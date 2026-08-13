@@ -1,0 +1,18 @@
+{
+  "name": "superatom",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "start":   "pm2 start ecosystem.config.cjs",
+    "stop":    "pm2 stop ecosystem.config.cjs",
+    "restart": "pm2 restart ecosystem.config.cjs",
+    "reload":  "pm2 reload ecosystem.config.cjs",
+    "status":  "pm2 status",
+    "logs":    "pm2 logs",
+    "flush":   "pm2 flush"
+  },
+  "devDependencies": {
+    "pm2": "latest"
+  },
+  "packageManager": "pnpm@9.0.0"
+}

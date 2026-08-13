@@ -1,0 +1,9 @@
+{
+  "name": "@superatom/introspect",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Per-database introspection helpers over the data seam. One module per dialect (mssql now; snowflake/oracle/salesforce/… later). Exposes the common, re-derived-every-time moves — tables, columns, profile, verifyJoin — so the agent calls them instead of re-writing the SQL.",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "test": "tsx src/introspect.test.mjs" }
+}

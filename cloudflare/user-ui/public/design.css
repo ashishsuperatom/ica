@@ -1,0 +1,291 @@
+/*
+  Superatom Design System
+  ──────────────────────
+  Used by: generated web components, shell UI
+  Scope:   .sa-ui wraps every generated component block
+  Prefix:  sa-  (class names)  /  --sa-  (custom properties, defined in :root)
+*/
+
+/* ── Reset inside sa-ui ── */
+.sa-ui, .sa-ui * { box-sizing: border-box; }
+
+/* ══════════════════════════════════════════
+   CARD SHELL
+   ══════════════════════════════════════════ */
+.sa-card {
+  background: var(--sa-surface);
+  border: 1px solid var(--sa-border);
+  border-radius: var(--sa-radius);
+  overflow: hidden;
+  box-shadow: var(--sa-shadow-sm);
+}
+
+/* Padding variants */
+.sa-pad   { padding: var(--sa-pad); }
+.sa-pad-t { padding: 20px 24px 0; }
+.sa-pad-sm { padding: var(--sa-pad-sm); }
+
+/* ══════════════════════════════════════════
+   TYPOGRAPHY
+   ══════════════════════════════════════════ */
+
+/* Section label — uppercase caps above a block */
+.sa-label {
+  display: block;
+  font-size: var(--sa-label-size);
+  font-weight: var(--sa-label-weight);
+  letter-spacing: var(--sa-label-tracking);
+  color: var(--sa-text-faint);
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  font-family: var(--sa-font);
+}
+
+/* Sub-label / caption inside a card */
+.sa-sublabel {
+  display: block;
+  font-size: 12px;
+  color: var(--sa-text-faint);
+  margin-top: 3px;
+  margin-bottom: 16px;
+  font-family: var(--sa-font);
+}
+
+/* Card heading */
+.sa-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--sa-text);
+  margin-bottom: 4px;
+  font-family: var(--sa-font);
+}
+
+/* ══════════════════════════════════════════
+   STAT / KPI NUMBERS
+   ══════════════════════════════════════════ */
+/* Stats: a flex-wrap row of atomic blocks. Each stat sizes to its own content, so a wide number gets
+   the room it needs and a small one ("25") stays narrow. When the row runs out of space the WHOLE next
+   block drops to a new row — a number is never split mid-digit. Dividers are a LEFT border; the
+   overflow:hidden + margin-left:-1px pair clips the leading divider of the first block in EVERY row
+   (including wrapped rows), so a wrapped block never shows a stray floating bar. No grid tracks, no
+   container queries / containment — that broke chart & map sizing because .sa-ui wraps every component. */
+.sa-stats {
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: 22px;
+  align-items: baseline;
+  overflow: hidden;                     /* clips the first-in-row divider (paired with margin-left below) */
+}
+.sa-stat {
+  flex: 1 1 0;                          /* grow to share the row EVENLY so KPIs fill the full width (symmetric)… */
+  min-width: max-content;              /* …but never narrower than the number itself, so it can't clip or wrap */
+  padding: 0 24px;
+  border-left: 1px solid var(--sa-border-soft);
+  margin-left: -1px;                    /* pulls the first block of each row's divider off-edge to be clipped */
+}
+/* A long-form stat (a sentence-style value, not a bare number) takes its own full row and wraps as
+   prose there, instead of squeezing into a column and towering. Authoring agent opts in per stat. */
+.sa-stat--wide {
+  flex: 1 0 100%;
+  border-left: none;
+  padding-left: 0;
+  margin-left: 0;
+}
+
+.sa-num {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--sa-text);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  font-family: var(--sa-font);
+  white-space: nowrap;                  /* a number is ONE unit — never split between digits */
+}
+.sa-stat--wide .sa-num { white-space: normal; overflow-wrap: anywhere; }  /* prose value may wrap */
+.sa-num sub {
+  font-size: 18px;
+  font-weight: 400;
+  color: var(--sa-text-faint);
+  vertical-align: baseline;
+}
+.sa-num.accent { color: var(--sa-accent); }
+.sa-num.positive { color: var(--sa-positive); }
+.sa-num.negative { color: var(--sa-negative); }
+
+/* Change delta pill inline after the number */
+.sa-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: var(--sa-radius-sm);
+  padding: 2px 7px;
+  vertical-align: middle;
+  margin-left: 8px;
+}
+.sa-delta.up   { background: #ecfdf5; color: var(--sa-positive); }
+.sa-delta.down { background: #fef2f2; color: var(--sa-negative); }
+.sa-delta.flat { background: #f5f3ef; color: var(--sa-text-faint); }
+
+/* ══════════════════════════════════════════
+   TABLE
+   ══════════════════════════════════════════ */
+.sa-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-family: var(--sa-font);
+}
+.sa-table th {
+  padding: 9px 16px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  color: var(--sa-text-faint);
+  border-bottom: 1px solid var(--sa-border-soft);
+  background: #faf9f7;
+  white-space: nowrap;
+}
+.sa-table td {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--sa-border-soft);
+  color: var(--sa-text);
+  vertical-align: top;
+  line-height: 1.4;
+}
+/* wide tables scroll horizontally instead of truncating / squeezing columns into tall wrapped rows */
+.sa-table-scroll { overflow-x: auto; }
+.sa-table tbody tr:last-child td { border-bottom: none; }
+.sa-table tbody tr:hover td { background: #faf9f7; }
+
+/* "Show more" control injected below a long table (frontend pagination) — reads as a table footer row */
+.sa-showmore {
+  display: block;
+  width: 100%;
+  padding: 11px 16px;
+  border: none;
+  border-top: 1px solid var(--sa-border-soft);
+  background: #faf9f7;
+  color: var(--sa-accent);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  font-family: var(--sa-font);
+  cursor: pointer;
+  text-align: center;
+}
+.sa-showmore:hover { background: #f3f1ec; }
+
+/* ══════════════════════════════════════════
+   BADGES
+   ══════════════════════════════════════════ */
+.sa-badge {
+  display: inline-block;
+  border-radius: var(--sa-radius-sm);
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  font-family: var(--sa-font);
+  white-space: nowrap;
+}
+.sa-badge-red    { background: #fef2f2; color: var(--sa-negative); }
+.sa-badge-green  { background: #ecfdf5; color: var(--sa-positive); border: 1px solid #a7f3d0; }
+.sa-badge-amber  { background: #fffbeb; color: var(--sa-warning); }
+.sa-badge-blue   { background: #eff6ff; color: var(--sa-neutral); }
+.sa-badge-accent { background: #fff0eb; color: var(--sa-accent); }
+.sa-badge-muted  { background: var(--sa-border-soft); color: var(--sa-text-faint); }
+
+/* ══════════════════════════════════════════
+   SUMMARY FOOTER (label + big value)
+   ══════════════════════════════════════════ */
+.sa-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 14px 24px;
+  border-top: 1px solid var(--sa-border);
+  font-family: var(--sa-font);
+  flex-wrap: wrap;
+}
+.sa-summary-val {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--sa-positive);
+  letter-spacing: -0.02em;
+}
+.sa-summary-val.accent   { color: var(--sa-accent); }
+.sa-summary-val.negative { color: var(--sa-negative); }
+
+/* ══════════════════════════════════════════
+   MAP / CHART LEGEND
+   ══════════════════════════════════════════ */
+.sa-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 20px;
+  padding: 12px 24px;
+  border-top: 1px solid var(--sa-border-soft);
+  font-size: 12px;
+  color: var(--sa-text-muted);
+  font-family: var(--sa-font);
+}
+.sa-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 5px;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+/* ══════════════════════════════════════════
+   CHART / MAP CONTAINERS
+   ══════════════════════════════════════════ */
+.sa-chart     { height: 240px; width: 100%; display: block; }
+.sa-chart-lg  { height: 320px; width: 100%; display: block; }
+.sa-map-wrap  { height: 300px; width: 100%; display: block; }
+
+/* ══════════════════════════════════════════
+   MICRO-BAR (inline progress bar)
+   ══════════════════════════════════════════ */
+.sa-bar-track {
+  display: inline-block;
+  width: 52px;
+  height: 3px;
+  background: var(--sa-border-soft);
+  border-radius: 2px;
+  vertical-align: middle;
+}
+.sa-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  display: block;
+}
+
+/* ══════════════════════════════════════════
+   DIVIDER
+   ══════════════════════════════════════════ */
+.sa-divider {
+  height: 1px;
+  background: var(--sa-border-soft);
+  margin: 0;
+}
+
+/* ══════════════════════════════════════════
+   UTILITY
+   ══════════════════════════════════════════ */
+.muted   { color: var(--sa-text-faint) !important; }
+.strong  { font-weight: 600 !important; }
+.right   { text-align: right !important; }
+.center  { text-align: center !important; }
+.mono    { font-family: var(--sa-font-mono) !important; font-size: 11px !important; }
+.nowrap  { white-space: nowrap !important; }
+.accent  { color: var(--sa-accent) !important; }
+.positive { color: var(--sa-positive) !important; }
+.negative { color: var(--sa-negative) !important; }
+.warning  { color: var(--sa-warning) !important; }

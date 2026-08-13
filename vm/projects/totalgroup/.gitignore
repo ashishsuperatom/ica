@@ -1,0 +1,14 @@
+# TotalGroup project workspace. SOURCE is tracked (units/, programs/, ui/, units-build/,
+# ui-templates/, suggested_questions.json); generated runtime state is NOT.
+node_modules/
+outputs/
+engine.db
+engine.db-*
+# programs/ SOURCE (program.ts + units/) is tracked; only per-run output is ignored.
+programs/**/program.json
+programs.json
+catalog.db
+catalog.db-*
+CATALOG.md
+graph.db
+units/.consolidation-ledger.json

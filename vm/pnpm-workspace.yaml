@@ -1,0 +1,4 @@
+packages:
+  - 'packages/*'
+  - 'apps/engine'
+  - 'apps/datasources/manager'

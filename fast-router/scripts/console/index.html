@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>fast-router console</title>
+<style>
+  :root {
+    --bg:#f6f7f9; --panel:#ffffff; --line:#e4e7eb; --ink:#1a2027; --dim:#697280;
+    --accent:#2563eb; --good:#16a34a; --warn:#b45309; --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 system-ui,sans-serif; }
+  header { display:flex; align-items:center; gap:14px; padding:12px 18px; border-bottom:1px solid var(--line); }
+  header b { font-size:15px; letter-spacing:.02em; }
+  .status { font:12px var(--mono); color:var(--dim); }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--warn); margin-right:6px; vertical-align:middle; }
+  .dot.on { background:var(--good); }
+  main { max-width:920px; margin:0 auto; padding:22px 18px 60px; }
+  .box { display:flex; gap:10px; align-items:center; }
+  input#q { flex:1; padding:14px 16px; font-size:17px; background:var(--panel); border:1px solid var(--line);
+            border-radius:10px; color:var(--ink); outline:none; }
+  input#q:focus { border-color:var(--accent); }
+  input#proj { width:130px; padding:14px 12px; font:13px var(--mono); background:var(--panel);
+               border:1px solid var(--line); border-radius:10px; color:var(--dim); }
+  .meta { display:flex; gap:16px; margin:10px 2px 20px; font:12px var(--mono); color:var(--dim); }
+  .meta b { color:var(--ink); font-weight:600; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin-bottom:16px; }
+  h3 { margin:0 0 12px; font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); font-weight:600; }
+  .suggest { padding:10px 12px; border:1px solid var(--line); border-radius:8px; margin-bottom:8px; cursor:pointer; }
+  .suggest:hover { border-color:var(--accent); }
+  .suggest .q { font-size:15px; }
+  .empty { color:var(--dim); font-style:italic; }
+  .match { display:grid; grid-template-columns:1fr 190px; gap:10px 14px; align-items:center; padding:7px 0; border-top:1px solid var(--line); }
+  .match:first-child { border-top:none; }
+  .match .q { font:13px var(--mono); }
+  .match.hit .q { color:var(--ink); }
+  .match .q { color:var(--dim); }
+  .bar { position:relative; height:16px; background:#eef1f4; border-radius:4px; overflow:hidden; }
+  .bar > i { position:absolute; left:0; top:0; bottom:0; background:linear-gradient(90deg,#2563eb,#60a5fa); }
+  .bar > span { position:absolute; right:6px; top:0; font:11px var(--mono); line-height:16px; color:#1e3a8a; }
+  .match.hit .bar > i { background:linear-gradient(90deg,#238636,#3fb950); }
+  .badge { display:inline-block; font:11px var(--mono); color:var(--dim); border:1px solid var(--line); border-radius:4px; padding:0 5px; margin-left:8px; }
+  .timings { display:flex; gap:18px; font:12px var(--mono); color:var(--dim); }
+  .timings b { color:var(--accent); }
+  .intent { font:13px var(--mono); color:var(--dim); }
+  .log { max-height:180px; overflow:auto; font:12px var(--mono); }
+  .log div { padding:2px 0; color:var(--dim); border-top:1px solid var(--line); }
+  .log .stale { color:var(--warn); }
+  .log b { color:var(--ink); }
+</style>
+</head>
+<body>
+<header>
+  <b>fast-router console</b>
+  <span class="status"><span class="dot" id="dot"></span><span id="conn">connecting…</span></span>
+</header>
+<main>
+  <div class="box">
+    <input id="q" placeholder="Type a question… (suggestions stream as you type)" autocomplete="off" spellcheck="false" />
+    <input id="proj" value="totalgroup" title="projectId" />
+  </div>
+  <div class="meta">
+    <span>inputId <b id="mInput">—</b></span>
+    <span>seq <b id="mSeq">0</b></span>
+    <span>total <b id="mMs">—</b></span>
+    <span>collection <b id="mColl">—</b> (<b id="mPts">0</b> indexed)</span>
+  </div>
+
+  <section>
+    <h3>Suggestions (above threshold)</h3>
+    <div id="sugg"><div class="empty">start typing…</div></div>
+  </section>
+
+  <section>
+    <h3>Intent (GLiNER2)</h3>
+    <div class="intent" id="intent">—</div>
+  </section>
+
+  <section>
+    <h3>Entities / params (GLiNER2 NER)</h3>
+    <div id="entities"><div class="empty">—</div></div>
+  </section>
+
+  <section>
+    <h3>Semantic matches — cosine similarity</h3>
+    <div id="matches"><div class="empty">—</div></div>
+  </section>
+
+  <section>
+    <h3>Timing</h3>
+    <div class="timings" id="timings"><span>—</span></div>
+  </section>
+
+  <section>
+    <h3>Request log</h3>
+    <div class="log" id="log"></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id)
+let ws, wsId = null, inputId = null, seq = 0, lastRendered = -1
+const USER = 'tester'
+
+function setConn(txt, on) { $('conn').textContent = txt; $('dot').classList.toggle('on', !!on) }
+
+async function connect() {
+  const cfg = await (await fetch('/config')).json()
+  const url = `${cfg.hubHost}/_ws/${encodeURIComponent(cfg.id)}?key=${encodeURIComponent(cfg.key)}`
+  ws = new WebSocket(url)
+  ws.onopen = () => ws.send(JSON.stringify({ type:'hello', key: cfg.key, role:'runtime' }))
+  ws.onmessage = (e) => {
+    const m = JSON.parse(e.data)
+    if (m.payload?.t === 'welcome') { wsId = m.payload.wsId; setConn('registered as runtime · ' + wsId, true); return }
+    if (m.payload?.t === 'suggestions') render(m.payload)
+  }
+  ws.onclose = () => { setConn('disconnected — retrying', false); setTimeout(connect, 1500) }
+  ws.onerror = () => setConn('error', false)
+}
+
+const pct = (s) => Math.round(Math.max(0, Math.min(1, s)) * 100)
+
+function render(p) {
+  if (p.seq < lastRendered) { logLine(p, true); return }   // stale — drop
+  lastRendered = p.seq
+  const d = p.diag || { matches:[], timings:{}, points:0, collection:'', threshold:0.55 }
+
+  $('mInput').textContent = (p.inputId||'').slice(0,8)
+  $('mSeq').textContent = p.seq
+  $('mMs').textContent = p.ms + 'ms'
+  $('mColl').textContent = d.collection || '—'
+  $('mPts').textContent = d.points ?? 0
+
+  // suggestions
+  $('sugg').innerHTML = (p.items && p.items.length)
+    ? p.items.map(it => `<div class="suggest" onclick="pick(${JSON.stringify(it.question).replace(/"/g,'&quot;')})">
+        <div class="q">${esc(it.question)}</div></div>`).join('')
+    : `<div class="empty">nothing above ${pct(d.threshold)}% yet</div>`
+
+  // intent — winner + per-class bars
+  const isc = d.intentScores || {}
+  $('intent').innerHTML = `<div style="margin-bottom:10px">winner: <b style="color:var(--ink);font-size:14px">${p.intent?.intent||'—'}</b> · ${pct(p.intent?.confidence||0)}%</div>`
+    + (Object.keys(isc).length ? Object.entries(isc).sort((a,b)=>b[1]-a[1]).map(([k,v]) =>
+        `<div class="match"><div class="q">${k}</div><div class="bar"><i style="width:${pct(v)}%"></i><span>${pct(v)}%</span></div></div>`).join('')
+      : '<span class="empty">warming up…</span>')
+
+  // entities
+  $('entities').innerHTML = (d.entities && d.entities.length)
+    ? d.entities.map(e => `<span class="badge" style="font-size:12px;margin:0 6px 6px 0;padding:3px 8px;display:inline-block;color:var(--ink)">${esc(e.text)} <span style="color:var(--dim)">→ ${esc(e.label)} · ${pct(e.score)}%</span></span>`).join('')
+    : '<div class="empty">none extracted</div>'
+
+  // matches
+  $('matches').innerHTML = (d.matches && d.matches.length)
+    ? d.matches.map(m => {
+        const hit = m.score >= d.threshold
+        return `<div class="match ${hit?'hit':''}">
+          <div class="q">${esc(m.question)}${m.intent?`<span class="badge">${m.intent}</span>`:''}</div>
+          <div class="bar"><i style="width:${pct(m.score)}%"></i><span>${pct(m.score)}%</span></div></div>`
+      }).join('')
+    : `<div class="empty">no candidates</div>`
+
+  // timings
+  $('timings').innerHTML = Object.entries(d.timings).map(([k,v]) => `<span>${k} <b>${v}ms</b></span>`).join('')
+    + `<span>total <b>${p.ms}ms</b></span>`
+
+  logLine(p, false)
+}
+
+function logLine(p, stale) {
+  const top = p.diag?.matches?.[0]
+  const div = document.createElement('div')
+  if (stale) div.className = 'stale'
+  div.innerHTML = `seq ${p.seq} · <b>"${esc(p.diag?.text||'')}"</b> · ${p.ms}ms`
+    + (stale ? ' · DROPPED (stale)' : (top ? ` · top ${pct(top.score)}% ${esc(top.question).slice(0,40)}` : ' · no match'))
+  $('log').prepend(div)
+}
+
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])) }
+window.pick = (q) => { $('q').value = q; console.log('would run:', q) }
+
+// input → debounced suggest
+$('q').addEventListener('focus', () => { inputId = crypto.randomUUID(); $('mInput').textContent = inputId.slice(0,8) })
+let timer
+$('q').addEventListener('input', () => {
+  clearTimeout(timer)
+  timer = setTimeout(() => {
+    if (!ws || ws.readyState !== 1 || !inputId) return
+    const text = $('q').value
+    seq++
+    $('mSeq').textContent = seq
+    ws.send(JSON.stringify({ to:{ type:'fast-router' }, payload:{
+      t:'suggest', projectId: $('proj').value.trim() || 'totalgroup', userId: USER, inputId, seq, text
+    }}))
+  }, 120)
+})
+
+connect()
+</script>
+</body>
+</html>

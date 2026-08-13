@@ -1,0 +1,30 @@
+{
+  "name": "@superatom/engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Enterprise engine — ICA (intelligent coding agent) + semantic model + superatom layer. See PLAN.md.",
+  "scripts": {
+    "dev": "tsx engine.ts",
+    "smoke": "tsx smoke.ts"
+  },
+  "dependencies": {
+    "@superatom/node-store": "workspace:*",
+    "@superatom/scaffold": "workspace:*",
+    "@superatom/introspect": "workspace:*",
+    "@earendil-works/pi-agent-core": "^0.78.0",
+    "@earendil-works/pi-ai": "^0.78.0",
+    "@earendil-works/pi-coding-agent": "^0.78.0",
+    "@openai/codex": "^0.144.0",
+    "@openai/codex-sdk": "^0.144.4",
+    "@opencode-ai/sdk": "^1.18.0",
+    "node-pty": "^1.0.0",
+    "opencode-ai": "^1.18.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.12",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.0"
+  }
+}

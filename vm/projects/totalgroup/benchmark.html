@@ -1,0 +1,1240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TotalGroup — Semantic Model &amp; Questions</title>
+<style>
+  :root{
+    --page:#ffffff; --panel:#f3f4f6; --ink:#161719; --body:#33373c; --muted:#6c7075;
+    --rule:#c9ccd1; --hair:#e2e4e8;
+    --navy:#15385c; --navy2:#20527f;
+    --r1:#e7b7b0; --r2:#cf7d72; --r3:#b04a3e; --r4:#8f2d23; --red:#9c2b23;
+    --serif:Georgia,"Times New Roman",serif;
+    --grot:"Helvetica Neue",Helvetica,Arial,"Liberation Sans",system-ui,sans-serif;
+    --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --page:#15171b; --panel:#1c1f24; --ink:#e7e5e0; --body:#c2c4c8; --muted:#8b8f95; --rule:#333840; --hair:#262a30;
+      --navy:#7ba7d4; --navy2:#5f8fbf; --r1:#5c332e; --r2:#8a4339; --r3:#b45a4d; --r4:#d98a84; --red:#d98a84; }
+  }
+  :root[data-theme="light"]{ --page:#fff; --panel:#f3f4f6; --ink:#161719; --body:#33373c; --muted:#6c7075; --rule:#c9ccd1; --hair:#e2e4e8; --navy:#15385c; --navy2:#20527f; --r1:#e7b7b0; --r2:#cf7d72; --r3:#b04a3e; --r4:#8f2d23; --red:#9c2b23; }
+  :root[data-theme="dark"]{ --page:#15171b; --panel:#1c1f24; --ink:#e7e5e0; --body:#c2c4c8; --muted:#8b8f95; --rule:#333840; --hair:#262a30; --navy:#7ba7d4; --navy2:#5f8fbf; --r1:#5c332e; --r2:#8a4339; --r3:#b45a4d; --r4:#d98a84; --red:#d98a84; }
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--page);color:var(--body);font-family:var(--grot);font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .num{font-variant-numeric:lining-nums tabular-nums;font-feature-settings:"lnum" 1,"tnum" 1}
+  .figs,table,.ageing{font-variant-numeric:lining-nums tabular-nums}
+  b,strong{color:var(--ink);font-weight:700}
+  code{font-family:var(--mono);font-size:12.5px;color:var(--ink);background:var(--panel);padding:1px 4px;border:1px solid var(--hair)}
+
+  /* ── app layout: sidebar + main ── */
+  .app{display:flex;align-items:flex-start;max-width:1200px;margin:0 auto}
+  .sidebar{width:256px;flex-shrink:0;position:sticky;top:0;height:100vh;overflow-y:auto;border-right:1px solid var(--rule);padding:24px 18px 48px}
+  .sidebar .brand{font-family:var(--grot);font-weight:800;letter-spacing:.1em;text-transform:uppercase;font-size:12px;color:var(--navy);line-height:1.35;border-top:3px solid var(--navy);padding-top:12px}
+  .sidebar .brand span{display:block;font-weight:600;letter-spacing:.02em;text-transform:none;font-size:11px;color:var(--muted);margin-top:3px}
+  .sidebar .navsec{font-family:var(--grot);font-size:10px;letter-spacing:.1em;text-transform:uppercase;font-weight:800;color:var(--muted);margin:24px 0 8px;padding-bottom:5px;border-bottom:1px solid var(--hair)}
+  .sidebar .navgrp{font-family:var(--grot);font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;font-weight:700;color:var(--navy);margin:13px 0 3px}
+  .sidebar a{display:flex;justify-content:space-between;gap:8px;align-items:baseline;font-family:var(--grot);font-size:12.5px;color:var(--body);text-decoration:none;padding:4px 0;line-height:1.35}
+  .sidebar a:hover{color:var(--navy)}
+  .sidebar a .qn{color:var(--muted);font-weight:700;margin-right:6px}
+  .sidebar a i{font-style:normal;font-size:8.5px;letter-spacing:.04em;text-transform:uppercase;font-weight:800;padding:1px 4px;flex-shrink:0}
+  .sidebar a i.ok{color:var(--page);background:var(--navy)}
+  .sidebar a i.cand{color:var(--navy);border:1px solid var(--navy)}
+  .sidebar a i.block{color:var(--red);border:1px solid var(--red)}
+  .main{flex:1;min-width:0}
+  .sheet{max-width:820px;margin:0;padding:26px 40px 90px}
+
+  .head .org{font-family:var(--grot);font-weight:800;letter-spacing:.14em;font-size:12px;color:var(--navy);text-transform:uppercase}
+  .head h1{font-family:var(--serif);font-weight:700;font-size:24px;line-height:1.2;margin:4px 0 0;color:var(--ink)}
+  .head .meta{font-family:var(--grot);font-size:11px;color:var(--muted);margin-top:8px}
+  .head .meta b{color:var(--body)}
+  .preface{font-style:italic;color:var(--body);border-left:2px solid var(--rule);padding:2px 0 2px 18px;margin:20px 0 6px;max-width:64ch}
+
+  /* ── Part I: semantic-model concept tree ── */
+  .part{margin-top:38px}
+  .part .lead{font-family:var(--grot);font-size:11px;letter-spacing:.14em;text-transform:uppercase;font-weight:800;color:var(--navy)}
+  .part h2{font-family:var(--serif);font-size:22px;font-weight:700;color:var(--ink);margin:4px 0 0}
+  .part .prule{border:0;border-top:1.5px solid var(--ink);margin:11px 0 16px}
+  .part .intro{color:var(--body);margin:0 0 20px;max-width:66ch}
+  details.concept{border:1px solid var(--rule);margin:0 0 9px}
+  details.concept>summary{list-style:none;cursor:pointer;display:flex;align-items:baseline;gap:10px;padding:12px 14px;font-family:var(--serif);font-size:16px;font-weight:700;color:var(--ink);user-select:none}
+  details.concept>summary::-webkit-details-marker{display:none}
+  details.concept>summary::before{content:"\25B8";color:var(--navy);font-size:10px;transition:transform .12s}
+  details.concept[open]>summary::before{transform:rotate(90deg)}
+  details.concept>summary .csrc{font-family:var(--mono);font-size:10.5px;color:var(--muted);font-weight:400;margin-left:auto}
+  .ctag{font-family:var(--grot);font-size:8.5px;letter-spacing:.05em;text-transform:uppercase;font-weight:800;padding:1px 6px;align-self:center}
+  .ctag.ok{color:var(--page);background:var(--navy)}
+  .ctag.cand{color:var(--navy);border:1px solid var(--navy)}
+  .ctag.block{color:var(--red);border:1px solid var(--red)}
+  .cbody{padding:6px 16px 16px 30px;border-top:1px solid var(--hair)}
+  .ctable{display:grid;grid-template-columns:1fr 1fr;gap:28px}
+  .ccol h5{font-family:var(--grot);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:12px 0 7px}
+  .ccol ul{list-style:none;margin:0;padding:0}
+  .ccol li{font-size:13px;line-height:1.5;padding:4px 0 4px 14px;position:relative;color:var(--body)}
+  .ccol li::before{content:"\2013";position:absolute;left:0;color:var(--rule)}
+  .ccol li b{color:var(--ink);font-weight:600}
+  .ccol li code{font-size:11px}
+  .ccol li.dim{color:var(--muted)}
+  .mnote{font-family:var(--grot);font-size:10.5px;color:var(--muted);margin-left:3px}
+  .mnote.warn{color:var(--red)}.mnote.ok{color:var(--navy)}
+  .vals{display:block;font-family:var(--grot);font-size:10.5px;color:var(--muted);margin-top:1px}
+  .crule{font-size:12px;color:var(--body);margin:15px 0 0;padding:9px 12px;background:var(--panel);border-left:2px solid var(--navy);line-height:1.55}
+  .crule .rk{color:var(--navy);font-family:var(--grot);font-size:10px;letter-spacing:.05em;text-transform:uppercase;font-weight:700;margin-right:6px}
+  /* entity-node facets */
+  .sig{font-family:var(--grot);font-size:11.5px;color:var(--body);margin:0 0 14px;padding:8px 11px;background:var(--panel);border:1px solid var(--hair);display:flex;gap:22px;flex-wrap:wrap}
+  .sig b{color:var(--navy);font-size:10px;letter-spacing:.05em;text-transform:uppercase;margin-right:5px}
+  .facet{margin:0 0 14px}
+  .facet>h5{font-family:var(--grot);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:0 0 7px}
+  .rels{list-style:none;margin:0;padding:0}
+  .rels li{font-size:13px;line-height:1.5;padding:4px 0;display:flex;gap:9px;align-items:baseline;flex-wrap:wrap;border-bottom:1px solid var(--hair)}
+  .rels li:last-child{border-bottom:0}
+  .rels .re{color:var(--ink);font-weight:600}
+  .rels .re::before{content:"→ ";color:var(--navy);font-weight:700}
+  .rels .via{font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+  .rels .card{font-family:var(--grot);font-size:9px;letter-spacing:.03em;color:var(--muted);border:1px solid var(--rule);padding:0 4px;text-transform:uppercase}
+  .cov{font-family:var(--grot);font-size:9.5px;letter-spacing:.03em;text-transform:uppercase;font-weight:700;padding:0 5px;margin-left:auto;white-space:nowrap}
+  .cov.ok{color:var(--navy);border:1px solid var(--navy)}
+  .cov.weak{color:var(--red);border:1px solid var(--red)}
+  .minor{display:grid;grid-template-columns:1fr 1fr;gap:14px 24px;margin:0 0 6px}
+  .minor .mf h5{font-family:var(--grot);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:0 0 5px}
+  .minor .mf p{font-size:12.5px;color:var(--body);margin:0;line-height:1.5}.minor .mf p b{color:var(--ink)}
+  .minor .mf .warn{color:var(--red)}
+  /* sub-heading within Part I */
+  .subhead{font-family:var(--grot);font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;font-weight:800;color:var(--navy);margin:30px 0 12px;padding-bottom:5px;border-bottom:1px solid var(--rule)}
+  .subhead span{color:var(--muted);font-weight:600;letter-spacing:.02em;text-transform:none;margin-left:8px;font-size:11px}
+  /* relevant-but-not-yet concept */
+  details.fconcept{border:1px dashed var(--rule);margin:0 0 8px}
+  details.fconcept>summary{list-style:none;cursor:pointer;display:flex;align-items:baseline;gap:10px;padding:11px 14px;font-family:var(--serif);font-size:15px;font-weight:700;color:var(--body);user-select:none}
+  details.fconcept>summary::-webkit-details-marker{display:none}
+  details.fconcept>summary::before{content:"\25B8";color:var(--muted);font-size:10px;transition:transform .12s}
+  details.fconcept[open]>summary::before{transform:rotate(90deg)}
+  details.fconcept>summary .csrc{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--muted);font-weight:400}
+  .fbody{padding:4px 16px 14px 30px;border-top:1px dashed var(--hair)}
+  .fbody .why{font-size:13px;color:var(--body);margin:8px 0 10px;line-height:1.5}.fbody .why b{color:var(--ink)}
+  .fbody .unlock{font-size:12.5px;color:var(--muted);line-height:1.65}
+  .fbody .unlock .k{font-family:var(--grot);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;color:var(--navy);margin-right:6px}
+
+  /* ── Part II heading ── */
+  .qhead{margin:46px 0 0}
+  .qhead .lead{font-family:var(--grot);font-size:11px;letter-spacing:.14em;text-transform:uppercase;font-weight:800;color:var(--navy)}
+  .qhead h2{font-family:var(--serif);font-size:22px;font-weight:700;color:var(--ink);margin:4px 0 0}
+  .qhead .prule{border:0;border-top:1.5px solid var(--ink);margin:11px 0 4px}
+
+  /* ── exhibit ── */
+  .exhibit{margin-top:40px;scroll-margin-top:16px}
+  .exhibit .no{font-family:var(--grot);font-size:11px;letter-spacing:.14em;text-transform:uppercase;font-weight:800;color:var(--navy)}
+  .exhibit .ti{font-family:var(--serif);font-size:20px;font-weight:700;color:var(--ink);margin:3px 0 0}
+  .exhibit .ti-rule{border:0;border-top:1.5px solid var(--ink);margin:11px 0 0}
+  .atype{font-family:var(--grot);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;font-weight:800;color:var(--page);background:var(--ink);padding:2px 7px;margin-left:10px;vertical-align:middle}
+  .period{font-family:var(--grot);font-size:11px;color:var(--body);margin:12px 0 20px;display:flex;gap:9px;align-items:baseline;flex-wrap:wrap}
+  .period .pk{font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;font-weight:800;color:var(--page);background:var(--navy);padding:2px 7px}
+  .period b{color:var(--ink);font-weight:700}.period .snap{color:var(--muted)}
+
+  .figs{display:grid;grid-template-columns:repeat(4,1fr);border-top:1.5px solid var(--ink);border-bottom:1px solid var(--rule);margin:0 0 22px}
+  .figs .f{padding:12px 16px 13px;border-left:1px solid var(--hair)}
+  .figs .f:first-child{border-left:0;padding-left:0}
+  .figs .f .k{font-family:var(--grot);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700}
+  .figs .f .v{font-family:var(--grot);font-size:24px;font-weight:700;color:var(--ink);line-height:1.15;margin-top:5px;letter-spacing:-.01em}
+  .figs .f .v.neg{color:var(--red)}
+  .figs .f .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+  p.body{margin:0 0 16px;max-width:64ch}p.body .navy{color:var(--navy);font-weight:700}
+
+  .ageing{margin:6px 0 20px}
+  .ageing .cap{font-family:var(--grot);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:7px;display:flex;justify-content:space-between}
+  .ageing .cap .note{color:var(--red);text-transform:none;letter-spacing:0;font-weight:700}
+  .ageing .bar{display:flex;height:20px;border:1px solid var(--ink)}
+  .ageing .seg{height:100%;border-left:1px solid var(--page)}.ageing .seg:first-child{border-left:0}
+  .ageing table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12.5px}
+  .ageing td{padding:4px 10px 4px 0;border-bottom:1px solid var(--hair);font-family:var(--grot)}
+  .ageing td .sw{display:inline-block;width:9px;height:9px;margin-right:7px;border:1px solid rgba(0,0,0,.15)}
+  .ageing td.r{text-align:right;color:var(--ink);font-weight:700}.ageing td.rr{text-align:right;color:var(--muted)}
+  .ageing tr.tot td{border-bottom:0;border-top:1px solid var(--ink);font-weight:700;color:var(--ink);padding-top:6px}
+
+  table.fin{width:100%;border-collapse:collapse;margin:4px 0 12px;font-size:14px}
+  table.fin caption{caption-side:top;text-align:left;font-family:var(--grot);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:700;padding-bottom:8px}
+  table.fin thead th{font-family:var(--grot);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;font-weight:700;color:var(--body);text-align:left;padding:0 14px 8px 0;border-bottom:1.5px solid var(--ink)}
+  table.fin th.r,table.fin td.r{text-align:right;padding-right:0}
+  table.fin tbody td{padding:8px 14px 8px 0;border-bottom:1px solid var(--hair);vertical-align:baseline;color:var(--body)}
+  table.fin td:last-child,table.fin th:last-child{padding-right:0}
+  table.fin tbody tr:hover{background:var(--panel)}
+  td.rk{color:var(--muted);width:22px;padding-right:8px}
+  td.name{color:var(--ink);font-weight:600}td.name small{display:block;font-family:var(--grot);font-size:10.5px;color:var(--muted);font-weight:400;margin-top:1px}
+  td.fig{color:var(--ink);font-weight:700;white-space:nowrap}td.share{color:var(--muted);width:56px}
+  .flag{font-family:var(--grot);font-size:9px;letter-spacing:.04em;text-transform:uppercase;font-weight:700;color:var(--red);border:1px solid var(--red);padding:0 4px;margin-left:6px;white-space:nowrap}
+  table.fin tfoot td{padding:10px 14px 0 0;border-top:1.5px solid var(--ink);font-weight:700;color:var(--ink)}
+
+  details.basis{border-top:1px solid var(--rule);margin-top:14px}
+  details.basis>summary{list-style:none;cursor:pointer;padding:11px 0 11px 20px;position:relative;font-family:var(--grot);font-size:11.5px;letter-spacing:.03em;color:var(--navy);font-weight:700;user-select:none}
+  details.basis>summary::-webkit-details-marker{display:none}
+  details.basis>summary::before{content:"\25B8";position:absolute;left:2px;top:11px;transition:transform .12s;font-size:10px}
+  details.basis[open]>summary::before{transform:rotate(90deg)}
+  details.basis>summary .h{color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;font-family:var(--serif);font-style:italic;margin-left:8px}
+  .drill{padding:4px 0 18px 20px}
+  .drill h5{font-family:var(--grot);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:16px 0 8px}.drill h5:first-child{margin-top:6px}
+  .steps{margin:0;padding:0;list-style:none;counter-reset:s}
+  .steps li{counter-increment:s;position:relative;padding:2px 0 2px 26px;font-size:13.5px;color:var(--body);line-height:1.5}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:2px;font-family:var(--grot);font-size:9.5px;font-weight:800;color:var(--navy);border:1px solid var(--navy);width:16px;height:16px;display:flex;align-items:center;justify-content:center;line-height:1}
+  details.dev{margin:10px 0 4px}
+  details.dev>summary{list-style:none;cursor:pointer;font-family:var(--grot);font-size:10px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--muted);padding:5px 0 5px 16px;position:relative;user-select:none}
+  details.dev>summary::-webkit-details-marker{display:none}
+  details.dev>summary::before{content:"\25B8";position:absolute;left:0;top:5px;font-size:9px}details.dev[open]>summary::before{transform:rotate(90deg)}
+  pre.sql{font-family:var(--mono);font-size:12px;line-height:1.55;color:var(--ink);background:var(--panel);border:1px solid var(--hair);border-left:2px solid var(--navy);padding:11px 13px;margin:4px 0 2px;overflow-x:auto;white-space:pre}
+  .basisnote{font-size:13.5px;color:var(--body);line-height:1.55;margin:0 0 10px;max-width:74ch}
+  .basisnote .k{font-family:var(--grot);font-size:10px;letter-spacing:.05em;text-transform:uppercase;font-weight:700;color:var(--navy);margin-right:7px}
+  .cite{font-family:var(--grot);font-size:11px;color:var(--navy);border:1px solid var(--navy);padding:1px 6px;text-decoration:none;white-space:nowrap}.cite:hover{background:var(--navy);color:var(--page)}.cite .mock{color:var(--muted)}
+  .drilllink{font-family:var(--grot);font-size:12px;color:var(--navy);text-decoration:none;font-weight:700;border-bottom:1px solid var(--navy)}
+  .roles{font-family:var(--grot);font-size:11px;color:var(--muted);margin-top:14px;padding-top:10px;border-top:1px dashed var(--rule);line-height:1.6}.roles b{color:var(--body)}
+  .src{font-family:var(--grot);font-size:10.5px;color:var(--muted);margin:6px 0 0}.src b{color:var(--body);font-weight:700}
+
+  .verdict{border:1.5px solid var(--navy);padding:15px 18px;margin:2px 0 20px}
+  .verdict .vk{font-family:var(--grot);font-size:10px;letter-spacing:.1em;text-transform:uppercase;font-weight:800;color:var(--navy)}
+  .verdict .vt{font-family:var(--serif);font-size:19px;font-weight:700;color:var(--ink);margin:3px 0 0}
+  .factors{display:grid;gap:11px;margin:0 0 18px}
+  .factor{display:grid;grid-template-columns:22px 1fr;gap:12px;font-size:14px;line-height:1.5}
+  .factor .m{font-family:var(--grot);font-weight:800;font-size:13px;text-align:center}.factor .m.ok{color:var(--navy)}.factor .m.warn{color:var(--red)}.factor b{color:var(--ink)}
+  .scen{border-top:1.5px solid var(--ink);margin:6px 0 18px}
+  .scenrow{display:grid;grid-template-columns:1fr auto auto;gap:16px;align-items:baseline;padding:11px 0;border-bottom:1px solid var(--hair)}
+  .scenrow .lab{font-size:14px;color:var(--body)}.scenrow .lab b{color:var(--ink)}
+  .scenrow .delta{font-family:var(--grot);font-weight:700;font-size:12.5px;white-space:nowrap;text-align:right}.scenrow .delta.up{color:var(--red)}.scenrow .delta.down{color:var(--navy)}
+  .scenrow .res{font-weight:700;color:var(--ink);white-space:nowrap;font-size:15px;text-align:right;min-width:92px}
+  .drilltree details>summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:1fr auto auto;gap:14px;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--hair)}
+  .drilltree details>summary::-webkit-details-marker{display:none}
+  .drilltree .nm{color:var(--ink);font-weight:600;font-size:14px}
+  .drilltree .nm::before{content:"\25B8";color:var(--navy);margin-right:9px;font-size:9px;display:inline-block;transition:transform .12s}
+  .drilltree details[open]>summary .nm::before{transform:rotate(90deg)}
+  .drilltree .nm .lv{font-family:var(--grot);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-right:9px}
+  .drilltree .amt{font-weight:700;color:var(--ink);font-size:14px;white-space:nowrap}
+  .drilltree .meta{color:var(--muted);font-family:var(--grot);font-size:11.5px;white-space:nowrap}
+  .drilltree .indent{margin-left:14px;border-left:1px solid var(--rule);padding-left:16px}
+  .drilltree .leaf{display:grid;grid-template-columns:1fr auto auto;gap:14px;padding:8px 0 8px 19px;border-bottom:1px dotted var(--hair);font-size:13px;color:var(--body)}.drilltree .leaf .amt{font-size:13px}
+
+  /* ── Part III: calculus (pure) ── */
+  .cx{font-family:var(--mono);font-size:12.5px;color:var(--ink);background:var(--panel);padding:1px 5px;border:1px solid var(--hair);white-space:nowrap}
+  .cxb{font-family:var(--mono);font-size:12.5px;line-height:1.75;color:var(--ink);background:var(--panel);border:1px solid var(--hair);border-left:2px solid var(--navy);padding:12px 15px;margin:0 0 16px;overflow-x:auto;white-space:pre}
+  .cxb .kw{color:var(--navy);font-weight:700}
+  .cxb .cm{color:var(--muted)}
+  .opgrp{font-family:var(--grot);font-size:10px;letter-spacing:.07em;text-transform:uppercase;font-weight:700;color:var(--navy);margin:16px 0 6px}
+  .op{display:grid;grid-template-columns:190px 1fr;gap:16px;font-size:13px;padding:5px 0;border-bottom:1px solid var(--hair);align-items:baseline}
+  .op:last-child{border-bottom:0}
+  .op .sg{font-family:var(--mono);font-size:12px;color:var(--ink);font-weight:700}
+  .op .sg b{color:var(--navy)}
+  .op .ds{color:var(--body)}
+  .laws{list-style:none;margin:0 0 6px;padding:0}
+  .laws li{font-size:13.5px;line-height:1.55;padding:6px 0 6px 22px;position:relative;color:var(--body);border-bottom:1px solid var(--hair)}
+  .laws li:last-child{border-bottom:0}
+  .laws li::before{content:"\00A7";position:absolute;left:0;color:var(--navy);font-weight:700}
+  .laws li b{color:var(--ink)}
+  table.calc td.q{color:var(--body)}
+  table.calc td.e{font-family:var(--mono);font-size:12px;color:var(--ink);white-space:nowrap}
+  table.calc td.e .cm{color:var(--muted)}
+  table.calc td.st{text-align:right;font-family:var(--grot);font-size:9.5px;letter-spacing:.04em;text-transform:uppercase;font-weight:700}
+  table.calc td.st.ok{color:var(--navy)}table.calc td.st.no{color:var(--red)}
+  /* ── per-exhibit calculus line + pending (needs-data) state ── */
+  .calcx{font-family:var(--mono);font-size:12px;color:var(--body);background:var(--panel);border:1px solid var(--hair);border-left:2px solid var(--navy);padding:8px 12px;margin:2px 0 14px;overflow-x:auto;white-space:nowrap}
+  .calcx .lbl{font-family:var(--grot);font-size:9px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--muted);margin-right:10px}
+  .calcx .cm{color:var(--muted)}
+  .exhibit .no .pend{margin-left:8px;font-family:var(--grot);font-size:9px;letter-spacing:.07em;text-transform:uppercase;font-weight:800;color:var(--red);border:1px solid var(--red);border-radius:2px;padding:1px 5px;vertical-align:1px}
+  .pending{border:1px dashed var(--rule);background:var(--panel);padding:15px 17px;margin:4px 0 14px}
+  .pending .pstat{font-family:var(--grot);font-size:10px;letter-spacing:.09em;text-transform:uppercase;font-weight:800;color:var(--red);margin-bottom:8px}
+  .pending.dec{border-color:var(--rule)} .pending.dec .pstat{color:var(--navy)}
+  .pending p{margin:7px 0;font-size:13.5px;color:var(--body);line-height:1.55}
+  .pending p:first-of-type{margin-top:0}
+  .pending .k{font-family:var(--grot);font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;font-weight:700;color:var(--navy);margin-right:7px}
+  .pending a.cn{color:var(--navy);text-decoration:none;border-bottom:1px solid var(--rule)}
+
+  footer{margin-top:44px;padding-top:16px;border-top:3px solid var(--navy);font-family:var(--grot);font-size:11px;color:var(--muted);line-height:1.6}
+
+  .val{border-bottom:1px dotted var(--muted);cursor:help;position:relative;outline:none;white-space:nowrap}
+  .val::after{content:attr(data-exact);position:absolute;left:50%;bottom:100%;transform:translate(-50%,-7px);background:var(--ink);color:var(--page);font-family:var(--grot);font-size:11.5px;font-weight:600;white-space:nowrap;padding:4px 9px;opacity:0;visibility:hidden;transition:opacity .1s;z-index:20;font-variant-numeric:lining-nums tabular-nums}
+  .val:hover::after,.val:focus::after{opacity:1;visibility:visible}
+
+  @media (max-width:860px){
+    .app{flex-direction:column}
+    .sidebar{position:static;width:auto;height:auto;border-right:0;border-bottom:1px solid var(--rule)}
+    .sheet{padding:20px 18px 64px}.figs{grid-template-columns:1fr 1fr}.ctable{grid-template-columns:1fr;gap:0}
+    .figs .f:nth-child(3){border-left:0;padding-left:0}.figs .f{border-top:1px solid var(--hair)}.head h1{font-size:20px}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <aside class="sidebar">
+    <div class="brand">TotalGroup Logistics<span>Receivables · model &amp; questions</span></div>
+    <nav>
+      <div class="navsec">Part I · Semantic model</div>
+      <div class="navgrp">Modelled</div>
+      <a href="#c-receivables">Receivables <i class="ok">✓</i></a>
+      <a href="#c-bookings">Bookings &amp; freight <i class="block">data</i></a>
+      <a href="#c-lanes">Lanes &amp; margin <i class="cand">cand</i></a>
+      <a href="#c-ops">Operations &amp; fleet <i class="cand">cand</i></a>
+      <a href="#c-vendors">Vendors &amp; brokers <i class="cand">cand</i></a>
+      <a href="#c-ledger">Ledger &amp; cash <i class="cand">cand</i></a>
+      <a href="#c-tyres">Tyres &amp; maintenance <i class="cand">cand</i></a>
+      <div class="navgrp">Relevant — not yet</div>
+      <a href="#f-payables">Payables (AP)</a>
+      <a href="#f-fuel">Fuel &amp; running cost</a>
+      <a href="#f-pnl">Profit &amp; loss</a>
+      <a href="#f-cashhist">Cash / collection history</a>
+      <a href="#f-fixed">Fixed assets</a>
+      <a href="#f-purchase">Purchase</a>
+      <a href="#f-inventory">Inventory</a>
+      <a href="#f-payroll">Payroll &amp; staff</a>
+      <a href="#f-terms">Credit terms</a>
+      <a href="#f-claims">Claims / SLA</a>
+      <a href="#f-statutory">Statutory / tax</a>
+
+      <div class="navsec">Part II · Questions</div>
+      <div class="navgrp">Lookup</div>
+      <a href="#ex1"><span><span class="qn">1</span>How much do we get owed</span></a>
+      <a href="#ex2"><span><span class="qn">2</span>Who owes the most</span></a>
+      <a href="#ex3"><span><span class="qn">3</span>Exposure by branch</span></a>
+      <a href="#ex4"><span><span class="qn">4</span>Collection priority</span></a>
+      <a href="#ex5"><span><span class="qn">5</span>What the balance is made of</span></a>
+      <div class="navgrp">Analysis · Causal · What-if</div>
+      <a href="#ex6"><span><span class="qn">6</span>Healthy or a problem</span> <i class="cand">Analysis</i></a>
+      <a href="#ex7"><span><span class="qn">7</span>What drives the overdue</span> <i class="cand">Causal</i></a>
+      <a href="#ex8"><span><span class="qn">8</span>What happens next</span> <i class="cand">What-if</i></a>
+      <a href="#ex9"><span><span class="qn">9</span>Drill to a single bill</span> <i class="cand">Drill</i></a>
+      <a href="#ex10"><span><span class="qn">10</span>If our biggest customer defaulted</span> <i class="cand">Risk</i></a>
+      <div class="navgrp">Revenue &amp; profit</div>
+      <a href="#ex11"><span><span class="qn">11</span>Which branches make money</span> <i class="ok">✓</i></a>
+      <a href="#ex12"><span><span class="qn">12</span>Which lanes make money</span> <i class="ok">✓</i></a>
+      <a href="#ex13"><span><span class="qn">13</span>Most profitable customers</span> <i class="ok">✓</i></a>
+      <a href="#ex14"><span><span class="qn">14</span>Unbilled revenue at risk</span> <i class="ok">✓</i></a>
+      <div class="navgrp">Fleet &amp; unit cost</div>
+      <a href="#ex15"><span><span class="qn">15</span>Tyre cost per km</span> <i class="ok">✓</i></a>
+      <a href="#ex16"><span><span class="qn">16</span>Fuel spend</span> <i class="block">decode</i></a>
+      <a href="#ex17"><span><span class="qn">17</span>Own vs hired fleet</span> <i class="block">decode</i></a>
+      <div class="navgrp">Compliance &amp; risk</div>
+      <a href="#ex18"><span><span class="qn">18</span>Driver licences expiring</span> <i class="ok">✓</i></a>
+      <a href="#ex19"><span><span class="qn">19</span>Damages &amp; claims</span> <i class="ok">✓</i></a>
+      <div class="navgrp">Cash · collections · payables</div>
+      <a href="#ex20"><span><span class="qn">20</span>Cash &amp; collections</span> <i class="block">decode</i></a>
+      <a href="#ex21"><span><span class="qn">21</span>Payables (AP)</span> <i class="block">decode</i></a>
+
+      <div class="navsec">Part III · Calculus</div>
+      <a href="#calc-idea">What the calculus is</a>
+      <a href="#calc-nouns">Nouns — from the model</a>
+      <a href="#calc-ops">Operators — the algebra</a>
+      <a href="#calc-laws">Laws — correctness</a>
+      <a href="#calc-q">The questions, in calculus</a>
+      <a href="#calc-sim">Toward simulation</a>
+    </nav>
+  </aside>
+
+  <main class="main"><div class="sheet">
+
+    <div class="head">
+      <div class="org">TotalGroup Logistics</div>
+      <h1>Receivables — Semantic Model &amp; Questions</h1>
+      <div class="meta"><b>As of</b> 3 June 2026 &nbsp;·&nbsp; <b>Source</b> live MSSQL &nbsp;·&nbsp; <b>Currency</b> ₹ crore (1 Cr = 1,00,00,000)</div>
+    </div>
+    <p class="preface">Three parts of one benchmark: the <b>semantic model</b> — the concepts we can compute on,
+      each with its measures and the filters it can be sliced by; the <b>questions</b> those concepts answer; and the
+      <b>calculus</b> — the pure form each question takes over the model. All three are meant to be grown; verified
+      pieces are marked, candidates and data-blocked pieces are flagged honestly.</p>
+
+    <!-- ══════════ PART I · SEMANTIC MODEL ══════════ -->
+    <section class="part" id="sm">
+      <div class="lead">Part I</div>
+      <h2>Semantic model — concept tree</h2>
+      <hr class="prule">
+      <p class="intro">Each concept is an <b>entity</b> — a real thing with a table behind it. A concept carries its
+        <b>relationships</b> (how it joins to other entities, with verified coverage), the <b>measures</b> and
+        <b>metrics</b> computable on it at a stated <b>grain</b>, the <b>dimensions</b> it can be sliced by, plus its
+        <b>identity, parameters and rules</b>. Measures and filters are two facets of this — not the whole.</p>
+
+      <div class="subhead">Modelled — concepts with data <span>relationships show cardinality · verified join coverage</span></div>
+
+      <details class="concept" id="c-receivables" open>
+        <summary>Receivables — AR outstanding bill <span class="ctag ok">Verified</span> <span class="csrc">dbo.rpt_db_outstanding_debtor</span></summary>
+        <div class="cbody">
+          <div class="sig"><span><b>Grain</b> one open bill</span><span><b>Time</b> snapshot — "as at"</span><span><b>Population</b> 44,610 open bills · 1,103 customers</span></div>
+          <div class="facet"><h5>Relationships</h5><ul class="rels">
+            <li><span class="re">Branch</span> <span class="via">LocationId = location</span> <span class="card">N:1</span> <span class="cov ok">100%</span></li>
+            <li><span class="re">Customer (Party)</span> <span class="via">SubLedger ≈ party name</span> <span class="card">N:1</span> <span class="cov weak">76% — identify by name instead</span></li>
+            <li><span class="re">Document stamp</span> <span class="via">DocumentStampId</span> <span class="card">1:1</span> <span class="cov ok">100%</span></li>
+          </ul></div>
+          <div class="ctable">
+            <div class="ccol"><h5>Measures <span style="color:var(--muted);font-weight:400;letter-spacing:0;text-transform:none">· per bill, additive</span></h5><ul>
+              <li><b>Outstanding balance</b> <code>SUM(BALANCE)</code> <span class="mnote ok">floors advances at ₹0</span></li>
+              <li><b>Overdue balance</b> <code>BALANCE · AgeingDays&gt;0</code></li>
+              <li><b>Within-terms balance</b> · <b>Maturing soon</b> <code>−15…0</code></li>
+              <li><b>Bill count</b> · <b>Customer count</b></li>
+              <li>CurrentBal <span class="mnote warn">understates ₹23.4 Cr — excluded</span></li>
+            </ul></div>
+            <div class="ccol"><h5>Dimensions</h5><ul>
+              <li class="dim">Customer · Branch · Zonal / Area office</li>
+              <li class="dim">Ageing bucket <span class="vals">within-terms · 1-30 · 31-60 · 61-90 · 91-180</span></li>
+              <li class="dim">Document type <span class="vals">Bill · Opening · Supplementary · JV</span></li>
+              <li class="dim">Party category &amp; type · Account group</li>
+              <li class="dim">Marketing exec · PIC <span class="mnote">sparse</span> · Bill/Due date · Year</li>
+            </ul></div>
+          </div>
+          <div class="minor">
+            <div class="mf"><h5>Metrics</h5><p>Outstanding receivables ✓. <span class="warn">DSO · Collection rate · Customer payment days — blocked (need revenue &amp; receipts).</span></p></div>
+            <div class="mf"><h5>Identity</h5><p>Customer = <b>SubLedger</b> ledger name (Party join only 76%; <code>PartyName</code> blank). Tata Steel CHA ≠ SCM.</p></div>
+            <div class="mf"><h5>Parameters</h5><p><b>Party credit days</b> — per-customer, learnable from payment history.</p></div>
+            <div class="mf"><h5>Source</h5><p><code>rpt_db_outstanding_debtor</code> · verified, whole-population.</p></div>
+          </div>
+          <div class="crule"><span class="rk">Rules</span> Measure on <code>BALANCE</code>, never <code>CurrentBal</code> (−₹23.4 Cr). Ageing columns are a refresh snapshot, not live. <code>DueDate</code> = bill date (no terms) — use <code>AgeingDays</code>.</div>
+        </div>
+      </details>
+
+      <details class="concept" id="c-bookings">
+        <summary>Bookings &amp; freight revenue <span class="ctag block">Blocked · data</span> <span class="csrc">dbo.trp_trn_booking</span></summary>
+        <div class="cbody">
+          <div class="sig"><span><b>Grain</b> one booking</span><span><b>Time</b> no booking date — trip dates as proxy</span></div>
+          <div class="facet"><h5>Relationships</h5><ul class="rels">
+            <li><span class="re">Customer (Party)</span> <span class="via">BillingPartyId</span> <span class="card">N:1</span> <span class="cov ok">99.99%</span></li>
+            <li><span class="re">Vehicle</span> <span class="via">VehicleId</span> <span class="card">N:1</span> <span class="cov ok">100%</span></li>
+            <li><span class="re">Branch</span> <span class="via">BillingLocationId</span> <span class="card">N:1</span> <span class="cov ok">100%</span></li>
+            <li><span class="re">Transport invoice</span> <span class="via">AdditionalTransactionId</span> <span class="card">N:1</span> <span class="cov ok">93% — verified link</span></li>
+            <li><span class="re">Operation (trip)</span> <span class="via">bridge oprbookingreference</span> <span class="card">N:N</span> <span class="cov ok">100%</span></li>
+          </ul></div>
+          <div class="ctable">
+            <div class="ccol"><h5>Measures <span style="color:var(--muted);font-weight:400;letter-spacing:0;text-transform:none">· per booking</span></h5><ul>
+              <li><b>Booking count</b> <code>COUNT(*)</code></li>
+              <li>Booking revenue / billed <code>SUM(Amount)</code> <span class="mnote warn">2023 outliers</span></li>
+              <li>Collected / paid / balance <span class="mnote warn">columns all-zero here</span></li>
+              <li>Booking vendor cost · payment lag (days)</li>
+            </ul></div>
+            <div class="ccol"><h5>Dimensions</h5><ul>
+              <li class="dim">Customer · Contract party</li>
+              <li class="dim">Lane (from/to) · Vehicle type · Branch</li>
+              <li class="dim">Trip dates <span class="mnote">proxy for activity</span> · Expected delivery</li>
+            </ul></div>
+          </div>
+          <div class="crule"><span class="rk">Blocked</span> No clean booking date, <code>PaidAmount</code> nil, <code>Amount</code> has outliers — so DSO / collection / revenue-by-period aren't trustworthy. Also: cost-allocation is NOT a conservation slice of revenue. Fix via the transport-invoice line for revenue + a data-quality pass.</div>
+        </div>
+      </details>
+
+      <details class="concept" id="c-lanes">
+        <summary>Lanes &amp; margin <span class="ctag cand">Candidate</span> <span class="csrc">booking · invoice · cost</span></summary>
+        <div class="cbody">
+          <div class="sig"><span><b>Grain</b> one (origin, destination) city lane</span><span><b>Derived</b> from bookings</span></div>
+          <div class="facet"><h5>Relationships</h5><ul class="rels">
+            <li><span class="re">City lane ← Booking</span> <span class="via">(FromCity, ToCity)</span> <span class="card">N:1</span> <span class="cov ok">98%</span></li>
+            <li><span class="re">Operation lane ← Operation</span> <span class="via">Start/EndLocationId</span> <span class="card">N:1</span> <span class="cov weak">33% — weak</span></li>
+            <li><span class="re">Gross margin ← revenue &amp; vendor cost</span> <span class="via">depends-on</span> <span class="cov ok">96%</span></li>
+          </ul></div>
+          <div class="ctable">
+            <div class="ccol"><h5>Measures &amp; metrics</h5><ul>
+              <li><b>Bookings per lane</b> · revenue &amp; vendor cost by lane</li>
+              <li>Gross margin · Gross margin % · <b>by lane</b> <span class="mnote">metric</span></li>
+              <li>Transport invoice amount</li>
+            </ul></div>
+            <div class="ccol"><h5>Dimensions</h5><ul>
+              <li class="dim">City lane (from → to) · Operation lane</li>
+              <li class="dim">Customer · Vehicle type</li>
+            </ul></div>
+          </div>
+          <div class="crule"><span class="rk">Rules</span> Margin from invoice + vendor cost, not cost-allocation (not a conservation slice). <code>Operation→Route</code> join is unusable; the operation-lane path is only 33% covered — prefer the city-lane derivation.</div>
+        </div>
+      </details>
+
+      <details class="concept" id="c-ops">
+        <summary>Operations, trips &amp; fleet <span class="ctag cand">Candidate</span> <span class="csrc">operation · vehicle · trip · driver</span></summary>
+        <div class="cbody">
+          <div class="sig"><span><b>Grain</b> one operation / trip · one vehicle</span></div>
+          <div class="facet"><h5>Relationships</h5><ul class="rels">
+            <li><span class="re">Operation → Vehicle</span> <span class="via">VehicleId</span> <span class="card">N:1</span> <span class="cov ok">98%</span></li>
+            <li><span class="re">Vehicle → Vehicle type</span> <span class="via">VehicleTypeId</span> <span class="card">N:1</span> <span class="cov ok">100%</span></li>
+            <li><span class="re">Trip info → Operation</span> <span class="via">TransactionId</span> <span class="card">1:1</span> <span class="cov ok">100%</span></li>
+            <li><span class="re">Vehicle / Trip → Driver</span> <span class="via">DriverId</span> <span class="card">N:1</span> <span class="cov weak">2% — unresolved</span></li>
+            <li><span class="re">Operation → Broker (Party)</span> <span class="via">VehicleBrokerId</span> <span class="card">N:1</span> <span class="cov weak">32%</span></li>
+          </ul></div>
+          <div class="ctable">
+            <div class="ccol"><h5>Measures &amp; metrics</h5><ul>
+              <li>Completed trips by driver <span class="mnote">/ origin city</span></li>
+              <li>Fleet count by vehicle type · Vehicle idle days</li>
+              <li>Operation distance (km) · transit days <span class="mnote">candidate</span></li>
+              <li>POD count · POD coverage · On-time rate <span class="mnote warn">unresolved</span></li>
+            </ul></div>
+            <div class="ccol"><h5>Dimensions &amp; segments</h5><ul>
+              <li class="dim">Trip origin city · lane · Vehicle type <span class="mnote">0 = unassigned</span></li>
+              <li class="dim">Driver · Booking-has-POD</li>
+              <li class="dim">Segments <span class="vals">completed trip · never tripped · active party</span></li>
+            </ul></div>
+          </div>
+          <div class="crule"><span class="rk">Rules</span> <code>VehicleTypeId=0</code> = unassigned. Driver joins are weak (2%) — driver-level answers are unreliable until fixed. ServiceNetwork branch names don't resolve cleanly to cities. A prior "idle vehicles" failure was a source outage, not a data gap.</div>
+        </div>
+      </details>
+
+      <details class="concept" id="c-vendors">
+        <summary>Vendors, brokers &amp; vehicles <span class="ctag cand">Candidate</span> <span class="csrc">party · placement</span></summary>
+        <div class="cbody">
+          <div class="sig"><span><b>Grain</b> one placement / vendor</span></div>
+          <div class="facet"><h5>Relationships</h5><ul class="rels">
+            <li><span class="re">Operation → Broker (Party)</span> <span class="via">VehicleBrokerId</span> <span class="card">N:1</span> <span class="cov weak">32%</span></li>
+            <li><span class="re">Broker / Vendor</span> <span class="via">segment of Party</span> <span class="card">role</span> <span class="cov ok">tagged</span></li>
+          </ul></div>
+          <div class="ctable">
+            <div class="ccol"><h5>Measures &amp; metrics</h5><ul>
+              <li><b>Vendor payments</b> · Broker trips by lane</li>
+              <li>Broker recommendation for a lane <span class="mnote">metric</span></li>
+            </ul></div>
+            <div class="ccol"><h5>Dimensions &amp; segments</h5><ul>
+              <li class="dim">Vendor · lane</li>
+              <li class="dim">Segments <span class="vals">vehicle broker party · vendor party</span></li>
+            </ul></div>
+          </div>
+          <div class="crule"><span class="rk">Rule</span> Broker sits on <code>trp_trn_vehicleplacement.VehicleBrokerId</code> — verified, corrected from an earlier wrong-table conclusion (broker was mistakenly read off the booking).</div>
+        </div>
+      </details>
+
+      <details class="concept" id="c-ledger">
+        <summary>Ledger, charges &amp; cash <span class="ctag cand">Candidate</span> <span class="csrc">voucher · ledger · charge head</span></summary>
+        <div class="cbody">
+          <div class="sig"><span><b>Grain</b> one voucher ledger line</span></div>
+          <div class="facet"><h5>Relationships</h5><ul class="rels">
+            <li><span class="re">Ledger line → Voucher</span> <span class="via">VoucherId</span> <span class="card">N:1</span> <span class="cov ok">100%</span></li>
+            <li><span class="re">Ledger line → Ledger</span> <span class="via">LedgerId</span> <span class="card">N:1</span> <span class="cov ok">100%</span></li>
+            <li><span class="re">Ledger line → Party</span> <span class="via">SubLedgerId</span> <span class="card">N:1</span> <span class="cov weak">75%</span></li>
+            <li><span class="re">Ledger → Account group</span> <span class="via">AccountGroupId</span> <span class="card">N:1</span> <span class="cov weak">10% — candidate</span></li>
+            <li><span class="re">Payment settlement → Voucher bill</span> <span class="via">VoucherLedgerBillId</span> <span class="card">N:1</span> <span class="cov ok">100%</span></li>
+          </ul></div>
+          <div class="ctable">
+            <div class="ccol"><h5>Measures &amp; metrics</h5><ul>
+              <li><b>Voucher ledger debit · credit</b></li>
+              <li>Charge head result amount <span class="mnote">candidate</span></li>
+              <li>Collection rate · DSO <span class="mnote warn">need receipts + revenue</span></li>
+            </ul></div>
+            <div class="ccol"><h5>Dimensions</h5><ul>
+              <li class="dim">Account group <span class="mnote">10% — weak roll-up</span> · Charge head group</li>
+              <li class="dim">Party · date · ledger</li>
+            </ul></div>
+          </div>
+          <div class="crule"><span class="rk">Rules</span> Vouchers must balance (double-entry). <code>ChargeHeadValue</code> uses a polymorphic (TransactionId, ReferenceTypeId) key; <code>ReferenceLinkId</code> is degenerate — never join on it. The account-group roll-up is only 10% covered.</div>
+        </div>
+      </details>
+
+      <details class="concept" id="c-tyres">
+        <summary>Tyres &amp; fleet maintenance <span class="ctag cand">Candidate</span> <span class="csrc">fleet_trn_tyremovement · tyretransaction</span></summary>
+        <div class="cbody">
+          <div class="sig"><span><b>Grain</b> one tyre movement / work order</span></div>
+          <div class="facet"><h5>Relationships</h5><ul class="rels">
+            <li><span class="re">Tyre movement → Work order</span> <span class="via">TransactionId</span> <span class="card">N:1</span> <span class="cov ok">100%</span></li>
+            <li><span class="re">Work order → Vehicle</span> <span class="via">VehicleId</span> <span class="card">N:1</span> <span class="cov ok">100%</span></li>
+          </ul></div>
+          <div class="ctable">
+            <div class="ccol"><h5>Measures</h5><ul><li><b>Tyre replacement count &amp; cost</b></li></ul></div>
+            <div class="ccol"><h5>Dimensions</h5><ul><li class="dim">Vehicle · Tyre movement type</li></ul></div>
+          </div>
+          <div class="crule"><span class="rk">Rule</span> Fitment vs. removal vs. position-swap must not be conflated — each movement type means a different thing for cost and life.</div>
+        </div>
+      </details>
+
+      <div class="subhead">Relevant — not yet in the model <span>a freight P&amp;L and cash picture needs these; each shows why it matters and what it would unlock</span></div>
+
+      <details class="fconcept" id="f-payables"><summary>Payables — what we owe vendors <span class="ctag block">Not yet</span> <span class="csrc">rpt_db_outstanding_creditor · planned</span></summary>
+        <div class="fbody"><p class="why"><b>The mirror of receivables.</b> What TotalGroup owes its vehicle vendors and suppliers — the other half of working capital and the cash position.</p>
+        <p class="unlock"><span class="k">Would unlock</span> Total payable · overdue to vendors · days payable (DPO) · <b>net working capital</b> (receivable − payable) · which vendors to pay first · vendor concentration.</p></div></details>
+
+      <details class="fconcept" id="f-fuel"><summary>Fuel &amp; running cost <span class="ctag block">Not yet</span> <span class="csrc">no source</span></summary>
+        <div class="fbody"><p class="why"><b>The biggest variable cost in trucking.</b> Without it, "lane margin" is only half-true — you have revenue and vendor hire, but not diesel, tolls, tyres-per-km or maintenance.</p>
+        <p class="unlock"><span class="k">Would unlock</span> Cost per km · fuel efficiency by vehicle / lane / driver · <b>true trip &amp; lane margin</b> · toll &amp; maintenance load · own-fleet vs hired economics.</p></div></details>
+
+      <details class="fconcept" id="f-pnl"><summary>Profit &amp; loss <span class="ctag block">Not yet</span> <span class="csrc">derived — needs revenue + all cost</span></summary>
+        <div class="fbody"><p class="why"><b>The bottom line.</b> Ties freight revenue to vendor hire, fuel, fixed and staff cost — the number the business is actually run on.</p>
+        <p class="unlock"><span class="k">Would unlock</span> Net margin · cost structure · breakeven load factor · profit by branch / lane / customer · fixed-vs-variable split.</p></div></details>
+
+      <details class="fconcept" id="f-cashhist"><summary>Cash &amp; collection history <span class="ctag block">Not yet</span> <span class="csrc">needs daily snapshots</span></summary>
+        <div class="fbody"><p class="why"><b>The missing "up or down?".</b> Today the ledger is a live snapshot with no memory — so we can state the ₹256 Cr but not whether it is rising or falling.</p>
+        <p class="unlock"><span class="k">Would unlock</span> Receivables &amp; overdue <b>trend</b> · DSO over time · collection velocity · month-on-month movement · early-warning on deterioration. (Begins the day we start snapshotting the ledger.)</p></div></details>
+
+      <details class="fconcept" id="f-fixed"><summary>Fixed assets &amp; depreciation <span class="ctag block">Not yet</span> <span class="csrc">ast_mst_asset · planned</span></summary>
+        <div class="fbody"><p class="why"><b>The fleet is the capital base.</b> Vehicles, depreciation and replacement drive return on assets and capex planning.</p>
+        <p class="unlock"><span class="k">Would unlock</span> Asset utilisation · age of fleet · depreciation load · replacement schedule · return on assets · own vs leased.</p></div></details>
+
+      <details class="fconcept" id="f-purchase"><summary>Purchase &amp; procurement <span class="ctag block">Not yet</span> <span class="csrc">pur_trn_transaction · planned</span></summary>
+        <div class="fbody"><p class="why">Buying of spares, tyres, fuel and services — the spend side of operations.</p>
+        <p class="unlock"><span class="k">Would unlock</span> Procurement spend · supplier concentration · price trend · spend by category / branch.</p></div></details>
+
+      <details class="fconcept" id="f-inventory"><summary>Inventory &amp; spares <span class="ctag block">Not yet</span> <span class="csrc">inv_mst_product · planned</span></summary>
+        <div class="fbody"><p class="why">Consumables and spare-part stock held across workshops.</p>
+        <p class="unlock"><span class="k">Would unlock</span> Stock value · dead / slow-moving stock · consumption rate · stock-out risk.</p></div></details>
+
+      <details class="fconcept" id="f-payroll"><summary>Payroll &amp; staff <span class="ctag block">Not yet</span> <span class="csrc">pay_mst_masterinternal · planned</span></summary>
+        <div class="fbody"><p class="why"><b>Drivers and staff are a large fixed cost</b> — and the human side of the operation.</p>
+        <p class="unlock"><span class="k">Would unlock</span> Cost per head · driver pay vs trips run · staff cost by branch · headcount productivity · payroll into the P&amp;L.</p></div></details>
+
+      <details class="fconcept" id="f-terms"><summary>Customer master &amp; credit terms <span class="ctag block">Not yet</span> <span class="csrc">needs source</span></summary>
+        <div class="fbody"><p class="why">The definitive credit terms per customer — today we infer overdue from the ledger's ageing field rather than the agreed terms.</p>
+        <p class="unlock"><span class="k">Would unlock</span> The <b>Party-credit-days parameter</b> per customer · terms-compliance · customer risk score · segmentation for collections.</p></div></details>
+
+      <details class="fconcept" id="f-claims"><summary>Claims, insurance &amp; SLA <span class="ctag block">Not yet</span> <span class="csrc">partial</span></summary>
+        <div class="fbody"><p class="why">Service quality and risk — damages, delays and cover.</p>
+        <p class="unlock"><span class="k">Would unlock</span> Claim rate &amp; cost · on-time / SLA adherence · insurance load · loss ratio by lane / customer.</p></div></details>
+
+      <details class="fconcept" id="f-statutory"><summary>Statutory, tax &amp; excise <span class="ctag block">Not yet</span> <span class="csrc">excise_trn_transaction · planned</span></summary>
+        <div class="fbody"><p class="why">Compliance and tax exposure — GST, excise and statutory dues.</p>
+        <p class="unlock"><span class="k">Would unlock</span> Tax liability &amp; input credit · statutory dues · compliance calendar.</p></div></details>
+    </section>
+
+    <!-- ══════════ PART II · QUESTIONS ══════════ -->
+    <div class="qhead"><div class="lead">Part II</div><h2>The questions</h2><hr class="prule"></div>
+
+    <!-- EXHIBIT 1 -->
+    <section class="exhibit" id="ex1">
+      <div class="no">Exhibit 1</div><h3 class="ti">How much do our customers owe us?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Snapshot — as at 3 June 2026</b></div>
+      <div class="figs num">
+        <div class="f"><div class="k">Total outstanding</div><div class="v"><span class="val" tabindex="0" data-exact="₹2,56,33,44,678">₹256.3 Cr</span></div><div class="s">44,610 open bills</div></div>
+        <div class="f"><div class="k">Overdue</div><div class="v neg"><span class="val" tabindex="0" data-exact="₹1,17,74,07,232">₹117.7 Cr</span></div><div class="s">45.9% of total</div></div>
+        <div class="f"><div class="k">Customers</div><div class="v">1,103</div><div class="s">with an open balance</div></div>
+        <div class="f"><div class="k">Concentration</div><div class="v">36</div><div class="s">= half the total</div></div>
+      </div>
+      <p class="body">Customers owe TotalGroup <b><span class="val" tabindex="0" data-exact="₹2,56,33,44,678">₹256.3 crore</span></b>.
+        <b>36 of 1,103 customers hold half the balance</b>, and the ten largest hold <b><span class="val" tabindex="0" data-exact="₹71,83,53,235">₹71.8 crore</span> (28%)</b> (Exhibit&nbsp;2).
+        Of the total, <span class="navy"><span class="val" tabindex="0" data-exact="₹1,17,74,07,232">₹117.7 crore</span> is overdue</span> — but it is
+        <b>recent slippage: 96% is under 60 days</b>, and barely <span class="val" tabindex="0" data-exact="₹4,30,63,010">₹4.3 crore</span> is over 60 days past terms.</p>
+      <div class="ageing num">
+        <div class="cap"><span>Ageing of the ₹256.3 Cr balance</span><span class="note">Only 1.7% is 60+ days overdue</span></div>
+        <div class="bar"><div class="seg" style="width:54.07%;background:var(--panel)"></div><div class="seg" style="width:31.55%;background:var(--r1)"></div><div class="seg" style="width:12.70%;background:var(--r2)"></div><div class="seg" style="width:1.42%;background:var(--r3)"></div><div class="seg" style="width:0.26%;background:var(--r4)"></div></div>
+        <table>
+          <tr><td><span class="sw" style="background:var(--panel)"></span>Within terms</td><td class="r"><span class="val" tabindex="0" data-exact="₹1,38,59,37,446">₹138.6 Cr</span></td><td class="rr">33,052 bills</td><td class="rr">54.1%</td></tr>
+          <tr><td><span class="sw" style="background:var(--r1)"></span>Overdue 1–30 days</td><td class="r"><span class="val" tabindex="0" data-exact="₹80,87,80,310">₹80.9 Cr</span></td><td class="rr">7,623 bills</td><td class="rr">31.5%</td></tr>
+          <tr><td><span class="sw" style="background:var(--r2)"></span>Overdue 31–60 days</td><td class="r"><span class="val" tabindex="0" data-exact="₹32,55,63,913">₹32.6 Cr</span></td><td class="rr">3,625 bills</td><td class="rr">12.7%</td></tr>
+          <tr><td><span class="sw" style="background:var(--r3)"></span>Overdue 61–90 days</td><td class="r"><span class="val" tabindex="0" data-exact="₹3,64,56,428">₹3.6 Cr</span></td><td class="rr">274 bills</td><td class="rr">1.4%</td></tr>
+          <tr><td><span class="sw" style="background:var(--r4)"></span>Overdue 91–180 days</td><td class="r"><span class="val" tabindex="0" data-exact="₹66,06,582">₹0.7 Cr</span></td><td class="rr">36 bills</td><td class="rr">0.3%</td></tr>
+          <tr class="tot"><td>Total outstanding</td><td class="r"><span class="val" tabindex="0" data-exact="₹2,56,33,44,678">₹256.3 Cr</span></td><td class="rr">44,610 bills</td><td class="rr">100%</td></tr>
+        </table>
+      </div>
+      <details class="basis"><summary>Basis of preparation, derivation &amp; underlying data<span class="h">— how this figure was reached</span></summary>
+        <div class="drill">
+          <h5>Time filter</h5><p class="basisnote">A live snapshot of open balances as at 3 June 2026 — the latest bill in the ledger; every open trade-receivable is counted.</p>
+          <h5>Derivation</h5><ol class="steps"><li>Take every open trade-receivable document (44,610 rows).</li><li>Sum <code>BALANCE</code> → ₹256.3 Cr.</li><li>Classify by the ledger's ageing field into within-terms / overdue buckets.</li></ol>
+          <details class="dev"><summary>Show the query · developer</summary><pre class="sql">SELECT SUM(BALANCE)                          AS total_outstanding,
+       SUM(CASE WHEN AgeingDays &gt; 0
+                THEN BALANCE ELSE 0 END)      AS overdue
+FROM   dbo.rpt_db_outstanding_debtor;</pre></details>
+          <h5>Notes &amp; judgements</h5>
+          <p class="basisnote"><span class="k">Measure</span> Summed on <code>BALANCE</code>, which floors advances at nil. <code>CurrentBal</code> nets 1,903 advances and understates by <span class="val" tabindex="0" data-exact="₹23,40,79,644">₹23.4 Cr</span>. &nbsp;<a class="cite" href="#">Collections policy §3 <span class="mock">· mock</span></a></p>
+          <p class="basisnote"><span class="k">Ageing</span> Uses <code>AgeingDays</code> (reflects credit terms); <code>DueDate</code> = bill date, so it is not used.</p>
+          <p class="basisnote"><span class="k">Coverage</span> Whole population; exact sums. <span class="drilllink">View the 44,610 underlying bills →</span></p>
+          <div class="roles"><b>Depth by role:</b> user reads the basis; developer opens the query; admin edits the cited policy.</div>
+        </div>
+      </details>
+      <p class="src"><b>Source:</b> AR outstanding ledger, live snapshot 3 June 2026.</p>
+    </section>
+
+    <!-- EXHIBIT 2 -->
+    <section class="exhibit" id="ex2">
+      <div class="no">Exhibit 2</div><h3 class="ti">Which customers owe us the most?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Snapshot — as at 3 June 2026</b></div>
+      <p class="body">The ten largest debtors carry <b><span class="val" tabindex="0" data-exact="₹71,83,53,235">₹71.8 crore</span>, 28% of the total</b>. VESUVIUS India and Electrotherm alone account for <b><span class="val" tabindex="0" data-exact="₹27,06,36,109">₹27.1 crore</span> (10.5%)</b>.</p>
+      <table class="fin num"><caption>Ten largest debtors by outstanding balance</caption>
+        <thead><tr><th style="width:22px"></th><th>Customer</th><th class="r">Open bills</th><th class="r">Outstanding</th><th class="r">% of total</th></tr></thead>
+        <tbody>
+          <tr><td class="rk">1</td><td class="name">VESUVIUS INDIA LTD</td><td class="r">157</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹14,74,06,213">₹14.74 Cr</span></td><td class="r share">5.75%</td></tr>
+          <tr><td class="rk">2</td><td class="name">ELECTROTHERM (INDIA) LTD</td><td class="r">461</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹12,32,29,896">₹12.32 Cr</span></td><td class="r share">4.81%</td></tr>
+          <tr><td class="rk">3</td><td class="name">BIRLA OPUS PAINTS <small>Grasim Industries Ltd</small></td><td class="r">1,334</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹7,33,68,965">₹7.34 Cr</span></td><td class="r share">2.86%</td></tr>
+          <tr><td class="rk">4</td><td class="name">INDOSPIRIT BEVERAGES PVT LTD</td><td class="r">339</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹6,94,19,288">₹6.94 Cr</span></td><td class="r share">2.71%</td></tr>
+          <tr><td class="rk">5</td><td class="name">EMMVEE ENERGY PVT LTD</td><td class="r">240</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹6,69,51,168">₹6.70 Cr</span></td><td class="r share">2.61%</td></tr>
+          <tr><td class="rk">6</td><td class="name">TATA STEEL LTD <small>TSLPL — CHA</small></td><td class="r">578</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹5,71,26,713">₹5.71 Cr</span></td><td class="r share">2.23%</td></tr>
+          <tr><td class="rk">7</td><td class="name">TATA STEEL LTD <small>TSLPL — SCM</small></td><td class="r">240</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹5,16,09,051">₹5.16 Cr</span></td><td class="r share">2.01%</td></tr>
+          <tr><td class="rk">8</td><td class="name">QWIK SUPPLY CHAIN PVT LTD</td><td class="r">779</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹4,62,90,957">₹4.63 Cr</span></td><td class="r share">1.81%</td></tr>
+          <tr><td class="rk">9</td><td class="name">AWL AGRI BUSINESS LTD</td><td class="r">534</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹4,24,09,275">₹4.24 Cr</span></td><td class="r share">1.65%</td></tr>
+          <tr><td class="rk">10</td><td class="name">KIRBY BUILDING SYSTEMS &amp; STRUCTURES INDIA</td><td class="r">740</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹4,05,41,709">₹4.05 Cr</span></td><td class="r share">1.58%</td></tr>
+        </tbody>
+        <tfoot><tr><td></td><td>Ten largest</td><td class="r">5,362</td><td class="r"><span class="val" tabindex="0" data-exact="₹71,83,53,235">₹71.84 Cr</span></td><td class="r">28.0%</td></tr></tfoot>
+      </table>
+      <details class="basis"><summary>Basis of preparation, derivation &amp; underlying data<span class="h">— how this ranking was built</span></summary>
+        <div class="drill">
+          <h5>Time filter</h5><p class="basisnote">Same snapshot as Exhibit 1 — open balances as at 3 June 2026.</p>
+          <h5>Derivation</h5><ol class="steps"><li>Group outstanding balances by customer ledger name.</li><li>Sum <code>BALANCE</code> per customer; take the ten largest.</li></ol>
+          <details class="dev"><summary>Show the query · developer</summary><pre class="sql">SELECT TOP 10 SubLedger, SUM(BALANCE) AS owed, COUNT(*) AS bills
+FROM   dbo.rpt_db_outstanding_debtor
+GROUP  BY SubLedger
+ORDER  BY owed DESC;</pre></details>
+          <h5>Notes &amp; judgements</h5>
+          <p class="basisnote"><span class="k">Grouping</span> By <code>SubLedger</code> — <code>PartyName</code> is blank. Tata Steel CHA + SCM shown as booked; combined <span class="val" tabindex="0" data-exact="₹10,87,35,764">₹10.87 crore</span>. <span class="drilllink">View a customer's bills →</span></p>
+        </div>
+      </details>
+      <p class="src"><b>Source:</b> as Exhibit 1, grouped by customer ledger.</p>
+    </section>
+
+    <!-- EXHIBIT 3 -->
+    <section class="exhibit" id="ex3">
+      <div class="no">Exhibit 3</div><h3 class="ti">Where does the exposure sit — by branch?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Snapshot — as at 3 June 2026</b></div>
+      <p class="body"><b>Mumbai <span class="val" tabindex="0" data-exact="₹39,70,84,402">₹39.7 Cr</span> and Bangalore <span class="val" tabindex="0" data-exact="₹32,63,13,389">₹32.6 Cr</span> together hold 28%</b>; the eight largest branches carry <b><span class="val" tabindex="0" data-exact="₹1,46,80,64,650">₹146.8 crore</span>, 57%</b>.</p>
+      <table class="fin num"><caption>Outstanding by branch — eight largest</caption>
+        <thead><tr><th>Branch</th><th class="r">Customers</th><th class="r">Open bills</th><th class="r">Outstanding</th><th class="r">% of total</th></tr></thead>
+        <tbody>
+          <tr><td class="name">MUMBAI</td><td class="r">114</td><td class="r">5,364</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹39,70,84,402">₹39.71 Cr</span></td><td class="r share">15.5%</td></tr>
+          <tr><td class="name">BANGALORE</td><td class="r">78</td><td class="r">7,411</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹32,63,13,389">₹32.63 Cr</span></td><td class="r share">12.7%</td></tr>
+          <tr><td class="name">GANDHIDHAM</td><td class="r">36</td><td class="r">969</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹16,02,72,716">₹16.03 Cr</span></td><td class="r share">6.3%</td></tr>
+          <tr><td class="name">VISAKHAPATNAM</td><td class="r">29</td><td class="r">725</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹14,88,63,878">₹14.89 Cr</span></td><td class="r share">5.8%</td></tr>
+          <tr><td class="name">KOLKATA</td><td class="r">48</td><td class="r">1,355</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹14,10,23,900">₹14.10 Cr</span></td><td class="r share">5.5%</td></tr>
+          <tr><td class="name">HYDERABAD</td><td class="r">73</td><td class="r">2,411</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹11,85,75,792">₹11.86 Cr</span></td><td class="r share">4.6%</td></tr>
+          <tr><td class="name">GOA</td><td class="r">19</td><td class="r">1,986</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹8,98,63,005">₹8.99 Cr</span></td><td class="r share">3.5%</td></tr>
+          <tr><td class="name">VASHI</td><td class="r">20</td><td class="r">2,732</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹8,60,69,168">₹8.61 Cr</span></td><td class="r share">3.4%</td></tr>
+        </tbody>
+        <tfoot><tr><td>Eight largest branches</td><td class="r">417</td><td class="r">22,953</td><td class="r"><span class="val" tabindex="0" data-exact="₹1,46,80,64,650">₹146.8 Cr</span></td><td class="r">57.3%</td></tr></tfoot>
+      </table>
+      <details class="basis"><summary>Basis of preparation, derivation &amp; underlying data<span class="h">— how this was reached</span></summary>
+        <div class="drill">
+          <h5>Time filter</h5><p class="basisnote">Same snapshot — open balances as at 3 June 2026.</p>
+          <h5>Derivation</h5><ol class="steps"><li>Group balances by branch (<code>Location</code>).</li><li>Sum <code>BALANCE</code>, count bills and distinct customers; take the eight largest.</li></ol>
+          <details class="dev"><summary>Show the query · developer</summary><pre class="sql">SELECT TOP 8 Location, SUM(BALANCE) AS owed,
+       COUNT(*) AS bills, COUNT(DISTINCT SubLedger) AS customers
+FROM   dbo.rpt_db_outstanding_debtor
+GROUP  BY Location ORDER BY owed DESC;</pre></details>
+          <h5>Notes &amp; judgements</h5>
+          <p class="basisnote"><span class="k">Branch field</span> <code>Location</code> is the branch that raised the bill; a customer may span branches, counted where booked.</p>
+        </div>
+      </details>
+      <p class="src"><b>Source:</b> as Exhibit 1, grouped by branch.</p>
+    </section>
+
+    <!-- EXHIBIT 4 -->
+    <section class="exhibit" id="ex4">
+      <div class="no">Exhibit 4</div><h3 class="ti">Who should collections chase first?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Snapshot — as at 3 June 2026</b></div>
+      <p class="body">A different list from "who owes the most": it ranks by the <b>overdue</b> portion. <b>AWL Agri (97% of its balance overdue) and TRL Krosaki (90%)</b> are almost entirely late — more urgent than their size implies.</p>
+      <table class="fin num"><caption>Largest overdue balances — collection priority</caption>
+        <thead><tr><th style="width:22px"></th><th>Customer</th><th class="r">Overdue</th><th class="r">Of total owed</th><th class="r">% overdue</th></tr></thead>
+        <tbody>
+          <tr><td class="rk">1</td><td class="name">VESUVIUS INDIA LTD</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹7,46,71,640">₹7.47 Cr</span></td><td class="r"><span class="val" tabindex="0" data-exact="₹14,74,06,213">₹14.74 Cr</span></td><td class="r share">51%</td></tr>
+          <tr><td class="rk">2</td><td class="name">ELECTROTHERM (INDIA) LTD</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹7,03,98,941">₹7.04 Cr</span></td><td class="r"><span class="val" tabindex="0" data-exact="₹12,32,29,896">₹12.32 Cr</span></td><td class="r share">57%</td></tr>
+          <tr><td class="rk">3</td><td class="name">AWL AGRI BUSINESS LTD <span class="flag">near-fully overdue</span></td><td class="r fig"><span class="val" tabindex="0" data-exact="₹4,11,05,864">₹4.11 Cr</span></td><td class="r"><span class="val" tabindex="0" data-exact="₹4,24,09,275">₹4.24 Cr</span></td><td class="r share">97%</td></tr>
+          <tr><td class="rk">4</td><td class="name">QWIK SUPPLY CHAIN PVT LTD</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹3,12,78,402">₹3.13 Cr</span></td><td class="r"><span class="val" tabindex="0" data-exact="₹4,62,90,957">₹4.63 Cr</span></td><td class="r share">68%</td></tr>
+          <tr><td class="rk">5</td><td class="name">EMMVEE ENERGY PVT LTD</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹2,67,88,814">₹2.68 Cr</span></td><td class="r"><span class="val" tabindex="0" data-exact="₹6,69,51,168">₹6.70 Cr</span></td><td class="r share">40%</td></tr>
+          <tr><td class="rk">6</td><td class="name">TATA STEEL LTD <small>TSLPL — SCM</small></td><td class="r fig"><span class="val" tabindex="0" data-exact="₹2,64,19,528">₹2.64 Cr</span></td><td class="r"><span class="val" tabindex="0" data-exact="₹5,16,09,051">₹5.16 Cr</span></td><td class="r share">51%</td></tr>
+          <tr><td class="rk">7</td><td class="name">APL APOLLO TUBES LTD <small>Hosur</small></td><td class="r fig"><span class="val" tabindex="0" data-exact="₹2,26,28,033">₹2.26 Cr</span></td><td class="r"><span class="val" tabindex="0" data-exact="₹3,27,11,981">₹3.27 Cr</span></td><td class="r share">69%</td></tr>
+          <tr><td class="rk">8</td><td class="name">TRL KROSAKI REFRACTORIES LTD <span class="flag">near-fully overdue</span></td><td class="r fig"><span class="val" tabindex="0" data-exact="₹2,16,36,757">₹2.16 Cr</span></td><td class="r"><span class="val" tabindex="0" data-exact="₹2,39,52,499">₹2.40 Cr</span></td><td class="r share">90%</td></tr>
+        </tbody>
+      </table>
+      <details class="basis"><summary>Basis of preparation, derivation &amp; underlying data<span class="h">— how this priority list was built</span></summary>
+        <div class="drill">
+          <h5>Time filter</h5><p class="basisnote">Same snapshot; "overdue" is the portion past credit terms at 3 June 2026.</p>
+          <h5>Derivation</h5><ol class="steps"><li>Per customer, sum only <code>BALANCE</code> where <code>AgeingDays&gt;0</code>.</li><li>Rank by overdue; show against total owed and %-overdue.</li></ol>
+          <details class="dev"><summary>Show the query · developer</summary><pre class="sql">SELECT TOP 8 SubLedger,
+       SUM(CASE WHEN AgeingDays &gt; 0 THEN BALANCE ELSE 0 END) AS overdue,
+       SUM(BALANCE)                                          AS total_owed
+FROM   dbo.rpt_db_outstanding_debtor
+GROUP  BY SubLedger ORDER BY overdue DESC;</pre></details>
+          <h5>Notes &amp; judgements</h5>
+          <p class="basisnote"><span class="k">Why overdue, not total</span> A customer within terms is not a collection problem; ranking by overdue surfaces urgency a "most owed" list hides.</p>
+        </div>
+      </details>
+      <p class="src"><b>Source:</b> as Exhibit 1; overdue by the ledger's ageing field.</p>
+    </section>
+
+    <!-- EXHIBIT 5 -->
+    <section class="exhibit" id="ex5">
+      <div class="no">Exhibit 5</div><h3 class="ti">What is the balance made of?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Snapshot — as at 3 June 2026</b></div>
+      <p class="body">Clean current billing, not legacy clutter: <b><span class="val" tabindex="0" data-exact="₹2,46,62,89,264">₹246.6 crore</span> — 96%</b> is regular freight bills; only <b><span class="val" tabindex="0" data-exact="₹7,55,80,286">₹7.6 crore</span> (3%)</b> is carried-forward opening balances.</p>
+      <table class="fin num"><caption>Composition by document type</caption>
+        <thead><tr><th>Document type</th><th class="r">Open items</th><th class="r">Balance</th><th class="r">Share</th></tr></thead>
+        <tbody>
+          <tr><td class="name">Regular freight bill</td><td class="r">36,453</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹2,46,62,89,264">₹246.63 Cr</span></td><td class="r share">96.2%</td></tr>
+          <tr><td class="name">Ledger opening balance</td><td class="r">5,616</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹7,55,80,286">₹7.56 Cr</span></td><td class="r share">2.9%</td></tr>
+          <tr><td class="name">Supplementary bill</td><td class="r">759</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹2,14,03,666">₹2.14 Cr</span></td><td class="r share">0.8%</td></tr>
+          <tr><td class="name">Journal voucher</td><td class="r">24</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹70,463">₹0.07 Cr</span></td><td class="r share">0.03%</td></tr>
+        </tbody>
+        <tfoot><tr><td>Total outstanding</td><td class="r">42,852</td><td class="r"><span class="val" tabindex="0" data-exact="₹2,56,33,44,678">₹256.3 Cr</span></td><td class="r">100%</td></tr></tfoot>
+      </table>
+      <details class="basis"><summary>Basis of preparation, derivation &amp; underlying data<span class="h">— how this was reached</span></summary>
+        <div class="drill">
+          <h5>Time filter</h5><p class="basisnote">Same snapshot — open balances as at 3 June 2026.</p>
+          <h5>Derivation</h5><ol class="steps"><li>Group open balances by document type; sum <code>BALANCE</code> and count.</li></ol>
+          <details class="dev"><summary>Show the query · developer</summary><pre class="sql">SELECT Document, COUNT(*) AS items, SUM(BALANCE) AS balance
+FROM   dbo.rpt_db_outstanding_debtor
+GROUP  BY Document ORDER BY balance DESC;</pre></details>
+          <h5>Notes &amp; judgements</h5>
+          <p class="basisnote"><span class="k">Payment documents</span> Receipt rows carry nil balance and are excluded; item count here is the 42,852 balance-bearing documents.</p>
+        </div>
+      </details>
+      <p class="src"><b>Source:</b> as Exhibit 1, grouped by document type.</p>
+    </section>
+
+    <!-- EXHIBIT 6 · ANALYSIS -->
+    <section class="exhibit" id="ex6">
+      <div class="no">Exhibit 6 <span class="atype">Analysis</span></div><h3 class="ti">So — is our receivable healthy or a problem?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Snapshot — as at 3 June 2026</b></div>
+      <div class="verdict"><div class="vk">Assessment</div><div class="vt">Concentrated, but current — the risk is <em>who</em> and <em>where</em>, not <em>how old</em>.</div></div>
+      <div class="factors">
+        <div class="factor"><div class="m ok">✓</div><div><b>Quality is high.</b> 96% of the balance is current freight bills (Exhibit&nbsp;5); of the overdue, 96% is under 60 days with barely <span class="val" tabindex="0" data-exact="₹4,30,63,010">₹4.3 Cr</span> aged past 60 days (Exhibit&nbsp;1). Almost no bad-debt tail.</div></div>
+        <div class="factor"><div class="m warn">!</div><div><b>Concentration is real.</b> 36 of 1,103 customers hold half the balance and two branches hold 28% (Exhibits&nbsp;2–3) — one large default or a slow branch moves the whole position.</div></div>
+        <div class="factor"><div class="m warn">!</div><div><b>Discipline is uneven.</b> The overdue clusters in Bangalore and a few branches (Exhibit&nbsp;7), and <span class="val" tabindex="0" data-exact="₹28,08,88,291">₹28.1 Cr</span> is within 15 days of tipping overdue (Exhibit&nbsp;8).</div></div>
+      </div>
+      <p class="body"><b>Net:</b> healthy fundamentals with concentrated, near-term risk. The response is targeted — the specific overdue names and the Bangalore cluster — not a broad tightening.</p>
+      <details class="basis"><summary>Basis of preparation<span class="h">— how this assessment is grounded</span></summary>
+        <div class="drill">
+          <h5>Time filter</h5><p class="basisnote">Snapshot as at 3 June 2026; a synthesis of Exhibits 1–5 and 7–8 — no new figures introduced.</p>
+          <h5>Judgement</h5><p class="basisnote">"Healthy vs problem" is a reasoned verdict, not a computed value — it weighs debt quality (high), ageing (low) and concentration (high). Each factor links to the exhibit it rests on, so the judgement can be checked.</p>
+        </div>
+      </details>
+      <p class="src"><b>Source:</b> synthesis of Exhibits 1–8; no additional data.</p>
+    </section>
+
+    <!-- EXHIBIT 7 · CAUSAL -->
+    <section class="exhibit" id="ex7">
+      <div class="no">Exhibit 7 <span class="atype">Causal</span></div><h3 class="ti">What is driving the ₹117.7 Cr overdue?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Snapshot — as at 3 June 2026</b></div>
+      <p class="body">A <b>branch-discipline problem, not a company-wide one — and not where the money is</b>. <b>Bangalore is the largest driver</b> at <b><span class="val" tabindex="0" data-exact="₹16,76,34,952">₹16.8 crore</span>, 51% of its book late</b> — though Mumbai carries a larger receivable and is disciplined (25% overdue). The problem clusters in Bangalore, Gandhidham, Visakhapatnam and Vadodara (51–60% overdue).</p>
+      <table class="fin num"><caption>Overdue attributed by branch — largest six</caption>
+        <thead><tr><th>Branch</th><th class="r">Overdue</th><th class="r">Total owed</th><th class="r">% of book overdue</th></tr></thead>
+        <tbody>
+          <tr><td class="name">BANGALORE</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹16,76,34,952">₹16.76 Cr</span></td><td class="r"><span class="val" tabindex="0" data-exact="₹32,63,13,389">₹32.63 Cr</span></td><td class="r share">51%</td></tr>
+          <tr><td class="name">MUMBAI <small>largest book — but disciplined</small></td><td class="r fig"><span class="val" tabindex="0" data-exact="₹9,95,46,215">₹9.95 Cr</span></td><td class="r"><span class="val" tabindex="0" data-exact="₹39,70,84,402">₹39.71 Cr</span></td><td class="r share">25%</td></tr>
+          <tr><td class="name">GANDHIDHAM</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹9,48,99,064">₹9.49 Cr</span></td><td class="r"><span class="val" tabindex="0" data-exact="₹16,02,72,716">₹16.03 Cr</span></td><td class="r share">59%</td></tr>
+          <tr><td class="name">VISAKHAPATNAM</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹8,39,98,386">₹8.40 Cr</span></td><td class="r"><span class="val" tabindex="0" data-exact="₹14,88,63,878">₹14.89 Cr</span></td><td class="r share">56%</td></tr>
+          <tr><td class="name">HYDERABAD</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹5,79,97,499">₹5.80 Cr</span></td><td class="r"><span class="val" tabindex="0" data-exact="₹11,85,75,792">₹11.86 Cr</span></td><td class="r share">49%</td></tr>
+          <tr><td class="name">VADODARA</td><td class="r fig"><span class="val" tabindex="0" data-exact="₹4,87,50,540">₹4.88 Cr</span></td><td class="r"><span class="val" tabindex="0" data-exact="₹8,19,44,904">₹8.19 Cr</span></td><td class="r share">60%</td></tr>
+        </tbody>
+      </table>
+      <details class="basis"><summary>Basis of preparation, derivation &amp; underlying data<span class="h">— how the driver was isolated</span></summary>
+        <div class="drill">
+          <h5>Time filter</h5><p class="basisnote">Snapshot as at 3 June 2026; overdue = past credit terms at that date.</p>
+          <h5>Derivation</h5><ol class="steps"><li>Per branch, sum overdue (<code>AgeingDays&gt;0</code>) and total balance.</li><li>Compute overdue ÷ total; rank by overdue amount.</li></ol>
+          <details class="dev"><summary>Show the query · developer</summary><pre class="sql">SELECT TOP 6 Location,
+       SUM(CASE WHEN AgeingDays &gt; 0 THEN BALANCE ELSE 0 END) AS overdue,
+       SUM(BALANCE) AS total
+FROM   dbo.rpt_db_outstanding_debtor
+GROUP  BY Location ORDER BY overdue DESC;</pre></details>
+          <h5>Notes &amp; judgements</h5>
+          <p class="basisnote"><span class="k">Caveat on "cause"</span> This isolates <em>where</em> the overdue sits, not <em>why</em> those branches are late — attribution, not root cause, the honest limit of a snapshot. Next step: join customer terms and dispute flags.</p>
+        </div>
+      </details>
+      <p class="src"><b>Source:</b> as Exhibit 1; overdue by branch.</p>
+    </section>
+
+    <!-- EXHIBIT 8 · COUNTERFACTUAL -->
+    <section class="exhibit" id="ex8">
+      <div class="no">Exhibit 8 <span class="atype">Counterfactual</span></div><h3 class="ti">What happens next — and what if we act?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Snapshot as at 3 June 2026, projected forward</b> <span class="snap">· if collections are unchanged</span></div>
+      <p class="body">Left alone, the overdue <b>grows</b> as within-terms bills mature; but clearing the eight worst names removes almost exactly the coming slippage.</p>
+      <div class="scen num">
+        <div class="scenrow"><div class="lab"><b>Overdue today</b></div><div class="delta">&nbsp;</div><div class="res"><span class="val" tabindex="0" data-exact="₹1,17,74,07,232">₹117.7 Cr</span></div></div>
+        <div class="scenrow"><div class="lab">If uncollected — bills maturing in <b>15 days</b> tip overdue</div><div class="delta up">▲ +<span class="val" tabindex="0" data-exact="₹28,08,88,291">₹28.1 Cr</span></div><div class="res">→ <span class="val" tabindex="0" data-exact="₹1,45,82,95,523">₹145.8 Cr</span></div></div>
+        <div class="scenrow"><div class="lab">If uncollected — maturing in <b>30 days</b></div><div class="delta up">▲ +<span class="val" tabindex="0" data-exact="₹47,01,23,660">₹47.0 Cr</span></div><div class="res">→ <span class="val" tabindex="0" data-exact="₹1,64,75,30,892">₹164.7 Cr</span></div></div>
+        <div class="scenrow"><div class="lab">If we <b>collect the 8 largest overdue names</b> (Exhibit 4)</div><div class="delta down">▼ −<span class="val" tabindex="0" data-exact="₹31,49,27,979">₹31.5 Cr</span></div><div class="res">→ <span class="val" tabindex="0" data-exact="₹86,24,79,253">₹86.2 Cr</span></div></div>
+      </div>
+      <p class="body"><b>Read:</b> the ₹28.1 Cr tipping overdue in 15 days is almost fully offset by the ₹31.5 Cr recoverable from the eight priority names — the same fortnight of focused effort keeps overdue roughly flat instead of drifting to ₹146 Cr.</p>
+      <details class="basis"><summary>Basis of preparation, derivation &amp; underlying data<span class="h">— how the what-ifs are computed</span></summary>
+        <div class="drill">
+          <h5>Time filter</h5><p class="basisnote">Base snapshot 3 June 2026, projected forward assuming <b>no</b> receipts and <b>no</b> new billing — a mechanical "if nothing changes" projection, not a forecast.</p>
+          <h5>Derivation</h5><ol class="steps"><li>Maturing balances: sum within-terms bills within 15 / 30 days of turning positive (<code>AgeingDays BETWEEN −15 AND 0</code>).</li><li>Add for "do nothing"; subtract the eight names' overdue (Exhibit 4) for "collect".</li></ol>
+          <details class="dev"><summary>Show the query · developer</summary><pre class="sql">SELECT SUM(CASE WHEN AgeingDays BETWEEN -15 AND 0 THEN BALANCE ELSE 0 END) AS tips_15d,
+       SUM(CASE WHEN AgeingDays BETWEEN -30 AND 0 THEN BALANCE ELSE 0 END) AS tips_30d
+FROM   dbo.rpt_db_outstanding_debtor;   -- add to ₹117.7 Cr overdue</pre></details>
+          <h5>Notes &amp; judgements</h5>
+          <p class="basisnote"><span class="k">Assumption</span> Collections and new billing are frozen to isolate the ageing effect. Both continue in reality — so these are bounds that frame the decision, not predictions.</p>
+        </div>
+      </details>
+      <p class="src"><b>Source:</b> as Exhibit 1; maturing balances by ageing band.</p>
+    </section>
+
+    <!-- EXHIBIT 9 · DRILLDOWN -->
+    <section class="exhibit" id="ex9">
+      <div class="no">Exhibit 9 <span class="atype">Drilldown</span></div><h3 class="ti">From the ₹256 Cr total down to a single bill</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Snapshot — as at 3 June 2026</b></div>
+      <p class="body">Any figure decomposes downward to its evidence. Open a level — total → branch → customer → bills.</p>
+      <div class="drilltree num">
+        <details open>
+          <summary><span class="nm"><span class="lv">Total</span>All trade receivables</span><span class="amt"><span class="val" tabindex="0" data-exact="₹2,56,33,44,678">₹256.3 Cr</span></span><span class="meta">1,103 customers · 44,610 bills</span></summary>
+          <div class="indent">
+            <details>
+              <summary><span class="nm"><span class="lv">Branch</span>MUMBAI</span><span class="amt"><span class="val" tabindex="0" data-exact="₹39,70,84,402">₹39.71 Cr</span></span><span class="meta">15.5% · 114 customers</span></summary>
+              <div class="indent">
+                <details>
+                  <summary><span class="nm"><span class="lv">Customer</span>BIRLA OPUS PAINTS</span><span class="amt"><span class="val" tabindex="0" data-exact="₹7,33,68,965">₹7.34 Cr</span></span><span class="meta">1,334 open bills</span></summary>
+                  <div class="indent">
+                    <div class="leaf"><span style="color:var(--navy);font-weight:700">View all 1,334 bills — date, amount, ageing →</span><span></span><span></span></div>
+                  </div>
+                </details>
+                <div class="leaf"><span>TSLPL CHA · Tata Steel</span><span class="amt"><span class="val" tabindex="0" data-exact="₹5,71,26,713">₹5.71 Cr</span></span><span class="meta">578 bills</span></div>
+                <div class="leaf"><span>TSLPL SCM · Tata Steel</span><span class="amt"><span class="val" tabindex="0" data-exact="₹5,16,09,051">₹5.16 Cr</span></span><span class="meta">240 bills</span></div>
+                <div class="leaf"><span style="color:var(--muted)">+ 111 more customers in Mumbai</span><span></span><span></span></div>
+              </div>
+            </details>
+            <div class="leaf"><span>BANGALORE</span><span class="amt"><span class="val" tabindex="0" data-exact="₹32,63,13,389">₹32.63 Cr</span></span><span class="meta">12.7% · 78 customers</span></div>
+            <div class="leaf"><span style="color:var(--muted)">+ 6 more branches (Exhibit 3)</span><span></span><span></span></div>
+          </div>
+        </details>
+      </div>
+      <details class="basis"><summary>Basis of preparation<span class="h">— how the drill reconciles</span></summary>
+        <div class="drill">
+          <h5>Derivation</h5><p class="basisnote">Each level is the same <code>SUM(BALANCE)</code> with one more <code>GROUP BY</code> (branch → customer → bills). Every level sums back to its parent — the ₹256.3 Cr total is never re-estimated, only partitioned.</p>
+          <p class="basisnote"><span class="k">Note</span> The deepest level (individual bills) is a stub; wired live it lists each open bill with date, amount and ageing.</p>
+        </div>
+      </details>
+      <p class="src"><b>Source:</b> as Exhibit 1, progressively grouped.</p>
+    </section>
+
+    <!-- EXHIBIT 10 -->
+    <section class="exhibit" id="ex10">
+      <div class="no">Exhibit 10</div><h3 class="ti">If our biggest customer defaulted, what is the hit?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Snapshot — as at 3 June 2026</b></div>
+      <div class="calcx"><span class="lbl">Calculus</span>scenario(loss, <span class="cm">assume:</span> default(top-1)) = outstanding <span class="cm">where:</span> customer = largest</div>
+      <div class="figs num">
+        <div class="f"><div class="k">Largest single exposure</div><div class="v neg"><span class="val" tabindex="0" data-exact="₹14,74,06,213">₹14.74 Cr</span></div><div class="s">VESUVIUS India · 157 bills</div></div>
+        <div class="f"><div class="k">As % of the book</div><div class="v">5.75%</div><div class="s">of ₹256.3 Cr</div></div>
+        <div class="f"><div class="k">Already overdue there</div><div class="v neg"><span class="val" tabindex="0" data-exact="₹7,46,71,640">₹7.47 Cr</span></div><div class="s">half the exposure</div></div>
+        <div class="f"><div class="k">Two largest together</div><div class="v"><span class="val" tabindex="0" data-exact="₹27,06,36,109">₹27.1 Cr</span></div><div class="s">10.6% of the book</div></div>
+      </div>
+      <p class="body">The single largest exposure is <b>VESUVIUS India — <span class="val" tabindex="0" data-exact="₹14,74,06,213">₹14.74 crore</span>, 5.75% of the book</b> — of which <b><span class="val" tabindex="0" data-exact="₹7,46,71,640">₹7.47 crore</span> is already overdue</b>. A default there is a ₹14.74 Cr hit, half of it past terms today. The two largest names together carry <b><span class="val" tabindex="0" data-exact="₹27,06,36,109">₹27.1 crore</span> (10.6%)</b>; the ten largest, <span class="val" tabindex="0" data-exact="₹71,83,53,235">₹71.8 crore</span> (28%). No single failure sinks the book — but the top-two concentration is the exposure to watch.</p>
+      <details class="basis"><summary>Basis of preparation, derivation &amp; underlying data<span class="h">— how this figure was reached</span></summary>
+        <div class="drill">
+          <h5>Time filter</h5><p class="basisnote">Same live snapshot as Exhibit 1 — open balances as at 3 June 2026.</p>
+          <h5>Derivation</h5><ol class="steps"><li>Group the open book by customer, sum <code>BALANCE</code>.</li><li>The largest customer balance is the single-name loss ceiling.</li><li>Split that customer's bills by <code>AgeingDays</code> for the already-overdue share.</li></ol>
+          <details class="dev"><summary>Show the query · developer</summary><pre class="sql">SELECT TOP 1 SubLedger,
+       SUM(BALANCE)                              AS exposure,
+       SUM(CASE WHEN AgeingDays &gt; 0 THEN BALANCE ELSE 0 END) AS overdue
+FROM   dbo.rpt_db_outstanding_debtor
+GROUP  BY SubLedger
+ORDER  BY exposure DESC;</pre></details>
+          <h5>Notes &amp; judgements</h5>
+          <p class="basisnote"><span class="k">Coverage</span> Customer identity resolves through <code>SubLedger</code> (~76% matched to a party) — the same caveat as Exhibit 2. Names above the match line are reliable.</p>
+          <p class="basisnote"><span class="k">Scope</span> This is gross exposure, not expected loss — it assumes zero recovery and no security/insurance (see <a class="cite" href="#f-claims">Claims &amp; insurance <span class="mock">· not yet</span></a>).</p>
+        </div>
+      </details>
+      <p class="src"><b>Source:</b> AR outstanding ledger, live snapshot 3 June 2026.</p>
+    </section>
+
+    <!-- EXHIBIT 11 -->
+    <section class="exhibit" id="ex11">
+      <div class="no">Exhibit 11</div><h3 class="ti">Which branches make money?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>FY 2024-25 — last full financial year</b></div>
+      <div class="calcx"><span class="lbl">Calculus</span>profit <span class="cm">by:</span> branch <span class="cm">// (revenue − cost), from the LR-profitability report</span></div>
+      <div class="figs num">
+        <div class="f"><div class="k">Group revenue</div><div class="v"><span class="val" tabindex="0" data-exact="₹24,31,28,00,000">₹2,431 Cr</span></div><div class="s">172 booking branches</div></div>
+        <div class="f"><div class="k">Gross profit</div><div class="v"><span class="val" tabindex="0" data-exact="₹2,01,02,00,000">₹201 Cr</span></div><div class="s">after direct cost</div></div>
+        <div class="f"><div class="k">Blended margin</div><div class="v">8.3%</div><div class="s">thin-margin freight</div></div>
+        <div class="f"><div class="k">Loss-making branches</div><div class="v">1</div><div class="s">Dibrugarh only</div></div>
+      </div>
+      <p class="body">The group turns <b><span class="val" tabindex="0" data-exact="₹24,31,28,00,000">₹2,431 crore</span> of freight into <span class="val" tabindex="0" data-exact="₹2,01,02,00,000">₹201 crore</span> gross profit — an 8.3% margin</b>, the thin economics of road freight. <b>Bangalore is the profit engine (<span class="val" tabindex="0" data-exact="₹11,19,00,000">₹11.2 Cr</span>) but on a below-average 8% margin</b>; the fat margins sit in smaller southern branches (Kochi, Surat 15%). Only one branch loses money.
+        <span class="navy">The same Bangalore drives the overdue (Exhibit&nbsp;7)</span> — our biggest engine earns thin <i>and</i> collects slowest.</p>
+      <table class="fin num"><caption>Branch gross profit, FY 2024-25 (₹ crore)</caption>
+        <thead><tr><th></th><th>Branch</th><th class="r">Revenue</th><th class="r">Gross profit</th><th class="r">Margin</th></tr></thead>
+        <tbody>
+          <tr><td class="rk">1</td><td class="name">BANGALORE</td><td class="r fig">₹154.0</td><td class="r fig">₹11.2</td><td class="r share">8%</td></tr>
+          <tr><td class="rk">2</td><td class="name">MUMBAI</td><td class="r fig">₹74.0</td><td class="r fig">₹6.2</td><td class="r share">9%</td></tr>
+          <tr><td class="rk">3</td><td class="name">GANDHIDHAM</td><td class="r fig">₹66.7</td><td class="r fig">₹5.9</td><td class="r share">10%</td></tr>
+          <tr><td class="rk">4</td><td class="name">VISAKHAPATNAM</td><td class="r fig">₹46.1</td><td class="r fig">₹4.6</td><td class="r share">11%</td></tr>
+          <tr><td class="rk">5</td><td class="name">KOCHI</td><td class="r fig">₹23.3</td><td class="r fig">₹3.1</td><td class="r share">15%</td></tr>
+          <tr><td class="rk">6</td><td class="name">SURAT</td><td class="r fig">₹21.1</td><td class="r fig">₹2.7</td><td class="r share">15%</td></tr>
+        </tbody>
+      </table>
+      <details class="basis"><summary>Basis of preparation, derivation &amp; underlying data<span class="h">— how this figure was reached</span></summary>
+        <div class="drill">
+          <h5>Derivation</h5><ol class="steps"><li>Read the maintained LR-profitability report at branch grain.</li><li>Filter to the last full year (FY25); dedup (rows are stored in duplicate) by taking the branch max.</li><li>Rank by gross profit; margin = profit ÷ revenue.</li></ol>
+          <details class="dev"><summary>Show the query · developer</summary><pre class="sql">SELECT BookingBranch,
+       MAX(TotalBookingAmount) AS revenue,   -- ₹ lakh
+       MAX(GrossProfit)        AS gross_profit,
+       MAX(GrossProfitPerc)    AS margin_pct
+FROM   rpt_db_lrprofitability_branch_wise
+WHERE  YearCode = 25
+GROUP  BY BookingBranch
+ORDER  BY gross_profit DESC;</pre></details>
+          <p class="basisnote"><span class="k">Units</span> Report stores amounts in ₹ lakh. FY25 sums reconcile to a sane 8.3% blended margin — the trustworthy profitability anchor.</p>
+        </div>
+      </details>
+      <p class="src"><b>Source:</b> <code>rpt_db_lrprofitability_branch_wise</code>, maintained LR-profitability report.</p>
+    </section>
+
+    <!-- EXHIBIT 12 -->
+    <section class="exhibit" id="ex12">
+      <div class="no">Exhibit 12</div><h3 class="ti">Which lanes make money?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Across booked consignments (GCN level)</b></div>
+      <div class="calcx"><span class="lbl">Calculus</span>profit <span class="cm">by:</span> lane(from → to) <span class="cm">top: 8</span></div>
+      <p class="body">Every consignment carries an origin and destination, so profit resolves to the <b>actual lane</b>. The
+        highest-contribution lanes mix two kinds: <b>a few very rich short hauls</b> (Hoshiarpur→Gulab Pura,
+        Taloja→Kolkata) and <b>high-volume trunk routes</b> (Gotitoria→Niwari at 9,008 trips, Yelahanka→Kolkata at
+        ₹25.2 Cr income). This is where lane-level pricing and vehicle allocation decisions get made.</p>
+      <table class="fin num"><caption>Top lanes by profit contribution</caption>
+        <thead><tr><th>Lane</th><th class="r">Trips</th><th class="r">Income</th><th class="r">Profit contrib.</th></tr></thead>
+        <tbody>
+          <tr><td class="name">HOSHIARPUR → GULAB PURA</td><td class="r">297</td><td class="r fig">₹5.9 Cr</td><td class="r fig">₹5.2 Cr</td></tr>
+          <tr><td class="name">GOTITORIA → NIWARI</td><td class="r">9,008</td><td class="r fig">₹7.0 Cr</td><td class="r fig">₹4.1 Cr</td></tr>
+          <tr><td class="name">HAZIRA → CHENNAI</td><td class="r">984</td><td class="r fig">₹15.1 Cr</td><td class="r fig">₹3.7 Cr</td></tr>
+          <tr><td class="name">TALOJA → KOLKATA</td><td class="r">305</td><td class="r fig">₹4.4 Cr</td><td class="r fig">₹3.3 Cr</td></tr>
+          <tr><td class="name">YELAHANKA → KOLKATA</td><td class="r">1,997</td><td class="r fig">₹25.2 Cr</td><td class="r fig">₹1.3 Cr</td></tr>
+        </tbody>
+      </table>
+      <details class="basis"><summary>Basis of preparation &amp; a caveat on lane margin<span class="h">— read before quoting a lane %</span></summary>
+        <div class="drill">
+          <details class="dev"><summary>Show the query · developer</summary><pre class="sql">SELECT [From], [To], COUNT(*) AS trips,
+       SUM([Total Income]) AS income, SUM([Profit]) AS profit
+FROM   salesprofitability_report
+WHERE  [From] &lt;&gt; ''
+GROUP  BY [From], [To]
+ORDER  BY profit DESC;</pre></details>
+          <p class="basisnote"><span class="k">Caveat</span> The report's <code>Profit</code> column nets only part of the cost stack, so lane <i>margins</i> read high. Trips and income are reliable; treat profit as a <b>contribution ranking</b>, and anchor true margin to the branch view (8.3%, Exhibit&nbsp;11) until the full cost basis is reconciled.</p>
+        </div>
+      </details>
+      <p class="src"><b>Source:</b> <code>salesprofitability_report</code> (761k consignments), origin/destination names.</p>
+    </section>
+
+    <!-- EXHIBIT 13 -->
+    <section class="exhibit" id="ex13">
+      <div class="no">Exhibit 13</div><h3 class="ti">Which customers are most profitable — not just which owe the most?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>FY 2025-26 to date</b></div>
+      <div class="calcx"><span class="lbl">Calculus</span>grossprofit <span class="cm">by:</span> customer <span class="cm">top: n</span></div>
+      <p class="body">The debtor list (Exhibit&nbsp;2) shows who <i>owes</i>; this shows who <i>earns</i>. <b>QWIK is both a
+        top debtor and a top earner</b> — ₹5.99 Cr profit on ₹9.44 Cr of freight — so its slow payment is worth
+        chasing, not dropping. By contrast <b>APL Apollo is high-volume but thin</b> (₹0.49 Cr profit on ₹4.82 Cr,
+        after ₹4.52 Cr of hire cost) — a customer to re-price, not grow.</p>
+      <table class="fin num"><caption>Customer profitability, FY 2025-26 to date</caption>
+        <thead><tr><th>Customer</th><th class="r">Bookings</th><th class="r">Freight</th><th class="r">Gross profit</th></tr></thead>
+        <tbody>
+          <tr><td class="name">QWIK SUPPLY CHAIN (POM)</td><td class="r">311</td><td class="r fig">₹9.4 Cr</td><td class="r fig">₹6.0 Cr</td></tr>
+          <tr><td class="name">HTL METAL PVT LTD</td><td class="r">56</td><td class="r fig">₹9.3 Cr</td><td class="r fig">₹6.3 Cr</td></tr>
+          <tr><td class="name">APL APOLLO TUBES (HOSUR)</td><td class="r">1,020</td><td class="r fig">₹4.8 Cr</td><td class="r fig">₹0.5 Cr</td></tr>
+        </tbody>
+      </table>
+      <details class="basis"><summary>Basis &amp; caveat<span class="h">— what "gross profit" means here</span></summary>
+        <div class="drill">
+          <details class="dev"><summary>Show the query · developer</summary><pre class="sql">SELECT BillingClient, TotalBooking, TotalFreight, grossprofit, HCCost
+FROM   rpt_db_top_ten_customer
+WHERE  YearCode = 26
+ORDER  BY grossprofit DESC;</pre></details>
+          <p class="basisnote"><span class="k">Caveat</span> <code>grossprofit</code> here nets only hire/carting cost (<code>HCCost</code>), so it overstates true margin. Reliable for <b>ranking</b> customers; anchor absolute margin to the branch view.</p>
+        </div>
+      </details>
+      <p class="src"><b>Source:</b> <code>rpt_db_top_ten_customer</code>.</p>
+    </section>
+
+    <!-- EXHIBIT 14 -->
+    <section class="exhibit" id="ex14">
+      <div class="no">Exhibit 14</div><h3 class="ti">How much revenue is delivered but not yet billed?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>FY 2025-26 to date</b></div>
+      <div class="calcx"><span class="lbl">Calculus</span>unbilled <span class="cm">by:</span> branch <span class="cm">// delivered, invoice not raised</span></div>
+      <div class="figs num">
+        <div class="f"><div class="k">Unbilled revenue</div><div class="v neg"><span class="val" tabindex="0" data-exact="₹1,19,60,94,444">₹119.6 Cr</span></div><div class="s">delivered, not invoiced</div></div>
+        <div class="f"><div class="k">Branches</div><div class="v">20</div><div class="s">carrying unbilled work</div></div>
+        <div class="f"><div class="k">Vs. receivables</div><div class="v">47%</div><div class="s">of the ₹256 Cr open book</div></div>
+      </div>
+      <p class="body">Beyond the ₹256 Cr customers already owe, another <b><span class="val" tabindex="0" data-exact="₹1,19,60,94,444">₹119.6 crore</span> of work has been delivered but not yet invoiced</b>. It is cash the business has earned and is entitled to, sitting one billing step short of the receivables clock even starting. Closing the billing lag is the fastest, lowest-risk cash release available — no collection needed, just invoicing.</p>
+      <details class="basis"><summary>Basis of preparation<span class="h">— how this figure was reached</span></summary>
+        <div class="drill">
+          <details class="dev"><summary>Show the query · developer</summary><pre class="sql">SELECT SUM(UnbilledAmount) AS unbilled, COUNT(*) AS branches
+FROM   rpt_db_unbilled_Branch
+WHERE  YearCode = 26;</pre></details>
+          <p class="basisnote"><span class="k">Note</span> Same figure is available by customer (<code>rpt_db_customerwise_unbilled</code>, split delivered / not-delivered) to target the billing chase.</p>
+        </div>
+      </details>
+      <p class="src"><b>Source:</b> <code>rpt_db_unbilled_Branch</code>.</p>
+    </section>
+
+    <!-- EXHIBIT 15 -->
+    <section class="exhibit" id="ex15">
+      <div class="no">Exhibit 15</div><h3 class="ti">What do tyres cost us per kilometre?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Across recorded tyre movements</b></div>
+      <div class="calcx"><span class="lbl">Calculus</span>tyre_cost ÷ km <span class="cm">by:</span> vehicle</div>
+      <div class="figs num">
+        <div class="f"><div class="k">Standard tyre cost</div><div class="v">₹10.01<span style="font-size:13px">/km</span></div><div class="s">per running km</div></div>
+        <div class="f"><div class="k">Distance covered</div><div class="v">53.9M<span style="font-size:13px"> km</span></div><div class="s">across the fleet</div></div>
+        <div class="f"><div class="k">Movements tracked</div><div class="v">2,348</div><div class="s">mount / removal records</div></div>
+      </div>
+      <p class="body">Tyres are tracked at the wheel: serial, axle, odometer at mount, km run and a standard cost per km.
+        The fleet runs at about <b>₹10 per km of tyre cost</b> over <b>53.9 million km</b> of recorded running. This is
+        the first real <b>unit-cost</b> we can compute — the same wheel-level records extend to cost per vehicle and
+        abnormal-wear outliers.</p>
+      <details class="basis"><summary>Basis of preparation<span class="h">— how this figure was reached</span></summary>
+        <div class="drill">
+          <details class="dev"><summary>Show the query · developer</summary><pre class="sql">SELECT COUNT(*) AS movements, SUM(TotalKmRun) AS km,
+       AVG(NULLIF(StdCostPerKm,0)) AS avg_cost_per_km
+FROM   fleet_trn_tyremovement;</pre></details>
+          <p class="basisnote"><span class="k">Note</span> <code>StdCostPerKm</code> is the standard rate; actual cost per vehicle (<code>TyreCostVehicle</code>) carries some sign/return noise to clean before quoting totals.</p>
+        </div>
+      </details>
+      <p class="src"><b>Source:</b> <code>fleet_trn_tyremovement</code>.</p>
+    </section>
+
+    <!-- EXHIBIT 16 -->
+    <section class="exhibit" id="ex16">
+      <div class="no">Exhibit 16 <span class="pend" style="color:var(--navy);border-color:var(--navy)">Decode</span></div><h3 class="ti">What are we spending on fuel?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Across recorded fuel slips</b></div>
+      <div class="calcx"><span class="lbl">Calculus</span>fuel ÷ km <span class="cm">by:</span> vehicle</div>
+      <div class="pending dec">
+        <div class="pstat">Data present — one decode pass away</div>
+        <p><span class="k">Have</span> <b>98,885 fuel slips</b> with quantity, rate, amount, fuel type and vendor — roughly <span class="val" tabindex="0" data-exact="₹1,31,74,66,396">₹131.7 Cr</span> of fuel spend on record.</p>
+        <p><span class="k">Decode</span> the <code>Rate</code> / <code>Quantity</code> units are inconsistent (implied ₹/litre is nonsensical), so litres and ₹/km need reconciling before a per-km figure is trustworthy.</p>
+        <p><span class="k">Then answers</span> fuel as a share of running cost, ₹/km by vehicle, and abnormal consumers — the highest-value leak in road freight.</p>
+      </div>
+      <p class="src"><b>Source:</b> <code>trp_trn_fuelslipconsumption</code> (+ fasttag/toll tables).</p>
+    </section>
+
+    <!-- EXHIBIT 17 -->
+    <section class="exhibit" id="ex17">
+      <div class="no">Exhibit 17 <span class="pend" style="color:var(--navy);border-color:var(--navy)">Decode</span></div><h3 class="ti">How much of the fleet is ours versus hired?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Current fleet register</b></div>
+      <div class="calcx"><span class="lbl">Calculus</span>count(vehicle) <span class="cm">by:</span> ownership · utilisation <span class="cm">by:</span> vehicle</div>
+      <div class="pending dec">
+        <div class="pstat">Data present — one decode pass away</div>
+        <p><span class="k">Have</span> a vehicle register of <b>236,028 rows</b> and <b>678,711 trip records</b> (≈249 own drivers).</p>
+        <p><span class="k">Decode</span> the register is the <b>universe of trucks ever used</b> — overwhelmingly market/hired owner-operators. Isolating the <b>owned</b> fleet needs a status / purchase-type filter; own-vs-market is the split that matters for utilisation and the own-vs-subcontract decision.</p>
+        <p><span class="k">Then answers</span> own vs hired share, utilisation (earning vs idle days), and the add-a-truck economics.</p>
+      </div>
+      <p class="src"><b>Source:</b> <code>trp_mst_vehicle</code>, <code>trp_trn_vehicletripinfo</code>.</p>
+    </section>
+
+    <!-- EXHIBIT 18 -->
+    <section class="exhibit" id="ex18">
+      <div class="no">Exhibit 18</div><h3 class="ti">Whose driving licence is about to expire?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Next 90 days</b></div>
+      <div class="calcx"><span class="lbl">Calculus</span>count(driver) <span class="cm">where:</span> licence_expiry &lt; today + 90d</div>
+      <div class="figs num">
+        <div class="f"><div class="k">Licences expiring</div><div class="v neg">85</div><div class="s">within 90 days</div></div>
+        <div class="f"><div class="k">Of total drivers</div><div class="v">270</div><div class="s">on the roster</div></div>
+        <div class="f"><div class="k">Share at risk</div><div class="v">31%</div><div class="s">need renewal now</div></div>
+      </div>
+      <p class="body"><b>85 of 270 drivers — nearly a third — have a licence expiring in the next 90 days.</b> An expired licence
+        is an un-dispatchable driver and a compliance exposure on every load they carry. This is a clean, actionable
+        list today: renewal reminders, not a data project.</p>
+      <details class="basis"><summary>Basis of preparation<span class="h">— how this figure was reached</span></summary>
+        <div class="drill">
+          <details class="dev"><summary>Show the query · developer</summary><pre class="sql">SELECT COUNT(*) AS total_drivers,
+       SUM(CASE WHEN LicenseExpDate &lt; DATEADD(day,90,GETDATE())
+                THEN 1 ELSE 0 END) AS expiring_90d
+FROM   trp_mst_driver;</pre></details>
+          <p class="basisnote"><span class="k">Note</span> Vehicle insurance and road-tax renewals sit in the same shape (<code>fleet_trn_vehicleinsurance</code>, <code>fleet_trn_renewaltax</code>) — one compliance calendar.</p>
+        </div>
+      </details>
+      <p class="src"><b>Source:</b> <code>trp_mst_driver</code>.</p>
+    </section>
+
+    <!-- EXHIBIT 19 -->
+    <section class="exhibit" id="ex19">
+      <div class="no">Exhibit 19</div><h3 class="ti">What are we losing to damages and claims?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Across recorded damage events</b></div>
+      <div class="calcx"><span class="lbl">Calculus</span>sum(damage_value) <span class="cm">by:</span> responsibility · customer · lane</div>
+      <div class="figs num">
+        <div class="f"><div class="k">Damage value</div><div class="v neg"><span class="val" tabindex="0" data-exact="₹7,77,06,996">₹7.77 Cr</span></div><div class="s">logged losses</div></div>
+        <div class="f"><div class="k">Events</div><div class="v">4,724</div><div class="s">damage / shortage records</div></div>
+        <div class="f"><div class="k">Weight affected</div><div class="v">834 t</div><div class="s">goods damaged / short</div></div>
+      </div>
+      <p class="body">Damage is recorded per consignment with value, weight, cause and <b>who was responsible</b> — leakage
+        (batteries), shortage, breakage. <b><span class="val" tabindex="0" data-exact="₹7,77,06,996">₹7.77 crore</span> across 4,724 events</b> is the reliability cost the freight P&amp;L
+        quietly carries. This is exactly the service-quality signal I had earlier flagged as missing — it exists, and
+        slices by responsibility, customer and lane.</p>
+      <details class="basis"><summary>Basis of preparation<span class="h">— how this figure was reached</span></summary>
+        <div class="drill">
+          <details class="dev"><summary>Show the query · developer</summary><pre class="sql">SELECT COUNT(*) AS events, SUM(DamageValue) AS value,
+       SUM(DamageWeight) AS weight_kg
+FROM   trp_trn_bookingdamage;</pre></details>
+          <p class="basisnote"><span class="k">Note</span> <code>ResponsibilityId</code> attributes each event (driver / handler / consignor), turning this into an accountability and recovery view.</p>
+        </div>
+      </details>
+      <p class="src"><b>Source:</b> <code>trp_trn_bookingdamage</code>.</p>
+    </section>
+
+    <!-- EXHIBIT 20 -->
+    <section class="exhibit" id="ex20">
+      <div class="no">Exhibit 20 <span class="pend" style="color:var(--navy);border-color:var(--navy)">Decode</span></div><h3 class="ti">What is our cash position and collection run-rate?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Daily, to 2 June 2026</b></div>
+      <div class="calcx"><span class="lbl">Calculus</span>cash <span class="cm">at:</span> as-of · collected <span class="cm">at:</span> during</div>
+      <div class="pending dec">
+        <div class="pstat">Data present — one decode pass away</div>
+        <p><span class="k">Have</span> a <b>daily branch cash book</b> (opening / receipt / payment / cash-in-hand, to 2&nbsp;Jun&nbsp;2026) and a <b>monthly payments-received</b> feed with TDS and short-close. Plus a recovery signal already in hand: <b><span class="val" tabindex="0" data-exact="₹2,85,37,45,354">₹285.4 Cr</span> has been recovered on bills still open</b> (billed ₹541.7 Cr − open ₹256.3 Cr).</p>
+        <p><span class="k">Decode</span> branch <code>cashinhand</code> is mostly zero (branches run near-cashless — the signal is in receipt/payment flows), and the payments-received columns (<code>SubTotal</code> vs <code>TDSAmount</code>) look mislabelled and need pinning down.</p>
+        <p><span class="k">Then answers</span> live cash position, collection run-rate, and the 30-day cash forecast (Exhibit&nbsp;11-style what-if).</p>
+      </div>
+      <p class="src"><b>Source:</b> <code>rpt_db_branchwise_cash_book</code>, <code>rpt_db_monthwisepaymentreceived_mr</code>.</p>
+    </section>
+
+    <!-- EXHIBIT 21 -->
+    <section class="exhibit" id="ex21">
+      <div class="no">Exhibit 21 <span class="pend" style="color:var(--navy);border-color:var(--navy)">Decode</span></div><h3 class="ti">How much do we owe our vendors?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Current creditor snapshot</b></div>
+      <div class="calcx"><span class="lbl">Calculus</span>payable <span class="cm">by:</span> vendor · ageing</div>
+      <div class="pending dec">
+        <div class="pstat">Data present — one decode pass away</div>
+        <p><span class="k">Have</span> a creditor-outstanding report mirroring the debtor one — <b>85,433 bills across 22,814 vendors</b>, gross billed <span class="val" tabindex="0" data-exact="₹4,08,22,46,011">₹408.2 Cr</span> — plus <b>1.43M vendor-payment</b> records.</p>
+        <p><span class="k">Decode</span> the clean <i>outstanding</i> column isn't populated the way the debtor report's <code>BALANCE</code> is (it sums to ~zero), so the right balance field needs identifying before quoting an AP total.</p>
+        <p><span class="k">Then answers</span> total payables, ageing, top vendors owed — and, paired with receivables, the true working-capital gap and the 30-day cash forecast.</p>
+      </div>
+      <p class="src"><b>Source:</b> <code>rpt_db_outstanding_creditor</code>, <code>trp_trn_vendorpayment</code>.</p>
+    </section>
+
+
+    <!-- ══════════ PART III · CALCULUS ══════════ -->
+    <section class="part" id="calc">
+      <div class="lead">Part III</div>
+      <h2>Calculus — the pure form of a question</h2>
+      <hr class="prule">
+      <p class="intro" id="calc-idea">The calculus writes a question in the model's own vocabulary: <b>nouns</b> from
+        the semantic model, a small fixed set of <b>operators</b>, and the <b>parameters</b> they take. It states
+        <i>what</i> is asked — and, by its types, whether the model can answer it correctly. It carries no
+        implementation: no tables, no columns, no SQL, no join keys. Those live in the TS program the calculus
+        compiles to, kept separate. <b>Pure means free of implementation, not free of parameters</b> — a cutoff, a
+        credit-term, a horizon belong to the calculus exactly as they belong to the semantic model. As the questions
+        and the model grow, this grows with them.</p>
+
+      <div class="subhead" id="calc-nouns">Nouns — drawn from the semantic model <span>typed; each carries grain, additivity, stock vs flow</span></div>
+      <div class="op"><span class="sg"><b>measure</b></span><span class="ds"><code class="cx">outstanding · overdue · bill_count</code> — an aggregate over an entity; typed {grain · additive? · stock | flow}</span></div>
+      <div class="op"><span class="sg"><b>metric</b></span><span class="ds"><code class="cx">dso · top-n share</code> — a formula over measures; inherits their types</span></div>
+      <div class="op"><span class="sg"><b>dimension</b></span><span class="ds"><code class="cx">branch · customer · ageing_bucket · document_type</code> — a way to slice; typed by the entity it joins and its coverage</span></div>
+      <div class="op"><span class="sg"><b>parameter</b></span><span class="ds"><code class="cx">credit_days · overdue_cutoff · horizon</code> — a free, learned value; part of the calculus, never hard-coded in it</span></div>
+      <div class="op"><span class="sg"><b>time</b></span><span class="ds"><code class="cx">as-of · during · trailing</code> — the temporal frame a measure is read in</span></div>
+
+      <div class="subhead" id="calc-ops">Operators — the algebra <span>a small fixed set; every question is a composition of these</span></div>
+      <div class="opgrp">Shape</div>
+      <div class="op"><span class="sg">select <b>m</b></span><span class="ds">name the measure or metric to compute</span></div>
+      <div class="op"><span class="sg">by <b>d…</b></span><span class="ds">group into slices along one or more dimensions</span></div>
+      <div class="op"><span class="sg">where <b>φ</b></span><span class="ds">restrict the population — a predicate over dimensions and measures</span></div>
+      <div class="op"><span class="sg">at <b>τ</b></span><span class="ds">read at a time frame: <i>as-of</i> a date · <i>during</i> a range · <i>trailing</i> a window</span></div>
+      <div class="op"><span class="sg">top <b>n</b></span><span class="ds">rank the slices and keep the largest <i>n</i></span></div>
+      <div class="opgrp">Compare</div>
+      <div class="op"><span class="sg">Δ(<b>m</b>, vs: <b>base</b>)</span><span class="ds">m against a baseline — prior period · target · peer → value and direction</span></div>
+      <div class="opgrp">Explain</div>
+      <div class="op"><span class="sg">attribute(<b>m</b>, by: <b>d</b>)</span><span class="ds">how much each slice of d contributes to m → ranked drivers</span></div>
+      <div class="op"><span class="sg">drill(<b>m</b>, path: <b>d→d→…</b>)</span><span class="ds">decompose m step by step down to the evidence rows</span></div>
+      <div class="opgrp">Hypothetical</div>
+      <div class="op"><span class="sg">scenario(<b>m</b>, assume: <b>ι</b>)</span><span class="ds">recompute m under an intervention ι — collect X, waive Y, tighten terms</span></div>
+      <div class="op"><span class="sg">simulate(<b>m</b>, over: <b>τ</b>, dynamics: <b>Δ</b>)</span><span class="ds">evolve the state forward under stated dynamics</span></div>
+      <div class="opgrp">Judge</div>
+      <div class="op"><span class="sg">assess(<b>m…</b>, against: <b>rubric</b>)</span><span class="ds">weigh several measures into a single verdict</span></div>
+
+      <div class="subhead" id="calc-laws">Laws — correctness by construction <span>the type system rejects the mistakes we actually made</span></div>
+      <ul class="laws">
+        <li>A <b>stock</b> (outstanding, a balance) is read <code class="cx">at: as-of</code>; a <b>flow</b> (revenue, receipts) is read <code class="cx">at: during</code>. A stock ÷ flow like DSO needs both — the checker demands it.</li>
+        <li><code class="cx">by d</code> is legal only if <b>m is additive at d's grain</b>; otherwise the sum is meaningless and the calculus refuses it.</li>
+        <li><code class="cx">where</code> / <code class="cx">by</code> on a dimension is legal only if it <b>joins m's entity</b> — and its <b>coverage travels with the answer</b> (a 76% party-match is stated, never hidden).</li>
+        <li>A <b>rule lives on the measure, not the query</b>: <code class="cx">outstanding</code> already means balance floored at zero; <code class="cx">overdue</code> already means <code class="cx">outstanding where ageing&gt;0</code>. Derived measures are reusable nouns.</li>
+        <li>The full expression is the concept's <b>identity</b> — ask it twice and you land on the same node. That is the reuse key.</li>
+      </ul>
+
+      <div class="subhead" id="calc-q">The nine questions, in calculus <span>D = snapshot 3 Jun 2026; top-n, cutoffs and windows are bound parameters</span></div>
+      <table class="fin calc">
+        <thead><tr><th style="width:22px">#</th><th>Question</th><th>Expression</th><th class="r">Status</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td class="q">Total owed</td><td class="e">outstanding <span class="cm">at:</span> as-of D</td><td class="st ok">✓</td></tr>
+          <tr><td>2</td><td class="q">Who owes most</td><td class="e">outstanding <span class="cm">by:</span> customer <span class="cm">top:</span> 10</td><td class="st ok">✓</td></tr>
+          <tr><td>3</td><td class="q">Exposure by branch</td><td class="e">outstanding <span class="cm">by:</span> branch <span class="cm">top:</span> 8</td><td class="st ok">✓</td></tr>
+          <tr><td>4</td><td class="q">Collection priority</td><td class="e">overdue <span class="cm">by:</span> customer <span class="cm">top:</span> 8</td><td class="st ok">✓</td></tr>
+          <tr><td>5</td><td class="q">What the balance is made of</td><td class="e">outstanding <span class="cm">by:</span> document_type</td><td class="st ok">✓</td></tr>
+          <tr><td>6</td><td class="q">Healthy or a problem</td><td class="e">assess(concentration, ageing, quality)</td><td class="st ok">verdict</td></tr>
+          <tr><td>7</td><td class="q">What drives the overdue</td><td class="e">attribute(overdue, <span class="cm">by:</span> branch)</td><td class="st ok">drivers</td></tr>
+          <tr><td>8</td><td class="q">What happens next</td><td class="e">scenario(overdue, <span class="cm">assume:</span> collect(top-8))<br>simulate(overdue, <span class="cm">over:</span> 15d, <span class="cm">dynamics:</span> {bills: mature, receipts: frozen})</td><td class="st ok">what-if</td></tr>
+          <tr><td>9</td><td class="q">Drill to a single bill</td><td class="e">drill(outstanding, <span class="cm">path:</span> branch→customer→bill)</td><td class="st ok">evidence</td></tr>
+          <tr><td>—</td><td class="q">Days sales outstanding</td><td class="e">dso = outstanding ÷ revenue<span class="cm">.at(</span>trailing 365d<span class="cm">)</span> × 365</td><td class="st no">needs revenue</td></tr>
+        </tbody>
+      </table>
+      <p class="src"><b>Note:</b> the last row type-checks as <i>invalid against the current model</i> — revenue is a flow the model does not yet carry (see <a href="#f-pnl">Profit &amp; loss</a>). The calculus surfaces the gap rather than guessing a number.</p>
+
+      <div class="subhead" id="calc-sim">Toward the enterprise simulation calculus <span>the last three operators already point past reporting</span></div>
+      <p class="intro"><b>State</b> is every measure at a moment — the org as a vector. <b>Dynamics</b> are the rules that
+        move it: a bill ages a day, a receipt clears, a truck depreciates, a lane reprices. <b>Interventions</b> are
+        the levers: collect the top eight, tighten a party's terms, add a vehicle, re-rate a lane. <code class="cx">scenario</code>
+        is state + one intervention, recomputed once; <code class="cx">simulate</code> is state + dynamics run forward
+        over time. Give the calculus the full set of measures as state and the rules as dynamics, with parameters
+        bound, and the same notation becomes an <b>enterprise simulation calculus</b> — the business run forward under
+        assumptions, not only measured today. That is the next thing to grow, once the missing concepts in Part I
+        (revenue, cash history, payables) have data behind them.</p>
+    </section>
+
+    <footer>TotalGroup Logistics · Semantic model (concepts) · questions (21 exhibits across receivables · revenue &amp; profit · fleet · compliance · cash — 17 answered live from the database, 4 one decode-pass away) · calculus (pure). Figures verified against the live database, June 2026.</footer>
+
+  </div></main>
+</div>
+</body>
+</html>

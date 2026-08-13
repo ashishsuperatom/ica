@@ -1,0 +1,4 @@
+
+# datasource-manager dynamic registry (box-specific abs paths)
+registry.json
+**/datasources/**/registry.json

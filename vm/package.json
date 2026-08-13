@@ -1,0 +1,25 @@
+{
+  "name": "superatom-vm",
+  "private": true,
+  "packageManager": "pnpm@9.0.0",
+  "scripts": {
+    "start":   "pm2 start ../ecosystem.config.cjs",
+    "stop":    "pm2 stop ../ecosystem.config.cjs",
+    "restart": "pm2 restart ../ecosystem.config.cjs",
+    "status":  "pm2 status",
+    "logs":    "pm2 logs",
+    "flush":   "pm2 flush",
+    "dev":     "pnpm run --parallel --filter datasource-manager --filter datasource-demo --filter code-engine dev"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild",
+      "node-pty",
+      "protobufjs",
+      "@google/genai",
+      "opencode-ai",
+      "@openai/codex"
+    ]
+  }
+}

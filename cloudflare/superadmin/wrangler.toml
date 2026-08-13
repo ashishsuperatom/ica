@@ -1,0 +1,60 @@
+name = "superatom-code-engine"
+main = "src/worker.ts"
+account_id = "91e1058d99235b9c34602fb0c28916d3"
+compatibility_date = "2026-05-23"
+compatibility_flags = ["nodejs_compat"]
+
+[[durable_objects.bindings]]
+class_name = "OrgDO"
+name = "ORG"
+
+[[durable_objects.bindings]]
+class_name = "ProjectDO"
+name = "PROJECT"
+
+[[durable_objects.bindings]]
+class_name = "GlobalDO"
+name = "GLOBAL"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["OrgDO"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["ProjectDO"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["GlobalDO"]
+
+[vars]
+# Secrets (JWT_SECRET, CLERK_SECRET_KEY, FLY_API_TOKEN) are NOT here — they live in
+# .dev.vars (local dev, gitignored) and `wrangler secret` (deployed). Only non-secret config below.
+VM_URL = "http://localhost:5050"
+FLY_ORG_SLUG = "superatom"
+
+# Hot-read cache for *.superatom.site subdomain → projectId resolution.
+# Edge-cached + globally distributed, so the GlobalDO registry stays off the hot path.
+[[kv_namespaces]]
+binding = "DOMAINS"
+id = "2f6f21f80d0a4526a9b1b4826c7a9614"
+
+[assets]
+directory = "./dist/client"
+binding = "ASSETS"          # expose env.ASSETS so the worker can serve SPA index fallbacks
+# Worker handles SPA fallback per-prefix (/admin → admin index, /u → user index),
+# so don't let the asset layer auto-serve a single root index.
+not_found_handling = "none"
+
+# Everything runs on superatom.site now (code.superatom.ai retired).
+# *.superatom.site → this same worker (admin + per-subdomain user apps).
+# Wildcard needs a zone route (custom_domain doesn't support wildcards). Requires the
+# superatom.site zone to be active in this Cloudflare account + a "*" DNS record.
+[[routes]]
+  pattern = "*.superatom.site/*"
+  zone_name = "superatom.site"
+
+[[routes]]
+  pattern = "superatom.site/*"
+  zone_name = "superatom.site"

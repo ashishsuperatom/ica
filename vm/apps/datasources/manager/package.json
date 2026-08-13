@@ -1,0 +1,13 @@
+{
+  "name": "@superatom/datasource-manager",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "The ONE data seam: query(dataSourceId, sql, params) → routes by id to a bridge. Bridges own the remote connections.",
+  "scripts": {
+    "start": "tsx src/index.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}

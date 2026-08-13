@@ -1,0 +1,15 @@
+app = "superatom-code-engine-vm"
+primary_region = "ord"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 2
+  memory = "4gb"
+
+# NOTE: no [[mounts]] here on purpose. This app is an IMAGE TEMPLATE — `flyctl deploy` only builds + pushes
+# the image and records the release. The real machines are created per-project by the worker's createMachine
+# (fly.ts), which attaches each machine's own /app/data volume via the Machines API. A [[mounts]] here would
+# force `flyctl deploy` to demand a 'data' volume for a throwaway default machine we don't want.

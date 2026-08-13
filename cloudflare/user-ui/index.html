@@ -1,0 +1,71 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Superatom — User</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- xterm -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" />
+
+  <!-- Superatom design system — CSS vars + component classes for generated UI -->
+  <link rel="stylesheet" href="/design.css" />
+
+  <!-- Mapbox GL JS -->
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet" />
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script>
+
+  <!-- ECharts -->
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      /* Superatom design tokens */
+      --sa-surface:        #ffffff;
+      --sa-bg:             #f5f3ef;
+      --sa-border:         #e8e4de;
+      --sa-border-soft:    #f0ede8;
+      --sa-text:           #1a1a1a;
+      --sa-text-muted:     #6b6560;
+      --sa-text-faint:     #9a9285;
+      --sa-accent:         #e55a1f;
+      --sa-positive:       #059669;
+      --sa-neutral:        #2563eb;
+      --sa-negative:       #b91c1c;
+      --sa-warning:        #d97706;
+      --sa-font:           "Inter", system-ui, sans-serif;
+      --sa-font-mono:      "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+      --sa-radius:         12px;
+      --sa-radius-sm:      6px;
+      --sa-pad:            24px 28px;
+      --sa-pad-sm:         14px 18px;
+      --sa-label-size:     11px;
+      --sa-label-weight:   600;
+      --sa-label-tracking: .08em;
+      --sa-shadow-sm:      0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+      --sa-shadow:         0 4px 12px rgba(0,0,0,.08), 0 2px 4px rgba(0,0,0,.04);
+    }
+
+    body {
+      background: var(--sa-bg);
+      font-family: var(--sa-font);
+      min-height: 100vh;
+      color: var(--sa-text);
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script>
+    // Make libs available to all generated web components
+    window.__libs = { echarts, mapboxgl };
+  </script>
+
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>

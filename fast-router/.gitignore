@@ -1,0 +1,36 @@
+# deps & build
+node_modules/
+dist/
+*.tsbuildinfo
+
+# secrets / per-machine config (holds the shared fast-router key)
+.env
+.env.*
+fast-router.local.json
+projects.local.json
+
+# ── model weights & their caches — NEVER commit (downloaded / exported at deploy time) ──
+models/
+*.onnx
+*.onnx_data
+*.bin
+*.gguf
+*.safetensors
+.cache/
+.transformers-cache/
+
+# per-project search indexes & ingested corpora (rebuilt from the engine's store)
+data/
+index/
+*.index
+
+# Qdrant local storage (the vector DB runs as its own co-located service)
+qdrant_storage/
+qdrant/storage/
+
+# logs
+*.log
+npm-debug.log*
+.qdrant/
+.deploy.env
+*.pem

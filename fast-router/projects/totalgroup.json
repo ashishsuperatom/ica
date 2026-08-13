@@ -1,0 +1,15 @@
+{
+  "_note": "Per-project config for the fast-router. entityLabels drive GLiNER NER param extraction — dataset-specific, so they live HERE per project, never hardcoded in the engine.",
+  "entityLabels": [
+    "location",
+    "branch",
+    "client",
+    "vehicle type",
+    "financial year",
+    "date",
+    "duration",
+    "GCN number",
+    "industry",
+    "amount"
+  ]
+}

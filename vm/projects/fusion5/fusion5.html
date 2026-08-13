@@ -1,0 +1,784 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fusion5 — Project Portfolio · Semantic Model &amp; Questions</title>
+<style>
+  :root{
+    --page:#ffffff; --panel:#f3f4f6; --ink:#161719; --body:#33373c; --muted:#6c7075;
+    --rule:#c9ccd1; --hair:#e2e4e8;
+    --navy:#15385c; --navy2:#20527f;
+    --r1:#e7b7b0; --r2:#cf7d72; --r3:#b04a3e; --r4:#8f2d23; --red:#9c2b23;
+    --serif:Georgia,"Times New Roman",serif;
+    --grot:"Helvetica Neue",Helvetica,Arial,"Liberation Sans",system-ui,sans-serif;
+    --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --page:#15171b; --panel:#1c1f24; --ink:#e7e5e0; --body:#c2c4c8; --muted:#8b8f95; --rule:#333840; --hair:#262a30;
+      --navy:#7ba7d4; --navy2:#5f8fbf; --r1:#5c332e; --r2:#8a4339; --r3:#b45a4d; --r4:#d98a84; --red:#d98a84; }
+  }
+  :root[data-theme="light"]{ --page:#fff; --panel:#f3f4f6; --ink:#161719; --body:#33373c; --muted:#6c7075; --rule:#c9ccd1; --hair:#e2e4e8; --navy:#15385c; --navy2:#20527f; --r1:#e7b7b0; --r2:#cf7d72; --r3:#b04a3e; --r4:#8f2d23; --red:#9c2b23; }
+  :root[data-theme="dark"]{ --page:#15171b; --panel:#1c1f24; --ink:#e7e5e0; --body:#c2c4c8; --muted:#8b8f95; --rule:#333840; --hair:#262a30; --navy:#7ba7d4; --navy2:#5f8fbf; --r1:#5c332e; --r2:#8a4339; --r3:#b45a4d; --r4:#d98a84; --red:#d98a84; }
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--page);color:var(--body);font-family:var(--grot);font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .num{font-variant-numeric:lining-nums tabular-nums;font-feature-settings:"lnum" 1,"tnum" 1}
+  .figs,table,.ageing{font-variant-numeric:lining-nums tabular-nums}
+  b,strong{color:var(--ink);font-weight:700}
+  code{font-family:var(--mono);font-size:12.5px;color:var(--ink);background:var(--panel);padding:1px 4px;border:1px solid var(--hair)}
+
+  /* ── app layout: sidebar + main ── */
+  .app{display:flex;align-items:flex-start;max-width:1200px;margin:0 auto}
+  .sidebar{width:256px;flex-shrink:0;position:sticky;top:0;height:100vh;overflow-y:auto;border-right:1px solid var(--rule);padding:24px 18px 48px}
+  .sidebar .brand{font-family:var(--grot);font-weight:800;letter-spacing:.1em;text-transform:uppercase;font-size:12px;color:var(--navy);line-height:1.35;border-top:3px solid var(--navy);padding-top:12px}
+  .sidebar .brand span{display:block;font-weight:600;letter-spacing:.02em;text-transform:none;font-size:11px;color:var(--muted);margin-top:3px}
+  .sidebar .navsec{font-family:var(--grot);font-size:10px;letter-spacing:.1em;text-transform:uppercase;font-weight:800;color:var(--muted);margin:24px 0 8px;padding-bottom:5px;border-bottom:1px solid var(--hair)}
+  .sidebar .navgrp{font-family:var(--grot);font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;font-weight:700;color:var(--navy);margin:13px 0 3px}
+  .sidebar a{display:flex;justify-content:space-between;gap:8px;align-items:baseline;font-family:var(--grot);font-size:12.5px;color:var(--body);text-decoration:none;padding:4px 0;line-height:1.35}
+  .sidebar a:hover{color:var(--navy)}
+  .sidebar a .qn{color:var(--muted);font-weight:700;margin-right:6px}
+  .sidebar a i{font-style:normal;font-size:8.5px;letter-spacing:.04em;text-transform:uppercase;font-weight:800;padding:1px 4px;flex-shrink:0}
+  .sidebar a i.ok{color:var(--page);background:var(--navy)}
+  .sidebar a i.cand{color:var(--navy);border:1px solid var(--navy)}
+  .sidebar a i.block{color:var(--red);border:1px solid var(--red)}
+  .main{flex:1;min-width:0}
+  .sheet{max-width:820px;margin:0;padding:26px 40px 90px}
+
+  .head .org{font-family:var(--grot);font-weight:800;letter-spacing:.14em;font-size:12px;color:var(--navy);text-transform:uppercase}
+  .head h1{font-family:var(--serif);font-weight:700;font-size:24px;line-height:1.2;margin:4px 0 0;color:var(--ink)}
+  .head .meta{font-family:var(--grot);font-size:11px;color:var(--muted);margin-top:8px}
+  .head .meta b{color:var(--body)}
+  .preface{font-style:italic;color:var(--body);border-left:2px solid var(--rule);padding:2px 0 2px 18px;margin:20px 0 6px;max-width:64ch}
+
+  /* ── Part I: semantic-model concept tree ── */
+  .part{margin-top:38px}
+  .part .lead{font-family:var(--grot);font-size:11px;letter-spacing:.14em;text-transform:uppercase;font-weight:800;color:var(--navy)}
+  .part h2{font-family:var(--serif);font-size:22px;font-weight:700;color:var(--ink);margin:4px 0 0}
+  .part .prule{border:0;border-top:1.5px solid var(--ink);margin:11px 0 16px}
+  .part .intro{color:var(--body);margin:0 0 20px;max-width:66ch}
+  details.concept{border:1px solid var(--rule);margin:0 0 9px}
+  details.concept>summary{list-style:none;cursor:pointer;display:flex;align-items:baseline;gap:10px;padding:12px 14px;font-family:var(--serif);font-size:16px;font-weight:700;color:var(--ink);user-select:none}
+  details.concept>summary::-webkit-details-marker{display:none}
+  details.concept>summary::before{content:"\25B8";color:var(--navy);font-size:10px;transition:transform .12s}
+  details.concept[open]>summary::before{transform:rotate(90deg)}
+  details.concept>summary .csrc{font-family:var(--mono);font-size:10.5px;color:var(--muted);font-weight:400;margin-left:auto}
+  .ctag{font-family:var(--grot);font-size:8.5px;letter-spacing:.05em;text-transform:uppercase;font-weight:800;padding:1px 6px;align-self:center}
+  .ctag.ok{color:var(--page);background:var(--navy)}
+  .ctag.cand{color:var(--navy);border:1px solid var(--navy)}
+  .ctag.block{color:var(--red);border:1px solid var(--red)}
+  .cbody{padding:6px 16px 16px 30px;border-top:1px solid var(--hair)}
+  .ctable{display:grid;grid-template-columns:1fr 1fr;gap:28px}
+  .ccol h5{font-family:var(--grot);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:12px 0 7px}
+  .ccol ul{list-style:none;margin:0;padding:0}
+  .ccol li{font-size:13px;line-height:1.5;padding:4px 0 4px 14px;position:relative;color:var(--body)}
+  .ccol li::before{content:"\2013";position:absolute;left:0;color:var(--rule)}
+  .ccol li b{color:var(--ink);font-weight:600}
+  .ccol li code{font-size:11px}
+  .ccol li.dim{color:var(--muted)}
+  .mnote{font-family:var(--grot);font-size:10.5px;color:var(--muted);margin-left:3px}
+  .mnote.warn{color:var(--red)}.mnote.ok{color:var(--navy)}
+  .vals{display:block;font-family:var(--grot);font-size:10.5px;color:var(--muted);margin-top:1px}
+  .crule{font-size:12px;color:var(--body);margin:15px 0 0;padding:9px 12px;background:var(--panel);border-left:2px solid var(--navy);line-height:1.55}
+  .crule .rk{color:var(--navy);font-family:var(--grot);font-size:10px;letter-spacing:.05em;text-transform:uppercase;font-weight:700;margin-right:6px}
+  /* entity-node facets */
+  .sig{font-family:var(--grot);font-size:11.5px;color:var(--body);margin:0 0 14px;padding:8px 11px;background:var(--panel);border:1px solid var(--hair);display:flex;gap:22px;flex-wrap:wrap}
+  .sig b{color:var(--navy);font-size:10px;letter-spacing:.05em;text-transform:uppercase;margin-right:5px}
+  .facet{margin:0 0 14px}
+  .facet>h5{font-family:var(--grot);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:0 0 7px}
+  .rels{list-style:none;margin:0;padding:0}
+  .rels li{font-size:13px;line-height:1.5;padding:4px 0;display:flex;gap:9px;align-items:baseline;flex-wrap:wrap;border-bottom:1px solid var(--hair)}
+  .rels li:last-child{border-bottom:0}
+  .rels .re{color:var(--ink);font-weight:600}
+  .rels .re::before{content:"→ ";color:var(--navy);font-weight:700}
+  .rels .via{font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+  .rels .card{font-family:var(--grot);font-size:9px;letter-spacing:.03em;color:var(--muted);border:1px solid var(--rule);padding:0 4px;text-transform:uppercase}
+  .cov{font-family:var(--grot);font-size:9.5px;letter-spacing:.03em;text-transform:uppercase;font-weight:700;padding:0 5px;margin-left:auto;white-space:nowrap}
+  .cov.ok{color:var(--navy);border:1px solid var(--navy)}
+  .cov.weak{color:var(--red);border:1px solid var(--red)}
+  .minor{display:grid;grid-template-columns:1fr 1fr;gap:14px 24px;margin:0 0 6px}
+  .minor .mf h5{font-family:var(--grot);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:0 0 5px}
+  .minor .mf p{font-size:12.5px;color:var(--body);margin:0;line-height:1.5}.minor .mf p b{color:var(--ink)}
+  .minor .mf .warn{color:var(--red)}
+  /* sub-heading within Part I */
+  .subhead{font-family:var(--grot);font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;font-weight:800;color:var(--navy);margin:30px 0 12px;padding-bottom:5px;border-bottom:1px solid var(--rule)}
+  .subhead span{color:var(--muted);font-weight:600;letter-spacing:.02em;text-transform:none;margin-left:8px;font-size:11px}
+  /* relevant-but-not-yet concept */
+  details.fconcept{border:1px dashed var(--rule);margin:0 0 8px}
+  details.fconcept>summary{list-style:none;cursor:pointer;display:flex;align-items:baseline;gap:10px;padding:11px 14px;font-family:var(--serif);font-size:15px;font-weight:700;color:var(--body);user-select:none}
+  details.fconcept>summary::-webkit-details-marker{display:none}
+  details.fconcept>summary::before{content:"\25B8";color:var(--muted);font-size:10px;transition:transform .12s}
+  details.fconcept[open]>summary::before{transform:rotate(90deg)}
+  details.fconcept>summary .csrc{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--muted);font-weight:400}
+  .fbody{padding:4px 16px 14px 30px;border-top:1px dashed var(--hair)}
+  .fbody .why{font-size:13px;color:var(--body);margin:8px 0 10px;line-height:1.5}.fbody .why b{color:var(--ink)}
+  .fbody .unlock{font-size:12.5px;color:var(--muted);line-height:1.65}
+  .fbody .unlock .k{font-family:var(--grot);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;color:var(--navy);margin-right:6px}
+
+  /* ── Part II heading ── */
+  .qhead{margin:46px 0 0}
+  .qhead .lead{font-family:var(--grot);font-size:11px;letter-spacing:.14em;text-transform:uppercase;font-weight:800;color:var(--navy)}
+  .qhead h2{font-family:var(--serif);font-size:22px;font-weight:700;color:var(--ink);margin:4px 0 0}
+  .qhead .prule{border:0;border-top:1.5px solid var(--ink);margin:11px 0 4px}
+
+  /* ── exhibit ── */
+  .exhibit{margin-top:40px;scroll-margin-top:16px}
+  .exhibit .no{font-family:var(--grot);font-size:11px;letter-spacing:.14em;text-transform:uppercase;font-weight:800;color:var(--navy)}
+  .exhibit .ti{font-family:var(--serif);font-size:20px;font-weight:700;color:var(--ink);margin:3px 0 0}
+  .exhibit .ti-rule{border:0;border-top:1.5px solid var(--ink);margin:11px 0 0}
+  .atype{font-family:var(--grot);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;font-weight:800;color:var(--page);background:var(--ink);padding:2px 7px;margin-left:10px;vertical-align:middle}
+  .period{font-family:var(--grot);font-size:11px;color:var(--body);margin:12px 0 20px;display:flex;gap:9px;align-items:baseline;flex-wrap:wrap}
+  .period .pk{font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;font-weight:800;color:var(--page);background:var(--navy);padding:2px 7px}
+  .period b{color:var(--ink);font-weight:700}.period .snap{color:var(--muted)}
+
+  .figs{display:grid;grid-template-columns:repeat(4,1fr);border-top:1.5px solid var(--ink);border-bottom:1px solid var(--rule);margin:0 0 22px}
+  .figs .f{padding:12px 16px 13px;border-left:1px solid var(--hair)}
+  .figs .f:first-child{border-left:0;padding-left:0}
+  .figs .f .k{font-family:var(--grot);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700}
+  .figs .f .v{font-family:var(--grot);font-size:24px;font-weight:700;color:var(--ink);line-height:1.15;margin-top:5px;letter-spacing:-.01em}
+  .figs .f .v.neg{color:var(--red)}
+  .figs .f .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+  p.body{margin:0 0 16px;max-width:64ch}p.body .navy{color:var(--navy);font-weight:700}
+
+  .ageing{margin:6px 0 20px}
+  .ageing .cap{font-family:var(--grot);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:7px;display:flex;justify-content:space-between}
+  .ageing .cap .note{color:var(--red);text-transform:none;letter-spacing:0;font-weight:700}
+  .ageing .bar{display:flex;height:20px;border:1px solid var(--ink)}
+  .ageing .seg{height:100%;border-left:1px solid var(--page)}.ageing .seg:first-child{border-left:0}
+  .ageing table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12.5px}
+  .ageing td{padding:4px 10px 4px 0;border-bottom:1px solid var(--hair);font-family:var(--grot)}
+  .ageing td .sw{display:inline-block;width:9px;height:9px;margin-right:7px;border:1px solid rgba(0,0,0,.15)}
+  .ageing td.r{text-align:right;color:var(--ink);font-weight:700}.ageing td.rr{text-align:right;color:var(--muted)}
+  .ageing tr.tot td{border-bottom:0;border-top:1px solid var(--ink);font-weight:700;color:var(--ink);padding-top:6px}
+
+  table.fin{width:100%;border-collapse:collapse;margin:4px 0 12px;font-size:14px}
+  table.fin caption{caption-side:top;text-align:left;font-family:var(--grot);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:700;padding-bottom:8px}
+  table.fin thead th{font-family:var(--grot);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;font-weight:700;color:var(--body);text-align:left;padding:0 14px 8px 0;border-bottom:1.5px solid var(--ink)}
+  table.fin th.r,table.fin td.r{text-align:right;padding-right:0}
+  table.fin tbody td{padding:8px 14px 8px 0;border-bottom:1px solid var(--hair);vertical-align:baseline;color:var(--body)}
+  table.fin td:last-child,table.fin th:last-child{padding-right:0}
+  table.fin tbody tr:hover{background:var(--panel)}
+  td.rk{color:var(--muted);width:22px;padding-right:8px}
+  td.name{color:var(--ink);font-weight:600}td.name small{display:block;font-family:var(--grot);font-size:10.5px;color:var(--muted);font-weight:400;margin-top:1px}
+  td.fig{color:var(--ink);font-weight:700;white-space:nowrap}td.share{color:var(--muted);width:56px}
+  .flag{font-family:var(--grot);font-size:9px;letter-spacing:.04em;text-transform:uppercase;font-weight:700;color:var(--red);border:1px solid var(--red);padding:0 4px;margin-left:6px;white-space:nowrap}
+  table.fin tfoot td{padding:10px 14px 0 0;border-top:1.5px solid var(--ink);font-weight:700;color:var(--ink)}
+
+  details.basis{border-top:1px solid var(--rule);margin-top:14px}
+  details.basis>summary{list-style:none;cursor:pointer;padding:11px 0 11px 20px;position:relative;font-family:var(--grot);font-size:11.5px;letter-spacing:.03em;color:var(--navy);font-weight:700;user-select:none}
+  details.basis>summary::-webkit-details-marker{display:none}
+  details.basis>summary::before{content:"\25B8";position:absolute;left:2px;top:11px;transition:transform .12s;font-size:10px}
+  details.basis[open]>summary::before{transform:rotate(90deg)}
+  details.basis>summary .h{color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;font-family:var(--serif);font-style:italic;margin-left:8px}
+  .drill{padding:4px 0 18px 20px}
+  .drill h5{font-family:var(--grot);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:16px 0 8px}.drill h5:first-child{margin-top:6px}
+  .steps{margin:0;padding:0;list-style:none;counter-reset:s}
+  .steps li{counter-increment:s;position:relative;padding:2px 0 2px 26px;font-size:13.5px;color:var(--body);line-height:1.5}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:2px;font-family:var(--grot);font-size:9.5px;font-weight:800;color:var(--navy);border:1px solid var(--navy);width:16px;height:16px;display:flex;align-items:center;justify-content:center;line-height:1}
+  details.dev{margin:10px 0 4px}
+  details.dev>summary{list-style:none;cursor:pointer;font-family:var(--grot);font-size:10px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--muted);padding:5px 0 5px 16px;position:relative;user-select:none}
+  details.dev>summary::-webkit-details-marker{display:none}
+  details.dev>summary::before{content:"\25B8";position:absolute;left:0;top:5px;font-size:9px}details.dev[open]>summary::before{transform:rotate(90deg)}
+  pre.sql{font-family:var(--mono);font-size:12px;line-height:1.55;color:var(--ink);background:var(--panel);border:1px solid var(--hair);border-left:2px solid var(--navy);padding:11px 13px;margin:4px 0 2px;overflow-x:auto;white-space:pre}
+  .basisnote{font-size:13.5px;color:var(--body);line-height:1.55;margin:0 0 10px;max-width:74ch}
+  .basisnote .k{font-family:var(--grot);font-size:10px;letter-spacing:.05em;text-transform:uppercase;font-weight:700;color:var(--navy);margin-right:7px}
+  .cite{font-family:var(--grot);font-size:11px;color:var(--navy);border:1px solid var(--navy);padding:1px 6px;text-decoration:none;white-space:nowrap}.cite:hover{background:var(--navy);color:var(--page)}.cite .mock{color:var(--muted)}
+  .drilllink{font-family:var(--grot);font-size:12px;color:var(--navy);text-decoration:none;font-weight:700;border-bottom:1px solid var(--navy)}
+  .roles{font-family:var(--grot);font-size:11px;color:var(--muted);margin-top:14px;padding-top:10px;border-top:1px dashed var(--rule);line-height:1.6}.roles b{color:var(--body)}
+  .src{font-family:var(--grot);font-size:10.5px;color:var(--muted);margin:6px 0 0}.src b{color:var(--body);font-weight:700}
+
+  .verdict{border:1.5px solid var(--navy);padding:15px 18px;margin:2px 0 20px}
+  .verdict .vk{font-family:var(--grot);font-size:10px;letter-spacing:.1em;text-transform:uppercase;font-weight:800;color:var(--navy)}
+  .verdict .vt{font-family:var(--serif);font-size:19px;font-weight:700;color:var(--ink);margin:3px 0 0}
+  .factors{display:grid;gap:11px;margin:0 0 18px}
+  .factor{display:grid;grid-template-columns:22px 1fr;gap:12px;font-size:14px;line-height:1.5}
+  .factor .m{font-family:var(--grot);font-weight:800;font-size:13px;text-align:center}.factor .m.ok{color:var(--navy)}.factor .m.warn{color:var(--red)}.factor b{color:var(--ink)}
+  .scen{border-top:1.5px solid var(--ink);margin:6px 0 18px}
+  .scenrow{display:grid;grid-template-columns:1fr auto auto;gap:16px;align-items:baseline;padding:11px 0;border-bottom:1px solid var(--hair)}
+  .scenrow .lab{font-size:14px;color:var(--body)}.scenrow .lab b{color:var(--ink)}
+  .scenrow .delta{font-family:var(--grot);font-weight:700;font-size:12.5px;white-space:nowrap;text-align:right}.scenrow .delta.up{color:var(--red)}.scenrow .delta.down{color:var(--navy)}
+  .scenrow .res{font-weight:700;color:var(--ink);white-space:nowrap;font-size:15px;text-align:right;min-width:92px}
+  .drilltree details>summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:1fr auto auto;gap:14px;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--hair)}
+  .drilltree details>summary::-webkit-details-marker{display:none}
+  .drilltree .nm{color:var(--ink);font-weight:600;font-size:14px}
+  .drilltree .nm::before{content:"\25B8";color:var(--navy);margin-right:9px;font-size:9px;display:inline-block;transition:transform .12s}
+  .drilltree details[open]>summary .nm::before{transform:rotate(90deg)}
+  .drilltree .nm .lv{font-family:var(--grot);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-right:9px}
+  .drilltree .amt{font-weight:700;color:var(--ink);font-size:14px;white-space:nowrap}
+  .drilltree .meta{color:var(--muted);font-family:var(--grot);font-size:11.5px;white-space:nowrap}
+  .drilltree .indent{margin-left:14px;border-left:1px solid var(--rule);padding-left:16px}
+  .drilltree .leaf{display:grid;grid-template-columns:1fr auto auto;gap:14px;padding:8px 0 8px 19px;border-bottom:1px dotted var(--hair);font-size:13px;color:var(--body)}.drilltree .leaf .amt{font-size:13px}
+
+  /* ── Part III: calculus (pure) ── */
+  .cx{font-family:var(--mono);font-size:12.5px;color:var(--ink);background:var(--panel);padding:1px 5px;border:1px solid var(--hair);white-space:nowrap}
+  .cxb{font-family:var(--mono);font-size:12.5px;line-height:1.75;color:var(--ink);background:var(--panel);border:1px solid var(--hair);border-left:2px solid var(--navy);padding:12px 15px;margin:0 0 16px;overflow-x:auto;white-space:pre}
+  .cxb .kw{color:var(--navy);font-weight:700}
+  .cxb .cm{color:var(--muted)}
+  .opgrp{font-family:var(--grot);font-size:10px;letter-spacing:.07em;text-transform:uppercase;font-weight:700;color:var(--navy);margin:16px 0 6px}
+  .op{display:grid;grid-template-columns:190px 1fr;gap:16px;font-size:13px;padding:5px 0;border-bottom:1px solid var(--hair);align-items:baseline}
+  .op:last-child{border-bottom:0}
+  .op .sg{font-family:var(--mono);font-size:12px;color:var(--ink);font-weight:700}
+  .op .sg b{color:var(--navy)}
+  .op .ds{color:var(--body)}
+  .laws{list-style:none;margin:0 0 6px;padding:0}
+  .laws li{font-size:13.5px;line-height:1.55;padding:6px 0 6px 22px;position:relative;color:var(--body);border-bottom:1px solid var(--hair)}
+  .laws li:last-child{border-bottom:0}
+  .laws li::before{content:"\00A7";position:absolute;left:0;color:var(--navy);font-weight:700}
+  .laws li b{color:var(--ink)}
+  table.calc td.q{color:var(--body)}
+  table.calc td.e{font-family:var(--mono);font-size:12px;color:var(--ink);white-space:nowrap}
+  table.calc td.e .cm{color:var(--muted)}
+  table.calc td.st{text-align:right;font-family:var(--grot);font-size:9.5px;letter-spacing:.04em;text-transform:uppercase;font-weight:700}
+  table.calc td.st.ok{color:var(--navy)}table.calc td.st.no{color:var(--red)}
+  /* ── per-exhibit calculus line + pending (needs-data) state ── */
+  .calcx{font-family:var(--mono);font-size:12px;color:var(--body);background:var(--panel);border:1px solid var(--hair);border-left:2px solid var(--navy);padding:8px 12px;margin:2px 0 14px;overflow-x:auto;white-space:nowrap}
+  .calcx .lbl{font-family:var(--grot);font-size:9px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--muted);margin-right:10px}
+  .calcx .cm{color:var(--muted)}
+  .exhibit .no .pend{margin-left:8px;font-family:var(--grot);font-size:9px;letter-spacing:.07em;text-transform:uppercase;font-weight:800;color:var(--red);border:1px solid var(--red);border-radius:2px;padding:1px 5px;vertical-align:1px}
+  .pending{border:1px dashed var(--rule);background:var(--panel);padding:15px 17px;margin:4px 0 14px}
+  .pending .pstat{font-family:var(--grot);font-size:10px;letter-spacing:.09em;text-transform:uppercase;font-weight:800;color:var(--red);margin-bottom:8px}
+  .pending.dec{border-color:var(--rule)} .pending.dec .pstat{color:var(--navy)}
+  .pending p{margin:7px 0;font-size:13.5px;color:var(--body);line-height:1.55}
+  .pending p:first-of-type{margin-top:0}
+  .pending .k{font-family:var(--grot);font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;font-weight:700;color:var(--navy);margin-right:7px}
+  .pending a.cn{color:var(--navy);text-decoration:none;border-bottom:1px solid var(--rule)}
+
+  footer{margin-top:44px;padding-top:16px;border-top:3px solid var(--navy);font-family:var(--grot);font-size:11px;color:var(--muted);line-height:1.6}
+
+  .val{border-bottom:1px dotted var(--muted);cursor:help;position:relative;outline:none;white-space:nowrap}
+  .val::after{content:attr(data-exact);position:absolute;left:50%;bottom:100%;transform:translate(-50%,-7px);background:var(--ink);color:var(--page);font-family:var(--grot);font-size:11.5px;font-weight:600;white-space:nowrap;padding:4px 9px;opacity:0;visibility:hidden;transition:opacity .1s;z-index:20;font-variant-numeric:lining-nums tabular-nums}
+  .val:hover::after,.val:focus::after{opacity:1;visibility:visible}
+
+  @media (max-width:860px){
+    .app{flex-direction:column}
+    .sidebar{position:static;width:auto;height:auto;border-right:0;border-bottom:1px solid var(--rule)}
+    .sheet{padding:20px 18px 64px}.figs{grid-template-columns:1fr 1fr}.ctable{grid-template-columns:1fr;gap:0}
+    .figs .f:nth-child(3){border-left:0;padding-left:0}.figs .f{border-top:1px solid var(--hair)}.head h1{font-size:20px}
+  }
+  /* ── fusion5 RAG chips ── */
+  .rag{display:inline-block;min-width:12px;padding:1px 7px;border-radius:2px;font-family:var(--grot);font-size:10px;font-weight:800;letter-spacing:.03em;color:#fff;text-align:center}
+  .rag.r{background:#9c2b23}.rag.a{background:#a9781f}.rag.g{background:#3f7d4f}
+  .ragdot{display:inline-block;width:9px;height:9px;border-radius:50%;vertical-align:0}
+  .ragdot.r{background:#9c2b23}.ragdot.a{background:#c0902f}.ragdot.g{background:#3f7d4f}
+  table.matrix td.rr{text-align:right;font-variant-numeric:lining-nums tabular-nums}
+  table.matrix td.red{color:#9c2b23;font-weight:700}table.matrix td.amb{color:#8a6318;font-weight:700}
+  table.matrix tbody tr.att td{background:#faf3f2}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <aside class="sidebar">
+    <div class="brand">Fusion5 · Portfolio</div>
+    <nav>
+      <div class="navsec">Part I · Semantic model</div>
+      <div class="navgrp">Modelled</div>
+      <a href="#c-project">Project <i class="ok">✓</i></a>
+      <a href="#c-rag">RAG status <i class="ok">✓</i></a>
+      <a href="#c-pillar">Pillar — department tree <i class="ok">✓</i></a>
+      <a href="#c-budget">Budget <i class="cand">part</i></a>
+      <a href="#c-client">Client &amp; manager <i class="ok">✓</i></a>
+      <div class="navgrp">Relevant — blocked</div>
+      <a href="#f-time">Time &amp; effort <i class="block">perm</i></a>
+      <a href="#f-people">People / employees <i class="block">perm</i></a>
+      <a href="#f-history">Portfolio history <i class="block">snapshot</i></a>
+      <a href="#f-milestone">Go-live milestones <i class="block">decode</i></a>
+      <a href="#f-billing">Invoicing &amp; revenue <i class="cand">cand</i></a>
+
+      <div class="navsec">Part II · Questions</div>
+      <div class="navgrp">Portfolio health (RAG)</div>
+      <a href="#ex1"><span><span class="qn">1</span>Counts by RAG × pillar</span> <i class="ok">✓</i></a>
+      <a href="#ex6"><span><span class="qn">6</span>RAG for a given project</span> <i class="ok">✓</i></a>
+      <a href="#ex4"><span><span class="qn">4</span>Changed RAG vs last week</span> <i class="block">hist</i></a>
+      <a href="#ex5"><span><span class="qn">5</span>Moved green→amber/red</span> <i class="block">hist</i></a>
+      <div class="navgrp">Budget</div>
+      <a href="#ex2"><span><span class="qn">2</span>Remaining budget by project/pillar</span> <i class="cand">part</i></a>
+      <div class="navgrp">Delivery timing</div>
+      <a href="#ex3"><span><span class="qn">3</span>Going live in next 3 months</span> <i class="block">decode</i></a>
+      <div class="navgrp">Effort &amp; utilisation</div>
+      <a href="#ex7"><span><span class="qn">7</span>Effort vs non-billable by person</span> <i class="block">perm</i></a>
+      <a href="#ex8"><span><span class="qn">8</span>% non-billable per person</span> <i class="block">perm</i></a>
+      <a href="#ex9"><span><span class="qn">9</span>Non-billable effort by project</span> <i class="block">perm</i></a>
+      <a href="#ex10"><span><span class="qn">10</span>Highest non-billable teams</span> <i class="block">perm</i></a>
+      <div class="navgrp">Lineage / meta</div>
+      <a href="#ex11"><span><span class="qn">11</span>What entities are used</span> <i class="ok">✓</i></a>
+      <a href="#ex12"><span><span class="qn">12</span>Exact calculation logic</span> <i class="ok">✓</i></a>
+
+      <div class="navsec">Part III · Calculus</div>
+      <a href="#calc-idea">What the calculus is</a>
+      <a href="#calc-nouns">Nouns — from the model</a>
+      <a href="#calc-ops">Operators</a>
+      <a href="#calc-q">The questions, in calculus</a>
+      <a href="#calc-sim">What unlocks the rest</a>
+    </nav>
+  </aside>
+
+  <main class="main"><div class="sheet">
+
+    <div class="head">
+      <div class="org">Fusion5</div>
+      <h1>Project Portfolio — Semantic Model &amp; Questions</h1>
+      <div class="meta"><b>As of</b> July 2026 &nbsp;·&nbsp; <b>Source</b> live NetSuite (SuiteQL) &nbsp;·&nbsp; <b>Population</b> 16,631 active projects</div>
+    </div>
+    <p class="preface">Three parts of one benchmark: the <b>semantic model</b> — the portfolio concepts we can compute
+      on; the <b>twelve questions</b> those concepts answer; and the <b>calculus</b> — the pure form each question
+      takes. Built from a real question list. Answers are marked honestly: <span class="rag g">✓</span> answerable
+      today, <span class="rag a">part</span> a decode away, <span class="rag r">blocked</span> where the data is not
+      reachable — and each block names <i>why</i> (no history, or a permission the integration role lacks).</p>
+
+    <!-- ══════════ PART I · SEMANTIC MODEL ══════════ -->
+    <section class="part" id="sm">
+      <div class="lead">Part I</div>
+      <h2>Semantic model — concept tree</h2>
+      <hr class="prule">
+      <p class="intro">The portfolio lives in one NetSuite record — the <b>project</b> (<code>job</code>) — carrying a
+        stack of Fusion5 custom fields. Each concept below is an entity or a facet of the project, with its
+        <b>relationships</b>, <b>measures</b>, <b>dimensions</b>, <b>identity, parameters and rules</b>.</p>
+
+      <div class="subhead">Modelled — concepts with data</div>
+
+      <details class="concept" id="c-project" open>
+        <summary>Project <span class="ctag ok">Verified</span> <span class="csrc">NetSuite job</span></summary>
+        <div class="cbody">
+          <div class="sig"><span><b>Grain</b> one project</span><span><b>Time</b> snapshot (live)</span><span><b>Population</b> 16,631 active · 14,906 inactive</span></div>
+          <div class="facet"><h5>Relationships</h5><ul class="rels">
+            <li><span class="re">Pillar (department)</span> <span class="via">custentity_f5_prj_pillar = department.id</span> <span class="card">N:1</span> <span class="cov ok">100% · tree</span></li>
+            <li><span class="re">Client</span> <span class="via">customer</span> <span class="card">N:1</span> <span class="cov ok">100%</span></li>
+            <li><span class="re">Project manager</span> <span class="via">custentity_f5_prj_manager → employee</span> <span class="card">N:1</span> <span class="cov weak">name via email; employee table blocked</span></li>
+            <li><span class="re">Subsidiary</span> <span class="via">subsidiary</span> <span class="card">N:1</span> <span class="cov ok">100%</span></li>
+          </ul></div>
+          <div class="ctable">
+            <div class="ccol"><h5>Measures <span style="color:var(--muted);font-weight:400;letter-spacing:0;text-transform:none">· per project</span></h5><ul>
+              <li><b>Project count</b> <code>COUNT(*)</code></li>
+              <li><b>Total budget</b> <code>SUM(custentity_f5_total_project_budget)</code></li>
+              <li>Actual / allocated / remaining time <span class="mnote">on the project record</span></li>
+              <li>Estimated cost · gross profit <span class="mnote">estimatedcostjc · estimatedgrossprofit</span></li>
+              <li>Consumed-to-date <span class="mnote warn">needs time entries — blocked</span></li>
+            </ul></div>
+            <div class="ccol"><h5>Dimensions</h5><ul>
+              <li class="dim">Pillar · RAG · Sub-RAGs</li>
+              <li class="dim">Subsidiary <span class="vals">F5AU · F5NZ …</span> · Billing type</li>
+              <li class="dim">Status · Gone-live flag · Manager</li>
+              <li class="dim">Start / projected-end date</li>
+            </ul></div>
+          </div>
+          <div class="minor">
+            <div class="mf"><h5>Identity</h5><p>Project = <code>job.id</code> (entityid also unique). Name in <code>companyname</code>.</p></div>
+            <div class="mf"><h5>Parameters</h5><p><b>Go-live window</b> (3 mo) · <b>Attention set</b> = RAG ∈ {Red, Amber} — both free, learnable.</p></div>
+            <div class="mf"><h5>Rules</h5><p>Active = <code>isinactive='F'</code>. Real projects carry a RAG (1,710 active have none).</p></div>
+            <div class="mf"><h5>Source</h5><p><code>job</code> + <code>custentity_f5_*</code> custom fields · verified.</p></div>
+          </div>
+        </div>
+      </details>
+
+      <details class="concept" id="c-rag">
+        <summary>RAG status — composite health <span class="ctag ok">Verified · rule found</span> <span class="csrc">custentity_f5_project_rag + 4 sub-KPIs</span></summary>
+        <div class="cbody">
+          <div class="sig"><span><b>Grain</b> one project's health</span><span><b>Codes</b> 1 = Red · 2 = Amber · 3 = Green</span></div>
+          <div class="facet"><h5>Composition — the overall RAG rolls up four component RAGs</h5><ul class="rels">
+            <li><span class="re">Budget KPI</span> <span class="via">custentity_f5_prj_budget_kpi</span></li>
+            <li><span class="re">Timeline KPI</span> <span class="via">custentity_f5_prj_timeline_kpi</span></li>
+            <li><span class="re">Customer satisfaction</span> <span class="via">custentity_f5_rag_cus_sat</span></li>
+            <li><span class="re">Resource</span> <span class="via">custentity_f5_rag_resource</span></li>
+          </ul></div>
+          <div class="ctable">
+            <div class="ccol"><h5>Measures &amp; metrics</h5><ul>
+              <li><b>Projects by RAG</b> — 52 Red · 168 Amber · 14,701 Green</li>
+              <li><b>Attention count</b> = Red + Amber = 220</li>
+              <li>RAG mix % by pillar</li>
+            </ul></div>
+            <div class="ccol"><h5>Dimensions</h5><ul>
+              <li class="dim">Overall RAG · each component RAG</li>
+              <li class="dim">Pillar · subsidiary · manager</li>
+            </ul></div>
+          </div>
+          <div class="crule"><span class="rk">Rule (discovered)</span> Overall RAG ≈ <b>worst-of the four component RAGs</b> — any Red component makes the project Red. Inferred from the data (every Red project has ≥1 Red component); confirm against the actual scoring workflow. <span class="mnote warn">No history is stored — week-over-week change (Q4/Q5) is blocked until snapshots begin.</span></div>
+        </div>
+      </details>
+
+      <details class="concept" id="c-pillar">
+        <summary>Pillar — the department tree <span class="ctag ok">Verified · hierarchy</span> <span class="csrc">department (custentity_f5_prj_pillar = department.id)</span></summary>
+        <div class="cbody">
+          <div class="sig"><span><b>Grain</b> one department (pillar)</span><span><b>Shape</b> 3-level tree via <code>parent</code></span><span><b>Population</b> 19 active · retired ones flagged</span></div>
+          <p class="basisnote" style="margin:0 0 10px"><span class="k">Key finding</span> The pillar field is <b>not a flat list — it is the <code>department</code> record.</b> <code>custentity_f5_prj_pillar</code> holds a department id, so a pillar carries a <b>parent</b> (roll-up) and an <b>isinactive</b> flag (the active rule) for free.</p>
+          <div class="facet"><h5>The hierarchy — a project hangs off a leaf; measures roll up</h5><ul class="rels">
+            <li><span class="re">Business Applications</span> <span class="via">Enterprise Apps → ERP · HCM · CPM · NetSuite</span> <span class="cov ok">8,339 proj</span></li>
+            <li><span class="re">Business Applications</span> <span class="via">Microsoft → BC · CEC · FO · Retail</span> <span class="cov ok">5,028 proj</span></li>
+            <li><span class="re">MSP</span> <span class="via">→ CIS</span> <span class="cov ok">1,551 proj</span></li>
+            <li><span class="re">DI</span> <span class="via">→ DA</span> <span class="cov ok">659 proj</span></li>
+            <li><span class="re">Standalone</span> <span class="via">COM · ESM · Jemini · OH · Pivotal · TS</span> <span class="cov ok">—</span></li>
+            <li><span class="re">Retired</span> <span class="via">CX · MWP · EPM · Middleware · Supply Chain · IS · Jade · Empower-HR</span> <span class="cov weak">isinactive = T</span></li>
+          </ul></div>
+          <div class="ctable">
+            <div class="ccol"><h5>Role &amp; roll-up</h5><ul>
+              <li>The primary <b>grouping dimension</b> — every measure (RAG, budget, go-lives, effort) answers <b>by pillar, group or division</b>.</li>
+              <li>Roll up the <code>parent</code> chain, or prefix-match <code>fullname</code> (<span class="mnote">"Business Applications : Microsoft : CEC"</span>).</li>
+              <li class="dim"><code>cross_pillar_prj</code> flags multi-pillar work</li>
+            </ul></div>
+            <div class="ccol"><h5>Active-pillar rule</h5><ul>
+              <li><b>Active</b> = <code>department.isinactive = 'F'</code> — the canonical, config-level truth.</li>
+              <li><b>Operationally active</b> = active <i>and</i> a project touched in the last ~90 days.</li>
+              <li class="dim">Only 2 live projects are tagged to a retired pillar — config-active is clean.</li>
+            </ul></div>
+          </div>
+          <div class="crule"><span class="rk">Rules</span> Join <code>custentity_f5_prj_pillar → department.id</code>; filter <code>isinactive='F'</code> for active pillars. Group at the <b>leaf</b> only when you mean it — CIS is a leaf under MSP, so a leaf-only group splits MSP's numbers. Decode names with <code>BUILTIN.DF()</code> per-row (it errors inside GROUP BY).</div>
+        </div>
+      </details>
+
+      <details class="concept" id="c-budget">
+        <summary>Budget <span class="ctag cand">Partial</span> <span class="csrc">custentity_f5_total_project_budget</span></summary>
+        <div class="cbody">
+          <div class="sig"><span><b>Grain</b> one project</span><span><b>Total</b> ≈ $742M across ~14,900 projects</span></div>
+          <div class="ctable">
+            <div class="ccol"><h5>Measures</h5><ul>
+              <li><b>Total budget</b> · budget sold · estimated revenue</li>
+              <li>Estimated cost · gross profit %</li>
+              <li>Remaining = budget − consumed <span class="mnote warn">consumed needs time — blocked</span></li>
+            </ul></div>
+            <div class="ccol"><h5>Dimensions</h5><ul>
+              <li class="dim">Pillar · project · manager · subsidiary</li>
+              <li class="dim">Budget RAG (on/over)</li>
+            </ul></div>
+          </div>
+          <div class="crule"><span class="rk">Caveat</span> Budget is present and additive; <b>remaining</b> budget needs consumed-to-date (billed or time-costed). Billed is reachable via <code>transaction</code>; time-costed is permission-blocked. Currency is mixed (AUD / NZD) — normalise before a group total.</div>
+        </div>
+      </details>
+
+      <details class="concept" id="c-client">
+        <summary>Client &amp; manager <span class="ctag ok">Verified</span> <span class="csrc">customer · custentity_f5_prj_manager</span></summary>
+        <div class="cbody">
+          <div class="sig"><span><b>Grain</b> one client · one manager</span></div>
+          <div class="ctable">
+            <div class="ccol"><h5>Measures &amp; dimensions</h5><ul>
+              <li>Projects · budget · RAG mix <b>by client</b> and <b>by manager</b></li>
+              <li class="dim">Manager email present on the project (<code>_prj_manager_email</code>)</li>
+            </ul></div>
+            <div class="ccol"><h5>Note</h5><ul>
+              <li class="dim">Manager <i>name</i> resolves via the email field even though the <code>employee</code> table is blocked</li>
+            </ul></div>
+          </div>
+        </div>
+      </details>
+
+      <div class="subhead">Relevant — blocked or not yet <span>each names why, and what it would unlock</span></div>
+
+      <details class="fconcept" id="f-time"><summary>Time &amp; effort <span class="ctag block">Blocked · permission</span> <span class="csrc">timebill · timesheet — denied</span></summary>
+        <div class="fbody"><p class="why"><b>The billable / non-billable split.</b> Time entries carry employee, hours, project and a billable flag — the whole basis of four of the twelve questions.</p>
+        <p class="unlock"><span class="k">Blocked because</span> <code>timebill</code>, <code>timesheet</code> and <code>resourceallocation</code> return HTTP 500 to this integration role, while <code>job</code> and <code>transaction</code> work — a <b>permission gap, not missing data</b>. Widening the role (Track Time + Employees) unlocks effort by person, non-billable %, utilisation.</p></div></details>
+
+      <details class="fconcept" id="f-people"><summary>People / employees <span class="ctag block">Blocked · permission</span> <span class="csrc">employee · resource — denied</span></summary>
+        <div class="fbody"><p class="why"><b>The person and team dimension.</b> Needed to roll effort up by person, team and practice.</p>
+        <p class="unlock"><span class="k">Blocked because</span> the <code>employee</code> / <code>resource</code> tables are permission-denied. Manager <i>name</i> is still reachable via the project's email field; full people analytics needs the role widened.</p></div></details>
+
+      <details class="fconcept" id="f-history"><summary>Portfolio history <span class="ctag block">Not snapshotted</span> <span class="csrc">no weekly capture</span></summary>
+        <div class="fbody"><p class="why"><b>The missing "since last week".</b> NetSuite holds today's RAG, not last week's — so movement can't be computed.</p>
+        <p class="unlock"><span class="k">Would unlock</span> RAG change vs last week · green→amber/red movement · RAG &amp; budget trend · early warning. Begins the day we snapshot the portfolio weekly.</p></div></details>
+
+      <details class="fconcept" id="f-milestone"><summary>Go-live milestones <span class="ctag block">Decode</span> <span class="csrc">projectedenddate · project_end_date</span></summary>
+        <div class="fbody"><p class="why"><b>When each project goes live.</b> Date fields exist (projected end, project end date, gone-live flag) but are stored as text and need a clean date parse.</p>
+        <p class="unlock"><span class="k">Would firm up</span> "going live in N months", the go-live calendar, and slippage — once the go-live date field and its format are pinned with <code>TO_DATE</code>.</p></div></details>
+
+      <details class="fconcept" id="f-billing"><summary>Invoicing &amp; revenue <span class="ctag cand">Candidate</span> <span class="csrc">transaction — reachable</span></summary>
+        <div class="fbody"><p class="why">Actual billed and revenue against each project — the other route to <b>remaining budget</b> and true margin.</p>
+        <p class="unlock"><span class="k">Would unlock</span> Budget vs billed · consumed-to-date · project margin · WIP. The <code>transaction</code> table (682k rows) is accessible — this is a modelling job, not an access gap.</p></div></details>
+    </section>
+
+    <!-- ══════════ PART II · QUESTIONS ══════════ -->
+    <div class="qhead"><div class="lead">Part II</div><h2>The twelve questions</h2><hr class="prule"></div>
+
+    <!-- EXHIBIT 1 -->
+    <section class="exhibit" id="ex1">
+      <div class="no">Exhibit 1</div><h3 class="ti">Project counts by RAG status, grouped by pillar</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Snapshot — live, active projects</b></div>
+      <div class="calcx"><span class="lbl">Calculus</span>count(project) <span class="cm">by:</span> pillar, rag</div>
+      <div class="figs num">
+        <div class="f"><div class="k">Green</div><div class="v">14,701</div><div class="s">98.5% of rated projects</div></div>
+        <div class="f"><div class="k">Amber</div><div class="v" style="color:#8a6318">168</div><div class="s">watch</div></div>
+        <div class="f"><div class="k">Red</div><div class="v neg">52</div><div class="s">intervene</div></div>
+        <div class="f"><div class="k">Need attention</div><div class="v neg">220</div><div class="s">Red + Amber</div></div>
+      </div>
+      <p class="body">Of ~14,900 rated active projects, <b>the portfolio is overwhelmingly green</b> — only <b>220 (1.5%) are
+        Red or Amber</b>. But the risk is <b>not spread evenly</b>: two pillars, <b>CEC and FO, hold more than half of
+        it</b>. That concentration is the answer worth acting on, not the aggregate.</p>
+      <table class="fin matrix num"><caption>Projects needing attention, by pillar (Red + Amber)</caption>
+        <thead><tr><th>Pillar</th><th class="r">Red</th><th class="r">Amber</th><th class="r">Attention</th><th class="r">Green</th></tr></thead>
+        <tbody>
+          <tr class="att"><td class="name">CEC</td><td class="rr red">17</td><td class="rr amb">41</td><td class="rr"><b>58</b></td><td class="rr">2,136</td></tr>
+          <tr class="att"><td class="name">FO</td><td class="rr red">13</td><td class="rr amb">41</td><td class="rr"><b>54</b></td><td class="rr">1,366</td></tr>
+          <tr><td class="name">NetSuite</td><td class="rr red">3</td><td class="rr amb">21</td><td class="rr">24</td><td class="rr">2,618</td></tr>
+          <tr><td class="name">DI</td><td class="rr red">3</td><td class="rr amb">15</td><td class="rr">18</td><td class="rr">459</td></tr>
+          <tr><td class="name">BC</td><td class="rr red">4</td><td class="rr amb">7</td><td class="rr">11</td><td class="rr">733</td></tr>
+          <tr><td class="name">HCM</td><td class="rr red">2</td><td class="rr amb">8</td><td class="rr">10</td><td class="rr">2,297</td></tr>
+          <tr><td class="name">CPM</td><td class="rr red">1</td><td class="rr amb">8</td><td class="rr">9</td><td class="rr">1,052</td></tr>
+          <tr><td class="name">ERP</td><td class="rr red">1</td><td class="rr amb">7</td><td class="rr">8</td><td class="rr">1,411</td></tr>
+          <tr><td class="name">CIS</td><td class="rr red">0</td><td class="rr amb">7</td><td class="rr">7</td><td class="rr">906</td></tr>
+          <tr><td class="name">Jemini</td><td class="rr red">4</td><td class="rr amb">1</td><td class="rr">5</td><td class="rr">94</td></tr>
+          <tr><td class="name">Others (8 pillars)</td><td class="rr red">4</td><td class="rr amb">12</td><td class="rr">16</td><td class="rr">1,629</td></tr>
+        </tbody>
+        <tfoot><tr><td>Total</td><td class="rr">52</td><td class="rr">168</td><td class="rr">220</td><td class="rr">14,701</td></tr></tfoot>
+      </table>
+      <details class="basis"><summary>Basis of preparation &amp; the query<span class="h">— how this is computed</span></summary>
+        <div class="drill">
+          <details class="dev"><summary>Show the query · developer</summary><pre class="sql">SELECT custentity_f5_prj_pillar AS pillar,
+       custentity_f5_project_rag AS rag,       -- 1=Red 2=Amber 3=Green
+       COUNT(*) AS n
+FROM   job
+WHERE  isinactive = 'F'
+  AND  custentity_f5_project_rag IS NOT NULL
+GROUP  BY custentity_f5_prj_pillar, custentity_f5_project_rag;
+-- decode pillar/rag codes client-side; BUILTIN.DF() errors inside GROUP BY.</pre></details>
+          <p class="basisnote"><span class="k">Population</span> Active projects with a RAG set (1,710 active have none — excluded). Green ≈ 98.5% is genuine, not a filter artefact.</p>
+          <p class="basisnote"><span class="k">Active pillar</span> Pillar = <code>department</code>; join <code>custentity_f5_prj_pillar → department.id</code> and filter <code>isinactive='F'</code> to drop retired pillars (only 2 stray projects). The same counts <b>roll up the tree</b> — group by department <code>parent</code> for a by-group (Enterprise Apps vs Microsoft) or by-division view.</p>
+        </div>
+      </details>
+      <p class="src"><b>Source:</b> NetSuite <code>job</code>.</p>
+    </section>
+
+    <!-- EXHIBIT 6 -->
+    <section class="exhibit" id="ex6">
+      <div class="no">Exhibit 6</div><h3 class="ti">What is the current RAG status for a given project?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Snapshot — live</b></div>
+      <div class="calcx"><span class="lbl">Calculus</span>rag(project) · assess(worst-of component RAGs)</div>
+      <p class="body">A lookup — but a <b>revealing</b> one. The overall RAG is not a single flag; it is the <b>worst of four
+        component RAGs</b> (budget · timeline · customer-satisfaction · resource). So the useful answer says <i>why</i>
+        a project is Red. Example — <b>"ABCO NetSuite Implementation" is Red because its budget and customer-satisfaction
+        KPIs are Red</b>, though timeline and resource are Green.</p>
+      <table class="fin num"><caption>A project's RAG, decomposed (live examples, all overall = Red)</caption>
+        <thead><tr><th>Project</th><th class="r">Budget</th><th class="r">Timeline</th><th class="r">Cust-sat</th><th class="r">Resource</th></tr></thead>
+        <tbody>
+          <tr><td class="name">ABCO NetSuite Implementation</td><td class="r"><span class="ragdot r"></span></td><td class="r"><span class="ragdot g"></span></td><td class="r"><span class="ragdot r"></span></td><td class="r"><span class="ragdot g"></span></td></tr>
+          <tr><td class="name">Active Components — Implementation</td><td class="r"><span class="ragdot r"></span></td><td class="r"><span class="ragdot r"></span></td><td class="r"><span class="ragdot a"></span></td><td class="r"><span class="ragdot a"></span></td></tr>
+          <tr><td class="name">Big Blue — Business Central A&amp;D</td><td class="r"><span class="ragdot r"></span></td><td class="r"><span class="ragdot r"></span></td><td class="r"><span class="ragdot r"></span></td><td class="r"><span class="ragdot g"></span></td></tr>
+        </tbody>
+      </table>
+      <details class="basis"><summary>The query<span class="h">— lookup + decomposition</span></summary>
+        <div class="drill"><details class="dev"><summary>Show the query · developer</summary><pre class="sql">SELECT companyname,
+       custentity_f5_project_rag     AS overall_rag,
+       custentity_f5_prj_budget_kpi  AS budget_rag,
+       custentity_f5_prj_timeline_kpi AS timeline_rag,
+       custentity_f5_rag_cus_sat     AS cust_sat_rag,
+       custentity_f5_rag_resource    AS resource_rag
+FROM   job
+WHERE  id = @projectId;</pre></details></div>
+      </details>
+      <p class="src"><b>Source:</b> NetSuite <code>job</code>.</p>
+    </section>
+
+    <!-- EXHIBIT 4 -->
+    <section class="exhibit" id="ex4">
+      <div class="no">Exhibit 4 <span class="pend">Blocked · history</span></div><h3 class="ti">Which projects changed RAG status compared with last week?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Change — this week vs last</b></div>
+      <div class="calcx"><span class="lbl">Calculus</span>Δ(rag, <span class="cm">vs:</span> last_week) <span class="cm">by:</span> project</div>
+      <div class="pending">
+        <div class="pstat">Blocked — no history is stored</div>
+        <p><span class="k">Needs</span> a <b>prior snapshot</b> of each project's RAG. NetSuite holds only the current value; nothing records what it was last week.</p>
+        <p><span class="k">Unlocks with</span> a <b>weekly portfolio snapshot</b> (<a class="cn" href="#f-history">Portfolio history</a>) — cheap to start, and it also answers Exhibit&nbsp;5 and any RAG/budget trend.</p>
+      </div>
+      <p class="src"><b>Source:</b> would be a snapshot table, captured weekly.</p>
+    </section>
+
+    <!-- EXHIBIT 5 -->
+    <section class="exhibit" id="ex5">
+      <div class="no">Exhibit 5 <span class="pend">Blocked · history</span></div><h3 class="ti">Which projects moved from green to amber or red?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Change — deterioration since last snapshot</b></div>
+      <div class="calcx"><span class="lbl">Calculus</span>rag <span class="cm">where:</span> was(green) &amp; now(amber ∨ red)</div>
+      <div class="pending">
+        <div class="pstat">Blocked — no history is stored</div>
+        <p><span class="k">Needs</span> the same weekly snapshot as Exhibit&nbsp;4. Deterioration is the highest-signal early warning — a green project sliding to amber/red is exactly what leadership wants flagged.</p>
+        <p><span class="k">Unlocks with</span> <a class="cn" href="#f-history">Portfolio history</a>. Until then, only today's 52 Red / 168 Amber are visible, not the direction of travel.</p>
+      </div>
+      <p class="src"><b>Source:</b> would be the weekly snapshot.</p>
+    </section>
+
+    <!-- EXHIBIT 2 -->
+    <section class="exhibit" id="ex2">
+      <div class="no">Exhibit 2</div><h3 class="ti">Remaining budget by project and by pillar</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Snapshot — active projects</b></div>
+      <div class="calcx"><span class="lbl">Calculus</span>sum(budget) <span class="cm">by:</span> pillar &nbsp; · &nbsp; remaining = budget − consumed</div>
+      <div class="figs num">
+        <div class="f"><div class="k">Total budget</div><div class="v"><span class="val" tabindex="0" data-exact="$742,000,000">~$742M</span></div><div class="s">~14,900 projects</div></div>
+        <div class="f"><div class="k">Biggest — FO</div><div class="v"><span class="val" tabindex="0" data-exact="$183,671,915">$183.7M</span></div><div class="s">1,420 projects</div></div>
+        <div class="f"><div class="k">Then CEC</div><div class="v"><span class="val" tabindex="0" data-exact="$159,803,814">$159.8M</span></div><div class="s">2,194 projects</div></div>
+      </div>
+      <p class="body"><b>Budget by pillar is answerable now</b> — and it mirrors the risk: <b>FO and CEC hold the most budget
+        <i>and</i> the most red/amber projects</b> (Exhibit&nbsp;1). The biggest bets are the most at-risk. <b>Remaining</b>
+        budget is the one gap: it needs consumed-to-date, which comes from time-costing (permission-blocked) or from
+        billed amounts (reachable via the transaction table — a modelling step away).</p>
+      <table class="fin num"><caption>Total project budget by pillar (mixed AUD/NZD)</caption>
+        <thead><tr><th>Pillar</th><th class="r">Projects</th><th class="r">Budget</th></tr></thead>
+        <tbody>
+          <tr><td class="name">FO</td><td class="r">1,420</td><td class="r fig"><span class="val" tabindex="0" data-exact="$183,671,915">$183.7M</span></td></tr>
+          <tr><td class="name">CEC</td><td class="r">2,194</td><td class="r fig"><span class="val" tabindex="0" data-exact="$159,803,814">$159.8M</span></td></tr>
+          <tr><td class="name">NetSuite</td><td class="r">2,642</td><td class="r fig"><span class="val" tabindex="0" data-exact="$80,531,900">$80.5M</span></td></tr>
+          <tr><td class="name">ERP</td><td class="r">1,419</td><td class="r fig"><span class="val" tabindex="0" data-exact="$61,020,125">$61.0M</span></td></tr>
+          <tr><td class="name">DI</td><td class="r">477</td><td class="r fig"><span class="val" tabindex="0" data-exact="$49,137,274">$49.1M</span></td></tr>
+          <tr><td class="name">CPM</td><td class="r">1,061</td><td class="r fig"><span class="val" tabindex="0" data-exact="$36,447,232">$36.4M</span></td></tr>
+          <tr><td class="name">BC · COM · HCM · others</td><td class="r">~5,700</td><td class="r fig">~$170M</td></tr>
+        </tbody>
+      </table>
+      <details class="basis"><summary>Basis &amp; the remaining-budget caveat<span class="h">— read before quoting "remaining"</span></summary>
+        <div class="drill">
+          <details class="dev"><summary>Show the query · developer</summary><pre class="sql">SELECT custentity_f5_prj_pillar AS pillar, COUNT(*) AS projects,
+       SUM(custentity_f5_total_project_budget) AS budget
+FROM   job
+WHERE  isinactive='F' AND custentity_f5_project_rag IS NOT NULL
+GROUP  BY custentity_f5_prj_pillar;</pre></details>
+          <p class="basisnote"><span class="k">Remaining</span> = budget − consumed-to-date. Consumed needs time-cost (<a class="cite" href="#f-time">blocked</a>) or billed-to-date (<a class="cite" href="#f-billing">transaction — reachable</a>). Currency mixed AUD/NZD; normalise before a single total.</p>
+        </div>
+      </details>
+      <p class="src"><b>Source:</b> NetSuite <code>job</code>.</p>
+    </section>
+
+    <!-- EXHIBIT 3 -->
+    <section class="exhibit" id="ex3">
+      <div class="no">Exhibit 3 <span class="pend">Decode</span></div><h3 class="ti">Which projects are going live in the next 3 months?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Forward — next 90 days</b></div>
+      <div class="calcx"><span class="lbl">Calculus</span>project <span class="cm">where:</span> go_live ∈ [today, today+3mo] &amp; not gone_live</div>
+      <div class="pending dec">
+        <div class="pstat">Data present — one decode away</div>
+        <p><span class="k">Have</span> the date fields — <code>projectedenddate</code>, <code>custentity_f5_project_end_date</code>, and a <code>gone_live</code> flag — plus the population filter.</p>
+        <p><span class="k">Decode</span> the dates are stored as <b>text</b> (dd/mm/yyyy), so a naïve <code>BETWEEN SYSDATE AND SYSDATE+90</code> matched only 1 project. A <code>TO_DATE</code> parse (and confirming which field is the true go-live date vs project end) firms this up.</p>
+        <p><span class="k">Then answers</span> the go-live calendar for the next quarter, by pillar — and, with history, slippage.</p>
+      </div>
+      <p class="src"><b>Source:</b> NetSuite <code>job</code> · <a class="cn" href="#f-milestone">go-live milestones</a>.</p>
+    </section>
+
+    <!-- EXHIBITS 7-10 : effort (permission-blocked) -->
+    <section class="exhibit" id="ex7">
+      <div class="no">Exhibit 7 <span class="pend">Blocked · permission</span></div><h3 class="ti">Total effort vs non-billable effort, by person</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Range — a period of time entries</b></div>
+      <div class="calcx"><span class="lbl">Calculus</span>sum(hours), sum(hours <span class="cm">where:</span> ¬billable) <span class="cm">by:</span> person</div>
+      <div class="pending">
+        <div class="pstat">Blocked — permission, not missing data</div>
+        <p><span class="k">Needs</span> the <b>time-entry</b> table (employee · hours · billable flag · project) and the <b>employee</b> table. Both return HTTP 500 to this integration role, while projects and transactions query fine — a role-permission gap.</p>
+        <p><span class="k">Unlocks with</span> Track-Time + Employees permission on the role (<a class="cn" href="#f-time">Time &amp; effort</a>, <a class="cn" href="#f-people">People</a>) — then Exhibits 7-10 all answer from one table.</p>
+      </div>
+      <p class="src"><b>Source:</b> would be <code>timebill</code> × <code>employee</code>.</p>
+    </section>
+    <section class="exhibit" id="ex8">
+      <div class="no">Exhibit 8 <span class="pend">Blocked · permission</span></div><h3 class="ti">What percentage of each person's effort is non-billable?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Range — a period</b></div>
+      <div class="calcx"><span class="lbl">Calculus</span>non_billable_hours ÷ total_hours <span class="cm">by:</span> person</div>
+      <div class="pending"><div class="pstat">Blocked — same time/employee permission gap</div>
+        <p><span class="k">Would show</span> each person's utilisation shortfall — the ratio managers watch. One <code>GROUP BY employee</code> once the time table is reachable.</p></div>
+      <p class="src"><b>Source:</b> would be <code>timebill</code>.</p>
+    </section>
+    <section class="exhibit" id="ex9">
+      <div class="no">Exhibit 9 <span class="pend">Blocked · permission</span></div><h3 class="ti">Non-billable effort by project</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Range — a period</b></div>
+      <div class="calcx"><span class="lbl">Calculus</span>sum(hours <span class="cm">where:</span> ¬billable) <span class="cm">by:</span> project</div>
+      <div class="pending"><div class="pstat">Blocked — same time permission gap</div>
+        <p><span class="k">Would show</span> which projects burn unbilled effort — the leakage against budget (Exhibit&nbsp;2). Joins straight to pillar and RAG once time is reachable.</p></div>
+      <p class="src"><b>Source:</b> would be <code>timebill</code> → <code>job</code>.</p>
+    </section>
+    <section class="exhibit" id="ex10">
+      <div class="no">Exhibit 10 <span class="pend">Blocked · permission</span></div><h3 class="ti">Which projects or teams have the highest non-billable effort?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Range — a period</b></div>
+      <div class="calcx"><span class="lbl">Calculus</span>non_billable_hours <span class="cm">by:</span> project ∨ team <span class="cm">top: n</span></div>
+      <div class="pending"><div class="pstat">Blocked — same time/employee permission gap</div>
+        <p><span class="k">Would show</span> the ranked worst offenders — the direct target list for utilisation recovery. Needs time (hours) + people (team roll-up), both permission-blocked.</p></div>
+      <p class="src"><b>Source:</b> would be <code>timebill</code> × <code>employee</code>.</p>
+    </section>
+
+    <!-- EXHIBIT 11 -->
+    <section class="exhibit" id="ex11">
+      <div class="no">Exhibit 11</div><h3 class="ti">What tables / entities back project, RAG, budget and time?</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Lineage — the model itself</b></div>
+      <div class="calcx"><span class="lbl">Calculus</span>lineage(measure) → entity · field</div>
+      <p class="body">The lineage answer — what each question actually reads:</p>
+      <table class="fin"><caption>Concept → NetSuite entity &amp; field</caption>
+        <thead><tr><th>Concept</th><th>Entity</th><th>Field</th><th class="r">Access</th></tr></thead>
+        <tbody>
+          <tr><td>Project</td><td><code>job</code></td><td>id · companyname · customer</td><td class="r"><span class="rag g">✓</span></td></tr>
+          <tr><td>RAG status</td><td><code>job</code></td><td>custentity_f5_project_rag (+4 sub-KPIs)</td><td class="r"><span class="rag g">✓</span></td></tr>
+          <tr><td>Pillar</td><td><code>job</code></td><td>custentity_f5_prj_pillar</td><td class="r"><span class="rag g">✓</span></td></tr>
+          <tr><td>Budget</td><td><code>job</code></td><td>custentity_f5_total_project_budget</td><td class="r"><span class="rag g">✓</span></td></tr>
+          <tr><td>Go-live date</td><td><code>job</code></td><td>projectedenddate · project_end_date</td><td class="r"><span class="rag a">decode</span></td></tr>
+          <tr><td>Time / effort</td><td><code>timebill</code></td><td>employee · hours · isbillable · job</td><td class="r"><span class="rag r">denied</span></td></tr>
+          <tr><td>People / teams</td><td><code>employee</code></td><td>name · department</td><td class="r"><span class="rag r">denied</span></td></tr>
+          <tr><td>History</td><td>—</td><td>not captured</td><td class="r"><span class="rag r">none</span></td></tr>
+        </tbody>
+      </table>
+      <p class="src"><b>Source:</b> the semantic model (Part I).</p>
+    </section>
+
+    <!-- EXHIBIT 12 -->
+    <section class="exhibit" id="ex12">
+      <div class="no">Exhibit 12</div><h3 class="ti">For a result, show the exact calculation logic used</h3><hr class="ti-rule">
+      <div class="period"><span class="pk">Time filter</span> <b>Lineage — the derivation</b></div>
+      <div class="calcx"><span class="lbl">Calculus</span>explain(measure) → grain · filter · formula</div>
+      <p class="body">Every answer states its own derivation — the whole point of the model. Two examples:</p>
+      <table class="fin"><caption>Measure → exact logic</caption>
+        <thead><tr><th>Measure</th><th>Logic</th></tr></thead>
+        <tbody>
+          <tr><td class="name">Projects needing attention (Ex 1)</td><td>Active projects (<code>isinactive='F'</code>) with a RAG set, where <code>custentity_f5_project_rag ∈ {1,2}</code>; count grouped by pillar.</td></tr>
+          <tr><td class="name">Overall RAG (Ex 6)</td><td><b>Worst-of</b> the four component RAGs — budget, timeline, customer-sat, resource. A project is Red if <i>any</i> component is Red. <span class="mnote warn">Inferred from data; confirm vs the scoring workflow.</span></td></tr>
+          <tr><td class="name">Total budget (Ex 2)</td><td><code>SUM(custentity_f5_total_project_budget)</code> over active, RAG-set projects; <b>remaining</b> = budget − consumed (consumed not yet available).</td></tr>
+        </tbody>
+      </table>
+      <p class="basisnote" style="margin-top:10px"><span class="k">Note</span> This is exactly what the "Basis of preparation" panel on every answered exhibit shows — the time filter, the derivation steps, the developer query, and the caveats — surfaced progressively so a reader sees the number first and the machinery on demand.</p>
+      <p class="src"><b>Source:</b> the program's provenance graph.</p>
+    </section>
+
+    <!-- ══════════ PART III · CALCULUS ══════════ -->
+    <section class="part" id="calc">
+      <div class="lead">Part III</div>
+      <h2>Calculus — the pure form of a question</h2>
+      <hr class="prule">
+      <p class="intro" id="calc-idea">The calculus writes each portfolio question in the model's own vocabulary —
+        <b>nouns</b> (project, pillar, RAG, budget, effort), a small set of <b>operators</b>, and its <b>parameters</b>
+        (the go-live window, the attention set). It states <i>what</i> is asked and, by its types, whether the model can
+        answer it. No implementation — the SuiteQL lives in the program, separately. Pure means free of implementation,
+        not free of parameters.</p>
+
+      <div class="subhead" id="calc-nouns">Nouns — from the model</div>
+      <div class="op"><span class="sg"><b>project</b></span><span class="ds">the entity; grain of the whole portfolio · 16,631 active</span></div>
+      <div class="op"><span class="sg"><b>rag</b></span><span class="ds">composite health · Red / Amber / Green · = worst-of four component RAGs</span></div>
+      <div class="op"><span class="sg"><b>pillar</b></span><span class="ds">practice line = a <b>department</b>; a 3-level tree (division → group → pillar), so the primary slice is also hierarchical · <i>active</i> = department not retired</span></div>
+      <div class="op"><span class="sg"><b>budget</b></span><span class="ds">a measure, additive per project · remaining = budget − consumed</span></div>
+      <div class="op"><span class="sg"><b>effort</b> · <b>billable</b></span><span class="ds">hours from time entries · a flow · <span class="cm">grain the model can't reach yet (permission)</span></span></div>
+      <div class="op"><span class="sg"><b>person</b> · <b>team</b></span><span class="ds">the people dimension · <span class="cm">blocked (permission)</span></span></div>
+      <div class="op"><span class="sg"><b>go_live_window</b> · <b>attention_set</b></span><span class="ds">parameters — free, learnable (3 mo · {Red, Amber})</span></div>
+
+      <div class="subhead" id="calc-ops">Operators — the algebra</div>
+      <div class="op"><span class="sg">count · sum <b>m</b></span><span class="ds">the measure to compute</span></div>
+      <div class="op"><span class="sg">by <b>d</b> @ <b>level</b></span><span class="ds">group along a dimension — and, for pillar, at any tree level (pillar · group · division) via the department <code>parent</code></span></div>
+      <div class="op"><span class="sg">where <b>φ</b></span><span class="ds">restrict — active pillar (<code>department.isinactive='F'</code>), RAG ∈ attention_set, go-live in window</span></div>
+      <div class="op"><span class="sg">assess(worst-of <b>…</b>)</span><span class="ds">roll component RAGs into the overall RAG</span></div>
+      <div class="op"><span class="sg">Δ(<b>m</b>, vs: <b>prior</b>)</span><span class="ds">change since last snapshot — <span class="cm">needs history</span></span></div>
+      <div class="op"><span class="sg">top <b>n</b></span><span class="ds">rank — worst non-billable, biggest budget</span></div>
+
+      <div class="subhead" id="calc-q">The twelve questions, in calculus <span>status: ✓ ready · ~ decode · ✗ blocked</span></div>
+      <table class="fin calc">
+        <thead><tr><th style="width:22px">#</th><th>Question</th><th>Expression</th><th class="r">Status</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td class="q">Counts by RAG × pillar</td><td class="e">count(project) <span class="cm">by:</span> pillar, rag</td><td class="st ok">✓</td></tr>
+          <tr><td>2</td><td class="q">Remaining budget by project/pillar</td><td class="e">sum(budget) <span class="cm">by:</span> pillar · remaining = budget − consumed</td><td class="st ok">✓ / ~</td></tr>
+          <tr><td>3</td><td class="q">Going live in next 3 months</td><td class="e">project <span class="cm">where:</span> go_live ∈ window</td><td class="st no">~ decode</td></tr>
+          <tr><td>4</td><td class="q">Changed RAG vs last week</td><td class="e">Δ(rag, <span class="cm">vs:</span> last_week) <span class="cm">by:</span> project</td><td class="st no">✗ history</td></tr>
+          <tr><td>5</td><td class="q">Moved green → amber/red</td><td class="e">rag <span class="cm">where:</span> was(green) &amp; now(∈ attention)</td><td class="st no">✗ history</td></tr>
+          <tr><td>6</td><td class="q">RAG for a given project</td><td class="e">rag(project) · assess(worst-of components)</td><td class="st ok">✓</td></tr>
+          <tr><td>7</td><td class="q">Effort vs non-billable by person</td><td class="e">sum(hours), sum(hours <span class="cm">where:</span> ¬billable) <span class="cm">by:</span> person</td><td class="st no">✗ perm</td></tr>
+          <tr><td>8</td><td class="q">% non-billable per person</td><td class="e">¬billable_hours ÷ hours <span class="cm">by:</span> person</td><td class="st no">✗ perm</td></tr>
+          <tr><td>9</td><td class="q">Non-billable effort by project</td><td class="e">sum(hours <span class="cm">where:</span> ¬billable) <span class="cm">by:</span> project</td><td class="st no">✗ perm</td></tr>
+          <tr><td>10</td><td class="q">Highest non-billable teams/projects</td><td class="e">¬billable_hours <span class="cm">by:</span> project ∨ team <span class="cm">top: n</span></td><td class="st no">✗ perm</td></tr>
+          <tr><td>11</td><td class="q">What entities are used</td><td class="e">lineage(measure) → entity · field</td><td class="st ok">✓</td></tr>
+          <tr><td>12</td><td class="q">Exact calculation logic</td><td class="e">explain(measure) → grain · filter · formula</td><td class="st ok">✓</td></tr>
+        </tbody>
+      </table>
+
+      <div class="subhead" id="calc-sim">What unlocks the rest <span>the blocks are two moves, not ten</span></div>
+      <p class="intro">The twelve questions fail for exactly <b>two</b> reasons, and each has one fix. <b>Six questions
+        (4, 5 + trend) need a weekly snapshot</b> — capture the portfolio's RAG and budget once a week and Δ becomes
+        computable. <b>Four questions (7-10) need one permission</b> — Track-Time + Employees on the integration role,
+        and effort/utilisation answers fall out of a single table. Plus one decode (go-live dates). So five answerable
+        today become <b>eleven</b> with a snapshot job and a role change — no new modelling. That is the portfolio's
+        path from reporting to a live, trend-aware, utilisation-aware view.</p>
+    </section>
+
+    <footer>Fusion5 · Project-portfolio semantic model (concepts) · twelve questions (5 answered live · 1 decode · 6 blocked: 2 on history, 4 on permission) · calculus (pure). Figures from live NetSuite (SuiteQL), July 2026.</footer>
+
+  </div></main>
+</div>
+</body>
+</html>
