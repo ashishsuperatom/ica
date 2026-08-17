@@ -39,7 +39,7 @@ export class ChannelDO {
       if (request.method === 'POST' && path === '/selftest') {
         const { projectId, serviceToken, question } = await request.json() as any
         if (!projectId || !serviceToken) return json({ ok: false, error: 'projectId + serviceToken required' }, 400)
-        const r = await this.runTurnRetrying(projectId, serviceToken, question || 'which branches make money', 'selftest')
+        const r = await this.runTurnRetrying(projectId, serviceToken, question || 'which branches make money', 'selftest', crypto.randomUUID())
         return json({ ok: true, category: r.category, answer: r.answer })
       }
 
@@ -54,15 +54,12 @@ export class ChannelDO {
         // Verify the request really came from the channel for THIS bot — BEFORE touching the hub, so a forged
         // request never wakes the engine or gets a reply.
         if (!(await adapter.verifyInbound(authToken ?? null, secrets))) return json({ ok: false, error: 'unauthorized' }, 401)
-        const sessionId = `${channel}:${message.conversation.conversationId}`
-        const conv = message.conversation as ConversationRef
-        // Typing indicator: post it immediately so the user knows the bot is working, and re-post on every
-        // engine status/tick so it stays visible through a long build (a typing activity expires in a few
-        // seconds). Fire-and-forget — a failed typing ping must never break the turn.
-        const typing = () => { const s = adapter.renderStatus?.('working'); if (s) void adapter.sendReply(conv, s, secrets).catch(() => {}) }
-        typing()
-        const r = await this.runTurnRetrying(projectId, cfg.serviceToken, message.text, sessionId, typing)
-        await adapter.sendReply(conv, adapter.renderAnswer(r.answer, r.category), secrets)
+        // Register the pending turn (qid → conversation ref) in DO storage: a durable queue so we always know
+        // which conversation to answer when the result lands, and so the reply happens exactly once. NEVER wait
+        // on the reflex/analyst here — a turn can take minutes; ack (200) immediately and reply in the background.
+        const qid = crypto.randomUUID()
+        await this.state.storage.put(`pending:${qid}`, { channel, conv: message.conversation, question: message.text, createdAt: Date.now() })
+        void this.handleTurn(qid, projectId, cfg.serviceToken, channel, message, secrets)
         return json({ ok: true })
       }
 
@@ -72,16 +69,39 @@ export class ChannelDO {
     }
   }
 
+  // Own one turn's whole lifecycle OFF the request path: keep the typing indicator alive, wait for the engine
+  // (up to a ceiling well ABOVE any engine timeout, so we never give up before it does), then reply to the
+  // stored conversation — or an error card if it truly failed. Idempotent via the pending record: we reply only
+  // if this qid is still pending, then clear it, so a turn is answered exactly once.
+  private async handleTurn(qid: string, projectId: string, serviceToken: string, channel: string, message: InboundMessage, secrets: ChannelSecrets): Promise<void> {
+    const adapter = channelAdapter(channel)!
+    const conv = message.conversation as ConversationRef
+    const sessionId = `${channel}:${conv.conversationId}`
+    const typing = () => { const s = adapter.renderStatus?.('working'); if (s) void adapter.sendReply(conv, s, secrets).catch(() => {}) }
+    typing()
+    let reply: unknown
+    try {
+      const r = await this.runTurnRetrying(projectId, serviceToken, message.text, sessionId, qid, typing)
+      reply = adapter.renderAnswer(r.answer, r.category)
+    } catch (err: any) {
+      reply = adapter.renderAnswer({ status: 'error', answer: `Sorry — I couldn't finish that. (${String(err?.message ?? err).slice(0, 160)})` } as any)
+    }
+    if (await this.state.storage.get(`pending:${qid}`)) {       // reply once
+      await this.state.storage.delete(`pending:${qid}`)
+      await adapter.sendReply(conv, reply, secrets).catch(() => {})
+    }
+  }
+
   // Ask one question, retrying a connection drop (the cold-wake case): the first attempt starts the machine
   // waking, and by the second attempt (~12-20s later) the engine is up and answers fast. onStatus keeps the
   // typing indicator alive across attempts. Only connection-level failures retry; an engine error does not.
-  private async runTurnRetrying(projectId: string, serviceToken: string, question: string, sessionId: string, onStatus?: () => void):
+  private async runTurnRetrying(projectId: string, serviceToken: string, question: string, sessionId: string, qid: string, onStatus?: () => void):
     Promise<{ category?: string; answer: any }> {
     const delays = [0, 12_000, 20_000]   // attempt 1 immediate; then wait for the wake to finish
     let lastErr: any
     for (let i = 0; i < delays.length; i++) {
       if (delays[i]) { onStatus?.(); await sleep(delays[i]) }
-      try { return await this.runTurn(projectId, serviceToken, question, sessionId, onStatus) }
+      try { return await this.runTurn(projectId, serviceToken, question, sessionId, qid, onStatus) }
       catch (e: any) { lastErr = e; if (!e?.retryable) throw e }
     }
     throw lastErr
@@ -89,18 +109,19 @@ export class ChannelDO {
 
   // Open an internal WS to the ProjectDO hub as a `runtime` client, ask one question,
   // resolve on analyst:answer. Event-driven; a timer is only the stall ceiling.
-  private runTurn(projectId: string, serviceToken: string, question: string, sessionId: string, onStatus?: () => void):
+  private runTurn(projectId: string, serviceToken: string, question: string, sessionId: string, qid: string, onStatus?: () => void):
     Promise<{ category?: string; answer: any }> {
     const stub = this.env.PROJECT.get(this.env.PROJECT.idFromName(`proj:${projectId}`))
     return stub.fetch(`https://do/_ws/${projectId}`, { headers: { Upgrade: 'websocket' } }).then((resp: Response) => {
       const ws = (resp as any).webSocket as WebSocket | undefined
       if (!ws) throw new Error('hub did not upgrade to a websocket')
       ws.accept()
-      const qid = crypto.randomUUID()
       return new Promise<{ category?: string; answer: any }>((resolve, reject) => {
         let settled = false
         const done = (fn: () => void) => { if (settled) return; settled = true; clearTimeout(timer); try { ws.close() } catch { /* closing */ } fn() }
-        const timer = setTimeout(() => done(() => reject(new Error('engine timed out'))), 6 * 60_000)
+        // Ceiling well ABOVE any engine timeout, so we never give up before the engine does (the engine's own
+        // timeout may be raised or made dynamic). A close/error before this fires is the cold-wake case (retried).
+        const timer = setTimeout(() => done(() => reject(new Error('engine timed out'))), 15 * 60_000)
         ws.addEventListener('message', (evt: MessageEvent) => {
           let msg: any; try { msg = JSON.parse(evt.data as string) } catch { return }
           const p = msg?.payload ?? msg
