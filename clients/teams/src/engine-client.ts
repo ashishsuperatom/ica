@@ -40,7 +40,15 @@ export function askEngine(opts: AskOpts): Promise<{ category?: string; answer: E
   const { question, sessionId, onWaking, onStatus, timeoutMs = 6 * 60_000 } = opts
   if (!config.projectId) return Promise.reject(new Error('SA_PROJECT_ID is not set'))
 
-  const url = `${config.hubWs}/_ws/${config.projectId}?token=${encodeURIComponent(config.engineToken)}`
+  // v1: authenticate as an adapter with the project API key (sk-proj-…). The DO also accepts a per-user JWT
+  // (?token=…); we'll switch to that once the platform token exists (docs/identity-and-access.md).
+  const cred = config.engineKey
+    ? `key=${encodeURIComponent(config.engineKey)}`
+    : `token=${encodeURIComponent(config.engineToken)}`
+  const url = `${config.hubWs}/_ws/${config.projectId}?${cred}`
+  const hello = config.engineKey
+    ? { type: 'hello', key: config.engineKey, role: 'runtime' }
+    : { type: 'hello', token: config.engineToken, role: 'runtime' }
   const qid = randomId()
 
   return new Promise((resolve, reject) => {
@@ -50,7 +58,7 @@ export function askEngine(opts: AskOpts): Promise<{ category?: string; answer: E
     const timer = setTimeout(() => done(() => reject(new Error('engine timed out'))), timeoutMs)
 
     ws.on('open', () => {
-      ws.send(JSON.stringify({ type: 'hello', token: config.engineToken, role: 'runtime' }))
+      ws.send(JSON.stringify(hello))
       ws.send(JSON.stringify({
         to: { type: 'code-engine' },
         payload: { t: 'analyse', question, projectId: config.projectId, role: 'user', sessionId, questionId: qid },

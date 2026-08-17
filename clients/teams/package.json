@@ -6,7 +6,8 @@
   "description": "Microsoft Teams bot surface onto the Superatom engine",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts"
+    "start": "tsx src/index.ts",
+    "ask": "tsx --env-file=.env scripts/ask.ts"
   },
   "dependencies": {
     "botbuilder": "^4.23.0",
