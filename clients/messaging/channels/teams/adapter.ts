@@ -62,11 +62,16 @@ export const teamsAdapter: ChannelAdapter = {
   },
 }
 
-// Client-credentials app token for the Bot Framework API. (No caching here — the DO
-// can cache it in state; kept simple for the adapter.)
+// Client-credentials app token for the Bot Framework API, cached per (appId,tenant) until ~1min before
+// expiry. The cache lives in the worker isolate, so repeated calls within a turn (typing pings + the final
+// reply) reuse one token instead of hitting Azure each time.
+const tokenCache = new Map<string, { token: string; exp: number }>()
 async function appToken(s: ChannelSecrets): Promise<string> {
   if (!s.appId || !s.appPassword) throw new Error('teams: appId/appPassword not configured for this project')
   const tenant = s.tenantId || 'botframework.com'
+  const key = `${s.appId}:${tenant}`
+  const cached = tokenCache.get(key)
+  if (cached && cached.exp > Date.now() + 60_000) return cached.token
   const res = await fetch(`https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -78,7 +83,9 @@ async function appToken(s: ChannelSecrets): Promise<string> {
     }),
   })
   if (!res.ok) throw new Error(`teams token failed (${res.status})`)
-  return ((await res.json()) as any).access_token as string
+  const j = (await res.json()) as any
+  tokenCache.set(key, { token: j.access_token, exp: Date.now() + (Number(j.expires_in) || 3600) * 1000 })
+  return j.access_token as string
 }
 
 // ── Adaptive Card (same shape as the local scaffold's, but plain JSON) ──────────

@@ -48,13 +48,16 @@ export class ChannelDO {
         if (!adapter) return json({ ok: false, error: `unknown channel ${channel}` }, 400)
         const cfg = (await this.state.storage.get<Config>('config')) ?? {}
         if (!cfg.serviceToken) return json({ ok: false, error: 'channel not configured (no serviceToken)' }, 409)
-        // Kick off the turn; reply when the engine answers (the DO stays alive on the open WS).
-        // We don't block the ingress on the whole build — but we DO await here so the DO keeps
-        // working; the worker calls us via ctx.waitUntil so this subrequest is allowed to run on.
         const sessionId = `${channel}:${message.conversation.conversationId}`
-        const r = await this.runTurn(projectId, cfg.serviceToken, message.text, sessionId)
         const secrets = cfg.secrets?.[channel] ?? {}
-        await adapter.sendReply(message.conversation as ConversationRef, adapter.renderAnswer(r.answer, r.category), secrets)
+        const conv = message.conversation as ConversationRef
+        // Typing indicator: post it immediately so the user knows the bot is working, and re-post on every
+        // engine status/tick so it stays visible through a long build (a typing activity expires in a few
+        // seconds). Fire-and-forget — a failed typing ping must never break the turn.
+        const typing = () => { const s = adapter.renderStatus?.('working'); if (s) void adapter.sendReply(conv, s, secrets).catch(() => {}) }
+        typing()
+        const r = await this.runTurn(projectId, cfg.serviceToken, message.text, sessionId, typing)
+        await adapter.sendReply(conv, adapter.renderAnswer(r.answer, r.category), secrets)
         return json({ ok: true })
       }
 
@@ -66,7 +69,7 @@ export class ChannelDO {
 
   // Open an internal WS to the ProjectDO hub as a `runtime` client, ask one question,
   // resolve on analyst:answer. Event-driven; a timer is only the stall ceiling.
-  private runTurn(projectId: string, serviceToken: string, question: string, sessionId: string):
+  private runTurn(projectId: string, serviceToken: string, question: string, sessionId: string, onStatus?: () => void):
     Promise<{ category?: string; answer: any }> {
     const stub = this.env.PROJECT.get(this.env.PROJECT.idFromName(`proj:${projectId}`))
     return stub.fetch(`https://do/_ws/${projectId}`, { headers: { Upgrade: 'websocket' } }).then((resp: Response) => {
@@ -82,7 +85,7 @@ export class ChannelDO {
           let msg: any; try { msg = JSON.parse(evt.data as string) } catch { return }
           const p = msg?.payload ?? msg
           switch (p?.t) {
-            case 'tick': case 'machine:waking': case 'analyst:status': return   // liveness / progress
+            case 'tick': case 'machine:waking': case 'analyst:status': onStatus?.(); return   // liveness / progress → keep typing alive
             case 'analyst:answer': return done(() => resolve({ category: p.category, answer: p.answer ?? {} }))
             case 'error': return done(() => reject(new Error(p.message ?? 'engine error')))
           }
