@@ -258,6 +258,11 @@ function OrgDetailPage() {
   const [projects, setProjects] = useState<any[]>([]); const [users, setUsers] = useState<any[]>([])
   const [showDeleted, setShowDeleted] = useState(false); const nav = useNavigate()
   const [conn, setConn] = useState<{ id: string; apiKey: string; wsUrl: string } | null>(null)   // external-project connection info (copyable panel)
+  const [svc, setSvc] = useState<{ projectId: string; channel: string; token: string; wsUrl: string; expiresAt: number } | null>(null)   // service-token (bot credential) copyable panel
+  const genServiceToken = async (projectId: string, channel: string) => {
+    const r = await api(`/projects/${projectId}/service-token`, { method: 'POST', body: JSON.stringify({ channel }) })
+    if (r.ok) setSvc(await r.json())
+  }
   const fetchProjects = useCallback(() => { if (token) api(`/projects?deleted=${showDeleted ? '1' : '0'}`).then(r => r.json()).then(setProjects).catch(() => {}) }, [token, api, showDeleted])
   useEffect(() => { if (!token) return; fetchProjects(); api('/users').then(r => r.json()).then(setUsers).catch(() => {}) }, [token, api, fetchProjects])
   async function createProject(e: React.FormEvent<HTMLFormElement>) {
@@ -294,6 +299,24 @@ function OrgDetailPage() {
           </div>
         )
       })()}
+      {svc && (() => {
+        const env = `SA_HUB_WS=${svc.wsUrl}\nSA_PROJECT_ID=${svc.projectId}\nSA_ENGINE_KEY=\nSA_ENGINE_TOKEN=${svc.token}`
+        const exp = new Date(svc.expiresAt).toLocaleDateString()
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setSvc(null)}>
+            <div className="card" style={{ maxWidth: 660, width: '92%', padding: 22 }} onClick={e => e.stopPropagation()}>
+              <h3 style={{ marginTop: 0 }}>{svc.channel} bot credential — service token</h3>
+              <p className="muted" style={{ marginTop: 4 }}>Paste into the surface's <code>.env</code> (e.g. <code>clients/teams/.env</code>). It authorizes the bot as a <code>runtime</code> for this project only, until {exp}. Revoke by removing the <code>{svc.projectId ? 'svc:' + svc.channel : ''}</code> member.</p>
+              <textarea readOnly value={env} onFocus={e => e.currentTarget.select()} rows={4}
+                style={{ width: '100%', fontFamily: 'monospace', fontSize: 13, padding: 12, borderRadius: 8, resize: 'vertical', whiteSpace: 'pre' }} />
+              <div className="row" style={{ gap: 8, marginTop: 12, alignItems: 'center' }}>
+                <button className="btn" onClick={() => { navigator.clipboard?.writeText(env); }}>Copy</button>
+                <button className="btn ghost" onClick={() => setSvc(null)} style={{ marginLeft: 'auto' }}>Close</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
       <div className="row" style={{ gap: 8, marginBottom: 18 }}>
         {(['projects', 'users'] as const).map(t => (
           <button key={t} className={`btn ghost ${tab === t ? 'on' : ''}`} onClick={() => setSearch({ tab: t })} style={{ textTransform: 'capitalize' }}>{t}</button>
@@ -318,7 +341,10 @@ function OrgDetailPage() {
               <div><strong>{p.name}</strong><br/><code className="mono">{p.id}</code></div>
               {p.deleted
                 ? <button className="btn sm ok" onClick={e => { e.stopPropagation(); restoreProject(p.id) }}>Restore</button>
-                : <button className="btn sm danger" onClick={e => { e.stopPropagation(); removeProject(p.id) }}>Delete</button>}
+                : <div className="row" style={{ gap: 8 }}>
+                    <button className="btn sm ghost" title="Generate a Teams bot credential (service token)" onClick={e => { e.stopPropagation(); genServiceToken(p.id, 'teams') }}>Teams token</button>
+                    <button className="btn sm danger" onClick={e => { e.stopPropagation(); removeProject(p.id) }}>Delete</button>
+                  </div>}
             </div>
           ))}
         </div>

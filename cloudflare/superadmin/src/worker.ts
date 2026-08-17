@@ -179,6 +179,30 @@ export default {
       if (subPath === 'status') {
         return handleProjectStatus(projectId, env)
       }
+      // Mint a long-lived SERVICE token for a headless client surface (Teams/Slack bot, mobile service, …).
+      // It's a normal platform JWT whose userId is a per-channel SERVICE MEMBER of this project — so the hub
+      // authorizes it as a `runtime` (it can ask questions), scoped by that membership. Revoke by removing the
+      // member. Superadmin-only (guarded above). This is the headless equivalent of the Clerk→JWT web login.
+      if (subPath === 'service-token') {
+        if (request.method !== 'POST') return new Response('method not allowed', { status: 405 })
+        const secret = env.JWT_SECRET
+        if (!secret) return new Response('server misconfigured: JWT_SECRET not set', { status: 500 })
+        const body = await request.json().catch(() => ({})) as { channel?: string; ttlDays?: number }
+        const channel = (body.channel || 'bot').toLowerCase().replace(/[^a-z0-9-]/g, '') || 'bot'
+        const ttlDays = Math.min(Math.max(body.ttlDays ?? 365, 1), 3650)
+        const userId = `svc:${channel}`
+        const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
+        // Register the service member in this project's DO (idempotent — INSERT OR REPLACE).
+        const mr = await stub.fetch(new Request('http://do/members', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ userId, role: 'service' }),
+        }))
+        if (!mr.ok) return new Response('failed to register service member', { status: 502 })
+        const exp = Math.floor(Date.now() / 1000) + ttlDays * 86400
+        const token = await signJwt({ userId, role: 'service', exp }, secret)
+        const wsUrl = `wss://${new URL(request.url).host}`
+        return Response.json({ token, userId, channel, projectId, wsUrl, expiresAt: exp * 1000 })
+      }
       const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
       return stub.fetch(new Request(
         `http://do/${subPath}${url.search}`, request
