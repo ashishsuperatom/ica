@@ -13,6 +13,9 @@
 export { OrgDO } from './do.js'
 export { ProjectDO } from './project-do.js'
 export { GlobalDO } from './global-do.js'
+export { ChannelDO } from './channel-do.js'
+// The channel-agnostic messaging module (Teams/Slack/… adapters) — imported, never inlined.
+import { channelAdapter } from '../../../clients/messaging/index.js'
 import { createMachine, stopMachine } from './fly.js'
 
 // ── JWT helpers (Web Crypto, no dependencies) ───────────────────────────────
@@ -192,6 +195,40 @@ export default {
     }
 
     // ── Project API (machine status, etc.) ─────────────────────────────────
+    // ── Messaging ingress: /api/messaging/<projectId>/<channel>/<hook> ─────────
+    // Project-scoped by URL (no KV, no global DO). Verify + parse via the channel
+    // adapter, hand the turn to that project's ChannelDO (a separate DO, so the
+    // ProjectDO stays clean). The Worker only routes + acks; the ChannelDO owns the
+    // engine round-trip and the reply.
+    const msgMatch = path.match(/^\/api\/messaging\/([^/]+)\/([^/]+)\/(.+)/)
+    if (msgMatch) {
+      const [, projectId, channel, hook] = msgMatch
+      const chan = env.CHANNEL.get(env.CHANNEL.idFromName(`chan:${projectId}`))
+
+      // Onboarding: store the hub service token + per-channel bot secrets. Superadmin only.
+      if (hook === 'config') {
+        if (!(await requireSuperadmin(request, env))) return new Response('unauthorized', { status: 401 })
+        return chan.fetch('https://do/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: await request.text() })
+      }
+
+      // TEST-ONLY: run one engine turn and return the answer (no channel reply). The
+      // service token goes in the body (it IS the credential), so this proves the
+      // ChannelDO↔hub↔engine loop in Cloudflare without any Azure/Teams setup.
+      if (hook === 'selftest') {
+        const body = JSON.parse((await request.text()) || '{}'); body.projectId = projectId
+        return chan.fetch('https://do/selftest', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      }
+
+      // Real channel webhook (Teams 'messages', Slack 'events'): verify → parse → forward.
+      const adapter = channelAdapter(channel)
+      if (!adapter) return new Response('unknown channel', { status: 404 })
+      if (!(await adapter.verifyInbound(request.clone(), {}))) return new Response('unauthorized', { status: 401 })
+      const message = await adapter.parseInbound(request)
+      if (!message) return new Response('', { status: 200 })   // non-message event → ack, nothing to do
+      ctx.waitUntil(chan.fetch('https://do/inbound', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ projectId, channel, message }) }))
+      return new Response('', { status: 200 })   // ack the channel immediately; reply comes proactively
+    }
+
     const projMatch = path.match(/^\/api\/projects\/([^/]+)\/(.+)/)
     if (projMatch) {
       // Admin/provisioning surface — require a valid superadmin JWT (the admin SPA sends it as

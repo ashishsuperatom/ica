@@ -16,6 +16,10 @@ name = "PROJECT"
 class_name = "GlobalDO"
 name = "GLOBAL"
 
+[[durable_objects.bindings]]
+class_name = "ChannelDO"
+name = "CHANNEL"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["OrgDO"]
@@ -27,6 +31,10 @@ new_sqlite_classes = ["ProjectDO"]
 [[migrations]]
 tag = "v3"
 new_sqlite_classes = ["GlobalDO"]
+
+[[migrations]]
+tag = "v4"
+new_sqlite_classes = ["ChannelDO"]
 
 [vars]
 # Secrets (JWT_SECRET, CLERK_SECRET_KEY, FLY_API_TOKEN) are NOT here — they live in
