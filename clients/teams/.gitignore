@@ -1,0 +1,3 @@
+# packaged app + local icons (add your own; not committed)
+*.zip
+appPackage/*.png
