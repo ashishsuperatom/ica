@@ -54,7 +54,16 @@ export function askEngine(opts: AskOpts): Promise<{ category?: string; answer: E
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(url)
     let settled = false
-    const done = (fn: () => void) => { if (settled) return; settled = true; clearTimeout(timer); try { ws.close() } catch { /* already closing */ } fn() }
+    // Keepalive: a suspended engine can take ~20-30s to wake, during which almost nothing flows on this
+    // socket — long enough for an intermediary to drop it (seen as a 1006 close). A periodic ping frame keeps
+    // the connection alive through the wake gap and any quiet stretch of a long analyst build.
+    let ping: ReturnType<typeof setInterval> | null = setInterval(() => { try { ws.ping() } catch { /* not open */ } }, 15_000)
+    const done = (fn: () => void) => {
+      if (settled) return; settled = true
+      clearTimeout(timer); if (ping) { clearInterval(ping); ping = null }
+      try { ws.close() } catch { /* already closing */ }
+      fn()
+    }
     const timer = setTimeout(() => done(() => reject(new Error('engine timed out'))), timeoutMs)
 
     ws.on('open', () => {
