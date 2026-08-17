@@ -37,8 +37,11 @@ export const teamsAdapter: ChannelAdapter = {
 
   async parseInbound(req): Promise<InboundMessage | null> {
     const a = await req.json().catch(() => null) as any
-    if (!a || a.type !== 'message') return null            // ignore non-message activities
-    const text = (a.text ?? '').trim()
+    // Only real chat messages. Reactions (👍❤️) arrive as 'messageReaction' activities — dropped here. We take
+    // ONLY the typed text; a quoted/replied message is a separate attachment we never read (keep it minimal).
+    if (!a || a.type !== 'message') return null
+    // Strip @-mention markup ("<at>Bot</at> question" → "question") so channels/group chats send a clean question.
+    const text = (a.text ?? '').replace(/<at\b[^>]*>.*?<\/at>/gi, ' ').replace(/\s+/g, ' ').trim()
     if (!text) return null
     return {
       text,
