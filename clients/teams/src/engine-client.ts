@@ -82,7 +82,12 @@ export function askEngine(opts: AskOpts): Promise<{ category?: string; answer: E
     })
 
     ws.on('error', (err) => done(() => reject(err)))
-    ws.on('close', () => done(() => reject(new Error('connection closed before an answer arrived'))))
+    ws.on('close', (code, reasonBuf) => {
+      const reason = reasonBuf?.length ? reasonBuf.toString() : ''
+      // Surface the hub's close code/reason — e.g. 4001 "Invalid JWT" (bad/absent credential),
+      // 4003 "Not a member of this project" — so auth failures are legible, not "closed".
+      done(() => reject(new Error(`connection closed before an answer (code ${code}${reason ? `: ${reason}` : ''})`)))
+    })
   })
 }
 
