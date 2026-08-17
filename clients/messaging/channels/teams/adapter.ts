@@ -92,7 +92,7 @@ function adaptiveCard(a: Answer, category?: string): unknown {
     const cols = a.table.columns, rows = a.table.rows ?? []
     const shown = rows.slice(0, MAX_ROWS)
     body.push({
-      type: 'Table', columns: cols.map(() => ({ width: 1 })), firstRowAsHeaders: true,
+      type: 'Table', columns: cols.map((_, i) => ({ width: i === 0 ? 2 : 1 })), firstRowAsHeaders: true,
       rows: [row(cols.map(String), true), ...shown.map((r) => row(cols.map((_, i) => fmt(r[i]))))],
       spacing: 'Medium',
     })
@@ -100,10 +100,12 @@ function adaptiveCard(a: Answer, category?: string): unknown {
     if (total > shown.length) body.push({ type: 'TextBlock', text: `Showing ${shown.length} of ${total} rows`, size: 'Small', isSubtle: true, spacing: 'Small' })
   }
   if (a.period) body.push({ type: 'TextBlock', text: a.period, size: 'Small', isSubtle: true, wrap: true, spacing: 'Small' })
-  return { $schema: 'http://adaptivecards.io/schemas/adaptive-card.json', type: 'AdaptiveCard', version: '1.5', body }
+  // msteams.width:'Full' makes the card use the FULL chat-pane width (default is ~half), so the table gets
+  // room to breathe instead of wrapping every cell.
+  return { $schema: 'http://adaptivecards.io/schemas/adaptive-card.json', type: 'AdaptiveCard', version: '1.5', msteams: { width: 'Full' }, body }
 }
 
 function row(cells: string[], header = false): unknown {
-  return { type: 'TableRow', cells: cells.map((c) => ({ type: 'TableCell', items: [{ type: 'TextBlock', text: c, wrap: true, weight: header ? 'Bolder' : 'Default', size: 'Small' }] })) }
+  return { type: 'TableRow', cells: cells.map((c) => ({ type: 'TableCell', items: [{ type: 'TextBlock', text: c, wrap: true, weight: header ? 'Bolder' : 'Default' }] })) }
 }
 function fmt(v: unknown): string { return v == null ? '' : typeof v === 'number' ? v.toLocaleString() : String(v) }
