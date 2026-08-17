@@ -10,18 +10,20 @@
 // Harness/model default to opencode + deepseek-v4-flash (the 2026-07-31 snapshot on the opencode-go gateway),
 // overridable per-agent from .env (ICA_REFLEX_HARNESS / ICA_REFLEX_MODEL / ICA_REFLEX_PROVIDER) with NO code change.
 
-import { readFile } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { createSession, type Harness, type Session } from '../../ica/index.js'
+import { loadPrompt } from '../../prompts.js'
 import { basisFromPairs, programCatalog, renderVocab, type BasisPair, type NodeStore, type ProgramEntry } from '@superatom/node-store'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+// The reflex prompt, via the override layer (volume override for the current image → baked fallback).
+const reflexPrompt = () => loadPrompt(join(__dirname, 'SYSTEM.md'), 'reflex/SYSTEM.md')
 
-/** Deterministic hash of the instructions — a prompt change → fresh session, never a stale resume. */
+/** Deterministic hash of the EFFECTIVE instructions — a prompt (or override) change → fresh session. */
 export async function promptVersion(): Promise<string> {
-  return createHash('sha1').update(await readFile(join(__dirname, 'SYSTEM.md'), 'utf8').catch(() => '')).digest('hex').slice(0, 12)
+  return createHash('sha1').update(reflexPrompt()).digest('hex').slice(0, 12)
 }
 
 export type Param = { role: string; text: string; type?: string; value?: unknown }
@@ -73,7 +75,6 @@ export function createReflex(opts: ReflexOpts) {
   const model = opts.ica?.model ?? process.env.ICA_REFLEX_MODEL ?? 'deepseek-v4-flash'
   const provider = opts.ica?.provider ?? process.env.ICA_REFLEX_PROVIDER ?? 'opencode-go'
   let session: Session | null = null
-  let system: string | null = null
 
   /**
    * Question (+ the program catalog) → intent coordinate, with an optional reuse pick. Stateless: each call
@@ -81,7 +82,7 @@ export function createReflex(opts: ReflexOpts) {
    * agent reads the real programs, it doesn't guess against a blind index.
    */
   async function coordinate(question: string, catalog: ProgramEntry[] = [], vocab?: string): Promise<IntentCoordinate> {
-    system ??= await readFile(join(__dirname, 'SYSTEM.md'), 'utf8')
+    const system = reflexPrompt()   // fresh each turn → an edited override goes live without a restart
     session ??= createSession(harness, { cwd: opts.cwd, model, provider, baseUrl: opts.ica?.baseUrl })
     const t0 = Date.now()
     // The LIVE axis vocabulary — PREFER these tokens over minting near-duplicates; grows as the space evolves.
@@ -99,7 +100,7 @@ export function createReflex(opts: ReflexOpts) {
   return {
     coordinate,
     /** Pre-create the session (connect to the warm opencode server) so the first route() has no cold start. */
-    async warmup() { system ??= await readFile(join(__dirname, 'SYSTEM.md'), 'utf8'); session ??= createSession(harness, { cwd: opts.cwd, model, provider, baseUrl: opts.ica?.baseUrl }); await session.warmup?.() },
+    async warmup() { session ??= createSession(harness, { cwd: opts.cwd, model, provider, baseUrl: opts.ica?.baseUrl }); await session.warmup?.() },
     /**
      * Every question goes through here. The agent reads the DB program catalog and either picks a program to
      * REUSE or routes to BUILD. We validate its pick against the DB (the intent must still have a program);

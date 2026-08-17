@@ -7,6 +7,7 @@
 // and units accumulate in ./units/ — so a calculation is defined once and reused across questions.
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { loadPrompt } from '../../prompts.js'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
@@ -15,13 +16,15 @@ import { execProgram } from '../../exec-program.js'
 import { CATEGORIES, type Category } from './classify.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+// Analyst prompt files via the override layer (volume override for the current image → baked fallback).
+const sysFile = (f: string) => loadPrompt(join(__dirname, 'system', f), 'analyst/system/' + f)
 
 // Deterministic hash of the analyst's instruction files. When it changes, the engine starts a fresh
 // session instead of resuming one whose in-context behaviour predates the new instructions.
 export async function promptVersion(): Promise<string> {
   const files = ['base.md', 'program_authoring.md', 'simple_lookup.md', 'complex_lookup.md', 'comparison.md', 'causal.md', 'counterfactual.md', 'analysis.md']
   const h = createHash('sha1')
-  for (const f of files) h.update(await readFile(join(__dirname, 'system', f), 'utf8').catch(() => ''))
+  for (const f of files) h.update(sysFile(f))
   return h.digest('hex').slice(0, 12)
 }
 
@@ -78,11 +81,11 @@ export interface Analyst {
 // decides which category fits THIS question and follows that shape, then reports it. (classify.ts is kept
 // for future pre-agent guardrails; it just isn't used to route here.)
 async function fullSystem(): Promise<string> {
-  const base = await readFile(join(__dirname, 'system', 'base.md'), 'utf8')
-  const authoring = await readFile(join(__dirname, 'system', 'program_authoring.md'), 'utf8').catch(() => '')
+  const base = sysFile('base.md')
+  const authoring = sysFile('program_authoring.md')
   let shapes = ''
   for (const c of CATEGORIES) {
-    const s = await readFile(join(__dirname, 'system', `${c}.md`), 'utf8').catch(() => '')
+    const s = sysFile(`${c}.md`)
     if (s.trim()) shapes += '\n\n' + s.trim()
   }
   return `${base}\n\n---\n\n${authoring.trim()}\n\n---\n\n# Answer shapes — decide which fits THIS question, follow its shape, and report it as \`category\`\n${shapes}`

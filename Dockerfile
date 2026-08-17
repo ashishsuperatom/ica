@@ -74,6 +74,12 @@ RUN printf 'export HOME=/app/data/agent-home\nmkdir -p "$HOME" 2>/dev/null\nexpo
 RUN mkdir -p /app/data/engine-data /app/data/workspace /app/data/datasources
 VOLUME ["/app/data"]
 
+# ── Build stamp ───────────────────────────────────────────────────────────────
+# Unique id for THIS image. The prompt-override layer (apps/engine/prompts.ts) honors a volume override only
+# when its stamp matches this id — so a freshly built image's baked prompts always win over a stale override.
+# Placed last (after all COPYs) so it regenerates whenever anything above changed, without busting caches.
+RUN head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n' > /app/BUILD_ID
+
 # ── Startup ─────────────────────────────────────────────────────────────────
 COPY vm/docker/start.sh /start.sh
 RUN chmod +x /start.sh
