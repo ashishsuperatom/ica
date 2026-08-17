@@ -1,4 +1,14 @@
-# Microsoft Teams surface
+# Microsoft Teams — LOCAL DEV/TEST HARNESS (not production)
+
+> ⚠️ This folder is the **local test harness** — a Node/restify server using the
+> Bot Framework SDK, for driving Teams from your machine (Bot Framework Emulator
+> / a dev tunnel) **without Cloudflare**. It was how we first proved the
+> transport.
+>
+> **The PRODUCTION Teams bot runs on Cloudflare** — code lives in
+> **`../messaging/`** (the channel-agnostic layer + `channels/teams/` adapter),
+> hosted by the hub Worker + a `ChannelDO`, configured from the admin app's
+> **Channels** tab. Use that for anything real; this harness is dev-only.
 
 A Teams **bot**: you @-mention it (or DM it) a question, it asks the Superatom
 engine, and replies with the answer (prose + figures + a table as an Adaptive
