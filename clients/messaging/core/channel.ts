@@ -49,9 +49,11 @@ export interface ChannelSecrets {
 export interface ChannelAdapter {
   readonly channel: Surface
 
-  // Is this inbound HTTP request genuinely from the channel? (Teams: Bot Framework
-  // JWT; Slack: signing-secret HMAC.) Reject forgeries before doing any work.
-  verifyInbound(req: Request, secrets: ChannelSecrets): Promise<boolean>
+  // Is this inbound genuinely from the channel? (Teams: validate the Bot Framework
+  // JWT bearer token against the App ID; Slack: signing-secret HMAC.) Verified in
+  // the ChannelDO, where the per-project secrets live, BEFORE touching the hub — so
+  // a forged request never wakes the engine. `authToken` is the bearer token (Teams).
+  verifyInbound(authToken: string | null, secrets: ChannelSecrets): Promise<boolean>
 
   // Normalize the inbound request into a message + conversation ref. Return null
   // for events we don't answer (the bot's own echo, non-message events, etc.).

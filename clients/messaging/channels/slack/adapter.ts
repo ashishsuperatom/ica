@@ -8,10 +8,10 @@ import type { ChannelAdapter, ChannelSecrets, ConversationRef, InboundMessage } 
 export const slackAdapter: ChannelAdapter = {
   channel: 'slack',
 
-  async verifyInbound(_req: Request, _secrets: ChannelSecrets): Promise<boolean> {
-    // TODO: verify the Slack request signature — HMAC-SHA256 over
-    // `v0:${timestamp}:${rawBody}` with the signing secret, compared to
-    // X-Slack-Signature; reject stale timestamps.
+  async verifyInbound(_authToken: string | null, _secrets: ChannelSecrets): Promise<boolean> {
+    // TODO: Slack doesn't use a bearer token — verify the request signature instead
+    // (HMAC-SHA256 over `v0:${timestamp}:${rawBody}` with the signing secret, vs
+    // X-Slack-Signature; reject stale timestamps). Will need the raw body, not a token.
     return false
   },
 

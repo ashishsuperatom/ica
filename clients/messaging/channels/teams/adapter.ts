@@ -12,14 +12,27 @@ const MAX_ROWS = 12
 export const teamsAdapter: ChannelAdapter = {
   channel: 'teams',
 
-  async verifyInbound(req, _secrets): Promise<boolean> {
-    // The request must carry a Bot Framework-signed bearer token in Authorization.
-    // TODO(security): fully validate the JWT — fetch the BF OpenID metadata + JWKS,
-    // verify signature, issuer (https://api.botframework.com), and audience (== appId),
-    // and the channel-signed claims. For now we require the header to be present so a
-    // naked POST is rejected; complete signature validation before production.
-    const auth = req.headers.get('authorization') || ''
-    return /^bearer\s+.+/i.test(auth)
+  async verifyInbound(authToken, secrets): Promise<boolean> {
+    // Fully validate the Bot Framework JWT: RS256 signature against the BF JWKS, plus
+    // issuer (the Bot Connector) and audience (== our bot App ID) and expiry. This is
+    // what proves the request really came from Microsoft for THIS bot. (Emulator-issued
+    // tokens use a different issuer and are intentionally not accepted here.)
+    if (!authToken) return false
+    try {
+      const [h64, p64, s64] = authToken.split('.')
+      if (!h64 || !p64 || !s64) return false
+      const header = JSON.parse(b64urlStr(h64))
+      const claims = JSON.parse(b64urlStr(p64))
+      if (secrets.appId && claims.aud !== secrets.appId) return false
+      if (claims.iss !== 'https://api.botframework.com') return false
+      const now = Math.floor(Date.now() / 1000)
+      if (typeof claims.exp === 'number' && claims.exp < now - 300) return false   // 5-min skew
+      const jwk = await botFrameworkJwk(header.kid)
+      if (!jwk) return false
+      const key = await crypto.subtle.importKey('jwk', { kty: 'RSA', n: jwk.n, e: jwk.e, alg: 'RS256', ext: true },
+        { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify'])
+      return await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, b64urlBytes(s64), new TextEncoder().encode(`${h64}.${p64}`))
+    } catch { return false }
   },
 
   async parseInbound(req): Promise<InboundMessage | null> {
@@ -116,3 +129,23 @@ function row(cells: string[], header = false): unknown {
   return { type: 'TableRow', cells: cells.map((c) => ({ type: 'TableCell', items: [{ type: 'TextBlock', text: c, wrap: true, weight: header ? 'Bolder' : 'Default' }] })) }
 }
 function fmt(v: unknown): string { return v == null ? '' : typeof v === 'number' ? v.toLocaleString() : String(v) }
+
+// ── Bot Framework JWKS (for inbound JWT validation) ───────────────────────────
+// Cache the signing keys (refreshed daily). The OpenID config points at the JWKS uri.
+let jwksCache: { exp: number; keys: any[] } = { exp: 0, keys: [] }
+async function botFrameworkJwk(kid: string): Promise<any | null> {
+  if (jwksCache.exp < Date.now()) {
+    const cfg = await (await fetch('https://login.botframework.com/v1/.well-known/openidconfiguration')).json() as any
+    const jwks = await (await fetch(cfg.jwks_uri)).json() as any
+    jwksCache = { exp: Date.now() + 24 * 3600_000, keys: jwks.keys ?? [] }
+  }
+  return jwksCache.keys.find((k) => k.kid === kid) ?? null
+}
+
+function b64urlBytes(s: string): Uint8Array {
+  const b = atob(s.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(s.length / 4) * 4, '='))
+  const out = new Uint8Array(b.length)
+  for (let i = 0; i < b.length; i++) out[i] = b.charCodeAt(i)
+  return out
+}
+function b64urlStr(s: string): string { return new TextDecoder().decode(b64urlBytes(s)) }

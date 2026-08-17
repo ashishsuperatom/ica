@@ -16,6 +16,8 @@ import { channelAdapter, type ChannelSecrets, type ConversationRef, type Inbound
 
 type Config = { serviceToken?: string; secrets?: Record<string, ChannelSecrets> }
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { 'content-type': 'application/json' } })
+const retryable = (e: Error) => Object.assign(e, { retryable: true })
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 export class ChannelDO {
   constructor(private state: DurableObjectState, private env: any) {}
@@ -37,26 +39,29 @@ export class ChannelDO {
       if (request.method === 'POST' && path === '/selftest') {
         const { projectId, serviceToken, question } = await request.json() as any
         if (!projectId || !serviceToken) return json({ ok: false, error: 'projectId + serviceToken required' }, 400)
-        const r = await this.runTurn(projectId, serviceToken, question || 'which branches make money', 'selftest')
+        const r = await this.runTurnRetrying(projectId, serviceToken, question || 'which branches make money', 'selftest')
         return json({ ok: true, category: r.category, answer: r.answer })
       }
 
-      // Real inbound: a parsed channel message. Run the turn, then reply to the channel.
+      // Real inbound: a parsed channel message. Verify authenticity, run the turn, reply to the channel.
       if (request.method === 'POST' && path === '/inbound') {
-        const { projectId, channel, message } = await request.json() as { projectId: string; channel: string; message: InboundMessage }
+        const { projectId, channel, message, authToken } = await request.json() as { projectId: string; channel: string; message: InboundMessage; authToken: string | null }
         const adapter = channelAdapter(channel)
         if (!adapter) return json({ ok: false, error: `unknown channel ${channel}` }, 400)
         const cfg = (await this.state.storage.get<Config>('config')) ?? {}
         if (!cfg.serviceToken) return json({ ok: false, error: 'channel not configured (no serviceToken)' }, 409)
-        const sessionId = `${channel}:${message.conversation.conversationId}`
         const secrets = cfg.secrets?.[channel] ?? {}
+        // Verify the request really came from the channel for THIS bot — BEFORE touching the hub, so a forged
+        // request never wakes the engine or gets a reply.
+        if (!(await adapter.verifyInbound(authToken ?? null, secrets))) return json({ ok: false, error: 'unauthorized' }, 401)
+        const sessionId = `${channel}:${message.conversation.conversationId}`
         const conv = message.conversation as ConversationRef
         // Typing indicator: post it immediately so the user knows the bot is working, and re-post on every
         // engine status/tick so it stays visible through a long build (a typing activity expires in a few
         // seconds). Fire-and-forget — a failed typing ping must never break the turn.
         const typing = () => { const s = adapter.renderStatus?.('working'); if (s) void adapter.sendReply(conv, s, secrets).catch(() => {}) }
         typing()
-        const r = await this.runTurn(projectId, cfg.serviceToken, message.text, sessionId, typing)
+        const r = await this.runTurnRetrying(projectId, cfg.serviceToken, message.text, sessionId, typing)
         await adapter.sendReply(conv, adapter.renderAnswer(r.answer, r.category), secrets)
         return json({ ok: true })
       }
@@ -65,6 +70,21 @@ export class ChannelDO {
     } catch (e: any) {
       return json({ ok: false, error: String(e?.message ?? e) }, 500)
     }
+  }
+
+  // Ask one question, retrying a connection drop (the cold-wake case): the first attempt starts the machine
+  // waking, and by the second attempt (~12-20s later) the engine is up and answers fast. onStatus keeps the
+  // typing indicator alive across attempts. Only connection-level failures retry; an engine error does not.
+  private async runTurnRetrying(projectId: string, serviceToken: string, question: string, sessionId: string, onStatus?: () => void):
+    Promise<{ category?: string; answer: any }> {
+    const delays = [0, 12_000, 20_000]   // attempt 1 immediate; then wait for the wake to finish
+    let lastErr: any
+    for (let i = 0; i < delays.length; i++) {
+      if (delays[i]) { onStatus?.(); await sleep(delays[i]) }
+      try { return await this.runTurn(projectId, serviceToken, question, sessionId, onStatus) }
+      catch (e: any) { lastErr = e; if (!e?.retryable) throw e }
+    }
+    throw lastErr
   }
 
   // Open an internal WS to the ProjectDO hub as a `runtime` client, ask one question,
@@ -90,8 +110,12 @@ export class ChannelDO {
             case 'error': return done(() => reject(new Error(p.message ?? 'engine error')))
           }
         })
-        ws.addEventListener('close', (e: CloseEvent) => done(() => reject(new Error(`hub closed (${e.code}${e.reason ? ': ' + e.reason : ''})`))))
-        ws.addEventListener('error', () => done(() => reject(new Error('hub ws error'))))
+        // A close/error before an answer is almost always the internal WS dropping during a ~30s cold machine
+        // wake (the socket goes silent while the engine boots, and an intermediary cuts it). Mark these
+        // RETRYABLE — the caller reconnects after the machine is up and gets a fast answer. A timeout is NOT
+        // retryable (that's a genuinely long build, not a wake).
+        ws.addEventListener('close', (e: CloseEvent) => done(() => reject(retryable(new Error(`hub closed (${e.code}${e.reason ? ': ' + e.reason : ''})`)))))
+        ws.addEventListener('error', () => done(() => reject(retryable(new Error('hub ws error')))))
         ws.send(JSON.stringify({ type: 'hello', role: 'runtime', token: serviceToken }))
         ws.send(JSON.stringify({ to: { type: 'code-engine' }, payload: { t: 'analyse', question, projectId, sessionId, questionId: qid, role: 'user' } }))
       })

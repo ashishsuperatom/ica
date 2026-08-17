@@ -219,13 +219,15 @@ export default {
         return chan.fetch('https://do/selftest', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
       }
 
-      // Real channel webhook (Teams 'messages', Slack 'events'): verify → parse → forward.
+      // Real channel webhook (Teams 'messages', Slack 'events'): parse + forward. The auth token travels to
+      // the ChannelDO, which VERIFIES it against the project's bot App ID before touching the hub (the worker
+      // has no secrets). We always 200 the channel fast; a forged request is dropped in the DO, unanswered.
       const adapter = channelAdapter(channel)
       if (!adapter) return new Response('unknown channel', { status: 404 })
-      if (!(await adapter.verifyInbound(request.clone(), {}))) return new Response('unauthorized', { status: 401 })
+      const authToken = (request.headers.get('authorization') || '').replace(/^bearer\s+/i, '') || null
       const message = await adapter.parseInbound(request)
       if (!message) return new Response('', { status: 200 })   // non-message event → ack, nothing to do
-      ctx.waitUntil(chan.fetch('https://do/inbound', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ projectId, channel, message }) }))
+      ctx.waitUntil(chan.fetch('https://do/inbound', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ projectId, channel, message, authToken }) }))
       return new Response('', { status: 200 })   // ack the channel immediately; reply comes proactively
     }
 
