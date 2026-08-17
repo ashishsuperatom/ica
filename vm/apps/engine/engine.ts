@@ -269,39 +269,28 @@ async function analyse(question: string, from: any, sid = '', qidIn = '') {
     // failed → fall through to rebuild via the analyst
   }
 
-  // ── REFLEX front door: classify the input — MODIFY the current answer, REUSE a program, or BUILD (analyst).
-  // The reflex is stateless (it only classifies); the ENGINE knows the session's current node (`pos`), so it
-  // supplies the modify target + the current question to the reflex/analyst.
+  // ── Routing: MODIFY is DETERMINISTIC (explicit "edit:"/"modify:" prefix only) — never guessed. Otherwise the
+  // REFLEX (stateless) classifies REUSE vs BUILD; it has no "modify" decision. The SAME question is a reuse.
   const curNode = pos !== ROOT ? graph.getNode(pos) : null
   const curQ = curNode ? ((curNode.props as any)?.question ?? curNode.summary) : undefined
   let coord: any = null
   let modifyTarget: { programDir: string; prevQuestion?: string } | null = null
-  // Resolve the current program to edit in place (used by BOTH the explicit-edit and reflex-modify paths).
-  const resolveModifyTarget = () => {
+  if (explicitEdit) {
+    // The user explicitly prefixed "edit:"/"modify:" — edit the current node's program in place; if there's
+    // nothing on screen to edit, fall through to a normal build.
     const curProgram = (curNode?.props as any)?.program
     if (curNode && curProgram && existsSync(join(WORKSPACE, curProgram, 'program.ts'))) {
       modifyTarget = { programDir: curProgram, prevQuestion: curQ }
-      return true
+      console.log(`[ica] explicit edit → editing ${modifyTarget.programDir} in place (node ${pos.slice(0, 14)})`)
+    } else {
+      console.log('[ica] explicit edit, but no current program to edit → building fresh')
     }
-    return false
-  }
-  if (explicitEdit) {
-    // The user explicitly prefixed "edit:"/"modify:" — deterministic, no reflex. Edit the current node's
-    // program in place; if there's nothing on screen to edit, fall through to a normal build.
-    if (resolveModifyTarget()) console.log(`[ica] explicit edit → editing ${modifyTarget!.programDir} in place (node ${pos.slice(0, 14)})`)
-    else console.log('[ica] explicit edit, but no current program to edit → building fresh')
   } else {
     try {
-      const route = await reflex.route(graph, question, curQ)
+      const route = await reflex.route(graph, question)
       coord = route.coordinate
       console.log(`[ica] reflex: ${route.decision} · ${(coord.axes ?? []).map((a: any) => `${a.type}:${a.token}`).join(' ')}`)
-      if (route.decision === 'modify') {
-        // Edit the CURRENT answer in place. The engine hands the analyst the current program's location (it may
-        // have been built long ago / by a reuse, so it's not in the analyst's context); the analyst reads + edits
-        // it. No new intent node — we update the current one.
-        if (resolveModifyTarget()) console.log(`[ica] reflex: modify → editing ${modifyTarget!.programDir} in place (node ${pos.slice(0, 14)})`)
-        else console.log('[ica] reflex: modify, but no current program to edit → building fresh')   // fall through to build
-      } else if (route.decision === 'reuse' && existsSync(join(WORKSPACE, route.program, 'program.ts'))) {
+      if (route.decision === 'reuse' && existsSync(join(WORKSPACE, route.program, 'program.ts'))) {
         const cat = (graph.getNode(route.intentId)?.props as any)?.category ?? 'analysis'
         if (await reuseProgram(route.program, route.params, cat, { sid, qid, question, norm, t0, nodeId: route.intentId })) return
         // failed → fall through to rebuild

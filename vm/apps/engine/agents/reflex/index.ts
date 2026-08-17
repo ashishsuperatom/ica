@@ -30,7 +30,6 @@ export type IntentCoordinate = {
   axes: ReturnType<typeof basisFromPairs>     // normalised, de-duped, canonical ids (feed straight to linkBasis)
   params: Param[]
   reuse?: { intentId: string; params: Record<string, unknown> }   // the agent's pick from the catalog (+ this question's values), when a program already computes it
-  modify?: boolean                                                 // the input is a MODIFICATION of the current answer (edit the current program), not a new question
   ms: number
   raw: string                                 // the model's raw text (for debugging a bad parse)
 }
@@ -55,9 +54,9 @@ function extractJson(s: string): any {
   throw new Error('unbalanced JSON object in reflex output')
 }
 
-/** The routing decision for one input: MODIFY the current answer, reuse an existing program, or build (analyst). */
+/** The routing decision for one input: reuse an existing program, or build (analyst). The reflex NEVER decides
+ * "modify" — editing an answer is deterministic and engine-side (only on an explicit `edit:`/`modify:` prefix). */
 export type Route =
-  | { decision: 'modify'; coordinate: IntentCoordinate }   // edit the current program in place (engine supplies the target)
   | { decision: 'reuse'; intentId: string; program: string; params: Record<string, unknown>; coordinate: IntentCoordinate }
   | { decision: 'build'; coordinate: IntentCoordinate }
 
@@ -81,22 +80,20 @@ export function createReflex(opts: ReflexOpts) {
    * is one fresh turn. The catalog is what makes the reuse decision GROUNDED in what actually exists — the
    * agent reads the real programs, it doesn't guess against a blind index.
    */
-  async function coordinate(question: string, catalog: ProgramEntry[] = [], currentQuestion?: string, vocab?: string): Promise<IntentCoordinate> {
+  async function coordinate(question: string, catalog: ProgramEntry[] = [], vocab?: string): Promise<IntentCoordinate> {
     system ??= await readFile(join(__dirname, 'SYSTEM.md'), 'utf8')
     session ??= createSession(harness, { cwd: opts.cwd, model, provider, baseUrl: opts.ica?.baseUrl })
     const t0 = Date.now()
-    // The current answer on screen — so the agent can tell a MODIFICATION of it from a genuinely new question.
-    const cur = currentQuestion ? `CURRENT ANSWER ON SCREEN (the user's last question): ${currentQuestion}\n\n---\n` : ''
     // The LIVE axis vocabulary — PREFER these tokens over minting near-duplicates; grows as the space evolves.
     const voc = vocab ? `AXIS VOCABULARY IN USE (reuse a token when it fits; only add a new one if none do):\n${vocab}\n\n---\n` : ''
-    const { lastLines } = await session.run(`${system}\n\n---\n${voc}${cur}${renderCatalog(catalog)}\n\n---\nINPUT: ${question}\n\nJSON:`)
+    const { lastLines } = await session.run(`${system}\n\n---\n${voc}${renderCatalog(catalog)}\n\n---\nINPUT: ${question}\n\nJSON:`)
     const parsed = extractJson(lastLines)
     const basis: BasisPair[] = Array.isArray(parsed.basis) ? parsed.basis : []
     const params: Param[] = Array.isArray(parsed.params) ? parsed.params : []
     const reuse = parsed.reuse && typeof parsed.reuse.intentId === 'string'
       ? { intentId: parsed.reuse.intentId, params: (parsed.reuse.params && typeof parsed.reuse.params === 'object') ? parsed.reuse.params : {} }
       : undefined
-    return { basis, axes: basisFromPairs(basis), params, reuse, modify: parsed.modify === true, ms: Date.now() - t0, raw: lastLines }
+    return { basis, axes: basisFromPairs(basis), params, reuse, ms: Date.now() - t0, raw: lastLines }
   }
 
   return {
@@ -110,11 +107,8 @@ export function createReflex(opts: ReflexOpts) {
      * (The basis space still grows via the coordinate's axes — that is the RETRIEVAL index for when the
      * catalog outgrows "show it all"; until then the agent sees every program directly.)
      */
-    async route(store: NodeStore, question: string, currentQuestion?: string): Promise<Route> {
-      const coord = await coordinate(question, programCatalog(store), currentQuestion, renderVocab(store))
-      // MODIFY wins: the user wants the CURRENT program changed, not a different program run. The engine knows
-      // WHICH program (the session's current node) and hands it to the analyst — the reflex only classifies.
-      if (coord.modify) return { decision: 'modify', coordinate: coord }
+    async route(store: NodeStore, question: string): Promise<Route> {
+      const coord = await coordinate(question, programCatalog(store), renderVocab(store))
       if (coord.reuse) {
         const props = store.getNode(coord.reuse.intentId)?.props as any
         if (props?.program) return { decision: 'reuse', intentId: coord.reuse.intentId, program: props.program, params: coord.reuse.params, coordinate: coord }
