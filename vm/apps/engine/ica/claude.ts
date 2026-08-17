@@ -7,6 +7,7 @@
 
 import type { Session, RunHandlers, RunResult } from './session.js'
 import { randomUUID } from 'node:crypto'
+import { execFile } from 'node:child_process'
 
 export interface ClaudeSessionOpts {
   cwd: string                 // working directory the agent runs in
@@ -25,6 +26,11 @@ const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
 export function createClaudeSession(opts: ClaudeSessionOpts): Session {
   const model = opts.model ?? 'claude-sonnet-5'
   const bin = opts.bin ?? process.env.CLAUDE_BIN ?? 'claude'
+  // Capture the claude-code version once — the interactive prompts we auto-answer (bypass dialog, session-age
+  // resume menu) are claude-code TUI copy that Anthropic can reword between versions. We log the version next
+  // to every auto-answer and WARN when expected wording is missing, so a drift is visible against a version.
+  let claudeVersion = ''
+  execFile(bin, ['--version'], (err, stdout) => { if (!err && stdout) claudeVersion = stdout.trim().split('\n')[0] })
   // WE own the session id: a fresh UUID on first run (pinned via --session-id), then --resume it after a
   // restart. So `sessionId()` is stable and storable per (project, agent). Claude persists the transcript
   // on disk (keyed by cwd), so resuming reloads the whole conversation.
@@ -53,6 +59,7 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
   const queue: Job[] = []
   let current: Job | null = null
   let bypassAccepted = false   // sent the "Yes, I accept" keystroke for the one-time Bypass-Permissions dialog
+  let resumeChoiceSent = false // answered the "session is old" resume menu (once per spawn)
   const rawListeners = new Set<(d: string) => void>()   // interactive terminal viewers (raw PTY passthrough, e.g. /login from the UI)
 
   async function ensure() {
@@ -73,6 +80,21 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
       if (!bypassAccepted && /Yes, I accept|accept all responsibility/i.test(stripAnsi(buf.slice(-3000)))) {
         bypassAccepted = true
         setTimeout(() => { try { pty?.write('\x1b[B\r') } catch {} }, 250)
+      }
+      // Session-age resume menu (a newer claude-code prompt on an old/large session): it BLOCKS a headless run,
+      // waiting for a keypress. Auto-answer it and keep the FULL context — pick "Resume full session as-is"
+      // (the option below the default "Resume from summary"): down-arrow + Enter. Anchored on the stable
+      // "Resume from summary" line; if the "full session" wording drifts we accept the default to unblock and
+      // WARN with the version so we can re-calibrate. Fires for EVERY claude agent (analyst/modeler/connector).
+      if (!resumeChoiceSent && /Resume from summary/i.test(stripAnsi(buf.slice(-3000)))) {
+        resumeChoiceSent = true
+        if (/Resume full session/i.test(stripAnsi(buf.slice(-3000)))) {
+          console.warn(`[ica:claude] session-age resume menu → "Resume full session as-is" (claude ${claudeVersion || '?'})`)
+          setTimeout(() => { try { pty?.write('\x1b[B\r') } catch {} }, 250)
+        } else {
+          console.warn(`[ica:claude] resume menu wording CHANGED (claude ${claudeVersion || '?'}) — accepting default to unblock: ${stripAnsi(buf.slice(-260)).replace(/\s+/g, ' ')}`)
+          setTimeout(() => { try { pty?.write('\r') } catch {} }, 250)
+        }
       }
       // Stale --resume: claude can't find the session (its store wasn't durable / the id is old). ALWAYS-ON
       // here (a bounded window or the bypass warning could defeat a timed check) → re-spawn FRESH once with a
