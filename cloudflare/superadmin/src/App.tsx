@@ -300,7 +300,7 @@ function OrgDetailPage() {
         )
       })()}
       {svc && (() => {
-        const env = `SA_HUB_WS=${svc.wsUrl}\nSA_PROJECT_ID=${svc.projectId}\nSA_ENGINE_KEY=\nSA_ENGINE_TOKEN=${svc.token}`
+        const env = `SA_HUB_WS=${svc.wsUrl}\nSA_PROJECT_ID=${svc.projectId}\nSA_ENGINE_TOKEN=${svc.token}`
         const exp = new Date(svc.expiresAt).toLocaleDateString()
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setSvc(null)}>

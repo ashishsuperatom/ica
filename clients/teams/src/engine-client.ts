@@ -13,16 +13,8 @@
 
 import { WebSocket } from 'ws'
 import { config } from './config.js'
-
-export type EngineAnswer = {
-  status?: string
-  category?: string
-  answer?: string
-  period?: string
-  figures?: Array<{ label: string; display: string; sub?: string }>
-  table?: { columns: string[]; rows: any[][]; totalRows?: number; total?: any[] }
-  [k: string]: unknown
-}
+// The canonical wire protocol — one source of truth for every surface.
+import type { Answer, Hello, Analyse, Envelope, EnginePayload } from '../../protocol.js'
 
 export type AskOpts = {
   question: string
@@ -36,7 +28,7 @@ export type AskOpts = {
 }
 
 /** Ask the engine one question and resolve with the final answer. Rejects on error/timeout. */
-export function askEngine(opts: AskOpts): Promise<{ category?: string; answer: EngineAnswer }> {
+export function askEngine(opts: AskOpts): Promise<{ category?: string; answer: Answer }> {
   const { question, sessionId, onWaking, onStatus, timeoutMs = 6 * 60_000 } = opts
   if (!config.projectId) return Promise.reject(new Error('SA_PROJECT_ID is not set'))
 
@@ -46,9 +38,9 @@ export function askEngine(opts: AskOpts): Promise<{ category?: string; answer: E
     ? `key=${encodeURIComponent(config.engineKey)}`
     : `token=${encodeURIComponent(config.engineToken)}`
   const url = `${config.hubWs}/_ws/${config.projectId}?${cred}`
-  const hello = config.engineKey
-    ? { type: 'hello', key: config.engineKey, role: 'runtime' }
-    : { type: 'hello', token: config.engineToken, role: 'runtime' }
+  const hello: Hello = config.engineKey
+    ? { type: 'hello', role: 'runtime', key: config.engineKey }
+    : { type: 'hello', role: 'runtime', token: config.engineToken }
   const qid = randomId()
 
   return new Promise((resolve, reject) => {
@@ -68,23 +60,22 @@ export function askEngine(opts: AskOpts): Promise<{ category?: string; answer: E
 
     ws.on('open', () => {
       ws.send(JSON.stringify(hello))
-      ws.send(JSON.stringify({
-        to: { type: 'code-engine' },
-        payload: { t: 'analyse', question, projectId: config.projectId, role: 'user', sessionId, questionId: qid },
-      }))
+      const analyse: Analyse = { t: 'analyse', question, projectId: config.projectId, sessionId, questionId: qid, role: 'user' }
+      const envelope: Envelope<Analyse> = { to: { type: 'code-engine' }, payload: analyse }
+      ws.send(JSON.stringify(envelope))
     })
 
     ws.on('message', (raw) => {
       let msg: any
       try { msg = JSON.parse(raw.toString()) } catch { return }
       // The hub wraps engine → client messages in an envelope; the browser reads `payload`. Tolerate both.
-      const p = msg?.payload ?? msg
+      const p = (msg?.payload ?? msg) as EnginePayload & Record<string, any>
       switch (p?.t) {
         case 'tick': return                                  // liveness ping
         case 'machine:waking': onWaking?.(); return          // engine was suspended; it's coming up
         case 'analyst:status': onStatus?.(p.text); return
         case 'analyst:answer':
-          return done(() => resolve({ category: p.category, answer: (p.answer ?? {}) as EngineAnswer }))
+          return done(() => resolve({ category: p.category, answer: (p.answer ?? {}) as Answer }))
         case 'error':
           return done(() => reject(new Error(p.message ?? 'engine error')))
       }

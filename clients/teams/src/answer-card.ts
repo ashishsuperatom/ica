@@ -4,7 +4,7 @@
 // AnswerCard at a basic level — prose, a figures FactSet, and a compact table.
 
 import { CardFactory, type Attachment } from 'botbuilder'
-import type { EngineAnswer } from './engine-client.js'
+import type { Answer as EngineAnswer } from '../../protocol.js'
 
 const MAX_ROWS = 12   // keep the card small; note the rest
 

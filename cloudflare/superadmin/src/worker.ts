@@ -74,6 +74,28 @@ async function requireSuperadmin(request: Request, env: Env): Promise<JwtClaims 
   return claims && claims.role === 'superadmin' ? claims : null
 }
 
+// The ONLY emails granted superadmin (full access to every org/project). Hard-coded
+// on purpose for now — self-serve superadmin is not a thing. Lower-case; matched
+// case-insensitively.
+const SUPERADMIN_EMAILS = ['ashish@superatom.ai']
+
+// Look up a Clerk user's primary email (the session object carries only user_id).
+// Returns '' on any failure — callers treat that as "not superadmin".
+async function fetchClerkPrimaryEmail(userId: string, env: Env): Promise<string> {
+  try {
+    const res = await fetch(`https://api.clerk.com/v1/users/${userId}`, {
+      headers: { Authorization: `Bearer ${env.CLERK_SECRET_KEY}` },
+    })
+    if (!res.ok) return ''
+    const u = await res.json() as any
+    const emails: any[] = u.email_addresses ?? []
+    const primary = emails.find((e) => e.id === u.primary_email_address_id) ?? emails[0]
+    return primary?.email_address ?? ''
+  } catch {
+    return ''
+  }
+}
+
 // ── Token exchange: Clerk session → our JWT ─────────────────────────────────
 // Strategy: decode the Clerk JWT to extract the session id, then validate the
 // session against Clerk's REST API. If Clerk says it's valid, we trust it and
@@ -115,15 +137,24 @@ async function handleTokenExchange(request: Request, env: Env): Promise<Response
       return Response.json({ error: 'no user in session' }, { status: 401 })
     }
 
+    // ── Superadmin gate ──────────────────────────────────────────────────────
+    // Superadmin (full access to every org/project) is granted ONLY to hard-coded
+    // email(s) — previously EVERY authenticated user became superadmin. Everyone
+    // else gets a plain 'user' token (usable for project runtimes where they're a
+    // member; rejected by requireSuperadmin on admin/provisioning routes).
+    const primaryEmail = await fetchClerkPrimaryEmail(userId, env)
+    const isSuperadmin = !!primaryEmail && SUPERADMIN_EMAILS.includes(primaryEmail.toLowerCase())
+    const role = isSuperadmin ? 'superadmin' : 'user'
+
     // Issue our JWT (30-day expiry)
     const token = await signJwt({
       userId,
-      role: 'superadmin',
+      role,
       exp: Math.floor(Date.now() / 1000) + 30 * 24 * 3600,
     }, env.JWT_SECRET)
 
-    console.log(`[auth] issued token for user ${userId}`)
-    return Response.json({ token, userId })
+    console.log(`[auth] issued ${role} token for ${primaryEmail || userId}`)
+    return Response.json({ token, userId, role })
   } catch (err: any) {
     console.error(`[auth] token exchange failed: ${err.message}`)
     return Response.json({ error: 'invalid session' }, { status: 401 })
@@ -200,7 +231,8 @@ export default {
         if (!mr.ok) return new Response('failed to register service member', { status: 502 })
         const exp = Math.floor(Date.now() / 1000) + ttlDays * 86400
         const token = await signJwt({ userId, role: 'service', exp }, secret)
-        const wsUrl = `wss://${new URL(request.url).host}`
+        // Canonical hub host (the apex the web app also uses) — never the admin host.
+        const wsUrl = 'wss://superatom.site'
         return Response.json({ token, userId, channel, projectId, wsUrl, expiresAt: exp * 1000 })
       }
       const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
