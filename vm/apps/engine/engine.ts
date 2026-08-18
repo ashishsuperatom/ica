@@ -215,6 +215,9 @@ function makeAgentSlot<A extends Agent>(role: string, promptVersion: () => Promi
     },
     async compact(h?: RunHandlers) { return (await get()).session.compact(h) },
     stop() { try { agent?.session.stop() } catch {} },
+    // Fully tear DOWN: kill the underlying session/PTY AND drop the agent so its memory is freed and the next
+    // get() spins up a fresh one. For a COLD one-shot agent (grounding), call this after its run so nothing lingers.
+    dispose() { try { agent?.session.stop() } catch {}; agent = null; building = null },
   }
 }
 const analystSlot  = makeAgentSlot('analyst',  analystPromptVersion,  (resumeId) => listSources().then(sources => createAnalyst({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { harness: ANALYST_HARNESS, model: ANALYST_MODEL, resumeId } })))
@@ -471,7 +474,12 @@ async function handleGrounding(from: any) {
     console.log(`[ica] grounding build done in ${(r.ms / 1000).toFixed(1)}s`)
   } catch (e: any) {
     emit(from, { t: 'grounding:status', text: `Grounding build failed: ${e?.message ?? e}` })
-  } finally { groundingSlot.persist(); groundingBusy = false }
+  } finally {
+    // COLD agent: once the build is done, tear the ICA all the way down — kill its claude-code PTY and drop
+    // the session so it holds no memory. It is never resumed; a future build spins up a fresh one.
+    groundingSlot.dispose(); groundingBusy = false
+    log.info('grounding', 'build finished — grounding agent torn down (PTY closed, memory freed)')
+  }
 }
 
 // The admin's CONNECTOR agent — a claude-code session streamed RAW (PTY) to the admin's xterm (no [[ui]]

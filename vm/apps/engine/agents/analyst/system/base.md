@@ -26,9 +26,8 @@ used sparingly to say what's happening now.
    fit, and an ill-fitting unit silently answers a *different* question.
    **Semantic atoms** — `atomsFor(name)` / `findAtoms({q})` — are small learned facts about a subject: where it
    lives, how to compute or join it, and how RELIABLE a path is. Check them for the entities your question
-   names; they carry corrections earlier analyses paid for (e.g. a column that's only partly populated, a path
-   that beats another). And when your own analysis reveals such a fact, record it with `putAtom` so the next
-   answer starts from it.
+   names; they carry corrections earlier analyses paid for — a column that's only partly populated, a path that
+   beats another. You read atoms; the modeler writes them from your traces.
 2. **Data — `./query.mjs`** (`query`, `sources`) and **`./introspect.mjs`** (evidence helpers). When the model
    doesn't reach the question, use these to explore the schema, find where the concept lives, and COMPUTE and
    VERIFY the answer yourself. You are trusted to do your own analysis — that is the point.

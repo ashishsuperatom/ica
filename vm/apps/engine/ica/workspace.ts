@@ -224,6 +224,9 @@ async function defaultSource() { if (!_default) _default = (await _sources())[0]
 // source's own tree is the single source of truth, so results are always fresh and nothing is copied/synced.
 const source = async (sql, src, params) => _query(src ?? await defaultSource(), sql, params ?? {})
 const store = new GroundingStore(fileURLToPath(new URL('./grounding.sqlite', import.meta.url)), { source })
+// Grounding holds the CURRENT state only (not versioned). NOT DONE YET: re-running build() is not a clean
+// refresh — it upserts on top, so values gone from the source linger and a differently-shaped re-run leaves
+// both shapes. (Flagging the consequence; not a decision on how to fix it.)
 export async function build(config) { return buildGrounding(store, source, config) }
 export const resolveEntity = (text, opts) => store.resolveEntity(text, opts)
 export const resolveHierarchy = (node, dir, name) => store.resolveHierarchy(node, dir, name)   // async: pull a reference's members/ancestors
