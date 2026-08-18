@@ -63,6 +63,12 @@ importers:
         specifier: ^5.6.0
         version: 5.9.3
 
+  packages/grounding:
+    dependencies:
+      better-sqlite3:
+        specifier: ^11.10.0
+        version: 11.10.0
+
   packages/introspect: {}
 
   packages/node-store:
