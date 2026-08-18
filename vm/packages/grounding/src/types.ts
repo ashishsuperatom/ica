@@ -33,20 +33,28 @@ export interface ResolveResult {
 }
 
 /** How a hierarchy's parent/children are obtained — the general model (not always geo, not always a clean FK).
- *  column       : parent id is a column on the row (self-ref or a lookup)
- *  derived-query: parent/children come from a query/join over transactions (e.g. branch→service-network)
- *  cross-source : the related level lives in another data source; bridge on a shared key
- *  materialized : precomputed into an edge table (for expensive/derived ones) + refreshed */
+ *  The first three resolve LIVE against the source at query time (nothing copied → always fresh, nothing to
+ *  sync). Materialized is the ONLY kind that keeps a copy — reserved for hierarchies where live resolution is
+ *  impractical; it then carries a refresh obligation. Prefer a live kind whenever the source already holds
+ *  the hierarchy simply — do not duplicate a tree the database can answer directly.
+ *  column       : the child row carries a parent-key column (a self-ref tree, or a clean FK to the parent).
+ *                 spec: { table, idCol, parentCol } — descendants = rows whose parentCol = @id; ancestors = @id's parentCol.
+ *  derived-query: the relationship needs a join/aggregation. spec: { descendantsSql, ancestorsSql? } (each binds @id).
+ *  cross-source : the related level lives in another data source; spec: { descendantsSql, ancestorsSql?, source }.
+ *  materialized : precomputed into the edge table (built from childrenSql) — for expensive/derived ones; refresh it. */
 export type ResolverKind = 'column' | 'derived-query' | 'cross-source' | 'materialized'
 
-/** A named hierarchy over one entity type. The `spec` is interpreted per `resolver` (a column name, a SQL
- *  template, a cross-source bridge, or "read the materialized edge table"). Built by the grounding agent. */
+/** A named hierarchy over one entity type. The `spec` is interpreted per `resolver` (see ResolverKind).
+ *  Built by the grounding agent; the store keeps the SPEC (how to resolve), not — except for materialized —
+ *  a copy of the edges. */
 export interface HierarchySpec {
-  name: string                 // e.g. "place", "branch-pickup", "org"
-  entityType: string           // the type of the nodes in this hierarchy
+  name: string                 // e.g. "place", "org", "location-tree"
+  entityType: string           // the PARENT node type
+  childType?: string           // the CHILD node type (may differ, e.g. location→service-network); defaults to entityType
   resolver: ResolverKind
-  spec: Record<string, unknown>   // resolver-specific: { column } | { childrenSql } | { source, bridgeKey } | { materialized: true }
-  oneToMany?: boolean          // is a parent → many children (e.g. branch→SN ~37) vs 1:1
+  spec: Record<string, unknown>   // resolver-specific — see ResolverKind for the shape of each
+  source?: string              // which data source to resolve against at query time (single-source: omit)
+  oneToMany?: boolean          // is a parent → many children (vs 1:1)
   note?: string
 }
 
@@ -62,6 +70,16 @@ export interface ValuePattern {
   confidence: number
 }
 
+/** A read-only structural summary of a grounding store — what was grounded, for inspection/verification.
+ *  The ONE typed shape both the workspace seam and the admin inspector read (neither re-queries the tables). */
+export interface GroundingStats {
+  entityTypes: Array<{ type: string; values: number; entities: number }>   // value-spellings + distinct entities per type
+  hierarchies: Array<{ name: string; parentType: string; childType: string; resolver: ResolverKind; live: boolean; spec: Record<string, unknown>; source: string | null; oneToMany: boolean; note: string | null }>
+  edges: Array<{ hierarchy: string; n: number }>                            // materialized edge counts (live hierarchies have none)
+  patterns: Array<{ name: string; entityType: string; location: string; regex: string; confidence: number }>
+  aliases: number
+}
+
 export interface ResolveOpts {
   /** Soft type prior from context (weights ranking; never a hard filter). */
   typeHint?: string
@@ -74,6 +92,10 @@ export interface ResolveOpts {
 /** The query-time interface the analyst calls. Read-only; the grounding agent populates the store. */
 export interface GroundingResolver {
   resolveEntity(text: string, opts?: ResolveOpts): ResolveResult
-  resolveHierarchy(node: HierarchyNode, dir?: 'descendants' | 'ancestors', hierarchy?: string): EntityRef[]
+  // Async: the live resolver kinds query the source at call time. Materialized-only stores still return a promise.
+  resolveHierarchy(node: HierarchyNode, dir?: 'descendants' | 'ancestors', hierarchy?: string): Promise<EntityRef[]>
+  // Join-mode: the hierarchy's knowledge (spec), so a program can compose the relationship as a JOIN in its
+  // own query instead of pulling per row. Null if unknown.
+  getHierarchy(name: string): (HierarchySpec & { childType: string }) | null
   resolveValueByPattern(value: string): Candidate[]
 }

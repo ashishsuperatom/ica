@@ -20,10 +20,28 @@ import { basisFromPairs, programCatalog, renderVocab, type BasisPair, type NodeS
 const __dirname = dirname(fileURLToPath(import.meta.url))
 // The reflex prompt, via the override layer (volume override for the current image → baked fallback).
 const reflexPrompt = () => loadPrompt(join(__dirname, 'SYSTEM.md'), 'reflex/SYSTEM.md')
+// The reflex's REVIEW instruction (a second, distinct job: judge a reused program's answer).
+const reviewPrompt = () => loadPrompt(join(__dirname, 'REVIEW.md'), 'reflex/REVIEW.md')
 
 /** Deterministic hash of the EFFECTIVE instructions — a prompt (or override) change → fresh session. */
 export async function promptVersion(): Promise<string> {
-  return createHash('sha1').update(reflexPrompt()).digest('hex').slice(0, 12)
+  return createHash('sha1').update(reflexPrompt() + reviewPrompt()).digest('hex').slice(0, 12)
+}
+
+/** The reflex's verdict on a reused program's answer. */
+export type ReviewVerdict = { verdict: 'accept' | 'escalate'; reason?: string }
+
+// A COMPACT view of an answer for review — enough to judge if it answers the question, not the whole blob.
+function answerDigest(a: any): string {
+  if (!a || typeof a !== 'object') return String(a)
+  const rows = a.table?.rows?.length ?? 0
+  const cols = a.table?.columns?.length ?? 0
+  return JSON.stringify({
+    status: a.status ?? null, answer: a.answer ?? null,
+    headline: a.headline ? { label: a.headline.label, display: a.headline.display } : null,
+    figures: Array.isArray(a.figures) ? a.figures.length : 0,
+    table: { columns: cols, rows }, caveat: a.caveat ?? null,
+  })
 }
 
 export type Param = { role: string; text: string; type?: string; value?: unknown }
@@ -97,8 +115,25 @@ export function createReflex(opts: ReflexOpts) {
     return { basis, axes: basisFromPairs(basis), params, reuse, ms: Date.now() - t0, raw: lastLines }
   }
 
+  /**
+   * Look at a reused program's ANSWER and decide whether it genuinely answers the question, or should be
+   * handed to the analyst. This is the missing feedback edge: a reused program can run cleanly and still not
+   * answer (stale interpretation, a name that now resolves to two things, an empty result). The reflex owns
+   * whether the answer is real. Stateless one-shot; fail-open handled by the caller (a review error must not
+   * take down the fast path).
+   */
+  async function review(question: string, answer: any): Promise<ReviewVerdict> {
+    const system = reviewPrompt()
+    session ??= createSession(harness, { cwd: opts.cwd, model, provider, baseUrl: opts.ica?.baseUrl })
+    const { lastLines } = await session.run(`${system}\n\n---\nQUESTION: ${question}\n\nANSWER (digest): ${answerDigest(answer)}\n\nJSON:`)
+    const parsed = extractJson(lastLines)
+    const verdict = parsed?.verdict === 'escalate' ? 'escalate' : 'accept'
+    return { verdict, reason: typeof parsed?.reason === 'string' ? parsed.reason : undefined }
+  }
+
   return {
     coordinate,
+    review,
     /** Pre-create the session (connect to the warm opencode server) so the first route() has no cold start. */
     async warmup() { session ??= createSession(harness, { cwd: opts.cwd, model, provider, baseUrl: opts.ica?.baseUrl }); await session.warmup?.() },
     /**

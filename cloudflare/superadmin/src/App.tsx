@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
-import { ConceptMap, useProjectHub } from './ConceptMap'
+import { useProjectHub } from './hub'
+import { Inspector, SECTIONS, SECTION_LABEL, type Section } from './Inspector'
 import { ConnectorConsole } from './ConnectorConsole'
+import { GroundingConsole } from './GroundingConsole'
 import { useSession, SignIn, UserButton } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useSearchParams } from 'react-router-dom'
 
@@ -17,29 +19,37 @@ body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,
 a{color:var(--purple);text-decoration:none}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 
-/* layout: fixed left sidebar + main */
+/* layout: fixed left sidebar + main. The sidebar is the ONLY nav — sub-sections expand
+   inline underneath their parent item, so the content pane keeps the full remaining width. */
 .app{display:flex;min-height:100vh}
-.side{width:240px;flex-shrink:0;background:#fff;border-right:1px solid var(--line);
+.side{width:212px;flex-shrink:0;background:#fff;border-right:1px solid var(--line);
  display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
-.side .org{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line2);cursor:default}
-.side .avatar{width:30px;height:30px;border-radius:7px;background:var(--purple);color:#fff;
- display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0}
-.side .org .nm{font-size:13.5px;font-weight:600;color:var(--ink);line-height:1.25}
-.side .org .sub{font-size:11.5px;color:var(--faint)}
-.side nav{padding:8px;flex:1;overflow-y:auto}
-.side .grp{font-size:11px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.04em;padding:14px 10px 5px}
-.side .nav{display:flex;align-items:center;gap:11px;padding:7px 10px;border-radius:7px;
- font-size:14px;color:var(--ink);font-weight:500;cursor:pointer;margin-bottom:1px}
+.side .org{display:flex;align-items:center;gap:9px;padding:11px 13px;border-bottom:1px solid var(--line2);cursor:default}
+.side .avatar{width:27px;height:27px;border-radius:7px;background:var(--purple);color:#fff;
+ display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12.5px;flex-shrink:0}
+.side .org .nm{font-size:13px;font-weight:600;color:var(--ink);line-height:1.25}
+.side .org .sub{font-size:11px;color:var(--faint)}
+.side nav{padding:6px;flex:1;overflow-y:auto}
+.side .grp{font-size:10.5px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.04em;padding:11px 9px 4px}
+.side .nav{display:flex;align-items:center;gap:9px;padding:6px 9px;border-radius:7px;
+ font-size:13.5px;color:var(--ink);font-weight:500;cursor:pointer;margin-bottom:1px}
 .side .nav:hover{background:#f6f8fb}
 .side .nav.on{background:#f0f1ff;color:var(--purple);font-weight:600}
-.side .nav svg{width:17px;height:17px;flex-shrink:0;opacity:.85}
-.side .foot{border-top:1px solid var(--line2);padding:11px 14px;display:flex;align-items:center;gap:10px}
+.side .nav svg{width:16px;height:16px;flex-shrink:0;opacity:.85}
+/* expander chevron + the nested sub-items it reveals */
+.side .chev{margin-left:auto;width:11px;height:11px;opacity:.55;transition:transform .15s}
+.side .chev.open{transform:rotate(90deg)}
+.side .subnav{display:block;margin-left:20px;padding:5px 9px 5px 11px;border-left:1px solid var(--line);
+ font-size:13px;color:var(--sub);cursor:pointer;border-radius:0 6px 6px 0}
+.side .subnav:hover{background:#f6f8fb;color:var(--ink)}
+.side .subnav.on{background:#f0f1ff;color:var(--purple);font-weight:600;border-left-color:var(--purple)}
+.side .foot{border-top:1px solid var(--line2);padding:9px 12px;display:flex;align-items:center;gap:10px}
 .main{flex:1;min-width:0;display:flex;flex-direction:column}
-.top{display:flex;align-items:center;gap:12px;padding:11px 28px;border-bottom:1px solid var(--line);
- background:#fff;position:sticky;top:0;z-index:5;min-height:52px}
-.content{padding:24px 30px 80px;width:100%}
+.top{display:flex;align-items:center;gap:12px;padding:8px 20px;border-bottom:1px solid var(--line);
+ background:#fff;position:sticky;top:0;z-index:5;min-height:44px}
+.content{padding:16px 20px 40px;width:100%;min-width:0}
 
-.h1{font-size:26px;font-weight:700;letter-spacing:-.02em;margin:0 0 4px}
+.h1{font-size:22px;font-weight:700;letter-spacing:-.02em;margin:0 0 2px}
 .bread{font-size:13px;color:var(--sub);display:flex;gap:7px;align-items:center}
 .row{display:flex;align-items:center;gap:10px}
 .between{display:flex;align-items:center;justify-content:space-between}
@@ -85,6 +95,11 @@ const I = {
   grid: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>,
   users: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><path d="M16 5.5a3 3 0 0 1 0 5.8M20.5 20a5 5 0 0 0-4-4.9"/></svg>,
   map: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="9" r="2.5"/><circle cx="9" cy="18" r="2.5"/><path d="M8 7l8 1.5M8.5 16l8-6"/></svg>,
+  chev: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6"><path d="M9 5l7 7-7 7"/></svg>,
+  pulse: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>,
+  globe: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 3 2.5 15 0 18M12 3c-2.5 3-2.5 15 0 18"/></svg>,
+  term: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/></svg>,
+  chat: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z"/></svg>,
 }
 
 // status → color
@@ -437,7 +452,11 @@ function ProjectDetailPage() {
   const [logs, setLogs] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false); const [error, setError] = useState('')
-  const [view, setView] = useState<'overview' | 'concepts' | 'events' | 'subdomains' | 'data' | 'channels'>('overview')
+  // The view id is flat: a top-level item ('overview'), or 'inspector/<section>' for an Inspector
+  // sub-section. Keeping it a single string means the sidebar, the title, and the body all agree
+  // without a second piece of nav state.
+  const [view, setView] = useState<string>('overview')
+  const [openGroup, setOpenGroup] = useState<string | null>(null)
   // One persistent hub connection for the whole project — survives switching sidebar views.
   const hub = useProjectHub(projectId, token)
 
@@ -503,23 +522,59 @@ function ProjectDetailPage() {
   const liveState = m?.state   // unified, backend-decided (Fly state or online/offline)
   const provider = status?.provider
 
-  const titles: Record<string, string> = { overview: 'Overview', concepts: 'Concept map', events: 'Event log', subdomains: 'Subdomains', data: 'Agent', channels: 'Channels' }
-  const items: [typeof view, string, React.ReactNode][] = [
-    ['overview', 'Overview', I.grid], ['concepts', 'Concept map', I.map],
-    ['events', 'Event log', I.home], ['subdomains', 'Subdomains', I.users], ['data', 'Agent', I.grid],
-    ['channels', 'Channels', I.users],
+  // Nav items; an item with `children` expands INLINE in the sidebar (no second, nested sidebar
+  // inside the content pane — that was eating ~280px of the working area).
+  type NavItem = { id: string; label: string; icon: React.ReactNode; children?: { id: string; label: string; group?: string }[] }
+  const items: NavItem[] = [
+    { id: 'overview', label: 'Overview', icon: I.grid },
+    { id: 'inspector', label: 'Inspector', icon: I.map, children: SECTIONS.map(s => ({ id: `inspector/${s.id}`, label: s.label, group: s.group })) },
+    { id: 'events', label: 'Event log', icon: I.pulse },
+    { id: 'subdomains', label: 'Subdomains', icon: I.globe },
+    { id: 'agent', label: 'Agent', icon: I.term },
+    { id: 'grounding', label: 'Grounding', icon: I.term },
+    { id: 'channels', label: 'Channels', icon: I.chat },
   ]
+  const title = view.startsWith('inspector/')
+    ? `Inspector · ${SECTION_LABEL(view.slice('inspector/'.length) as Section)}`
+    : items.find(i => i.id === view)?.label ?? 'Overview'
+
   const nav = <>
     <div className="grp">Project · {projectId?.slice(0, 6)}…</div>
-    {items.map(([v, label, icon]) => (
-      <a key={v} className={'nav' + (view === v ? ' on' : '')} style={{ cursor: 'pointer' }} onClick={() => setView(v)}>{icon}{label}</a>
-    ))}
+    {items.map(it => {
+      const expanded = openGroup === it.id
+      return (
+        <div key={it.id}>
+          <a className={'nav' + (view === it.id || (it.children && view.startsWith(it.id + '/')) ? ' on' : '')} style={{ cursor: 'pointer' }}
+            onClick={() => {
+              if (!it.children) { setView(it.id); return }
+              // Toggle the group. Opening it also navigates to its first section, so one click gets you somewhere.
+              if (expanded) setOpenGroup(null)
+              else { setOpenGroup(it.id); if (!view.startsWith(it.id + '/')) setView(it.children[0].id) }
+            }}>
+            {it.icon}{it.label}
+            {it.children && <span className={'chev' + (expanded ? ' open' : '')}>{I.chev}</span>}
+          </a>
+          {it.children && expanded && (() => {
+            const out: React.ReactNode[] = []
+            let lastGroup: string | undefined
+            for (const c of it.children) {
+              if (c.group && c.group !== lastGroup) {
+                lastGroup = c.group
+                out.push(<div key={'grp-' + c.group} style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--faint)', padding: '11px 0 3px 14px' }}>{c.group}</div>)
+              }
+              out.push(<a key={c.id} className={'subnav' + (view === c.id ? ' on' : '')} onClick={() => setView(c.id)}>{c.label}</a>)
+            }
+            return out
+          })()}
+        </div>
+      )
+    })}
   </>
 
   return (
     <Shell nav={nav} crumbs={<><Link to="/">Organizations</Link><span>/</span><Link to={`/org/${orgId}`}><code className="mono">{orgId?.slice(0, 8)}…</code></Link><span>/</span><code className="mono">{projectId?.slice(0, 8)}…</code></>}>
       <div className="between" style={{ marginBottom: 18 }}>
-        <div className="row"><h1 className="h1">{titles[view]}</h1>{!loading && <Pill s={liveState} />}</div>
+        <div className="row"><h1 className="h1">{title}</h1>{!loading && <Pill s={liveState} />}</div>
         {loading && <span className="row muted" style={{ fontSize: 13 }}><span className="spin" /> connecting…</span>}
       </div>
 
@@ -553,7 +608,7 @@ function ProjectDetailPage() {
         </div>
       </>}
 
-      {view === 'concepts' && <ConceptMap hub={hub} />}
+      {view.startsWith('inspector/') && <Inspector hub={hub} section={view.slice('inspector/'.length) as Section} />}
 
       {view === 'events' && (
         <div className="card">
@@ -598,7 +653,7 @@ function ProjectDetailPage() {
         </div>
       )}
 
-      {view === 'data' && (
+      {view === 'agent' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div className="card between">
             <div><strong>Data source</strong><div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>Upload a file the agent can use, or just describe the source in the console below.</div></div>
@@ -611,6 +666,12 @@ function ProjectDetailPage() {
             </div>
           </div>
           <ConnectorConsole hub={hub} />
+        </div>
+      )}
+
+      {view === 'grounding' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <GroundingConsole hub={hub} />
         </div>
       )}
 

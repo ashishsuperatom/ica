@@ -17,7 +17,6 @@ import WebSocket from 'ws'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { existsSync, mkdirSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { execProgram } from './exec-program.js'
 import { createSession, prepareWorkspace, type Session, type Harness, type RunHandlers } from './ica/index.js'
@@ -25,7 +24,10 @@ import { createSemanticModeller, promptVersion as semanticPromptVersion } from '
 import { createReflex } from './agents/reflex/index.js'
 import { createAnalyst, promptVersion as analystPromptVersion } from './agents/analyst/index.js'
 import { createConnector, promptVersion as connectorPromptVersion } from './agents/connector/index.js'
+import { createGroundingAgent, promptVersion as groundingPromptVersion } from './agents/grounding/index.js'
 import { openAnswers, normalizeQuestion } from './answers.js'
+import { log, readJsonSafe } from './log.js'
+import { createInspector } from './inspect.js'
 import { NodeStore, ROOT, ensureRoot, ensureConceptTree, ensureBasisSeed, intentId, linkBasis } from '@superatom/node-store'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -33,17 +35,22 @@ try { process.loadEnvFile(join(__dirname, '.env')) } catch { /* no .env — rely
 // Resilience: a stray async error from a flaky agent CLI/harness (a PTY that vanished, an opencode server
 // that timed out starting) must NEVER take the engine down. Fly would restart it, but crash-looping drops
 // the in-flight answer and looks like "nothing happened" to the user. Log it and keep serving.
-process.on('unhandledRejection', (r: any) => console.error('[ica] unhandledRejection (kept alive):', r?.message ?? r))
-process.on('uncaughtException',  (e: any) => console.error('[ica] uncaughtException (kept alive):', e?.message ?? e))
+process.on('unhandledRejection', (r: any) => log.error('engine', 'unhandledRejection (kept alive)', r))
+process.on('uncaughtException',  (e: any) => log.error('engine', 'uncaughtException (kept alive)', e))
 
 const HUB = process.env.ICA_HUB || 'ws://localhost:5174'
 const PROJECT = process.env.ICA_PROJECT || ''
-// Persistence roots — env-configurable so on Fly they point at the mounted VOLUME (else the model, programs,
-// answers + consolidation watermark would live on the ephemeral container layer and be wiped on every restart).
-// Default to next-to-the-engine for local/EC2 (unchanged behavior).
-const DATA_ROOT = process.env.ENGINE_DATA_DIR ?? join(__dirname, '.data')
-const WORKSPACE_ROOT = process.env.ENGINE_WORKSPACE_DIR ?? join(__dirname, '.agent-workspace')
-const WORKSPACE = join(WORKSPACE_ROOT, PROJECT)   // where programs/ + out/ live (same as the analyst cwd)
+// Persistence roots. All GENERATED per-project state lives under ONE root, OUTSIDE the engine code app:
+//   <STATE_ROOT>/<projectId>/ — the workspace (seams, programs/, out/) AND the project's DBs together
+//   (project.sqlite · grounding.sqlite · answers.sqlite). Committed per-project INPUTS (the datasource
+//   bridges) live separately in <repo>/projects/<projectId>/. Env-overridable so Fly points them at the
+//   mounted VOLUME (else state would sit on the ephemeral container layer and be wiped on every restart);
+//   the existing per-root env vars still win, so Fly's layout is unchanged.
+const VM_ROOT = join(__dirname, '..', '..')                              // apps/engine → the vm monorepo root
+const STATE_ROOT = process.env.ENGINE_STATE_DIR ?? join(VM_ROOT, '.state')
+const WORKSPACE_ROOT = process.env.ENGINE_WORKSPACE_DIR ?? STATE_ROOT
+const DATA_ROOT = process.env.ENGINE_DATA_DIR ?? STATE_ROOT              // answers.sqlite co-locates with the workspace
+const WORKSPACE = join(WORKSPACE_ROOT, PROJECT)   // the project's home: seams + programs/ + out/ + its DBs
 const KEY = process.env.ICA_KEY || ''
 const HARNESS = (process.env.ICA_HARNESS as Harness) || 'opencode'   // read AFTER .env is loaded
 // Per-agent harness + model, from .env — so switching needs NO source change. Unset → the agent's own
@@ -55,9 +62,12 @@ const SEMANTIC_HARNESS = (process.env.ICA_SEMANTIC_HARNESS as Harness) || 'claud
 const SEMANTIC_MODEL   = process.env.ICA_SEMANTIC_MODEL    || 'claude-sonnet-5'
 const CONNECTOR_HARNESS = (process.env.ICA_CONNECTOR_HARNESS as Harness) || 'claude-code'
 const CONNECTOR_MODEL   = process.env.ICA_CONNECTOR_MODEL   || 'claude-sonnet-5'
-// Where the connector agent writes bridges (shared with the datasource-manager, which loads them by
-// absolute path). Defaults next to the engine; on Fly point it at the mounted volume.
-const DATASOURCES_DIR  = process.env.DATASOURCES_DIR || join(__dirname, '.datasources', PROJECT)
+const GROUNDING_HARNESS = (process.env.ICA_GROUNDING_HARNESS as Harness) || 'claude-code'
+const GROUNDING_MODEL   = process.env.ICA_GROUNDING_MODEL   || 'claude-sonnet-5'
+// Where the connector agent writes bridges (shared with the datasource-manager, which loads them by absolute
+// path). Defaults to the project's COMMITTED inputs folder so connector-written bridges land beside any
+// hand-authored ones (one place, no duplicate); on Fly override via env to the mounted volume.
+const DATASOURCES_DIR  = process.env.DATASOURCES_DIR || join(VM_ROOT, 'projects', PROJECT, 'datasources')
 const MODEL = process.env.ICA_MODEL                  // undefined → the harness's own default (e.g. opencode glm-5.2)
 const OC_URL = process.env.ICA_OC_URL                // opencode: connect to a shared standalone server
 const DATASOURCE = process.env.DATASOURCE_URL || 'http://localhost:4000'   // the one data seam
@@ -84,6 +94,7 @@ let hub: WebSocket | null = null
 let semanticBusy = false
 let analystBusy = false
 let connectorBusy = false
+let groundingBusy = false
 
 // ── Semantic-model consolidation (System 4) state ─────────────────────────────
 // This is the SEMANTIC-MODEL consolidation specifically — the bottom layer (meaning + the implementation
@@ -136,6 +147,25 @@ ensureConceptTree(graph)   // concept tree root + place any orphan concept under
 ensureBasisSeed(graph)     // plant the grounded three-plane axis vocabulary (subject / operation / mode)
 // The FRONT DOOR: every question is routed here first — reuse a program on a basis match, else build.
 const reflex = createReflex({ cwd: WORKSPACE })   // the reflex agent — the fast front door
+// READ-ONLY window into the graph + answer history + the files behind them, served over the hub to the
+// admin console. The engine runs on a Fly VM with nothing listening, so this is the only way to see
+// what it knows without SSH. It answers `inspect:req` and never writes anything. See inspect.ts.
+const inspector = createInspector({
+  graph, answers, workspace: WORKSPACE, dataRoot: join(DATA_ROOT, PROJECT), projectId: PROJECT,
+  datasourceUrl: DATASOURCE,
+  runtime: () => ({
+    harness: HARNESS,
+    agents: {
+      analyst:   { harness: ANALYST_HARNESS,   model: ANALYST_MODEL,   busy: analystBusy },
+      semantic:  { harness: SEMANTIC_HARNESS,  model: SEMANTIC_MODEL,  busy: semanticBusy, consolidating: semanticConsolidating },
+      connector: { harness: CONNECTOR_HARNESS, model: CONNECTOR_MODEL, busy: connectorBusy },
+      grounding: { harness: GROUNDING_HARNESS, model: GROUNDING_MODEL, busy: groundingBusy },
+      reflex:    { harness: process.env.ICA_REFLEX_HARNESS ?? 'opencode', model: process.env.ICA_REFLEX_MODEL ?? 'deepseek-v4-flash' },
+    },
+    consolidateIntervalMs: SEMANTIC_CONSOLIDATE_INTERVAL_MS,
+    uptimeMs: Date.now() - EPOCH,
+  }),
+})
 // sessionId → current intent node id (default ROOT). Kept in memory for the hot path, but PERSISTED per
 // session in project.sqlite so it survives engine restarts / image rolls — otherwise a restart forgets which
 // answer each session is "on", and edit:/modify would have nothing to target (falls through to build). Scoped
@@ -190,7 +220,9 @@ function makeAgentSlot<A extends Agent>(role: string, promptVersion: () => Promi
 const analystSlot  = makeAgentSlot('analyst',  analystPromptVersion,  (resumeId) => listSources().then(sources => createAnalyst({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { harness: ANALYST_HARNESS, model: ANALYST_MODEL, resumeId } })))
 const semanticSlot = makeAgentSlot('semantic', semanticPromptVersion, (resumeId) => listSources().then(sources => createSemanticModeller({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { harness: SEMANTIC_HARNESS, model: SEMANTIC_MODEL, resumeId } })))
 const connectorSlot = makeAgentSlot('connector', connectorPromptVersion, (resumeId) => createConnector({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, datasourcesDir: DATASOURCES_DIR, ica: { harness: CONNECTOR_HARNESS, model: CONNECTOR_MODEL, resumeId } }))
-console.log(`[ica] analyst=${ANALYST_HARNESS ?? 'claude-code'}:${ANALYST_MODEL ?? 'claude-sonnet-5'} · modeler=${SEMANTIC_HARNESS ?? 'claude-code'}:${SEMANTIC_MODEL ?? 'claude-sonnet-5'} · connector=${CONNECTOR_HARNESS}:${CONNECTOR_MODEL}`)
+// COLD by design: never warmed at boot (below); spun up only when the admin triggers a grounding build.
+const groundingSlot = makeAgentSlot('grounding', groundingPromptVersion, (resumeId) => listSources().then(sources => createGroundingAgent({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { harness: GROUNDING_HARNESS, model: GROUNDING_MODEL, resumeId } })))
+console.log(`[ica] analyst=${ANALYST_HARNESS ?? 'claude-code'}:${ANALYST_MODEL ?? 'claude-sonnet-5'} · modeler=${SEMANTIC_HARNESS ?? 'claude-code'}:${SEMANTIC_MODEL ?? 'claude-sonnet-5'} · connector=${CONNECTOR_HARNESS}:${CONNECTOR_MODEL} · grounding=${GROUNDING_HARNESS}:${GROUNDING_MODEL} (cold)`)
 // Live analyst state, kept so a (re)connecting client can RE-SYNC after a reload (the engine stores
 // no history — this is just the current run + last result, replayed on demand).
 let curQuestion = '', curCategory = '', curSid = ''
@@ -213,6 +245,33 @@ async function reuseProgram(programDir: string, params: any, category: string,
     const out = rr.output as any
     const answer = { ...out, status: out?.status ?? 'answered' }
     const timing = { ms: Date.now() - t0, reused: true }
+    // Deterministic AUDIT of this run (no LLM): the input at this moment, the output's shape, and a rough
+    // "degenerate" flag (answered-but-nothing-came-back) so we can later see how the program behaves + count failures.
+    const emptyRun = answer.status === 'answered' && (out?.table?.rows?.length ?? 0) === 0 && out?.headline?.value == null && !(out?.figures?.length)
+    answers.recordRun({ programDir, qid, question, params, status: answer.status, empty: emptyRun, shapeHash: (rr as any).finalShapeHash, ms: timing.ms })
+    // ── The missing edge: REVIEW the reused answer before shipping it ─────────────
+    // A saved program can run cleanly and still not answer the question (a stale interpretation, a name that
+    // now resolves to two things, an empty result). The reflex looks at what came back and decides whether it
+    // genuinely answers; if not, we hand UP to the analyst instead of shipping a non-answer. Fail-open: if the
+    // reviewer errors, escalate only the clearly-degenerate runs (don't flood the analyst when review is down).
+    // First, PROGRAM SELF-DOUBT: a program that couldn't confidently answer (an input outside its assumptions,
+    // a reference that resolved to more than one thing) says so — status 'uncertain' or a `doubt` field. That
+    // is a definitive raised hand, so we escalate deterministically without even asking the reviewer.
+    const doubtReason = answer.status === 'uncertain'
+      ? (typeof (out as any)?.doubt === 'string' ? (out as any).doubt : (out as any)?.doubt?.reason ?? 'the program was not confident')
+      : ((out as any)?.doubt != null ? (typeof (out as any).doubt === 'string' ? (out as any).doubt : (out as any).doubt?.reason ?? 'the program flagged doubt') : null)
+    let escalate = false, why = ''
+    if (doubtReason) { escalate = true; why = `program raised doubt — ${doubtReason}` }
+    else {
+      // Otherwise the reflex REVIEWS whether the (confident-looking) answer actually answers the question.
+      try { const v = await reflex.review(question, answer); escalate = v.verdict === 'escalate'; why = v.reason ?? '' }
+      catch (e: any) { escalate = emptyRun; why = 'reviewer unavailable' + (emptyRun ? ' + degenerate answer' : ''); log.warn('reflex-review', `review failed for ${programDir}`, e) }
+    }
+    if (escalate) {
+      clearInterval(ka)
+      log.info('reflex-review', `reused ${programDir} did not answer → escalating to the analyst`, why)
+      return false   // fall through to the analyst build (analyse handles the rebuild)
+    }
     lastAnswer = answer; lastTiming = timing; lastCategory = category
     emit(reply, { t: 'analyst:answer', category, answer, timing, sid, qid, reused: true })
     emit(reply, { t: 'analyst:done', sid })
@@ -329,7 +388,8 @@ async function analyse(question: string, from: any, sid = '', qidIn = '') {
     // Capture the PROGRAM the agent built (its built.json pointer) so a repeat of this question re-runs
     // that program (fresh query) instead of re-invoking the LLM.
     let programDir: string | undefined, programParams: any, programTerms: any[] = [], analystParent: any
-    try { const b = JSON.parse(await readFile(join(WORKSPACE, 'out', qid, 'built.json'), 'utf8')); programDir = b.programDir; programParams = b.params; programTerms = Array.isArray(b.terms) ? b.terms : []; analystParent = b.parent } catch { /* unknowable/gap → no program */ }
+    const b = await readJsonSafe<any>(join(WORKSPACE, 'out', qid, 'built.json'), null, 'analyst')   // absent = unknowable/gap (no program)
+    if (b) { programDir = b.programDir; programParams = b.params; programTerms = Array.isArray(b.terms) ? b.terms : []; analystParent = b.parent }
     emit(reply, { t: 'analyst:answer', category: r.category, answer: r.answer, lastLines: r.lastLines, timing, sid, qid })
     // PERSIST: the engine reads the agent's file result and writes the DB — the agent never touches the DB.
     // finishedAt is stamped HERE, deterministically, the moment the analyst's artifact is in hand — this is
@@ -394,6 +454,26 @@ async function buildSemanticModel(from: any) {
   } finally { semanticSlot.persist(); semanticBusy = false }
 }
 
+// The admin's GROUNDING agent — a COLD claude-code session (spun up on demand, never warmed) that builds
+// this project's value→id resolution indexes. Streamed RAW (PTY) to the admin's xterm, same machinery as the
+// modeler/connector. It reads data via the seam and persists via build(config) on grounding.mjs; it never
+// answers user questions and never touches the semantic model.
+async function handleGrounding(from: any) {
+  if (groundingBusy) { emit(from, { t: 'grounding:status', text: 'Grounding build already running.' }); return }
+  groundingBusy = true
+  const sources = await listSources()
+  emit(from, { t: 'grounding:stream', kind: 'pty' })
+  emit(from, { t: 'grounding:status', text: `Building grounding indexes — sources: ${sources.join(', ') || '(none)'}` })
+  try {
+    const grounding = await groundingSlot.get()
+    const r = await grounding.build({ onOutput: (chunk) => emit(from, { t: 'grounding:chunk', text: chunk }) })
+    emit(from, { t: 'grounding:done', summary: r.note })
+    console.log(`[ica] grounding build done in ${(r.ms / 1000).toFixed(1)}s`)
+  } catch (e: any) {
+    emit(from, { t: 'grounding:status', text: `Grounding build failed: ${e?.message ?? e}` })
+  } finally { groundingSlot.persist(); groundingBusy = false }
+}
+
 // The admin's CONNECTOR agent — a claude-code session streamed RAW (PTY) to the admin's xterm (no [[ui]]
 // narration; the admin just watches it work). Same ICA machinery as analyst/modeler. The session persists,
 // so the admin's follow-up replies continue the same conversation.
@@ -419,13 +499,13 @@ async function handleConnector(text: string, from: any) {
 // back to the PTY. claude auth is SHARED across all three agents (one $HOME on the volume), so a login in any
 // one authenticates them all. To avoid double output, the raw stream is emitted only while the agent is IDLE
 // — during a run the existing per-run stream already feeds the asker.
-type Which = 'analyst' | 'semantic' | 'connector'
-const normWhich = (w: any): Which => (w === 'connector' ? 'connector' : w === 'semantic' ? 'semantic' : 'analyst')
-const slotFor = (w: Which) => (w === 'connector' ? connectorSlot : w === 'semantic' ? semanticSlot : analystSlot)
-const termChunkT = (w: Which) => (w === 'connector' ? 'connector:chunk' : w === 'semantic' ? 'semantic:chunk' : 'analyst:chunk')
-const isAgentBusy = (w: Which) => (w === 'connector' ? connectorBusy : w === 'semantic' ? semanticBusy : analystBusy)
-const termViewers: Record<Which, Set<any>> = { analyst: new Set(), semantic: new Set(), connector: new Set() }
-const termUnsub: Record<Which, (() => void) | null> = { analyst: null, semantic: null, connector: null }
+type Which = 'analyst' | 'semantic' | 'connector' | 'grounding'
+const normWhich = (w: any): Which => (w === 'connector' ? 'connector' : w === 'grounding' ? 'grounding' : w === 'semantic' ? 'semantic' : 'analyst')
+const slotFor = (w: Which) => (w === 'connector' ? connectorSlot : w === 'grounding' ? groundingSlot : w === 'semantic' ? semanticSlot : analystSlot)
+const termChunkT = (w: Which) => (w === 'connector' ? 'connector:chunk' : w === 'grounding' ? 'grounding:chunk' : w === 'semantic' ? 'semantic:chunk' : 'analyst:chunk')
+const isAgentBusy = (w: Which) => (w === 'connector' ? connectorBusy : w === 'grounding' ? groundingBusy : w === 'semantic' ? semanticBusy : analystBusy)
+const termViewers: Record<Which, Set<any>> = { analyst: new Set(), semantic: new Set(), connector: new Set(), grounding: new Set() }
+const termUnsub: Record<Which, (() => void) | null> = { analyst: null, semantic: null, connector: null, grounding: null }
 async function attachTerminal(w: Which, from: any) {
   termViewers[w].add(from)
   const agent = await slotFor(w).get()
@@ -538,14 +618,21 @@ function resyncAnalyst(from: any) {
 async function handle(payload: any, from: any) {
   if (payload.t === 'analyse') { analyse(String(payload.question || ''), from, String(payload.sessionId || ''), String(payload.questionId || '')) }   // UI supplies both ids
   else if (payload.t === 'semantic:build') { buildSemanticModel(from) }                      // build/refine the semantic model (watchable)
+  else if (payload.t === 'grounding:build') { handleGrounding(from) }                         // admin console → grounding agent builds value→id indexes (watchable)
   else if (payload.t === 'connector:ask') { handleConnector(String(payload.text || ''), from) }   // admin console → connector agent (raw PTY back)
   else if (payload.t === 'term:attach') { attachTerminal(normWhich(payload.which), from) }         // open a live typeable terminal into an agent's PTY (e.g. /login)
   else if (payload.t === 'term:input')  { inputTerminal(normWhich(payload.which), String(payload.data ?? '')) }   // raw keystrokes/paste → the agent's PTY
+  // ── Admin INSPECTOR (read-only) ─────────────────────────────────────────────
+  // One request type, many views (see inspect.ts). reqId is echoed back so the admin UI can have
+  // several panels in flight on the ONE shared project socket without confusing the replies.
+  else if (payload.t === 'inspect:req') {
+    inspector.handle(payload).then((res) => emit(from, { t: 'inspect:res', reqId: payload.reqId, view: payload.view ?? 'overview', ...res }))
+  }
   else if (payload.t === 'sessions:list' || payload.t === 'analyst:sync') { resyncAnalyst(from) }   // (re)connect → replay the live analyst state
   else if (payload.t === 'session:load') { emit(from, { t: 'session:load:res', items: [] }) }
   else if (payload.t === 'suggestions:req') { emit(from, { t: 'suggestions:res', suggestions: { groups: [] } }) }
   else if (payload.t === 'ui:resize') {   // UI fitted its terminal → resize the matching agent's PTY (claude-code)
-    const slot = payload.which === 'semantic' ? semanticSlot : payload.which === 'connector' ? connectorSlot : analystSlot
+    const slot = slotFor(normWhich(payload.which))
     slot.session()?.resize?.(Number(payload.cols) || 120, Number(payload.rows) || 40)
   }
   else if (payload.t === 'session:new') {   // UI button → fresh session for that agent (drop resume + history)
@@ -670,7 +757,7 @@ const shutdown = () => {
   // Graceful goodbye: free the singleton slot NOW so the replacement process connects into an empty slot
   // (no restart-window eviction war). Then stop sessions and exit.
   try { if (hub?.readyState === WebSocket.OPEN) hub.send(JSON.stringify({ type: 'bye', instanceId: INSTANCE_ID })) } catch { /* socket already gone */ }
-  analystSlot.stop(); semanticSlot.stop(); connectorSlot.stop(); setTimeout(() => process.exit(0), 300)
+  analystSlot.stop(); semanticSlot.stop(); connectorSlot.stop(); groundingSlot.stop(); setTimeout(() => process.exit(0), 300)
 }
 process.once('SIGINT', shutdown); process.once('SIGTERM', shutdown)
 connect()

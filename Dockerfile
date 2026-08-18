@@ -66,12 +66,12 @@ RUN pnpm install --frozen-lockfile
 RUN printf 'export HOME=/app/data/agent-home\nmkdir -p "$HOME" 2>/dev/null\nexport PATH="/usr/local/share/pnpm:/app/apps/engine/node_modules/.bin:/app/node_modules/.bin:$PATH"\n' >> /root/.bashrc
 
 # ── Volume mount point (persisted across stop/start) ────────────────────────
-# Everything stateful lives here so it survives machine restarts: the engine's answers + consolidation
-# watermark (engine-data/<project>), the agent workspaces incl. programs + the semantic model project.sqlite
-# (workspace/<project>), and the datasource registry + connector-written bridges (datasources/). A fresh
-# machine starts with these empty — sources are added at runtime via the connector agent. Paths are set by
-# fly.ts (ENGINE_DATA_DIR / ENGINE_WORKSPACE_DIR / DATASOURCE_DATA_DIR / DATASOURCES_DIR).
-RUN mkdir -p /app/data/engine-data /app/data/workspace /app/data/datasources
+# Everything stateful lives here so it survives machine restarts: per project, ONE state home under
+# state/<project>/ (the workspace incl. programs + the DBs project.sqlite/grounding.sqlite/answers.sqlite),
+# plus the datasource registry + connector-written bridges (datasources/). A fresh machine starts with these
+# empty — sources are added at runtime via the connector agent. Paths are set by fly.ts (ENGINE_STATE_DIR /
+# DATASOURCE_DATA_DIR / DATASOURCES_DIR).
+RUN mkdir -p /app/data/state /app/data/datasources
 VOLUME ["/app/data"]
 
 # ── Build stamp ───────────────────────────────────────────────────────────────

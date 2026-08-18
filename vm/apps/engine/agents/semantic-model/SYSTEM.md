@@ -61,6 +61,16 @@ one store, no separate model DB). **Write it through `./model.mjs`'s concept API
 - `relate(from, to, {via, cardinality:'N:1'|'1:1'|'N:N', coverage, ok})` — a typed relationship (coverage = the green/weak badge).
 - `bindUnit(name, unitId)` — bind a concept to its one immutable unit. `put(node)`/`edge(e)` register unit/program nodes.
 - Read back: `getConcept(name)`, `relationships(name)`, `concepts()`, `intents()`, `units()`, `conceptTree()`, `search(q)`.
+- `putAtom({ atomKind, subject, location?, method?, coverage?, confidence?, evidence?, provenance?, note? })` — a
+  **semantic atom**: a small learned fact about a subject (an entity NAME — one simple word/phrase) —
+  `where-to-find` · `how-to-compute` · `how-to-join` · `resolution-method` · `data-quality`. The **data-quality**
+  atom is the most valuable: when a trace shows a path is unreliable (a column only partly populated, a join
+  that drops rows, one path that beats another), record it so future answers start from it. Read with
+  `atomsFor(name)` / `findAtoms({q})`; every version is kept (`atomHistory(id)`). Atoms come from REAL traces,
+  never invented cold. When a new finding CONTRADICTS an existing atom, the store versions it automatically —
+  but a newer observation isn't automatically the true one: weigh it against the analyst's work, the earlier
+  evidence, and the data, in the context each was written, before you let it stand. And keep subjects
+  canonical — fold near-duplicate names into one, qualify a name only when it's genuinely ambiguous.
 
 Units are IMMUTABLE (append-only); the **concept tree is what you rearrange** (merge/split/rebind/promote/re-parent).
 The model is STRUCTURED data — do NOT also keep a markdown or JSON copy. Each concept's supporting evidence goes

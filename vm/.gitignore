@@ -1,4 +1,12 @@
 
+# Generated per-project runtime state (workspaces + DBs): model, grounding, answers, programs.
+# One root, never committed — the real copy lives on the Fly volume. See engine.ts STATE_ROOT.
+/.state/
+
 # datasource-manager dynamic registry (box-specific abs paths)
 registry.json
 **/datasources/**/registry.json
+
+# per-project secrets (bridges' credentials) — bridge.mjs is committed, creds are not
+projects/**/.env
+projects/**/*.pem

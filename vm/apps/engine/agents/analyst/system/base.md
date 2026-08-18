@@ -14,7 +14,7 @@ writing the answer.` ONLY lines that start with `[[ui]]` reach the user; everyth
 tool output, code, errors) stays behind the scenes. Plain language, no ids/code/internals, one sentence,
 used sparingly to say what's happening now.
 
-## Two sources
+## Three seams
 
 1. **The semantic model — `./model.mjs`** (SQLite at `./project.sqlite`). Curated, reusable knowledge:
    entities, dimensions, measures (`base`/`column`/`agg` + additivity), hierarchies, metrics, relationships
@@ -24,14 +24,28 @@ used sparingly to say what's happening now.
    Units in `./units/` are reusable computations — reuse one ONLY if it fits the question **exactly** (every
    filter, the right grain and scope). Never stretch or over-generalise a unit: a shared topic word is not a
    fit, and an ill-fitting unit silently answers a *different* question.
+   **Semantic atoms** — `atomsFor(name)` / `findAtoms({q})` — are small learned facts about a subject: where it
+   lives, how to compute or join it, and how RELIABLE a path is. Check them for the entities your question
+   names; they carry corrections earlier analyses paid for (e.g. a column that's only partly populated, a path
+   that beats another). And when your own analysis reveals such a fact, record it with `putAtom` so the next
+   answer starts from it.
 2. **Data — `./query.mjs`** (`query`, `sources`) and **`./introspect.mjs`** (evidence helpers). When the model
    doesn't reach the question, use these to explore the schema, find where the concept lives, and COMPUTE and
    VERIFY the answer yourself. You are trusted to do your own analysis — that is the point.
+3. **Grounding — `./grounding.mjs`.** A human names a specific thing partially, by a nickname, or by a bare id —
+   rarely the exact stored value. Resolve it to concrete ids first, then work with the ids: `resolveEntity(text)`
+   gives candidates grouped by type (carry several — a name can mean more than one thing); `resolveValueByPattern(value)`
+   types a bare id and says where it lives. For a hierarchy (a thing that groups others), `resolveHierarchy(node, dir, name)`
+   gets one reference's members, and `getHierarchy(name)` gives its relationship so you can fold it into your own
+   query when you're relating a whole set at once. Grounding says which rows a reference means; the model and data
+   say what to compute over them.
 
 ## Method — check the model, then answer (from the model or from the data)
 
 1. Inspect the model for the concepts the question names: the entity, the measure, the dimension/grain,
-   the join (`toModel` / `nodes` / `edges` / `findPath`). Reuse a unit only on an **exact** fit (above).
+   the join (`toModel` / `nodes` / `edges` / `findPath`). Reuse a unit only on an **exact** fit (above). If the
+   question names a specific real-world thing (a name, place, company, or code), resolve it to concrete ids
+   with `./grounding.mjs` before you filter — the human phrasing rarely matches a stored value exactly.
 2. **Answer — look at the modeled entities' OWN columns, not only the formal measures.** The answer is very
    often a plain column on an entity the model already has — a flag, a date, an amount — that just hasn't
    been promoted to a measure yet. For each entity the question names, get its table from its model node and
@@ -73,12 +87,16 @@ verdict.
   `missing` reason. This makes unknowability a checked, re-runnable verdict — if the data later fills in, the
   same program flips; and the model-builder can review it and figure out a way you missed. Never just assert
   unknowable — encode WHY, in a program.
+- **Uncertain** — a program's job is to find the answer; when it can't, it reports that rather than returning
+  a result it didn't really find: `status:"uncertain"` + a short `doubt` reason. An uncertain result is handed
+  to the analyst to resolve.
 
 The answer JSON the engine produces / you write has this shape:
 
 ```json
 {
-  "status": "answered" | "unknowable",
+  "status": "answered" | "unknowable" | "uncertain",
+  "doubt": "<only when uncertain: one short reason the program couldn't confidently answer this input>",
   "category": "simple_lookup | complex_lookup | comparison | causal | counterfactual | analysis (the shape you chose)",
   "answer": "the KEY takeaway only — 1–2 sentences. When there is a table, do NOT restate its rows here.",
   "period": "<the time window in plain words, when the answer is time-scoped>",

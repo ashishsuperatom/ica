@@ -47,7 +47,15 @@ export function openAnswers(path: string) {
   try { db.exec(`ALTER TABLE answers ADD COLUMN finished_at INTEGER`) } catch { /* already there */ }
   db.exec(`CREATE INDEX IF NOT EXISTS idx_finished ON answers(finished_at);
     -- tiny KV for engine-owned cursors (e.g. the offline modeler's consolidation watermark).
-    CREATE TABLE IF NOT EXISTS engine_meta (k TEXT PRIMARY KEY, v TEXT);`)
+    CREATE TABLE IF NOT EXISTS engine_meta (k TEXT PRIMARY KEY, v TEXT);
+    -- PROGRAM RUN AUDIT (deterministic, written by the runner — no LLM). One row per program execution: the
+    -- input at that moment, the output's shape/status, whether it was degenerate (empty), and how long it took.
+    -- This is the history that lets us SEE how a program behaves as inputs/data change, and count its failures.
+    CREATE TABLE IF NOT EXISTS program_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      program_dir TEXT NOT NULL, qid TEXT, question TEXT, params_json TEXT,
+      status TEXT, empty INTEGER, shape_hash TEXT, ms INTEGER, at INTEGER NOT NULL);
+    CREATE INDEX IF NOT EXISTS idx_program_runs_dir ON program_runs(program_dir, at);`)
   const insert = db.prepare(`INSERT OR REPLACE INTO answers
     (qid, session_id, question, norm, category, status, answer_json, created_at, program_dir, params_json, finished_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
   const findStmt = db.prepare(`SELECT * FROM answers WHERE norm = ? AND status = 'answered' ORDER BY created_at DESC LIMIT 1`)
@@ -58,6 +66,10 @@ export function openAnswers(path: string) {
   const consolidatedProgsStmt = db.prepare(`SELECT DISTINCT program_dir FROM answers WHERE program_dir IS NOT NULL AND finished_at IS NOT NULL AND finished_at <= ?`)
   const metaGet = db.prepare(`SELECT v FROM engine_meta WHERE k = ?`)
   const metaSet = db.prepare(`INSERT OR REPLACE INTO engine_meta (k, v) VALUES (?, ?)`)
+  const runIns = db.prepare(`INSERT INTO program_runs (program_dir, qid, question, params_json, status, empty, shape_hash, ms, at) VALUES (?,?,?,?,?,?,?,?,?)`)
+  const runsStmt = db.prepare(`SELECT * FROM program_runs WHERE program_dir = ? ORDER BY at DESC LIMIT ?`)
+  const runsAllStmt = db.prepare(`SELECT * FROM program_runs ORDER BY at DESC LIMIT ?`)
+  const runStatsStmt = db.prepare(`SELECT program_dir, COUNT(*) AS runs, SUM(empty) AS empties, MAX(at) AS lastAt FROM program_runs GROUP BY program_dir ORDER BY lastAt DESC`)
   const getStmt = db.prepare(`SELECT * FROM answers WHERE qid = ?`)
   const sessStmt = db.prepare(`SELECT * FROM answers WHERE session_id = ? ORDER BY created_at ASC`)
   const agentGet = db.prepare(`SELECT harness, session_id, prompt_version FROM agent_sessions WHERE project_id = ? AND role = ?`)
@@ -82,6 +94,18 @@ export function openAnswers(path: string) {
     consolidatedProgramDirs(uptoFinishedAt: number): string[] { return consolidatedProgsStmt.all(uptoFinishedAt).map((r: any) => r.program_dir) },
     getMeta(k: string): string | null { const r: any = metaGet.get(k); return r ? r.v : null },
     setMeta(k: string, v: string) { metaSet.run(k, v) },
+    // ── Deterministic program-run audit (written by the runner, never an LLM) ────
+    recordRun(r: { programDir: string; qid?: string; question?: string; params?: any; status?: string; empty?: boolean; shapeHash?: string; ms?: number }) {
+      runIns.run(r.programDir, r.qid ?? null, r.question ?? null, r.params != null ? JSON.stringify(r.params) : null,
+        r.status ?? null, r.empty ? 1 : 0, r.shapeHash ?? null, r.ms ?? null, Date.now())
+    },
+    programRuns(programDir: string | undefined, limit = 100): any[] {
+      const rows = (programDir ? runsStmt.all(programDir, limit) : runsAllStmt.all(limit)) as any[]
+      return rows.map(r => ({ id: r.id, programDir: r.program_dir, qid: r.qid ?? null, question: r.question ?? null,
+        params: r.params_json ? safeParse(r.params_json) : null, status: r.status ?? null, empty: !!r.empty,
+        shapeHash: r.shape_hash ?? null, ms: r.ms ?? null, at: r.at }))
+    },
+    programRunStats(): any[] { return (runStatsStmt.all() as any[]).map(r => ({ programDir: r.program_dir, runs: r.runs, empties: r.empties ?? 0, lastAt: r.lastAt })) },
     // Reuse the PROGRAM (not the answer): the latest run for this question that has a program to re-run.
     // We ALWAYS re-execute it (fresh query) — we never hand back a stale stored answer.
     findAnswered(norm: string): AnswerRow | null { return row(findStmt.get(norm)) },

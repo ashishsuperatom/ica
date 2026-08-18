@@ -118,8 +118,10 @@ export async function createMachine(token: string, config: MachineConfig): Promi
           // Machine (Firecracker microVM) is one, so the analyst/connector/modeller can run as root.
           IS_SANDBOX: '1',
           // Persistence + the datasource registry live on the mounted VOLUME so they survive machine restarts.
-          ENGINE_DATA_DIR: '/app/data/engine-data',
-          ENGINE_WORKSPACE_DIR: '/app/data/workspace',
+          // ONE state root: the workspace (seams, programs, out) and the project's DBs (project/grounding/
+          // answers) co-locate under /app/data/state/<project>. (The engine derives WORKSPACE_ROOT/DATA_ROOT
+          // from ENGINE_STATE_DIR when those per-root vars are unset — see vm/apps/engine/engine.ts.)
+          ENGINE_STATE_DIR: '/app/data/state',
           DATASOURCE_DATA_DIR: '/app/data/datasources',
           DATASOURCES_DIR: '/app/data/datasources',
           // claude-code auth: prefer the per-machine token if given, else inherit the Fly app secret

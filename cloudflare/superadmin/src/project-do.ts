@@ -456,8 +456,11 @@ export class ProjectDO extends DurableObject<Env> {
 
       // Superadmin (admin UI): accesses ANY project — no membership required. Registers as
       // the 'admin' role (distinct from 'runtime'/'code-engine') so it can req/res with the
-      // code-engine over the relay (e.g. introspect) without evicting either of them, and
-      // WITHOUT waking the machine (read-only introspection is not user activity).
+      // code-engine over the relay (the Inspector's inspect:req) without evicting either of them.
+      // An admin frame is NOT user activity — it never bumps last_active, so watching the Inspector
+      // does not extend the idle countdown. It CAN still wake a suspended machine (see relay()):
+      // an inspect request needs the engine up to answer, and the Inspector only fetches on
+      // open/refresh, never on a poll.
       if (claims.role === 'superadmin') {
         this.register(ws, 'admin', claims.userId, claims.role, authTimer)
         return

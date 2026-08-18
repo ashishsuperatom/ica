@@ -43,6 +43,8 @@ however you see fit — there is no setup to do.
   carries the corrections we've made — that's why it comes first.
 - Data:       ./query.mjs      — use this to query the data source: \`query(sourceId, sql, params)\` + \`sources()\`.
 - Introspect: ./introspect.mjs — schema/evidence helpers over the data.
+- Grounding:  ./grounding.mjs  — resolve a fuzzy human reference to concrete ids: \`resolveEntity(text)\`,
+  \`resolveHierarchy(node, dir, name)\`, \`resolveValueByPattern(value)\` (built per-project by the grounding agent).
 - Run:        ./run.mjs        — run a program: \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\` (prints the output; writes the graph/shape to program.json).
 
 ## Layout
@@ -98,7 +100,17 @@ export async function sources() {   // list data sources + their kind/dialect
 // The concept layer is a TREE (root → concepts → their unit): every concept has ONE parent (a broader
 // composite concept, or the root) via setParent, is 'simple' (one unit) or 'composite' (has sub-concepts)
 // via props.form, and may declare parameters. Units are IMMUTABLE; the concept tree is what you rearrange.
-import { NodeStore, upsertConcept as _c, relate as _r, bindUnit as _b, getConcept as _g, relationships as _rel, setParent as _sp, conceptTree as _ct } from '@superatom/node-store'
+//
+// SEMANTIC ATOMS — small typed knowledge units indexed by an entity NAME (a simple word/phrase). Each says,
+// about one subject: where it lives, how to compute/join it, how a value resolves, or — most valuable — how
+// RELIABLE a path is (data-quality). Atoms are usage-learned (from real analysis), never invented cold.
+//   putAtom({ atomKind:'where-to-find'|'how-to-compute'|'how-to-join'|'resolution-method'|'data-quality',
+//             subject, location?, method?, coverage?, confidence?, evidence?, provenance?, note?, source? })
+//        — write/update. Re-emitting the SAME content is a no-op; DIFFERENT content VERSIONS the atom (the old
+//          one is archived + timestamped and kept, the new one goes live, linked back). Never a silent overwrite.
+//   atomsFor(subject) · findAtoms({subject?,atomKind?,q?}) · atomHistory(id)   — read (live only; history = all versions)
+import { NodeStore, upsertConcept as _c, relate as _r, bindUnit as _b, getConcept as _g, relationships as _rel, setParent as _sp, conceptTree as _ct,
+  putAtom as _pa, findAtoms as _fa, atomsFor as _af, atomHistory as _ah } from '@superatom/node-store'
 import { fileURLToPath } from 'node:url'
 const store = new NodeStore(fileURLToPath(new URL('./project.sqlite', import.meta.url)))
 export const concept = (name, props, summary) => _c(store, name, props, summary)
@@ -108,6 +120,10 @@ export const setParent = (childName, parentName) => _sp(store, childName, parent
 export const getConcept = (name) => _g(store, name)
 export const relationships = (name) => _rel(store, name)
 export const conceptTree = () => _ct(store)
+export const putAtom = (atom) => _pa(store, atom)
+export const findAtoms = (opts) => _fa(store, opts)
+export const atomsFor = (subject) => _af(store, subject)
+export const atomHistory = (id) => _ah(store, id)
 export const concepts = () => store.listKind('concept')
 export const intents  = () => store.listKind('intent')
 export const units    = () => store.listKind('unit')
@@ -171,6 +187,50 @@ export async function forSource(id) {
   if (!s) throw new Error('unknown source: ' + id + ' (call sources() to list)')
   return getIntrospect(s.dialect, query, id)
 }
+`)
+
+  await writeFile(join(dir, 'grounding.mjs'),
+`// The GROUNDING seam. Grounding turns a fuzzy human reference — a name, a place, an id — into concrete
+// structured ids, using indexes built per-project FROM this project's OWN data (nothing dataset-specific is
+// assumed; entity types, hierarchies and value patterns are all discovered here and stored). The grounding
+// agent BUILDS these indexes; the analyst READS them. It answers three questions, each a distinct resolver:
+//   resolveEntity(text, {typeHint?, perType?})  — "which specific thing is this?"  value → ranked ids, PER type
+//   resolveHierarchy(node, dir, name)           — one reference's members/ancestors (resolved against the source)
+//   getHierarchy(name)                          — the hierarchy's relationship, to fold into your own query for a whole set
+//   resolveValueByPattern(value)                — "what kind of value is this?"      id → { type, where it lives }
+//
+// BUILD (grounding agent): call build(config). You discover the config by exploring the data; the mechanical
+// population is deterministic. config = {
+//   entities:    [{ type, sql, source? }],        // sql returns rows { id, value } — one row per resolvable name
+//   hierarchies: [{ name, entityType, childType?, resolver, source?, oneToMany?, spec }],
+//   patterns:    [{ name, regex, entityType, location, howToFind, confidence }],   // format → where an id lives
+//   aliases:     [{ type, id, alias }],           // curated human synonyms
+// }
+// A hierarchy is resolved LIVE against the source — nothing is copied, so it never goes stale. Prefer a live
+// kind whenever the source already holds the tree simply; do NOT duplicate it. resolver + spec:
+//   'column'        spec:{ table, idCol, parentCol } — child row carries a parent-key (self-ref tree or clean FK)
+//   'derived-query' spec:{ descendantsSql, ancestorsSql? } — needs a join; each template binds @id
+//   'cross-source'  spec:{ descendantsSql, ancestorsSql?, source } — related level in another source
+//   'materialized'  spec:{ childrenSql } — the ONLY kind that COPIES edges (childrenSql → { parent_id, child_id });
+//                   reserve it for hierarchies too expensive to resolve live, and re-run build() to refresh.
+// build() is idempotent (re-running replaces). Verify with stats() and by calling the resolvers.
+import { GroundingStore, buildGrounding } from '@superatom/grounding'
+import { fileURLToPath } from 'node:url'
+import { query as _query, sources as _sources } from './query.mjs'
+let _default
+async function defaultSource() { if (!_default) _default = (await _sources())[0]?.id; return _default }
+// The live data seam: routes each spec's SQL to its named source (or the sole source) and binds @name params.
+// Hierarchies of the live kinds (column/derived-query/cross-source) resolve THROUGH this at query time — the
+// source's own tree is the single source of truth, so results are always fresh and nothing is copied/synced.
+const source = async (sql, src, params) => _query(src ?? await defaultSource(), sql, params ?? {})
+const store = new GroundingStore(fileURLToPath(new URL('./grounding.sqlite', import.meta.url)), { source })
+export async function build(config) { return buildGrounding(store, source, config) }
+export const resolveEntity = (text, opts) => store.resolveEntity(text, opts)
+export const resolveHierarchy = (node, dir, name) => store.resolveHierarchy(node, dir, name)   // async: pull a reference's members/ancestors
+export const getHierarchy = (name) => store.getHierarchy(name)   // join-mode: the relationship's spec to compose into your OWN SQL (no N+1)
+export const resolveValueByPattern = (value) => store.resolveValueByPattern(value)
+export const stats = () => store.stats()   // the ONE structural reader (defined on GroundingStore)
+export const raw = store
 `)
   return dir
 }

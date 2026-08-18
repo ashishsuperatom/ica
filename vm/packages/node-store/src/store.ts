@@ -10,6 +10,8 @@ export type Node = {
   summary?: string
   props?: Record<string, unknown>
   file_path?: string
+  valid_from?: number          // bitemporal window (ms) — set by the store; read-only to callers
+  valid_to?: number | null     // null = currently live; a number = superseded/retired at that time
 }
 
 export type Edge = {
@@ -31,6 +33,8 @@ function rowToNode(r: any): Node {
     summary: r.summary ?? undefined,
     props: r.props ? JSON.parse(r.props) : {},
     file_path: r.file_path ?? undefined,
+    valid_from: r.valid_from ?? undefined,
+    valid_to: r.valid_to ?? null,
   }
 }
 

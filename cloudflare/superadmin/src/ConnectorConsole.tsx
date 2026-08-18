@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import type { Hub } from './ConceptMap'
+import type { Hub } from './hub'
 
 // Uses the ONE shared project hub (from ProjectDetailPage) — it opens NO socket of its own.
 export function ConnectorConsole({ hub }: { hub: Hub }) {
