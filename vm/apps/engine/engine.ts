@@ -375,7 +375,14 @@ async function analyse(question: string, from: any, sid = '', qidIn = '') {
     emit(reply, { t: 'analyst:stream', kind: analyst.session.kind ?? 'events', sid })
     const handlers = {
       onCategory: (c: string) => { curCategory = c; emit(reply, { t: 'analyst:category', category: c, sid }) },
-      onOutput: (chunk: string) => { if (reply) emit(reply, { t: 'analyst:chunk', text: chunk }) },   // raw terminal (pty) / event text (events) → Analyst tab
+      onOutput: (chunk: string) => {
+        // The analyst is ONE agent with ONE terminal — mirror its live output to the asker AND to every
+        // attached web-UI terminal, so the Analyst tab shows the work no matter where the question came from
+        // (web, Teams, …). Dedup so the web asker (also an attached viewer) isn't written twice.
+        const m = { t: 'analyst:chunk', text: chunk }
+        if (reply) emit(reply, m)
+        for (const v of termViewers.analyst) if (v !== reply) emit(v, m)
+      },
       onNarration: (text: string) => { if (reply) emit(reply, { t: 'analyst:progress', text, sid }) },  // clean prose → New chat progress
     }
     const r = await analyst.ask(question, handlers, { qid, modify: modifyTarget ?? undefined })
