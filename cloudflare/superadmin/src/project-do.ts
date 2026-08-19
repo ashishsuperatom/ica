@@ -98,6 +98,9 @@ export class ProjectDO extends DurableObject<Env> {
   private connByWs = new Map<WebSocket, ConnInfo>()
   // role → wsId  (at most one connection per role)
   private roleRegistry = new Map<string, string>()
+  // Resolvers waiting for the code-engine to (re)register — used to give a briefly-reconnecting engine a
+  // short grace before a routed message is declared "offline" (see routeToCodeEngine).
+  private engineWaiters = new Set<() => void>()
 
   // This project's id (learned from the /_ws/<id> URL) + its read-only project name. The ProjectDO is the
   // SOURCE OF TRUTH for the name: it is WRITTEN here (setName) on create + rename, so the user-UI reads it
@@ -122,6 +125,10 @@ export class ProjectDO extends DurableObject<Env> {
 
   // Timeout for unauthenticated connections (ms)
   private static AUTH_TIMEOUT = 10_000
+  // Grace for a briefly-absent EXTERNAL engine before a routed message errors "offline": only if it
+  // heartbeated within ENGINE_RECENT_MS (so we don't stall a genuinely-off box), wait up to ENGINE_GRACE_MS.
+  private static ENGINE_RECENT_MS = 30_000
+  private static ENGINE_GRACE_MS = 5_000
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
@@ -389,7 +396,7 @@ export class ProjectDO extends DurableObject<Env> {
       return
     }
 
-    this.relay(ws, sender, msg)
+    await this.relay(ws, sender, msg)
   }
 
   private async handleHello(ws: WebSocket, msg: any, authTimer: ReturnType<typeof setTimeout>) {
@@ -522,6 +529,11 @@ export class ProjectDO extends DurableObject<Env> {
     this.wsById.set(wsId, ws)
     this.connByWs.set(ws, { wsId, type, userId, orgRole, instanceId, epoch })
     if (singleton) this.roleRegistry.set(type, wsId)
+    // Wake anything waiting for the engine to come back (grace window in routeToCodeEngine).
+    if (type === 'code-engine' && this.engineWaiters.size) {
+      for (const w of this.engineWaiters) { try { w() } catch { /* one bad waiter can't block the rest */ } }
+      this.engineWaiters.clear()
+    }
 
     // Welcome
     ws.send(JSON.stringify({
@@ -539,6 +551,20 @@ export class ProjectDO extends DurableObject<Env> {
       payload: { t: 'connection:join', wsId, type },
     })
     return true
+  }
+
+  // Resolve when the code-engine (re)registers, or after `ms` — whichever first. Lets a routed message ride
+  // out a brief engine reconnect (e.g. after a worker deploy drops the non-hibernating socket) instead of
+  // immediately erroring "offline". Bounded, so a genuinely-down engine still errors promptly.
+  private waitForEngine(ms: number): Promise<boolean> {
+    if (this.roleRegistry.has('code-engine')) return Promise.resolve(true)
+    return new Promise<boolean>((resolve) => {
+      let done = false
+      const finish = (ok: boolean) => { if (done) return; done = true; this.engineWaiters.delete(w); resolve(ok) }
+      const w = () => finish(true)
+      this.engineWaiters.add(w)
+      setTimeout(() => finish(this.roleRegistry.has('code-engine')), ms)
+    })
   }
 
   private handleDisconnect(ws: WebSocket) {
@@ -565,7 +591,7 @@ export class ProjectDO extends DurableObject<Env> {
 
   // ── Message relay ──────────────────────────────────────────────────────────
 
-  private relay(senderWs: WebSocket, sender: ConnInfo, msg: any) {
+  private async relay(senderWs: WebSocket, sender: ConnInfo, msg: any) {
     // A runtime (human client) sending a message is real activity → reset the idle clock.
     if (sender.type === 'runtime') this.markUserActivity()
 
@@ -582,9 +608,20 @@ export class ProjectDO extends DurableObject<Env> {
     // trigger; an idle browser tab never wakes the machine.
     const to = msg.to as { id?: string; type?: string } | undefined
     if (to?.type === 'code-engine') {
-      const [pm] = this.ctx.storage.sql.exec('SELECT provider, idle_phase FROM fly_machine LIMIT 1')
+      const [pm] = this.ctx.storage.sql.exec('SELECT provider, idle_phase, last_heartbeat FROM fly_machine LIMIT 1')
       const phase = (pm as any)?.idle_phase as string | undefined
-      const engineDown = !this.roleRegistry.has('code-engine') || phase === 'suspended' || phase === 'stopped'
+      let engineDown = !this.roleRegistry.has('code-engine') || phase === 'suspended' || phase === 'stopped'
+      // GRACE (external only): an external engine that isn't suspended/stopped but is momentarily absent is
+      // almost always mid-reconnect — a non-hibernating hub socket dies (1006) on every worker deploy and the
+      // engine is back in ~1s. If it heartbeated recently, wait a few seconds for it to re-register before
+      // declaring it offline, so a blip doesn't surface as a scary error. A genuinely-down box errors promptly.
+      if (engineDown && (pm as any)?.provider === 'external' && phase !== 'suspended' && phase !== 'stopped') {
+        const lastHb = Number((pm as any)?.last_heartbeat ?? 0)
+        if (lastHb && Date.now() - lastHb < ProjectDO.ENGINE_RECENT_MS) {
+          await this.waitForEngine(ProjectDO.ENGINE_GRACE_MS)
+          engineDown = !this.roleRegistry.has('code-engine')
+        }
+      }
       if (engineDown) {
         if ((pm as any)?.provider === 'external') {
           // Local/EC2 box we can't start — just tell the user it's offline.
