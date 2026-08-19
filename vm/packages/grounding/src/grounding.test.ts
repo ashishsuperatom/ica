@@ -53,6 +53,7 @@ ok('typo "sri sae road lines" → SRI SAI ROAD LINES', r1.byType.customer?.[0]?.
 ok('"everest" → EVEREST… (via alias/fuzzy)', g.resolveEntity('everest').byType.customer?.[0]?.ref.id == 3)
 ok('"kirby" → KIRBY…', g.resolveEntity('kirby').byType.customer?.[0]?.ref.id == 4)
 ok('results grouped byType (never one flat list)', typeof r1.byType === 'object')
+ok('FTS index populated after build (scale path active, not a full scan)', ((g as any).db.prepare('SELECT COUNT(*) AS n FROM entity_fts').get() as any).n > 0)
 
 console.log('\n[resolveHierarchy — LIVE column resolution against the source]')
 const kids = await g.resolveHierarchy({ type: 'branch', id: 1 }, 'descendants', 'branch-sn-live')

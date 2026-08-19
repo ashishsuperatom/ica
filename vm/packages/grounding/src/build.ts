@@ -60,6 +60,7 @@ export async function buildGrounding(store: GroundingStore, source: SourceQuery,
   }
   for (const p of cfg.patterns ?? []) store.upsertPattern(p)
   for (const a of cfg.aliases ?? []) store.addAlias(a.type, a.id, a.alias)
+  store.reindexFts()   // build the trigram index so resolveEntity scales (candidates from an index, not a scan)
   store.checkpoint()   // fold the writes into the main file so a read-only reader (the inspector) sees them
   return { entities, edges, hierarchies: (cfg.hierarchies ?? []).length, patterns: (cfg.patterns ?? []).length }
 }
