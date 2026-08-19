@@ -19,10 +19,17 @@ fi
 if ! $DOCKER compose version >/dev/null 2>&1; then
   echo "[deploy] The 'docker compose' plugin is missing — installing it…"
   SUDO=""; [ "$DOCKER" = "sudo docker" ] && SUDO="sudo"
-  if command -v apt-get >/dev/null 2>&1;   then $SUDO apt-get update && $SUDO apt-get install -y docker-compose-plugin
-  elif command -v dnf >/dev/null 2>&1;     then $SUDO dnf install -y docker-compose-plugin
-  elif command -v yum >/dev/null 2>&1;     then $SUDO yum install -y docker-compose-plugin
-  else echo "[deploy] No apt/dnf/yum found — install the docker compose plugin manually, then re-run."; exit 1; fi
+  # Try the distro package first (works when Docker's official repo is present)…
+  if command -v apt-get >/dev/null 2>&1;   then $SUDO apt-get update >/dev/null 2>&1 && $SUDO apt-get install -y docker-compose-plugin >/dev/null 2>&1 || true
+  elif command -v dnf >/dev/null 2>&1;     then $SUDO dnf install -y docker-compose-plugin >/dev/null 2>&1 || true
+  elif command -v yum >/dev/null 2>&1;     then $SUDO yum install -y docker-compose-plugin >/dev/null 2>&1 || true
+  fi
+  # …otherwise (Docker from docker.io/snap, no official repo) drop the v2 plugin binary in directly. Distro-agnostic.
+  if ! $DOCKER compose version >/dev/null 2>&1; then
+    DEST=/usr/local/lib/docker/cli-plugins; $SUDO mkdir -p "$DEST"
+    $SUDO curl -fSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$(uname -m)" -o "$DEST/docker-compose"
+    $SUDO chmod +x "$DEST/docker-compose"
+  fi
   $DOCKER compose version >/dev/null 2>&1 || { echo "[deploy] compose plugin still missing after install — install it manually, then re-run."; exit 1; }
 fi
 
