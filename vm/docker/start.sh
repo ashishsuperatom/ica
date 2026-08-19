@@ -13,6 +13,25 @@ mkdir -p "$HOME"
 [ -f "$HOME/.claude.json" ] || printf '{"hasCompletedOnboarding":true,"theme":"dark"}' > "$HOME/.claude.json"
 echo "[vm] HOME=$HOME (agent auth persists on the volume)"
 
+# ── One-time workspace layout migration (idempotent, runs BEFORE the engine opens any DB) ─────────────
+# Older workspaces dumped every SQLite file + seam at the workspace root. The engine now uses the
+# concern-organized layout — all DBs under db/. Move any root-level DBs into db/ and drop the stale root
+# seams/role-docs (regenerated in their concern folders on next run). No-op once a workspace is migrated,
+# so this self-heals any host (Fly / EC2 / fresh) on startup with no manual volume surgery.
+STATE_DIR="${ENGINE_STATE_DIR:-/app/data/state}"
+for ws in "$STATE_DIR"/*/; do
+  [ -d "$ws" ] || continue
+  mkdir -p "${ws}db"
+  for db in project.sqlite grounding.sqlite answers.sqlite; do
+    for ext in "" "-wal" "-shm"; do
+      if [ -f "${ws}${db}${ext}" ]; then mv -f "${ws}${db}${ext}" "${ws}db/${db}${ext}"; echo "[vm] migrated ${db}${ext} -> db/ in ${ws}"; fi
+    done
+  done
+  for f in query.mjs introspect.mjs model.mjs grounding.mjs ANALYST.md MODEL.md GROUNDING.md CONNECTOR.md; do
+    if [ -f "${ws}${f}" ]; then rm -f "${ws}${f}"; fi
+  done
+done
+
 # ── Warm the opencode server ──────────────────────────────────────────────────
 # The reflex agent (opencode-go) connects to a running opencode server. Cold-spawning it per question
 # exceeds the SDK's 5s startup timeout on this box and would crash the engine — so start ONE server here at
