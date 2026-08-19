@@ -4,6 +4,7 @@
 // EXCLUDING node_modules, generated state, DBs, and any secret (.env / .pem), then zips it into dist/.
 // Nothing secret or project-specific goes in — the target fills .env and connects its own data source.
 import { cp, mkdir, rm } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join, dirname, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -35,14 +36,15 @@ async function main() {
   await mkdir(join(STAGE, 'apps', 'datasources'), { recursive: true })
   await cp(join(VM, 'apps', 'engine'), join(STAGE, 'apps', 'engine'), { recursive: true, filter })
   await cp(join(VM, 'apps', 'datasources', 'manager'), join(STAGE, 'apps', 'datasources', 'manager'), { recursive: true, filter })
-  // 3. the deploy scripts, at the zip root
+  // 3. the deploy scripts, at the zip root (+ VERSION, so the artifact carries its own version)
   for (const f of ['setup.sh', 'run.sh', '.env.example', 'README.md']) {
     await cp(join(HERE, f), join(STAGE, f))
   }
+  await cp(join(REPO, 'deploy', 'VERSION'), join(STAGE, 'VERSION'))
 
   // 4. zip it (system `zip` — no npm dependency). Stamp with a wall-clock time.
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-  const zip = join(OUT, `superatom-engine-linux-${stamp}.zip`)
+  const VERSION = readFileSync(join(REPO, 'deploy', 'VERSION'), 'utf8').trim()
+  const zip = join(OUT, `sa-engine-linux-${VERSION}.zip`)
   execFileSync('zip', ['-r', '-q', zip, '.'], { cwd: STAGE })
   await rm(STAGE, { recursive: true, force: true })
 

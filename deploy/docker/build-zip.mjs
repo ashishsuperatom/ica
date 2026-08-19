@@ -3,7 +3,7 @@
 // Stages the Dockerfile + the workspace SOURCE (under vm/, matching the Dockerfile's COPY paths) + the
 // docker-compose deploy files, EXCLUDING node_modules / state / DBs / secrets, then zips into dist/.
 import { cp, mkdir, rm } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join, dirname, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -26,8 +26,9 @@ async function main() {
   // 1. the Dockerfile (+ .dockerignore) at the build-context root
   await cp(join(REPO, 'Dockerfile'), join(STAGE, 'Dockerfile'))
   if (existsSync(join(REPO, '.dockerignore'))) await cp(join(REPO, '.dockerignore'), join(STAGE, '.dockerignore'))
-  // 2. the compose + deploy files at the root
+  // 2. the compose + deploy files at the root (+ the VERSION, so the artifact carries its own version)
   for (const f of ['docker-compose.yml', 'deploy.sh', '.env.example', 'README.md']) await cp(join(HERE, f), join(STAGE, f))
+  await cp(join(REPO, 'deploy', 'VERSION'), join(STAGE, 'VERSION'))
   // 3. the workspace SOURCE under vm/ (the Dockerfile COPYs vm/package.json, vm/packages/, vm/apps/, vm/docker/start.sh)
   for (const f of ['package.json', 'pnpm-workspace.yaml', '.npmrc', 'pnpm-lock.yaml']) await cp(join(VM, f), join(STAGE, 'vm', f))
   await cp(join(VM, 'packages'), join(STAGE, 'vm', 'packages'), { recursive: true, filter })
@@ -35,8 +36,8 @@ async function main() {
   await cp(join(VM, 'apps', 'datasources', 'manager'), join(STAGE, 'vm', 'apps', 'datasources', 'manager'), { recursive: true, filter })
   await cp(join(VM, 'docker', 'start.sh'), join(STAGE, 'vm', 'docker', 'start.sh'))
 
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-  const zip = join(OUT, `superatom-engine-docker-${stamp}.zip`)
+  const VERSION = readFileSync(join(REPO, 'deploy', 'VERSION'), 'utf8').trim()
+  const zip = join(OUT, `sa-engine-docker-${VERSION}.zip`)
   execFileSync('zip', ['-r', '-q', zip, '.'], { cwd: STAGE })
   await rm(STAGE, { recursive: true, force: true })
   const sizeMb = execFileSync('du', ['-m', zip]).toString().split('\t')[0]
