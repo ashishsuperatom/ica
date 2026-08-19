@@ -18,6 +18,8 @@ type Config = { serviceToken?: string; secrets?: Record<string, ChannelSecrets> 
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { 'content-type': 'application/json' } })
 const retryable = (e: Error) => Object.assign(e, { retryable: true })
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+const TYPING_MS = 4000              // re-send the channel "typing" indicator this often while a turn is pending
+const TURN_TTL_MS = 15 * 60_000     // stop typing (drop the pending turn) if no answer arrives within this
 
 export class ChannelDO {
   constructor(private state: DurableObjectState, private env: any) {}
@@ -82,7 +84,28 @@ export class ChannelDO {
         // on the reflex/analyst here — a turn can take minutes; ack (200) immediately and reply in the background.
         const qid = crypto.randomUUID()
         await this.state.storage.put(`pending:${qid}`, { channel, conv: message.conversation, question: message.text, createdAt: Date.now() })
-        void this.handleTurn(qid, projectId, cfg.serviceToken, channel, message, secrets)
+        // Show typing now + arm the alarm that keeps it alive (no held socket). Then FIRE the analyse at the
+        // engine — event-based: we do NOT wait for the answer. It comes back to /answer when ready.
+        const typ = adapter.renderStatus?.('working'); if (typ) await adapter.sendReply(message.conversation, typ, secrets).catch(() => {})
+        await this.state.storage.setAlarm(Date.now() + TYPING_MS)
+        await this.sendAnalyse(projectId, cfg.serviceToken, channel, message, qid).catch((e: any) => console.log('[channel] sendAnalyse failed:', e?.message ?? e))
+        return json({ ok: true })
+      }
+
+      // The engine's finished answer for a channel turn, handed here by the ProjectDO (DO→DO). Post it to the
+      // channel and clear the pending turn. Delivery errors are LOGGED (never swallowed).
+      if (request.method === 'POST' && path === '/answer') {
+        const { qid, channel, answer, category } = await request.json() as any
+        const rec = await this.state.storage.get<{ channel: string; conv: ConversationRef }>(`pending:${qid}`)
+        if (!rec) return json({ ok: true, note: 'no pending turn (already delivered?)' })
+        await this.state.storage.delete(`pending:${qid}`)                       // delete first → deliver at most once
+        const ch = rec.channel || channel
+        const adapter = channelAdapter(ch)
+        const cfg = (await this.state.storage.get<Config>('config')) ?? {}
+        if (adapter) {
+          try { await adapter.sendReply(rec.conv, adapter.renderAnswer(answer, category), cfg.secrets?.[ch] ?? {}) }
+          catch (e: any) { console.log(`[channel] sendReply failed for ${qid}:`, e?.message ?? e) }
+        }
         return json({ ok: true })
       }
 
@@ -96,23 +119,38 @@ export class ChannelDO {
   // (up to a ceiling well ABOVE any engine timeout, so we never give up before it does), then reply to the
   // stored conversation — or an error card if it truly failed. Idempotent via the pending record: we reply only
   // if this qid is still pending, then clear it, so a turn is answered exactly once.
-  private async handleTurn(qid: string, projectId: string, serviceToken: string, channel: string, message: InboundMessage, secrets: ChannelSecrets): Promise<void> {
-    const adapter = channelAdapter(channel)!
+  // Fire ONE analyse at the engine over a short-lived hub WS, tagged with `channel` + qid so the engine
+  // delivers the finished answer back via the hub (to:'channel' → this DO's /answer). We do NOT wait for the
+  // answer — that's the point: no long-held socket, eviction-proof; the answer arrives as an inbound event.
+  private async sendAnalyse(projectId: string, serviceToken: string, channel: string, message: InboundMessage, qid: string): Promise<void> {
     const conv = message.conversation as ConversationRef
-    const sessionId = `${channel}:${conv.conversationId}`
-    const typing = () => { const s = adapter.renderStatus?.('working'); if (s) void adapter.sendReply(conv, s, secrets).catch(() => {}) }
-    typing()
-    let reply: unknown
-    try {
-      const r = await this.runTurnRetrying(projectId, serviceToken, message.text, sessionId, qid, typing)
-      reply = adapter.renderAnswer(r.answer, r.category)
-    } catch (err: any) {
-      reply = adapter.renderAnswer({ status: 'error', answer: `Sorry — I couldn't finish that. (${String(err?.message ?? err).slice(0, 160)})` } as any)
+    const stub = this.env.PROJECT.get(this.env.PROJECT.idFromName(`proj:${projectId}`))
+    const resp = await stub.fetch(`https://do/_ws/${projectId}`, { headers: { Upgrade: 'websocket' } })
+    const ws = (resp as any).webSocket as WebSocket | undefined
+    if (!ws) throw new Error('hub did not upgrade to a websocket')
+    ws.accept()
+    ws.send(JSON.stringify({ type: 'hello', role: 'runtime', token: serviceToken }))
+    ws.send(JSON.stringify({ to: { type: 'code-engine' }, payload: {
+      t: 'analyse', question: message.text, projectId, sessionId: `${channel}:${conv.conversationId}`,
+      questionId: qid, role: 'user', channel } }))
+    await sleep(1200); try { ws.close() } catch { /* closing */ }   // let the hub relay, then release — no waiting
+  }
+
+  // Keep the channel's "typing" indicator alive while any turn is pending, WITHOUT holding a socket. Re-arms
+  // every TYPING_MS until /answer clears the pending turn (or it ages out past TURN_TTL_MS).
+  async alarm(): Promise<void> {
+    const pend = await this.state.storage.list<{ channel: string; conv: ConversationRef; createdAt: number }>({ prefix: 'pending:' })
+    if (!pend.size) return
+    const cfg = (await this.state.storage.get<Config>('config')) ?? {}
+    const now = Date.now()
+    let live = 0
+    for (const [key, rec] of pend) {
+      if (now - (rec.createdAt ?? 0) > TURN_TTL_MS) { await this.state.storage.delete(key); continue }   // stale → stop typing
+      const adapter = channelAdapter(rec.channel); if (!adapter) continue
+      const s = adapter.renderStatus?.('working')
+      if (s) { live++; await adapter.sendReply(rec.conv, s, cfg.secrets?.[rec.channel] ?? {}).catch(() => {}) }
     }
-    if (await this.state.storage.get(`pending:${qid}`)) {       // reply once
-      await this.state.storage.delete(`pending:${qid}`)
-      await adapter.sendReply(conv, reply, secrets).catch(() => {})
-    }
+    if (live) await this.state.storage.setAlarm(now + TYPING_MS)
   }
 
   // Ask one question, retrying a connection drop (the cold-wake case): the first attempt starts the machine

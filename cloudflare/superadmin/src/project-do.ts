@@ -595,6 +595,17 @@ export class ProjectDO extends DurableObject<Env> {
   // ── Message relay ──────────────────────────────────────────────────────────
 
   private async relay(senderWs: WebSocket, sender: ConnInfo, msg: any) {
+    // ── Chat-channel answer delivery ──────────────────────────────────────────
+    // The engine finished a channel-originated turn (Teams/…) and addresses the answer to type:'channel'.
+    // The channel consumer holds no live socket, so we WAKE its ChannelDO (DO→DO) and hand it the answer to
+    // post. Generic across channels — the adapter inside the ChannelDO does the channel-specific rendering.
+    if ((msg.to as any)?.type === 'channel') {
+      const p = msg.payload as any
+      const chan = this.env.CHANNEL.get(this.env.CHANNEL.idFromName(`chan:${this._pid}`))
+      await chan.fetch('https://do/answer', { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ qid: p?.qid, channel: p?.channel, answer: p?.answer, category: p?.category }) }).catch(() => {})
+      return
+    }
     // A runtime (human client) sending a message is real activity → reset the idle clock.
     if (sender.type === 'runtime') this.markUserActivity()
 
