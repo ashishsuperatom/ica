@@ -30,7 +30,30 @@ export class ChannelDO {
         const body = await request.json() as Config
         const cur = (await this.state.storage.get<Config>('config')) ?? {}
         await this.state.storage.put('config', { ...cur, ...body, secrets: { ...(cur.secrets ?? {}), ...(body.secrets ?? {}) } })
+        // Stamp when each channel in this update was (re)configured — for the admin's "connected" status.
+        const meta = (await this.state.storage.get<Record<string, { configuredAt: number }>>('channelMeta')) ?? {}
+        for (const ch of Object.keys(body.secrets ?? {})) meta[ch] = { configuredAt: Date.now() }
+        await this.state.storage.put('channelMeta', meta)
         return json({ ok: true })
+      }
+
+      // Read-only STATUS for the admin UI: is each channel connected, plus SAFE metadata only —
+      // masked appId/tenantId + a secret-present flag + when it was configured. The client secret
+      // (appPassword) is NEVER returned; there is no read path for it.
+      if (request.method === 'GET' && path === '/status') {
+        const cfg = (await this.state.storage.get<Config>('config')) ?? {}
+        const meta = (await this.state.storage.get<Record<string, { configuredAt: number }>>('channelMeta')) ?? {}
+        const mask = (v?: string) => (v && v.length > 12 ? v.slice(0, 8) + '…' + v.slice(-4) : (v ?? null))
+        const channels: Record<string, any> = {}
+        for (const ch of Object.keys(cfg.secrets ?? {})) {
+          const s = (cfg.secrets![ch] ?? {}) as any
+          channels[ch] = {
+            connected: !!cfg.serviceToken && !!s.appId,
+            appId: mask(s.appId), tenantId: mask(s.tenantId),
+            hasSecret: !!s.appPassword, configuredAt: meta[ch]?.configuredAt ?? null,
+          }
+        }
+        return json({ ok: true, channels })
       }
 
       // TEST-ONLY: run one engine turn synchronously and return the answer JSON — no

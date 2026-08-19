@@ -211,6 +211,12 @@ export default {
         return chan.fetch('https://do/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: await request.text() })
       }
 
+      // Read-only connection status for the admin UI (masked ids + secret-present flag; never the secret). Superadmin only.
+      if (hook === 'status') {
+        if (!(await requireSuperadmin(request, env))) return new Response('unauthorized', { status: 401 })
+        return chan.fetch('https://do/status', { method: 'GET' })
+      }
+
       // TEST-ONLY: run one engine turn and return the answer (no channel reply). The
       // service token goes in the body (it IS the credential), so this proves the
       // ChannelDO↔hub↔engine loop in Cloudflare without any Azure/Teams setup.

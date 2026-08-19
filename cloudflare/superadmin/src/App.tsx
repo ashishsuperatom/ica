@@ -402,7 +402,10 @@ function ChannelsPanel({ projectId, api }: { projectId: string; api: (path: stri
   const [appId, setAppId] = useState(''); const [secret, setSecret] = useState(''); const [tenantId, setTenantId] = useState('')
   const [busy, setBusy] = useState(false); const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [showGuide, setShowGuide] = useState(false)
+  const [status, setStatus] = useState<{ connected?: boolean; appId?: string; tenantId?: string; hasSecret?: boolean; configuredAt?: number } | null>(null)
   const fld: React.CSSProperties = { display: 'block', marginBottom: 10, fontSize: 13, color: 'var(--muted)' }
+  const refreshStatus = () => api(`/messaging/${projectId}/teams/status`).then(r => (r.ok ? r.json() : null)).then(d => setStatus(d?.channels?.teams ?? null)).catch(() => {})
+  useEffect(() => { refreshStatus() }, [projectId])   // show "connected" without ever re-exposing the secret
   async function connect(e: React.FormEvent) {
     e.preventDefault(); setBusy(true); setMsg(null)
     try {
@@ -415,8 +418,8 @@ function ChannelsPanel({ projectId, api }: { projectId: string; api: (path: stri
         serviceToken, secrets: { teams: { appId: appId.trim(), appPassword: secret.trim(), tenantId: tenantId.trim() } },
       }) })
       if (!r.ok) throw new Error(`config failed (${r.status})`)
-      setMsg({ ok: true, text: 'Teams connected — the bot can now answer for this project.' })
-      setSecret('')
+      setMsg({ ok: true, text: 'Saved. If the bot isn’t in Teams yet, publish the app to your org — see the setup guide.' })
+      setSecret(''); refreshStatus()
     } catch (err: any) { setMsg({ ok: false, text: String(err?.message ?? err) }) } finally { setBusy(false) }
   }
   return (
@@ -434,6 +437,16 @@ function ChannelsPanel({ projectId, api }: { projectId: string; api: (path: stri
           </button>
         </div>
         <div className="muted" style={{ fontSize: 12.5, margin: '4px 0 12px' }}>Set the messaging endpoint in Azure, then paste the bot's App ID, client secret, and tenant ID below and connect. First time? Open the setup guide.</div>
+        {status?.connected && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', alignItems: 'center', margin: '0 0 12px', padding: '8px 12px', border: '1px solid var(--ok)', borderRadius: 8, background: 'rgba(60,190,120,.08)', fontSize: 12.5 }}>
+            <span style={{ color: 'var(--ok)', fontWeight: 600 }}>● Connected</span>
+            <span className="muted">App ID <span className="mono">{status.appId}</span></span>
+            <span className="muted">Tenant <span className="mono">{status.tenantId}</span></span>
+            <span className="muted">Client secret {status.hasSecret ? 'set ✓' : '—'}</span>
+            {status.configuredAt ? <span className="muted">· configured {new Date(status.configuredAt).toLocaleString()}</span> : null}
+            <span className="muted" style={{ flexBasis: '100%', fontSize: 11.5 }}>The secret is stored, never shown. Re-enter the fields below only to update it.</span>
+          </div>
+        )}
         {showGuide && (
           <ol style={{ margin: '0 0 14px', paddingLeft: 30, fontSize: 12.5, lineHeight: 1.65, color: 'var(--muted)', background: 'rgba(127,127,127,.06)', border: '1px solid var(--line)', borderRadius: 8, padding: '12px 14px 12px 32px' }}>
             <li><strong>Create the bot.</strong> Azure Portal → create an <em>Azure Bot</em> resource. For “Type of App”, <em>Multi-tenant</em> is simplest.</li>
@@ -442,7 +455,10 @@ function ChannelsPanel({ projectId, api }: { projectId: string; api: (path: stri
             <li><strong>App ID.</strong> Azure Bot → <em>Configuration</em> → <em>Microsoft App ID</em> (the app registration’s <em>Application (client) ID</em>).</li>
             <li><strong>Client secret.</strong> Azure Portal → <em>App registrations</em> → your bot’s app → <em>Certificates &amp; secrets</em> → <em>New client secret</em> → copy the <strong>Value</strong> immediately (shown only once — the “Secret ID” is <em>not</em> it).</li>
             <li><strong>Tenant ID.</strong> Azure Portal → <em>Microsoft Entra ID</em> → <em>Overview</em> → <em>Tenant ID</em> (needed for single-tenant apps).</li>
-            <li><strong>Connect.</strong> Paste the three values below → <em>Connect Teams</em>. Then add the bot in a Teams chat/channel and message it.</li>
+            <li><strong>Connect here.</strong> Paste the three values below → <em>Connect Teams</em>. This stores the credentials so the engine can answer — it does <em>not</em> yet put the bot in Teams.</li>
+            <li><strong>Publish the app to your org.</strong> At <em>dev.teams.microsoft.com</em> (Developer Portal) → <em>Apps</em> → create an app, set its <em>Bot</em> to this bot’s App ID, add a name + icons + descriptions, then <em>Publish → Publish to your org</em>. A Teams admin approves it in <em>Teams admin center → Teams apps → Manage apps</em>.</li>
+            <li><strong>Find it in Teams.</strong> Teams → <em>Apps</em> → <em>Built for your org</em> → your app → <em>Add</em>. Org-published apps can take a while (often up to ~24h) to appear — if it’s not there yet, give it time and refresh.</li>
+            <li><strong>Start chatting.</strong> Open a 1:1 chat with the bot and just message it (e.g. “how many customers do we have?”), or add it to a channel and <em>@mention</em> it. It answers for <em>this</em> project only.</li>
           </ol>
         )}
         <label style={fld}>Messaging endpoint <span style={{ fontSize: 11 }}>(paste into Azure Bot → Configuration)</span>
