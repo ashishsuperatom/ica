@@ -401,6 +401,7 @@ function ChannelsPanel({ projectId, api }: { projectId: string; api: (path: stri
   const endpoint = `https://superatom.site/api/messaging/${projectId}/teams/messages`
   const [appId, setAppId] = useState(''); const [secret, setSecret] = useState(''); const [tenantId, setTenantId] = useState('')
   const [busy, setBusy] = useState(false); const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [showGuide, setShowGuide] = useState(false)
   const fld: React.CSSProperties = { display: 'block', marginBottom: 10, fontSize: 13, color: 'var(--muted)' }
   async function connect(e: React.FormEvent) {
     e.preventDefault(); setBusy(true); setMsg(null)
@@ -425,8 +426,25 @@ function ChannelsPanel({ projectId, api }: { projectId: string; api: (path: stri
         <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>Connect a chat surface to this project. Each connects to the engine as a scoped bot, routed by URL to this project only.</div>
       </div>
       <form onSubmit={connect} className="card">
-        <strong>Microsoft Teams</strong>
-        <div className="muted" style={{ fontSize: 12.5, margin: '4px 0 12px' }}>In the Azure Bot → Configuration, set the messaging endpoint below. Then paste the bot's App ID, client secret, and tenant ID here and connect.</div>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+          <strong>Microsoft Teams</strong>
+          <button type="button" onClick={() => setShowGuide(v => !v)}
+            style={{ fontSize: 12, padding: '3px 9px', border: '1px solid var(--line)', borderRadius: 6, background: 'transparent', color: 'var(--muted)', cursor: 'pointer' }}>
+            {showGuide ? '× Hide setup guide' : 'ⓘ Setup guide'}
+          </button>
+        </div>
+        <div className="muted" style={{ fontSize: 12.5, margin: '4px 0 12px' }}>Set the messaging endpoint in Azure, then paste the bot's App ID, client secret, and tenant ID below and connect. First time? Open the setup guide.</div>
+        {showGuide && (
+          <ol style={{ margin: '0 0 14px', paddingLeft: 30, fontSize: 12.5, lineHeight: 1.65, color: 'var(--muted)', background: 'rgba(127,127,127,.06)', border: '1px solid var(--line)', borderRadius: 8, padding: '12px 14px 12px 32px' }}>
+            <li><strong>Create the bot.</strong> Azure Portal → create an <em>Azure Bot</em> resource. For “Type of App”, <em>Multi-tenant</em> is simplest.</li>
+            <li><strong>Enable the Teams channel.</strong> On the Azure Bot → <em>Channels</em> → select <em>Microsoft Teams</em> → agree &amp; apply. Without this, Teams can’t reach the bot.</li>
+            <li><strong>Set the messaging endpoint.</strong> Copy the endpoint shown below → Azure Bot → <em>Configuration</em> → <em>Messaging endpoint</em> → Save.</li>
+            <li><strong>App ID.</strong> Azure Bot → <em>Configuration</em> → <em>Microsoft App ID</em> (the app registration’s <em>Application (client) ID</em>).</li>
+            <li><strong>Client secret.</strong> Azure Portal → <em>App registrations</em> → your bot’s app → <em>Certificates &amp; secrets</em> → <em>New client secret</em> → copy the <strong>Value</strong> immediately (shown only once — the “Secret ID” is <em>not</em> it).</li>
+            <li><strong>Tenant ID.</strong> Azure Portal → <em>Microsoft Entra ID</em> → <em>Overview</em> → <em>Tenant ID</em> (needed for single-tenant apps).</li>
+            <li><strong>Connect.</strong> Paste the three values below → <em>Connect Teams</em>. Then add the bot in a Teams chat/channel and message it.</li>
+          </ol>
+        )}
         <label style={fld}>Messaging endpoint <span style={{ fontSize: 11 }}>(paste into Azure Bot → Configuration)</span>
           <input readOnly value={endpoint} onFocus={e => e.currentTarget.select()} className="mono" style={{ width: '100%', marginTop: 4, padding: '7px 10px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 12 }} />
         </label>
