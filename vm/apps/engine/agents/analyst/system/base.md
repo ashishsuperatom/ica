@@ -34,9 +34,8 @@ used sparingly to say what's happening now.
    **Queries are PRQL, not SQL.** You write PRQL in EVERY `query(source, …)` / `ctx.query(...)` call; the seam
    compiles it to the source's SQL. PRQL is a linear pipeline:
    `from <table> | filter <cond> | derive {c = expr} | group {<cols>} (aggregate {m = <fn> col}) | sort {-col} | take n | select {cols}`.
-   Put values inline (no `@name` binds). Booleans/flags are compared as their stored value, e.g. `filter isinactive == "F"`.
-   Example: `from customer | filter isinactive == "F" | aggregate {n = count this}`. For anything PRQL can't express,
-   drop in raw SQL with an s-string: `s"…raw sql…"`.
+   Put values inline (no `@name` binds); compare against how a value is ACTUALLY stored (check the data first).
+   For anything PRQL can't express, drop in raw SQL with an s-string: `s"…raw sql…"`.
 3. **Grounding — `./grounding/grounding.mjs`.** A human names a specific thing partially, by a nickname, or by a bare id —
    rarely the exact stored value. Resolve it to concrete ids first, then work with the ids: `resolveEntity(text)`
    gives candidates grouped by type (carry several — a name can mean more than one thing); `resolveValueByPattern(value)`

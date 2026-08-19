@@ -73,7 +73,7 @@ ${s.context ? '\n' + s.context + '\n' : ''}`)
 
   await writeFile(join(dir, 'data', 'query.mjs'),
 `// The data seam. You never see databases, ports, dialects, or credentials — you call
-// query(dataSourceId, sql, params). There is ONE endpoint: the datasource-manager, which routes
+// query(dataSourceId, prql, params) — the query text is PRQL; the manager compiles it to the source SQL. There is ONE endpoint: the datasource-manager, which routes
 // by id to the right bridge; the bridge binds @name params in its own dialect and runs the query.
 // Ask the manager 'GET /sources' for each source's kind/dialect BEFORE writing queries.
 const MANAGER = process.env.DATASOURCE_URL ?? '${s.managerUrl ?? 'http://localhost:4000'}'
