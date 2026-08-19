@@ -23,31 +23,36 @@ export interface WorkspaceSpec {
 
 export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
   const dir = join(s.root, s.projectId)
-  for (const sub of ['', 'semantic', 'units', 'programs', 'out']) await mkdir(join(dir, sub), { recursive: true })
+  // Organized by CONCERN, not dumped flat. db/ holds every SQLite file; each concern (data / model /
+  // grounding / analyst / connector) holds its own seam + role doc together. CONTEXT.md + run.mjs stay at
+  // the root as the entry point + the program runner.
+  for (const sub of ['', 'db', 'data', 'model', 'grounding', 'analyst', 'connector', 'units', 'programs', 'out'])
+    await mkdir(join(dir, sub), { recursive: true })
 
   await writeFile(join(dir, 'CONTEXT.md'),
 `# Project ${s.projectId} — workspace
 
 Read this FIRST. It states the environment and the seams so you never probe or guess. Then read your
-role file (./MODEL.md if you build the model, ./ANALYST.md if you answer questions).
+role file (./model/MODEL.md if you build the model, ./analyst/ANALYST.md if you answer questions).
 
 ## Environment
 \`node\` and \`tsx\` are both on PATH and both run \`.mjs\`/\`.ts\`; every \`@superatom/*\` import resolves
 from the monorepo, so there is nothing to install and no package.json to create. Run and explore code
 however you see fit — there is no setup to do.
 
-## Seams
-- **Model — check FIRST.** ./model.mjs — what's already been figured out for this project. Probe it before
+## Seams (grouped by concern)
+- **Model — check FIRST.** ./model/model.mjs — what's already been figured out for this project. Probe it before
   touching data: \`find('term', …)\` (search concepts/units/past questions), \`concepts()\`, \`intents()\`,
   \`getConcept(name)\`, \`relationships(name)\`, \`conceptTree()\`. Reusing a modeled unit is deterministic and
   carries the corrections we've made — that's why it comes first.
-- Data:       ./query.mjs      — use this to query the data source: \`query(sourceId, sql, params)\` + \`sources()\`.
-- Introspect: ./introspect.mjs — schema/evidence helpers over the data.
-- Grounding:  ./grounding.mjs  — resolve a fuzzy human reference to concrete ids: \`resolveEntity(text)\`,
+- Data:       ./data/query.mjs      — use this to query the data source: \`query(sourceId, sql, params)\` + \`sources()\`.
+- Introspect: ./data/introspect.mjs — schema/evidence helpers over the data.
+- Grounding:  ./grounding/grounding.mjs — resolve a fuzzy human reference to concrete ids: \`resolveEntity(text)\`,
   \`resolveHierarchy(node, dir, name)\`, \`resolveValueByPattern(value)\` (built per-project by the grounding agent).
 - Run:        ./run.mjs        — run a program: \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\` (prints the output; writes the graph/shape to program.json).
 
 ## Layout
+- db/       — every SQLite database (project.sqlite = the model/graph, grounding.sqlite, answers.sqlite). You never open these directly — the seams do.
 - programs/ — one folder per answered question: \`program.ts\` + \`units/*.ts\`. This is where an ANSWER is built.
 - units/    — a shared library of earlier units you may read for reference.
 - out/      — you write \`built.json\` here (a pointer to the program you built); the ENGINE runs it and writes \`answer.json\`.
@@ -66,7 +71,7 @@ Running a program records a DAG + the SHAPE of each unit's output. Same shape on
 a new shape ⇒ the UI is re-authored. So keep each unit's output structure stable across inputs.
 ${s.context ? '\n' + s.context + '\n' : ''}`)
 
-  await writeFile(join(dir, 'query.mjs'),
+  await writeFile(join(dir, 'data', 'query.mjs'),
 `// The data seam. You never see databases, ports, dialects, or credentials — you call
 // query(dataSourceId, sql, params). There is ONE endpoint: the datasource-manager, which routes
 // by id to the right bridge; the bridge binds @name params in its own dialect and runs the query.
@@ -84,8 +89,8 @@ export async function sources() {   // list data sources + their kind/dialect
 }
 `)
 
-  await writeFile(join(dir, 'model.mjs'),
-`// The MODEL seam. The semantic model is CONCEPT + UNIT nodes in ./project.sqlite — the SAME node-store
+  await writeFile(join(dir, 'model', 'model.mjs'),
+`// The MODEL seam. The semantic model is CONCEPT + UNIT nodes in ../db/project.sqlite — the SAME node-store
 // graph the intent nodes and units already live in (one project, one store — no separate model DB).
 // You CONSOLIDATE finished analyses into this concept layer:
 //   concept(name, props, summary?)     — upsert an entity/concept. props:
@@ -112,7 +117,7 @@ export async function sources() {   // list data sources + their kind/dialect
 import { NodeStore, upsertConcept as _c, relate as _r, bindUnit as _b, getConcept as _g, relationships as _rel, setParent as _sp, conceptTree as _ct,
   putAtom as _pa, findAtoms as _fa, atomsFor as _af, atomHistory as _ah } from '@superatom/node-store'
 import { fileURLToPath } from 'node:url'
-const store = new NodeStore(fileURLToPath(new URL('./project.sqlite', import.meta.url)))
+const store = new NodeStore(fileURLToPath(new URL('../db/project.sqlite', import.meta.url)))
 export const concept = (name, props, summary) => _c(store, name, props, summary)
 export const relate = (fromName, toName, rel) => _r(store, fromName, toName, rel)
 export const bindUnit = (name, unitId) => _b(store, name, unitId)
@@ -167,7 +172,7 @@ async function main() {
 main().catch((e) => { console.error(e); process.exit(1) })
 `)
 
-  await writeFile(join(dir, 'introspect.mjs'),
+  await writeFile(join(dir, 'data', 'introspect.mjs'),
 `// Introspection helpers over the data seam — DIALECT-SPECIFIC, resolved per source automatically.
 // They hide the SQL, NEVER the DATA: every helper returns raw evidence (values, distributions,
 // mismatches, sample rows) so YOU can catch bad data — they never hand you a black-box verdict.
@@ -189,7 +194,7 @@ export async function forSource(id) {
 }
 `)
 
-  await writeFile(join(dir, 'grounding.mjs'),
+  await writeFile(join(dir, 'grounding', 'grounding.mjs'),
 `// The GROUNDING seam. Grounding turns a fuzzy human reference — a name, a place, an id — into concrete
 // structured ids, using indexes built per-project FROM this project's OWN data (nothing dataset-specific is
 // assumed; entity types, hierarchies and value patterns are all discovered here and stored). The grounding
@@ -216,14 +221,14 @@ export async function forSource(id) {
 // build() is idempotent (re-running replaces). Verify with stats() and by calling the resolvers.
 import { GroundingStore, buildGrounding } from '@superatom/grounding'
 import { fileURLToPath } from 'node:url'
-import { query as _query, sources as _sources } from './query.mjs'
+import { query as _query, sources as _sources } from '../data/query.mjs'
 let _default
 async function defaultSource() { if (!_default) _default = (await _sources())[0]?.id; return _default }
 // The live data seam: routes each spec's SQL to its named source (or the sole source) and binds @name params.
 // Hierarchies of the live kinds (column/derived-query/cross-source) resolve THROUGH this at query time — the
 // source's own tree is the single source of truth, so results are always fresh and nothing is copied/synced.
 const source = async (sql, src, params) => _query(src ?? await defaultSource(), sql, params ?? {})
-const store = new GroundingStore(fileURLToPath(new URL('./grounding.sqlite', import.meta.url)), { source })
+const store = new GroundingStore(fileURLToPath(new URL('../db/grounding.sqlite', import.meta.url)), { source })
 // Grounding holds the CURRENT state only (not versioned). NOT DONE YET: re-running build() is not a clean
 // refresh — it upserts on top, so values gone from the source linger and a differently-shaped re-run leaves
 // both shapes. (Flagging the consequence; not a decision on how to fix it.)

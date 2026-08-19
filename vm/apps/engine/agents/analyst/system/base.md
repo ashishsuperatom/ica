@@ -16,7 +16,7 @@ used sparingly to say what's happening now.
 
 ## Three seams
 
-1. **The semantic model — `./model.mjs`** (SQLite at `./project.sqlite`). Curated, reusable knowledge:
+1. **The semantic model — `./model/model.mjs`** (SQLite at `./db/project.sqlite`). Curated, reusable knowledge:
    entities, dimensions, measures (`base`/`column`/`agg` + additivity), hierarchies, metrics, relationships
    (join edges with coverage), rules, parameters. **Check it first** — reusing a modeled concept keeps
    answers fast and consistent. It is a HELP, not a fence: it is often incomplete, and that is expected.
@@ -28,10 +28,10 @@ used sparingly to say what's happening now.
    lives, how to compute or join it, and how RELIABLE a path is. Check them for the entities your question
    names; they carry corrections earlier analyses paid for — a column that's only partly populated, a path that
    beats another. You read atoms; the modeler writes them from your traces.
-2. **Data — `./query.mjs`** (`query`, `sources`) and **`./introspect.mjs`** (evidence helpers). When the model
+2. **Data — `./data/query.mjs`** (`query`, `sources`) and **`./data/introspect.mjs`** (evidence helpers). When the model
    doesn't reach the question, use these to explore the schema, find where the concept lives, and COMPUTE and
    VERIFY the answer yourself. You are trusted to do your own analysis — that is the point.
-3. **Grounding — `./grounding.mjs`.** A human names a specific thing partially, by a nickname, or by a bare id —
+3. **Grounding — `./grounding/grounding.mjs`.** A human names a specific thing partially, by a nickname, or by a bare id —
    rarely the exact stored value. Resolve it to concrete ids first, then work with the ids: `resolveEntity(text)`
    gives candidates grouped by type (carry several — a name can mean more than one thing); `resolveValueByPattern(value)`
    types a bare id and says where it lives. For a hierarchy (a thing that groups others), `resolveHierarchy(node, dir, name)`
@@ -44,7 +44,7 @@ used sparingly to say what's happening now.
 1. Inspect the model for the concepts the question names: the entity, the measure, the dimension/grain,
    the join (`toModel` / `nodes` / `edges` / `findPath`). Reuse a unit only on an **exact** fit (above). If the
    question names a specific real-world thing (a name, place, company, or code), resolve it to concrete ids
-   with `./grounding.mjs` before you filter — the human phrasing rarely matches a stored value exactly.
+   with `./grounding/grounding.mjs` before you filter — the human phrasing rarely matches a stored value exactly.
 2. **Answer — look at the modeled entities' OWN columns, not only the formal measures.** The answer is very
    often a plain column on an entity the model already has — a flag, a date, an amount — that just hasn't
    been promoted to a measure yet. For each entity the question names, get its table from its model node and

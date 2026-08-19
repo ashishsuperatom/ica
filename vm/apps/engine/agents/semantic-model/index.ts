@@ -1,8 +1,8 @@
 // ── Semantic-Model Agent ──────────────────────────────────────────────────────
 // ONE agent whose only job is to build and refine the semantic model. It never answers user
 // questions. It drives an ICA (default claude-code:sonnet5, any harness swappable) using the
-// system prompt in ./SYSTEM.md, and reaches data ONLY through the data seam (query.mjs → the
-// datasource-manager). The agent persists the model DIRECTLY to project.sqlite via ./model.mjs as it
+// system prompt in ./SYSTEM.md, and reaches data ONLY through the data seam (data/query.mjs → the
+// datasource-manager). The agent persists the model DIRECTLY to db/project.sqlite via ./model/model.mjs as it
 // builds (upsertNode/upsertEdge) — the DB is the model's home, not a JSON file we import afterward.
 
 import { readFile, writeFile, cp, mkdir } from 'node:fs/promises'
@@ -61,16 +61,16 @@ export async function createSemanticModeller(opts: SemanticModellerOpts): Promis
   const harness = opts.ica?.harness ?? 'claude-code'
   const model = opts.ica?.model ?? 'claude-sonnet-5'
 
-  // Workspace: query.mjs (the data seam) + semantic/ units/ out/. Drop SYSTEM.md in so the ICA
+  // Workspace: data/query.mjs (the data seam) + semantic/ units/ out/. Drop SYSTEM.md in so the ICA
   // reads its full-fidelity system prompt from a file (no prompt-line mangling).
   const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl })
-  // Distinct filename (MODEL.md, not SYSTEM.md): the analyst SHARES this workspace and writes its own
-  // ANALYST.md — separate files so neither clobbers the other.
-  await cp(join(__dirname, 'SYSTEM.md'), join(cwd, 'MODEL.md'))
+  // Distinct filename (model/MODEL.md, not SYSTEM.md): the analyst SHARES this workspace and writes its own
+  // analyst/ANALYST.md — separate files so neither clobbers the other.
+  await cp(join(__dirname, 'SYSTEM.md'), join(cwd, 'model/MODEL.md'))
 
   const session = createSession(harness, { cwd, model, resumeId: opts.ica?.resumeId })
 
-  const preamble = 'Read ./CONTEXT.md FIRST (the environment + the seams — where the model is stored, the datasources; nothing to install), then ./MODEL.md (your instructions) and follow it exactly. Explore and run code however you see fit. The ONLY data access is query.mjs (call sources() before writing queries; use the right dialect).'
+  const preamble = 'Read ./CONTEXT.md FIRST (the environment + the seams — where the model is stored, the datasources; nothing to install), then ./model/MODEL.md (your instructions) and follow it exactly. Explore and run code however you see fit. The ONLY data access is data/query.mjs (call sources() before writing queries; use the right dialect).'
 
   return {
     cwd,
@@ -84,10 +84,10 @@ Build the FIRST full pass of the semantic model for these data sources: ${opts.s
 Begin by calling sources() to get each source's kind/dialect, then introspect each source. Then
 produce the semantic-model DAG (entities, dimensions, measures with additivity, relationships,
 rules) and author the UNITs, following ./SYSTEM.md. Validate slice conservation. Print a summary.`
-      return session.run(prompt, handlers)   // the agent persists the graph to project.sqlite itself (./model.mjs)
+      return session.run(prompt, handlers)   // the agent persists the graph to db/project.sqlite itself (./model/model.mjs)
     },
 
-    // Refine after a QA agent answered a question. TODO(project.sqlite): persist the +1 good/bad
+    // Refine after a QA agent answered a question. TODO(db/project.sqlite): persist the +1 good/bad
     // counters on qa.usedNodes here once the schema step lands.
     async refine(qa, handlers) {
       const verdict = qa.correct ? 'CORRECT' : 'WRONG'
@@ -99,7 +99,7 @@ Question: ${qa.question}
 Answer: ${qa.answer}
 Semantic-model nodes used: ${qa.usedNodes.join(', ') || '(none reported)'}
 
-Record ${bump} on those nodes, then refine the semantic model per ./MODEL.md: add/merge/split
+Record ${bump} on those nodes, then refine the semantic model per ./model/MODEL.md: add/merge/split
 concepts, learn any parameter defaults this question revealed, add missing measures/rules, and fix
 whatever produced a wrong answer. Print what you changed.`
       return session.run(prompt, handlers)
@@ -109,7 +109,7 @@ whatever produced a wrong answer. Print what you changed.`
     // Extend the model for exactly this concept, verify against real data, and report back — then the
     // engine re-asks the analyst (same session) and the user gets the answer.
     async fillGap(gap, handlers) {
-      await cp(join(__dirname, 'SYSTEM.md'), join(cwd, 'MODEL.md')).catch(() => {})
+      await cp(join(__dirname, 'SYSTEM.md'), join(cwd, 'model/MODEL.md')).catch(() => {})
       // The modeler's report goes into the QUESTION FOLDER alongside the analyst's attempts:
       // ./out/<qid>/model.json — provenance of what was found/built for this question.
       const outDir = gap.qid ? join(cwd, 'out', gap.qid) : join(cwd, 'out')
@@ -125,7 +125,7 @@ A user asked this question and the ANALYST could not answer it from the current 
 Work out from SCRATCH whether the DATA can answer it, and if so extend the model so it can. Do your OWN
 analysis — you are NOT told (and must not assume) where the answer lives.
 
-Following ./MODEL.md:
+Following ./model/MODEL.md:
 1. Be thorough before you conclude. Figure out which concept the question needs, then look widely for
    where the data could support it — don't settle for the first candidate, and don't confine yourself to
    one part of the data. A "can't answer" is usually just a source you haven't looked at yet.
@@ -133,12 +133,12 @@ Following ./MODEL.md:
    an unverified join, and never treat a sparsely-populated column as usable.
 3. IF the data supports it → add exactly what this question needs (entity / dimension / measure /
    relationship) at proper quality (status / confidence / evidence / additivity) and persist via
-   ./model.mjs. Do NOT re-model unrelated areas. IF nothing in the data supports it → invent nothing.
+   ./model/model.mjs. Do NOT re-model unrelated areas. IF nothing in the data supports it → invent nothing.
 4. Write ${resultRel} exactly:
    { "built": true|false, "note": "<one paragraph for the analyst: what you added (node ids + how it
      computes) OR — only after looking widely — why it truly isn't buildable and what you ruled out>" }
 5. Also print that same note.`
-      // The modeler's report (model.json, written as its FINAL action, after persisting to project.sqlite)
+      // The modeler's report (model.json, written as its FINAL action, after persisting to db/project.sqlite)
       // is the true completion signal. We DON'T fast-complete on it (that could race ahead of the DB writes
       // flushing) — each turn runs to a real idle turn-end. But a turn can be TRUNCATED before the work is
       // done: claude-code auto-compaction (context full) ends the turn mid-modeling, so it returns to the
@@ -150,7 +150,7 @@ Following ./MODEL.md:
       for (let i = 0; i < 5 && !(await reportExists()); i++) {
         handlers?.onOutput?.(`\r\n[modeler: turn ended without a report — continuing (${i + 1})]\r\n`)
         r = await session.run(
-          `Continue exactly where you left off and FINISH. Persist everything via ./model.mjs, then write ${resultRel} = ` +
+          `Continue exactly where you left off and FINISH. Persist everything via ./model/model.mjs, then write ${resultRel} = ` +
           `{ "built": true|false, "note": "..." } as your FINAL action — set "built": false with the reason if the data ` +
           `truly cannot support it after looking widely. Do not stop until ${resultRel} exists.`,
           handlers)
@@ -168,7 +168,7 @@ Following ./MODEL.md:
     // model so future answers reuse a modeled concept instead of re-deriving it. It NEVER answers questions
     // (they are already answered) and never blocks the analyst; it just consolidates behind the scenes.
     async consolidate(batch, batchId, handlers) {
-      await cp(join(__dirname, 'SYSTEM.md'), join(cwd, 'MODEL.md')).catch(() => {})
+      await cp(join(__dirname, 'SYSTEM.md'), join(cwd, 'model/MODEL.md')).catch(() => {})
       const outDir = join(cwd, 'out', 'consolidation', batchId)
       await mkdir(outDir, { recursive: true })
       const resultRel = `./out/consolidation/${batchId}/result.json`
@@ -189,7 +189,7 @@ the analyst. You have more time and must produce concrete, VERIFIED knowledge.
 Analyses finished since the last consolidation:
 ${list}
 
-Following ./MODEL.md:
+Following ./model/MODEL.md:
 1. READ the program each analysis built (./programs/<slug>/program.ts and its units/). That code is the
    analyst's real computation — the SQL it wrote, the joins it used, the concepts it computed from scratch.
    An analysis that reused model nodes needs little; one that computed everything fresh is the real signal.
@@ -209,7 +209,7 @@ Following ./MODEL.md:
    be answerable). If after looking widely it truly is unknowable, say so and what you ruled out — don't
    invent a source.
 4. Add/refine those in the model at proper quality (status / confidence / evidence / additivity — evidence
-   being what YOU verified, not what the analyst claimed) and persist via ./model.mjs. MERGE with existing
+   being what YOU verified, not what the analyst claimed) and persist via ./model/model.mjs. MERGE with existing
    nodes — never duplicate a concept already modeled; invent nothing the data doesn't support. You may leave
    the model unchanged if these analyses revealed nothing new (or nothing that survived verification).
 5. Write ${resultRel} exactly, as your FINAL action:
@@ -224,7 +224,7 @@ Following ./MODEL.md:
       for (let i = 0; i < 5 && !(await reportExists()); i++) {
         handlers?.onOutput?.(`\r\n[modeler: consolidation turn ended without a report — continuing (${i + 1})]\r\n`)
         r = await session.run(
-          `Continue exactly where you left off and FINISH. Persist everything via ./model.mjs, then write ` +
+          `Continue exactly where you left off and FINISH. Persist everything via ./model/model.mjs, then write ` +
           `${resultRel} = { "changed": <n>, "note": "..." } as your FINAL action. Do not stop until ${resultRel} exists.`,
           handlers)
       }

@@ -3,7 +3,7 @@
 // the admin talks to in a terminal (raw PTY → xterm; NO [[ui]] narration — you just watch it work). Its
 // main job is connecting data sources: it writes a bridge, tests it against the datasource-manager, and
 // registers it live. It shares the ICA workspace machinery with the analyst/modeler; its instructions are
-// in ./SYSTEM.md (copied in as ./CONNECTOR.md so it never clobbers the other agents' role files).
+// in ./SYSTEM.md (copied in as ./connector/CONNECTOR.md so it never clobbers the other agents' role files).
 
 import { readFile, cp } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
@@ -36,12 +36,12 @@ export async function createConnector(opts: ConnectorOpts): Promise<Connector> {
   const harness = opts.ica?.harness ?? 'claude-code'
   const model = opts.ica?.model ?? 'claude-sonnet-5'
   const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl })
-  await cp(join(__dirname, 'SYSTEM.md'), join(cwd, 'CONNECTOR.md'))
+  await cp(join(__dirname, 'SYSTEM.md'), join(cwd, 'connector/CONNECTOR.md'))
 
   const session = createSession(harness, { cwd, model, resumeId: opts.ica?.resumeId })
   const manager = opts.managerUrl ?? 'http://localhost:4000'
   const preamble =
-    `You are the infrastructure connector agent. Read ./CONNECTOR.md for your role + the bridge protocol, then help ` +
+    `You are the infrastructure connector agent. Read ./connector/CONNECTOR.md for your role + the bridge protocol, then help ` +
     `the admin. The datasource-manager is at ${manager}. Write bridges under ${opts.datasourcesDir} (one folder per ` +
     `source: <id>/bridge.mjs + <id>/.env for secrets). Register a bridge LIVE via POST ${manager}/sources ` +
     `{"id","path"} (absolute path), then verify via GET ${manager}/sources, POST ${manager}/introspect, POST ${manager}/query.`

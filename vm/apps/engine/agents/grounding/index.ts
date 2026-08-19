@@ -2,9 +2,9 @@
 // ONE agent whose only job is to build this project's GROUNDING indexes — the maps that turn a fuzzy human
 // reference (a name, a place, an id) into concrete structured ids. It never answers user questions and never
 // touches the semantic model. It drives an ICA (default claude-code:sonnet-5, harness swappable) using the
-// system prompt in ./SYSTEM.md, reaches data ONLY through the data seam (query.mjs → the datasource-manager),
-// and persists what it discovers by calling build(config) on the grounding seam (grounding.mjs). It is COLD:
-// spun up only when the admin triggers it, never warmed at boot. Its role file is copied in as ./GROUNDING.md
+// system prompt in ./SYSTEM.md, reaches data ONLY through the data seam (data/query.mjs → the datasource-manager),
+// and persists what it discovers by calling build(config) on the grounding seam (grounding/grounding.mjs). It is COLD:
+// spun up only when the admin triggers it, never warmed at boot. Its role file is copied in as ./grounding/GROUNDING.md
 // so it never clobbers the analyst/modeler/connector role files that share the workspace.
 
 import { readFile, cp, mkdir } from 'node:fs/promises'
@@ -39,10 +39,10 @@ export async function createGroundingAgent(opts: GroundingAgentOpts): Promise<Gr
   const model = opts.ica?.model ?? 'claude-sonnet-5'
   const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl })
   // Distinct filename so it never clobbers the analyst/modeler/connector role files in the shared workspace.
-  await cp(join(__dirname, 'SYSTEM.md'), join(cwd, 'GROUNDING.md'))
+  await cp(join(__dirname, 'SYSTEM.md'), join(cwd, 'grounding/GROUNDING.md'))
 
   const session = createSession(harness, { cwd, model, resumeId: opts.ica?.resumeId })
-  const preamble = 'Read ./CONTEXT.md FIRST (the environment + the seams — where things are stored, the datasources; nothing to install), then ./GROUNDING.md (your instructions) and follow it exactly. The ONLY data access is query.mjs (call sources() before writing queries; use the right dialect). You PERSIST what you discover by calling build(config) on ./grounding.mjs.'
+  const preamble = 'Read ./CONTEXT.md FIRST (the environment + the seams — where things are stored, the datasources; nothing to install), then ./grounding/GROUNDING.md (your instructions) and follow it exactly. The ONLY data access is data/query.mjs (call sources() before writing queries; use the right dialect). You PERSIST what you discover by calling build(config) on ./grounding/grounding.mjs.'
 
   return {
     cwd,
@@ -53,7 +53,7 @@ export async function createGroundingAgent(opts: GroundingAgentOpts): Promise<Gr
     // build(config) → verify by resolving. The agent writes ./out/grounding/result.json as its FINAL action;
     // that report is the completion signal we trust (a truncated turn is nudged to continue until it exists).
     async build(handlers) {
-      await cp(join(__dirname, 'SYSTEM.md'), join(cwd, 'GROUNDING.md')).catch(() => {})
+      await cp(join(__dirname, 'SYSTEM.md'), join(cwd, 'grounding/GROUNDING.md')).catch(() => {})
       const outDir = join(cwd, 'out', 'grounding')
       await mkdir(outDir, { recursive: true })
       const resultRel = './out/grounding/result.json'
@@ -62,9 +62,9 @@ export async function createGroundingAgent(opts: GroundingAgentOpts): Promise<Gr
 
 Build the GROUNDING indexes for these data sources: ${opts.sources.join(', ')}.
 Begin by calling sources() to get each source's kind/dialect, then explore each source's real data. Following
-./GROUNDING.md, discover which columns hold resolvable ENTITY values, which HIERARCHIES connect entities (a
+./grounding/GROUNDING.md, discover which columns hold resolvable ENTITY values, which HIERARCHIES connect entities (a
 hierarchy may be DERIVED from transactions, not a clean foreign key — verify it against real rows), and which
-value PATTERNS identify a thing. Persist everything by calling build(config) on ./grounding.mjs, then VERIFY
+value PATTERNS identify a thing. Persist everything by calling build(config) on ./grounding/grounding.mjs, then VERIFY
 by resolving a handful of real references (call the resolvers and check the ids that come back). Write
 ${resultRel} exactly, as your FINAL action:
   { "note": "<one paragraph: the entity types you grounded (with row counts), the hierarchies you built (with
@@ -78,7 +78,7 @@ and print that same note.`
       for (let i = 0; i < 5 && !(await reportExists()); i++) {
         handlers?.onOutput?.(`\r\n[grounding: turn ended without a report — continuing (${i + 1})]\r\n`)
         r = await session.run(
-          `Continue exactly where you left off and FINISH. Persist everything via build(config) on ./grounding.mjs, ` +
+          `Continue exactly where you left off and FINISH. Persist everything via build(config) on ./grounding/grounding.mjs, ` +
           `then write ${resultRel} = { "note": "..." } as your FINAL action. Do not stop until ${resultRel} exists.`,
           handlers)
       }

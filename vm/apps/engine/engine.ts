@@ -126,12 +126,13 @@ let semanticConsolidating = false
 // ── BOOTSTRAP: guarantee the engine's environment BEFORE opening any store or connecting. On a fresh
 // machine the per-project dirs don't exist yet; opening a sqlite in a missing dir throws. We create them
 // here, explicitly, and fail LOUD + clean (not a cryptic driver stack) if the volume isn't writable.
-for (const d of [WORKSPACE, join(DATA_ROOT, PROJECT)]) {
+// Every SQLite file lives under <workspace>/db/ (organized-by-concern workspace; the seams open them there).
+for (const d of [WORKSPACE, join(WORKSPACE, 'db'), join(DATA_ROOT, PROJECT), join(DATA_ROOT, PROJECT, 'db')]) {
   try { mkdirSync(d, { recursive: true }) }
   catch (e: any) { console.error(`[ica] FATAL bootstrap: cannot create ${d}: ${e?.message ?? e}`); process.exit(1) }
 }
 
-const answers = openAnswers(join(DATA_ROOT, PROJECT, 'answers.sqlite'))
+const answers = openAnswers(join(DATA_ROOT, PROJECT, 'db', 'answers.sqlite'))
 const genId = () => 'q_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
 
 // ── INTENT GRAPH (the new spine) ──────────────────────────────────────────────
@@ -141,7 +142,7 @@ const genId = () => 'q_' + Date.now().toString(36) + Math.random().toString(36).
 // and we mint the node below). Node id = hash(parent, normalised question) → deterministic.
 // ONE project database. The intent graph + concepts + units are all just nodes/edges in the project's
 // node-store, which lives in project.sqlite alongside the rest of the project's graph — not a separate file.
-const graph = new NodeStore(join(WORKSPACE, 'project.sqlite'))
+const graph = new NodeStore(join(WORKSPACE, 'db', 'project.sqlite'))
 ensureRoot(graph)
 ensureConceptTree(graph)   // concept tree root + place any orphan concept under it (structural)
 ensureBasisSeed(graph)     // plant the grounded three-plane axis vocabulary (subject / operation / mode)

@@ -3,7 +3,7 @@
 // (default claude-code:sonnet5, swappable) using a per-CATEGORY system prompt — the classifier's
 // label selects which instruction the agent gets, but it is always the same harness/model.
 //
-// It shares the SEMANTIC MODEL's workspace (same projectId dir): the model lives in ./project.sqlite
+// It shares the SEMANTIC MODEL's workspace (same projectId dir): the model lives in ./db/project.sqlite
 // and units accumulate in ./units/ — so a calculation is defined once and reused across questions.
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
@@ -30,7 +30,7 @@ export async function promptVersion(): Promise<string> {
 
 export interface AnalystOpts {
   root: string                                   // workspace root — MUST be the same the modeller used
-  projectId: string                              // same projectId → same project.sqlite + units/
+  projectId: string                              // same projectId → same db/project.sqlite + units/
   sources: string[]
   ica?: { harness?: Harness; model?: string; resumeId?: string }   // default claude-code:sonnet5; resumeId to resume a prior session
   managerUrl?: string
@@ -99,9 +99,9 @@ export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
   const session = createSession(harness, { cwd, model, resumeId: opts.ica?.resumeId })
 
   const preamble =
-    'Read ./CONTEXT.md FIRST (environment: `node` for quick checks/probes, `tsx` for units/programs; and the seams), then ./ANALYST.md ' +
-    '(your instructions) — follow it exactly. The semantic model is ./model.mjs; data is ONLY ./query.mjs / ' +
-    './introspect.mjs. Your deliverable is a PROGRAM (see below) — the engine runs it and writes the answer.'
+    'Read ./CONTEXT.md FIRST (environment: `node` for quick checks/probes, `tsx` for units/programs; and the seams), then ./analyst/ANALYST.md ' +
+    '(your instructions) — follow it exactly. The semantic model is ./model/model.mjs; data is ONLY ./data/query.mjs / ' +
+    './data/introspect.mjs. Your deliverable is a PROGRAM (see below) — the engine runs it and writes the answer.'
 
   return {
     cwd,
@@ -109,9 +109,9 @@ export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
 
     async ask(question, handlers, opts = {}) {
       const t0 = Date.now()
-      // The agent self-decides the category (no separate classifier). Full instructions → ./ANALYST.md
+      // The agent self-decides the category (no separate classifier). Full instructions → ./analyst/ANALYST.md
       // (a distinct filename so the modeller, which SHARES this workspace, never clobbers it).
-      await writeFile(join(cwd, 'ANALYST.md'), await fullSystem())
+      await writeFile(join(cwd, 'analyst/ANALYST.md'), await fullSystem())
       // Each question gets its OWN FOLDER (./out/<qid>/), with files named by MEANING:
       //   built.json   — a pointer to the program the analyst built (the engine runs it → answer.json)
       //   answer.json  — the FINAL answer (engine-written from the program output, or an unknowable direct)
@@ -135,12 +135,12 @@ greeting, small talk, or a question about you / the system / whether data source
 build a small program whose output IS your reply. Whatever you would say goes INTO the program's output
 (which becomes the answer card + UI) — never into chat.
 
-1. Decide which answer-shape (\`category\`) from ./ANALYST.md fits THIS question, and report it as \`category\`.
+1. Decide which answer-shape (\`category\`) from ./analyst/ANALYST.md fits THIS question, and report it as \`category\`.
 2. RECON THE MODEL FIRST — before touching raw data. Decide what this question needs (entity, measure, grain,
-   filters), then PROBE the model for it with a few targeted queries: ./model.mjs — \`find('term','term'…)\`,
+   filters), then PROBE the model for it with a few targeted queries: ./model/model.mjs — \`find('term','term'…)\`,
    \`concepts()\`, \`intents()\`, \`getConcept(name)\`. Inspect what comes back; if a concept / unit / past program
    CONFIDENTLY fits, reuse or compose it — deterministic, and it carries the corrections we've made. ONLY if
-   nothing confidently fits, analyze the raw data yourself (./query.mjs / ./introspect.mjs). Probe, judge, move
+   nothing confidently fits, analyze the raw data yourself (./data/query.mjs / ./data/introspect.mjs). Probe, judge, move
    on — never force an ill-fitting unit. Always PRODUCE AN ANSWER.
 3. Write ${builtRel} = {"programDir":"programs/<slug>","params":{...the params...}, "parent":"root" | "<a prior intent id>"}
    pointing at the program you built, and RUN it with \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\` until
