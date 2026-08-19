@@ -3,6 +3,7 @@ import { useSession, SignIn, UserButton, useUser } from '@clerk/react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
+import { useClaudeTerminal } from './useClaudeTerminal'
 
 // Cloud mode: VITE_HUB_URL set (e.g. wss://superatom.site). The page is served at
 // /u behind the worker; it logs in via Clerk, exchanges for our JWT, and connects to
@@ -191,26 +192,10 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     return () => { ro.disconnect(); term.dispose() }
   }, [])
 
-  // xterm setup — the Semantic-model agent's own terminal. FIXED 120 cols to match the claude PTY
-  // (ica/claude.ts spawns it 120×34); a mismatched/dynamic width garbles the live status line.
-  useEffect(() => {
-    const term = new Terminal({ cols: 120, rows: 40, cursorBlink: false, fontSize: 11, convertEol: true,
-      scrollback: 8000, theme: { background: '#161a17', foreground: '#bcd0be' } })
-    if (semTermRef.current) term.open(semTermRef.current)
-    semXtermRef.current = term
-    return () => { term.dispose() }
-  }, [])
-
-  // xterm setup — the Analyst agent's own terminal (same fixed 120-col claude PTY width as semantic).
-  useEffect(() => {
-    const term = new Terminal({ cols: 120, rows: 40, cursorBlink: false, fontSize: 11, convertEol: true,
-      scrollback: 8000, theme: { background: '#161a17', foreground: '#bcd0be' } })
-    if (anTermRef.current) term.open(anTermRef.current)
-    // Raw keystrokes/paste typed here go straight to the analyst's PTY (e.g. /login). `send` is hoisted.
-    term.onData((d) => send({ t: 'term:input', which: 'analyst', data: d }))
-    anXtermRef.current = term
-    return () => { term.dispose() }
-  }, [])
+  // Both claude-code agent terminals (modeler + analyst) go through ONE shared module — same code path,
+  // parameterized by `which` + `interactive`. Model-agnostic; codex/opencode would use their own view.
+  useClaudeTerminal(semTermRef, semXtermRef, { which: 'semantic', interactive: true, send })
+  useClaudeTerminal(anTermRef, anXtermRef, { which: 'analyst', interactive: true, send })
 
   // Keep the event log (SDK harnesses) pinned to the newest line as it streams.
   useEffect(() => {
@@ -635,7 +620,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
         </div>
         {gapsPanel}
         <div style={{ flex: 1, overflow: 'auto', background: '#161a17', padding: 12 }}>
-          <div ref={semTermRef} />
+          <div ref={semTermRef} onMouseDown={() => semXtermRef.current?.focus()} />
         </div>
       </div>
 
@@ -689,7 +674,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
         )})()}
         <div ref={anLogRef} style={{ flex: 1, overflow: 'auto', background: '#161a17', padding: 12 }}>
           {/* PTY harness (claude-code) → terminal emulator; kept mounted so its buffer survives view switches */}
-          <div ref={anTermRef} style={{ display: anStreamKind === 'pty' ? 'block' : 'none' }} />
+          <div ref={anTermRef} onMouseDown={() => anXtermRef.current?.focus()} style={{ display: anStreamKind === 'pty' ? 'block' : 'none' }} />
           {/* SDK harness (codex) → a plain, readable event log — reasoning + `→ commands`, no terminal emulation */}
           {anStreamKind === 'events' && (
             <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#bcd0be', fontSize: 12.5, lineHeight: 1.55, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
