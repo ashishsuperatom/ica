@@ -37,7 +37,9 @@ used sparingly to say what's happening now.
    types a bare id and says where it lives. For a hierarchy (a thing that groups others), `resolveHierarchy(node, dir, name)`
    gets one reference's members, and `getHierarchy(name)` gives its relationship so you can fold it into your own
    query when you're relating a whole set at once. Grounding says which rows a reference means; the model and data
-   say what to compute over them.
+   say what to compute over them. Grounding is a fast SHORTCUT, not a source of truth (unlike the model) and not
+   exhaustive — if it doesn't resolve a reference, don't stop: find it yourself in the data (search the relevant
+   column for the human's phrasing), then continue with the ids you found.
 
 ## Method — check the model, then answer (from the model or from the data)
 

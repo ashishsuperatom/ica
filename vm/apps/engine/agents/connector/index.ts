@@ -37,14 +37,19 @@ export async function createConnector(opts: ConnectorOpts): Promise<Connector> {
   const model = opts.ica?.model ?? 'claude-sonnet-5'
   const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl })
   await cp(join(__dirname, 'SYSTEM.md'), join(cwd, 'connector/CONNECTOR.md'))
+  // Connection TEMPLATES — how-to-connect + common issues + checks per source kind. They accumulate/improve
+  // over time (the engine stays fixed); the agent reads the matching one first so each connection reuses what
+  // we've already figured out. Copied in so the agent can read ./templates/<kind>.md.
+  await cp(join(__dirname, 'templates'), join(cwd, 'templates'), { recursive: true }).catch(() => {})
 
   const session = createSession(harness, { cwd, model, resumeId: opts.ica?.resumeId })
   const manager = opts.managerUrl ?? 'http://localhost:4000'
   const preamble =
     `You are the infrastructure connector agent. Read ./connector/CONNECTOR.md for your role + the bridge protocol, then help ` +
-    `the admin. The datasource-manager is at ${manager}. Write bridges under ${opts.datasourcesDir} (one folder per ` +
-    `source: <id>/bridge.mjs + <id>/.env for secrets). Register a bridge LIVE via POST ${manager}/sources ` +
-    `{"id","path"} (absolute path), then verify via GET ${manager}/sources, POST ${manager}/introspect, POST ${manager}/query.`
+    `the admin. BEFORE writing a bridge, read the matching connection template in ./templates/ (e.g. suiteql.md, sql.md, ` +
+    `rest.md) and reuse its connect steps + common-issue checks. The datasource-manager is at ${manager}. Write bridges under ` +
+    `${opts.datasourcesDir} (one folder per source: <id>/bridge.mjs + <id>/.env for secrets). Register a bridge LIVE via POST ` +
+    `${manager}/sources {"id","path"} (absolute path), then verify via GET ${manager}/sources, POST ${manager}/introspect, POST ${manager}/query.`
 
   return {
     cwd,

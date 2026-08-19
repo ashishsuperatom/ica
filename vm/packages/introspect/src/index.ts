@@ -4,6 +4,7 @@
 // interface is dialect-agnostic; only the SQL/API inside each module differs.
 
 import { mssqlIntrospect } from './mssql.js'
+import { suiteqlIntrospect } from './suiteql.js'
 
 export type QueryFn = (sourceId: string, sql: string, params?: Record<string, unknown>) => Promise<any[]>
 
@@ -38,8 +39,8 @@ export interface Introspect {
 
 const REGISTRY: Record<string, (query: QueryFn, source: string) => Introspect> = {
   mssql: mssqlIntrospect,
+  suiteql: suiteqlIntrospect,
   // snowflake: snowflakeIntrospect,   // add as needed
-  // oracle: oracleIntrospect,
 }
 
 export function getIntrospect(dialect: string, query: QueryFn, source: string): Introspect {
