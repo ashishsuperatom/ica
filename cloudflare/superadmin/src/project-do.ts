@@ -123,8 +123,6 @@ export class ProjectDO extends DurableObject<Env> {
     await this.ctx.storage.put('projectName', name)
   }
 
-  // Timeout for unauthenticated connections (ms)
-  private static AUTH_TIMEOUT = 10_000
   // Grace for a briefly-absent EXTERNAL engine before a routed message errors "offline": only if it
   // heartbeated within ENGINE_RECENT_MS (so we don't stall a genuinely-off box), wait up to ENGINE_GRACE_MS.
   private static ENGINE_RECENT_MS = 30_000
@@ -238,6 +236,7 @@ export class ProjectDO extends DurableObject<Env> {
   // ── HTTP + WS entry point ───────────────────────────────────────────────────
 
   async fetch(request: Request): Promise<Response> {
+    this.hydrate()   // rebuild conn Maps from hibernated sockets before any path reads them (state/connections)
     const url  = new URL(request.url)
     const path = url.pathname
     const wsm = path.match(/^\/_ws\/([^/?]+)/); if (wsm) this._pid = decodeURIComponent(wsm[1])   // learn our project id
@@ -301,46 +300,49 @@ export class ProjectDO extends DurableObject<Env> {
     const pair = new WebSocketPair()
     const [client, server] = Object.values(pair) as [WebSocket, WebSocket]
 
-    // Standard (non-hibernation) accept — REQUIRED because this hub uses
-    // addEventListener('message'|'close'|'error') below + in-memory Maps + a setTimeout
-    // auth timer. ctx.acceptWebSocket() (hibernation) would route messages to
-    // webSocketMessage()/webSocketClose() class methods instead, so the listeners would
-    // never fire (the bug: 101 ok, but hello never received → 10s 4001 timeout).
-    server.accept()
-
-    // Auth timeout — close if handshake not received within the window
-    const authTimer = setTimeout(() => {
-      if (!this.connByWs.has(server)) {
-        server.close(4001, 'Authentication timeout')
-      }
-    }, ProjectDO.AUTH_TIMEOUT)
-
-    server.addEventListener('message', async (evt) => {
-      try {
-        await this.handleMessage(server, JSON.parse(evt.data as string), authTimer)
-      } catch {
-        server.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'error', reason: 'Invalid JSON' } }))
-      }
-    })
-
-    server.addEventListener('close', () => {
-      clearTimeout(authTimer)
-      this.handleDisconnect(server)
-    })
-
-    server.addEventListener('error', () => {
-      clearTimeout(authTimer)
-      this.handleDisconnect(server)
-    })
-
+    // HIBERNATION accept: the runtime keeps this socket alive across DO isolate eviction AND worker deploys,
+    // then delivers messages/close/error to the webSocketMessage()/webSocketClose()/webSocketError() class
+    // methods below. This is what stops the engine socket dying (1006) on every deploy. In-memory Maps don't
+    // survive a hibernation wake, so they're rebuilt on demand from each socket's serialized attachment
+    // (set in register(), read in hydrate()). No per-socket setTimeout auth timer survives hibernation; an
+    // unauthenticated socket is instead closed the moment it sends any non-hello frame (see handleMessage).
+    this.ctx.acceptWebSocket(server)
     return new Response(null, { status: 101, webSocket: client })
   }
 
-  private async handleMessage(ws: WebSocket, msg: any, authTimer: ReturnType<typeof setTimeout>) {
+  // ── Hibernation handlers (replace addEventListener) ───────────────────────────
+  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
+    this.hydrate()
+    let msg: any
+    try { msg = JSON.parse(typeof message === 'string' ? message : new TextDecoder().decode(message)) }
+    catch { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'error', reason: 'Invalid JSON' } })); return }
+    try { await this.handleMessage(ws, msg) }
+    catch { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'error', reason: 'Invalid JSON' } })) }
+  }
+  async webSocketClose(ws: WebSocket) { this.hydrate(); this.handleDisconnect(ws) }
+  async webSocketError(ws: WebSocket) { this.hydrate(); this.handleDisconnect(ws) }
+
+  // Rebuild the connection Maps from the sockets the runtime kept across a hibernation wake / new deploy.
+  // Each AUTHENTICATED socket carries its ConnInfo as a serialized attachment (set in register()); sockets
+  // that never authenticated have no attachment and are skipped. Runs at most once per isolate lifetime.
+  private hydrated = false
+  private hydrate() {
+    if (this.hydrated) return
+    this.hydrated = true
+    for (const ws of this.ctx.getWebSockets()) {
+      const att = ws.deserializeAttachment() as ConnInfo | null
+      if (!att) continue
+      this.wsById.set(att.wsId, ws)
+      this.connByWs.set(ws, att)
+      if (att.type === 'code-engine' || att.type === 'fast-router') this.roleRegistry.set(att.type, att.wsId)
+    }
+  }
+
+  private async handleMessage(ws: WebSocket, msg: any) {
     // ── Handshake ───────────────────────────────────────────────────────────
     if (msg.type === 'hello') {
       try {
-        await this.handleHello(ws, msg, authTimer)
+        await this.handleHello(ws, msg)
       } catch (err: any) {
         this.log('ws:hello_error', { error: err?.message ?? String(err) })
         ws.close(4001, 'Internal error')
@@ -399,7 +401,7 @@ export class ProjectDO extends DurableObject<Env> {
     await this.relay(ws, sender, msg)
   }
 
-  private async handleHello(ws: WebSocket, msg: any, authTimer: ReturnType<typeof setTimeout>) {
+  private async handleHello(ws: WebSocket, msg: any) {
     const { role, key, token, instanceId, epoch } = msg   // instanceId/epoch: singleton identity + generation (code-engine)
 
     // ── Server-side (code-engine): validate the per-project API key from the hello
@@ -414,7 +416,7 @@ export class ProjectDO extends DurableObject<Env> {
       }
       this.log('ws:ce_auth_ok', {})
       this.recordHeartbeat()
-      if (await this.register(ws, role, undefined, undefined, authTimer, instanceId, epoch)) this.flushQueued(ws)
+      if (await this.register(ws, role, undefined, undefined, instanceId, epoch)) this.flushQueued(ws)
       return
     }
 
@@ -429,7 +431,7 @@ export class ProjectDO extends DurableObject<Env> {
         return
       }
       this.log('ws:fr_auth_ok', {})
-      if (await this.register(ws, role, undefined, undefined, authTimer, instanceId, epoch)) this.flushQueued(ws)
+      if (await this.register(ws, role, undefined, undefined, instanceId, epoch)) this.flushQueued(ws)
       return
     }
 
@@ -448,7 +450,7 @@ export class ProjectDO extends DurableObject<Env> {
         return
       }
       this.log('ws:rt_key_auth_ok', {})
-      this.register(ws, 'runtime', undefined, undefined, authTimer)
+      this.register(ws, 'runtime', undefined, undefined)
       return
     }
 
@@ -469,7 +471,7 @@ export class ProjectDO extends DurableObject<Env> {
       // an inspect request needs the engine up to answer, and the Inspector only fetches on
       // open/refresh, never on a poll.
       if (claims.role === 'superadmin') {
-        this.register(ws, 'admin', claims.userId, claims.role, authTimer)
+        this.register(ws, 'admin', claims.userId, claims.role)
         return
       }
 
@@ -482,7 +484,7 @@ export class ProjectDO extends DurableObject<Env> {
       // Runtime (a human's client surface: web/voice/mobile) connected — real activity; wake machine.
       this.markUserActivity()
       this.wakeMachine()
-      this.register(ws, 'runtime', claims.userId, claims.role, authTimer)
+      this.register(ws, 'runtime', claims.userId, claims.role)
       return
     }
 
@@ -491,8 +493,7 @@ export class ProjectDO extends DurableObject<Env> {
 
   // Returns true if the connection was registered, false if it was FENCED (rejected — an older/stale
   // singleton connection that a newer instance already superseded). Callers skip post-register work on false.
-  private async register(ws: WebSocket, type: string, userId: string | undefined, orgRole: string | undefined, authTimer: ReturnType<typeof setTimeout>, instanceId?: string, epoch?: number): Promise<boolean> {
-    clearTimeout(authTimer)
+  private async register(ws: WebSocket, type: string, userId: string | undefined, orgRole: string | undefined, instanceId?: string, epoch?: number): Promise<boolean> {
 
     // Generate wsId
     const wsId = crypto.randomUUID().slice(0, 8)
@@ -527,7 +528,9 @@ export class ProjectDO extends DurableObject<Env> {
 
     // Register
     this.wsById.set(wsId, ws)
-    this.connByWs.set(ws, { wsId, type, userId, orgRole, instanceId, epoch })
+    const conn: ConnInfo = { wsId, type, userId, orgRole, instanceId, epoch }
+    this.connByWs.set(ws, conn)
+    ws.serializeAttachment(conn)   // survives hibernation → hydrate() rebuilds the Maps after a wake/deploy
     if (singleton) this.roleRegistry.set(type, wsId)
     // Wake anything waiting for the engine to come back (grace window in routeToCodeEngine).
     if (type === 'code-engine' && this.engineWaiters.size) {
@@ -875,6 +878,7 @@ export class ProjectDO extends DurableObject<Env> {
   // A connected user never triggers a cold STOP — they keep getting fast suspend-wakes.
   // Any failure re-arms in 1 min so an idle machine can never be left running (cost).
   async alarm() {
+    this.hydrate()   // may fire after a hibernation wake — rebuild conn Maps before reading them
     const [m] = this.ctx.storage.sql.exec(
       'SELECT machine_id, last_active, idle_phase, status, provider FROM fly_machine LIMIT 1'
     )
