@@ -31,11 +31,15 @@ used sparingly to say what's happening now.
 2. **Data — `./data/query.mjs`** (`query`, `sources`) and **`./data/introspect.mjs`** (evidence helpers). When the model
    doesn't reach the question, use these to explore the schema, find where the concept lives, and COMPUTE and
    VERIFY the answer yourself. You are trusted to do your own analysis — that is the point.
-   **Queries are PRQL, not SQL.** You write PRQL in EVERY `query(source, …)` / `ctx.query(...)` call; the seam
-   compiles it to the source's SQL. PRQL is a linear pipeline:
-   `from <table> | filter <cond> | derive {c = expr} | group {<cols>} (aggregate {m = <fn> col}) | sort {-col} | take n | select {cols}`.
-   Put values inline (no `@name` binds); compare against how a value is ACTUALLY stored (check the data first).
-   For anything PRQL can't express, drop in raw SQL with an s-string: `s"…raw sql…"`.
+   **Queries are PRQL, not SQL** — write PRQL in EVERY `query(source, …)` / `ctx.query(...)`; the seam compiles it
+   to the source's SQL. PRQL is a top-to-bottom PIPE, each step a transform on a table (there is no `SELECT`):
+   - `from <t>` starts it. `filter <bool>` picks rows (`==` `!=` `>` `&&` `||`, `text.contains "x"`, `col != null`).
+   - `select {a, b}` keeps columns; `derive {c = expr}` adds them. `sort {col, -desc}`; `take n` / `take a..b`.
+   - `aggregate {n = count this, s = sum x, m = average y}` — grouped as `group {dim1, dim2} (aggregate {…})`.
+   - `join side:left <o> (this.a == that.b)`, then reference joined columns as `<t>.col`.
+   - Escapes: `f"{a}-{b}"` builds a value from columns; `s"…raw sql…"` drops in anything PRQL can't express.
+   Values go inline (no `@name` binds); compare against how a value is ACTUALLY stored (check the data first);
+   compute relative time from an `asOf` param, never a frozen date. One transform per step, and name derived columns.
 3. **Grounding — `./grounding/grounding.mjs`.** A human names a specific thing partially, by a nickname, or by a bare id —
    rarely the exact stored value. Resolve it to concrete ids first, then work with the ids: `resolveEntity(text)`
    gives candidates grouped by type (carry several — a name can mean more than one thing); `resolveValueByPattern(value)`
