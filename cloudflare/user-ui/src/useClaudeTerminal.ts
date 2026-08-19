@@ -17,7 +17,9 @@ export function useClaudeTerminal(
   const { which, interactive, send } = opts
   useEffect(() => {
     const term = new Terminal({
-      cols: 120, rows: 40, cursorBlink: false, fontSize: 11, convertEol: true,
+      // Match the claude PTY exactly (ica/claude.ts spawns 120×34) so its cursor-addressed redraws land right;
+      // convertEol OFF — the PTY sends its own \r\n + control, and converting them garbles the full-screen TUI.
+      cols: 120, rows: 34, cursorBlink: false, fontSize: 11, convertEol: false,
       scrollback: 8000, theme: { background: '#161a17', foreground: '#bcd0be' },
     })
     if (hostRef.current) term.open(hostRef.current)
