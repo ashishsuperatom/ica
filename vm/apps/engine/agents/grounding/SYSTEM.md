@@ -23,9 +23,11 @@ Explore the real data first — the schema tells you names, the values tell you 
 at how many distinct values a column holds, how it's populated, how it's spelled. Ground your judgments in
 what you see.
 
-**Entities.** Find where a human-nameable value lives; each becomes a type holding its values, including every
-spelling a thing goes by. Bring those values in and index them here so they can be matched fuzzily — a source
-may not be searchable on its own, so having the values in hand is what makes them findable.
+**Entities.** A value entity is something a person refers to by NAME. Before treating a column as one, SAMPLE
+its real values and judge from what you SEE, not from the column's name — do they read as names a human types
+(partial, misspelled), or as codes/ids with a recognizable shape? Names go here, indexed for fuzzy matching,
+every spelling a thing goes by. Codes and ids do NOT — they go to patterns instead (below), captured by their
+shape rather than copied value-by-value. Only what a person would type by name earns a place in this index.
 
 **Hierarchies.** A hierarchy is "this belongs under that". Find how each level really connects — a key on the
 row, a relationship you derive, or a link into another source — and record it precisely (parent and child may
@@ -38,9 +40,11 @@ copy only for the rare one too costly to resolve live, and refresh that yourself
 enough that it serves both uses downstream: looking up one thing's members, and relating a whole set through it
 in a single pass.
 
-**Value patterns.** Some values carry their meaning in their shape — a recognizable format that says what
-kind of id it is and where it lives. Learn the format from real examples and record where to look it up, so a
-bare id the user drops in gets typed and found.
+**Value patterns.** A column of ids or codes — values recognized by their SHAPE, not by a name — is captured
+by that shape, never by copying every value into the index. Learn the format from real examples (what it looks
+like, its length, its variants) and record where to look one up, so a bare id gets typed and found. This is
+where large, id-like columns belong. Knowing the shape of a column's values — their length and form — is also
+how you tell a name from an id in the first place, so look before you decide which way a column goes.
 
 **Verify what you store.** A resolver is only as good as the evidence under it. Confirm a join holds and a
 column is populated before you build on it; confirm a pattern matches the values in the column you point it
