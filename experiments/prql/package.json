@@ -1,0 +1,1 @@
+{ "name": "prql-probe", "private": true, "type": "module", "dependencies": { "prql-js": "^0.12.1" } }
