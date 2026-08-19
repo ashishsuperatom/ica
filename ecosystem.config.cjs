@@ -38,7 +38,9 @@ function readEnv(path) {
 const IDS = {
   totalgroup: '22dd6ecd-7878-4739-bb23-bc7703737807',
   fusion5:    '1c20400d-99b6-4afb-ba71-0e458a78b1a2',
+  prql:       '96b7087f-e3bb-4e8b-a96e-b3cafcea1cef',   // PRQL experiment — one project, BOTH sources (mssql + suiteql)
 }
+const prql = readEnv(`${root}/vm/projects/${IDS.prql}/.env`)
 
 // fusion5 = a SECOND project (NetSuite). Same engine/agents/ICA code — a second INSTANCE, pointed at
 // fusion5's project id/hub/key + its own datasource-manager. Its config comes from projects/<id>/.env.
@@ -87,6 +89,26 @@ module.exports = {
       // ICA_PROJECT/ICA_HUB/ICA_KEY/DATASOURCE_URL from fusion5/.env win over engine/.env (loadEnvFile
       // does not override an already-set var), so this instance targets fusion5 without any engine change.
       env:         { PATH: process.env.PATH, ...fusion5, DATASOURCES_DIR: `${root}/vm/projects/${IDS.fusion5}/datasources` },
+    },
+
+    // ── PRQL experiment — one project, BOTH sources (totalgroup MSSQL + fusion5 SuiteQL) ─────────────
+    {
+      name:        'sa-datasources-prql',
+      script:      '/opt/homebrew/bin/pnpm',
+      args:        'exec tsx src/index.ts',
+      cwd:         `${root}/vm/apps/datasources/manager`,
+      interpreter: 'none',
+      watch:       false,
+      env:         { PATH: process.env.PATH, DATASOURCE_PORT: '4020', DATASOURCE_DATA_DIR: `${root}/vm/projects/${IDS.prql}/datasources` },
+    },
+    {
+      name:        'sa-engine-prql',
+      script:      '/opt/homebrew/bin/pnpm',
+      args:        'exec tsx engine.ts',
+      cwd:         `${root}/vm/apps/engine`,
+      interpreter: 'none',
+      watch:       false,
+      env:         { PATH: process.env.PATH, ...prql, DATASOURCES_DIR: `${root}/vm/projects/${IDS.prql}/datasources` },
     },
   ],
 }
