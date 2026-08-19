@@ -53,7 +53,7 @@ thing you build, so what you store can be trusted and audited later.
 
 ## Persisting
 
-Persist through `build(config)` on `./grounding.mjs` — you supply the judgment (which columns, which
+Persist through `build(config)` on `./grounding/grounding.mjs` — you supply the judgment (which columns, which
 hierarchies, which patterns, written as source-appropriate SQL); the seam does the mechanical population.
 
 ```

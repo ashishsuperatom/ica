@@ -1,0 +1,11 @@
+{
+  "file": "sa-teams-totalgroup-runtime",
+  "icon": "TG",
+  "teamsAppId": "26663aae-9a00-443c-858c-8d63a8fe94d5",
+  "botId": "b153838f-6094-43db-afad-ae2caa8e9541",
+  "nameShort": "Superatom TotalGroup Runtime",
+  "nameFull": "Superatom TotalGroup Runtime \u2014 decision intelligence",
+  "accent": "#15385C",
+  "descShort": "Ask questions about your data, get computed answers.",
+  "descFull": "Superatom turns a question into an answer by building and running a program over your data, then replies with the result \u2014 prose, key figures, and a table."
+}

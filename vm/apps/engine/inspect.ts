@@ -363,7 +363,7 @@ export function createInspector(deps: InspectorDeps) {
    *  the hierarchies (live vs materialized, with their join spec) and value patterns. Read through the ONE
    *  GroundingStore reader (never re-queried here); read-only, and absent until the agent has run. */
   function grounding() {
-    const path = join(workspace, 'grounding.sqlite')
+    const path = join(workspace, 'db', 'grounding.sqlite')
     if (!existsSync(path)) return { exists: false, path }
     let store: GroundingStore | null = null
     try {
@@ -377,7 +377,7 @@ export function createInspector(deps: InspectorDeps) {
 
   /** A compact grounding line for the landing screen (counts only — the full view is `grounding`). */
   function groundingSummary() {
-    const path = join(workspace, 'grounding.sqlite')
+    const path = join(workspace, 'db', 'grounding.sqlite')
     if (!existsSync(path)) return { exists: false }
     let store: GroundingStore | null = null
     try {
@@ -411,8 +411,8 @@ export function createInspector(deps: InspectorDeps) {
     }
     return {
       databases: [
-        inspect('project.sqlite', join(workspace, 'project.sqlite'), graph.db),
-        inspect('answers.sqlite', join(dataRoot, 'answers.sqlite'), answers.db),
+        inspect('project.sqlite', join(workspace, 'db', 'project.sqlite'), graph.db),
+        inspect('answers.sqlite', join(dataRoot, 'db', 'answers.sqlite'), answers.db),
       ],
     }
   }

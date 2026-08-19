@@ -32,9 +32,17 @@ function readEnv(path) {
   return out
 }
 
+// Projects are keyed by their UNIQUE project id (UUID) on disk — names collide, ids don't, and the id is
+// exactly what the engine connects to the hub with (ICA_PROJECT). This map keeps the config readable
+// (name → id); the human-facing name→id index also lives in vm/projects/INDEX.md.
+const IDS = {
+  totalgroup: '22dd6ecd-7878-4739-bb23-bc7703737807',
+  fusion5:    '1c20400d-99b6-4afb-ba71-0e458a78b1a2',
+}
+
 // fusion5 = a SECOND project (NetSuite). Same engine/agents/ICA code — a second INSTANCE, pointed at
-// fusion5's project id/hub/key + its own datasource-manager. Its config comes from vm/projects/fusion5/.env.
-const fusion5 = readEnv(`${root}/vm/projects/fusion5/.env`)
+// fusion5's project id/hub/key + its own datasource-manager. Its config comes from projects/<id>/.env.
+const fusion5 = readEnv(`${root}/vm/projects/${IDS.fusion5}/.env`)
 
 module.exports = {
   apps: [
@@ -47,7 +55,7 @@ module.exports = {
       watch:       false,
       // totalgroup: load sources from projects/totalgroup/datasources/registry.json (the uniform structure the
       // connector agent also writes into). No SOURCES env / hardcoded default anymore.
-      env:         { PATH: process.env.PATH, DATASOURCE_PORT: '4000', DATASOURCE_DATA_DIR: `${root}/vm/projects/totalgroup/datasources` },
+      env:         { PATH: process.env.PATH, DATASOURCE_PORT: '4000', DATASOURCE_DATA_DIR: `${root}/vm/projects/${IDS.totalgroup}/datasources` },
     },
     {
       name:        'sa-engine',
@@ -56,7 +64,7 @@ module.exports = {
       cwd:         `${root}/vm/apps/engine`,          // the new engine; ICA lives in ica/. Config from vm/apps/engine/.env
       interpreter: 'none',
       watch:       false,
-      env:         { PATH: process.env.PATH, DATASOURCES_DIR: `${root}/vm/projects/totalgroup/datasources` },   // where the connector writes bridges (same dir the manager reads)
+      env:         { PATH: process.env.PATH, DATASOURCES_DIR: `${root}/vm/projects/${IDS.totalgroup}/datasources` },   // where the connector writes bridges (same dir the manager reads)
     },
 
     // ── fusion5 (NetSuite) — second project, same engine/agents code ──────────────────────────────
@@ -67,7 +75,7 @@ module.exports = {
       cwd:         `${root}/vm/apps/datasources/manager`,   // same manager code; scoped to fusion5 by its registry.json
       interpreter: 'none',
       watch:       false,
-      env:         { PATH: process.env.PATH, DATASOURCE_PORT: '4010', DATASOURCE_DATA_DIR: `${root}/vm/projects/fusion5/datasources` },
+      env:         { PATH: process.env.PATH, DATASOURCE_PORT: '4010', DATASOURCE_DATA_DIR: `${root}/vm/projects/${IDS.fusion5}/datasources` },
     },
     {
       name:        'sa-engine-fusion5',
@@ -78,7 +86,7 @@ module.exports = {
       watch:       false,
       // ICA_PROJECT/ICA_HUB/ICA_KEY/DATASOURCE_URL from fusion5/.env win over engine/.env (loadEnvFile
       // does not override an already-set var), so this instance targets fusion5 without any engine change.
-      env:         { PATH: process.env.PATH, ...fusion5, DATASOURCES_DIR: `${root}/vm/projects/fusion5/datasources` },
+      env:         { PATH: process.env.PATH, ...fusion5, DATASOURCES_DIR: `${root}/vm/projects/${IDS.fusion5}/datasources` },
     },
   ],
 }

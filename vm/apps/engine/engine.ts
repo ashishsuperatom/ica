@@ -89,6 +89,7 @@ if (!PROJECT || !KEY) {
 // runs a PTY; pi is in-process). The engine never touches a server directly.
 let busy = false
 let reply: any = null                                // who to stream the current turn back to
+let curChannel = ''                                  // non-empty when the current turn came from a chat channel (Teams/…) — deliver the answer to the durable channel consumer, not a live socket
 let hub: WebSocket | null = null
 
 let semanticBusy = false
@@ -126,12 +127,13 @@ let semanticConsolidating = false
 // ── BOOTSTRAP: guarantee the engine's environment BEFORE opening any store or connecting. On a fresh
 // machine the per-project dirs don't exist yet; opening a sqlite in a missing dir throws. We create them
 // here, explicitly, and fail LOUD + clean (not a cryptic driver stack) if the volume isn't writable.
-for (const d of [WORKSPACE, join(DATA_ROOT, PROJECT)]) {
+// Every SQLite file lives under <workspace>/db/ (organized-by-concern workspace; the seams open them there).
+for (const d of [WORKSPACE, join(WORKSPACE, 'db'), join(DATA_ROOT, PROJECT), join(DATA_ROOT, PROJECT, 'db')]) {
   try { mkdirSync(d, { recursive: true }) }
   catch (e: any) { console.error(`[ica] FATAL bootstrap: cannot create ${d}: ${e?.message ?? e}`); process.exit(1) }
 }
 
-const answers = openAnswers(join(DATA_ROOT, PROJECT, 'answers.sqlite'))
+const answers = openAnswers(join(DATA_ROOT, PROJECT, 'db', 'answers.sqlite'))
 const genId = () => 'q_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
 
 // ── INTENT GRAPH (the new spine) ──────────────────────────────────────────────
@@ -141,7 +143,7 @@ const genId = () => 'q_' + Date.now().toString(36) + Math.random().toString(36).
 // and we mint the node below). Node id = hash(parent, normalised question) → deterministic.
 // ONE project database. The intent graph + concepts + units are all just nodes/edges in the project's
 // node-store, which lives in project.sqlite alongside the rest of the project's graph — not a separate file.
-const graph = new NodeStore(join(WORKSPACE, 'project.sqlite'))
+const graph = new NodeStore(join(WORKSPACE, 'db', 'project.sqlite'))
 ensureRoot(graph)
 ensureConceptTree(graph)   // concept tree root + place any orphan concept under it (structural)
 ensureBasisSeed(graph)     // plant the grounded three-plane axis vocabulary (subject / operation / mode)
@@ -277,6 +279,7 @@ async function reuseProgram(programDir: string, params: any, category: string,
     }
     lastAnswer = answer; lastTiming = timing; lastCategory = category
     emit(reply, { t: 'analyst:answer', category, answer, timing, sid, qid, reused: true })
+    if (curChannel) emit({ type: 'channel' }, { t: 'channel:answer', channel: curChannel, qid, answer, category })   // durable delivery to the chat channel
     emit(reply, { t: 'analyst:done', sid })
     answers.save({ qid, sessionId: sid, question, norm, category, status: 'answered', answer, createdAt: Date.now(), finishedAt: Date.now(), programDir, params })
     const n = graph.getNode(nodeId); if (n) graph.putNode({ ...n, props: { ...(n.props as any), lastShapeHash: (rr as any).finalShapeHash ?? (n.props as any)?.lastShapeHash } })
@@ -294,7 +297,7 @@ async function reuseProgram(programDir: string, params: any, category: string,
 
 // Answer a question: classify → analyst ICA (per-category SYSTEM.md, semantic-model-first) → stream
 // the raw claude terminal to the "Analyst" tab and emit the final structured answer.
-async function analyse(question: string, from: any, sid = '', qidIn = '') {
+async function analyse(question: string, from: any, sid = '', qidIn = '', channel = '') {
   if (analystBusy) { emit(from, { t: 'analyst:status', text: 'Already answering a question — one at a time.' }); return }
   if (!question.trim()) return
   // ── EXPLICIT EDIT prefix ──────────────────────────────────────────────────────
@@ -307,7 +310,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '') {
   if (editMatch) question = (question.replace(/^\s+/, '').slice(editMatch[0].length).trim()) || question
   // Stream everything to `reply` (re-targetable): a reload reconnects and sessions:list points reply
   // at the new connection, so the in-flight run's output + final answer reach the reloaded client.
-  analystBusy = true; busy = true; reply = from
+  analystBusy = true; busy = true; reply = from; curChannel = channel
   const norm = normalizeQuestion(question)
   // ONE id end to end: the UI mints it and sends it; we use it verbatim (agent writes ./out/<qid>.json,
   // DB keys on it). Fall back to minting our own if a non-UI caller omitted it. Trust-but-verify: if the
@@ -374,7 +377,14 @@ async function analyse(question: string, from: any, sid = '', qidIn = '') {
     emit(reply, { t: 'analyst:stream', kind: analyst.session.kind ?? 'events', sid })
     const handlers = {
       onCategory: (c: string) => { curCategory = c; emit(reply, { t: 'analyst:category', category: c, sid }) },
-      onOutput: (chunk: string) => { if (reply) emit(reply, { t: 'analyst:chunk', text: chunk }) },   // raw terminal (pty) / event text (events) → Analyst tab
+      onOutput: (chunk: string) => {
+        // The analyst is ONE agent with ONE terminal — mirror its live output to the asker AND to every
+        // attached web-UI terminal, so the Analyst tab shows the work no matter where the question came from
+        // (web, Teams, …). Dedup so the web asker (also an attached viewer) isn't written twice.
+        const m = { t: 'analyst:chunk', text: chunk }
+        if (reply) emit(reply, m)
+        for (const v of termViewers.analyst) if (v !== reply) emit(v, m)
+      },
       onNarration: (text: string) => { if (reply) emit(reply, { t: 'analyst:progress', text, sid }) },  // clean prose → New chat progress
     }
     const r = await analyst.ask(question, handlers, { qid, modify: modifyTarget ?? undefined })
@@ -394,6 +404,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '') {
     const b = await readJsonSafe<any>(join(WORKSPACE, 'out', qid, 'built.json'), null, 'analyst')   // absent = unknowable/gap (no program)
     if (b) { programDir = b.programDir; programParams = b.params; programTerms = Array.isArray(b.terms) ? b.terms : []; analystParent = b.parent }
     emit(reply, { t: 'analyst:answer', category: r.category, answer: r.answer, lastLines: r.lastLines, timing, sid, qid })
+    if (channel) emit({ type: 'channel' }, { t: 'channel:answer', channel, qid, answer: r.answer, category: r.category })   // durable delivery to the chat channel
     // PERSIST: the engine reads the agent's file result and writes the DB — the agent never touches the DB.
     // finishedAt is stamped HERE, deterministically, the moment the analyst's artifact is in hand — this is
     // the cursor the offline modeler consolidates by (never a time the agent self-reports).
@@ -624,7 +635,7 @@ function resyncAnalyst(from: any) {
 }
 
 async function handle(payload: any, from: any) {
-  if (payload.t === 'analyse') { analyse(String(payload.question || ''), from, String(payload.sessionId || ''), String(payload.questionId || '')) }   // UI supplies both ids
+  if (payload.t === 'analyse') { analyse(String(payload.question || ''), from, String(payload.sessionId || ''), String(payload.questionId || ''), String(payload.channel || '')) }   // UI supplies both ids; channel set for chat-channel turns
   else if (payload.t === 'semantic:build') { buildSemanticModel(from) }                      // build/refine the semantic model (watchable)
   else if (payload.t === 'grounding:build') { handleGrounding(from) }                         // admin console → grounding agent builds value→id indexes (watchable)
   else if (payload.t === 'connector:ask') { handleConnector(String(payload.text || ''), from) }   // admin console → connector agent (raw PTY back)

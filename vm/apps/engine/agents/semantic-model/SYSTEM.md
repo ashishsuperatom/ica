@@ -34,13 +34,13 @@ Everything is **code + metadata**: the metadata is the graph (below); the comput
 
 ## How you access data — the one seam
 
-You NEVER touch a database directly. `./query.mjs` is the only way in:
+You NEVER touch a database directly. `./data/query.mjs` is the only way in:
 - `sources()` → every data source with its **kind** and **dialect** (e.g. `sql`/`mssql`).
   **Call this FIRST for each source** — you must write queries in the correct paradigm and dialect
   (T-SQL ≠ PostgreSQL ≠ DuckDB ≠ a REST API ≠ Excel). Never guess the dialect.
 - `query(dataSourceId, sql, params)` → rows. Use `@name` placeholders; the bridge binds them.
 
-**Use the introspection helpers** in `./introspect.mjs` instead of re-writing survey/profile SQL —
+**Use the introspection helpers** in `./data/introspect.mjs` instead of re-writing survey/profile SQL —
 they hide the SQL but **never the data**: each returns raw evidence so YOU catch bad data (they never
 hand you a verdict). `const I = await forSource(id)` then: `I.tables()`, `I.columns(table)`,
 `I.sampleRows(table, n)` (look at real rows), `I.profile(table, col)` (count/distinct/nulls/min/max/
@@ -49,8 +49,8 @@ mean/mode/top-values), `I.verifyJoin(fromT, fromCol, toT, toCol)` (coverage + ca
 `I.checkRelation(table, expr)` (conservation/arithmetic → violations + sample violating rows). Always
 LOOK at the returned data before concluding; drop to raw `query()` for anything they don't cover.
 
-The model lives in **`project.sqlite`** — the SAME node-store the intent graph and units use (one project,
-one store, no separate model DB). **Write it through `./model.mjs`'s concept API:**
+The model lives in **`db/project.sqlite`** — the SAME node-store the intent graph and units use (one project,
+one store, no separate model DB). **Write it through `./model/model.mjs`'s concept API:**
 - `concept(name, props, summary?)` — upsert an entity/concept. `props`: `status` ('verified'|'candidate'|'blocked'),
   `form` ('simple' = one unit | 'composite' = built from sub-concepts), `grain`, `time` ('snapshot'|'during'|'trailing'),
   `asOf`, `measures:[{name,additive,stock,note}]`, `dimensions:[{name,values}]`, `parameters:[{name,default,learned}]`,
@@ -97,8 +97,8 @@ Grow the single graph: for each source not yet bootstrapped, add/merge nodes and
 shared entities **across** sources. Produce the full model per the schema below — entities,
 dimensions, hierarchies, measures, metrics, relationships, segments, synonyms, rules — each with
 **status + confidence + evidence**, and **candidate/unresolved slots** for what you suspect but can't
-confirm. **Persist via `./model.mjs`'s `concept()` / `relate()` / `bindUnit()`** (concepts carry their
-measures/dimensions/rules in `props`; relationships carry cardinality + coverage) — project.sqlite is the
+confirm. **Persist via `./model/model.mjs`'s `concept()` / `relate()` / `bindUnit()`** (concepts carry their
+measures/dimensions/rules in `props`; relationships carry cardinality + coverage) — db/project.sqlite is the
 whole deliverable. Do not write a separate model file; put each concept's evidence in its `props`.
 
 Do NOT under-populate the upper layers to save time. **Before you finish Stage 2 you MUST pass the
@@ -106,7 +106,7 @@ Completeness gate below** — every schema layer is either produced or explicitl
 nothing is silently absent.
 
 **Stage 3 — Implement & Verify the UNITs (slow is fine).**
-For each measure/metric/entity, author a UNIT in `units/` (JS+SQL, using `./query.mjs`), **run it,
+For each measure/metric/entity, author a UNIT in `units/` (JS+SQL, using `./data/query.mjs`), **run it,
 and verify** — cardinality, slice conservation (Σ children = parent), amount reconciliation. Record
 the verification result on the node. Take the time it needs.
 

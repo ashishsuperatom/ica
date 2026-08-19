@@ -1,0 +1,25 @@
+# Docker self-host deploy for the Superatom engine (any Linux host with Docker).
+# Builds the same image as Fly, maps a PERSISTENT volume for state, and restarts on reboot.
+#   ./deploy.sh              (or: docker compose up -d --build)
+#   docker compose down      -> stop, KEEP data
+#   docker compose down -v   -> stop and WIPE data (clean teardown)
+services:
+  engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: superatom-engine:local
+    env_file: .env                     # ICA_PROJECT / ICA_KEY / ICA_HUB / optional CLAUDE_CODE_OAUTH_TOKEN
+    environment:
+      # ONE unified state root on the persistent volume (same layout as Fly).
+      ENGINE_STATE_DIR: /app/data/state
+      DATASOURCES_DIR: /app/data/datasources
+      DATASOURCE_DATA_DIR: /app/data/datasources
+      DATASOURCE_URL: http://localhost:4000
+    volumes:
+      - superatom-data:/app/data       # persistent: workspace + DBs + agent auth survive restart/recreate
+    restart: unless-stopped
+    # connects OUT to the hub — no inbound ports to publish
+
+volumes:
+  superatom-data:

@@ -1,5 +1,5 @@
 // Local driver: run the ANALYST on ONE question via its module (no hub, no Fly). Same workspace the
-// grounding agent populated, so ./grounding.mjs is live. Streams the analyst's terminal; prints the answer.
+// grounding agent populated, so ./grounding/grounding.mjs is live. Streams the analyst's terminal; prints the answer.
 //   pnpm exec tsx apps/engine/agents/analyst/run-local.ts <projectId> "the question"
 import { createAnalyst } from './index.js'
 import { fileURLToPath } from 'node:url'

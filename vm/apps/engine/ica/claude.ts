@@ -58,6 +58,7 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
   interface Job { prompt: string; h?: RunHandlers; resolve: (r: RunResult) => void; startedAt: number; submitted: boolean }
   const queue: Job[] = []
   let current: Job | null = null
+  let trustAccepted = false    // answered the one-time "trust this folder" safety dialog (new workspace dir)
   let bypassAccepted = false   // sent the "Yes, I accept" keystroke for the one-time Bypass-Permissions dialog
   let resumeChoiceSent = false // answered the "session is old" resume menu (once per spawn)
   const rawListeners = new Set<(d: string) => void>()   // interactive terminal viewers (raw PTY passthrough, e.g. /login from the UI)
@@ -74,6 +75,14 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
       // Raw terminal passthrough: stream EVERY byte to any interactive viewer (the UI xterm), so a user can
       // watch the live TUI and drive it (e.g. run /login) even when no run is active. Independent of the queue.
       if (rawListeners.size) for (const fn of rawListeners) { try { fn(d) } catch { /* one bad viewer can't break the PTY */ } }
+      // First-run "trust this folder" safety dialog (shown the first time a workspace dir is opened, even with
+      // --dangerously-skip-permissions). Blocks a headless run. Auto-accept ONCE: option "1. Yes, I trust this
+      // folder" is the default (cursor already on it) → just Enter. claude records the trust on the volume, so
+      // it never asks again for this dir. Fires for every claude agent on its first spawn in a new workspace.
+      if (!trustAccepted && /trust this folder|Is this a project you (created|trust)/i.test(stripAnsi(buf.slice(-3000)))) {
+        trustAccepted = true
+        setTimeout(() => { try { pty?.write('\r') } catch {} }, 250)
+      }
       // First-run "Bypass Permissions mode" acceptance dialog (from --dangerously-skip-permissions) blocks a
       // headless run — the harness can't type past a menu. Auto-accept it ONCE: move to "2. Yes, I accept"
       // (down-arrow) + Enter. claude then remembers it (config on the volume), so it's one-time per machine.
@@ -128,7 +137,7 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
     const start = Date.now()
     while (Date.now() - start < READY_MAX) {
       const s = stripAnsi(buf)
-      const boxReady = READY_MARKER.test(s) && !/Yes, I accept/i.test(s)   // NOT ready while the bypass dialog is up
+      const boxReady = READY_MARKER.test(s) && !/Yes, I accept/i.test(s) && !/trust this folder/i.test(s)   // NOT ready while the bypass/trust dialog is up
       const quiet = Date.now() - lastDataAt >= READY_QUIET
       if (boxReady && quiet) return
       await delay(100)
