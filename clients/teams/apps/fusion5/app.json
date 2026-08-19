@@ -1,11 +1,11 @@
 {
   "file": "sa-teams-fusion5-runtime",
   "icon": "F5",
-  "teamsAppId": "3e67841a-62a1-4df0-8ebc-6b083f9f9314",
+  "teamsAppId": "d9b6e155-4aba-4625-a630-87c9487af4c3",
   "botId": "d47d040c-b435-4691-87ce-4b1df7089714",
   "nameShort": "Superatom Fusion5 Runtime",
-  "nameFull": "Superatom Fusion5 Runtime — decision intelligence",
+  "nameFull": "Superatom Fusion5 Runtime \u2014 decision intelligence",
   "accent": "#1E40AF",
   "descShort": "Ask questions about your Fusion5 data in chat.",
-  "descFull": "Superatom Fusion5 Runtime — chat with your Fusion5 (NetSuite) data. Ask in a 1:1 chat or @mention the bot in a channel and it answers from your project's data."
+  "descFull": "Superatom Fusion5 Runtime \u2014 chat with your Fusion5 (NetSuite) data. Ask in a 1:1 chat or @mention the bot in a channel and it answers from your project's data."
 }
