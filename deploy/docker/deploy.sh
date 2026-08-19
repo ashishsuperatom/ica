@@ -17,7 +17,13 @@ if ! docker info >/dev/null 2>&1; then
   else echo "[deploy] Can't reach the Docker daemon — run as root or add your user to the docker group."; exit 1; fi
 fi
 if ! $DOCKER compose version >/dev/null 2>&1; then
-  echo "[deploy] The 'docker compose' plugin is missing. On Ubuntu: sudo apt-get install -y docker-compose-plugin"; exit 1
+  echo "[deploy] The 'docker compose' plugin is missing — installing it…"
+  SUDO=""; [ "$DOCKER" = "sudo docker" ] && SUDO="sudo"
+  if command -v apt-get >/dev/null 2>&1;   then $SUDO apt-get update && $SUDO apt-get install -y docker-compose-plugin
+  elif command -v dnf >/dev/null 2>&1;     then $SUDO dnf install -y docker-compose-plugin
+  elif command -v yum >/dev/null 2>&1;     then $SUDO yum install -y docker-compose-plugin
+  else echo "[deploy] No apt/dnf/yum found — install the docker compose plugin manually, then re-run."; exit 1; fi
+  $DOCKER compose version >/dev/null 2>&1 || { echo "[deploy] compose plugin still missing after install — install it manually, then re-run."; exit 1; }
 fi
 
 # 2. .env — created on first run; you fill it, then re-run.
