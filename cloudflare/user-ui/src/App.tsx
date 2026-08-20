@@ -924,7 +924,7 @@ function ensureAnswerCSS() {
 function answerToText(a: any, cat: string, meta?: { qid?: string; at?: number; timing?: { ms: number; classifyMs?: number; modelMs?: number } }): string {
   const out: string[] = []
   if (cat) out.push(cat.toUpperCase())
-  if (a.answer) out.push(String(a.answer))
+  if (a.answer) out.push(Array.isArray(a.answer) ? a.answer.join('; ') : String(a.answer))
   if (a.periods?.length) out.push('Time filter: ' + a.periods.map((p: any) => `${p.label}${p.detail ? ' — ' + p.detail : ''}`).join(' · '))
   else if (a.period) out.push('Time filter: ' + a.period)
   const figs = Array.isArray(a.figures) && a.figures.length ? a.figures : a.headline?.display ? [{ label: a.headline.label, display: a.headline.display, sub: a.headline.sub }] : []
@@ -936,7 +936,7 @@ function answerToText(a: any, cat: string, meta?: { qid?: string; at?: number; t
     else if (s?.kind === 'kpis' && Array.isArray(s.items)) out.push(s.items.map((f: any) => `${f.label}: ${f.display}${f.sub ? ` (${f.sub})` : ''}`).join('\n'))
     else if (s?.kind === 'table' && Array.isArray(s.columns)) out.push([s.columns.join('\t'), ...(s.rows || []).map((r: any[]) => r.map((v: any) => v == null ? '' : String(v)).join('\t'))].join('\n'))
   }
-  if (a.caveat) out.push('Note: ' + a.caveat)
+  if (a.caveat) out.push('Note: ' + (Array.isArray(a.caveat) ? a.caveat.join('; ') : a.caveat))
   if (a.scope) out.push('Scope: ' + a.scope)
   if (a.source) out.push('Source: ' + a.source)
   if (a.missing) out.push('No source in the data: ' + a.missing)
@@ -1184,7 +1184,7 @@ function AnswerCard({ answer: a, category, timing, qid, at }: { answer: any; cat
         <button className="sa-ic" onClick={toggleFull} title={full ? 'Exit full screen' : 'Full screen'} aria-label="Full screen">{full ? IC.close : IC.expand}</button>
       </div>
       <div className={`sa-type${isTerminal ? ' warn' : ''}`}>{isTerminal ? "Can't answer" : (cat || 'Answer')}</div>
-      {a.answer && <div className="sa-prose" dangerouslySetInnerHTML={{ __html: renderInlineMd(a.answer) }} />}
+      {a.answer && <div className="sa-prose" dangerouslySetInnerHTML={{ __html: renderAnswerBody(a.answer) }} />}
       {(a.periods?.length > 0 || a.period) && (
         <div className="sa-period"><span className="pk">Time filter</span>
           {a.periods?.length > 0
@@ -1206,7 +1206,7 @@ function AnswerCard({ answer: a, category, timing, qid, at }: { answer: any; cat
       {/* All tabular/blocked results render through `sections` (the ONE format). The old flat top-level `table`
           renderer was removed — the analyst now emits a `table` section even for a single table. */}
       {Array.isArray(a.sections) && a.sections.map((s: any, i: number) => <SectionBlock key={i} s={s} />)}
-      {a.caveat && <div className="sa-caveat">{a.caveat}</div>}
+      {a.caveat && <div className="sa-caveat" dangerouslySetInnerHTML={{ __html: renderAnswerBody(a.caveat) }} />}
       {a.scope && <div className="sa-src"><b>Scope:</b> {a.scope}</div>}
       {a.source && <div className="sa-src"><b>Source:</b> {a.source}</div>}
       {a.missing && <div className="sa-caveat">No source in the data: {a.missing}</div>}
@@ -1236,17 +1236,32 @@ function renderInlineMd(text: string): string {
   const clean = text.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\uFE0F\u200D]/gu, '').replace(/ {2,}/g, ' ')
   const esc = clean.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   const out: string[] = []
-  let para: string[] = [], bullets: string[] = []
+  let para: string[] = [], bullets: string[] = [], numbers: string[] = []
   const flushPara = () => { if (para.length) { out.push(para.join('<br/>')); para = [] } }
   const flushBul = () => { if (bullets.length) { out.push(`<ul class="sa-list">${bullets.join('')}</ul>`); bullets = [] } }
+  const flushNum = () => { if (numbers.length) { out.push(`<ol class="sa-olist">${numbers.join('')}</ol>`); numbers = [] } }
+  const flushAll = () => { flushPara(); flushBul(); flushNum() }
   for (const ln of esc.split('\n')) {
-    const m = ln.match(/^\s*[-\u2022]\s+(.*)/)
-    if (m) { flushPara(); bullets.push(`<li>${inlineMd(m[1])}</li>`) }
-    else if (ln.trim() === '') { flushBul(); flushPara() }
-    else { flushBul(); para.push(inlineMd(ln)) }
+    const b = ln.match(/^\s*[-\u2022]\s+(.*)/)
+    const n = ln.match(/^\s*\d+[.)]\s+(.*)/)   // "1. " / "2) " \u2192 a real numbered list (needs a . or ) right after the digits, so "1338 lanes" is NOT a list item)
+    if (b) { flushPara(); flushNum(); bullets.push(`<li>${inlineMd(b[1])}</li>`) }
+    else if (n) { flushPara(); flushBul(); numbers.push(`<li>${inlineMd(n[1])}</li>`) }
+    else if (ln.trim() === '') { flushAll() }
+    else { flushBul(); flushNum(); para.push(inlineMd(ln)) }
   }
-  flushPara(); flushBul()
+  flushAll()
   return out.join('')
+}
+
+// A takeaway (answer/caveat) is EITHER a string (a paragraph) OR an array of item strings (a list) — the
+// program returns one or the other; the UI decides how it renders. A string, or an array of ONE item, is
+// plain text (no bullet). Only an array of MORE THAN ONE item becomes a list.
+function renderAnswerBody(answer: unknown): string {
+  if (Array.isArray(answer)) {
+    if (answer.length <= 1) return renderInlineMd(String(answer[0] ?? ''))   // single item → plain text, no bullet
+    return renderInlineMd(answer.map((it) => `- ${String(it)}`).join('\n'))   // several → a list
+  }
+  return renderInlineMd(String(answer ?? ''))
 }
 
 function Spinner() {

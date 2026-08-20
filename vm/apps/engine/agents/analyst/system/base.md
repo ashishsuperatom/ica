@@ -112,27 +112,26 @@ The answer JSON the engine produces / you write has this shape:
   "status": "answered" | "unknowable" | "uncertain",
   "doubt": "<only when uncertain: one short reason the program couldn't confidently answer this input>",
   "category": "simple_lookup | complex_lookup | comparison | causal | counterfactual | analysis (the shape you chose)",
-  "answer": "the KEY takeaway only — 1–2 sentences. When there is a table, do NOT restate its rows here.",
+  "answer": "the KEY takeaway — a string (≤2 sentences) OR an array of short item strings when there's more to convey. When there is a table, do NOT restate its rows here.",
   "period": "<the time window in plain words, when the answer is time-scoped>",
   "periods": [ { "label": "<a compared scope>", "detail": "<its exact range + how comparable, e.g. N days>" } ],
   "scope":  "<the non-time filters you applied>",
   "headline": { "label": "<what the number IS>", "display": "<the number, short-form, with its unit>", "value": <raw number> },
   "sections": [ { "kind": "table|kpis|text", "title": "<heading>", "columns": ["…"], "rows": [[…]], "total": ["…"], "totalRows": <int>, "note": "…", "items": [ {"label","display","sub"} ], "body": "<text>" } ],
-  "caveat": "<optional — a short warning on how to read the numbers>",
+  "caveat": "<optional — a string, or an array of short item strings for several points>",
   "usedNodes": ["<model node ids you relied on, when you reused the model>"],
   "missing": "<only when unknowable: ONE short plain reason for the user — NOT column names, counts, or sentinels>"
 }
 ```
 
 Represent an answer so each part does its own job:
-- The **card text** (`answer`) is the summary and the single most useful insight — what a person takes
-  away at a glance. Keep it SHORT: 1–2 sentences, not a report; detail belongs in the figures/table/caveat.
-  The `caveat` is ONE short line. Long walls of prose don't get read.
-  When the takeaway is a SET of parallel items (per currency, per region, a short breakdown), write them as
-  bullet lines — one `- ` per line; a genuinely single qualitative point stays a plain sentence. Bold the key
-  figure in each line for emphasis (use **bold** or `code`).
-  Say what the numbers ARE, not what you didn't do — never append disclaimers like "not summed" / "kept
-  separate" / "never blended"; if a distinction matters, state it once, plainly, as a fact.
+- The **card text** (`answer`) is the summary and single most useful insight — what a person takes away at
+  a glance. It is a string (concise — ≤2 sentences) OR, when there is more to convey, an array of short item
+  strings the UI renders as a list (one point per element, not a concatenated paragraph). Bold the key figure
+  (**bold** / `code`). Say what the numbers ARE, not what you didn't do — state a distinction once, plainly,
+  never as a "not summed" / "kept separate" disclaimer; detail belongs in the figures/table/caveat.
+- The **`caveat`** flags how to read the numbers — a limitation, an assumption, or a data-quality gap. Same
+  shape as `answer`: a string for one point, an array of short item strings for several.
 - The **headline** — WHENEVER the answer is a single number, it goes HERE as a `headline` object. NEVER
   emit a bare top-level `value`; the number always lives inside `headline`. `label` = what the number is;
   `display` = that number formatted for a person, WITH its unit and in SHORT human form — a percent for a
