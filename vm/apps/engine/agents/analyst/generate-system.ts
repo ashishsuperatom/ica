@@ -241,7 +241,9 @@ The point: the **compute unit is identical** whether the caller has a name or an
 whether a resolver runs first. (A later search layer will do name→id globally; the shape is the same, so
 author to it now.)`
 
-// WHY: (pre-existing — reason not verified)
+// WHY: the four-capabilities list is pre-existing (reason not verified). The trailing two paras were added
+// recently with known reasons: the no-hardcode para (a reused program must carry no baked data value) and the
+// time-as-parameter para (2026-08, after a "December of every year" question — relative-vs-named time, generic).
 const paCtx = `## The four ctx capabilities (nothing else)
 - \`ctx.query(sourceId, prql, params)\` — your own **PRQL** to the source (the seam compiles it to SQL). The
   model tells you WHICH tables/joins/measures; you write the PRQL pipeline. Values go **inline** (no \`@name\`
@@ -252,7 +254,12 @@ const paCtx = `## The four ctx capabilities (nothing else)
 
 Every program re-runs later over DIFFERENT data, so nothing it outputs may be hard-coded: every value comes from
 the params, the query, or data computed at run time — never a typed-in data literal. Defaults stay neutral,
-never a specific value: a reused program carries any baked value into the wrong run.`
+never a specific value: a reused program carries any baked value into the wrong run.
+
+Time is a parameter, never a constant. A relative window ("recent", "this quarter", "last N months") is computed
+from an \`asOf\` param each run — never a frozen date; a specific named period the question states (a given month,
+quarter, or year) is captured as a param too, so the same program re-runs for a different one rather than baking
+it into the query.`
 
 // WHY: (pre-existing — reason not verified)
 const paRun = `## Run it, verify it, then hand it off — you do NOT write the answer

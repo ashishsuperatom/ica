@@ -55,6 +55,11 @@ Every program re-runs later over DIFFERENT data, so nothing it outputs may be ha
 the params, the query, or data computed at run time — never a typed-in data literal. Defaults stay neutral,
 never a specific value: a reused program carries any baked value into the wrong run.
 
+Time is a parameter, never a constant. A relative window ("recent", "this quarter", "last N months") is computed
+from an `asOf` param each run — never a frozen date; a specific named period the question states (a given month,
+quarter, or year) is captured as a param too, so the same program re-runs for a different one rather than baking
+it into the query.
+
 ## Run it, verify it, then hand it off — you do NOT write the answer
 1. Run it: `tsx run.mjs programs/<slug>/program.ts '<jsonParams>'`. Read the output. Fix until it is
    correct and its shape is clean (stable field names, every value carrying its unit).
