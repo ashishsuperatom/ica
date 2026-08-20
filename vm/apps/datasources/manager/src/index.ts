@@ -13,12 +13,44 @@ import http from 'node:http'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { dirname, join, isAbsolute } from 'node:path'
-import * as prqljs from 'prql-js'
+import { createRequire } from 'node:module'
 
 // Compile PRQL → the source's SQL dialect. `sql.mssql` emits OFFSET/FETCH FIRST, which is valid MSSQL AND the
 // Oracle-12c form SuiteQL accepts — so it covers both our sources. The target is set via the PRQL header.
 const PRQL_TARGET: Record<string, string> = { mssql: 'sql.mssql', suiteql: 'sql.mssql', postgres: 'sql.postgres', sqlite: 'sql.sqlite', duckdb: 'sql.duckdb' }
-const _prqlCompile: (s: string) => string = (prqljs as any).compile ?? (prqljs as any).default?.compile
+// prqlc runs as a WASM module (prql-js). A specific input can make the Rust compiler PANIC, which POISONS the
+// WASM instance — every LATER compile then throws "memory access out of bounds"/"unreachable" until the process
+// restarts (a single-point wedge for the whole data path). This is an upstream prqlc bug, not our code. We make
+// it SELF-HEAL: prql_js.js builds a fresh WebAssembly.Instance on each require, so dropping it from the CJS cache
+// and re-requiring gives a clean instance + clean memory. Compiles are SYNCHRONOUS (serialized on the JS thread),
+// so nothing is ever mid-flight in the instance when we swap it — safe even under many concurrent users.
+const _require = createRequire(import.meta.url)
+const loadPrqlCompile = (): ((s: string) => string) => {
+  const m: any = _require('prql-js')
+  const c = m.compile ?? m.default?.compile
+  if (typeof c !== 'function') throw new Error('prql-js: no compile() export')
+  return c
+}
+let _prqlCompileFn = loadPrqlCompile()
+const reloadPrqlCompiler = () => { try { delete _require.cache[_require.resolve('prql-js')] } catch { /* ignore */ }; _prqlCompileFn = loadPrqlCompile() }
+// A poisoned-instance/panic signature — NOT a normal PRQL syntax error (which must propagate unchanged).
+const isWasmFault = (msg: string) => /out of bounds|unreachable|RuntimeError|recursive use|table index|null function|memory access|\bwasm\b/i.test(String(msg))
+// Compile with self-healing: on a WASM fault, LOG the offending PRQL (so we can capture + report the trigger),
+// re-instantiate, and retry ONCE. If the SAME input faults again it reliably crashes prqlc → reset for the NEXT
+// query and reject THIS one clearly, so a bad input can never wedge the compiler for everyone else.
+const _prqlCompile = (src: string): string => {
+  try { return _prqlCompileFn(src) }
+  catch (e: any) {
+    if (!isWasmFault(e?.message ?? '')) throw e
+    console.error('[manager] prqlc WASM FAULT — re-instantiating compiler. Offending PRQL:\n' + src + '\n' + (e?.message ?? e))
+    reloadPrqlCompiler()
+    try { return _prqlCompileFn(src) }
+    catch (e2: any) {
+      if (isWasmFault(e2?.message ?? '')) reloadPrqlCompiler()   // input reliably crashes prqlc → reset so the NEXT query is clean
+      throw new Error('this query crashed the PRQL compiler (upstream prqlc bug on this input) — rephrase the pipeline: ' + (e2?.message ?? e2))
+    }
+  }
+}
 // Result caps for AGENT queries — a runaway/unbounded query must not dump a whole table (192K rows would
 // overwhelm the bridge WS AND the UI, which shows hundreds at most). MAX_ROWS is enforced AT THE SOURCE (a `take`
 // appended to the PRQL, so the DB returns no more) — a no-op for aggregations, only bites a raw row list.
