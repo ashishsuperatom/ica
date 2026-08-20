@@ -59,6 +59,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [hasLog, setHasLog]     = useState(false)
   const [semHasLog, setSemHasLog] = useState(false)
   const [semStatus, setSemStatus] = useState('')
+  const [semBusy, setSemBusy] = useState(false)   // modeler running (drives the codex "thinking" indicator)
   // The main view is URL state (?view=analyst|semantic; absent = chat) so back/forward and refresh work
   // and you can always return. `navigate` pushes a history entry; popstate syncs it back.
   const readView = (): 'chat' | 'semantic' | 'analyst' => {
@@ -91,6 +92,8 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [anStreamKind, setAnStreamKind] = useState<'pty' | 'events'>('pty')
   const anStreamKindRef = useRef<'pty' | 'events'>('pty')
   const [anEvents, setAnEvents] = useState<AgentEvent[]>([])   // structured event log when kind === 'events' (codex)
+  const [semStreamKind, setSemStreamKind] = useState<'pty' | 'events'>('pty')   // modeler: claude (pty) vs codex (events)
+  const [semEvents, setSemEvents] = useState<AgentEvent[]>([])
   const anLogRef = useRef<HTMLDivElement>(null)
   const [gaps, setGaps]             = useState<{ question: string; need: string; basis?: string; status: 'building' | 'done' }[]>([])
   const [role, setRole]         = useState<'user' | 'developer'>('developer')   // for now: everyone is developer (sees the agents)
@@ -266,10 +269,16 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           rawStreamRef.current = (rawStreamRef.current + (msg.text ?? '')).slice(-400000)   // capture only — never shown
         } else if (msg.t === 'semantic:status') {
           setSemHasLog(true); setSemStatus(msg.text)
+        } else if (msg.t === 'semantic:stream') {
+          setSemStreamKind(msg.kind === 'pty' ? 'pty' : 'events')
+        } else if (msg.t === 'semantic:event') {
+          setSemHasLog(true); setSemEvents(evs => mergeEvent(evs, msg.ev))   // codex structured event (live)
+        } else if (msg.t === 'semantic:events') {
+          setSemEvents(msg.events ?? [])                                     // codex event-log replay (reconnect)
         } else if (msg.t === 'semantic:chunk') {
           setSemHasLog(true); if (msg.replace) semXtermRef.current?.clear(); semXtermRef.current?.write(msg.text)   // raw claude terminal → Semantic model panel
         } else if (msg.t === 'semantic:done') {
-          setSemStatus('Semantic model built ✓')
+          setSemStatus('Semantic model built ✓'); setSemBusy(false)
         } else if (msg.t === 'analyst:status') {
           // "Answering" is a LIVE state: it lives only while ticks keep arriving. Arm the watchdog NOW so that
           // a replayed/stale "answering" (e.g. from a reconnect after the engine restarted) self-clears if no
@@ -461,7 +470,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // terminal to the "Semantic model" panel so the build is watchable.
   const buildSemantic = useCallback(() => {
     if (wsRef.current?.readyState !== 1) return
-    navigate('semantic'); setSemHasLog(true); setSemStatus('Starting…')
+    navigate('semantic'); setSemHasLog(true); setSemStatus('Starting…'); setSemBusy(true)
     semXtermRef.current?.clear()
     send({ t: 'semantic:build', projectId })
   }, [projectId])
@@ -625,8 +634,10 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           <button onClick={() => sessionCtl('semantic', 'new')} style={s.backBtn} title="Start a completely fresh session">↻ New session</button>
         </div>
         {gapsPanel}
-        <div style={{ flex: 1, overflow: 'auto', background: '#161a17', padding: 12 }}>
-          <div ref={semTermRef} onMouseDown={() => semXtermRef.current?.focus()} />
+        <div style={{ flex: 1, overflow: 'auto', background: '#161a17', padding: 12, paddingBottom: 110 }}>
+          {/* pty (claude) → xterm, kept mounted; events (codex) → structured log */}
+          <div ref={semTermRef} onMouseDown={() => semXtermRef.current?.focus()} style={{ display: semStreamKind === 'pty' ? 'block' : 'none' }} />
+          {semStreamKind === 'events' && <CodexEventLog events={semEvents} busy={semBusy} />}
         </div>
       </div>
 

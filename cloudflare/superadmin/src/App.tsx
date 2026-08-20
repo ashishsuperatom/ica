@@ -3,6 +3,7 @@ import { useProjectHub } from './hub'
 import { Inspector, SECTIONS, SECTION_LABEL, type Section } from './Inspector'
 import { ConnectorConsole } from './ConnectorConsole'
 import { GroundingConsole } from './GroundingConsole'
+import { AnalystConsole } from './AnalystConsole'
 import { useSession, SignIn, UserButton } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useSearchParams } from 'react-router-dom'
 
@@ -566,6 +567,7 @@ function ProjectDetailPage() {
     { id: 'events', label: 'Event log', icon: I.pulse },
     { id: 'subdomains', label: 'Subdomains', icon: I.globe },
     { id: 'agent', label: 'Agent', icon: I.term },
+    { id: 'analyst', label: 'Analyst', icon: I.term },
     { id: 'grounding', label: 'Grounding', icon: I.term },
     { id: 'channels', label: 'Channels', icon: I.chat },
   ]
@@ -701,6 +703,12 @@ function ProjectDetailPage() {
             </div>
           </div>
           <ConnectorConsole hub={hub} />
+        </div>
+      )}
+
+      {view === 'analyst' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <AnalystConsole hub={hub} />
         </div>
       )}
 

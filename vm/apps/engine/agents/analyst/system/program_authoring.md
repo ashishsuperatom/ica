@@ -49,6 +49,10 @@ author to it now.)
 - `ctx.decide(label, condition, reason)` — mark a branch (records which path and why); returns the condition.
 - `ctx.log(message)` — an optional human progress line.
 
+Every program re-runs later over DIFFERENT data, so nothing it outputs may be hard-coded: every value comes from
+the params, the query, or data computed at run time — never a typed-in data literal. Defaults stay neutral,
+never a specific value: a reused program carries any baked value into the wrong run.
+
 ## Run it, verify it, then hand it off — you do NOT write the answer
 1. Run it: `tsx run.mjs programs/<slug>/program.ts '<jsonParams>'`. Read the output. Fix until it is
    correct and its shape is clean (stable field names, every value carrying its unit).
