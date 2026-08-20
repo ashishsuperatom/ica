@@ -9,6 +9,7 @@
 //   Override via opts / ICA_OC_PROVIDER + ICA_OC_MODEL.
 
 import { createOpencode, createOpencodeClient, createOpencodeServer } from '@opencode-ai/sdk'
+import type { AgentEvent } from './session.js'
 import type { Session, RunHandlers, RunResult } from './session.js'   // the shared session interface
 
 export interface OpencodeSessionOpts {
@@ -61,6 +62,28 @@ function fmtEvent(e: any, seen: Map<string, number>, asst: Set<string>): string 
   return ''
 }
 
+// Normalize ONE opencode message part → AgentEvent for the UI event log (null = not rendered).
+// FORMAT CONTRACT — @opencode-ai/sdk 1.18. NOTE: opencode's /event SSE stopped delivering message.part.updated
+// since 1.14.42 (upstream bug anomalyco/opencode#27966), so we do NOT rely on the SSE for parts — we POLL
+// session.messages (see below) and normalize the parts here. Parts: {type:'text', id, text} and
+// {type:'tool', id, tool|name, state:{status, input, output}}. Stable part id → the UI updates a block in place.
+function normPart(part: any): AgentEvent | null {
+  if (!part) return null
+  if (part.type === 'text' && typeof part.text === 'string' && part.text.trim()) {
+    return { kind: 'message', id: part.id, text: part.text }
+  }
+  if (part.type === 'tool') {
+    const name = part.tool || part.name || 'tool'
+    const st = part.state || {}
+    const input = st.input || part.input || {}
+    const d = input.command || input.filePath || input.path || (input.sql ? String(input.sql).replace(/\s+/g, ' ').slice(0, 200) : '')
+    const output = typeof st.output === 'string' ? st.output : (st.output ? JSON.stringify(st.output).slice(0, 4000) : '')
+    const status = st.status
+    return { kind: 'command', id: part.id, command: `${name}${d ? ' ' + d : ''}`.trim(), output, status, done: status === 'completed' || status === 'error' }
+  }
+  return null
+}
+
 export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
   const providerID = opts.provider ?? process.env.ICA_OC_PROVIDER ?? 'opencode-go'
   const modelID = opts.model ?? process.env.ICA_OC_MODEL ?? 'glm-5.2'
@@ -71,6 +94,8 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
   let sse: AbortController | null = null   // aborts OUR event subscription on stop (so closing a server doesn't ECONNRESET-reject)
   let sessionId = ''
   let buf = ''
+  const eventLog: AgentEvent[] = []                 // structured events (the 'events' view), fed by POLLING (SSE is broken)
+  const polled = new Map<string, string>()          // part id → last signature, so we emit only on change
   let running = false
   let activeHandler: RunHandlers | undefined
   const queue: { prompt: string; h?: RunHandlers; resolve: (r: RunResult) => void }[] = []
@@ -120,6 +145,29 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
     })().catch(() => {})
   }
 
+  // Emit one normalized event: update the block with the same id, else append; skip if unchanged since last poll.
+  function emit(ne: AgentEvent, h?: RunHandlers) {
+    const sig = `${ne.text?.length ?? 0}:${ne.output?.length ?? 0}:${ne.status ?? ''}:${ne.done ? 1 : 0}`
+    if (ne.id && polled.get(ne.id) === sig) return
+    if (ne.id) polled.set(ne.id, sig)
+    if (ne.id) { const i = eventLog.findIndex(x => x.id === ne.id); if (i >= 0) eventLog[i] = ne; else eventLog.push(ne) }
+    else eventLog.push(ne)
+    if (eventLog.length > 600) eventLog.shift()
+    h?.onEvent?.(ne)
+  }
+  // Poll the session's messages → normalize the assistant parts → emit changed events. This is the live event
+  // source (opencode's SSE part stream is broken since 1.14.42, #27966), polled every ~1s during a turn.
+  async function pollMessages(h?: RunHandlers) {
+    try {
+      const res: any = await client.session.messages({ path: { id: sessionId }, query: { directory: opts.cwd } })
+      for (const m of (res?.data ?? res ?? [])) {
+        const info = m.info ?? m
+        if (info?.role !== 'assistant') continue
+        for (const part of (m.parts ?? info.parts ?? [])) { const ne = normPart(part); if (ne) emit(ne, h) }
+      }
+    } catch { /* transient — next poll retries */ }
+  }
+
   async function pump() {
     if (running || !queue.length) return
     running = true
@@ -128,6 +176,7 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
     activeHandler = h
     const t0 = Date.now()
     let answer = ''
+    const poll = setInterval(() => { void pollMessages(h) }, 1000)      // live events via polling (SSE parts broken)
     try {
       const res = await client.session.prompt({                         // resolves when the turn is DONE (exact completion)
         path: { id: sessionId },
@@ -136,6 +185,7 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
       })
       answer = partsText(res?.data?.parts ?? res?.parts ?? [])
     } catch (e: any) { answer = `opencode error: ${e?.message ?? e}` }
+    finally { clearInterval(poll); await pollMessages(h) }               // one final poll to catch the last state
     activeHandler = undefined
     running = false
     resolve({ lastLines: answer, ms: Date.now() - t0 })
@@ -149,6 +199,7 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
       return { lastLines: '(opencode summarized session context)', ms: 0 }
     },
     buffer: () => buf,
+    events: () => eventLog,
     busy: () => running,
     // Clean up OUR session on the server either way; stop the SERVER only if we spawned it.
     // If we connected to a shared/standalone server, leave it running for everyone else.
