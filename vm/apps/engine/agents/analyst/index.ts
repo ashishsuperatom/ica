@@ -70,6 +70,7 @@ export interface AskOpts {
   // answers + the program's location (the id) — the analyst OPENS and READS the program itself (that is the
   // source of truth), so we never pass a stale answer string around.
   modify?: { programDir: string; prevQuestion?: string }
+  hint?: string           // an optional pointer from reflex (e.g. a close existing program to reuse or ignore)
 }
 
 export interface Analyst {
@@ -130,7 +131,7 @@ export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
       const buildPrompt = `${preamble}
 
 Question: ${question}
-
+${opts.hint ? '\n' + opts.hint + '\n' : ''}
 There is ONE path: BUILD A PROGRAM. Every question becomes a program — no exceptions. This includes a
 greeting, small talk, or a question about you / the system / whether data sources are connected: for those,
 build a small program whose output IS your reply. Whatever you would say goes INTO the program's output

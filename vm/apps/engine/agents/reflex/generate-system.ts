@@ -50,14 +50,20 @@ const jsonShape = `Respond with STRICT JSON only — no prose, no code fences, n
 {
   "reuse":  { "intentId": "<id of the matching program from the catalog>", "params": { "<program's param keys>": <this question's values> } },
   "basis":  [ { "type": "<axis type>", "token": "<axis value>", "text": "<the span it came from>" } ],
-  "params": [ { "role": "<what it fills>", "text": "<the span>", "type": "id|name|date|window|number", "value": <structured value, optional> } ]
+  "params": [ { "role": "<what it fills>", "text": "<the span>", "type": "id|name|date|window|number", "value": <structured value, optional> } ],
+  "closest": { "intentId": "<a program that is a strict superset/subset of this question>", "relation": "superset" | "subset" }
 }
 \`\`\`
 
 **Omit \`reuse\` entirely** when no catalog program computes this question — that routes it to build. Only
 include \`reuse\` when you are confident it is the SAME computation; when in doubt, omit it and let the analyst
 build. The \`reuse.params\` must use the SAME KEYS as the matched program's \`params\` shown in the catalog,
-carrying THIS question's values.`
+carrying THIS question's values.
+
+When an existing program is a strict \`superset\` (answers a broader question that INCLUDES this one) or a
+\`subset\` (answers a narrower PART of this one) — not the same scope — don't reuse it: omit \`reuse\` and put
+its intentId + relation in \`closest\`, a pointer the analyst can reuse or ignore. Only for a real
+superset/subset, never a merely similar question.`
 
 // WHY: (pre-existing — reason not verified)
 const choosingAxes = `## How to choose basis axes
