@@ -10,6 +10,7 @@
 // Harness/model default to opencode + deepseek-v4-flash (the 2026-07-31 snapshot on the opencode-go gateway),
 // overridable per-agent from .env (ICA_REFLEX_HARNESS / ICA_REFLEX_MODEL / ICA_REFLEX_PROVIDER) with NO code change.
 
+import './generate-system.js'   // FIRST: (re)writes ./SYSTEM.md + ./REVIEW.md from generate-system.ts before they're read below
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
