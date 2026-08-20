@@ -5,6 +5,7 @@
 // registers it live. It shares the ICA workspace machinery with the analyst/modeler; its instructions are
 // in ./SYSTEM.md (copied in as ./connector/CONNECTOR.md so it never clobbers the other agents' role files).
 
+import './generate-system.js'   // FIRST: (re)writes ./SYSTEM.md from generate-system.ts before it's read below
 import { readFile, cp } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
