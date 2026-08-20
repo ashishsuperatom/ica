@@ -5,9 +5,8 @@
 // ConnectorConsole's PTY wiring (term:attach / ui:resize with which:'grounding').
 
 import { useEffect, useRef, useState } from 'react'
-import { ANSI } from './termColors'
+import { ANSI, COLS, ROWS } from './termColors'
 import { Terminal } from '@xterm/xterm'
-import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import type { Hub } from './hub'
 import { CodexEventLog, mergeEvent, type AgentEvent } from './CodexEventLog'   // codex (events-kind) view
@@ -15,7 +14,6 @@ import { CodexEventLog, mergeEvent, type AgentEvent } from './CodexEventLog'   /
 export function GroundingConsole({ hub }: { hub: Hub }) {
   const elRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
-  const fitRef = useRef<FitAddon | null>(null)
   const hubRef = useRef(hub); hubRef.current = hub
   const status = hub.status
   const [busy, setBusy] = useState(false)
@@ -24,22 +22,20 @@ export function GroundingConsole({ hub }: { hub: Hub }) {
 
   const attach = () => hub.send({ to: { type: 'code-engine' }, payload: { t: 'term:attach', which: 'grounding' } })
   const sendResize = () => {
-    const t = termRef.current
-    if (!t) return
-    hub.send({ to: { type: 'code-engine' }, payload: { t: 'ui:resize', which: 'grounding', cols: t.cols, rows: t.rows } })
+    hub.send({ to: { type: 'code-engine' }, payload: { t: 'ui:resize', which: 'grounding', cols: COLS, rows: ROWS } })   // fixed geometry
   }
 
   // ── xterm ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!elRef.current) return
-    const term = new Terminal({ cursorBlink: false, fontSize: 12, convertEol: false, scrollback: 8000,
+    const term = new Terminal({ cursorBlink: false, fontSize: 11, convertEol: false, cols: COLS, rows: ROWS, scrollback: 8000,
       theme: { background: '#0d0f0d', foreground: '#e6e2da', ...ANSI } })
-    const fit = new FitAddon(); term.loadAddon(fit); term.open(elRef.current)
-    termRef.current = term; fitRef.current = fit
+    term.open(elRef.current)
+    termRef.current = term
     // Raw keystrokes go to the grounding PTY too (so /login etc. works if the agent ever needs it).
     term.onData((d) => hubRef.current.send({ to: { type: 'code-engine' }, payload: { t: 'term:input', which: 'grounding', data: d } }))
     term.writeln('\x1b[2mGrounding agent — press Build to (re)construct this project’s value→id indexes. Watch it work live.\x1b[0m')
-    const onResize = () => { try { fit.fit(); sendResize() } catch { /* not mounted yet */ } }
+    const onResize = () => { try { sendResize() } catch { /* not mounted yet */ } }
     const raf = requestAnimationFrame(onResize)
     window.addEventListener('resize', onResize)
     return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', onResize); term.dispose(); termRef.current = null }

@@ -4,9 +4,8 @@
 // connecting data sources, but it's a general infrastructure agent.
 
 import { useEffect, useRef, useState } from 'react'
-import { ANSI } from './termColors'
+import { ANSI, COLS, ROWS } from './termColors'
 import { Terminal } from '@xterm/xterm'
-import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import type { Hub } from './hub'
 import { CodexEventLog, mergeEvent, type AgentEvent } from './CodexEventLog'   // codex (events-kind) view
@@ -15,7 +14,6 @@ import { CodexEventLog, mergeEvent, type AgentEvent } from './CodexEventLog'   /
 export function ConnectorConsole({ hub }: { hub: Hub }) {
   const elRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
-  const fitRef = useRef<FitAddon | null>(null)
   const hubRef = useRef(hub); hubRef.current = hub   // keep the latest hub for the xterm onData closure
   const status = hub.status
   const [busy, setBusy] = useState(false)
@@ -32,23 +30,21 @@ export function ConnectorConsole({ hub }: { hub: Hub }) {
 
   // Tell the engine to size the connector's PTY to the fitted terminal, so claude's output isn't clipped.
   const sendResize = () => {
-    const t = termRef.current
-    if (!t) return
-    hub.send({ to: { type: 'code-engine' }, payload: { t: 'ui:resize', which: 'connector', cols: t.cols, rows: t.rows } })
+    hub.send({ to: { type: 'code-engine' }, payload: { t: 'ui:resize', which: 'connector', cols: COLS, rows: ROWS } })   // fixed geometry
   }
 
   // ── xterm ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!elRef.current) return
-    const term = new Terminal({ cursorBlink: false, fontSize: 12, convertEol: false, scrollback: 8000,
+    const term = new Terminal({ cursorBlink: false, fontSize: 11, convertEol: false, cols: COLS, rows: ROWS, scrollback: 8000,
       theme: { background: '#0d0f0d', foreground: '#e6e2da', ...ANSI } })
-    const fit = new FitAddon(); term.loadAddon(fit); term.open(elRef.current)
-    termRef.current = term; fitRef.current = fit
+    term.open(elRef.current)
+    termRef.current = term
     // Raw keystrokes/paste typed in the terminal go straight to the connector's PTY (drives claude directly —
     // e.g. type `/login`, then paste the code from your browser right here).
     term.onData((d) => hubRef.current.send({ to: { type: 'code-engine' }, payload: { t: 'term:input', which: 'connector', data: d } }))
     term.writeln('\x1b[2mConnector agent — a live terminal. Type here to drive it (e.g. /login). Or use the box below.\x1b[0m')
-    const onResize = () => { try { fit.fit(); sendResize() } catch { /* not mounted yet */ } }
+    const onResize = () => { try { sendResize() } catch { /* not mounted yet */ } }
     const raf = requestAnimationFrame(onResize)
     window.addEventListener('resize', onResize)
     return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', onResize); term.dispose(); termRef.current = null }

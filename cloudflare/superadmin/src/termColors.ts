@@ -3,6 +3,13 @@
 // ANSI-black/dim vanishes ("dark text getting lost"). Here black + bright-black are LIFTED to legible greys, so
 // NO colour can collide with a dark background. Spread into each terminal's theme AFTER its own background/
 // foreground: `theme: { background, foreground, ...ANSI }`.
+// The ONE fixed geometry for every claude PTY terminal. The PTY is a single shared stream and its TUI is
+// cursor-addressed for ONE width — so every viewer (user UI, admin console, …) MUST render at the same size,
+// and the backend PTY is set to match. We do NOT fit-to-container per viewer: many viewers with different
+// widths would each resize the shared PTY and garble the others. Wide enough to feel full-screen; tune here.
+export const COLS = 160
+export const ROWS = 40
+
 export const ANSI = {
   black: '#6b6b6b', red: '#e06c75', green: '#98c379', yellow: '#e5c07b',
   blue: '#61afef', magenta: '#c678dd', cyan: '#56b6c2', white: '#e6e2da',

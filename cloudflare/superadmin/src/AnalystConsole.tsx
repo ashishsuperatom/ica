@@ -4,9 +4,8 @@
 // Unlike the user UI (watch-only), THIS is interactive — the admin can drive the analyst directly.
 
 import { useEffect, useRef, useState } from 'react'
-import { ANSI } from './termColors'
+import { ANSI, COLS, ROWS } from './termColors'
 import { Terminal } from '@xterm/xterm'
-import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import type { Hub } from './hub'
 import { CodexEventLog, mergeEvent, type AgentEvent } from './CodexEventLog'
@@ -14,7 +13,6 @@ import { CodexEventLog, mergeEvent, type AgentEvent } from './CodexEventLog'
 export function AnalystConsole({ hub }: { hub: Hub }) {
   const elRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
-  const fitRef = useRef<FitAddon | null>(null)
   const hubRef = useRef(hub); hubRef.current = hub
   const sidRef = useRef<string>(crypto.randomUUID())   // one stable admin-analyst session for follow-ups
   const status = hub.status
@@ -25,15 +23,15 @@ export function AnalystConsole({ hub }: { hub: Hub }) {
   const [answer, setAnswer] = useState('')
 
   const attach = () => hub.send({ to: { type: 'code-engine' }, payload: { t: 'term:attach', which: 'analyst' } })
-  const sendResize = () => { const t = termRef.current; if (!t) return; hub.send({ to: { type: 'code-engine' }, payload: { t: 'ui:resize', which: 'analyst', cols: t.cols, rows: t.rows } }) }
+  const sendResize = () => { hub.send({ to: { type: 'code-engine' }, payload: { t: 'ui:resize', which: 'analyst', cols: COLS, rows: ROWS } }) }   // fixed geometry — every viewer + the PTY agree
 
   useEffect(() => {
     if (!elRef.current) return
-    const term = new Terminal({ cursorBlink: false, fontSize: 12, convertEol: false, cols: 120, rows: 34, scrollback: 8000, theme: { background: '#0d0f0d', foreground: '#e6e2da', ...ANSI } })
-    const fit = new FitAddon(); term.loadAddon(fit); term.open(elRef.current)
-    termRef.current = term; fitRef.current = fit
+    const term = new Terminal({ cursorBlink: false, fontSize: 11, convertEol: false, cols: COLS, rows: ROWS, scrollback: 8000, theme: { background: '#0d0f0d', foreground: '#e6e2da', ...ANSI } })
+    term.open(elRef.current)
+    termRef.current = term
     term.onData((d) => hubRef.current.send({ to: { type: 'code-engine' }, payload: { t: 'term:input', which: 'analyst', data: d } }))
-    const onResize = () => { try { fit.fit(); sendResize() } catch { /* not mounted */ } }
+    const onResize = () => { try { sendResize() } catch { /* not mounted */ } }
     const raf = requestAnimationFrame(onResize); window.addEventListener('resize', onResize)
     return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', onResize); term.dispose(); termRef.current = null }
   }, [])
