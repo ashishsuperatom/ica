@@ -45,7 +45,7 @@ however you see fit — there is no setup to do.
   touching data: \`find('term', …)\` (search concepts/units/past questions), \`concepts()\`, \`intents()\`,
   \`getConcept(name)\`, \`relationships(name)\`, \`conceptTree()\`. Reusing a modeled unit is deterministic and
   carries the corrections we've made — that's why it comes first.
-- Data:       ./data/query.mjs      — use this to query the data source: \`query(sourceId, sql, params)\` + \`sources()\`.
+- Data:       ./data/query.mjs      — write PRQL to query the data source: \`query(sourceId, prql, params)\` + \`sources()\`.
 - Introspect: ./data/introspect.mjs — schema/evidence helpers over the data.
 - Grounding:  ./grounding/grounding.mjs — resolve a fuzzy human reference to concrete ids: \`resolveEntity(text)\`,
   \`resolveHierarchy(node, dir, name)\`, \`resolveValueByPattern(value)\` (built per-project by the grounding agent).
@@ -63,7 +63,7 @@ A UNIT is one file with three exports: \`meta\` (its MEANING — name, inputs, o
 relative time like "this month" from an \`asOf\` param, never a frozen date), and \`ui\` (\`{ category }\`).
 A PROGRAM is just a unit with \`meta.concept === 'program'\` that COMPOSES units with \`ctx.use\` and ends in a
 final UI unit. The kernel injects \`ctx\` with exactly four capabilities:
-- \`query(sourceId, sql, params)\` — query the data source (your SQL/API; the model tells you WHICH tables/joins).
+- \`query(sourceId, prql, params)\` — query the source in PRQL (the seam compiles it to SQL; the model tells you WHICH tables/joins).
 - \`use(unitName, params)\`        — run/compose another unit (records the step + its output shape).
 - \`decide(label, cond, reason)\`  — mark a branch: records which path and why; returns \`cond\`.
 - \`log(message)\`                  — an optional human progress note (each step is auto-narrated anyway).
@@ -80,6 +80,16 @@ const MANAGER = process.env.DATASOURCE_URL ?? '${s.managerUrl ?? 'http://localho
 export async function query(dataSourceId, sql, params = {}) {
   const r = await fetch(MANAGER + '/query', { method:'POST', headers:{'content-type':'application/json'},
     body: JSON.stringify({ id: dataSourceId, sql, params }) })
+  if (!r.ok) throw new Error(r.status + ' ' + await r.text())
+  const p = await r.json(); if (p?.error) throw new Error(p.error)
+  return p?.rows ?? []
+}
+// SYSTEM-only raw-SQL path (NOT for agent data queries): the introspect/grounding seams read catalogs and build
+// indexes in raw dialect SQL. This posts { raw:true } so the manager runs it as-is instead of compiling PRQL.
+// Agent queries must go through query() above (PRQL only) — that is the access-control boundary.
+export async function rawQuery(dataSourceId, sql, params = {}) {
+  const r = await fetch(MANAGER + '/query', { method:'POST', headers:{'content-type':'application/json'},
+    body: JSON.stringify({ id: dataSourceId, sql, params, raw: true }) })
   if (!r.ok) throw new Error(r.status + ' ' + await r.text())
   const p = await r.json(); if (p?.error) throw new Error(p.error)
   return p?.rows ?? []
@@ -186,11 +196,11 @@ main().catch((e) => { console.error(e); process.exit(1) })
 //                                            (unmatchedSamples reveals sentinels/orphans — YOU judge; hint is a soft aside)
 //   await I.checkRelation(table, expr)     → {total, violations, violationRate, sampleViolations} (conservation/arithmetic)
 import { getIntrospect } from '@superatom/introspect'
-import { query, sources } from './query.mjs'
+import { rawQuery, sources } from './query.mjs'   // introspect reads catalogs in raw dialect SQL (trusted system path)
 export async function forSource(id) {
   const s = (await sources()).find(x => x.id === id)
   if (!s) throw new Error('unknown source: ' + id + ' (call sources() to list)')
-  return getIntrospect(s.dialect, query, id)
+  return getIntrospect(s.dialect, rawQuery, id)
 }
 `)
 
@@ -221,7 +231,7 @@ export async function forSource(id) {
 // build() is idempotent (re-running replaces). Verify with stats() and by calling the resolvers.
 import { GroundingStore, buildGrounding } from '@superatom/grounding'
 import { fileURLToPath } from 'node:url'
-import { query as _query, sources as _sources } from '../data/query.mjs'
+import { rawQuery as _query, sources as _sources } from '../data/query.mjs'   // grounding builds/resolves in raw SQL (trusted system path)
 let _default
 async function defaultSource() { if (!_default) _default = (await _sources())[0]?.id; return _default }
 // The live data seam: routes each spec's SQL to its named source (or the sole source) and binds @name params.

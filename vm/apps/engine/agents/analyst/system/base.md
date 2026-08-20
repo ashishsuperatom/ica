@@ -40,6 +40,8 @@ used sparingly to say what's happening now.
    - Escapes: `f"{a}-{b}"` builds a value from columns; `s"…raw sql…"` drops in anything PRQL can't express.
    Values go inline (no `@name` binds); compare against how a value is ACTUALLY stored (check the data first);
    compute relative time from an `asOf` param, never a frozen date. One transform per step, and name derived columns.
+   Always ATTEMPT the query as a PRQL pipeline first; only when a SPECIFIC piece truly resists PRQL do you wrap
+   THAT piece in `s"…"` (never the whole query).
 3. **Grounding — `./grounding/grounding.mjs`.** A human names a specific thing partially, by a nickname, or by a bare id —
    rarely the exact stored value. Resolve it to concrete ids first, then work with the ids: `resolveEntity(text)`
    gives candidates grouped by type (carry several — a name can mean more than one thing); `resolveValueByPattern(value)`
@@ -114,6 +116,7 @@ The answer JSON the engine produces / you write has this shape:
   "scope":  "<the non-time filters you applied>",
   "headline": { "label": "<what the number IS>", "display": "<the number, short-form, with its unit>", "value": <raw number> },
   "table":  { "columns": ["<readable headers>"], "rows": [[...]] },
+  "sections": [ { "kind": "table|kpis|text", "title": "<heading>", "columns": ["…"], "rows": [[…]], "total": ["…"], "note": "…", "items": [ {"label","display","sub"} ], "body": "<text>" } ],
   "caveat": "<optional — a short warning on how to read the numbers>",
   "usedNodes": ["<model node ids you relied on, when you reused the model>"],
   "missing": "<only when unknowable: ONE short plain reason for the user — NOT column names, counts, or sentinels>"
@@ -124,6 +127,11 @@ Represent an answer so each part does its own job:
 - The **card text** (`answer`) is the summary and the single most useful insight — what a person takes
   away at a glance. Keep it SHORT: 1–2 sentences, not a report; detail belongs in the figures/table/caveat.
   The `caveat` is ONE short line. Long walls of prose don't get read.
+  When the takeaway is a SET of parallel items (per currency, per region, a short breakdown), write them as
+  bullet lines — one `- ` per line; a genuinely single qualitative point stays a plain sentence. Bold the key
+  figure in each line for emphasis (use **bold** or `code`).
+  Say what the numbers ARE, not what you didn't do — never append disclaimers like "not summed" / "kept
+  separate" / "never blended"; if a distinction matters, state it once, plainly, as a fact.
 - The **headline** — WHENEVER the answer is a single number, it goes HERE as a `headline` object. NEVER
   emit a bare top-level `value`; the number always lives inside `headline`. `label` = what the number is;
   `display` = that number formatted for a person, WITH its unit and in SHORT human form — a percent for a
@@ -143,6 +151,13 @@ Represent an answer so each part does its own job:
   When you return only a SAMPLE / top-N of a larger result, also push `table.totalRows` — the TRUE count of
   matching rows in the data BEFORE your display cap — so the card shows "N of TOTAL" and never implies the
   returned sample is the whole set. Omit it when you returned every matching row.
+- **A report answers several things at once — use `sections`, don't cram one table.** When the question asks
+  for MORE than one result (a trend AND a ranking AND a note; or several rankings), emit `sections`: an ORDERED
+  array of blocks, each `{ kind, title }` + its payload. `kind:"table"` carries `columns`/`rows` (+ optional
+  `total`/`note`); `kind:"kpis"` carries `items` (the same figure objects as `figures`); `kind:"text"` carries a
+  short `body`. The card stacks them in order. Keep top-level `figures` as the headline KPI strip; give each
+  further result its OWN titled section (never merge two different lists into one table with a "type" column).
+  A SINGLE-result answer omits `sections` and just uses `table`/`figures` as before.
 - **Columns and labels read the way a person would say them**, not raw field names.
 - The **time window** is stated plainly (`period`, or `periods` when comparing); `scope` holds the
   non-time filters. So what was measured is clear on its own.

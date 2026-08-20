@@ -42,8 +42,9 @@ whether a resolver runs first. (A later search layer will do name→id globally;
 author to it now.)
 
 ## The four ctx capabilities (nothing else)
-- `ctx.query(sourceId, sql, params)` — your own SQL/API to the source. The model tells you WHICH
-  tables/joins/measures; you write the query. Bind values with named params.
+- `ctx.query(sourceId, prql, params)` — your own **PRQL** to the source (the seam compiles it to SQL). The
+  model tells you WHICH tables/joins/measures; you write the PRQL pipeline. Values go **inline** (no `@name`
+  binds); use `s"…raw sql…"` only for a specific expression PRQL can't produce, never for the whole query.
 - `ctx.use(name, params)` — run/compose another unit in this program.
 - `ctx.decide(label, condition, reason)` — mark a branch (records which path and why); returns the condition.
 - `ctx.log(message)` — an optional human progress line.

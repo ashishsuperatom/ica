@@ -834,6 +834,9 @@ const ANSWER_CSS = `
 .sa-answer .sa-prose b,.sa-answer .sa-prose strong{color:var(--ink);font-weight:700}
 .sa-answer .sa-prose em{font-style:italic}
 .sa-answer .sa-prose code{font-family:var(--mono);font-size:12.5px;color:var(--ink);background:var(--panel);padding:1px 4px;border:1px solid var(--hair)}
+.sa-answer .sa-prose ul.sa-list{margin:7px 0 4px;padding-left:2px;list-style:none}
+.sa-answer .sa-prose ul.sa-list li{position:relative;padding-left:16px;margin:3px 0;line-height:1.55}
+.sa-answer .sa-prose ul.sa-list li::before{content:"";position:absolute;left:2px;top:9px;width:4px;height:4px;background:var(--navy);border-radius:50%}
 .sa-answer .sa-period{font-family:var(--grot);font-size:11px;color:var(--body);margin:0 0 16px;display:flex;gap:9px;align-items:baseline;flex-wrap:wrap}
 .sa-answer .sa-period .pk{font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;font-weight:800;color:var(--page);background:var(--navy);padding:2px 7px}
 .sa-answer .sa-period b{color:var(--ink);font-weight:700}
@@ -876,6 +879,14 @@ const ANSWER_CSS = `
 .sa-answer .sa-more:hover{background:var(--panel)}
 .sa-answer .sa-tblsec{margin:0 0 20px}   /* gap between the table block and whatever card follows */
 .sa-answer .sa-count{font-family:var(--grot);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:700;margin-top:8px}
+/* multi-block report sections: a titled block (table / kpis / text), stacked top-to-bottom. Every section has
+   the SAME vertical rhythm (title gap, body, bottom margin) so tables with a note read no taller than ones
+   without — the row padding itself is the shared .sa-fin value, identical across all of them. */
+.sa-answer .sa-sec{margin:0 0 18px}
+.sa-answer .sa-sec.sa-tblsec{margin:0 0 18px}   /* combined class: keep the SAME bottom gap as any other section */
+.sa-answer .sa-sec:last-child{margin-bottom:0}
+.sa-answer .sa-sec .sa-count{margin-top:6px}    /* the note sits tight under its table, not a floating gap */
+.sa-answer .sa-sec-title{font-family:var(--grot);font-size:12px;letter-spacing:.04em;text-transform:uppercase;font-weight:800;color:var(--ink);margin:0 0 10px;padding-bottom:5px;border-bottom:1px solid var(--hair)}
 `
 let _cssInjected = false
 function ensureAnswerCSS() {
@@ -897,6 +908,12 @@ function answerToText(a: any, cat: string): string {
   const figs = Array.isArray(a.figures) && a.figures.length ? a.figures : a.headline?.display ? [{ label: a.headline.label, display: a.headline.display, sub: a.headline.sub }] : []
   if (figs.length) out.push(figs.map((f: any) => `${f.label}: ${f.display}${f.sub ? ` (${f.sub})` : ''}`).join('\n'))
   if (a.table?.columns) out.push([a.table.columns.join('\t'), ...(a.table.rows || []).map((r: any[]) => r.map(v => v == null ? '' : String(v)).join('\t'))].join('\n'))
+  if (Array.isArray(a.sections)) for (const s of a.sections) {   // report blocks → readable text, in order
+    if (s?.title) out.push(String(s.title).toUpperCase())
+    if (s?.kind === 'text' && s.body) out.push(String(s.body))
+    else if (s?.kind === 'kpis' && Array.isArray(s.items)) out.push(s.items.map((f: any) => `${f.label}: ${f.display}${f.sub ? ` (${f.sub})` : ''}`).join('\n'))
+    else if (s?.kind === 'table' && Array.isArray(s.columns)) out.push([s.columns.join('\t'), ...(s.rows || []).map((r: any[]) => r.map((v: any) => v == null ? '' : String(v)).join('\t'))].join('\n'))
+  }
   if (a.caveat) out.push('Note: ' + a.caveat)
   if (a.scope) out.push('Scope: ' + a.scope)
   if (a.source) out.push('Source: ' + a.source)
@@ -925,6 +942,57 @@ const IC = {
 }
 
 const PAGE = 25   // tables show this many rows at a time; "show more" reveals another page (CSV exports ALL rows)
+
+// Which columns read as numeric (so they right-align + get the figure weight). Same rule as the main table.
+function numColsOf(cols: string[], rows: any[][]): boolean[] {
+  return cols.map((_, ci) => rows.length > 0 && rows.every(r => {
+    const v = r[ci]; if (v == null) return true
+    return typeof v === 'number' || (typeof v === 'string' && /^[₹$€£]?\s?-?[\d,.\s]+%?$/.test(v.trim()) && /\d/.test(v))
+  }))
+}
+
+// One block of a multi-block report. The answer view-model may carry `sections: Section[]`; each renders with
+// the SAME visual primitives as the flat card (KPI strip, fin-table, prose) so a report is just several of them
+// stacked. Kinds: 'kpis' (a labelled KPI strip), 'table' (a titled fin-table, optional `total`/`note`), 'text'
+// (a titled prose block, e.g. stand-outs). Unknown kinds render nothing (forward-compatible).
+function SectionBlock({ s }: { s: any }) {
+  if (!s || !s.kind) return null
+  if (s.kind === 'text') {
+    if (!s.body) return null
+    return <div className="sa-sec">{s.title && <div className="sa-sec-title">{s.title}</div>}
+      <div className="sa-prose" dangerouslySetInnerHTML={{ __html: renderInlineMd(String(s.body)) }} /></div>
+  }
+  if (s.kind === 'kpis') {
+    const items: any[] = Array.isArray(s.items) ? s.items : []
+    if (!items.length) return null
+    return <div className="sa-sec">{s.title && <div className="sa-sec-title">{s.title}</div>}
+      <div className="sa-figs">{items.map((f: any, i: number) => (
+        <div className="sa-fig" key={i} title={f.value != null ? String(f.value) : undefined}>
+          <div className="k">{f.label}</div><div className={`v${f.neg ? ' neg' : ''}`}>{f.display}</div>
+          {f.sub && <div className="s">{f.sub}</div>}
+        </div>))}</div></div>
+  }
+  if (s.kind === 'table') {
+    const cols: string[] = s.columns ?? []
+    const rows: any[][] = s.rows ?? []
+    const numc = numColsOf(cols, rows)
+    return <div className="sa-sec sa-tblsec">{s.title && <div className="sa-sec-title">{s.title}</div>}
+      <div className="sa-scroll"><table className="sa-fin num">
+        <thead><tr>{cols.map((c, i) => <th key={i} className={numc[i] ? 'r' : ''}>{c}</th>)}</tr></thead>
+        <tbody>{rows.map((r, ri) => (
+          <tr key={ri}>{r.map((v, ci) => (
+            <td key={ci} className={numc[ci] ? 'r fig' : ''}>{typeof v === 'number' ? v.toLocaleString() : String(v ?? '')}</td>
+          ))}</tr>))}</tbody>
+        {Array.isArray(s.total) && s.total.length > 0 && (
+          <tfoot><tr className="sa-total">{cols.map((_, i) => {
+            const v = s.total[i]
+            return <td key={i} className={numc[i] ? 'r' : ''}>{typeof v === 'number' ? v.toLocaleString() : String(v ?? '')}</td>
+          })}</tr></tfoot>)}
+      </table></div>
+      {s.note && <div className="sa-count">{s.note}</div>}</div>
+  }
+  return null
+}
 
 function AnswerCard({ answer: a, category, timing }: { answer: any; category?: string; timing?: { ms: number; classifyMs?: number; modelMs?: number } }) {
   ensureAnswerCSS()
@@ -1050,6 +1118,9 @@ function AnswerCard({ answer: a, category, timing }: { answer: any; category?: s
           </div>
         </div>
       )}
+      {/* multi-block report: several titled sections (tables / kpis / text) stacked. Present ONLY on report-shaped
+          answers; a simple answer omits `sections` and renders the flat figs+table above exactly as before. */}
+      {Array.isArray(a.sections) && a.sections.map((s: any, i: number) => <SectionBlock key={i} s={s} />)}
       {a.caveat && <div className="sa-caveat">{a.caveat}</div>}
       {a.scope && <div className="sa-src"><b>Scope:</b> {a.scope}</div>}
       {a.source && <div className="sa-src"><b>Source:</b> {a.source}</div>}
@@ -1066,14 +1137,31 @@ function AnswerCard({ answer: a, category, timing }: { answer: any; category?: s
 }
 
 // Minimal, safe inline markdown: escape HTML first, then bold/italic/code + breaks.
+// Inline-only emphasis applied WITHIN one line \u2014 bold and code ONLY (italics deliberately not parsed: it
+// reads oddly in these cards, and the model is told not to use it).
+function inlineMd(s: string): string {
+  return s
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+}
+// Light block markdown for answer/section prose: bold/italic/code inline, PLUS a run of lines that start with
+// "- " (or "\u2022 ") becomes a real bulleted list. Everything else is plain paragraph text with <br/> line breaks.
+// Not full markdown \u2014 just enough that a list-shaped takeaway reads as bullets and key figures can be bolded.
 function renderInlineMd(text: string): string {
   const clean = text.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\uFE0F\u200D]/gu, '').replace(/ {2,}/g, ' ')
   const esc = clean.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  return esc
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\n/g, '<br/>')
+  const out: string[] = []
+  let para: string[] = [], bullets: string[] = []
+  const flushPara = () => { if (para.length) { out.push(para.join('<br/>')); para = [] } }
+  const flushBul = () => { if (bullets.length) { out.push(`<ul class="sa-list">${bullets.join('')}</ul>`); bullets = [] } }
+  for (const ln of esc.split('\n')) {
+    const m = ln.match(/^\s*[-\u2022]\s+(.*)/)
+    if (m) { flushPara(); bullets.push(`<li>${inlineMd(m[1])}</li>`) }
+    else if (ln.trim() === '') { flushBul(); flushPara() }
+    else { flushBul(); para.push(inlineMd(ln)) }
+  }
+  flushPara(); flushBul()
+  return out.join('')
 }
 
 function Spinner() {

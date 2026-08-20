@@ -26,6 +26,7 @@ import { createAnalyst, promptVersion as analystPromptVersion } from './agents/a
 import { createConnector, promptVersion as connectorPromptVersion } from './agents/connector/index.js'
 import { createGroundingAgent, promptVersion as groundingPromptVersion } from './agents/grounding/index.js'
 import { openAnswers, normalizeQuestion } from './answers.js'
+import { forgetProgram } from './forget.js'
 import { log, readJsonSafe } from './log.js'
 import { createInspector } from './inspect.js'
 import { NodeStore, ROOT, ensureRoot, ensureConceptTree, ensureBasisSeed, intentId, linkBasis } from '@superatom/node-store'
@@ -415,7 +416,8 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // ── INTENT GRAPH ──
     if (modifyTarget && curNode) {
       // MODIFY: update the CURRENT node's program IN PLACE — no new node, no new edge, position unchanged.
-      graph.putNode({ ...curNode, props: { ...(curNode.props as any), program: programDir ?? modifyTarget.programDir, params: programParams, rawAnalysis: r.lastLines, category: r.category } })
+      // rawAnalysis (r.lastLines) intentionally NOT stored — it's a garbled TUI snapshot with little value; re-enable here if reworked.
+      graph.putNode({ ...curNode, props: { ...(curNode.props as any), program: programDir ?? modifyTarget.programDir, params: programParams, category: r.category } })
       console.log(`[ica] modified node ${pos.slice(0, 14)} in place · program ${programDir ?? modifyTarget.programDir}`)
     } else {
       // The ANALYST places its own node: built.json.parent = 'root' (a new topic under ROOT) or a prior intent's
@@ -425,7 +427,8 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         : pos
       const nodeId = parent === pos ? nid : intentId(parent, question)
       graph.putNode({ id: nodeId, kind: 'intent', label: question.slice(0, 80), summary: question,
-        props: { question: norm, category: r.category, program: programDir, params: programParams, rawAnalysis: r.lastLines, terms: programTerms, orchParams: coord?.params ?? [] } })
+        // rawAnalysis (r.lastLines) intentionally NOT stored — garbled TUI snapshot, low value; re-enable here if reworked.
+        props: { question: norm, category: r.category, program: programDir, params: programParams, terms: programTerms, orchParams: coord?.params ?? [] } })
       graph.putEdge({ from: parent, to: nodeId, type: 'follow_up' })
       if (coord?.axes?.length) linkBasis(graph, nodeId, coord.axes)   // grow the basis space for reuse
       setPosition(sid, nodeId)
@@ -666,6 +669,12 @@ async function handle(payload: any, from: any) {
     slot.compact({ onOutput: (chunk) => emit(from, { t: chunkT, text: chunk }) })
       .then(() => emit(from, { t: role === 'semantic' ? 'semantic:status' : 'analyst:status', text: 'Compacted ✓' }))
       .catch((e: any) => emit(from, { t: role === 'semantic' ? 'semantic:status' : 'analyst:status', text: `Compact failed: ${e?.message ?? e}` }))
+  }
+  else if (payload.t === 'program:forget') {   // admin → completely delete a program + its answers/runs/out, so the question rebuilds
+    // Identify by programDir, question text, or a qid it produced. Deterministic, engine-owned (no LLM).
+    const res = forgetProgram(answers, WORKSPACE, { programDir: payload.programDir, question: payload.question, qid: payload.qid })
+    log[res.ok ? 'info' : 'warn']('engine', 'program:forget', { target: { programDir: payload.programDir, question: payload.question, qid: payload.qid }, ...res })
+    emit(from, { t: 'program:forget:res', ...res })
   }
   else if (payload.t === 'suggest') { /* as-you-type — later (fast-router) */ }
 }

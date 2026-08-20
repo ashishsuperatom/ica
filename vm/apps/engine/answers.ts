@@ -75,6 +75,14 @@ export function openAnswers(path: string) {
   const agentGet = db.prepare(`SELECT harness, session_id, prompt_version FROM agent_sessions WHERE project_id = ? AND role = ?`)
   const agentSet = db.prepare(`INSERT OR REPLACE INTO agent_sessions (project_id, role, harness, session_id, prompt_version, updated_at) VALUES (?, ?, ?, ?, ?, ?)`)
   const agentDel = db.prepare(`DELETE FROM agent_sessions WHERE project_id = ? AND role = ?`)
+  // ── Invalidation ("forget a program") — deterministic, engine-owned. Removes every ROW a program produced:
+  // its answers (the reflex reuse cache) and its run-audit history. The program FILES are removed by the caller
+  // (it owns the workspace path); `qidsForProg` gives the per-question folders to clean too.
+  const progForNorm  = db.prepare(`SELECT program_dir FROM answers WHERE norm = ? AND program_dir IS NOT NULL ORDER BY created_at DESC LIMIT 1`)
+  const qidsForProg  = db.prepare(`SELECT qid FROM answers WHERE program_dir = ?`)
+  const delAnsProg   = db.prepare(`DELETE FROM answers WHERE program_dir = ?`)
+  const delAnsNorm   = db.prepare(`DELETE FROM answers WHERE norm = ?`)
+  const delRunsProg  = db.prepare(`DELETE FROM program_runs WHERE program_dir = ?`)
   const row = (r: any): AnswerRow | null => r ? {
     qid: r.qid, sessionId: r.session_id, question: r.question, norm: r.norm,
     category: r.category, status: r.status, answer: safeParse(r.answer_json), createdAt: r.created_at,
@@ -119,6 +127,18 @@ export function openAnswers(path: string) {
       if (sessionId) agentSet.run(projectId, role, harness, sessionId, promptVersion, now)
     },
     clearAgentSession(projectId: string, role: string) { agentDel.run(projectId, role) },   // force a fresh session next time
+    // ── Invalidation ────────────────────────────────────────────────────────────
+    // Which program a question is bound to (latest), so a caller can forget by question text.
+    programDirForNorm(norm: string): string | null { const r: any = progForNorm.get(norm); return r ? r.program_dir : null },
+    // Forget one program: delete its answers + run-audit rows. Returns the qids it produced (for the caller to
+    // clean the matching out/<qid> folders) plus how many rows went. Files are the caller's job (workspace path).
+    forgetProgram(programDir: string): { answers: number; runs: number; qids: string[] } {
+      const qids = (qidsForProg.all(programDir) as any[]).map((r) => r.qid)
+      const a = delAnsProg.run(programDir); const runs = delRunsProg.run(programDir)
+      return { answers: Number(a.changes), runs: Number(runs.changes), qids }
+    },
+    // Forget a program-less answer purely by question text (older rows with no program_dir). Returns rows removed.
+    forgetNorm(norm: string): number { return Number(delAnsNorm.run(norm).changes) },
     db,
   }
 }

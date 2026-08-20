@@ -111,21 +111,34 @@ function adaptiveCard(a: Answer, category?: string): unknown {
   if (cat) body.push({ type: 'TextBlock', text: String(cat).replace(/_/g, ' ').toUpperCase(), weight: 'Bolder', size: 'Small', isSubtle: true, spacing: 'None' })
   if (a.answer) body.push({ type: 'TextBlock', text: a.answer, wrap: true, spacing: 'Small' })
   if (a.figures?.length) body.push({ type: 'FactSet', facts: a.figures.map((f) => ({ title: f.label, value: f.sub ? `${f.display}  (${f.sub})` : f.display })), spacing: 'Medium' })
-  if (a.table?.columns?.length) {
-    const cols = a.table.columns, rows = a.table.rows ?? []
-    const shown = rows.slice(0, MAX_ROWS)
-    body.push({
-      type: 'Table', columns: cols.map((_, i) => ({ width: i === 0 ? 2 : 1 })), firstRowAsHeaders: true,
-      rows: [row(cols.map(String), true), ...shown.map((r) => row(cols.map((_, i) => fmt(r[i]))))],
-      spacing: 'Medium',
-    })
-    const total = typeof a.table.totalRows === 'number' ? a.table.totalRows : rows.length
-    if (total > shown.length) body.push({ type: 'TextBlock', text: `Showing ${shown.length} of ${total} rows`, size: 'Small', isSubtle: true, spacing: 'Small' })
+  if (a.table?.columns?.length) pushTable(body, a.table.columns, a.table.rows ?? [], typeof a.table.totalRows === 'number' ? a.table.totalRows : undefined)
+  // Multi-block report: render each section with the same primitives (heading + table / factset / text). A
+  // simple answer has no `sections` and is unaffected — this whole block is skipped.
+  for (const s of a.sections ?? []) {
+    if (s.title) body.push({ type: 'TextBlock', text: s.title, weight: 'Bolder', size: 'Small', spacing: 'Medium', wrap: true })
+    if (s.kind === 'table' && s.columns?.length) pushTable(body, s.columns, s.rows ?? [], undefined, s.note)
+    else if (s.kind === 'kpis' && s.items?.length) body.push({ type: 'FactSet', facts: s.items.map((f) => ({ title: f.label, value: f.sub ? `${f.display}  (${f.sub})` : f.display })), spacing: 'Small' })
+    else if (s.kind === 'text' && s.body) body.push({ type: 'TextBlock', text: s.body, wrap: true, spacing: 'Small' })
   }
   if (a.period) body.push({ type: 'TextBlock', text: a.period, size: 'Small', isSubtle: true, wrap: true, spacing: 'Small' })
   // msteams.width:'Full' makes the card use the FULL chat-pane width (default is ~half), so the table gets
   // room to breathe instead of wrapping every cell.
   return { $schema: 'http://adaptivecards.io/schemas/adaptive-card.json', type: 'AdaptiveCard', version: '1.5', msteams: { width: 'Full' }, body }
+}
+
+// Push one Adaptive Card Table (+ an optional footnote). Shared by the flat `a.table` and each report section,
+// so both render identically. For the flat table `totalRows` drives the "Showing X of Y" line (unchanged
+// behaviour); a section passes `note` instead.
+function pushTable(body: any[], cols: string[], rows: unknown[][], totalRows?: number, note?: string): void {
+  const shown = rows.slice(0, MAX_ROWS)
+  body.push({
+    type: 'Table', columns: cols.map((_, i) => ({ width: i === 0 ? 2 : 1 })), firstRowAsHeaders: true,
+    rows: [row(cols.map(String), true), ...shown.map((r) => row(cols.map((_, i) => fmt(r[i]))))],
+    spacing: 'Medium',
+  })
+  const total = typeof totalRows === 'number' ? totalRows : rows.length
+  if (total > shown.length) body.push({ type: 'TextBlock', text: `Showing ${shown.length} of ${total} rows`, size: 'Small', isSubtle: true, spacing: 'Small' })
+  else if (note) body.push({ type: 'TextBlock', text: note, size: 'Small', isSubtle: true, spacing: 'Small' })
 }
 
 function row(cells: string[], header = false): unknown {

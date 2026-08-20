@@ -66,8 +66,15 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
   async function ensure() {
     if (pty) return
     const m = await import('node-pty')
+    // Each agent PTY must be a CLEAN, top-level claude-code session. If the engine was itself launched from
+    // inside a claude-code session (e.g. dev-restarting pm2 from the CLI), it inherits CLAUDE_CODE_* markers;
+    // passing them down makes the spawned claude think it's a CHILD session — which DISABLES transcript saving
+    // (so --resume then fails with "No conversation found"). Strip every CLAUDE_CODE_* var so the agent is
+    // always a fresh top-level session, regardless of how the engine was started.
+    const childEnv: Record<string, any> = { ...process.env, TERM: 'xterm-256color' }
+    for (const k of Object.keys(childEnv)) if (k.startsWith('CLAUDE_CODE_')) delete childEnv[k]
     pty = m.spawn(bin, ['--model', model, '--dangerously-skip-permissions', ...sessionArgs()],
-      { name: 'xterm-256color', cols, rows, cwd: opts.cwd, env: { ...process.env, TERM: 'xterm-256color' } as any })
+      { name: 'xterm-256color', cols, rows, cwd: opts.cwd, env: childEnv as any })
     lastDataAt = Date.now()
     pty.onData((d: string) => {
       buf = (buf + d).slice(-CAP)
