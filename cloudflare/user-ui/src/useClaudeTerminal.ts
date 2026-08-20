@@ -1,5 +1,6 @@
 import { useEffect, type RefObject } from 'react'
 import { Terminal } from '@xterm/xterm'
+import { ANSI } from './termColors'
 
 // The ONE terminal setup shared by every claude-code agent (analyst, modeler, …). The running MODEL is
 // irrelevant to the UI — only the HARNESS is, so this is claude-code-specific; codex/opencode get their own
@@ -20,7 +21,7 @@ export function useClaudeTerminal(
       // Match the claude PTY exactly (ica/claude.ts spawns 120×34) so its cursor-addressed redraws land right;
       // convertEol OFF — the PTY sends its own \r\n + control, and converting them garbles the full-screen TUI.
       cols: 120, rows: 34, cursorBlink: false, fontSize: 11, convertEol: false,
-      scrollback: 8000, theme: { background: '#161a17', foreground: '#bcd0be' },
+      scrollback: 8000, theme: { background: '#161a17', foreground: '#e6e2da', ...ANSI },
     })
     if (hostRef.current) term.open(hostRef.current)
     if (interactive) term.onData((d) => send({ t: 'term:input', which, data: d }))

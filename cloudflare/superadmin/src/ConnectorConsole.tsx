@@ -4,6 +4,7 @@
 // connecting data sources, but it's a general infrastructure agent.
 
 import { useEffect, useRef, useState } from 'react'
+import { ANSI } from './termColors'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -39,8 +40,8 @@ export function ConnectorConsole({ hub }: { hub: Hub }) {
   // ── xterm ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!elRef.current) return
-    const term = new Terminal({ cursorBlink: false, fontSize: 12, convertEol: true, scrollback: 8000,
-      theme: { background: '#0d0f0d', foreground: '#cdd6cd' } })
+    const term = new Terminal({ cursorBlink: false, fontSize: 12, convertEol: false, scrollback: 8000,
+      theme: { background: '#0d0f0d', foreground: '#e6e2da', ...ANSI } })
     const fit = new FitAddon(); term.loadAddon(fit); term.open(elRef.current)
     termRef.current = term; fitRef.current = fit
     // Raw keystrokes/paste typed in the terminal go straight to the connector's PTY (drives claude directly —

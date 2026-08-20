@@ -4,6 +4,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { useClaudeTerminal } from './useClaudeTerminal'
+import { ANSI } from './termColors'
 
 // Cloud mode: VITE_HUB_URL set (e.g. wss://superatom.site). The page is served at
 // /u behind the worker; it logs in via Clerk, exchanges for our JWT, and connects to
@@ -179,8 +180,8 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // xterm setup
   useEffect(() => {
     const term = new Terminal({
-      cursorBlink: false, fontSize: 12, convertEol: true, scrollback: 2000,
-      theme: { background: '#1a1a1a', foreground: '#c8c4be' }
+      cursorBlink: false, fontSize: 12, convertEol: false, scrollback: 2000,
+      theme: { background: '#1a1a1a', foreground: '#e6e2da', ...ANSI }
     })
     const fit = new FitAddon()
     term.loadAddon(fit)

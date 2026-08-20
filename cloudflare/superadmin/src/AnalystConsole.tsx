@@ -4,6 +4,7 @@
 // Unlike the user UI (watch-only), THIS is interactive — the admin can drive the analyst directly.
 
 import { useEffect, useRef, useState } from 'react'
+import { ANSI } from './termColors'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -28,7 +29,7 @@ export function AnalystConsole({ hub }: { hub: Hub }) {
 
   useEffect(() => {
     if (!elRef.current) return
-    const term = new Terminal({ cursorBlink: false, fontSize: 12, convertEol: false, cols: 120, rows: 34, scrollback: 8000, theme: { background: '#0d0f0d', foreground: '#cdd6cd' } })
+    const term = new Terminal({ cursorBlink: false, fontSize: 12, convertEol: false, cols: 120, rows: 34, scrollback: 8000, theme: { background: '#0d0f0d', foreground: '#e6e2da', ...ANSI } })
     const fit = new FitAddon(); term.loadAddon(fit); term.open(elRef.current)
     termRef.current = term; fitRef.current = fit
     term.onData((d) => hubRef.current.send({ to: { type: 'code-engine' }, payload: { t: 'term:input', which: 'analyst', data: d } }))
