@@ -50,6 +50,12 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
 
   let pty: any = null
   let buf = ''
+  // Authoritative SCREEN state: a headless terminal emulator (server-side) consumes the SAME PTY byte stream
+  // and holds the current 2D grid. `buffer()` serializes IT — a consistent snapshot that recreates the exact
+  // screen — so reconnect/replay is correct (you cannot rebuild a cursor-addressed TUI from a raw byte tail).
+  // `buf` stays the raw tail, still used for prompt-matching + answer extraction (those want the raw stream).
+  let term: any = null            // @xterm/headless Terminal
+  let serialize: any = null       // @xterm/addon-serialize — term.serialize() → the snapshot
   let idle: ReturnType<typeof setTimeout> | null = null
   let donePoll: ReturnType<typeof setInterval> | null = null   // fast completion: poll the caller's doneWhen()
   let lastNarr = '', lastNarrAt = 0                            // last clean narration line emitted (dedup + throttle)
@@ -65,6 +71,11 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
 
   async function ensure() {
     if (pty) return
+    if (!term) {   // one headless emulator per session, sized to match the PTY (kept in sync by resize())
+      const [{ Terminal }, { SerializeAddon }] = await Promise.all([import('@xterm/headless'), import('@xterm/addon-serialize')])
+      term = new Terminal({ cols, rows, scrollback: 200, allowProposedApi: true })
+      serialize = new SerializeAddon(); term.loadAddon(serialize)
+    }
     const m = await import('node-pty')
     // Each agent PTY must be a CLEAN, top-level claude-code session. If the engine was itself launched from
     // inside a claude-code session (e.g. dev-restarting pm2 from the CLI), it inherits CLAUDE_CODE_* markers;
@@ -78,6 +89,7 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
     lastDataAt = Date.now()
     pty.onData((d: string) => {
       buf = (buf + d).slice(-CAP)
+      try { term?.write(d) } catch { /* emulator must never break the PTY */ }   // feed the authoritative screen
       lastDataAt = Date.now()
       // Raw terminal passthrough: stream EVERY byte to any interactive viewer (the UI xterm), so a user can
       // watch the live TUI and drive it (e.g. run /login) even when no run is active. Independent of the queue.
@@ -120,7 +132,7 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
         const miss = stripAnsi(buf.slice(-2000)).match(/No conversation found with session ID: ([\w-]+)/i)
         if (miss) {
           console.warn(`[ica:claude] --resume ${miss[1]} failed (session not found — store not persisted?); starting a FRESH session`)
-          resuming = false; const dead = pty; pty = null; buf = ''; sid = randomUUID()
+          resuming = false; const dead = pty; pty = null; buf = ''; sid = randomUUID(); try { term?.reset() } catch {}
           try { dead?.kill() } catch {}
           void ensure()   // re-spawn fresh; waitForReady keeps polling the new session's buffer
           return
@@ -235,15 +247,18 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
     onRaw(cb: (d: string) => void) { rawListeners.add(cb); return () => rawListeners.delete(cb) },
     async run(prompt, h) { await ensure(); return enqueue(prompt, h) },
     async compact(h) { await ensure(); return enqueue('/compact', h) },   // same terminal — compact when context grows
-    buffer: () => buf,
+    // Replay = the SERIALIZED SCREEN from the headless emulator (a consistent snapshot that recreates the exact
+    // grid + cursor), NOT the raw byte tail — so a reconnecting client repaints correctly. Falls back to the raw
+    // tail if the emulator isn't up yet or serialization throws.
+    buffer: () => { try { return serialize ? serialize.serialize() : buf } catch { return buf } },
     busy: () => !!current,
     stop: () => { try { pty?.kill() } catch {} },
-    // The UI fits xterm to its container width and sends the resulting cols/rows here so claude's
-    // TUI re-lays-out to fill the panel (no more 120-col clamp). Stored for the next spawn too.
-    resize: (c: number, r: number) => { cols = Math.max(40, c | 0); rows = Math.max(10, r | 0); try { pty?.resize(cols, rows) } catch {} },
+    // The UI fits xterm to its container width and sends the resulting cols/rows here so claude's TUI re-lays-out
+    // to fill the panel. Resize the emulator TOO, so its screen stays the same geometry as the client's.
+    resize: (c: number, r: number) => { cols = Math.max(40, c | 0); rows = Math.max(10, r | 0); try { pty?.resize(cols, rows) } catch {}; try { term?.resize(cols, rows) } catch {} },
     sessionId: () => sid,
-    // Abandon this conversation: kill the PTY and mint a NEW id (no --resume). The next run spawns a
-    // fresh claude session — nothing carried over. Deliberate reset, distinct from a crash (onExit).
-    reset: () => { try { pty?.kill() } catch {}; pty = null; buf = ''; resuming = false; sid = randomUUID() },
+    // Abandon this conversation: kill the PTY and mint a NEW id (no --resume). The next run spawns a fresh claude
+    // session — nothing carried over. Clear the emulator screen too so the replay doesn't show the old session.
+    reset: () => { try { pty?.kill() } catch {}; pty = null; buf = ''; resuming = false; sid = randomUUID(); try { term?.reset() } catch {} },
   }
 }

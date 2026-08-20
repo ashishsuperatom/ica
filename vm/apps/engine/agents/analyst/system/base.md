@@ -115,8 +115,7 @@ The answer JSON the engine produces / you write has this shape:
   "periods": [ { "label": "<a compared scope>", "detail": "<its exact range + how comparable, e.g. N days>" } ],
   "scope":  "<the non-time filters you applied>",
   "headline": { "label": "<what the number IS>", "display": "<the number, short-form, with its unit>", "value": <raw number> },
-  "table":  { "columns": ["<readable headers>"], "rows": [[...]] },
-  "sections": [ { "kind": "table|kpis|text", "title": "<heading>", "columns": ["…"], "rows": [[…]], "total": ["…"], "note": "…", "items": [ {"label","display","sub"} ], "body": "<text>" } ],
+  "sections": [ { "kind": "table|kpis|text", "title": "<heading>", "columns": ["…"], "rows": [[…]], "total": ["…"], "totalRows": <int>, "note": "…", "items": [ {"label","display","sub"} ], "body": "<text>" } ],
   "caveat": "<optional — a short warning on how to read the numbers>",
   "usedNodes": ["<model node ids you relied on, when you reused the model>"],
   "missing": "<only when unknowable: ONE short plain reason for the user — NOT column names, counts, or sentinels>"
@@ -143,21 +142,16 @@ Represent an answer so each part does its own job:
   `display` formatting rule as `headline`; `sub` = a short qualifier like `"45.9% of total"` or
   `"1,103 customers"`; `neg: true` renders it in the alert colour — use for an overdue/negative figure).
   This renders as the KPI strip across the top of the card — the first thing the reader sees.
-- The **table** is the itemised detail behind it — same rule: numbers carry their unit and use the short
-  form in the cells. When a **total / summary line** is meaningful, push `table.total` — an array the SAME
-  length as `columns` (the total per column, a label like "Total" in the first cell, blank where a column
-  doesn't total). YOU decide whether a total makes sense (never sum a %, ratio, or id). The UI renders it as
-  the bold footer row; omit `total` when there's nothing to summarise.
-  When you return only a SAMPLE / top-N of a larger result, also push `table.totalRows` — the TRUE count of
-  matching rows in the data BEFORE your display cap — so the card shows "N of TOTAL" and never implies the
-  returned sample is the whole set. Omit it when you returned every matching row.
-- **A report answers several things at once — use `sections`, don't cram one table.** When the question asks
-  for MORE than one result (a trend AND a ranking AND a note; or several rankings), emit `sections`: an ORDERED
-  array of blocks, each `{ kind, title }` + its payload. `kind:"table"` carries `columns`/`rows` (+ optional
-  `total`/`note`); `kind:"kpis"` carries `items` (the same figure objects as `figures`); `kind:"text"` carries a
-  short `body`. The card stacks them in order. Keep top-level `figures` as the headline KPI strip; give each
-  further result its OWN titled section (never merge two different lists into one table with a "type" column).
-  A SINGLE-result answer omits `sections` and just uses `table`/`figures` as before.
+- **Every table is a `sections` block** — there is no top-level `table`. Put each tabular result in `sections`
+  as `{ "kind":"table", "title", "columns", "rows" }`; a SINGLE table is just ONE such section. Numbers carry
+  their unit and use the short form in the cells. Per table you may add: `total` (a summary footer row — an
+  array the SAME length as `columns`, a label like "Total" in the first cell, blank where a column doesn't
+  total; never sum a %, ratio, or id); `totalRows` (the TRUE count of matching rows when you returned only a
+  SAMPLE / top-N, so the card honestly shows "N of TOTAL"); and `note` (a short caption line).
+- **A report is just several sections.** When the question asks for MORE than one result (a trend AND a
+  ranking; or several rankings), emit several blocks IN ORDER — each its OWN titled section, never merged into
+  one table with a "type" column. `kind:"kpis"` carries `items` (the same figure objects as `figures`);
+  `kind:"text"` carries a short `body`. Keep top-level `figures` as the headline KPI strip across the top.
 - **Columns and labels read the way a person would say them**, not raw field names.
 - The **time window** is stated plainly (`period`, or `periods` when comparing); `scope` holds the
   non-time filters. So what was measured is clear on its own.

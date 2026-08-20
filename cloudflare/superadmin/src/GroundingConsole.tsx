@@ -9,6 +9,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import type { Hub } from './hub'
+import { CodexEventLog, mergeEvent, type AgentEvent } from './CodexEventLog'   // codex (events-kind) view
 
 export function GroundingConsole({ hub }: { hub: Hub }) {
   const elRef = useRef<HTMLDivElement | null>(null)
@@ -17,6 +18,8 @@ export function GroundingConsole({ hub }: { hub: Hub }) {
   const hubRef = useRef(hub); hubRef.current = hub
   const status = hub.status
   const [busy, setBusy] = useState(false)
+  const [streamKind, setStreamKind] = useState<'pty' | 'events'>('pty')   // claude → xterm; codex → CodexEventLog
+  const [events, setEvents] = useState<AgentEvent[]>([])
 
   const attach = () => hub.send({ to: { type: 'code-engine' }, payload: { t: 'term:attach', which: 'grounding' } })
   const sendResize = () => {
@@ -46,15 +49,19 @@ export function GroundingConsole({ hub }: { hub: Hub }) {
     setTimeout(() => { sendResize(); attach() }, 0)
     return hub.subscribe((m) => {
       if (m?.t === 'welcome') setTimeout(() => { sendResize(); attach() }, 0)
+      else if (m?.t === 'grounding:stream') setStreamKind(m.kind === 'pty' ? 'pty' : 'events')
+      else if (m?.t === 'grounding:event') setEvents((e) => mergeEvent(e, m.ev))       // codex structured event (live)
+      else if (m?.t === 'grounding:events') setEvents(m.events ?? [])                  // codex event-log replay (reconnect)
       else if (m?.t === 'grounding:chunk') { if (m.replace) termRef.current?.clear(); termRef.current?.write(m.text ?? '') }
       else if (m?.t === 'grounding:status' && m.text) termRef.current?.writeln(`\r\n\x1b[2m— ${m.text}\x1b[0m`)
-      else if (m?.t === 'grounding:done') { setBusy(false); if (m.summary) termRef.current?.writeln(`\r\n\x1b[32m✓ ${m.summary}\x1b[0m`) }
+      else if (m?.t === 'grounding:done') { setBusy(false); if (m.summary && streamKind === 'pty') termRef.current?.writeln(`\r\n\x1b[32m✓ ${m.summary}\x1b[0m`) }
     })
   }, [hub])
 
   const build = () => {
     setBusy(true)
-    termRef.current?.writeln('\r\n\x1b[36m❯ Building grounding indexes…\x1b[0m')
+    if (streamKind === 'events') setEvents((e) => [...e, { kind: 'user', text: 'Build grounding indexes' }])
+    else termRef.current?.writeln('\r\n\x1b[36m❯ Building grounding indexes…\x1b[0m')
     hub.send({ to: { type: 'code-engine' }, payload: { t: 'grounding:build' } })
   }
 
@@ -70,7 +77,10 @@ export function GroundingConsole({ hub }: { hub: Hub }) {
           <button className="btn" onClick={build} disabled={busy || status !== 'live'}>{busy ? 'Building…' : 'Build grounding indexes'}</button>
         </div>
       </div>
-      <div ref={elRef} style={{ flex: 1, minHeight: 0, background: '#0d0f0d', borderRadius: 10, padding: '8px 10px', overflow: 'hidden' }} />
+      <div style={{ flex: 1, minHeight: 0, background: '#0d0f0d', borderRadius: 10, padding: '8px 10px', overflow: 'auto' }}>
+        <div ref={elRef} style={{ height: '100%', display: streamKind === 'pty' ? 'block' : 'none' }} />
+        {streamKind === 'events' && <CodexEventLog events={events} busy={busy} />}
+      </div>
     </div>
   )
 }

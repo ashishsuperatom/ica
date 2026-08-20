@@ -9,7 +9,7 @@
 //   ALL PERMISSIONS enabled: sandbox danger-full-access + approvals never (see ensure()).
 
 import { Codex, type Thread } from '@openai/codex-sdk'
-import type { Session, RunHandlers, RunResult } from './session.js'
+import type { Session, RunHandlers, RunResult, AgentEvent } from './session.js'
 
 export interface CodexSessionOpts {
   cwd: string
@@ -37,6 +37,33 @@ function fmtEvent(ev: any, seen: Map<string, number>): string {
   return ''
 }
 
+// Structured sibling of fmtEvent: turn a ThreadEvent into a normalized AgentEvent for the UI event log
+// (null = an event we don't render). Each item keeps its stable id across started→updated→completed, so the
+// UI updates the same block in place as the command output or message text streams in.
+//
+// FORMAT CONTRACT — @openai/codex-sdk ^0.144 (this is what we're coding against; harness formats DRIFT, so if
+// the event view goes blank/garbled after an SDK bump, check here first). Events we map:
+//   turn.started                                    → { kind:'turn' }
+//   item.{started,updated,completed} · item.type of:
+//     agent_message      { id, text }               → message
+//     reasoning          { id, text }               → reasoning
+//     command_execution  { id, command, aggregated_output, status } → command
+//     file_change        { id, path|text }          → file
+// New item.types Codex adds later fall through to null (rendered as nothing) until mapped here.
+function normEvent(ev: any): AgentEvent | null {
+  if (ev?.type === 'turn.started') return { kind: 'turn' }
+  if (ev?.type !== 'item.started' && ev?.type !== 'item.updated' && ev?.type !== 'item.completed') return null
+  const it = ev.item; if (!it) return null
+  const done = ev.type === 'item.completed'
+  switch (it.type) {
+    case 'agent_message':     return { kind: 'message',   id: it.id, text: it.text ?? '', done }
+    case 'reasoning':         return { kind: 'reasoning', id: it.id, text: it.text ?? '', done }
+    case 'command_execution': return { kind: 'command',   id: it.id, command: it.command ?? '', output: it.aggregated_output ?? '', status: it.status, done }
+    case 'file_change':       return { kind: 'file',      id: it.id, text: it.path ?? it.text ?? '', done }
+    default:                  return null
+  }
+}
+
 export function createCodexSession(opts: CodexSessionOpts): Session {
   const model = opts.model ?? process.env.ICA_CODEX_MODEL ?? 'gpt-5.6-terra'
   const effort = (opts.reasoningEffort ?? process.env.ICA_CODEX_EFFORT ?? 'medium') as CodexSessionOpts['reasoningEffort']
@@ -46,6 +73,7 @@ export function createCodexSession(opts: CodexSessionOpts): Session {
   let threadId: string | null = opts.resumeId ?? null              // current thread id — persist this to resume across restarts
   let resumeFailed = false
   let buf = ''
+  const eventLog: AgentEvent[] = []                                // structured events (the 'events' view's buffer), capped
   let running = false
   const queue: { prompt: string; h?: RunHandlers; resolve: (r: RunResult) => void }[] = []
 
@@ -77,7 +105,8 @@ export function createCodexSession(opts: CodexSessionOpts): Session {
       const streamed = await thread!.runStreamed(prompt)
       for await (const ev of streamed.events) {                     // generator ends when the turn completes → exact
         if (ev.type === 'thread.started' && (ev as any).thread_id) threadId = (ev as any).thread_id
-        h?.onEvent?.(ev)                                            // FULL raw event — caller selects what to forward
+        const norm = normEvent(ev)                                 // structured event for the UI event log
+        if (norm) { eventLog.push(norm); if (eventLog.length > 600) eventLog.shift(); h?.onEvent?.(norm) }
         const chunk = fmtEvent(ev, seen)
         if (chunk) { buf = (buf + chunk).slice(-64000); h?.onOutput?.(chunk) }
         if ((ev.type === 'item.completed' || ev.type === 'item.updated') && ev.item?.type === 'agent_message') {
@@ -105,6 +134,7 @@ export function createCodexSession(opts: CodexSessionOpts): Session {
     async run(prompt, h) { return new Promise<RunResult>((resolve) => { queue.push({ prompt, h, resolve }); pump() }) },
     async compact() { return { lastLines: '(codex manages its own context)', ms: 0 } },
     buffer: () => buf,
+    events: () => eventLog,
     busy: () => running,
     stop: () => { thread = null; codex = null },
     sessionId: () => threadId ?? undefined,   // the codex thread id — persisted so we resume it after a restart

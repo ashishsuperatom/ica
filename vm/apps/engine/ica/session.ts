@@ -4,10 +4,25 @@
 // module knows nothing about the hub or any message protocol. Completion is per-harness
 // (idle for claude-code, SDK-precise for pi/opencode) but the interface hides that.
 
+// A normalized agent-activity event — the STRUCTURED sibling of the text `buffer()`. Event-kind harnesses
+// (codex/…) translate their own native events into these, so the UI renders ONE consistent event log
+// (command runs, assistant messages, reasoning, file edits) no matter which harness produced them. Items
+// carry a stable `id` across started→updated→completed so the UI can update a block in place as it streams.
+export interface AgentEvent {
+  kind: 'command' | 'message' | 'reasoning' | 'file' | 'turn'
+  id?: string
+  text?: string       // message/reasoning prose, or (kind:'file') the path
+  command?: string    // kind:'command' — the shell command
+  output?: string     // kind:'command' — its aggregated output
+  status?: string     // kind:'command' — 'in_progress' | 'completed' | 'failed'
+  done?: boolean      // the item reached completion (item.completed)
+}
+
 export interface RunHandlers {
   onOutput?: (chunk: string) => void   // formatted text stream (raw PTY for claude-code; readable text for pi/opencode)
-  onEvent?: (ev: any) => void          // FULL raw event — tool calls, args, token deltas, lifecycle.
-                                       // The caller decides what to forward over the WS and what to discard.
+  onEvent?: (ev: AgentEvent) => void   // normalized structured event (event-kind harnesses only; the harness
+                                       // translates its native events → AgentEvent). The caller forwards these
+                                       // to the UI event log; claude-code (pty) uses onOutput instead.
   // Fast completion: polled (~250ms) after the prompt is submitted. When it returns true the run
   // resolves IMMEDIATELY, instead of waiting out the idle timeout. Use it when the agent's deliverable
   // is a file (e.g. out/answer.json) — the moment it's written, we're done; don't wait for silence.
@@ -35,7 +50,8 @@ export interface Session {
   input?(data: string): void | Promise<void>                        // interactive terminal: raw keystrokes/paste → the agent's PTY (e.g. /login)
   onRaw?(cb: (d: string) => void): () => void                       // subscribe to every byte of PTY output (returns an unsubscribe)
   reset?(): void                                                    // abandon this session → a fresh one on the next run
-  buffer(): string                                                  // rolling output (replay on reconnect)
+  buffer(): string                                                  // rolling text output (replay on reconnect; the 'pty' view)
+  events?(): AgentEvent[]                                           // rolling structured events (replay on reconnect; the 'events' view — event-kind harnesses only)
   busy(): boolean
   stop(): void
   resize?(cols: number, rows: number): void                         // PTY harnesses only (claude-code) — fit terminal to the UI width

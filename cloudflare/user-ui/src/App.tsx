@@ -46,7 +46,7 @@ type FeedItem =
   | { id: string; type: 'step'; text: string }
   | { id: string; type: 'narrative'; text: string }
   | { id: string; type: 'component'; tag: string; vTag: string; code: string; data: any }
-  | { id: string; type: 'answer'; category?: string; answer: any; timing?: { ms: number; classifyMs?: number; modelMs?: number } }   // the analyst's structured result, rendered as a card
+  | { id: string; type: 'answer'; category?: string; answer: any; timing?: { ms: number; classifyMs?: number; modelMs?: number }; qid?: string; at?: number }   // the analyst's structured result, rendered as a card (qid = the question id; at = when the answer arrived)
   | { id: string; type: 'error'; text: string }
 
 export function App({ token, projectId = 'default' }: { token?: string | null; projectId?: string } = {}) {
@@ -90,7 +90,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // discrete agent events (codex/SDK) → a plain event log (a terminal emulator makes no sense for these).
   const [anStreamKind, setAnStreamKind] = useState<'pty' | 'events'>('pty')
   const anStreamKindRef = useRef<'pty' | 'events'>('pty')
-  const [anEventLog, setAnEventLog] = useState('')   // accumulated event text when kind === 'events'
+  const [anEvents, setAnEvents] = useState<AgentEvent[]>([])   // structured event log when kind === 'events' (codex)
   const anLogRef = useRef<HTMLDivElement>(null)
   const [gaps, setGaps]             = useState<{ question: string; need: string; basis?: string; status: 'building' | 'done' }[]>([])
   const [role, setRole]         = useState<'user' | 'developer'>('developer')   // for now: everyone is developer (sees the agents)
@@ -200,7 +200,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // Keep the event log (SDK harnesses) pinned to the newest line as it streams.
   useEffect(() => {
     if (anStreamKind === 'events' && anLogRef.current) anLogRef.current.scrollTop = anLogRef.current.scrollHeight
-  }, [anEventLog, anStreamKind])
+  }, [anEvents, anStreamKind])
 
   // WS connection — direct to code-engine (local) or via the worker hub (cloud).
   useEffect(() => {
@@ -290,6 +290,12 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           if (msg.replace) anXtermRef.current?.clear()
           anXtermRef.current?.write(msg.text ?? '')
           rawStreamRef.current = msg.replace ? (msg.text ?? '') : (rawStreamRef.current + (msg.text ?? '')).slice(-400000)
+        } else if (msg.t === 'analyst:event') {
+          // 'events'-kind harness (codex): one normalized AgentEvent. Merge by id so a streaming command/message
+          // updates its own block in place (started → updated → completed); id-less events (turn) append.
+          setAnEvents(evs => mergeEvent(evs, msg.ev))
+        } else if (msg.t === 'analyst:events') {
+          setAnEvents(msg.events ?? [])   // reconnect: full event-log replay (replace)
         } else if (msg.t === 'analyst:progress') {
           setAnProgress(msg.text || '')   // clean prose narration → live progress line
         } else if (msg.t === 'analyst:gap') {
@@ -315,7 +321,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           // A REPLAY (reconnect) is already in the saved feed — don't duplicate it. A fresh answer gets
           // appended to its OWN chat: the visible feed if it's current, else that chat's saved feed.
           if (!msg.replay) {
-            const card: FeedItem = { id: crypto.randomUUID(), type: 'answer', category: msg.category, answer: ans, timing: msg.timing }
+            const card: FeedItem = { id: crypto.randomUUID(), type: 'answer', category: msg.category, answer: ans, timing: msg.timing, qid: msg.qid, at: Date.now() }
             if (!msg.sid || msg.sid === sidRef.current) { setFeed(f => [...f, card]); scroll() }
             else { const f = loadFeed(msg.sid); localStorage.setItem(fkey(msg.sid), JSON.stringify([...f, card].slice(-100))) }
           }
@@ -427,7 +433,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     setFeed(f => [...f, { id: qid, type: 'user-msg', text }])
     setAnQuestion(text); setAnAnswer(null); setAnCategory(''); setAnStatus('Classifying…'); setAnBusy(true); setAnEnriching(null); setAnProgress('')
     anXtermRef.current?.clear()   // claude PTY: fresh TUI per question (harmless when the analyst is codex)
-    setAnEventLog(l => (l ? l + '\n\n' : '') + `━━━━━  ${text}  ━━━━━\n`)   // codex: append this question to the running session log
+    if (anStreamKindRef.current === 'events') setAnEvents(l => [...l, { kind: 'user', text }])   // codex: the question as a user turn in the log
     setStatus('')
     setBusy(true); busyRef.current = true; armWatchdog()
     if (inputRef.current) { inputRef.current.value = ''; inputRef.current.style.height = 'auto' }
@@ -465,7 +471,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     if (wsRef.current?.readyState !== 1) return
     // The analyst's running session log resets ONLY here: a New session wipes it (a brand-new thread);
     // a compaction is marked with a divider (the thread continues with summarized context below it).
-    if (role === 'analyst') setAnEventLog(l => action === 'new' ? '' : l + '\n\n════════  context compacted  ════════\n')
+    if (role === 'analyst') setAnEvents(l => action === 'new' ? [] : [...l, { kind: 'turn' }])   // new: wipe; compact: a divider rule
     send({ t: action === 'new' ? 'session:new' : 'session:compact', role, projectId })
     ;(role === 'semantic' ? setSemStatus : setAnStatus)(action === 'new' ? 'New session' : 'Compacting…')
   }, [projectId])
@@ -672,15 +678,12 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
             )}
           </div>
         )})()}
-        <div ref={anLogRef} style={{ flex: 1, overflow: 'auto', background: '#161a17', padding: 12 }}>
+        <div ref={anLogRef} style={{ flex: 1, overflow: 'auto', background: '#161a17', padding: 12, paddingBottom: 110 }}>
           {/* PTY harness (claude-code) → terminal emulator; kept mounted so its buffer survives view switches */}
           <div ref={anTermRef} onMouseDown={() => anXtermRef.current?.focus()} style={{ display: anStreamKind === 'pty' ? 'block' : 'none' }} />
-          {/* SDK harness (codex) → a plain, readable event log — reasoning + `→ commands`, no terminal emulation */}
-          {anStreamKind === 'events' && (
-            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#bcd0be', fontSize: 12.5, lineHeight: 1.55, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
-              {anEventLog || (anBusy ? 'Waiting for the agent…' : '')}
-            </pre>
-          )}
+          {/* SDK harness (codex) → a structured event log (command runs, messages, reasoning), rendered natively
+              like the codex client — NOT a terminal emulation. */}
+          {anStreamKind === 'events' && <CodexEventLog events={anEvents} busy={anBusy} />}
         </div>
         {view === 'analyst' && (
           <div style={s.bottomBar}>
@@ -808,7 +811,7 @@ function FeedCard({ item }: { item: FeedItem }) {
     return <div style={{ ...s.narrative, borderColor: '#fca5a5', color: '#b91c1c' }}>{item.text}</div>
   }
   if (item.type === 'answer') {
-    return <AnswerCard answer={item.answer} category={item.category} timing={item.timing} />
+    return <AnswerCard answer={item.answer} category={item.category} timing={item.timing} qid={item.qid} at={item.at} />
   }
   return null
 }
@@ -887,6 +890,11 @@ const ANSWER_CSS = `
 .sa-answer .sa-sec:last-child{margin-bottom:0}
 .sa-answer .sa-sec .sa-count{margin-top:6px}    /* the note sits tight under its table, not a floating gap */
 .sa-answer .sa-sec-title{font-family:var(--grot);font-size:12px;letter-spacing:.04em;text-transform:uppercase;font-weight:800;color:var(--ink);margin:0 0 10px;padding-bottom:5px;border-bottom:1px solid var(--hair)}
+/* table header row: title (left) + download (right) on ONE line — the download reveals on hover of the table */
+.sa-answer .sa-tbl-head{display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:1px solid var(--hair);padding-bottom:6px;margin:0 0 10px;min-height:24px}
+.sa-answer .sa-tbl-head .sa-sec-title{margin:0;padding:0;border:0}
+.sa-answer .sa-dl{opacity:0;transition:opacity .12s;flex:none}
+.sa-answer .sa-tblsec:hover .sa-dl,.sa-answer:fullscreen .sa-dl{opacity:1}
 `
 let _cssInjected = false
 function ensureAnswerCSS() {
@@ -899,7 +907,9 @@ function ensureAnswerCSS() {
 // ── Front-end-only helpers for the card actions (Copy / CSV) ─────────────────────────────────────────
 // We HAVE the structured answer JSON here, so copy is built from it (clean), generic across the fields the
 // card shows; paragraphs separated by blank lines, the table as TSV. Add a field to the card → add it here.
-function answerToText(a: any, cat: string): string {
+// meta (qid / timing / arrival time) is appended as a SEPARATE footer after the answer body, so a pasted
+// answer carries its provenance (which question, how long, when) without cluttering the answer itself.
+function answerToText(a: any, cat: string, meta?: { qid?: string; at?: number; timing?: { ms: number; classifyMs?: number; modelMs?: number } }): string {
   const out: string[] = []
   if (cat) out.push(cat.toUpperCase())
   if (a.answer) out.push(String(a.answer))
@@ -918,6 +928,18 @@ function answerToText(a: any, cat: string): string {
   if (a.scope) out.push('Scope: ' + a.scope)
   if (a.source) out.push('Source: ' + a.source)
   if (a.missing) out.push('No source in the data: ' + a.missing)
+  if (meta) {   // provenance footer — separated from the answer
+    const fmt = (m: number) => m >= 1000 ? `${(m / 1000).toFixed(1)}s` : `${m}ms`
+    const lines: string[] = []
+    if (meta.qid) lines.push(`Question ID: ${meta.qid}`)
+    if (meta.timing?.ms != null && meta.at) lines.push(`Initiated: ${new Date(meta.at - meta.timing.ms).toLocaleString()}`)
+    if (meta.at) lines.push(`Answered: ${new Date(meta.at).toLocaleString()}`)
+    if (meta.timing?.ms != null) {
+      const sub = [meta.timing.classifyMs != null ? `classify ${fmt(meta.timing.classifyMs)}` : '', meta.timing.modelMs != null ? `model ${fmt(meta.timing.modelMs)}` : ''].filter(Boolean).join(' · ')
+      lines.push(`Took: ${fmt(meta.timing.ms)}${sub ? ` (${sub})` : ''}`)
+    }
+    if (lines.length) out.push('—\n' + lines.join('\n'))
+  }
   return out.join('\n\n')
 }
 function tableToCSV(cols: string[], rows: any[][], total?: any[]): string {
@@ -972,38 +994,136 @@ function SectionBlock({ s }: { s: any }) {
           {f.sub && <div className="s">{f.sub}</div>}
         </div>))}</div></div>
   }
-  if (s.kind === 'table') {
-    const cols: string[] = s.columns ?? []
-    const rows: any[][] = s.rows ?? []
-    const numc = numColsOf(cols, rows)
-    return <div className="sa-sec sa-tblsec">{s.title && <div className="sa-sec-title">{s.title}</div>}
-      <div className="sa-scroll"><table className="sa-fin num">
-        <thead><tr>{cols.map((c, i) => <th key={i} className={numc[i] ? 'r' : ''}>{c}</th>)}</tr></thead>
-        <tbody>{rows.map((r, ri) => (
-          <tr key={ri}>{r.map((v, ci) => (
-            <td key={ci} className={numc[ci] ? 'r fig' : ''}>{typeof v === 'number' ? v.toLocaleString() : String(v ?? '')}</td>
-          ))}</tr>))}</tbody>
-        {Array.isArray(s.total) && s.total.length > 0 && (
-          <tfoot><tr className="sa-total">{cols.map((_, i) => {
-            const v = s.total[i]
-            return <td key={i} className={numc[i] ? 'r' : ''}>{typeof v === 'number' ? v.toLocaleString() : String(v ?? '')}</td>
-          })}</tr></tfoot>)}
-      </table></div>
-      {s.note && <div className="sa-count">{s.note}</div>}</div>
-  }
+  if (s.kind === 'table') return <DataTable columns={s.columns ?? []} rows={s.rows ?? []} total={s.total} totalRows={s.totalRows} title={s.title} note={s.note} csvName={s.title} />
   return null
 }
 
-function AnswerCard({ answer: a, category, timing }: { answer: any; category?: string; timing?: { ms: number; classifyMs?: number; modelMs?: number } }) {
+// ── Codex event log — the 'events'-kind analyst view (the structured counterpart of the xterm 'pty' view) ──
+// Renders the normalized AgentEvent stream (mirror of the engine's ica/session.ts AgentEvent) the way the
+// native codex client does: command runs with collapsed output, assistant messages, reasoning, turn rules.
+// One small component per event kind; events are keyed by id so a streaming block updates itself in place.
+// 'user' is UI-synthesized (the question you asked) — the engine's stream vocabulary is the rest.
+type AgentEvent = { kind: 'command' | 'message' | 'reasoning' | 'file' | 'turn' | 'user'; id?: string; text?: string; command?: string; output?: string; status?: string; done?: boolean }
+
+// Merge one live event into the log: update the block with the same id (started→updated→completed), else append.
+function mergeEvent(evs: AgentEvent[], e: AgentEvent): AgentEvent[] {
+  if (e.id) { const i = evs.findIndex(x => x.id === e.id); if (i >= 0) { const n = evs.slice(); n[i] = e; return n } }
+  return [...evs, e]
+}
+
+// A command's output, collapsed to the first few lines with a +N-lines toggle (matches the native client).
+function CmdOutput({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  const lines = text.replace(/\s+$/, '').split('\n')
+  const CAP = 5, hidden = lines.length - CAP
+  const shown = open || hidden <= 0 ? lines : lines.slice(0, CAP)
+  return (
+    <div style={{ marginTop: 4 }}>
+      <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#8a9a8c', fontSize: 12, lineHeight: 1.5, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{shown.join('\n')}</pre>
+      {hidden > 0 && <span onClick={() => setOpen(o => !o)} style={{ cursor: 'pointer', color: '#6f8a70', fontSize: 11, userSelect: 'none' }}>{open ? '▲ show less' : `▾ +${hidden} lines`}</span>}
+    </div>
+  )
+}
+
+function CodexEvent({ e }: { e: AgentEvent }) {
+  const mono = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' as const }
+  if (e.kind === 'turn') return <div style={{ borderTop: '1px solid #263026', margin: '14px 0' }} />
+  if (e.kind === 'user') return (
+    <div style={{ margin: '16px 0 10px', paddingTop: 12, borderTop: '1px solid #263026', color: '#e7efe7', fontSize: 13.5, fontWeight: 600 }}>
+      <span style={{ color: '#6f8a70' }}>›</span> {e.text}
+    </div>
+  )
+  if (e.kind === 'command') return (
+    <div style={{ margin: '9px 0' }}>
+      <div style={{ color: '#cfe3d0', fontSize: 12.5, ...mono }}>
+        <span style={{ color: e.status === 'in_progress' ? '#c9a24a' : '#7fae7f' }}>●</span>{' '}
+        <span style={{ color: '#9db29e' }}>Ran</span> {e.command}
+      </div>
+      {e.output ? <CmdOutput text={e.output} /> : null}
+    </div>
+  )
+  if (e.kind === 'file') return (
+    <div style={{ margin: '9px 0', color: '#cfe3d0', fontSize: 12.5, ...mono }}>
+      <span style={{ color: '#7fae7f' }}>●</span> <span style={{ color: '#9db29e' }}>Edited</span> {e.text}
+    </div>
+  )
+  const muted = e.kind === 'reasoning'   // reasoning is subdued; agent_message is the prominent prose
+  return <div style={{ margin: '9px 0', color: muted ? '#8a9a8c' : '#d3e4d4', fontSize: 13, lineHeight: 1.55, fontStyle: muted ? 'italic' : 'normal' }}
+    dangerouslySetInnerHTML={{ __html: renderInlineMd(e.text ?? '') }} />
+}
+
+// Codex reasons SILENTLY before its next action (no event streams during that phase), so a turn can look
+// stuck. Show a "thinking…" line whenever the turn is busy but nothing is actively streaming (the last event
+// has completed / there's no event yet) — the fact it's working, without exposing the reasoning content.
+function ThinkingLine() {
+  const [n, setN] = useState(1)
+  useEffect(() => { const t = setInterval(() => setN(x => (x % 3) + 1), 420); return () => clearInterval(t) }, [])
+  return <div style={{ color: '#c9a24a', fontSize: 12.5, fontStyle: 'italic', margin: '9px 0' }}>◐ codex is thinking{'.'.repeat(n)}</div>
+}
+
+function CodexEventLog({ events, busy }: { events: AgentEvent[]; busy?: boolean }) {
+  const last = events[events.length - 1]
+  const streaming = !!last && last.done === false && (last.kind === 'command' || last.kind === 'message' || last.kind === 'reasoning')
+  const thinking = !!busy && !streaming   // busy but nothing actively streaming ⇒ reasoning between steps
+  if (!events.length && !thinking) return null
+  return <div>
+    {events.map((e, i) => <CodexEvent key={e.id ?? `turn${i}`} e={e} />)}
+    {thinking && <ThinkingLine />}
+  </div>
+}
+
+// The ONE table renderer — used by both the flat answer table AND each report section, so both get the same
+// features: numeric right-alignment, a total/summary footer, "show more" pagination, CSV download, and the honest
+// "N of TOTAL matching rows" count. Each instance owns its own pagination + download state.
+function DataTable({ columns, rows, total, totalRows, title, note, csvName }: {
+  columns: string[]; rows: any[][]; total?: any[]; totalRows?: number; title?: string; note?: string; csvName?: string
+}) {
+  const [shown, setShown] = useState(PAGE)
+  const [downloaded, setDownloaded] = useState(false)
+  const numc = numColsOf(columns, rows)
+  const visible = rows.slice(0, shown)
+  const doDownload = () => { downloadText(tableToCSV(columns, rows, total), `${(csvName || 'table').trim().replace(/\s+/g, '-') || 'table'}.csv`); setDownloaded(true); setTimeout(() => setDownloaded(false), 1600) }
+  return (
+    <div className="sa-tblsec">
+      {/* title + download on ONE row; the download reveals on hover (no dead space, no always-on button) */}
+      <div className="sa-tbl-head">
+        <div className="sa-sec-title">{title || ''}</div>
+        <button className="sa-ic sa-dl" onClick={doDownload} title={downloaded ? 'Downloaded' : 'Download CSV'} aria-label="Download CSV">{downloaded ? IC.check : IC.download}</button>
+      </div>
+      <div className="sa-scroll">
+        <table className="sa-fin num">
+          <thead><tr>{columns.map((c, i) => <th key={i} className={numc[i] ? 'r' : ''}>{c}</th>)}</tr></thead>
+          <tbody>{visible.map((r, ri) => (
+            <tr key={ri}>{r.map((v, ci) => (
+              <td key={ci} className={numc[ci] ? 'r fig' : ''}>{typeof v === 'number' ? v.toLocaleString() : String(v ?? '')}</td>
+            ))}</tr>))}</tbody>
+          {Array.isArray(total) && total.length > 0 && (
+            <tfoot><tr className="sa-total">{columns.map((_, i) => {
+              const v = total[i]
+              return <td key={i} className={numc[i] ? 'r' : ''}>{typeof v === 'number' ? v.toLocaleString() : String(v ?? '')}</td>
+            })}</tr></tfoot>)}
+        </table>
+      </div>
+      {shown < rows.length && (
+        <div className="sa-more" onClick={() => setShown(s => Math.min(s + PAGE, rows.length))}>Show more data ({(rows.length - shown).toLocaleString()} more)</div>
+      )}
+      <div className="sa-count">
+        {totalRows != null && totalRows > rows.length
+          ? `${rows.length.toLocaleString()} of ${totalRows.toLocaleString()} matching rows`
+          : `${rows.length.toLocaleString()} row${rows.length === 1 ? '' : 's'}`}{note ? ` · ${note}` : ''}
+      </div>
+    </div>
+  )
+}
+
+function AnswerCard({ answer: a, category, timing, qid, at }: { answer: any; category?: string; timing?: { ms: number; classifyMs?: number; modelMs?: number }; qid?: string; at?: number }) {
   ensureAnswerCSS()
   const cardRef = useRef<HTMLDivElement>(null)
   const hoverRef = useRef(false)   // is the pointer over THIS card? drives the "F = toggle fullscreen" hotkey
   const scrollYRef = useRef(0)     // page scroll captured on ENTER fullscreen, restored on EXIT (browser loses it)
   const wasFullRef = useRef(false) // was THIS card the fullscreen element last event? so only it restores scroll
   const [full, setFull] = useState(false)
-  const [shown, setShown] = useState(PAGE)
   const [copied, setCopied] = useState(false)
-  const [downloaded, setDownloaded] = useState(false)
   // Native fullscreen: the card element itself goes full screen (no portal) — the table is then crisp.
   useEffect(() => {
     const onFs = () => {
@@ -1040,22 +1160,11 @@ function AnswerCard({ answer: a, category, timing }: { answer: any; category?: s
   const figs: any[] = Array.isArray(a.figures) && a.figures.length ? a.figures
     : a.headline?.display ? [{ label: a.headline.label, display: a.headline.display, sub: a.headline.sub, value: a.headline.value, neg: a.headline.neg }]
     : []
-  const cols: string[] = a.table?.columns ?? []
-  const rows: any[][] = a.table?.rows ?? []
-  // totalRows = the TRUE count of matching rows in the data before any display cap the program applied
-  // (so we can honestly say "92 of 1,000" and never imply the returned sample is the whole set).
-  const totalRows: number | undefined = typeof a.table?.totalRows === 'number' ? a.table.totalRows : undefined
-  const isNumCol = cols.map((_, ci) => rows.length > 0 && rows.every(r => {
-    const v = r[ci]; if (v == null) return true
-    return typeof v === 'number' || (typeof v === 'string' && /^[₹$€£]?\s?-?[\d,.\s]+%?$/.test(v.trim()) && /\d/.test(v))
-  }))
-  const visible = rows.slice(0, shown)
-  const doCopy = () => { try { navigator.clipboard.writeText(answerToText(a, cat)); setCopied(true); setTimeout(() => setCopied(false), 1400) } catch { /* clipboard blocked */ } }
-  const doDownload = () => { downloadText(tableToCSV(cols, rows, a.table?.total), `${(cat || 'table').trim().replace(/\s+/g, '-') || 'table'}.csv`); setDownloaded(true); setTimeout(() => setDownloaded(false), 1600) }
+  const doCopy = () => { try { navigator.clipboard.writeText(answerToText(a, cat, { qid, at, timing })); setCopied(true); setTimeout(() => setCopied(false), 1400) } catch { /* clipboard blocked */ } }
   const toggleFull = () => { const el = cardRef.current; if (!el) return; if (document.fullscreenElement === el) document.exitFullscreen?.(); else { scrollYRef.current = window.scrollY; el.requestFullscreen?.() } }
 
   return (
-    <div ref={cardRef} className={`sa-answer num${isTerminal ? ' warn' : ''}`}
+    <div ref={cardRef} data-qid={qid} className={`sa-answer num${isTerminal ? ' warn' : ''}`}
       onMouseEnter={() => { hoverRef.current = true }} onMouseLeave={() => { hoverRef.current = false }}>
       {/* hover actions — small icon buttons, top-right (tooltips via title); always visible in fullscreen */}
       <div className="sa-actions">
@@ -1082,44 +1191,8 @@ function AnswerCard({ answer: a, category, timing }: { answer: any; category?: s
           ))}
         </div>
       )}
-      {a.table && (
-        <div className="sa-tblsec">
-          {/* download icon at the table's top-right */}
-          <div className="sa-tbar">
-            <button className="sa-ic" onClick={doDownload} title={downloaded ? 'Downloaded' : 'Download CSV'} aria-label="Download CSV">{downloaded ? IC.check : IC.download}</button>
-          </div>
-          <div className="sa-scroll">
-            <table className="sa-fin num">
-              <thead><tr>{cols.map((c, i) => <th key={i} className={isNumCol[i] ? 'r' : ''}>{c}</th>)}</tr></thead>
-              <tbody>
-                {visible.map((r, ri) => (
-                  <tr key={ri}>{r.map((v, ci) => (
-                    <td key={ci} className={isNumCol[ci] ? 'r fig' : ''}>{typeof v === 'number' ? v.toLocaleString() : String(v ?? '')}</td>
-                  ))}</tr>
-                ))}
-              </tbody>
-              {/* the agent's total/summary row — pushed in a.table.total; ALWAYS shown, even while paginated */}
-              {Array.isArray(a.table.total) && a.table.total.length > 0 && (
-                <tfoot><tr className="sa-total">{cols.map((_, i) => {
-                  const v = a.table.total[i]
-                  return <td key={i} className={isNumCol[i] ? 'r' : ''}>{typeof v === 'number' ? v.toLocaleString() : String(v ?? '')}</td>
-                })}</tr></tfoot>
-              )}
-            </table>
-          </div>
-          {/* show-more OUTSIDE the horizontal scroll → stays centred in the viewport regardless of table width */}
-          {shown < rows.length && (
-            <div className="sa-more" onClick={() => setShown(s => Math.min(s + PAGE, rows.length))}>Show more data ({(rows.length - shown).toLocaleString()} more)</div>
-          )}
-          <div className="sa-count">
-            {totalRows != null && totalRows > rows.length
-              ? `${rows.length.toLocaleString()} of ${totalRows.toLocaleString()} matching rows`
-              : `${rows.length.toLocaleString()} row${rows.length === 1 ? '' : 's'}`}
-          </div>
-        </div>
-      )}
-      {/* multi-block report: several titled sections (tables / kpis / text) stacked. Present ONLY on report-shaped
-          answers; a simple answer omits `sections` and renders the flat figs+table above exactly as before. */}
+      {/* All tabular/blocked results render through `sections` (the ONE format). The old flat top-level `table`
+          renderer was removed — the analyst now emits a `table` section even for a single table. */}
       {Array.isArray(a.sections) && a.sections.map((s: any, i: number) => <SectionBlock key={i} s={s} />)}
       {a.caveat && <div className="sa-caveat">{a.caveat}</div>}
       {a.scope && <div className="sa-src"><b>Scope:</b> {a.scope}</div>}

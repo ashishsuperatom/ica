@@ -387,6 +387,14 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         for (const v of termViewers.analyst) if (v !== reply) emit(v, m)
       },
       onNarration: (text: string) => { if (reply) emit(reply, { t: 'analyst:progress', text, sid }) },  // clean prose → New chat progress
+      // Structured events (codex/SDK harnesses only — claude PTY uses onOutput above). The session already
+      // normalizes + buffers these (session.events()); the engine just mirrors each one live to the asker and
+      // any attached viewers, same as onOutput. Reconnect replay is handled in resyncAnalyst via events().
+      onEvent: (ev) => {
+        const m = { t: 'analyst:event', ev, sid }
+        if (reply) emit(reply, m)
+        for (const v of termViewers.analyst) if (v !== reply) emit(v, m)
+      },
     }
     const r = await analyst.ask(question, handlers, { qid, modify: modifyTarget ?? undefined })
     console.log(`[ica] analyst · ${r.category} · ${(r.ms / 1000).toFixed(1)}s · status=${r.answer?.status ?? 'no-json'}`)
@@ -461,9 +469,8 @@ async function buildSemanticModel(from: any) {
   emit(from, { t: 'semantic:status', text: `Building semantic model — sources: ${sources.join(', ') || '(none)'}` })
   try {
     const semantic = await semanticSlot.get()
-    const r = await semantic.buildFirstPass({
-      onOutput: (chunk) => emit(from, { t: 'semantic:chunk', text: chunk }),   // raw claude terminal → "Semantic model" panel
-    })
+    announceKind('semantic', from, semantic)   // tell the panel which renderer: 'pty' (claude) or 'events' (codex)
+    const r = await semantic.buildFirstPass(agentStream('semantic', from))
     emit(from, { t: 'semantic:done', summary: r.lastLines })
     console.log(`[ica] semantic build done in ${(r.ms / 1000).toFixed(1)}s`)
   } catch (e: any) {
@@ -479,11 +486,11 @@ async function handleGrounding(from: any) {
   if (groundingBusy) { emit(from, { t: 'grounding:status', text: 'Grounding build already running.' }); return }
   groundingBusy = true
   const sources = await listSources()
-  emit(from, { t: 'grounding:stream', kind: 'pty' })
   emit(from, { t: 'grounding:status', text: `Building grounding indexes — sources: ${sources.join(', ') || '(none)'}` })
   try {
     const grounding = await groundingSlot.get()
-    const r = await grounding.build({ onOutput: (chunk) => emit(from, { t: 'grounding:chunk', text: chunk }) })
+    announceKind('grounding', from, grounding)   // real session kind (grounding may be codex now, not always pty)
+    const r = await grounding.build(agentStream('grounding', from))
     emit(from, { t: 'grounding:done', summary: r.note })
     console.log(`[ica] grounding build done in ${(r.ms / 1000).toFixed(1)}s`)
   } catch (e: any) {
@@ -503,11 +510,11 @@ async function handleConnector(text: string, from: any) {
   if (!text.trim()) return
   if (connectorBusy) { emit(from, { t: 'connector:status', text: 'The connector is busy — one message at a time.' }); return }
   connectorBusy = true
-  emit(from, { t: 'connector:stream', kind: 'pty' })          // the admin UI renders this as a terminal (xterm)
   emit(from, { t: 'connector:status', text: 'Working…' })
   try {
     const connector = await connectorSlot.get()
-    const r = await connector.ask(text, { onOutput: (chunk) => emit(from, { t: 'connector:chunk', text: chunk }) })
+    announceKind('connector', from, connector)   // real session kind: 'pty' (claude) or 'events' (codex)
+    const r = await connector.ask(text, agentStream('connector', from))
     console.log(`[ica] connector · ${(r.ms / 1000).toFixed(1)}s`)
   } catch (e: any) {
     emit(from, { t: 'connector:status', text: `Connector failed: ${e?.message ?? e}` })
@@ -525,6 +532,16 @@ type Which = 'analyst' | 'semantic' | 'connector' | 'grounding'
 const normWhich = (w: any): Which => (w === 'connector' ? 'connector' : w === 'grounding' ? 'grounding' : w === 'semantic' ? 'semantic' : 'analyst')
 const slotFor = (w: Which) => (w === 'connector' ? connectorSlot : w === 'grounding' ? groundingSlot : w === 'semantic' ? semanticSlot : analystSlot)
 const termChunkT = (w: Which) => (w === 'connector' ? 'connector:chunk' : w === 'grounding' ? 'grounding:chunk' : w === 'semantic' ? 'semantic:chunk' : 'analyst:chunk')
+
+// Standard streaming for the from-based agent flows (semantic/connector/grounding): forward BOTH the harness's
+// text chunks (the pty view) AND its structured events (the codex/events view) to the requester, tagged by agent.
+// The console renders per the kind we announce with `<w>:stream` — which is the SESSION's real kind, so a codex
+// agent gets the event view and a claude agent gets the terminal, with no per-flow hardcoding.
+const agentStream = (w: Which, from: any): RunHandlers => ({
+  onOutput: (chunk) => emit(from, { t: `${w}:chunk`, text: chunk }),
+  onEvent: (ev) => emit(from, { t: `${w}:event`, ev }),
+})
+const announceKind = (w: Which, from: any, agent: any) => emit(from, { t: `${w}:stream`, kind: agent?.session?.kind ?? 'events' })
 const isAgentBusy = (w: Which) => (w === 'connector' ? connectorBusy : w === 'grounding' ? groundingBusy : w === 'semantic' ? semanticBusy : analystBusy)
 const termViewers: Record<Which, Set<any>> = { analyst: new Set(), semantic: new Set(), connector: new Set(), grounding: new Set() }
 const termUnsub: Record<Which, (() => void) | null> = { analyst: null, semantic: null, connector: null, grounding: null }
@@ -532,8 +549,16 @@ async function attachTerminal(w: Which, from: any) {
   termViewers[w].add(from)
   const agent = await slotFor(w).get()
   const t = termChunkT(w)
-  emit(from, { t: 'term:stream', which: w, kind: 'pty' })
-  emit(from, { t, text: agent.session.buffer?.() ?? '', replace: true })    // replay the current screen (incl. any login prompt)
+  const kind = agent.session.kind ?? 'events'
+  emit(from, { t: 'term:stream', which: w, kind })                          // the REAL kind (was hardcoded 'pty')
+  if (kind === 'events') {
+    // codex/SDK: replay the structured EVENT LOG (the last turns' work) — the text buffer + raw byte passthrough
+    // don't apply. So a reload shows the previous events, just like claude's screen replay below.
+    const evs = agent.session.events?.() ?? []
+    if (evs.length) emit(from, { t: `${w}:events`, events: evs, replace: true })
+    return
+  }
+  emit(from, { t, text: agent.session.buffer?.() ?? '', replace: true })    // claude (pty): replay the current screen (incl. any login prompt)
   if (!termUnsub[w] && agent.session.onRaw) {
     termUnsub[w] = agent.session.onRaw((d: string) => {
       if (isAgentBusy(w)) return                                             // during a run, the per-run stream already feeds output
@@ -619,9 +644,16 @@ function resyncAnalyst(from: any) {
   emit(from, { t: 'sessions:res', sessions: [] })   // UI keeps its own chat list (localStorage); this is just the ack
   const aSession = analystSlot.session(), sSession = semanticSlot.session()
   if (!aSession) return
-  const buf = aSession.buffer()
-  emit(from, { t: 'analyst:stream', kind: aSession.kind ?? 'events' })     // tell the reconnecting UI which renderer to use
-  if (buf) emit(from, { t: 'analyst:chunk', text: buf, replace: true })   // repaint the analyst terminal / event log
+  const kind = aSession.kind ?? 'events'
+  emit(from, { t: 'analyst:stream', kind })                               // tell the reconnecting UI which renderer to use
+  // Repaint from the matching replay buffer: 'events' → the structured event log; 'pty' → the rolling text.
+  if (kind === 'events' && aSession.events) {
+    const evs = aSession.events()
+    if (evs.length) emit(from, { t: 'analyst:events', events: evs, replace: true })
+  } else {
+    const buf = aSession.buffer()
+    if (buf) emit(from, { t: 'analyst:chunk', text: buf, replace: true })
+  }
   if (sSession) {                                                          // repaint the semantic terminal too (e.g. mid gap-fill)
     const sbuf = sSession.buffer()
     if (sbuf) emit(from, { t: 'semantic:chunk', text: sbuf, replace: true })

@@ -9,16 +9,18 @@
     "smoke": "tsx smoke.ts"
   },
   "dependencies": {
-    "@superatom/node-store": "workspace:*",
-    "@superatom/scaffold": "workspace:*",
-    "@superatom/introspect": "workspace:*",
-    "@superatom/grounding": "workspace:*",
     "@earendil-works/pi-agent-core": "^0.78.0",
     "@earendil-works/pi-ai": "^0.78.0",
     "@earendil-works/pi-coding-agent": "^0.78.0",
     "@openai/codex": "^0.144.0",
     "@openai/codex-sdk": "^0.144.4",
     "@opencode-ai/sdk": "^1.18.0",
+    "@superatom/grounding": "workspace:*",
+    "@superatom/introspect": "workspace:*",
+    "@superatom/node-store": "workspace:*",
+    "@superatom/scaffold": "workspace:*",
+    "@xterm/addon-serialize": "^0.14.0",
+    "@xterm/headless": "^6.0.0",
     "node-pty": "^1.0.0",
     "opencode-ai": "^1.18.0",
     "ws": "^8.18.0"

@@ -8,6 +8,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import type { Hub } from './hub'
+import { CodexEventLog, mergeEvent, type AgentEvent } from './CodexEventLog'   // codex (events-kind) view
 
 // Uses the ONE shared project hub (from ProjectDetailPage) — it opens NO socket of its own.
 export function ConnectorConsole({ hub }: { hub: Hub }) {
@@ -18,6 +19,10 @@ export function ConnectorConsole({ hub }: { hub: Hub }) {
   const status = hub.status
   const [busy, setBusy] = useState(false)
   const [input, setInput] = useState('')
+  // The connector agent may run on claude (pty → xterm) OR codex (events → CodexEventLog). The engine tells us
+  // which via connector:stream; we render accordingly. Input works for both (connector:ask runs a turn).
+  const [streamKind, setStreamKind] = useState<'pty' | 'events'>('pty')
+  const [events, setEvents] = useState<AgentEvent[]>([])
 
   // Open a live, typeable terminal into the connector's PTY (raw keystrokes + full output stream). This is how
   // the admin runs `/login` directly in the browser — no SSH, copy/paste works. Auth is shared across all the
@@ -53,6 +58,9 @@ export function ConnectorConsole({ hub }: { hub: Hub }) {
     setTimeout(() => { sendResize(); attach() }, 0)   // size the PTY + open the live terminal stream
     return hub.subscribe((m) => {
       if (m?.t === 'welcome') setTimeout(() => { sendResize(); attach() }, 0)   // reconnect → re-attach
+      else if (m?.t === 'connector:stream') setStreamKind(m.kind === 'pty' ? 'pty' : 'events')
+      else if (m?.t === 'connector:event') setEvents((e) => mergeEvent(e, m.ev))       // codex structured event (live)
+      else if (m?.t === 'connector:events') setEvents(m.events ?? [])                  // codex event-log replay (reconnect)
       else if (m?.t === 'connector:chunk') { if (m.replace) termRef.current?.clear(); termRef.current?.write(m.text ?? '') }
       else if (m?.t === 'connector:status' && m.text) termRef.current?.writeln(`\r\n\x1b[2m— ${m.text}\x1b[0m`)
       else if (m?.t === 'connector:done') setBusy(false)
@@ -61,7 +69,8 @@ export function ConnectorConsole({ hub }: { hub: Hub }) {
 
   const send = (text: string) => {
     if (!text.trim()) return
-    termRef.current?.writeln(`\r\n\x1b[36m❯ ${text}\x1b[0m`)   // echo the admin's message
+    if (streamKind === 'events') setEvents((e) => [...e, { kind: 'user', text }])   // codex: the message as a user turn
+    else termRef.current?.writeln(`\r\n\x1b[36m❯ ${text}\x1b[0m`)                     // claude: echo into the terminal
     setBusy(true)
     hub.send({ to: { type: 'code-engine' }, payload: { t: 'connector:ask', text, reqId: Math.random().toString(36).slice(2) } })
   }
@@ -75,7 +84,11 @@ export function ConnectorConsole({ hub }: { hub: Hub }) {
         </div>
         <span className="muted" style={{ fontSize: 12 }}>{status === 'live' ? 'connected' : status}</span>
       </div>
-      <div ref={elRef} style={{ flex: 1, minHeight: 0, background: '#0d0f0d', borderRadius: 10, padding: '8px 10px', overflow: 'hidden' }} />
+      <div style={{ flex: 1, minHeight: 0, background: '#0d0f0d', borderRadius: 10, padding: '8px 10px', overflow: 'auto' }}>
+        {/* pty (claude) → xterm, kept mounted so its buffer survives; events (codex) → the structured log */}
+        <div ref={elRef} style={{ height: '100%', display: streamKind === 'pty' ? 'block' : 'none' }} />
+        {streamKind === 'events' && <CodexEventLog events={events} busy={busy} />}
+      </div>
       <form className="row" style={{ gap: 8 }} onSubmit={(e) => { e.preventDefault(); if (!input.trim()) return; send(input); setInput('') }}>
         <input className="input" style={{ flex: 1 }} value={input} onChange={(e) => setInput(e.target.value)}
           placeholder={status === 'live' ? 'Ask the connector agent…' : 'Connecting…'}
