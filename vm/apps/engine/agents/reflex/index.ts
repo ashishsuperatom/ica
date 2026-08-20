@@ -97,9 +97,10 @@ export function createReflex(opts: ReflexOpts) {
   let session: Session | null = null
 
   /**
-   * Question (+ the program catalog) → intent coordinate, with an optional reuse pick. Stateless: each call
-   * is one fresh turn. The catalog is what makes the reuse decision GROUNDED in what actually exists — the
-   * agent reads the real programs, it doesn't guess against a blind index.
+   * Question (+ the program catalog) → intent coordinate, with an optional reuse pick. Each call is a turn on
+   * the ONE reused session (stateful — context carries across questions; a future per-user split + top-trim is
+   * planned). The catalog is what makes the reuse decision GROUNDED in what actually exists — the agent reads
+   * the real programs, it doesn't guess against a blind index.
    */
   async function coordinate(question: string, catalog: ProgramEntry[] = [], vocab?: string): Promise<IntentCoordinate> {
     const system = reflexPrompt()   // fresh each turn → an edited override goes live without a restart
@@ -124,7 +125,7 @@ export function createReflex(opts: ReflexOpts) {
    * Look at a reused program's ANSWER and decide whether it genuinely answers the question, or should be
    * handed to the analyst. This is the missing feedback edge: a reused program can run cleanly and still not
    * answer (stale interpretation, a name that now resolves to two things, an empty result). The reflex owns
-   * whether the answer is real. Stateless one-shot; fail-open handled by the caller (a review error must not
+   * whether the answer is real. One turn on the reused session; fail-open handled by the caller (a review error must not
    * take down the fast path).
    */
   async function review(question: string, answer: any): Promise<ReviewVerdict> {
