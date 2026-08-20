@@ -1,3 +1,5 @@
+<!-- GENERATED — edit the generate-*.ts source, not this .md. -->
+
 ### SIMPLE LOOKUP
 
 One fact about one named entity. Resolve the name to its id in the model/data first (values can have

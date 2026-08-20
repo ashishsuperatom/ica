@@ -1,3 +1,5 @@
+<!-- GENERATED — edit the generate-*.ts source, not this .md. -->
+
 ### COUNTERFACTUAL ("what if")
 
 A hypothetical — recompute a real figure under a changed assumption. The value is in showing the WORKING,

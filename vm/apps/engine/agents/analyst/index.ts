@@ -6,6 +6,7 @@
 // It shares the SEMANTIC MODEL's workspace (same projectId dir): the model lives in ./db/project.sqlite
 // and units accumulate in ./units/ — so a calculation is defined once and reused across questions.
 
+import './generate-system.js'   // FIRST: (re)writes system/*.md from generate-system.ts before they're read below
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { loadPrompt } from '../../prompts.js'
 import { join, dirname } from 'node:path'

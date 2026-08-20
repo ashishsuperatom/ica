@@ -1,3 +1,5 @@
+<!-- GENERATED — edit the generate-*.ts source, not this .md. -->
+
 # How you deliver an answer: BUILD A PROGRAM
 
 Your deliverable is not a hand-written answer — it is a **program** that computes the answer, plus the

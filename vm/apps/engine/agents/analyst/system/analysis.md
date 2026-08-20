@@ -1,3 +1,5 @@
+<!-- GENERATED — edit the generate-*.ts source, not this .md. -->
+
 ### ANALYSIS (open-ended)
 
 Multi-step and needs judgement. Plan the steps briefly, compute each piece from the model (reuse
