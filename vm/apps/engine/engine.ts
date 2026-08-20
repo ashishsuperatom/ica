@@ -431,10 +431,12 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     const savedNorm = modifyTarget && curNode ? (((curNode.props as any)?.question as string) ?? norm) : norm
     answers.save({ qid, sessionId: sid, question: savedQ, norm: savedNorm, category: r.category, status: r.answer?.status ?? 'error', answer: r.answer, createdAt: Date.now(), finishedAt: Date.now(), programDir: programDir ?? modifyTarget?.programDir, params: programParams })
     // ── INTENT GRAPH ──
+    let builtIntentId: string | undefined
     if (modifyTarget && curNode) {
       // MODIFY: update the CURRENT node's program IN PLACE — no new node, no new edge, position unchanged.
       // rawAnalysis (r.lastLines) intentionally NOT stored — it's a garbled TUI snapshot with little value; re-enable here if reworked.
       graph.putNode({ ...curNode, props: { ...(curNode.props as any), program: programDir ?? modifyTarget.programDir, params: programParams, category: r.category } })
+      builtIntentId = curNode.id
       console.log(`[ica] modified node ${pos.slice(0, 14)} in place · program ${programDir ?? modifyTarget.programDir}`)
     } else {
       // The ANALYST places its own node: built.json.parent = 'root' (a new topic under ROOT) or a prior intent's
@@ -446,10 +448,24 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       graph.putNode({ id: nodeId, kind: 'intent', label: question.slice(0, 80), summary: question,
         // rawAnalysis (r.lastLines) intentionally NOT stored — garbled TUI snapshot, low value; re-enable here if reworked.
         props: { question: norm, category: r.category, program: programDir, params: programParams, terms: programTerms, orchParams: coord?.params ?? [] } })
+      builtIntentId = nodeId
       graph.putEdge({ from: parent, to: nodeId, type: 'follow_up' })
       if (coord?.axes?.length) linkBasis(graph, nodeId, coord.axes)   // grow the basis space for reuse
       setPosition(sid, nodeId)
       console.log(`[ica] intent node ${nodeId.slice(0, 14)} under ${parent === ROOT ? 'ROOT' : parent.slice(0, 14)} (${analystParent ? 'analyst-placed' : 'positional'})${programDir ? ` · program ${programDir}` : ' · no program'}`)
+    }
+    // PROGRAM NODE — the program's OWN identity in the DB (kind:'program'), distinct from the question/intent
+    // node. props.dir is the pointer to where the program lives; props.authoredBy records WHO wrote it —
+    // engine-known and deterministic (never the LLM). Stamped ONLY here, on the analyst build/edit path —
+    // never on reuse (reuse is captured separately in program_runs). Upserted by slug, so reuse/rebuild dedupe
+    // to one node. Additive: the intent node keeps props.program, so the reflex catalog is unaffected.
+    const authoredProgramDir = programDir ?? modifyTarget?.programDir
+    if (authoredProgramDir && builtIntentId) {
+      const slug = authoredProgramDir.replace(/^programs\//, '')
+      const authoredBy = { harness: ANALYST_HARNESS, provider: process.env.ICA_ANALYST_PROVIDER || null, model: ANALYST_MODEL ?? null, at: Date.now() }
+      graph.putNode({ id: `prog:${slug}`, kind: 'program', label: slug, summary: authoredProgramDir,
+        props: { dir: authoredProgramDir, authoredBy, category: r.category } })
+      graph.putEdge({ from: builtIntentId, to: `prog:${slug}`, type: 'program' })
     }
     // No explicit wake needed — the always-running consolidation timer picks this up on its next tick. That
     // is deliberate: the timer, not this signal, is the guarantee (it survives restarts and missed signals).
