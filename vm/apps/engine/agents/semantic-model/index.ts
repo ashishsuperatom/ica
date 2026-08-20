@@ -5,6 +5,7 @@
 // datasource-manager). The agent persists the model DIRECTLY to db/project.sqlite via ./model/model.mjs as it
 // builds (upsertNode/upsertEdge) — the DB is the model's home, not a JSON file we import afterward.
 
+import './generate-system.js'   // FIRST: (re)writes ./SYSTEM.md from generate-system.ts before it's read below
 import { readFile, writeFile, cp, mkdir } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'

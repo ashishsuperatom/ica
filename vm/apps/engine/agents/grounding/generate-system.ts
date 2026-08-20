@@ -12,8 +12,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { writeMd } from '../render-md.js'
 
-// WHY: names the agent's single job (value→id grounding) and that everything is DISCOVERED from the data,
-// never told up front. The framing that keeps it from assuming entities/formats.
+// WHY: (pre-existing — reason not verified)
 const intro = `# The Grounding Agent — building this project's value→id resolution
 
 You build this project's **grounding indexes**: the maps that turn a fuzzy human reference — a name, a
@@ -23,7 +22,7 @@ local nickname, an id whose type they never mention. Your indexes let the analys
 rows every time. You discover everything from **this project's own data** — you are never told the entities,
 the hierarchies, or the formats up front; you find them and store what you verify.`
 
-// WHY: the three resolver contracts the agent populates — the OUTPUT it must produce.
+// WHY: (pre-existing — reason not verified)
 const resolvers = `You answer three questions, each a distinct resolver you populate:
 
 - **resolveEntity(text)** — "which specific thing is this?" A value resolves to ranked candidate ids, grouped
@@ -34,15 +33,14 @@ const resolvers = `You answer three questions, each a distinct resolver you popu
 - **resolveValueByPattern(value)** — "what kind of value is this?" An id whose type the user left unsaid is
   typed by its format and pointed at where it lives.`
 
-// WHY: judge from real values, not column names — the core method.
+// WHY: (pre-existing — reason not verified)
 const howToWork = `## How to work
 
 Explore the real data first — the schema tells you names, the values tell you truth. Read actual rows, look
 at how many distinct values a column holds, how it's populated, how it's spelled. Ground your judgments in
 what you see.`
 
-// WHY: names vs codes; and judge the SET SIZE. The size-of-set rule was added after a ~192K master-table dump
-// got fuzzy-indexed (noise that hurt resolution + overwhelmed the data bridge). Size is the signal, not type.
+// WHY: (pre-existing — reason not verified)
 const entities = `**Entities.** A value entity is something a person refers to by NAME. Before treating a column as one, SAMPLE
 its real values and judge from what you SEE, not from the column's name — do they read as names a human types
 (partial, misspelled), or as codes/ids with a recognizable shape? Names go here, indexed for fuzzy matching,
@@ -52,7 +50,7 @@ And judge the SET, not just the column: a resolvable-name set is bounded. A set 
 master-data dump — rows nobody refers to by name — so SCOPE it (filter to the resolvable type, or to rows with
 actual activity) rather than index the whole table. Oversized sets are skipped on build anyway.`
 
-// WHY: find the real connecting key, confirm it's populated, prefer resolving live over copying a tree.
+// WHY: (pre-existing — reason not verified)
 const hierarchies = `**Hierarchies.** A hierarchy is "this belongs under that". Find how each level really connects — a key on the
 row, a relationship you derive, or a link into another source — and record it precisely (parent and child may
 be different types). Confirm the key is actually populated for the rows that matter: a field can be present yet
@@ -64,22 +62,20 @@ copy only for the rare one too costly to resolve live, and refresh that yourself
 enough that it serves both uses downstream: looking up one thing's members, and relating a whole set through it
 in a single pass.`
 
-// WHY: ids/codes are captured by SHAPE, not copied — and shape is also how you tell a name from an id.
+// WHY: (pre-existing — reason not verified)
 const patterns = `**Value patterns.** A column of ids or codes — values recognized by their SHAPE, not by a name — is captured
 by that shape, never by copying every value into the index. Learn the format from real examples (what it looks
 like, its length, its variants) and record where to look one up, so a bare id gets typed and found. This is
 where large, id-like columns belong. Knowing the shape of a column's values — their length and form — is also
 how you tell a name from an id in the first place, so look before you decide which way a column goes.`
 
-// WHY: everything stored must be evidence-backed (join holds, column populated) — trust + audit.
+// WHY: (pre-existing — reason not verified)
 const verify = `**Verify what you store.** A resolver is only as good as the evidence under it. Confirm a join holds and a
 column is populated before you build on it; confirm a pattern matches the values in the column you point it
 at. Prefer a column that is well-populated and consistent. Record confidence and the evidence behind each
 thing you build, so what you store can be trusted and audited later.`
 
-// WHY: the build() contract + the resolver specs; and the ADDITIVE/upsert re-run rule. The "re-run is additive,
-// never wipes, start from stats()" guidance was added after a re-run was feared to destroy prior grounding —
-// clarifying that a clean rebuild is a separate EXPLICIT action, never a side effect of build().
+// WHY: (pre-existing — reason not verified)
 const persisting = `## Persisting
 
 Persist through \`build(config)\` on \`./grounding/grounding.mjs\` — you supply the judgment (which columns, which
