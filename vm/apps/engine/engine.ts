@@ -54,17 +54,26 @@ const DATA_ROOT = process.env.ENGINE_DATA_DIR ?? STATE_ROOT              // answ
 const WORKSPACE = join(WORKSPACE_ROOT, PROJECT)   // the project's home: seams + programs/ + out/ + its DBs
 const KEY = process.env.ICA_KEY || ''
 const HARNESS = (process.env.ICA_HARNESS as Harness) || 'opencode'   // read AFTER .env is loaded
-// Per-agent harness + model, from .env — so switching needs NO source change. Unset → the agent's own
-// default (claude-code:sonnet-5). To flip the analyst to codex: ICA_ANALYST_HARNESS=codex and
-// ICA_ANALYST_MODEL=gpt-5.6-terra in .env, then restart. Same knobs for the modeler (ICA_SEMANTIC_*).
-const ANALYST_HARNESS  = (process.env.ICA_ANALYST_HARNESS  as Harness) || 'claude-code'
-const ANALYST_MODEL    = process.env.ICA_ANALYST_MODEL     || 'claude-sonnet-5'
-const SEMANTIC_HARNESS = (process.env.ICA_SEMANTIC_HARNESS as Harness) || 'claude-code'
-const SEMANTIC_MODEL   = process.env.ICA_SEMANTIC_MODEL    || 'claude-sonnet-5'
-const CONNECTOR_HARNESS = (process.env.ICA_CONNECTOR_HARNESS as Harness) || 'claude-code'
-const CONNECTOR_MODEL   = process.env.ICA_CONNECTOR_MODEL   || 'claude-sonnet-5'
-const GROUNDING_HARNESS = (process.env.ICA_GROUNDING_HARNESS as Harness) || 'claude-code'
-const GROUNDING_MODEL   = process.env.ICA_GROUNDING_MODEL   || 'claude-sonnet-5'
+// ONE fleet switch for the four WORK agents (analyst/semantic/connector/grounding): ICA_AGENT_HARNESS =
+// claude-code | codex | opencode picks the brain for ALL of them, and each agent's MODEL is INHERITED from
+// that harness (claude-code→claude-sonnet-5, codex→gpt-5.6-terra) — you don't set a model. Any single agent
+// can still be pinned with ICA_<AGENT>_HARNESS / _MODEL, which wins. Reflex is independent (own opencode-go).
+const HARNESS_MODEL: Partial<Record<Harness, string>> = { 'claude-code': 'claude-sonnet-5', codex: 'gpt-5.6-terra' }
+const FLEET_HARNESS = (process.env.ICA_AGENT_HARNESS as Harness) || 'claude-code'
+const FLEET_MODEL   = process.env.ICA_AGENT_MODEL     // optional: force a model for the fleet harness (rarely needed)
+// Resolve one agent: its own harness override → the fleet harness; its model override → the fleet model (only
+// when it shares the fleet's harness) → the harness's own default model.
+const agentCfg = (name: string): { harness: Harness; model: string | undefined } => {
+  const harness = (process.env[`ICA_${name}_HARNESS`] as Harness) || FLEET_HARNESS
+  const model = process.env[`ICA_${name}_MODEL`]
+    || (harness === FLEET_HARNESS ? FLEET_MODEL : undefined)
+    || HARNESS_MODEL[harness]
+  return { harness, model }
+}
+const { harness: ANALYST_HARNESS,   model: ANALYST_MODEL }   = agentCfg('ANALYST')
+const { harness: SEMANTIC_HARNESS,  model: SEMANTIC_MODEL }  = agentCfg('SEMANTIC')
+const { harness: CONNECTOR_HARNESS, model: CONNECTOR_MODEL } = agentCfg('CONNECTOR')
+const { harness: GROUNDING_HARNESS, model: GROUNDING_MODEL } = agentCfg('GROUNDING')
 // Where the connector agent writes bridges (shared with the datasource-manager, which loads them by absolute
 // path). Defaults to the project's COMMITTED inputs folder so connector-written bridges land beside any
 // hand-authored ones (one place, no duplicate); on Fly override via env to the mounted volume.
