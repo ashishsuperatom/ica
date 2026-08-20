@@ -349,7 +349,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   const curNode = pos !== ROOT ? graph.getNode(pos) : null
   const curQ = curNode ? ((curNode.props as any)?.question ?? curNode.summary) : undefined
   let coord: any = null
-  let closestHint: { program: string; relation: string } | undefined   // reflex's CLOSE-but-not-matching program → a pointer for the analyst
+  let overlapHint: { program: string; relation: string } | undefined   // reflex's superset/subset program → a pointer for the analyst
   let modifyTarget: { programDir: string; prevQuestion?: string } | null = null
   if (explicitEdit) {
     // The user explicitly prefixed "edit:"/"modify:" — edit the current node's program in place; if there's
@@ -365,8 +365,8 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     try {
       const route = await reflex.route(graph, question)
       coord = route.coordinate
-      if (route.decision === 'build') closestHint = route.closest
-      console.log(`[ica] reflex: ${route.decision} · ${(coord.axes ?? []).map((a: any) => `${a.type}:${a.token}`).join(' ')}${closestHint ? ` · closest ${closestHint.relation} ${closestHint.program}` : ''}`)
+      if (route.decision === 'build') overlapHint = route.overlap
+      console.log(`[ica] reflex: ${route.decision} · ${(coord.axes ?? []).map((a: any) => `${a.type}:${a.token}`).join(' ')}${overlapHint ? ` · ${overlapHint.relation} ${overlapHint.program}` : ''}`)
       if (route.decision === 'reuse' && existsSync(join(WORKSPACE, route.program, 'program.ts'))) {
         const cat = (graph.getNode(route.intentId)?.props as any)?.category ?? 'analysis'
         if (await reuseProgram(route.program, route.params, cat, { sid, qid, question, norm, t0, nodeId: route.intentId })) return
@@ -407,7 +407,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         for (const v of termViewers.analyst) if (v !== reply) emit(v, m)
       },
     }
-    const hint = closestHint ? `Reflex found a close existing program: ${closestHint.program} (a ${closestHint.relation} of this question). Open it and reuse what fits, or ignore it.` : undefined
+    const hint = overlapHint ? `An existing program is a ${overlapHint.relation} of this question: ${overlapHint.program}. Open it and reuse what fits, or ignore it.` : undefined
     const r = await analyst.ask(question, handlers, { qid, modify: modifyTarget ?? undefined, hint })
     console.log(`[ica] analyst · ${r.category} · ${(r.ms / 1000).toFixed(1)}s · status=${r.answer?.status ?? 'no-json'}`)
 

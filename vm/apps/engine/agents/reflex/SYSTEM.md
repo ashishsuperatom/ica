@@ -7,7 +7,7 @@ reply to the user yourself — not even to a greeting; that goes to the analyst 
 question AND the list of programs that already exist (the catalog, provided below each turn), is to decide
 between exactly TWO options:
 
-- **REUSE** — one of the existing programs already computes THIS question (the same computation; the literal
+- **REUSE** — one of the existing programs already answers THIS question (the same intent; the literal
   values may differ). Pick it, and fill in THIS question's values in the same param shape. The SAME question
   asked again is always a REUSE — it re-runs the existing program against current data.
 - **BUILD** — nothing in the catalog fits. Route it to the analyst (which will build a new program).
@@ -32,19 +32,19 @@ Respond with STRICT JSON only — no prose, no code fences, no tool calls:
   "reuse":  { "intentId": "<id of the matching program from the catalog>", "params": { "<program's param keys>": <this question's values> } },
   "basis":  [ { "type": "<axis type>", "token": "<axis value>", "text": "<the span it came from>" } ],
   "params": [ { "role": "<what it fills>", "text": "<the span>", "type": "id|name|date|window|number", "value": <structured value, optional> } ],
-  "closest": { "intentId": "<a program that is a strict superset/subset of this question>", "relation": "superset" | "subset" }
+  "superset": "<optional: intentId of a program whose intent INCLUDES this question>",
+  "subset":   "<optional: intentId of a program that is a narrower PART of this question>"
 }
 ```
 
 **Omit `reuse` entirely** when no catalog program computes this question — that routes it to build. Only
-include `reuse` when you are confident it is the SAME computation; when in doubt, omit it and let the analyst
+include `reuse` when you are confident it is the SAME intent; when in doubt, omit it and let the analyst
 build. The `reuse.params` must use the SAME KEYS as the matched program's `params` shown in the catalog,
 carrying THIS question's values.
 
-When an existing program is a strict `superset` (answers a broader question that INCLUDES this one) or a
-`subset` (answers a narrower PART of this one) — not the same scope — don't reuse it: omit `reuse` and put
-its intentId + relation in `closest`, a pointer the analyst can reuse or ignore. Only for a real
-superset/subset, never a merely similar question.
+If an existing program's intent is a strict `superset` of this question (broader — it INCLUDES this one),
+put its intentId in `superset`; if a strict `subset` (a narrower PART of this one), put it in `subset`.
+Only for a real superset/subset, never a merely similar question.
 
 ## How to choose basis axes
 

@@ -51,7 +51,7 @@ export type IntentCoordinate = {
   axes: ReturnType<typeof basisFromPairs>     // normalised, de-duped, canonical ids (feed straight to linkBasis)
   params: Param[]
   reuse?: { intentId: string; params: Record<string, unknown> }   // the agent's pick from the catalog (+ this question's values), when a program already computes it
-  closest?: { intentId: string; relation: string }   // a CLOSE-but-not-matching program (superset/subset) — a pointer for the analyst to reuse or ignore
+  overlap?: { intentId: string; relation: 'superset' | 'subset' }   // an existing program whose intent is a strict superset/subset of this question — a pointer for the analyst
   ms: number
   raw: string                                 // the model's raw text (for debugging a bad parse)
 }
@@ -80,7 +80,7 @@ function extractJson(s: string): any {
  * "modify" — editing an answer is deterministic and engine-side (only on an explicit `edit:`/`modify:` prefix). */
 export type Route =
   | { decision: 'reuse'; intentId: string; program: string; params: Record<string, unknown>; coordinate: IntentCoordinate }
-  | { decision: 'build'; coordinate: IntentCoordinate; closest?: { program: string; relation: string } }
+  | { decision: 'build'; coordinate: IntentCoordinate; overlap?: { program: string; relation: string } }
 
 // Render the catalog for the prompt: id + question + the program's param shape, so the agent can pick a
 // match and fill THIS question's values into the same shape.
@@ -114,10 +114,10 @@ export function createReflex(opts: ReflexOpts) {
     const reuse = parsed.reuse && typeof parsed.reuse.intentId === 'string'
       ? { intentId: parsed.reuse.intentId, params: (parsed.reuse.params && typeof parsed.reuse.params === 'object') ? parsed.reuse.params : {} }
       : undefined
-    const closest = parsed.closest && typeof parsed.closest.intentId === 'string'
-      ? { intentId: parsed.closest.intentId, relation: String(parsed.closest.relation ?? 'related') }
+    const overlap = typeof parsed.superset === 'string' ? { intentId: parsed.superset, relation: 'superset' as const }
+      : typeof parsed.subset === 'string' ? { intentId: parsed.subset, relation: 'subset' as const }
       : undefined
-    return { basis, axes: basisFromPairs(basis), params, reuse, closest, ms: Date.now() - t0, raw: lastLines }
+    return { basis, axes: basisFromPairs(basis), params, reuse, overlap, ms: Date.now() - t0, raw: lastLines }
   }
 
   /**
@@ -155,13 +155,13 @@ export function createReflex(opts: ReflexOpts) {
         if (props?.program) return { decision: 'reuse', intentId: coord.reuse.intentId, program: props.program, params: coord.reuse.params, coordinate: coord }
         // The agent named an intent that no longer has a program → ignore the pick and build.
       }
-      // A CLOSE-but-not-matching program → resolve its intentId to a program path and hand it to the analyst.
-      let closest: { program: string; relation: string } | undefined
-      if (coord.closest) {
-        const prog = (store.getNode(coord.closest.intentId)?.props as any)?.program
-        if (prog) closest = { program: prog, relation: coord.closest.relation }
+      // A strict superset/subset program → resolve its intentId to a program path and hand it to the analyst.
+      let overlap: { program: string; relation: string } | undefined
+      if (coord.overlap) {
+        const prog = (store.getNode(coord.overlap.intentId)?.props as any)?.program
+        if (prog) overlap = { program: prog, relation: coord.overlap.relation }
       }
-      return { decision: 'build', coordinate: coord, closest }
+      return { decision: 'build', coordinate: coord, overlap }
     },
     stop() { session?.stop() },
   }
