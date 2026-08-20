@@ -7,6 +7,7 @@
 // spun up only when the admin triggers it, never warmed at boot. Its role file is copied in as ./grounding/GROUNDING.md
 // so it never clobbers the analyst/modeler/connector role files that share the workspace.
 
+import './generate-system.js'   // FIRST: (re)writes ./SYSTEM.md from generate-system.ts before it's read below
 import { readFile, cp, mkdir } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
