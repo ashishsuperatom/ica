@@ -16,7 +16,7 @@
 import WebSocket from 'ws'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { execProgram } from './exec-program.js'
 import { createSession, prepareWorkspace, type Session, type Harness, type RunHandlers } from './ica/index.js'
@@ -482,9 +482,17 @@ async function buildSemanticModel(from: any) {
 // this project's value→id resolution indexes. Streamed RAW (PTY) to the admin's xterm, same machinery as the
 // modeler/connector. It reads data via the seam and persists via build(config) on grounding.mjs; it never
 // answers user questions and never touches the semantic model.
-async function handleGrounding(from: any) {
+async function handleGrounding(from: any, rebuild = false) {
   if (groundingBusy) { emit(from, { t: 'grounding:status', text: 'Grounding build already running.' }); return }
   groundingBusy = true
+  // EXPLICIT clean rebuild only: wipe the grounding DB so the agent starts empty. A normal build is ADDITIVE
+  // (upsert-on-top, never destructive) — this deliberate reset is the one place a wipe happens. Safe here because
+  // the grounding agent is COLD (no store open between builds).
+  if (rebuild) {
+    const db = join(WORKSPACE, 'db', 'grounding.sqlite')
+    for (const f of [db, `${db}-wal`, `${db}-shm`]) { try { rmSync(f) } catch { /* not there */ } }
+    emit(from, { t: 'grounding:status', text: 'Cleared existing grounding — rebuilding from empty.' })
+  }
   const sources = await listSources()
   emit(from, { t: 'grounding:status', text: `Building grounding indexes — sources: ${sources.join(', ') || '(none)'}` })
   try {
@@ -672,7 +680,7 @@ function resyncAnalyst(from: any) {
 async function handle(payload: any, from: any) {
   if (payload.t === 'analyse') { analyse(String(payload.question || ''), from, String(payload.sessionId || ''), String(payload.questionId || ''), String(payload.channel || '')) }   // UI supplies both ids; channel set for chat-channel turns
   else if (payload.t === 'semantic:build') { buildSemanticModel(from) }                      // build/refine the semantic model (watchable)
-  else if (payload.t === 'grounding:build') { handleGrounding(from) }                         // admin console → grounding agent builds value→id indexes (watchable)
+  else if (payload.t === 'grounding:build') { handleGrounding(from, !!payload.rebuild) }        // admin console → grounding agent builds (rebuild:true = wipe first, else additive)
   else if (payload.t === 'connector:ask') { handleConnector(String(payload.text || ''), from) }   // admin console → connector agent (raw PTY back)
   else if (payload.t === 'term:attach') { attachTerminal(normWhich(payload.which), from) }         // open a live typeable terminal into an agent's PTY (e.g. /login)
   else if (payload.t === 'term:input')  { inputTerminal(normWhich(payload.which), String(payload.data ?? '')) }   // raw keystrokes/paste → the agent's PTY

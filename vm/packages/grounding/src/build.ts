@@ -31,10 +31,23 @@ function pick(r: any, key: string): unknown {
   return k ? r[k] : undefined
 }
 
+// A resolvable-name set (customers, places, lanes) is BOUNDED — hundreds to low-thousands. A set of tens of
+// thousands is a master-data dump (every driver/consignee/contact), not something a person names, so indexing it
+// is wrong (noise that hurts resolution) AND huge (it can overwhelm the bridge WS). We COUNT first and SKIP over
+// the cap — the count is one row, so we never pull the dump. Env-tunable; not a hard "reject", a "this isn't
+// resolution targets, leave it". SIZE is the signal, not type (a small mixed table still gets indexed).
+const MAX_ENTITY_ROWS = Number(process.env.GROUNDING_MAX_ENTITY_ROWS ?? 20000)
+
 export async function buildGrounding(store: GroundingStore, source: SourceQuery, cfg: BuildConfig):
-  Promise<{ entities: number; edges: number; hierarchies: number; patterns: number }> {
+  Promise<{ entities: number; edges: number; hierarchies: number; patterns: number; skipped: { type: string; count: number }[] }> {
   let entities = 0, edges = 0
+  const skipped: { type: string; count: number }[] = []
   for (const e of cfg.entities ?? []) {
+    // Count first (strip a trailing ORDER BY so it wraps as a subquery). If it's a master-dump, skip — don't pull it.
+    let count = -1
+    try { const inner = e.sql.replace(/\border\s+by\b[\s\S]*$/i, '').trim(); const c: any[] = await source(`SELECT COUNT(*) AS n FROM (${inner}) _cnt`, e.source); count = Number(c?.[0]?.n ?? 0) }
+    catch { count = -1 }   // count failed (odd SQL) → fall through and fetch (best-effort)
+    if (count > MAX_ENTITY_ROWS) { skipped.push({ type: e.type, count }); continue }
     const rows = await source(e.sql, e.source)
     for (const r of rows) {
       const id = pick(r, 'id'), value = pick(r, 'value')
@@ -62,5 +75,5 @@ export async function buildGrounding(store: GroundingStore, source: SourceQuery,
   for (const a of cfg.aliases ?? []) store.addAlias(a.type, a.id, a.alias)
   store.reindexFts()   // build the trigram index so resolveEntity scales (candidates from an index, not a scan)
   store.checkpoint()   // fold the writes into the main file so a read-only reader (the inspector) sees them
-  return { entities, edges, hierarchies: (cfg.hierarchies ?? []).length, patterns: (cfg.patterns ?? []).length }
+  return { entities, edges, hierarchies: (cfg.hierarchies ?? []).length, patterns: (cfg.patterns ?? []).length, skipped }
 }

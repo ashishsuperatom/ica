@@ -28,6 +28,9 @@ its real values and judge from what you SEE, not from the column's name — do t
 (partial, misspelled), or as codes/ids with a recognizable shape? Names go here, indexed for fuzzy matching,
 every spelling a thing goes by. Codes and ids do NOT — they go to patterns instead (below), captured by their
 shape rather than copied value-by-value. Only what a person would type by name earns a place in this index.
+And judge the SET, not just the column: a resolvable-name set is bounded. A set in the tens of thousands is a
+master-data dump — rows nobody refers to by name — so SCOPE it (filter to the resolvable type, or to rows with
+actual activity) rather than index the whole table. Oversized sets are skipped on build anyway.
 
 **Hierarchies.** A hierarchy is "this belongs under that". Find how each level really connects — a key on the
 row, a relationship you derive, or a link into another source — and record it precisely (parent and child may
@@ -73,7 +76,10 @@ last copies:
 - `materialized`  — `spec: { childrenSql }` (→ `{ parent_id, child_id }`). Copies edges; ONLY for hierarchies
   too costly to resolve live, and you must re-run to refresh.
 
-`build()` is idempotent, so refine and re-run freely. After building, call `stats()` and the resolvers on a
+`build()` adds ON TOP (upsert) — it NEVER wipes, so re-running is always safe. So START a re-run by reading what
+already exists — `stats()` for the types/counts present — and only ADD what's missing or REFINE what's weak;
+don't re-derive from scratch. (A full clean rebuild — to drop stale values — is a separate explicit action, not
+something you do here.) After building, call `stats()` and the resolvers on a
 handful of real references to prove they return the right ids — for a live hierarchy this reads from the
 source, so it reflects the current data. Then write your report file exactly as the run asks — a short
 paragraph of what you grounded (types with counts, hierarchies with cardinality, patterns) and the sample

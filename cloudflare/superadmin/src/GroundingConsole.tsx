@@ -58,11 +58,15 @@ export function GroundingConsole({ hub }: { hub: Hub }) {
     })
   }, [hub])
 
-  const build = () => {
+  // Normal build = ADDITIVE (upsert-on-top, never destructive) — safe to re-run to improve. Rebuild = the ONE
+  // explicit destructive path: wipe the index and start empty (confirmed), for a clean refresh that drops stale.
+  const build = (rebuild = false) => {
+    if (rebuild && !window.confirm('Wipe the existing grounding index and rebuild from empty? This deletes all current value→id data.')) return
     setBusy(true)
-    if (streamKind === 'events') setEvents((e) => [...e, { kind: 'user', text: 'Build grounding indexes' }])
-    else termRef.current?.writeln('\r\n\x1b[36m❯ Building grounding indexes…\x1b[0m')
-    hub.send({ to: { type: 'code-engine' }, payload: { t: 'grounding:build' } })
+    const label = rebuild ? 'Rebuild grounding (clear first)' : 'Build / improve grounding'
+    if (streamKind === 'events') setEvents((e) => [...e, { kind: 'user', text: label }])
+    else termRef.current?.writeln(`\r\n\x1b[36m❯ ${label}…\x1b[0m`)
+    hub.send({ to: { type: 'code-engine' }, payload: { t: 'grounding:build', rebuild } })
   }
 
   return (
@@ -74,7 +78,8 @@ export function GroundingConsole({ hub }: { hub: Hub }) {
         </div>
         <div className="row" style={{ gap: 10 }}>
           <span className="muted" style={{ fontSize: 12 }}>{status === 'live' ? 'connected' : status}</span>
-          <button className="btn" onClick={build} disabled={busy || status !== 'live'}>{busy ? 'Building…' : 'Build grounding indexes'}</button>
+          <button className="btn ghost" onClick={() => build(true)} disabled={busy || status !== 'live'} title="Wipe the index and rebuild from empty">Rebuild (clear)</button>
+          <button className="btn" onClick={() => build(false)} disabled={busy || status !== 'live'}>{busy ? 'Building…' : 'Build / improve'}</button>
         </div>
       </div>
       <div style={{ flex: 1, minHeight: 0, background: '#0d0f0d', borderRadius: 10, padding: '8px 10px', overflow: 'auto' }}>
