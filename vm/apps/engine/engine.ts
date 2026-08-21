@@ -648,7 +648,14 @@ async function semanticConsolidateTick() {
       if (reply) emit(reply, { t: 'semantic:status', text: `Consolidating ${items.length} recent answer(s) into the model…` })
       try {
         const semantic = await semanticSlot.get()
-        const r = await semantic.consolidate(items, batchId, { onOutput: (chunk) => { if (reply) emit(reply, { t: 'semantic:chunk', text: chunk }) } })
+        // Same dual-view as the analyst: announce the STRUCTURED view (from the modeler's JSONL) + whether a raw
+        // terminal exists; stream events by default; the PTY (semantic:chunk) goes ONLY to explicit terminal viewers.
+        const semViewers = () => { const s = new Set(termViewers.semantic); if (reply) s.add(reply); return s }
+        if (reply) emit(reply, { t: 'semantic:stream', kind: semantic.session.events ? 'events' : (semantic.session.kind ?? 'events'), pty: semantic.session.kind === 'pty' })
+        const r = await semantic.consolidate(items, batchId, {
+          onEvent: (ev) => { for (const v of semViewers()) emit(v, { t: 'semantic:event', ev }) },
+          onOutput: (chunk) => { if (termViewers.semantic.size) for (const v of termViewers.semantic) emit(v, { t: 'semantic:chunk', text: chunk }) },
+        })
         // Advance PAST the last finished_at we consumed → those rows never re-enter a batch (strictly-greater cursor).
         answers.setMeta(SEMANTIC_CONSOLIDATE_WM_KEY, nextWm)
         answers.setMeta(SEMANTIC_CONSOLIDATE_FAIL_KEY, '0')     // clean pass → reset the failure streak
@@ -693,9 +700,10 @@ function resyncAnalyst(from: any) {
     const buf = aSession.buffer()
     if (buf) emit(from, { t: 'analyst:chunk', text: buf, replace: true })
   }
-  if (sSession) {                                                          // repaint the semantic terminal too (e.g. mid gap-fill)
-    const sbuf = sSession.buffer()
-    if (sbuf) emit(from, { t: 'semantic:chunk', text: sbuf, replace: true })
+  if (sSession) {                                                          // repaint the semantic view too (e.g. mid consolidation)
+    emit(from, { t: 'semantic:stream', kind: sSession.events ? 'events' : (sSession.kind ?? 'events'), pty: sSession.kind === 'pty' })
+    if (sSession.events) { const evs = sSession.events(); if (evs.length) emit(from, { t: 'semantic:events', events: evs, replace: true }) }
+    else { const sbuf = sSession.buffer(); if (sbuf) emit(from, { t: 'semantic:chunk', text: sbuf, replace: true }) }
     if (semanticBusy) emit(from, { t: 'semantic:status', text: 'Building the model…' })
   }
   if (analystBusy) {

@@ -80,8 +80,13 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
-  // Returning to the chat view → jump to the newest message (the feed didn't move while you were away).
-  useEffect(() => { if (view === 'chat') scroll(true) }, [view])   // eslint-disable-line react-hooks/exhaustive-deps
+  // Switching view → jump to the newest content (the feed/log didn't move while you were away). Chat scrolls
+  // the page; the analyst/semantic event logs are their own scroll containers, so pin those to the bottom.
+  useEffect(() => {
+    if (view === 'chat') { scroll(true); return }
+    const ref = view === 'analyst' ? anLogRef : view === 'semantic' ? semLogRef : null
+    if (ref) { const pin = () => { if (ref.current) ref.current.scrollTop = ref.current.scrollHeight }; requestAnimationFrame(pin); setTimeout(pin, 60) }
+  }, [view])   // eslint-disable-line react-hooks/exhaustive-deps
   // Analyst tab — the QA agent (classify → claude-code answers from the semantic model + units).
   const [anStatus, setAnStatus]     = useState('')
   const [anCategory, setAnCategory] = useState('')
@@ -97,9 +102,12 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [anEvents, setAnEvents] = useState<AgentEvent[]>([])   // structured event log when kind === 'events' (codex)
   const [anHasPty, setAnHasPty] = useState(false)       // claude-code: a raw PTY terminal is also available (show the toggle)
   const [anTerminal, setAnTerminal] = useState(false)   // user opened the raw terminal → attach the PTY (lazily) and render xterm
-  const [semStreamKind, setSemStreamKind] = useState<'pty' | 'events'>('pty')   // modeler: claude (pty) vs codex (events)
+  const [semStreamKind, setSemStreamKind] = useState<'pty' | 'events'>('events')   // default = structured; PTY is opt-in
   const [semEvents, setSemEvents] = useState<AgentEvent[]>([])
+  const [semHasPty, setSemHasPty] = useState(false)       // modeler is claude → a raw terminal is available (show the toggle)
+  const [semTerminal, setSemTerminal] = useState(false)   // user opened the raw terminal → attach the PTY lazily
   const anLogRef = useRef<HTMLDivElement>(null)
+  const semLogRef = useRef<HTMLDivElement>(null)
   const [gaps, setGaps]             = useState<{ question: string; need: string; basis?: string; status: 'building' | 'done' }[]>([])
   const [role, setRole]         = useState<'user' | 'developer'>('developer')   // for now: everyone is developer (sees the agents)
   // Live as-you-type suggestions from the fast-router (optional; absent if not configured).
@@ -202,7 +210,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
 
   // Both claude-code agent terminals (modeler + analyst) go through ONE shared module — same code path,
   // parameterized by `which` + `interactive`. Model-agnostic; codex/opencode would use their own view.
-  useClaudeTerminal(semTermRef, semXtermRef, { which: 'semantic', interactive: true, send })
+  useClaudeTerminal(semTermRef, semXtermRef, { which: 'semantic', interactive: true, send, autoAttach: false })   // default = structured; PTY attaches only on the Terminal toggle
   useClaudeTerminal(anTermRef, anXtermRef, { which: 'analyst', interactive: true, send, autoAttach: false })   // default = structured; PTY attaches only on the Terminal toggle
 
   // Keep the event log (SDK harnesses) pinned to the newest line as it streams.
@@ -276,6 +284,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           setSemHasLog(true); setSemStatus(msg.text)
         } else if (msg.t === 'semantic:stream') {
           setSemStreamKind(msg.kind === 'pty' ? 'pty' : 'events')
+          setSemHasPty(!!msg.pty)
         } else if (msg.t === 'semantic:event') {
           setSemHasLog(true); setSemEvents(evs => mergeEvent(evs, msg.ev))   // codex structured event (live)
         } else if (msg.t === 'semantic:events') {
@@ -636,14 +645,27 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           <button onClick={() => navigate('chat')} style={s.backBtn} title="Back to your chat">← Chat</button>
           <button onClick={buildSemantic} style={s.consolidateBtn} title="Run the semantic-model agent (claude-code)">◈ Build / refresh model</button>
           <span style={{ color: '#8a8276', fontSize: 13, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{semStatus || 'The semantic-model agent — builds the model; never answers questions.'}</span>
+          {semHasPty && (
+            <button
+              onClick={() => {
+                const next = !semTerminal; setSemTerminal(next)
+                if (next) { send({ t: 'ui:resize', which: 'semantic', cols: COLS, rows: ROWS }); send({ t: 'term:attach', which: 'semantic' }) }
+                else send({ t: 'term:detach', which: 'semantic' })
+              }}
+              style={s.backBtn}
+              title={semTerminal ? 'Back to the structured view' : 'Open the raw claude-code terminal'}>
+              {semTerminal ? '≣ Structured' : '⌨ Terminal'}
+            </button>
+          )}
           <button onClick={() => sessionCtl('semantic', 'compact')} style={s.backBtn} title="Compact the session's context">⇊ Compact</button>
           <button onClick={() => sessionCtl('semantic', 'new')} style={s.backBtn} title="Start a completely fresh session">↻ New session</button>
         </div>
         {gapsPanel}
-        <div style={{ flex: 1, overflow: 'auto', background: 'transparent', padding: 12, paddingBottom: 110 }}>
-          {/* pty (claude) → xterm, kept mounted; events (codex) → structured log */}
-          <div ref={semTermRef} onMouseDown={() => semXtermRef.current?.focus()} style={{ display: semStreamKind === 'pty' ? 'block' : 'none' }} />
-          {semStreamKind === 'events' && <CodexEventLog events={semEvents} busy={semBusy} />}
+        <div ref={semLogRef} style={{ flex: 1, overflow: 'auto', background: 'transparent', padding: 12, paddingBottom: 110 }}>
+          {/* Raw claude terminal (PTY) — shown only when opened via the toggle, or a pure-pty agent. */}
+          <div ref={semTermRef} onMouseDown={() => semXtermRef.current?.focus()} style={{ display: (semTerminal || semStreamKind === 'pty') ? 'block' : 'none' }} />
+          {/* DEFAULT: the structured event log (modeler via JSONL, codex via events). */}
+          {!(semTerminal || semStreamKind === 'pty') && <CodexEventLog events={semEvents} busy={semBusy} claude={semHasPty} />}
         </div>
       </div>
 
