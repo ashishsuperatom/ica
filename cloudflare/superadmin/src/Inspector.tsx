@@ -155,11 +155,15 @@ type Focus =
 // ── the shell ────────────────────────────────────────────────────────────────
 export function Inspector({ hub, section }: { hub: Hub; section: Section }) {
   useCss()
-  const [focus, setFocus] = useState<Focus>(null)
-  const open = useCallback((f: Focus) => setFocus(f), [])
+  // A navigation STACK, not a single focus: opening a file FROM a program pushes on top, so closing the file
+  // returns to the program (its file list), not all the way out. close() pops ONE level (back).
+  const [stack, setStack] = useState<Focus[]>([])
+  const focus = stack[stack.length - 1] ?? null
+  const open = useCallback((f: Focus) => { if (f) setStack(s => [...s, f]) }, [])
+  const close = useCallback(() => setStack(s => s.slice(0, -1)), [])
 
   // Changing section closes any open detail — otherwise you'd land on a stale panel.
-  useEffect(() => { setFocus(null) }, [section])
+  useEffect(() => { setStack([]) }, [section])
 
   if (hub.status !== 'live') {
     return <div className="card"><div className="empty">
@@ -179,7 +183,7 @@ export function Inspector({ hub, section }: { hub: Hub; section: Section }) {
       <Body hub={hub} open={open} />
       {/* `key` remounts the panel per focus, so no state can survive a program → file switch. */}
       {focus && <DetailPanel key={`${focus.kind}:${(focus as any).id ?? (focus as any).path ?? (focus as any).qid ?? (focus as any).dir}`}
-        hub={hub} focus={focus} open={open} close={() => setFocus(null)} />}
+        hub={hub} focus={focus} open={open} close={close} />}
     </div>
   )
 }
