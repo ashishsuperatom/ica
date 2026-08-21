@@ -95,15 +95,34 @@ export class ChannelDO {
       // The engine's finished answer for a channel turn, handed here by the ProjectDO (DO→DO). Post it to the
       // channel and clear the pending turn. Delivery errors are LOGGED (never swallowed).
       if (request.method === 'POST' && path === '/answer') {
-        const { qid, channel, answer, category } = await request.json() as any
-        const rec = await this.state.storage.get<{ channel: string; conv: ConversationRef }>(`pending:${qid}`)
+        const { qid, channel, answer, category, projectId } = await request.json() as any
+        const rec = await this.state.storage.get<{ channel: string; conv: ConversationRef; question?: string }>(`pending:${qid}`)
         if (!rec) return json({ ok: true, note: 'no pending turn (already delivered?)' })
         await this.state.storage.delete(`pending:${qid}`)                       // delete first → deliver at most once
         const ch = rec.channel || channel
         const adapter = channelAdapter(ch)
         const cfg = (await this.state.storage.get<Config>('config')) ?? {}
         if (adapter) {
-          try { await adapter.sendReply(rec.conv, adapter.renderAnswer(answer, category), cfg.secrets?.[ch] ?? {}) }
+          let body: unknown
+          // RICH path: render the answer to an image (matching the web card — Adaptive Cards can't) via the
+          // reporting service, and reply with text + image + a "view full report" link. GATED on REPORTING_URL:
+          // the URL-returning /render isn't deployed yet, so until it's configured we use the plain card below.
+          // On ANY failure we also fall back — exactly-once already deleted the pending record, so we must never
+          // drop the answer. The png URL is passed straight through (Microsoft's CDN fetches it unauthenticated).
+          const reportBase = (this.env.REPORTING_URL as string | undefined)?.replace(/\/$/, '')
+          if (reportBase && projectId && adapter.renderReport) {
+            try {
+              const rr = await fetch(`${reportBase}/render`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', ...(this.env.REPORTING_TOKEN ? { authorization: `Bearer ${this.env.REPORTING_TOKEN}` } : {}) },
+                body: JSON.stringify({ projectId, questionId: qid, answer, category, title: rec.question }),
+              })
+              if (rr.ok) { const rep = await rr.json() as any; if (rep?.png && rep?.html) body = adapter.renderReport(answer, { png: rep.png, html: rep.html }, category) }
+              else console.log(`[channel] report /render ${rr.status} for ${qid} — falling back to card`)
+            } catch (e: any) { console.log(`[channel] report /render failed for ${qid}:`, e?.message ?? e) }
+          }
+          if (!body) body = adapter.renderAnswer(answer, category)               // fallback: the plain adaptive card
+          try { await adapter.sendReply(rec.conv, body, cfg.secrets?.[ch] ?? {}) }
           catch (e: any) { console.log(`[channel] sendReply failed for ${qid}:`, e?.message ?? e) }
         }
         return json({ ok: true })

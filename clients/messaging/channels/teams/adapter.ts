@@ -61,6 +61,10 @@ export const teamsAdapter: ChannelAdapter = {
     return { type: 'message', attachments: [{ contentType: 'application/vnd.microsoft.card.adaptive', content: adaptiveCard(answer, category) }] }
   },
 
+  renderReport(answer: Answer, report: { png: string; html: string }, category?: string): unknown {
+    return { type: 'message', attachments: [{ contentType: 'application/vnd.microsoft.card.adaptive', content: reportCard(answer, report, category) }] }
+  },
+
   renderStatus(_text: string): unknown {
     return { type: 'typing' }
   },
@@ -124,6 +128,22 @@ function adaptiveCard(a: Answer, category?: string): unknown {
   // msteams.width:'Full' makes the card use the FULL chat-pane width (default is ~half), so the table gets
   // room to breathe instead of wrapping every cell.
   return { $schema: 'http://adaptivecards.io/schemas/adaptive-card.json', type: 'AdaptiveCard', version: '1.5', msteams: { width: 'Full' }, body }
+}
+
+// The RICH report reply: the takeaway as TEXT (accessible + shows in the notification/preview + a fallback if
+// the image can't load) + the reporting service's rendered card as an IMAGE (matches the web UI) + a link to
+// the full HTML report. The png URL is passed straight through — Microsoft's CDN fetches it unauthenticated,
+// so the URL carries its own signature; we never proxy or re-host it.
+function reportCard(a: Answer, report: { png: string; html: string }, category?: string): unknown {
+  const body: any[] = []
+  const cat = category ?? a.category
+  if (cat) body.push({ type: 'TextBlock', text: String(cat).replace(/_/g, ' ').toUpperCase(), weight: 'Bolder', size: 'Small', isSubtle: true, spacing: 'None' })
+  const ans: any = (a as any).answer
+  const takeaway = Array.isArray(ans) ? ans.map((x: any) => `• ${x}`).join('\n') : ans
+  if (takeaway) body.push({ type: 'TextBlock', text: String(takeaway), wrap: true, spacing: 'Small' })
+  if (report.png) body.push({ type: 'Image', url: report.png, size: 'Stretch', altText: 'Answer report', spacing: 'Medium' })
+  const actions = report.html ? [{ type: 'Action.OpenUrl', title: 'View the full report', url: report.html }] : []
+  return { $schema: 'http://adaptivecards.io/schemas/adaptive-card.json', type: 'AdaptiveCard', version: '1.5', msteams: { width: 'Full' }, body, actions }
 }
 
 // Push one Adaptive Card Table (+ an optional footnote). Shared by the flat `a.table` and each report section,

@@ -62,6 +62,11 @@ export interface ChannelAdapter {
   // Render an engine Answer into this channel's native reply body.
   renderAnswer(answer: Answer, category?: string): unknown
 
+  // Optional RICH reply: the answer's text takeaway + the reporting service's rendered card image (png URL)
+  // + a link to the full HTML report. Adaptive Cards can't reproduce the web card, so this shows the real
+  // thing as an image. When absent (or the render fails) the caller falls back to renderAnswer.
+  renderReport?(answer: Answer, report: { png: string; html: string }, category?: string): unknown
+
   // Optional interim signal (typing indicator / progress). Return null to skip.
   renderStatus?(text: string): unknown
 

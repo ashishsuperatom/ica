@@ -603,7 +603,7 @@ export class ProjectDO extends DurableObject<Env> {
       const p = msg.payload as any
       const chan = this.env.CHANNEL.get(this.env.CHANNEL.idFromName(`chan:${this._pid}`))
       await chan.fetch('https://do/answer', { method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ qid: p?.qid, channel: p?.channel, answer: p?.answer, category: p?.category }) }).catch(() => {})
+        body: JSON.stringify({ qid: p?.qid, channel: p?.channel, answer: p?.answer, category: p?.category, projectId: this._pid }) }).catch(() => {})
       return
     }
     // A runtime (human client) sending a message is real activity → reset the idle clock.
