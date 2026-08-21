@@ -496,6 +496,14 @@ function ProjectDetailPage() {
   const view = params['*'] || 'overview'
   const setView = (v: string) => navigate(`/org/${orgId}/projects/${projectId}${v && v !== 'overview' ? '/' + v : ''}`)
   const [openGroup, setOpenGroup] = useState<string | null>(null)
+  // The org + project NAMES (the sidebar/crumbs/header show real names, not just truncated ids).
+  const [meta, setMeta] = useState<{ project?: string; org?: string }>({})
+  useEffect(() => {
+    if (!token) return
+    api('/projects').then(r => (r.ok ? r.json() : [])).then((ps: any[]) => setMeta(m => ({ ...m, project: Array.isArray(ps) ? ps.find(p => p.id === projectId)?.name : undefined }))).catch(() => {})
+    api('/organizations').then(r => (r.ok ? r.json() : [])).then((os: any[]) => setMeta(m => ({ ...m, org: Array.isArray(os) ? os.find(o => o.id === orgId)?.name : undefined }))).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, projectId, orgId])
   // One persistent hub connection for the whole project — survives switching sidebar views.
   const hub = useProjectHub(projectId, token)
 
@@ -569,27 +577,32 @@ function ProjectDetailPage() {
     { id: 'inspector', label: 'Inspector', icon: I.map, children: SECTIONS.map(s => ({ id: `inspector/${s.id}`, label: s.label, group: s.group })) },
     { id: 'events', label: 'Event log', icon: I.pulse },
     { id: 'subdomains', label: 'Subdomains', icon: I.globe },
-    { id: 'agent', label: 'Agent', icon: I.term },
-    { id: 'analyst', label: 'Analyst', icon: I.term },
-    { id: 'grounding', label: 'Grounding', icon: I.term },
+    { id: 'agents', label: 'Agents', icon: I.term, children: [
+      { id: 'agent', label: 'Connector' },
+      { id: 'analyst', label: 'Analyst' },
+      { id: 'grounding', label: 'Grounding' },
+    ] },
     { id: 'channels', label: 'Channels', icon: I.chat },
   ]
   const title = view.startsWith('inspector/')
     ? `Inspector · ${SECTION_LABEL(view.slice('inspector/'.length) as Section)}`
-    : items.find(i => i.id === view)?.label ?? 'Overview'
+    : items.find(i => i.id === view)?.label
+      ?? items.flatMap(i => i.children ?? []).find(c => c.id === view)?.label
+      ?? 'Overview'
 
   const nav = <>
-    <div className="grp">Project · {projectId?.slice(0, 6)}…</div>
+    <div className="grp">{meta.project ?? `Project · ${projectId?.slice(0, 6)}…`}</div>
     {items.map(it => {
-      const expanded = openGroup === it.id
+      const childActive = !!it.children && (view.startsWith(it.id + '/') || it.children.some(c => c.id === view))
+      const expanded = openGroup === it.id || childActive   // auto-expand the group whose child is the active view
       return (
         <div key={it.id}>
-          <a className={'nav' + (view === it.id || (it.children && view.startsWith(it.id + '/')) ? ' on' : '')} style={{ cursor: 'pointer' }}
+          <a className={'nav' + (view === it.id || childActive ? ' on' : '')} style={{ cursor: 'pointer' }}
             onClick={() => {
               if (!it.children) { setView(it.id); return }
-              // Toggle the group. Opening it also navigates to its first section, so one click gets you somewhere.
-              if (expanded) setOpenGroup(null)
-              else { setOpenGroup(it.id); if (!view.startsWith(it.id + '/')) setView(it.children[0].id) }
+              // Toggle the group. Opening it also navigates to its first child, so one click gets you somewhere.
+              if (expanded && openGroup === it.id) setOpenGroup(null)
+              else { setOpenGroup(it.id); if (!childActive) setView(it.children[0].id) }
             }}>
             {it.icon}{it.label}
             {it.children && <span className={'chev' + (expanded ? ' open' : '')}>{I.chev}</span>}
@@ -612,10 +625,18 @@ function ProjectDetailPage() {
   </>
 
   return (
-    <Shell nav={nav} crumbs={<><Link to="/">Organizations</Link><span>/</span><Link to={`/org/${orgId}`}><code className="mono">{orgId?.slice(0, 8)}…</code></Link><span>/</span><code className="mono">{projectId?.slice(0, 8)}…</code></>}>
+    <Shell nav={nav} crumbs={<><Link to="/">Organizations</Link><span>/</span><Link to={`/org/${orgId}`}>{meta.org ?? <code className="mono">{orgId?.slice(0, 8)}…</code>}</Link><span>/</span>{meta.project ?? <code className="mono">{projectId?.slice(0, 8)}…</code>}</>}>
       <div className="between" style={{ marginBottom: 18 }}>
         <div className="row"><h1 className="h1">{title}</h1>{!loading && <Pill s={liveState} />}</div>
-        {loading && <span className="row muted" style={{ fontSize: 13 }}><span className="spin" /> connecting…</span>}
+        <div className="row" style={{ gap: 12, alignItems: 'center' }}>
+          {loading && <span className="row muted" style={{ fontSize: 13 }}><span className="spin" /> connecting…</span>}
+          {(meta.project || meta.org) && (
+            <div style={{ textAlign: 'right', lineHeight: 1.25 }}>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>{meta.project ?? projectId?.slice(0, 8) + '…'}</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)' }}>{meta.org ?? orgId?.slice(0, 8) + '…'}</div>
+            </div>
+          )}
+        </div>
       </div>
 
       {view === 'overview' && <>
