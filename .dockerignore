@@ -28,6 +28,7 @@ server
 **/.agent-workspace
 **/.data
 **/.ica-workspace
+**/.state
 
 # ── SECRETS — env files + keys never enter the image.
 #    Fly injects ICA_PROJECT/ICA_KEY/ICA_HUB via machine env; agent auth is manual via SSH. ──
