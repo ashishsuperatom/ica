@@ -626,17 +626,14 @@ function ProjectDetailPage() {
 
   return (
     <Shell nav={nav} crumbs={<><Link to="/">Organizations</Link><span>/</span><Link to={`/org/${orgId}`}>{meta.org ?? <code className="mono">{orgId?.slice(0, 8)}…</code>}</Link><span>/</span>{meta.project ?? <code className="mono">{projectId?.slice(0, 8)}…</code>}</>}>
-      <div className="between" style={{ marginBottom: 18 }}>
-        <div className="row"><h1 className="h1">{title}</h1>{!loading && <Pill s={liveState} />}</div>
-        <div className="row" style={{ gap: 12, alignItems: 'center' }}>
-          {loading && <span className="row muted" style={{ fontSize: 13 }}><span className="spin" /> connecting…</span>}
-          {(meta.project || meta.org) && (
-            <div style={{ textAlign: 'right', lineHeight: 1.25 }}>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>{meta.project ?? projectId?.slice(0, 8) + '…'}</div>
-              <div style={{ fontSize: 12, color: 'var(--muted)' }}>{meta.org ?? orgId?.slice(0, 8) + '…'}</div>
-            </div>
-          )}
+      {/* Compact header — org/project already live in the breadcrumb + sidebar, so the title stays tiny and
+          the content gets the space. */}
+      <div className="between" style={{ marginBottom: 10 }}>
+        <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+          <span style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: '.02em', color: 'var(--muted)' }}>{title}</span>
+          {!loading && <Pill s={liveState} />}
         </div>
+        {loading && <span className="row muted" style={{ fontSize: 12 }}><span className="spin" /> connecting…</span>}
       </div>
 
       {view === 'overview' && <>
