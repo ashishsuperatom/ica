@@ -16,9 +16,9 @@ import { ANSI, COLS, ROWS } from './termColors'
 export function useClaudeTerminal(
   hostRef: RefObject<HTMLDivElement | null>,
   xtermRef: RefObject<Terminal | null>,
-  opts: { which: string; interactive: boolean; send: (payload: any) => void },
+  opts: { which: string; interactive: boolean; send: (payload: any) => void; autoAttach?: boolean },
 ) {
-  const { which, interactive, send } = opts
+  const { which, interactive, send, autoAttach = true } = opts
   useEffect(() => {
     const term = new Terminal({
       // convertEol OFF — the PTY sends its own \r\n + control; converting them garbles the full-screen TUI.
@@ -28,8 +28,13 @@ export function useClaudeTerminal(
     if (hostRef.current) term.open(hostRef.current)
     if (interactive) term.onData((d) => send({ t: 'term:input', which, data: d }))
     xtermRef.current = term
-    send({ t: 'ui:resize', which, cols: COLS, rows: ROWS })   // pin the shared PTY to the fixed geometry BEFORE attach…
-    send({ t: 'term:attach', which })                          // …so the replayed screen comes back at the right width
+    // autoAttach=false → the raw PTY is NOT opened on mount (the default structured view drives the panel);
+    // the parent sends term:attach only when the user switches to the terminal, so PTY bytes never stream
+    // until asked. autoAttach=true keeps the old behaviour for views that are terminal-only.
+    if (autoAttach) {
+      send({ t: 'ui:resize', which, cols: COLS, rows: ROWS })   // pin the shared PTY to the fixed geometry BEFORE attach…
+      send({ t: 'term:attach', which })                          // …so the replayed screen comes back at the right width
+    }
     return () => { term.dispose(); xtermRef.current = null }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [which, interactive])

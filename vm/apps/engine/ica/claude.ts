@@ -8,6 +8,9 @@
 import type { Session, RunHandlers, RunResult } from './session.js'
 import { randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
+import { statSync, openSync, readSync, closeSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { makeClaudeEventLog, transcriptPath } from './claude-events.js'
 
 export interface ClaudeSessionOpts {
   cwd: string                 // working directory the agent runs in
@@ -68,6 +71,35 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
   let bypassAccepted = false   // sent the "Yes, I accept" keystroke for the one-time Bypass-Permissions dialog
   let resumeChoiceSent = false // answered the "session is old" resume menu (once per spawn)
   const rawListeners = new Set<(d: string) => void>()   // interactive terminal viewers (raw PTY passthrough, e.g. /login from the UI)
+
+  // ── STRUCTURED events, from the JSONL transcript (NOT the PTY) ──────────────────────────────────────────
+  // claude writes a clean, structured transcript to ~/.claude/projects/<encoded-cwd>/<sid>.jsonl — one event
+  // per line. We TAIL it and turn each line into an AgentEvent (the same shape codex emits), so the UI can
+  // render claude through the shared event log with NO PTY and NO LLM. Purely additive: the PTY path above is
+  // untouched — it stays as the on-demand "raw terminal" view.
+  const eventLog = makeClaudeEventLog()
+  let tailTimer: ReturnType<typeof setInterval> | null = null
+  let tailPath = '', tailOffset = 0, tailBuf = ''
+  function pollTranscript() {
+    const path = transcriptPath(homedir(), opts.cwd, sid)   // sid can change (a failed --resume re-spawns fresh)
+    if (path !== tailPath) { tailPath = path; tailOffset = 0; tailBuf = '' }
+    let size = 0
+    try { size = statSync(tailPath).size } catch { return }   // not created yet
+    if (size < tailOffset) { tailOffset = 0; tailBuf = '' }   // truncated/rotated
+    if (size <= tailOffset) return
+    let chunk = ''
+    try { const fd = openSync(tailPath, 'r'); const b = Buffer.alloc(size - tailOffset); readSync(fd, b, 0, b.length, tailOffset); closeSync(fd); chunk = b.toString('utf8'); tailOffset = size } catch { return }
+    tailBuf += chunk
+    let nl: number
+    while ((nl = tailBuf.indexOf('\n')) >= 0) {
+      const line = tailBuf.slice(0, nl); tailBuf = tailBuf.slice(nl + 1)
+      if (!line.trim()) continue
+      let o: any; try { o = JSON.parse(line) } catch { continue }
+      for (const ev of eventLog.handleEntry(o)) current?.h?.onEvent?.(ev)   // live to the active run; events() has the full log for replay
+    }
+  }
+  const startTail = () => { if (!tailTimer) tailTimer = setInterval(pollTranscript, 400) }
+  const stopTail = () => { if (tailTimer) { clearInterval(tailTimer); tailTimer = null } }
 
   async function ensure() {
     if (pty) return
@@ -146,6 +178,7 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
       if (current?.submitted) { if (idle) clearTimeout(idle); idle = setTimeout(maybeFinish, IDLE) }
     })
     pty.onExit(() => { pty = null })
+    startTail()   // begin tailing this session's JSONL transcript → structured AgentEvents (independent of the PTY)
     // (Stale-resume recovery is handled ALWAYS-ON in onData above — re-spawn FRESH on "No conversation found".)
   }
 
@@ -251,8 +284,10 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
     // grid + cursor), NOT the raw byte tail — so a reconnecting client repaints correctly. Falls back to the raw
     // tail if the emulator isn't up yet or serialization throws.
     buffer: () => { try { return serialize ? serialize.serialize() : buf } catch { return buf } },
+    // The STRUCTURED view (from the JSONL transcript) — the sibling of buffer(), same AgentEvent shape as codex.
+    events: () => eventLog.events(),
     busy: () => !!current,
-    stop: () => { try { pty?.kill() } catch {} },
+    stop: () => { stopTail(); try { pty?.kill() } catch {} },
     // The UI fits xterm to its container width and sends the resulting cols/rows here so claude's TUI re-lays-out
     // to fill the panel. Resize the emulator TOO, so its screen stays the same geometry as the client's.
     resize: (c: number, r: number) => { cols = Math.max(40, c | 0); rows = Math.max(10, r | 0); try { pty?.resize(cols, rows) } catch {}; try { term?.resize(cols, rows) } catch {} },

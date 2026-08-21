@@ -4,7 +4,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { useClaudeTerminal } from './useClaudeTerminal'
-import { ANSI } from './termColors'
+import { ANSI, COLS, ROWS } from './termColors'
 
 // Cloud mode: VITE_HUB_URL set (e.g. wss://superatom.site). The page is served at
 // /u behind the worker; it logs in via Clerk, exchanges for our JWT, and connects to
@@ -92,9 +92,11 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [anProgress, setAnProgress] = useState('')   // clean live narration from the agent (no tool calls)
   // How to render the analyst's raw stream: 'pty' = a real terminal (claude-code) → xterm; 'events' =
   // discrete agent events (codex/SDK) → a plain event log (a terminal emulator makes no sense for these).
-  const [anStreamKind, setAnStreamKind] = useState<'pty' | 'events'>('pty')
-  const anStreamKindRef = useRef<'pty' | 'events'>('pty')
+  const [anStreamKind, setAnStreamKind] = useState<'pty' | 'events'>('events')   // default = structured (claude via JSONL, codex); PTY is opt-in
+  const anStreamKindRef = useRef<'pty' | 'events'>('events')
   const [anEvents, setAnEvents] = useState<AgentEvent[]>([])   // structured event log when kind === 'events' (codex)
+  const [anHasPty, setAnHasPty] = useState(false)       // claude-code: a raw PTY terminal is also available (show the toggle)
+  const [anTerminal, setAnTerminal] = useState(false)   // user opened the raw terminal → attach the PTY (lazily) and render xterm
   const [semStreamKind, setSemStreamKind] = useState<'pty' | 'events'>('pty')   // modeler: claude (pty) vs codex (events)
   const [semEvents, setSemEvents] = useState<AgentEvent[]>([])
   const anLogRef = useRef<HTMLDivElement>(null)
@@ -201,7 +203,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // Both claude-code agent terminals (modeler + analyst) go through ONE shared module — same code path,
   // parameterized by `which` + `interactive`. Model-agnostic; codex/opencode would use their own view.
   useClaudeTerminal(semTermRef, semXtermRef, { which: 'semantic', interactive: true, send })
-  useClaudeTerminal(anTermRef, anXtermRef, { which: 'analyst', interactive: true, send })
+  useClaudeTerminal(anTermRef, anXtermRef, { which: 'analyst', interactive: true, send, autoAttach: false })   // default = structured; PTY attaches only on the Terminal toggle
 
   // Keep the event log (SDK harnesses) pinned to the newest line as it streams.
   useEffect(() => {
@@ -292,6 +294,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
         } else if (msg.t === 'analyst:stream') {
           const k = msg.kind === 'pty' ? 'pty' : 'events'
           anStreamKindRef.current = k; setAnStreamKind(k)
+          setAnHasPty(!!msg.pty)   // claude-code also has a raw PTY terminal → offer the "Terminal" toggle
           // Do NOT clear the log here — the agent thread persists across questions, so the event log
           // ACCUMULATES the whole session (cleared only on New session; a divider marks a compaction).
         } else if (msg.t === 'analyst:chunk') {
@@ -655,6 +658,18 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           </span>
           {anBusy && <Spinner />}
           <span style={{ color: '#8a8276', fontSize: 12 }}>{anStatus}</span>
+          {anHasPty && (
+            <button
+              onClick={() => {
+                const next = !anTerminal; setAnTerminal(next)
+                if (next) { send({ t: 'ui:resize', which: 'analyst', cols: COLS, rows: ROWS }); send({ t: 'term:attach', which: 'analyst' }) }   // lazy: open the PTY only now
+                else send({ t: 'term:detach', which: 'analyst' })   // switching back → stop the PTY stream
+              }}
+              style={s.backBtn}
+              title={anTerminal ? 'Back to the structured view' : 'Open the raw claude-code terminal'}>
+              {anTerminal ? '≣ Structured' : '⌨ Terminal'}
+            </button>
+          )}
           <button onClick={() => sessionCtl('analyst', 'compact')} style={s.backBtn} title="Compact the session's context">⇊ Compact</button>
           <button onClick={() => sessionCtl('analyst', 'new')} style={s.backBtn} title="Start a completely fresh session">↻ New session</button>
         </div>
@@ -693,11 +708,11 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           </div>
         )})()}
         <div ref={anLogRef} style={{ flex: 1, overflow: 'auto', background: 'transparent', padding: 12, paddingBottom: 110 }}>
-          {/* PTY harness (claude-code) → terminal emulator; kept mounted so its buffer survives view switches */}
-          <div ref={anTermRef} onMouseDown={() => anXtermRef.current?.focus()} style={{ display: anStreamKind === 'pty' ? 'block' : 'none' }} />
-          {/* SDK harness (codex) → a structured event log (command runs, messages, reasoning), rendered natively
-              like the codex client — NOT a terminal emulation. */}
-          {anStreamKind === 'events' && <CodexEventLog events={anEvents} busy={anBusy} />}
+          {/* Raw claude-code terminal (PTY) — shown only when the user opened it via the toggle, or for a
+              pure-pty agent. Kept mounted so its buffer survives view switches. */}
+          <div ref={anTermRef} onMouseDown={() => anXtermRef.current?.focus()} style={{ display: (anTerminal || anStreamKind === 'pty') ? 'block' : 'none' }} />
+          {/* DEFAULT: the STRUCTURED event log — claude-code (from its JSONL transcript) AND codex, same view. */}
+          {!(anTerminal || anStreamKind === 'pty') && <CodexEventLog events={anEvents} busy={anBusy} />}
         </div>
         {view === 'analyst' && (
           <div style={s.bottomBar}>

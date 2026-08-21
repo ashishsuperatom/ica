@@ -384,18 +384,20 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   let keepalive: ReturnType<typeof setInterval> | null = setInterval(() => { if (reply) emit(reply, { t: 'tick', sid }) }, 8000)
   try {
     const analyst = await analystSlot.get()
-    // Tell the UI how to render this harness's stream: 'pty' → terminal emulator (claude-code), 'events' →
-    // a plain event log (codex/SDK harnesses; a terminal emulator makes no sense for discrete events).
-    emit(reply, { t: 'analyst:stream', kind: analyst.session.kind ?? 'events', sid })
+    // Tell the UI how to render this harness's stream. claude-code now has BOTH: a STRUCTURED event view
+    // (from its JSONL transcript — the default) AND the raw PTY terminal (on demand). So announce 'events'
+    // when the session exposes events() (claude + codex), plus `pty:true` when a raw terminal is available
+    // (claude only) so the UI can offer a "Terminal" toggle. A pure event harness (codex) has no PTY.
+    emit(reply, { t: 'analyst:stream', kind: analyst.session.events ? 'events' : (analyst.session.kind ?? 'events'), pty: analyst.session.kind === 'pty', sid })
     const handlers = {
       onCategory: (c: string) => { curCategory = c; emit(reply, { t: 'analyst:category', category: c, sid }) },
       onOutput: (chunk: string) => {
-        // The analyst is ONE agent with ONE terminal — mirror its live output to the asker AND to every
-        // attached web-UI terminal, so the Analyst tab shows the work no matter where the question came from
-        // (web, Teams, …). Dedup so the web asker (also an attached viewer) isn't written twice.
+        // PTY bytes are the RAW-TERMINAL view — streamed ONLY to viewers who explicitly opened the terminal
+        // (termViewers). The default view is driven by onEvent below (structured, from the JSONL), so a claude
+        // run streams clean events by default and the PTY never reaches a client that didn't ask for it.
+        if (!termViewers.analyst.size) return
         const m = { t: 'analyst:chunk', text: chunk }
-        if (reply) emit(reply, m)
-        for (const v of termViewers.analyst) if (v !== reply) emit(v, m)
+        for (const v of termViewers.analyst) emit(v, m)
       },
       onNarration: (text: string) => { if (reply) emit(reply, { t: 'analyst:progress', text, sid }) },  // clean prose → New chat progress
       // Structured events (codex/SDK harnesses only — claude PTY uses onOutput above). The session already
@@ -680,10 +682,11 @@ function resyncAnalyst(from: any) {
   emit(from, { t: 'sessions:res', sessions: [] })   // UI keeps its own chat list (localStorage); this is just the ack
   const aSession = analystSlot.session(), sSession = semanticSlot.session()
   if (!aSession) return
-  const kind = aSession.kind ?? 'events'
-  emit(from, { t: 'analyst:stream', kind })                               // tell the reconnecting UI which renderer to use
-  // Repaint from the matching replay buffer: 'events' → the structured event log; 'pty' → the rolling text.
-  if (kind === 'events' && aSession.events) {
+  const kind = aSession.events ? 'events' : (aSession.kind ?? 'events')
+  emit(from, { t: 'analyst:stream', kind, pty: aSession.kind === 'pty' })   // which renderer + whether a raw terminal exists
+  // Repaint the STRUCTURED event log by default (claude + codex); the raw PTY screen is replayed only when the
+  // client explicitly opens the terminal (term:attach), so PTY bytes never reach a client that didn't ask.
+  if (aSession.events) {
     const evs = aSession.events()
     if (evs.length) emit(from, { t: 'analyst:events', events: evs, replace: true })
   } else {
@@ -711,6 +714,7 @@ async function handle(payload: any, from: any) {
   else if (payload.t === 'grounding:build') { handleGrounding(from, !!payload.rebuild) }        // admin console → grounding agent builds (rebuild:true = wipe first, else additive)
   else if (payload.t === 'connector:ask') { handleConnector(String(payload.text || ''), from) }   // admin console → connector agent (raw PTY back)
   else if (payload.t === 'term:attach') { attachTerminal(normWhich(payload.which), from) }         // open a live typeable terminal into an agent's PTY (e.g. /login)
+  else if (payload.t === 'term:detach') { termViewers[normWhich(payload.which)]?.delete(from) }    // UI switched away from the raw terminal → stop streaming PTY bytes to it
   else if (payload.t === 'term:input')  { inputTerminal(normWhich(payload.which), String(payload.data ?? '')) }   // raw keystrokes/paste → the agent's PTY
   // ── Admin INSPECTOR (read-only) ─────────────────────────────────────────────
   // One request type, many views (see inspect.ts). reqId is echoed back so the admin UI can have
