@@ -62,23 +62,22 @@ export const teamsAdapter: ChannelAdapter = {
   },
 
   renderReport(answer: Answer, report: { png: string; html: string }, category?: string): unknown {
-    // Send the PNG as a NATIVE IMAGE ATTACHMENT (contentType image/png) — Teams then shows it as a real image
-    // that tap-expands IN-APP (the lightbox), unlike an Adaptive Card Image whose only tap action opens a
-    // browser tab. The takeaway + report link ride in the message text as markdown. Answer.answer may be a
-    // string OR a list of items → bullet lines.
+    // TWO attachments (stacked via attachmentLayout:'list'):
+    //   1. an Adaptive Card — category + takeaway + a proper "View the full report" BUTTON (the nice styled
+    //      action; a markdown link looks worse). The card carries NO image.
+    //   2. a NATIVE image/png attachment — Teams shows it as a real image that tap-expands IN-APP (unlike an
+    //      Adaptive Card Image, whose tap can only open a browser tab).
+    // So we keep the tappable image AND the button. Answer.answer may be a string OR a list → bullet lines.
     const cat = category ?? (answer as any).category
     const ans: any = (answer as any).answer
-    const takeaway = Array.isArray(ans) ? ans.map((x: any) => `- ${x}`).join('\n') : (ans != null ? String(ans) : '')
-    const parts: string[] = []
-    if (cat) parts.push(`**${String(cat).replace(/_/g, ' ').toUpperCase()}**`)
-    if (takeaway) parts.push(takeaway)
-    if (report.html) parts.push(`[📄 View the full report](${report.html})`)
-    return {
-      type: 'message',
-      textFormat: 'markdown',
-      text: parts.join('\n\n'),
-      attachments: report.png ? [{ contentType: 'image/png', contentUrl: report.png, name: 'report.png' }] : [],
-    }
+    const body: any[] = []
+    if (cat) body.push({ type: 'TextBlock', text: String(cat).replace(/_/g, ' ').toUpperCase(), weight: 'Bolder', size: 'Small', isSubtle: true, spacing: 'None' })
+    const takeaway = Array.isArray(ans) ? ans.map((x: any) => `• ${x}`).join('\n') : (ans != null ? String(ans) : '')
+    if (takeaway) body.push({ type: 'TextBlock', text: takeaway, wrap: true, spacing: 'Small' })
+    const card = { $schema: 'http://adaptivecards.io/schemas/adaptive-card.json', type: 'AdaptiveCard', version: '1.5', msteams: { width: 'Full' }, body, actions: report.html ? [{ type: 'Action.OpenUrl', title: 'View the full report', url: report.html }] : [] }
+    const attachments: any[] = [{ contentType: 'application/vnd.microsoft.card.adaptive', content: card }]
+    if (report.png) attachments.push({ contentType: 'image/png', contentUrl: report.png, name: 'report.png' })
+    return { type: 'message', attachmentLayout: 'list', attachments }
   },
 
   renderStatus(_text: string): unknown {
