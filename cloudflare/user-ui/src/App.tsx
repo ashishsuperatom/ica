@@ -80,6 +80,8 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
+  // Returning to the chat view → jump to the newest message (the feed didn't move while you were away).
+  useEffect(() => { if (view === 'chat') scroll(true) }, [view])   // eslint-disable-line react-hooks/exhaustive-deps
   // Analyst tab — the QA agent (classify → claude-code answers from the semantic model + units).
   const [anStatus, setAnStatus]     = useState('')
   const [anCategory, setAnCategory] = useState('')
@@ -635,7 +637,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           <button onClick={() => sessionCtl('semantic', 'new')} style={s.backBtn} title="Start a completely fresh session">↻ New session</button>
         </div>
         {gapsPanel}
-        <div style={{ flex: 1, overflow: 'auto', background: '#161a17', padding: 12, paddingBottom: 110 }}>
+        <div style={{ flex: 1, overflow: 'auto', background: 'transparent', padding: 12, paddingBottom: 110 }}>
           {/* pty (claude) → xterm, kept mounted; events (codex) → structured log */}
           <div ref={semTermRef} onMouseDown={() => semXtermRef.current?.focus()} style={{ display: semStreamKind === 'pty' ? 'block' : 'none' }} />
           {semStreamKind === 'events' && <CodexEventLog events={semEvents} busy={semBusy} />}
@@ -690,7 +692,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
             )}
           </div>
         )})()}
-        <div ref={anLogRef} style={{ flex: 1, overflow: 'auto', background: '#161a17', padding: 12, paddingBottom: 110 }}>
+        <div ref={anLogRef} style={{ flex: 1, overflow: 'auto', background: 'transparent', padding: 12, paddingBottom: 110 }}>
           {/* PTY harness (claude-code) → terminal emulator; kept mounted so its buffer survives view switches */}
           <div ref={anTermRef} onMouseDown={() => anXtermRef.current?.focus()} style={{ display: anStreamKind === 'pty' ? 'block' : 'none' }} />
           {/* SDK harness (codex) → a structured event log (command runs, messages, reasoning), rendered natively
