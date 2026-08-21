@@ -712,7 +712,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
               pure-pty agent. Kept mounted so its buffer survives view switches. */}
           <div ref={anTermRef} onMouseDown={() => anXtermRef.current?.focus()} style={{ display: (anTerminal || anStreamKind === 'pty') ? 'block' : 'none' }} />
           {/* DEFAULT: the STRUCTURED event log — claude-code (from its JSONL transcript) AND codex, same view. */}
-          {!(anTerminal || anStreamKind === 'pty') && <CodexEventLog events={anEvents} busy={anBusy} />}
+          {!(anTerminal || anStreamKind === 'pty') && <CodexEventLog events={anEvents} busy={anBusy} claude={anHasPty} />}
         </div>
         {view === 'analyst' && (
           <div style={s.bottomBar}>
@@ -1041,43 +1041,57 @@ function mergeEvent(evs: AgentEvent[], e: AgentEvent): AgentEvent[] {
 }
 
 // A command's output, collapsed to the first few lines with a +N-lines toggle (matches the native client).
-function CmdOutput({ text }: { text: string }) {
+function CmdOutput({ text, claude }: { text: string; claude?: boolean }) {
   const [open, setOpen] = useState(false)
-  const lines = text.replace(/\s+$/, '').split('\n')
-  const CAP = 5, hidden = lines.length - CAP
+  let body = text.replace(/\s+$/, '')
+  // claude-only: if the whole output is a JSON value, pretty-print it (reads far better than a one-line blob).
+  if (claude) { const t = body.trim(); if (/^[[{]/.test(t) && /[}\]]$/.test(t)) { try { body = JSON.stringify(JSON.parse(t), null, 2) } catch { /* not strict JSON (e.g. node inspect) — leave as-is */ } } }
+  const lines = body.split('\n')
+  const CAP = 8, hidden = lines.length - CAP
   const shown = open || hidden <= 0 ? lines : lines.slice(0, CAP)
   return (
     <div style={{ marginTop: 4 }}>
-      <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#8a9a8c', fontSize: 12, lineHeight: 1.5, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{shown.join('\n')}</pre>
-      {hidden > 0 && <span onClick={() => setOpen(o => !o)} style={{ cursor: 'pointer', color: '#6f8a70', fontSize: 11, userSelect: 'none' }}>{open ? '▲ show less' : `▾ +${hidden} lines`}</span>}
+      <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#54634f', fontSize: 12, lineHeight: 1.5, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', background: '#ece8de', border: '1px solid #e0dacd', borderRadius: 4, padding: '6px 9px' }}>{shown.join('\n')}</pre>
+      {hidden > 0 && <span onClick={() => setOpen(o => !o)} style={{ cursor: 'pointer', color: '#8a7a3a', fontSize: 11, userSelect: 'none' }}>{open ? '▲ show less' : `▾ +${hidden} lines`}</span>}
     </div>
   )
 }
 
-function CodexEvent({ e }: { e: AgentEvent }) {
+function CodexEvent({ e, claude }: { e: AgentEvent; claude?: boolean }) {
   const mono = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' as const }
-  if (e.kind === 'turn') return <div style={{ borderTop: '1px solid #263026', margin: '14px 0' }} />
+  if (e.kind === 'turn') return <div style={{ borderTop: '1px solid #ddd6ca', margin: '14px 0' }} />
   if (e.kind === 'user') return (
-    <div style={{ margin: '16px 0 10px', paddingTop: 12, borderTop: '1px solid #263026', color: '#e7efe7', fontSize: 13.5, fontWeight: 600 }}>
-      <span style={{ color: '#6f8a70' }}>›</span> {e.text}
+    <div style={{ margin: '16px 0 10px', paddingTop: 12, borderTop: '1px solid #ddd6ca', color: '#1a1a1a', fontSize: 13.5, fontWeight: 600 }}>
+      <span style={{ color: '#9aa79b' }}>›</span> {e.text}
     </div>
   )
   if (e.kind === 'command') return (
     <div style={{ margin: '9px 0' }}>
-      <div style={{ color: '#cfe3d0', fontSize: 12.5, ...mono }}>
-        <span style={{ color: e.status === 'in_progress' ? '#c9a24a' : '#7fae7f' }}>●</span>{' '}
-        <span style={{ color: '#9db29e' }}>Ran</span> {e.command}
+      <div style={{ color: '#2f3d2c', fontSize: 12.5, ...mono }}>
+        <span style={{ color: e.status === 'in_progress' ? '#b07d1a' : '#3a7d3a' }}>●</span>{' '}
+        <span style={{ color: '#6b7a6c' }}>Ran</span> {e.command}
       </div>
-      {e.output ? <CmdOutput text={e.output} /> : null}
+      {e.output ? <CmdOutput text={e.output} claude={claude} /> : null}
     </div>
   )
   if (e.kind === 'file') return (
-    <div style={{ margin: '9px 0', color: '#cfe3d0', fontSize: 12.5, ...mono }}>
-      <span style={{ color: '#7fae7f' }}>●</span> <span style={{ color: '#9db29e' }}>Edited</span> {e.text}
+    <div style={{ margin: '9px 0', color: '#2f3d2c', fontSize: 12.5, ...mono }}>
+      <span style={{ color: '#3a7d3a' }}>●</span> <span style={{ color: '#6b7a6c' }}>Edited</span> {(e.text || '').split('/').slice(-3).join('/')}
     </div>
   )
-  const muted = e.kind === 'reasoning'   // reasoning is subdued; agent_message is the prominent prose
-  return <div style={{ margin: '9px 0', color: muted ? '#8a9a8c' : '#d3e4d4', fontSize: 13, lineHeight: 1.55, fontStyle: muted ? 'italic' : 'normal' }}
+  const muted = e.kind === 'reasoning'   // reasoning is subdued; a message is the prominent prose
+  const color = muted ? '#7a857c' : '#263124'
+  // claude-only: a long PROSE message reads better broken into sentences (never applied to command OUTPUT,
+  // which can be code). Only split when there's genuinely more than one sentence.
+  if (claude && !muted && e.text) {
+    const parts = e.text.split(/(?<=[.!?])\s+(?=[A-Z(])/).map((s) => s.trim()).filter(Boolean)
+    if (parts.length > 1) return (
+      <div style={{ margin: '9px 0', color: '#263124', fontSize: 13, lineHeight: 1.55 }}>
+        {parts.map((p, i) => <div key={i} style={{ margin: '3px 0' }} dangerouslySetInnerHTML={{ __html: renderInlineMd(p) }} />)}
+      </div>
+    )
+  }
+  return <div style={{ margin: '9px 0', color, fontSize: 13, lineHeight: 1.55, fontStyle: muted ? 'italic' : 'normal' }}
     dangerouslySetInnerHTML={{ __html: renderInlineMd(e.text ?? '') }} />
 }
 
@@ -1087,16 +1101,16 @@ function CodexEvent({ e }: { e: AgentEvent }) {
 function ThinkingLine() {
   const [n, setN] = useState(1)
   useEffect(() => { const t = setInterval(() => setN(x => (x % 3) + 1), 420); return () => clearInterval(t) }, [])
-  return <div style={{ color: '#c9a24a', fontSize: 12.5, fontStyle: 'italic', margin: '9px 0' }}>◐ codex is thinking{'.'.repeat(n)}</div>
+  return <div style={{ color: '#9a7b1a', fontSize: 12.5, fontStyle: 'italic', margin: '9px 0' }}>◐ agent is thinking{'.'.repeat(n)}</div>
 }
 
-function CodexEventLog({ events, busy }: { events: AgentEvent[]; busy?: boolean }) {
+function CodexEventLog({ events, busy, claude }: { events: AgentEvent[]; busy?: boolean; claude?: boolean }) {
   const last = events[events.length - 1]
   const streaming = !!last && last.done === false && (last.kind === 'command' || last.kind === 'message' || last.kind === 'reasoning')
   const thinking = !!busy && !streaming   // busy but nothing actively streaming ⇒ reasoning between steps
   if (!events.length && !thinking) return null
   return <div>
-    {events.map((e, i) => <CodexEvent key={e.id ?? `turn${i}`} e={e} />)}
+    {events.map((e, i) => <CodexEvent key={e.id ?? `turn${i}`} e={e} claude={claude} />)}
     {thinking && <ThinkingLine />}
   </div>
 }
