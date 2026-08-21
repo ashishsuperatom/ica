@@ -61,18 +61,16 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [semHasLog, setSemHasLog] = useState(false)
   const [semStatus, setSemStatus] = useState('')
   const [semBusy, setSemBusy] = useState(false)   // modeler running (drives the codex "thinking" indicator)
-  // The main view is URL state (?view=analyst|semantic; absent = chat) so back/forward and refresh work
-  // and you can always return. `navigate` pushes a history entry; popstate syncs it back.
+  // The main view lives in the URL PATH at ROOT (the subdomain serves the user app for ANY path): a chat is
+  // /c/<id>, the other views are /analyst and /semantic. A reload / shared link lands on the same view.
+  // `navigate` pushes a history entry; popstate syncs it back.
   const readView = (): 'chat' | 'semantic' | 'analyst' => {
-    const v = new URLSearchParams(location.search).get('view')
-    return v === 'analyst' || v === 'semantic' ? v : 'chat'
+    const seg = location.pathname.replace(/\/+$/, '').split('/').pop()
+    return seg === 'analyst' || seg === 'semantic' ? seg : 'chat'
   }
   const [view, setView] = useState<'chat' | 'semantic' | 'analyst'>(readView)
   const navigate = useCallback((v: 'chat' | 'semantic' | 'analyst') => {
-    const sp = new URLSearchParams(location.search)
-    if (v === 'chat') sp.delete('view'); else sp.set('view', v)
-    const qs = sp.toString()
-    history.pushState(null, '', `${location.pathname}${qs ? '?' + qs : ''}`)
+    history.pushState(null, '', v === 'chat' ? `/c/${sidRef.current}${location.search}` : `/${v}`)
     setView(v)
   }, [])
   useEffect(() => {
@@ -157,8 +155,8 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [sessionId, setSessionId] = useState<string>(() => readSid() || newId())
   const sidRef = useRef(sessionId); sidRef.current = sessionId
   const vtagCtr = useRef(0)
-  // Make sure the URL always carries the session id.
-  useEffect(() => { if (!readSid()) history.replaceState(null, '', `/c/${sessionId}${location.search}`) }, [])   // keep ?project=
+  // Make sure the CHAT view's URL carries the session id — but don't clobber /analyst or /semantic on load.
+  useEffect(() => { if (!readSid() && readView() === 'chat') history.replaceState(null, '', `/c/${sessionId}${location.search}`) }, [])   // keep ?project=
   // Restore THIS chat's feed on mount (reload survives) and jump straight to the bottom.
   useEffect(() => { const f = loadFeed(sessionId); if (f.length) { setFeed(f); scroll(true) } }, [])   // eslint-disable-line
   // Persist the feed + keep the chat in the sidebar list (title = first question) whenever it changes.
@@ -395,12 +393,14 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     // running session log stays (it clears only on "New session").
     const id = newId(); sidRef.current = id; setSessionId(id); setFeed([]); setAnAnswer(null); setAnBusy(false)
     history.pushState(null, '', `/c/${id}${location.search}`)   // keep ?project=
+    setView('chat')   // selecting/creating a chat returns to the chat view (e.g. from the analyst view)
     inputRef.current?.focus()
   }
   function openSession(id: string) {
     if (id === sidRef.current) return
     sidRef.current = id; setSessionId(id); setFeed(loadFeed(id)); setAnAnswer(null)   // restore that chat's saved feed
     history.pushState(null, '', `/c/${id}${location.search}`)   // keep ?project=
+    setView('chat')   // selecting a chat returns to the chat view
     scroll(true)   // jump straight to the bottom (instant) instead of landing at the top
   }
 
