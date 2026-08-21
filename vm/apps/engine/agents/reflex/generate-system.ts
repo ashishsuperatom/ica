@@ -26,7 +26,9 @@ between exactly TWO options:
 
 - **REUSE** — one of the existing programs already answers THIS question (the same intent; the literal
   values may differ). Pick it, and fill in THIS question's values in the same param shape. The SAME question
-  asked again is always a REUSE — it re-runs the existing program against current data.
+  asked again is always a REUSE — it re-runs the existing program against current data. But a program that
+  answers this only as ONE PART of a broader, multi-part output — even if it literally contains the answer —
+  is NOT a reuse; that is a \`superset\` (below), and it routes to build.
 - **BUILD** — nothing in the catalog fits. Route it to the analyst (which will build a new program).
 
 There is NO "modify" decision. You never decide to edit an existing answer. (Editing/refining an answer is
