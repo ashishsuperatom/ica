@@ -141,7 +141,9 @@ function reportCard(a: Answer, report: { png: string; html: string }, category?:
   const ans: any = (a as any).answer
   const takeaway = Array.isArray(ans) ? ans.map((x: any) => `• ${x}`).join('\n') : ans
   if (takeaway) body.push({ type: 'TextBlock', text: String(takeaway), wrap: true, spacing: 'Small' })
-  if (report.png) body.push({ type: 'Image', url: report.png, size: 'Stretch', altText: 'Answer report', spacing: 'Medium' })
+  // selectAction makes the card image TAPPABLE — Adaptive Card images aren't tap-to-expand by default. Opens
+  // the full-size PNG (pinch-zoomable on mobile); the button below opens the interactive HTML report.
+  if (report.png) body.push({ type: 'Image', url: report.png, size: 'Stretch', altText: 'Answer report', spacing: 'Medium', selectAction: { type: 'Action.OpenUrl', title: 'Open image', url: report.png } })
   const actions = report.html ? [{ type: 'Action.OpenUrl', title: 'View the full report', url: report.html }] : []
   return { $schema: 'http://adaptivecards.io/schemas/adaptive-card.json', type: 'AdaptiveCard', version: '1.5', msteams: { width: 'Full' }, body, actions }
 }
