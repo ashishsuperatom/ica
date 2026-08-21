@@ -219,7 +219,7 @@ export function App() {
       <Routes>
         <Route path="/" element={<OrgListPage />} />
         <Route path="/org/:orgId" element={<OrgDetailPage />} />
-        <Route path="/org/:orgId/projects/:projectId" element={<ProjectDetailPage />} />
+        <Route path="/org/:orgId/projects/:projectId/*" element={<ProjectDetailPage />} />
       </Routes>
     </BrowserRouter>
   )
@@ -482,16 +482,19 @@ function ChannelsPanel({ projectId, api }: { projectId: string; api: (path: stri
 }
 
 function ProjectDetailPage() {
-  const token = useAuth(); const { orgId, projectId } = useParams<{ orgId: string; projectId: string }>()
+  const token = useAuth(); const params = useParams<{ orgId: string; projectId: string; '*': string }>()
+  const { orgId, projectId } = params
+  const navigate = useNavigate()
   const api = useApi(token, orgId)
   const [status, setStatus] = useState<any>(null)
   const [logs, setLogs] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false); const [error, setError] = useState('')
-  // The view id is flat: a top-level item ('overview'), or 'inspector/<section>' for an Inspector
-  // sub-section. Keeping it a single string means the sidebar, the title, and the body all agree
-  // without a second piece of nav state.
-  const [view, setView] = useState<string>('overview')
+  // The view id is flat: a top-level item ('overview'), or 'inspector/<section>' for an Inspector sub-section.
+  // It lives in the URL PATH (the route splat), so a reload / shared link lands on the same view — e.g.
+  // /admin/org/<org>/projects/<id>/semantic or /inspector/db-kinds. setView navigates instead of setState.
+  const view = params['*'] || 'overview'
+  const setView = (v: string) => navigate(`/org/${orgId}/projects/${projectId}${v && v !== 'overview' ? '/' + v : ''}`)
   const [openGroup, setOpenGroup] = useState<string | null>(null)
   // One persistent hub connection for the whole project — survives switching sidebar views.
   const hub = useProjectHub(projectId, token)
