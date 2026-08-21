@@ -36,7 +36,7 @@ export function loadConfig(): Config {
   return { hubHost, id, key, workers }
 }
 
-// The DO WS URL — same scheme every server-side client dials (see hub fly.ts):
+// The DO WS URL — same scheme every server-side client dials (see control-plane fly.ts):
 //   wss://<host>/_ws/<fastRouterId>?key=<sharedKey>
 // (The key is re-sent in the `hello` message, which is where the DO actually validates it.)
 export function hubUrl(cfg: Config): string {

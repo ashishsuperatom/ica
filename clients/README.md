@@ -1,7 +1,7 @@
 # Client surfaces
 
 Alternative front-ends onto the **same** Superatom engine. The web app
-(`hub/user-ui`) is the first surface; these are the others.
+(`control-plane/user-ui`) is the first surface; these are the others.
 
 Every surface is a thin client — it owns only presentation and input. It never
 talks to the code-engine directly. It connects to the hub as a **`runtime`**
@@ -28,5 +28,5 @@ identical across surfaces; only (a) differs.
 | `android/`| Android native app                     | placeholder         |
 | `ios/`    | iOS native app                         | placeholder         |
 
-The `hub/user-ui` web app stays where it is — this folder is only for the
+The `control-plane/user-ui` web app stays where it is — this folder is only for the
 additional surfaces.

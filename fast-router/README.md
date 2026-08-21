@@ -84,5 +84,5 @@ pnpm start          # or: pnpm dev  (watch)
 
 `FR_HUB_HOST` overrides the hub (default `wss://superatom.site`).
 
-> The DO must accept `role:'fast-router'` (added in `hub/superadmin/src/project-do.ts`) —
+> The DO must accept `role:'fast-router'` (added in `control-plane/superadmin/src/project-do.ts`) —
 > deploy that before the worker can register live.

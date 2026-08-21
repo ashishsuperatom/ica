@@ -16,7 +16,7 @@
 ecosystem.config.cjs
 
 # ── not part of the engine image ──
-hub
+control-plane
 fast-router
 server
 

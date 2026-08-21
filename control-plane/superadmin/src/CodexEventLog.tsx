@@ -4,7 +4,7 @@
 // client does — command runs with collapsed output, assistant messages, reasoning, turn rules — plus a
 // "thinking" line for the silent reasoning phase.
 //
-// THIS FILE IS CANONICAL. The user-ui has a COPY (hub/user-ui/src/CodexEventLog.tsx) that references
+// THIS FILE IS CANONICAL. The user-ui has a COPY (control-plane/user-ui/src/CodexEventLog.tsx) that references
 // this one — make changes HERE first, then sync the copy. (Deliberate copy, not a shared import.)
 import { useEffect, useState } from 'react'
 

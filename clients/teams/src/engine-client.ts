@@ -1,4 +1,4 @@
-// The shared runtime handshake — identical to what hub/user-ui does, just
+// The shared runtime handshake — identical to what control-plane/user-ui does, just
 // in Node instead of the browser. A surface connects to the hub as a `runtime`
 // peer and asks the code-engine a question:
 //

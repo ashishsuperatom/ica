@@ -15,7 +15,7 @@ engine, and replies with the answer (prose + figures + a table as an Adaptive
 Card). This is the quickest Teams experiment — a bot maps 1:1 onto the product's
 question→answer model, and each Teams conversation becomes an engine session.
 
-> A Teams **tab** (embedding `hub/user-ui` inside Teams) is the other
+> A Teams **tab** (embedding `control-plane/user-ui` inside Teams) is the other
 > option and reuses the whole web UI — noted here as the alternative, not built.
 
 ## How it fits
