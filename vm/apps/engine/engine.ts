@@ -26,6 +26,7 @@ import { createAnalyst, promptVersion as analystPromptVersion } from './agents/a
 import { createConnector, promptVersion as connectorPromptVersion } from './agents/connector/index.js'
 import { createGroundingAgent, promptVersion as groundingPromptVersion } from './agents/grounding/index.js'
 import { openAnswers, normalizeQuestion } from './answers.js'
+import { followUpCues } from './followup.js'
 import { forgetProgram } from './forget.js'
 import { log, readJsonSafe } from './log.js'
 import { createInspector } from './inspect.js'
@@ -336,11 +337,21 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   // words at a different position is a different node (context = position). A hit re-runs
   // the node's program — a FRESH query against current data, never the stored answer.
   const pos = position.get(sid) || ROOT
-  const nid = intentId(pos, question)
-  const hitNode = graph.getNode(nid)
+  const nid = intentId(pos, question)   // real-position node id — the reflex/build path uses this, UNCHANGED
+  // The ONLY new determination — a small regex (no model, no network): is this a self-contained ROOT question or a
+  // FOLLOW-UP? It is used for exactly ONE thing here: the fast REUSE lookup below. A root question is matched at
+  // ROOT, so an exact repeat of a standalone question re-runs its saved program WITHOUT the reflex classifier. It
+  // NEVER creates or places a node — a miss falls straight through to the unchanged reflex+build path, which alone
+  // decides node identity/placement (still the reflex agent's job). For now we only OBSERVE whether the regex
+  // agreed with where the analyst ends up placing the node (logged at the build site) to see if we were right.
+  const cues = explicitEdit ? [] : followUpCues(question)
+  const rootQuestion = !explicitEdit && cues.length === 0
+  const matchId = rootQuestion ? intentId(ROOT, question) : nid
+  if (!explicitEdit) console.log(`[ica] regex: ${rootQuestion ? 'ROOT → reuse-match at ROOT' : `FOLLOW-UP (${cues.join(',')}) → reuse-match @ ${pos === ROOT ? 'ROOT' : pos.slice(0, 14)}`}`)
+  const hitNode = graph.getNode(matchId)
   const hp: any = hitNode?.props
   if (!explicitEdit && hp?.program && existsSync(join(WORKSPACE, hp.program, 'program.ts'))) {
-    if (await reuseProgram(hp.program, hp.params, hp.category, { sid, qid, question, norm, t0, nodeId: nid })) return
+    if (await reuseProgram(hp.program, hp.params, hp.category, { sid, qid, question, norm, t0, nodeId: matchId })) return
     // failed → fall through to rebuild via the analyst
   }
 
@@ -458,6 +469,9 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       if (coord?.axes?.length) linkBasis(graph, nodeId, coord.axes)   // grow the basis space for reuse
       setPosition(sid, nodeId)
       console.log(`[ica] intent node ${nodeId.slice(0, 14)} under ${parent === ROOT ? 'ROOT' : parent.slice(0, 14)} (${analystParent ? 'analyst-placed' : 'positional'})${programDir ? ` · program ${programDir}` : ' · no program'}`)
+      // OBSERVE-only (we do NOT act on this yet): did the cheap regex agree with where the analyst actually placed
+      // the node? parent===ROOT ⇒ analyst treated it as a new/root topic. Builds the labelled corpus for later.
+      if (!explicitEdit) console.log(`[ica] regex-check: guessed ${rootQuestion ? 'ROOT' : 'FOLLOW-UP'} · analyst placed ${parent === ROOT ? 'ROOT' : 'FOLLOW-UP'} → ${rootQuestion === (parent === ROOT) ? 'MATCH ✓' : 'MISMATCH ✗'}`)
     }
     // PROGRAM NODE — the program's OWN identity in the DB (kind:'program'), distinct from the question/intent
     // node. props.dir is the pointer to where the program lives; props.authoredBy records WHO wrote it —
