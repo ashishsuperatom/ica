@@ -1,4 +1,4 @@
-// The wire shape — identical envelope to the existing DO hub (cloudflare/superadmin/src/hub-core.ts).
+// The wire shape — identical envelope to the existing DO hub (hub/superadmin/src/hub-core.ts).
 // fast-router is NOT a new protocol; it's a new server-side role on the SAME per-project DO. The DO
 // stamps `from` on every relayed message (we never set it); we send `to` (or omit for broadcast).
 
