@@ -62,7 +62,23 @@ export const teamsAdapter: ChannelAdapter = {
   },
 
   renderReport(answer: Answer, report: { png: string; html: string }, category?: string): unknown {
-    return { type: 'message', attachments: [{ contentType: 'application/vnd.microsoft.card.adaptive', content: reportCard(answer, report, category) }] }
+    // Send the PNG as a NATIVE IMAGE ATTACHMENT (contentType image/png) — Teams then shows it as a real image
+    // that tap-expands IN-APP (the lightbox), unlike an Adaptive Card Image whose only tap action opens a
+    // browser tab. The takeaway + report link ride in the message text as markdown. Answer.answer may be a
+    // string OR a list of items → bullet lines.
+    const cat = category ?? (answer as any).category
+    const ans: any = (answer as any).answer
+    const takeaway = Array.isArray(ans) ? ans.map((x: any) => `- ${x}`).join('\n') : (ans != null ? String(ans) : '')
+    const parts: string[] = []
+    if (cat) parts.push(`**${String(cat).replace(/_/g, ' ').toUpperCase()}**`)
+    if (takeaway) parts.push(takeaway)
+    if (report.html) parts.push(`[📄 View the full report](${report.html})`)
+    return {
+      type: 'message',
+      textFormat: 'markdown',
+      text: parts.join('\n\n'),
+      attachments: report.png ? [{ contentType: 'image/png', contentUrl: report.png, name: 'report.png' }] : [],
+    }
   },
 
   renderStatus(_text: string): unknown {
@@ -128,24 +144,6 @@ function adaptiveCard(a: Answer, category?: string): unknown {
   // msteams.width:'Full' makes the card use the FULL chat-pane width (default is ~half), so the table gets
   // room to breathe instead of wrapping every cell.
   return { $schema: 'http://adaptivecards.io/schemas/adaptive-card.json', type: 'AdaptiveCard', version: '1.5', msteams: { width: 'Full' }, body }
-}
-
-// The RICH report reply: the takeaway as TEXT (accessible + shows in the notification/preview + a fallback if
-// the image can't load) + the reporting service's rendered card as an IMAGE (matches the web UI) + a link to
-// the full HTML report. The png URL is passed straight through — Microsoft's CDN fetches it unauthenticated,
-// so the URL carries its own signature; we never proxy or re-host it.
-function reportCard(a: Answer, report: { png: string; html: string }, category?: string): unknown {
-  const body: any[] = []
-  const cat = category ?? a.category
-  if (cat) body.push({ type: 'TextBlock', text: String(cat).replace(/_/g, ' ').toUpperCase(), weight: 'Bolder', size: 'Small', isSubtle: true, spacing: 'None' })
-  const ans: any = (a as any).answer
-  const takeaway = Array.isArray(ans) ? ans.map((x: any) => `• ${x}`).join('\n') : ans
-  if (takeaway) body.push({ type: 'TextBlock', text: String(takeaway), wrap: true, spacing: 'Small' })
-  // selectAction makes the card image TAPPABLE — Adaptive Card images aren't tap-to-expand by default. Opens
-  // the full-size PNG (pinch-zoomable on mobile); the button below opens the interactive HTML report.
-  if (report.png) body.push({ type: 'Image', url: report.png, size: 'Stretch', altText: 'Answer report', spacing: 'Medium', selectAction: { type: 'Action.OpenUrl', title: 'Open image', url: report.png } })
-  const actions = report.html ? [{ type: 'Action.OpenUrl', title: 'View the full report', url: report.html }] : []
-  return { $schema: 'http://adaptivecards.io/schemas/adaptive-card.json', type: 'AdaptiveCard', version: '1.5', msteams: { width: 'Full' }, body, actions }
 }
 
 // Push one Adaptive Card Table (+ an optional footnote). Shared by the flat `a.table` and each report section,
