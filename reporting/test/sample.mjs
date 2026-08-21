@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { Renderer } from '@takumi-rs/wasm/node'
 import { renderImage } from '../src/render/image.ts'
-import { sampleAnswer } from './sample-answer.mjs'
+import { sampleAnswer } from '../src/sample.ts'
 
 // The real product font. These same files ship to the Worker (see README: fonts are
 // registered once per isolate, not per render).

@@ -1,6 +1,9 @@
-// A representative Answer: prose + KPIs + a long table + sections + caveat.
-// Deliberately oversized (60 rows, 9 columns) so the fit heuristics actually fire.
-const rows = []
+// A representative Answer used by the local sample render AND by the deployed
+// worker's /sample route, so what you see in a browser is what the test produces.
+// Deliberately oversized (60 rows, 9 columns, 8 figures) so the fit heuristics fire.
+import type { Answer } from './types.js'
+
+const rows: unknown[][] = []
 const branches = ['Auckland Central','Hamilton','Tauranga','Wellington','Christchurch','Dunedin','Palmerston North','Napier','Rotorua','Invercargill','New Plymouth','Whangarei']
 for (let i = 0; i < 60; i++) {
   const b = branches[i % branches.length] + (i >= branches.length ? ` Depot ${Math.floor(i / branches.length) + 1}` : '')
@@ -10,7 +13,7 @@ for (let i = 0; i < 60; i++) {
     '$' + Math.round(rev / (1200 - i * 13)).toLocaleString('en-US'), (i % 7) - 3 + '%', 'NZ', 'Freight', i % 3 === 0 ? 'Yes' : 'No'])
 }
 
-export const sampleAnswer = {
+export const sampleAnswer: Answer = {
   status: 'answered',
   category: 'profitability_analysis',
   answer: 'Six branches carry the network. Auckland Central, Hamilton and Tauranga together produce 41% of revenue at above-average margin, while the eleven smallest depots contribute under 6% combined and three of them run below the 12% margin floor.\n\nThe gap is widening: the top quartile improved margin 1.8pts year on year, the bottom quartile lost 2.4pts.',

@@ -18,6 +18,20 @@ import { stylesheet, type Theme } from './theme.js'
 const esc = (s: unknown) =>
   String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
+/** Parse a formatted cell back to a number: "$4,200,000" → 4200000, "(1,200)" → -1200,
+ *  "+12.2%" → 12.2. Returns null when the cell isn't a number at all. */
+export function parseNum(v: unknown): number | null {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null
+  if (v == null) return null
+  const s = String(v).trim()
+  if (!s) return null
+  const neg = /^\(.*\)$/.test(s) || s.startsWith('-') || s.startsWith('\u2212')
+  const cleaned = s.replace(/[()\s,]/g, '').replace(/^[-+\u2212]/, '').replace(/^[$€£¥₹]/, '').replace(/%$/, '')
+  if (!/^\d*\.?\d+$/.test(cleaned)) return null
+  const n = parseFloat(cleaned)
+  return Number.isFinite(n) ? (neg ? -n : n) : null
+}
+
 /** Which columns are numeric, so they can be right-aligned — decided from the DATA,
  *  not the header text, and only when a clear majority of non-empty cells parse as
  *  numbers (one stray "n/a" shouldn't left-align a column of money). */
@@ -36,13 +50,60 @@ function numericColumns(columns: string[], rows: unknown[][]): boolean[] {
 
 /** A table lives in a card, so its header band and spill footer sit inside one
  *  rounded shell — the same shape the web app gives it. */
+/** Pick ONE column to carry magnitude bars, or none.
+ *
+ *  A bar is a purely DESCRIPTIVE encoding — it says "this row is bigger than that
+ *  row", which is always true of the numbers as printed. It asserts nothing about
+ *  whether big is good. That's why it's safe to add without knowing the domain, and
+ *  why we place it on a magnitude column rather than a delta column.
+ *
+ *  Requirements, all of them about not lying:
+ *   • every value non-negative — a bar length can't express a sign
+ *   • at least 3 rows and real spread — bars on 2 rows, or on near-identical values,
+ *     invent a comparison that isn't there
+ *   • not a percentage-ish column — those are usually rates or deltas, where relative
+ *     bar length implies a ranking the numbers don't support
+ */
+function barColumn(cols: string[], rows: unknown[][], num: boolean[]): number {
+  if (rows.length < 3) return -1
+  for (let i = 0; i < cols.length; i++) {
+    if (!num[i] || i === 0) continue
+    if (/%|pct|percent|margin|rate|share|change|delta|yoy|growth/i.test(cols[i])) continue
+    const vals = rows.map((r) => parseNum(r?.[i])).filter((n): n is number => n != null)
+    if (vals.length < rows.length * 0.9) continue
+    if (vals.some((v) => v < 0)) continue
+    const max = Math.max(...vals), min = Math.min(...vals)
+    // Only draw the comparison when the comparison is VISIBLE. At low spread every
+    // bar is the same length, which is truthful and useless — it adds noise and
+    // implies a distinction the eye can't read. 0.35 is a parameter, not a law.
+    if (max <= 0 || (max - min) / max < 0.35) continue
+    return i
+  }
+  return -1
+}
+
 function tableHtml(t: AnswerTable & { fit?: { spill?: string } }, note?: string): string {
   const cols = t.columns ?? []
   const rows = t.rows ?? []
   const num = numericColumns(cols, rows)
-  const cls = (i: number) => (num[i] ? ' class="num"' : '')
+  const barCol = barColumn(cols, rows, num)
+  const barMax = barCol >= 0 ? Math.max(...rows.map((r) => parseNum(r?.[barCol]) ?? 0)) : 0
+  // `first`/`last` let the rule chrome pull the outer padding to the page edge, so a
+  // table's first column lines up with the prose above it.
+  const cls = (i: number) => {
+    const c = [num[i] ? 'num' : '', i === 0 ? 'first' : '', i === cols.length - 1 ? 'last' : ''].filter(Boolean)
+    return c.length ? ` class="${c.join(' ')}"` : ''
+  }
+  const cell = (v: unknown, i: number) => {
+    if (i !== barCol) return esc(v)
+    const n = parseNum(v)
+    const pct = n != null && barMax > 0 ? Math.max(2, Math.round((n / barMax) * 100)) : 0
+    // The bar sits UNDER the number, in flow — no absolute positioning, which keeps
+    // it identical in the browser, the image and email.
+    return `${esc(v)}<span class="sa-barwrap"><span class="sa-bar" style="width:${pct}%"></span></span>`
+  }
   const head = `<tr>${cols.map((c, i) => `<th${cls(i)}>${esc(c)}</th>`).join('')}</tr>`
-  const body = rows.map((r) => `<tr>${cols.map((_, i) => `<td${cls(i)}>${esc(r?.[i])}</td>`).join('')}</tr>`).join('')
+  const body = rows.map((r) => `<tr>${cols.map((_, i) => `<td${cls(i)}>${cell(r?.[i], i)}</td>`).join('')}</tr>`).join('')
   const total = t.total ? `<tr class="total">${cols.map((_, i) => `<td${cls(i)}>${esc(t.total![i])}</td>`).join('')}</tr>` : ''
   // The spill line is the reduction notice; it reads as a table footer, in the
   // accent colour, because it is the thing a reader must not miss.
@@ -102,11 +163,20 @@ export function renderFragment(a: Answer, o: RenderHtmlOptions): string {
     : `<span>${esc(o.theme.wordmark ?? '')}</span>`
 
   const parts: string[] = []
+  parts.push(`<div class="sa-masthead"></div>`)
   parts.push(`<div class="sa-head"><div class="sa-brand">${brandInner}</div>` +
     (a.category ? `<div class="sa-cat">${esc(String(a.category).replace(/_/g, ' '))}</div>` : '') + `</div>`)
   if (o.title) parts.push(`<div class="sa-title">${esc(o.title)}</div>`)
-  const scope = [a.period, a.scope].filter(Boolean).join(' · ')
-  if (scope) parts.push(`<div class="sa-scope">${esc(scope)}</div>`)
+  // The period is a labelled fact ("TIME FILTER — …"), not a caption: it changes
+  // what every number below it means, so it gets the accent pill.
+  if (a.period || a.scope) {
+    // Every child is an explicit element: a bare text node inside a flex row becomes
+    // an anonymous item and lays out unpredictably.
+    const pill = a.period ? `<span class="pk">Time filter</span>` : ''
+    const value = [a.period ? `<b>${esc(a.period)}</b>` : '', a.scope ? `${a.period ? ' &middot; ' : ''}${esc(a.scope)}` : '']
+      .filter(Boolean).join('')
+    parts.push(`<div class="sa-period">${pill}<span class="pv">${value}</span></div>`)
+  }
   if (prose.length) parts.push(`<div class="sa-card sa-card-pad"><div class="sa-prose">${prose.map((p) => paragraphs(String(p))).join('')}</div></div>`)
   if (a.figures?.length) parts.push(kpisHtml(a.figures))
   if (a.table?.columns?.length) parts.push(tableHtml(a.table as AnswerTable))

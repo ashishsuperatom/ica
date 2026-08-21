@@ -75,19 +75,42 @@ eventually be learned from real reports rather than fixed by us today.
 
 ## Themes
 
-A theme is a set of tokens; nothing in the renderer hard-codes a colour. Token names
-mirror the web app's `--sa-*` custom properties, and the `superatom` theme matches
-`cloudflare/user-ui/public/design.css` 1:1 — a report should read as the same product
-as the React UI. A second theme (`slate`) exists to keep the token layer honest.
+A theme is a set of tokens **plus a chrome mode**, because the product's two looks
+differ structurally, not just chromatically:
+
+| theme | chrome | source |
+|---|---|---|
+| `editorial` *(default)* | `rule` — heavy 1.5px ink rules, hairlines, no boxes | the live answer card (`control-plane/user-ui/src/App.tsx`, `ANSWER_CSS`) |
+| `paper` | `card` — rounded surfaces on tinted paper | the design system (`control-plane/user-ui/public/design.css`) |
+
+Both come from the **same markup** (`html.ts`); the stylesheet decides whether
+`.sa-card` is a box or is structurally inert. That is what stops a new theme from
+forking the renderer.
+
+Note `editorial` has **no positive colour** — good news is just ink, and only bad news
+is tinted (amber `#8a5a12`, not red; the live card reserves red for errors). `positive`
+is therefore optional on a theme rather than assumed.
 
 Tokens are substituted as literal values rather than emitted as `var()`: Outlook is
 unreliable with custom properties. Artefacts are light-only — a baked image cannot
 respond to a viewer's theme.
 
+### Rendering-engine gotchas found the hard way
+
+- **A flex row, not `inline-block`, for the accent pill.** As an inline-block the box
+  was sized before `white-space` applied and the background was clipped mid-word.
+- **No bare text nodes inside a flex container** — they become anonymous items and lay
+  out unpredictably. Every child is an explicit element.
+- **Register a `generic: 'sans-serif'` font.** A theme's font *stack* only resolves if
+  something claims the generic family; otherwise every glyph is tofu.
+- **No backticks in this file's CSS comments** — the stylesheet is a template literal
+  and one will end it.
+
 ## Fonts
 
-Inter (400/600/700) in `assets/fonts/`. Fonts must be registered with the renderer;
-do it **once per isolate**, not per render.
+Inter (400/600/700) in `assets/fonts/`, registered as the `sans-serif` generic so both
+themes' font stacks resolve to it. Fonts must be registered with the renderer **once
+per isolate**, not per render.
 
 ## Layout
 
@@ -111,6 +134,12 @@ pnpm install
 pnpm sample     # writes test/out/report.png + report.html
 pnpm test
 ```
+
+## Deployed
+
+`https://reports.superatom.site` — `/sample.png` is the image, `/sample` the complete
+HTML, `POST /render` and `POST /preview` take an Answer. The route is more specific
+than the control-plane's `*.superatom.site/*` wildcard, so only `reports.*` lands here.
 
 ## Not built yet
 

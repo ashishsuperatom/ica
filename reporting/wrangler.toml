@@ -1,0 +1,24 @@
+name = "superatom-reporting"
+main = "src/worker.ts"
+account_id = "91e1058d99235b9c34602fb0c28916d3"
+compatibility_date = "2026-05-23"
+workers_dev = true
+
+# Fonts ship as bundled binary modules (ArrayBuffers), so there is no fetch on the
+# render path. See src/fonts.ts for when this should move to R2 instead.
+[[rules]]
+type = "Data"
+globs = ["**/*.ttf"]
+fallthrough = true
+
+# NOTE: no R2 binding and no Durable Object yet — v0 is deliberately stateless, to
+# prove the wasm render works inside workerd before storage is built on it.
+
+# The hub worker holds the wildcard `*.superatom.site/*`. This route is MORE SPECIFIC,
+# and Cloudflare picks the most specific match, so reports.* lands here while every
+# other subdomain keeps going to the hub. The zone's `*` DNS record already resolves
+# this hostname, so no new DNS entry is needed.
+[[routes]]
+  pattern = "reports.superatom.site/*"
+  zone_name = "superatom.site"
+
