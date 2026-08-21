@@ -62,22 +62,20 @@ export const teamsAdapter: ChannelAdapter = {
   },
 
   renderReport(answer: Answer, report: { png: string; html: string }, category?: string): unknown {
-    // TWO attachments (stacked via attachmentLayout:'list'):
-    //   1. an Adaptive Card — category + takeaway + a proper "View the full report" BUTTON (the nice styled
-    //      action; a markdown link looks worse). The card carries NO image.
-    //   2. a NATIVE image/png attachment — Teams shows it as a real image that tap-expands IN-APP (unlike an
-    //      Adaptive Card Image, whose tap can only open a browser tab).
-    // So we keep the tappable image AND the button. Answer.answer may be a string OR a list → bullet lines.
+    // ONE Adaptive Card with the image INSIDE it. msteams width:'Full' makes it render WIDE and clean on BOTH
+    // Teams desktop and mobile — far better than a bare image attachment (which comes out small/narrow). The
+    // image's selectAction (and the button) open the FULL HTML REPORT — tapping the card image takes you to the
+    // real interactive report, which is more useful than a bigger static PNG. Answer.answer may be a string OR
+    // a list → bullet lines.
     const cat = category ?? (answer as any).category
     const ans: any = (answer as any).answer
     const body: any[] = []
     if (cat) body.push({ type: 'TextBlock', text: String(cat).replace(/_/g, ' ').toUpperCase(), weight: 'Bolder', size: 'Small', isSubtle: true, spacing: 'None' })
     const takeaway = Array.isArray(ans) ? ans.map((x: any) => `• ${x}`).join('\n') : (ans != null ? String(ans) : '')
     if (takeaway) body.push({ type: 'TextBlock', text: takeaway, wrap: true, spacing: 'Small' })
+    if (report.png) body.push({ type: 'Image', url: report.png, size: 'Stretch', altText: 'Answer report', spacing: 'Medium', ...(report.html ? { selectAction: { type: 'Action.OpenUrl', title: 'Open the full report', url: report.html } } : {}) })
     const card = { $schema: 'http://adaptivecards.io/schemas/adaptive-card.json', type: 'AdaptiveCard', version: '1.5', msteams: { width: 'Full' }, body, actions: report.html ? [{ type: 'Action.OpenUrl', title: 'View the full report', url: report.html }] : [] }
-    const attachments: any[] = [{ contentType: 'application/vnd.microsoft.card.adaptive', content: card }]
-    if (report.png) attachments.push({ contentType: 'image/png', contentUrl: report.png, name: 'report.png' })
-    return { type: 'message', attachmentLayout: 'list', attachments }
+    return { type: 'message', attachments: [{ contentType: 'application/vnd.microsoft.card.adaptive', content: card }] }
   },
 
   renderStatus(_text: string): unknown {
