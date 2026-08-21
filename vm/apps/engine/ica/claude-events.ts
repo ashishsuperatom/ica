@@ -18,14 +18,20 @@ export function transcriptPath(home: string, cwd: string, sessionId: string): st
   return `${home}/.claude/projects/${cwd.replace(/[/.]/g, '-')}/${sessionId}.jsonl`
 }
 
-// One assistant tool_use → an AgentEvent (a 'file' op for reads/writes, else a 'command').
+// One assistant tool_use → an AgentEvent (a 'file' op for reads/writes, else a 'command'). For a write/edit we
+// also capture WHAT changed (content or old→new diff) — it's in the transcript — so the UI can reveal it.
 function toolUseToEvent(p: any): AgentEvent {
   const name = p.name as string
   const inp = p.input ?? {}
   const id = p.id as string
   if (name === 'Bash') return { kind: 'command', id, command: short(inp.command ?? '', 2000), status: 'in_progress' }
-  if (['Write', 'Edit', 'MultiEdit', 'Read', 'NotebookEdit'].includes(name))
-    return { kind: 'file', id, text: inp.file_path ?? inp.notebook_path ?? '', status: 'in_progress' }
+  if (['Write', 'Edit', 'MultiEdit', 'Read', 'NotebookEdit'].includes(name)) {
+    const ev: AgentEvent = { kind: 'file', id, text: inp.file_path ?? inp.notebook_path ?? '', status: 'in_progress' }
+    if (name === 'Write' && inp.content) ev.output = short(inp.content, 2500)
+    else if (name === 'Edit' && (inp.old_string != null || inp.new_string != null)) ev.output = short(`- ${inp.old_string ?? ''}\n+ ${inp.new_string ?? ''}`, 2500)
+    else if (name === 'MultiEdit' && Array.isArray(inp.edits)) ev.output = short(inp.edits.map((e: any) => `- ${e.old_string ?? ''}\n+ ${e.new_string ?? ''}`).join('\n'), 2500)
+    return ev
+  }
   // any other tool (Grep/Glob/WebFetch/…) → a command line, so it still shows what happened
   return { kind: 'command', id, command: `${name} ${short(JSON.stringify(inp), 300)}`, status: 'in_progress' }
 }

@@ -1041,17 +1041,42 @@ function mergeEvent(evs: AgentEvent[], e: AgentEvent): AgentEvent[] {
 }
 
 // A command's output, collapsed to the first few lines with a +N-lines toggle (matches the native client).
+// Find the first BALANCED json object/array in a string that actually parses (string-escape aware), so a JSON
+// blob embedded in a run's mixed text output can be lifted out and pretty-printed separately from the trace.
+function findJsonSpan(text: string): { start: number; end: number; value: any } | null {
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== '{' && text[i] !== '[') continue
+    let depth = 0, inStr = false, esc = false
+    for (let j = i; j < text.length; j++) {
+      const c = text[j]
+      if (inStr) { if (esc) esc = false; else if (c === '\\') esc = true; else if (c === '"') inStr = false; continue }
+      if (c === '"') inStr = true
+      else if (c === '{' || c === '[') depth++
+      else if (c === '}' || c === ']') { if (--depth === 0) { try { const v = JSON.parse(text.slice(i, j + 1)); if (v && typeof v === 'object') return { start: i, end: j + 1, value: v } } catch { /* not this one */ } break } }
+    }
+  }
+  return null
+}
+const CODE_PRE: React.CSSProperties = { margin: '4px 0 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#54634f', fontSize: 12, lineHeight: 1.5, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', background: '#ece8de', border: '1px solid #e0dacd', borderRadius: 4, padding: '6px 9px' }
+const TRACE_TXT: React.CSSProperties = { color: '#8a8f86', fontSize: 11.5, lineHeight: 1.5, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: '2px 0' }
+
 function CmdOutput({ text, claude }: { text: string; claude?: boolean }) {
   const [open, setOpen] = useState(false)
-  let body = text.replace(/\s+$/, '')
-  // claude-only: if the whole output is a JSON value, pretty-print it (reads far better than a one-line blob).
-  if (claude) { const t = body.trim(); if (/^[[{]/.test(t) && /[}\]]$/.test(t)) { try { body = JSON.stringify(JSON.parse(t), null, 2) } catch { /* not strict JSON (e.g. node inspect) — leave as-is */ } } }
-  const lines = body.split('\n')
-  const CAP = 8, hidden = lines.length - CAP
+  const raw = text.replace(/\s+$/, '')
+  // claude-only: lift an embedded JSON blob out of mixed output → pretty-print it apart from the run trace.
+  const span = claude ? findJsonSpan(raw) : null
+  const pre = span ? raw.slice(0, span.start).trim() : ''
+  const post = span ? raw.slice(span.end).trim() : ''
+  let main = span ? JSON.stringify(span.value, null, 2) : raw
+  if (!span && claude) { const t = raw.trim(); if (/^[[{]/.test(t)) { try { main = JSON.stringify(JSON.parse(t), null, 2) } catch { /* node-inspect etc. → as-is */ } } }
+  const lines = main.split('\n')
+  const CAP = 12, hidden = lines.length - CAP
   const shown = open || hidden <= 0 ? lines : lines.slice(0, CAP)
   return (
     <div style={{ marginTop: 4 }}>
-      <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#54634f', fontSize: 12, lineHeight: 1.5, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', background: '#ece8de', border: '1px solid #e0dacd', borderRadius: 4, padding: '6px 9px' }}>{shown.join('\n')}</pre>
+      {pre && <div style={TRACE_TXT}>{pre}</div>}
+      {main.trim() && <pre style={CODE_PRE}>{shown.join('\n')}</pre>}
+      {post && <div style={TRACE_TXT}>{post}</div>}
       {hidden > 0 && <span onClick={() => setOpen(o => !o)} style={{ cursor: 'pointer', color: '#8a7a3a', fontSize: 11, userSelect: 'none' }}>{open ? '▲ show less' : `▾ +${hidden} lines`}</span>}
     </div>
   )
@@ -1075,8 +1100,11 @@ function CodexEvent({ e, claude }: { e: AgentEvent; claude?: boolean }) {
     </div>
   )
   if (e.kind === 'file') return (
-    <div style={{ margin: '9px 0', color: '#2f3d2c', fontSize: 12.5, ...mono }}>
-      <span style={{ color: '#3a7d3a' }}>●</span> <span style={{ color: '#6b7a6c' }}>Edited</span> {(e.text || '').split('/').slice(-3).join('/')}
+    <div style={{ margin: '9px 0' }}>
+      <div style={{ color: '#2f3d2c', fontSize: 12.5, ...mono }}>
+        <span style={{ color: '#3a7d3a' }}>●</span> <span style={{ color: '#6b7a6c' }}>Edited</span> {(e.text || '').split('/').slice(-3).join('/')}
+      </div>
+      {e.output ? <CmdOutput text={e.output} claude={claude} /> : null}
     </div>
   )
   const muted = e.kind === 'reasoning'   // reasoning is subdued; a message is the prominent prose
