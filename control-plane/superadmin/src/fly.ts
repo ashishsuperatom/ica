@@ -83,7 +83,10 @@ export async function createMachine(token: string, config: MachineConfig): Promi
     body: JSON.stringify({
       name: volName,
       region,
-      size_gb: 50,
+      // Engine state is tiny (~1.6GB observed: ~170MB real state + agent-home caches). 10GB is ~6x headroom
+      // and the OS runs on the machine's separate rootfs, not this volume. Fly bills provisioned size, so
+      // don't over-allocate — a volume can be extended later if a project ever genuinely needs it.
+      size_gb: 10,
       encrypted: true,
     }),
   })
