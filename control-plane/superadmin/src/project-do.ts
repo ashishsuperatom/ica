@@ -21,7 +21,7 @@ import { DurableObject } from 'cloudflare:workers'
 import { suspendMachine, stopMachine as flyStopMachine, startMachine as flyStartMachine, getMachineStatus } from './fly.js'
 
 const FLY_APP = 'superatom-code-engine-vm'
-const SUSPEND_AFTER_MS = 30 * 60 * 1000        // 30 min idle (no real activity) → suspend (RAM snapshot kept → ~1-2s WARM wake, no agent re-warm)
+const SUSPEND_AFTER_MS = 60 * 60 * 1000        // 60 min idle (no real activity) → suspend (RAM snapshot kept → ~1-2s WARM wake, no agent re-warm)
 const STOP_AFTER_MS    = 24 * 60 * 60 * 1000   // 24 h idle → stop (release the RAM snapshot; next wake is a COLD boot + agent warm-up)
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -887,7 +887,7 @@ export class ProjectDO extends DurableObject<Env> {
 
   // The idle state machine. Runs whenever the alarm fires. Anchored to last_active
   // (real activity), so it's robust to reconnects and to the code-engine crashing.
-  //   running   + idle >= 30min            → SUSPEND (compute billing → 0, ~1-2s WARM wake)
+  //   running   + idle >= 60min            → SUSPEND (compute billing → 0, ~1-2s WARM wake)
   //   suspended + idle >= 24h + NO user     → STOP    (release snapshot; cold wake)
   //   idle is measured from last_active, which is reset on: a user message, a busy heartbeat, AND a WAKE
   //   (recordHeartbeat) — so a freshly-started machine always gets a full idle window before it can suspend.
@@ -912,7 +912,7 @@ export class ProjectDO extends DurableObject<Env> {
     const hasUser    = [...this.connByWs.values()].some(c => c.type === 'runtime')
 
     if (phase !== 'suspended' && phase !== 'stopped') {
-      // Running → suspend once idle 30 min.
+      // Running → suspend once idle 60 min.
       if (idleMs >= SUSPEND_AFTER_MS) {
         try {
           await suspendMachine(token, mid, FLY_APP)
