@@ -420,7 +420,10 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       narrating = true
       const activity = narrationBuf.splice(0).join('\n')
       try {
-        const line = await narrator!.narrate(question, activity)
+        // TIMEOUT the narrate call: if the narrator (deepseek) hangs, `finally` would never run, `narrating`
+        // would stay true, and EVERY later tick early-returns → narration frozen on one line while the analyst
+        // keeps working. Race it so a hung beat is abandoned (settles in the background) and the guard clears.
+        const line = await Promise.race([narrator!.narrate(question, activity), new Promise<null>((res) => setTimeout(() => res(null), 20000))])
         if (line) {
           if (reply) emit(reply, { t: 'narration', text: line, qid, sid })
           if (channel) emit({ type: 'channel' }, { t: 'channel:narration', channel, qid, text: line })   // stream to the chat channel (Teams/…) as a tiny message
