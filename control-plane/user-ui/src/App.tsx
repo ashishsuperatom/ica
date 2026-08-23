@@ -95,9 +95,9 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [anBusy, setAnBusy]         = useState(false)
   const [anEnriching, setAnEnriching] = useState<{ need: string; basis?: string } | null>(null)
   const [anProgress, setAnProgress] = useState('')   // clean live narration from the agent (no tool calls)
-  const [storyLog, setStoryLog]     = useState<string[]>([])   // receptionist (narrator) beats for THIS question — ACCUMULATE (never overwrite)
-  const storyLogRef                 = useRef<string[]>([])     // latest beats, readable inside ws handlers (state is stale in closures)
-  const storyTimesRef               = useRef<number[]>([])     // arrival ms per beat — drives the per-step live timer (UI-only, nice-to-have)
+  const [narrationLog, setNarrationLog]     = useState<string[]>([])   // receptionist (narrator) beats for THIS question — ACCUMULATE (never overwrite)
+  const narrationLogRef                 = useRef<string[]>([])     // latest beats, readable inside ws handlers (state is stale in closures)
+  const narrationTimesRef               = useRef<number[]>([])     // arrival ms per beat — drives the per-step live timer (UI-only, nice-to-have)
   const [nowMs, setNowMs]           = useState(0)              // ticks every 1s while busy so the CURRENT beat's timer counts up
   // How to render the analyst's raw stream: 'pty' = a real terminal (claude-code) → xterm; 'events' =
   // discrete agent events (codex/SDK) → a plain event log (a terminal emulator makes no sense for these).
@@ -225,7 +225,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     if (view !== 'analyst' || !anPinnedRef.current) return
     const t = setTimeout(() => { const el = anLogRef.current; if (el) el.scrollTop = el.scrollHeight }, 120)
     return () => clearTimeout(t)
-  }, [anEvents, storyLog, anStreamKind, view])
+  }, [anEvents, narrationLog, anStreamKind, view])
 
   // Per-step timer (UI-only, nice-to-have): tick every second while busy so the CURRENT analysis beat counts up.
   useEffect(() => {
@@ -347,8 +347,8 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
               setFeed(f => f.some(it => it.type === 'followups' && it.qid === fuQid) ? f : [...f, { id: crypto.randomUUID(), type: 'followups', items, qid: fuQid }])
             }, 3500)
           }
-        } else if (msg.t === 'story') {
-          if (msg.text) { storyLogRef.current = [...storyLogRef.current, msg.text]; storyTimesRef.current = [...storyTimesRef.current, Date.now()]; setStoryLog(storyLogRef.current); setNowMs(Date.now()) }   // append a beat + stamp its arrival
+        } else if (msg.t === 'narration') {
+          if (msg.text) { narrationLogRef.current = [...narrationLogRef.current, msg.text]; narrationTimesRef.current = [...narrationTimesRef.current, Date.now()]; setNarrationLog(narrationLogRef.current); setNowMs(Date.now()) }   // append a beat + stamp its arrival
         } else if (msg.t === 'analyst:progress') {
           setAnProgress(msg.text || '')   // clean prose narration → live progress line
         } else if (msg.t === 'analyst:gap') {
@@ -375,7 +375,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           // appended to its OWN chat: the visible feed if it's current, else that chat's saved feed.
           if (!msg.replay) {
             // The story becomes its OWN card, placed BETWEEN the question and the answer (collapsed accordion).
-            const beats = storyLogRef.current
+            const beats = narrationLogRef.current
             const analysisCard: FeedItem | null = beats.length ? { id: crypto.randomUUID(), type: 'analysis', beats: [...beats], qid: msg.qid } : null
             const card: FeedItem = { id: crypto.randomUUID(), type: 'answer', category: msg.category, answer: ans, timing: msg.timing, qid: msg.qid, at: Date.now() }
             const toAppend = analysisCard ? [analysisCard, card] : [card]
@@ -383,9 +383,9 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
             if (!msg.sid || msg.sid === sidRef.current) { setFeed(f => [...f, ...toAppend]); scroll() }
             else { const f = loadFeed(msg.sid); localStorage.setItem(fkey(msg.sid), JSON.stringify([...f, ...toAppend].slice(-100))) }
           }
-          // Keep storyLog as-is — the analyst-view mirror keeps showing it until the NEXT question starts (cleared in ask()).
+          // Keep narrationLog as-is — the analyst-view mirror keeps showing it until the NEXT question starts (cleared in ask()).
         } else if (msg.t === 'analyst:done') {
-          setAnBusy(false); setAnStatus('Done ✓'); setAnProgress(''); setStoryLog([]); storyLogRef.current = []; storyTimesRef.current = []; setBusy(false); busyRef.current = false; clearWatchdog()
+          setAnBusy(false); setAnStatus('Done ✓'); setAnProgress(''); setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []; setBusy(false); busyRef.current = false; clearWatchdog()
         } else if (msg.t === 'analysis:step') {
           setFeed(f => [...f, { id: crypto.randomUUID(), type: 'step', text: msg.text }])
           scroll()
@@ -477,7 +477,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   function endTurn(note?: string) {
     clearWatchdog()
     busyRef.current = false; setBusy(false); setStatus('')
-    setAnBusy(false); setAnStatus(''); setAnProgress(''); setStoryLog([]); storyLogRef.current = []; storyTimesRef.current = []
+    setAnBusy(false); setAnStatus(''); setAnProgress(''); setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []
     if (note) { setFeed(f => [...f, { id: crypto.randomUUID(), type: 'error', text: note }]); scroll() }
   }
   // Liveness: the engine ticks every ~8s while a turn runs; every incoming message re-arms this. If nothing
@@ -500,7 +500,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // Seconds shown next to a beat: the last (current) beat ticks via nowMs; past beats freeze at the gap until the
   // next beat arrived. Shows from 1 (never 0).
   const beatSecs = (i: number, total: number) => {
-    const t = storyTimesRef.current
+    const t = narrationTimesRef.current
     if (!t[i]) return 1
     const end = i < total - 1 ? (t[i + 1] ?? nowMs) : nowMs
     return Math.max(1, Math.floor(Math.max(0, end - t[i]) / 1000) + 1)
@@ -520,7 +520,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     // card. The Analyst tab keeps the raw terminal for when you WANT to look under the hood.
     setFeed(f => [...f, { id: qid, type: 'user-msg', text }])
     scroll()   // pin the new (now last) question to the top of the viewport
-    setAnQuestion(text); setAnAnswer(null); setAnCategory(''); setAnStatus('Classifying…'); setAnBusy(true); setAnEnriching(null); setAnProgress(''); setStoryLog([]); storyLogRef.current = []; storyTimesRef.current = []
+    setAnQuestion(text); setAnAnswer(null); setAnCategory(''); setAnStatus('Classifying…'); setAnBusy(true); setAnEnriching(null); setAnProgress(''); setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []
     anXtermRef.current?.clear()   // claude PTY: fresh TUI per question (harmless when the analyst is codex)
     if (anStreamKindRef.current === 'events') setAnEvents(l => [...l, { kind: 'user', text }])   // codex: the question as a user turn in the log
     setStatus('')
@@ -797,10 +797,10 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
         <div ref={anLogRef} onScroll={e => { const el = e.currentTarget; anPinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 240 }} style={{ flex: 1, overflow: 'auto', background: 'transparent', padding: 12, paddingBottom: 110 }}>
           {/* Narrator (receptionist) mirror — the exact business-language beats the USER sees, in a distinct
               color, so the operator can compare them against the raw activity below. */}
-          {storyLog.length > 0 && (
+          {narrationLog.length > 0 && (
             <div className="sa-narr">
-              <div className="sa-narr-h">Narrator · what the user sees ({storyLog.length})</div>
-              {storyLog.map((b, i) => <div key={i} className="sa-md sa-nb" dangerouslySetInnerHTML={{ __html: renderInlineMd(b) }} />)}
+              <div className="sa-narr-h">Narrator · what the user sees ({narrationLog.length})</div>
+              {narrationLog.map((b, i) => <div key={i} className="sa-md sa-nb" dangerouslySetInnerHTML={{ __html: renderInlineMd(b) }} />)}
             </div>
           )}
           {/* Raw claude-code terminal (PTY) — shown only when the user opened it via the toggle, or for a
@@ -840,17 +840,17 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
                   <Spinner /><span>Analysis</span>
                   <span className="lnk" onClick={() => navigate('analyst')}>details ↗</span>
                 </div>
-                {storyLog.length > 0 && (
+                {narrationLog.length > 0 && (
                   <div className="sa-beats">
-                    {storyLog.map((b, i) => (
-                      <div key={i} className={'sa-beat' + (i < storyLog.length - 1 ? ' past' : '')}>
+                    {narrationLog.map((b, i) => (
+                      <div key={i} className={'sa-beat' + (i < narrationLog.length - 1 ? ' past' : '')}>
                         <div className="sa-beat-b sa-md" dangerouslySetInnerHTML={{ __html: renderInlineMd(b) }} />
-                        <div className="sa-beat-t">{beatSecs(i, storyLog.length)}s</div>
+                        <div className="sa-beat-t">{beatSecs(i, narrationLog.length)}s</div>
                       </div>
                     ))}
                   </div>
                 )}
-                {storyLog.length === 0 && <div style={{ marginTop: 8, fontSize: 13.5, color: '#8a8276' }}>{anEnriching ? `Learning this part of your data: ${anEnriching.need}` : (anProgress || anStatus || 'Analyzing…')}</div>}
+                {narrationLog.length === 0 && <div style={{ marginTop: 8, fontSize: 13.5, color: '#8a8276' }}>{anEnriching ? `Learning this part of your data: ${anEnriching.need}` : (anProgress || anStatus || 'Analyzing…')}</div>}
               </div>
             )}
             {/* Reserve a screenful of scroll room after the last content so the LAST QUESTION can always reach the

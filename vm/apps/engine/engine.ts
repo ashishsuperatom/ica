@@ -398,11 +398,11 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   // the gap-loop model build is silent too. Tick every 8s for the whole turn so the watchdog never false-fires.
   let keepalive: ReturnType<typeof setInterval> | null = setInterval(() => { if (reply) emit(reply, { t: 'tick', sid }) }, 8000)
   // ── Receptionist narration (a SEPARATE throwaway agent): while the analyst works behind the scenes, translate
-  // its raw activity into business-language 'story' beats for the USER UI. Fresh per question; best-effort — a
+  // its raw activity into business-language 'narration' beats for the USER UI. Fresh per question; best-effort — a
   // narration failure must NEVER affect the answer.
   let narrator: ReturnType<typeof createNarrator> | null = null
-  let storyTimer: ReturnType<typeof setInterval> | null = null
-  const storyBuf: string[] = []
+  let narrationTimer: ReturnType<typeof setInterval> | null = null
+  const narrationBuf: string[] = []
   let narrating = false
   try {
     const analyst = await analystSlot.get()
@@ -411,15 +411,15 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // when the session exposes events() (claude + codex), plus `pty:true` when a raw terminal is available
     // (claude only) so the UI can offer a "Terminal" toggle. A pure event harness (codex) has no PTY.
     emit(reply, { t: 'analyst:stream', kind: analyst.session.events ? 'events' : (analyst.session.kind ?? 'events'), pty: analyst.session.kind === 'pty', sid })
-    // Kick off the story: an immediate opener, then every few seconds translate whatever the analyst just did
+    // Kick off the narration: an immediate opener, then every few seconds translate whatever the analyst just did
     // into ONE business line. Overlap-guarded (skip a tick if the previous narrate is still running).
     narrator = createNarrator({ cwd: WORKSPACE })
-    if (reply) emit(reply, { t: 'story', text: 'Looking into your question…', qid, sid })
-    storyTimer = setInterval(async () => {
-      if (narrating || !reply || storyBuf.length === 0) return
+    if (reply) emit(reply, { t: 'narration', text: 'Looking into your question…', qid, sid })
+    narrationTimer = setInterval(async () => {
+      if (narrating || !reply || narrationBuf.length === 0) return
       narrating = true
-      const activity = storyBuf.splice(0).join('\n')
-      try { const line = await narrator!.narrate(question, activity); if (line && reply) emit(reply, { t: 'story', text: line, qid, sid }) }
+      const activity = narrationBuf.splice(0).join('\n')
+      try { const line = await narrator!.narrate(question, activity); if (line && reply) emit(reply, { t: 'narration', text: line, qid, sid }) }
       catch { /* narration is best-effort */ } finally { narrating = false }
     }, 4000)
     const handlers = {
@@ -440,12 +440,12 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         const m = { t: 'analyst:event', ev, sid }
         if (reply) emit(reply, m)
         for (const v of termViewers.analyst) if (v !== reply) emit(v, m)
-        // Tee a digest — the command/file AND especially its OUTPUT (query results = the findings the narrator
-        // should report) — to the narrator, which translates it into business language. A generous cap so real
-        // results survive; the narrator hides all the machinery.
-        const label = ev.command || (ev.kind === 'file' ? `${ev.status === 'in_progress' ? 'reading' : 'wrote'} ${ev.text || ''}` : ev.text || '')
-        const d = ev.output ? `${label} → RESULT: ${ev.output}` : label
-        if (d && d.trim()) storyBuf.push(d.trim().slice(0, 1800))
+        // Narrator digest — feed ONLY the business signal: commands + their RESULTS (query outputs = the
+        // findings) and the analyst's own prose. SKIP file events (program code / diffs / paths) — that's pure
+        // machinery the narrator must hide anyway: big input bloat + a leak risk, with no business value (every
+        // real figure is already in a command's result).
+        if (ev.kind === 'command') { const d = ev.output ? `${ev.command || ''} → RESULT: ${ev.output}` : (ev.command || ''); if (d.trim()) narrationBuf.push(d.trim().slice(0, 1800)) }
+        else if (ev.kind === 'message' && ev.text?.trim()) narrationBuf.push(ev.text.trim().slice(0, 600))
       },
     }
     const hint = overlapHint ? `An existing program is a ${overlapHint.relation} of this question: ${overlapHint.program}. Open it and reuse what fits, or ignore it.` : undefined
@@ -524,7 +524,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     emit(reply, { t: 'analyst:answer', answer: lastAnswer, sid })
   } finally {
     if (keepalive) { clearInterval(keepalive); keepalive = null }
-    if (storyTimer) { clearInterval(storyTimer); storyTimer = null }
+    if (narrationTimer) { clearInterval(narrationTimer); narrationTimer = null }
     if (narrator) { narrator.stop(); narrator = null }
     curQuestion = ''
     emit(reply, { t: 'analyst:done', sid })
