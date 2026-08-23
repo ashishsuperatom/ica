@@ -24,7 +24,7 @@ export interface MachineInfo {
 const FLY_API = 'https://api.machines.dev/v1'
 
 // Fly naming rules: lowercase alphanumeric + underscores, max 30 chars
-function safeName(prefix: string, projectId: string): string {
+export function safeName(prefix: string, projectId: string): string {
   const clean = projectId.replace(/-/g, '_').replace(/[^a-z0-9_]/g, '')
   return `${prefix}_${clean}`.slice(0, 30)
 }

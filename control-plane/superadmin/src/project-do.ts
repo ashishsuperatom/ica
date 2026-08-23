@@ -18,7 +18,7 @@
 // Clients send `to` (optional; absent = broadcast); the DO resolves `to.type` via role registry.
 
 import { DurableObject } from 'cloudflare:workers'
-import { suspendMachine, stopMachine as flyStopMachine, startMachine as flyStartMachine, getMachineStatus } from './fly.js'
+import { suspendMachine, stopMachine as flyStopMachine, startMachine as flyStartMachine, getMachineStatus, safeName } from './fly.js'
 
 const FLY_APP = 'superatom-code-engine-vm'
 const SUSPEND_AFTER_MS = 60 * 60 * 1000        // 60 min idle (no real activity) → suspend (RAM snapshot kept → ~1-2s WARM wake, no agent re-warm)
@@ -415,7 +415,7 @@ export class ProjectDO extends DurableObject<Env> {
         return
       }
       this.log('ws:ce_auth_ok', {})
-      if (msg.machineId) this.reconcileMachineId(msg.machineId)   // self-heal the tracked machine id (survives recreate/resize)
+      if (msg.machineId) await this.reconcileMachineId(msg.machineId)   // self-heal (Fly-verified) the tracked machine id (survives recreate/resize)
       this.recordHeartbeat()
       if (await this.register(ws, role, undefined, undefined, instanceId, epoch)) this.flushQueued(ws)
       return
@@ -811,16 +811,33 @@ export class ProjectDO extends DurableObject<Env> {
 
   // ── Machine lifecycle ──────────────────────────────────────────────────────
 
-  // The engine reports the Fly machine it's actually running on (FLY_MACHINE_ID). If our tracked id drifted
-  // — the machine was recreated or resized — reconcile it so suspend/stop/start always target the LIVE machine.
-  // No-op on external (EC2/Docker) engines (no machine id) and when already correct.
-  private reconcileMachineId(machineId: string) {
+  // The engine reports the Fly machine it's running on (FLY_MACHINE_ID). If our tracked id drifted — the
+  // machine was recreated or resized — reconcile so suspend/stop/start always target the LIVE machine.
+  //
+  // SECURITY: the claimed id is NOT trusted. Holding the project key is enough to send this hello, so a
+  // key-holder could otherwise point the DO at an arbitrary machine and have us drive Fly stop/suspend against
+  // it with the org token. So on a claimed CHANGE we verify against Fly (the source of truth): the id must name
+  // a machine that EXISTS IN OUR APP and whose name is this project's deterministic `proj_<projectId>` — which
+  // can only be created with our Fly token. Same-id reconnects and external engines make no Fly call.
+  private async reconcileMachineId(claimedId: string) {
     const [m] = this.ctx.storage.sql.exec('SELECT machine_id, provider FROM fly_machine LIMIT 1')
     if (!m) return
-    if ((m as any).provider === 'external') return
-    if ((m as any).machine_id === machineId) return
-    this.ctx.storage.sql.exec('UPDATE fly_machine SET machine_id = ?', machineId)
-    this.log('machine:reconciled', { from: (m as any).machine_id ?? null, to: machineId })
+    if ((m as any).provider === 'external') return              // user-managed; no Fly machine to track
+    if ((m as any).machine_id === claimedId) return             // already correct — no Fly call
+    const token = this.env.FLY_API_TOKEN as string
+    if (!token || !this._pid) return
+    const expected = safeName('proj', this._pid)
+    try {
+      const info = await getMachineStatus(token, claimedId, FLY_APP)   // 404s if not in our app
+      if (info?.name !== expected) {
+        this.log('machine:reconcile_rejected', { claimedId, name: info?.name ?? null, expected })
+        return
+      }
+      this.ctx.storage.sql.exec('UPDATE fly_machine SET machine_id = ?', claimedId)
+      this.log('machine:reconciled', { from: (m as any).machine_id ?? null, to: claimedId })
+    } catch (err: any) {
+      this.log('machine:reconcile_failed', { claimedId, error: err?.message ?? String(err) })
+    }
   }
 
   private async updateMachine(req: Request): Promise<Response> {
