@@ -66,9 +66,11 @@ export function createNarrator(opts: NarratorOpts) {
   return {
     /** Translate a batch of raw system activity into ONE business-language line for the user. Best-effort. */
     async narrate(question: string, activity: string): Promise<string> {
-      session ??= createSession(harness, { cwd: opts.cwd, model, provider, baseUrl: opts.ica?.baseUrl })
+      // noTools + system=NARRATE → a PURE text completion: no coding-agent scaffolding, no tool schemas, no tool
+      // calls. The instructions live in the (well-cached) system prompt; only the per-turn activity travels here.
+      session ??= createSession(harness, { cwd: opts.cwd, model, provider, baseUrl: opts.ica?.baseUrl, noTools: true, system: NARRATE })
       const { lastLines } = await session.run(
-        `${NARRATE}\n\n---\nUSER QUESTION: ${question}\n\nRECENT SYSTEM ACTIVITY (raw + technical — TRANSLATE it, never repeat it):\n${activity}\n\nThe one line:`,
+        `USER QUESTION: ${question}\n\nRECENT SYSTEM ACTIVITY (raw + technical — TRANSLATE it, never repeat it):\n${activity}\n\nThe one line:`,
       )
       // Keep the full update (may be a couple of sentences when there's a real finding). Strip any stray
       // wrapping quotes / markdown the model adds, and collapse blank lines.

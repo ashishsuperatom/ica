@@ -29,6 +29,8 @@ export interface SessionOpts {
   baseUrl?: string      // opencode only: connect to a standalone `opencode serve` instead of spawning
   bin?: string          // claude-code only: the claude binary
   resumeId?: string     // resume a prior harness session (per project/agent) — harness-specific
+  noTools?: boolean     // opencode: disable ALL tools — a pure text completion, no coding-agent tool schemas
+  system?: string       // opencode: REPLACE the harness's default coding system prompt with this one (well-cached; keeps the per-turn prompt small). For pure-LLM agents (narrator/reflex) that don't need the agent scaffolding.
 }
 
 // The DEFAULT harness — override with ICA_HARNESS.
@@ -36,7 +38,7 @@ export const DEFAULT_HARNESS: Harness = (process.env.ICA_HARNESS as Harness) || 
 
 export function createSession(harness: Harness, opts: SessionOpts): Session {
   switch (harness) {
-    case 'opencode':    return createOpencodeSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model, baseUrl: opts.baseUrl })
+    case 'opencode':    return createOpencodeSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model, baseUrl: opts.baseUrl, noTools: opts.noTools, system: opts.system })
     case 'pi':          return createPiSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model })
     case 'claude-code': return createClaudeSession({ cwd: opts.cwd, model: opts.model, bin: opts.bin, resumeId: opts.resumeId })
     case 'codex':       return createCodexSession({ cwd: opts.cwd, model: opts.model, resumeId: opts.resumeId })

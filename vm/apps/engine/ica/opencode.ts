@@ -23,6 +23,8 @@ export interface OpencodeSessionOpts {
   baseUrl?: string
   hostname?: string   // default '127.0.0.1' (only when spawning a private server)
   port?: number       // default 0 ephemeral (only when spawning a private server)
+  noTools?: boolean   // disable ALL tools for this session (pure text completion — no tool schemas, no tool calls)
+  system?: string     // REPLACE opencode's default coding system prompt with this one (for pure-LLM agents)
 }
 
 // ALL PERMISSIONS enabled — opencode gates edit/webfetch on "ask" by default, which HANGS a headless
@@ -181,7 +183,9 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
       const res = await client.session.prompt({                         // resolves when the turn is DONE (exact completion)
         path: { id: sessionId },
         query: { directory: opts.cwd },
-        body: { model: { providerID, modelID }, parts: [{ type: 'text', text: prompt }] },
+        // `system` REPLACES opencode's default coding prompt; `tools:{'*':false}` disables the whole toolset —
+        // so a pure-LLM agent (narrator) pays for neither the agent scaffolding nor the tool schemas.
+        body: { model: { providerID, modelID }, parts: [{ type: 'text', text: prompt }], ...(opts.system ? { system: opts.system } : {}), ...(opts.noTools ? { tools: { '*': false } } : {}) },
       })
       answer = partsText(res?.data?.parts ?? res?.parts ?? [])
       // Cost visibility: log this turn's token usage + $cost. The prompt prefix identifies the caller
