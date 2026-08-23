@@ -19,6 +19,7 @@
 
 import { DurableObject } from 'cloudflare:workers'
 import { suspendMachine, stopMachine as flyStopMachine, startMachine as flyStartMachine, getMachineStatus, safeName } from './fly.js'
+import { AnswerBuffer } from './answer-buffer.js'
 
 const FLY_APP = 'superatom-code-engine-vm'
 const SUSPEND_AFTER_MS = 60 * 60 * 1000        // 60 min idle (no real activity) → suspend (RAM snapshot kept → ~1-2s WARM wake, no agent re-warm)
@@ -128,8 +129,13 @@ export class ProjectDO extends DurableObject<Env> {
   private static ENGINE_RECENT_MS = 30_000
   private static ENGINE_GRACE_MS = 5_000
 
+  // Durable per-user answer buffer + session snapshot — all storage logic lives in answer-buffer.ts; the DO
+  // only wires it to transport (relay) and its migration ladder.
+  private buffer: AnswerBuffer
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
+    this.buffer = new AnswerBuffer(this.ctx.storage.sql, (e, d) => this.log(e, d))
     this.ctx.blockConcurrencyWhile(() => this.migrate())
   }
 
@@ -208,20 +214,7 @@ export class ProjectDO extends DurableObject<Env> {
     // offline when the answer landed (internet blip, machine asleep, app closed, a different device) PULLS it
     // from this DO without waking the engine. Every row is tagged with user_id (from the runtime JWT) so it's
     // already user-scoped for the eventual per-user-DO split. Bounded: pruned to newest 20 per user / 7 days.
-    if (v < 6) {
-      this.ctx.storage.sql.exec(`
-        CREATE TABLE IF NOT EXISTS answer_buffer (
-          qid TEXT PRIMARY KEY, user_id TEXT NOT NULL DEFAULT '', session_id TEXT, question TEXT,
-          payload_json TEXT, followups_json TEXT,
-          at INTEGER NOT NULL, answered_at INTEGER, acked INTEGER NOT NULL DEFAULT 0
-        )`)
-      this.ctx.storage.sql.exec('CREATE INDEX IF NOT EXISTS idx_ab_user ON answer_buffer(user_id, at)')
-      this.ctx.storage.sql.exec(`
-        CREATE TABLE IF NOT EXISTS session_snapshot (
-          session_id TEXT NOT NULL, user_id TEXT NOT NULL DEFAULT '', title TEXT, last_at INTEGER NOT NULL,
-          PRIMARY KEY (session_id, user_id)
-        )`)
-    }
+    if (v < 6) AnswerBuffer.migrate(this.ctx.storage.sql)
 
     // Advance to current version
     this.ctx.storage.sql.exec('DELETE FROM _schema_version')
@@ -638,14 +631,15 @@ export class ProjectDO extends DurableObject<Env> {
     // Serve history/answers straight from the always-on DO (no engine wake), and capture questions/answers as
     // they pass through so an offline client can recover them. All user-scoped by the runtime's JWT userId.
     const pl = msg.payload || {}
+    const hubReply = (payload: any) => senderWs.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload }))
     if (sender.type === 'runtime') {
-      if (pl.t === 'sync:req')   { this.handleSyncReq(senderWs, sender); return }
-      if (pl.t === 'answer:get') { this.handleAnswerGet(senderWs, sender, pl); return }
-      if (pl.t === 'answer:ack') { this.ackAnswers(sender, pl); return }
-      if (pl.t === 'analyse' && pl.questionId) this.recordPending(sender, pl)   // capture, then route on
+      if (pl.t === 'sync:req')   { hubReply(this.buffer.sync(sender.userId || '')); return }
+      if (pl.t === 'answer:get') { hubReply(this.buffer.get(sender.userId || '', pl.qid)); return }
+      if (pl.t === 'answer:ack') { this.buffer.ack(sender.userId || '', pl.qids); return }
+      if (pl.t === 'analyse' && pl.questionId) this.buffer.recordPending(sender.userId || '', pl)   // capture, then route on
     } else if (sender.type === 'code-engine') {
-      if (pl.t === 'analyst:answer' && pl.qid && !pl.replay) this.recordAnswer(pl)
-      else if (pl.t === 'followups' && pl.qid) this.recordFollowups(pl)
+      if (pl.t === 'analyst:answer' && pl.qid && !pl.replay) this.buffer.recordAnswer(pl)
+      else if (pl.t === 'followups' && pl.qid) this.buffer.recordFollowups(pl)
     }
 
     const envelope: Envelope = {
@@ -840,70 +834,6 @@ export class ProjectDO extends DurableObject<Env> {
     const { event, detail } = await req.json() as any
     this.log(event, detail)
     return Response.json({ ok: true }, { status: 201 })
-  }
-
-  // ── Durable answer buffer (per-user, always-on delivery) ────────────────────
-  private static BUFFER_KEEP = 20                          // newest answers kept per user
-  private static BUFFER_TTL_MS = 7 * 24 * 60 * 60 * 1000   // …or within 7 days
-
-  // A runtime asked a question → record a PENDING row (user-attributed even if its socket later dies) + bump the
-  // recent-session snapshot. Filled in by recordAnswer when the engine replies.
-  private recordPending(sender: ConnInfo, p: any) {
-    const uid = sender.userId || '', qid = String(p.questionId), sid = String(p.sessionId || ''), q = String(p.question || ''), now = Date.now()
-    try {
-      this.ctx.storage.sql.exec(
-        'INSERT INTO answer_buffer (qid, user_id, session_id, question, at) VALUES (?,?,?,?,?) ON CONFLICT(qid) DO UPDATE SET question=excluded.question',
-        qid, uid, sid, q, now)
-      if (sid) this.ctx.storage.sql.exec(
-        'INSERT INTO session_snapshot (session_id, user_id, title, last_at) VALUES (?,?,?,?) ON CONFLICT(session_id,user_id) DO UPDATE SET title=excluded.title, last_at=excluded.last_at',
-        sid, uid, q.slice(0, 80), now)
-      this.pruneBuffer(uid)
-    } catch (e) { this.log('buffer:pending_failed', { error: String(e) }) }
-  }
-
-  private recordAnswer(p: any) {
-    try { this.ctx.storage.sql.exec('UPDATE answer_buffer SET payload_json = ?, answered_at = ?, acked = 0 WHERE qid = ?', JSON.stringify(p), Date.now(), String(p.qid)) } catch {}
-  }
-  private recordFollowups(p: any) {
-    try { this.ctx.storage.sql.exec('UPDATE answer_buffer SET followups_json = ? WHERE qid = ?', JSON.stringify(p), String(p.qid)) } catch {}
-  }
-
-  // Keep it BOUNDED: drop rows older than the TTL, and everything beyond the newest N — per user.
-  private pruneBuffer(uid: string) {
-    const cutoff = Date.now() - ProjectDO.BUFFER_TTL_MS
-    try {
-      this.ctx.storage.sql.exec('DELETE FROM answer_buffer WHERE user_id = ? AND at < ?', uid, cutoff)
-      this.ctx.storage.sql.exec(
-        'DELETE FROM answer_buffer WHERE user_id = ? AND qid NOT IN (SELECT qid FROM answer_buffer WHERE user_id = ? ORDER BY at DESC LIMIT ?)',
-        uid, uid, ProjectDO.BUFFER_KEEP)
-      this.ctx.storage.sql.exec('DELETE FROM session_snapshot WHERE user_id = ? AND last_at < ?', uid, cutoff)
-    } catch {}
-  }
-
-  // Client (re)connect / app-open → hand back this user's recent sessions + any answered-but-UNACKED answers.
-  private handleSyncReq(ws: WebSocket, sender: ConnInfo) {
-    const uid = sender.userId || ''
-    const sessions = [...this.ctx.storage.sql.exec('SELECT session_id, title, last_at FROM session_snapshot WHERE user_id = ? ORDER BY last_at DESC LIMIT 50', uid)]
-      .map((r: any) => ({ sessionId: r.session_id, title: r.title, lastAt: r.last_at }))
-    const answers = [...this.ctx.storage.sql.exec('SELECT qid, session_id, payload_json, followups_json FROM answer_buffer WHERE user_id = ? AND payload_json IS NOT NULL AND acked = 0 ORDER BY at DESC LIMIT ?', uid, ProjectDO.BUFFER_KEEP)]
-      .map((r: any) => ({ qid: r.qid, sessionId: r.session_id, answer: JSON.parse(r.payload_json), followups: r.followups_json ? JSON.parse(r.followups_json) : null }))
-    ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'sync:res', sessions, answers } }))
-  }
-
-  // Client asks for ONE answer by qid (served from the DO — engine stays asleep).
-  private handleAnswerGet(ws: WebSocket, sender: ConnInfo, p: any) {
-    const uid = sender.userId || '', qid = String(p.qid || '')
-    const [r] = this.ctx.storage.sql.exec('SELECT payload_json, followups_json FROM answer_buffer WHERE qid = ? AND user_id = ?', qid, uid)
-    const rr = r as any
-    const payload = !rr ? { t: 'answer:res', qid, status: 'none' }
-      : !rr.payload_json ? { t: 'answer:res', qid, status: 'pending' }
-      : { t: 'answer:res', qid, status: 'ready', answer: JSON.parse(rr.payload_json), followups: rr.followups_json ? JSON.parse(rr.followups_json) : null }
-    ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload }))
-  }
-
-  private ackAnswers(sender: ConnInfo, p: any) {
-    const uid = sender.userId || ''
-    for (const q of (Array.isArray(p.qids) ? p.qids : [])) { try { this.ctx.storage.sql.exec('UPDATE answer_buffer SET acked = 1 WHERE qid = ? AND user_id = ?', String(q), uid) } catch {} }
   }
 
   // ── Machine lifecycle ──────────────────────────────────────────────────────
