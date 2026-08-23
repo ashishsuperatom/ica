@@ -4,6 +4,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { useClaudeTerminal } from './useClaudeTerminal'
+import { useQuestionNav } from './questionNav'
 import { ANSI, COLS, ROWS } from './termColors'
 
 // Cloud mode: VITE_HUB_URL set (e.g. wss://superatom.site). The page is served at
@@ -88,27 +89,8 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     if (ref) { const pin = () => { if (ref.current) ref.current.scrollTop = ref.current.scrollHeight }; requestAnimationFrame(pin); setTimeout(pin, 60) }
   }, [view])   // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Shift+Up / Shift+Down (when NOT typing) = smooth-scroll to the PREVIOUS / NEXT question, pinned to the top.
-  // "Current" is derived from the scroll position each press (never stored): Shift+Up → the nearest question that
-  // has scrolled above the top; Shift+Down → the nearest one below it. Plain arrows keep the browser default.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!e.shiftKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || e.metaKey || e.ctrlKey || e.altKey) return
-      const t = document.activeElement as HTMLElement | null
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
-      if (readView() !== 'chat') return
-      const qs = (Array.from(document.querySelectorAll('[data-role="q"]')) as HTMLElement[]).map(el => ({ el, top: el.getBoundingClientRect().top }))
-      if (!qs.length) return
-      let target: HTMLElement | undefined
-      if (e.key === 'ArrowUp') { const a = qs.filter(x => x.top < -2); if (a.length) target = a.reduce((p, c) => c.top > p.top ? c : p).el }   // closest above the top
-      else { const b = qs.filter(x => x.top > 2); if (b.length) target = b.reduce((p, c) => c.top < p.top ? c : p).el }                       // closest below the top
-      if (!target) return
-      e.preventDefault()
-      window.scrollTo({ top: target.getBoundingClientRect().top + window.scrollY - 12, behavior: 'smooth' })
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])   // eslint-disable-line react-hooks/exhaustive-deps
+  // Shift+Up / Shift+Down jump to the previous / next question (see questionNav.ts).
+  useQuestionNav(() => readView() === 'chat')
   // Analyst tab — the QA agent (classify → claude-code answers from the semantic model + units).
   const [anStatus, setAnStatus]     = useState('')
   const [anCategory, setAnCategory] = useState('')
