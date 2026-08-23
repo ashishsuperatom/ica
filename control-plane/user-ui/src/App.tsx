@@ -1494,9 +1494,14 @@ function AnswerCard({ answer: a, category, timing, qid, at }: { answer: any; cat
           ))}
         </div>
       )}
-      {/* All tabular/blocked results render through `sections` (the ONE format). The old flat top-level `table`
-          renderer was removed — the analyst now emits a `table` section even for a single table. */}
+      {/* Section-format results (the current format). */}
       {Array.isArray(a.sections) && a.sections.map((s: any, i: number) => <SectionBlock key={i} s={s} />)}
+      {/* Backward-compat: programs built in the OLDER format (and reused since) emit a flat top-level `table`
+          instead of a `table` section. Render it too — dropping it stranded every pre-format program (e.g. all
+          of TotalGroup's), silently losing real rows. */}
+      {a.table?.columns && (!Array.isArray(a.sections) || !a.sections.some((s: any) => s?.kind === 'table')) && (
+        <DataTable columns={a.table.columns} rows={a.table.rows ?? []} total={a.table.total} totalRows={a.table.totalRows} title={a.table.title} note={a.table.note} csvName={a.table.title} />
+      )}
       {a.caveat && <div className="sa-caveat" dangerouslySetInnerHTML={{ __html: renderAnswerBody(a.caveat) }} />}
       {a.scope && <div className="sa-src"><b>Scope:</b> {a.scope}</div>}
       {a.source && <div className="sa-src"><b>Source:</b> {a.source}</div>}
