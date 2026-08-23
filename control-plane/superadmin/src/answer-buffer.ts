@@ -60,19 +60,19 @@ export class AnswerBuffer {
     const uid = userId || ''
     const sessions = [...this.sql.exec('SELECT session_id, title, last_at FROM session_snapshot WHERE user_id=? ORDER BY last_at DESC LIMIT 50', uid)]
       .map((r: any) => ({ sessionId: r.session_id, title: r.title, lastAt: r.last_at }))
-    const answers = [...this.sql.exec('SELECT qid, session_id, payload_json, followups_json FROM answer_buffer WHERE user_id=? AND payload_json IS NOT NULL AND acked=0 ORDER BY at DESC LIMIT ?', uid, AnswerBuffer.KEEP)]
-      .map((r: any) => ({ qid: r.qid, sessionId: r.session_id, answer: JSON.parse(r.payload_json), followups: r.followups_json ? JSON.parse(r.followups_json) : null }))
+    const answers = [...this.sql.exec('SELECT qid, session_id, question, payload_json, followups_json FROM answer_buffer WHERE user_id=? AND payload_json IS NOT NULL AND acked=0 ORDER BY at DESC LIMIT ?', uid, AnswerBuffer.KEEP)]
+      .map((r: any) => ({ qid: r.qid, sessionId: r.session_id, question: r.question, answer: JSON.parse(r.payload_json), followups: r.followups_json ? JSON.parse(r.followups_json) : null }))
     return { t: 'sync:res', sessions, answers }
   }
 
   // ONE answer by qid (served from the DO — engine stays asleep).
   get(userId: string, qid: string) {
     const q = String(qid || '')
-    const [r] = this.sql.exec('SELECT payload_json, followups_json FROM answer_buffer WHERE qid=? AND user_id=?', q, userId || '')
+    const [r] = this.sql.exec('SELECT question, payload_json, followups_json FROM answer_buffer WHERE qid=? AND user_id=?', q, userId || '')
     const rr = r as any
     if (!rr) return { t: 'answer:res', qid: q, status: 'none' as const }
-    if (!rr.payload_json) return { t: 'answer:res', qid: q, status: 'pending' as const }
-    return { t: 'answer:res', qid: q, status: 'ready' as const, answer: JSON.parse(rr.payload_json), followups: rr.followups_json ? JSON.parse(rr.followups_json) : null }
+    if (!rr.payload_json) return { t: 'answer:res', qid: q, status: 'pending' as const, question: rr.question }
+    return { t: 'answer:res', qid: q, status: 'ready' as const, question: rr.question, answer: JSON.parse(rr.payload_json), followups: rr.followups_json ? JSON.parse(rr.followups_json) : null }
   }
 
   ack(userId: string, qids: unknown) {

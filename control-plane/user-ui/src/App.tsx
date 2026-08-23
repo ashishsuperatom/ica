@@ -285,13 +285,13 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
         // then ack so the DO stops re-pushing them.
         if (msg.t === 'sync:res') {
           if (msg.sessions?.length) mergeServerSessions(msg.sessions)
-          for (const a of (msg.answers || [])) mergeRecovered(a.qid, a.sessionId, a.answer, a.followups)
+          for (const a of [...(msg.answers || [])].reverse()) mergeRecovered(a.qid, a.sessionId, a.question, a.answer, a.followups)   // reverse: DO sends newest-first, append oldest-first → top-down chronological
           const qids = (msg.answers || []).map((a: any) => a.qid).filter(Boolean)
           if (qids.length) send({ t: 'answer:ack', qids })
           return
         }
         if (msg.t === 'answer:res') {   // targeted pull for one qid
-          if (msg.status === 'ready') { mergeRecovered(msg.qid, sidRef.current, msg.answer, msg.followups); send({ t: 'answer:ack', qids: [msg.qid] }) }
+          if (msg.status === 'ready') { mergeRecovered(msg.qid, sidRef.current, msg.question, msg.answer, msg.followups); send({ t: 'answer:ack', qids: [msg.qid] }) }
           return
         }
         if (msg.t === 'suggestions:res') { if (msg.suggestions?.groups) setSuggestions(msg.suggestions); return }
@@ -448,16 +448,22 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     ws.send(JSON.stringify(CLOUD ? { to: { type: 'code-engine' }, payload } : payload))
   }
 
-  // Merge an answer recovered from the DO into the right session's feed — dedup by qid so a live delivery +
-  // a recovery never double-render. `answerPayload` is the buffered analyst:answer message (.answer/.category/
+  // Recover a full Q&A PAIR from the DO into the right session's feed. A qid is a pair, so we restore the
+  // QUESTION card too — its id is the qid (matching how ask() writes it), so it dedups whether or not the
+  // question is already there. `answerPayload` is the buffered analyst:answer message (.answer/.category/
   // .timing); `followupsPayload` is the buffered followups message (.items).
-  function mergeRecovered(qid: string, sessionId: string, answerPayload: any, followupsPayload: any) {
+  function mergeRecovered(qid: string, sessionId: string, question: string, answerPayload: any, followupsPayload: any) {
     if (!qid) return
     const sid = sessionId || sidRef.current
-    const card: FeedItem = { id: crypto.randomUUID(), type: 'answer', category: answerPayload?.category, answer: answerPayload?.answer ?? answerPayload, timing: answerPayload?.timing, qid, at: Date.now() }
+    const qCard: FeedItem = { id: qid, type: 'user-msg', text: question || '' }
+    const aCard: FeedItem = { id: crypto.randomUUID(), type: 'answer', category: answerPayload?.category, answer: answerPayload?.answer ?? answerPayload, timing: answerPayload?.timing, qid, at: Date.now() }
     const fuItems = followupsPayload?.items
     const fuCard: FeedItem | null = Array.isArray(fuItems) && fuItems.length ? { id: crypto.randomUUID(), type: 'followups', items: fuItems, qid } : null
-    const add = (arr: FeedItem[]) => arr.some(it => it.type === 'answer' && (it as any).qid === qid) ? arr : [...arr, card, ...(fuCard ? [fuCard] : [])]
+    const add = (arr: FeedItem[]) => {
+      if (arr.some(it => it.type === 'answer' && (it as any).qid === qid)) return arr   // pair already complete
+      const hasQ = arr.some(it => it.id === qid)                                        // question already in the feed (same-device)?
+      return [...arr, ...(!hasQ && question ? [qCard] : []), aCard, ...(fuCard ? [fuCard] : [])]
+    }
     if (sid === sidRef.current) setFeed(f => add(f))
     else { const f = loadFeed(sid); localStorage.setItem(fkey(sid), JSON.stringify(add(f).slice(-100))) }
   }
