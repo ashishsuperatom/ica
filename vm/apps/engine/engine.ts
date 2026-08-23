@@ -22,7 +22,7 @@ import { execProgram } from './exec-program.js'
 import { createSession, prepareWorkspace, type Session, type Harness, type RunHandlers } from './ica/index.js'
 import { createSemanticModeller, promptVersion as semanticPromptVersion } from './agents/semantic-model/index.js'
 import { createReflex } from './agents/reflex/index.js'
-import { createNarrator } from './agents/narrator/index.js'
+import { createNarrator, capResultData } from './agents/narrator/index.js'
 import { createAnalyst, promptVersion as analystPromptVersion } from './agents/analyst/index.js'
 import { createConnector, promptVersion as connectorPromptVersion } from './agents/connector/index.js'
 import { createGroundingAgent, promptVersion as groundingPromptVersion } from './agents/grounding/index.js'
@@ -419,8 +419,13 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       if (narrating || !reply || narrationBuf.length === 0) return
       narrating = true
       const activity = narrationBuf.splice(0).join('\n')
-      try { const line = await narrator!.narrate(question, activity); if (line && reply) emit(reply, { t: 'narration', text: line, qid, sid }) }
-      catch { /* narration is best-effort */ } finally { narrating = false }
+      try {
+        const line = await narrator!.narrate(question, activity)
+        if (line) {
+          if (reply) emit(reply, { t: 'narration', text: line, qid, sid })
+          if (channel) emit({ type: 'channel' }, { t: 'channel:narration', channel, qid, text: line })   // stream to the chat channel (Teams/…) as a tiny message
+        }
+      } catch { /* narration is best-effort */ } finally { narrating = false }
     }, 4000)
     const handlers = {
       onCategory: (c: string) => { curCategory = c; emit(reply, { t: 'analyst:category', category: c, sid }) },
@@ -444,7 +449,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         // findings) and the analyst's own prose. SKIP file events (program code / diffs / paths) — that's pure
         // machinery the narrator must hide anyway: big input bloat + a leak risk, with no business value (every
         // real figure is already in a command's result).
-        if (ev.kind === 'command') { const d = ev.output ? `${ev.command || ''} → RESULT: ${ev.output}` : (ev.command || ''); if (d.trim()) narrationBuf.push(d.trim().slice(0, 1800)) }
+        if (ev.kind === 'command') { const out = ev.output ? capResultData(ev.output) : ''; const d = out ? `${ev.command || ''} → RESULT: ${out}` : (ev.command || ''); if (d.trim()) narrationBuf.push(d.trim().slice(0, 1800)) }
         else if (ev.kind === 'message' && ev.text?.trim()) narrationBuf.push(ev.text.trim().slice(0, 600))
       },
     }

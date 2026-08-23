@@ -602,8 +602,13 @@ export class ProjectDO extends DurableObject<Env> {
     if ((msg.to as any)?.type === 'channel') {
       const p = msg.payload as any
       const chan = this.env.CHANNEL.get(this.env.CHANNEL.idFromName(`chan:${this._pid}`))
-      await chan.fetch('https://do/answer', { method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ qid: p?.qid, channel: p?.channel, answer: p?.answer, category: p?.category, projectId: this._pid }) }).catch(() => {})
+      // Live narration streams as tiny messages (→ /narration); the final answer is the rich card (→ /answer).
+      const narration = p?.t === 'channel:narration'
+      const path = narration ? 'https://do/narration' : 'https://do/answer'
+      const body = narration
+        ? { qid: p?.qid, channel: p?.channel, text: p?.text }
+        : { qid: p?.qid, channel: p?.channel, answer: p?.answer, category: p?.category, projectId: this._pid }
+      await chan.fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).catch(() => {})
       return
     }
     // A runtime (human client) sending a message is real activity → reset the idle clock.

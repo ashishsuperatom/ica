@@ -78,6 +78,12 @@ export const teamsAdapter: ChannelAdapter = {
     return { type: 'message', attachments: [{ contentType: 'application/vnd.microsoft.card.adaptive', content: card }] }
   },
 
+  renderText(text: string): unknown {
+    // A plain Bot Framework message. Teams renders markdown in `text` (bold, lists, small tables) — ideal for a
+    // tiny live narration beat. Kept minimal on purpose: this is narration, not the answer card.
+    return { type: 'message', text: String(text) }
+  },
+
   renderStatus(_text: string): unknown {
     return { type: 'typing' }
   },

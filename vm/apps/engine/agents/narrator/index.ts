@@ -38,6 +38,21 @@ Rules:
 - Progress notes, not the final answer — light framing ("so far", "early read"). If there's genuinely no data
   yet, ONE tiny plain line ("Pulling the figures together…") — never pad.`
 
+// Cap the data we feed the narrator. Query results can be huge (long lists/tables, possibly NESTED — the array
+// may not be at the top). The narrator only needs a SAMPLE to summarise, so keep the first N items of every
+// array (recursively), or the first few lines of a plain-text dump. Big input → smaller + cheaper, same shape.
+export function capResultData(s: string, n = 8): string {
+  const t = (s ?? '').trim()
+  if (!t) return t
+  const trim = (v: any): any =>
+    Array.isArray(v) ? [...v.slice(0, n).map(trim), ...(v.length > n ? [`…(+${v.length - n} more)`] : [])]
+    : (v && typeof v === 'object') ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, trim(x)]))
+    : v
+  if (t[0] === '{' || t[0] === '[') { try { return JSON.stringify(trim(JSON.parse(t))) } catch { /* not clean JSON — fall through */ } }
+  const lines = t.split('\n')
+  return lines.length > n + 2 ? lines.slice(0, n + 1).join('\n') + `\n…(+${lines.length - n - 1} more lines)` : t
+}
+
 export interface NarratorOpts {
   cwd: string
   ica?: { harness?: Harness; model?: string; provider?: string; baseUrl?: string }

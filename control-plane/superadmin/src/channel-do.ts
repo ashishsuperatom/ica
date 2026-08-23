@@ -94,6 +94,22 @@ export class ChannelDO {
 
       // The engine's finished answer for a channel turn, handed here by the ProjectDO (DO→DO). Post it to the
       // channel and clear the pending turn. Delivery errors are LOGGED (never swallowed).
+      if (request.method === 'POST' && path === '/narration') {
+        // A live narration beat → post as a tiny plain message (markdown OK on Teams). Uses the SAME pending
+        // conversation ref but does NOT delete it — the final answer still needs it. Best-effort; never gates.
+        const { qid, channel, text } = await request.json() as any
+        if (!text) return json({ ok: true })
+        const rec = await this.state.storage.get<{ channel: string; conv: ConversationRef; question?: string }>(`pending:${qid}`)
+        if (!rec) return json({ ok: true, note: 'no pending turn' })
+        const ch = rec.channel || channel
+        const adapter = channelAdapter(ch)
+        const cfg = (await this.state.storage.get<Config>('config')) ?? {}
+        if (adapter?.renderText) {
+          try { await adapter.sendReply(rec.conv, adapter.renderText(String(text)), cfg.secrets?.[ch] ?? {}) }
+          catch (e: any) { console.log(`[channel] narration sendReply failed for ${qid}:`, e?.message ?? e) }
+        }
+        return json({ ok: true })
+      }
       if (request.method === 'POST' && path === '/answer') {
         const { qid, channel, answer, category, projectId } = await request.json() as any
         const rec = await this.state.storage.get<{ channel: string; conv: ConversationRef; question?: string }>(`pending:${qid}`)

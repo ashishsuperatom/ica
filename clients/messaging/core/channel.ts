@@ -67,6 +67,10 @@ export interface ChannelAdapter {
   // thing as an image. When absent (or the render fails) the caller falls back to renderAnswer.
   renderReport?(answer: Answer, report: { png: string; html: string }, category?: string): unknown
 
+  // Optional: render a plain, tiny text message (used for live narration beats — markdown renders on Teams).
+  // When absent, narration simply isn't posted to that channel (best-effort, never affects the answer).
+  renderText?(text: string): unknown
+
   // Optional interim signal (typing indicator / progress). Return null to skip.
   renderStatus?(text: string): unknown
 
