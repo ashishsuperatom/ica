@@ -292,6 +292,9 @@ async function reuseProgram(programDir: string, params: any, category: string,
     lastAnswer = answer; lastTiming = timing; lastCategory = category
     emit(reply, { t: 'analyst:answer', category, answer, timing, sid, qid, reused: true })
     if (curChannel) emit({ type: 'channel' }, { t: 'channel:answer', channel: curChannel, qid, answer, category })   // durable delivery to the chat channel
+    // Follow-ups persisted on the node when it was first built → replay them on reuse (no analyst involved).
+    const fu = (graph.getNode(nodeId)?.props as any)?.followups
+    if (Array.isArray(fu) && fu.length && reply) emit(reply, { t: 'followups', items: fu, qid, sid })
     emit(reply, { t: 'analyst:done', sid })
     answers.save({ qid, sessionId: sid, question, norm, category, status: 'answered', answer, createdAt: Date.now(), finishedAt: Date.now(), programDir, params })
     const n = graph.getNode(nodeId); if (n) graph.putNode({ ...n, props: { ...(n.props as any), lastShapeHash: (rr as any).finalShapeHash ?? (n.props as any)?.lastShapeHash } })
@@ -459,11 +462,14 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     lastAnswer = r.answer; lastTiming = timing; lastCategory = r.category
     // Capture the PROGRAM the agent built (its built.json pointer) so a repeat of this question re-runs
     // that program (fresh query) instead of re-invoking the LLM.
-    let programDir: string | undefined, programParams: any, programTerms: any[] = [], analystParent: any
+    let programDir: string | undefined, programParams: any, programTerms: any[] = [], analystParent: any, programFollowups: string[] = []
     const b = await readJsonSafe<any>(join(WORKSPACE, 'out', qid, 'built.json'), null, 'analyst')   // absent = unknowable/gap (no program)
-    if (b) { programDir = b.programDir; programParams = b.params; programTerms = Array.isArray(b.terms) ? b.terms : []; analystParent = b.parent }
+    if (b) { programDir = b.programDir; programParams = b.params; programTerms = Array.isArray(b.terms) ? b.terms : []; analystParent = b.parent; programFollowups = Array.isArray(b.followups) ? b.followups.filter((x: any) => typeof x === 'string' && x.trim()).slice(0, 3) : [] }
     emit(reply, { t: 'analyst:answer', category: r.category, answer: r.answer, lastLines: r.lastLines, timing, sid, qid })
     if (channel) emit({ type: 'channel' }, { t: 'channel:answer', channel, qid, answer: r.answer, category: r.category })   // durable delivery to the chat channel
+    // Follow-ups are NICE-TO-HAVE — emitted AFTER the answer, never gating or delaying it. The UI reveals them on
+    // a delay so the user reads the answer first. Persisted on the node below → free on a later reuse (no analyst).
+    if (programFollowups.length && reply) emit(reply, { t: 'followups', items: programFollowups, qid, sid })
     // PERSIST: the engine reads the agent's file result and writes the DB — the agent never touches the DB.
     // finishedAt is stamped HERE, deterministically, the moment the analyst's artifact is in hand — this is
     // the cursor the offline modeler consolidates by (never a time the agent self-reports).
@@ -488,7 +494,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       const nodeId = parent === pos ? nid : intentId(parent, question)
       graph.putNode({ id: nodeId, kind: 'intent', label: question.slice(0, 80), summary: question,
         // rawAnalysis (r.lastLines) intentionally NOT stored — garbled TUI snapshot, low value; re-enable here if reworked.
-        props: { question: norm, category: r.category, program: programDir, params: programParams, terms: programTerms, orchParams: coord?.params ?? [] } })
+        props: { question: norm, category: r.category, program: programDir, params: programParams, terms: programTerms, orchParams: coord?.params ?? [], followups: programFollowups } })
       builtIntentId = nodeId
       graph.putEdge({ from: parent, to: nodeId, type: 'follow_up' })
       if (coord?.axes?.length) linkBasis(graph, nodeId, coord.axes)   // grow the basis space for reuse

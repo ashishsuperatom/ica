@@ -49,6 +49,7 @@ type FeedItem =
   | { id: string; type: 'component'; tag: string; vTag: string; code: string; data: any }
   | { id: string; type: 'answer'; category?: string; answer: any; timing?: { ms: number; classifyMs?: number; modelMs?: number }; qid?: string; at?: number }   // the analyst's structured result, rendered as a card (qid = the question id; at = when the answer arrived)
   | { id: string; type: 'analysis'; beats: string[]; qid?: string }   // the receptionist's story beats — its OWN collapsed card, sitting between the question and the answer
+  | { id: string; type: 'followups'; items: string[]; qid?: string }   // suggested next questions — a DELAYED card below the answer; a chip FILLS the input (never auto-submits)
   | { id: string; type: 'error'; text: string }
 
 export function App({ token, projectId = 'default' }: { token?: string | null; projectId?: string } = {}) {
@@ -326,6 +327,16 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           setAnEvents(evs => mergeEvent(evs, msg.ev))
         } else if (msg.t === 'analyst:events') {
           setAnEvents(msg.events ?? [])   // reconnect: full event-log replay (replace)
+        } else if (msg.t === 'followups') {
+          // Suggested next questions — reveal as a card AFTER a delay, so the user reads the answer first.
+          const items = Array.isArray(msg.items) ? msg.items.filter((x: any) => typeof x === 'string' && x.trim()).slice(0, 3) : []
+          const fuSid = msg.sid, fuQid = msg.qid
+          if (items.length && (!fuSid || fuSid === sidRef.current)) {
+            setTimeout(() => {
+              if (fuSid && fuSid !== sidRef.current) return   // user switched chats during the delay — skip
+              setFeed(f => f.some(it => it.type === 'followups' && it.qid === fuQid) ? f : [...f, { id: crypto.randomUUID(), type: 'followups', items, qid: fuQid }])
+            }, 3500)
+          }
         } else if (msg.t === 'story') {
           if (msg.text) { storyLogRef.current = [...storyLogRef.current, msg.text]; setStoryLog(storyLogRef.current) }   // append a beat
         } else if (msg.t === 'analyst:progress') {
@@ -466,6 +477,15 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     clearWatchdog()
     watchdog.current = setTimeout(() => endTurn('The engine went silent — it may have restarted or is still starting. Please ask again.'), ms)
   }
+
+  // A follow-up chip FILLS the input (editable) and focuses it — it does NOT submit, so the user can tweak it
+  // and press Enter themselves.
+  const fillInput = useCallback((text: string) => {
+    const el = inputRef.current
+    if (!el) return
+    el.value = text; el.focus()
+    try { el.setSelectionRange(text.length, text.length) } catch { /* not selectable */ }
+  }, [])
 
   const submit = useCallback((preset?: string) => {
     const text = (typeof preset === 'string' ? preset : inputRef.current?.value)?.trim()
@@ -788,7 +808,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
       ) : (
         <>
           <div ref={feedRef} style={s.feed}>
-            {feed.map(item => <FeedCard key={item.id} item={item} />)}
+            {feed.map(item => <FeedCard key={item.id} item={item} onPick={fillInput} />)}
             {/* Working indicator — no terminal; a details link goes to the Analyst tab. */}
             {anBusy && (
               <div style={{ border: '1px solid #e8e4de', borderRadius: 8, background: '#fbfaf8', padding: '12px 14px', margin: '4px 0' }}>
@@ -865,7 +885,7 @@ function enhanceTables(root: HTMLElement) {
   }
 }
 
-function FeedCard({ item }: { item: FeedItem }) {
+function FeedCard({ item, onPick }: { item: FeedItem; onPick?: (t: string) => void }) {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -902,6 +922,21 @@ function FeedCard({ item }: { item: FeedItem }) {
   }
   if (item.type === 'error') {
     return <div style={{ ...s.narrative, borderColor: '#fca5a5', color: '#b91c1c' }}>{item.text}</div>
+  }
+  if (item.type === 'followups') {
+    return (
+      <div style={{ margin: '2px 0 16px' }}>
+        <div style={{ fontSize: 12, color: '#8a8276', marginBottom: 8, fontWeight: 600 }}>You could also ask</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-start' }}>
+          {item.items.map((q, i) => (
+            <button key={i} onClick={() => onPick?.(q)} title="Click to put this in the box — edit it, then press Enter"
+              style={{ textAlign: 'left', border: '1px solid #e0dcd4', background: '#fff', borderRadius: 999, padding: '8px 15px', fontSize: 13.5, color: '#2a2a2a', cursor: 'pointer', maxWidth: '100%', lineHeight: 1.4 }}>
+              {q}
+            </button>
+          ))}
+        </div>
+      </div>
+    )
   }
   if (item.type === 'analysis') {
     return (

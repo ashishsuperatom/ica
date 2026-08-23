@@ -144,11 +144,14 @@ build a small program whose output IS your reply. Whatever you would say goes IN
    CONFIDENTLY fits, reuse or compose it — deterministic, and it carries the corrections we've made. ONLY if
    nothing confidently fits, analyze the raw data yourself (./data/query.mjs / ./data/introspect.mjs). Probe, judge, move
    on — never force an ill-fitting unit. Always PRODUCE AN ANSWER.
-3. Write ${builtRel} = {"programDir":"programs/<slug>","params":{...the params...}, "parent":"root" | "<a prior intent id>"}
+3. Write ${builtRel} = {"programDir":"programs/<slug>","params":{...the params...}, "parent":"root" | "<a prior intent id>", "followups":["…", "…"]}
    pointing at the program you built, and RUN it with \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\` until
    it is correct. Reuse an existing ./programs/ program if one fits. \`parent\` PLACES this question in the intent
    graph: "root" for a NEW topic, or the id of a prior intent (from \`intents()\`) if this FOLLOWS UP that
    question. Omit \`parent\` if unsure (it stays in the current thread).
+   \`followups\` (OPTIONAL, best-effort): up to 3 short questions the user might naturally ask NEXT — VARY them
+   (one deeper, one broader, one a different angle; not always deeper), each phrased as a standalone question.
+   Purely a suggestion for the UI; it never changes the answer. Omit if none are obvious.
 
 The ENGINE runs your program and writes the answer from its REAL output — so the user sees the program's
 result, never a figure or reply you typed. Do NOT write ${answerRel} yourself, and do NOT answer in chat. A

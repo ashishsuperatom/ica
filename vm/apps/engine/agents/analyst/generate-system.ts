@@ -265,7 +265,9 @@ const paRun = `## Run it, verify it, then hand it off — you do NOT write the a
 1. Run it: \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\`. Read the output. Fix until it is
    correct and its shape is clean (stable field names, every value carrying its unit).
 2. Point at it: write \`./out/<qid>/built.json\` = \`{ "programDir": "programs/<slug>", "params": { …the
-   params… }, "terms": [ …see below… ] }\`. **Do NOT write answer.json** — the engine RUNS your program and
+   params… }, "terms": [ …see below… ], "followups": [ …optional, up to 3… ] }\`. \`followups\` are up to 3
+   short next questions the user might ask — VARY them (deeper / broader / a different angle), each standalone;
+   a UI suggestion only, never affecting the answer. **Do NOT write answer.json** — the engine RUNS your program and
    writes the answer from its real output. The number the user sees is the program's, never one you typed, so a
    correct program is the whole job. (If you type a figure into an answer file, it is ignored.)
    In \`params\` put ONLY the IDENTITY bindings (the keys/names/filters the program is about) — NOT today's date
