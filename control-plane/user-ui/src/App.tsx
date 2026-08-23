@@ -272,12 +272,28 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           // answering, the resync below re-sends analyst:status and the spinner comes back; we never keep a
           // stale one.
           if (busyRef.current) endTurn()
-          send({ t: 'sessions:list', projectId }); send({ t: 'session:load', sessionId: sidRef.current }); send({ t: 'suggestions:req', projectId }); send({ t: 'term:attach', which: 'analyst' }); return
+          send({ t: 'sessions:list', projectId }); send({ t: 'session:load', sessionId: sidRef.current }); send({ t: 'suggestions:req', projectId }); send({ t: 'term:attach', which: 'analyst' })
+          send({ t: 'sync:req' })   // pull recent sessions + any answers we missed while offline, straight from the always-on DO (no engine wake)
+          return
         }
         // Machine is being woken from suspend — that takes ~60s (wake + boot), so give the watchdog a long
         // window here so it doesn't false-fire before the engine even comes up.
         if (msg.t === 'machine:waking') { setStatus('Starting the engine…'); setAnStatus('Starting the engine…'); if (busyRef.current) armWatchdog(120000); return }
         if (msg.t === 'sessions:res') { if (msg.sessions?.length) setSessions(msg.sessions); return }   // engine stores none; keep our localStorage list
+        // Durable recovery from the always-on DO: sessions we may not have locally + answers that landed while
+        // we were offline (internet blip / machine asleep / app closed / another device). Merge (dedup by qid),
+        // then ack so the DO stops re-pushing them.
+        if (msg.t === 'sync:res') {
+          if (msg.sessions?.length) mergeServerSessions(msg.sessions)
+          for (const a of (msg.answers || [])) mergeRecovered(a.qid, a.sessionId, a.answer, a.followups)
+          const qids = (msg.answers || []).map((a: any) => a.qid).filter(Boolean)
+          if (qids.length) send({ t: 'answer:ack', qids })
+          return
+        }
+        if (msg.t === 'answer:res') {   // targeted pull for one qid
+          if (msg.status === 'ready') { mergeRecovered(msg.qid, sidRef.current, msg.answer, msg.followups); send({ t: 'answer:ack', qids: [msg.qid] }) }
+          return
+        }
         if (msg.t === 'suggestions:res') { if (msg.suggestions?.groups) setSuggestions(msg.suggestions); return }
         if (msg.t === 'suggestions') {   // fast-router (as-you-type) — drop stale + ignore other input boxes
           if (typeof msg.seq === 'number' && msg.seq < lastSuggestSeq.current) return
@@ -430,6 +446,35 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     const ws = wsRef.current
     if (ws?.readyState !== 1) return
     ws.send(JSON.stringify(CLOUD ? { to: { type: 'code-engine' }, payload } : payload))
+  }
+
+  // Merge an answer recovered from the DO into the right session's feed — dedup by qid so a live delivery +
+  // a recovery never double-render. `answerPayload` is the buffered analyst:answer message (.answer/.category/
+  // .timing); `followupsPayload` is the buffered followups message (.items).
+  function mergeRecovered(qid: string, sessionId: string, answerPayload: any, followupsPayload: any) {
+    if (!qid) return
+    const sid = sessionId || sidRef.current
+    const card: FeedItem = { id: crypto.randomUUID(), type: 'answer', category: answerPayload?.category, answer: answerPayload?.answer ?? answerPayload, timing: answerPayload?.timing, qid, at: Date.now() }
+    const fuItems = followupsPayload?.items
+    const fuCard: FeedItem | null = Array.isArray(fuItems) && fuItems.length ? { id: crypto.randomUUID(), type: 'followups', items: fuItems, qid } : null
+    const add = (arr: FeedItem[]) => arr.some(it => it.type === 'answer' && (it as any).qid === qid) ? arr : [...arr, card, ...(fuCard ? [fuCard] : [])]
+    if (sid === sidRef.current) setFeed(f => add(f))
+    else { const f = loadFeed(sid); localStorage.setItem(fkey(sid), JSON.stringify(add(f).slice(-100))) }
+  }
+
+  // Merge the DO's recent-session snapshot into the local sidebar list (dedup by id, newest first, bounded 50).
+  function mergeServerSessions(serverSessions: any[]) {
+    setSessions(prev => {
+      const byId = new Map(prev.map((s: any) => [s.id, s]))
+      for (const s of serverSessions) {
+        const id = s.sessionId || s.id; if (!id) continue
+        const ex = byId.get(id)
+        byId.set(id, { id, title: s.title || ex?.title || 'Untitled', updatedAt: Math.max(s.lastAt || 0, ex?.updatedAt || 0) })
+      }
+      const next = [...byId.values()].sort((a: any, b: any) => b.updatedAt - a.updatedAt).slice(0, 50)
+      localStorage.setItem(SKEY, JSON.stringify(next))
+      return next
+    })
   }
 
   function newChat() {
