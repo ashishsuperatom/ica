@@ -189,7 +189,12 @@ const represent = `Represent an answer so each part does its own job:
 const outroBase = `Put each piece where it belongs and the split takes care of itself. Then print the same short answer as
 plain text so it streams live.`
 
-export const BASE = [baseIntro, liveProgress, threeSeams, method, unknowable, outputHead, answerSchema, represent, outroBase]
+// claude-code only: it can background a command / sub-agent and then wait on it forever, hanging the turn.
+const analystHarness = process.env.ICA_ANALYST_HARNESS || process.env.ICA_AGENT_HARNESS || 'claude-code'
+const claudeNoBackground = `Run every command in the foreground and wait for it — never background a command or spawn a sub-agent/watcher; if a step fails, say so and move on.`
+
+export const BASE = [baseIntro, liveProgress, threeSeams, method, unknowable, outputHead, answerSchema, represent,
+  ...(analystHarness.startsWith('claude-code') ? [claudeNoBackground] : []), outroBase]
 
 // ════════════════════════ program_authoring.md — build a program ════════════════════════
 

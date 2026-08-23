@@ -457,7 +457,29 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       },
     }
     const hint = overlapHint ? `An existing program is a ${overlapHint.relation} of this question: ${overlapHint.program}. Open it and reuse what fits, or ignore it.` : undefined
-    const r = await analyst.ask(question, handlers, { qid, modify: modifyTarget ?? undefined, hint })
+    // LAST-RESORT backstop, deliberately BIG. The real fix for stuck turns is the prompt (foreground-only, no
+    // background/sub-agents — see generate-system.ts). But if claude STILL wedges — a query in a retry loop, or
+    // a background step it waits on — its "done" signal never fires and ask() would hang forever (the user sees
+    // narration but never an answer). This cap is a safety net, NOT a guillotine: it's set high so a legitimately
+    // slow question is never cut, and when it DOES fire it recovers the answer the agent almost certainly already
+    // wrote to out/<qid>/answer.json (so a completed-but-not-signalled answer is never lost) and resets the stuck
+    // session so the next question starts clean. Tune via ANALYST_MAX_TURN_MS.
+    const MAX_TURN_MS = Number(process.env.ANALYST_MAX_TURN_MS) || 30 * 60 * 1000
+    const TIMED_OUT = Symbol('analyst-timeout')
+    const askP = analyst.ask(question, handlers, { qid, modify: modifyTarget ?? undefined, hint })
+    askP.catch(() => {})   // if we abandon it on timeout, don't leak an unhandled rejection
+    let capT: ReturnType<typeof setTimeout> | undefined
+    const raced: any = await Promise.race([askP, new Promise((res) => { capT = setTimeout(() => res(TIMED_OUT), MAX_TURN_MS) })])
+    if (capT) clearTimeout(capT)
+    let r: any
+    if (raced === TIMED_OUT) {
+      const recovered = await readJsonSafe<any>(join(WORKSPACE, 'out', qid, 'answer.json'), null, 'analyst')
+      log.warn('analyst', `turn exceeded ${(MAX_TURN_MS / 1000) | 0}s for ${qid} — ${recovered ? 'recovered the written answer' : 'nothing written'}; resetting the stuck session`)
+      try { (analyst as any).session?.reset?.() } catch { /* best-effort */ }
+      r = { answer: recovered ?? { status: 'error', answer: 'That one took too long and was stopped — please try again.' }, category: recovered?.category ?? 'analysis', ms: Date.now() - t0, lastLines: '' }
+    } else {
+      r = raced
+    }
     console.log(`[ica] analyst · ${r.category} · ${(r.ms / 1000).toFixed(1)}s · status=${r.answer?.status ?? 'no-json'}`)
 
     // The analyst is self-sufficient: it answers from the semantic model when a unit/concept fits, and does
