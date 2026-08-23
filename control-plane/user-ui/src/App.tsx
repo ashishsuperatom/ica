@@ -128,7 +128,6 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const busyRef     = useRef(false)            // mirror of `busy` for use inside ws closures
   const watchdog    = useRef<any>(null)        // fires if the engine goes silent mid-turn
   const feedRef   = useRef<HTMLDivElement>(null)
-  const pinTopRef = useRef<string | null>(null)   // qid of the question anchored at the top of the viewport for its turn (ChatGPT-style)
   const termRef   = useRef<HTMLDivElement>(null)
   const xtermRef  = useRef<Terminal | null>(null)
   const fitRef    = useRef<FitAddon | null>(null)
@@ -359,9 +358,8 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
             const analysisCard: FeedItem | null = beats.length ? { id: crypto.randomUUID(), type: 'analysis', beats: [...beats], qid: msg.qid } : null
             const card: FeedItem = { id: crypto.randomUUID(), type: 'answer', category: msg.category, answer: ans, timing: msg.timing, qid: msg.qid, at: Date.now() }
             const toAppend = analysisCard ? [analysisCard, card] : [card]
-            // Keep the question pinned at the top for its turn (so question → analysis → answer read top-down);
-            // only fall back to the classic pin-to-bottom for a replay / non-pinned append.
-            if (!msg.sid || msg.sid === sidRef.current) { setFeed(f => [...f, ...toAppend]); if (pinTopRef.current) setTimeout(() => pinQuestionTop(pinTopRef.current, true), 60); else scroll() }
+            // Keep the last question pinned at the top (question → analysis → answer read top-down).
+            if (!msg.sid || msg.sid === sidRef.current) { setFeed(f => [...f, ...toAppend]); scroll() }
             else { const f = loadFeed(msg.sid); localStorage.setItem(fkey(msg.sid), JSON.stringify([...f, ...toAppend].slice(-100))) }
           }
           // Keep storyLog as-is — the analyst-view mirror keeps showing it until the NEXT question starts (cleared in ask()).
@@ -422,31 +420,29 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     scroll(true)   // jump straight to the bottom (instant) instead of landing at the top
   }
 
+  // "Scroll to newest" = pin the LAST QUESTION to the top of the viewport (NOT the document bottom — that only
+  // shows the tail of an answer). One behaviour for asking, answering, AND loading a chat: land on the last
+  // question and read its analysis + answer downward from there. The tall spacer (while busy) gives the room for
+  // the last question to actually reach the top. Best-effort — no question yet just no-ops.
   function scroll(instant = false) {
-    // Live updates animate smoothly. For an INSTANT (load) scroll the trick is that charts / web-components
-    // render ASYNChronously AFTER the feed sets, growing the page after a single scroll fires — which is why
-    // it used to strand you at the top. So we RE-PIN to the bottom until the height stops growing (or a hard
-    // cap), instantly, no animation — the page settles already scrolled to the newest message.
-    if (!instant) { setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }), 50); return }
+    const pin = () => {
+      const qs = document.querySelectorAll('[data-role="q"]')
+      const el = qs.length ? qs[qs.length - 1] as HTMLElement : null
+      if (!el) return
+      const y = el.getBoundingClientRect().top + window.scrollY - 12   // 12px breathing room above the question
+      window.scrollTo({ top: y, behavior: instant ? 'auto' : 'smooth' })
+    }
+    if (!instant) { setTimeout(pin, 50); return }
+    // instant (load): cards / web-components render ASYNC and grow the page after the first pin, so re-pin to
+    // the question until the height settles (or a hard cap).
     let last = -1, stable = 0
-    window.scrollTo({ top: document.body.scrollHeight, behavior: 'auto' })
+    pin()
     const iv = setInterval(() => {
       const h = document.body.scrollHeight
-      window.scrollTo({ top: h, behavior: 'auto' })
-      if (h === last) { if (++stable >= 3) clearInterval(iv) } else { stable = 0; last = h }   // settled for ~180ms → stop
+      pin()
+      if (h === last) { if (++stable >= 3) clearInterval(iv) } else { stable = 0; last = h }
     }, 60)
-    setTimeout(() => clearInterval(iv), 3000)   // hard cap so we never pin forever
-  }
-
-  // ChatGPT-style: on a new question, bring THAT question to the top of the viewport so the whole analysis +
-  // answer can be read below it without scrolling. A tall spacer at the end of the feed guarantees the page can
-  // scroll far enough for the last question to reach the top. Best-effort — a missing element just no-ops.
-  function pinQuestionTop(qid: string | null, smooth = true) {
-    if (!qid) return
-    const el = document.querySelector(`[data-qid="${qid}"]`) as HTMLElement | null
-    if (!el) return
-    const y = el.getBoundingClientRect().top + window.scrollY - 12   // 12px breathing room above the question
-    window.scrollTo({ top: y, behavior: smooth ? 'smooth' : 'auto' })
+    setTimeout(() => clearInterval(iv), 3000)
   }
 
   // Liveness watchdog: the engine sends a `tick` every 8s while a turn runs. We re-arm on every
@@ -484,8 +480,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     // Ask in New chat (the end-user surface): show the question here, answer renders here as a clean
     // card. The Analyst tab keeps the raw terminal for when you WANT to look under the hood.
     setFeed(f => [...f, { id: qid, type: 'user-msg', text }])
-    pinTopRef.current = qid
-    setTimeout(() => pinQuestionTop(qid), 90)   // once the new question has painted, bring it to the top
+    scroll()   // pin the new (now last) question to the top of the viewport
     setAnQuestion(text); setAnAnswer(null); setAnCategory(''); setAnStatus('Classifying…'); setAnBusy(true); setAnEnriching(null); setAnProgress(''); setStoryLog([]); storyLogRef.current = []
     anXtermRef.current?.clear()   // claude PTY: fresh TUI per question (harmless when the analyst is codex)
     if (anStreamKindRef.current === 'events') setAnEvents(l => [...l, { kind: 'user', text }])   // codex: the question as a user turn in the log
@@ -809,9 +804,9 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
                 </div>
               </div>
             )}
-            {/* While a turn runs, reserve a viewport of scroll room so the current question can sit at the very
-                top (ChatGPT-style). Removed once idle, so returning to old chats still lands on the newest message. */}
-            {anBusy && <div aria-hidden style={{ minHeight: '70vh' }} />}
+            {/* Reserve a screenful of scroll room after the last content so the LAST QUESTION can always reach the
+                top of the viewport — on ask, on answer, and on loading a chat. */}
+            <div aria-hidden style={{ minHeight: '58vh' }} />
           </div>
           <div style={s.bottomBar}>
             <div style={{ width: '100%', maxWidth: 720, margin: '0 auto' }}>
@@ -894,7 +889,7 @@ function FeedCard({ item }: { item: FeedItem }) {
   }, [])
 
   if (item.type === 'user-msg') {
-    return <div data-qid={item.id} style={s.userMsg}>{item.text}</div>
+    return <div data-qid={item.id} data-role="q" style={s.userMsg}>{item.text}</div>
   }
   if (item.type === 'step') {
     return <div style={s.step}>{item.text}</div>
