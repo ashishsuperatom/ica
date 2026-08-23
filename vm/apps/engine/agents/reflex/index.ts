@@ -24,6 +24,11 @@ const reflexPrompt = () => loadPrompt(join(__dirname, 'SYSTEM.md'), 'reflex/SYST
 // The reflex's REVIEW instruction (a second, distinct job: judge a reused program's answer).
 const reviewPrompt = () => loadPrompt(join(__dirname, 'REVIEW.md'), 'reflex/REVIEW.md')
 
+// Reflex is a pure CLASSIFIER — it never uses tools or writes files. This minimal system prompt REPLACES
+// opencode's default coding agent prompt (the per-message SYSTEM.md/REVIEW.md carry the real task), and paired
+// with noTools it strips the whole toolset — no schemas, no tool calls, far fewer tokens.
+const REFLEX_SYS = 'You are a fast classifier. Follow the instructions in each message exactly and reply with ONLY what they ask for — strict JSON when requested, no prose, no code fences. You have NO tools: never read or write files, never run commands.'
+
 /** Deterministic hash of the EFFECTIVE instructions — a prompt (or override) change → fresh session. */
 export async function promptVersion(): Promise<string> {
   return createHash('sha1').update(reflexPrompt() + reviewPrompt()).digest('hex').slice(0, 12)
@@ -104,7 +109,7 @@ export function createReflex(opts: ReflexOpts) {
    */
   async function coordinate(question: string, catalog: ProgramEntry[] = [], vocab?: string): Promise<IntentCoordinate> {
     const system = reflexPrompt()   // fresh each turn → an edited override goes live without a restart
-    session ??= createSession(harness, { cwd: opts.cwd, model, provider, baseUrl: opts.ica?.baseUrl })
+    session ??= createSession(harness, { cwd: opts.cwd, model, provider, baseUrl: opts.ica?.baseUrl, noTools: true, system: REFLEX_SYS })
     const t0 = Date.now()
     // The LIVE axis vocabulary — PREFER these tokens over minting near-duplicates; grows as the space evolves.
     const voc = vocab ? `AXIS VOCABULARY IN USE (reuse a token when it fits; only add a new one if none do):\n${vocab}\n\n---\n` : ''
@@ -130,7 +135,7 @@ export function createReflex(opts: ReflexOpts) {
    */
   async function review(question: string, answer: any): Promise<ReviewVerdict> {
     const system = reviewPrompt()
-    session ??= createSession(harness, { cwd: opts.cwd, model, provider, baseUrl: opts.ica?.baseUrl })
+    session ??= createSession(harness, { cwd: opts.cwd, model, provider, baseUrl: opts.ica?.baseUrl, noTools: true, system: REFLEX_SYS })
     const { lastLines } = await session.run(`${system}\n\n---\nQUESTION: ${question}\n\nANSWER (digest): ${answerDigest(answer)}\n\nJSON:`)
     const parsed = extractJson(lastLines)
     const verdict = parsed?.verdict === 'escalate' ? 'escalate' : 'accept'
@@ -141,7 +146,7 @@ export function createReflex(opts: ReflexOpts) {
     coordinate,
     review,
     /** Pre-create the session (connect to the warm opencode server) so the first route() has no cold start. */
-    async warmup() { session ??= createSession(harness, { cwd: opts.cwd, model, provider, baseUrl: opts.ica?.baseUrl }); await session.warmup?.() },
+    async warmup() { session ??= createSession(harness, { cwd: opts.cwd, model, provider, baseUrl: opts.ica?.baseUrl, noTools: true, system: REFLEX_SYS }); await session.warmup?.() },
     /**
      * Every question goes through here. The agent reads the DB program catalog and either picks a program to
      * REUSE or routes to BUILD. We validate its pick against the DB (the intent must still have a program);
