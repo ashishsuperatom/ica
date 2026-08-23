@@ -97,6 +97,8 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [anProgress, setAnProgress] = useState('')   // clean live narration from the agent (no tool calls)
   const [storyLog, setStoryLog]     = useState<string[]>([])   // receptionist (narrator) beats for THIS question — ACCUMULATE (never overwrite)
   const storyLogRef                 = useRef<string[]>([])     // latest beats, readable inside ws handlers (state is stale in closures)
+  const storyTimesRef               = useRef<number[]>([])     // arrival ms per beat — drives the per-step live timer (UI-only, nice-to-have)
+  const [nowMs, setNowMs]           = useState(0)              // ticks every 1s while busy so the CURRENT beat's timer counts up
   // How to render the analyst's raw stream: 'pty' = a real terminal (claude-code) → xterm; 'events' =
   // discrete agent events (codex/SDK) → a plain event log (a terminal emulator makes no sense for these).
   const [anStreamKind, setAnStreamKind] = useState<'pty' | 'events'>('events')   // default = structured (claude via JSONL, codex); PTY is opt-in
@@ -225,6 +227,14 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     return () => clearTimeout(t)
   }, [anEvents, storyLog, anStreamKind, view])
 
+  // Per-step timer (UI-only, nice-to-have): tick every second while busy so the CURRENT analysis beat counts up.
+  useEffect(() => {
+    if (!anBusy) return
+    setNowMs(Date.now())
+    const iv = setInterval(() => setNowMs(Date.now()), 1000)
+    return () => clearInterval(iv)
+  }, [anBusy])
+
   // WS connection — direct to code-engine (local) or via the worker hub (cloud).
   useEffect(() => {
     if (CLOUD && !token) return   // wait for auth in cloud mode
@@ -338,7 +348,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
             }, 3500)
           }
         } else if (msg.t === 'story') {
-          if (msg.text) { storyLogRef.current = [...storyLogRef.current, msg.text]; setStoryLog(storyLogRef.current) }   // append a beat
+          if (msg.text) { storyLogRef.current = [...storyLogRef.current, msg.text]; storyTimesRef.current = [...storyTimesRef.current, Date.now()]; setStoryLog(storyLogRef.current); setNowMs(Date.now()) }   // append a beat + stamp its arrival
         } else if (msg.t === 'analyst:progress') {
           setAnProgress(msg.text || '')   // clean prose narration → live progress line
         } else if (msg.t === 'analyst:gap') {
@@ -375,7 +385,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           }
           // Keep storyLog as-is — the analyst-view mirror keeps showing it until the NEXT question starts (cleared in ask()).
         } else if (msg.t === 'analyst:done') {
-          setAnBusy(false); setAnStatus('Done ✓'); setAnProgress(''); setStoryLog([]); storyLogRef.current = []; setBusy(false); busyRef.current = false; clearWatchdog()
+          setAnBusy(false); setAnStatus('Done ✓'); setAnProgress(''); setStoryLog([]); storyLogRef.current = []; storyTimesRef.current = []; setBusy(false); busyRef.current = false; clearWatchdog()
         } else if (msg.t === 'analysis:step') {
           setFeed(f => [...f, { id: crypto.randomUUID(), type: 'step', text: msg.text }])
           scroll()
@@ -467,7 +477,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   function endTurn(note?: string) {
     clearWatchdog()
     busyRef.current = false; setBusy(false); setStatus('')
-    setAnBusy(false); setAnStatus(''); setAnProgress(''); setStoryLog([]); storyLogRef.current = []
+    setAnBusy(false); setAnStatus(''); setAnProgress(''); setStoryLog([]); storyLogRef.current = []; storyTimesRef.current = []
     if (note) { setFeed(f => [...f, { id: crypto.randomUUID(), type: 'error', text: note }]); scroll() }
   }
   // Liveness: the engine ticks every ~8s while a turn runs; every incoming message re-arms this. If nothing
@@ -487,6 +497,15 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     try { el.setSelectionRange(text.length, text.length) } catch { /* not selectable */ }
   }, [])
 
+  // Seconds shown next to a beat: the last (current) beat ticks via nowMs; past beats freeze at the gap until the
+  // next beat arrived. Shows from 1 (never 0).
+  const beatSecs = (i: number, total: number) => {
+    const t = storyTimesRef.current
+    if (!t[i]) return 1
+    const end = i < total - 1 ? (t[i + 1] ?? nowMs) : nowMs
+    return Math.max(1, Math.floor(Math.max(0, end - t[i]) / 1000) + 1)
+  }
+
   const submit = useCallback((preset?: string) => {
     const text = (typeof preset === 'string' ? preset : inputRef.current?.value)?.trim()
     if (!text || busy || wsRef.current?.readyState !== 1) return
@@ -501,7 +520,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     // card. The Analyst tab keeps the raw terminal for when you WANT to look under the hood.
     setFeed(f => [...f, { id: qid, type: 'user-msg', text }])
     scroll()   // pin the new (now last) question to the top of the viewport
-    setAnQuestion(text); setAnAnswer(null); setAnCategory(''); setAnStatus('Classifying…'); setAnBusy(true); setAnEnriching(null); setAnProgress(''); setStoryLog([]); storyLogRef.current = []
+    setAnQuestion(text); setAnAnswer(null); setAnCategory(''); setAnStatus('Classifying…'); setAnBusy(true); setAnEnriching(null); setAnProgress(''); setStoryLog([]); storyLogRef.current = []; storyTimesRef.current = []
     anXtermRef.current?.clear()   // claude PTY: fresh TUI per question (harmless when the analyst is codex)
     if (anStreamKindRef.current === 'events') setAnEvents(l => [...l, { kind: 'user', text }])   // codex: the question as a user turn in the log
     setStatus('')
@@ -779,9 +798,9 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           {/* Narrator (receptionist) mirror — the exact business-language beats the USER sees, in a distinct
               color, so the operator can compare them against the raw activity below. */}
           {storyLog.length > 0 && (
-            <div style={{ position: 'sticky', top: 0, zIndex: 2, border: '1px solid #cdd9c2', borderRadius: 8, background: '#eef4e6', padding: '10px 12px', marginBottom: 12, maxHeight: 240, overflowY: 'auto', boxShadow: '0 2px 8px rgba(0,0,0,.05)' }}>
-              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: '#5a7a4a', marginBottom: 6 }}>Narrator · what the user sees ({storyLog.length})</div>
-              {storyLog.map((b, i) => <div key={i} className="sa-md" style={{ borderTop: i ? '1px solid #d5e0c8' : 'none', paddingTop: i ? 6 : 0, marginTop: i ? 6 : 0 }} dangerouslySetInnerHTML={{ __html: renderInlineMd(b) }} />)}
+            <div className="sa-narr">
+              <div className="sa-narr-h">Narrator · what the user sees ({storyLog.length})</div>
+              {storyLog.map((b, i) => <div key={i} className="sa-md sa-nb" dangerouslySetInnerHTML={{ __html: renderInlineMd(b) }} />)}
             </div>
           )}
           {/* Raw claude-code terminal (PTY) — shown only when the user opened it via the toggle, or for a
@@ -811,17 +830,22 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
             {feed.map(item => <FeedCard key={item.id} item={item} onPick={fillInput} />)}
             {/* Working indicator — no terminal; a details link goes to the Analyst tab. */}
             {anBusy && (
-              <div style={{ border: '1px solid #e8e4de', borderRadius: 8, background: '#fbfaf8', padding: '12px 14px', margin: '4px 0' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#6b6459', fontSize: 12.5, fontWeight: 600 }}>
+              <div className="sa-live">
+                <div className="sa-live-h">
                   <Spinner /><span>Analysis</span>
-                  <span onClick={() => navigate('analyst')} style={{ marginLeft: 'auto', fontWeight: 400, fontSize: 12, color: '#8a8276', cursor: 'pointer', textDecoration: 'underline' }}>details ↗</span>
+                  <span className="lnk" onClick={() => navigate('analyst')}>details ↗</span>
                 </div>
-                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {storyLog.map((b, i) => (
-                    <div key={i} className="sa-md" style={{ borderTop: i ? '1px solid #efece6' : 'none', paddingTop: i ? 8 : 0, opacity: i === storyLog.length - 1 ? 1 : 0.6 }} dangerouslySetInnerHTML={{ __html: renderInlineMd(b) }} />
-                  ))}
-                  {storyLog.length === 0 && <div style={{ fontSize: 13.5, color: '#8a8276' }}>{anEnriching ? `Learning this part of your data: ${anEnriching.need}` : (anProgress || anStatus || 'Analyzing…')}</div>}
-                </div>
+                {storyLog.length > 0 && (
+                  <div className="sa-beats">
+                    {storyLog.map((b, i) => (
+                      <div key={i} className={'sa-beat' + (i < storyLog.length - 1 ? ' past' : '')}>
+                        <div className="sa-beat-b sa-md" dangerouslySetInnerHTML={{ __html: renderInlineMd(b) }} />
+                        <div className="sa-beat-t">{beatSecs(i, storyLog.length)}s</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {storyLog.length === 0 && <div style={{ marginTop: 8, fontSize: 13.5, color: '#8a8276' }}>{anEnriching ? `Learning this part of your data: ${anEnriching.need}` : (anProgress || anStatus || 'Analyzing…')}</div>}
               </div>
             )}
             {/* Reserve a screenful of scroll room after the last content so the LAST QUESTION can always reach the
@@ -925,14 +949,11 @@ function FeedCard({ item, onPick }: { item: FeedItem; onPick?: (t: string) => vo
   }
   if (item.type === 'followups') {
     return (
-      <div style={{ margin: '2px 0 16px' }}>
-        <div style={{ fontSize: 12, color: '#8a8276', marginBottom: 8, fontWeight: 600 }}>You could also ask</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-start' }}>
+      <div className="sa-fu">
+        <div className="sa-fu-label">You could also ask</div>
+        <div className="sa-fu-list">
           {item.items.map((q, i) => (
-            <button key={i} onClick={() => onPick?.(q)} title="Click to put this in the box — edit it, then press Enter"
-              style={{ textAlign: 'left', border: '1px solid #e0dcd4', background: '#fff', borderRadius: 999, padding: '8px 15px', fontSize: 13.5, color: '#2a2a2a', cursor: 'pointer', maxWidth: '100%', lineHeight: 1.4 }}>
-              {q}
-            </button>
+            <button key={i} className="sa-fu-chip" onClick={() => onPick?.(q)} title="Click to put this in the box — edit it, then press Enter">{q}</button>
           ))}
         </div>
       </div>
@@ -940,14 +961,10 @@ function FeedCard({ item, onPick }: { item: FeedItem; onPick?: (t: string) => vo
   }
   if (item.type === 'analysis') {
     return (
-      <details style={{ border: '1px solid #e8e4de', borderRadius: 10, background: '#fbfaf8', margin: '2px 0 12px', fontSize: 13 }}>
-        <summary style={{ cursor: 'pointer', padding: '10px 16px', color: '#6b6459', fontWeight: 600, userSelect: 'none' }}>
-          Analysis · {item.beats.length} step{item.beats.length > 1 ? 's' : ''}
-        </summary>
-        <div style={{ padding: '0 16px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {item.beats.map((b, i) => (
-            <div key={i} className="sa-md" style={{ borderTop: i ? '1px solid #efece6' : 'none', paddingTop: i ? 8 : 0 }} dangerouslySetInnerHTML={{ __html: renderInlineMd(b) }} />
-          ))}
+      <details className="sa-analysis-card">
+        <summary>Analysis · {item.beats.length} step{item.beats.length > 1 ? 's' : ''}</summary>
+        <div className="sa-ac-body">
+          {item.beats.map((b, i) => <div key={i} className="sa-md" dangerouslySetInnerHTML={{ __html: renderInlineMd(b) }} />)}
         </div>
       </details>
     )
@@ -1014,6 +1031,29 @@ const ANSWER_CSS = `
 .sa-mdtable{border-collapse:collapse;margin:6px 0;font-size:12.5px;font-variant-numeric:tabular-nums}
 .sa-mdtable th,.sa-mdtable td{border:1px solid #e0dcd4;padding:3px 9px;text-align:left;white-space:nowrap}
 .sa-mdtable th{background:#f3f1ec;font-weight:600}
+/* ── Receptionist UI (feed = light): live analysis, analysis card, follow-ups, narrator mirror, per-step timer ── */
+.sa-live{border:1px solid #e8e4de;border-radius:8px;background:#fbfaf8;padding:12px 14px;margin:4px 0}
+.sa-live-h{display:flex;align-items:center;gap:10px;color:#6b6459;font-size:12.5px;font-weight:600}
+.sa-live-h .lnk{margin-left:auto;font-weight:400;font-size:12px;color:#8a8276;cursor:pointer;text-decoration:underline}
+.sa-beats{margin-top:8px;display:flex;flex-direction:column;gap:8px}
+.sa-beat{display:flex;gap:12px;align-items:flex-start;border-top:1px solid #efece6;padding-top:8px}
+.sa-beat:first-child{border-top:none;padding-top:0}
+.sa-beat.past{opacity:.55}
+.sa-beat .sa-beat-b{flex:1;min-width:0}
+.sa-beat .sa-beat-t{flex-shrink:0;font-size:11.5px;color:#a49a8c;font-variant-numeric:tabular-nums;padding-top:1px;min-width:26px;text-align:right}
+.sa-analysis-card{border:1px solid #e8e4de;border-radius:10px;background:#fbfaf8;margin:2px 0 12px;font-size:13px}
+.sa-analysis-card>summary{cursor:pointer;padding:10px 16px;color:#6b6459;font-weight:600;user-select:none}
+.sa-analysis-card>.sa-ac-body{padding:0 16px 12px;display:flex;flex-direction:column;gap:8px}
+.sa-fu{margin:2px 0 16px}
+.sa-fu-label{font-size:12px;color:#8a8276;margin-bottom:8px;font-weight:600}
+.sa-fu-list{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
+.sa-fu-chip{text-align:left;border:1px solid #e0dcd4;background:#fff;border-radius:999px;padding:8px 15px;font-size:13.5px;color:#2a2a2a;cursor:pointer;max-width:100%;line-height:1.4}
+.sa-fu-chip:hover{background:#f3f1ec}
+.sa-narr{position:sticky;top:0;z-index:2;border:1px solid #cdd9c2;border-radius:8px;background:#eef4e6;padding:10px 12px;margin-bottom:12px;max-height:240px;overflow-y:auto;box-shadow:0 2px 8px rgba(0,0,0,.05)}
+.sa-narr-h{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#5a7a4a;margin-bottom:6px}
+.sa-narr .sa-md{color:#3a4a2f}
+.sa-narr .sa-nb{border-top:1px solid #d5e0c8;padding-top:6px;margin-top:6px}
+.sa-narr .sa-nb:first-child{border-top:none;padding-top:0;margin-top:0}
 .sa-answer .sa-src{font-size:11.5px;color:var(--muted);margin-top:6px}.sa-answer .sa-src b{color:var(--body)}
 .sa-answer .sa-foot{display:flex;justify-content:flex-end;gap:12px;margin-top:12px;padding-top:8px;border-top:1px solid var(--hair);font-size:11px;color:var(--muted)}
 .sa-answer{position:relative}
