@@ -173,8 +173,9 @@ THE USER'S CHANGE REQUEST: ${question}
 First OPEN and READ ./${m.programDir} (program.ts + its units) to see exactly what it currently computes and
 shows — that program IS the source of truth. Then EDIT its units/code to satisfy the request — change the
 calculation, the output shape, or add the context they asked for. RUN it with \`tsx run.mjs ${m.programDir}/program.ts '<jsonParams>'\`
-until correct. Then write ${builtRel} = {"programDir":"${m.programDir}","params":{...}} pointing at the SAME
-program (do NOT change programDir, do NOT set parent). The ENGINE runs it and writes the answer — do NOT write
+until correct. Then write ${builtRel} = {"programDir":"${m.programDir}","params":{...}, "followups":["…","…"]}
+pointing at the SAME program (do NOT change programDir, do NOT set parent). \`followups\` = up to 3 FRESH
+next questions for the CORRECTED answer (optional; vary them). The ENGINE runs it and writes the answer — do NOT write
 ${answerRel} yourself, and do NOT answer in chat.` : ''
       const prompt = m ? modifyPrompt : buildPrompt
 

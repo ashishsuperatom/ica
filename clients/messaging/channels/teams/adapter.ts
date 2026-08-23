@@ -9,6 +9,27 @@ import type { ChannelAdapter, ChannelSecrets, ConversationRef, InboundMessage } 
 
 const MAX_ROWS = 12
 
+// Teams message markdown renders **bold** + bullet lists, but NOT GFM pipe tables (they come out as garbled
+// "| --- |" text). Convert any table block into bullet lines: "- <first cell> — <col>: <val> · …".
+function mdTablesToBullets(md: string): string {
+  const lines = md.split('\n')
+  const isRow = (s: string) => /^\s*\|.*\|\s*$/.test(s)
+  const isSep = (s: string) => /^\s*\|[\s:|-]+\|\s*$/.test(s)
+  const cells = (s: string) => s.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim())
+  const out: string[] = []
+  for (let i = 0; i < lines.length;) {
+    if (isRow(lines[i]) && i + 1 < lines.length && isSep(lines[i + 1])) {
+      const header = cells(lines[i]); i += 2
+      while (i < lines.length && isRow(lines[i])) {
+        const c = cells(lines[i]); i++
+        const rest = c.slice(1).map((v, k) => (v ? `${header[k + 1] ? header[k + 1] + ' ' : ''}${v}` : '')).filter(Boolean).join(' · ')
+        out.push(`- ${c[0]}${rest ? ' — ' + rest : ''}`)
+      }
+    } else { out.push(lines[i]); i++ }
+  }
+  return out.join('\n')
+}
+
 export const teamsAdapter: ChannelAdapter = {
   channel: 'teams',
 
@@ -79,9 +100,10 @@ export const teamsAdapter: ChannelAdapter = {
   },
 
   renderText(text: string): unknown {
-    // A plain Bot Framework message. Teams renders markdown in `text` (bold, lists, small tables) — ideal for a
-    // tiny live narration beat. Kept minimal on purpose: this is narration, not the answer card.
-    return { type: 'message', text: String(text) }
+    // Plain Bot Framework message. Teams renders **bold** + bullet lists but NOT markdown pipe tables, so we
+    // convert any table to bullet lines HERE (programmatically) — the LLM just emits canonical markdown, unaware
+    // of the channel.
+    return { type: 'message', text: mdTablesToBullets(String(text)) }
   },
 
   renderStatus(_text: string): unknown {

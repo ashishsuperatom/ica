@@ -490,7 +490,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     if (modifyTarget && curNode) {
       // MODIFY: update the CURRENT node's program IN PLACE — no new node, no new edge, position unchanged.
       // rawAnalysis (r.lastLines) intentionally NOT stored — it's a garbled TUI snapshot with little value; re-enable here if reworked.
-      graph.putNode({ ...curNode, props: { ...(curNode.props as any), program: programDir ?? modifyTarget.programDir, params: programParams, category: r.category } })
+      graph.putNode({ ...curNode, props: { ...(curNode.props as any), program: programDir ?? modifyTarget.programDir, params: programParams, category: r.category, ...(programFollowups.length ? { followups: programFollowups } : {}) } })
       builtIntentId = curNode.id
       console.log(`[ica] modified node ${pos.slice(0, 14)} in place · program ${programDir ?? modifyTarget.programDir}`)
     } else {

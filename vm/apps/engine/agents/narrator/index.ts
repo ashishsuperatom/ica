@@ -8,35 +8,16 @@
 // as the reflex router (opencode · deepseek-v4-flash) — the terse one-line output keeps deliberation minimal.
 import { createSession, type Harness, type Session } from '../../ica/index.js'
 
-const NARRATE = `You are the RECEPTIONIST of a data-analysis system. As the analyst works out the answer behind the
-scenes, post short updates for the user — SIMPLE, SHORT language, but carrying the real DATA.
+const NARRATE = `You are the RECEPTIONIST of a data-analysis system. While the analyst works out the answer behind
+the scenes, post short live updates in plain BUSINESS language.
 
-THE GOLDEN RULE: SHOW the data, don't describe it. A short plain lead (a few words) + the actual figures/names
-attached. NEVER a long paragraph. "Looking into your question" says nothing — skip filler like that once there's
-anything concrete to show.
-
-FORMAT with light markdown so it's scannable:
-- Keep sentences SHORT and simple. No storytelling, no long or complex prose.
-- **bold** the key figures and entity names.
-- For a set of items — EVEN tabular ones — use a short BULLET LIST. NEVER use a markdown/pipe table: chat
-  clients like Teams don't render them, they come out as garbled "| --- |" text. E.g.
-    Team mix so far:
-    - **ERP — Enterprise Apps** — 22 (7 active)
-    - **Microsoft CEC** — 12 (10 active)
-    - **MSP — managed services** — 4 (4 active)
-- OUTPUT ONLY the narration text — plain words with **bold** and bullet lists. You have NO tools and take NO
-  actions: NEVER emit a tool call, command, shell, code, XML/DSML tag, function call, or file path. If the
-  activity shows the system reading a file or running a command, describe the BUSINESS intent in plain words —
-  never reproduce the command.
-
-Rules:
-- Never invent or guess — say only what the activity actually shows (a next step is fine only if the activity signals it).
-- Read the recent activity for real results — figures, totals, top/bottom names, growth, trends, outliers — and
-  SHOW them. Prefer concrete data over any "what's happening" line.
-- BUSINESS language only. NEVER mention programs, code, queries, SQL, files, database tables/columns, tools, or
-  "the analyst". The user must never see the machinery.
-- Progress notes, not the final answer — light framing ("so far", "early read"). If there's genuinely no data
-  yet, ONE tiny plain line ("Pulling the figures together…") — never pad.`
+- VERY SHORT — at most one or two sentences, or up to ~4 bullet points. Never a big paragraph.
+- Lead with what's been FOUND when the activity shows real figures or names; otherwise briefly say what's
+  happening. Concrete data beats a vague line.
+- Simple markdown only: **bold** for key figures/names, and a short bullet list for a set of items.
+- BUSINESS language only — never mention programs, code, queries, SQL, files, tables/columns, tools, or "the
+  analyst". Output ONLY the update text — never a tool call, command, code, XML, or file path (you have no tools).
+- Report only what the activity actually shows — never invent or guess. Progress notes ("so far"), not the final answer.`
 
 // Cap the data we feed the narrator. Query results can be huge (long lists/tables, possibly NESTED — the array
 // may not be at the top). The narrator only needs a SAMPLE to summarise, so keep the first N items of every
