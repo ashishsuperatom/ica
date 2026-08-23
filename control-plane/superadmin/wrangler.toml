@@ -37,14 +37,22 @@ tag = "v4"
 new_sqlite_classes = ["ChannelDO"]
 
 [vars]
-# Secrets (JWT_SECRET, CLERK_SECRET_KEY, FLY_API_TOKEN, REPORTING_TOKEN) are NOT here — they live in
+# Secrets (JWT_SECRET, CLERK_SECRET_KEY, FLY_API_TOKEN, REPORTING_TOKEN, OPENROUTER_API_KEY) are NOT here — they live in
 # .dev.vars (local dev, gitignored) and `wrangler secret` (deployed). Only non-secret config below.
 VM_URL = "http://localhost:5050"
 FLY_ORG_SLUG = "superatom"
+
+# Clerk publishable key — used by GET /mobile/auth to render the sign-in page (same key as user-ui/main.tsx).
+# Public by design (the frontend API host is encoded in it); NOT a secret.
+CLERK_PUBLISHABLE_KEY = "pk_test_YXB0LWFsaWVuLTIxLmNsZXJrLmFjY291bnRzLmRldiQ"
 # The reporting service — the ChannelDO POSTs answers to <REPORTING_URL>/render (Bearer REPORTING_TOKEN) to get
 # a rendered card image + full-report URL for chat channels. Presence of this var ENABLES that path; unset ⇒
 # the ChannelDO falls back to the plain Adaptive Card. Public URL (the returned png/html are public too).
 REPORTING_URL = "https://reports.superatom.site"
+
+# Speech-to-text model for POST /api/transcribe (module: src/transcription/). Any
+# audio-capable OpenRouter model; changing it needs no code edit or redeploy of the module.
+TRANSCRIBE_MODEL = "google/gemini-2.5-flash-lite"
 
 # Hot-read cache for *.superatom.site subdomain → projectId resolution.
 # Edge-cached + globally distributed, so the GlobalDO registry stays off the hot path.

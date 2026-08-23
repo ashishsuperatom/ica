@@ -16,87 +16,26 @@ export { GlobalDO } from './global-do.js'
 export { ChannelDO } from './channel-do.js'
 // The channel-agnostic messaging module (Teams/Slack/… adapters) — imported, never inlined.
 import { channelAdapter } from '../../../clients/messaging/index.js'
+// Speech-to-text for voice clients (mobile). A SELF-CONTAINED module in src/transcription/ —
+// this import and the /api/transcribe route below are its ONLY touchpoints in the worker.
+import { handleTranscribe } from './transcription/index.js'
 import { createMachine, stopMachine } from './fly.js'
+// Auth: token primitives + Clerk→platform-token mint (./auth/tokens.ts) and the mobile browser-redirect
+// device flow (./auth/mobile.ts). worker.ts only routes to these; the rules live in the module.
+import { verifyJwt, signJwt, mintPlatformTokenFromClerk, type JwtClaims } from './auth/tokens.js'
+import { mobileAuthPage, handleMobileCode, handleMobileExchange, handleMeProjects } from './auth/mobile.js'
 
-// ── JWT helpers (Web Crypto, no dependencies) ───────────────────────────────
+// ── Auth ────────────────────────────────────────────────────────────────────
+// Token primitives, the Clerk→platform-token mint, and SUPERADMIN_EMAILS live in ./auth/tokens.ts (imported
+// above). The mobile browser-redirect device flow lives in ./auth/mobile.ts. worker.ts only routes.
 
-function b64url(buf: Uint8Array): string {
-  return btoa(String.fromCharCode(...buf))
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-}
-
-function b64urlDecode(s: string): string {
-  s = s.replace(/-/g, '+').replace(/_/g, '/')
-  while (s.length % 4) s += '='
-  return atob(s)
-}
-
-const encoder = new TextEncoder()
-
-interface JwtClaims {
-  userId: string
-  role?: string
-  exp: number
-}
-
-async function signJwt(payload: JwtClaims, secret: string): Promise<string> {
-  const header = b64url(encoder.encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' })))
-  const body   = b64url(encoder.encode(JSON.stringify(payload)))
-  const input  = `${header}.${body}`
-  const key = await crypto.subtle.importKey(
-    'raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
-  )
-  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, encoder.encode(input)))
-  return `${input}.${b64url(sig)}`
-}
-
-async function verifyJwt(token: string, secret: string): Promise<JwtClaims | null> {
-  const parts = token.split('.')
-  if (parts.length !== 3) return null
-  const [header, body, sig] = parts
-  const key = await crypto.subtle.importKey(
-    'raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']
-  )
-  const sigBytes = Uint8Array.from(b64urlDecode(sig), c => c.charCodeAt(0))
-  const ok = await crypto.subtle.verify('HMAC', key, sigBytes, encoder.encode(`${header}.${body}`))
-  if (!ok) return null
-  try {
-    const claims = JSON.parse(b64urlDecode(body)) as JwtClaims
-    if (claims.exp && claims.exp * 1000 < Date.now()) return null
-    return claims
-  } catch { return null }
-}
-
-// Admin/provisioning routes require a valid superadmin JWT (issued by /api/auth/token). The admin
-// SPA sends it as `Authorization: Bearer <jwt>`. Returns the claims, or null if missing/invalid —
-// closing the hole where these routes forwarded to the DO with NO auth at all.
+// Admin/provisioning routes require a valid superadmin JWT (Authorization: Bearer <jwt>). Returns the claims,
+// or null if missing/invalid — closing the hole where these routes forwarded to the DO with NO auth at all.
 async function requireSuperadmin(request: Request, env: Env): Promise<JwtClaims | null> {
   const m = (request.headers.get('authorization') || '').match(/^Bearer\s+(.+)$/i)
   if (!m) return null
   const claims = await verifyJwt(m[1], env.JWT_SECRET)
   return claims && claims.role === 'superadmin' ? claims : null
-}
-
-// The ONLY emails granted superadmin (full access to every org/project). Hard-coded
-// on purpose for now — self-serve superadmin is not a thing. Lower-case; matched
-// case-insensitively.
-const SUPERADMIN_EMAILS = ['ashish@superatom.ai']
-
-// Look up a Clerk user's primary email (the session object carries only user_id).
-// Returns '' on any failure — callers treat that as "not superadmin".
-async function fetchClerkPrimaryEmail(userId: string, env: Env): Promise<string> {
-  try {
-    const res = await fetch(`https://api.clerk.com/v1/users/${userId}`, {
-      headers: { Authorization: `Bearer ${env.CLERK_SECRET_KEY}` },
-    })
-    if (!res.ok) return ''
-    const u = await res.json() as any
-    const emails: any[] = u.email_addresses ?? []
-    const primary = emails.find((e) => e.id === u.primary_email_address_id) ?? emails[0]
-    return primary?.email_address ?? ''
-  } catch {
-    return ''
-  }
 }
 
 // ── Token exchange: Clerk session → our JWT ─────────────────────────────────
@@ -107,57 +46,10 @@ async function fetchClerkPrimaryEmail(userId: string, env: Env): Promise<string>
 async function handleTokenExchange(request: Request, env: Env): Promise<Response> {
   try {
     const { clerkToken } = await request.json() as { clerkToken?: string }
-    if (!clerkToken) {
-      return Response.json({ error: 'missing clerkToken' }, { status: 400 })
-    }
-
-    // Decode the Clerk JWT to extract session id (safe — Clerk API re-validates)
-    const parts = clerkToken.split('.')
-    if (parts.length !== 3) {
-      return Response.json({ error: 'malformed token' }, { status: 400 })
-    }
-    const payload = JSON.parse(b64urlDecode(parts[1]))
-    const sid = payload.sid
-    if (!sid) {
-      return Response.json({ error: 'no session id in token' }, { status: 400 })
-    }
-
-    // Validate session against Clerk's REST API
-    const clerkRes = await fetch(`https://api.clerk.com/v1/sessions/${sid}`, {
-      headers: { Authorization: `Bearer ${env.CLERK_SECRET_KEY}` },
-    })
-    if (!clerkRes.ok) {
-      console.error(`[auth] Clerk session lookup failed (${clerkRes.status})`)
-      return Response.json({ error: 'invalid session' }, { status: 401 })
-    }
-    const session = await clerkRes.json() as any
-    if (session.status !== 'active') {
-      return Response.json({ error: 'session not active' }, { status: 401 })
-    }
-
-    const userId = session.user_id
-    if (!userId) {
-      return Response.json({ error: 'no user in session' }, { status: 401 })
-    }
-
-    // ── Superadmin gate ──────────────────────────────────────────────────────
-    // Superadmin (full access to every org/project) is granted ONLY to hard-coded
-    // email(s) — previously EVERY authenticated user became superadmin. Everyone
-    // else gets a plain 'user' token (usable for project runtimes where they're a
-    // member; rejected by requireSuperadmin on admin/provisioning routes).
-    const primaryEmail = await fetchClerkPrimaryEmail(userId, env)
-    const isSuperadmin = !!primaryEmail && SUPERADMIN_EMAILS.includes(primaryEmail.toLowerCase())
-    const role = isSuperadmin ? 'superadmin' : 'user'
-
-    // Issue our JWT (30-day expiry)
-    const token = await signJwt({
-      userId,
-      role,
-      exp: Math.floor(Date.now() / 1000) + 30 * 24 * 3600,
-    }, env.JWT_SECRET)
-
-    console.log(`[auth] issued ${role} token for ${primaryEmail || userId}`)
-    return Response.json({ token, userId, role })
+    const r = await mintPlatformTokenFromClerk(clerkToken, env)   // shared rules (Clerk validation + superadmin gate + 30-day JWT)
+    return r.ok
+      ? Response.json({ token: r.token, userId: r.userId, role: r.role })
+      : Response.json({ error: r.error }, { status: r.status })
   } catch (err: any) {
     console.error(`[auth] token exchange failed: ${err.message}`)
     return Response.json({ error: 'invalid session' }, { status: 401 })
@@ -171,12 +63,12 @@ export default {
     const isWs = request.headers.get('upgrade') === 'websocket'
 
     // ── *.superatom.site — subdomain-addressed apps ───────────────────────────
-    // Only document/SPA requests are host-routed here; /_ws/* and /api/* on .site
-    // share this same worker and fall through to the normal handlers below, so the
-    // browser connects to wss://<same-host>/_ws/<projectId> with nothing hardcoded.
+    // Only document/SPA requests are host-routed here; /_ws/*, /api/*, and /mobile/* (the device-login page)
+    // share this same worker and fall through to the normal handlers below, so the browser connects to
+    // wss://<same-host>/_ws/<projectId> with nothing hardcoded.
     // (superatom.site / superatom.ai are untouched — different host, skipped.)
     if ((url.hostname === 'superatom.site' || url.hostname.endsWith(SITE_SUFFIX)) &&
-        !path.startsWith('/_ws/') && !path.startsWith('/api/') && !isWs) {
+        !path.startsWith('/_ws/') && !path.startsWith('/api/') && !path.startsWith('/mobile/') && !isWs) {
       return handleSiteRequest(url.hostname, request, env)
     }
 
@@ -289,6 +181,24 @@ export default {
     // ── Auth: exchange Clerk session for our JWT ─────────────────────────────
     if (request.method === 'POST' && path === '/api/auth/token') {
       return handleTokenExchange(request, env)
+    }
+
+    // ── Mobile / device login (browser-redirect PKCE flow — see clients/ios/AUTH-HANDOFF.md) ──
+    if (request.method === 'GET'  && path === '/mobile/auth')              return mobileAuthPage(env)
+    if (request.method === 'POST' && path === '/api/auth/mobile/code')     return handleMobileCode(request, env)
+    if (request.method === 'POST' && path === '/api/auth/mobile/exchange') return handleMobileExchange(request, env)
+    if (request.method === 'GET'  && path === '/api/me/projects')          return handleMeProjects(request, env)
+
+    // ── Audio transcription (module: src/transcription/) ────────────────────
+    // Voice clients (iOS/Android) record speech, cut it into chunks with an on-device
+    // voice-activity detector, and POST each chunk here to get its text back. Audio
+    // is the ONE thing that does not go over the hub WebSocket: it is bulk binary and
+    // each chunk must be retryable on its own. The resulting text is then asked as an
+    // ordinary `analyse` question over the socket, so nothing downstream knows or cares
+    // that it was spoken. All speech-to-text logic lives in the module; this route and
+    // the import above are the only lines it adds to the worker.
+    if (request.method === 'POST' && path === '/api/transcribe') {
+      return handleTranscribe(request, env, (token, secret) => verifyJwt(token, secret))
     }
 
     // ── Project creation (with Fly Machine provisioning) ────────────────────

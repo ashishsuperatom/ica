@@ -8,10 +8,15 @@
 // Identified by name "global" — only one instance per Worker.
 
 import { DurableObject } from 'cloudflare:workers'
+import { LoginCodeStore } from './auth/login-code-store.js'
 
 export class GlobalDO extends DurableObject<Env> {
+  // One-time mobile login codes — strongly-consistent store lives here (see auth/login-code-store.ts).
+  private loginCodes: LoginCodeStore
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
+    this.loginCodes = new LoginCodeStore(this.ctx.storage.sql)
     this.ctx.blockConcurrencyWhile(() => this.migrate())
   }
 
@@ -46,6 +51,7 @@ export class GlobalDO extends DurableObject<Env> {
     `)
     // Migration: add column if missing (existing DOs from before this change)
     try { this.ctx.storage.sql.exec('ALTER TABLE organizations ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0') } catch {}
+    LoginCodeStore.migrate(this.ctx.storage.sql)
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -55,6 +61,17 @@ export class GlobalDO extends DurableObject<Env> {
     // Auth: lookup superatom admin by Clerk user ID
     if (request.method === 'POST' && path === '/admin-by-clerk-id') {
       return this.adminByClerkId(request)
+    }
+
+    // Mobile login one-time codes (device flow — strongly-consistent store; see auth/login-code-store.ts)
+    if (request.method === 'POST' && path === '/mobile-code') {
+      this.loginCodes.put(await request.json() as any)
+      return Response.json({ ok: true })
+    }
+    if (request.method === 'POST' && path === '/mobile-code/claim') {
+      const { code, codeVerifier } = await request.json() as any
+      const r = await this.loginCodes.claim(String(code || ''), String(codeVerifier || ''))
+      return r ? Response.json(r) : new Response('not found', { status: 404 })   // caller maps to a uniform 401
     }
 
     // CRUD: organizations (soft-delete — never hard-delete)
