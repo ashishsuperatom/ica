@@ -225,6 +225,38 @@ export function App() {
   )
 }
 
+// ── Destructive-action guard ─────────────────────────────────────────────────
+// A delete is NEVER one click from a list. This modal spells out the consequences and only arms the
+// Delete button once the user has typed the exact resource name — so deletion is always deliberate.
+function ConfirmDelete({ kind, name, consequences, onConfirm, onClose }: {
+  kind: string; name: string; consequences: string[]; onConfirm: () => void | Promise<void>; onClose: () => void
+}) {
+  const [typed, setTyped] = useState(''); const [busy, setBusy] = useState(false)
+  const armed = typed.trim() === name
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={onClose}>
+      <div className="card" style={{ maxWidth: 520, width: '92%', padding: 22 }} onClick={e => e.stopPropagation()}>
+        <h3 style={{ marginTop: 0, color: 'var(--bad)' }}>Delete {kind} “{name}”?</h3>
+        <p className="muted" style={{ marginTop: 4, marginBottom: 8 }}>This can’t be undone from here. Deleting will:</p>
+        <ul style={{ margin: '0 0 14px 18px', fontSize: 13, color: 'var(--muted)', lineHeight: 1.65 }}>
+          {consequences.map((c, i) => <li key={i}>{c}</li>)}
+        </ul>
+        <label style={{ display: 'block', fontSize: 13, marginBottom: 6 }}>Type <strong>{name}</strong> to confirm:</label>
+        <input className="input" value={typed} onChange={e => setTyped(e.target.value)} placeholder={name} autoFocus
+          onKeyDown={e => { if (e.key === 'Enter' && armed && !busy) { setBusy(true); Promise.resolve(onConfirm()).finally(() => setBusy(false)) } }}
+          style={{ width: '100%', marginBottom: 14 }} />
+        <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+          <button className="btn ghost" onClick={onClose} disabled={busy}>Cancel</button>
+          <button className="btn danger" disabled={!armed || busy}
+            onClick={async () => { setBusy(true); try { await onConfirm() } finally { setBusy(false) } }}>
+            {busy ? 'Deleting…' : `Delete ${kind}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Org list ─────────────────────────────────────────────────────────────────
 function OrgListPage() {
   const token = useAuth(); const api = useApi(token)
@@ -233,7 +265,7 @@ function OrgListPage() {
   const fetchOrgs = useCallback(() => { if (token) api(`/organizations?deleted=${showDeleted ? '1' : '0'}`).then(r => r.json()).then(setOrgs).catch(() => {}) }, [token, api, showDeleted])
   useEffect(() => { fetchOrgs() }, [fetchOrgs])
   async function create(e: React.FormEvent<HTMLFormElement>) { e.preventDefault(); const fd = new FormData(e.currentTarget); await api('/organizations', { method: 'POST', body: JSON.stringify({ name: fd.get('name') }) }); (e.target as HTMLFormElement).reset(); fetchOrgs() }
-  const remove  = async (id: string) => { await api('/organizations', { method: 'DELETE', body: JSON.stringify({ id }) }); fetchOrgs() }
+  // Deletion is NOT here — it lives on the org page's Danger zone (deliberate, type-to-confirm). Restore is safe.
   const restore = async (id: string) => { await api('/organizations', { method: 'PUT', body: JSON.stringify({ id }) }); fetchOrgs() }
 
   return (
@@ -255,7 +287,7 @@ function OrgListPage() {
               <strong style={{ fontSize: 15 }}>{o.name}</strong>
               {o.deleted
                 ? <button className="btn sm ok" onClick={e => { e.stopPropagation(); restore(o.id) }}>Restore</button>
-                : <button className="btn sm danger" onClick={e => { e.stopPropagation(); remove(o.id) }}>Delete</button>}
+                : <span className="muted" style={{ fontSize: 12 }}>Open →</span>}
             </div>
             <code className="mono">{o.id}</code>
           </div>
@@ -270,15 +302,14 @@ function OrgListPage() {
 function OrgDetailPage() {
   const token = useAuth(); const { orgId } = useParams<{ orgId: string }>(); const api = useApi(token, orgId)
   const [search, setSearch] = useSearchParams()
-  const tab = (search.get('tab') as 'projects' | 'users') || 'projects'
+  const tab = (search.get('tab') as 'projects' | 'users' | 'settings') || 'projects'
   const [projects, setProjects] = useState<any[]>([]); const [users, setUsers] = useState<any[]>([])
   const [showDeleted, setShowDeleted] = useState(false); const nav = useNavigate()
   const [conn, setConn] = useState<{ id: string; apiKey: string; wsUrl: string } | null>(null)   // external-project connection info (copyable panel)
-  const [svc, setSvc] = useState<{ projectId: string; channel: string; token: string; wsUrl: string; expiresAt: number } | null>(null)   // service-token (bot credential) copyable panel
-  const genServiceToken = async (projectId: string, channel: string) => {
-    const r = await api(`/projects/${projectId}/service-token`, { method: 'POST', body: JSON.stringify({ channel }) })
-    if (r.ok) setSvc(await r.json())
-  }
+  // Teams-token generation moved to the PROJECT's Settings view. Here we only need the org NAME (for the
+  // type-to-confirm delete) + the Danger-zone modal toggle.
+  const [orgName, setOrgName] = useState(''); const [delOrg, setDelOrg] = useState(false)
+  useEffect(() => { if (token) api('/organizations').then(r => r.json()).then((os: any[]) => setOrgName(Array.isArray(os) ? (os.find(o => o.id === orgId)?.name ?? '') : '')).catch(() => {}) }, [token, api, orgId])
   const fetchProjects = useCallback(() => { if (token) api(`/projects?deleted=${showDeleted ? '1' : '0'}`).then(r => r.json()).then(setProjects).catch(() => {}) }, [token, api, showDeleted])
   useEffect(() => { if (!token) return; fetchProjects(); api('/users').then(r => r.json()).then(setUsers).catch(() => {}) }, [token, api, fetchProjects])
   async function createProject(e: React.FormEvent<HTMLFormElement>) {
@@ -292,7 +323,7 @@ function OrgDetailPage() {
     else nav(`/org/${orgId}/projects/${p.id}`)
   }
   async function createUser(e: React.FormEvent<HTMLFormElement>) { e.preventDefault(); const fd = new FormData(e.currentTarget); await api('/users', { method: 'POST', body: JSON.stringify({ email: fd.get('email'), name: fd.get('name'), role: fd.get('role') }) }); (e.target as HTMLFormElement).reset(); api('/users').then(r => r.json()).then(setUsers).catch(() => {}) }
-  const removeProject  = async (id: string) => { await api('/projects', { method: 'DELETE', body: JSON.stringify({ id }) }); fetchProjects() }
+  // Project delete lives on the project's own Settings → Danger zone (type-to-confirm), not on this list.
   const restoreProject = async (id: string) => { await api('/projects', { method: 'PUT', body: JSON.stringify({ id }) }); fetchProjects() }
 
   return (
@@ -315,26 +346,8 @@ function OrgDetailPage() {
           </div>
         )
       })()}
-      {svc && (() => {
-        const env = `SA_HUB_WS=${svc.wsUrl}\nSA_PROJECT_ID=${svc.projectId}\nSA_ENGINE_TOKEN=${svc.token}`
-        const exp = new Date(svc.expiresAt).toLocaleDateString()
-        return (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setSvc(null)}>
-            <div className="card" style={{ maxWidth: 660, width: '92%', padding: 22 }} onClick={e => e.stopPropagation()}>
-              <h3 style={{ marginTop: 0 }}>{svc.channel} bot credential — service token</h3>
-              <p className="muted" style={{ marginTop: 4 }}>Paste into the surface's <code>.env</code> (e.g. <code>clients/teams/.env</code>). It authorizes the bot as a <code>runtime</code> for this project only, until {exp}. Revoke by removing the <code>{svc.projectId ? 'svc:' + svc.channel : ''}</code> member.</p>
-              <textarea readOnly value={env} onFocus={e => e.currentTarget.select()} rows={4}
-                style={{ width: '100%', fontFamily: 'monospace', fontSize: 13, padding: 12, borderRadius: 8, resize: 'vertical', whiteSpace: 'pre' }} />
-              <div className="row" style={{ gap: 8, marginTop: 12, alignItems: 'center' }}>
-                <button className="btn" onClick={() => { navigator.clipboard?.writeText(env); }}>Copy</button>
-                <button className="btn ghost" onClick={() => setSvc(null)} style={{ marginLeft: 'auto' }}>Close</button>
-              </div>
-            </div>
-          </div>
-        )
-      })()}
       <div className="row" style={{ gap: 8, marginBottom: 18 }}>
-        {(['projects', 'users'] as const).map(t => (
+        {(['projects', 'users', 'settings'] as const).map(t => (
           <button key={t} className={`btn ghost ${tab === t ? 'on' : ''}`} onClick={() => setSearch({ tab: t })} style={{ textTransform: 'capitalize' }}>{t}</button>
         ))}
         <label className="row muted" style={{ marginLeft: 'auto', fontSize: 13, cursor: 'pointer' }}>
@@ -357,10 +370,7 @@ function OrgDetailPage() {
               <div><strong>{p.name}</strong><br/><code className="mono">{p.id}</code></div>
               {p.deleted
                 ? <button className="btn sm ok" onClick={e => { e.stopPropagation(); restoreProject(p.id) }}>Restore</button>
-                : <div className="row" style={{ gap: 8 }}>
-                    <button className="btn sm ghost" title="Generate a Teams bot credential (service token)" onClick={e => { e.stopPropagation(); genServiceToken(p.id, 'teams') }}>Teams token</button>
-                    <button className="btn sm danger" onClick={e => { e.stopPropagation(); removeProject(p.id) }}>Delete</button>
-                  </div>}
+                : <span className="muted" style={{ fontSize: 12 }}>Open →</span>}
             </div>
           ))}
         </div>
@@ -385,6 +395,19 @@ function OrgDetailPage() {
         </div>
         {users.length === 0 && <div className="empty">No users yet.</div>}
       </>}
+
+      {tab === 'settings' && (
+        <div className="card" style={{ padding: 18, borderColor: 'var(--bad)', maxWidth: 720 }}>
+          <h3 style={{ margin: '0 0 4px', color: 'var(--bad)' }}>Danger zone</h3>
+          <div className="between">
+            <div><strong>Delete this organization</strong><div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>Removes the org and every project inside it.</div></div>
+            <button className="btn danger" onClick={() => setDelOrg(true)}>Delete organization…</button>
+          </div>
+        </div>
+      )}
+      {delOrg && <ConfirmDelete kind="organization" name={orgName || orgId || ''} onClose={() => setDelOrg(false)}
+        consequences={[`Delete organization “${orgName || orgId}”`, `Delete all ${projects.length} project(s) inside it`, 'Detach their engines / bots', 'Soft-delete — restorable from the org list (Show deleted)']}
+        onConfirm={async () => { await api('/organizations', { method: 'DELETE', body: JSON.stringify({ id: orgId }) }); nav('/') }} />}
     </Shell>
   )
 }
@@ -498,6 +521,14 @@ function ProjectDetailPage() {
   const [openGroup, setOpenGroup] = useState<string | null>(null)
   // The org + project NAMES (the sidebar/crumbs/header show real names, not just truncated ids).
   const [meta, setMeta] = useState<{ project?: string; org?: string }>({})
+  // Settings view: the Teams bot credential + the Danger zone (delete). Kept OFF the project list — a delete is
+  // never one click from a card.
+  const [svc, setSvc] = useState<{ projectId: string; channel: string; token: string; wsUrl: string; expiresAt: number } | null>(null)
+  const [delProj, setDelProj] = useState(false)
+  const genServiceToken = async (channel: string) => {
+    const r = await api(`/projects/${projectId}/service-token`, { method: 'POST', body: JSON.stringify({ channel }) })
+    if (r.ok) setSvc(await r.json())
+  }
   useEffect(() => {
     if (!token) return
     api('/projects').then(r => (r.ok ? r.json() : [])).then((ps: any[]) => setMeta(m => ({ ...m, project: Array.isArray(ps) ? ps.find(p => p.id === projectId)?.name : undefined }))).catch(() => {})
@@ -583,6 +614,7 @@ function ProjectDetailPage() {
       { id: 'grounding', label: 'Grounding' },
     ] },
     { id: 'channels', label: 'Channels', icon: I.chat },
+    { id: 'settings', label: 'Settings', icon: I.grid },
   ]
   const title = view.startsWith('inspector/')
     ? `Inspector · ${SECTION_LABEL(view.slice('inspector/'.length) as Section)}`
@@ -710,6 +742,44 @@ function ProjectDetailPage() {
             </div>}
         </div>
       )}
+
+      {view === 'settings' && (
+        <div style={{ maxWidth: 720, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div className="card" style={{ padding: 18 }}>
+            <strong>Teams bot credential</strong>
+            <div className="muted" style={{ fontSize: 12.5, margin: '4px 0 12px' }}>Generate a scoped service token so a Teams bot can act as this project’s runtime. Shown once.</div>
+            <button className="btn ghost" onClick={() => genServiceToken('teams')}>Generate Teams token</button>
+          </div>
+          <div className="card" style={{ padding: 18, borderColor: 'var(--bad)' }}>
+            <h3 style={{ margin: '0 0 4px', color: 'var(--bad)' }}>Danger zone</h3>
+            <div className="between">
+              <div><strong>Delete this project</strong><div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>Tears down its engine wiring, machine mapping, and channel credentials.</div></div>
+              <button className="btn danger" onClick={() => setDelProj(true)}>Delete project…</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {svc && (() => {
+        const env = `SA_HUB_WS=${svc.wsUrl}\nSA_PROJECT_ID=${svc.projectId}\nSA_ENGINE_TOKEN=${svc.token}`
+        const exp = new Date(svc.expiresAt).toLocaleDateString()
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setSvc(null)}>
+            <div className="card" style={{ maxWidth: 660, width: '92%', padding: 22 }} onClick={e => e.stopPropagation()}>
+              <h3 style={{ marginTop: 0 }}>{svc.channel} bot credential — service token</h3>
+              <p className="muted" style={{ marginTop: 4 }}>Paste into the surface’s <code>.env</code>. Authorizes the bot as a <code>runtime</code> for this project only, until {exp}.</p>
+              <textarea readOnly value={env} onFocus={e => e.currentTarget.select()} rows={4} style={{ width: '100%', fontFamily: 'monospace', fontSize: 13, padding: 12, borderRadius: 8, resize: 'vertical', whiteSpace: 'pre' }} />
+              <div className="row" style={{ gap: 8, marginTop: 12, alignItems: 'center' }}>
+                <button className="btn" onClick={() => { navigator.clipboard?.writeText(env) }}>Copy</button>
+                <button className="btn ghost" onClick={() => setSvc(null)} style={{ marginLeft: 'auto' }}>Close</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+      {delProj && <ConfirmDelete kind="project" name={meta.project || projectId || ''} onClose={() => setDelProj(false)}
+        consequences={[`Delete project “${meta.project || projectId}”`, 'Tear down its engine wiring + machine mapping', 'Revoke its channel / bot credentials', 'Soft-delete — restorable from the org’s project list (Show deleted)']}
+        onConfirm={async () => { await api('/projects', { method: 'DELETE', body: JSON.stringify({ id: projectId }) }); navigate(`/org/${orgId}`) }} />}
 
       {view === 'agent' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

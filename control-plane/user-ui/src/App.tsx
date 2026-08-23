@@ -888,9 +888,10 @@ const ANSWER_CSS = `
 .sa-answer .sa-prose b,.sa-answer .sa-prose strong{color:var(--ink);font-weight:700}
 .sa-answer .sa-prose em{font-style:italic}
 .sa-answer .sa-prose code{font-family:var(--mono);font-size:12.5px;color:var(--ink);background:var(--panel);padding:1px 4px;border:1px solid var(--hair)}
-.sa-answer .sa-prose ul.sa-list{margin:7px 0 4px;padding-left:2px;list-style:none}
-.sa-answer .sa-prose ul.sa-list li{position:relative;padding-left:16px;margin:3px 0;line-height:1.55}
-.sa-answer .sa-prose ul.sa-list li::before{content:"";position:absolute;left:2px;top:9px;width:4px;height:4px;background:var(--navy);border-radius:50%}
+.sa-answer .sa-prose ul.sa-list,.sa-answer .sa-caveat ul.sa-list{margin:7px 0 4px;padding-left:2px;list-style:none}
+.sa-answer .sa-prose ul.sa-list li,.sa-answer .sa-caveat ul.sa-list li{position:relative;padding-left:18px;margin:3px 0;line-height:1.55}
+.sa-answer .sa-prose ul.sa-list li::before,.sa-answer .sa-caveat ul.sa-list li::before{content:"";position:absolute;left:4px;top:9px;width:4px;height:4px;background:var(--navy);border-radius:50%}
+.sa-answer .sa-caveat ul.sa-list{margin:0}
 .sa-answer .sa-period{font-family:var(--grot);font-size:11px;color:var(--body);margin:0 0 16px;display:flex;gap:9px;align-items:baseline;flex-wrap:wrap}
 .sa-answer .sa-period .pk{font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;font-weight:800;color:var(--page);background:var(--navy);padding:2px 7px}
 .sa-answer .sa-period b{color:var(--ink);font-weight:700}
@@ -911,7 +912,7 @@ const ANSWER_CSS = `
 .sa-answer table.sa-fin tbody tr:hover{background:var(--panel)}
 .sa-answer table.sa-fin td.rk{color:var(--muted);width:22px;padding-right:8px}
 .sa-answer table.sa-fin td.fig{color:var(--ink);font-weight:700}
-.sa-answer .sa-caveat{font-size:12.5px;color:var(--body);background:var(--panel);border:1px solid var(--hair);border-radius:3px;padding:8px 12px;margin:0 0 12px;line-height:1.6}
+.sa-answer .sa-caveat{font-size:12.5px;color:var(--body);background:var(--panel);border:1px solid var(--hair);border-radius:3px;padding:11px 16px;margin:0 0 12px;line-height:1.6}
 .sa-answer .sa-src{font-size:11.5px;color:var(--muted);margin-top:6px}.sa-answer .sa-src b{color:var(--body)}
 .sa-answer .sa-foot{display:flex;justify-content:flex-end;gap:12px;margin-top:12px;padding-top:8px;border-top:1px solid var(--hair);font-size:11px;color:var(--muted)}
 .sa-answer{position:relative}
