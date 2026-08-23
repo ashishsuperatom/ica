@@ -827,7 +827,12 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
       ) : (
         <>
           <div ref={feedRef} style={s.feed}>
-            {feed.map(item => <FeedCard key={item.id} item={item} onPick={fillInput} />)}
+            {(() => {
+              // Follow-up chips are only useful for the RECENT turns — keep the last two, hide older ones so
+              // scrolling back through old Q&As isn't cluttered. UI-only; the backend still sends them all.
+              const keepFu = new Set(feed.filter(i => i.type === 'followups').slice(-2).map(i => i.id))
+              return feed.map(item => (item.type === 'followups' && !keepFu.has(item.id)) ? null : <FeedCard key={item.id} item={item} onPick={fillInput} />)
+            })()}
             {/* Working indicator — no terminal; a details link goes to the Analyst tab. */}
             {anBusy && (
               <div className="sa-live">
