@@ -449,8 +449,11 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         // findings) and the analyst's own prose. SKIP file events (program code / diffs / paths) — that's pure
         // machinery the narrator must hide anyway: big input bloat + a leak risk, with no business value (every
         // real figure is already in a command's result).
-        if (ev.kind === 'command') { const out = ev.output ? capResultData(ev.output) : ''; const d = out ? `${ev.command || ''} → RESULT: ${out}` : (ev.command || ''); if (d.trim()) narrationBuf.push(d.trim().slice(0, 1800)) }
-        else if (ev.kind === 'message' && ev.text?.trim()) narrationBuf.push(ev.text.trim().slice(0, 600))
+        // Feed the narrator the SIGNAL only: the analyst's own PROSE (already business-ish), plus the OUTPUT of a
+        // genuine DATA RUN (a tsx/node query). NEVER feed raw command text or file-read/plumbing output (cat/ls/
+        // grep… = machinery) — it's noise, and it tempts the model to echo tool-call syntax (the Teams DSML leak).
+        if (ev.kind === 'message' && ev.text?.trim()) narrationBuf.push(ev.text.trim().slice(0, 600))
+        else if (ev.kind === 'command' && ev.output?.trim() && /\b(tsx|node|run\.mjs|query\.mjs|program\.ts)\b/.test(ev.command || '')) narrationBuf.push(('RESULT: ' + capResultData(ev.output)).slice(0, 1800))
       },
     }
     const hint = overlapHint ? `An existing program is a ${overlapHint.relation} of this question: ${overlapHint.program}. Open it and reuse what fits, or ignore it.` : undefined

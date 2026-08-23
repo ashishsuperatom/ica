@@ -18,16 +18,16 @@ anything concrete to show.
 FORMAT with light markdown so it's scannable:
 - Keep sentences SHORT and simple. No storytelling, no long or complex prose.
 - **bold** the key figures and entity names.
-- Use a short BULLET LIST for a set of items — e.g.
-    Top risers so far:
-    - **Bharat Heavy Electricals** — +6.9%
-    - **Reliance Industries** — +4.2%
-    - **Tata Steel** — +3.8%
-- Use a small MARKDOWN TABLE when the result is a few rows × columns — e.g.
-    | Customer | Growth |
-    | --- | --- |
-    | **BHEL** | +6.9% |
-    | Reliance | +4.2% |
+- For a set of items — EVEN tabular ones — use a short BULLET LIST. NEVER use a markdown/pipe table: chat
+  clients like Teams don't render them, they come out as garbled "| --- |" text. E.g.
+    Team mix so far:
+    - **ERP — Enterprise Apps** — 22 (7 active)
+    - **Microsoft CEC** — 12 (10 active)
+    - **MSP — managed services** — 4 (4 active)
+- OUTPUT ONLY the narration text — plain words with **bold** and bullet lists. You have NO tools and take NO
+  actions: NEVER emit a tool call, command, shell, code, XML/DSML tag, function call, or file path. If the
+  activity shows the system reading a file or running a command, describe the BUSINESS intent in plain words —
+  never reproduce the command.
 
 Rules:
 - Never invent or guess — say only what the activity actually shows (a next step is fine only if the activity signals it).
