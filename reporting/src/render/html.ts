@@ -109,7 +109,10 @@ function tableHtml(t: AnswerTable & { fit?: { spill?: string } }, note?: string)
   // accent colour, because it is the thing a reader must not miss.
   const spill = t.fit?.spill ? `<div class="sa-spill">${esc(t.fit.spill)}</div>` : ''
   const n = note ? `<div class="sa-note">${esc(note)}</div>` : ''
-  return `<div class="sa-card"><table class="sa-table"><thead>${head}</thead><tbody>${body}${total}</tbody></table>${n}${spill}</div>`
+  // The scroll wrapper is always emitted; only the web stylesheet gives it overflow.
+  // In the image it is an inert div, so both surfaces share one markup tree.
+  return `<div class="sa-card"><div class="sa-scroll"><table class="sa-table">` +
+    `<thead>${head}</thead><tbody>${body}${total}</tbody></table></div>${n}${spill}</div>`
 }
 
 /** KPIs render as the web app's stat row: tiles sharing the width, separated by a
@@ -146,6 +149,12 @@ function paragraphs(text: string): string {
 
 export interface RenderHtmlOptions {
   theme: Theme
+  /** Which surface this document is for. The markup is IDENTICAL either way — only the
+   *  stylesheet differs, scoped by a class on the root. It has to: a browser can scroll
+   *  a wide table sideways, and an image cannot scroll at all. Rules that assume a
+   *  viewport (overflow, nowrap, a centred max-width column) would silently break the
+   *  image, where the frame is the whole world. */
+  surface?: 'web' | 'image'
   scale?: number           // px multiplier baked into the stylesheet (see theme.ts)
   title?: string           // the question, normally
   footerLeft?: string      // e.g. "Generated 21 Aug 2026"
@@ -188,7 +197,7 @@ export function renderFragment(a: Answer, o: RenderHtmlOptions): string {
   if (o.footerLeft || o.footerRight) {
     parts.push(`<div class="sa-foot"><div>${esc(o.footerLeft ?? '')}</div><div class="link">${esc(o.footerRight ?? '')}</div></div>`)
   }
-  return `<div class="sa-report">${parts.join('')}</div>`
+  return `<div class="sa-report ${o.surface === 'image' ? 'img' : 'web'}">${parts.join('')}</div>`
 }
 
 /** A full standalone document — what the browser gets, and what the image renderer

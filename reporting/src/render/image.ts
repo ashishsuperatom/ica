@@ -66,7 +66,7 @@ export async function renderImage(a: Answer, r: Rasteriser, o: ImageOptions = {}
   const build = (lim: FitLimits) => {
     const f = fitAnswer(a, lim)
     const opts: RenderHtmlOptions = {
-      theme, scale, title: o.title,
+      theme, scale, surface: 'image', title: o.title,
       footerLeft: o.footerLeft, footerRight: o.footerRight,
       fitNotes: f.fit.notes,
     }

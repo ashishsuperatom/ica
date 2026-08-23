@@ -11,8 +11,17 @@ type = "Data"
 globs = ["**/*.ttf"]
 fallthrough = true
 
-# NOTE: no R2 binding and no Durable Object yet — v0 is deliberately stateless, to
-# prove the wasm render works inside workerd before storage is built on it.
+# Storage is R2 — NOT KV (eventually consistent, and a CDN fetches a report seconds
+# after it is written, from another region) and NOT a Durable Object (a report is
+# immutable and read globally; a DO would pin every read to one region).
+# Shared bucket: everything this worker touches lives under the `reporting/` prefix.
+[[r2_buckets]]
+binding = "REPORTS"
+bucket_name = "frontend-packages"
+
+[vars]
+PUBLIC_ORIGIN = "https://reports.superatom.site"
+# SERVICE_TOKEN and SIGNING_KEY are secrets — `wrangler secret put`, never here.
 
 # The hub worker holds the wildcard `*.superatom.site/*`. This route is MORE SPECIFIC,
 # and Cloudflare picks the most specific match, so reports.* lands here while every

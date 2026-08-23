@@ -136,6 +136,17 @@ export function stylesheet(t: Theme, scale = 1): string {
 
   return `
 html, body { margin: 0; padding: 0; background: ${t.page}; }
+
+/* ── Web surface only ────────────────────────────────────────────────────────
+   A wide table SCROLLS sideways rather than squashing its columns into tall
+   wrapped rows — the same choice the web app makes. Both parts are needed: the
+   overflow container gives it somewhere to scroll, and nowrap stops the browser
+   from compressing columns to fit instead of overflowing. Neither rule may reach
+   the image, where there is no viewport and no scrolling: there, cells wrap and
+   the fit pass is what keeps the table inside the frame. */
+.web .sa-scroll { overflow-x: auto; }
+.web .sa-table th, .web .sa-table td { white-space: nowrap; }
+.web .sa-report { max-width: 1180px; margin: 0 auto; }
 .sa-report { background: ${t.page}; color: ${t.body}; font-family: ${t.font};
   font-size: ${p(14)}; line-height: 1.6; padding: ${p(26)} ${p(28)}; }
 /* Lining tabular figures: digits share one advance width, so columns of numbers line

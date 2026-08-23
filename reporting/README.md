@@ -135,18 +135,121 @@ pnpm sample     # writes test/out/report.png + report.html
 pnpm test
 ```
 
-## Deployed
+## Deployed — `https://reports.superatom.site`
 
-`https://reports.superatom.site` — `/sample.png` is the image, `/sample` the complete
-HTML, `POST /render` and `POST /preview` take an Answer. The route is more specific
-than the control-plane's `*.superatom.site/*` wildcard, so only `reports.*` lands here.
+```
+POST /render                  Bearer service token
+     { projectId, questionId, answer, title?, category?, theme? }
+  →  { id, html, png, csv, expiresAt }
+
+GET  /r/:projectId/:id        HTML — COMPLETE, nothing dropped
+GET  /r/:projectId/:id.png    PNG  — fitted, and says what it dropped
+GET  /r/:projectId/:id.csv    CSV  — COMPLETE
+GET  /sample /sample.png /sample.csv     no storage, no auth
+```
+
+The route is more specific than the control-plane's `*.superatom.site/*` wildcard, so
+only `reports.*` lands here.
+
+### Identity: (projectId, questionId)
+
+The id is `HMAC-SHA256(SIGNING_KEY, "projectId:questionId")`, truncated to 22 chars.
+That is idempotent (a retried POST returns the same report — verified), predictable (a
+caller holding the qid can derive the URL without storing a second id), and
+unguessable, which matters because **the id IS the credential**: Teams' CDN and
+Outlook's image proxy fetch the PNG with no cookies and no auth headers, so nothing but
+the URL can carry authority. Anyone with the link can view the report — inherent to the
+surfaces, bounded by the 30-day TTL, and revocable wholesale by rotating the key.
+
+A report is **immutable**: a re-POST of the same qid returns the existing report
+untouched (`reused: true`) rather than overwriting it. Overwriting only the JSON would
+leave already-cached renders disagreeing with the page. A re-ask is a new qid, so it is
+naturally a new report, and a shared link keeps showing what its recipient was told.
+
+### Three cache tiers, cheapest first
+
+Edge (`caches.default`) → R2 → render. The PNG renders **lazily on first request**, so
+the POST path stays fast (a live turn is waiting on it) and a report nobody opens is
+never paid for. Persisting and edge-caching happen in `waitUntil`, after the response.
+The `x-cache` header reports which tier served it — note the copy placed in the cache is
+built separately, or every edge hit would forever echo the `miss` of the render that
+populated it.
+
+### Storage
+
+R2 (`frontend-packages`, everything under the `reporting/` prefix). Not KV — it is
+eventually consistent, and the flow is *POST → share URL → a CDN fetches it seconds
+later from another region*, exactly where KV can 404 on a report that exists. Not a
+Durable Object — a report is immutable and read globally; a DO would pin every read to
+one region for coordination we do not need. Expiry is enforced on read rather than by a
+bucket lifecycle rule — but deletion IS one: R2 lifecycle rules take a prefix condition,
+so `reporting-expiry` expires objects under `reporting/` after 31 days and cannot reach
+anything else in the shared bucket. The rule works on object age, so it only matches our
+`expiresAt` while `TTL_DAYS` is a constant; the extra day keeps the read path (410 Gone)
+authoritative and makes deletion a pure cost cleanup.
+
+## Who actually fetches the image (measured)
+
+A report image in a Teams card is **not** fetched by the viewer's device. Captured from
+a live card:
+
+```
+user-agent:       Mozilla/5.0 (Windows NT 6.1; WOW64) SkypeUriPreview
+                  Preview/0.5 skype-url-preview@microsoft.com
+cf-connecting-ip: 52.112.49.196        (Microsoft)
+cf-ipcountry:     MY                   (a Microsoft datacentre, not the user)
+```
+
+It is Microsoft's server-side link-preview crawler, with a hardcoded legacy UA, fetching
+**once** and then serving every viewer on every device from Microsoft's own cache. A
+user tapping the image on their phone produces no request here at all.
+
+Three consequences, all load-bearing:
+
+1. **Per-device rendering is impossible.** There is no device signal, and one message is
+   viewed on many devices anyway. A "mobile variant" cannot be chosen at send time or at
+   fetch time. Don't try. Render one image that works everywhere, at 2× so tap-to-zoom
+   is legible — verified on a real phone.
+2. **The image must be self-sufficient the instant it is fetched.** There is no second
+   chance to renegotiate size, format or content.
+3. **Our caching matters less than expected for Teams** — expect roughly one render per
+   report regardless of audience size. The edge/R2 tiers mostly serve the HTML page.
+
+## Image format
+
+PNG, and measured rather than assumed: at 2× the same report is **271KB as PNG, 374KB as
+WebP, 599KB as JPEG**. Takumi's WASM build has no lossy WebP encoder (`quality: 80` and
+`quality: 60` produce byte-identical output), and JPEG is the wrong codec for flat colour
+and sharp text. The real size lever is `scale`: 2× 271KB → 1.5× 192KB → 1× 122KB. Revisit
+if a lossy WebP encoder lands.
+
+## Known gaps
+
+Ordered by how likely each is to bite.
+
+1. **Only Latin glyphs ship.** `assets/fonts/` is Inter 400/600/700 — Latin, punctuation
+   and currency symbols. Verified good: `₹`, `→`, `—`, `·`. Anything in Devanagari,
+   CJK, Arabic, Thai or Cyrillic will render as **tofu**, silently, in the image only
+   (the HTML page uses the viewer's system fonts and will look fine, which makes the
+   bug easy to miss). Fix is a subset font per script, loaded lazily from R2 by
+   codepoint range — Takumi's `FontLoader` supports exactly that.
+3. **No access control on read, by design.** Anyone with a link sees the report. The PNG
+   *has* to work this way (Teams' CDN sends no auth), but the HTML page carries the
+   COMPLETE data and is arguably more sensitive than the image. Worth revisiting whether
+   the page should require a session while the image stays open.
+4. **A theme is a request parameter, not a project setting.** Per-project branding needs
+   somewhere to live before it is real.
+5. **Concurrent first-hits render more than once.** Two requests for a cold PNG both
+   render. Wasteful, not wrong (rendering is idempotent), and the cache closes the
+   window quickly.
+6. **Timing headers read 0 in production.** Workers freeze `Date.now()` between I/O as a
+   timing side-channel defence, so in-request wall clock is unmeasurable. Local
+   `wrangler dev` numbers are the real ones.
+7. **Route tests are thin.** `fit.test.mjs` covers the reduction invariants — the part
+   that can silently corrupt an answer. The worker's routes are verified by hand
+   against the deployment, not by a test.
 
 ## Not built yet
 
-The worker itself (`/render`, `/r/:id`, `/r/:id.png`), the ReportDO, signed URLs, R2
-caching, CSV, the email CSS inliner, and the admin app. Decisions already taken for
-those: reports are immutable (re-answering mints a new id, so a shared link keeps
-showing what the recipient was told); the signed URL *is* the credential, because Teams'
-CDN and Outlook's image proxy send no auth headers, so links need a TTL and a
-per-project signing key that can be rotated; and the PNG renders lazily on first hit,
-so a report nobody opens is never paid for.
+The email CSS inliner and the admin app. CSV exists but is unreviewed — whether a report
+should carry a data download at all is still open.
