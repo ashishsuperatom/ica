@@ -48,7 +48,7 @@ type FeedItem =
   | { id: string; type: 'narrative'; text: string }
   | { id: string; type: 'component'; tag: string; vTag: string; code: string; data: any }
   | { id: string; type: 'answer'; category?: string; answer: any; timing?: { ms: number; classifyMs?: number; modelMs?: number }; qid?: string; at?: number }   // the analyst's structured result, rendered as a card (qid = the question id; at = when the answer arrived)
-  | { id: string; type: 'analysis'; beats: string[]; qid?: string }   // the receptionist's story beats — its OWN collapsed card, sitting between the question and the answer
+  | { id: string; type: 'analysis'; beats: string[]; secs?: number[]; qid?: string }   // the receptionist's beats (+ frozen per-beat seconds) — its OWN collapsed card, rendered EXACTLY like the live analysis
   | { id: string; type: 'followups'; items: string[]; qid?: string }   // suggested next questions — a DELAYED card below the answer; a chip FILLS the input (never auto-submits)
   | { id: string; type: 'error'; text: string }
 
@@ -374,9 +374,12 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           // A REPLAY (reconnect) is already in the saved feed — don't duplicate it. A fresh answer gets
           // appended to its OWN chat: the visible feed if it's current, else that chat's saved feed.
           if (!msg.replay) {
-            // The story becomes its OWN card, placed BETWEEN the question and the answer (collapsed accordion).
+            // The story becomes its OWN card, placed BETWEEN the question and the answer (collapsed accordion) —
+            // rendered EXACTLY like the live analysis: separated rows + frozen per-beat seconds.
             const beats = narrationLogRef.current
-            const analysisCard: FeedItem | null = beats.length ? { id: crypto.randomUUID(), type: 'analysis', beats: [...beats], qid: msg.qid } : null
+            const times = narrationTimesRef.current, nowT = Date.now()
+            const secs = beats.map((_, i) => { const end = i < beats.length - 1 ? (times[i + 1] ?? nowT) : nowT; return Math.max(1, Math.floor(Math.max(0, end - (times[i] ?? nowT)) / 1000) + 1) })
+            const analysisCard: FeedItem | null = beats.length ? { id: crypto.randomUUID(), type: 'analysis', beats: [...beats], secs, qid: msg.qid } : null
             const card: FeedItem = { id: crypto.randomUUID(), type: 'answer', category: msg.category, answer: ans, timing: msg.timing, qid: msg.qid, at: Date.now() }
             const toAppend = analysisCard ? [analysisCard, card] : [card]
             // Keep the last question pinned at the top (question → analysis → answer read top-down).
@@ -969,7 +972,12 @@ function FeedCard({ item, onPick }: { item: FeedItem; onPick?: (t: string) => vo
       <details className="sa-analysis-card">
         <summary>Analysis · {item.beats.length} step{item.beats.length > 1 ? 's' : ''}</summary>
         <div className="sa-ac-body">
-          {item.beats.map((b, i) => <div key={i} className="sa-md" dangerouslySetInnerHTML={{ __html: renderInlineMd(b) }} />)}
+          {item.beats.map((b, i) => (
+            <div key={i} className="sa-beat">
+              <div className="sa-beat-b sa-md" dangerouslySetInnerHTML={{ __html: renderInlineMd(b) }} />
+              {item.secs?.[i] != null && <div className="sa-beat-t">{item.secs[i]}s</div>}
+            </div>
+          ))}
         </div>
       </details>
     )
