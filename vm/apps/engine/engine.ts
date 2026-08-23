@@ -836,7 +836,9 @@ function connect() {
   hub = ws
   ws.on('open', () => {
     reconnectDelay = 1000   // stable connection → reset backoff
-    ws.send(JSON.stringify({ type: 'hello', key: KEY, role: 'code-engine', instanceId: INSTANCE_ID, epoch: EPOCH }))
+    // machineId lets the hub self-heal which Fly machine it tracks (survives recreate/resize). Fly injects
+    // FLY_MACHINE_ID automatically; undefined off-Fly (EC2/Docker) so it's simply omitted there.
+    ws.send(JSON.stringify({ type: 'hello', key: KEY, role: 'code-engine', instanceId: INSTANCE_ID, epoch: EPOCH, machineId: process.env.FLY_MACHINE_ID }))
   })
   ws.on('message', async (raw) => {
     let m: any; try { m = JSON.parse(raw.toString()) } catch { return }

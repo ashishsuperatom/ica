@@ -415,6 +415,7 @@ export class ProjectDO extends DurableObject<Env> {
         return
       }
       this.log('ws:ce_auth_ok', {})
+      if (msg.machineId) this.reconcileMachineId(msg.machineId)   // self-heal the tracked machine id (survives recreate/resize)
       this.recordHeartbeat()
       if (await this.register(ws, role, undefined, undefined, instanceId, epoch)) this.flushQueued(ws)
       return
@@ -809,6 +810,18 @@ export class ProjectDO extends DurableObject<Env> {
   }
 
   // ── Machine lifecycle ──────────────────────────────────────────────────────
+
+  // The engine reports the Fly machine it's actually running on (FLY_MACHINE_ID). If our tracked id drifted
+  // — the machine was recreated or resized — reconcile it so suspend/stop/start always target the LIVE machine.
+  // No-op on external (EC2/Docker) engines (no machine id) and when already correct.
+  private reconcileMachineId(machineId: string) {
+    const [m] = this.ctx.storage.sql.exec('SELECT machine_id, provider FROM fly_machine LIMIT 1')
+    if (!m) return
+    if ((m as any).provider === 'external') return
+    if ((m as any).machine_id === machineId) return
+    this.ctx.storage.sql.exec('UPDATE fly_machine SET machine_id = ?', machineId)
+    this.log('machine:reconciled', { from: (m as any).machine_id ?? null, to: machineId })
+  }
 
   private async updateMachine(req: Request): Promise<Response> {
     const { machineId, status } = await req.json() as any
