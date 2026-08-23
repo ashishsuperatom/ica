@@ -30,7 +30,7 @@ FORMAT with light markdown so it's scannable:
     | Reliance | +4.2% |
 
 Rules:
-- Say what HAS happened / been found — never what's coming next.
+- Never invent or guess — say only what the activity actually shows (a next step is fine only if the activity signals it).
 - Read the recent activity for real results — figures, totals, top/bottom names, growth, trends, outliers — and
   SHOW them. Prefer concrete data over any "what's happening" line.
 - BUSINESS language only. NEVER mention programs, code, queries, SQL, files, database tables/columns, tools, or
