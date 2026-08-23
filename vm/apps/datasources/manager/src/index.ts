@@ -21,8 +21,13 @@ import { createRequire } from 'node:module'
 // Oracle than `sql.mssql` (standard COALESCE/||/CHAR_LENGTH, no [brackets] or ISNULL) — only pagination differs.
 // This is the ONE place a new source declares how its PRQL compiles; keep each fixup small and targeted.
 const PRQL_TARGET: Record<string, string> = { mssql: 'sql.mssql', postgres: 'sql.postgres', sqlite: 'sql.sqlite', duckdb: 'sql.duckdb', suiteql: 'sql.ansi' }
+// A post-compile PLUGIN registry: per-dialect rewrites applied to the emitted SQL. RULE: only add a transform
+// that is DETERMINISTIC and GUARANTEED-correct (a mechanical dialect rewrite that is ALWAYS valid for that
+// source) — never a heuristic guess. Anything a rewrite can't safely express belongs in an s"…" native fragment
+// the analyst writes, not here.
 const DIALECT_FIXUP: Record<string, (sql: string) => string> = {
   // SuiteQL/Oracle: no LIMIT — it uses `FETCH FIRST n ROWS ONLY` (with an optional leading `OFFSET m ROWS`).
+  // Guaranteed: ANSI `LIMIT n [OFFSET m]` → the exact Oracle row-limiting clause, always valid.
   suiteql: (sql) => sql.replace(/\bLIMIT\s+(\d+)(?:\s+OFFSET\s+(\d+))?/gi, (_m, n, off) => (off ? `OFFSET ${off} ROWS ` : '') + `FETCH FIRST ${n} ROWS ONLY`),
 }
 // prqlc runs as a WASM module (prql-js). A specific input can make the Rust compiler PANIC, which POISONS the
