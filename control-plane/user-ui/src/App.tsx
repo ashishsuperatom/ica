@@ -48,6 +48,7 @@ type FeedItem =
   | { id: string; type: 'narrative'; text: string }
   | { id: string; type: 'component'; tag: string; vTag: string; code: string; data: any }
   | { id: string; type: 'answer'; category?: string; answer: any; timing?: { ms: number; classifyMs?: number; modelMs?: number }; qid?: string; at?: number }   // the analyst's structured result, rendered as a card (qid = the question id; at = when the answer arrived)
+  | { id: string; type: 'analysis'; beats: string[]; qid?: string }   // the receptionist's story beats — its OWN collapsed card, sitting between the question and the answer
   | { id: string; type: 'error'; text: string }
 
 export function App({ token, projectId = 'default' }: { token?: string | null; projectId?: string } = {}) {
@@ -93,6 +94,8 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [anBusy, setAnBusy]         = useState(false)
   const [anEnriching, setAnEnriching] = useState<{ need: string; basis?: string } | null>(null)
   const [anProgress, setAnProgress] = useState('')   // clean live narration from the agent (no tool calls)
+  const [storyLog, setStoryLog]     = useState<string[]>([])   // receptionist (narrator) beats for THIS question — ACCUMULATE (never overwrite)
+  const storyLogRef                 = useRef<string[]>([])     // latest beats, readable inside ws handlers (state is stale in closures)
   // How to render the analyst's raw stream: 'pty' = a real terminal (claude-code) → xterm; 'events' =
   // discrete agent events (codex/SDK) → a plain event log (a terminal emulator makes no sense for these).
   const [anStreamKind, setAnStreamKind] = useState<'pty' | 'events'>('events')   // default = structured (claude via JSONL, codex); PTY is opt-in
@@ -105,6 +108,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [semHasPty, setSemHasPty] = useState(false)       // modeler is claude → a raw terminal is available (show the toggle)
   const [semTerminal, setSemTerminal] = useState(false)   // user opened the raw terminal → attach the PTY lazily
   const anLogRef = useRef<HTMLDivElement>(null)
+  const anPinnedRef = useRef(true)   // is the analyst log scrolled near the bottom? (so new content auto-scrolls, but a manual scroll-up to read isn't yanked back down)
   const semLogRef = useRef<HTMLDivElement>(null)
   const [gaps, setGaps]             = useState<{ question: string; need: string; basis?: string; status: 'building' | 'done' }[]>([])
   const [role, setRole]         = useState<'user' | 'developer'>('developer')   // for now: everyone is developer (sees the agents)
@@ -211,10 +215,14 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   useClaudeTerminal(semTermRef, semXtermRef, { which: 'semantic', interactive: true, send, autoAttach: false })   // default = structured; PTY attaches only on the Terminal toggle
   useClaudeTerminal(anTermRef, anXtermRef, { which: 'analyst', interactive: true, send, autoAttach: false })   // default = structured; PTY attaches only on the Terminal toggle
 
-  // Keep the event log (SDK harnesses) pinned to the newest line as it streams.
+  // Keep the analyst log pinned to the newest content — the event log AND the narrator beats — as they stream,
+  // but ONLY if the user is already near the bottom (a scroll-up to read isn't yanked down). Debounced: content
+  // can arrive fast, so coalesce to a single scroll once it settles.
   useEffect(() => {
-    if (anStreamKind === 'events' && anLogRef.current) anLogRef.current.scrollTop = anLogRef.current.scrollHeight
-  }, [anEvents, anStreamKind])
+    if (view !== 'analyst' || !anPinnedRef.current) return
+    const t = setTimeout(() => { const el = anLogRef.current; if (el) el.scrollTop = el.scrollHeight }, 120)
+    return () => clearTimeout(t)
+  }, [anEvents, storyLog, anStreamKind, view])
 
   // WS connection — direct to code-engine (local) or via the worker hub (cloud).
   useEffect(() => {
@@ -318,6 +326,8 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           setAnEvents(evs => mergeEvent(evs, msg.ev))
         } else if (msg.t === 'analyst:events') {
           setAnEvents(msg.events ?? [])   // reconnect: full event-log replay (replace)
+        } else if (msg.t === 'story') {
+          if (msg.text) { storyLogRef.current = [...storyLogRef.current, msg.text]; setStoryLog(storyLogRef.current) }   // append a beat
         } else if (msg.t === 'analyst:progress') {
           setAnProgress(msg.text || '')   // clean prose narration → live progress line
         } else if (msg.t === 'analyst:gap') {
@@ -343,12 +353,17 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           // A REPLAY (reconnect) is already in the saved feed — don't duplicate it. A fresh answer gets
           // appended to its OWN chat: the visible feed if it's current, else that chat's saved feed.
           if (!msg.replay) {
+            // The story becomes its OWN card, placed BETWEEN the question and the answer (collapsed accordion).
+            const beats = storyLogRef.current
+            const analysisCard: FeedItem | null = beats.length ? { id: crypto.randomUUID(), type: 'analysis', beats: [...beats], qid: msg.qid } : null
             const card: FeedItem = { id: crypto.randomUUID(), type: 'answer', category: msg.category, answer: ans, timing: msg.timing, qid: msg.qid, at: Date.now() }
-            if (!msg.sid || msg.sid === sidRef.current) { setFeed(f => [...f, card]); scroll() }
-            else { const f = loadFeed(msg.sid); localStorage.setItem(fkey(msg.sid), JSON.stringify([...f, card].slice(-100))) }
+            const toAppend = analysisCard ? [analysisCard, card] : [card]
+            if (!msg.sid || msg.sid === sidRef.current) { setFeed(f => [...f, ...toAppend]); scroll() }
+            else { const f = loadFeed(msg.sid); localStorage.setItem(fkey(msg.sid), JSON.stringify([...f, ...toAppend].slice(-100))) }
           }
+          // Keep storyLog as-is — the analyst-view mirror keeps showing it until the NEXT question starts (cleared in ask()).
         } else if (msg.t === 'analyst:done') {
-          setAnBusy(false); setAnStatus('Done ✓'); setAnProgress(''); setBusy(false); busyRef.current = false; clearWatchdog()
+          setAnBusy(false); setAnStatus('Done ✓'); setAnProgress(''); setStoryLog([]); storyLogRef.current = []; setBusy(false); busyRef.current = false; clearWatchdog()
         } else if (msg.t === 'analysis:step') {
           setFeed(f => [...f, { id: crypto.randomUUID(), type: 'step', text: msg.text }])
           scroll()
@@ -431,7 +446,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   function endTurn(note?: string) {
     clearWatchdog()
     busyRef.current = false; setBusy(false); setStatus('')
-    setAnBusy(false); setAnStatus(''); setAnProgress('')
+    setAnBusy(false); setAnStatus(''); setAnProgress(''); setStoryLog([]); storyLogRef.current = []
     if (note) { setFeed(f => [...f, { id: crypto.randomUUID(), type: 'error', text: note }]); scroll() }
   }
   // Liveness: the engine ticks every ~8s while a turn runs; every incoming message re-arms this. If nothing
@@ -455,7 +470,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     // Ask in New chat (the end-user surface): show the question here, answer renders here as a clean
     // card. The Analyst tab keeps the raw terminal for when you WANT to look under the hood.
     setFeed(f => [...f, { id: qid, type: 'user-msg', text }])
-    setAnQuestion(text); setAnAnswer(null); setAnCategory(''); setAnStatus('Classifying…'); setAnBusy(true); setAnEnriching(null); setAnProgress('')
+    setAnQuestion(text); setAnAnswer(null); setAnCategory(''); setAnStatus('Classifying…'); setAnBusy(true); setAnEnriching(null); setAnProgress(''); setStoryLog([]); storyLogRef.current = []
     anXtermRef.current?.clear()   // claude PTY: fresh TUI per question (harmless when the analyst is codex)
     if (anStreamKindRef.current === 'events') setAnEvents(l => [...l, { kind: 'user', text }])   // codex: the question as a user turn in the log
     setStatus('')
@@ -729,7 +744,15 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
             )}
           </div>
         )})()}
-        <div ref={anLogRef} style={{ flex: 1, overflow: 'auto', background: 'transparent', padding: 12, paddingBottom: 110 }}>
+        <div ref={anLogRef} onScroll={e => { const el = e.currentTarget; anPinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 240 }} style={{ flex: 1, overflow: 'auto', background: 'transparent', padding: 12, paddingBottom: 110 }}>
+          {/* Narrator (receptionist) mirror — the exact business-language beats the USER sees, in a distinct
+              color, so the operator can compare them against the raw activity below. */}
+          {storyLog.length > 0 && (
+            <div style={{ position: 'sticky', top: 0, zIndex: 2, border: '1px solid #cdd9c2', borderRadius: 8, background: '#eef4e6', padding: '10px 12px', marginBottom: 12, maxHeight: 240, overflowY: 'auto', boxShadow: '0 2px 8px rgba(0,0,0,.05)' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: '#5a7a4a', marginBottom: 6 }}>Narrator · what the user sees ({storyLog.length})</div>
+              {storyLog.map((b, i) => <div key={i} className="sa-md" style={{ borderTop: i ? '1px solid #d5e0c8' : 'none', paddingTop: i ? 6 : 0, marginTop: i ? 6 : 0 }} dangerouslySetInnerHTML={{ __html: renderInlineMd(b) }} />)}
+            </div>
+          )}
           {/* Raw claude-code terminal (PTY) — shown only when the user opened it via the toggle, or for a
               pure-pty agent. Kept mounted so its buffer survives view switches. */}
           <div ref={anTermRef} onMouseDown={() => anXtermRef.current?.focus()} style={{ display: (anTerminal || anStreamKind === 'pty') ? 'block' : 'none' }} />
@@ -757,12 +780,17 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
             {feed.map(item => <FeedCard key={item.id} item={item} />)}
             {/* Working indicator — no terminal; a details link goes to the Analyst tab. */}
             {anBusy && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 2px', color: '#8a8276', fontSize: 14 }}>
-                <Spinner />
-                <span>{anEnriching ? `Learning this part of your data: ${anEnriching.need}` : (anProgress || anStatus || 'Analyzing…')}</span>
-                <span onClick={() => navigate('analyst')} style={{ marginLeft: 'auto', fontSize: 12, color: '#8a8276', cursor: 'pointer', textDecoration: 'underline' }}>
-                  details ↗
-                </span>
+              <div style={{ border: '1px solid #e8e4de', borderRadius: 8, background: '#fbfaf8', padding: '12px 14px', margin: '4px 0' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#6b6459', fontSize: 12.5, fontWeight: 600 }}>
+                  <Spinner /><span>Analysis</span>
+                  <span onClick={() => navigate('analyst')} style={{ marginLeft: 'auto', fontWeight: 400, fontSize: 12, color: '#8a8276', cursor: 'pointer', textDecoration: 'underline' }}>details ↗</span>
+                </div>
+                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {storyLog.map((b, i) => (
+                    <div key={i} className="sa-md" style={{ borderTop: i ? '1px solid #efece6' : 'none', paddingTop: i ? 8 : 0, opacity: i === storyLog.length - 1 ? 1 : 0.6 }} dangerouslySetInnerHTML={{ __html: renderInlineMd(b) }} />
+                  ))}
+                  {storyLog.length === 0 && <div style={{ fontSize: 13.5, color: '#8a8276' }}>{anEnriching ? `Learning this part of your data: ${anEnriching.need}` : (anProgress || anStatus || 'Analyzing…')}</div>}
+                </div>
               </div>
             )}
           </div>
@@ -861,6 +889,20 @@ function FeedCard({ item }: { item: FeedItem }) {
   if (item.type === 'error') {
     return <div style={{ ...s.narrative, borderColor: '#fca5a5', color: '#b91c1c' }}>{item.text}</div>
   }
+  if (item.type === 'analysis') {
+    return (
+      <details style={{ border: '1px solid #e8e4de', borderRadius: 10, background: '#fbfaf8', margin: '2px 0 12px', fontSize: 13 }}>
+        <summary style={{ cursor: 'pointer', padding: '10px 16px', color: '#6b6459', fontWeight: 600, userSelect: 'none' }}>
+          Analysis · {item.beats.length} step{item.beats.length > 1 ? 's' : ''}
+        </summary>
+        <div style={{ padding: '0 16px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {item.beats.map((b, i) => (
+            <div key={i} className="sa-md" style={{ borderTop: i ? '1px solid #efece6' : 'none', paddingTop: i ? 8 : 0 }} dangerouslySetInnerHTML={{ __html: renderInlineMd(b) }} />
+          ))}
+        </div>
+      </details>
+    )
+  }
   if (item.type === 'answer') {
     return <AnswerCard answer={item.answer} category={item.category} timing={item.timing} qid={item.qid} at={item.at} />
   }
@@ -913,6 +955,16 @@ const ANSWER_CSS = `
 .sa-answer table.sa-fin td.rk{color:var(--muted);width:22px;padding-right:8px}
 .sa-answer table.sa-fin td.fig{color:var(--ink);font-weight:700}
 .sa-answer .sa-caveat{font-size:12.5px;color:var(--body);background:var(--panel);border:1px solid var(--hair);border-radius:3px;padding:11px 16px;margin:0 0 12px;line-height:1.6}
+.sa-md{font-size:13px;line-height:1.55;color:#3a3a3a}
+.sa-md strong{font-weight:700;color:#1a1a1a}
+.sa-md ul.sa-list,.sa-md ol.sa-olist{margin:4px 0;padding-left:18px}
+.sa-md ul.sa-list{list-style:disc}
+.sa-md ol.sa-olist{list-style:decimal}
+.sa-md li{margin:2px 0}
+.sa-md code{font-family:monospace;font-size:12px;background:#f0ede8;padding:1px 4px;border-radius:3px}
+.sa-mdtable{border-collapse:collapse;margin:6px 0;font-size:12.5px;font-variant-numeric:tabular-nums}
+.sa-mdtable th,.sa-mdtable td{border:1px solid #e0dcd4;padding:3px 9px;text-align:left;white-space:nowrap}
+.sa-mdtable th{background:#f3f1ec;font-weight:600}
 .sa-answer .sa-src{font-size:11.5px;color:var(--muted);margin-top:6px}.sa-answer .sa-src b{color:var(--body)}
 .sa-answer .sa-foot{display:flex;justify-content:flex-end;gap:12px;margin-top:12px;padding-top:8px;border-top:1px solid var(--hair);font-size:11px;color:var(--muted)}
 .sa-answer{position:relative}
@@ -1318,18 +1370,30 @@ function renderInlineMd(text: string): string {
   const clean = text.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\uFE0F\u200D]/gu, '').replace(/ {2,}/g, ' ')
   const esc = clean.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   const out: string[] = []
-  let para: string[] = [], bullets: string[] = [], numbers: string[] = []
+  let para: string[] = [], bullets: string[] = [], numbers: string[] = [], tableRows: string[] = []
   const flushPara = () => { if (para.length) { out.push(para.join('<br/>')); para = [] } }
   const flushBul = () => { if (bullets.length) { out.push(`<ul class="sa-list">${bullets.join('')}</ul>`); bullets = [] } }
   const flushNum = () => { if (numbers.length) { out.push(`<ol class="sa-olist">${numbers.join('')}</ol>`); numbers = [] } }
-  const flushAll = () => { flushPara(); flushBul(); flushNum() }
+  const flushTable = () => {   // GFM pipe table: first row = header when row 2 is a `--- | ---` separator
+    if (!tableRows.length) return
+    const rows = tableRows.map(r => r.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim())); tableRows = []
+    const isSep = (r: string[]) => r.length > 0 && r.every(c => /^:?-{2,}:?$/.test(c))
+    let header: string[] | null = null, body: string[][] = rows
+    if (rows.length >= 2 && isSep(rows[1])) { header = rows[0]; body = rows.slice(2) }
+    const thead = header ? `<thead><tr>${header.map(c => `<th>${inlineMd(c)}</th>`).join('')}</tr></thead>` : ''
+    const tbody = `<tbody>${body.map(r => `<tr>${r.map(c => `<td>${inlineMd(c)}</td>`).join('')}</tr>`).join('')}</tbody>`
+    out.push(`<table class="sa-mdtable">${thead}${tbody}</table>`)
+  }
+  const flushAll = () => { flushPara(); flushBul(); flushNum(); flushTable() }
   for (const ln of esc.split('\n')) {
+    const isTable = /^\s*\|(.+)\|\s*$/.test(ln)
     const b = ln.match(/^\s*[-\u2022]\s+(.*)/)
     const n = ln.match(/^\s*\d+[.)]\s+(.*)/)   // "1. " / "2) " \u2192 a real numbered list (needs a . or ) right after the digits, so "1338 lanes" is NOT a list item)
-    if (b) { flushPara(); flushNum(); bullets.push(`<li>${inlineMd(b[1])}</li>`) }
-    else if (n) { flushPara(); flushBul(); numbers.push(`<li>${inlineMd(n[1])}</li>`) }
+    if (isTable) { flushPara(); flushBul(); flushNum(); tableRows.push(ln) }
+    else if (b) { flushPara(); flushNum(); flushTable(); bullets.push(`<li>${inlineMd(b[1])}</li>`) }
+    else if (n) { flushPara(); flushBul(); flushTable(); numbers.push(`<li>${inlineMd(n[1])}</li>`) }
     else if (ln.trim() === '') { flushAll() }
-    else { flushBul(); flushNum(); para.push(inlineMd(ln)) }
+    else { flushBul(); flushNum(); flushTable(); para.push(inlineMd(ln)) }
   }
   flushAll()
   return out.join('')

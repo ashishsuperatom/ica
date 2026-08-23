@@ -184,6 +184,13 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
         body: { model: { providerID, modelID }, parts: [{ type: 'text', text: prompt }] },
       })
       answer = partsText(res?.data?.parts ?? res?.parts ?? [])
+      // Cost visibility: log this turn's token usage + $cost. The prompt prefix identifies the caller
+      // (reflex vs narrator, etc.). opencode's message info carries tokens{input,output,reasoning,cache} + cost.
+      try {
+        const info: any = (res as any)?.data?.info ?? (res as any)?.info
+        if (info) { const tk = info.tokens ?? {}
+          console.log(`[oc-usage] ${modelID} in=${tk.input ?? '?'} out=${tk.output ?? '?'} reason=${tk.reasoning ?? 0} cacheR=${tk.cache?.read ?? 0} cacheW=${tk.cache?.write ?? 0} cost=$${info.cost ?? '?'} · "${String(prompt).slice(0, 26).replace(/\s+/g, ' ')}…"`) }
+      } catch { /* usage logging is best-effort */ }
     } catch (e: any) { answer = `opencode error: ${e?.message ?? e}` }
     finally { clearInterval(poll); await pollMessages(h) }               // one final poll to catch the last state
     activeHandler = undefined

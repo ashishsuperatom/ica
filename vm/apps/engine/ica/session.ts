@@ -18,6 +18,20 @@ export interface AgentEvent {
   done?: boolean      // the item reached completion (item.completed)
 }
 
+// ── Usage / cost — ABSTRACT INTERFACE every ICA harness SHOULD provide ────────────────────────────────
+// Uniform token + $cost accounting for a turn, so cost is observable no matter which agent (reflex/narrator/
+// analyst) or which backend (opencode/claude/codex) produced it. NOT fully wired yet — opencode surfaces this
+// today (see ica/opencode.ts `[oc-usage]`); claude-code + codex still need to map their native usage into this
+// shape. Delivered two ways (below): streamed via onUsage as it becomes known, AND as a total on RunResult.usage.
+export interface TokenUsage {
+  input?: number        // prompt / input tokens
+  output?: number       // completion / output tokens
+  reasoning?: number    // hidden reasoning tokens, when the model separates them
+  cacheRead?: number    // prompt-cache HITS (cheap)
+  cacheWrite?: number   // prompt-cache writes
+  costUsd?: number      // this turn's $ cost, when the backend reports it
+}
+
 export interface RunHandlers {
   onOutput?: (chunk: string) => void   // formatted text stream (raw PTY for claude-code; readable text for pi/opencode)
   onEvent?: (ev: AgentEvent) => void   // normalized structured event (event-kind harnesses only; the harness
@@ -31,9 +45,16 @@ export interface RunHandlers {
   // answer"), NEVER tool calls or raw terminal. Harness-specific: claude-code parses its TUI prose;
   // SDK harnesses forward assistant-text events. Safe to show a non-technical user.
   onNarration?: (text: string) => void
+  // TODO(usage): the event form of the usage interface — EVERY ICA harness should call this as it learns its
+  // token/cost numbers (a long turn may report incrementally, e.g. per assistant message), so the engine can
+  // stream live cost to the UI just like onEvent streams activity. Not implemented by the harnesses yet.
+  onUsage?: (u: TokenUsage) => void
 }
 
-export interface RunResult { lastLines: string; ms: number }   // lastLines = the answer/tail; ms = wall time
+// TODO(usage): `usage` — the finished turn's token/cost TOTALS. Every ICA harness should populate it when the
+// backend can report it (see TokenUsage). Optional for now so nothing breaks; opencode has the data (ica/
+// opencode.ts logs it), claude-code/codex to follow. This is the "tell us when it finishes" half of the contract.
+export interface RunResult { lastLines: string; ms: number; usage?: TokenUsage }   // lastLines = the answer/tail; ms = wall time
 
 // Session lifecycle protocol — the same verbs for every harness: run · compact · reset · stop.
 // Creation takes `resumeId` (opts) to continue a prior session; `sessionId()` reads the current id to
