@@ -408,7 +408,6 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     }
   }
 
-  emit(reply, { t: 'analyst:status', text: 'Classifying…', question, sid, qid })
   // Liveness keepalive: the UI arms a 25s watchdog and re-arms on every message. Claude-code's PTY streams
   // constantly so it's always fed, but SDK harnesses (codex) reason/exec silently for long stretches — and
   // the gap-loop model build is silent too. Tick every 8s for the whole turn so the watchdog never false-fires.
