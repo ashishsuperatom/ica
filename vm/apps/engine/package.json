@@ -21,6 +21,7 @@
     "@superatom/scaffold": "workspace:*",
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/headless": "^6.0.0",
+    "fastembed": "^2.1.0",
     "node-pty": "^1.0.0",
     "opencode-ai": "^1.18.0",
     "ws": "^8.18.0"
