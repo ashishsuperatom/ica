@@ -19,7 +19,8 @@
       "protobufjs",
       "@google/genai",
       "opencode-ai",
-      "@openai/codex"
+      "@openai/codex",
+      "onnxruntime-node"
     ]
   }
 }

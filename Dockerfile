@@ -57,6 +57,14 @@ COPY vm/apps/ ./apps/
 # honors it and compiles better-sqlite3/node-pty/esbuild from source (build tools above).
 RUN pnpm install --frozen-lockfile
 
+# ── Bake the embedding model into the image ─────────────────────────────────
+# bge-small-en-v1.5 (~130MB, via fastembed) drives the reflex's semantic reuse. Baked here so the engine NEVER
+# downloads it at runtime — instant, immutable, and present even on a source-only fast-roll. sqlite-vec + the
+# onnxruntime-node binary already installed above (onnxruntime-node is allow-listed for its postinstall).
+ENV FASTEMBED_CACHE_DIR=/opt/fastembed
+RUN cd /app/apps/engine \
+    && node --input-type=module -e "const {FlagEmbedding,EmbeddingModel}=await import('fastembed'); const m=await FlagEmbedding.init({model:EmbeddingModel.BGESmallENV15,cacheDir:'/opt/fastembed'}); for await (const _ of m.passageEmbed(['warm'])){}; console.log('embedding model baked')"
+
 # `fly ssh console` opens an interactive shell that does NOT inherit the image's ENV PATH, so the agent
 # CLIs (needed for manual `... auth login`) aren't found. Put them on PATH for every SSH session:
 #   - global pnpm bins  → claude, tsx           (/usr/local/share/pnpm)
