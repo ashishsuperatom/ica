@@ -22,6 +22,7 @@ export interface Embedder {
 export interface VectorIndex {
   upsert(id: string, vec: Float32Array): void
   remove(id: string): void
+  has(id: string): boolean
   // cosine DESC; `keep` (if given) restricts candidates to ids it approves (liveness / kind filter)
   search(vec: Float32Array, opts: { limit: number; keep?: (id: string) => boolean }): Array<{ id: string; score: number }>
 }
@@ -63,6 +64,7 @@ export class SqliteVecIndex implements VectorIndex {
     this.db.prepare(`INSERT INTO ${this.tbl}(node_id, embedding) VALUES (?, ?)`).run(id, buf)
   }
   remove(id: string) { this.db.prepare(`DELETE FROM ${this.tbl} WHERE node_id = ?`).run(id) }
+  has(id: string) { return !!this.db.prepare(`SELECT 1 FROM ${this.tbl} WHERE node_id = ?`).get(id) }
   search(q: Float32Array, opts: { limit: number; keep?: (id: string) => boolean }) {
     const k = Math.max(opts.limit * 4, 32)   // over-fetch so post-filtering (keep) still fills `limit`
     const rows = this.db.prepare(`SELECT node_id, distance FROM ${this.tbl} WHERE embedding MATCH ? AND k = ? ORDER BY distance`)
@@ -97,4 +99,18 @@ export async function hybridSearch(store: NodeStore, index: VectorIndex, embedde
 export async function indexText(index: VectorIndex, embedder: Embedder, id: string, text: string): Promise<void> {
   const [v] = await embedder.embed([text])
   index.upsert(id, v)
+}
+
+// One-time catch-up: embed any live nodes (optionally of a kind) not yet in the index. Idempotent (skips those
+// already there), batched. Run on boot so pre-existing intents are searchable, not just newly-built ones.
+export async function backfillMissing(store: NodeStore, index: VectorIndex, embedder: Embedder, opts: { kind?: string; batch?: number } = {}): Promise<number> {
+  const batch = opts.batch ?? 64, kind = opts.kind?.replace(/'/g, '')
+  const rows = (store.db.prepare(`SELECT id, label, summary FROM nodes WHERE valid_to IS NULL${kind ? ` AND kind='${kind}'` : ''}`).all() as Array<{ id: string; label: string; summary: string | null }>)
+    .filter(r => !index.has(r.id))
+  for (let i = 0; i < rows.length; i += batch) {
+    const chunk = rows.slice(i, i + batch)
+    const vecs = await embedder.embed(chunk.map(r => r.summary || r.label))
+    chunk.forEach((r, j) => index.upsert(r.id, vecs[j]))
+  }
+  return rows.length
 }

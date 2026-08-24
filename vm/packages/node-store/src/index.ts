@@ -20,5 +20,5 @@ export type { AtomKind, AtomProps, AtomInput, FindAtomsOpts } from './atom.js'
 
 // Semantic search — GENERIC hybrid (FTS + vector) over any node kind. Swappable seams: Embedder (model),
 // VectorIndex (SqliteVecIndex now / Qdrant later), rrfFuse (reranker).
-export { SqliteVecIndex, rrfFuse, hybridSearch, indexText } from './semantic.js'
+export { SqliteVecIndex, rrfFuse, hybridSearch, indexText, backfillMissing } from './semantic.js'
 export type { Embedder, VectorIndex, Hit } from './semantic.js'

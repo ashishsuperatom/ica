@@ -31,7 +31,7 @@ import { followUpCues } from './followup.js'
 import { forgetProgram } from './forget.js'
 import { log, readJsonSafe } from './log.js'
 import { createInspector } from './inspect.js'
-import { NodeStore, ROOT, ensureRoot, ensureConceptTree, ensureBasisSeed, intentId, linkBasis, SqliteVecIndex, indexText } from '@superatom/node-store'
+import { NodeStore, ROOT, ensureRoot, ensureConceptTree, ensureBasisSeed, intentId, linkBasis, SqliteVecIndex, indexText, backfillMissing } from '@superatom/node-store'
 import { bgeEmbedder } from './embed.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -162,6 +162,11 @@ const graph = new NodeStore(join(WORKSPACE, 'db', 'project.sqlite'))
 let vectors: SqliteVecIndex | null = null
 try { vectors = new SqliteVecIndex(graph.db, bgeEmbedder.id, bgeEmbedder.dim) }
 catch (e: any) { console.warn('[semantic] sqlite-vec unavailable — semantic index disabled:', e?.message ?? e) }
+// Backfill pre-existing intents on boot so semantic reuse can search history, not just newly-built ones.
+// Best-effort + non-blocking (never delays boot); degrades silently if the model/native deps aren't present.
+if (vectors) void backfillMissing(graph, vectors, bgeEmbedder, { kind: 'intent' })
+  .then(n => { if (n) log.info('semantic', `backfilled ${n} intent embedding(s)`) })
+  .catch(e => log.warn('semantic', 'intent backfill failed', e))
 ensureRoot(graph)
 ensureConceptTree(graph)   // concept tree root + place any orphan concept under it (structural)
 ensureBasisSeed(graph)     // plant the grounded three-plane axis vocabulary (subject / operation / mode)

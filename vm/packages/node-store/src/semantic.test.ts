@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { NodeStore } from './store.js'
-import { SqliteVecIndex, hybridSearch, indexText, rrfFuse, type Embedder } from './semantic.js'
+import { SqliteVecIndex, hybridSearch, indexText, backfillMissing, rrfFuse, type Embedder } from './semantic.js'
 
 // Deterministic MOCK embedder — hand-placed vectors so the test is meaningful without shipping a real model.
 // (The real embedder just swaps in behind the same interface.)
@@ -55,6 +55,16 @@ test('retire drops from search', async () => {
   store.retire(id); index.remove(id)
   const hits = await hybridSearch(store, index, mock, 'top 10 lanes by revenue', { kind: 'intent', limit: 5 })
   assert.ok(hits.every(h => h.id !== id), 'retired intent must not appear')
+})
+
+test('backfillMissing embeds only the not-yet-indexed live intents (idempotent)', async () => {
+  const store = new NodeStore(':memory:')
+  const index = new SqliteVecIndex(store.db, mock.id, mock.dim)
+  for (const text of Object.keys(VECS)) store.putNode({ id: 'intent:' + text.slice(0, 12), kind: 'intent', label: text, summary: text })
+  const first = await backfillMissing(store, index, mock, { kind: 'intent' })
+  assert.equal(first, Object.keys(VECS).length)          // all embedded on first pass
+  const again = await backfillMissing(store, index, mock, { kind: 'intent' })
+  assert.equal(again, 0)                                  // idempotent — nothing left to do
 })
 
 test('rrfFuse merges two ranked lists', () => {
