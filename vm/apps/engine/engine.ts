@@ -31,7 +31,7 @@ import { followUpCues } from './followup.js'
 import { forgetProgram } from './forget.js'
 import { log, readJsonSafe } from './log.js'
 import { createInspector } from './inspect.js'
-import { NodeStore, ROOT, ensureRoot, ensureConceptTree, ensureBasisSeed, intentId, linkBasis, SqliteVecIndex, indexText, backfillMissing } from '@superatom/node-store'
+import { NodeStore, ROOT, ensureRoot, ensureConceptTree, ensureBasisSeed, intentId, SqliteVecIndex, indexText, backfillMissing, hybridSearch } from '@superatom/node-store'
 import { bgeEmbedder } from './embed.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -374,8 +374,8 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   // REFLEX (stateless) classifies REUSE vs BUILD; it has no "modify" decision. The SAME question is a reuse.
   const curNode = pos !== ROOT ? graph.getNode(pos) : null
   const curQ = curNode ? ((curNode.props as any)?.question ?? curNode.summary) : undefined
-  let coord: any = null
-  let overlapHint: { program: string; relation: string } | undefined   // reflex's superset/subset program → a pointer for the analyst
+  let overlapHint: { program: string; relation: string } | undefined   // a related program the reflex flagged → a pointer for the analyst to adapt
+  let reflexPlacement: string | undefined                               // 'root' or an intentId — where the reflex says this question's node hangs
   let modifyTarget: { programDir: string; prevQuestion?: string } | null = null
   if (explicitEdit) {
     // The user explicitly prefixed "edit:"/"modify:" — edit the current node's program in place; if there's
@@ -389,10 +389,15 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     }
   } else {
     try {
-      const route = await reflex.route(graph, question)
-      coord = route.coordinate
-      if (route.decision === 'build') overlapHint = route.overlap
-      console.log(`[ica] reflex: ${route.decision} · ${(coord.axes ?? []).map((a: any) => `${a.type}:${a.token}`).join(' ')}${overlapHint ? ` · ${overlapHint.relation} ${overlapHint.program}` : ''}`)
+      // Semantic retrieval: hand the reflex the top-K most-similar EXISTING intents (candidates), not the catalog.
+      const candidates = vectors
+        ? (await hybridSearch(graph, vectors, bgeEmbedder, question, { kind: 'intent', limit: 8 }))
+            .map(h => { const p = graph.getNode(h.id)?.props as any; return { intentId: h.id, question: (p?.question ?? h.label ?? '') as string, program: p?.program, params: p?.params } })
+        : []
+      const route = await reflex.route(graph, question, candidates, { firstInSession: pos === ROOT, currentIntentId: pos === ROOT ? undefined : pos, currentQuestion: curQ })
+      reflexPlacement = route.placement
+      if (route.decision === 'build' && route.adapt) overlapHint = { program: route.adapt.program, relation: 'related' }
+      console.log(`[ica] reflex: ${route.decision}${route.decision === 'reuse' ? ` → ${route.program}` : route.adapt ? ` (adapt ${route.adapt.program})` : ''} · place=${route.placement === 'root' ? 'ROOT' : route.placement.slice(0, 14)}`)
       if (route.decision === 'reuse' && existsSync(join(WORKSPACE, route.program, 'program.ts'))) {
         const cat = (graph.getNode(route.intentId)?.props as any)?.category ?? 'analysis'
         if (await reuseProgram(route.program, route.params, cat, { sid, qid, question, norm, t0, nodeId: route.intentId })) return
@@ -506,9 +511,9 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     lastAnswer = r.answer; lastTiming = timing; lastCategory = r.category
     // Capture the PROGRAM the agent built (its built.json pointer) so a repeat of this question re-runs
     // that program (fresh query) instead of re-invoking the LLM.
-    let programDir: string | undefined, programParams: any, programTerms: any[] = [], analystParent: any, programFollowups: string[] = []
+    let programDir: string | undefined, programParams: any, programTerms: any[] = [], programFollowups: string[] = []
     const b = await readJsonSafe<any>(join(WORKSPACE, 'out', qid, 'built.json'), null, 'analyst')   // absent = unknowable/gap (no program)
-    if (b) { programDir = b.programDir; programParams = b.params; programTerms = Array.isArray(b.terms) ? b.terms : []; analystParent = b.parent; programFollowups = Array.isArray(b.followups) ? b.followups.filter((x: any) => typeof x === 'string' && x.trim()).slice(0, 3) : [] }
+    if (b) { programDir = b.programDir; programParams = b.params; programTerms = Array.isArray(b.terms) ? b.terms : []; programFollowups = Array.isArray(b.followups) ? b.followups.filter((x: any) => typeof x === 'string' && x.trim()).slice(0, 3) : [] }
     emit(reply, { t: 'analyst:answer', category: r.category, answer: r.answer, lastLines: r.lastLines, timing, sid, qid })
     if (channel) emit({ type: 'channel' }, { t: 'channel:answer', channel, qid, answer: r.answer, category: r.category })   // durable delivery to the chat channel
     // Follow-ups are NICE-TO-HAVE — emitted AFTER the answer, never gating or delaying it. The UI reveals them on
@@ -530,27 +535,23 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       builtIntentId = curNode.id
       console.log(`[ica] modified node ${pos.slice(0, 14)} in place · program ${programDir ?? modifyTarget.programDir}`)
     } else {
-      // The ANALYST places its own node: built.json.parent = 'root' (a new topic under ROOT) or a prior intent's
-      // id (a follow-up of that node); absent → the session's current position. Node id = hash(parent, question).
-      const parent = analystParent === 'root' ? ROOT
-        : (typeof analystParent === 'string' && analystParent && graph.getNode(analystParent)) ? analystParent
-        : pos
-      const nodeId = parent === pos ? nid : intentId(parent, question)
+      // The REFLEX placed this node (reflexPlacement): 'root' (a new topic under ROOT) or an existing intent's id
+      // (a follow-up of it). Default to ROOT if unset (reflex failed). Node id = hash(parent, question).
+      const parent = (reflexPlacement && reflexPlacement !== 'root' && graph.getNode(reflexPlacement)) ? reflexPlacement : ROOT
+      const nodeId = intentId(parent, question)
       graph.putNode({ id: nodeId, kind: 'intent', label: question.slice(0, 80), summary: question,
         // rawAnalysis (r.lastLines) intentionally NOT stored — garbled TUI snapshot, low value; re-enable here if reworked.
-        props: { question: norm, category: r.category, program: programDir, params: programParams, terms: programTerms, orchParams: coord?.params ?? [], followups: programFollowups } })
+        props: { question: norm, category: r.category, program: programDir, params: programParams, terms: programTerms, followups: programFollowups } })
       builtIntentId = nodeId
       graph.putEdge({ from: parent, to: nodeId, type: 'follow_up' })
-      if (coord?.axes?.length) linkBasis(graph, nodeId, coord.axes)   // grow the basis space for reuse
-      // Embed-on-build: index this intent's question for semantic reuse. Best-effort + non-blocking — the answer
-      // is already emitted; a failure (or a host without the model) only means this intent isn't semantically
-      // searchable, never a broken turn.
+      // Embed-on-build: index this new intent's question for semantic reuse. Best-effort + non-blocking — the
+      // answer is already emitted; a failure (or a host without the model) only means this intent isn't
+      // semantically searchable, never a broken turn.
       if (vectors) void indexText(vectors, bgeEmbedder, nodeId, norm).catch(e => log.warn('semantic', `embed ${nodeId.slice(0, 14)} failed`, e))
       setPosition(sid, nodeId)
-      console.log(`[ica] intent node ${nodeId.slice(0, 14)} under ${parent === ROOT ? 'ROOT' : parent.slice(0, 14)} (${analystParent ? 'analyst-placed' : 'positional'})${programDir ? ` · program ${programDir}` : ' · no program'}`)
-      // OBSERVE-only (we do NOT act on this yet): did the cheap regex agree with where the analyst actually placed
-      // the node? parent===ROOT ⇒ analyst treated it as a new/root topic. Builds the labelled corpus for later.
-      if (!explicitEdit) console.log(`[ica] regex-check: guessed ${rootQuestion ? 'ROOT' : 'FOLLOW-UP'} · analyst placed ${parent === ROOT ? 'ROOT' : 'FOLLOW-UP'} → ${rootQuestion === (parent === ROOT) ? 'MATCH ✓' : 'MISMATCH ✗'}`)
+      console.log(`[ica] intent node ${nodeId.slice(0, 14)} under ${parent === ROOT ? 'ROOT' : parent.slice(0, 14)} (reflex-placed)${programDir ? ` · program ${programDir}` : ' · no program'}`)
+      // OBSERVE-only: did the cheap exact-match regex agree with where the reflex placed the node?
+      if (!explicitEdit) console.log(`[ica] regex-check: guessed ${rootQuestion ? 'ROOT' : 'FOLLOW-UP'} · reflex placed ${parent === ROOT ? 'ROOT' : 'FOLLOW-UP'} → ${rootQuestion === (parent === ROOT) ? 'MATCH ✓' : 'MISMATCH ✗'}`)
     }
     // PROGRAM NODE — the program's OWN identity in the DB (kind:'program'), distinct from the question/intent
     // node. props.dir is the pointer to where the program lives; props.authoredBy records WHO wrote it —

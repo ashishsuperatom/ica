@@ -88,7 +88,7 @@ export async function hybridSearch(store: NodeStore, index: VectorIndex, embedde
   const limit = opts.limit ?? 8, pool = limit * 3, kind = opts.kind
   const keep = (id: string) => !!store.db.prepare(`SELECT 1 FROM nodes WHERE id=? AND valid_to IS NULL${kind ? ` AND kind='${kind.replace(/'/g, '')}'` : ''}`).get(id)
   const lex = store.search(query, { kind, limit: pool }).map(h => h.id)
-  const [qv] = await embedder.embed([query])
+  const [qv] = await embedder.embed([query], { asQuery: true })
   const sem = index.search(qv, { limit: pool, keep }).map(h => h.id)
   return rrfFuse([lex, sem]).slice(0, limit)
     .map(f => ({ id: f.id, label: store.getNode(f.id)?.label ?? '', score: f.score }))
