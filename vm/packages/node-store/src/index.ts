@@ -17,3 +17,8 @@ export type { ConceptProps, ConceptStatus, ConceptForm, TimeSemantics, Measure, 
 // Semantic atoms (System A) — typed knowledge units (where/how/quality), versioned on contradiction.
 export { atomId, atomContentHash, putAtom, retireAtom, findAtoms, atomsFor, atomHistory } from './atom.js'
 export type { AtomKind, AtomProps, AtomInput, FindAtomsOpts } from './atom.js'
+
+// Semantic search — GENERIC hybrid (FTS + vector) over any node kind. Swappable seams: Embedder (model),
+// VectorIndex (SqliteVecIndex now / Qdrant later), rrfFuse (reranker).
+export { SqliteVecIndex, rrfFuse, hybridSearch, indexText } from './semantic.js'
+export type { Embedder, VectorIndex, Hit } from './semantic.js'
