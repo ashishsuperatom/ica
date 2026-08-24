@@ -9,7 +9,7 @@
 // injects a concrete embedder. Vectors are stored L2-normalised so cosine == dot product.
 
 import type { NodeStore } from './store.js'
-import * as sqliteVec from 'sqlite-vec'
+import { createRequire } from 'node:module'
 
 export interface Embedder {
   readonly id: string           // model id (e.g. 'bge-small-en-v1.5'); stamped so a model swap is detectable
@@ -49,7 +49,12 @@ export class SqliteVecIndex implements VectorIndex {
   private static loaded = new WeakSet<object>()
   private tbl = 'vec_nodes'
   constructor(private db: NodeStore['db'], readonly model: string, readonly dim: number) {
-    if (!SqliteVecIndex.loaded.has(db)) { sqliteVec.load(db); SqliteVecIndex.loaded.add(db) }
+    // Require sqlite-vec LAZILY (not a top-level import) so merely importing node-store never needs the native
+    // binary present — a host without it just can't construct this (caller guards), rather than failing to load.
+    if (!SqliteVecIndex.loaded.has(db)) {
+      const sqliteVec = createRequire(import.meta.url)('sqlite-vec')
+      sqliteVec.load(db); SqliteVecIndex.loaded.add(db)
+    }
     db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS ${this.tbl} USING vec0(node_id TEXT PRIMARY KEY, embedding float[${dim}])`)
   }
   upsert(id: string, vec: Float32Array) {

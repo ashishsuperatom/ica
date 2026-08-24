@@ -31,7 +31,8 @@ import { followUpCues } from './followup.js'
 import { forgetProgram } from './forget.js'
 import { log, readJsonSafe } from './log.js'
 import { createInspector } from './inspect.js'
-import { NodeStore, ROOT, ensureRoot, ensureConceptTree, ensureBasisSeed, intentId, linkBasis } from '@superatom/node-store'
+import { NodeStore, ROOT, ensureRoot, ensureConceptTree, ensureBasisSeed, intentId, linkBasis, SqliteVecIndex, indexText } from '@superatom/node-store'
+import { bgeEmbedder } from './embed.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 try { process.loadEnvFile(join(__dirname, '.env')) } catch { /* no .env — rely on the ambient environment */ }
@@ -156,6 +157,11 @@ const genId = () => 'q_' + Date.now().toString(36) + Math.random().toString(36).
 // ONE project database. The intent graph + concepts + units are all just nodes/edges in the project's
 // node-store, which lives in project.sqlite alongside the rest of the project's graph — not a separate file.
 const graph = new NodeStore(join(WORKSPACE, 'db', 'project.sqlite'))
+// Semantic index (sqlite-vec) over the SAME db — GUARDED: if the native extension or model isn't present on
+// this host yet, semantic search is simply disabled (FTS keeps working), never a crash. See embed.ts.
+let vectors: SqliteVecIndex | null = null
+try { vectors = new SqliteVecIndex(graph.db, bgeEmbedder.id, bgeEmbedder.dim) }
+catch (e: any) { console.warn('[semantic] sqlite-vec unavailable — semantic index disabled:', e?.message ?? e) }
 ensureRoot(graph)
 ensureConceptTree(graph)   // concept tree root + place any orphan concept under it (structural)
 ensureBasisSeed(graph)     // plant the grounded three-plane axis vocabulary (subject / operation / mode)
@@ -531,6 +537,10 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       builtIntentId = nodeId
       graph.putEdge({ from: parent, to: nodeId, type: 'follow_up' })
       if (coord?.axes?.length) linkBasis(graph, nodeId, coord.axes)   // grow the basis space for reuse
+      // Embed-on-build: index this intent's question for semantic reuse. Best-effort + non-blocking — the answer
+      // is already emitted; a failure (or a host without the model) only means this intent isn't semantically
+      // searchable, never a broken turn.
+      if (vectors) void indexText(vectors, bgeEmbedder, nodeId, norm).catch(e => log.warn('semantic', `embed ${nodeId.slice(0, 14)} failed`, e))
       setPosition(sid, nodeId)
       console.log(`[ica] intent node ${nodeId.slice(0, 14)} under ${parent === ROOT ? 'ROOT' : parent.slice(0, 14)} (${analystParent ? 'analyst-placed' : 'positional'})${programDir ? ` · program ${programDir}` : ' · no program'}`)
       // OBSERVE-only (we do NOT act on this yet): did the cheap regex agree with where the analyst actually placed

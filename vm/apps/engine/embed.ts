@@ -4,18 +4,22 @@
 //
 // BGE is asymmetric: search queries and indexed passages get different prefixes — queryEmbed vs passageEmbed —
 // which is why the Embedder interface carries `asQuery`.
-import { FlagEmbedding, EmbeddingModel } from 'fastembed'
 import type { Embedder } from '@superatom/node-store'
 
 const ID = 'bge-small-en-v1.5'
 const DIM = 384
 
-let init: Promise<InstanceType<typeof FlagEmbedding>> | null = null
-const model = () => (init ??= FlagEmbedding.init({
-  model: EmbeddingModel.BGESmallENV15,
-  // Model files (~130MB) cache here. Point at the volume in prod (persists across restarts) via env.
-  cacheDir: process.env.FASTEMBED_CACHE_DIR || '.fastembed',
-}))
+// fastembed (onnxruntime native + a ~130MB model) is imported LAZILY inside model() — merely importing this
+// file can never crash a host that hasn't installed the native dep or downloaded the model yet; the failure
+// surfaces on the first embed() call, where callers treat embedding as best-effort (degrade to FTS-only).
+let init: Promise<any> | null = null
+const model = () => (init ??= (async () => {
+  const { FlagEmbedding, EmbeddingModel } = await import('fastembed')
+  return FlagEmbedding.init({
+    model: EmbeddingModel.BGESmallENV15,
+    cacheDir: process.env.FASTEMBED_CACHE_DIR || '.fastembed',   // point at the volume in prod (persists across restarts)
+  })
+})())
 
 export const bgeEmbedder: Embedder = {
   id: ID,
