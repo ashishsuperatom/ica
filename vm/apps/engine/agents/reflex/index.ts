@@ -130,7 +130,6 @@ export function createReflex(opts: ReflexOpts) {
   }
 
   return {
-    coordinate,
     review,
     /** Pre-create the session (connect to the warm opencode server) so the first route() has no cold start. */
     async warmup() { session ??= createSession(harness, { cwd: opts.cwd, model, provider, baseUrl: opts.ica?.baseUrl, noTools: true, system: REFLEX_SYS }); await session.warmup?.() },
