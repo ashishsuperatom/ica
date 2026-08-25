@@ -57,7 +57,11 @@ export function useLogNav(ref: RefObject<HTMLElement | null>, active: boolean, c
     const onKey = (e: KeyboardEvent) => {
       if (!active || !e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return
       const dir = e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0
-      if (!dir || isTyping(document.activeElement)) return
+      if (!dir) return
+      // These are WATCH views (the input is incidental), so Shift+Arrow is always a question-nav gesture here —
+      // don't bail when a field is focused; instead blur it so the scroll isn't fighting text-caret movement.
+      const ae = document.activeElement as HTMLElement | null
+      if (isTyping(ae)) ae?.blur?.()
       const el = ref.current
       if (!el) return
       const qs = Array.from(el.querySelectorAll('[data-role="q"]')) as HTMLElement[]

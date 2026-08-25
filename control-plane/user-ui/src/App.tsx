@@ -577,7 +577,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     scroll()   // pin the new (now last) question to the top of the viewport
     setAnQuestion(text); setAnAnswer(null); setAnCategory(''); setAnStatus('Classifying…'); setAnBusy(true); setAnEnriching(null); setAnProgress(''); setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []
     anXtermRef.current?.clear()   // claude PTY: fresh TUI per question (harmless when the analyst is codex)
-    if (anStreamKindRef.current === 'events') setAnEvents(l => [...l, { kind: 'user', text }])   // codex: the question as a user turn in the log
+    setAnEvents(l => [...l, { kind: 'user', text }])   // a QUESTION-boundary marker in the analyst log (strong divider + Shift+Arrow anchor); harmless if the PTY view is shown
     setStatus('')
     setBusy(true); busyRef.current = true; armWatchdog()
     if (inputRef.current) { inputRef.current.value = ''; inputRef.current.style.height = 'auto' }
