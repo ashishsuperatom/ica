@@ -133,6 +133,7 @@ final class ConversationStore {
     /// this lands on a question that no longer exists and is discarded.
     func cancelPending() {
         guard let pending = state.pending else { return }
+        services.recorder.speech.cancel()
         voiceTasks.forEach { $0.cancel() }
         voiceTasks = []
         voiceQuestionId = nil
@@ -188,6 +189,9 @@ final class ConversationStore {
         services.recorder.start()
     }
 
+    /// Live on-device text, for display while speaking.
+    var liveTranscript: String { services.recorder.speech.text }
+
     /// Called from the FIRST chunk of a spoken turn — i.e. once the VAD has confirmed
     /// there is speech. Idempotent for the chunks that follow.
     private func beginVoiceQuestionIfNeeded() -> String? {
@@ -202,6 +206,19 @@ final class ConversationStore {
 
     func stopVoice() {
         services.recorder.stop()
+        // The on-device transcript is ready the moment recording ends — no upload, no
+        // round trip. Show it straight away so the review card is never empty while the
+        // server catches up.
+        Task { [weak self] in
+            guard let self else { return }
+            let onDevice = await self.services.recorder.speech.finish()
+            guard !onDevice.isEmpty, let qid = self.voiceQuestionId ?? self.state.pending?.id else { return }
+            if let question = try? self.db.question(id: qid),
+               question.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                try? self.db.setQuestionText(id: qid, text: onDevice)
+                try? self.db.markQuestion(id: qid, state: .draft)
+            }
+        }
     }
 
     /// All chunks are in and assembled. The question is now a DRAFT for review — it is
@@ -220,6 +237,7 @@ final class ConversationStore {
             try? db.markQuestion(id: questionId, state: .draft)
             return
         }
+        // On-device heard nothing either — only then is this genuinely a miss.
 
         // No text. Say WHY rather than quietly dropping something the user just spoke —
         // a failed transcription and an unheard one need different responses from them.

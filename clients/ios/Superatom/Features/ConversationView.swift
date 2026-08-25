@@ -289,6 +289,22 @@ struct ConversationView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, Theme.gutter)
             }
+            if services.recorder.state.isRecording, !conversation.liveTranscript.isEmpty {
+                Text(conversation.liveTranscript)
+                    .font(Theme.serif(17))
+                    .foregroundStyle(Theme.inkSoft)
+                    .lineSpacing(5)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18).fill(Theme.paperInset)
+                    )
+                    .padding(.horizontal, Theme.gutter)
+                    .transition(.opacity)
+            }
+
             if let pending = conversation.state.pending {
                 reviewComposer(pending)
             } else if typing {
@@ -302,6 +318,7 @@ struct ConversationView: View {
         .animation(.easeInOut(duration: 0.22), value: typing)
         .animation(.easeInOut(duration: 0.22), value: services.recorder.state.isRecording)
         .animation(.easeInOut(duration: 0.22), value: conversation.state.pending?.id)
+        .animation(.easeOut(duration: 0.15), value: conversation.liveTranscript.isEmpty)
     }
 
     /// A spoken question, transcribed and awaiting your say-so. Transcription is not

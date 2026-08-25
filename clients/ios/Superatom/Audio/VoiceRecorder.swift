@@ -29,6 +29,11 @@ final class VoiceRecorder: NSObject {
     /// What the UI observes. Separate object so the audio engine needs no isolation.
     let state = VoiceState()
 
+    /// On-device transcription, fed from the same tap. It sees EVERY buffer, not just the
+    /// speech the VAD keeps, because the analyzer does its own endpointing and hearing the
+    /// silences helps it decide where phrases end.
+    let speech = SpeechBridge()
+
     private var engine: AVAudioEngine?
     private var vad: VADWrapper?
     private let audioQueue = DispatchQueue(label: "ai.superatom.audio", qos: .userInitiated)
@@ -149,6 +154,7 @@ final class VoiceRecorder: NSObject {
             chunkIndex = 0
             didCaptureSpeech = false
         }
+        speech.start()
         state.isRecording = true
         state.startedAt = .now
         state.speechSeconds = 0
@@ -233,6 +239,7 @@ final class VoiceRecorder: NSObject {
         guard error == nil, converted.frameLength > 0,
               let channel = converted.floatChannelData?[0] else { return }
         vad?.processAudioData(withBuffer: channel, count: UInt(converted.frameLength))
+        speech.append(buffer)      // raw tap buffer: the analyzer picks its own format
     }
 
     // ── Flushing ─────────────────────────────────────────────────────────────
