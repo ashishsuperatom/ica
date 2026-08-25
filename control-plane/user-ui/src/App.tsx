@@ -225,6 +225,26 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   useLogNav(anLogRef,  view === 'analyst',  anEvents)     // pass the ARRAY (new ref on every merge, incl. in-place streaming) — not .length
   useLogNav(semLogRef, view === 'semantic', semEvents)
 
+  // Persist the analyst log to localStorage — a ROLLING copy of the last few sessions so a RELOAD doesn't wipe
+  // it. The DO deliberately does NOT store this heavy real-time log (it would bloat one project's DO), so we keep
+  // a light local copy: capped events per session, LRU-capped sessions. Restore on mount only (don't clobber live).
+  useEffect(() => {
+    if (anEvents.length) return
+    try { const raw = localStorage.getItem('sa-anlog-' + sessionId); if (raw) setAnEvents(JSON.parse(raw)) } catch { /* ignore corrupt/oversized */ }
+  }, [sessionId])   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!anEvents.length) return
+    const t = setTimeout(() => {
+      try {
+        localStorage.setItem('sa-anlog-' + sessionId, JSON.stringify(anEvents.slice(-400)))
+        const idx: string[] = [sessionId, ...(JSON.parse(localStorage.getItem('sa-anlog-index') || '[]') as string[]).filter((s) => s !== sessionId)]
+        while (idx.length > 6) { const drop = idx.pop(); if (drop) localStorage.removeItem('sa-anlog-' + drop) }
+        localStorage.setItem('sa-anlog-index', JSON.stringify(idx))
+      } catch { /* localStorage full/blocked — best-effort */ }
+    }, 500)
+    return () => clearTimeout(t)
+  }, [anEvents, sessionId])
+
   // Per-step timer (UI-only, nice-to-have): tick every second while busy so the CURRENT analysis beat counts up.
   useEffect(() => {
     if (!anBusy) return

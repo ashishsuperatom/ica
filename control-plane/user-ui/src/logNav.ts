@@ -13,6 +13,22 @@ const MARGIN = 4
 const COOLDOWN = 800
 const NEAR_BOTTOM = 240  // px from the bottom still counts as "following"
 
+// TEMP: a fixed on-screen line so we can SEE what the nav handler observes (remove once Shift+Arrow works).
+function showNavDebug(msg: string) {
+  let el = document.getElementById('sa-navdebug') as (HTMLDivElement & { _t?: number }) | null
+  if (!el) {
+    el = document.createElement('div') as HTMLDivElement & { _t?: number }
+    el.id = 'sa-navdebug'
+    el.style.cssText = 'position:fixed;bottom:16px;right:16px;z-index:99999;padding:8px 12px;border-radius:8px;' +
+      'background:#111;color:#6f6;font:600 13px/1.4 ui-monospace,monospace;box-shadow:0 2px 12px rgba(0,0,0,.4);pointer-events:none'
+    document.body.appendChild(el)
+  }
+  el.textContent = msg
+  el.style.opacity = '1'
+  clearTimeout(el._t)
+  el._t = window.setTimeout(() => { if (el) el.style.opacity = '0' }, 2500)
+}
+
 function isTyping(el: Element | null): boolean {
   if (!el) return false
   const t = el as HTMLElement
@@ -55,6 +71,12 @@ export function useLogNav(ref: RefObject<HTMLElement | null>, active: boolean, c
   // Shift+Arrow → previous / next question, scrolling the CONTAINER.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const isNav = e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')
+      if (isNav) {   // TEMP DEBUG: show what the handler sees, even when it would bail — remove once nav confirmed
+        const el0 = ref.current
+        const n = el0 ? el0.querySelectorAll('[data-role="q"]').length : -1
+        showNavDebug(`Shift${e.key === 'ArrowUp' ? '↑' : '↓'} · active=${active} · markers=${n} · el=${el0 ? 'yes' : 'null'}`)
+      }
       if (!active || !e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return
       const dir = e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0
       if (!dir) return
