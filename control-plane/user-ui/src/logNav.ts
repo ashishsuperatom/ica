@@ -50,7 +50,7 @@ export function useLogNav(ref: RefObject<HTMLElement | null>, active: boolean, c
     if (!active || !pinned.current) return
     const t = window.setTimeout(() => { const el = ref.current; if (el) el.scrollTop = el.scrollHeight }, 60)
     return () => clearTimeout(t)
-  }, [contentKey, active, ref])
+  }, [content, active, ref])
 
   // Shift+Arrow → previous / next question, scrolling the CONTAINER.
   useEffect(() => {
