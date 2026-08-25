@@ -5,6 +5,7 @@ import { useSession, SignIn, UserButton, useUser } from '@clerk/react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
+import './design.css'   // BUNDLED (hashed, loaded atomically with the app) — not a fragile separate <link href="/design.css">, which intermittently failed to attach and left the UI unstyled
 import { useClaudeTerminal } from './useClaudeTerminal'
 import { useQuestionNav } from './questionNav'
 import { useLogNav } from './logNav'
