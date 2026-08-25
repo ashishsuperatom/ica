@@ -39,8 +39,8 @@ whole-population totals reconcile). A check fails and a concept tells you why �
 ## Narrate
 Narrate as you go — a one-line note starting \`[[ui]]\` at EACH step: when you pick the approach, when you write
 the program, when you run it, when you check the result. These \`[[ui]]\` lines are the ONLY thing the user sees
-while you work, so keep them coming — never go silent for long. Plain BUSINESS language, one short line each; never
-mention concepts, PRQL, code, programs, files, or tools. You narrate yourself; there is no separate narrator.`
+while you work, so keep them coming. Write each as one short line of plain business language describing what is
+happening for their question right now — what is being pulled together, worked out, or checked at this step.`
 
 // No "generated — edit the source" banner in the output: agents READ this prompt, and such a banner would invite
 // them to edit the generator, which is not theirs to touch. The source that generates a prompt must never be
