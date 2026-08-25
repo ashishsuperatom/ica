@@ -88,6 +88,16 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // analyst/semantic logs own their own open/follow/nav behaviour separately — see useLogNav below.
   useEffect(() => { if (view === 'chat') scroll(true) }, [view])   // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Agent-LOG channel subscription: the engine emits the analyst/composer/semantic logs to the DO, which forwards
+  // them ONLY to this user's devices that have ATTACHED to the channel. So we attach the channels the current view
+  // shows, and detach on leave — logs never reach a device (or a user) that isn't watching. The Analyst view shows
+  // BOTH the composer's and the analyst's work for a question, so it attaches both.
+  useEffect(() => {
+    const want = view === 'analyst' ? ['analyst-log', 'composer-log'] : view === 'semantic' ? ['semantic-log'] : []
+    want.forEach((channel) => send({ t: 'log:attach', channel }))
+    return () => want.forEach((channel) => send({ t: 'log:detach', channel }))
+  }, [view])   // eslint-disable-line react-hooks/exhaustive-deps
+
   // Chat feed: Shift+Up/Down jump between questions, scrolling the PAGE (see questionNav.ts).
   useQuestionNav(() => readView() === 'chat')
   // Analyst tab — the QA agent (classify → claude-code answers from the semantic model + units).

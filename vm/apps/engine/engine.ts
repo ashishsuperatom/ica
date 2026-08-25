@@ -482,16 +482,14 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // Whose events these are — the composer runs first, the analyst only if it escalates. Every event/progress
     // line carries `agent` so the UI can colour + separate composer vs analyst, and interleave the narrator.
     let currentAgent: 'composer' | 'analyst' = 'composer'
+    // Agent-LOG emission: the engine LABELS each structured event / PTY chunk with its channel (composer-log while
+    // the composer runs, analyst-log while the analyst runs) + the qid, and sends it ONCE. The DO fans it to the
+    // OWNER's attached devices only (never another user, never a device that didn't attach). The engine no longer
+    // tracks who's watching — that decision moved to the DO.
+    const emitLog = (msg: any) => emit({ type: 'log', channel: currentAgent === 'composer' ? 'composer-log' : 'analyst-log' }, { ...msg, qid, sid, agent: currentAgent })
     const handlers = {
       onCategory: (c: string) => { curCategory = c; emit(reply, { t: 'analyst:category', category: c, sid, agent: currentAgent }) },
-      onOutput: (chunk: string) => {
-        // PTY bytes are the RAW-TERMINAL view — streamed ONLY to viewers who explicitly opened the terminal
-        // (termViewers). The default view is driven by onEvent below (structured, from the JSONL), so a claude
-        // run streams clean events by default and the PTY never reaches a client that didn't ask for it.
-        if (!termViewers.analyst.size) return
-        const m = { t: 'analyst:chunk', text: chunk, agent: currentAgent }
-        for (const v of termViewers.analyst) emit(v, m)
-      },
+      onOutput: (chunk: string) => emitLog({ t: 'analyst:chunk', text: chunk }),   // raw PTY bytes → the agent's log channel
       onNarration: (text: string) => {
         if (!reply) return
         // The COMPOSER self-narrates — its [[ui]] line IS a business beat, so it drives the analysis tape directly
@@ -504,9 +502,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       // normalizes + buffers these (session.events()); the engine just mirrors each one live to the asker and
       // any attached viewers, same as onOutput. Reconnect replay is handled in resyncAnalyst via events().
       onEvent: (ev) => {
-        const m = { t: 'analyst:event', ev, sid, agent: currentAgent }
-        if (reply) emit(reply, m)
-        for (const v of termViewers.analyst) if (v !== reply) emit(v, m)
+        emitLog({ t: 'analyst:event', ev })   // structured event → the agent's log channel (composer-log / analyst-log)
         // Narrator digest — feed ONLY the business signal: commands + their RESULTS (query outputs = the
         // findings) and the analyst's own prose. SKIP file events (program code / diffs / paths) — that's pure
         // machinery the narrator must hide anyway: big input bloat + a leak risk, with no business value (every
@@ -808,24 +804,22 @@ async function semanticConsolidateTick() {
       const batchId = 'b_' + Date.now().toString(36)
       const items = fresh.map((r) => ({ question: r.question, status: r.status, programDir: r.programDir, usedNodes: (r.answer as any)?.usedNodes }))
       console.log(`[semantic-consolidation] ${batchId}: ${items.length} new program(s) of ${batch.length} answer(s) since wm=${wm}`)
-      // Consolidation is a BACKGROUND task (no current asker) — stream its status/events to whoever has the
-      // semantic tab open, never to a specific session's socket.
-      for (const v of termViewers.semantic) emit(v, { t: 'semantic:status', text: `Consolidating ${items.length} recent answer(s) into the model…` })
+      // Consolidation is a BACKGROUND, PROJECT-LEVEL task (no asker/qid). Its stream goes to the semantic-log
+      // channel; the DO delivers it to whoever ATTACHED to that channel (no owner → project-level, not user data).
+      const semLog = (msg: any) => emit({ type: 'log', channel: 'semantic-log' }, msg)
+      semLog({ t: 'semantic:status', text: `Consolidating ${items.length} recent answer(s) into the model…` })
       try {
         const semantic = await semanticSlot.get()
-        // Same dual-view as the analyst: announce the STRUCTURED view (from the modeler's JSONL) + whether a raw
-        // terminal exists; stream events by default; the PTY (semantic:chunk) goes ONLY to explicit terminal viewers.
-        const semViewers = () => termViewers.semantic
-        for (const v of termViewers.semantic) emit(v, { t: 'semantic:stream', kind: semantic.session.events ? 'events' : (semantic.session.kind ?? 'events'), pty: semantic.session.kind === 'pty' })
+        semLog({ t: 'semantic:stream', kind: semantic.session.events ? 'events' : (semantic.session.kind ?? 'events'), pty: semantic.session.kind === 'pty' })
         const r = await semantic.consolidate(items, batchId, {
-          onEvent: (ev) => { for (const v of semViewers()) emit(v, { t: 'semantic:event', ev }) },
-          onOutput: (chunk) => { if (termViewers.semantic.size) for (const v of termViewers.semantic) emit(v, { t: 'semantic:chunk', text: chunk }) },
+          onEvent: (ev) => semLog({ t: 'semantic:event', ev }),
+          onOutput: (chunk) => semLog({ t: 'semantic:chunk', text: chunk }),
         })
         // Advance PAST the last finished_at we consumed → those rows never re-enter a batch (strictly-greater cursor).
         answers.setMeta(SEMANTIC_CONSOLIDATE_WM_KEY, nextWm)
         answers.setMeta(SEMANTIC_CONSOLIDATE_FAIL_KEY, '0')     // clean pass → reset the failure streak
         console.log(`[semantic-consolidation] ${batchId} done in ${(r.ms / 1000).toFixed(1)}s`)
-        for (const v of termViewers.semantic) emit(v, { t: 'semantic:status', text: 'Model consolidated ✓' })
+        semLog({ t: 'semantic:status', text: 'Model consolidated ✓' })
       } catch (e: any) {
         // The agent SESSION errored (a crash, not a compaction — those are handled inside consolidate()).
         // Do NOT advance the watermark yet: a transient error should be retried. But bound it — after

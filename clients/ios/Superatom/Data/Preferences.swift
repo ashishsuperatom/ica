@@ -19,10 +19,25 @@ final class Preferences {
         didSet { store.set(showFollowUps, forKey: Key.showFollowUps) }
     }
 
+    /// Transcribe on this device, or send the audio to the platform.
+    ///
+    /// EXACTLY ONE of them runs. Running both meant two transcripts finishing at
+    /// different times for the same spoken question, which is a race with no good
+    /// resolution — whichever lands second wants to change a turn the reader may already
+    /// have sent.
+    ///
+    /// On-device is the default on iOS: instant, offline, free. Hosted exists for
+    /// languages with no on-device model, and is the path Android will use until it has
+    /// an equivalent.
+    var transcribeOnDevice: Bool {
+        didSet { store.set(transcribeOnDevice, forKey: Key.transcribeOnDevice) }
+    }
+
     private let store: UserDefaults
 
     private enum Key {
         static let showFollowUps = "sa.pref.showFollowUps"
+        static let transcribeOnDevice = "sa.pref.transcribeOnDevice"
     }
 
     init(store: UserDefaults = .standard) {
@@ -30,5 +45,6 @@ final class Preferences {
         // `object(forKey:)` rather than `bool(forKey:)`: bool returns false for a missing
         // key, which would silently make the default OFF instead of ON.
         showFollowUps = (store.object(forKey: Key.showFollowUps) as? Bool) ?? true
+        transcribeOnDevice = (store.object(forKey: Key.transcribeOnDevice) as? Bool) ?? true
     }
 }

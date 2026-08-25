@@ -74,7 +74,7 @@ export function useLogNav(ref: RefObject<HTMLElement | null>, active: boolean, c
       else { const ctop = el.getBoundingClientRect().top; cur = 0; qs.forEach((q, i) => { if (q.getBoundingClientRect().top - ctop <= 12) cur = i }) }
 
       const idx = Math.max(0, Math.min(qs.length - 1, cur + dir))
-      qs[idx].scrollIntoView({ block: 'start' })   // dead simple: bring that question's divider to the top
+      qs[idx].scrollIntoView({ behavior: 'smooth', block: 'start' })   // bring the divider to the top, animated like the chat
       cursor.current = { idx, at: now }
     }
     window.addEventListener('keydown', onKey)

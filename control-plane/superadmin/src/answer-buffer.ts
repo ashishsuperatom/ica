@@ -43,6 +43,9 @@ export class AnswerBuffer {
   }
 
   recordAnswer(p: any) { try { this.sql.exec('UPDATE answer_buffer SET payload_json=?, answered_at=?, acked=0 WHERE qid=?', JSON.stringify(p), Date.now(), String(p.qid)) } catch {} }
+  // The authenticated user who ASKED this qid — the sole authority on who may receive its answer/logs. Recorded
+  // by recordPending. '' if unknown (never fan out to '' — that would be every unauthenticated connection).
+  ownerOf(qid: string): string { try { const [r] = this.sql.exec('SELECT user_id FROM answer_buffer WHERE qid=?', String(qid)); return String((r as any)?.user_id || '') } catch { return '' } }
   recordFollowups(p: any) { try { this.sql.exec('UPDATE answer_buffer SET followups_json=? WHERE qid=?', JSON.stringify(p), String(p.qid)) } catch {} }
 
   // BOUNDED: drop rows past the TTL, and everything beyond the newest KEEP — per user.

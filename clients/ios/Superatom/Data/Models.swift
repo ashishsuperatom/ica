@@ -188,3 +188,19 @@ final class AnswerCache: @unchecked Sendable {
     func value(for id: String) -> EngineAnswer? { cache.object(forKey: id as NSString)?.value }
     func store(_ value: EngineAnswer, for id: String) { cache.setObject(Box(value), forKey: id as NSString) }
 }
+
+/// The plain-text form of an answer, built once per feed item.
+///
+/// Assembling a whole report — prose, figures, every table row, the provenance footer —
+/// is not something to do during layout. It is built on demand and cached, so a Share
+/// sheet and a Copy tap reuse the same string.
+enum AnswerText {
+    private static let cache = NSCache<NSString, NSString>()
+
+    static func of(_ item: FeedItem) -> String {
+        if let hit = cache.object(forKey: item.id as NSString) { return hit as String }
+        let text = item.answer?.plainText(questionId: item.questionId) ?? item.payload
+        cache.setObject(text as NSString, forKey: item.id as NSString)
+        return text
+    }
+}

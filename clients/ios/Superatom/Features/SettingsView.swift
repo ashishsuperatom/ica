@@ -30,6 +30,23 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Toggle(isOn: $preferences.transcribeOnDevice) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Transcribe on this device")
+                            Text(services.recorder.speech.available
+                                 ? "Instant and works offline. Turn off to transcribe on the server, which covers more languages."
+                                 : "Not available on this device — the server is used instead.")
+                                .font(Theme.sans(11))
+                                .foregroundStyle(Theme.inkFaint)
+                        }
+                    }
+                    .tint(Theme.accent)
+                    .disabled(!services.recorder.speech.available)
+                } header: {
+                    Text("Voice")
+                }
+
+                Section {
                     LabeledContent("Status") {
                         HStack(spacing: 6) {
                             if services.hub.status == .connected {
