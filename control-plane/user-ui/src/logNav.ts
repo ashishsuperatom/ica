@@ -19,7 +19,10 @@ function isTyping(el: Element | null): boolean {
   return t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable
 }
 
-export function useLogNav(ref: RefObject<HTMLElement | null>, active: boolean, contentKey: number) {
+// `content` is any value that changes reference/identity whenever the log changes — pass the events array
+// itself (a new reference on every merge), NOT its length: streaming edits an event IN PLACE, so the length
+// can stay the same while the content grows. Keyed on the array, auto-follow fires on every update.
+export function useLogNav(ref: RefObject<HTMLElement | null>, active: boolean, content: unknown) {
   const pinned = useRef(true)   // is the log scrolled near the bottom? (so new content follows, but reading-up doesn't yank)
   const cursor = useRef<{ idx: number; at: number }>({ idx: -1, at: 0 })
 

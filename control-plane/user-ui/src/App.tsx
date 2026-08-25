@@ -222,8 +222,8 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
 
   // The analyst + semantic logs each own their interactions SEPARATELY (open→bottom, follow-if-near-bottom,
   // Shift+Arrow between questions) — see logNav.ts. contentKey = a number that grows as the log grows.
-  useLogNav(anLogRef,  view === 'analyst',  anEvents.length + narrationLog.length)
-  useLogNav(semLogRef, view === 'semantic', semEvents.length)
+  useLogNav(anLogRef,  view === 'analyst',  anEvents)     // pass the ARRAY (new ref on every merge, incl. in-place streaming) — not .length
+  useLogNav(semLogRef, view === 'semantic', semEvents)
 
   // Per-step timer (UI-only, nice-to-have): tick every second while busy so the CURRENT analysis beat counts up.
   useEffect(() => {

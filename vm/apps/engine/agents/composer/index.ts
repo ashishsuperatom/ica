@@ -100,8 +100,9 @@ ${candBlock}
 1. Can any program above CORRECTLY answer this question — as-is or with different params? If one genuinely fits,
    pick it, run it to confirm, and write ${builtRel} = {"programDir":"<that program>","params":{…}}. If none
    truly answers it, do NOT force-fit one — build a new program from concepts (step 2). Accuracy over reuse.
-2. Otherwise COMPOSE — but stay LIGHT (you're the fast path). \`./find-concept "<phrase>"\` for the concepts this
-   needs; do a SMALL rewrite of their PRQL (different params, a grouping, a filter, a window over fields already in
+2. Otherwise COMPOSE — but stay LIGHT (you're the fast path). \`./find-concept "<phrase>"\` to find the concepts
+   this needs, then \`./find-concept "<phrase>" --full\` for the full guide (its runnable PRQL); do a SMALL rewrite
+   of that PRQL (different params, a grouping, a filter, a window over fields already in
    the concept). Run it (\`tsx run.mjs programs/<slug>/program.ts '<json>'\`), verify against the review checks,
    write ${builtRel}. The engine runs it — do NOT write answer.json or answer in chat.
 3. ESCALATE the moment it turns into a real BUILD — a genuinely new computation the concepts don't contain (a

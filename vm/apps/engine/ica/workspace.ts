@@ -42,9 +42,9 @@ however you see fit — there is no setup to do.
 
 ## Tools — just RUN these (they work from ANY directory, first try; each prints JSON to stdout)
 Search the project's knowledge:
-- \`./find-concept "<phrase>"\`        → strong, evaluated concepts (guide fields); no args = the full menu.
-- \`./find-model "<term>" […]\`        → the semantic model: concepts, units, atoms, past questions (compact).
-- \`./find-program "<question>"\`      → existing programs that answered a similar question (reuse before you build).
+- \`./find-concept ["<phrase>"] [--full]\` → no args = the concept menu; a phrase = matching phrases + one-line (an index); add \`--full\` for the whole guide (the compute you rewrite).
+- \`./find-model "<term>" [--full]\`       → matching model nodes (id/kind/name/summary — an index); add \`--full\` for their props.
+- \`./find-program "<question>" [--full]\` → programs that answered a similar question; add \`--full\` for the saved params.
 Query the data:
 - \`./sources\`                        → the data sources + their kind/dialect.
 - \`./query "<source>" "<prql>"\`      → run a PRQL query → JSON rows.
@@ -286,31 +286,37 @@ export const raw = store
   // path and runs its driver with tsx (node can't resolve node-store's .ts imports; tsx can), so `./find-*`
   // returns clean JSON on the FIRST try from ANY directory. The agent never reads the .mjs source.
   const drivers: Record<string, string> = {
-    'find-concept': `// Search strong concepts. Run: ./find-concept "<phrase>"  (no args = the menu). Prints JSON.
+    'find-concept': `// Concepts. No args = the menu (phrases). "<phrase>" = matching phrases + one-line (the INDEX). Add --full for the whole guide (compute/strategy/represent/review).
 import { findConcept, listConcepts } from ${JSON.stringify(join(dir, 'concepts', 'find.mjs'))}
-const q = process.argv.slice(2).join(' ').trim()
-console.log(JSON.stringify(q ? findConcept(q) : listConcepts(), null, 2))
+const args = process.argv.slice(2)
+const full = args.includes('--full')
+const q = args.filter(a => a !== '--full').join(' ').trim()
+const slim = (c) => ({ phrase: c.phrase, what: c.what })
+console.log(JSON.stringify(!q ? listConcepts() : (full ? findConcept(q) : findConcept(q).map(slim)), null, 2))
 `,
-    'find-model': `// Search the semantic model (concepts/units/atoms/past questions). Run: ./find-model "<term>" ["<term>"…]. Prints JSON.
+    'find-model': `// Semantic model. "<term>…" = matching id/kind/name/summary (the INDEX). Add --full for each match's props too.
 import { find } from ${JSON.stringify(join(dir, 'model', 'model.mjs'))}
-const terms = process.argv.slice(2)
-const clean = (h) => { // drop bulky/garbled props (rawAnalysis) so the view stays compact + useful
-  const p = (typeof h.props === 'string' ? JSON.parse(h.props || '{}') : (h.props || {}))
-  const { rawAnalysis, ...rest } = p
-  return { id: h.id, kind: h.kind, name: h.name, summary: h.summary, props: rest }
-}
-console.log(JSON.stringify(terms.length ? find(...terms).map(clean) : [], null, 2))
+const args = process.argv.slice(2)
+const full = args.includes('--full')
+const terms = args.filter(a => a !== '--full')
+const propsOf = (h) => { const p = (typeof h.props === 'string' ? JSON.parse(h.props || '{}') : (h.props || {})); const { rawAnalysis, ...rest } = p; return rest }
+const view = (h) => full ? { id: h.id, kind: h.kind, name: h.name, summary: h.summary, props: propsOf(h) } : { id: h.id, kind: h.kind, name: h.name, summary: h.summary }
+console.log(JSON.stringify(terms.length ? find(...terms).map(view) : [], null, 2))
 `,
-    'find-program': `// Find existing programs that answered a similar question. Run: ./find-program "<question>". Prints JSON.
+    'find-program': `// Programs that answered a similar question. "<question>" = matching question/program/category (the INDEX). Add --full for its saved params.
 import { NodeStore } from '@superatom/node-store'
 const store = new NodeStore(${JSON.stringify(join(dir, 'db', 'project.sqlite'))})
-const q = process.argv.slice(2).join(' ').trim()
+const args = process.argv.slice(2)
+const full = args.includes('--full')
+const q = args.filter(a => a !== '--full').join(' ').trim()
 const P = (n) => (typeof n.props === 'string' ? JSON.parse(n.props || '{}') : (n.props || {}))
 const out = []
 for (const h of store.search(q, { limit: 20 })) {
   const p = P(h)
-  if (h.kind === 'intent' && p.program) out.push({ question: p.question ?? h.label, program: p.program, category: p.category })
-  else if (h.kind === 'program') out.push({ question: h.label, program: p.dir, category: p.category })
+  const row = h.kind === 'intent' && p.program ? { question: p.question ?? h.label, program: p.program, category: p.category, params: p.params }
+            : h.kind === 'program' ? { question: h.label, program: p.dir, category: p.category }
+            : null
+  if (row) out.push(full ? row : { question: row.question, program: row.program, category: row.category })
 }
 const seen = new Set()
 console.log(JSON.stringify(out.filter(o => o.program && !seen.has(o.program) && seen.add(o.program)).slice(0, 8), null, 2))
@@ -354,9 +360,9 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
   // Each tool is SELF-DOCUMENTING: `<tool> --help` prints how to use it (args/subcommands) — so the agent
   // never needs to read the .mjs to learn what to pass, and never sees the implementation.
   const usages: Record<string, string> = {
-    'find-concept': 'find-concept "<phrase>"   → strong concepts matching the phrase (JSON); no args = the full concept menu',
-    'find-model':   'find-model "<term>" ["<term>"…]   → the semantic model: concepts/units/atoms/past-questions matching the terms (JSON)',
-    'find-program': 'find-program "<question>"   → existing programs that answered a similar question (JSON)',
+    'find-concept': 'find-concept ["<phrase>"] [--full]   → no args = the concept menu (phrases); "<phrase>" = matching phrases + one-line (an INDEX); add --full for the WHOLE guide (compute PRQL, strategy, represent, review)',
+    'find-model':   'find-model "<term>" ["<term>"…] [--full]   → matching model nodes as id/kind/name/summary (an INDEX); add --full for the full props of each match',
+    'find-program': 'find-program "<question>" [--full]   → programs that answered a similar question (question/program/category); add --full for the saved params',
     'sources':      'sources   → every data source with its kind + dialect (JSON)',
     'query':        'query "<source>" "<prql>"   → run a PRQL query against a source → JSON rows   (list sources: ./sources)',
     'introspect':   'introspect "<source>" <cmd>   where <cmd> = tables | columns "<table>" | sample "<table>" [n] | profile "<table>" "<column>" | verify-join "<fromT>" "<fromCol>" "<toT>" "<toCol>"',
