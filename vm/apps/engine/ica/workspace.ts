@@ -371,7 +371,11 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
   for (const [name, body] of Object.entries(drivers)) {
     // Prepend a --help guard. ESM hoists the body's imports above this, but they only OPEN cheap handles; the
     // guard still short-circuits before any query/search runs, printing usage and nothing else.
-    const help = `if (process.argv.slice(2).some(a => a === '-h' || a === '--help')) { console.log(${JSON.stringify(usages[name])}); process.exit(0) }\n`
+    // Clean errors (message only, no stack) + a --help guard. Any failure inside the tool prints one actionable
+    // line and exits 1 — the agent reads a clear reason, not a Node stack trace.
+    const help = `process.on('unhandledRejection', (e) => { console.error(String(e && e.message || e)); process.exit(1) })
+process.on('uncaughtException', (e) => { console.error(String(e && e.message || e)); process.exit(1) })
+if (process.argv.slice(2).some(a => a === '-h' || a === '--help')) { console.log(${JSON.stringify(usages[name])}); process.exit(0) }\n`
     await writeFile(join(dir, '.tools', name + '.mjs'), help + body)
     await writeFile(join(dir, name),
 `#!/usr/bin/env bash
