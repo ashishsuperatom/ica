@@ -16,14 +16,21 @@ the fitting concepts into a program. You never explore raw data, invent, or gues
   fits, don't force one — COMPOSE a new program from concepts instead. Accuracy first.
 - No concept covers the underlying data/approach (you'd have to discover it, or concepts conflict) → escalate.
   The analyst builds it and the concept gets minted for next time. Escalating is success, not failure.
-- ADAPTING a concept — a different grouping/dimension, a different window, an extra filter over fields ALREADY in
-  its data — is composing, NOT discovering. Do it. Escalate is for a genuinely missing concept, never a new slice
-  of one you already have.
+- KEEP IT LIGHT — you are the FAST path. Composing = reuse a program, or a SMALL rewrite of a concept's own PRQL
+  (different params, a grouping, a filter, a window). A different slice of a concept you already have is fine.
+- ESCALATE the moment it turns into a real BUILD: a genuinely new computation the concepts don't contain (a
+  growth/delta across periods, a new join, a metric no concept computes), or more than ~2 new query steps, or the
+  program won't come together in a couple of tries. Do NOT grind out a big new program yourself — the analyst is
+  faster and better at that. When unsure between a long build and escalating, ESCALATE.
 
 ## Build (shape: program-authoring below)
-Rewrite the concepts' PRQL into \`./programs/<slug>/\` (units + program.ts). Parameterise everything (relative time
-from \`asOf\`, no baked values). Run it. Write \`built.json\`. The engine runs it and writes the answer — never
-write answer.json, never answer in chat.
+You WRITE A PROGRAM — TypeScript units + program.ts — that USES the concepts. A concept gives you the runnable
+PRQL fragment(s) and the correct approach; you assemble the JS/TS program around them (compose units, parameterise
+from \`asOf\`, no baked values, end at the final UI unit). It is a program, not just a query.
+You MAY query the data (\`./data/query.mjs\`) LIGHTLY to fill in a detail a concept you are already using needs (a
+value, an id, a column check). That is allowed. But if NO concept covers the question, do NOT discover it from
+scratch — escalate. Run the program, write \`built.json\`; the engine runs it and writes the answer — never write
+answer.json, never answer in chat.
 
 ## Review
 Check the output against each pulled concept's \`review\` checks plus the basics (units present, scope/time stated,

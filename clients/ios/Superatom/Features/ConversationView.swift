@@ -654,14 +654,17 @@ struct NarrationView: View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             MarkdownText(raw: beat.text, font: Theme.sans(13),
                          color: isCurrent ? Theme.ink : Theme.inkSoft, lineSpacing: 3)
-            // Held back for the first second: a step stamped "0s" reads as though it never
-            // ran, when it has only just started.
-            if seconds >= 1 {
-                Text("\(seconds)s")
-                    .font(Theme.mono(11))
-                    .foregroundStyle(isCurrent ? Theme.accent : Theme.inkFaint)
-                    .monospacedDigit()
-            }
+            // A FIXED column for the elapsed time, wide enough for "999s".
+            //
+            // Without it the text column is whatever is left over, so "2s" and "92s" give
+            // the content different widths and every line re-wraps as the timer ticks past
+            // 9 and 99. The space is reserved even while the label is hidden for the first
+            // second, so nothing shifts when it appears.
+            Text(seconds >= 1 ? "\(seconds)s" : "")
+                .font(Theme.mono(11))
+                .foregroundStyle(isCurrent ? Theme.accent : Theme.inkFaint)
+                .monospacedDigit()
+                .frame(width: 34, alignment: .trailing)
         }
         .padding(.vertical, 7)
     }

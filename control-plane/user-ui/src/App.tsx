@@ -86,7 +86,12 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   useEffect(() => {
     if (view === 'chat') { scroll(true); return }
     const ref = view === 'analyst' ? anLogRef : view === 'semantic' ? semLogRef : null
-    if (ref) { const pin = () => { if (ref.current) ref.current.scrollTop = ref.current.scrollHeight }; requestAnimationFrame(pin); setTimeout(pin, 60) }
+    if (ref) {
+      anPinnedRef.current = true   // opening the tab counts as "at the bottom", so live content keeps following
+      const pin = () => { if (ref.current) ref.current.scrollTop = ref.current.scrollHeight }
+      // Pin repeatedly: the event log often mounts/renders AFTER this effect runs, so a single early pin misses it.
+      requestAnimationFrame(pin); [40, 120, 260, 500].forEach(d => setTimeout(pin, d))
+    }
   }, [view])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Shift+Up / Shift+Down jump to the previous / next question (see questionNav.ts).
@@ -354,7 +359,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
         } else if (msg.t === 'analyst:event') {
           // 'events'-kind harness (codex): one normalized AgentEvent. Merge by id so a streaming command/message
           // updates its own block in place (started → updated → completed); id-less events (turn) append.
-          setAnEvents(evs => mergeEvent(evs, msg.ev))
+          setAnEvents(evs => mergeEvent(evs, { ...msg.ev, agent: msg.agent }))
         } else if (msg.t === 'analyst:events') {
           setAnEvents(msg.events ?? [])   // reconnect: full event-log replay (replace)
         } else if (msg.t === 'followups') {
@@ -368,7 +373,8 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
             }, 3500)
           }
         } else if (msg.t === 'narration') {
-          if (msg.text) { narrationLogRef.current = [...narrationLogRef.current, msg.text]; narrationTimesRef.current = [...narrationTimesRef.current, Date.now()]; setNarrationLog(narrationLogRef.current); setNowMs(Date.now()) }   // append a beat + stamp its arrival
+          if (msg.text) { narrationLogRef.current = [...narrationLogRef.current, msg.text]; narrationTimesRef.current = [...narrationTimesRef.current, Date.now()]; setNarrationLog(narrationLogRef.current); setNowMs(Date.now())   // append a beat + stamp its arrival (chat-view analysis card)
+            setAnEvents(evs => [...evs, { id: 'narr-' + narrationTimesRef.current.length, kind: 'narration', text: msg.text, agent: 'narrator', done: true }]) }   // ALSO drop it into the analyst-tab stream so it interleaves by time with the agent's events
         } else if (msg.t === 'analyst:progress') {
           setAnProgress(msg.text || '')   // clean prose narration → live progress line
         } else if (msg.t === 'analyst:gap') {
@@ -853,14 +859,8 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           </div>
         )})()}
         <div ref={anLogRef} onScroll={e => { const el = e.currentTarget; anPinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 240 }} style={{ flex: 1, overflow: 'auto', background: 'transparent', padding: 12, paddingBottom: 110 }}>
-          {/* Narrator (receptionist) mirror — the exact business-language beats the USER sees, in a distinct
-              color, so the operator can compare them against the raw activity below. */}
-          {narrationLog.length > 0 && (
-            <div className="sa-narr">
-              <div className="sa-narr-h">Narrator · what the user sees ({narrationLog.length})</div>
-              {narrationLog.map((b, i) => <div key={i} className="sa-md sa-nb" dangerouslySetInnerHTML={{ __html: renderInlineMd(b) }} />)}
-            </div>
-          )}
+          {/* Narrator beats are no longer a separate block pinned at the top — they're pushed into the event
+              stream (kind:'narration') so they interleave in time order with the composer/analyst events below. */}
           {/* Raw claude-code terminal (PTY) — shown only when the user opened it via the toggle, or for a
               pure-pty agent. Kept mounted so its buffer survives view switches. */}
           <div ref={anTermRef} onMouseDown={() => anXtermRef.current?.focus()} style={{ display: (anTerminal || anStreamKind === 'pty') ? 'block' : 'none' }} />
@@ -1264,7 +1264,7 @@ function SectionBlock({ s }: { s: any }) {
 // native codex client does: command runs with collapsed output, assistant messages, reasoning, turn rules.
 // One small component per event kind; events are keyed by id so a streaming block updates itself in place.
 // 'user' is UI-synthesized (the question you asked) — the engine's stream vocabulary is the rest.
-type AgentEvent = { kind: 'command' | 'message' | 'reasoning' | 'file' | 'turn' | 'user'; id?: string; text?: string; command?: string; output?: string; status?: string; done?: boolean }
+type AgentEvent = { kind: 'command' | 'message' | 'reasoning' | 'file' | 'turn' | 'user' | 'narration'; id?: string; text?: string; command?: string; output?: string; status?: string; done?: boolean; agent?: 'composer' | 'analyst' | 'narrator' }
 
 // Merge one live event into the log: update the block with the same id (started→updated→completed), else append.
 function mergeEvent(evs: AgentEvent[], e: AgentEvent): AgentEvent[] {
@@ -1317,6 +1317,13 @@ function CmdOutput({ text, claude }: { text: string; claude?: boolean }) {
 function CodexEvent({ e, claude }: { e: AgentEvent; claude?: boolean }) {
   const mono = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' as const }
   if (e.kind === 'turn') return <div style={{ borderTop: '1px solid #ddd6ca', margin: '14px 0' }} />
+  // Narrator beat — the business-language line the end user sees, interleaved here in time order.
+  if (e.kind === 'narration') return (
+    <div className="sa-md" style={{ margin: '7px 0', fontSize: 13, color: '#726f60', fontStyle: 'italic' }}>
+      <span style={{ color: '#a99f8c', fontStyle: 'normal', marginRight: 6 }}>◈ narrator</span>
+      <span dangerouslySetInnerHTML={{ __html: renderInlineMd(e.text || '') }} />
+    </div>
+  )
   if (e.kind === 'user') return (
     <div style={{ margin: '16px 0 10px', paddingTop: 12, borderTop: '1px solid #ddd6ca', color: '#1a1a1a', fontSize: 13.5, fontWeight: 600 }}>
       <span style={{ color: '#9aa79b' }}>›</span> {e.text}
@@ -1370,7 +1377,12 @@ function CodexEventLog({ events, busy, claude }: { events: AgentEvent[]; busy?: 
   const thinking = !!busy && !streaming   // busy but nothing actively streaming ⇒ reasoning between steps
   if (!events.length && !thinking) return null
   return <div>
-    {events.map((e, i) => <CodexEvent key={e.id ?? `turn${i}`} e={e} claude={claude} />)}
+    {/* A coloured left rail per agent — composer (blue), analyst (amber), narrator (grey) — so you can see at a
+        glance who produced each line, all interleaved in time order. */}
+    {events.map((e, i) => {
+      const c = e.agent === 'composer' ? '#4a90d9' : e.agent === 'analyst' ? '#c08a2b' : e.agent === 'narrator' ? '#a99f8c' : ''
+      return <div key={e.id ?? `turn${i}`} style={c ? { borderLeft: `3px solid ${c}`, paddingLeft: 10 } : undefined}><CodexEvent e={e} claude={claude} /></div>
+    })}
     {thinking && <ThinkingLine />}
   </div>
 }

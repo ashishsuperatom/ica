@@ -472,22 +472,25 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         }
       } catch { /* narration is best-effort */ } finally { narrating = false }
     }, 4000)
+    // Whose events these are — the composer runs first, the analyst only if it escalates. Every event/progress
+    // line carries `agent` so the UI can colour + separate composer vs analyst, and interleave the narrator.
+    let currentAgent: 'composer' | 'analyst' = 'composer'
     const handlers = {
-      onCategory: (c: string) => { curCategory = c; emit(reply, { t: 'analyst:category', category: c, sid }) },
+      onCategory: (c: string) => { curCategory = c; emit(reply, { t: 'analyst:category', category: c, sid, agent: currentAgent }) },
       onOutput: (chunk: string) => {
         // PTY bytes are the RAW-TERMINAL view — streamed ONLY to viewers who explicitly opened the terminal
         // (termViewers). The default view is driven by onEvent below (structured, from the JSONL), so a claude
         // run streams clean events by default and the PTY never reaches a client that didn't ask for it.
         if (!termViewers.analyst.size) return
-        const m = { t: 'analyst:chunk', text: chunk }
+        const m = { t: 'analyst:chunk', text: chunk, agent: currentAgent }
         for (const v of termViewers.analyst) emit(v, m)
       },
-      onNarration: (text: string) => { if (reply) emit(reply, { t: 'analyst:progress', text, sid }) },  // clean prose → New chat progress
+      onNarration: (text: string) => { if (reply) emit(reply, { t: 'analyst:progress', text, sid, agent: currentAgent }) },  // clean prose → New chat progress
       // Structured events (codex/SDK harnesses only — claude PTY uses onOutput above). The session already
       // normalizes + buffers these (session.events()); the engine just mirrors each one live to the asker and
       // any attached viewers, same as onOutput. Reconnect replay is handled in resyncAnalyst via events().
       onEvent: (ev) => {
-        const m = { t: 'analyst:event', ev, sid }
+        const m = { t: 'analyst:event', ev, sid, agent: currentAgent }
         if (reply) emit(reply, m)
         for (const v of termViewers.analyst) if (v !== reply) emit(v, m)
         // Narrator digest — feed ONLY the business signal: commands + their RESULTS (query outputs = the
@@ -529,6 +532,8 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       }
     }
     if (!r) {   // composer escalated → the analyst (System 3) handles it (build or modify)
+      currentAgent = 'analyst'
+      emit(reply, { t: 'analyst:progress', text: 'Handing off to the analyst for deeper analysis…', sid, agent: 'analyst' })
       const askP = analyst.ask(question, handlers, { qid, modify: modifyTarget ?? undefined, hint })
       askP.catch(() => {})   // if we abandon it on timeout, don't leak an unhandled rejection
       let capT: ReturnType<typeof setTimeout> | undefined
@@ -787,13 +792,15 @@ async function semanticConsolidateTick() {
       const batchId = 'b_' + Date.now().toString(36)
       const items = fresh.map((r) => ({ question: r.question, status: r.status, programDir: r.programDir, usedNodes: (r.answer as any)?.usedNodes }))
       console.log(`[semantic-consolidation] ${batchId}: ${items.length} new program(s) of ${batch.length} answer(s) since wm=${wm}`)
-      if (reply) emit(reply, { t: 'semantic:status', text: `Consolidating ${items.length} recent answer(s) into the model…` })
+      // Consolidation is a BACKGROUND task (no current asker) — stream its status/events to whoever has the
+      // semantic tab open, never to a specific session's socket.
+      for (const v of termViewers.semantic) emit(v, { t: 'semantic:status', text: `Consolidating ${items.length} recent answer(s) into the model…` })
       try {
         const semantic = await semanticSlot.get()
         // Same dual-view as the analyst: announce the STRUCTURED view (from the modeler's JSONL) + whether a raw
         // terminal exists; stream events by default; the PTY (semantic:chunk) goes ONLY to explicit terminal viewers.
-        const semViewers = () => { const s = new Set(termViewers.semantic); if (reply) s.add(reply); return s }
-        if (reply) emit(reply, { t: 'semantic:stream', kind: semantic.session.events ? 'events' : (semantic.session.kind ?? 'events'), pty: semantic.session.kind === 'pty' })
+        const semViewers = () => termViewers.semantic
+        for (const v of termViewers.semantic) emit(v, { t: 'semantic:stream', kind: semantic.session.events ? 'events' : (semantic.session.kind ?? 'events'), pty: semantic.session.kind === 'pty' })
         const r = await semantic.consolidate(items, batchId, {
           onEvent: (ev) => { for (const v of semViewers()) emit(v, { t: 'semantic:event', ev }) },
           onOutput: (chunk) => { if (termViewers.semantic.size) for (const v of termViewers.semantic) emit(v, { t: 'semantic:chunk', text: chunk }) },
@@ -802,7 +809,7 @@ async function semanticConsolidateTick() {
         answers.setMeta(SEMANTIC_CONSOLIDATE_WM_KEY, nextWm)
         answers.setMeta(SEMANTIC_CONSOLIDATE_FAIL_KEY, '0')     // clean pass → reset the failure streak
         console.log(`[semantic-consolidation] ${batchId} done in ${(r.ms / 1000).toFixed(1)}s`)
-        if (reply) emit(reply, { t: 'semantic:status', text: 'Model consolidated ✓' })
+        for (const v of termViewers.semantic) emit(v, { t: 'semantic:status', text: 'Model consolidated ✓' })
       } catch (e: any) {
         // The agent SESSION errored (a crash, not a compaction — those are handled inside consolidate()).
         // Do NOT advance the watermark yet: a transient error should be retried. But bound it — after

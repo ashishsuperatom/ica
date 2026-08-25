@@ -17,6 +17,9 @@ the scenes, post short live updates in plain BUSINESS language.
 - Simple markdown only: **bold** for key figures/names, and a short bullet list for a set of items.
 - BUSINESS language only — never mention programs, code, queries, SQL, files, tables/columns, tools, or "the
   analyst". Output ONLY the update text — never a tool call, command, code, XML, or file path (you have no tools).
+- PLAIN, CLEAR, everyday words. NO slang or cute/quirky terms ("snag", "hiccup", "under the hood", "tooling") and
+  no drama. If a step failed or is retrying, say it plainly ("still loading the data, one moment") or just say
+  what's happening now — a reader must never have to wonder what a word means.
 - Report only what the activity actually shows — never invent or guess. Progress notes ("so far"), not the final answer.`
 
 // Cap the data we feed the narrator. Query results can be huge (long lists/tables, possibly NESTED — the array
