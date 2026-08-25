@@ -515,17 +515,19 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // and writes the same out/<qid>/{built,answer}.json, so a composed result flows through the IDENTICAL
     // post-processing below. Skip for a MODIFY (the composer doesn't edit). On escalation → the analyst (System 3).
     let authoredBy: 'composer' | 'analyst' = 'analyst'
-    if (!modifyTarget) {
+    {
+      // The COMPOSER handles both a fresh question (compose/reuse) AND a MODIFY (edit the current program in
+      // place). It escalates only when it genuinely can't — then the analyst takes over.
       const composer = await getComposer(sid)
-      const c = await composer.ask(question, handlers, { qid, candidates: programCandidates })
+      const c = await composer.ask(question, handlers, { qid, candidates: programCandidates, modify: modifyTarget ?? undefined })
       if (c.escalate) console.log(`[ica] composer → escalate · ${c.escalate.reason}`)
       else {
         authoredBy = 'composer'
         r = { answer: c.answer, category: c.category ?? 'analysis', ms: c.ms, lastLines: c.lastLines ?? '' }
-        console.log(`[ica] composer · ${(c.ms / 1000).toFixed(1)}s · status=${c.answer?.status ?? 'no-json'}`)
+        console.log(`[ica] composer${modifyTarget ? ' (modify)' : ''} · ${(c.ms / 1000).toFixed(1)}s · status=${c.answer?.status ?? 'no-json'}`)
       }
     }
-    if (!r) {   // composer escalated (or this is a MODIFY) → the analyst (System 3) discovers + builds
+    if (!r) {   // composer escalated → the analyst (System 3) handles it (build or modify)
       const askP = analyst.ask(question, handlers, { qid, modify: modifyTarget ?? undefined, hint })
       askP.catch(() => {})   // if we abandon it on timeout, don't leak an unhandled rejection
       let capT: ReturnType<typeof setTimeout> | undefined

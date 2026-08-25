@@ -34,8 +34,9 @@ export interface ComposerResult {
   ms: number
 }
 export interface ProgramCandidate { question: string; program?: string; score: number }
+export interface ModifyTarget { programDir: string; prevQuestion?: string }
 export interface Composer {
-  ask(question: string, handlers?: RunHandlers, opts?: { qid?: string; candidates?: ProgramCandidate[] }): Promise<ComposerResult>
+  ask(question: string, handlers?: RunHandlers, opts?: { qid?: string; candidates?: ProgramCandidate[]; modify?: ModifyTarget }): Promise<ComposerResult>
   session: Session
   cwd: string
 }
@@ -71,7 +72,26 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
         ? 'Existing programs the engine matched to this question (score = similarity, higher = closer):\n' +
           cands.slice(0, 6).map(c => `- ${c.program} — "${c.question}" (${c.score.toFixed(2)})`).join('\n')
         : 'No existing program matched this question.'
-      const prompt = `${preamble}
+      const m = o.modify
+      // MODIFY: edit the SAME program in place (the engine supplies the current program — it may be from a
+      // reuse, so it is NOT in your context). No new program, no escalate — just apply the edit and rerun.
+      const modifyPrompt = m ? `${preamble}
+
+The user wants to EDIT the CURRENT program — the SAME program, changed as they ask (a different calculation,
+columns/outputs, a filter, or a top-N). Make the edit from what you ALREADY have: the program's own code plus the
+concepts (\`findConcept\`). Do NOT discover raw data, and do NOT build a new program.
+
+CURRENT PROGRAM: ./${m.programDir}${m.prevQuestion ? `  (it answers: "${m.prevQuestion}")` : ''}
+THE EDIT: ${question}
+
+OPEN and READ ./${m.programDir} (program.ts + its units). If the edit can be made from its code + the concepts you
+can pull, EDIT it, RUN it (\`tsx run.mjs ${m.programDir}/program.ts '<json>'\`) until correct, then write
+${builtRel} = {"programDir":"${m.programDir}","params":{…}} pointing at the SAME program (do NOT change
+programDir). But if the edit needs something in NEITHER the program NOR any concept — you'd have to discover it —
+write ${escalateRel} = {"reason":"<what's missing>"} and STOP; the analyst will handle it. Never explore raw
+data. Do NOT write answer.json.` : ''
+
+      const composePrompt = `${preamble}
 
 Question: ${question}
 
@@ -88,6 +108,7 @@ ${candBlock}
 3. Only if the underlying data/approach is in NO concept (you'd have to discover it, or two concepts contradict)
    → write ${escalateRel} = {"reason":"<what's missing>"} and STOP. Escalating is success; the analyst builds it.
    Never explore raw data or guess.`
+      const prompt = m ? modifyPrompt : composePrompt
 
       const hasBuilt     = async () => { try { return !!JSON.parse(await readFile(builtPath, 'utf8'))?.programDir } catch { return false } }
       const hasEscalated = async () => { try { return !!JSON.parse(await readFile(escalatePath, 'utf8')) } catch { return false } }
