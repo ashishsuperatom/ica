@@ -21,7 +21,15 @@ struct TableView: View {
     private static let page = 25
 
     @State private var shown = TableView.page
-    @State private var exported: URL?
+    /// Export is revealed by touching the table, then hides itself again.
+    @State private var showExport = false
+    @State private var hideExport: Task<Void, Never>?
+
+    /// How long the export stays available after a touch. The web reveals it on hover;
+    /// a phone has no hover, and a permanently visible export button competes with the
+    /// data for attention when almost nobody is exporting. Long enough to notice it and
+    /// reach it, short enough that it stops being furniture.
+    private static let exportVisible: Duration = .seconds(10)
     private let columnGap: CGFloat = 20
 
     private var visible: [[JSONValue]] { Array(rows.prefix(shown)) }
@@ -29,6 +37,8 @@ struct TableView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             grid
+                .contentShape(Rectangle())
+                .onTapGesture { revealExport() }
             if shown < rows.count { showMore }
             footer
         }
@@ -60,17 +70,37 @@ struct TableView: View {
                 .font(Theme.sans(11))
                 .foregroundStyle(Theme.inkFaint)
             Spacer()
-            if let url = csvURL {
+            if showExport, let url = csvURL {
                 ShareLink(item: url) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "square.and.arrow.up").font(Theme.sans(11))
-                        Text("CSV").font(Theme.sans(11, .medium))
+                    HStack(spacing: 5) {
+                        Image(systemName: "square.and.arrow.up").font(Theme.sans(11, .semibold))
+                        Text("CSV").font(Theme.sans(12, .medium))
                     }
                     .foregroundStyle(Theme.inkSoft)
+                    .padding(.horizontal, 12)
+                    .frame(height: 32)
+                    .background(Capsule().fill(Theme.paperInset))
+                    .contentShape(Rectangle())
                 }
+                .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .trailing)))
             }
         }
+        .frame(minHeight: 32)          // reserve the row, so revealing it moves nothing
         .padding(.top, 8)
+        .animation(.easeOut(duration: 0.18), value: showExport)
+    }
+
+    /// Touching the table offers the export, and each touch restarts the clock.
+    private func revealExport() {
+        guard csvURL != nil else { return }
+        if !showExport { Haptics.light() }
+        showExport = true
+        hideExport?.cancel()
+        hideExport = Task {
+            try? await Task.sleep(for: Self.exportVisible)
+            guard !Task.isCancelled else { return }
+            showExport = false
+        }
     }
 
     private var countLabel: String {

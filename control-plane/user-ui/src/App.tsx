@@ -111,15 +111,6 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // analyst/semantic logs own their own open/follow/nav behaviour separately — see useLogNav below.
   useEffect(() => { if (view === 'chat') scroll(true) }, [view])   // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Agent-LOG channel subscription. OPT-IN by visiting a log view — the DO then forwards that channel ONLY to this
-  // user's devices (never another user), and only to devices that attached (no clogging). It STAYS attached: we do
-  // NOT detach on navigation (the run continues in the background; you're just moving around). Delivery stops only
-  // when the WS closes (the DO drops the connection) or on an explicit detach. Each view = its one channel.
-  useEffect(() => {
-    const ch = view === 'analyst' ? 'analyst-log' : view === 'composer' ? 'composer-log' : view === 'semantic' ? 'semantic-log' : ''
-    if (ch) send({ t: 'log:attach', channel: ch })
-  }, [view])   // eslint-disable-line react-hooks/exhaustive-deps
-
   // Chat feed: Shift+Up/Down jump between questions, scrolling the PAGE (see questionNav.ts).
   useQuestionNav(() => readView() === 'chat')
   // Analyst tab — the QA agent (classify → claude-code answers from the semantic model + units).
@@ -282,7 +273,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
       ws.onopen = () => {
         setConnected(true)
         if (CLOUD) ws.send(JSON.stringify({ type: 'hello', token, role: 'runtime' }))
-        else { send({ t: 'sessions:list', projectId }); send({ t: 'session:load', sessionId: sidRef.current }); send({ t: 'suggestions:req', projectId }); send({ t: 'term:attach', which: 'analyst' }) }
+        else { send({ t: 'sessions:list', projectId }); send({ t: 'session:load', sessionId: sidRef.current }); send({ t: 'suggestions:req', projectId }); send({ t: 'term:attach', which: 'analyst' }); attachLogs() }
       }
       ws.onclose = () => {
         setConnected(false); setBusy(false); setStatus(''); clearWatchdog(); busyRef.current = false
@@ -305,6 +296,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           // stale one.
           if (busyRef.current) endTurn()
           send({ t: 'sessions:list', projectId }); send({ t: 'session:load', sessionId: sidRef.current }); send({ t: 'suggestions:req', projectId }); send({ t: 'term:attach', which: 'analyst' })
+          attachLogs()   // this console WATCHES the agents → subscribe to all agent-log channels for the whole session, so you never miss a question's log by attaching late
           send({ t: 'sync:req' })   // pull recent sessions + any answers we missed while offline, straight from the always-on DO (no engine wake)
           return
         }
@@ -484,6 +476,10 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     if (ws?.readyState !== 1) return
     ws.send(JSON.stringify(CLOUD ? { to: { type: 'code-engine' }, payload } : payload))
   }
+  // Subscribe to every agent-log channel (called on connect). The DO forwards each only to THIS user's devices,
+  // so the console always has the composer/analyst/semantic logs from the moment it connects — no missing a
+  // question's log by attaching late. Stays for the connection's life (the DO drops it on WS close).
+  const attachLogs = () => ['analyst-log', 'composer-log', 'semantic-log'].forEach((channel) => send({ t: 'log:attach', channel }))
 
   // Recover a full Q&A PAIR from the DO into the right session's feed. A qid is a pair, so we restore the
   // QUESTION card too — its id is the qid (matching how ask() writes it), so it dedups whether or not the
