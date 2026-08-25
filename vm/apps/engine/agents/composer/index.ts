@@ -129,7 +129,7 @@ ${candBlock}
         const built = JSON.parse(await readFile(builtPath, 'utf8')) as BuiltPtr
         let answer: any
         try {
-          handlers?.onNarration?.(`Running program ${built.programDir}`)
+          handlers?.onNarration?.('Running the numbers…')   // shown as a business beat (composer self-narrates)
           const rr = await execProgram(cwd, built.programDir, built.params ?? {})
           const out = rr.output as any
           answer = { ...out, status: out?.status ?? 'answered' }

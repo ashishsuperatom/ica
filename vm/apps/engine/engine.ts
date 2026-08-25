@@ -455,23 +455,26 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     emit(reply, { t: 'analyst:stream', kind: analyst.session.events ? 'events' : (analyst.session.kind ?? 'events'), pty: analyst.session.kind === 'pty', sid })
     // Kick off the narration: an immediate opener, then every few seconds translate whatever the analyst just did
     // into ONE business line. Overlap-guarded (skip a tick if the previous narrate is still running).
-    narrator = createNarrator({ cwd: WORKSPACE })
-    if (reply) emit(reply, { t: 'narration', text: 'Looking into your question…', qid, sid })
-    narrationTimer = setInterval(async () => {
-      if (narrating || !reply || narrationBuf.length === 0) return
-      narrating = true
-      const activity = narrationBuf.splice(0).join('\n')
-      try {
-        // TIMEOUT the narrate call: if the narrator (deepseek) hangs, `finally` would never run, `narrating`
-        // would stay true, and EVERY later tick early-returns → narration frozen on one line while the analyst
-        // keeps working. Race it so a hung beat is abandoned (settles in the background) and the guard clears.
-        const line = await Promise.race([narrator!.narrate(question, activity), new Promise<null>((res) => setTimeout(() => res(null), 20000))])
-        if (line) {
-          if (reply) emit(reply, { t: 'narration', text: line, qid, sid })
-          if (channel) emit({ type: 'channel' }, { t: 'channel:narration', channel, qid, text: line })   // stream to the chat channel (Teams/…) as a tiny message
-        }
-      } catch { /* narration is best-effort */ } finally { narrating = false }
-    }, 4000)
+    if (reply) emit(reply, { t: 'narration', text: 'Looking into your question…', qid, sid })   // opener beat
+    // The COMPOSER narrates ITSELF (its [[ui]] lines become beats — see onNarration). The separate deepseek
+    // NARRATOR is spun up ONLY when we escalate to the analyst (claude-code has no clean self-narration): it
+    // translates the analyst's raw activity into business beats. startNarrator() begins that loop on demand.
+    const startNarrator = () => {
+      narrator = createNarrator({ cwd: WORKSPACE })
+      narrationTimer = setInterval(async () => {
+        if (narrating || !reply || narrationBuf.length === 0) return
+        narrating = true
+        const activity = narrationBuf.splice(0).join('\n')
+        try {
+          // TIMEOUT the narrate call so a hung beat (deepseek) can't freeze narration (finally never running).
+          const line = await Promise.race([narrator!.narrate(question, activity), new Promise<null>((res) => setTimeout(() => res(null), 20000))])
+          if (line) {
+            if (reply) emit(reply, { t: 'narration', text: line, qid, sid })
+            if (channel) emit({ type: 'channel' }, { t: 'channel:narration', channel, qid, text: line })   // stream to the chat channel (Teams/…)
+          }
+        } catch { /* narration is best-effort */ } finally { narrating = false }
+      }, 4000)
+    }
     // Whose events these are — the composer runs first, the analyst only if it escalates. Every event/progress
     // line carries `agent` so the UI can colour + separate composer vs analyst, and interleave the narrator.
     let currentAgent: 'composer' | 'analyst' = 'composer'
@@ -485,7 +488,14 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         const m = { t: 'analyst:chunk', text: chunk, agent: currentAgent }
         for (const v of termViewers.analyst) emit(v, m)
       },
-      onNarration: (text: string) => { if (reply) emit(reply, { t: 'analyst:progress', text, sid, agent: currentAgent }) },  // clean prose → New chat progress
+      onNarration: (text: string) => {
+        if (!reply) return
+        // The COMPOSER self-narrates — its [[ui]] line IS a business beat, so it drives the analysis tape directly
+        // (no separate narrator runs during the composer phase). The ANALYST's [[ui]] is a side progress line; its
+        // beats come from the deepseek narrator started on escalation.
+        if (currentAgent === 'composer') emit(reply, { t: 'narration', text, qid, sid })
+        else emit(reply, { t: 'analyst:progress', text, sid, agent: 'analyst' })
+      },
       // Structured events (codex/SDK harnesses only — claude PTY uses onOutput above). The session already
       // normalizes + buffers these (session.events()); the engine just mirrors each one live to the asker and
       // any attached viewers, same as onOutput. Reconnect replay is handled in resyncAnalyst via events().
@@ -533,6 +543,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     }
     if (!r) {   // composer escalated → the analyst (System 3) handles it (build or modify)
       currentAgent = 'analyst'
+      startNarrator()   // the narrator runs ONLY for the analyst phase (the composer narrated itself)
       emit(reply, { t: 'analyst:progress', text: 'Handing off to the analyst for deeper analysis…', sid, agent: 'analyst' })
       const askP = analyst.ask(question, handlers, { qid, modify: modifyTarget ?? undefined, hint })
       askP.catch(() => {})   // if we abandon it on timeout, don't leak an unhandled rejection
