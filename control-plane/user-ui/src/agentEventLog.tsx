@@ -126,8 +126,9 @@ export function CodexEventLog({ events, busy, claude }: { events: AgentEvent[]; 
         glance who produced each line, all interleaved in time order. */}
     {events.map((e, i) => {
       const c = e.agent === 'composer' ? '#4a90d9' : e.agent === 'analyst' ? '#c08a2b' : e.agent === 'narrator' ? '#a99f8c' : ''
-      // A 'user' block is a QUESTION boundary → anchor it for Shift+Arrow nav; don't wrap it in an agent rail.
-      if (e.kind === 'user') return <div key={e.id ?? `turn${i}`} data-role="q"><CodexEvent e={e} claude={claude} /></div>
+      // A 'user' block is a QUESTION boundary → anchor it for Shift+Arrow nav. Uses its OWN attribute (data-qlog),
+      // NOT data-role="q", so it never collides with the CHAT feed's nav (which scans document-wide for that).
+      if (e.kind === 'user') return <div key={e.id ?? `turn${i}`} data-qlog="" style={{ scrollMarginTop: 10 }}><CodexEvent e={e} claude={claude} /></div>
       return <div key={e.id ?? `turn${i}`} style={c ? { borderLeft: `3px solid ${c}`, paddingLeft: 10 } : undefined}><CodexEvent e={e} claude={claude} /></div>
     })}
     {thinking && <ThinkingLine />}

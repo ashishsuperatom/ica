@@ -1,16 +1,35 @@
 import SwiftUI
 
-// Who you are and what you can reach. No host field, no project id field, no token box —
-// all three come from signing in.
-struct AccountView: View {
+// ── Settings ─────────────────────────────────────────────────────────────────
+// One place for everything that isn't asking a question: what the app shows, which engine
+// it is talking to, and who is signed in. No host field, no project id, no token box —
+// those all come from signing in.
+
+struct SettingsView: View {
     @Environment(Services.self) private var services
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
+        @Bindable var preferences = services.preferences
+
         NavigationStack {
             List {
-                Section("Engine") {
+                Section {
+                    Toggle(isOn: $preferences.showFollowUps) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Suggested questions")
+                            Text("Shown under an answer as “Next”.")
+                                .font(Theme.sans(11))
+                                .foregroundStyle(Theme.inkFaint)
+                        }
+                    }
+                    .tint(Theme.accent)
+                } header: {
+                    Text("Answers")
+                }
+
+                Section {
                     LabeledContent("Status") {
                         HStack(spacing: 6) {
                             if services.hub.status == .connected {
@@ -21,6 +40,8 @@ struct AccountView: View {
                     }
                     LabeledContent("Project", value: store.home.project?.name ?? "—")
                     LabeledContent("Organisation", value: store.home.org?.name ?? "—")
+                } header: {
+                    Text("Engine")
                 }
 
                 Section {
@@ -35,11 +56,13 @@ struct AccountView: View {
                     } label: {
                         Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
                     }
+                } header: {
+                    Text("Account")
                 } footer: {
                     Text("Signing out clears the stored credential on this device. Your conversations stay.")
                 }
             }
-            .navigationTitle("Account")
+            .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }

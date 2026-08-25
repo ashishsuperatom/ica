@@ -76,8 +76,12 @@ struct ConversationView: View {
                         // way to the top of the screen, even when its answer hasn't arrived
                         // yet and there is nothing under it. Sized to the gap rather than a
                         // fixed slab, so a long answer doesn't leave dead space beneath it.
+                        // Room for the newest question to travel up — but never so much
+                        // that the page can be scrolled into emptiness. Capped at half the
+                        // viewport, so at least the top half always holds content.
                         Color.clear
-                            .frame(height: max(56, viewport.size.height - lastTurnHeight - 30))
+                            .frame(height: min(max(56, viewport.size.height - lastTurnHeight - 30),
+                                               viewport.size.height * 0.5))
                             .id(bottomAnchor)
                     }
                     .padding(.top, 24)
@@ -94,18 +98,22 @@ struct ConversationView: View {
                 .onChange(of: conversation.state.questions.count) { _, _ in
                     pinLastQuestion(proxy, in: conversation)
                 }
-                .onAppear { pinLastQuestion(proxy, in: conversation, animated: false) }
+                .onAppear { pinLastQuestion(proxy, in: conversation) }
             }
         }
     }
 
-    private func pinLastQuestion(_ proxy: ScrollViewProxy, in conversation: ConversationStore, animated: Bool = true) {
+    /// Put the newest question at the top. Deliberately NOT animated.
+    ///
+    /// Animating it meant the feed visibly travelled from wherever it was to the top on
+    /// every single ask — which reads as the app fidgeting, and is doubly odd for a
+    /// question that was already near the top. You asked; it is there. The answer building
+    /// underneath is the thing worth watching, not the journey to it.
+    private func pinLastQuestion(_ proxy: ScrollViewProxy, in conversation: ConversationStore) {
         guard let last = conversation.state.questions.last else { return }
         // One frame for the new row to exist before scrolling to it.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            withAnimation(animated ? .easeOut(duration: 0.3) : nil) {
-                proxy.scrollTo(last.id, anchor: .top)
-            }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
+            proxy.scrollTo(last.id, anchor: .top)
         }
     }
 
@@ -204,8 +212,10 @@ struct ConversationView: View {
                 Text(item.payload).font(Theme.sans(13)).foregroundStyle(Theme.warning)
             }
         case .followups:
-            FollowUps(items: item.followups) { question in
-                conversation.proposeFollowUp(question)
+            if services.preferences.showFollowUps {
+                FollowUps(items: item.followups) { question in
+                    conversation.proposeFollowUp(question)
+                }
             }
         case .note:
             EmptyView()

@@ -22,7 +22,7 @@ struct SessionListView: View {
             ToolbarItem(placement: .principal) { titleBlock }
             ToolbarItem(placement: .topBarLeading) {
                 Button { showSettings = true } label: {
-                    Image(systemName: "person.circle").font(Theme.sans(16))
+                    Image(systemName: "gearshape").font(Theme.sans(15))
                 }
                 .tint(Theme.ink)
             }
@@ -40,7 +40,7 @@ struct SessionListView: View {
             ConversationView(session: session, services: services)
         }
         .sheet(isPresented: $showSwitcher) { ContextSwitcherView() }
-        .sheet(isPresented: $showSettings) { AccountView() }
+        .sheet(isPresented: $showSettings) { SettingsView() }
     }
 
     /// The title doubles as the context switcher: project name over org name, tappable.

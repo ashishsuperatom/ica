@@ -13,6 +13,7 @@ final class Services {
     let auth: AuthController
     let hub: HubClient
     let recorder = VoiceRecorder()
+    let preferences = Preferences()
     let outbox: AudioOutbox
 
     init(db: AppDatabase) {
