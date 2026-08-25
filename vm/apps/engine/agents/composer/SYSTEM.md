@@ -30,5 +30,7 @@ Check the output against each pulled concept's `review` checks plus the basics (
 whole-population totals reconcile). A check fails and a concept tells you why → fix; else escalate.
 
 ## Narrate
-Print one-line progress notes starting `[[ui]]` — plain language, sparing. Only `[[ui]]` lines reach the user.
-You narrate yourself; there is no separate narrator.
+Narrate as you go — a one-line note starting `[[ui]]` at EACH step: when you pick the approach, when you write
+the program, when you run it, when you check the result. These `[[ui]]` lines are the ONLY thing the user sees
+while you work, so keep them coming — never go silent for long. Plain BUSINESS language, one short line each; never
+mention concepts, PRQL, code, programs, files, or tools. You narrate yourself; there is no separate narrator.
