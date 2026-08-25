@@ -50,7 +50,7 @@ Query the data:
 - \`./query "<source>" "<prql>"\`      → run a PRQL query → JSON rows.
 - \`./introspect "<source>" <tables|columns|sample|profile|verify-join> [args]\` → schema/evidence.
 - \`./resolve "<text>"\`               → a fuzzy name/value → concrete ids (grounding).
-Each prints JSON to stdout. NEVER \`node\`/\`require\`/\`cat\` a \`.mjs\` to do these — just run the tool.
+Each prints JSON to stdout; run any of them with \`--help\` for its exact arguments. NEVER \`node\`/\`require\`/\`cat\` a \`.mjs\` to do these — just run the tool.
 
 ## Write/run seams (import these in your program/unit/model CODE — they take rich args, not a CLI)
 - Model:  ./model/model.mjs        — WRITE the model: \`concept()\`, \`relate()\`, \`bindUnit()\`, \`putAtom()\`, \`setParent()\`. (To SEARCH it, use \`./find-model\`.)
@@ -351,8 +351,22 @@ if (!t) { console.error('usage: ./resolve "<text>"'); process.exit(1) }
 console.log(JSON.stringify(await resolveEntity(t), null, 2))
 `,
   }
+  // Each tool is SELF-DOCUMENTING: `<tool> --help` prints how to use it (args/subcommands) — so the agent
+  // never needs to read the .mjs to learn what to pass, and never sees the implementation.
+  const usages: Record<string, string> = {
+    'find-concept': 'find-concept "<phrase>"   → strong concepts matching the phrase (JSON); no args = the full concept menu',
+    'find-model':   'find-model "<term>" ["<term>"…]   → the semantic model: concepts/units/atoms/past-questions matching the terms (JSON)',
+    'find-program': 'find-program "<question>"   → existing programs that answered a similar question (JSON)',
+    'sources':      'sources   → every data source with its kind + dialect (JSON)',
+    'query':        'query "<source>" "<prql>"   → run a PRQL query against a source → JSON rows   (list sources: ./sources)',
+    'introspect':   'introspect "<source>" <cmd>   where <cmd> = tables | columns "<table>" | sample "<table>" [n] | profile "<table>" "<column>" | verify-join "<fromT>" "<fromCol>" "<toT>" "<toCol>"',
+    'resolve':      'resolve "<text>"   → resolve a fuzzy name/value to concrete ids (JSON)',
+  }
   for (const [name, body] of Object.entries(drivers)) {
-    await writeFile(join(dir, '.tools', name + '.mjs'), body)
+    // Prepend a --help guard. ESM hoists the body's imports above this, but they only OPEN cheap handles; the
+    // guard still short-circuits before any query/search runs, printing usage and nothing else.
+    const help = `if (process.argv.slice(2).some(a => a === '-h' || a === '--help')) { console.log(${JSON.stringify(usages[name])}); process.exit(0) }\n`
+    await writeFile(join(dir, '.tools', name + '.mjs'), help + body)
     await writeFile(join(dir, name),
 `#!/usr/bin/env bash
 D=${JSON.stringify(join(dir, '.tools', name + '.mjs'))}

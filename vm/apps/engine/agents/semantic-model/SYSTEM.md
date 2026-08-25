@@ -32,23 +32,20 @@ Everything is **code + metadata**: the metadata is the graph (below); the comput
 
 ---
 
-## How you access data — the one seam
+## Reading the data
+You never open a database directly — these tools are the way in (they print JSON, run from any directory):
+- `./sources` → every source with its **kind** and **dialect** (mssql, suiteql, …). Check it FIRST for each
+  source; you must query in the correct paradigm/dialect (T-SQL ≠ SuiteQL ≠ a REST API ≠ Excel). Never guess it.
+- `./introspect "<source>" <cmd>` → schema + evidence, never a verdict (raw data so YOU catch bad data):
+  `tables` · `columns "<t>"` · `sample "<t>" [n]` (real rows) · `profile "<t>" "<col>"` (count/distinct/nulls/
+  min/max/mean/mode/top-values) · `verify-join "<fT>" "<fC>" "<tT>" "<tC>"` (coverage + cardinality +
+  unmatchedSamples — reveals sentinels/orphans). Always LOOK at what comes back before concluding.
+- `./query "<source>" "<prql>"` → run a PRQL query (compiled to the source's SQL) for anything the helpers don't cover.
 
-You NEVER touch a database directly. `./data/query.mjs` is the only way in:
-- `sources()` → every data source with its **kind** and **dialect** (e.g. `sql`/`mssql`).
-  **Call this FIRST for each source** — you must write queries in the correct paradigm and dialect
-  (T-SQL ≠ PostgreSQL ≠ DuckDB ≠ a REST API ≠ Excel). Never guess the dialect.
-- `query(dataSourceId, sql, params)` → rows. Use `@name` placeholders; the bridge binds them.
+---
 
-**Use the introspection helpers** in `./data/introspect.mjs` instead of re-writing survey/profile SQL —
-they hide the SQL but **never the data**: each returns raw evidence so YOU catch bad data (they never
-hand you a verdict). `const I = await forSource(id)` then: `I.tables()`, `I.columns(table)`,
-`I.sampleRows(table, n)` (look at real rows), `I.profile(table, col)` (count/distinct/nulls/min/max/
-mean/mode/top-values), `I.verifyJoin(fromT, fromCol, toT, toCol)` (coverage + cardinality +
-**unmatchedSamples** — reveals sentinels/orphans — + fromTopValues; a soft `hint`, not a verdict),
-`I.checkRelation(table, expr)` (conservation/arithmetic → violations + sample violating rows). Always
-LOOK at the returned data before concluding; drop to raw `query()` for anything they don't cover.
-
+## Writing the model
+Before you add anything, check what's already modeled with `./find-model "term"` — never duplicate a concept.
 The model lives in **`db/project.sqlite`** — the SAME node-store the intent graph and units use (one project,
 one store, no separate model DB). **Write it through `./model/model.mjs`'s concept API:**
 - `concept(name, props, summary?)` — upsert an entity/concept. `props`: `status` ('verified'|'candidate'|'blocked'),

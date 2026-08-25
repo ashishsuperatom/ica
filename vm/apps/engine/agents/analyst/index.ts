@@ -101,9 +101,9 @@ export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
   const session = createSession(harness, { cwd, model, resumeId: opts.ica?.resumeId })
 
   const preamble =
-    'Read ./CONTEXT.md FIRST (environment: `node` for quick checks/probes, `tsx` for units/programs; and the seams), then ./analyst/ANALYST.md ' +
-    '(your instructions) — follow it exactly. The semantic model is ./model/model.mjs; data is ONLY ./data/query.mjs / ' +
-    './data/introspect.mjs. Your deliverable is a PROGRAM (see below) — the engine runs it and writes the answer.'
+    'Read ./CONTEXT.md FIRST (the tools + seams), then ./analyst/ANALYST.md (your instructions) — follow it exactly. ' +
+    'Search the model with `./find-model`, query data with `./query` / `./sources` / `./introspect`, resolve names with ' +
+    '`./resolve`. Your deliverable is a PROGRAM (see below) — the engine runs it and writes the answer.'
 
   return {
     cwd,
@@ -139,11 +139,11 @@ build a small program whose output IS your reply. Whatever you would say goes IN
 
 1. Decide which answer-shape (\`category\`) from ./analyst/ANALYST.md fits THIS question, and report it as \`category\`.
 2. RECON THE MODEL FIRST — before touching raw data. Decide what this question needs (entity, measure, grain,
-   filters), then PROBE the model for it with a few targeted queries: ./model/model.mjs — \`find('term','term'…)\`,
-   \`concepts()\`, \`intents()\`, \`getConcept(name)\`. Inspect what comes back; if a concept / unit / past program
-   CONFIDENTLY fits, reuse or compose it — deterministic, and it carries the corrections we've made. ONLY if
-   nothing confidently fits, analyze the raw data yourself (./data/query.mjs / ./data/introspect.mjs). Probe, judge, move
-   on — never force an ill-fitting unit. Always PRODUCE AN ANSWER.
+   filters), then search the model for it: \`./find-model "term" "term"\` (and \`./find-concept "phrase"\`,
+   \`./find-program "question"\`). Inspect what comes back; if a concept / unit / past program CONFIDENTLY fits,
+   reuse or compose it — deterministic, and it carries the corrections we've made. ONLY if nothing confidently
+   fits, analyze the raw data yourself (\`./query\` / \`./introspect\`). Probe, judge, move on — never force an
+   ill-fitting unit. Always PRODUCE AN ANSWER.
 3. Write ${builtRel} = {"programDir":"programs/<slug>","params":{...the params...}, "parent":"root" | "<a prior intent id>", "followups":["…", "…"]}
    pointing at the program you built, and RUN it with \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\` until
    it is correct. Reuse an existing ./programs/ program if one fits. \`parent\` PLACES this question in the intent

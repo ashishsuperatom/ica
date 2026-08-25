@@ -71,7 +71,7 @@ export async function createSemanticModeller(opts: SemanticModellerOpts): Promis
 
   const session = createSession(harness, { cwd, model, resumeId: opts.ica?.resumeId })
 
-  const preamble = 'Read ./CONTEXT.md FIRST (the environment + the seams — where the model is stored, the datasources; nothing to install), then ./model/MODEL.md (your instructions) and follow it exactly. Explore and run code however you see fit. The ONLY data access is data/query.mjs (call sources() before writing queries; use the right dialect).'
+  const preamble = 'Read ./CONTEXT.md FIRST (the tools + seams), then ./model/MODEL.md (your instructions) and follow it exactly. Read data with `./sources` / `./introspect` / `./query`, search the model with `./find-model`, and WRITE the model through ./model/model.mjs.'
 
   return {
     cwd,
