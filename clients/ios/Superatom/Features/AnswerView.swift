@@ -209,7 +209,8 @@ struct SectionView: View {
                 FigureBand(figures: section.items)
             case .table:
                 TableView(columns: section.columns, rows: section.rows,
-                          total: section.total.isEmpty ? nil : section.total)
+                          total: section.total.isEmpty ? nil : section.total,
+                          totalRows: section.totalRows, title: section.title)
             case .text:
                 if let body = section.body, !body.isEmpty {
                     MarkdownText(raw: body, font: Theme.sans(14.5), color: Theme.inkSoft, lineSpacing: 6)

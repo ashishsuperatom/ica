@@ -85,14 +85,14 @@ export function useLogNav(ref: RefObject<HTMLElement | null>, active: boolean, c
         qs.forEach((q, i) => { const tp = rel(q); if (tp > PIN + MARGIN && tp < best) { best = tp; idx = i } })
       }
 
-      if (dir > 0 && idx > last) {                    // past the last → reveal the end
-        el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
-        cursor.current = { idx: last, at: now }
-      } else {
-        idx = Math.max(0, Math.min(last, idx))
-        el.scrollTo({ top: el.scrollTop + rel(qs[idx]) - PIN, behavior: 'smooth' })
-        cursor.current = { idx, at: now }
-      }
+      // Set scrollTop DIRECTLY — the same mechanism the (working) auto-scroll uses. scrollTo({behavior:'smooth'})
+      // was not moving this container. Try a smooth animation, but always fall back to the direct set.
+      const to = (dir > 0 && idx > last)
+        ? el.scrollHeight                              // past the last → reveal the end
+        : el.scrollTop + rel(qs[Math.max(0, Math.min(last, idx))]) - PIN
+      try { el.scrollTo({ top: to, behavior: 'smooth' }) } catch { /* older engines */ }
+      el.scrollTop = to                                // guaranteed move (smooth may or may not animate)
+      cursor.current = { idx: dir > 0 && idx > last ? last : Math.max(0, Math.min(last, idx)), at: now }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

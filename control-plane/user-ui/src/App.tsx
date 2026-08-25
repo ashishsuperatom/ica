@@ -827,28 +827,8 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
             {anEnriching.basis && <div style={{ color: '#8a8276', fontSize: 12, marginTop: 2 }}>Basis: {anEnriching.basis}</div>}
           </div>
         )}
-        {/* Structured answer (from out/answer.json) */}
-        {anAnswer && (() => {
-          const warn = anAnswer.status === 'unknowable' || anAnswer.status === 'cannot_answer' || anAnswer.status === 'gap'
-          return (
-          <div style={{ padding: '12px 16px', borderBottom: '1px solid #23281f', background: warn ? '#2a2118' : '#181d16' }}>
-            <div style={{ color: warn ? '#e0b070' : '#cfe3d0', fontSize: 14, marginBottom: anAnswer.value != null || anAnswer.table ? 8 : 0 }}>
-              {warn ? '⚠ Cannot answer' : ''} {anAnswer.answer}
-            </div>
-            {anAnswer.value != null && <div style={{ fontSize: 24, fontWeight: 700, color: '#bcd0be' }}>{typeof anAnswer.value === 'number' ? anAnswer.value.toLocaleString() : anAnswer.value}</div>}
-            {anAnswer.scope && <div style={{ color: '#8a8276', fontSize: 12, marginTop: 4 }}>Scope: {anAnswer.scope}</div>}
-            {anAnswer.missing && <div style={{ color: '#e0b070', fontSize: 12, marginTop: 4 }}>No source in the data: {anAnswer.missing}</div>}
-            {anAnswer.gap?.need && <div style={{ color: '#e0b070', fontSize: 12, marginTop: 4 }}>Needs modeling: {anAnswer.gap.need}</div>}
-            {anAnswer.table && (
-              <div style={{ overflowX: 'auto', marginTop: 8 }}>
-                <table style={{ borderCollapse: 'collapse', fontSize: 12, color: '#cfe3d0' }}>
-                  <thead><tr>{anAnswer.table.columns?.map((c: string, i: number) => <th key={i} style={{ textAlign: 'left', padding: '4px 12px 4px 0', borderBottom: '1px solid #33402f', color: '#9db29e' }}>{c}</th>)}</tr></thead>
-                  <tbody>{anAnswer.table.rows?.slice(0, 100).map((r: any[], ri: number) => <tr key={ri}>{r.map((v, ci) => <td key={ci} style={{ padding: '3px 12px 3px 0', fontVariantNumeric: 'tabular-nums' }}>{typeof v === 'number' ? v.toLocaleString() : String(v ?? '')}</td>)}</tr>)}</tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )})()}
+        {/* The structured ANSWER card is intentionally NOT shown here — the analyst view is the agent's WORK
+            (its steps/events), not the answer. The answer renders in the chat view. */}
         <div ref={anLogRef} style={{ flex: 1, overflow: 'auto', background: 'transparent', padding: 12, paddingBottom: 110 }}>
           {/* Narrator beats are no longer a separate block pinned at the top — they're pushed into the event
               stream (kind:'narration') so they interleave in time order with the composer/analyst events below. */}

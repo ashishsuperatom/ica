@@ -352,7 +352,11 @@ async function reuseProgram(programDir: string, params: any, category: string,
 // Answer a question: classify → analyst ICA (per-category SYSTEM.md, semantic-model-first) → stream
 // the raw claude terminal to the "Analyst" tab and emit the final structured answer.
 async function analyse(question: string, from: any, sid = '', qidIn = '', channel = '') {
-  if (busySessions.has(sid)) { emit(from, { t: 'analyst:status', text: 'Already answering a question in this chat — one at a time.', sid }); return }
+  console.log(`[ica][session] analyse sid="${sid}" pos=${(position.get(sid) || 'ROOT').slice(0, 14)} busy=[${[...busySessions].map(s => `"${s}"`).join(',')}] q="${question.slice(0, 50)}"`)
+  if (busySessions.has(sid)) {
+    console.log(`[ica][session] REJECTED (one-at-a-time) sid="${sid}" — locked sessions: [${[...busySessions].map(s => `"${s}"`).join(',')}]`)
+    emit(from, { t: 'analyst:status', text: 'Already answering a question in this chat — one at a time.', sid }); return
+  }
   if (!question.trim()) return
   // ── EXPLICIT EDIT prefix ──────────────────────────────────────────────────────
   // An input that, after any leading whitespace, begins with "edit:" or "modify:" (case-insensitive) is the
@@ -607,6 +611,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       // semantically searchable, never a broken turn.
       if (vectors) void indexText(vectors, bgeEmbedder, nodeId, norm).catch(e => log.warn('semantic', `embed ${nodeId.slice(0, 14)} failed`, e))
       setPosition(sid, nodeId)
+      console.log(`[ica][session] setPosition sid="${sid}" → ${nodeId.slice(0, 14)}  q="${question.slice(0, 40)}"`)
       console.log(`[ica] intent node ${nodeId.slice(0, 14)} under ${parent === ROOT ? 'ROOT' : parent.slice(0, 14)} (reflex-placed)${programDir ? ` · program ${programDir}` : ' · no program'}`)
       // OBSERVE-only: did the cheap exact-match regex agree with where the reflex placed the node?
       if (!explicitEdit) console.log(`[ica] regex-check: guessed ${rootQuestion ? 'ROOT' : 'FOLLOW-UP'} · reflex placed ${parent === ROOT ? 'ROOT' : 'FOLLOW-UP'} → ${rootQuestion === (parent === ROOT) ? 'MATCH ✓' : 'MISMATCH ✗'}`)

@@ -46,6 +46,9 @@ struct EngineAnswer: Hashable {
         var note: String?
         var items: [Figure] = []
         var body: String?
+        /// How many rows MATCHED, when the engine sent only a sample. Without it a
+        /// truncated table silently reads as the whole answer.
+        var totalRows: Int?
         /// Position within the answer. STABLE across re-parses — see above.
         var index: Int = 0
         var id: String { "\(index)-\(kind.rawValue)-\(title ?? "")" }
@@ -133,6 +136,7 @@ struct EngineAnswer: Hashable {
             promoted.columns = (table["columns"] as? [Any] ?? []).map { Coerce.string($0) ?? "" }
             promoted.rows = Self.rows(table["rows"])
             promoted.total = Self.row(table["total"])
+            promoted.totalRows = (table["totalRows"] as? NSNumber)?.intValue
             sections = [promoted]
         }
     }
@@ -177,6 +181,7 @@ struct EngineAnswer: Hashable {
         section.rows = rows
         section.total = Self.row(item["total"])
         section.note = Coerce.string(item["note"])
+        section.totalRows = (item["totalRows"] as? NSNumber)?.intValue
         section.items = items
         section.body = body
         return section
