@@ -63,9 +63,15 @@ function CodexEvent({ e, claude }: { e: AgentEvent; claude?: boolean }) {
       <span dangerouslySetInnerHTML={{ __html: renderInlineMd(e.text || '') }} />
     </div>
   )
+  // A STRONG per-question divider — a full-width rule + the question in bold — so questions are unmistakably
+  // separated and easy to scan/jump between. (Its wrapper carries data-role="q" for Shift+Arrow nav.)
   if (e.kind === 'user') return (
-    <div style={{ margin: '16px 0 10px', paddingTop: 12, borderTop: '1px solid #ddd6ca', color: '#1a1a1a', fontSize: 13.5, fontWeight: 600 }}>
-      <span style={{ color: '#9aa79b' }}>›</span> {e.text}
+    <div style={{ margin: '30px 0 14px' }}>
+      <div style={{ borderTop: '2px solid #b0a48c', marginBottom: 12 }} />
+      <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', color: '#1a1a1a', fontSize: 14.5, fontWeight: 700, lineHeight: 1.4 }}>
+        <span style={{ color: '#9aa79b', fontWeight: 500, fontSize: 12, letterSpacing: '.04em', textTransform: 'uppercase', flex: '0 0 auto', paddingTop: 1 }}>Question</span>
+        <span dangerouslySetInnerHTML={{ __html: renderInlineMd(e.text || '') }} />
+      </div>
     </div>
   )
   if (e.kind === 'command') return (
@@ -120,6 +126,8 @@ export function CodexEventLog({ events, busy, claude }: { events: AgentEvent[]; 
         glance who produced each line, all interleaved in time order. */}
     {events.map((e, i) => {
       const c = e.agent === 'composer' ? '#4a90d9' : e.agent === 'analyst' ? '#c08a2b' : e.agent === 'narrator' ? '#a99f8c' : ''
+      // A 'user' block is a QUESTION boundary → anchor it for Shift+Arrow nav; don't wrap it in an agent rail.
+      if (e.kind === 'user') return <div key={e.id ?? `turn${i}`} data-role="q"><CodexEvent e={e} claude={claude} /></div>
       return <div key={e.id ?? `turn${i}`} style={c ? { borderLeft: `3px solid ${c}`, paddingLeft: 10 } : undefined}><CodexEvent e={e} claude={claude} /></div>
     })}
     {thinking && <ThinkingLine />}

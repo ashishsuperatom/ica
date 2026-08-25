@@ -7,6 +7,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { useClaudeTerminal } from './useClaudeTerminal'
 import { useQuestionNav } from './questionNav'
+import { useLogNav } from './logNav'
 import { ANSI, COLS, ROWS } from './termColors'
 
 // Cloud mode: VITE_HUB_URL set (e.g. wss://superatom.site). The page is served at
@@ -83,20 +84,11 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
-  // Switching view → jump to the newest content (the feed/log didn't move while you were away). Chat scrolls
-  // the page; the analyst/semantic event logs are their own scroll containers, so pin those to the bottom.
-  useEffect(() => {
-    if (view === 'chat') { scroll(true); return }
-    const ref = view === 'analyst' ? anLogRef : view === 'semantic' ? semLogRef : null
-    if (ref) {
-      anPinnedRef.current = true   // opening the tab counts as "at the bottom", so live content keeps following
-      const pin = () => { if (ref.current) ref.current.scrollTop = ref.current.scrollHeight }
-      // Pin repeatedly: the event log often mounts/renders AFTER this effect runs, so a single early pin misses it.
-      requestAnimationFrame(pin); [40, 120, 260, 500].forEach(d => setTimeout(pin, d))
-    }
-  }, [view])   // eslint-disable-line react-hooks/exhaustive-deps
+  // Switching to CHAT → jump to the newest content (the page feed didn't move while you were away). The
+  // analyst/semantic logs own their own open/follow/nav behaviour separately — see useLogNav below.
+  useEffect(() => { if (view === 'chat') scroll(true) }, [view])   // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Shift+Up / Shift+Down jump to the previous / next question (see questionNav.ts).
+  // Chat feed: Shift+Up/Down jump between questions, scrolling the PAGE (see questionNav.ts).
   useQuestionNav(() => readView() === 'chat')
   // Analyst tab — the QA agent (classify → claude-code answers from the semantic model + units).
   const [anStatus, setAnStatus]     = useState('')
@@ -122,7 +114,6 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [semHasPty, setSemHasPty] = useState(false)       // modeler is claude → a raw terminal is available (show the toggle)
   const [semTerminal, setSemTerminal] = useState(false)   // user opened the raw terminal → attach the PTY lazily
   const anLogRef = useRef<HTMLDivElement>(null)
-  const anPinnedRef = useRef(true)   // is the analyst log scrolled near the bottom? (so new content auto-scrolls, but a manual scroll-up to read isn't yanked back down)
   const semLogRef = useRef<HTMLDivElement>(null)
   const [gaps, setGaps]             = useState<{ question: string; need: string; basis?: string; status: 'building' | 'done' }[]>([])
   const [role, setRole]         = useState<'user' | 'developer'>('developer')   // for now: everyone is developer (sees the agents)
@@ -229,14 +220,10 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   useClaudeTerminal(semTermRef, semXtermRef, { which: 'semantic', interactive: true, send, autoAttach: false })   // default = structured; PTY attaches only on the Terminal toggle
   useClaudeTerminal(anTermRef, anXtermRef, { which: 'analyst', interactive: true, send, autoAttach: false })   // default = structured; PTY attaches only on the Terminal toggle
 
-  // Keep the analyst log pinned to the newest content — the event log AND the narrator beats — as they stream,
-  // but ONLY if the user is already near the bottom (a scroll-up to read isn't yanked down). Debounced: content
-  // can arrive fast, so coalesce to a single scroll once it settles.
-  useEffect(() => {
-    if (view !== 'analyst' || !anPinnedRef.current) return
-    const t = setTimeout(() => { const el = anLogRef.current; if (el) el.scrollTop = el.scrollHeight }, 120)
-    return () => clearTimeout(t)
-  }, [anEvents, narrationLog, anStreamKind, view])
+  // The analyst + semantic logs each own their interactions SEPARATELY (open→bottom, follow-if-near-bottom,
+  // Shift+Arrow between questions) — see logNav.ts. contentKey = a number that grows as the log grows.
+  useLogNav(anLogRef,  view === 'analyst',  anEvents.length + narrationLog.length)
+  useLogNav(semLogRef, view === 'semantic', semEvents.length)
 
   // Per-step timer (UI-only, nice-to-have): tick every second while busy so the CURRENT analysis beat counts up.
   useEffect(() => {
@@ -326,6 +313,8 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           rawStreamRef.current = (rawStreamRef.current + (msg.text ?? '')).slice(-400000)   // capture only — never shown
         } else if (msg.t === 'semantic:status') {
           setSemHasLog(true); setSemStatus(msg.text)
+          // A consolidation BATCH start is the semantic log's question-boundary → drop a strong marker in the stream.
+          if (/consolidating/i.test(msg.text)) setSemEvents(evs => [...evs, { kind: 'user', text: msg.text }])
         } else if (msg.t === 'semantic:stream') {
           setSemStreamKind(msg.kind === 'pty' ? 'pty' : 'events')
           setSemHasPty(!!msg.pty)
@@ -860,7 +849,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
             )}
           </div>
         )})()}
-        <div ref={anLogRef} onScroll={e => { const el = e.currentTarget; anPinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 240 }} style={{ flex: 1, overflow: 'auto', background: 'transparent', padding: 12, paddingBottom: 110 }}>
+        <div ref={anLogRef} style={{ flex: 1, overflow: 'auto', background: 'transparent', padding: 12, paddingBottom: 110 }}>
           {/* Narrator beats are no longer a separate block pinned at the top — they're pushed into the event
               stream (kind:'narration') so they interleave in time order with the composer/analyst events below. */}
           {/* Raw claude-code terminal (PTY) — shown only when the user opened it via the toggle, or for a

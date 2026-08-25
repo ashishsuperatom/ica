@@ -27,7 +27,7 @@ the fitting concepts into a program. You never explore raw data, invent, or gues
 You WRITE A PROGRAM — TypeScript units + program.ts — that USES the concepts. A concept gives you the runnable
 PRQL fragment(s) and the correct approach; you assemble the JS/TS program around them (compose units, parameterise
 from \`asOf\`, no baked values, end at the final UI unit). It is a program, not just a query.
-You MAY query the data (\`./data/query.mjs\`) LIGHTLY to fill in a detail a concept you are already using needs (a
+You MAY query the data (\`./query "<source>" "<prql>"\`) LIGHTLY to fill in a detail a concept you are already using needs (a
 value, an id, a column check). That is allowed. But if NO concept covers the question, do NOT discover it from
 scratch — escalate. Run the program, write \`built.json\`; the engine runs it and writes the answer — never write
 answer.json, never answer in chat.

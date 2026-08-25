@@ -49,9 +49,9 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
   const session = createSession(harness, { cwd, model, provider, baseUrl: opts.ica?.baseUrl })
 
   const preamble =
-    'Read ./CONTEXT.md FIRST (environment: `node` for quick checks, `tsx` for programs; and the seams), then ' +
-    './composer/COMPOSER.md (your instructions) — follow it exactly. Concepts are in ./concepts/find.mjs; you ' +
-    'write a PROGRAM the engine runs. You do NOT explore raw data — you compose concepts, or you escalate.'
+    'Read ./CONTEXT.md FIRST (the tools + seams), then ./composer/COMPOSER.md (your instructions) — follow it ' +
+    'exactly. Search concepts with `./find-concept "<phrase>"` and existing programs with `./find-program "<question>"`; ' +
+    'you write a PROGRAM the engine runs. You do NOT explore raw data — you compose concepts, or you escalate.'
 
   return {
     cwd,
@@ -79,7 +79,7 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
 
 The user wants to EDIT the CURRENT program — the SAME program, changed as they ask (a different calculation,
 columns/outputs, a filter, or a top-N). Make the edit from what you ALREADY have: the program's own code plus the
-concepts (\`findConcept\`). Do NOT discover raw data, and do NOT build a new program.
+concepts (\`./find-concept "<phrase>"\`). Do NOT discover raw data, and do NOT build a new program.
 
 CURRENT PROGRAM: ./${m.programDir}${m.prevQuestion ? `  (it answers: "${m.prevQuestion}")` : ''}
 THE EDIT: ${question}
@@ -100,7 +100,7 @@ ${candBlock}
 1. Can any program above CORRECTLY answer this question — as-is or with different params? If one genuinely fits,
    pick it, run it to confirm, and write ${builtRel} = {"programDir":"<that program>","params":{…}}. If none
    truly answers it, do NOT force-fit one — build a new program from concepts (step 2). Accuracy over reuse.
-2. Otherwise COMPOSE — but stay LIGHT (you're the fast path). \`findConcept('<phrase>')\` for the concepts this
+2. Otherwise COMPOSE — but stay LIGHT (you're the fast path). \`./find-concept "<phrase>"\` for the concepts this
    needs; do a SMALL rewrite of their PRQL (different params, a grouping, a filter, a window over fields already in
    the concept). Run it (\`tsx run.mjs programs/<slug>/program.ts '<json>'\`), verify against the review checks,
    write ${builtRel}. The engine runs it — do NOT write answer.json or answer in chat.
