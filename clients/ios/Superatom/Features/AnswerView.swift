@@ -177,7 +177,7 @@ struct SectionView: View {
         VStack(alignment: .leading, spacing: 11) {
             if let title = section.title, !title.isEmpty {
                 Text(title)
-                    .font(Theme.serif(16, .semibold))
+                    .font(Theme.sans(13, .bold))
                     .foregroundStyle(Theme.ink)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.bottom, 2)

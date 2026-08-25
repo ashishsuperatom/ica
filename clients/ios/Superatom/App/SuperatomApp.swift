@@ -4,6 +4,7 @@ import SwiftUI
 struct SuperatomApp: App {
     @State private var store: AppStore
     @State private var services: Services
+    @Environment(\.scenePhase) private var scenePhase
     private let database: AppDatabase
 
     init() {
@@ -47,6 +48,13 @@ struct SuperatomApp: App {
             .environment(store)
             .environment(services)
             .tint(Theme.ink)
+            .onChange(of: scenePhase) { _, phase in
+                switch phase {
+                case .active:     services.onForeground()
+                case .background: services.onBackground()
+                default:          break
+                }
+            }
             .task {
                 store.onProjectChange = { project in
                     services.connection.projectId = project.id

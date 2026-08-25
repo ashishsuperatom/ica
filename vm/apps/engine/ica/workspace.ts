@@ -26,7 +26,7 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
   // Organized by CONCERN, not dumped flat. db/ holds every SQLite file; each concern (data / model /
   // grounding / analyst / connector) holds its own seam + role doc together. CONTEXT.md + run.mjs stay at
   // the root as the entry point + the program runner.
-  for (const sub of ['', 'db', 'data', 'model', 'grounding', 'analyst', 'connector', 'units', 'programs', 'out'])
+  for (const sub of ['', 'db', 'data', 'model', 'grounding', 'analyst', 'connector', 'composer', 'concepts', 'units', 'programs', 'out'])
     await mkdir(join(dir, sub), { recursive: true })
 
   await writeFile(join(dir, 'CONTEXT.md'),
@@ -201,6 +201,28 @@ export async function forSource(id) {
   const s = (await sources()).find(x => x.id === id)
   if (!s) throw new Error('unknown source: ' + id + ' (call sources() to list)')
   return getIntrospect(s.dialect, rawQuery, id)
+}
+`)
+
+  await writeFile(join(dir, 'concepts', 'find.mjs'),
+`// The CONCEPT seam. Strong, EVALUATED concepts — discovery already paid for — live as concept nodes in
+// ../db/project.sqlite. Each says WHERE the data is, HOW to compute it (a runnable PRQL step-list), HOW to
+// present it, and its REVIEW checks. You answer by REWRITING the concepts that fit into your program — a
+// concept is a GUIDE, never an import.
+//   findConcept('revenue by pillar')  → up to \`limit\` matching concepts (guide fields), best match first
+//   listConcepts()                    → every concept's phrase (the menu) — see what exists before you search
+import { NodeStore } from '@superatom/node-store'
+import { fileURLToPath } from 'node:url'
+const store = new NodeStore(fileURLToPath(new URL('../db/project.sqlite', import.meta.url)))
+const propsOf = (n) => (typeof n.props === 'string' ? JSON.parse(n.props || '{}') : (n.props || {}))
+const guide = (n) => { const { strong: _s, ...g } = propsOf(n); return g }   // drop the metadata flag
+export function findConcept(query, limit = 8) {
+  return store.search(String(query || ''), { kind: 'concept', limit: limit * 3 })
+    .filter((n) => propsOf(n).strong === true).slice(0, limit).map(guide)
+}
+export function listConcepts() {
+  return store.db.prepare("SELECT props FROM nodes WHERE kind = 'concept' AND valid_to IS NULL").all()
+    .map((r) => JSON.parse(r.props || '{}')).filter((p) => p.strong === true).map((p) => p.phrase)
 }
 `)
 

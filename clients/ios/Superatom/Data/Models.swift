@@ -85,10 +85,14 @@ struct FeedItem: Codable, Identifiable, Hashable, FetchableRecord, PersistableRe
     var payload: String                     // the engine's JSON, stored verbatim
     var createdAt: Date = .now
 
-    /// Suggested next questions, when this block carries them.
+    /// Suggested next questions, when this block carries them. Cached for the same
+    /// reason as `answer`: this is read on every render pass and the payload never changes.
     var followups: [String] {
-        guard kind == .followups, let data = payload.data(using: .utf8),
+        guard kind == .followups else { return [] }
+        if let cached = FollowUpCache.shared.value(for: id) { return cached }
+        guard let data = payload.data(using: .utf8),
               let items = try? JSONSerialization.jsonObject(with: data) as? [String] else { return [] }
+        FollowUpCache.shared.store(items, for: id)
         return items
     }
 
@@ -96,7 +100,11 @@ struct FeedItem: Codable, Identifiable, Hashable, FetchableRecord, PersistableRe
     /// so an unexpected field costs one value, never the whole report.
     var answer: EngineAnswer? {
         guard kind == .answer else { return nil }
+        // Cached: this is read on every render pass, and re-parsing a large report each
+        // time is both wasteful and a source of churn in the view tree.
+        if let cached = AnswerCache.shared.value(for: id) { return cached }
         guard let parsed = EngineAnswer(json: payload), !parsed.isEmpty else { return nil }
+        AnswerCache.shared.store(parsed, for: id)
         return parsed
     }
 }
@@ -137,4 +145,26 @@ struct AppState: Codable, FetchableRecord, PersistableRecord {
     enum Key: String {
         case currentAccountId, currentOrgId, currentProjectId
     }
+}
+
+
+/// Parsed follow-up lists, keyed by feed-item id.
+final class FollowUpCache: @unchecked Sendable {
+    static let shared = FollowUpCache()
+    private let cache = NSCache<NSString, NSArray>()
+
+    func value(for id: String) -> [String]? { cache.object(forKey: id as NSString) as? [String] }
+    func store(_ value: [String], for id: String) { cache.setObject(value as NSArray, forKey: id as NSString) }
+}
+
+/// Parsed answers, keyed by feed-item id. An answer never changes once stored, so this
+/// needs no invalidation — and NSCache sheds entries by itself under memory pressure.
+final class AnswerCache: @unchecked Sendable {
+    static let shared = AnswerCache()
+    private let cache = NSCache<NSString, Box>()
+
+    private final class Box { let value: EngineAnswer; init(_ v: EngineAnswer) { value = v } }
+
+    func value(for id: String) -> EngineAnswer? { cache.object(forKey: id as NSString)?.value }
+    func store(_ value: EngineAnswer, for id: String) { cache.setObject(Box(value), forKey: id as NSString) }
 }

@@ -11,38 +11,39 @@ struct ConversationView: View {
     let session: Session
 
     @Environment(Services.self) private var services
-    @State private var conversation: ConversationStore?
+    /// Built in init, NOT in .task — a store created after the first frame means the view
+    /// renders its empty state first and only fills in once something forces a redraw,
+    /// which reads as a blank screen that "wakes up" when you touch it. The conversation
+    /// is already on disk; it should be on screen in the first frame.
+    @State private var conversation: ConversationStore
     @State private var typing = false
     @State private var editingPending = false
     @State private var pendingText = ""
     @State private var draft = ""
     @State private var now = Date.now
+    @State private var lastTurnHeight: CGFloat = 0
     @FocusState private var composerFocused: Bool
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
+    init(session: Session, services: Services) {
+        self.session = session
+        _conversation = State(initialValue: ConversationStore(db: services.db, session: session, services: services))
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            if let conversation {
-                if conversation.state.isEmpty && !services.recorder.state.isRecording {
-                    emptyState
-                } else {
-                    feed(conversation)
-                }
+            if conversation.state.isEmpty && !services.recorder.state.isRecording {
+                emptyState
             } else {
-                Spacer()
+                feed(conversation)
             }
             composer
         }
         .pageBackground()
         .navigationTitle(session.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
-        .task {
-            if conversation == nil {
-                conversation = ConversationStore(db: services.db, session: session, services: services)
-            }
-        }
-        .onDisappear { if services.recorder.state.isRecording { conversation?.stopVoice() } }
+        .onDisappear { if services.recorder.state.isRecording { conversation.stopVoice() } }
         // One heartbeat drives BOTH the recording clock and the narration timers. Without
         // it the elapsed seconds only moved when a new beat arrived, which made a long
         // step look frozen exactly when you most want to see it counting.
@@ -54,35 +55,61 @@ struct ConversationView: View {
     // ── Feed ─────────────────────────────────────────────────────────────────
 
     private func feed(_ conversation: ConversationStore) -> some View {
-        ScrollViewReader { proxy in
-            ScrollView(showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(conversation.state.questions.enumerated()), id: \.element.id) { index, question in
-                        turn(question, conversation: conversation, isFirst: index == 0)
-                            .id(question.id)
+        GeometryReader { viewport in
+            ScrollViewReader { proxy in
+                ScrollView(showsIndicators: false) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(conversation.state.questions.enumerated()), id: \.element.id) { index, question in
+                            turn(question, conversation: conversation, isFirst: index == 0)
+                                .id(question.id)
+                                // Measure the LAST turn so the tail below it can be sized
+                                // exactly — no more, no less.
+                                .background(alignment: .top) {
+                                    if question.id == conversation.state.questions.last?.id {
+                                        GeometryReader { turn in
+                                            Color.clear.preference(key: LastTurnHeight.self, value: turn.size.height)
+                                        }
+                                    }
+                                }
+                        }
+                        // Enough room below the newest question that it can travel all the
+                        // way to the top of the screen, even when its answer hasn't arrived
+                        // yet and there is nothing under it. Sized to the gap rather than a
+                        // fixed slab, so a long answer doesn't leave dead space beneath it.
+                        Color.clear
+                            .frame(height: max(56, viewport.size.height - lastTurnHeight - 30))
+                            .id(bottomAnchor)
                     }
-                    Color.clear.frame(height: 28).id(bottomAnchor)
+                    .padding(.top, 24)
+                    .background {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture { dismissKeyboard() }
+                    }
                 }
-                .padding(.top, 24)
-                .contentShape(Rectangle())
-                .onTapGesture { dismissKeyboard() }
+                .scrollDismissesKeyboard(.interactively)
+                .onPreferenceChange(LastTurnHeight.self) { lastTurnHeight = $0 }
+                // A new question goes to the TOP, not the bottom: you asked it, so it should
+                // be the thing you are looking at while the answer builds underneath it.
+                .onChange(of: conversation.state.questions.count) { _, _ in
+                    pinLastQuestion(proxy, in: conversation)
+                }
+                .onAppear { pinLastQuestion(proxy, in: conversation, animated: false) }
             }
-            .scrollDismissesKeyboard(.interactively)
-            .onChange(of: conversation.state.questions.count) { _, _ in scrollToBottom(proxy) }
-            .onChange(of: conversation.state.beatsByQuestion.count) { _, _ in scrollToBottom(proxy) }
-            .onAppear { scrollToBottom(proxy, animated: false) }
+        }
+    }
+
+    private func pinLastQuestion(_ proxy: ScrollViewProxy, in conversation: ConversationStore, animated: Bool = true) {
+        guard let last = conversation.state.questions.last else { return }
+        // One frame for the new row to exist before scrolling to it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            withAnimation(animated ? .easeOut(duration: 0.3) : nil) {
+                proxy.scrollTo(last.id, anchor: .top)
+            }
         }
     }
 
     private let bottomAnchor = "bottom"
-
-    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            withAnimation(animated ? .easeOut(duration: 0.25) : nil) {
-                proxy.scrollTo(bottomAnchor, anchor: .bottom)
-            }
-        }
-    }
 
     @ViewBuilder
     private func turn(_ question: Question, conversation: ConversationStore, isFirst: Bool) -> some View {
@@ -90,14 +117,52 @@ struct ConversationView: View {
             if !isFirst { TurnBreak().padding(.vertical, 26) }
 
             VStack(alignment: .leading, spacing: 15) {
-                VStack(alignment: .leading, spacing: 6) {
-                    speaker("you", spoken: question.source == .voice)
-                    Text(question.text.isEmpty ? "…" : question.text)
-                        .font(Theme.serif(18))
-                        .foregroundStyle(question.text.isEmpty ? Theme.inkFaint : Theme.ink)
-                        .lineSpacing(6)
-                        .fixedSize(horizontal: false, vertical: true)
+                // The question is the handle for its whole exchange. Deleting is
+                // deliberately absent: removing a question mid-thread would strand its
+                // answer with nothing above it, so that lives on the conversation list.
+                Menu {
+                    Button {
+                        conversation.askAgain(question.text)
+                    } label: {
+                        Label("Ask again", systemImage: "arrow.clockwise")
+                    }
+                    if question.state == .asking || question.state == .failed {
+                        Button {
+                            services.hub.recheck(questionId: question.id)
+                            Haptics.light()
+                        } label: {
+                            Label("Check for answer", systemImage: "arrow.down.circle")
+                        }
+                    }
+                    Button {
+                        UIPasteboard.general.string = question.text
+                        Haptics.success()
+                    } label: {
+                        Label("Copy question", systemImage: "doc.on.doc")
+                    }
+                    if hasAnswer(question, in: conversation) {
+                        Button {
+                            UIPasteboard.general.string = answerText(for: question, in: conversation)
+                            Haptics.success()
+                        } label: {
+                            Label("Copy answer", systemImage: "doc.on.clipboard")
+                        }
+                    }
+                } label: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        speaker("you", spoken: question.source == .voice)
+                        Text(question.text.isEmpty ? "…" : question.text)
+                            .font(Theme.serif(18))
+                            .foregroundStyle(question.text.isEmpty ? Theme.inkFaint : Theme.ink)
+                            .lineSpacing(6)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .contentShape(Rectangle())
                 }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
 
                 // The analyst's live commentary, and its record once finished. Persisted
                 // beat by beat, so this survives the app being killed mid-question.
@@ -111,7 +176,7 @@ struct ConversationView: View {
 
                 if question.state == .asking,
                           (conversation.state.beatsByQuestion[question.id] ?? []).isEmpty {
-                    workingLine(services.hub.status.label ?? "Thinking…")
+                    workingLine(services.hub.status.label ?? "Thinking…", since: question.askedAt)
                 }
             }
             .padding(.horizontal, Theme.gutter)
@@ -140,7 +205,7 @@ struct ConversationView: View {
             }
         case .followups:
             FollowUps(items: item.followups) { question in
-                conversation?.proposeFollowUp(question)
+                conversation.proposeFollowUp(question)
             }
         case .note:
             EmptyView()
@@ -149,10 +214,15 @@ struct ConversationView: View {
 
     /// Who is speaking. "you" stays quiet; the engine's name carries the accent, so a
     /// glance down the page separates your questions from its answers without reading.
+    private func hasAnswer(_ question: Question, in conversation: ConversationStore) -> Bool {
+        conversation.state.itemsByQuestion[question.id]?.contains { $0.kind == .answer } ?? false
+    }
+
     /// The answer to a question as copyable text, if it has one.
-    private func answerText(for question: Question, in conversation: ConversationStore?) -> String? {
-        conversation?.state.itemsByQuestion[question.id]?
-            .first(where: { $0.kind == .answer })?.answer?.plainText
+    private func answerText(for question: Question, in conversation: ConversationStore) -> String? {
+        conversation.state.itemsByQuestion[question.id]?
+            .first(where: { $0.kind == .answer })?.answer?
+            .plainText(questionId: question.id, answeredAt: question.answeredAt)
     }
 
     private func speaker(_ name: String, spoken: Bool = false, accent: Bool = false) -> some View {
@@ -167,11 +237,24 @@ struct ConversationView: View {
         }
     }
 
-    private func workingLine(_ text: String) -> some View {
+    /// There is no timeout on a question, so the wait has to be legible: an elapsed
+    /// counter is the difference between "still working" and "this has hung".
+    private func workingLine(_ text: String, since: Date? = nil) -> some View {
         HStack(spacing: 8) {
             ProgressView().controlSize(.small)
             Text(text).font(Theme.sans(13)).foregroundStyle(Theme.inkFaint)
+            if let since {
+                Text(elapsedLabel(since))
+                    .font(Theme.mono(11))
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.inkFaint.opacity(0.8))
+            }
         }
+    }
+
+    private func elapsedLabel(_ since: Date) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(since)))
+        return seconds < 60 ? "\(seconds)s" : "\(seconds / 60)m \(seconds % 60)s"
     }
 
     private var emptyState: some View {
@@ -201,12 +284,12 @@ struct ConversationView: View {
     @ViewBuilder
     private var composer: some View {
         VStack(spacing: 10) {
-            if let failure = conversation?.voiceError ?? services.recorder.state.failure {
+            if let failure = conversation.voiceError ?? services.recorder.state.failure {
                 Text(failure).font(Theme.sans(12)).foregroundStyle(Theme.warning)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, Theme.gutter)
             }
-            if let pending = conversation?.state.pending {
+            if let pending = conversation.state.pending {
                 reviewComposer(pending)
             } else if typing {
                 keyboardComposer
@@ -218,7 +301,7 @@ struct ConversationView: View {
         .padding(.bottom, 14)
         .animation(.easeInOut(duration: 0.22), value: typing)
         .animation(.easeInOut(duration: 0.22), value: services.recorder.state.isRecording)
-        .animation(.easeInOut(duration: 0.22), value: conversation?.state.pending?.id)
+        .animation(.easeInOut(duration: 0.22), value: conversation.state.pending?.id)
     }
 
     /// A spoken question, transcribed and awaiting your say-so. Transcription is not
@@ -246,7 +329,7 @@ struct ConversationView: View {
                         .lineSpacing(5)
                         .lineLimit(1...6)
                         .focused($composerFocused)
-                        .onChange(of: pendingText) { _, new in conversation?.editPending(new) }
+                        .onChange(of: pendingText) { _, new in conversation.editPending(new) }
                 } else {
                     TypedText(text: pending.text)
                         .font(Theme.serif(17))
@@ -276,7 +359,7 @@ struct ConversationView: View {
                     Haptics.light()
                     editingPending = false
                     composerFocused = false
-                    conversation?.cancelPending()
+                    conversation.cancelPending()
                 } label: {
                     Text("Cancel")
                         .font(Theme.sans(15, .medium))
@@ -290,7 +373,7 @@ struct ConversationView: View {
                     Haptics.medium()
                     editingPending = false
                     composerFocused = false
-                    conversation?.submitPending()
+                    conversation.submitPending()
                 } label: {
                     HStack(spacing: 8) {
                         Text("Send").font(Theme.serif(16, .medium))
@@ -437,23 +520,23 @@ struct ConversationView: View {
     private func sendTyped() {
         guard !trimmedDraft.isEmpty else { return }
         Haptics.light()
-        conversation?.ask(trimmedDraft)
+        conversation.ask(trimmedDraft)
         draft = ""
     }
 
     private func toggleRecording() {
         if services.recorder.state.isRecording {
             Haptics.light()
-            conversation?.stopVoice()
+            conversation.stopVoice()
         } else {
             Haptics.heavy()
-            conversation?.startVoice()
+            conversation.startVoice()
         }
     }
 
     /// Is anything in flight? Drives the heartbeat so timers keep counting.
     private var isWorking: Bool {
-        conversation?.state.questions.contains { $0.state == .asking || $0.state == .transcribing } ?? false
+        conversation.state.questions.contains { $0.state == .asking || $0.state == .transcribing }
     }
 
     private var wallClock: String {
@@ -504,11 +587,11 @@ struct NarrationView: View {
                 header
                 if expanded {
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(beats.enumerated()), id: \.element.seq) { index, beat in
+                        ForEach(Array(timed.enumerated()), id: \.element.beat.seq) { index, entry in
                             if index > 0 {
                                 Rectangle().fill(Theme.rule.opacity(0.5)).frame(height: 0.5)
                             }
-                            row(beat, isCurrent: live && beat.seq == beats.last?.seq)
+                            row(entry.beat, seconds: entry.seconds, isCurrent: live && index == timed.count - 1)
                         }
                     }
                     .padding(.top, 4)
@@ -534,6 +617,9 @@ struct NarrationView: View {
                 Text("·")
                 Text("\(beats.count) step\(beats.count == 1 ? "" : "s")")
                     .font(Theme.sans(11))
+                if live, !userChose, beats.count > liveTail {
+                    Text("· showing latest \(liveTail)").font(Theme.sans(10))
+                }
                 if let total = totalDuration {
                     Text("·")
                     Text(total).font(Theme.mono(11)).monospacedDigit()
@@ -547,15 +633,31 @@ struct NarrationView: View {
         .buttonStyle(.plain)
     }
 
-    private func row(_ beat: NarrationBeat, isCurrent: Bool) -> some View {
+    /// Each beat paired with how long it took — walked once, in order, instead of
+    /// searching the array again for every row.
+    private var timed: [(beat: NarrationBeat, seconds: Int)] {
+        let end = Int64(now.timeIntervalSince1970 * 1000)
+        let all = beats.indices.map { index -> (beat: NarrationBeat, seconds: Int) in
+            let next = index < beats.count - 1 ? beats[index + 1].atMs : end
+            return (beats[index], max(0, Int((next - beats[index].atMs) / 1000)))
+        }
+        // A long run can produce twenty-plus steps — a verification loop against a flaky
+        // source will do it easily. While it is RUNNING, what matters is what it is doing
+        // now, so only the recent steps are shown; tapping the header reveals the lot.
+        guard live, !userChose, all.count > liveTail else { return all }
+        return Array(all.suffix(liveTail))
+    }
+
+    private let liveTail = 5
+
+    private func row(_ beat: NarrationBeat, seconds: Int, isCurrent: Bool) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             MarkdownText(raw: beat.text, font: Theme.sans(13),
                          color: isCurrent ? Theme.ink : Theme.inkSoft, lineSpacing: 3)
             // Held back for the first second: a step stamped "0s" reads as though it never
             // ran, when it has only just started.
-            let secs = elapsed(for: beat)
-            if secs >= 1 {
-                Text("\(secs)s")
+            if seconds >= 1 {
+                Text("\(seconds)s")
                     .font(Theme.mono(11))
                     .foregroundStyle(isCurrent ? Theme.accent : Theme.inkFaint)
                     .monospacedDigit()
@@ -564,16 +666,17 @@ struct NarrationView: View {
         .padding(.vertical, 7)
     }
 
-    private func elapsed(for beat: NarrationBeat) -> Int {
-        guard let index = beats.firstIndex(where: { $0.seq == beat.seq }) else { return 0 }
-        let end = index < beats.count - 1 ? beats[index + 1].atMs : Int64(now.timeIntervalSince1970 * 1000)
-        return max(0, Int((end - beat.atMs) / 1000))
-    }
-
     private var totalDuration: String? {
         guard let first = beats.first else { return nil }
         let end = live ? Int64(now.timeIntervalSince1970 * 1000) : (beats.last?.atMs ?? first.atMs)
         let secs = max(0, Int((end - first.atMs) / 1000))
         return secs >= 1 ? "\(secs)s" : nil
     }
+}
+
+/// Height of the newest turn, so the scroll tail can be sized to exactly the room that
+/// question needs to reach the top of the screen.
+private struct LastTurnHeight: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }

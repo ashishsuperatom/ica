@@ -19,6 +19,10 @@ struct TurnBreak: View {
 
 /// Where the conversation could go next.
 ///
+/// Deliberately compact and quiet: these are asides, not content. They sit below the
+/// answer and must not compete with it for attention or for vertical space — a phone
+/// screen spent on suggestions is a screen not spent on the report.
+///
 /// Tapping one does NOT ask it — it becomes a draft in the composer with Send and Cancel,
 /// exactly like a spoken question. A suggestion is the engine's idea, not yours, and it
 /// should pass through the same moment of consent before it costs a run.
@@ -30,40 +34,41 @@ struct FollowUps: View {
         if items.isEmpty {
             EmptyView()
         } else {
-            VStack(alignment: .leading, spacing: 7) {
+            VStack(alignment: .leading, spacing: 5) {
                 Text("NEXT")
-                    .font(Theme.sans(9.5, .heavy))
-                    .tracking(1.2)
+                    .font(Theme.sans(9, .heavy))
+                    .tracking(1.1)
                     .foregroundStyle(Theme.inkFaint)
+                    .padding(.bottom, 1)
                 ForEach(items, id: \.self) { item in
                     Button {
                         Haptics.light()
                         onPick(item)
                     } label: {
-                        HStack(alignment: .firstTextBaseline, spacing: 9) {
-                            Text(item)
-                                .font(Theme.serif(15))
-                                .foregroundStyle(Theme.ink)
-                                .multilineTextAlignment(.leading)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Spacer(minLength: 4)
-                            Image(systemName: "arrow.up.left")
-                                .font(Theme.sans(11, .semibold))
+                        HStack(alignment: .firstTextBaseline, spacing: 7) {
+                            Image(systemName: "arrow.turn.down.right")
+                                .font(Theme.sans(9, .semibold))
                                 .foregroundStyle(Theme.accent)
+                            Text(item)
+                                .font(Theme.sans(13))
+                                .foregroundStyle(Theme.inkSoft)
+                                .multilineTextAlignment(.leading)
+                                .lineSpacing(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
                         }
-                        .padding(.horizontal, 13)
-                        .padding(.vertical, 11)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(
-                            RoundedRectangle(cornerRadius: 12).fill(Theme.paperInset)
-                                .overlay(RoundedRectangle(cornerRadius: 12)
-                                    .stroke(Theme.rule.opacity(0.8), lineWidth: 0.5))
+                            RoundedRectangle(cornerRadius: 9).fill(Theme.paperInset)
                         )
                     }
                     .buttonStyle(.plain)
                 }
             }
             .padding(.top, 4)
+            .padding(.bottom, 2)
         }
     }
 }

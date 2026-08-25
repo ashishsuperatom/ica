@@ -24,6 +24,7 @@ import { createSemanticModeller, promptVersion as semanticPromptVersion } from '
 import { createReflex } from './agents/reflex/index.js'
 import { createNarrator, capResultData } from './agents/narrator/index.js'
 import { createAnalyst, promptVersion as analystPromptVersion } from './agents/analyst/index.js'
+import { createComposer, type Composer } from './agents/composer/index.js'
 import { createConnector, promptVersion as connectorPromptVersion } from './agents/connector/index.js'
 import { createGroundingAgent, promptVersion as groundingPromptVersion } from './agents/grounding/index.js'
 import { openAnswers, normalizeQuestion } from './answers.js'
@@ -247,6 +248,33 @@ function makeAgentSlot<A extends Agent>(role: string, promptVersion: () => Promi
 }
 const analystSlot  = makeAgentSlot('analyst',  analystPromptVersion,  (resumeId) => listSources().then(sources => createAnalyst({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { harness: ANALYST_HARNESS, model: ANALYST_MODEL, resumeId } })))
 const semanticSlot = makeAgentSlot('semantic', semanticPromptVersion, (resumeId) => listSources().then(sources => createSemanticModeller({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { harness: SEMANTIC_HARNESS, model: SEMANTIC_MODEL, resumeId } })))
+// The COMPOSER (System 2), ONE PER SESSION: each chat session gets its own composer (a cheap opencode CLIENT
+// session on the shared server, so N sessions ≈ free). Created on the session's first question, reused for the
+// session; only the in-flight question needs memory. Idle sessions are disposed by the sweep below.
+const composersBySession = new Map<string, { composer: Promise<Composer>; lastUsed: number }>()
+function getComposer(sid: string): Promise<Composer> {
+  let e = composersBySession.get(sid)
+  if (!e) {
+    e = { composer: createComposer({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, ica: { baseUrl: OC_URL } }), lastUsed: Date.now() }
+    composersBySession.set(sid, e)
+    console.log(`[ica] composer: new session ${sid.slice(0, 8)} (live composers: ${composersBySession.size})`)
+  }
+  e.lastUsed = Date.now()
+  return e.composer
+}
+// Dispose a session's composer only after it has been genuinely idle this long — lastUsed is bumped on EVERY
+// question for that session (see getComposer), so an active chat is never closed; a session that goes quiet for
+// 60 min is torn down (freeing its opencode session), and the next question in it transparently wakes a fresh one.
+const COMPOSER_IDLE_MS = Number(process.env.ICA_COMPOSER_IDLE_MS) || 60 * 60 * 1000
+setInterval(() => {
+  const now = Date.now()
+  for (const [sid, e] of composersBySession) {
+    if (now - e.lastUsed < COMPOSER_IDLE_MS) continue
+    composersBySession.delete(sid)
+    e.composer.then(c => { try { c.session.stop() } catch {} }).catch(() => {})
+    console.log(`[ica] composer: disposed idle session ${sid.slice(0, 8)} (live composers: ${composersBySession.size})`)
+  }
+}, 5 * 60 * 1000).unref?.()
 const connectorSlot = makeAgentSlot('connector', connectorPromptVersion, (resumeId) => createConnector({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, datasourcesDir: DATASOURCES_DIR, ica: { harness: CONNECTOR_HARNESS, model: CONNECTOR_MODEL, resumeId } }))
 // COLD by design: never warmed at boot (below); spun up only when the admin triggers a grounding build.
 const groundingSlot = makeAgentSlot('grounding', groundingPromptVersion, (resumeId) => listSources().then(sources => createGroundingAgent({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { harness: GROUNDING_HARNESS, model: GROUNDING_MODEL, resumeId } })))
@@ -374,8 +402,9 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   // REFLEX (stateless) classifies REUSE vs BUILD; it has no "modify" decision. The SAME question is a reuse.
   const curNode = pos !== ROOT ? graph.getNode(pos) : null
   const curQ = curNode ? ((curNode.props as any)?.question ?? curNode.summary) : undefined
-  let overlapHint: { program: string; relation: string } | undefined   // a related program the reflex flagged → a pointer for the analyst to adapt
-  let reflexPlacement: string | undefined                               // 'root' or an intentId — where the reflex says this question's node hangs
+  let overlapHint: { program: string; relation: string } | undefined   // the closest existing program → a pointer for the composer/analyst to adapt
+  let reflexPlacement: string | undefined                               // 'root' or an intentId — where this question's node hangs
+  let programCandidates: { question: string; program?: string; score: number }[] = []   // engine-searched matches handed to the composer
   let modifyTarget: { programDir: string; prevQuestion?: string } | null = null
   if (explicitEdit) {
     // The user explicitly prefixed "edit:"/"modify:" — edit the current node's program in place; if there's
@@ -388,23 +417,20 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       console.log('[ica] explicit edit, but no current program to edit → building fresh')
     }
   } else {
+    // NO reflex routing. The exact-match fast-path above already handled exact repeats (no LLM). For everything
+    // else the ENGINE searches (semantic) and hands the composer the candidate programs + scores — the composer
+    // judges (reuse a strong match / compose from concepts / escalate). Placement is the regex heuristic: a
+    // self-contained question is a new ROOT topic; a follow-up hangs under the current node.
+    reflexPlacement = rootQuestion ? 'root' : pos
     try {
-      // Semantic retrieval: hand the reflex the top-K most-similar EXISTING intents (candidates), not the catalog.
-      const candidates = vectors
-        ? (await hybridSearch(graph, vectors, bgeEmbedder, question, { kind: 'intent', limit: 8 }))
-            .map(h => { const p = graph.getNode(h.id)?.props as any; return { intentId: h.id, question: (p?.question ?? h.label ?? '') as string, program: p?.program, params: p?.params } })
-        : []
-      const route = await reflex.route(graph, question, candidates, { firstInSession: pos === ROOT, currentIntentId: pos === ROOT ? undefined : pos, currentQuestion: curQ })
-      reflexPlacement = route.placement
-      if (route.decision === 'build' && route.adapt) overlapHint = { program: route.adapt.program, relation: 'related' }
-      console.log(`[ica] reflex: ${route.decision}${route.decision === 'reuse' ? ` → ${route.program}` : route.adapt ? ` (adapt ${route.adapt.program})` : ''} · place=${route.placement === 'root' ? 'ROOT' : route.placement.slice(0, 14)}`)
-      if (route.decision === 'reuse' && existsSync(join(WORKSPACE, route.program, 'program.ts'))) {
-        const cat = (graph.getNode(route.intentId)?.props as any)?.category ?? 'analysis'
-        if (await reuseProgram(route.program, route.params, cat, { sid, qid, question, norm, t0, nodeId: route.intentId })) return
-        // failed → fall through to rebuild
-      }
+      const hits = vectors ? await hybridSearch(graph, vectors, bgeEmbedder, question, { kind: 'intent', limit: 6 }) : []
+      programCandidates = hits
+        .map(h => { const p = graph.getNode(h.id)?.props as any; return { question: (p?.question ?? h.label ?? '') as string, program: p?.program as string | undefined, score: h.score } })
+        .filter(c => c.program && existsSync(join(WORKSPACE, c.program!, 'program.ts')))
+      if (programCandidates[0]?.program) overlapHint = { program: programCandidates[0].program!, relation: 'closest' }
+      console.log(`[ica] search: ${programCandidates.length} program candidate(s)${programCandidates[0] ? ` · top ${programCandidates[0].program} (${programCandidates[0].score.toFixed(2)})` : ''} → composer`)
     } catch (e: any) {
-      console.log(`[ica] reflex failed (${e?.message ?? e}) — building via the analyst`)
+      console.log(`[ica] candidate search failed (${e?.message ?? e}) — composer builds from concepts`)
     }
   }
 
@@ -484,21 +510,35 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // session so the next question starts clean. Tune via ANALYST_MAX_TURN_MS.
     const MAX_TURN_MS = Number(process.env.ANALYST_MAX_TURN_MS) || 30 * 60 * 1000
     const TIMED_OUT = Symbol('analyst-timeout')
-    const askP = analyst.ask(question, handlers, { qid, modify: modifyTarget ?? undefined, hint })
-    askP.catch(() => {})   // if we abandon it on timeout, don't leak an unhandled rejection
-    let capT: ReturnType<typeof setTimeout> | undefined
-    const raced: any = await Promise.race([askP, new Promise((res) => { capT = setTimeout(() => res(TIMED_OUT), MAX_TURN_MS) })])
-    if (capT) clearTimeout(capT)
     let r: any
-    if (raced === TIMED_OUT) {
-      const recovered = await readJsonSafe<any>(join(WORKSPACE, 'out', qid, 'answer.json'), null, 'analyst')
-      log.warn('analyst', `turn exceeded ${(MAX_TURN_MS / 1000) | 0}s for ${qid} — ${recovered ? 'recovered the written answer' : 'nothing written'}; resetting the stuck session`)
-      try { (analyst as any).session?.reset?.() } catch { /* best-effort */ }
-      r = { answer: recovered ?? { status: 'error', answer: 'That one took too long and was stopped — please try again.' }, category: recovered?.category ?? 'analysis', ms: Date.now() - t0, lastLines: '' }
-    } else {
-      r = raced
+    // ── SYSTEM 2 FIRST: the COMPOSER composes this from existing concepts (fast, cheap). It shares this workspace
+    // and writes the same out/<qid>/{built,answer}.json, so a composed result flows through the IDENTICAL
+    // post-processing below. Skip for a MODIFY (the composer doesn't edit). On escalation → the analyst (System 3).
+    let authoredBy: 'composer' | 'analyst' = 'analyst'
+    if (!modifyTarget) {
+      const composer = await getComposer(sid)
+      const c = await composer.ask(question, handlers, { qid, candidates: programCandidates })
+      if (c.escalate) console.log(`[ica] composer → escalate · ${c.escalate.reason}`)
+      else {
+        authoredBy = 'composer'
+        r = { answer: c.answer, category: c.category ?? 'analysis', ms: c.ms, lastLines: c.lastLines ?? '' }
+        console.log(`[ica] composer · ${(c.ms / 1000).toFixed(1)}s · status=${c.answer?.status ?? 'no-json'}`)
+      }
     }
-    console.log(`[ica] analyst · ${r.category} · ${(r.ms / 1000).toFixed(1)}s · status=${r.answer?.status ?? 'no-json'}`)
+    if (!r) {   // composer escalated (or this is a MODIFY) → the analyst (System 3) discovers + builds
+      const askP = analyst.ask(question, handlers, { qid, modify: modifyTarget ?? undefined, hint })
+      askP.catch(() => {})   // if we abandon it on timeout, don't leak an unhandled rejection
+      let capT: ReturnType<typeof setTimeout> | undefined
+      const raced: any = await Promise.race([askP, new Promise((res) => { capT = setTimeout(() => res(TIMED_OUT), MAX_TURN_MS) })])
+      if (capT) clearTimeout(capT)
+      if (raced === TIMED_OUT) {
+        const recovered = await readJsonSafe<any>(join(WORKSPACE, 'out', qid, 'answer.json'), null, 'analyst')
+        log.warn('analyst', `turn exceeded ${(MAX_TURN_MS / 1000) | 0}s for ${qid} — ${recovered ? 'recovered the written answer' : 'nothing written'}; resetting the stuck session`)
+        try { (analyst as any).session?.reset?.() } catch { /* best-effort */ }
+        r = { answer: recovered ?? { status: 'error', answer: 'That one took too long and was stopped — please try again.' }, category: recovered?.category ?? 'analysis', ms: Date.now() - t0, lastLines: '' }
+      } else r = raced
+      console.log(`[ica] analyst · ${r.category} · ${(r.ms / 1000).toFixed(1)}s · status=${r.answer?.status ?? 'no-json'}`)
+    }
 
     // The analyst is self-sufficient: it answers from the semantic model when a unit/concept fits, and does
     // its OWN analysis over the data when nothing fits. It NEVER blocks on the model-builder — the modeler is
@@ -560,9 +600,13 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     const authoredProgramDir = programDir ?? modifyTarget?.programDir
     if (authoredProgramDir && builtIntentId) {
       const slug = authoredProgramDir.replace(/^programs\//, '')
-      const authoredBy = { harness: ANALYST_HARNESS, provider: process.env.ICA_ANALYST_PROVIDER || null, model: ANALYST_MODEL ?? null, at: Date.now() }
+      // `by` = which SYSTEM/agent authored it (analyst=System 3 discovery; composer=System 2 concept-composition).
+      // Deterministic + engine-known (never the LLM), so a later quality diff between authors is debuggable.
+      const authoredMeta = authoredBy === 'composer'
+        ? { by: 'composer', harness: process.env.ICA_COMPOSER_HARNESS || 'opencode', provider: process.env.ICA_COMPOSER_PROVIDER || 'opencode-go', model: process.env.ICA_COMPOSER_MODEL || 'deepseek-v4-flash', at: Date.now() }
+        : { by: 'analyst', harness: ANALYST_HARNESS, provider: process.env.ICA_ANALYST_PROVIDER || null, model: ANALYST_MODEL ?? null, at: Date.now() }
       graph.putNode({ id: `prog:${slug}`, kind: 'program', label: slug, summary: authoredProgramDir,
-        props: { dir: authoredProgramDir, authoredBy, category: r.category } })
+        props: { dir: authoredProgramDir, authoredBy: authoredMeta, category: r.category } })
       graph.putEdge({ from: builtIntentId, to: `prog:${slug}`, type: 'program' })
     }
     // No explicit wake needed — the always-running consolidation timer picks this up on its next tick. That

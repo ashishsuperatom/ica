@@ -43,10 +43,6 @@ final class HubClient {
     private var pingTimer: Timer?
     private var reconnectAttempt = 0
     private var deliberatelyClosed = false
-    /// Fires when a turn goes quiet for too long. The busy state is driven by the
-    /// heartbeat, never by a flag we must remember to clear — so a stale "answering"
-    /// left over from a reconnect times out by itself instead of spinning forever.
-    private var watchdog: Task<Void, Never>?
 
     init(db: AppDatabase, connection: Connection) {
         self.db = db
@@ -78,6 +74,15 @@ final class HubClient {
         // Pull anything that landed while we were away. The DO is always on and buffers
         // per user, so this recovers answers WITHOUT waking a suspended engine — and it
         // also brings across conversations had on the web or another device.
+        // ONE request, whatever our history looks like.
+        //
+        // The hub already keeps a delivery ledger: every buffered answer carries an
+        // `acked` flag, `sync:req` returns exactly the answers this user has NOT acked,
+        // and we ack them once they are safely in the local database. So the server
+        // already knows what we are owed — asking it per question would be reimplementing
+        // that ledger on the client, and it would scale with history on every reconnect
+        // (mobile reconnects constantly). Two messages per connect, regardless of whether
+        // you have 3 questions or 3000.
         send(payload: ["t": "sync:req"])
         status = .connected
         reconnectAttempt = 0
@@ -88,7 +93,6 @@ final class HubClient {
     func disconnect() {
         deliberatelyClosed = true
         stopPing()
-        watchdog?.cancel()
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
         status = .idle
@@ -147,6 +151,13 @@ final class HubClient {
         send(raw: ["to": ["type": "code-engine"], "payload": payload])
     }
 
+    /// Ask the hub about ONE specific question. Deliberately not used on connect — that
+    /// is what sync:req is for. This exists for the user-initiated case: a turn that looks
+    /// stuck, where someone wants to check rather than wait.
+    func recheck(questionId: String) {
+        send(payload: ["t": "answer:get", "qid": questionId])
+    }
+
     /// Ask a question. The qid is already the local row's primary key, so the answer
     /// lands back on the right row no matter how long it takes or how often we reconnect.
     func ask(question: Question) {
@@ -162,7 +173,6 @@ final class HubClient {
             "questionId": question.id,
             "role": "user",
         ])
-        armWatchdog()
     }
 
     // ── Receiving ────────────────────────────────────────────────────────────
@@ -190,12 +200,10 @@ final class HubClient {
     private func handleDrop() {
         stopPing()
         socket = nil
-        // An in-flight turn cannot survive a dropped socket — end it rather than leaving
-        // a spinner that never resolves.
-        if let qid = activeQuestionId {
-            try? db.markQuestion(id: qid, state: .failed, answeredAt: .now)
-            activeQuestionId = nil
-        }
+        // The in-flight question is deliberately LEFT OPEN. There is no timeout on a
+        // question anywhere in this client: the analyst can think for as long as it needs,
+        // and the hub buffers the answer durably, so reconnecting pulls it. Marking the
+        // turn failed here used to throw away work that was still on its way.
         status = .connecting
         scheduleReconnect()
     }
@@ -212,7 +220,6 @@ final class HubClient {
         // instead of looking like the engine never replied.
         if t != "tick" { NSLog("[hub] IN %@ keys=%@", t, msg.keys.sorted().joined(separator: ",")) }
 
-        if activeQuestionId != nil { armWatchdog() }   // any traffic = the engine is alive
 
         switch t {
         case "tick":
@@ -249,8 +256,10 @@ final class HubClient {
                   let answer = msg["answer"] as? [String: Any],
                   let data = try? JSONSerialization.data(withJSONObject: answer),
                   let json = String(data: data, encoding: .utf8) else { return }
-            let sid = (try? db.question(id: qid))?.sessionId ?? ""
-            _ = try? db.merge(sessions: [], answers: [(qid: qid, sessionId: sid,
+            let existing = try? db.question(id: qid)
+            if existing?.state == .failed { try? db.clearErrors(questionId: qid) }
+            NSLog("[hub] recovered answer for qid=%@", qid)
+            _ = try? db.merge(sessions: [], answers: [(qid: qid, sessionId: existing?.sessionId ?? "",
                                                        question: (msg["question"] as? String) ?? "",
                                                        answerJSON: json)],
                               projectId: connection.projectId, accountId: connection.userId)
@@ -259,8 +268,6 @@ final class HubClient {
 
         case "machine:waking":
             status = .waking
-            // Waking a suspended machine takes ~60s; a normal watchdog would false-fire.
-            armWatchdog(seconds: 150)
 
         case "analyst:status", "analyst:progress":
             status = .connected
@@ -299,12 +306,16 @@ final class HubClient {
 
             let json = (try? JSONSerialization.data(withJSONObject: enriched))
                 .flatMap { String(data: $0, encoding: .utf8) }
-            NSLog("[hub] ANSWER stored qid=%@ bytes=%d", qid, json?.count ?? 0)
+            NSLog("[hub] ANSWER qid=%@ bytes=%d wasFailed=%@", qid, json?.count ?? 0,
+                  question.state == .failed ? "yes" : "no")
+            // If we timed this turn out and the answer arrived anyway, the timeout was
+            // wrong — clear the apology so the reader isn't left with an error sitting
+            // above a perfectly good answer.
+            if question.state == .failed { try? db.clearErrors(questionId: qid) }
             try? db.appendFeedItem(sessionId: question.sessionId, questionId: qid, kind: .answer,
                                    payload: json ?? #"{"answer":"Answer could not be stored."}"#)
             try? db.markQuestion(id: qid, state: .answered, answeredAt: .now)
             if qid == activeQuestionId { activeQuestionId = nil }
-            watchdog?.cancel()
             return
 
         case "followups":
@@ -328,7 +339,6 @@ final class HubClient {
                 try? db.markQuestion(id: qid, state: .answered, answeredAt: .now)
                 activeQuestionId = nil
             }
-            watchdog?.cancel()
 
         case "error":
             let text = (msg["message"] as? String) ?? "Something went wrong."
@@ -338,7 +348,6 @@ final class HubClient {
                 try? db.markQuestion(id: qid, state: .failed, answeredAt: .now)
             }
             activeQuestionId = nil
-            watchdog?.cancel()
 
         default:
             NSLog("[hub] UNHANDLED %@", t)
@@ -350,16 +359,4 @@ final class HubClient {
         NSLog("[hub] %@ keys=%@", what, msg.keys.sorted().joined(separator: ","))
     }
 
-    private func armWatchdog(seconds: Double = 90) {
-        watchdog?.cancel()
-        watchdog = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(seconds))
-            guard !Task.isCancelled, let qid = self.activeQuestionId else { return }
-            try? self.db.appendFeedItem(sessionId: (try? self.db.question(id: qid))?.sessionId ?? "",
-                                        questionId: qid, kind: .error,
-                                        payload: "The engine went quiet. Please try again.")
-            try? self.db.markQuestion(id: qid, state: .failed, answeredAt: .now)
-            self.activeQuestionId = nil
-        }
-    }
 }

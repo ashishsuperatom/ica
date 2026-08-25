@@ -37,7 +37,7 @@ struct SessionListView: View {
             }
         }
         .navigationDestination(item: $openSession) { session in
-            ConversationView(session: session)
+            ConversationView(session: session, services: services)
         }
         .sheet(isPresented: $showSwitcher) { ContextSwitcherView() }
         .sheet(isPresented: $showSettings) { AccountView() }

@@ -17,7 +17,7 @@ struct MarkdownText: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ForEach(Array(MarkdownBlock.parse(raw).enumerated()), id: \.offset) { _, block in
+            ForEach(Array(MarkdownBlock.cached(raw).enumerated()), id: \.offset) { _, block in
                 switch block {
                 case .paragraph(let text):
                     inline(text)
@@ -54,6 +54,23 @@ struct MarkdownText: View {
 }
 
 enum MarkdownBlock {
+    /// Parsed blocks, keyed by the source text.
+    ///
+    /// `body` runs on EVERY render pass, and this view renders answer prose, caveats,
+    /// section bodies and every narration beat — the last of which re-renders once a
+    /// second while a question is running. Re-parsing markdown each time is pure waste,
+    /// and the same text always produces the same blocks, so it is cached and never needs
+    /// invalidating.
+    static func cached(_ raw: String) -> [MarkdownBlock] {
+        if let hit = store.object(forKey: raw as NSString) { return hit.blocks }
+        let blocks = parse(raw)
+        store.setObject(Parsed(blocks), forKey: raw as NSString)
+        return blocks
+    }
+
+    private final class Parsed { let blocks: [MarkdownBlock]; init(_ b: [MarkdownBlock]) { blocks = b } }
+    private static let store = NSCache<NSString, Parsed>()
+
     case paragraph(String)
     case bullets([String])
     case table(columns: [String], rows: [[JSONValue]])

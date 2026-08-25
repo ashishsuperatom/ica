@@ -46,59 +46,57 @@ struct EngineAnswer: Hashable {
         var note: String?
         var items: [Figure] = []
         var body: String?
-        let id = UUID()
+        /// Position within the answer. STABLE across re-parses — see above.
+        var index: Int = 0
+        var id: String { "\(index)-\(kind.rawValue)-\(title ?? "")" }
     }
 
-    /// The whole report as plain text, for copying out. Tables become aligned columns
-    /// rather than JSON — what lands in a message or an email should be readable there,
-    /// not a shape that only means something inside this app.
-    var plainText: String {
+    /// The whole report as plain text, matching what the web card copies (answerToText in
+    /// user-ui/src/App.tsx) so an answer pasted from a phone and one pasted from a browser
+    /// are the same document.
+    ///
+    /// Tables are TAB-separated, as on the web: tabs paste into a spreadsheet as real
+    /// columns, which is where a copied table usually ends up. Section titles are
+    /// uppercased to stand in for the headings plain text cannot carry.
+    func plainText(questionId: String? = nil, answeredAt: Date? = nil) -> String {
         var out: [String] = []
         if let answer, !answer.isEmpty { out.append(answer) }
         if let period, !period.isEmpty { out.append("Time filter: \(period)") }
-        if !figures.isEmpty {
-            out.append(figures.map { figure in
-                let sub = figure.sub.map { " (\($0))" } ?? ""
-                return "\(figure.label): \(figure.display)\(sub)"
-            }.joined(separator: "\n"))
-        }
+        if !figures.isEmpty { out.append(figures.map(Self.line).joined(separator: "\n")) }
+
         for section in sections {
-            var block: [String] = []
-            if let title = section.title, !title.isEmpty { block.append(title) }
+            if let title = section.title, !title.isEmpty { out.append(title.uppercased()) }
             switch section.kind {
             case .text:
-                if let body = section.body { block.append(body) }
+                if let body = section.body, !body.isEmpty { out.append(body) }
             case .kpis:
-                block.append(section.items.map { "\($0.label): \($0.display)" }.joined(separator: "\n"))
+                out.append(section.items.map(Self.line).joined(separator: "\n"))
             case .table:
-                block.append(Self.textTable(columns: section.columns, rows: section.rows, total: section.total))
+                var rows = [section.columns.joined(separator: "\t")]
+                rows.append(contentsOf: section.rows.map { $0.map(\.copyText).joined(separator: "\t") })
+                if !section.total.isEmpty { rows.append(section.total.map(\.copyText).joined(separator: "\t")) }
+                out.append(rows.joined(separator: "\n"))
             }
-            if let note = section.note, !note.isEmpty { block.append(note) }
-            out.append(block.joined(separator: "\n"))
+            if let note = section.note, !note.isEmpty { out.append(note) }
         }
-        if let caveat, !caveat.isEmpty { out.append("Caveat: \(caveat)") }
+
+        if let caveat, !caveat.isEmpty { out.append("Note: \(caveat)") }
         if let scope, !scope.isEmpty { out.append("Scope: \(scope)") }
         if let source, !source.isEmpty { out.append("Source: \(source)") }
+
+        // Provenance footer, kept apart from the answer — where it came from is part of
+        // being able to trust it later.
+        var meta: [String] = []
+        if let questionId { meta.append("Question ID: \(questionId)") }
+        if let answeredAt { meta.append("Answered: \(answeredAt.formatted(date: .abbreviated, time: .shortened))") }
+        if !meta.isEmpty { out.append("—\n" + meta.joined(separator: "\n")) }
+
         return out.joined(separator: "\n\n")
     }
 
-    /// Pad every column to its widest cell so the table survives being pasted anywhere
-    /// that uses a fixed-width font.
-    private static func textTable(columns: [String], rows: [[JSONValue]], total: [JSONValue]) -> String {
-        var lines: [[String]] = []
-        if !columns.isEmpty { lines.append(columns) }
-        lines.append(contentsOf: rows.map { $0.map(\.display) })
-        if !total.isEmpty { lines.append(total.map(\.display)) }
-        guard let width = lines.map(\.count).max() else { return "" }
-        let widths = (0..<width).map { column in
-            lines.map { $0.indices.contains(column) ? $0[column].count : 0 }.max() ?? 0
-        }
-        return lines.map { line in
-            (0..<width).map { column in
-                let cell = line.indices.contains(column) ? line[column] : ""
-                return cell.padding(toLength: max(widths[column], cell.count), withPad: " ", startingAt: 0)
-            }.joined(separator: "  ").trimmingCharacters(in: .whitespaces)
-        }.joined(separator: "\n")
+    private static func line(_ figure: Figure) -> String {
+        let sub = (figure.sub?.isEmpty == false) ? " (\(figure.sub!))" : ""
+        return "\(figure.label): \(figure.display)\(sub)"
     }
 
     init?(json: String) {
@@ -123,7 +121,11 @@ struct EngineAnswer: Hashable {
             figures = Self.figures([headline])
         }
 
-        sections = (object["sections"] as? [Any] ?? []).compactMap(Self.section)
+        sections = (object["sections"] as? [Any] ?? []).enumerated().compactMap { index, raw in
+            var section = Self.section(raw)
+            section?.index = index
+            return section
+        }
 
         // Older shape: a bare top-level table. Promote it so there is ONE render path.
         if let table = object["table"] as? [String: Any], sections.isEmpty {
@@ -220,6 +222,10 @@ enum JSONValue: Hashable {
     }
 
     var isNumeric: Bool { if case .number = self { return true }; return false }
+
+    /// For copying: a blank rather than an em dash, so a pasted table has empty cells
+    /// where there was no value instead of a character a spreadsheet reads as text.
+    var copyText: String { if case .null = self { return "" }; return display }
 
     // Grouping is pinned rather than taken from the device locale: the engine formats its
     // own figures in western grouping, and a table rendering "4,12,000" beneath "$412k"

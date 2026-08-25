@@ -36,6 +36,24 @@ final class Services {
         }
     }
 
+    /// The app came back to the foreground.
+    ///
+    /// iOS suspends the process in the background, which kills the WebSocket AND freezes
+    /// any reconnect we had scheduled — so without this the app would sit disconnected
+    /// until it was force-quit and relaunched, silently missing every answer that landed
+    /// meanwhile. Reconnecting here also re-runs sync, which pulls exactly those answers.
+    func onForeground() {
+        guard connection.isReady else { return }
+        if hub.status != .connected { hub.connect() }
+        Task { await outbox.drain() }          // and re-send any audio stranded by the suspend
+    }
+
+    /// Going to the background: close the socket deliberately rather than letting it die
+    /// half-open, so the next foreground is a clean connect instead of a timeout.
+    func onBackground() {
+        hub.disconnect()
+    }
+
     /// Re-point at a different project, or reconnect after signing in.
     func reconnect() {
         hub.disconnect()

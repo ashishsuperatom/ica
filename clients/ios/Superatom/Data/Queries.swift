@@ -171,6 +171,11 @@ extension AppDatabase {
     /// abandoned mid-typing is worthless, and left alone these accumulate forever.
     func pruneEmptySessions() throws {
         try writer.write { db in
+            // A spoken turn left mid-transcription can never finish: the recorder and its
+            // upload died with the previous run. Left alone it wedges the composer on
+            // "Transcribing…" forever, with no way to record anything else.
+            try db.execute(sql: "DELETE FROM question WHERE state = 'transcribing'")
+
             // A spoken turn that never produced any text — the recorder was stopped
             // before the detector heard anything, or the transcription never landed.
             // It has no content and can never gain any, so it is not history.
@@ -326,6 +331,15 @@ extension AppDatabase {
     func setQuestionText(id: String, text: String) throws {
         try writer.write { db in
             try db.execute(sql: "UPDATE question SET text = ? WHERE id = ?", arguments: [text, id])
+        }
+    }
+
+    /// Remove error blocks from a question — used when an answer arrives after we had
+    /// already reported a failure.
+    func clearErrors(questionId: String) throws {
+        try writer.write { db in
+            try db.execute(sql: "DELETE FROM feedItem WHERE questionId = ? AND kind = 'error'",
+                           arguments: [questionId])
         }
     }
 

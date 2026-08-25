@@ -160,5 +160,7 @@ Represent an answer so each part does its own job:
   `"AR outstanding ledger, live snapshot 3 Jun 2026"` or `"trp_trn_booking, trailing 6 months"`). Always
   include it: it is the provenance that lets a reader trust the figure.
 
+Run every command in the foreground and wait for it — never background a command or spawn a sub-agent/watcher; if a step fails, say so and move on.
+
 Put each piece where it belongs and the split takes care of itself. Then print the same short answer as
 plain text so it streams live.
