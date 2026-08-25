@@ -46,6 +46,7 @@ export function CloudGate() {
   return <App token={token} projectId={projectId} />
 }
 
+type View = 'chat' | 'semantic' | 'analyst' | 'composer'   // the tabs: chat (answers) + the three agent-log views
 type FeedItem =
   | { id: string; type: 'user-msg'; text: string }
   | { id: string; type: 'step'; text: string }
@@ -55,6 +56,28 @@ type FeedItem =
   | { id: string; type: 'analysis'; beats: string[]; secs?: number[]; qid?: string }   // the receptionist's beats (+ frozen per-beat seconds) — its OWN collapsed card, rendered EXACTLY like the live analysis
   | { id: string; type: 'followups'; items: string[]; qid?: string }   // suggested next questions — a DELAYED card below the answer; a chip FILLS the input (never auto-submits)
   | { id: string; type: 'error'; text: string }
+
+// A ROLLING localStorage copy of an agent-log (last 6 sessions, ≤400 events each) so a RELOAD restores it — the DO
+// deliberately doesn't store this heavy real-time log. Restore on mount only (never clobber live events). Shared by
+// every agent-log view (analyst / composer) so they persist identically.
+function usePersistLog(prefix: string, sessionId: string, events: AgentEvent[], setEvents: (e: AgentEvent[]) => void) {
+  useEffect(() => {
+    if (events.length) return
+    try { const raw = localStorage.getItem(prefix + sessionId); if (raw) setEvents(JSON.parse(raw)) } catch { /* corrupt/oversized */ }
+  }, [sessionId])   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!events.length) return
+    const t = setTimeout(() => {
+      try {
+        localStorage.setItem(prefix + sessionId, JSON.stringify(events.slice(-400)))
+        const idx: string[] = [sessionId, ...(JSON.parse(localStorage.getItem(prefix + 'index') || '[]') as string[]).filter((s) => s !== sessionId)]
+        while (idx.length > 6) { const drop = idx.pop(); if (drop) localStorage.removeItem(prefix + drop) }
+        localStorage.setItem(prefix + 'index', JSON.stringify(idx))
+      } catch { /* localStorage full/blocked — best-effort */ }
+    }, 500)
+    return () => clearTimeout(t)
+  }, [events, sessionId])   // eslint-disable-line react-hooks/exhaustive-deps
+}
 
 export function App({ token, projectId = 'default' }: { token?: string | null; projectId?: string } = {}) {
   const [feed, setFeed]               = useState<FeedItem[]>([])
@@ -70,12 +93,12 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // The main view lives in the URL PATH at ROOT (the subdomain serves the user app for ANY path): a chat is
   // /c/<id>, the other views are /analyst and /semantic. A reload / shared link lands on the same view.
   // `navigate` pushes a history entry; popstate syncs it back.
-  const readView = (): 'chat' | 'semantic' | 'analyst' => {
+  const readView = (): View => {
     const seg = location.pathname.replace(/\/+$/, '').split('/').pop()
-    return seg === 'analyst' || seg === 'semantic' ? seg : 'chat'
+    return seg === 'analyst' || seg === 'semantic' || seg === 'composer' ? seg : 'chat'
   }
-  const [view, setView] = useState<'chat' | 'semantic' | 'analyst'>(readView)
-  const navigate = useCallback((v: 'chat' | 'semantic' | 'analyst') => {
+  const [view, setView] = useState<View>(readView)
+  const navigate = useCallback((v: View) => {
     history.pushState(null, '', v === 'chat' ? `/c/${sidRef.current}${location.search}` : `/${v}`)
     setView(v)
   }, [])
@@ -88,14 +111,13 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // analyst/semantic logs own their own open/follow/nav behaviour separately — see useLogNav below.
   useEffect(() => { if (view === 'chat') scroll(true) }, [view])   // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Agent-LOG channel subscription: the engine emits the analyst/composer/semantic logs to the DO, which forwards
-  // them ONLY to this user's devices that have ATTACHED to the channel. So we attach the channels the current view
-  // shows, and detach on leave — logs never reach a device (or a user) that isn't watching. The Analyst view shows
-  // BOTH the composer's and the analyst's work for a question, so it attaches both.
+  // Agent-LOG channel subscription. OPT-IN by visiting a log view — the DO then forwards that channel ONLY to this
+  // user's devices (never another user), and only to devices that attached (no clogging). It STAYS attached: we do
+  // NOT detach on navigation (the run continues in the background; you're just moving around). Delivery stops only
+  // when the WS closes (the DO drops the connection) or on an explicit detach. Each view = its one channel.
   useEffect(() => {
-    const want = view === 'analyst' ? ['analyst-log', 'composer-log'] : view === 'semantic' ? ['semantic-log'] : []
-    want.forEach((channel) => send({ t: 'log:attach', channel }))
-    return () => want.forEach((channel) => send({ t: 'log:detach', channel }))
+    const ch = view === 'analyst' ? 'analyst-log' : view === 'composer' ? 'composer-log' : view === 'semantic' ? 'semantic-log' : ''
+    if (ch) send({ t: 'log:attach', channel: ch })
   }, [view])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Chat feed: Shift+Up/Down jump between questions, scrolling the PAGE (see questionNav.ts).
@@ -123,8 +145,10 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [semEvents, setSemEvents] = useState<AgentEvent[]>([])
   const [semHasPty, setSemHasPty] = useState(false)       // modeler is claude → a raw terminal is available (show the toggle)
   const [semTerminal, setSemTerminal] = useState(false)   // user opened the raw terminal → attach the PTY lazily
+  const [coEvents, setCoEvents] = useState<AgentEvent[]>([])   // COMPOSER log (composer-log channel) — its own view, separate from the analyst
   const anLogRef = useRef<HTMLDivElement>(null)
   const semLogRef = useRef<HTMLDivElement>(null)
+  const coLogRef = useRef<HTMLDivElement>(null)
   const [gaps, setGaps]             = useState<{ question: string; need: string; basis?: string; status: 'building' | 'done' }[]>([])
   const [role, setRole]         = useState<'user' | 'developer'>('developer')   // for now: everyone is developer (sees the agents)
   // Live as-you-type suggestions from the fast-router (optional; absent if not configured).
@@ -233,27 +257,11 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // The analyst + semantic logs each own their interactions SEPARATELY (open→bottom, follow-if-near-bottom,
   // Shift+Arrow between questions) — see logNav.ts. contentKey = a number that grows as the log grows.
   useLogNav(anLogRef,  view === 'analyst',  anEvents)     // pass the ARRAY (new ref on every merge, incl. in-place streaming) — not .length
+  useLogNav(coLogRef,  view === 'composer', coEvents)
   useLogNav(semLogRef, view === 'semantic', semEvents)
 
-  // Persist the analyst log to localStorage — a ROLLING copy of the last few sessions so a RELOAD doesn't wipe
-  // it. The DO deliberately does NOT store this heavy real-time log (it would bloat one project's DO), so we keep
-  // a light local copy: capped events per session, LRU-capped sessions. Restore on mount only (don't clobber live).
-  useEffect(() => {
-    if (anEvents.length) return
-    try { const raw = localStorage.getItem('sa-anlog-' + sessionId); if (raw) setAnEvents(JSON.parse(raw)) } catch { /* ignore corrupt/oversized */ }
-  }, [sessionId])   // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (!anEvents.length) return
-    const t = setTimeout(() => {
-      try {
-        localStorage.setItem('sa-anlog-' + sessionId, JSON.stringify(anEvents.slice(-400)))
-        const idx: string[] = [sessionId, ...(JSON.parse(localStorage.getItem('sa-anlog-index') || '[]') as string[]).filter((s) => s !== sessionId)]
-        while (idx.length > 6) { const drop = idx.pop(); if (drop) localStorage.removeItem('sa-anlog-' + drop) }
-        localStorage.setItem('sa-anlog-index', JSON.stringify(idx))
-      } catch { /* localStorage full/blocked — best-effort */ }
-    }, 500)
-    return () => clearTimeout(t)
-  }, [anEvents, sessionId])
+  usePersistLog('sa-anlog-', sessionId, anEvents, setAnEvents)   // analyst + composer logs both survive a reload
+  usePersistLog('sa-colog-', sessionId, coEvents, setCoEvents)
 
   // Per-step timer (UI-only, nice-to-have): tick every second while busy so the CURRENT analysis beat counts up.
   useEffect(() => {
@@ -378,9 +386,11 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           anXtermRef.current?.write(msg.text ?? '')
           rawStreamRef.current = msg.replace ? (msg.text ?? '') : (rawStreamRef.current + (msg.text ?? '')).slice(-400000)
         } else if (msg.t === 'analyst:event') {
-          // 'events'-kind harness (codex): one normalized AgentEvent. Merge by id so a streaming command/message
-          // updates its own block in place (started → updated → completed); id-less events (turn) append.
-          setAnEvents(evs => mergeEvent(evs, { ...msg.ev, agent: msg.agent }))
+          // One normalized AgentEvent (merge by id so a streaming block updates in place). Route by which agent
+          // produced it — the COMPOSER's work goes to the Composer view, the ANALYST's to the Analyst view.
+          const ev = { ...msg.ev, agent: msg.agent }
+          if (msg.agent === 'composer') setCoEvents(evs => mergeEvent(evs, ev))
+          else setAnEvents(evs => mergeEvent(evs, ev))
         } else if (msg.t === 'analyst:events') {
           setAnEvents(msg.events ?? [])   // reconnect: full event-log replay (replace)
         } else if (msg.t === 'followups') {
@@ -607,7 +617,8 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     scroll()   // pin the new (now last) question to the top of the viewport
     setAnQuestion(text); setAnAnswer(null); setAnCategory(''); setAnStatus('Classifying…'); setAnBusy(true); setAnEnriching(null); setAnProgress(''); setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []
     anXtermRef.current?.clear()   // claude PTY: fresh TUI per question (harmless when the analyst is codex)
-    setAnEvents(l => [...l, { kind: 'user', text }])   // a QUESTION-boundary marker in the analyst log (strong divider + Shift+Arrow anchor); harmless if the PTY view is shown
+    const qMarker: AgentEvent = { kind: 'user', text }   // QUESTION-boundary divider (+ Shift+Arrow anchor) — put it in BOTH agent-log views
+    setAnEvents(l => [...l, qMarker]); setCoEvents(l => [...l, qMarker])
     setStatus('')
     setBusy(true); busyRef.current = true; armWatchdog()
     if (inputRef.current) { inputRef.current.value = ''; inputRef.current.style.height = 'auto' }
@@ -755,6 +766,10 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           </>
         )}
         <div style={s.navSection}>AGENT</div>
+        <div onClick={() => navigate('composer')}
+          style={{ ...s.sessionItem, ...(view === 'composer' ? s.sessionItemActive : {}) }}>
+          ◇ Composer
+        </div>
         <div onClick={() => navigate('analyst')}
           style={{ ...s.sessionItem, ...(view === 'analyst' ? s.sessionItemActive : {}) }}>
           ◇ Analyst
@@ -816,6 +831,22 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           <div ref={semTermRef} onMouseDown={() => semXtermRef.current?.focus()} style={{ display: (semTerminal || semStreamKind === 'pty') ? 'block' : 'none' }} />
           {/* DEFAULT: the structured event log (modeler via JSONL, codex via events). */}
           {!(semTerminal || semStreamKind === 'pty') && <CodexEventLog events={semEvents} busy={semBusy} claude={semHasPty} />}
+        </div>
+      </div>
+
+      {/* Composer view — the composer agent's work (reuse-or-compose, escalate). Its own tab, separate from the
+          analyst; per-session (one composer per session). Always mounted so its log persists across view switches. */}
+      <div style={{ display: view === 'composer' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+        <div style={s.semHeader}>
+          <button onClick={() => navigate('chat')} style={s.backBtn} title="Back to your chat">← Chat</button>
+          <span style={{ color: '#bcd0be', fontSize: 13, fontWeight: 600 }}>◇ Composer</span>
+          <span style={{ color: '#8a8276', fontSize: 13, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {anQuestion || 'The composer reuses a program or composes concepts — escalating to the analyst when needed.'}
+          </span>
+          {busy && <Spinner />}
+        </div>
+        <div ref={coLogRef} style={{ flex: 1, overflow: 'auto', background: 'transparent', padding: 12, paddingBottom: 110 }}>
+          <CodexEventLog events={coEvents} busy={busy} />
         </div>
       </div>
 
