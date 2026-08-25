@@ -101,13 +101,13 @@ if (!PROJECT || !KEY) {
 // The engine only picks the harness — each harness manages ITS OWN binary/server lifecycle
 // internally (opencode ensures `opencode serve`; codex spawns the codex CLI per turn; claude-code
 // runs a PTY; pi is in-process). The engine never touches a server directly.
-let busy = false
-let reply: any = null                                // who to stream the current turn back to
-let curChannel = ''                                  // non-empty when the current turn came from a chat channel (Teams/…) — deliver the answer to the durable channel consumer, not a live socket
 let hub: WebSocket | null = null
 
 let semanticBusy = false
-let analystBusy = false
+// PER-SESSION answer lock: DIFFERENT sessions answer CONCURRENTLY; one session still answers one at a time. The
+// stream target (reply) + channel are LOCAL per analyse() call now — no cross-session clobber. curQuestion/
+// lastAnswer below stay global as a best-effort reconnect-status snapshot only, never for answer routing.
+const busySessions = new Set<string>()
 let connectorBusy = false
 let groundingBusy = false
 
@@ -182,7 +182,7 @@ const inspector = createInspector({
   runtime: () => ({
     harness: HARNESS,
     agents: {
-      analyst:   { harness: ANALYST_HARNESS,   model: ANALYST_MODEL,   busy: analystBusy },
+      analyst:   { harness: ANALYST_HARNESS,   model: ANALYST_MODEL,   busy: busySessions.size > 0 },
       semantic:  { harness: SEMANTIC_HARNESS,  model: SEMANTIC_MODEL,  busy: semanticBusy, consolidating: semanticConsolidating },
       connector: { harness: CONNECTOR_HARNESS, model: CONNECTOR_MODEL, busy: connectorBusy },
       grounding: { harness: GROUNDING_HARNESS, model: GROUNDING_MODEL, busy: groundingBusy },
@@ -289,8 +289,8 @@ const emit = (to: any, msg: unknown) => { if (hub?.readyState === WebSocket.OPEN
 // Reuse a saved program (SYS-1, no LLM): run it against CURRENT data, emit the answer, persist. Shared by
 // the positional exact-hit and the reflex catalog-match. Returns false on failure so the caller rebuilds.
 async function reuseProgram(programDir: string, params: any, category: string,
-  ctx: { sid: string; qid: string; question: string; norm: string; t0: number; nodeId: string }): Promise<boolean> {
-  const { sid, qid, question, norm, t0, nodeId } = ctx
+  ctx: { sid: string; qid: string; question: string; norm: string; t0: number; nodeId: string; reply: any; channel: string }): Promise<boolean> {
+  const { sid, qid, question, norm, t0, nodeId, reply, channel } = ctx
   emit(reply, { t: 'analyst:category', category, sid })
   emit(reply, { t: 'analyst:status', text: 'Re-running the saved program…', question, sid, qid })
   const ka = setInterval(() => { if (reply) emit(reply, { t: 'tick', sid }) }, 8000)
@@ -330,7 +330,7 @@ async function reuseProgram(programDir: string, params: any, category: string,
     }
     lastAnswer = answer; lastTiming = timing; lastCategory = category
     emit(reply, { t: 'analyst:answer', category, answer, timing, sid, qid, reused: true })
-    if (curChannel) emit({ type: 'channel' }, { t: 'channel:answer', channel: curChannel, qid, answer, category })   // durable delivery to the chat channel
+    if (channel) emit({ type: 'channel' }, { t: 'channel:answer', channel, qid, answer, category })   // durable delivery to the chat channel
     // Follow-ups persisted on the node when it was first built → replay them on reuse (no analyst involved).
     const fu = (graph.getNode(nodeId)?.props as any)?.followups
     if (Array.isArray(fu) && fu.length && reply) emit(reply, { t: 'followups', items: fu, qid, sid })
@@ -339,7 +339,7 @@ async function reuseProgram(programDir: string, params: any, category: string,
     const n = graph.getNode(nodeId); if (n) graph.putNode({ ...n, props: { ...(n.props as any), lastShapeHash: (rr as any).finalShapeHash ?? (n.props as any)?.lastShapeHash } })
     setPosition(sid, nodeId)
     clearInterval(ka)
-    analystBusy = false; busy = false; curQuestion = ''
+    busySessions.delete(sid); curQuestion = ''
     console.log(`[ica] REUSE ${programDir} · ${((Date.now() - t0) / 1000).toFixed(1)}s`)
     return true
   } catch (e: any) {
@@ -352,7 +352,7 @@ async function reuseProgram(programDir: string, params: any, category: string,
 // Answer a question: classify → analyst ICA (per-category SYSTEM.md, semantic-model-first) → stream
 // the raw claude terminal to the "Analyst" tab and emit the final structured answer.
 async function analyse(question: string, from: any, sid = '', qidIn = '', channel = '') {
-  if (analystBusy) { emit(from, { t: 'analyst:status', text: 'Already answering a question — one at a time.' }); return }
+  if (busySessions.has(sid)) { emit(from, { t: 'analyst:status', text: 'Already answering a question in this chat — one at a time.', sid }); return }
   if (!question.trim()) return
   // ── EXPLICIT EDIT prefix ──────────────────────────────────────────────────────
   // An input that, after any leading whitespace, begins with "edit:" or "modify:" (case-insensitive) is the
@@ -364,7 +364,8 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   if (editMatch) question = (question.replace(/^\s+/, '').slice(editMatch[0].length).trim()) || question
   // Stream everything to `reply` (re-targetable): a reload reconnects and sessions:list points reply
   // at the new connection, so the in-flight run's output + final answer reach the reloaded client.
-  analystBusy = true; busy = true; reply = from; curChannel = channel
+  busySessions.add(sid)
+  const reply = from                                   // LOCAL to this turn — no cross-session clobber (channel is the param)
   const norm = normalizeQuestion(question)
   // ONE id end to end: the UI mints it and sends it; we use it verbatim (agent writes ./out/<qid>.json,
   // DB keys on it). Fall back to minting our own if a non-UI caller omitted it. Trust-but-verify: if the
@@ -394,7 +395,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   const hitNode = graph.getNode(matchId)
   const hp: any = hitNode?.props
   if (!explicitEdit && hp?.program && existsSync(join(WORKSPACE, hp.program, 'program.ts'))) {
-    if (await reuseProgram(hp.program, hp.params, hp.category, { sid, qid, question, norm, t0, nodeId: matchId })) return
+    if (await reuseProgram(hp.program, hp.params, hp.category, { sid, qid, question, norm, t0, nodeId: matchId, reply, channel })) return
     // failed → fall through to rebuild via the analyst
   }
 
@@ -623,7 +624,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     curQuestion = ''
     emit(reply, { t: 'analyst:done', sid })
     analystSlot.persist(); semanticSlot.persist()   // capture the live ids (incl. any resume-fallback)
-    analystBusy = false; busy = false
+    busySessions.delete(sid)
   }
 }
 
@@ -721,7 +722,7 @@ const agentStream = (w: Which, from: any): RunHandlers => ({
   onEvent: (ev) => emit(from, { t: `${w}:event`, ev }),
 })
 const announceKind = (w: Which, from: any, agent: any) => emit(from, { t: `${w}:stream`, kind: agent?.session?.kind ?? 'events' })
-const isAgentBusy = (w: Which) => (w === 'connector' ? connectorBusy : w === 'grounding' ? groundingBusy : w === 'semantic' ? semanticBusy : analystBusy)
+const isAgentBusy = (w: Which) => (w === 'connector' ? connectorBusy : w === 'grounding' ? groundingBusy : w === 'semantic' ? semanticBusy : busySessions.size > 0)
 const termViewers: Record<Which, Set<any>> = { analyst: new Set(), semantic: new Set(), connector: new Set(), grounding: new Set() }
 const termUnsub: Record<Which, (() => void) | null> = { analyst: null, semantic: null, connector: null, grounding: null }
 async function attachTerminal(w: Which, from: any) {
@@ -847,8 +848,9 @@ function resyncAnalyst(from: any) {
     else { const sbuf = sSession.buffer(); if (sbuf) emit(from, { t: 'semantic:chunk', text: sbuf, replace: true }) }
     if (semanticBusy) emit(from, { t: 'semantic:status', text: 'Building the model…' })
   }
-  if (analystBusy) {
-    reply = from                                                          // re-target the running run to this (new) connection
+  if (busySessions.size > 0) {
+    // No reply re-target under per-session concurrency (that would steal another session's live stream). A
+    // reconnecting client recovers a missed answer from the durable ProjectDO answer-buffer instead.
     emit(from, { t: 'analyst:status', text: curCategory ? `Answering — ${curCategory}…` : 'Answering…', question: curQuestion, sid: curSid })
     if (curCategory) emit(from, { t: 'analyst:category', category: curCategory, sid: curSid })
   } else if (lastAnswer) {
@@ -958,7 +960,7 @@ function connect() {
 
 // Heartbeat: the DO drops its in-memory role registry when it hibernates. A heartbeat keeps
 // it warm so this engine STAYS the registered code-engine (else the UI shows "Starting machine…").
-setInterval(() => { if (hub?.readyState === WebSocket.OPEN) hub.send(JSON.stringify({ type: 'heartbeat', busy })) }, 12000)
+setInterval(() => { if (hub?.readyState === WebSocket.OPEN) hub.send(JSON.stringify({ type: 'heartbeat', busy: busySessions.size > 0 })) }, 12000)
 // Semantic-model consolidation heartbeat: ALWAYS running from boot, independent of any question signal. Every
 // tick it checks for analyses past the watermark and drains them — so a restart with a backlog (even days
 // later, with no new question asked) still gets consolidated. A no-op while a pass is in flight or the
