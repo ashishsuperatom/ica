@@ -1,5 +1,3 @@
-<!-- GENERATED — edit the generate-*.ts source, not this .md. -->
-
 ### AGGREGATE / COMPLEX LOOKUP
 
 A number (or ranked set) computed over the whole population — sum / count / average / max-min /

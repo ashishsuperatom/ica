@@ -1,5 +1,3 @@
-<!-- GENERATED — edit the generate-*.ts source, not this .md. -->
-
 ### COMPARISON
 
 Two (or more) scopes, measured the same way, then compared. Compute both sides identically so they are

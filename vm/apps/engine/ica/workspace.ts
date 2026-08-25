@@ -11,7 +11,7 @@
 //     units/              — the partial UNIT library                          [filled over time]
 //     out/                — where the agent writes this run's answer + UI
 
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, writeFile, chmod } from 'node:fs/promises'
 import { join } from 'node:path'
 
 export interface WorkspaceSpec {
@@ -26,7 +26,7 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
   // Organized by CONCERN, not dumped flat. db/ holds every SQLite file; each concern (data / model /
   // grounding / analyst / connector) holds its own seam + role doc together. CONTEXT.md + run.mjs stay at
   // the root as the entry point + the program runner.
-  for (const sub of ['', 'db', 'data', 'model', 'grounding', 'analyst', 'connector', 'composer', 'concepts', 'units', 'programs', 'out'])
+  for (const sub of ['', 'db', 'data', 'model', 'grounding', 'analyst', 'connector', 'composer', 'concepts', 'units', 'programs', 'out', '.tools'])
     await mkdir(join(dir, sub), { recursive: true })
 
   await writeFile(join(dir, 'CONTEXT.md'),
@@ -40,16 +40,23 @@ role file (./model/MODEL.md if you build the model, ./analyst/ANALYST.md if you 
 from the monorepo, so there is nothing to install and no package.json to create. Run and explore code
 however you see fit — there is no setup to do.
 
-## Seams (grouped by concern)
-- **Model — check FIRST.** ./model/model.mjs — what's already been figured out for this project. Probe it before
-  touching data: \`find('term', …)\` (search concepts/units/past questions), \`concepts()\`, \`intents()\`,
-  \`getConcept(name)\`, \`relationships(name)\`, \`conceptTree()\`. Reusing a modeled unit is deterministic and
-  carries the corrections we've made — that's why it comes first.
-- Data:       ./data/query.mjs      — write PRQL to query the data source: \`query(sourceId, prql, params)\` + \`sources()\`.
-- Introspect: ./data/introspect.mjs — schema/evidence helpers over the data.
-- Grounding:  ./grounding/grounding.mjs — resolve a fuzzy human reference to concrete ids: \`resolveEntity(text)\`,
-  \`resolveHierarchy(node, dir, name)\`, \`resolveValueByPattern(value)\` (built per-project by the grounding agent).
-- Run:        ./run.mjs        — run a program: \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\` (prints the output; writes the graph/shape to program.json).
+## Tools — just RUN these (they work from ANY directory, first try; each prints JSON to stdout)
+Search the project's knowledge:
+- \`./find-concept "<phrase>"\`        → strong, evaluated concepts (guide fields); no args = the full menu.
+- \`./find-model "<term>" […]\`        → the semantic model: concepts, units, atoms, past questions (compact).
+- \`./find-program "<question>"\`      → existing programs that answered a similar question (reuse before you build).
+Query the data:
+- \`./sources\`                        → the data sources + their kind/dialect.
+- \`./query "<source>" "<prql>"\`      → run a PRQL query → JSON rows.
+- \`./introspect "<source>" <tables|columns|sample|profile|verify-join> [args]\` → schema/evidence.
+- \`./resolve "<text>"\`               → a fuzzy name/value → concrete ids (grounding).
+Each prints JSON to stdout. NEVER \`node\`/\`require\`/\`cat\` a \`.mjs\` to do these — just run the tool.
+
+## Write/run seams (import these in your program/unit/model CODE — they take rich args, not a CLI)
+- Model:  ./model/model.mjs        — WRITE the model: \`concept()\`, \`relate()\`, \`bindUnit()\`, \`putAtom()\`, \`setParent()\`. (To SEARCH it, use \`./find-model\`.)
+- Ground: ./grounding/grounding.mjs — \`build(config)\` the grounding indexes (grounding agent).
+- Data:   ./data/query.mjs         — \`query()\`/\`sources()\` inside program/unit code.
+- Run:    ./run.mjs                — run a program: \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\`.
 
 ## Layout
 - db/       — every SQLite database (project.sqlite = the model/graph, grounding.sqlite, answers.sqlite). You never open these directly — the seams do.
@@ -272,5 +279,87 @@ export const resolveValueByPattern = (value) => store.resolveValueByPattern(valu
 export const stats = () => store.stats()   // the ONE structural reader (defined on GroundingStore)
 export const raw = store
 `)
+
+  // ── Search TOOLS: robust, CWD-independent bash wrappers over the seams ────────────────────────────────────
+  // The agents kept failing to search (require() an ESM file, `node` not resolving @superatom, a relative path
+  // from the wrong CWD) then falling back to `ls`. These wrappers END that: each bakes the ABSOLUTE workspace
+  // path and runs its driver with tsx (node can't resolve node-store's .ts imports; tsx can), so `./find-*`
+  // returns clean JSON on the FIRST try from ANY directory. The agent never reads the .mjs source.
+  const drivers: Record<string, string> = {
+    'find-concept': `// Search strong concepts. Run: ./find-concept "<phrase>"  (no args = the menu). Prints JSON.
+import { findConcept, listConcepts } from ${JSON.stringify(join(dir, 'concepts', 'find.mjs'))}
+const q = process.argv.slice(2).join(' ').trim()
+console.log(JSON.stringify(q ? findConcept(q) : listConcepts(), null, 2))
+`,
+    'find-model': `// Search the semantic model (concepts/units/atoms/past questions). Run: ./find-model "<term>" ["<term>"…]. Prints JSON.
+import { find } from ${JSON.stringify(join(dir, 'model', 'model.mjs'))}
+const terms = process.argv.slice(2)
+const clean = (h) => { // drop bulky/garbled props (rawAnalysis) so the view stays compact + useful
+  const p = (typeof h.props === 'string' ? JSON.parse(h.props || '{}') : (h.props || {}))
+  const { rawAnalysis, ...rest } = p
+  return { id: h.id, kind: h.kind, name: h.name, summary: h.summary, props: rest }
+}
+console.log(JSON.stringify(terms.length ? find(...terms).map(clean) : [], null, 2))
+`,
+    'find-program': `// Find existing programs that answered a similar question. Run: ./find-program "<question>". Prints JSON.
+import { NodeStore } from '@superatom/node-store'
+const store = new NodeStore(${JSON.stringify(join(dir, 'db', 'project.sqlite'))})
+const q = process.argv.slice(2).join(' ').trim()
+const P = (n) => (typeof n.props === 'string' ? JSON.parse(n.props || '{}') : (n.props || {}))
+const out = []
+for (const h of store.search(q, { limit: 20 })) {
+  const p = P(h)
+  if (h.kind === 'intent' && p.program) out.push({ question: p.question ?? h.label, program: p.program, category: p.category })
+  else if (h.kind === 'program') out.push({ question: h.label, program: p.dir, category: p.category })
+}
+const seen = new Set()
+console.log(JSON.stringify(out.filter(o => o.program && !seen.has(o.program) && seen.add(o.program)).slice(0, 8), null, 2))
+`,
+    'sources': `// List data sources + their kind/dialect. Run: ./sources. Prints JSON.
+import { sources } from ${JSON.stringify(join(dir, 'data', 'query.mjs'))}
+console.log(JSON.stringify(await sources(), null, 2))
+`,
+    'query': `// Run a PRQL query against a source. Run: ./query "<source>" "<prql>". Prints JSON rows.
+import { query } from ${JSON.stringify(join(dir, 'data', 'query.mjs'))}
+const [src, ...rest] = process.argv.slice(2)
+if (!src || !rest.length) { console.error('usage: ./query "<source>" "<prql>"  (list sources with ./sources)'); process.exit(1) }
+console.log(JSON.stringify(await query(src, rest.join(' ')), null, 2))
+`,
+    'introspect': `// Inspect data schema/evidence. Run ONE of:
+//   ./introspect "<source>" tables
+//   ./introspect "<source>" columns "<table>"
+//   ./introspect "<source>" sample "<table>" [n]
+//   ./introspect "<source>" profile "<table>" "<column>"
+//   ./introspect "<source>" verify-join "<fromT>" "<fromCol>" "<toT>" "<toCol>"
+import { forSource } from ${JSON.stringify(join(dir, 'data', 'introspect.mjs'))}
+const [src, cmd, ...a] = process.argv.slice(2)
+if (!src || !cmd) { console.error('usage: ./introspect "<source>" <tables|columns|sample|profile|verify-join> [args]'); process.exit(1) }
+const I = await forSource(src)
+let r
+if (cmd === 'tables') r = await I.tables()
+else if (cmd === 'columns') r = await I.columns(a[0])
+else if (cmd === 'sample') r = await I.sampleRows(a[0], a[1] ? Number(a[1]) : 8)
+else if (cmd === 'profile') r = await I.profile(a[0], a[1])
+else if (cmd === 'verify-join') r = await I.verifyJoin(a[0], a[1], a[2], a[3])
+else { console.error('unknown subcommand: ' + cmd); process.exit(1) }
+console.log(JSON.stringify(r, null, 2))
+`,
+    'resolve': `// Resolve a fuzzy human reference (a name/value) to concrete ids. Run: ./resolve "<text>". Prints JSON.
+import { resolveEntity } from ${JSON.stringify(join(dir, 'grounding', 'grounding.mjs'))}
+const t = process.argv.slice(2).join(' ').trim()
+if (!t) { console.error('usage: ./resolve "<text>"'); process.exit(1) }
+console.log(JSON.stringify(await resolveEntity(t), null, 2))
+`,
+  }
+  for (const [name, body] of Object.entries(drivers)) {
+    await writeFile(join(dir, '.tools', name + '.mjs'), body)
+    await writeFile(join(dir, name),
+`#!/usr/bin/env bash
+D=${JSON.stringify(join(dir, '.tools', name + '.mjs'))}
+if command -v tsx >/dev/null 2>&1; then exec tsx "$D" "$@"; else exec npx --yes tsx "$D" "$@"; fi
+`)
+    await chmod(join(dir, name), 0o755)
+  }
+
   return dir
 }

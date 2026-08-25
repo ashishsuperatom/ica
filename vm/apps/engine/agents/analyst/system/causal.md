@@ -1,5 +1,3 @@
-<!-- GENERATED — edit the generate-*.ts source, not this .md. -->
-
 ### CAUSAL / COUNTERFACTUAL
 
 A "why did X change" or "what if" question. For **why**: decompose the metric across time and its

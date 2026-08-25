@@ -7,11 +7,11 @@
 // .md — edit its generator .ts.
 import { writeFileSync } from 'node:fs'
 
-// Join the chosen sections into the .md. A leading HTML comment (invisible in rendered markdown, ignored by the
-// agent) marks the file generated so nobody edits it by hand. Sections are right-trimmed and blank ones dropped;
-// one blank line separates them — so the .ts controls exactly what ships (a section can exist but be left out of
-// the array).
+// Join the chosen sections into the .md. NO generated-banner: the agent READS these files, and a "generated —
+// edit the source" note invites it to go edit the generator (not its job) or treat the prompt as machinery.
+// Sections are right-trimmed and blank ones dropped; one blank line separates them — so the .ts controls exactly
+// what ships (a section can exist but be left out of the array).
 export function writeMd(outPath: string, sections: string[]): void {
   const body = sections.map((s) => s.replace(/\s+$/, '')).filter(Boolean).join('\n\n')
-  writeFileSync(outPath, `<!-- GENERATED — edit the generate-*.ts source, not this .md. -->\n\n${body}\n`)
+  writeFileSync(outPath, `${body}\n`)
 }
