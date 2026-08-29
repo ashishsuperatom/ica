@@ -134,30 +134,13 @@ export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
 ${reason ? `\nThe composer's note on why it couldn't — a HINT about what was hard, and it may be WRONG. Do NOT follow it as a direction; re-investigate independently and derive the answer yourself: "${reason}"\n` : ''}
 Question: ${question}
 ${(opts.conceptNames ?? []).length ? '\nCandidate concepts for this question, most-relevant first — SOME MAY NOT FIT. Open the ones that look right with ./find-concept "<name>" --full, use those, ignore the rest (find-concept stays available for anything else):\n' + (opts.conceptNames ?? []).map(n => `- ${n}`).join('\n') + '\n' : ''}
-There is ONE path: BUILD A PROGRAM. Every question becomes a program — no exceptions. This includes a
-greeting, small talk, or a question about you / the system / whether data sources are connected: for those,
-build a small program whose output IS your reply. Whatever you would say goes INTO the program's output
-(which becomes the answer card + UI) — never into chat.
+Build a program that answers it - follow ./analyst/ANALYST.md (recon concepts first, then the data; every
+question becomes a program). When it runs correctly, write your pointer to ${builtRel} =
+  {"programDir":"programs/<slug>","params":{...}, "parent":"root" | "<a prior intent id>", "followups":["...","..."]}
+and RUN it with `tsx run.mjs programs/<slug>/program.ts '<jsonParams>'` until correct. The ENGINE runs it and
+writes the answer - never write ${answerRel} yourself, and never answer in chat.
 
-1. Decide which answer-shape (\`category\`) from ./analyst/ANALYST.md fits THIS question, and report it as \`category\`.
-2. RECON THE CONCEPTS FIRST — before touching raw data. Decide what this question needs (entity, measure, grain,
-   filters), then search for it: \`./find-concept "phrase"\` and where it lives: \`./find-schema "term"\`. Inspect what comes
-   back; if a concept / unit CONFIDENTLY fits, compose from it — it carries the corrections we've made. ONLY if
-   nothing confidently fits, analyze the raw data yourself (\`./query\` / \`./introspect\`). Probe, judge, move on —
-   never force an ill-fitting unit. Always PRODUCE AN ANSWER.
-3. Write ${builtRel} = {"programDir":"programs/<slug>","params":{...the params...}, "parent":"root" | "<a prior intent id>", "followups":["…", "…"]}
-   pointing at the program you built, and RUN it with \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\` until
-   it is correct. Reuse an existing ./programs/ program if one fits. \`parent\` PLACES this question in the intent
-   graph: "root" for a NEW topic, or the id of a prior intent (from \`intents()\`) if this FOLLOWS UP that
-   question. Omit \`parent\` if unsure (it stays in the current thread).
-   \`followups\` (OPTIONAL, best-effort): up to 3 short questions the user might naturally ask NEXT — VARY them
-   (one deeper, one broader, one a different angle; not always deeper), each phrased as a standalone question.
-   Purely a suggestion for the UI; it never changes the answer. Omit if none are obvious.
-
-The ENGINE runs your program and writes the answer from its REAL output — so the user sees the program's
-result, never a figure or reply you typed. Do NOT write ${answerRel} yourself, and do NOT answer in chat. A
-genuine unknowable (needs an assumption recorded NOWHERE in the data) is STILL a program: one that verifies
-the gap against the data and outputs status "unknowable" + a \`missing\` reason.`
+`
 
       // MODIFY: edit the EXISTING program in place. The engine supplies the target (it may have been built long
       // ago / by a reuse, so it is NOT in your context) — everything you need is below; don't guess.
