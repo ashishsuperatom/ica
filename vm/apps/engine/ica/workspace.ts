@@ -46,6 +46,7 @@ Search the project's knowledge:
 - \`./find-model "<term>" [--full]\`       → matching model nodes (id/kind/name/summary — an index); add \`--full\` for their props.
 Query the data:
 - \`./sources\`                        → the data sources + their kind/dialect.
+- \`./find-schema "<term>" [--source <S>] [--full]\` → search ALL sources for where a field/table lives (SOURCE.TABLE.COLUMN : type); the fastest way to find where data is before querying.
 - \`./query "<source>" "<prql>"\`      → run a PRQL query → JSON rows.
 - \`./introspect "<source>" <tables|columns|sample|profile|verify-join> [args]\` → schema/evidence.
 - \`./resolve "<text>"\`               → a fuzzy name/value → concrete ids (grounding).
@@ -209,9 +210,8 @@ const guide = (n) => { const { _v, ...g } = propsOf(n); return { name: n.label, 
 // to fewer-word / more-general concepts. Pure lexical. Returns the top specificity tier (within 1 of the best).
 const C_STOP = new Set(('a an the of on in for by per to and or is are was be with as at this that it id what ' +
   'which who how me my we our you your can do get give show tell find value from over under across').split(' '))
-const C_SRC = new Set(['netsuite', 'totalgroup', 'fusion5'])
 const stemw = (w) => { for (const suf of ['ing','ed','es','s','ly']) { if (w.endsWith(suf) && w.length - suf.length >= 3) { w = w.slice(0, -suf.length); break } } if (w.length > 3 && w.endsWith('e')) w = w.slice(0, -1); return w }
-const cWords = (s) => new Set(String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !C_STOP.has(w) && !C_SRC.has(w)).map(stemw))
+const cWords = (s) => new Set(String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !C_STOP.has(w)).map(stemw))
 export function findConcept(query, limit = 8) {
   const qw = cWords(query)
   if (!qw.size) return []
@@ -289,6 +289,20 @@ const q = args.filter(a => a !== '--full').join(' ').trim()
 if (!q) { console.log(JSON.stringify({ hint: 'pass a concept name or phrase; the engine already surfaced the likely concepts for this question' })); process.exit(0) }
 console.log(JSON.stringify(full ? findConcept(q) : findConcept(q).map(c => c.name), null, 2))
 `,
+    'find-schema': `// Datasource index. "<term>" = matching fields across ALL sources (SOURCE.CONTAINER.FIELD : type). Search by field/table name, by type (date/number), or by what a column MEANS. --source <S> filters to one source; --full adds PK/nullable/references.
+import { NodeStore, searchDataSource } from '@superatom/node-store'
+const store = new NodeStore(${JSON.stringify(join(dir, 'db', 'project.sqlite'))})
+const args = process.argv.slice(2)
+const full = args.includes('--full')
+const si = args.indexOf('--source')
+const source = si >= 0 ? args[si + 1] : undefined
+const skip = si >= 0 ? si + 1 : -1   // index of the source VALUE to drop (only when --source is present)
+const q = args.filter((a, i) => a !== '--full' && a !== '--source' && i !== skip).join(' ').trim()
+if (!q) { console.log(JSON.stringify({ hint: 'find-schema "<term>" [--source <SOURCE>] [--full] — search every datasource for a field/table by name, type, or description' })); process.exit(0) }
+const rows = searchDataSource(store, q, { source, limit: full ? 40 : 60 })
+const view = (e) => full ? e : (e.key + ' : ' + (e.type || '?') + (e.isKey ? ' [PK]' : '') + (e.references ? (' → ' + e.references) : ''))
+console.log(JSON.stringify(rows.map(view), null, 2))
+`,
     'find-model': `// Semantic model. "<term>…" = matching id/kind/name/summary (the INDEX). Add --full for each match's props too.
 import { find } from ${JSON.stringify(join(dir, 'model', 'model.mjs'))}
 const args = process.argv.slice(2)
@@ -356,6 +370,7 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
   // never needs to read the .mjs to learn what to pass, and never sees the implementation.
   const usages: Record<string, string> = {
     'find-concept': 'find-concept "<phrase or name>" [--full]   → matching concept NAMES; add --full for a matched concept method. A query is required.',
+    'find-schema':  'find-schema "<term>" [--source <SOURCE>] [--full]   → search ALL datasources for a field/table by name, type, or description (SOURCE.TABLE.COLUMN : type); --source filters to one; --full adds PK/nullable/references',
     'find-model':   'find-model "<term>" ["<term>"…] [--full]   → matching model nodes as id/kind/name/summary (an INDEX); add --full for the full props of each match',
     'find-program': 'find-program "<question>" [--full]   → programs that answered a similar question (question/program/category); add --full for the saved params',
     'sources':      'sources   → every data source with its kind + dialect (JSON)',

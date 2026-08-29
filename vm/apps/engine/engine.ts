@@ -169,7 +169,6 @@ const graph = new NodeStore(join(WORKSPACE, 'db', 'project.sqlite'))
 // find-concept. Dynamic count: the top specificity tier (within 1 of the best), capped.
 const CONCEPT_STOP = new Set(('a an the of on in for by per to and or is are was be with as at this that it id ' +
   'what which who how me my we our you your can do get give show tell find value from over under across').split(' '))
-const CONCEPT_SRC = new Set(['netsuite', 'totalgroup', 'fusion5'])
 // Light stem so word-FORMS match (rate/rates/rating -> rat, charge/charged -> charg, bill/billing -> bill).
 // Morphology only — deliberately NOT synonyms (bill != charge). If a question uses a different word than the
 // concept name, it simply won't match; we keep it simple rather than maintain a synonym layer.
@@ -179,7 +178,7 @@ const stem = (w: string): string => {
   return w
 }
 const conceptWords = (s: string): Set<string> =>
-  new Set(String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 1 && !CONCEPT_STOP.has(w) && !CONCEPT_SRC.has(w)).map(stem))
+  new Set(String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 1 && !CONCEPT_STOP.has(w)).map(stem))
 // Favour RECALL, not precision: surface anything plausibly relevant and let the AGENT reject/pick. Two cheap
 // recall sources unioned — LEXICAL (name-word overlap) and SEMANTIC (the vector index, which catches paraphrase/
 // synonyms for free, no synonym map to maintain). We ORDER by specificity (most name-words covered first) so the
