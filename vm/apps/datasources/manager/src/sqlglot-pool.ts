@@ -33,6 +33,7 @@ export type RewriteOpts = {
   sourceDialect?: string // the source's dialect name, used by the per-dialect hooks
   policies?: unknown[]    // authorization predicates injected server-side (empty for now)
   maxRows?: number        // hard row cap injected as LIMIT/FETCH FIRST
+  allowWrites?: boolean   // default false = READ-ONLY (reject writes). A future action-taking source/request sets true.
 }
 
 type Pending = { resolve: (v: any) => void; reject: (e: Error) => void }
@@ -132,6 +133,7 @@ export async function rewriteSql(sql: string, opts: RewriteOpts = {}): Promise<s
     source_dialect: opts.sourceDialect ?? opts.read,
     policies: opts.policies ?? [],
     maxRows: opts.maxRows ?? 0,
+    allowWrites: opts.allowWrites ?? false,   // read-only unless the caller explicitly opts in
   }
   let attempt = 0
   for (;;) {

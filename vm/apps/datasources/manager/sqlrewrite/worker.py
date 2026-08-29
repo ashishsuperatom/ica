@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "ven
 
 import sqlglot  # noqa: E402  (vendor path must be set first)
 from sqlglot import exp  # noqa: E402
+from sqlglot.errors import ParseError  # noqa: E402
 import hooks  # noqa: E402  (sibling module)
 
 # Our source-dialect name → the SQLGlot dialect we parse/render as. Unknown → None (SQLGlot's permissive default).
@@ -117,10 +118,17 @@ def rewrite(req):
 
     root = sqlglot.parse_one(sql, read=read)  # raises ParseError (with position) on bad SQL
 
-    forbidden = root.find(*FORBIDDEN)
-    if forbidden is not None or not root.find(exp.Select):
-        kind = type(forbidden).__name__ if forbidden is not None else type(root).__name__
-        raise ValueError(f"only read queries (SELECT) are allowed here — got {kind}")
+    # READ-ONLY BY DEFAULT — but a switch, not a wall. A source/request that is allowed to take ACTION passes
+    # allowWrites:true (finer per-source authorization plugs in at inject_policies() later). Analytics/BI stays
+    # locked to reads. When rejecting, say WHY and WHAT to do — a bare rejection makes the agent go blind.
+    if not req.get("allowWrites"):
+        forbidden = root.find(*FORBIDDEN)
+        if forbidden is not None or not root.find(exp.Select):
+            verb = (type(forbidden).__name__ if forbidden is not None else type(root).__name__).upper()
+            raise ValueError(
+                f"query rejected — this source is READ-ONLY, so only SELECT (read) queries run here, but this is "
+                f"a {verb} statement. Rewrite it to READ the data with SELECT; writes are not permitted on this source."
+            )
 
     root = hooks.apply_pre_ast(root, ctx)
     root = inject_policies(root, req.get("policies"))
@@ -149,8 +157,10 @@ def main():
             rid = req.get("id")
             resp = handle(req)
             resp["id"] = rid
-        except Exception as e:  # never let one bad request kill the worker
-            resp = {"id": rid, "ok": False, "error": _ANSI.sub("", f"{type(e).__name__}: {e}")}
+        except ParseError as e:  # bad SQL — the message carries the line/col so the agent can fix it
+            resp = {"id": rid, "ok": False, "error": "SQL error — " + _ANSI.sub("", str(e))}
+        except Exception as e:  # our rejections already carry a clean, actionable message; never let one kill the worker
+            resp = {"id": rid, "ok": False, "error": _ANSI.sub("", str(e))}
         sys.stdout.write(json.dumps(resp, default=str) + "\n")
         sys.stdout.flush()
 
