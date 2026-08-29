@@ -111,7 +111,7 @@ ${conceptBlock}
 1. Can any program above CORRECTLY answer this question — as-is or with different params? If one genuinely fits,
    pick it, run it to confirm, and write ${builtRel} = {"programDir":"<that program>","params":{…}}. If none
    truly answers it, do NOT force-fit one — build a new program from concepts (step 2). Accuracy over reuse.
-2. Otherwise COMPOSE from the concepts (\`./find-concept "<phrase>" --full\` for a concept's runnable PRQL). If they
+2. Otherwise COMPOSE from the concepts (\`./find-concept "<phrase>" --full\` for a concept's runnable query). If they
    don't fully cover it, do the work yourself — \`./query\`/\`./introspect\` the data, analyse, write the units +
    program. Run it (\`tsx run.mjs programs/<slug>/program.ts '<json>'\`), verify against the review checks, write
    ${builtRel}. The engine runs it — do NOT write answer.json.

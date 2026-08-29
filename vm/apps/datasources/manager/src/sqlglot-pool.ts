@@ -1,6 +1,6 @@
 // SQLGlot rewrite pool — the Node side of the SQL access seam.
 //
-// Replaces the old prqlc-WASM compile. Every AGENT query flows through here: parse → SELECT-only allow-list →
+// Every AGENT query flows through here: parse → SELECT-only allow-list →
 // our per-dialect hooks → authorization inject → row cap → render to the source dialect. The heavy lifting is in
 // Python (sqlrewrite/worker.py, vendored SQLGlot); this module owns the PROCESS lifecycle so it satisfies three
 // requirements at once:
@@ -21,6 +21,10 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const WORKER_PY = join(HERE, '..', 'sqlrewrite', 'worker.py')
 const PYTHON = process.env.PYTHON ?? process.env.PYTHON_BIN ?? 'python3'
 const MAX_WORKERS = Math.max(1, Number(process.env.SQLGLOT_WORKERS ?? 4))
+// Keep a FLOOR of warm workers so a query after an idle spell is never cold (~80ms). The floor is pre-warmed at
+// boot and the reaper never drops below it; only the workers spun up ABOVE the floor under load get reaped. One
+// worker ≈ 40-60MB resident — the standing cost of never cold-starting. Set 0 to reap to nothing (pure lazy).
+const MIN_WORKERS = Math.max(0, Math.min(Number(process.env.SQLGLOT_MIN_WORKERS ?? 1), MAX_WORKERS))
 const IDLE_MS = Math.max(5_000, Number(process.env.SQLGLOT_IDLE_MS ?? 120_000))
 
 export type RewriteOpts = {
@@ -89,8 +93,9 @@ function release(w: Worker): void {
   const next = waiters.shift()
   if (next) { next(w); return }
   idle.push(w)
-  // Whole pool quiet → arm the idle reaper (unref'd so it never keeps the process alive).
-  if (!reapTimer && idle.length === workers.length) {
+  // Whole pool quiet AND above the warm floor → arm the idle reaper (unref'd so it never keeps the process
+  // alive). At the floor there is nothing to reap, so don't even arm the timer.
+  if (!reapTimer && idle.length === workers.length && workers.length > MIN_WORKERS) {
     reapTimer = setTimeout(reap, IDLE_MS)
     reapTimer.unref?.()
   }
@@ -99,8 +104,11 @@ function release(w: Worker): void {
 function reap(): void {
   reapTimer = null
   if (waiters.length) return
-  const dead = workers.slice()
-  workers = []; idle.length = 0
+  // Fires only when the pool is fully idle. Keep MIN_WORKERS warm; kill the load-driven surplus above the floor.
+  const survivors = workers.slice(0, MIN_WORKERS)
+  const dead = workers.slice(MIN_WORKERS)
+  workers = survivors; idle.length = 0
+  for (const w of survivors) idle.push(w)
   for (const w of dead) { w.alive = false; try { w.proc.kill('SIGTERM') } catch { /* already gone */ } }
 }
 
@@ -153,3 +161,7 @@ export function shutdownPool(): void {
 for (const sig of ['exit', 'SIGINT', 'SIGTERM'] as const) {
   process.on(sig, () => { shutdownPool(); if (sig !== 'exit') process.exit(0) })
 }
+
+// Pre-warm the floor at boot: a floor of N means N are ALWAYS resident — including the first query, which is
+// therefore never cold. (MIN_WORKERS=0 → no floor, pure lazy spawn.)
+for (let i = 0; i < MIN_WORKERS; i++) idle.push(spawnWorker())

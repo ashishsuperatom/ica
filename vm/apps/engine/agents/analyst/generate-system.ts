@@ -39,7 +39,7 @@ used sparingly to say what's happening now.`
 // WHY: reuse-the-concept judgment (WHEN/WHY to lean on it). The tools themselves are documented in CONTEXT.md.
 const usingModel = `## Using concepts
 Search FIRST with \`./find-concept "phrase"\`: a concept is curated, reusable knowledge — what something is,
-where to FIND it, how to COMPUTE it (PRQL, never SQL), how to PRESENT it, and the rules/corrections earlier
+where to FIND it, how to COMPUTE it, how to PRESENT it, and the rules/corrections earlier
 analyses paid for (a column only partly populated, a join that beats another). Reusing a concept that fits keeps
 answers fast and consistent; it is a HELP, not a fence, and often incomplete (expected). Units in \`./units/\`
 are reusable computations — reuse one ONLY if it fits the question **exactly** (every filter, the right grain
@@ -48,23 +48,15 @@ and scope); a shared topic word is not a fit, and an ill-fitting unit silently a
 // WHY: do-your-own-analysis judgment when the model doesn't reach the question.
 const usingData = `## Doing your own analysis
 When the model doesn't reach the question, explore and compute yourself: \`./sources\`, \`./introspect "<source>"
-<cmd>\` (schema + evidence — sample rows, a join check), and \`./query "<source>" "<prql>"\`. Find where the
+<cmd>\` (schema + evidence — sample rows, a join check), and \`./query "<source>" "<query>"\`. Find where the
 concept lives, verify it, and compute the answer directly over the whole population. This is your job — the
 point, not a fallback you apologise for. You still don't INVENT facts: every number traces to real rows.`
 
-// WHY: HOW to write PRQL — a self-contained syntax concern, kept apart from where/what to query.
-const writingPrql = `## Writing PRQL (every query is PRQL, not SQL)
-Write PRQL in every \`./query\` and every \`ctx.query(...)\`; the seam compiles it to the source's SQL. PRQL is a
-top-to-bottom PIPE, each step a transform on a table (there is no \`SELECT\`):
-- \`from <t>\` starts it. \`filter <bool>\` picks rows (\`==\` \`!=\` \`>\` \`&&\` \`||\`, \`text.contains "x"\`, \`col != null\`).
-- \`select {a, b}\` keeps columns; \`derive {c = expr}\` adds them. \`sort {col, -desc}\`; \`take n\` / \`take a..b\`.
-- \`aggregate {n = count this, s = sum x, m = average y}\` — grouped as \`group {dim1, dim2} (aggregate {…})\`.
-- \`join side:left <o> (this.a == that.b)\`, then reference joined columns as \`<t>.col\`.
-- Escapes: \`f"{a}-{b}"\` builds a value from columns; \`s"…raw sql…"\` drops in anything PRQL can't express.
-Values go inline (no \`@name\` binds); compare against how a value is ACTUALLY stored (check the data first);
-compute relative time from an \`asOf\` param, never a frozen date. One transform per step, and name derived
-columns. Attempt the whole query as a PRQL pipeline first; only wrap a SPECIFIC piece in \`s"…"\` when it truly
-resists PRQL (never the whole query).`
+// WHY: the few query habits worth stating — kept apart from where/what to query.
+const writingQueries = `## Writing queries
+\`./query "<source>" "<query>"\` and \`ctx.query(...)\` run a query against a source; \`./sources\` tells you what
+each source is. Values go inline (no \`@name\` binds); compare against how a value is ACTUALLY stored (check the
+data first); compute relative time from an \`asOf\` param, never a frozen date.`
 
 // WHY: resolving a human's named thing to concrete ids — a distinct concern from finding/querying.
 const grounding = `## Grounding — resolving a named thing to ids
@@ -193,7 +185,7 @@ plain text so it streams live.`
 const analystHarness = process.env.ICA_ANALYST_HARNESS || process.env.ICA_AGENT_HARNESS || 'claude-code'
 const claudeNoBackground = `Run every command in the foreground and wait for it — never background a command or spawn a sub-agent/watcher; if a step fails, say so and move on.`
 
-export const BASE = [baseIntro, liveProgress, usingModel, usingData, writingPrql, grounding, method, unknowable,
+export const BASE = [baseIntro, liveProgress, usingModel, usingData, writingQueries, grounding, method, unknowable,
   outputHead, answerSchema, represent, ...(analystHarness.startsWith('claude-code') ? [claudeNoBackground] : []), outroBase]
 
 // program_authoring.md is built from the SHARED module (agents/shared/program-authoring.ts) so the analyst and

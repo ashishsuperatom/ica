@@ -9,7 +9,7 @@ We do NOT build it all at once. We build in order, starting with the **ICA**.
 ## The core loop
 
 A question comes in. The **ICA** (Intelligent Coding Agent) answers it, given four inputs:
-- **(a) data sources** — the *world state* (never touched directly; only via `query(dataSourceId, prql|call, params)` over the hub or a localhost http wrapper).
+- **(a) data sources** — the *world state* (never touched directly; only via `query(dataSourceId, query|call, params)` over the hub or a localhost http wrapper).
 - **(b) knowledge graph** — business rules + tribal knowledge + user preferences.
 - **(c) the concept layer** — a partial model of the data sources; *always* used with the data sources; improved after every question.
 - **(d) the partial UNIT library** — small computations, each a self-sufficient `situation → next-step` (associative memory).
@@ -31,7 +31,7 @@ Everything is **code + metadata**. The metadata is the concept "meaning" as norm
 
 ## Layers
 
-1. **Data fetching & transformation** — PRQL / REST / small transforms. **No abstraction that hides anything.** Raw and inspectable.
+1. **Data fetching & transformation** — queries / REST / small transforms. **No abstraction that hides anything.** Raw and inspectable.
 2. **Concept layer** — flat, time-versioned concepts: general ideas of computation (find/compute/present + optional data-model facets).
 3. **Superatom model** — UNITs and PROGRAMs (as designed). Later: a **simulation engine**.
 

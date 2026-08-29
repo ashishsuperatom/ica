@@ -40,7 +40,7 @@ async function main() {
   ok(nextSteps(s, q1.node.id).length === 1, 'Q1 has exactly one travelled next step')
 
   // A concept with the lean core + the optional data-model block (Receivables genuinely is an entity).
-  // Compute recipes are ALWAYS PRQL, never SQL — the datasource seam compiles PRQL to the source's dialect.
+  // Compute recipes are runnable queries against the source.
   const recv: ConceptProps = {
     value: 'Open receivables — one row per open bill.', status: 'verified',
     grain: 'one open bill', time: 'snapshot', keying: 'id = SubLedger', source: 'totalgroup',

@@ -142,11 +142,15 @@ const server = http.createServer(async (req, res) => {
   try {
     if (url.pathname === '/query') {
       if (!body.sql) return send(res, 400, { error: 'body must have { id, sql, params? }' })
-      // Agent path (default): the query text is native SQL → parsed to an AST, SELECT-only-checked, policy- and
-      // row-cap-injected, rendered to the source dialect (sqlrewrite/worker.py). Trusted SYSTEM path
-      // (introspect/grounding, via {raw:true}): run the SQL as-is. This is the access-control boundary — only the
-      // raw path skips the rewrite, and the agent can't reach it. `sql` (the executed SQL) is returned for visibility.
-      const sql = body.raw ? String(body.sql) : await rewriteSql(String(body.sql), { sourceDialect: bridge.dialect, maxRows: MAX_ROWS })
+      // Agent path (default): for a kind:'sql' source the query goes through the rewrite — parsed to an AST,
+      // SELECT-only-checked, policy- and row-cap-injected, rendered to the source dialect (sqlrewrite/worker.py).
+      // A NON-SQL source (rest/file/json) owns its own query paradigm, so its query text passes to the bridge
+      // as-is (the rewrite only understands SQL). Trusted SYSTEM path (introspect/grounding, via {raw:true})
+      // always passes as-is. Only the raw path skips checks and the agent can't reach it; `sql` (what actually
+      // ran) is returned for visibility.
+      const sql = (body.raw || bridge.kind !== 'sql')
+        ? String(body.sql)
+        : await rewriteSql(String(body.sql), { sourceDialect: bridge.dialect, maxRows: MAX_ROWS })
       const rows = await bridge.query(sql, body.params ?? {})
       // Byte guard for wide rows (the row cap is already injected into the agent query's AST). Raw/system reads are exempt.
       if (!body.raw) { const bytes = JSON.stringify(rows).length; if (bytes > MAX_BYTES) return send(res, 413, { error: `result too large (${(bytes / 1e6).toFixed(1)} MB) — add a filter or aggregate` }) }

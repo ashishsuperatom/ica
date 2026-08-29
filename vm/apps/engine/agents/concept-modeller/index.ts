@@ -83,7 +83,7 @@ Follow ./model/MODEL.md exactly: READ each program, VERIFY its computation again
 yourself — do not trust the analyst), MERGE into existing concepts (search with ./find-concept first, never
 duplicate), and write clean, general concepts via ./model/model.mjs with meta.changedBy='consolidator'. An
 [unknowable] program is the highest-value item — try hardest to work out whether the data can actually answer it.
-Compute recipes are PRQL, never SQL. Then write ${resultRel} as your FINAL action.`
+Compute recipes are runnable queries against the source. Then write ${resultRel} as your FINAL action.`
       // Truncation guard: a claude-code auto-compaction can end the turn mid-work with no report. Nudge to
       // CONTINUE until the report exists (bounded).
       const reportExists = async () => { try { return !!(await readFile(resultPath, 'utf8')).trim() } catch { return false } }

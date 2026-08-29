@@ -50,6 +50,18 @@ def _dialect(name):
     return DIALECTS.get((name or "").lower().strip(), None)
 
 
+def _limit_value(node):
+    """The integer row count from a limit clause — whether it's a LIMIT (exp.Limit) or an Oracle/SuiteQL
+    FETCH FIRST n ROWS (exp.Fetch). Both live under the select's `limit` arg. None if not a plain integer."""
+    if node is None:
+        return None
+    lit = node.args.get("count") if isinstance(node, exp.Fetch) else node.expression
+    try:
+        return int(lit.this) if lit is not None else None
+    except (AttributeError, ValueError, TypeError):
+        return None
+
+
 def enforce_cap(root, max_rows):
     """Ensure the outermost SELECT returns at most max_rows (the smaller of any existing limit and max_rows).
     A safety cap so a runaway query can't dump a whole table; a no-op semantics-wise for aggregations."""
@@ -58,15 +70,11 @@ def enforce_cap(root, max_rows):
     select = root if isinstance(root, exp.Select) else root.find(exp.Select)
     if select is None:
         return root
-    existing = root.args.get("limit") if isinstance(root, exp.Select) else None
-    if existing is not None:
-        try:
-            n = int(existing.expression.this)
-            if n <= max_rows:
-                return root  # agent asked for fewer — keep it
-        except (AttributeError, ValueError, TypeError):
-            pass
-    return root.limit(max_rows)
+    n = _limit_value(select.args.get("limit"))   # holds exp.Limit OR exp.Fetch
+    if n is not None and n <= max_rows:
+        return root                               # agent asked for fewer — keep it
+    select.limit(max_rows, copy=False)            # no limit, or one bigger than the cap → clamp to the cap
+    return root
 
 
 def inject_policies(root, policies):

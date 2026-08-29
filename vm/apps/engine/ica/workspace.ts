@@ -46,7 +46,7 @@ Search the project's knowledge:
 Query the data:
 - \`./sources\`                        → the data sources + their kind/dialect.
 - \`./find-schema "<term>" [--source <S>] [--full]\` → search ALL sources for where a field/table lives (SOURCE.TABLE.COLUMN : type); the fastest way to find where data is before querying.
-- \`./query "<source>" "<prql>"\`      → run a PRQL query → JSON rows.
+- \`./query "<source>" "<query>"\`     → run a query against a source → JSON rows.
 - \`./introspect "<source>" <tables|columns|sample|profile|verify-join> [args]\` → schema/evidence.
 - \`./resolve "<text>"\`               → a fuzzy name/value → concrete ids (grounding).
 Each prints JSON to stdout; run any of them with \`--help\` for its exact arguments. NEVER \`node\`/\`require\`/\`cat\` a \`.mjs\` to do these — just run the tool.
@@ -71,7 +71,7 @@ A UNIT is one file with three exports: \`meta\` (its MEANING — name, inputs, o
 relative time like "this month" from an \`asOf\` param, never a frozen date), and \`ui\` (\`{ category }\`).
 A PROGRAM is just a unit with \`meta.concept === 'program'\` that COMPOSES units with \`ctx.use\` and ends in a
 final UI unit. The kernel injects \`ctx\` with exactly four capabilities:
-- \`query(sourceId, prql, params)\` — query the source in PRQL (the seam compiles it to SQL; the model tells you WHICH tables/joins).
+- \`query(sourceId, query, params)\` — query the source (\`./sources\` says what it is; the model tells you WHICH tables/joins).
 - \`use(unitName, params)\`        — run/compose another unit (records the step + its output shape).
 - \`decide(label, cond, reason)\`  — mark a branch: records which path and why; returns \`cond\`.
 - \`log(message)\`                  — an optional human progress note (each step is auto-narrated anyway).
@@ -81,7 +81,7 @@ ${s.context ? '\n' + s.context + '\n' : ''}`)
 
   await writeFile(join(dir, 'data', 'query.mjs'),
 `// The data seam. You never see databases, ports, dialects, or credentials — you call
-// query(dataSourceId, prql, params) — the query text is PRQL; the manager compiles it to the source SQL. There is ONE endpoint: the datasource-manager, which routes
+// query(dataSourceId, query, params) — the manager runs the query against the source. There is ONE endpoint: the datasource-manager, which routes
 // by id to the right bridge; the bridge binds @name params in its own dialect and runs the query.
 // Ask the manager 'GET /sources' for each source's kind/dialect BEFORE writing queries.
 const MANAGER = process.env.DATASOURCE_URL ?? '${s.managerUrl ?? 'http://localhost:4000'}'
@@ -93,8 +93,8 @@ export async function query(dataSourceId, sql, params = {}) {
   return p?.rows ?? []
 }
 // SYSTEM-only raw-SQL path (NOT for agent data queries): the introspect/grounding seams read catalogs and build
-// indexes in raw dialect SQL. This posts { raw:true } so the manager runs it as-is instead of compiling PRQL.
-// Agent queries must go through query() above (PRQL only) — that is the access-control boundary.
+// indexes in raw dialect SQL. This posts { raw:true } so the manager runs it as-is, skipping the agent query path.
+// Agent queries must go through query() above — that is the access-control boundary.
 export async function rawQuery(dataSourceId, sql, params = {}) {
   const r = await fetch(MANAGER + '/query', { method:'POST', headers:{'content-type':'application/json'},
     body: JSON.stringify({ id: dataSourceId, sql, params, raw: true }) })
@@ -115,7 +115,7 @@ export async function sources() {   // list data sources + their kind/dialect
 // data-model block (measures/dimensions/…) is an OPTIONAL specialization for entities/measures only.
 //   concept(name, props, meta)  — upsert a concept (versioned). meta: { changedBy, reason? }. props:
 //        { value, aliases?, status:'unverified'|'corroborated'|'verified', rules?, requires?, supersedes?,
-//          find?, compute?, present?,           ← general facets; compute is ALWAYS PRQL, never SQL
+//          find?, compute?, present?,           ← general facets; compute is a runnable query
 //          source?, grain?, keying?, time?, measures?, dimensions?, parameters?, provenance? }  ← optional
 //   getConcept(name, asOf?)  — the live concept, or (asOf = unix ms) the version live at that instant
 //   conceptHistory(name)     — the full timeline (each version + who/when/why)
@@ -194,7 +194,7 @@ export async function forSource(id) {
 
   await writeFile(join(dir, 'concepts', 'find.mjs'),
 `// The CONCEPT seam. Strong, EVALUATED concepts — discovery already paid for — live as concept nodes in
-// ../db/project.sqlite. Each says WHERE the data is, HOW to compute it (a runnable PRQL step-list), HOW to
+// ../db/project.sqlite. Each says WHERE the data is, HOW to compute it (a runnable query step-list), HOW to
 // present it, and its REVIEW checks. You answer by REWRITING the concepts that fit into your program — a
 // concept is a GUIDE, never an import.
 //   findConcept('revenue by pillar')  → up to \`limit\` matching concepts (guide fields), best match first
@@ -280,7 +280,7 @@ export const raw = store
   // path and runs its driver with tsx (node can't resolve node-store's .ts imports; tsx can), so `./find-*`
   // returns clean JSON on the FIRST try from ANY directory. The agent never reads the .mjs source.
   const drivers: Record<string, string> = {
-    'find-concept': `// Concepts. "<phrase or name>" → matching concept NAMES + how many concepts exist IN TOTAL (so you know if the library is empty vs just no match). Add --full for a matched concept's method (compute/rules/prql). A query is required.
+    'find-concept': `// Concepts. "<phrase or name>" → matching concept NAMES + how many concepts exist IN TOTAL (so you know if the library is empty vs just no match). Add --full for a matched concept's method (compute/rules/query). A query is required.
 import { findConcept, listConcepts } from ${JSON.stringify(join(dir, 'concepts', 'find.mjs'))}
 const args = process.argv.slice(2)
 const full = args.includes('--full')
@@ -326,10 +326,10 @@ console.log(JSON.stringify(out.filter(o => o.program && !seen.has(o.program) && 
 import { sources } from ${JSON.stringify(join(dir, 'data', 'query.mjs'))}
 console.log(JSON.stringify(await sources(), null, 2))
 `,
-    'query': `// Run a PRQL query against a source. Run: ./query "<source>" "<prql>". Prints JSON rows.
+    'query': `// Run a query against a source. Run: ./query "<source>" "<query>". Prints JSON rows.
 import { query } from ${JSON.stringify(join(dir, 'data', 'query.mjs'))}
 const [src, ...rest] = process.argv.slice(2)
-if (!src || !rest.length) { console.error('usage: ./query "<source>" "<prql>"  (list sources with ./sources)'); process.exit(1) }
+if (!src || !rest.length) { console.error('usage: ./query "<source>" "<query>"  (list sources with ./sources)'); process.exit(1) }
 console.log(JSON.stringify(await query(src, rest.join(' ')), null, 2))
 `,
     'introspect': `// Inspect data schema/evidence. Run ONE of:
@@ -365,7 +365,7 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
     'find-schema':  'find-schema "<term>" [--source <SOURCE>] [--full]   → search ALL datasources for a field/table by name, type, or description (SOURCE.TABLE.COLUMN : type); --source filters to one; --full adds PK/nullable/references',
     'find-program': 'find-program "<question>" [--full]   → programs that answered a similar question (question/program/category); add --full for the saved params',
     'sources':      'sources   → every data source with its kind + dialect (JSON)',
-    'query':        'query "<source>" "<prql>"   → run a PRQL query against a source → JSON rows   (list sources: ./sources)',
+    'query':        'query "<source>" "<query>"   → run a query against a source → JSON rows   (list sources: ./sources)',
     'introspect':   'introspect "<source>" <cmd>   where <cmd> = tables | columns "<table>" | sample "<table>" [n] | profile "<table>" "<column>" | verify-join "<fromT>" "<fromCol>" "<toT>" "<toCol>"',
     'resolve':      'resolve "<text>"   → resolve a fuzzy name/value to concrete ids (JSON)',
   }

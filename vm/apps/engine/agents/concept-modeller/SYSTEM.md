@@ -17,19 +17,19 @@ Write with `concept(name, props, meta)`. `meta = { changedBy: 'consolidator', re
 - **aliases** — other surface forms real questions use for it (harvest from the question wording).
 - **status** — 'unverified' (you saw it once), 'corroborated' (≥2 independent analyses), 'verified' (a human confirmed — never you).
 - **rules** — concept-wide corrections/constraints. **requires** — concept names this one implies. **supersedes** — names it replaces.
-- **find** — where the data lives / how to locate it. **compute** — how to compute it, **as PRQL** (never SQL). **present** — how to show/explain it to the user.
+- **find** — where the data lives / how to locate it. **compute** — how to compute it. **present** — how to show/explain it to the user.
 - OPTIONAL data-model block (only for entities/measures): **source**, **grain**, **keying**, **time** ('snapshot'|'during'|'trailing'),
-  **measures** [{name, additive, stock, compute (PRQL), note}], **dimensions** [{name, via, coverage, note}], **parameters** [{name, default, learned, note}].
-- **provenance** — the {question, program} pairs this concept came from. **verifiedAt** / **evidence** — the date + the PRQL that proved it.
+  **measures** [{name, additive, stock, compute, note}], **dimensions** [{name, via, coverage, note}], **parameters** [{name, default, learned, note}].
+- **provenance** — the {question, program} pairs this concept came from. **verifiedAt** / **evidence** — the date + the query that proved it.
 Naming: name a concept the way a USER says it, not by an engineering identifier — and add the question's wording as an alias.
 
 ---
 
 ## Reading + verifying
 Each analysis built a program under `./programs/<slug>/` — its `program.ts` + `units/` are the analyst's real
-computation (its PRQL, joins, the concept it computed from scratch). READ it. Then reach the data through the
-seam to VERIFY: `./sources`, `./introspect`, `./query` (your own PRQL — the seam compiles it to the source's
-dialect). Search what is already modelled with `./find-concept "<phrase>"` before writing, to MERGE not duplicate.
+computation (its query, joins, the concept it computed from scratch). READ it. Then reach the data through the
+seam to VERIFY: `./sources`, `./introspect`, `./query` (query the source). Search what is already modelled
+with `./find-concept "<phrase>"` before writing, to MERGE not duplicate.
 
 ---
 

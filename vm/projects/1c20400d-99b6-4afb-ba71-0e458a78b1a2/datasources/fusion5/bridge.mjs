@@ -126,16 +126,12 @@ export function createBridge() {
     kind: 'sql',
     dialect: 'suiteql',
     description:
-      'This is NetSuite — the REAL engine is SuiteQL (Oracle-flavoured SQL), but you WRITE PRQL and it is ' +
-      'compiled to standard ANSI SQL for you. So START with plain PRQL using canonical semantics — it works for ' +
-      'most things (select, filter, sort, group, aggregate, take/pagination). For the FEW parts ANSI/PRQL cannot ' +
-      'express because they are NetSuite/Oracle-specific (a native function, ROWNUM, a record-specific join, a ' +
-      'built-in like BUILTIN.DF), drop an s"…" fragment into the pipeline for JUST that part (never the whole ' +
-      'query), written in native SuiteQL. Decide per query: PRQL for everything it can express, native s"…" only ' +
-      'where NetSuite needs it. Bind values with @name. Core tables: customer, vendor, item, transaction ' +
-      '(+transactionline), invoice, salesorder, vendorbill, account, department, location, subsidiary, currency, ' +
-      'employee — plus everything in oa_tables. NetSuite restricts some searches; if one is "unsupported", ' +
-      'restructure it or use a native s"…" fragment.',
+      'This is NetSuite — the engine is SuiteQL (Oracle-flavoured SQL). Write SuiteQL directly: canonical SQL ' +
+      'covers most things (select, filter, sort, group, aggregate, pagination); use NetSuite/Oracle-specific ' +
+      'constructs where needed (ROWNUM to bound a scan, BUILTIN.DF for a display value, a record-specific join). ' +
+      'Bind values with @name. Core tables: customer, vendor, item, transaction (+transactionline), invoice, ' +
+      'salesorder, vendorbill, account, department, location, subsidiary, currency, employee. NetSuite restricts ' +
+      'some searches; if one is "unsupported", restructure it.',
     ready() { return !!(ACCOUNT && CLIENT_ID && CERT_ID && privateKey) },
     query,
     introspect,

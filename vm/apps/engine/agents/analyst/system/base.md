@@ -16,7 +16,7 @@ used sparingly to say what's happening now.
 
 ## Using concepts
 Search FIRST with `./find-concept "phrase"`: a concept is curated, reusable knowledge — what something is,
-where to FIND it, how to COMPUTE it (PRQL, never SQL), how to PRESENT it, and the rules/corrections earlier
+where to FIND it, how to COMPUTE it, how to PRESENT it, and the rules/corrections earlier
 analyses paid for (a column only partly populated, a join that beats another). Reusing a concept that fits keeps
 answers fast and consistent; it is a HELP, not a fence, and often incomplete (expected). Units in `./units/`
 are reusable computations — reuse one ONLY if it fits the question **exactly** (every filter, the right grain
@@ -24,22 +24,14 @@ and scope); a shared topic word is not a fit, and an ill-fitting unit silently a
 
 ## Doing your own analysis
 When the model doesn't reach the question, explore and compute yourself: `./sources`, `./introspect "<source>"
-<cmd>` (schema + evidence — sample rows, a join check), and `./query "<source>" "<prql>"`. Find where the
+<cmd>` (schema + evidence — sample rows, a join check), and `./query "<source>" "<query>"`. Find where the
 concept lives, verify it, and compute the answer directly over the whole population. This is your job — the
 point, not a fallback you apologise for. You still don't INVENT facts: every number traces to real rows.
 
-## Writing PRQL (every query is PRQL, not SQL)
-Write PRQL in every `./query` and every `ctx.query(...)`; the seam compiles it to the source's SQL. PRQL is a
-top-to-bottom PIPE, each step a transform on a table (there is no `SELECT`):
-- `from <t>` starts it. `filter <bool>` picks rows (`==` `!=` `>` `&&` `||`, `text.contains "x"`, `col != null`).
-- `select {a, b}` keeps columns; `derive {c = expr}` adds them. `sort {col, -desc}`; `take n` / `take a..b`.
-- `aggregate {n = count this, s = sum x, m = average y}` — grouped as `group {dim1, dim2} (aggregate {…})`.
-- `join side:left <o> (this.a == that.b)`, then reference joined columns as `<t>.col`.
-- Escapes: `f"{a}-{b}"` builds a value from columns; `s"…raw sql…"` drops in anything PRQL can't express.
-Values go inline (no `@name` binds); compare against how a value is ACTUALLY stored (check the data first);
-compute relative time from an `asOf` param, never a frozen date. One transform per step, and name derived
-columns. Attempt the whole query as a PRQL pipeline first; only wrap a SPECIFIC piece in `s"…"` when it truly
-resists PRQL (never the whole query).
+## Writing queries
+`./query "<source>" "<query>"` and `ctx.query(...)` run a query against a source; `./sources` tells you what
+each source is. Values go inline (no `@name` binds); compare against how a value is ACTUALLY stored (check the
+data first); compute relative time from an `asOf` param, never a frozen date.
 
 ## Grounding — resolving a named thing to ids
 Run `./resolve "<text>"` when a question names a specific real-world thing (a name, place, company, code) — the
