@@ -1,42 +1,52 @@
-// Bootstrap populator for the DATASOURCE INDEX — a thin caller of the per-type indexer registry (the future
-// connector agent replaces this as the live, per-source updater). Run:
-//   DB=<project.sqlite> MANAGER=http://localhost:4020 pnpm exec tsx scripts/build-datasource-index.ts
+// Bootstrap populator for the DATASOURCE INDEX — RESUMABLE. Enumerates each source's containers (Phase 0),
+// then indexes the ones not already in the index (Phase N), persisting per container. Re-run to resume: it
+// skips containers already indexed. The future connector agent replaces this as the live per-source updater.
+//   DB=<project.sqlite> SEEDS_FILE=<project>/datasources/index-seeds.json [WIPE=1] [ONLY=<sourceId>] tsx scripts/build-datasource-index.ts
 import { NodeStore, putEntries, dataSourceStats } from '@superatom/node-store'
-import { buildEntries } from '../datasource-index/indexer.js'
+import { getIndexer } from '../datasource-index/indexer.js'
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 
-const DB = process.env.DB || ''            // project.sqlite (required — no project baked into the engine)
+const DB = process.env.DB || ''
 const MANAGER = process.env.MANAGER || 'http://localhost:4020'
-// Per-source seed tables (for catalog-less types) live OUTSIDE the engine, in the project's datasource config.
-// SEEDS_FILE points at <project>/datasources/index-seeds.json = { "<sourceId>": ["table", …] }.
 const SEEDS_FILE = process.env.SEEDS_FILE || ''
+const ONLY = process.env.ONLY || ''
 const SEED_TABLES: Record<string, string[]> = SEEDS_FILE ? JSON.parse(readFileSync(SEEDS_FILE, 'utf8')) : {}
-if (!DB) { console.error('set DB=<project.sqlite> (and optionally SEEDS_FILE=<project>/datasources/index-seeds.json)'); process.exit(1) }
+if (!DB) { console.error('set DB=<project.sqlite>'); process.exit(1) }
 
 async function rawQuery(id: string, sql: string): Promise<any[]> {
   const r = await fetch(MANAGER + '/query', { method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ id, sql, raw: true }) })
-  const j: any = await r.json()
-  if (j.error) throw new Error(j.error)
-  return j.rows || []
+  const j: any = await r.json(); if (j.error) throw new Error(j.error); return j.rows || []
 }
 
 async function main() {
-  const sources: Array<{ id: string; dialect: string }> = await (await fetch(MANAGER + '/sources')).json().then((j: any) => j.sources || [])
-  console.log(`sources: ${sources.map((s) => `${s.id}(${s.dialect})`).join(', ')}`)
+  let sources: Array<{ id: string; dialect: string }> = await (await fetch(MANAGER + '/sources')).json().then((j: any) => j.sources || [])
+  if (ONLY) sources = sources.filter((s) => s.id === ONLY)
   const store = new NodeStore(DB)
-  if (process.env.WIPE === '1') { store.db.exec('DELETE FROM datasource_index'); console.log('(wiped existing index)') }
-  let total = 0
+  if (process.env.WIPE === '1') { store.db.exec('DELETE FROM datasource_index' + (ONLY ? ` WHERE source='${ONLY}'` : '')); console.log('(wiped index' + (ONLY ? ' for ' + ONLY : '') + ')') }
+
   for (const s of sources) {
     console.log(`\n── ${s.id} [${s.dialect}] ──`)
-    try {
-      const entries = await buildEntries(s.dialect, s.id, rawQuery, { seedTables: SEED_TABLES[s.id] })
-      if (entries.length) { putEntries(store, entries); total += entries.length }
-      console.log(`  ${entries.length} fields`)
-    } catch (e: any) { console.error(`  ${s.id} FAILED: ${e.message}`) }
+    let indexer; try { indexer = getIndexer(s.dialect) } catch (e: any) { console.error('  ' + e.message); continue }
+    let containers: string[]
+    try { containers = await indexer.listContainers(s.id, rawQuery, { seedTables: SEED_TABLES[s.id] }) }
+    catch (e: any) { console.error(`  listContainers FAILED: ${e.message}`); continue }
+    // RESUME: skip containers already in the index (the index table IS the done-state).
+    const done = new Set<string>((store.db.prepare('SELECT DISTINCT container FROM datasource_index WHERE source=?').all(s.id) as any[]).map((r) => r.container))
+    const todo = containers.filter((c) => !done.has(c))
+    console.log(`  ${containers.length} containers · ${done.size} already indexed · ${todo.length} to do`)
+    let i = 0, ok = 0, empty = 0, fields = 0
+    for (const c of todo) {
+      i++
+      try {
+        const entries = await indexer.indexContainer(s.id, c, rawQuery)
+        if (entries.length) { putEntries(store, entries); ok++; fields += entries.length } else empty++
+        if (i % 25 === 0 || i === todo.length) console.log(`  …${i}/${todo.length}  (${ok} indexed, ${empty} empty/absent, ${fields} fields)`)
+      } catch { empty++ /* table absent or unqueryable → skip */ }
+    }
+    console.log(`  done: +${ok} containers, ${fields} new fields`)
   }
-  console.log(`\n=== indexed ${total} fields ===`)
+  console.log('\n=== index totals ===')
   console.table(dataSourceStats(store))
   store.close?.()
 }
