@@ -30,8 +30,15 @@ async function main() {
     let indexer; try { indexer = getIndexer(s.dialect) } catch (e: any) { console.error('  ' + e.message); continue }
     // STEP 1 — enumerate every container FIRST (find all tables before indexing any).
     console.log(`  step 1 · enumerating containers…`)
+    // The source's own catalog (via /introspect — for NetSuite this is the metadata-catalog) is the PRIMARY list.
+    let catalogTables: string[] | undefined
+    try {
+      const j: any = await (await fetch(MANAGER + '/introspect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: s.id }) })).json()
+      const t = (j.tables || []).map((x: any) => String(x?.name ?? x ?? '')).filter(Boolean)
+      if (t.length) { catalogTables = t; console.log(`  step 1 · catalog: ${t.length} tables from the source catalog`) }
+    } catch { /* no catalog → type fallbacks (standard list, customrecordtype) */ }
     let containers: string[]
-    try { containers = await indexer.listContainers(s.id, rawQuery, { seedTables: SEED_TABLES[s.id] }) }
+    try { containers = await indexer.listContainers(s.id, rawQuery, { seedTables: SEED_TABLES[s.id], catalogTables }) }
     catch (e: any) { console.error(`  step 1 FAILED: ${e.message}`); continue }
     const done = new Set<string>((store.db.prepare('SELECT DISTINCT container FROM datasource_index WHERE source=?').all(s.id) as any[]).map((r) => r.container))
     const todo = containers.filter((c) => !done.has(c))   // RESUME: skip containers already in the index (the index IS the done-state)

@@ -9,7 +9,9 @@
 import { dsiKey, type DataSourceEntry } from '@superatom/node-store'
 
 export type RawQuery = (source: string, sql: string) => Promise<any[]>
-export interface IndexerOpts { seedTables?: string[] }
+// catalogTables = the definitive table list from the source's own catalog (for NetSuite, the metadata-catalog via
+// the bridge's /introspect) — the PRIMARY enumeration when available; the type-specific fallbacks fill in if not.
+export interface IndexerOpts { seedTables?: string[]; catalogTables?: string[] }
 export interface TypeIndexer {
   listContainers(source: string, query: RawQuery, opts: IndexerOpts): Promise<string[]>
   indexContainer(source: string, container: string, query: RawQuery): Promise<DataSourceEntry[]>
@@ -30,17 +32,32 @@ export function inferType(v: any): string | undefined {
 }
 
 // ── mssql (T-SQL) — full catalog. Columns/PKs/FKs fetched once per RUN and cached across indexContainer calls. ──
+// CRITICAL: the raw/system path is NOT capped by the manager, so a large schema (10k–100k+ column rows) in one
+// query can overflow the bridge's WebSocket ("Max decompressed message size exceeded"). Every metadata read is
+// therefore PAGED in bounded chunks (OFFSET/FETCH) — never an unbounded pull, no matter how many tables.
+const PAGE_ROWS = 5000
+const MAX_META_ROWS = 2_000_000                                   // absolute backstop against a runaway loop
+async function pagedRaw(source: string, query: RawQuery, selectSql: string, orderBy: string): Promise<any[]> {
+  const all: any[] = []
+  for (let offset = 0; ; offset += PAGE_ROWS) {
+    const page = await query(source, `${selectSql} ORDER BY ${orderBy} OFFSET ${offset} ROWS FETCH NEXT ${PAGE_ROWS} ROWS ONLY`)
+    if (!Array.isArray(page) || !page.length) break
+    all.push(...page)
+    if (page.length < PAGE_ROWS || all.length >= MAX_META_ROWS) break
+  }
+  return all
+}
 let _mssqlCache: { source: string; cols: Map<string, any[]>; pks: Set<string>; fks: Map<string, string> } | null = null
 async function mssqlLoad(source: string, query: RawQuery) {
   if (_mssqlCache?.source === source) return _mssqlCache
   const cols = new Map<string, any[]>()
-  for (const r of await query(source, `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS`)) {
+  for (const r of await pagedRaw(source, query, `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS`, `TABLE_NAME, COLUMN_NAME`)) {
     const t = trim(r.TABLE_NAME); (cols.get(t) ?? cols.set(t, []).get(t)!).push(r)
   }
   const pks = new Set<string>()
-  try { for (const r of await query(source, `SELECT ku.TABLE_NAME t, ku.COLUMN_NAME c FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE ku ON tc.CONSTRAINT_NAME=ku.CONSTRAINT_NAME WHERE tc.CONSTRAINT_TYPE='PRIMARY KEY'`)) pks.add(trim(r.t) + '.' + trim(r.c)) } catch {}
+  try { for (const r of await pagedRaw(source, query, `SELECT ku.TABLE_NAME t, ku.COLUMN_NAME c FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE ku ON tc.CONSTRAINT_NAME=ku.CONSTRAINT_NAME WHERE tc.CONSTRAINT_TYPE='PRIMARY KEY'`, `ku.TABLE_NAME, ku.COLUMN_NAME`)) pks.add(trim(r.t) + '.' + trim(r.c)) } catch {}
   const fks = new Map<string, string>()
-  try { for (const r of await query(source, `SELECT fk.TABLE_NAME ft, fk.COLUMN_NAME fc, pk.TABLE_NAME tt, pk.COLUMN_NAME tc FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE fk ON rc.CONSTRAINT_NAME=fk.CONSTRAINT_NAME JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE pk ON rc.UNIQUE_CONSTRAINT_NAME=pk.CONSTRAINT_NAME AND fk.ORDINAL_POSITION=pk.ORDINAL_POSITION`)) fks.set(trim(r.ft) + '.' + trim(r.fc), trim(r.tt) + '.' + trim(r.tc)) } catch {}
+  try { for (const r of await pagedRaw(source, query, `SELECT fk.TABLE_NAME ft, fk.COLUMN_NAME fc, pk.TABLE_NAME tt, pk.COLUMN_NAME tc FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE fk ON rc.CONSTRAINT_NAME=fk.CONSTRAINT_NAME JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE pk ON rc.UNIQUE_CONSTRAINT_NAME=pk.CONSTRAINT_NAME AND fk.ORDINAL_POSITION=pk.ORDINAL_POSITION`, `fk.TABLE_NAME, fk.COLUMN_NAME`)) fks.set(trim(r.ft) + '.' + trim(r.fc), trim(r.tt) + '.' + trim(r.tc)) } catch {}
   return (_mssqlCache = { source, cols, pks, fks })
 }
 const mssql: TypeIndexer = {
@@ -95,12 +112,14 @@ const suiteql: TypeIndexer = {
   // the standard + seed list; a later resume re-adds the custom records. Never throws — worst case returns [].
   async listContainers(source, query, opts) {
     const set = new Set<string>()
+    // PRIMARY: the metadata-catalog (definitive standard + custom), passed in from the bridge's /introspect.
+    for (const t of (opts.catalogTables ?? [])) { const s = String(t).toLowerCase(); if (s) set.add(s) }
     for (const t of (opts.seedTables ?? [])) set.add(t)            // config seeds
-    for (const t of NETSUITE_STANDARD) set.add(t)                  // general NetSuite knowledge (probed at index time)
-    try {                                                          // custom records, LIVE — the part that can blip
+    for (const t of NETSUITE_STANDARD) set.add(t)                  // FALLBACK: general NetSuite knowledge (no-catalog case)
+    try {                                                          // FALLBACK: custom records live (if the catalog was unavailable)
       const rows = await query(source, `SELECT scriptid FROM customrecordtype`)
       if (Array.isArray(rows)) for (const r of rows) { const s = r?.scriptid; if (s) set.add(String(s).toLowerCase()) }
-    } catch (e: any) { console.warn(`  [${source}] customrecordtype enumeration failed (${String(e?.message ?? e).slice(0, 80)}) — using standard+seeds; resume will retry`) }
+    } catch (e: any) { console.warn(`  [${source}] customrecordtype enumeration failed (${String(e?.message ?? e).slice(0, 80)}) — using catalog/standard/seeds; resume will retry`) }
     return [...set].sort()
   },
   // One container = one sample call. EVERY failure mode (table absent, no permission, 429 rate-limit, timeout,

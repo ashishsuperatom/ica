@@ -110,11 +110,13 @@ export function createBridge() {
   }
 
   async function introspect() {
-    // oa_tables is SuiteQL's own catalog of queryable tables. Return names + whatever metadata it exposes.
+    // NetSuite's ODBC catalog (oa_tables) is EMPTY over the REST SuiteQL endpoint. The record metadata-catalog
+    // is the definitive list of every queryable record type (standard + custom) — one GET, same OAuth.
     let tables = []
     try {
-      const rows = await query('SELECT * FROM oa_tables')
-      tables = rows.map((r) => ({ name: r.table_name || r.tablename || r.name || r.id, ...r }))
+      const tk = await accessToken()
+      const r = await fetch(`${base}/services/rest/record/v1/metadata-catalog`, { headers: { authorization: `Bearer ${tk}`, accept: 'application/json' } })
+      if (r.ok) { const j = await r.json(); tables = (j.items || []).map((x) => ({ name: String(x.name || '') })).filter((t) => t.name) }
     } catch { tables = [] }
     return { kind: 'sql', dialect: 'suiteql', tables }
   }
