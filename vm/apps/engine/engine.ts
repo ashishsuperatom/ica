@@ -34,6 +34,7 @@ import { log, readJsonSafe } from './log.js'
 import { createInspector } from './inspect.js'
 import { NodeStore, ROOT, ensureRoot, intentId, SqliteVecIndex, indexText, backfillMissing, hybridSearch } from '@superatom/node-store'
 import { bgeEmbedder } from './embed.js'
+import { createSpanFirer } from './span-firing.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 try { process.loadEnvFile(join(__dirname, '.env')) } catch { /* no .env — rely on the ambient environment */ }
@@ -210,6 +211,8 @@ async function rankConceptsBySpecificity(question: string, cap: number): Promise
 let vectors: SqliteVecIndex | null = null
 try { vectors = new SqliteVecIndex(graph.db, bgeEmbedder.id, bgeEmbedder.dim) }
 catch (e: any) { console.warn('[semantic] sqlite-vec unavailable — semantic index disabled:', e?.message ?? e) }
+// §3 span-firing retriever — an A/B alternative to rankConceptsBySpecificity, logged side-by-side for comparison.
+const spanFirer = createSpanFirer(graph, bgeEmbedder)
 // Backfill pre-existing intents on boot so semantic reuse can search history, not just newly-built ones.
 // Best-effort + non-blocking (never delays boot); degrades silently if the model/native deps aren't present.
 if (vectors) void backfillMissing(graph, vectors, bgeEmbedder, { kind: 'intent' })
@@ -502,7 +505,14 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // Surface relevant CONCEPT NAMES by SPECIFICITY (CSS-like: most-question-words-covered wins), names only —
     // the agent opens the winner via find-concept for the method, so we never bias it with a formula.
     try {
-      conceptNames = await rankConceptsBySpecificity(question, 8)   // generous recall, ordered best-first; agent filters
+      const specificity = await rankConceptsBySpecificity(question, 8)   // current retriever (name-word specificity + semantic recall)
+      let fired: { concepts: string[]; scored: { name: string; activation: number }[]; unexplained: string[] } = { concepts: [], scored: [], unexplained: [] }
+      try { fired = await spanFirer.fire(question) } catch (e: any) { log.warn('span-firing', 'fire failed', e) }
+      // Log BOTH retrievers side-by-side so we can compare which surfaces the right concepts.
+      console.log(`[retrieval] specificity → [${specificity.join(', ')}]`)
+      console.log(`[retrieval] span-firing → fires [${fired.concepts.join(', ')}]  ·  ranked [${fired.scored.slice(0, 6).map(s => `${s.name} ${s.activation.toFixed(2)}`).join(', ')}]${fired.unexplained.length ? `  ·  unexplained [${fired.unexplained.slice(0, 8).join(' | ')}]` : ''}`)
+      // Surface span-firing (the mechanism under test); fall back to specificity only if it fires nothing. Flip with USE_SPECIFICITY=1.
+      conceptNames = process.env.USE_SPECIFICITY ? specificity : (fired.concepts.length ? fired.concepts : specificity)
       if (conceptNames.length) console.log(`[ica] concepts surfaced: ${conceptNames.join(', ')}`)
     } catch (e: any) { console.log(`[ica] concept search failed (${e?.message ?? e})`) }
   }
