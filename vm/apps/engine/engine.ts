@@ -111,30 +111,30 @@ let groundingBusy = false
 // ── Semantic-model consolidation (System 4) state ─────────────────────────────
 // This is the SEMANTIC-MODEL consolidation specifically — the bottom layer (meaning + the implementation
 // embedded in units). It is deliberately NOT "the" consolidation: other consolidation tasks (higher layers)
-// will come later, so everything here is namespaced `semanticConsolidate*` to keep them distinct.
+// will come later, so everything here is namespaced `conceptConsolidate*` to keep them distinct.
 //
-// The modeler runs OFFLINE over the stream of finished analyses. A watermark (a finished_at value, stored in
+// The concept modeller runs OFFLINE over the stream of finished analyses. A watermark (a finished_at value, stored in
 // answers.engine_meta) marks how far it has consumed. The trigger is a TIMER, not a per-question signal: a
 // single interval, started at boot and always running, that checks "is there anything past the watermark?"
 // and drains it. This is robust to restarts — if the server stops with un-consolidated answers and comes
 // back days later with no new questions, the timer still catches up (a finished-question signal might never
 // arrive; the timer always does). While a pass is running the tick is a no-op (single-runner) — the timer
 // keeps ticking but does nothing until the current pass finishes, then the next tick continues.
-const SEMANTIC_CONSOLIDATE_WM_KEY = 'semantic_model:consolidation_watermark'
+const CONCEPT_CONSOLIDATE_WM_KEY = 'concept_model:consolidation_watermark'
 // TODO: once this is proven, bump the default interval to 3 minutes (180000) so a real burst of questions
 // coalesces into ONE consolidation pass. Kept short (30s) for now so testing is fast — you don't want to
-// wait 3 min to see the modeler wake.
-const SEMANTIC_CONSOLIDATE_INTERVAL_MS = Number(process.env.SEMANTIC_CONSOLIDATE_INTERVAL_MS || 30000)
+// wait 3 min to see the concept modeller wake.
+const CONCEPT_CONSOLIDATE_INTERVAL_MS = Number(process.env.CONCEPT_CONSOLIDATE_INTERVAL_MS || 30000)
 // A batch that makes the agent SESSION crash is retried at most this many times (across ticks), then skipped
 // so a poison batch can never retry forever. Tracked in answers.engine_meta; reset on any clean pass.
-const SEMANTIC_CONSOLIDATE_FAIL_KEY = 'semantic_model:consolidation_failstreak'
-const SEMANTIC_CONSOLIDATE_MAX_FAILS = 3
+const CONCEPT_CONSOLIDATE_FAIL_KEY = 'concept_model:consolidation_failstreak'
+const CONCEPT_CONSOLIDATE_MAX_FAILS = 3
 // SEAM: the watermark-drain machinery below is KEPT (proven cursor + poison-cap logic), but its payload —
 // the semantic-model modeler — was removed. Repoint `consolidateBatch()` at the new offline learning loop
 // (record the verified concept set per solved question + learn requires-edges, spec §6/§10/§11), then flip
 // this to true. While false the tick is inert and NEVER advances the watermark, so no backlog is consumed.
 const CONSOLIDATOR_WIRED = false
-let semanticConsolidating = false
+let conceptConsolidating = false
 
 // Every question + answer for this project, in one sqlite the ENGINE owns (the LLM never writes it).
 // Enables deterministic reuse ("already answered?") + full history + agent session ids. See answers.ts.
@@ -232,8 +232,8 @@ const inspector = createInspector({
       grounding: { harness: GROUNDING_HARNESS, model: GROUNDING_MODEL, busy: groundingBusy },
       reflex:    { harness: process.env.ICA_REFLEX_HARNESS ?? 'opencode', model: process.env.ICA_REFLEX_MODEL ?? 'deepseek-v4-flash' },
     },
-    consolidating: semanticConsolidating,
-    consolidateIntervalMs: SEMANTIC_CONSOLIDATE_INTERVAL_MS,
+    consolidating: conceptConsolidating,
+    consolidateIntervalMs: CONCEPT_CONSOLIDATE_INTERVAL_MS,
     uptimeMs: Date.now() - EPOCH,
   }),
 })
@@ -822,7 +822,7 @@ function inputTerminal(w: Which, data: string) {
 
 // ── Semantic-model consolidation tick ─────────────────────────────────────────
 // Fired by the always-running interval (below). Idempotent and cheap when there's nothing to do. It NEVER
-// blocks the analyst (separate busy flags). If the modeler is busy with a manual build, this tick skips and
+// blocks the analyst (separate busy flags). If the concept modeller is busy with a manual build, this tick skips and
 // the next one retries. When it does run, it drains ALL pending batches (a 3-day backlog is processed in
 // order, 50 at a time) until nothing is left past the watermark.
 // SEAM: process one batch of freshly-finished answers offline. The semantic-model modeler was removed;
@@ -832,15 +832,15 @@ async function consolidateBatch(_items: any[], _batchId: string, _log: (m: any) 
   throw new Error('consolidator not wired — repoint consolidateBatch() at the new learning loop (spec §6)')
 }
 
-async function semanticConsolidateTick() {
+async function conceptConsolidateTick() {
   if (!CONSOLIDATOR_WIRED) return                              // seam disabled → inert, never advances the watermark (backlog waits)
-  if (semanticConsolidating) return                            // already consolidating → no-op; next tick retries
-  const wmPeek = Number(answers.getMeta(SEMANTIC_CONSOLIDATE_WM_KEY) ?? '0')
+  if (conceptConsolidating) return                            // already consolidating → no-op; next tick retries
+  const wmPeek = Number(answers.getMeta(CONCEPT_CONSOLIDATE_WM_KEY) ?? '0')
   if (!answers.sinceFinished(wmPeek, 1).length) return         // nothing past the watermark → cheap exit
-  semanticConsolidating = true                                 // single-runner: hold for the whole drain
+  conceptConsolidating = true                                 // single-runner: hold for the whole drain
   try {
     for (;;) {
-      const wm = Number(answers.getMeta(SEMANTIC_CONSOLIDATE_WM_KEY) ?? '0')
+      const wm = Number(answers.getMeta(CONCEPT_CONSOLIDATE_WM_KEY) ?? '0')
       const batch = answers.sinceFinished(wm)                   // finished after the watermark, oldest-first
       if (!batch.length) break
       const nextWm = String(Math.max(...batch.map((b) => b.finishedAt ?? wm)))   // where the watermark goes once this batch is done
@@ -857,13 +857,13 @@ async function semanticConsolidateTick() {
       if (!fresh.length) {
         // Nothing new — every answer here re-runs an already-consolidated program (or has no program). Advance
         // PAST them WITHOUT spending an agent run. This is the "asked again, nothing changed → don't re-model" case.
-        console.log(`[semantic-consolidation] ${batch.length} answer(s) since wm=${wm} — all already-consolidated repeats; skipping the modeler`)
-        answers.setMeta(SEMANTIC_CONSOLIDATE_WM_KEY, nextWm)
+        console.log(`[concept-consolidation] ${batch.length} answer(s) since wm=${wm} — all already-consolidated repeats; skipping the modeler`)
+        answers.setMeta(CONCEPT_CONSOLIDATE_WM_KEY, nextWm)
         continue
       }
       const batchId = 'b_' + Date.now().toString(36)
       const items = fresh.map((r) => ({ question: r.question, status: r.status, programDir: r.programDir, usedNodes: (r.answer as any)?.usedNodes }))
-      console.log(`[semantic-consolidation] ${batchId}: ${items.length} new program(s) of ${batch.length} answer(s) since wm=${wm}`)
+      console.log(`[concept-consolidation] ${batchId}: ${items.length} new program(s) of ${batch.length} answer(s) since wm=${wm}`)
       // Consolidation is a BACKGROUND, PROJECT-LEVEL task (no asker/qid). Its stream goes to the semantic-log
       // channel; the DO delivers it to whoever ATTACHED to that channel (no owner → project-level, not user data).
       const semLog = (msg: any) => emit({ type: 'log', channel: 'semantic-log' }, msg)
@@ -871,29 +871,29 @@ async function semanticConsolidateTick() {
       try {
         const r = await consolidateBatch(items, batchId, semLog)
         // Advance PAST the last finished_at we consumed → those rows never re-enter a batch (strictly-greater cursor).
-        answers.setMeta(SEMANTIC_CONSOLIDATE_WM_KEY, nextWm)
-        answers.setMeta(SEMANTIC_CONSOLIDATE_FAIL_KEY, '0')     // clean pass → reset the failure streak
-        console.log(`[semantic-consolidation] ${batchId} done in ${(r.ms / 1000).toFixed(1)}s`)
+        answers.setMeta(CONCEPT_CONSOLIDATE_WM_KEY, nextWm)
+        answers.setMeta(CONCEPT_CONSOLIDATE_FAIL_KEY, '0')     // clean pass → reset the failure streak
+        console.log(`[concept-consolidation] ${batchId} done in ${(r.ms / 1000).toFixed(1)}s`)
         semLog({ t: 'semantic:status', text: 'Model consolidated ✓' })
       } catch (e: any) {
         // The agent SESSION errored (a crash, not a compaction — those are handled inside consolidate()).
         // Do NOT advance the watermark yet: a transient error should be retried. But bound it — after
         // MAX_FAILS consecutive failures on the SAME batch, skip it (advance past) so a poison batch can
         // never retry forever and burn money. The skipped analyses' concepts resurface if re-asked.
-        const streak = Number(answers.getMeta(SEMANTIC_CONSOLIDATE_FAIL_KEY) ?? '0') + 1
-        console.log(`[semantic-consolidation] ${batchId} FAILED (streak ${streak}/${SEMANTIC_CONSOLIDATE_MAX_FAILS}): ${e?.message ?? e}`)
-        if (streak >= SEMANTIC_CONSOLIDATE_MAX_FAILS) {
-          console.log(`[semantic-consolidation] skipping poison batch — advancing watermark past ${nextWm}`)
-          answers.setMeta(SEMANTIC_CONSOLIDATE_WM_KEY, nextWm); answers.setMeta(SEMANTIC_CONSOLIDATE_FAIL_KEY, '0')
+        const streak = Number(answers.getMeta(CONCEPT_CONSOLIDATE_FAIL_KEY) ?? '0') + 1
+        console.log(`[concept-consolidation] ${batchId} FAILED (streak ${streak}/${CONCEPT_CONSOLIDATE_MAX_FAILS}): ${e?.message ?? e}`)
+        if (streak >= CONCEPT_CONSOLIDATE_MAX_FAILS) {
+          console.log(`[concept-consolidation] skipping poison batch — advancing watermark past ${nextWm}`)
+          answers.setMeta(CONCEPT_CONSOLIDATE_WM_KEY, nextWm); answers.setMeta(CONCEPT_CONSOLIDATE_FAIL_KEY, '0')
         } else {
-          answers.setMeta(SEMANTIC_CONSOLIDATE_FAIL_KEY, String(streak))
+          answers.setMeta(CONCEPT_CONSOLIDATE_FAIL_KEY, String(streak))
         }
         break                                                    // stop this drain; the next tick retries (or has moved on if skipped)
       }
     }
   } catch (e: any) {
-    console.log(`[semantic-consolidation] error: ${e?.message ?? e}`)
-  } finally { semanticConsolidating = false }
+    console.log(`[concept-consolidation] error: ${e?.message ?? e}`)
+  } finally { conceptConsolidating = false }
 }
 
 // A client (re)connected (e.g. after reload). Replay the live analyst state so it doesn't see a blank
@@ -1027,7 +1027,7 @@ setInterval(() => { if (hub?.readyState === WebSocket.OPEN) hub.send(JSON.string
 // tick it checks for analyses past the watermark and drains them — so a restart with a backlog (even days
 // later, with no new question asked) still gets consolidated. A no-op while a pass is in flight or the
 // modeler is otherwise busy. (This is the SEMANTIC-MODEL consolidation; other layers get their own timers.)
-setInterval(() => { semanticConsolidateTick().catch((e) => console.log('[semantic-consolidation] tick error:', e?.message ?? e)) }, SEMANTIC_CONSOLIDATE_INTERVAL_MS)
+setInterval(() => { conceptConsolidateTick().catch((e) => console.log('[concept-consolidation] tick error:', e?.message ?? e)) }, CONCEPT_CONSOLIDATE_INTERVAL_MS)
 // ── Eager agent warm-up ───────────────────────────────────────────────────────
 // The ESSENTIAL agents are pre-spawned at boot, not lazily on the first question. On a Fly VM that
 // suspends/resumes to save money, a lazily-spawned claude costs ~10-15s on the FIRST question after a

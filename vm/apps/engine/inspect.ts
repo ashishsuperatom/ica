@@ -385,7 +385,7 @@ export function createInspector(deps: InspectorDeps) {
     const answered = (answers.db.prepare(`SELECT COUNT(*) AS n FROM answers WHERE status='answered'`).get() as any).n
     const totalQ = (answers.db.prepare(`SELECT COUNT(*) AS n FROM answers`).get() as any).n
     const last = answers.db.prepare(`SELECT created_at FROM answers ORDER BY created_at DESC LIMIT 1`).get() as any
-    const watermark = Number(answers.getMeta('semantic_model:consolidation_watermark') ?? '0')
+    const watermark = Number(answers.getMeta('concept_model:consolidation_watermark') ?? '0')
     const pending = (answers.db.prepare(`SELECT COUNT(*) AS n FROM answers WHERE finished_at > ?`).get(watermark) as any).n
 
     return {
