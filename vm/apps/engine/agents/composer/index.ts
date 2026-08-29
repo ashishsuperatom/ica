@@ -36,7 +36,7 @@ export interface ComposerResult {
 export interface ProgramCandidate { question: string; program?: string; score: number }
 export interface ModifyTarget { programDir: string; prevQuestion?: string }
 export interface Composer {
-  ask(question: string, handlers?: RunHandlers, opts?: { qid?: string; candidates?: ProgramCandidate[]; modify?: ModifyTarget }): Promise<ComposerResult>
+  ask(question: string, handlers?: RunHandlers, opts?: { qid?: string; candidates?: ProgramCandidate[]; modify?: ModifyTarget; conceptNames?: string[] }): Promise<ComposerResult>
   session: Session
   cwd: string
 }
@@ -50,8 +50,9 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
 
   const preamble =
     'Read ./CONTEXT.md FIRST (the tools + seams), then ./composer/COMPOSER.md (your instructions) — follow it ' +
-    'exactly. Search concepts with `./find-concept "<phrase>"` and existing programs with `./find-program "<question>"`; ' +
-    'you write a PROGRAM the engine runs. You do NOT explore raw data — you compose concepts, or you escalate.'
+    'exactly. Search concepts with `./find-concept "<phrase>"` and compose them into a PROGRAM the engine runs. ' +
+    'If the concepts don\'t fully cover it, explore the data yourself (`./query`/`./introspect`) and analyse — ' +
+    'escalate to the analyst when it\'s a hard problem or you can\'t figure it out (many composers share one analyst).'
 
   return {
     cwd,
@@ -72,6 +73,14 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
         ? 'Existing programs the engine matched to this question (score = similarity, higher = closer):\n' +
           cands.slice(0, 6).map(c => `- ${c.program} — "${c.question}" (${c.score.toFixed(2)})`).join('\n')
         : 'No existing program matched this question.'
+      // Concept NAMES the engine surfaced for this question (names only — no method, so it can't bias you toward
+      // a formula you might not use). Open the ones that look right with `./find-concept "<name>" --full`. This is
+      // a head-start, NOT the whole set — find-concept is still live for anything else you need.
+      const conceptBlock = (o.conceptNames ?? []).length
+        ? '\nCandidate concepts for this question, most-relevant first — SOME MAY NOT FIT. Open the ones that look' +
+          ' right with `./find-concept "<name>" --full`, use those, ignore the rest (find-concept stays available):\n' +
+          (o.conceptNames ?? []).map(n => `- ${n}`).join('\n') + '\n'
+        : ''
       const m = o.modify
       // MODIFY: edit the SAME program in place (the engine supplies the current program — it may be from a
       // reuse, so it is NOT in your context). No new program, no escalate — just apply the edit and rerun.
@@ -96,20 +105,16 @@ data. Do NOT write answer.json.` : ''
 Question: ${question}
 
 ${candBlock}
-
+${conceptBlock}
 1. Can any program above CORRECTLY answer this question — as-is or with different params? If one genuinely fits,
    pick it, run it to confirm, and write ${builtRel} = {"programDir":"<that program>","params":{…}}. If none
    truly answers it, do NOT force-fit one — build a new program from concepts (step 2). Accuracy over reuse.
-2. Otherwise COMPOSE — but stay LIGHT (you're the fast path). \`./find-concept "<phrase>"\` to find the concepts
-   this needs, then \`./find-concept "<phrase>" --full\` for the full guide (its runnable PRQL); do a SMALL rewrite
-   of that PRQL (different params, a grouping, a filter, a window over fields already in
-   the concept). Run it (\`tsx run.mjs programs/<slug>/program.ts '<json>'\`), verify against the review checks,
-   write ${builtRel}. The engine runs it — do NOT write answer.json or answer in chat.
-3. ESCALATE the moment it turns into a real BUILD — a genuinely new computation the concepts don't contain (a
-   growth/delta across periods, a new join, a metric no concept computes), more than ~2 new query steps, or it
-   won't come together in a couple of tries. Write ${escalateRel} = {"reason":"<what's missing / why it needs a
-   build>"} and STOP. Escalating is success — the analyst is faster at real builds. When unsure, escalate; never
-   grind out a big new program yourself, and never explore raw data or guess.`
+2. Otherwise COMPOSE from the concepts (\`./find-concept "<phrase>" --full\` for a concept's runnable PRQL). If they
+   don't fully cover it, do the work yourself — \`./query\`/\`./introspect\` the data, analyse, write the units +
+   program. Run it (\`tsx run.mjs programs/<slug>/program.ts '<json>'\`), verify against the review checks, write
+   ${builtRel}. The engine runs it — do NOT write answer.json.
+3. Escalate to the analyst when it's a hard problem or you can't figure it out. Write ${escalateRel} =
+   {"reason":"<what's blocking you>"} and STOP. Many composers share one analyst, so do the rest yourself.`
       const prompt = m ? modifyPrompt : composePrompt
 
       const hasBuilt     = async () => { try { return !!JSON.parse(await readFile(builtPath, 'utf8'))?.programDir } catch { return false } }

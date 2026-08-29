@@ -21,7 +21,9 @@ function isTyping(el: Element | null): boolean {
 // `content` is any value that changes reference/identity whenever the log changes — pass the events array
 // itself (a new reference on every merge), NOT its length: streaming edits an event IN PLACE, so the length
 // can stay the same while the content grows. Keyed on the array, auto-follow fires on every update.
-export function useLogNav(ref: RefObject<HTMLElement | null>, active: boolean, content: unknown) {
+// `jumpKey` changes whenever the user asks a NEW question → force the log to that latest question (pin to bottom),
+// even if they'd scrolled up. Streaming of the SAME question follows only when already near the bottom.
+export function useLogNav(ref: RefObject<HTMLElement | null>, active: boolean, content: unknown, jumpKey?: unknown) {
   const pinned = useRef(true)   // is the log scrolled near the bottom? (so new content follows, but reading-up doesn't yank)
   const cursor = useRef<{ idx: number; at: number }>({ idx: -1, at: 0 })
 
@@ -34,21 +36,26 @@ export function useLogNav(ref: RefObject<HTMLElement | null>, active: boolean, c
     return () => el.removeEventListener('scroll', onScroll)
   }, [ref, active])
 
-  // Open the tab → pin to the bottom. The log often mounts/renders AFTER this runs, so pin repeatedly.
+  // FORCE to the bottom when the view OPENS (active) or a NEW question is asked (jumpKey) — pin repeatedly and
+  // for a while, because the container may be display:none→flex or its content may render just after this runs,
+  // so a single scroll misses. This is why opening Analyst used to land at the top.
   useEffect(() => {
     if (!active) return
     pinned.current = true
     const pin = () => { const el = ref.current; if (el) el.scrollTop = el.scrollHeight }
+    pin()
     const raf = requestAnimationFrame(pin)
-    const ts = [40, 120, 260, 500].map(d => window.setTimeout(pin, d))
+    const ts = [0, 30, 80, 160, 300, 500, 800, 1200].map(d => window.setTimeout(pin, d))
     return () => { cancelAnimationFrame(raf); ts.forEach(clearTimeout) }
-  }, [active, ref])
+  }, [active, jumpKey, ref])
 
-  // New content → follow to the bottom, but only if the user is already near it.
+  // FOLLOW new content to the bottom while near it — via requestAnimationFrame, NOT a debounced setTimeout. A
+  // debounce that is cleared on every event STARVES during a continuous stream (it's always one delay away and
+  // never fires), which is why the live question didn't follow. rAF fires the next frame regardless.
   useEffect(() => {
     if (!active || !pinned.current) return
-    const t = window.setTimeout(() => { const el = ref.current; if (el) el.scrollTop = el.scrollHeight }, 60)
-    return () => clearTimeout(t)
+    const raf = requestAnimationFrame(() => { const el = ref.current; if (el) el.scrollTop = el.scrollHeight })
+    return () => cancelAnimationFrame(raf)
   }, [content, active, ref])
 
   // Shift+Arrow → previous / next question, scrolling the CONTAINER.

@@ -138,6 +138,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [semHasPty, setSemHasPty] = useState(false)       // modeler is claude → a raw terminal is available (show the toggle)
   const [semTerminal, setSemTerminal] = useState(false)   // user opened the raw terminal → attach the PTY lazily
   const [coEvents, setCoEvents] = useState<AgentEvent[]>([])   // COMPOSER log (composer-log channel) — its own view, separate from the analyst
+  const [askTick, setAskTick] = useState(0)                    // bumps on every new question → useLogNav jumps each log view to it
   const anLogRef = useRef<HTMLDivElement>(null)
   const semLogRef = useRef<HTMLDivElement>(null)
   const coLogRef = useRef<HTMLDivElement>(null)
@@ -248,8 +249,8 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
 
   // The analyst + semantic logs each own their interactions SEPARATELY (open→bottom, follow-if-near-bottom,
   // Shift+Arrow between questions) — see logNav.ts. contentKey = a number that grows as the log grows.
-  useLogNav(anLogRef,  view === 'analyst',  anEvents)     // pass the ARRAY (new ref on every merge, incl. in-place streaming) — not .length
-  useLogNav(coLogRef,  view === 'composer', coEvents)
+  useLogNav(anLogRef,  view === 'analyst',  anEvents,  askTick)   // pass the ARRAY (new ref on every merge, incl. in-place streaming) — not .length; askTick = force-jump on a new question
+  useLogNav(coLogRef,  view === 'composer', coEvents,  askTick)
   useLogNav(semLogRef, view === 'semantic', semEvents)
 
   usePersistLog('sa-anlog-', sessionId, anEvents, setAnEvents)   // analyst + composer logs both survive a reload
@@ -616,6 +617,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     anXtermRef.current?.clear()   // claude PTY: fresh TUI per question (harmless when the analyst is codex)
     const qMarker: AgentEvent = { kind: 'user', text }   // QUESTION-boundary divider (+ Shift+Arrow anchor) — put it in BOTH agent-log views
     setAnEvents(l => [...l, qMarker]); setCoEvents(l => [...l, qMarker])
+    setAskTick(t => t + 1)   // force each log view to jump to this newest question, even if it was scrolled up (see useLogNav jumpKey)
     setStatus('')
     setBusy(true); busyRef.current = true; armWatchdog()
     if (inputRef.current) { inputRef.current.value = ''; inputRef.current.style.height = 'auto' }

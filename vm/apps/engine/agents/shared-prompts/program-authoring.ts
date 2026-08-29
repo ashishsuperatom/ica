@@ -11,10 +11,10 @@ answer it produces. A program is the reusable, inspectable artifact; the number 
 output of *running* it. Do your discovery however you like (probe with \`query\`, read the model), but once
 you know how to answer, crystallize it into a program.`
 
-const paExisting = `## First: can an existing program answer this?
-Look in \`./programs/\`. If one already fits this question (exactly, or with different parameters like a
-different name/date/lane), REUSE it — run it with the right params and use its output. Author a new
-program only when none fits. Fewer new programs over time is the goal.`
+const paExisting = `## Build from CONCEPTS
+Compose what THIS question needs from the CONCEPTS that fit (\`find-concept\`) — concepts are your reusable logic.
+(The model-builder turns common program patterns into concepts offline, so building from concepts is how reuse
+compounds.)`
 
 const paShape = `## The shape
 Create \`./programs/<slug>/\` (a short, descriptive slug for the question). Inside:
@@ -102,4 +102,10 @@ missed), the same program re-runs and can flip to answered. The engine keeps you
 an unknowable program stays unknowable; an answered program's output omits \`status\` (defaults to answered) or
 sets it to \`"answered"\`.`
 
-export const PROGRAM_AUTHORING: string[] = [paIntro, paExisting, paShape, paKeys, paCtx, paRun]
+const paStyle = `## Style
+- Comments: short, only where the code's intent isn't obvious. No big top-of-file blocks; don't restate the code.
+- Values: always carry the RAW number WITH its currency/unit as separate fields (e.g. \`{ value: 3810000, currency:
+  'AUD' }\`) alongside your display value — so a global layer can re-format or convert currency later. Format for
+  display however fits; just keep the raw value + unit too.`
+
+export const PROGRAM_AUTHORING: string[] = [paIntro, paExisting, paShape, paKeys, paCtx, paRun, paStyle]

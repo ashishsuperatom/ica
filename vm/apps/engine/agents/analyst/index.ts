@@ -70,7 +70,7 @@ export interface AskOpts {
   // answers + the program's location (the id) — the analyst OPENS and READS the program itself (that is the
   // source of truth), so we never pass a stale answer string around.
   modify?: { programDir: string; prevQuestion?: string }
-  hint?: string           // an optional pointer from reflex (e.g. a close existing program to reuse or ignore)
+  conceptNames?: string[] // concept NAMES the engine surfaced for this question (names only — open with find-concept for the method)
 }
 
 export interface Analyst {
@@ -131,19 +131,18 @@ export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
       const buildPrompt = `${preamble}
 
 Question: ${question}
-${opts.hint ? '\n' + opts.hint + '\n' : ''}
+${(opts.conceptNames ?? []).length ? '\nCandidate concepts for this question, most-relevant first — SOME MAY NOT FIT. Open the ones that look right with ./find-concept "<name>" --full, use those, ignore the rest (find-concept stays available for anything else):\n' + (opts.conceptNames ?? []).map(n => `- ${n}`).join('\n') + '\n' : ''}
 There is ONE path: BUILD A PROGRAM. Every question becomes a program — no exceptions. This includes a
 greeting, small talk, or a question about you / the system / whether data sources are connected: for those,
 build a small program whose output IS your reply. Whatever you would say goes INTO the program's output
 (which becomes the answer card + UI) — never into chat.
 
 1. Decide which answer-shape (\`category\`) from ./analyst/ANALYST.md fits THIS question, and report it as \`category\`.
-2. RECON THE MODEL FIRST — before touching raw data. Decide what this question needs (entity, measure, grain,
-   filters), then search the model for it: \`./find-model "term" "term"\` (and \`./find-concept "phrase"\`,
-   \`./find-program "question"\`). Inspect what comes back; if a concept / unit / past program CONFIDENTLY fits,
-   reuse or compose it — deterministic, and it carries the corrections we've made. ONLY if nothing confidently
-   fits, analyze the raw data yourself (\`./query\` / \`./introspect\`). Probe, judge, move on — never force an
-   ill-fitting unit. Always PRODUCE AN ANSWER.
+2. RECON THE CONCEPTS FIRST — before touching raw data. Decide what this question needs (entity, measure, grain,
+   filters), then search for it: \`./find-concept "phrase"\` (and \`./find-model "term" "term"\`). Inspect what comes
+   back; if a concept / unit CONFIDENTLY fits, compose from it — it carries the corrections we've made. ONLY if
+   nothing confidently fits, analyze the raw data yourself (\`./query\` / \`./introspect\`). Probe, judge, move on —
+   never force an ill-fitting unit. Always PRODUCE AN ANSWER.
 3. Write ${builtRel} = {"programDir":"programs/<slug>","params":{...the params...}, "parent":"root" | "<a prior intent id>", "followups":["…", "…"]}
    pointing at the program you built, and RUN it with \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\` until
    it is correct. Reuse an existing ./programs/ program if one fits. \`parent\` PLACES this question in the intent

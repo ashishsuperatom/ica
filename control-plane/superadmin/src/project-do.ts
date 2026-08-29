@@ -477,25 +477,27 @@ export class ProjectDO extends DurableObject<Env> {
       catch { ws.close(4001, 'JWT verify error'); return }
       if (!claims) { ws.close(4001, 'Invalid JWT'); return }
 
-      // Superadmin (admin UI): accesses ANY project — no membership required. Registers as
-      // the 'admin' role (distinct from 'runtime'/'code-engine') so it can req/res with the
-      // code-engine over the relay (the Inspector's inspect:req) without evicting either of them.
-      // An admin frame is NOT user activity — it never bumps last_active, so watching the Inspector
-      // does not extend the idle countdown. It CAN still wake a suspended machine (see relay()):
-      // an inspect request needs the engine up to answer, and the Inspector only fetches on
-      // open/refresh, never on a poll.
-      if (claims.role === 'superadmin') {
+      // SURFACE and AUTHORIZATION are SEPARATE. The connection TYPE follows the surface the client DECLARES in its
+      // hello `role` ('admin' = the superadmin console app; 'runtime' = a human's client: web/voice/mobile). The JWT
+      // claims.role ('superadmin' | …) is the user's AUTHORIZATION — it only gates WHICH surface is allowed and is
+      // carried on the connection (orgRole) for downstream role checks. A user's privilege must NEVER silently change
+      // what KIND of connection this is: a superadmin using the user app is a 'runtime' like anyone else (this is why
+      // superadmins previously got no logs — they were mistyped 'admin' and skipped the runtime-only log:attach).
+      if (role === 'admin') {
+        // Admin-console surface — allowed ONLY for a superadmin. Accesses any project without membership, relays the
+        // Inspector's inspect:req to the engine, and is NOT counted as user activity (watching ≠ using), so it never
+        // bumps last_active / extends the idle countdown. It can still wake a suspended machine (see relay()).
+        if (claims.role !== 'superadmin') { ws.close(4003, 'Admin surface requires superadmin'); return }
         this.register(ws, 'admin', claims.userId, claims.role)
         return
       }
 
-      // Verify user is a member of this project
-      const memberRows = [...this.ctx.storage.sql.exec(
-        'SELECT role FROM members WHERE user_id = ?', claims.userId
-      )]
-      if (!memberRows.length) { ws.close(4003, 'Not a member of this project'); return }
-
-      // Runtime (a human's client surface: web/voice/mobile) connected — real activity; wake machine.
+      // Runtime surface — a human's client app. A superadmin may open ANY project here without membership; every
+      // other user must be a member of this project. Either way it registers as 'runtime' (real user activity).
+      if (claims.role !== 'superadmin') {
+        const memberRows = [...this.ctx.storage.sql.exec('SELECT role FROM members WHERE user_id = ?', claims.userId)]
+        if (!memberRows.length) { ws.close(4003, 'Not a member of this project'); return }
+      }
       this.markUserActivity()
       this.wakeMachine()
       this.register(ws, 'runtime', claims.userId, claims.role)
@@ -640,8 +642,13 @@ export class ProjectDO extends DurableObject<Env> {
       if (pl.t === 'answer:ack') { this.buffer.ack(sender.userId || '', pl.qids); return }
       // Agent-LOG subscriptions live in the DO (not the engine): a client attaches when it opens a log view and
       // detaches when it leaves, so the DO alone decides who receives which channel. Ephemeral (re-attach on reconnect).
-      if (pl.t === 'log:attach' && typeof pl.channel === 'string') { (sender.channels ??= new Set()).add(pl.channel); return }
-      if (pl.t === 'log:detach' && typeof pl.channel === 'string') { sender.channels?.delete(pl.channel); return }
+      // Runtime-only is correct: the browser is ALWAYS a runtime surface (see handleHello — type follows the declared
+      // surface, not the user's role), so a superadmin's user app attaches here like any user; the admin console is a
+      // different surface and deliberately gets no log feed. Re-serialize after mutating channels: a hibernation wake
+      // is transparent to the browser (it never re-attaches), so the subscription MUST live in the socket's attachment
+      // or hydrate() rebuilds it empty and the log dies.
+      if (pl.t === 'log:attach' && typeof pl.channel === 'string') { (sender.channels ??= new Set()).add(pl.channel); senderWs.serializeAttachment(sender); return }
+      if (pl.t === 'log:detach' && typeof pl.channel === 'string') { sender.channels?.delete(pl.channel); senderWs.serializeAttachment(sender); return }
       if (pl.t === 'analyse' && pl.questionId) this.buffer.recordPending(sender.userId || '', pl)   // capture, then route on
     } else if (sender.type === 'code-engine') {
       // The engine addresses an answer/followups to the ASKER's connection (base routing, below). Here we (a)

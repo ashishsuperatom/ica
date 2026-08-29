@@ -42,9 +42,8 @@ however you see fit — there is no setup to do.
 
 ## Tools — just RUN these (they work from ANY directory, first try; each prints JSON to stdout)
 Search the project's knowledge:
-- \`./find-concept ["<phrase>"] [--full]\` → no args = the concept menu; a phrase = matching phrases + one-line (an index); add \`--full\` for the whole guide (the compute you rewrite).
+- \`./find-concept "<phrase or name>" [--full]\` → matching concept NAMES (the engine already surfaced the likely ones); add \`--full\` for a matched concept's method. A query is required.
 - \`./find-model "<term>" [--full]\`       → matching model nodes (id/kind/name/summary — an index); add \`--full\` for their props.
-- \`./find-program "<question>" [--full]\` → programs that answered a similar question; add \`--full\` for the saved params.
 Query the data:
 - \`./sources\`                        → the data sources + their kind/dialect.
 - \`./query "<source>" "<prql>"\`      → run a PRQL query → JSON rows.
@@ -56,6 +55,8 @@ Each prints JSON to stdout; run any of them with \`--help\` for its exact argume
 - Model:  ./model/model.mjs        — WRITE the model: \`concept()\`, \`relate()\`, \`bindUnit()\`, \`putAtom()\`, \`setParent()\`. (To SEARCH it, use \`./find-model\`.)
 - Ground: ./grounding/grounding.mjs — \`build(config)\` the grounding indexes (grounding agent).
 - Data:   ./data/query.mjs         — \`query()\`/\`sources()\` inside program/unit code.
+- Format: \`import { money, pct, abbrev, num } from '@superatom/scaffold'\` — OPTIONAL display helpers (IN/AU/US
+  locale profiles). Always emit the RAW \`{ value, currency, unit }\`; call these only if you also want a display string.
 - Run:    ./run.mjs                — run a program: \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\`.
 
 ## Layout
@@ -222,14 +223,31 @@ import { NodeStore } from '@superatom/node-store'
 import { fileURLToPath } from 'node:url'
 const store = new NodeStore(fileURLToPath(new URL('../db/project.sqlite', import.meta.url)))
 const propsOf = (n) => (typeof n.props === 'string' ? JSON.parse(n.props || '{}') : (n.props || {}))
-const guide = (n) => { const { strong: _s, ...g } = propsOf(n); return g }   // drop the metadata flag
+const guide = (n) => { const { strong: _s, ...g } = propsOf(n); return { name: n.label, ...g } }   // name = the label; drop the metadata flag
+// SPECIFICITY ranking (same idea the engine uses to surface concept names): a concept's NAME is its set of
+// selector-words; the concept whose selector the query covers the MOST wins (most-specific match), falling back
+// to fewer-word / more-general concepts. Pure lexical. Returns the top specificity tier (within 1 of the best).
+const C_STOP = new Set(('a an the of on in for by per to and or is are was be with as at this that it id what ' +
+  'which who how me my we our you your can do get give show tell find value from over under across').split(' '))
+const C_SRC = new Set(['netsuite', 'totalgroup', 'fusion5'])
+const stemw = (w) => { for (const suf of ['ing','ed','es','s','ly']) { if (w.endsWith(suf) && w.length - suf.length >= 3) { w = w.slice(0, -suf.length); break } } if (w.length > 3 && w.endsWith('e')) w = w.slice(0, -1); return w }
+const cWords = (s) => new Set(String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !C_STOP.has(w) && !C_SRC.has(w)).map(stemw))
 export function findConcept(query, limit = 8) {
-  return store.search(String(query || ''), { kind: 'concept', limit: limit * 3 })
-    .filter((n) => propsOf(n).strong === true).slice(0, limit).map(guide)
+  const qw = cWords(query)
+  if (!qw.size) return []
+  const rows = store.db.prepare("SELECT * FROM nodes WHERE kind = 'concept' AND valid_to IS NULL").all()
+  const scored = rows.filter((n) => propsOf(n).strong === true)
+    .map((n) => { const cw = cWords(n.label); if (!cw.size) return { n, matched: 0, cover: 0 }; let m = 0; for (const w of cw) if (qw.has(w)) m++; return { n, matched: m, cover: m / cw.size } })
+    .filter((x) => x.matched > 0)
+    .sort((a, b) => (b.matched - a.matched) || (b.cover - a.cover))
+  return scored.slice(0, limit).map((x) => guide(x.n))   // generous: top matches by specificity (best first), no tight tier — the agent filters
 }
 export function listConcepts() {
-  return store.db.prepare("SELECT props FROM nodes WHERE kind = 'concept' AND valid_to IS NULL").all()
-    .map((r) => JSON.parse(r.props || '{}')).filter((p) => p.strong === true).map((p) => p.phrase)
+  return store.db.prepare("SELECT label, props FROM nodes WHERE kind = 'concept' AND valid_to IS NULL").all()
+    .map((r) => ({ label: r.label, p: JSON.parse(r.props || '{}') }))
+    .filter((x) => x.p.strong === true)
+    .map((x) => x.p.phrase || x.label)   // human concepts have no 'phrase' -> fall back to the name; never emit null
+    .filter(Boolean)
 }
 `)
 
@@ -286,13 +304,13 @@ export const raw = store
   // path and runs its driver with tsx (node can't resolve node-store's .ts imports; tsx can), so `./find-*`
   // returns clean JSON on the FIRST try from ANY directory. The agent never reads the .mjs source.
   const drivers: Record<string, string> = {
-    'find-concept': `// Concepts. No args = the menu (phrases). "<phrase>" = matching phrases + one-line (the INDEX). Add --full for the whole guide (compute/strategy/represent/review).
-import { findConcept, listConcepts } from ${JSON.stringify(join(dir, 'concepts', 'find.mjs'))}
+    'find-concept': `// Concepts. "<phrase or name>" = matching concept NAMES (the engine already surfaced the likely ones for your question). Add --full to get a matched concept's method (compute/rules/prql). A query is required — no whole-library dump.
+import { findConcept } from ${JSON.stringify(join(dir, 'concepts', 'find.mjs'))}
 const args = process.argv.slice(2)
 const full = args.includes('--full')
 const q = args.filter(a => a !== '--full').join(' ').trim()
-const slim = (c) => ({ phrase: c.phrase, what: c.what })
-console.log(JSON.stringify(!q ? listConcepts() : (full ? findConcept(q) : findConcept(q).map(slim)), null, 2))
+if (!q) { console.log(JSON.stringify({ hint: 'pass a concept name or phrase; the engine already surfaced the likely concepts for this question' })); process.exit(0) }
+console.log(JSON.stringify(full ? findConcept(q) : findConcept(q).map(c => c.name), null, 2))
 `,
     'find-model': `// Semantic model. "<term>…" = matching id/kind/name/summary (the INDEX). Add --full for each match's props too.
 import { find } from ${JSON.stringify(join(dir, 'model', 'model.mjs'))}
@@ -360,7 +378,7 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
   // Each tool is SELF-DOCUMENTING: `<tool> --help` prints how to use it (args/subcommands) — so the agent
   // never needs to read the .mjs to learn what to pass, and never sees the implementation.
   const usages: Record<string, string> = {
-    'find-concept': 'find-concept ["<phrase>"] [--full]   → no args = the concept menu (phrases); "<phrase>" = matching phrases + one-line (an INDEX); add --full for the WHOLE guide (compute PRQL, strategy, represent, review)',
+    'find-concept': 'find-concept "<phrase or name>" [--full]   → matching concept NAMES; add --full for a matched concept method. A query is required.',
     'find-model':   'find-model "<term>" ["<term>"…] [--full]   → matching model nodes as id/kind/name/summary (an INDEX); add --full for the full props of each match',
     'find-program': 'find-program "<question>" [--full]   → programs that answered a similar question (question/program/category); add --full for the saved params',
     'sources':      'sources   → every data source with its kind + dialect (JSON)',

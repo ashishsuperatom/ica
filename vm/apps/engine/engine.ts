@@ -158,6 +158,51 @@ const genId = () => 'q_' + Date.now().toString(36) + Math.random().toString(36).
 // ONE project database. The intent graph + concepts + units are all just nodes/edges in the project's
 // node-store, which lives in project.sqlite alongside the rest of the project's graph — not a separate file.
 const graph = new NodeStore(join(WORKSPACE, 'db', 'project.sqlite'))
+
+// ── CONCEPT SPECIFICITY (CSS-like) ─────────────────────────────────────────────
+// A concept's NAME is its set of "selector words". The concept whose selector the question COVERS THE MOST wins
+// (most-specific match), falling back to fewer-word / more-general concepts when the specific combination isn't
+// present. Pure lexical over the node-store (no vectors). Returns NAMES only — the agent opens the winner via
+// find-concept. Dynamic count: the top specificity tier (within 1 of the best), capped.
+const CONCEPT_STOP = new Set(('a an the of on in for by per to and or is are was be with as at this that it id ' +
+  'what which who how me my we our you your can do get give show tell find value from over under across').split(' '))
+const CONCEPT_SRC = new Set(['netsuite', 'totalgroup', 'fusion5'])
+// Light stem so word-FORMS match (rate/rates/rating -> rat, charge/charged -> charg, bill/billing -> bill).
+// Morphology only — deliberately NOT synonyms (bill != charge). If a question uses a different word than the
+// concept name, it simply won't match; we keep it simple rather than maintain a synonym layer.
+const stem = (w: string): string => {
+  for (const suf of ['ing', 'ed', 'es', 's', 'ly']) { if (w.endsWith(suf) && w.length - suf.length >= 3) { w = w.slice(0, -suf.length); break } }
+  if (w.length > 3 && w.endsWith('e')) w = w.slice(0, -1)
+  return w
+}
+const conceptWords = (s: string): Set<string> =>
+  new Set(String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 1 && !CONCEPT_STOP.has(w) && !CONCEPT_SRC.has(w)).map(stem))
+// Favour RECALL, not precision: surface anything plausibly relevant and let the AGENT reject/pick. Two cheap
+// recall sources unioned — LEXICAL (name-word overlap) and SEMANTIC (the vector index, which catches paraphrase/
+// synonyms for free, no synonym map to maintain). We ORDER by specificity (most name-words covered first) so the
+// best is on top, but we do NOT cut the tail — better the agent sees an extra it can ignore than miss the right one.
+async function rankConceptsBySpecificity(question: string, cap: number): Promise<string[]> {
+  const qw = conceptWords(question)
+  if (!qw.size) return []   // boundary: empty / all-stopword question -> surface nothing
+  const byId = new Map<string, { name: string; matched: number; cover: number; sem: number }>()
+  for (const c of graph.listKind('concept', 1000) as any[]) {
+    if (c.props?.strong !== true || /semantic model/i.test(c.label)) continue
+    const cw = conceptWords(c.label)
+    let m = 0; for (const w of cw) if (qw.has(w)) m++
+    byId.set(c.id, { name: c.label, matched: m, cover: cw.size ? m / cw.size : 0, sem: 0 })
+  }
+  if (vectors) {   // semantic recall: rank the vector hits so paraphrase-only matches still surface
+    try {
+      const hits = await hybridSearch(graph, vectors, bgeEmbedder, question, { kind: 'concept', limit: cap })
+      let r = hits.length; for (const h of hits) { const e = byId.get(h.id); if (e) e.sem = r; r-- }
+    } catch { /* semantic is optional; lexical still works */ }
+  }
+  return [...byId.values()]
+    .filter(c => c.matched > 0 || c.sem > 0)                                            // lexical OR semantic relevance
+    .sort((a, b) => (b.matched - a.matched) || (b.cover - a.cover) || (b.sem - a.sem))  // specificity first, semantic as recall/tiebreak
+    .slice(0, cap)
+    .map(c => c.name)
+}
 // Semantic index (sqlite-vec) over the SAME db — GUARDED: if the native extension or model isn't present on
 // this host yet, semantic search is simply disabled (FTS keeps working), never a crash. See embed.ts.
 let vectors: SqliteVecIndex | null = null
@@ -284,7 +329,23 @@ console.log(`[ica] analyst=${ANALYST_HARNESS ?? 'claude-code'}:${ANALYST_MODEL ?
 let curQuestion = '', curCategory = '', curSid = ''
 let lastAnswer: any = null, lastTiming: any = null, lastCategory = ''
 
-const emit = (to: any, msg: unknown) => { if (hub?.readyState === WebSocket.OPEN) hub.send(JSON.stringify({ to, payload: msg })) }
+// Outbound is RESILIENT to a brief hub flap: if the socket is momentarily down (reconnecting), queue the frame
+// and flush it once we're re-registered — otherwise an answer/log emitted in a down window is lost forever and
+// the user sees "engine went silent" with no answer. Bounded so a long outage can't grow memory without limit.
+// (The 12s heartbeat uses hub.send directly, NOT this — a stale heartbeat is useless. Ticks DO queue, which is
+// fine: a flushed tick simply re-arms the client watchdog, so a flap no longer trips a false "engine went silent".)
+let outbox: string[] = []
+const MAX_OUTBOX = 1000
+const emit = (to: any, msg: unknown) => {
+  const frame = JSON.stringify({ to, payload: msg })
+  if (hub?.readyState === WebSocket.OPEN) hub.send(frame)
+  else { outbox.push(frame); if (outbox.length > MAX_OUTBOX) outbox.shift() }
+}
+function flushOutbox() {
+  if (!outbox.length || hub?.readyState !== WebSocket.OPEN) return
+  const pending = outbox; outbox = []
+  for (const frame of pending) { try { hub!.send(frame) } catch { /* socket died mid-flush; the rest waits for the next reconnect */ } }
+}
 
 // Reuse a saved program (SYS-1, no LLM): run it against CURRENT data, emit the answer, persist. Shared by
 // the positional exact-hit and the reflex catalog-match. Returns false on failure so the caller rebuilds.
@@ -407,9 +468,9 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   // REFLEX (stateless) classifies REUSE vs BUILD; it has no "modify" decision. The SAME question is a reuse.
   const curNode = pos !== ROOT ? graph.getNode(pos) : null
   const curQ = curNode ? ((curNode.props as any)?.question ?? curNode.summary) : undefined
-  let overlapHint: { program: string; relation: string } | undefined   // the closest existing program → a pointer for the composer/analyst to adapt
   let reflexPlacement: string | undefined                               // 'root' or an intentId — where this question's node hangs
   let programCandidates: { question: string; program?: string; score: number }[] = []   // engine-searched matches handed to the composer
+  let conceptNames: string[] = []   // engine-searched CONCEPT names (names only) surfaced to composer + analyst
   let modifyTarget: { programDir: string; prevQuestion?: string } | null = null
   if (explicitEdit) {
     // The user explicitly prefixed "edit:"/"modify:" — edit the current node's program in place; if there's
@@ -432,11 +493,16 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       programCandidates = hits
         .map(h => { const p = graph.getNode(h.id)?.props as any; return { question: (p?.question ?? h.label ?? '') as string, program: p?.program as string | undefined, score: h.score } })
         .filter(c => c.program && existsSync(join(WORKSPACE, c.program!, 'program.ts')))
-      if (programCandidates[0]?.program) overlapHint = { program: programCandidates[0].program!, relation: 'closest' }
       console.log(`[ica] search: ${programCandidates.length} program candidate(s)${programCandidates[0] ? ` · top ${programCandidates[0].program} (${programCandidates[0].score.toFixed(2)})` : ''} → composer`)
     } catch (e: any) {
       console.log(`[ica] candidate search failed (${e?.message ?? e}) — composer builds from concepts`)
     }
+    // Surface relevant CONCEPT NAMES by SPECIFICITY (CSS-like: most-question-words-covered wins), names only —
+    // the agent opens the winner via find-concept for the method, so we never bias it with a formula.
+    try {
+      conceptNames = await rankConceptsBySpecificity(question, 8)   // generous recall, ordered best-first; agent filters
+      if (conceptNames.length) console.log(`[ica] concepts surfaced: ${conceptNames.join(', ')}`)
+    } catch (e: any) { console.log(`[ica] concept search failed (${e?.message ?? e})`) }
   }
 
   // Liveness keepalive: the UI arms a 25s watchdog and re-arms on every message. Claude-code's PTY streams
@@ -514,7 +580,11 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         else if (ev.kind === 'command' && ev.output?.trim() && /\b(tsx|node|run\.mjs|query\.mjs|program\.ts)\b/.test(ev.command || '')) narrationBuf.push(('RESULT: ' + capResultData(ev.output)).slice(0, 1800))
       },
     }
-    const hint = overlapHint ? `An existing program is a ${overlapHint.relation} of this question: ${overlapHint.program}. Open it and reuse what fits, or ignore it.` : undefined
+    // The analyst does its OWN search (find-concept / find-program / find-model) and is a strong model (Sonnet),
+    // so we deliberately do NOT hand it the engine's "closest program" pointer. That pointer is a RANK-based RRF
+    // top, not a real-relevance match, and injecting it ANCHORED the analyst onto look-alike programs (e.g. an
+    // actual-billable-hours program for a forecast question). The analyst starts from the question alone; only the
+    // faster composer gets the candidate list.
     // LAST-RESORT backstop, deliberately BIG. The real fix for stuck turns is the prompt (foreground-only, no
     // background/sub-agents — see generate-system.ts). But if claude STILL wedges — a query in a retry loop, or
     // a background step it waits on — its "done" signal never fires and ask() would hang forever (the user sees
@@ -533,7 +603,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       // The COMPOSER handles both a fresh question (compose/reuse) AND a MODIFY (edit the current program in
       // place). It escalates only when it genuinely can't — then the analyst takes over.
       const composer = await getComposer(sid)
-      const c = await composer.ask(question, handlers, { qid, candidates: programCandidates, modify: modifyTarget ?? undefined })
+      const c = await composer.ask(question, handlers, { qid, candidates: programCandidates, conceptNames, modify: modifyTarget ?? undefined })
       if (c.escalate) console.log(`[ica] composer → escalate · ${c.escalate.reason}`)
       else {
         authoredBy = 'composer'
@@ -545,7 +615,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       currentAgent = 'analyst'
       startNarrator()   // the narrator runs ONLY for the analyst phase (the composer narrated itself)
       emit(reply, { t: 'analyst:progress', text: 'Handing off to the analyst for deeper analysis…', sid, agent: 'analyst' })
-      const askP = analyst.ask(question, handlers, { qid, modify: modifyTarget ?? undefined, hint })
+      const askP = analyst.ask(question, handlers, { qid, conceptNames, modify: modifyTarget ?? undefined })
       askP.catch(() => {})   // if we abandon it on timeout, don't leak an unhandled rejection
       let capT: ReturnType<typeof setTimeout> | undefined
       const raced: any = await Promise.race([askP, new Promise((res) => { capT = setTimeout(() => res(TIMED_OUT), MAX_TURN_MS) })])
@@ -950,6 +1020,7 @@ function connect() {
     const t = m.payload?.t
     if (t === 'welcome') {
       console.log(`[ica] registered (${m.payload.wsId}) — running self-check…`)
+      flushOutbox()   // re-registered → deliver anything queued while the socket was flapping (answers, logs)
       // Only claim READY after the self-check passes. The hub/DO can trust this signal to mean the engine
       // can actually answer, not merely that a socket is open.
       selfCheck().then((res) => {

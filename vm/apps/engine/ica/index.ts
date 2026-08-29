@@ -55,7 +55,7 @@ function createMockSession(opts: SessionOpts): Session {
       const answer = `mock answer for: "${prompt.slice(0, 60)}" (cwd ${opts.cwd})`
       buf = answer
       h?.onOutput?.(answer)
-      h?.onEvent?.({ type: 'mock.done', text: answer })
+      h?.onEvent?.({ kind: 'message', text: answer, done: true })
       return { lastLines: answer, ms: 0 }
     },
     async compact() { return { lastLines: '(mock)', ms: 0 } },
