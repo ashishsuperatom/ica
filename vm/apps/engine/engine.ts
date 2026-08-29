@@ -511,8 +511,8 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       // Log BOTH retrievers side-by-side so we can compare which surfaces the right concepts.
       console.log(`[retrieval] specificity → [${specificity.join(', ')}]`)
       console.log(`[retrieval] span-firing → fires [${fired.concepts.join(', ')}]  ·  ranked [${fired.scored.slice(0, 6).map(s => `${s.name} ${s.activation.toFixed(2)}`).join(', ')}]${fired.unexplained.length ? `  ·  unexplained [${fired.unexplained.slice(0, 8).join(' | ')}]` : ''}`)
-      // Surface span-firing (the mechanism under test); fall back to specificity only if it fires nothing. Flip with USE_SPECIFICITY=1.
-      conceptNames = process.env.USE_SPECIFICITY ? specificity : (fired.concepts.length ? fired.concepts : specificity)
+      // CLEAN A/B — surface EXACTLY ONE retriever, no mixing/fallback. Default = span-firing (B); USE_SPECIFICITY=1 = specificity (A).
+      conceptNames = process.env.USE_SPECIFICITY ? specificity : fired.concepts
       if (conceptNames.length) console.log(`[ica] concepts surfaced: ${conceptNames.join(', ')}`)
     } catch (e: any) { console.log(`[ica] concept search failed (${e?.message ?? e})`) }
   }
