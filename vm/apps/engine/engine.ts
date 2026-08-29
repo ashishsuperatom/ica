@@ -34,7 +34,7 @@ import { log, readJsonSafe } from './log.js'
 import { createInspector } from './inspect.js'
 import { NodeStore, ROOT, ensureRoot, intentId, SqliteVecIndex, indexText, backfillMissing, hybridSearch } from '@superatom/node-store'
 import { bgeEmbedder } from './embed.js'
-import { createSpanFirer } from './span-firing.js'
+import { createSpanFirer } from './retrieval/span-firing.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 try { process.loadEnvFile(join(__dirname, '.env')) } catch { /* no .env — rely on the ambient environment */ }
