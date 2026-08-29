@@ -52,7 +52,7 @@ Query the data:
 Each prints JSON to stdout; run any of them with \`--help\` for its exact arguments. NEVER \`node\`/\`require\`/\`cat\` a \`.mjs\` to do these — just run the tool.
 
 ## Write/run seams (import these in your program/unit/model CODE — they take rich args, not a CLI)
-- Model:  ./model/model.mjs        — WRITE the model: \`concept()\`, \`relate()\`, \`bindUnit()\`, \`putAtom()\`, \`setParent()\`. (To SEARCH it, use \`./find-model\`.)
+- Model:  ./model/model.mjs        — WRITE the model: \`concept()\`, \`relate()\`, \`bindUnit()\`, \`setParent()\`. (To SEARCH it, use \`./find-model\`.)
 - Ground: ./grounding/grounding.mjs — \`build(config)\` the grounding indexes (grounding agent).
 - Data:   ./data/query.mjs         — \`query()\`/\`sources()\` inside program/unit code.
 - Format: \`import { money, pct, abbrev, num } from '@superatom/scaffold'\` — OPTIONAL display helpers (IN/AU/US
@@ -124,16 +124,7 @@ export async function sources() {   // list data sources + their kind/dialect
 // composite concept, or the root) via setParent, is 'simple' (one unit) or 'composite' (has sub-concepts)
 // via props.form, and may declare parameters. Units are IMMUTABLE; the concept tree is what you rearrange.
 //
-// SEMANTIC ATOMS — small typed knowledge units indexed by an entity NAME (a simple word/phrase). Each says,
-// about one subject: where it lives, how to compute/join it, how a value resolves, or — most valuable — how
-// RELIABLE a path is (data-quality). Atoms are usage-learned (from real analysis), never invented cold.
-//   putAtom({ atomKind:'where-to-find'|'how-to-compute'|'how-to-join'|'resolution-method'|'data-quality',
-//             subject, location?, method?, coverage?, confidence?, evidence?, provenance?, note?, source? })
-//        — write/update. Re-emitting the SAME content is a no-op; DIFFERENT content VERSIONS the atom (the old
-//          one is archived + timestamped and kept, the new one goes live, linked back). Never a silent overwrite.
-//   atomsFor(subject) · findAtoms({subject?,atomKind?,q?}) · atomHistory(id)   — read (live only; history = all versions)
-import { NodeStore, upsertConcept as _c, relate as _r, bindUnit as _b, getConcept as _g, relationships as _rel, setParent as _sp, conceptTree as _ct,
-  putAtom as _pa, findAtoms as _fa, atomsFor as _af, atomHistory as _ah } from '@superatom/node-store'
+import { NodeStore, upsertConcept as _c, relate as _r, bindUnit as _b, getConcept as _g, relationships as _rel, setParent as _sp, conceptTree as _ct } from '@superatom/node-store'
 import { fileURLToPath } from 'node:url'
 const store = new NodeStore(fileURLToPath(new URL('../db/project.sqlite', import.meta.url)))
 export const concept = (name, props, summary) => _c(store, name, props, summary)
@@ -143,10 +134,6 @@ export const setParent = (childName, parentName) => _sp(store, childName, parent
 export const getConcept = (name) => _g(store, name)
 export const relationships = (name) => _rel(store, name)
 export const conceptTree = () => _ct(store)
-export const putAtom = (atom) => _pa(store, atom)
-export const findAtoms = (opts) => _fa(store, opts)
-export const atomsFor = (subject) => _af(store, subject)
-export const atomHistory = (id) => _ah(store, id)
 export const concepts = () => store.listKind('concept')
 export const intents  = () => store.listKind('intent')
 export const units    = () => store.listKind('unit')

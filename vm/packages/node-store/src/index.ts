@@ -10,10 +10,6 @@ export { conceptId, upsertConcept, relate, bindUnit, getConcept, relationships,
   CONCEPT_ROOT, ensureConceptTree, setParent, conceptTree } from './concept.js'
 export type { ConceptProps, ConceptStatus, ConceptForm, TimeSemantics, Measure, Dimension, Parameter, Cardinality, RelationProps, ConceptTreeNode } from './concept.js'
 
-// Semantic atoms (System A) — typed knowledge units (where/how/quality), versioned on contradiction.
-export { atomId, atomContentHash, putAtom, retireAtom, findAtoms, atomsFor, atomHistory } from './atom.js'
-export type { AtomKind, AtomProps, AtomInput, FindAtomsOpts } from './atom.js'
-
 // Semantic search — GENERIC hybrid (FTS + vector) over any node kind. Swappable seams: Embedder (model),
 // VectorIndex (SqliteVecIndex now / Qdrant later), rrfFuse (reranker).
 export { SqliteVecIndex, rrfFuse, hybridSearch, indexText, backfillMissing } from './semantic.js'
