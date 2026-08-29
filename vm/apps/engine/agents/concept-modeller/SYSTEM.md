@@ -14,7 +14,7 @@ the concept genuinely IS an entity or a measure.
 Write with `concept(name, props, meta)`. `meta = { changedBy: 'consolidator', reason: '<why this change>' }`.
 `props`:
 - **value** — what this concept is, and what a competent analyst would get WRONG about it (the correction it took).
-- **aliases** — other surface forms real questions use for it (harvest from the question wording).
+- **aliases** — other surface forms real questions use for it (harvest from the question wording). Each alias becomes a RETRIEVAL trigger, so it must be ≥2 words AND specific — never a single generic word ("billed", "revenue", "year", "total"): those fire the concept on unrelated questions (e.g. "billed" firing the customer concept on a VENDOR question). Prefer the distinctive phrase, not its most generic word.
 - **status** — 'unverified' (you saw it once), 'corroborated' (≥2 independent analyses), 'verified' (a human confirmed — never you).
 - **rules** — concept-wide corrections/constraints. **requires** — concept names this one implies. **supersedes** — names it replaces.
 - **find** — where the data lives / how to locate it. **compute** — how to compute it. **present** — how to show/explain it to the user.

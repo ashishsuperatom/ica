@@ -77,7 +77,31 @@ function nodeFromRow(r: any): Node {
  * and recording who/why. Callers re-index the live row after this returns; the archived row is never indexed,
  * so retrieval only ever sees the current version.
  */
+// §9 alias guard — an alias becomes a firing SURFACE FORM, so a too-generic one mis-fires on unrelated questions
+// (the "billed" alias fired the CUSTOMER concept on VENDOR questions). Enforce the spec's cheap filters: an alias
+// must be ≥2 tokens and not all-generic/high-frequency. (The fuller validate-before-accept — re-fire over question
+// history and reject an alias that fires where the concept wasn't needed — is a later addition; these
+// deterministic checks catch the worst cases, e.g. a single generic word like "billed"/"revenue"/"year".)
+const ALIAS_STOP = new Set(('a an the of on in for by per to and or is are was be do does with as at this that it its ' +
+  'we our us you your they their what which who whom how many much more most all each every this year to date so far')
+  .split(' ').filter(Boolean))
+export function sanitizeAliases(aliases?: string[]): string[] {
+  if (!Array.isArray(aliases)) return []
+  const seen = new Set<string>(); const out: string[] = []
+  for (const a of aliases) {
+    const s = String(a ?? '').trim()
+    const toks = s.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean)
+    if (toks.length < 2) continue                     // §9: minimum 2 tokens (drops "billed", "billing", "headcount")
+    if (toks.every(t => ALIAS_STOP.has(t))) continue  // §9: reject all-generic / high-frequency
+    const k = toks.join(' ')
+    if (seen.has(k)) continue
+    seen.add(k); out.push(s)
+  }
+  return out
+}
+
 export function upsertConcept(store: NodeStore, name: string, props: ConceptProps, meta: ChangeMeta): Node {
+  props = { ...props, aliases: sanitizeAliases(props.aliases) }   // §9 alias guard — applied before anything is stored
   const id = conceptId(name)
   const cur = store.getNode(id)
   const curProps = (cur?.props ?? {}) as ConceptProps
