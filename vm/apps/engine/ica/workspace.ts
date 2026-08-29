@@ -52,7 +52,7 @@ Query the data:
 Each prints JSON to stdout; run any of them with \`--help\` for its exact arguments. NEVER \`node\`/\`require\`/\`cat\` a \`.mjs\` to do these — just run the tool.
 
 ## Write/run seams (import these in your program/unit/model CODE — they take rich args, not a CLI)
-- Model:  ./model/model.mjs        — WRITE the model: \`concept()\`, \`relate()\`, \`bindUnit()\`, \`setParent()\`. (To SEARCH it, use \`./find-model\`.)
+- Concepts: ./model/model.mjs      — WRITE concepts: \`concept(name, props, meta)\`, \`getConcept(name, asOf?)\`, \`conceptHistory(name)\`. (To SEARCH, use \`./find-concept\`.)
 - Ground: ./grounding/grounding.mjs — \`build(config)\` the grounding indexes (grounding agent).
 - Data:   ./data/query.mjs         — \`query()\`/\`sources()\` inside program/unit code.
 - Format: \`import { money, pct, abbrev, num } from '@superatom/scaffold'\` — OPTIONAL display helpers (IN/AU/US
@@ -110,30 +110,23 @@ export async function sources() {   // list data sources + their kind/dialect
   await writeFile(join(dir, 'model', 'model.mjs'),
 `// The MODEL seam. The semantic model is CONCEPT + UNIT nodes in ../db/project.sqlite — the SAME node-store
 // graph the intent nodes and units already live in (one project, one store — no separate model DB).
-// You CONSOLIDATE finished analyses into this concept layer:
-//   concept(name, props, summary?)     — upsert an entity/concept. props:
-//        { status:'verified'|'candidate'|'blocked', grain, time:'snapshot'|'during'|'trailing', asOf,
-//          measures:[{name,additive,stock,note}], dimensions:[{name,values}], parameters:[{name,default,learned}],
-//          rules:[..], identity, source, unit }   ← one entity = one parameterised unit (its id)
-//   relate(fromName, toName, rel)       — a typed edge. rel: { via, cardinality:'N:1'|'1:1'|'N:N', coverage, ok }
-//   bindUnit(name, unitId)             — bind a concept to its one big unit (immutable)
-//   setParent(childName, parentName?)  — place a concept in the TREE under a parent (omit/'root' → the root)
-//   getConcept(name) · relationships(name) · concepts() · intents() · units() · conceptTree()
-//   put(node) · edge({from,to,type,props}) · node(id) · search(q)   — low-level (register unit/program nodes)
-// The concept layer is a TREE (root → concepts → their unit): every concept has ONE parent (a broader
-// composite concept, or the root) via setParent, is 'simple' (one unit) or 'composite' (has sub-concepts)
-// via props.form, and may declare parameters. Units are IMMUTABLE; the concept tree is what you rearrange.
+// You CONSOLIDATE finished analyses into this concept layer. Concepts are a FLAT, time-versioned set (no
+// tree). A concept is a GENERAL idea of computation — most are lean (a value + one or two facets); the
+// data-model block (measures/dimensions/…) is an OPTIONAL specialization for entities/measures only.
+//   concept(name, props, meta)  — upsert a concept (versioned). meta: { changedBy, reason? }. props:
+//        { value, aliases?, status:'unverified'|'corroborated'|'verified', rules?, requires?, supersedes?,
+//          find?, compute?, present?,           ← general facets; compute is ALWAYS PRQL, never SQL
+//          source?, grain?, keying?, time?, measures?, dimensions?, parameters?, provenance? }  ← optional
+//   getConcept(name, asOf?)  — the live concept, or (asOf = unix ms) the version live at that instant
+//   conceptHistory(name)     — the full timeline (each version + who/when/why)
+//   concepts() · intents() · units() · put(node) · edge({from,to,type,props}) · node(id) · search(q)
 //
-import { NodeStore, upsertConcept as _c, relate as _r, bindUnit as _b, getConcept as _g, relationships as _rel, setParent as _sp, conceptTree as _ct } from '@superatom/node-store'
+import { NodeStore, upsertConcept as _c, getConcept as _g, conceptHistory as _ch } from '@superatom/node-store'
 import { fileURLToPath } from 'node:url'
 const store = new NodeStore(fileURLToPath(new URL('../db/project.sqlite', import.meta.url)))
-export const concept = (name, props, summary) => _c(store, name, props, summary)
-export const relate = (fromName, toName, rel) => _r(store, fromName, toName, rel)
-export const bindUnit = (name, unitId) => _b(store, name, unitId)
-export const setParent = (childName, parentName) => _sp(store, childName, parentName)
-export const getConcept = (name) => _g(store, name)
-export const relationships = (name) => _rel(store, name)
-export const conceptTree = () => _ct(store)
+export const concept = (name, props, meta) => _c(store, name, props, meta)
+export const getConcept = (name, asOf) => _g(store, name, asOf)
+export const conceptHistory = (name) => _ch(store, name)
 export const concepts = () => store.listKind('concept')
 export const intents  = () => store.listKind('intent')
 export const units    = () => store.listKind('unit')
@@ -143,7 +136,7 @@ export const node = (id) => store.getNode(id)
 export const search = (q, opts) => store.search(q, opts)
 // find(...terms): RECON. Run a search per term (probe several angles of what you think you need), dedupe, and
 // return a COMPACT view (id, kind, name, summary, key props) so you can inspect + judge fit fast. Then use
-// getConcept(name) / relationships(name) / node(id) for full detail on a candidate. Kept simple on purpose.
+// getConcept(name) / node(id) for full detail on a candidate. Kept simple on purpose.
 export const find = (...terms) => {
   const seen = new Map()
   for (const t of terms.flat()) for (const h of store.search(String(t), { limit: 8 }))
@@ -210,7 +203,7 @@ import { NodeStore } from '@superatom/node-store'
 import { fileURLToPath } from 'node:url'
 const store = new NodeStore(fileURLToPath(new URL('../db/project.sqlite', import.meta.url)))
 const propsOf = (n) => (typeof n.props === 'string' ? JSON.parse(n.props || '{}') : (n.props || {}))
-const guide = (n) => { const { strong: _s, ...g } = propsOf(n); return { name: n.label, ...g } }   // name = the label; drop the metadata flag
+const guide = (n) => { const { _v, ...g } = propsOf(n); return { name: n.label, version: _v?.version, ...g } }   // name = the label; hide raw version metadata
 // SPECIFICITY ranking (same idea the engine uses to surface concept names): a concept's NAME is its set of
 // selector-words; the concept whose selector the query covers the MOST wins (most-specific match), falling back
 // to fewer-word / more-general concepts. Pure lexical. Returns the top specificity tier (within 1 of the best).
@@ -223,18 +216,15 @@ export function findConcept(query, limit = 8) {
   const qw = cWords(query)
   if (!qw.size) return []
   const rows = store.db.prepare("SELECT * FROM nodes WHERE kind = 'concept' AND valid_to IS NULL").all()
-  const scored = rows.filter((n) => propsOf(n).strong === true)
+  const scored = rows
     .map((n) => { const cw = cWords(n.label); if (!cw.size) return { n, matched: 0, cover: 0 }; let m = 0; for (const w of cw) if (qw.has(w)) m++; return { n, matched: m, cover: m / cw.size } })
     .filter((x) => x.matched > 0)
     .sort((a, b) => (b.matched - a.matched) || (b.cover - a.cover))
   return scored.slice(0, limit).map((x) => guide(x.n))   // generous: top matches by specificity (best first), no tight tier — the agent filters
 }
 export function listConcepts() {
-  return store.db.prepare("SELECT label, props FROM nodes WHERE kind = 'concept' AND valid_to IS NULL").all()
-    .map((r) => ({ label: r.label, p: JSON.parse(r.props || '{}') }))
-    .filter((x) => x.p.strong === true)
-    .map((x) => x.p.phrase || x.label)   // human concepts have no 'phrase' -> fall back to the name; never emit null
-    .filter(Boolean)
+  return store.db.prepare("SELECT label FROM nodes WHERE kind = 'concept' AND valid_to IS NULL ORDER BY label").all()
+    .map((r) => r.label).filter(Boolean)
 }
 `)
 

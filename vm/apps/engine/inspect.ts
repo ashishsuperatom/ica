@@ -21,8 +21,6 @@ import type { NodeStore, Node } from '@superatom/node-store'
 import { GroundingStore } from '@superatom/grounding'   // the ONE loader/reader for the grounding store
 import type { AnswerStore } from './answers.js'
 import { log } from './log.js'   // the central log/error channel — surfaced read-only here
-
-const CONCEPT_ROOT = 'concept:root'
 const INTENT_ROOT = 'intent:root'
 
 /** Biggest file we'll ship to the browser. A unit is a few KB; anything past this is a data dump. */
@@ -170,20 +168,19 @@ export function createInspector(deps: InspectorDeps) {
 
   // ── composed views ─────────────────────────────────────────────────────────
 
-  /** The concept tree, read-only (never plants the root — that's the engine's job at boot). */
-  function conceptTree() {
-    if (!graph.getNode(CONCEPT_ROOT)) return { root: null, tree: [] }
-    const tree = graph.walk(CONCEPT_ROOT, { type: 'belongs_to', direction: 'in' }).map((n: any) => {
+  /** Live concepts, flat (concepts are a flat set now — no tree). Current versions only (valid_to IS NULL). */
+  function conceptList() {
+    const list = graph.listKind('concept', 2000).map((n: any) => {
       const p = (n.props ?? {}) as any
       return {
-        id: n.id, label: n.label, summary: n.summary ?? null, depth: n.depth,
-        status: p.status ?? null, form: p.form ?? null, unit: p.unit ?? null,
-        grain: p.grain ?? null, asOf: p.asOf ?? null, population: p.population ?? null,
+        id: n.id, name: n.label, summary: n.summary ?? null,
+        status: p.status ?? null, version: p._v?.version ?? 1, changedBy: p._v?.changedBy ?? null,
+        source: p.source ?? null, grain: p.grain ?? null, verifiedAt: p.verifiedAt ?? null,
         measures: (p.measures ?? []).length, dimensions: (p.dimensions ?? []).length,
-        parameters: p.parameters ?? [], rules: p.rules ?? [],
+        requires: p.requires ?? [], rules: p.rules ?? [],
       }
     })
-    return { root: CONCEPT_ROOT, tree }
+    return { total: list.length, concepts: list }
   }
 
   /**
@@ -408,7 +405,7 @@ export function createInspector(deps: InspectorDeps) {
 
   const VIEWS: Record<string, (a: any) => any> = {
     overview, nodes, node, file, dir, programs, db: dbInfo, grounding, logs, runs,
-    concepts: conceptTree, intents: intentTree,
+    concepts: conceptList, intents: intentTree,
     answers: answerList, answer: answerDetail,
   }
 

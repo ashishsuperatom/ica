@@ -5,10 +5,9 @@ export type { Node, Edge, SearchHit } from './store.js'
 export { ROOT, ensureRoot, ask, intentId, normalizeQuestion, pathTo, nextSteps, programCatalog } from './intent.js'
 export type { IntentProps, RunOutput, Built, AskDeps, AskResult, ProgramEntry } from './intent.js'
 
-// Concepts — the semantic model as a term registry (one entity = one parameterised unit).
-export { conceptId, upsertConcept, relate, bindUnit, getConcept, relationships,
-  CONCEPT_ROOT, ensureConceptTree, setParent, conceptTree } from './concept.js'
-export type { ConceptProps, ConceptStatus, ConceptForm, TimeSemantics, Measure, Dimension, Parameter, Cardinality, RelationProps, ConceptTreeNode } from './concept.js'
+// Concepts — the single atomic knowledge kind, time-versioned (current row + concept_history audit).
+export { conceptId, upsertConcept, getConcept, conceptHistory } from './concept.js'
+export type { ConceptProps, ConceptStatus, TimeSemantics, Measure, Dimension, Parameter, Provenance, ChangeMeta, ConceptVersion } from './concept.js'
 
 // Semantic search — GENERIC hybrid (FTS + vector) over any node kind. Swappable seams: Embedder (model),
 // VectorIndex (SqliteVecIndex now / Qdrant later), rrfFuse (reranker).

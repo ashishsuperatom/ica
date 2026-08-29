@@ -14,15 +14,13 @@ writing the answer.` ONLY lines that start with `[[ui]]` reach the user; everyth
 tool output, code, errors) stays behind the scenes. Plain language, no ids/code/internals, one sentence,
 used sparingly to say what's happening now.
 
-## Using the semantic model
-Search it FIRST with `./find-model "term" ["term"…]` (and `./find-concept "phrase"` for a ready-made concept):
-curated, reusable knowledge — entities, measures, relationships, rules, units — plus the **atoms** and past
-questions that match. Reusing a modeled concept keeps answers fast and consistent; it is a HELP, not a fence, and
-often incomplete (expected). Units in `./units/` are reusable computations — reuse one ONLY if it fits the
-question **exactly** (every filter, the right grain and scope); a shared topic word is not a fit, and an
-ill-fitting unit silently answers a *different* question. The **atoms** that come back are small learned facts
-about a subject — where it lives, how to compute/join it, how RELIABLE a path is — carrying corrections earlier
-analyses paid for (a column only partly populated, a path that beats another).
+## Using concepts
+Search FIRST with `./find-concept "phrase"`: a concept is curated, reusable knowledge — what something is,
+where to FIND it, how to COMPUTE it (PRQL, never SQL), how to PRESENT it, and the rules/corrections earlier
+analyses paid for (a column only partly populated, a join that beats another). Reusing a concept that fits keeps
+answers fast and consistent; it is a HELP, not a fence, and often incomplete (expected). Units in `./units/`
+are reusable computations — reuse one ONLY if it fits the question **exactly** (every filter, the right grain
+and scope); a shared topic word is not a fit, and an ill-fitting unit silently answers a *different* question.
 
 ## Doing your own analysis
 When the model doesn't reach the question, explore and compute yourself: `./sources`, `./introspect "<source>"

@@ -31,7 +31,7 @@ import { followUpCues } from './followup.js'
 import { forgetProgram } from './forget.js'
 import { log, readJsonSafe } from './log.js'
 import { createInspector } from './inspect.js'
-import { NodeStore, ROOT, ensureRoot, ensureConceptTree, intentId, SqliteVecIndex, indexText, backfillMissing, hybridSearch } from '@superatom/node-store'
+import { NodeStore, ROOT, ensureRoot, intentId, SqliteVecIndex, indexText, backfillMissing, hybridSearch } from '@superatom/node-store'
 import { bgeEmbedder } from './embed.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -188,7 +188,7 @@ async function rankConceptsBySpecificity(question: string, cap: number): Promise
   if (!qw.size) return []   // boundary: empty / all-stopword question -> surface nothing
   const byId = new Map<string, { name: string; matched: number; cover: number; sem: number }>()
   for (const c of graph.listKind('concept', 1000) as any[]) {
-    if (c.props?.strong !== true || /semantic model/i.test(c.label)) continue
+    // Surface ALL live concepts, ordered by specificity — the agent filters (recall over precision).
     const cw = conceptWords(c.label)
     let m = 0; for (const w of cw) if (qw.has(w)) m++
     byId.set(c.id, { name: c.label, matched: m, cover: cw.size ? m / cw.size : 0, sem: 0 })
@@ -216,7 +216,6 @@ if (vectors) void backfillMissing(graph, vectors, bgeEmbedder, { kind: 'intent' 
   .then(n => { if (n) log.info('semantic', `backfilled ${n} intent embedding(s)`) })
   .catch(e => log.warn('semantic', 'intent backfill failed', e))
 ensureRoot(graph)
-ensureConceptTree(graph)   // concept tree root + place any orphan concept under it (structural)
 // The FRONT DOOR: every question is routed here first — reuse a program on a match, else build.
 const reflex = createReflex({ cwd: WORKSPACE })   // the reflex agent — the fast front door
 // READ-ONLY window into the graph + answer history + the files behind them, served over the hub to the
