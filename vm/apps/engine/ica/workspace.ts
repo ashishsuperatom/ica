@@ -11,8 +11,9 @@
 //     units/              — the partial UNIT library                          [filled over time]
 //     out/                — where the agent writes this run's answer + UI
 
-import { mkdir, writeFile, chmod } from 'node:fs/promises'
+import { mkdir, writeFile, chmod, cp } from 'node:fs/promises'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 export interface WorkspaceSpec {
   root: string                 // e.g. <repo>/vm/apps/workspace or an absolute scratch root
@@ -28,6 +29,12 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
   // the root as the entry point + the program runner.
   for (const sub of ['', 'db', 'data', 'model', 'grounding', 'analyst', 'connector', 'composer', 'concepts', 'units', 'programs', 'out', '.tools'])
     await mkdir(join(dir, sub), { recursive: true })
+
+  // Seed READ-ONLY example programs into programs/ so the analyst learns the SHAPE of a program from a real,
+  // correct one instead of reverse-engineering the engine source. They ship with the engine (versioned), use an
+  // ILLUSTRATIVE fake schema (so they can't be copy-run — the analyst must adapt to the real source), and are
+  // named example.* so reuse ignores them (reuse is node-based; examples are never registered as nodes).
+  await cp(fileURLToPath(new URL('../examples', import.meta.url)), join(dir, 'programs'), { recursive: true, force: true }).catch(() => {})
 
   await writeFile(join(dir, 'CONTEXT.md'),
 `# Project ${s.projectId} — workspace
@@ -61,7 +68,7 @@ Each prints JSON to stdout; run any of them with \`--help\` for its exact argume
 
 ## Layout
 - db/       — every SQLite database (project.sqlite = the model/graph, grounding.sqlite, answers.sqlite). You never open these directly — the seams do.
-- programs/ — one folder per answered question: \`program.ts\` + \`units/*.ts\`. This is where an ANSWER is built.
+- programs/ — one folder per answered question: \`program.ts\` + \`units/*.ts\`. This is where an ANSWER is built. The \`example.*\` folders are read-only REFERENCE TEMPLATES (illustrative fake schema) — read one for the SHAPE of a program (imports, units, ctx.use/ctx.query, the view unit), then write your OWN against your real source (\`./find-schema\`); never run one or point built.json at it.
 - units/    — a shared library of earlier units you may read for reference.
 - out/      — you write \`built.json\` here (a pointer to the program you built); the ENGINE runs it and writes \`answer.json\`.
 
