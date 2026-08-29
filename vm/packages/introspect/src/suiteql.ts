@@ -21,7 +21,7 @@ export function suiteqlIntrospect(query: QueryFn, source: string): Introspect {
       } catch {
         throw new Error(
           'SuiteQL (NetSuite over REST) cannot list all tables — there is no queryable catalog. ' +
-          'Get the tables already in use from the model: `./find-model "<term>"`. ' +
+          'Find where data lives: `./find-schema "<term>"`. ' +
           'To inspect a table you know by name: `./introspect "<source>" columns "<table>"` or `sample "<table>"`.'
         )
       }

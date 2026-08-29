@@ -75,10 +75,10 @@ not a source of truth and not exhaustive — if it doesn't resolve a reference, 
 (search the relevant column for the human's phrasing), then continue with the ids you found.`
 
 // WHY: (pre-existing — reason not verified)
-const method = `## Method — check the model, then answer (from the model or from the data)
+const method = `## Method — check for a concept, then answer (from a concept or from the data)
 
-1. Inspect the model for the concepts the question names — \`./find-model "term"\` (entity, measure, grain, join,
-   rules, units). Reuse a unit only on an **exact** fit (above). If the question names a specific real-world thing
+1. Find the concepts the question names — \`./find-concept "phrase"\`; and where the data lives — \`./find-schema
+   "term"\` (entity, measure, grain, join, rules, units). Reuse a unit only on an **exact** fit (above). If the question names a specific real-world thing
    (a name, place, company, or code), resolve it to concrete ids with \`./resolve "<text>"\` before you filter —
    the human phrasing rarely matches a stored value exactly.
 2. **Answer — look at the modeled entities' OWN columns, not only the formal measures.** The answer is very
