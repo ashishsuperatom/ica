@@ -47,7 +47,7 @@ export function CloudGate() {
   return <App token={token} projectId={projectId} />
 }
 
-type View = 'chat' | 'semantic' | 'analyst' | 'composer'   // the tabs: chat (answers) + the three agent-log views
+type View = 'chat' | 'analyst' | 'composer'   // the tabs: chat (answers) + the two agent-log views
 type FeedItem =
   | { id: string; type: 'user-msg'; text: string }
   | { id: string; type: 'step'; text: string }
@@ -88,15 +88,12 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [status, setStatus]           = useState('')
   const [logOpen, setLogOpen]   = useState(true)   // Claude live-output drawer open by default
   const [hasLog, setHasLog]     = useState(false)
-  const [semHasLog, setSemHasLog] = useState(false)
-  const [semStatus, setSemStatus] = useState('')
-  const [semBusy, setSemBusy] = useState(false)   // modeler running (drives the codex "thinking" indicator)
   // The main view lives in the URL PATH at ROOT (the subdomain serves the user app for ANY path): a chat is
   // /c/<id>, the other views are /analyst and /semantic. A reload / shared link lands on the same view.
   // `navigate` pushes a history entry; popstate syncs it back.
   const readView = (): View => {
     const seg = location.pathname.replace(/\/+$/, '').split('/').pop()
-    return seg === 'analyst' || seg === 'semantic' || seg === 'composer' ? seg : 'chat'
+    return seg === 'analyst' || seg === 'composer' ? seg : 'chat'
   }
   const [view, setView] = useState<View>(readView)
   const navigate = useCallback((v: View) => {
@@ -133,14 +130,9 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [anEvents, setAnEvents] = useState<AgentEvent[]>([])   // structured event log when kind === 'events' (codex)
   const [anHasPty, setAnHasPty] = useState(false)       // claude-code: a raw PTY terminal is also available (show the toggle)
   const [anTerminal, setAnTerminal] = useState(false)   // user opened the raw terminal → attach the PTY (lazily) and render xterm
-  const [semStreamKind, setSemStreamKind] = useState<'pty' | 'events'>('events')   // default = structured; PTY is opt-in
-  const [semEvents, setSemEvents] = useState<AgentEvent[]>([])
-  const [semHasPty, setSemHasPty] = useState(false)       // modeler is claude → a raw terminal is available (show the toggle)
-  const [semTerminal, setSemTerminal] = useState(false)   // user opened the raw terminal → attach the PTY lazily
   const [coEvents, setCoEvents] = useState<AgentEvent[]>([])   // COMPOSER log (composer-log channel) — its own view, separate from the analyst
   const [askTick, setAskTick] = useState(0)                    // bumps on every new question → useLogNav jumps each log view to it
   const anLogRef = useRef<HTMLDivElement>(null)
-  const semLogRef = useRef<HTMLDivElement>(null)
   const coLogRef = useRef<HTMLDivElement>(null)
   const [gaps, setGaps]             = useState<{ question: string; need: string; basis?: string; status: 'building' | 'done' }[]>([])
   const [role, setRole]         = useState<'user' | 'developer'>('developer')   // for now: everyone is developer (sees the agents)
@@ -167,9 +159,6 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // The agent's RAW terminal stream is captured here for later use (debugging/telemetry) but is NEVER
   // rendered to the end user — the user-facing app shows only clean status, progress narration, and answers.
   const rawStreamRef = useRef('')
-  // Semantic-model agent panel — its OWN terminal (a different agent than the QA/answer flow).
-  const semTermRef  = useRef<HTMLDivElement>(null)
-  const semXtermRef = useRef<Terminal | null>(null)
   // Analyst agent panel — its OWN terminal (fixed 120-col claude PTY width).
   const anTermRef   = useRef<HTMLDivElement>(null)
   const anXtermRef  = useRef<Terminal | null>(null)
@@ -242,16 +231,14 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     return () => { ro.disconnect(); term.dispose() }
   }, [])
 
-  // Both claude-code agent terminals (modeler + analyst) go through ONE shared module — same code path,
-  // parameterized by `which` + `interactive`. Model-agnostic; codex/opencode would use their own view.
-  useClaudeTerminal(semTermRef, semXtermRef, { which: 'semantic', interactive: true, send, autoAttach: false })   // default = structured; PTY attaches only on the Terminal toggle
+  // The analyst's claude-code terminal goes through the shared module — parameterized by `which` +
+  // `interactive`. Model-agnostic; codex/opencode would use their own view.
   useClaudeTerminal(anTermRef, anXtermRef, { which: 'analyst', interactive: true, send, autoAttach: false })   // default = structured; PTY attaches only on the Terminal toggle
 
   // The analyst + semantic logs each own their interactions SEPARATELY (open→bottom, follow-if-near-bottom,
   // Shift+Arrow between questions) — see logNav.ts. contentKey = a number that grows as the log grows.
   useLogNav(anLogRef,  view === 'analyst',  anEvents,  askTick)   // pass the ARRAY (new ref on every merge, incl. in-place streaming) — not .length; askTick = force-jump on a new question
   useLogNav(coLogRef,  view === 'composer', coEvents,  askTick)
-  useLogNav(semLogRef, view === 'semantic', semEvents)
 
   usePersistLog('sa-anlog-', sessionId, anEvents, setAnEvents)   // analyst + composer logs both survive a reload
   usePersistLog('sa-colog-', sessionId, coEvents, setCoEvents)
@@ -343,21 +330,6 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           setStatus(msg.text)
         } else if (msg.t === 'analysis:chunk') {
           rawStreamRef.current = (rawStreamRef.current + (msg.text ?? '')).slice(-400000)   // capture only — never shown
-        } else if (msg.t === 'semantic:status') {
-          setSemHasLog(true); setSemStatus(msg.text)
-          // A consolidation BATCH start is the semantic log's question-boundary → drop a strong marker in the stream.
-          if (/consolidating/i.test(msg.text)) setSemEvents(evs => [...evs, { kind: 'user', text: msg.text }])
-        } else if (msg.t === 'semantic:stream') {
-          setSemStreamKind(msg.kind === 'pty' ? 'pty' : 'events')
-          setSemHasPty(!!msg.pty)
-        } else if (msg.t === 'semantic:event') {
-          setSemHasLog(true); setSemEvents(evs => mergeEvent(evs, msg.ev))   // codex structured event (live)
-        } else if (msg.t === 'semantic:events') {
-          setSemEvents(msg.events ?? [])                                     // codex event-log replay (reconnect)
-        } else if (msg.t === 'semantic:chunk') {
-          setSemHasLog(true); if (msg.replace) semXtermRef.current?.clear(); semXtermRef.current?.write(msg.text)   // raw claude terminal → Semantic model panel
-        } else if (msg.t === 'semantic:done') {
-          setSemStatus('Semantic model built ✓'); setSemBusy(false)
         } else if (msg.t === 'analyst:status') {
           // "Answering" is a LIVE state: it lives only while ticks keep arriving. Arm the watchdog NOW so that
           // a replayed/stale "answering" (e.g. from a reconnect after the engine restarted) self-clears if no
@@ -481,7 +453,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // Subscribe to every agent-log channel (called on connect). The DO forwards each only to THIS user's devices,
   // so the console always has the composer/analyst/semantic logs from the moment it connects — no missing a
   // question's log by attaching late. Stays for the connection's life (the DO drops it on WS close).
-  const attachLogs = () => ['analyst-log', 'composer-log', 'semantic-log'].forEach((channel) => send({ t: 'log:attach', channel }))
+  const attachLogs = () => ['analyst-log', 'composer-log'].forEach((channel) => send({ t: 'log:attach', channel }))
 
   // Recover a full Q&A PAIR from the DO into the right session's feed. A qid is a pair, so we restore the
   // QUESTION card too — its id is the qid (matching how ask() writes it), so it dedups whether or not the
@@ -641,23 +613,14 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     scroll()
   }, [busy])
 
-  // Developer-only: trigger the semantic-model agent (its own panel). Streams the raw claude
-  // terminal to the "Semantic model" panel so the build is watchable.
-  const buildSemantic = useCallback(() => {
-    if (wsRef.current?.readyState !== 1) return
-    navigate('semantic'); setSemHasLog(true); setSemStatus('Starting…'); setSemBusy(true)
-    semXtermRef.current?.clear()
-    send({ t: 'semantic:build', projectId })
-  }, [projectId])
-
-  // Standard ICA session controls, per agent: a completely fresh session, or compact (shrink context).
-  const sessionCtl = useCallback((role: 'analyst' | 'semantic', action: 'new' | 'compact') => {
+  // Standard ICA session controls for the analyst: a completely fresh session, or compact (shrink context).
+  const sessionCtl = useCallback((action: 'new' | 'compact') => {
     if (wsRef.current?.readyState !== 1) return
     // The analyst's running session log resets ONLY here: a New session wipes it (a brand-new thread);
     // a compaction is marked with a divider (the thread continues with summarized context below it).
-    if (role === 'analyst') setAnEvents(l => action === 'new' ? [] : [...l, { kind: 'turn' }])   // new: wipe; compact: a divider rule
-    send({ t: action === 'new' ? 'session:new' : 'session:compact', role, projectId })
-    ;(role === 'semantic' ? setSemStatus : setAnStatus)(action === 'new' ? 'New session' : 'Compacting…')
+    setAnEvents(l => action === 'new' ? [] : [...l, { kind: 'turn' }])   // new: wipe; compact: a divider rule
+    send({ t: action === 'new' ? 'session:new' : 'session:compact', role: 'analyst', projectId })
+    setAnStatus(action === 'new' ? 'New session' : 'Compacting…')
   }, [projectId])
 
   // ── Composer (ChatGPT-style: auto-growing textarea, attach, send) ──
@@ -755,15 +718,6 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
              title={proj?.id || projectId}>
           {proj?.name || 'Superatom'}
         </div>
-        {role === 'developer' && (
-          <>
-            <div style={s.navSection}>MODEL</div>
-            <div onClick={() => navigate('semantic')}
-              style={{ ...s.sessionItem, ...(view === 'semantic' ? s.sessionItemActive : {}) }}>
-              ◈ Semantic model
-            </div>
-          </>
-        )}
         <div style={s.navSection}>AGENT</div>
         <div onClick={() => navigate('composer')}
           style={{ ...s.sessionItem, ...(view === 'composer' ? s.sessionItemActive : {}) }}>
@@ -801,36 +755,6 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
         {status && <span style={s.statusChip}><Spinner />{status}</span>}
         <div style={{ ...s.dot, background: connected ? '#059669' : '#d1cec9' }} title={connected ? 'Connected' : 'Offline'} />
       </div>
-      </div>
-
-      {/* Semantic-model view — always mounted so xterm keeps its DOM node; shown when selected */}
-      <div style={{ display: view === 'semantic' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-        <div style={s.semHeader}>
-          <button onClick={() => navigate('chat')} style={s.backBtn} title="Back to your chat">← Chat</button>
-          <button onClick={buildSemantic} style={s.consolidateBtn} title="Run the semantic-model agent (claude-code)">◈ Build / refresh model</button>
-          <span style={{ color: '#8a8276', fontSize: 13, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{semStatus || 'The semantic-model agent — builds the model; never answers questions.'}</span>
-          {semHasPty && (
-            <button
-              onClick={() => {
-                const next = !semTerminal; setSemTerminal(next)
-                if (next) { send({ t: 'ui:resize', which: 'semantic', cols: COLS, rows: ROWS }); send({ t: 'term:attach', which: 'semantic' }) }
-                else send({ t: 'term:detach', which: 'semantic' })
-              }}
-              style={s.backBtn}
-              title={semTerminal ? 'Back to the structured view' : 'Open the raw claude-code terminal'}>
-              {semTerminal ? '≣ Structured' : '⌨ Terminal'}
-            </button>
-          )}
-          <button onClick={() => sessionCtl('semantic', 'compact')} style={s.backBtn} title="Compact the session's context">⇊ Compact</button>
-          <button onClick={() => sessionCtl('semantic', 'new')} style={s.backBtn} title="Start a completely fresh session">↻ New session</button>
-        </div>
-        {gapsPanel}
-        <div ref={semLogRef} style={{ flex: 1, overflow: 'auto', background: 'transparent', padding: 12, paddingBottom: 110 }}>
-          {/* Raw claude terminal (PTY) — shown only when opened via the toggle, or a pure-pty agent. */}
-          <div ref={semTermRef} onMouseDown={() => semXtermRef.current?.focus()} style={{ display: (semTerminal || semStreamKind === 'pty') ? 'block' : 'none' }} />
-          {/* DEFAULT: the structured event log (modeler via JSONL, codex via events). */}
-          {!(semTerminal || semStreamKind === 'pty') && <CodexEventLog events={semEvents} busy={semBusy} claude={semHasPty} />}
-        </div>
       </div>
 
       {/* Composer view — the composer agent's work (reuse-or-compose, escalate). Its own tab, separate from the
@@ -872,8 +796,8 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
               {anTerminal ? '≣ Structured' : '⌨ Terminal'}
             </button>
           )}
-          <button onClick={() => sessionCtl('analyst', 'compact')} style={s.backBtn} title="Compact the session's context">⇊ Compact</button>
-          <button onClick={() => sessionCtl('analyst', 'new')} style={s.backBtn} title="Start a completely fresh session">↻ New session</button>
+          <button onClick={() => sessionCtl('compact')} style={s.backBtn} title="Compact the session's context">⇊ Compact</button>
+          <button onClick={() => sessionCtl('new')} style={s.backBtn} title="Start a completely fresh session">↻ New session</button>
         </div>
         {gapsPanel}
         {/* Enriching banner — the model didn't cover it; the model-builder is filling the gap, then we re-ask. */}
@@ -881,7 +805,6 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           <div style={{ padding: '12px 16px', borderBottom: '1px solid #33402f', background: '#241d12' }}>
             <div style={{ color: '#e0b070', fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
               <Spinner /> I don't have this in the model yet — the model-builder is adding it, then I'll answer.
-              <span onClick={() => navigate('semantic')} style={{ marginLeft: 'auto', fontSize: 12, textDecoration: 'underline', cursor: 'pointer' }}>watch in Semantic model ↗</span>
             </div>
             <div style={{ color: '#c9a86e', fontSize: 12, marginTop: 4 }}>Modeling: {anEnriching.need}</div>
             {anEnriching.basis && <div style={{ color: '#8a8276', fontSize: 12, marginTop: 2 }}>Basis: {anEnriching.basis}</div>}
@@ -1480,8 +1403,6 @@ const s: Record<string, React.CSSProperties> = {
   roleBtn:     { border: 'none', background: 'transparent', fontSize: 12, padding: '4px 12px',
                  cursor: 'pointer', color: '#9a9285' },
   roleBtnActive: { background: '#1a1a1a', color: '#fff' },
-  consolidateBtn: { border: '1px solid #e8e4de', borderRadius: 20, background: '#fff', fontSize: 12,
-                    padding: '4px 12px', cursor: 'pointer', color: '#6b6560' },
   logBar:      { background: '#1e1e1e', color: '#9a9285', fontSize: 12, fontFamily: 'monospace',
                  padding: '6px 24px', cursor: 'pointer', userSelect: 'none', flexShrink: 0 },
   logPanel:    { background: '#1a1a1a', color: '#c8c4be', fontFamily: 'monospace', fontSize: 12,

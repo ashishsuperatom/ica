@@ -20,7 +20,6 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { execProgram } from './exec-program.js'
 import { createSession, prepareWorkspace, type Session, type Harness, type RunHandlers } from './ica/index.js'
-import { createSemanticModeller, promptVersion as semanticPromptVersion } from './agents/semantic-model/index.js'
 import { createReflex } from './agents/reflex/index.js'
 import { createNarrator, capResultData } from './agents/narrator/index.js'
 import { createAnalyst, promptVersion as analystPromptVersion } from './agents/analyst/index.js'
@@ -58,7 +57,7 @@ const DATA_ROOT = process.env.ENGINE_DATA_DIR ?? STATE_ROOT              // answ
 const WORKSPACE = join(WORKSPACE_ROOT, PROJECT)   // the project's home: seams + programs/ + out/ + its DBs
 const KEY = process.env.ICA_KEY || ''
 const HARNESS = (process.env.ICA_HARNESS as Harness) || 'opencode'   // read AFTER .env is loaded
-// ONE fleet switch for the four WORK agents (analyst/semantic/connector/grounding): ICA_AGENT_HARNESS =
+// ONE fleet switch for the WORK agents (analyst/connector/grounding): ICA_AGENT_HARNESS =
 // claude-code | codex | opencode picks the brain for ALL of them, and each agent's MODEL is INHERITED from
 // that harness (claude-code→claude-sonnet-5, codex→gpt-5.6-terra) — you don't set a model. Any single agent
 // can still be pinned with ICA_<AGENT>_HARNESS / _MODEL, which wins. Reflex is independent (own opencode-go).
@@ -75,7 +74,6 @@ const agentCfg = (name: string): { harness: Harness; model: string | undefined }
   return { harness, model }
 }
 const { harness: ANALYST_HARNESS,   model: ANALYST_MODEL }   = agentCfg('ANALYST')
-const { harness: SEMANTIC_HARNESS,  model: SEMANTIC_MODEL }  = agentCfg('SEMANTIC')
 const { harness: CONNECTOR_HARNESS, model: CONNECTOR_MODEL } = agentCfg('CONNECTOR')
 const { harness: GROUNDING_HARNESS, model: GROUNDING_MODEL } = agentCfg('GROUNDING')
 // Where the connector agent writes bridges (shared with the datasource-manager, which loads them by absolute
@@ -103,7 +101,6 @@ if (!PROJECT || !KEY) {
 // runs a PTY; pi is in-process). The engine never touches a server directly.
 let hub: WebSocket | null = null
 
-let semanticBusy = false
 // PER-SESSION answer lock: DIFFERENT sessions answer CONCURRENTLY; one session still answers one at a time. The
 // stream target (reply) + channel are LOCAL per analyse() call now — no cross-session clobber. curQuestion/
 // lastAnswer below stay global as a best-effort reconnect-status snapshot only, never for answer routing.
@@ -132,6 +129,11 @@ const SEMANTIC_CONSOLIDATE_INTERVAL_MS = Number(process.env.SEMANTIC_CONSOLIDATE
 // so a poison batch can never retry forever. Tracked in answers.engine_meta; reset on any clean pass.
 const SEMANTIC_CONSOLIDATE_FAIL_KEY = 'semantic_model:consolidation_failstreak'
 const SEMANTIC_CONSOLIDATE_MAX_FAILS = 3
+// SEAM: the watermark-drain machinery below is KEPT (proven cursor + poison-cap logic), but its payload —
+// the semantic-model modeler — was removed. Repoint `consolidateBatch()` at the new offline learning loop
+// (record the verified concept set per solved question + learn requires-edges, spec §6/§10/§11), then flip
+// this to true. While false the tick is inert and NEVER advances the watermark, so no backlog is consumed.
+const CONSOLIDATOR_WIRED = false
 let semanticConsolidating = false
 
 // Every question + answer for this project, in one sqlite the ENGINE owns (the LLM never writes it).
@@ -227,11 +229,11 @@ const inspector = createInspector({
     harness: HARNESS,
     agents: {
       analyst:   { harness: ANALYST_HARNESS,   model: ANALYST_MODEL,   busy: busySessions.size > 0 },
-      semantic:  { harness: SEMANTIC_HARNESS,  model: SEMANTIC_MODEL,  busy: semanticBusy, consolidating: semanticConsolidating },
       connector: { harness: CONNECTOR_HARNESS, model: CONNECTOR_MODEL, busy: connectorBusy },
       grounding: { harness: GROUNDING_HARNESS, model: GROUNDING_MODEL, busy: groundingBusy },
       reflex:    { harness: process.env.ICA_REFLEX_HARNESS ?? 'opencode', model: process.env.ICA_REFLEX_MODEL ?? 'deepseek-v4-flash' },
     },
+    consolidating: semanticConsolidating,
     consolidateIntervalMs: SEMANTIC_CONSOLIDATE_INTERVAL_MS,
     uptimeMs: Date.now() - EPOCH,
   }),
@@ -291,7 +293,6 @@ function makeAgentSlot<A extends Agent>(role: string, promptVersion: () => Promi
   }
 }
 const analystSlot  = makeAgentSlot('analyst',  analystPromptVersion,  (resumeId) => listSources().then(sources => createAnalyst({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { harness: ANALYST_HARNESS, model: ANALYST_MODEL, resumeId } })))
-const semanticSlot = makeAgentSlot('semantic', semanticPromptVersion, (resumeId) => listSources().then(sources => createSemanticModeller({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { harness: SEMANTIC_HARNESS, model: SEMANTIC_MODEL, resumeId } })))
 // The COMPOSER (System 2), ONE PER SESSION: each chat session gets its own composer (a cheap opencode CLIENT
 // session on the shared server, so N sessions ≈ free). Created on the session's first question, reused for the
 // session; only the in-flight question needs memory. Idle sessions are disposed by the sweep below.
@@ -322,7 +323,7 @@ setInterval(() => {
 const connectorSlot = makeAgentSlot('connector', connectorPromptVersion, (resumeId) => createConnector({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, datasourcesDir: DATASOURCES_DIR, ica: { harness: CONNECTOR_HARNESS, model: CONNECTOR_MODEL, resumeId } }))
 // COLD by design: never warmed at boot (below); spun up only when the admin triggers a grounding build.
 const groundingSlot = makeAgentSlot('grounding', groundingPromptVersion, (resumeId) => listSources().then(sources => createGroundingAgent({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { harness: GROUNDING_HARNESS, model: GROUNDING_MODEL, resumeId } })))
-console.log(`[ica] analyst=${ANALYST_HARNESS ?? 'claude-code'}:${ANALYST_MODEL ?? 'claude-sonnet-5'} · modeler=${SEMANTIC_HARNESS ?? 'claude-code'}:${SEMANTIC_MODEL ?? 'claude-sonnet-5'} · connector=${CONNECTOR_HARNESS}:${CONNECTOR_MODEL} · grounding=${GROUNDING_HARNESS}:${GROUNDING_MODEL} (cold)`)
+console.log(`[ica] analyst=${ANALYST_HARNESS ?? 'claude-code'}:${ANALYST_MODEL ?? 'claude-sonnet-5'} · connector=${CONNECTOR_HARNESS}:${CONNECTOR_MODEL} · grounding=${GROUNDING_HARNESS}:${GROUNDING_MODEL} (cold)`)
 // Live analyst state, kept so a (re)connecting client can RE-SYNC after a reload (the engine stores
 // no history — this is just the current run + last result, replayed on demand).
 let curQuestion = '', curCategory = '', curSid = ''
@@ -409,7 +410,7 @@ async function reuseProgram(programDir: string, params: any, category: string,
   }
 }
 
-// Answer a question: classify → analyst ICA (per-category SYSTEM.md, semantic-model-first) → stream
+// Answer a question: classify → analyst ICA (per-category SYSTEM.md) → stream
 // the raw claude terminal to the "Analyst" tab and emit the final structured answer.
 async function analyse(question: string, from: any, sid = '', qidIn = '', channel = '') {
   console.log(`[ica][session] analyse sid="${sid}" pos=${(position.get(sid) || 'ROOT').slice(0, 14)} busy=[${[...busySessions].map(s => `"${s}"`).join(',')}] q="${question.slice(0, 50)}"`)
@@ -579,7 +580,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         else if (ev.kind === 'command' && ev.output?.trim() && /\b(tsx|node|run\.mjs|query\.mjs|program\.ts)\b/.test(ev.command || '')) narrationBuf.push(('RESULT: ' + capResultData(ev.output)).slice(0, 1800))
       },
     }
-    // The analyst does its OWN search (find-concept / find-program / find-model) and is a strong model (Sonnet),
+    // The analyst does its OWN search (find-concept) and is a strong model (Sonnet),
     // so we deliberately do NOT hand it the engine's "closest program" pointer. That pointer is a RANK-based RRF
     // top, not a real-relevance match, and injecting it ANCHORED the analyst onto look-alike programs (e.g. an
     // actual-billable-hours program for a forecast question). The analyst starts from the question alone; only the
@@ -709,7 +710,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     if (narrator) { narrator.stop(); narrator = null }
     curQuestion = ''
     emit(reply, { t: 'analyst:done', sid })
-    analystSlot.persist(); semanticSlot.persist()   // capture the live ids (incl. any resume-fallback)
+    analystSlot.persist()   // capture the live ids (incl. any resume-fallback)
     busySessions.delete(sid)
   }
 }
@@ -717,23 +718,6 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
 async function listSources(): Promise<string[]> {
   try { const r = await fetch(`${DATASOURCE}/sources`); const j: any = await r.json(); return (j.sources || []).map((s: any) => s.id) }
   catch { return [] }
-}
-
-// Run the semantic-model agent and stream its raw claude-code terminal to the UI panel.
-async function buildSemanticModel(from: any) {
-  if (semanticBusy) { emit(from, { t: 'semantic:status', text: 'Semantic model build already running.' }); return }
-  semanticBusy = true
-  const sources = await listSources()
-  emit(from, { t: 'semantic:status', text: `Building semantic model — sources: ${sources.join(', ') || '(none)'}` })
-  try {
-    const semantic = await semanticSlot.get()
-    announceKind('semantic', from, semantic)   // tell the panel which renderer: 'pty' (claude) or 'events' (codex)
-    const r = await semantic.buildFirstPass(agentStream('semantic', from))
-    emit(from, { t: 'semantic:done', summary: r.lastLines })
-    console.log(`[ica] semantic build done in ${(r.ms / 1000).toFixed(1)}s`)
-  } catch (e: any) {
-    emit(from, { t: 'semantic:status', text: `Semantic build failed: ${e?.message ?? e}` })
-  } finally { semanticSlot.persist(); semanticBusy = false }
 }
 
 // The admin's GROUNDING agent — a COLD claude-code session (spun up on demand, never warmed) that builds
@@ -794,10 +778,10 @@ async function handleConnector(text: string, from: any) {
 // back to the PTY. claude auth is SHARED across all three agents (one $HOME on the volume), so a login in any
 // one authenticates them all. To avoid double output, the raw stream is emitted only while the agent is IDLE
 // — during a run the existing per-run stream already feeds the asker.
-type Which = 'analyst' | 'semantic' | 'connector' | 'grounding'
-const normWhich = (w: any): Which => (w === 'connector' ? 'connector' : w === 'grounding' ? 'grounding' : w === 'semantic' ? 'semantic' : 'analyst')
-const slotFor = (w: Which) => (w === 'connector' ? connectorSlot : w === 'grounding' ? groundingSlot : w === 'semantic' ? semanticSlot : analystSlot)
-const termChunkT = (w: Which) => (w === 'connector' ? 'connector:chunk' : w === 'grounding' ? 'grounding:chunk' : w === 'semantic' ? 'semantic:chunk' : 'analyst:chunk')
+type Which = 'analyst' | 'connector' | 'grounding'
+const normWhich = (w: any): Which => (w === 'connector' ? 'connector' : w === 'grounding' ? 'grounding' : 'analyst')
+const slotFor = (w: Which) => (w === 'connector' ? connectorSlot : w === 'grounding' ? groundingSlot : analystSlot)
+const termChunkT = (w: Which) => (w === 'connector' ? 'connector:chunk' : w === 'grounding' ? 'grounding:chunk' : 'analyst:chunk')
 
 // Standard streaming for the from-based agent flows (semantic/connector/grounding): forward BOTH the harness's
 // text chunks (the pty view) AND its structured events (the codex/events view) to the requester, tagged by agent.
@@ -808,9 +792,9 @@ const agentStream = (w: Which, from: any): RunHandlers => ({
   onEvent: (ev) => emit(from, { t: `${w}:event`, ev }),
 })
 const announceKind = (w: Which, from: any, agent: any) => emit(from, { t: `${w}:stream`, kind: agent?.session?.kind ?? 'events' })
-const isAgentBusy = (w: Which) => (w === 'connector' ? connectorBusy : w === 'grounding' ? groundingBusy : w === 'semantic' ? semanticBusy : busySessions.size > 0)
-const termViewers: Record<Which, Set<any>> = { analyst: new Set(), semantic: new Set(), connector: new Set(), grounding: new Set() }
-const termUnsub: Record<Which, (() => void) | null> = { analyst: null, semantic: null, connector: null, grounding: null }
+const isAgentBusy = (w: Which) => (w === 'connector' ? connectorBusy : w === 'grounding' ? groundingBusy : busySessions.size > 0)
+const termViewers: Record<Which, Set<any>> = { analyst: new Set(), connector: new Set(), grounding: new Set() }
+const termUnsub: Record<Which, (() => void) | null> = { analyst: null, connector: null, grounding: null }
 async function attachTerminal(w: Which, from: any) {
   termViewers[w].add(from)
   const agent = await slotFor(w).get()
@@ -842,11 +826,19 @@ function inputTerminal(w: Which, data: string) {
 // blocks the analyst (separate busy flags). If the modeler is busy with a manual build, this tick skips and
 // the next one retries. When it does run, it drains ALL pending batches (a 3-day backlog is processed in
 // order, 50 at a time) until nothing is left past the watermark.
+// SEAM: process one batch of freshly-finished answers offline. The semantic-model modeler was removed;
+// repoint this at the new learning loop (record the verified concept set per solved question + learn
+// requires-edges, spec §6/§10/§11). Until then the tick is gated off by CONSOLIDATOR_WIRED.
+async function consolidateBatch(_items: any[], _batchId: string, _log: (m: any) => void): Promise<{ ms: number; lastLines?: string }> {
+  throw new Error('consolidator not wired — repoint consolidateBatch() at the new learning loop (spec §6)')
+}
+
 async function semanticConsolidateTick() {
-  if (semanticConsolidating || semanticBusy) return            // already consolidating, or modeler busy → no-op; next tick retries
+  if (!CONSOLIDATOR_WIRED) return                              // seam disabled → inert, never advances the watermark (backlog waits)
+  if (semanticConsolidating) return                            // already consolidating → no-op; next tick retries
   const wmPeek = Number(answers.getMeta(SEMANTIC_CONSOLIDATE_WM_KEY) ?? '0')
-  if (!answers.sinceFinished(wmPeek, 1).length) return         // nothing past the watermark → cheap exit, no session spin-up
-  semanticConsolidating = true; semanticBusy = true            // hold the modeler mutex for the whole drain
+  if (!answers.sinceFinished(wmPeek, 1).length) return         // nothing past the watermark → cheap exit
+  semanticConsolidating = true                                 // single-runner: hold for the whole drain
   try {
     for (;;) {
       const wm = Number(answers.getMeta(SEMANTIC_CONSOLIDATE_WM_KEY) ?? '0')
@@ -876,14 +868,9 @@ async function semanticConsolidateTick() {
       // Consolidation is a BACKGROUND, PROJECT-LEVEL task (no asker/qid). Its stream goes to the semantic-log
       // channel; the DO delivers it to whoever ATTACHED to that channel (no owner → project-level, not user data).
       const semLog = (msg: any) => emit({ type: 'log', channel: 'semantic-log' }, msg)
-      semLog({ t: 'semantic:status', text: `Consolidating ${items.length} recent answer(s) into the model…` })
+      semLog({ t: 'semantic:status', text: `Consolidating ${items.length} recent answer(s)…` })
       try {
-        const semantic = await semanticSlot.get()
-        semLog({ t: 'semantic:stream', kind: semantic.session.events ? 'events' : (semantic.session.kind ?? 'events'), pty: semantic.session.kind === 'pty' })
-        const r = await semantic.consolidate(items, batchId, {
-          onEvent: (ev) => semLog({ t: 'semantic:event', ev }),
-          onOutput: (chunk) => semLog({ t: 'semantic:chunk', text: chunk }),
-        })
+        const r = await consolidateBatch(items, batchId, semLog)
         // Advance PAST the last finished_at we consumed → those rows never re-enter a batch (strictly-greater cursor).
         answers.setMeta(SEMANTIC_CONSOLIDATE_WM_KEY, nextWm)
         answers.setMeta(SEMANTIC_CONSOLIDATE_FAIL_KEY, '0')     // clean pass → reset the failure streak
@@ -907,7 +894,7 @@ async function semanticConsolidateTick() {
     }
   } catch (e: any) {
     console.log(`[semantic-consolidation] error: ${e?.message ?? e}`)
-  } finally { semanticConsolidating = false; semanticBusy = false; semanticSlot.persist() }
+  } finally { semanticConsolidating = false }
 }
 
 // A client (re)connected (e.g. after reload). Replay the live analyst state so it doesn't see a blank
@@ -915,7 +902,7 @@ async function semanticConsolidateTick() {
 // (re-targeted to this connection) or the last completed answer.
 function resyncAnalyst(from: any) {
   emit(from, { t: 'sessions:res', sessions: [] })   // UI keeps its own chat list (localStorage); this is just the ack
-  const aSession = analystSlot.session(), sSession = semanticSlot.session()
+  const aSession = analystSlot.session()
   if (!aSession) return
   const kind = aSession.events ? 'events' : (aSession.kind ?? 'events')
   emit(from, { t: 'analyst:stream', kind, pty: aSession.kind === 'pty' })   // which renderer + whether a raw terminal exists
@@ -927,12 +914,6 @@ function resyncAnalyst(from: any) {
   } else {
     const buf = aSession.buffer()
     if (buf) emit(from, { t: 'analyst:chunk', text: buf, replace: true })
-  }
-  if (sSession) {                                                          // repaint the semantic view too (e.g. mid consolidation)
-    emit(from, { t: 'semantic:stream', kind: sSession.events ? 'events' : (sSession.kind ?? 'events'), pty: sSession.kind === 'pty' })
-    if (sSession.events) { const evs = sSession.events(); if (evs.length) emit(from, { t: 'semantic:events', events: evs, replace: true }) }
-    else { const sbuf = sSession.buffer(); if (sbuf) emit(from, { t: 'semantic:chunk', text: sbuf, replace: true }) }
-    if (semanticBusy) emit(from, { t: 'semantic:status', text: 'Building the model…' })
   }
   if (busySessions.size > 0) {
     // No reply re-target under per-session concurrency (that would steal another session's live stream). A
@@ -947,7 +928,6 @@ function resyncAnalyst(from: any) {
 
 async function handle(payload: any, from: any) {
   if (payload.t === 'analyse') { analyse(String(payload.question || ''), from, String(payload.sessionId || ''), String(payload.questionId || ''), String(payload.channel || '')) }   // UI supplies both ids; channel set for chat-channel turns
-  else if (payload.t === 'semantic:build') { buildSemanticModel(from) }                      // build/refine the semantic model (watchable)
   else if (payload.t === 'grounding:build') { handleGrounding(from, !!payload.rebuild) }        // admin console → grounding agent builds (rebuild:true = wipe first, else additive)
   else if (payload.t === 'connector:ask') { handleConnector(String(payload.text || ''), from) }   // admin console → connector agent (raw PTY back)
   else if (payload.t === 'term:attach') { attachTerminal(normWhich(payload.which), from) }         // open a live typeable terminal into an agent's PTY (e.g. /login)
@@ -966,18 +946,14 @@ async function handle(payload: any, from: any) {
     const slot = slotFor(normWhich(payload.which))
     slot.session()?.resize?.(Number(payload.cols) || 120, Number(payload.rows) || 40)
   }
-  else if (payload.t === 'session:new') {   // UI button → fresh session for that agent (drop resume + history)
-    const slot = payload.role === 'semantic' ? semanticSlot : analystSlot
-    slot.newSession(); emit(from, { t: 'session:reset', role: payload.role || 'analyst' })
+  else if (payload.t === 'session:new') {   // UI button → fresh session for the analyst (drop resume + history)
+    analystSlot.newSession(); emit(from, { t: 'session:reset', role: 'analyst' })
   }
-  else if (payload.t === 'session:compact') {   // UI button → compact (shrink context) of that agent's session
-    const role = payload.role === 'semantic' ? 'semantic' : 'analyst'
-    const slot = role === 'semantic' ? semanticSlot : analystSlot
-    const chunkT = role === 'semantic' ? 'semantic:chunk' : 'analyst:chunk'
-    emit(from, { t: role === 'semantic' ? 'semantic:status' : 'analyst:status', text: 'Compacting context…' })
-    slot.compact({ onOutput: (chunk) => emit(from, { t: chunkT, text: chunk }) })
-      .then(() => emit(from, { t: role === 'semantic' ? 'semantic:status' : 'analyst:status', text: 'Compacted ✓' }))
-      .catch((e: any) => emit(from, { t: role === 'semantic' ? 'semantic:status' : 'analyst:status', text: `Compact failed: ${e?.message ?? e}` }))
+  else if (payload.t === 'session:compact') {   // UI button → compact (shrink context) of the analyst's session
+    emit(from, { t: 'analyst:status', text: 'Compacting context…' })
+    analystSlot.compact({ onOutput: (chunk) => emit(from, { t: 'analyst:chunk', text: chunk }) })
+      .then(() => emit(from, { t: 'analyst:status', text: 'Compacted ✓' }))
+      .catch((e: any) => emit(from, { t: 'analyst:status', text: `Compact failed: ${e?.message ?? e}` }))
   }
   else if (payload.t === 'program:forget') {   // admin → completely delete a program + its answers/runs/out, so the question rebuilds
     // Identify by programDir, question text, or a qid it produced. Deterministic, engine-owned (no LLM).
@@ -1064,7 +1040,7 @@ setInterval(() => { semanticConsolidateTick().catch((e) => console.log('[semanti
 let warmed = false
 async function warmEssentialAgents() {
   if (warmed) return; warmed = true
-  console.log('[ica] warming essential agents (analyst · connector · modeler · reflex)…')
+  console.log('[ica] warming essential agents (analyst · connector · reflex)…')
   const warm = async (name: string, p: Promise<unknown>): Promise<{ name: string; ok: boolean; ms: number }> => {
     const t0 = Date.now()
     try { await p; const ms = Date.now() - t0; console.log(`[ica] warm: ${name} ready (${(ms / 1000).toFixed(1)}s)`); return { name, ok: true, ms } }
@@ -1074,7 +1050,6 @@ async function warmEssentialAgents() {
     warm('reflex', (reflex as any).warmup?.() ?? Promise.resolve()),
     warm('analyst',   analystSlot.get().then(a => a.session.warmup?.())),
     warm('connector', connectorSlot.get().then(a => a.session.warmup?.())),
-    warm('modeler',   semanticSlot.get().then(a => a.session.warmup?.())),
   ])
   // ONE unmistakable line the user can look for: the engine has finished booting and every essential agent
   // is up (or which one failed). "Fully ready" vs "ready with warnings" — never ambiguous.
@@ -1097,7 +1072,7 @@ const shutdown = () => {
   // Graceful goodbye: free the singleton slot NOW so the replacement process connects into an empty slot
   // (no restart-window eviction war). Then stop sessions and exit.
   try { if (hub?.readyState === WebSocket.OPEN) hub.send(JSON.stringify({ type: 'bye', instanceId: INSTANCE_ID })) } catch { /* socket already gone */ }
-  analystSlot.stop(); semanticSlot.stop(); connectorSlot.stop(); groundingSlot.stop(); setTimeout(() => process.exit(0), 300)
+  analystSlot.stop(); connectorSlot.stop(); groundingSlot.stop(); setTimeout(() => process.exit(0), 300)
 }
 process.once('SIGINT', shutdown); process.once('SIGTERM', shutdown)
 connect()

@@ -6,7 +6,7 @@
 //   3. Shift+ArrowUp / Shift+ArrowDown → move to the previous / next QUESTION, parked near the top, scrolling
 //      the CONTAINER (not the page). Questions are marked `[data-qlog]` inside the log (a DISTINCT attribute from
 //      the chat feed's `[data-role="q"]`, so the two navs never see each other's markers).
-// One hook instance per log (call it once for analyst, once for semantic) — they don't share state.
+// One hook instance per log (call it once per agent log view) — they don't share state.
 import { useEffect, useRef, type RefObject } from 'react'
 
 const COOLDOWN = 800     // ms: rapid repeat presses chain off the cursor instead of re-deriving position
