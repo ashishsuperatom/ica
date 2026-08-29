@@ -137,7 +137,7 @@ ${(opts.conceptNames ?? []).length ? '\nCandidate concepts for this question, mo
 Build a program that answers it - follow ./analyst/ANALYST.md (recon concepts first, then the data; every
 question becomes a program). When it runs correctly, write your pointer to ${builtRel} =
   {"programDir":"programs/<slug>","params":{...}, "parent":"root" | "<a prior intent id>", "followups":["...","..."]}
-and RUN it with `tsx run.mjs programs/<slug>/program.ts '<jsonParams>'` until correct. The ENGINE runs it and
+and RUN it with \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\` until correct. The ENGINE runs it and
 writes the answer - never write ${answerRel} yourself, and never answer in chat.
 
 `
