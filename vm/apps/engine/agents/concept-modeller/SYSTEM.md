@@ -28,8 +28,7 @@ Naming: name a concept the way a USER says it, not by an engineering identifier 
 ## Reading + verifying
 Each analysis built a program under `./programs/<slug>/` — its `program.ts` + `units/` are the analyst's real
 computation (its query, joins, the concept it computed from scratch). READ it. Then reach the data through the
-seam to VERIFY: `./sources`, `./introspect`, `./query` (query the source). Search what is already modelled
-with `./find-concept "<phrase>"` before writing, to MERGE not duplicate.
+seam to VERIFY: `./sources`, `./introspect`, `./query` (query the source). Search what is already modelled with `./find-concept "<phrase>"` before writing, to MERGE not duplicate.
 
 ---
 

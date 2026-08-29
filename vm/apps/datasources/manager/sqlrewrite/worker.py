@@ -38,11 +38,15 @@ DIALECTS = {
     "ansi": None, "": None,
 }
 
-# Statements that MUST be rejected — this is the access-control allow-list (only read queries pass). A single
-# unparsed `Command` (raw EXEC/etc.) is rejected too: if SQLGlot can't model it, we can't secure it.
+# READ-ONLY GATE (default access control): a query is rejected unless it is a pure read. Any of these anywhere in
+# the tree fails it — the mutating statements, plus `Into` (T-SQL `SELECT … INTO t` creates a table while looking
+# like a Select), plus a raw unparsed `Command` (EXEC/etc. — if SQLGlot can't model it, we can't secure it).
+# NOTE: stacked injection (`SELECT 1; DROP …`) is also neutralised structurally — we parse+re-render only the
+# FIRST statement, so a trailing statement never reaches the bridge. This is the blunt default; finer per-source
+# authorization comes later and plugs in at inject_policies().
 FORBIDDEN = (
     exp.Insert, exp.Update, exp.Delete, exp.Merge, exp.Create, exp.Drop,
-    exp.Alter, exp.TruncateTable, exp.Command, exp.Grant,
+    exp.Alter, exp.TruncateTable, exp.Command, exp.Grant, exp.Into,
 )
 
 
