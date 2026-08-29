@@ -22,6 +22,7 @@ export interface DataSourceEntry {
   isOptional?: boolean        // nullable
   isKey?: boolean             // part of the primary key
   references?: string         // the FK target this field joins to, as 'CONTAINER.FIELD' (cheap-if-available only)
+  rows?: number               // approximate row count of this field's CONTAINER (0 = empty → auto-disabled). null = unknown
   enabled?: boolean           // false disables this field (or whole table) from being used; default true
 }
 
@@ -44,6 +45,7 @@ export function ensureDataSourceIndex(store: NodeStore): void {
       is_optional  INTEGER,
       is_key       INTEGER,
       references_  TEXT,                    -- FK target 'CONTAINER.FIELD' (trailing _ : REFERENCES is reserved)
+      rows         INTEGER,                 -- approx row count of the CONTAINER (0 = empty → auto-disabled)
       enabled      INTEGER NOT NULL DEFAULT 1
     );
     CREATE INDEX IF NOT EXISTS dsi_source    ON datasource_index(source);
@@ -69,6 +71,28 @@ export function ensureDataSourceIndex(store: NodeStore): void {
       VALUES (new.rowid, new.key, new.container, new.field, new.type, new.desc_default, new.desc_ai, new.desc_human);
     END;
   `)
+  try { store.db.exec(`ALTER TABLE datasource_index ADD COLUMN rows INTEGER`) } catch { /* column already present */ }
+}
+
+/**
+ * Record known row counts for a source's containers and AUTO-DISABLE the empty ones (so they never surface in
+ * search — an empty table/column is pure distraction). CRITICAL: only pass counts you DEFINITIVELY got (a real
+ * 0 = empty). A timeout/error means "unknown, possibly huge" — do NOT include it here, so it stays enabled.
+ * Never re-enables a manually-disabled non-empty table (only flips enabled for the containers passed in).
+ */
+export function applyRowCounts(store: NodeStore, source: string, counts: Record<string, number>): { disabled: number; enabled: number } {
+  ensureDataSourceIndex(store)
+  let disabled = 0, enabled = 0
+  const upd = store.db.prepare('UPDATE datasource_index SET rows=?, enabled=? WHERE source=? AND container=?')
+  const tx = store.db.transaction((entries: [string, number][]) => {
+    for (const [container, n] of entries) {
+      const en = n > 0 ? 1 : 0
+      upd.run(n, en, source, container)
+      if (en) enabled++; else disabled++
+    }
+  })
+  tx(Object.entries(counts))
+  return { disabled, enabled }
 }
 
 export function dsiKey(source: string, container: string, field: string): string {
@@ -79,18 +103,18 @@ export function dsiKey(source: string, container: string, field: string): string
 export function putEntry(store: NodeStore, e: DataSourceEntry): void {
   ensureDataSourceIndex(store)
   store.db.prepare(`
-    INSERT INTO datasource_index (key, source, container, field, type, desc_default, desc_ai, desc_human, is_optional, is_key, references_, enabled)
-    VALUES (@key, @source, @container, @field, @type, @descDefault, @descAi, @descHuman, @isOptional, @isKey, @references, @enabled)
+    INSERT INTO datasource_index (key, source, container, field, type, desc_default, desc_ai, desc_human, is_optional, is_key, references_, rows, enabled)
+    VALUES (@key, @source, @container, @field, @type, @descDefault, @descAi, @descHuman, @isOptional, @isKey, @references, @rows, @enabled)
     ON CONFLICT(key) DO UPDATE SET
       type=excluded.type, desc_default=excluded.desc_default, is_optional=excluded.is_optional,
       is_key=excluded.is_key, references_=excluded.references_
-      -- NOTE: desc_ai/desc_human/enabled are curated, so a refresh from the source never clobbers them.
+      -- NOTE: desc_ai/desc_human/rows/enabled are curated (rows/enabled owned by applyRowCounts), so a refresh never clobbers them.
   `).run({
     key: e.key, source: e.source, container: e.container, field: e.field, type: e.type ?? null,
     descDefault: e.descDefault ?? null, descAi: e.descAi ?? null, descHuman: e.descHuman ?? null,
     isOptional: e.isOptional == null ? null : (e.isOptional ? 1 : 0),
     isKey: e.isKey == null ? null : (e.isKey ? 1 : 0), references: e.references ?? null,
-    enabled: e.enabled === false ? 0 : 1,
+    rows: e.rows == null ? null : e.rows, enabled: e.enabled === false ? 0 : 1,
   })
 }
 
@@ -105,7 +129,8 @@ function rowToEntry(r: any): DataSourceEntry {
   return { key: r.key, source: r.source, container: r.container, field: r.field, type: r.type ?? undefined,
     descDefault: r.desc_default ?? undefined, descAi: r.desc_ai ?? undefined, descHuman: r.desc_human ?? undefined,
     isOptional: r.is_optional == null ? undefined : !!r.is_optional,
-    isKey: r.is_key == null ? undefined : !!r.is_key, references: r.references_ ?? undefined, enabled: !!r.enabled }
+    isKey: r.is_key == null ? undefined : !!r.is_key, references: r.references_ ?? undefined,
+    rows: r.rows == null ? undefined : r.rows, enabled: !!r.enabled }
 }
 
 /** Full-text search across the whole index (all sources), or filtered to one `source`. Disabled rows hidden

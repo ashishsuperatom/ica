@@ -2,7 +2,7 @@
 // then indexes the ones not already in the index (Phase N), persisting per container. Re-run to resume: it
 // skips containers already indexed. The future connector agent replaces this as the live per-source updater.
 //   DB=<project.sqlite> SEEDS_FILE=<project>/datasources/index-seeds.json [WIPE=1] [ONLY=<sourceId>] tsx scripts/build-datasource-index.ts
-import { NodeStore, putEntries, dataSourceStats } from '@superatom/node-store'
+import { NodeStore, putEntries, applyRowCounts, dataSourceStats } from '@superatom/node-store'
 import { getIndexer } from '../datasource-index/indexer.js'
 import { readFileSync } from 'node:fs'
 
@@ -28,13 +28,16 @@ async function main() {
   for (const s of sources) {
     console.log(`\n── ${s.id} [${s.dialect}] ──`)
     let indexer; try { indexer = getIndexer(s.dialect) } catch (e: any) { console.error('  ' + e.message); continue }
+    // STEP 1 — enumerate every container FIRST (find all tables before indexing any).
+    console.log(`  step 1 · enumerating containers…`)
     let containers: string[]
     try { containers = await indexer.listContainers(s.id, rawQuery, { seedTables: SEED_TABLES[s.id] }) }
-    catch (e: any) { console.error(`  listContainers FAILED: ${e.message}`); continue }
-    // RESUME: skip containers already in the index (the index table IS the done-state).
+    catch (e: any) { console.error(`  step 1 FAILED: ${e.message}`); continue }
     const done = new Set<string>((store.db.prepare('SELECT DISTINCT container FROM datasource_index WHERE source=?').all(s.id) as any[]).map((r) => r.container))
-    const todo = containers.filter((c) => !done.has(c))
-    console.log(`  ${containers.length} containers · ${done.size} already indexed · ${todo.length} to do`)
+    const todo = containers.filter((c) => !done.has(c))   // RESUME: skip containers already in the index (the index IS the done-state)
+    console.log(`  step 1 · found ${containers.length} containers (${done.size} already indexed → ${todo.length} to do)`)
+    // STEP 2 — index the remaining containers one by one, persisting each.
+    if (todo.length) console.log(`  step 2 · indexing ${todo.length} containers…`)
     let i = 0, ok = 0, empty = 0, fields = 0
     for (const c of todo) {
       i++
@@ -44,7 +47,16 @@ async function main() {
         if (i % 25 === 0 || i === todo.length) console.log(`  …${i}/${todo.length}  (${ok} indexed, ${empty} empty/absent, ${fields} fields)`)
       } catch { empty++ /* table absent or unqueryable → skip */ }
     }
-    console.log(`  done: +${ok} containers, ${fields} new fields`)
+    if (todo.length) console.log(`  step 2 · done: +${ok} containers, ${fields} new fields`)
+    // STEP 3 — definitive row counts → auto-disable EMPTY containers so they never surface in search.
+    // rowCounts() omits anything it couldn't count (timeout/unknown), so those stay enabled.
+    if (indexer.rowCounts) {
+      console.log(`  step 3 · row counts + disable empties…`)
+      try {
+        const { disabled, enabled } = applyRowCounts(store, s.id, await indexer.rowCounts(s.id, rawQuery))
+        console.log(`  step 3 · ${disabled} empty → disabled, ${enabled} non-empty (kept)`)
+      } catch (e: any) { console.warn(`  step 3 failed (all stay enabled): ${e.message}`) }
+    }
   }
   console.log('\n=== index totals ===')
   console.table(dataSourceStats(store))

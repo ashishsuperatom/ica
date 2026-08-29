@@ -10,7 +10,7 @@ export { conceptId, upsertConcept, getConcept, conceptHistory } from './concept.
 export type { ConceptProps, ConceptStatus, TimeSemantics, Measure, Dimension, Parameter, Provenance, ChangeMeta, ConceptVersion } from './concept.js'
 
 // Datasource index — a flat, full-text map of every field in every source (SOURCE.CONTAINER.FIELD).
-export { ensureDataSourceIndex, putEntry, putEntries, searchDataSource, setEnabled, dataSourceStats, describeEntry, dsiKey } from './datasource-index.js'
+export { ensureDataSourceIndex, putEntry, putEntries, searchDataSource, setEnabled, applyRowCounts, dataSourceStats, describeEntry, dsiKey } from './datasource-index.js'
 export type { DataSourceEntry } from './datasource-index.js'
 
 // Semantic search — GENERIC hybrid (FTS + vector) over any node kind. Swappable seams: Embedder (model),

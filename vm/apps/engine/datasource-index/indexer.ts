@@ -13,6 +13,9 @@ export interface IndexerOpts { seedTables?: string[] }
 export interface TypeIndexer {
   listContainers(source: string, query: RawQuery, opts: IndexerOpts): Promise<string[]>
   indexContainer(source: string, container: string, query: RawQuery): Promise<DataSourceEntry[]>
+  // DEFINITIVE row counts (0 = truly empty → auto-disabled). Only return counts you actually got; omit anything
+  // that timed out/errored (unknown, possibly huge) so it stays enabled. Optional — omit if the type can't count cheaply.
+  rowCounts?(source: string, query: RawQuery): Promise<Record<string, number>>
 }
 
 const trim = (s: any) => String(s ?? '').trim()
@@ -55,6 +58,13 @@ const mssql: TypeIndexer = {
           isOptional: trim(r.IS_NULLABLE).toUpperCase() === 'YES', isKey: c.pks.has(ck), references: c.fks.get(ck) }
       })
     } catch { return [] }
+  },
+  // Fast, DEFINITIVE base-table counts from metadata (sys.partitions) — no table scan, no timeout risk. Views
+  // are omitted (no cheap definitive count) so they stay enabled (unknown, never wrongly disabled).
+  async rowCounts(source, query) {
+    const out: Record<string, number> = {}
+    try { for (const r of await query(source, `SELECT t.name tbl, SUM(p.rows) n FROM sys.tables t JOIN sys.partitions p ON p.object_id=t.object_id AND p.index_id IN (0,1) GROUP BY t.name`)) out[trim(r.tbl)] = Number(r.n) || 0 } catch {}
+    return out
   },
 }
 
