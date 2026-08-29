@@ -26,6 +26,7 @@ import { createAnalyst, promptVersion as analystPromptVersion } from './agents/a
 import { createComposer, type Composer } from './agents/composer/index.js'
 import { createConnector, promptVersion as connectorPromptVersion } from './agents/connector/index.js'
 import { createGroundingAgent, promptVersion as groundingPromptVersion } from './agents/grounding/index.js'
+import { createConceptModeller, promptVersion as modellerPromptVersion } from './agents/concept-modeller/index.js'
 import { openAnswers, normalizeQuestion } from './answers.js'
 import { followUpCues } from './followup.js'
 import { forgetProgram } from './forget.js'
@@ -76,6 +77,7 @@ const agentCfg = (name: string): { harness: Harness; model: string | undefined }
 const { harness: ANALYST_HARNESS,   model: ANALYST_MODEL }   = agentCfg('ANALYST')
 const { harness: CONNECTOR_HARNESS, model: CONNECTOR_MODEL } = agentCfg('CONNECTOR')
 const { harness: GROUNDING_HARNESS, model: GROUNDING_MODEL } = agentCfg('GROUNDING')
+const { harness: MODELLER_HARNESS,  model: MODELLER_MODEL }  = agentCfg('MODELLER')   // the concept modeller (System 4)
 // Where the connector agent writes bridges (shared with the datasource-manager, which loads them by absolute
 // path). Defaults to the project's COMMITTED inputs folder so connector-written bridges land beside any
 // hand-authored ones (one place, no duplicate); on Fly override via env to the mounted volume.
@@ -129,11 +131,10 @@ const CONCEPT_CONSOLIDATE_INTERVAL_MS = Number(process.env.CONCEPT_CONSOLIDATE_I
 // so a poison batch can never retry forever. Tracked in answers.engine_meta; reset on any clean pass.
 const CONCEPT_CONSOLIDATE_FAIL_KEY = 'concept_model:consolidation_failstreak'
 const CONCEPT_CONSOLIDATE_MAX_FAILS = 3
-// SEAM: the watermark-drain machinery below is KEPT (proven cursor + poison-cap logic), but its payload —
-// the semantic-model modeler — was removed. Repoint `consolidateBatch()` at the new offline learning loop
-// (record the verified concept set per solved question + learn requires-edges, spec §6/§10/§11), then flip
-// this to true. While false the tick is inert and NEVER advances the watermark, so no backlog is consumed.
-const CONSOLIDATOR_WIRED = false
+// The offline consolidator is WIRED to the concept modeller (System 4): each tick hands a batch of finished
+// analyses to consolidateBatch(), which spins up the modeller to distil verified concepts. Set false to make
+// the tick inert (it then never advances the watermark, so no backlog is consumed).
+const CONSOLIDATOR_WIRED = true
 let conceptConsolidating = false
 
 // Every question + answer for this project, in one sqlite the ENGINE owns (the LLM never writes it).
@@ -322,6 +323,9 @@ setInterval(() => {
 const connectorSlot = makeAgentSlot('connector', connectorPromptVersion, (resumeId) => createConnector({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, datasourcesDir: DATASOURCES_DIR, ica: { harness: CONNECTOR_HARNESS, model: CONNECTOR_MODEL, resumeId } }))
 // COLD by design: never warmed at boot (below); spun up only when the admin triggers a grounding build.
 const groundingSlot = makeAgentSlot('grounding', groundingPromptVersion, (resumeId) => listSources().then(sources => createGroundingAgent({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { harness: GROUNDING_HARNESS, model: GROUNDING_MODEL, resumeId } })))
+// The CONCEPT MODELLER (System 4 — "sleep"): LAZY, never warmed at boot — spun up only when the offline
+// consolidation tick has a batch to study, then it distils verified concepts from finished analyses.
+const modellerSlot = makeAgentSlot('modeller', modellerPromptVersion, (resumeId) => listSources().then(sources => createConceptModeller({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { harness: MODELLER_HARNESS, model: MODELLER_MODEL, resumeId } })))
 console.log(`[ica] analyst=${ANALYST_HARNESS ?? 'claude-code'}:${ANALYST_MODEL ?? 'claude-sonnet-5'} · connector=${CONNECTOR_HARNESS}:${CONNECTOR_MODEL} · grounding=${GROUNDING_HARNESS}:${GROUNDING_MODEL} (cold)`)
 // Live analyst state, kept so a (re)connecting client can RE-SYNC after a reload (the engine stores
 // no history — this is just the current run + last result, replayed on demand).
@@ -828,8 +832,19 @@ function inputTerminal(w: Which, data: string) {
 // SEAM: process one batch of freshly-finished answers offline. The semantic-model modeler was removed;
 // repoint this at the new learning loop (record the verified concept set per solved question + learn
 // requires-edges, spec §6/§10/§11). Until then the tick is gated off by CONSOLIDATOR_WIRED.
-async function consolidateBatch(_items: any[], _batchId: string, _log: (m: any) => void): Promise<{ ms: number; lastLines?: string }> {
-  throw new Error('consolidator not wired — repoint consolidateBatch() at the new learning loop (spec §6)')
+// Hand one batch of finished analyses to the concept modeller (System 4) → it distils verified concepts.
+// Streams the modeller's work to the concept-log channel; returns its timing + summary note.
+async function consolidateBatch(items: any[], batchId: string, log: (m: any) => void): Promise<{ ms: number; lastLines?: string }> {
+  const modeller = await modellerSlot.get()
+  log({ t: 'concept:stream', kind: modeller.session.events ? 'events' : (modeller.session.kind ?? 'events'), pty: modeller.session.kind === 'pty' })
+  try {
+    const r = await modeller.consolidate(items, batchId, {
+      onEvent: (ev) => log({ t: 'concept:event', ev }),
+      onOutput: (chunk) => log({ t: 'concept:chunk', text: chunk }),
+    })
+    log({ t: 'concept:status', text: `Consolidated ${r.changed} concept(s)` })
+    return { ms: r.ms, lastLines: r.note }
+  } finally { modellerSlot.persist() }
 }
 
 async function conceptConsolidateTick() {
@@ -864,17 +879,17 @@ async function conceptConsolidateTick() {
       const batchId = 'b_' + Date.now().toString(36)
       const items = fresh.map((r) => ({ question: r.question, status: r.status, programDir: r.programDir, usedNodes: (r.answer as any)?.usedNodes }))
       console.log(`[concept-consolidation] ${batchId}: ${items.length} new program(s) of ${batch.length} answer(s) since wm=${wm}`)
-      // Consolidation is a BACKGROUND, PROJECT-LEVEL task (no asker/qid). Its stream goes to the semantic-log
+      // Consolidation is a BACKGROUND, PROJECT-LEVEL task (no asker/qid). Its stream goes to the concept-log
       // channel; the DO delivers it to whoever ATTACHED to that channel (no owner → project-level, not user data).
-      const semLog = (msg: any) => emit({ type: 'log', channel: 'semantic-log' }, msg)
-      semLog({ t: 'semantic:status', text: `Consolidating ${items.length} recent answer(s)…` })
+      const semLog = (msg: any) => emit({ type: 'log', channel: 'concept-log' }, msg)
+      semLog({ t: 'concept:status', text: `Consolidating ${items.length} recent answer(s)…` })
       try {
         const r = await consolidateBatch(items, batchId, semLog)
         // Advance PAST the last finished_at we consumed → those rows never re-enter a batch (strictly-greater cursor).
         answers.setMeta(CONCEPT_CONSOLIDATE_WM_KEY, nextWm)
         answers.setMeta(CONCEPT_CONSOLIDATE_FAIL_KEY, '0')     // clean pass → reset the failure streak
         console.log(`[concept-consolidation] ${batchId} done in ${(r.ms / 1000).toFixed(1)}s`)
-        semLog({ t: 'semantic:status', text: 'Model consolidated ✓' })
+        semLog({ t: 'concept:status', text: 'Concepts consolidated ✓' })
       } catch (e: any) {
         // The agent SESSION errored (a crash, not a compaction — those are handled inside consolidate()).
         // Do NOT advance the watermark yet: a transient error should be retried. But bound it — after
@@ -1071,7 +1086,7 @@ const shutdown = () => {
   // Graceful goodbye: free the singleton slot NOW so the replacement process connects into an empty slot
   // (no restart-window eviction war). Then stop sessions and exit.
   try { if (hub?.readyState === WebSocket.OPEN) hub.send(JSON.stringify({ type: 'bye', instanceId: INSTANCE_ID })) } catch { /* socket already gone */ }
-  analystSlot.stop(); connectorSlot.stop(); groundingSlot.stop(); setTimeout(() => process.exit(0), 300)
+  analystSlot.stop(); connectorSlot.stop(); groundingSlot.stop(); modellerSlot.stop(); setTimeout(() => process.exit(0), 300)
 }
 process.once('SIGINT', shutdown); process.once('SIGTERM', shutdown)
 connect()
