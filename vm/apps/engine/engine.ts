@@ -32,7 +32,7 @@ import { followUpCues } from './followup.js'
 import { forgetProgram } from './forget.js'
 import { log, readJsonSafe } from './log.js'
 import { createInspector } from './inspect.js'
-import { NodeStore, ROOT, ensureRoot, ensureConceptTree, ensureBasisSeed, intentId, SqliteVecIndex, indexText, backfillMissing, hybridSearch } from '@superatom/node-store'
+import { NodeStore, ROOT, ensureRoot, ensureConceptTree, intentId, SqliteVecIndex, indexText, backfillMissing, hybridSearch } from '@superatom/node-store'
 import { bgeEmbedder } from './embed.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -215,8 +215,7 @@ if (vectors) void backfillMissing(graph, vectors, bgeEmbedder, { kind: 'intent' 
   .catch(e => log.warn('semantic', 'intent backfill failed', e))
 ensureRoot(graph)
 ensureConceptTree(graph)   // concept tree root + place any orphan concept under it (structural)
-ensureBasisSeed(graph)     // plant the grounded three-plane axis vocabulary (subject / operation / mode)
-// The FRONT DOOR: every question is routed here first — reuse a program on a basis match, else build.
+// The FRONT DOOR: every question is routed here first — reuse a program on a match, else build.
 const reflex = createReflex({ cwd: WORKSPACE })   // the reflex agent — the fast front door
 // READ-ONLY window into the graph + answer history + the files behind them, served over the hub to the
 // admin console. The engine runs on a Fly VM with nothing listening, so this is the only way to see
