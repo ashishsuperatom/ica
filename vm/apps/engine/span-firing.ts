@@ -4,9 +4,9 @@
 // change moved the needle):
 //   - SPANS: all n-grams n=2..4 of the UNTOUCHED question (stopwords kept). 1-grams are the noise floor, excluded.
 //   - SURFACE FORMS: each concept's forms = name + aliases, embedded SEPARATELY. Concept score = MAX over forms.
-//   - CENTRE: subtract a frozen global mean `mu` (built from the forms + a background sample of real question
-//     spans) from every vector before cosine — so activations are comparable. mu is computed once per concept-set
-//     and cached (a fixed reference set, never recomputed per query).
+//   - CENTRE: subtract a frozen global mean `mu` (built ONCE from the forms + a background sample of real question
+//     spans) from every vector before cosine — so activations are comparable. mu is FROZEN: recomputing it as
+//     aliases/concepts are added silently rescales every score (the spec's 0.10-F1 bug, §4). Only reindex() resets it.
 //   - AGGREGATE: activation = best(span×form) + 0.25 · Σ(that concept's other cosines > 0.30).
 //   - FIRE: rank by activation, take top 6, walk down, STOP at the first gap > 0.10. Never an absolute threshold.
 //   - EXACT SHORT-CIRCUIT: a span that literally equals a surface form resolves that concept at 1.000.
@@ -44,7 +44,6 @@ function cosineCentred(a: Float32Array, b: Float32Array, mu: Float32Array): numb
 }
 
 type Form = { name: string; norm: string; vec: Float32Array }
-type Index = { sig: string; forms: Form[]; mu: Float32Array; exact: Map<string, string> }
 
 export type FireResult = {
   concepts: string[]                               // the fired concept names
@@ -53,45 +52,63 @@ export type FireResult = {
 }
 
 export function createSpanFirer(store: NodeStore, embedder: Embedder) {
-  let idx: Index | null = null
+  // FROZEN centre (§3.3/§4): mu is computed ONCE over a fixed reference set and NEVER recomputed as concepts or
+  // aliases are added — recomputing it silently rescales every score. Only reindex() resets it.
+  let mu: Float32Array | null = null
+  // Append-only vector cache (§4): key = name\tform → embedding. A form is NEVER re-embedded, so its vector is
+  // stable for the life of the index; adding a concept/alias embeds ONLY the new rows.
+  const vecOf = new Map<string, Float32Array>()
+  let forms: Form[] = []
+  let exact = new Map<string, string>()
+  let sig = ''
+  const key = (name: string, form: string) => name + '\t' + form
 
   const surfaceForms = () => {
     const rows: { name: string; form: string }[] = []
     for (const c of store.listKind('concept') as any[]) {
       const props = typeof c.props === 'string' ? JSON.parse(c.props || '{}') : (c.props || {})
-      const forms = [c.label, ...(Array.isArray(props.aliases) ? props.aliases : [])]
-      for (const f of forms) if (f && String(f).trim()) rows.push({ name: c.label, form: String(f) })
+      const allForms = [c.label, ...(Array.isArray(props.aliases) ? props.aliases : [])]
+      for (const f of allForms) if (f && String(f).trim()) rows.push({ name: c.label, form: String(f) })
     }
     return rows
   }
 
-  // Build (or reuse) the frozen form index + mu. Rebuilds only when the concept-set signature changes.
-  const build = async (): Promise<Index | null> => {
+  // Reconcile with the current concept set: embed ONLY new forms, keep every existing vector, keep mu FROZEN.
+  const build = async (): Promise<boolean> => {
     const rows = surfaceForms()
-    if (!rows.length) return null
-    const sig = rows.map(r => r.name + '' + r.form).sort().join('\n')
-    if (idx && idx.sig === sig) return idx
+    if (!rows.length) return false
 
-    const formVecs = await embedder.embed(rows.map(r => r.form))                 // forms = passages
-    const forms: Form[] = rows.map((r, i) => ({ name: r.name, norm: norm(r.form), vec: formVecs[i] }))
+    const missing = rows.filter(r => !vecOf.has(key(r.name, r.form)))
+    if (missing.length) {
+      const vecs = await embedder.embed(missing.map(r => r.form))              // embed ONLY the new forms (passages)
+      missing.forEach((r, i) => vecOf.set(key(r.name, r.form), vecs[i]))
+    }
 
-    // mu reference set = the form vectors + a background sample of REAL question spans (from intent history).
-    const intents = (store.listKind('intent') as any[]).map(n => n.label).filter(Boolean)
-    const bgSpans = [...new Set(intents.flatMap(spansOf))].slice(0, 300)
-    const bgVecs = bgSpans.length ? await embedder.embed(bgSpans, { asQuery: true }) : []
-    const mu = meanNormalised([...forms.map(f => f.vec), ...bgVecs])
+    // Freeze mu ONCE, at the first build with forms, over the fixed reference set (those forms + a background
+    // sample of real question spans). Later concept/alias additions must NOT move it.
+    if (!mu) {
+      const intents = (store.listKind('intent') as any[]).map(n => n.label).filter(Boolean)
+      const bgSpans = [...new Set(intents.flatMap(spansOf))].slice(0, 300)
+      const bgVecs = bgSpans.length ? await embedder.embed(bgSpans, { asQuery: true }) : []
+      mu = meanNormalised([...rows.map(r => vecOf.get(key(r.name, r.form))!), ...bgVecs])
+    }
 
-    const exact = new Map<string, string>()
-    for (const f of forms) if (!exact.has(f.norm)) exact.set(f.norm, f.name)     // normalised form → concept name
-
-    idx = { sig, forms, mu, exact }
-    return idx
+    const newSig = rows.map(r => key(r.name, r.form)).sort().join('\n')
+    if (newSig !== sig) {
+      forms = rows.map(r => ({ name: r.name, norm: norm(r.form), vec: vecOf.get(key(r.name, r.form))! }))
+      exact = new Map()
+      for (const f of forms) if (!exact.has(f.norm)) exact.set(f.norm, f.name)
+      sig = newSig
+    }
+    return true
   }
 
   return {
+    // Deliberate reindex (§4: model change / mu refresh) — the ONLY sanctioned way mu changes.
+    reindex() { mu = null; vecOf.clear(); forms = []; exact = new Map(); sig = '' },
+
     async fire(question: string): Promise<FireResult> {
-      const ix = await build()
-      if (!ix) return { concepts: [], scored: [], unexplained: [] }
+      if (!(await build()) || !mu) return { concepts: [], scored: [], unexplained: [] }
       const qspans = spansOf(question)
       if (!qspans.length) return { concepts: [], scored: [], unexplained: [] }
       const spanVecs = await embedder.embed(qspans, { asQuery: true })
@@ -99,14 +116,14 @@ export function createSpanFirer(store: NodeStore, embedder: Embedder) {
       const byConcept = new Map<string, number[]>()      // concept name → all its (span×form) centred cosines
       const spanBest = new Map<string, number>()         // span → best cosine to any form (for unexplained spans)
       for (let si = 0; si < qspans.length; si++) {
-        const exactName = ix.exact.get(norm(qspans[si]))
+        const exactName = exact.get(norm(qspans[si]))
         if (exactName) {                                  // literal surface form → 1.000, no embedding needed
           ;(byConcept.get(exactName) ?? byConcept.set(exactName, []).get(exactName)!).push(1)
           spanBest.set(qspans[si], 1)
           continue
         }
-        for (const f of ix.forms) {
-          const cos = cosineCentred(spanVecs[si], f.vec, ix.mu)
+        for (const f of forms) {
+          const cos = cosineCentred(spanVecs[si], f.vec, mu)
           ;(byConcept.get(f.name) ?? byConcept.set(f.name, []).get(f.name)!).push(cos)
           spanBest.set(qspans[si], Math.max(spanBest.get(qspans[si]) ?? -1, cos))
         }
