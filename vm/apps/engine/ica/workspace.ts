@@ -287,9 +287,9 @@ const args = process.argv.slice(2)
 const full = args.includes('--full')
 const q = args.filter(a => a !== '--full').join(' ').trim()
 const total = listConcepts().length
-if (!q) { console.log(JSON.stringify(total ? { total, note: total + ' concepts in the library — pass a phrase to search' } : { total: 0, note: 'the concept library is EMPTY (0 concepts) — nothing to reuse; build the program from the data' })); process.exit(0) }
+if (!q) { console.log(JSON.stringify(total ? { total, note: total + ' concepts in the library — pass a phrase to search' } : { total: 0, note: 'the concept library is empty (0 concepts)' })); process.exit(0) }
 const matches = findConcept(q)
-console.log(JSON.stringify({ matched: full ? matches : matches.map(c => c.name), of: total, note: total === 0 ? 'the concept library is EMPTY (0 of 0) — build from the data; do not search concepts again' : (matches.length + ' matched of ' + total + ' concepts') }, null, 2))
+console.log(JSON.stringify({ matched: full ? matches : matches.map(c => c.name), of: total, note: total === 0 ? 'the concept library is empty (0 of 0)' : (matches.length + ' matched of ' + total + ' concepts') }, null, 2))
 `,
     'find-schema': `// Datasource index. "<term>" = matching fields across ALL sources (SOURCE.CONTAINER.FIELD : type). Search by field/table name, by type (date/number), or by what a column MEANS. --source <S> filters to one source; --full adds PK/nullable/references.
 import { NodeStore, searchDataSource } from '@superatom/node-store'

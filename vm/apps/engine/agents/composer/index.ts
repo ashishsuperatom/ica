@@ -80,7 +80,9 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
         ? '\nCandidate concepts for this question, most-relevant first — SOME MAY NOT FIT. Open the ones that look' +
           ' right with `./find-concept "<name>" --full`, use those, ignore the rest (find-concept stays available):\n' +
           (o.conceptNames ?? []).map(n => `- ${n}`).join('\n') + '\n'
-        : ''
+        // No concept fits this question → nothing to compose from. That is fresh analysis, which is the analyst's
+        // job — escalate immediately rather than attempt discovery yourself.
+        : `\nNo concept fits this question — there is nothing to compose from. ESCALATE now: write ${escalateRel} = {"reason":"no relevant concept — needs fresh analysis"} and STOP. Do not do the discovery yourself.\n`
       const m = o.modify
       // MODIFY: edit the SAME program in place (the engine supplies the current program — it may be from a
       // reuse, so it is NOT in your context). No new program, no escalate — just apply the edit and rerun.
