@@ -7,7 +7,7 @@
 import type { Introspect, QueryFn } from './index.js'
 
 const q = (t: string) => t.replace(/[^A-Za-z0-9_.]/g, '')   // SuiteQL identifiers are plain; strip anything odd
-const lim = (n: number, cap = 100) => Math.max(1, Math.min(n, cap))
+const lim = (n: number, cap = 100) => Math.max(1, Math.min(Number.isFinite(n) ? n : 5, cap))   // guard NaN → a bad limit must never reach the query
 
 export function suiteqlIntrospect(query: QueryFn, source: string): Introspect {
   return {

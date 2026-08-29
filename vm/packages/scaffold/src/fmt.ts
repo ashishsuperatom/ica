@@ -7,10 +7,12 @@
 
 export type Locale = 'IN' | 'AU' | 'US'
 type Profile = { locale: string; sym: Record<string, string>; tiers: [number, string][] }
+// ISO CODES everywhere (no ₹/$/A$ symbols) — clean + unambiguous: "AUD 45.12M", "INR 3.81 Cr", "USD 1.23M".
+// The locale still sets grouping + the abbreviation tiers (IN lakh/crore, US/AU K/M/B); only the symbol is dropped.
 const PROFILES: Record<Locale, Profile> = {
-  IN: { locale: 'en-IN', sym: { INR: '₹' },  tiers: [[1e7, 'Cr'], [1e5, 'L']] },
-  AU: { locale: 'en-AU', sym: { AUD: 'A$' }, tiers: [[1e6, 'M'], [1e3, 'K']] },
-  US: { locale: 'en-US', sym: { USD: '$' },  tiers: [[1e9, 'B'], [1e6, 'M'], [1e3, 'K']] },
+  IN: { locale: 'en-IN', sym: {}, tiers: [[1e7, 'Cr'], [1e5, 'L']] },
+  AU: { locale: 'en-AU', sym: {}, tiers: [[1e6, 'M'], [1e3, 'K']] },
+  US: { locale: 'en-US', sym: {}, tiers: [[1e9, 'B'], [1e6, 'M'], [1e3, 'K']] },
 }
 const localeFor = (currency?: string): Locale => currency === 'INR' ? 'IN' : currency === 'AUD' ? 'AU' : 'US'
 

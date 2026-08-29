@@ -102,7 +102,7 @@ export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
 
   const preamble =
     'Read ./CONTEXT.md FIRST (the tools + seams), then ./analyst/ANALYST.md (your instructions) — follow it exactly. ' +
-    'Search the model with `./find-model`, query data with `./query` / `./sources` / `./introspect`, resolve names with ' +
+    'Search concepts with `./find-concept`, find where data lives with `./find-schema`, query data with `./query` / `./sources` / `./introspect`, resolve names with ' +
     '`./resolve`. Your deliverable is a PROGRAM (see below) — the engine runs it and writes the answer.'
 
   return {
@@ -139,7 +139,7 @@ build a small program whose output IS your reply. Whatever you would say goes IN
 
 1. Decide which answer-shape (\`category\`) from ./analyst/ANALYST.md fits THIS question, and report it as \`category\`.
 2. RECON THE CONCEPTS FIRST — before touching raw data. Decide what this question needs (entity, measure, grain,
-   filters), then search for it: \`./find-concept "phrase"\` (and \`./find-model "term" "term"\`). Inspect what comes
+   filters), then search for it: \`./find-concept "phrase"\` and where it lives: \`./find-schema "term"\`. Inspect what comes
    back; if a concept / unit CONFIDENTLY fits, compose from it — it carries the corrections we've made. ONLY if
    nothing confidently fits, analyze the raw data yourself (\`./query\` / \`./introspect\`). Probe, judge, move on —
    never force an ill-fitting unit. Always PRODUCE AN ANSWER.

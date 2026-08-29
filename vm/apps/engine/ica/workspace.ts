@@ -43,7 +43,6 @@ however you see fit — there is no setup to do.
 ## Tools — just RUN these (they work from ANY directory, first try; each prints JSON to stdout)
 Search the project's knowledge:
 - \`./find-concept "<phrase or name>" [--full]\` → matching concept NAMES (the engine already surfaced the likely ones); add \`--full\` for a matched concept's method. A query is required.
-- \`./find-model "<term>" [--full]\`       → matching model nodes (id/kind/name/summary — an index); add \`--full\` for their props.
 Query the data:
 - \`./sources\`                        → the data sources + their kind/dialect.
 - \`./find-schema "<term>" [--source <S>] [--full]\` → search ALL sources for where a field/table lives (SOURCE.TABLE.COLUMN : type); the fastest way to find where data is before querying.
@@ -305,15 +304,6 @@ const rows = searchDataSource(store, q, { source, limit: full ? 40 : 60 })
 const view = (e) => full ? e : (e.key + ' : ' + (e.type || '?') + (e.isKey ? ' [PK]' : '') + (e.references ? (' → ' + e.references) : ''))
 console.log(JSON.stringify(rows.map(view), null, 2))
 `,
-    'find-model': `// Semantic model. "<term>…" = matching id/kind/name/summary (the INDEX). Add --full for each match's props too.
-import { find } from ${JSON.stringify(join(dir, 'model', 'model.mjs'))}
-const args = process.argv.slice(2)
-const full = args.includes('--full')
-const terms = args.filter(a => a !== '--full')
-const propsOf = (h) => { const p = (typeof h.props === 'string' ? JSON.parse(h.props || '{}') : (h.props || {})); const { rawAnalysis, ...rest } = p; return rest }
-const view = (h) => full ? { id: h.id, kind: h.kind, name: h.name, summary: h.summary, props: propsOf(h) } : { id: h.id, kind: h.kind, name: h.name, summary: h.summary }
-console.log(JSON.stringify(terms.length ? find(...terms).map(view) : [], null, 2))
-`,
     'find-program': `// Programs that answered a similar question. "<question>" = matching question/program/category (the INDEX). Add --full for its saved params.
 import { NodeStore } from '@superatom/node-store'
 const store = new NodeStore(${JSON.stringify(join(dir, 'db', 'project.sqlite'))})
@@ -355,7 +345,7 @@ const I = await forSource(src)
 let r
 if (cmd === 'tables') r = await I.tables()
 else if (cmd === 'columns') r = await I.columns(a[0])
-else if (cmd === 'sample') r = await I.sampleRows(a[0], a[1] ? Number(a[1]) : 8)
+else if (cmd === 'sample') { const n = a.slice(1).map(Number).find(x => Number.isFinite(x) && x > 0); r = await I.sampleRows(a[0], n ?? 8) }
 else if (cmd === 'profile') r = await I.profile(a[0], a[1])
 else if (cmd === 'verify-join') r = await I.verifyJoin(a[0], a[1], a[2], a[3])
 else { console.error('unknown subcommand: ' + cmd); process.exit(1) }
@@ -373,7 +363,6 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
   const usages: Record<string, string> = {
     'find-concept': 'find-concept "<phrase or name>" [--full]   → matching concept NAMES; add --full for a matched concept method. A query is required.',
     'find-schema':  'find-schema "<term>" [--source <SOURCE>] [--full]   → search ALL datasources for a field/table by name, type, or description (SOURCE.TABLE.COLUMN : type); --source filters to one; --full adds PK/nullable/references',
-    'find-model':   'find-model "<term>" ["<term>"…] [--full]   → matching model nodes as id/kind/name/summary (an INDEX); add --full for the full props of each match',
     'find-program': 'find-program "<question>" [--full]   → programs that answered a similar question (question/program/category); add --full for the saved params',
     'sources':      'sources   → every data source with its kind + dialect (JSON)',
     'query':        'query "<source>" "<prql>"   → run a PRQL query against a source → JSON rows   (list sources: ./sources)',
