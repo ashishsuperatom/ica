@@ -8,6 +8,31 @@
 // field names are preserved EXACTLY as the source spells them.
 import { dsiKey, type DataSourceEntry } from '@superatom/node-store'
 
+// ── The indexing / enrichment pipeline ──────────────────────────────────────────────────────────────────────
+// IMPLEMENTED now (this file + the runner) — Steps 1–3. The system is fully usable on these alone:
+//   1. ENUMERATE  list every container (source catalog → type fallbacks). Paged/bounded, never an unbounded pull.
+//   2. INDEX      per container: its fields + the COMMON metadata (name, type; mssql also nullable/PK/FK).
+//   3. COUNT      definitive row counts (mssql metadata only — never COUNT NetSuite, it scans) → auto-disable EMPTY
+//                 containers so they don't pollute find-schema. A timeout is "unknown", never "empty".
+//
+// FUTURE — LAZY, incremental enrichment. NOT built. The connector agent runs these in the BACKGROUND, long after
+// 1–3, one source (or column) at a time; each just ADDS intelligence, and the more that's combined the more the
+// system can reason across sources. Deliberately kept separate from 1–3:
+//   4. PROFILE    per-column statistics — min/max/mean, distinct & null rates, top values, and CARDINALITY
+//                 (low-cardinality ⇒ categorical/enum ⇒ a drill-down dimension). Plus SEMANTIC-TYPE detection
+//                 (email / phone / currency / date-in-string / id-vs-free-text) and PII / sensitivity flags
+//                 (→ feed the authorization layer). Keep costly full-scan counts OFF NetSuite.
+//   5. LINK       cross- AND intra-source relationships by VALUE OVERLAP — the actual values intersect (name/
+//                 pattern similarity is at most a weak hint, not this). Infer FKs WITHIN a source (e.g.
+//                 totalgroup has 0 declared FKs) and join keys ACROSS sources; CONFORMED ENTITIES (the same
+//                 business thing in two systems); FRESHNESS / AUTHORITY (which source is more complete/recent
+//                 for a shared entity).
+//   6. DESCRIBE   AI writes table/column descriptions (→ the desc_ai field). LAST on purpose: it is richest once
+//                 the profile (4) and links (5) exist — it can say "customer id · 99% populated · joins to
+//                 F5NETSUITE.customer.id" instead of guessing from a name. (5 before 6 — linking needs no prose;
+//                 descriptions improve once links exist.)
+// ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
 export type RawQuery = (source: string, sql: string) => Promise<any[]>
 // catalogTables = the definitive table list from the source's own catalog (for NetSuite, the metadata-catalog via
 // the bridge's /introspect) — the PRIMARY enumeration when available; the type-specific fallbacks fill in if not.

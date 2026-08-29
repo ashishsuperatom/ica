@@ -64,6 +64,8 @@ async function main() {
         console.log(`  step 3 · ${disabled} empty → disabled, ${enabled} non-empty (kept)`)
       } catch (e: any) { console.warn(`  step 3 failed (all stay enabled): ${e.message}`) }
     }
+    // Steps 4 (profile/cardinality/semantic-type/PII), 5 (link by value-overlap), 6 (AI describe) are LAZY
+    // background enrichment — NOT built here. See the pipeline note at the top of datasource-index/indexer.ts.
   }
   console.log('\n=== index totals ===')
   console.table(dataSourceStats(store))
