@@ -25,6 +25,8 @@ A concept is a GENERAL, atomic idea of COMPUTATION — reusable knowledge, not a
 LEAN: a short \`value\` (what it is) plus one or two facets. Only promote the structured data-model block when
 the concept genuinely IS an entity or a measure.
 
+A concept answers something a USER would ASK — a business quantity or idea (revenue, headcount, vendor spend), named the way they say it. The query mechanics you discover on the way (a dialect quirk, a BUILTIN, a join trick) belong in \`rules\` on the concept they serve; they are never a concept of their own.
+
 Write with \`concept(name, props, meta)\`. \`meta = { changedBy: 'consolidator', reason: '<why this change>' }\`.
 \`props\`:
 - **value** — what this concept is, and what a competent analyst would get WRONG about it (the correction it took).
