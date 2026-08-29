@@ -37,6 +37,9 @@ own resolver unit**, and the program composes it first:
   thousands of ids), keep the pattern INSIDE the unit's query; do not pre-resolve it to a passed id-list
   (`type:"pattern"`, `resolvedBy:"inline"`).
 
+- **Never pull ids out and paste them back** as `id==1 || id==2 || …` (it scans badly and crashes the compiler).
+  Match in ONE query: JOIN to the id source; or, for a literal list, a flat `filter (id | in [1,2,…])` — never `||`.
+
 The point: the **compute unit is identical** whether the caller has a name or an id — the only difference is
 whether a resolver runs first. (A later search layer will do name→id globally; the shape is the same, so
 author to it now.)

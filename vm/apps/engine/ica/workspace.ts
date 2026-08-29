@@ -281,13 +281,15 @@ export const raw = store
   // path and runs its driver with tsx (node can't resolve node-store's .ts imports; tsx can), so `./find-*`
   // returns clean JSON on the FIRST try from ANY directory. The agent never reads the .mjs source.
   const drivers: Record<string, string> = {
-    'find-concept': `// Concepts. "<phrase or name>" = matching concept NAMES (the engine already surfaced the likely ones for your question). Add --full to get a matched concept's method (compute/rules/prql). A query is required — no whole-library dump.
-import { findConcept } from ${JSON.stringify(join(dir, 'concepts', 'find.mjs'))}
+    'find-concept': `// Concepts. "<phrase or name>" → matching concept NAMES + how many concepts exist IN TOTAL (so you know if the library is empty vs just no match). Add --full for a matched concept's method (compute/rules/prql). A query is required.
+import { findConcept, listConcepts } from ${JSON.stringify(join(dir, 'concepts', 'find.mjs'))}
 const args = process.argv.slice(2)
 const full = args.includes('--full')
 const q = args.filter(a => a !== '--full').join(' ').trim()
-if (!q) { console.log(JSON.stringify({ hint: 'pass a concept name or phrase; the engine already surfaced the likely concepts for this question' })); process.exit(0) }
-console.log(JSON.stringify(full ? findConcept(q) : findConcept(q).map(c => c.name), null, 2))
+const total = listConcepts().length
+if (!q) { console.log(JSON.stringify(total ? { total, note: total + ' concepts in the library — pass a phrase to search' } : { total: 0, note: 'the concept library is EMPTY (0 concepts) — nothing to reuse; build the program from the data' })); process.exit(0) }
+const matches = findConcept(q)
+console.log(JSON.stringify({ matched: full ? matches : matches.map(c => c.name), of: total, note: total === 0 ? 'the concept library is EMPTY (0 of 0) — build from the data; do not search concepts again' : (matches.length + ' matched of ' + total + ' concepts') }, null, 2))
 `,
     'find-schema': `// Datasource index. "<term>" = matching fields across ALL sources (SOURCE.CONTAINER.FIELD : type). Search by field/table name, by type (date/number), or by what a column MEANS. --source <S> filters to one source; --full adds PK/nullable/references.
 import { NodeStore, searchDataSource } from '@superatom/node-store'

@@ -80,6 +80,11 @@ function compilePrql(prql: string, dialect?: string): string {
   // A whole-query raw-SQL escape (`s"…SELECT…"`) is opaque and would bypass filter injection — reject it with a
   // targeted message. A scoped `s"…"`/`f"…"` fragment INSIDE a pipeline is fine (the pipeline still starts `from`).
   if (/^\s*s"/.test(body)) throw new Error('whole-query raw SQL is not allowed here — write a PRQL pipeline (start with `from …`); use s"…" only for a specific expression inside it')
+  // Guard prqlc against a pathological giant OR-chain (`x==1 || x==2 || …` for hundreds of ids): a deeply-nested
+  // binary expression PANICS the WASM compiler and poisons it for everyone. Reject it BEFORE compiling, with an
+  // actionable message — the agent must not pre-expand a big id list inline.
+  const orCount = (prql.match(/\|\|/g) || []).length
+  if (orCount > 100) throw new Error(`this filter inlines ${orCount} OR (\`||\`) conditions — a deeply-nested chain that crashes the compiler. Best: JOIN to the table those ids came from (don't pre-expand ids at all). If you must pass a big id list, use a FLAT in-list: \`filter (id | in [1,2,3,…])\` — that compiles fine at any size. Never a \`||\` chain.`)
   // Hard row cap at the source: append `take MAX_ROWS` so the DB never returns more (protects the bridge WS + UI).
   // A no-op for aggregations; if the agent already `take`s fewer, the smaller wins. Only an unbounded list is capped.
   const src = (hasHeader ? prql : `prql target:${target}\n${prql}`) + `\ntake ${MAX_ROWS}`
@@ -186,7 +191,9 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url!, 'http://localhost')
   if (req.method === 'GET' && url.pathname === '/health') return send(res, 200, { ok: true })
   if (req.method === 'GET' && url.pathname === '/sources')   // the agent reads kind/dialect here before writing queries
-    return send(res, 200, { sources: [...bridges.values()].map((b) => ({ id: b.id, kind: b.kind, dialect: b.dialect, description: b.description, ready: b.ready() })) })
+    // id is the REGISTRY KEY (what the manager routes by), NOT the bridge's own id — one authoritative name so
+    // /sources, /query, the index and grounding always agree (a source is renamed by its registry key alone).
+    return send(res, 200, { sources: [...bridges.entries()].map(([id, b]) => ({ id, kind: b.kind, dialect: b.dialect, description: b.description, ready: b.ready() })) })
 
   // Dynamic registration (the connector agent): add or remove a bridge live, no restart.
   if (req.method === 'POST' && url.pathname === '/sources') {
