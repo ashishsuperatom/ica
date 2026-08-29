@@ -71,6 +71,7 @@ export interface AskOpts {
   // source of truth), so we never pass a stale answer string around.
   modify?: { programDir: string; prevQuestion?: string }
   conceptNames?: string[] // concept NAMES the engine surfaced for this question (names only — open with find-concept for the method)
+  reason?: string         // the composer's escalation note — a NON-authoritative hint of what was hard (the analyst re-derives from scratch)
 }
 
 export interface Analyst {
@@ -128,8 +129,9 @@ export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
       // Answer the question fresh (self-contained — never "continue the last one"; the queue means the
       // session may have moved on). The analyst is self-sufficient: it ALWAYS produces an answer — it never
       // defers to the model-builder (that is now an offline consolidation pass, not something in this path).
-      const buildPrompt = `${preamble}
-
+      const reason = opts.reason
+      const buildBody = `# Your task — a fresh, standalone question. A lighter agent tried it and could not finish; start from the beginning.
+${reason ? `\nThe composer's note on why it couldn't — a HINT about what was hard, and it may be WRONG. Do NOT follow it as a direction; re-investigate independently and derive the answer yourself: "${reason}"\n` : ''}
 Question: ${question}
 ${(opts.conceptNames ?? []).length ? '\nCandidate concepts for this question, most-relevant first — SOME MAY NOT FIT. Open the ones that look right with ./find-concept "<name>" --full, use those, ignore the rest (find-concept stays available for anything else):\n' + (opts.conceptNames ?? []).map(n => `- ${n}`).join('\n') + '\n' : ''}
 There is ONE path: BUILD A PROGRAM. Every question becomes a program — no exceptions. This includes a
@@ -160,7 +162,7 @@ the gap against the data and outputs status "unknowable" + a \`missing\` reason.
       // MODIFY: edit the EXISTING program in place. The engine supplies the target (it may have been built long
       // ago / by a reuse, so it is NOT in your context) — everything you need is below; don't guess.
       const m = opts.modify
-      const modifyPrompt = m ? `${preamble}
+      const modifyBody = m ? `# Your task — MODIFY the current answer
 
 The user wants to MODIFY the CURRENT answer — the SAME program, changed as they ask (a different calculation,
 different columns/outputs, extra context, a different filter or top-N). Do NOT build a new program.
@@ -176,7 +178,13 @@ until correct. Then write ${builtRel} = {"programDir":"${m.programDir}","params"
 pointing at the SAME program (do NOT change programDir, do NOT set parent). \`followups\` = up to 3 FRESH
 next questions for the CORRECTED answer (optional; vary them). The ENGINE runs it and writes the answer — do NOT write
 ${answerRel} yourself, and do NOT answer in chat.` : ''
-      const prompt = m ? modifyPrompt : buildPrompt
+      const taskRel = opts.qid ? `./out/${opts.qid}/task.md` : `./out/task.md`
+      await writeFile(join(dir, 'task.md'), m ? modifyBody : buildBody)   // the long content lives in a FILE the analyst READS
+      // The TYPED message stays SHORT so it is delivered reliably: a long line typed into the TUI can truncate
+      // under load, which once sent the analyst a stray prompt fragment instead of the actual question.
+      const prompt = `${preamble}
+
+Your task is in ${taskRel} — read it and follow it exactly. ${m ? 'Modify the current program as it describes.' : 'It is a FRESH, standalone question — answer it from scratch; assume no earlier conversation.'}`
 
       // Completion: the analyst either points at a built program (built.json) or writes an unknowable answer.json.
       const hasBuilt  = async () => { try { return !!JSON.parse(await readFile(builtPath, 'utf8'))?.programDir } catch { return false } }

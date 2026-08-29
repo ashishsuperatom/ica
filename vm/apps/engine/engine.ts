@@ -601,12 +601,13 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // and writes the same out/<qid>/{built,answer}.json, so a composed result flows through the IDENTICAL
     // post-processing below. Skip for a MODIFY (the composer doesn't edit). On escalation → the analyst (System 3).
     let authoredBy: 'composer' | 'analyst' = 'analyst'
+    let escalateReason: string | undefined   // the composer's note on WHY it escalated — handed to the analyst as a non-authoritative hint
     {
       // The COMPOSER handles both a fresh question (compose/reuse) AND a MODIFY (edit the current program in
       // place). It escalates only when it genuinely can't — then the analyst takes over.
       const composer = await getComposer(sid)
       const c = await composer.ask(question, handlers, { qid, candidates: programCandidates, conceptNames, modify: modifyTarget ?? undefined })
-      if (c.escalate) console.log(`[ica] composer → escalate · ${c.escalate.reason}`)
+      if (c.escalate) { escalateReason = c.escalate.reason; console.log(`[ica] composer → escalate · ${c.escalate.reason}`) }
       else {
         authoredBy = 'composer'
         r = { answer: c.answer, category: c.category ?? 'analysis', ms: c.ms, lastLines: c.lastLines ?? '' }
@@ -617,7 +618,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       currentAgent = 'analyst'
       startNarrator()   // the narrator runs ONLY for the analyst phase (the composer narrated itself)
       emit(reply, { t: 'analyst:progress', text: 'Handing off to the analyst for deeper analysis…', sid, agent: 'analyst' })
-      const askP = analyst.ask(question, handlers, { qid, conceptNames, modify: modifyTarget ?? undefined })
+      const askP = analyst.ask(question, handlers, { qid, conceptNames, reason: escalateReason, modify: modifyTarget ?? undefined })
       askP.catch(() => {})   // if we abandon it on timeout, don't leak an unhandled rejection
       let capT: ReturnType<typeof setTimeout> | undefined
       const raced: any = await Promise.race([askP, new Promise((res) => { capT = setTimeout(() => res(TIMED_OUT), MAX_TURN_MS) })])
