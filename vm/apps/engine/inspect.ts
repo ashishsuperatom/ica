@@ -5,7 +5,7 @@
 // touches the data sources except to list them.
 //
 // Everything it exposes comes from two places:
-//   • project.sqlite — the node-store graph: concepts, units, programs, intents, basis axes
+//   • project.sqlite — the node-store graph: concepts, units, programs, intents
 //   • answers.sqlite — the engine-owned question/answer history + consolidation watermark
 // …plus the FILES those nodes point at (a unit node's file_path, a program's directory), so a
 // node is inspectable all the way down to its source without SSH.
@@ -78,8 +78,7 @@ export function createInspector(deps: InspectorDeps) {
       // A compact preview of props so a list row can show status/program/etc without a second round-trip.
       propKeys: Object.keys(props),
       status: props.status ?? null, program: props.program ?? null,
-      category: props.category ?? null, unit: props.unit ?? null,
-      basisType: props.type ?? null, basisToken: props.token ?? null, seed: props.seed ?? null,
+      category: props.category ?? null, version: props._v?.version ?? null,
     }
   }
 

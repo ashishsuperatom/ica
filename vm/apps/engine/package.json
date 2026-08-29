@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Enterprise engine — ICA (intelligent coding agent) + semantic model + superatom layer. See PLAN.md.",
+  "description": "Enterprise engine — ICA (intelligent coding agent) + concept layer + superatom layer. See PLAN.md.",
   "scripts": {
     "dev": "tsx engine.ts",
     "smoke": "tsx smoke.ts"

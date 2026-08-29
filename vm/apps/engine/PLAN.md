@@ -9,36 +9,36 @@ We do NOT build it all at once. We build in order, starting with the **ICA**.
 ## The core loop
 
 A question comes in. The **ICA** (Intelligent Coding Agent) answers it, given four inputs:
-- **(a) data sources** — the *world state* (never touched directly; only via `query(dataSourceId, sql|call, params)` over the hub or a localhost http wrapper).
+- **(a) data sources** — the *world state* (never touched directly; only via `query(dataSourceId, prql|call, params)` over the hub or a localhost http wrapper).
 - **(b) knowledge graph** — business rules + tribal knowledge + user preferences.
-- **(c) the partial semantic model** — a partial model of the data sources; *always* used with the data sources; improved after every question.
+- **(c) the concept layer** — a partial model of the data sources; *always* used with the data sources; improved after every question.
 - **(d) the partial UNIT library** — small computations, each a self-sufficient `situation → next-step` (associative memory).
 
 The ICA: **analyse → build the UI → validate it's what's expected → commit the answer.** Then it **improves**:
-- the **semantic model** (its DAG + implementation details — code + metadata),
+- the **concepts** (general ideas of computation — code + metadata, time-versioned),
 - any **UNIT** (change / merge / replace / split).
 
 When a new question **exactly matches** existing work → the fast **SYS-1** agent answers directly (no ICA).
 
 ## One invariant: everything is three things
 
-Every node — a semantic-model concept, a unit, a program — always has:
+Every node — a concept, a unit, a program — always has:
 - **(a) meaning** — for organization / search / human comprehension.
 - **(b) computation** — JS code that fetches data or computes.
 - **(c) UI** — how the computed data is represented. *This is really part (b.2) of the computation*, not a separate thing.
 
-Everything is **code + metadata**. The metadata is the "semantic model" as normally understood; we *also* keep the code implementation.
+Everything is **code + metadata**. The metadata is the concept "meaning" as normally understood; we *also* keep the code implementation.
 
 ## Layers
 
-1. **Data fetching & transformation** — SQL / REST / small transforms. **No abstraction that hides anything.** Raw and inspectable.
-2. **Semantic model** — a DAG of the business domain: meaning, business rules, dependencies, actions, effects.
+1. **Data fetching & transformation** — PRQL / REST / small transforms. **No abstraction that hides anything.** Raw and inspectable.
+2. **Concept layer** — flat, time-versioned concepts: general ideas of computation (find/compute/present + optional data-model facets).
 3. **Superatom model** — UNITs and PROGRAMs (as designed). Later: a **simulation engine**.
 
 ## Storage (SQLite)
 
 - **users.sqlite** — users of the system: roles, permissions, everything user-related. Kept **separate** from project data.
-- **project.sqlite** — everything about one project: UNITs, the semantic-model DAG, programs, knowledge, runs. (We already have a start: `engine.db` = messages/programs/sessions — evolve it.)
+- **project.sqlite** — everything about one project: UNITs, concepts, programs, knowledge, runs. (We already have a start: `engine.db` = messages/programs/sessions — evolve it.)
 - **DAG + data live in SQLite.** When a node needs code to run, store the **code path/id** in a column (code on disk = truth, SQLite = the findable index).
 - **Data sources** may be SQLite files in a `datasources/` folder — but we **never see or connect to them directly**. Same as if hosted elsewhere. Access is *only* `query(dataSourceId, …)` over the websocket hub or a localhost http wrapper. This is the *world-model* database.
 
@@ -66,7 +66,7 @@ Uniform interface (all adapters implement it): `createICA({harness, model, apiKe
 **Reusable from the current repo (port, don't rewrite):**
 - `query(dataSourceId, sql, params)` datasource seam (`@superatom/scaffold` datasource.ts) — the ONLY data access.
 - The websocket hub (Cloudflare DO) + localhost http datasource-manager.
-- SQLite project store (`engine.db`) — evolve schema to hold the semantic-model DAG + units.
+- SQLite project store (`engine.db`) — evolve schema to hold concepts + units.
 - The pi harness pattern (`unit-author.mjs` / `pi-engine.ts` via `@earendil-works/pi-coding-agent`).
 - fast-router (SYS-1 search/match) — the exact-match fast path.
 
