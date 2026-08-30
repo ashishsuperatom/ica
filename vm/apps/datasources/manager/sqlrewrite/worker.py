@@ -69,17 +69,20 @@ def _limit_value(node):
 
 def enforce_cap(root, max_rows):
     """Ensure the outermost SELECT returns at most max_rows (the smaller of any existing limit and max_rows).
-    A safety cap so a runaway query can't dump a whole table; a no-op semantics-wise for aggregations."""
+    A safety cap so a runaway query can't dump a whole table; a no-op semantics-wise for aggregations.
+    Returns (root, capped_to) — capped_to is the injected limit when WE added/tightened one, else None. The
+    caller REPORTS that: a cap the caller can't see is indistinguishable from "that's all the data", which is
+    how a truncated read becomes a confidently wrong total."""
     if not max_rows or max_rows <= 0:
-        return root
+        return root, None
     select = root if isinstance(root, exp.Select) else root.find(exp.Select)
     if select is None:
-        return root
+        return root, None
     n = _limit_value(select.args.get("limit"))   # holds exp.Limit OR exp.Fetch
     if n is not None and n <= max_rows:
-        return root                               # agent asked for fewer — keep it
+        return root, None                         # agent asked for fewer — keep it
     select.limit(max_rows, copy=False)            # no limit, or one bigger than the cap → clamp to the cap
-    return root
+    return root, max_rows
 
 
 def inject_policies(root, policies):
@@ -132,10 +135,12 @@ def rewrite(req):
 
     root = hooks.apply_pre_ast(root, ctx)
     root = inject_policies(root, req.get("policies"))
-    root = enforce_cap(root, int(req.get("maxRows") or 0))
+    root, cappedTo = enforce_cap(root, int(req.get("maxRows") or 0))
     out = root.sql(dialect=write)
     out = hooks.apply_post_text(out, ctx)
-    return {"sql": out, "lineage": None}  # lineage: wired later once the schema is fed from the datasource-index
+    # cappedTo travels back so the CALLER can tell the agent a limit was applied — an invisible cap
+    # reads as "that is all the data".
+    return {"sql": out, "lineage": None, "cappedTo": cappedTo}
 
 
 def handle(req):

@@ -13,7 +13,7 @@ import http from 'node:http'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { dirname, join, isAbsolute } from 'node:path'
-import { rewriteSql } from './sqlglot-pool.js'
+import { rewriteSqlDetailed } from './sqlglot-pool.js'
 
 // Result caps for AGENT queries — a runaway/unbounded query must not dump a whole table (192K rows would
 // overwhelm the bridge WS AND the UI, which shows hundreds at most). MAX_ROWS is enforced AT THE SOURCE — the
@@ -150,13 +150,23 @@ const server = http.createServer(async (req, res) => {
       // as-is (the rewrite only understands SQL). Trusted SYSTEM path (introspect/grounding, via {raw:true})
       // always passes as-is. Only the raw path skips checks and the agent can't reach it; `sql` (what actually
       // ran) is returned for visibility.
-      const sql = (body.raw || bridge.kind !== 'sql')
-        ? String(body.sql)
-        : await rewriteSql(String(body.sql), { sourceDialect: bridge.dialect, maxRows: MAX_ROWS })
+      const passthrough = body.raw || bridge.kind !== 'sql'
+      const rw = passthrough
+        ? { sql: String(body.sql), cappedTo: null as number | null }
+        : await rewriteSqlDetailed(String(body.sql), { sourceDialect: bridge.dialect, maxRows: MAX_ROWS })
+      const sql = rw.sql
       const rows = await bridge.query(sql, body.params ?? {})
       // Byte guard for wide rows (the row cap is already injected into the agent query's AST). Raw/system reads are exempt.
       if (!body.raw) { const bytes = JSON.stringify(rows).length; if (bytes > MAX_BYTES) return send(res, 413, { error: `result too large (${(bytes / 1e6).toFixed(1)} MB) — add a filter or aggregate` }) }
-      return send(res, 200, { rows, sql })
+      // REPORT what we did to the query. `notes` is only present when it changes how the result must be read:
+      // we injected a row limit AND the result reached it, so these rows are a PREFIX, not the whole answer.
+      // Without this the caller cannot tell a capped read from a complete one — the difference between a
+      // partial list and a wrong total.
+      const truncated = rw.cappedTo != null && rows.length >= rw.cappedTo
+      const notes = truncated
+        ? [`Row limit ${rw.cappedTo} was applied and reached: these are the FIRST ${rw.cappedTo} rows, not the full result. Aggregate in the query (COUNT/SUM/GROUP BY) for totals, or narrow it with a filter.`]
+        : undefined
+      return send(res, 200, { rows, sql, ...(rw.cappedTo != null ? { cappedTo: rw.cappedTo } : {}), ...(notes ? { notes } : {}) })
     }
     if (url.pathname === '/introspect') return send(res, 200, await bridge.introspect())
     return send(res, 404, { error: 'not found — use POST /query, POST /introspect, GET /sources' })

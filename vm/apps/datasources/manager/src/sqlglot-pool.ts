@@ -124,7 +124,10 @@ async function once(w: Worker, req: any): Promise<any> {
 
 /** Rewrite an agent SQL query: transpile to the source dialect, enforce SELECT-only, inject policies + row cap.
  *  Returns the final SQL string. Throws with the worker's message on a parse/policy/forbidden error. */
-export async function rewriteSql(sql: string, opts: RewriteOpts = {}): Promise<string> {
+// Returns the rewritten SQL AND what we changed that the caller must know about: `cappedTo` is the row limit we
+// injected (null when the caller's own limit already fit). An unreported cap is indistinguishable from "that is
+// all the data", which turns a truncated read into a confidently wrong total — so it always travels back.
+export async function rewriteSqlDetailed(sql: string, opts: RewriteOpts = {}): Promise<{ sql: string; cappedTo: number | null }> {
   const req = {
     op: 'rewrite',
     sql,
@@ -142,7 +145,7 @@ export async function rewriteSql(sql: string, opts: RewriteOpts = {}): Promise<s
       const msg = await once(w, req)
       release(w)
       if (!msg.ok) throw new Error(String(msg.error || 'sql rewrite failed'))
-      return String(msg.sql)
+      return { sql: String(msg.sql), cappedTo: msg.cappedTo == null ? null : Number(msg.cappedTo) }
     } catch (e: any) {
       // A dead worker (crash/exit) is retried ONCE on a fresh one; a real rewrite error (msg.ok=false) is rethrown.
       if (w.alive) { release(w); throw e }
@@ -167,3 +170,8 @@ for (const sig of ['exit', 'SIGINT', 'SIGTERM'] as const) {
 // Pre-warm the floor at boot: a floor of N means N are ALWAYS resident — including the first query, which is
 // therefore never cold. (MIN_WORKERS=0 → no floor, pure lazy spawn.)
 for (let i = 0; i < MIN_WORKERS; i++) idle.push(spawnWorker())
+
+/** SQL only — for callers that don't care what was rewritten. */
+export async function rewriteSql(sql: string, opts: RewriteOpts = {}): Promise<string> {
+  return (await rewriteSqlDetailed(sql, opts)).sql
+}

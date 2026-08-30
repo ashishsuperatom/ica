@@ -26,5 +26,13 @@ export async function query(
 
   const payload: any = await res.json()
   if (payload?.error) throw new Error(`Source error [${dataSourceId}]: ${payload.error}`)
-  return payload?.rows ?? []
+  const rows: any[] = payload?.rows ?? []
+  // The seam REPORTS what it did to the query. A row limit that the caller can't see reads as "that is all the
+  // data" — so surface it loudly in the run output (where whoever is writing the program will see it) and hang
+  // it off the result for anything that wants to branch on it.
+  if (Array.isArray(payload?.notes) && payload.notes.length) {
+    for (const n of payload.notes) console.warn(`[datasource:${dataSourceId}] ${n}`)
+    Object.defineProperty(rows, 'notes', { value: payload.notes, enumerable: false })
+  }
+  return rows
 }
