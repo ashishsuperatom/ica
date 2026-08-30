@@ -150,10 +150,13 @@ const server = http.createServer(async (req, res) => {
       // as-is (the rewrite only understands SQL). Trusted SYSTEM path (introspect/grounding, via {raw:true})
       // always passes as-is. Only the raw path skips checks and the agent can't reach it; `sql` (what actually
       // ran) is returned for visibility.
+      // Ask for ONE MORE than the cap. If that extra row comes back there genuinely IS more data; if it doesn't,
+      // the result is complete — even when it lands exactly on the cap. Comparing rows.length to the cap can't
+      // tell those apart, and guessing wrong in either direction is a lie about the data.
       const passthrough = body.raw || bridge.kind !== 'sql'
       const rw = passthrough
         ? { sql: String(body.sql), cappedTo: null as number | null }
-        : await rewriteSqlDetailed(String(body.sql), { sourceDialect: bridge.dialect, maxRows: MAX_ROWS })
+        : await rewriteSqlDetailed(String(body.sql), { sourceDialect: bridge.dialect, maxRows: MAX_ROWS + 1 })
       const sql = rw.sql
       const rows = await bridge.query(sql, body.params ?? {})
       // Byte guard for wide rows (the row cap is already injected into the agent query's AST). Raw/system reads are exempt.
@@ -162,11 +165,12 @@ const server = http.createServer(async (req, res) => {
       // we injected a row limit AND the result reached it, so these rows are a PREFIX, not the whole answer.
       // Without this the caller cannot tell a capped read from a complete one — the difference between a
       // partial list and a wrong total.
-      const truncated = rw.cappedTo != null && rows.length >= rw.cappedTo
+      const truncated = rw.cappedTo != null && rows.length > MAX_ROWS   // the probe row came back ⇒ there IS more
+      const out = truncated ? rows.slice(0, MAX_ROWS) : rows            // never hand back the probe row
       const notes = truncated
-        ? [`Row limit ${rw.cappedTo} was applied and reached: these are the FIRST ${rw.cappedTo} rows, not the full result. Aggregate in the query (COUNT/SUM/GROUP BY) for totals, or narrow it with a filter.`]
+        ? [`Row limit ${MAX_ROWS} was applied and there is more data beyond it: these are the FIRST ${MAX_ROWS} rows, not the full result. Aggregate in the query (COUNT/SUM/GROUP BY) for totals, or narrow it with a filter.`]
         : undefined
-      return send(res, 200, { rows, sql, ...(rw.cappedTo != null ? { cappedTo: rw.cappedTo } : {}), ...(notes ? { notes } : {}) })
+      return send(res, 200, { rows: out, sql, ...(truncated ? { cappedTo: MAX_ROWS } : {}), ...(notes ? { notes } : {}) })
     }
     if (url.pathname === '/introspect') return send(res, 200, await bridge.introspect())
     return send(res, 404, { error: 'not found — use POST /query, POST /introspect, GET /sources' })

@@ -69,17 +69,24 @@ export class SqliteVecIndex implements VectorIndex {
     const k = Math.max(opts.limit * 4, 32)   // over-fetch so post-filtering (keep) still fills `limit`
     const rows = this.db.prepare(`SELECT node_id, distance FROM ${this.tbl} WHERE embedding MATCH ? AND k = ? ORDER BY distance`)
       .all(toBuf(normalize(q)), k) as Array<{ node_id: string; distance: number }>
-    const out: Array<{ id: string; score: number }> = []
+    const out: Array<{ id: string; score: number; sim: number }> = []
     for (const r of rows) {
       if (opts.keep && !opts.keep(r.node_id)) continue
-      out.push({ id: r.node_id, score: -r.distance })   // closer (smaller L2) → higher score
+      // Vectors are stored L2-normalised, so cosine is exact: |a-b|² = 2 - 2·cos ⇒ cos = 1 - d²/2. Carry it
+      // alongside the ordering score — cosine is the only number here that says HOW CLOSE, on a scale a caller
+      // can threshold (≈1 near-identical, ≈0 unrelated). Rank position cannot express that.
+      out.push({ id: r.node_id, score: -r.distance, sim: 1 - (r.distance * r.distance) / 2 })
       if (out.length >= opts.limit) break
     }
     return out
   }
 }
 
-export interface Hit { id: string; label: string; score: number }
+// `score` ORDERS the list (RRF over the two retrievers — good at fusing incomparable scales, but it is a rank
+// position: identical whether the top hit is perfect or merely least-bad). `sim` is the cosine similarity that
+// says how close the match actually is — the number to threshold on. null when the hit came only from the
+// lexical side, so there is no vector comparison to report.
+export interface Hit { id: string; label: string; score: number; sim: number | null }
 
 // GENERIC hybrid retrieval over ANY node kind (intents, semantic-model concepts, units, atoms, …). Omit `kind`
 // to search everything. FTS (lexical) ∪ cosine (semantic) → RRF → top-K LIVE nodes. Callers add their own
@@ -89,10 +96,16 @@ export async function hybridSearch(store: NodeStore, index: VectorIndex, embedde
   const keep = (id: string) => !!store.db.prepare(`SELECT 1 FROM nodes WHERE id=? AND valid_to IS NULL${kind ? ` AND kind='${kind.replace(/'/g, '')}'` : ''}`).get(id)
   const lex = store.search(query, { kind, limit: pool }).map(h => h.id)
   const [qv] = await embedder.embed([query], { asQuery: true })
-  const sem = index.search(qv, { limit: pool, keep }).map(h => h.id)
+  const semHits = index.search(qv, { limit: pool * 3, keep })   // wide, so fused candidates carry a similarity
+  const simById = new Map(semHits.map(h => [h.id, h.sim]))
+  const sem = semHits.map(h => h.id)
+  // RRF decides WHICH candidates surface (it fuses two incomparable retrievers well). SIMILARITY decides their
+  // ORDER, because rank fusion is flat — it scores a perfect match and a passable one identically, and can rank
+  // the weaker one first. A candidate with no vector (lexical-only) keeps its fused position, after the scored ones.
   return rrfFuse([lex, sem]).slice(0, limit)
-    .map(f => ({ id: f.id, label: store.getNode(f.id)?.label ?? '', score: f.score }))
+    .map(f => ({ id: f.id, label: store.getNode(f.id)?.label ?? '', score: f.score, sim: simById.get(f.id) ?? null }))
     .filter(h => h.label)
+    .sort((a, b) => (b.sim ?? -1) - (a.sim ?? -1) || b.score - a.score)
 }
 
 // Embed + store any node's text. Call when the node is (re)built; call index.remove(id) when it's retired.

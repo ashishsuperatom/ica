@@ -490,7 +490,9 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   const curNode = pos !== ROOT ? graph.getNode(pos) : null
   const curQ = curNode ? ((curNode.props as any)?.question ?? curNode.summary) : undefined
   let reflexPlacement: string | undefined                               // 'root' or an intentId — where this question's node hangs
-  let programCandidates: { question: string; program?: string; score: number }[] = []   // engine-searched matches handed to the composer
+  // `sim` = cosine similarity to the asked question (0..1) — the number that says HOW CLOSE this candidate is.
+  // `score` is only the RRF rank-fusion value used for ordering; it is a position, not a measure of fit.
+  let programCandidates: { question: string; program?: string; score: number; sim: number | null }[] = []   // engine-searched matches handed to the composer
   let conceptNames: string[] = []   // engine-searched CONCEPT names (names only) surfaced to composer + analyst
   let modifyTarget: { programDir: string; prevQuestion?: string } | null = null
   if (explicitEdit) {
@@ -512,9 +514,10 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     try {
       const hits = vectors ? await hybridSearch(graph, vectors, bgeEmbedder, question, { kind: 'intent', limit: 6 }) : []
       programCandidates = hits
-        .map(h => { const p = graph.getNode(h.id)?.props as any; return { question: (p?.question ?? h.label ?? '') as string, program: p?.program as string | undefined, score: h.score } })
+        .map(h => { const p = graph.getNode(h.id)?.props as any; return { question: (p?.question ?? h.label ?? '') as string, program: p?.program as string | undefined, score: h.score, sim: h.sim } })
         .filter(c => c.program && existsSync(join(WORKSPACE, c.program!, 'program.ts')))
-      console.log(`[ica] search: ${programCandidates.length} program candidate(s)${programCandidates[0] ? ` · top ${programCandidates[0].program} (${programCandidates[0].score.toFixed(2)})` : ''} → composer`)
+      const top = programCandidates[0]
+      console.log(`[ica] search: ${programCandidates.length} program candidate(s)${top ? ` · top ${top.program} (sim ${top.sim == null ? 'n/a' : top.sim.toFixed(2)})` : ''} → composer`)
     } catch (e: any) {
       console.log(`[ica] candidate search failed (${e?.message ?? e}) — composer builds from concepts`)
     }
