@@ -40,13 +40,23 @@ export type ReviewVerdict = { verdict: 'accept' | 'escalate'; reason?: string }
 // A COMPACT view of an answer for review — enough to judge if it answers the question, not the whole blob.
 function answerDigest(a: any): string {
   if (!a || typeof a !== 'object') return String(a)
-  const rows = a.table?.rows?.length ?? 0
-  const cols = a.table?.columns?.length ?? 0
+  // Tables arrive EITHER flat (a.table) or inside a.sections[{kind:'table'}] — read both. Looking at only one
+  // shape makes every table in the other invisible, and the reviewer then rejects a perfectly good answer for
+  // "delivering no list", sending it to be rebuilt.
+  const secTables: any[] = Array.isArray(a.sections) ? a.sections.filter((s: any) => s?.kind === 'table') : []
+  const tables = [a.table, ...secTables].filter(Boolean).map((t: any) => ({
+    title: t.title ?? null,
+    columns: Array.isArray(t.columns) ? t.columns.length : 0,
+    rows: Array.isArray(t.rows) ? t.rows.length : 0,
+    totalRows: t.totalRows ?? null,
+    sample: Array.isArray(t.rows) ? t.rows.slice(0, 2) : [],   // a couple of real rows: is this the RIGHT list?
+  }))
   return JSON.stringify({
     status: a.status ?? null, answer: a.answer ?? null,
+    period: a.period ?? null, scope: a.scope ?? null,           // the window/scope actually computed
     headline: a.headline ? { label: a.headline.label, display: a.headline.display } : null,
     figures: Array.isArray(a.figures) ? a.figures.length : 0,
-    table: { columns: cols, rows }, caveat: a.caveat ?? null,
+    tables, caveat: a.caveat ?? null,
   })
 }
 
