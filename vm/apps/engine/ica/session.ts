@@ -65,6 +65,13 @@ export interface Session {
   // terminal emulator); 'events' = discrete agent events (codex/pi/opencode → render as a plain event log,
   // NOT a terminal). The UI picks its renderer from this. Absent ⇒ treat as 'events'.
   kind?: 'pty' | 'events'
+  // How a `systemReference` (the authoritative authoring reference) was installed for this session:
+  //   'system' — baked into the REAL system prompt (claude --append-system-prompt-file, opencode `system`,
+  //              codex instructions) → the agent has it always, survives compaction, no file read needed.
+  //   'file'   — the harness can't inject a system prompt → the CALLER must write the reference into the
+  //              workspace and tell the agent to read it (the legacy behavior). Absent ⇒ treat as 'file'.
+  // Lets the engine drop the "go read CONTEXT.md" preamble only when delivery is 'system'.
+  systemDelivery?: 'system' | 'file'
   run(prompt: string, handlers?: RunHandlers): Promise<RunResult>   // queues one turn; resolves when it completes
   compact(handlers?: RunHandlers): Promise<RunResult>               // shrink context when it grows (same session)
   warmup?(): Promise<void>                                          // pre-spawn/connect so the first run is instant (no cold start)

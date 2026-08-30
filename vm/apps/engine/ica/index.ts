@@ -31,6 +31,11 @@ export interface SessionOpts {
   resumeId?: string     // resume a prior harness session (per project/agent) — harness-specific
   noTools?: boolean     // opencode: disable ALL tools — a pure text completion, no coding-agent tool schemas
   system?: string       // opencode: REPLACE the harness's default coding system prompt with this one (well-cached; keeps the per-turn prompt small). For pure-LLM agents (narrator/reflex) that don't need the agent scaffolding.
+  // The AUTHORITATIVE authoring reference (program contract + unit interface + one canonical example) to install
+  // into the system prompt of a CODING agent (composer/analyst), so it never reads engine source or other
+  // programs to learn the shape. Harness-agnostic: each harness delivers it its own way and reports how via
+  // Session.systemDelivery; if a harness can't, it degrades to 'file' and the caller writes it to the workspace.
+  systemReference?: string
 }
 
 // The DEFAULT harness — override with ICA_HARNESS.
@@ -38,9 +43,9 @@ export const DEFAULT_HARNESS: Harness = (process.env.ICA_HARNESS as Harness) || 
 
 export function createSession(harness: Harness, opts: SessionOpts): Session {
   switch (harness) {
-    case 'opencode':    return createOpencodeSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model, baseUrl: opts.baseUrl, noTools: opts.noTools, system: opts.system })
+    case 'opencode':    return createOpencodeSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model, baseUrl: opts.baseUrl, noTools: opts.noTools, system: opts.system, systemReference: opts.systemReference })
     case 'pi':          return createPiSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model })
-    case 'claude-code': return createClaudeSession({ cwd: opts.cwd, model: opts.model, bin: opts.bin, resumeId: opts.resumeId })
+    case 'claude-code': return createClaudeSession({ cwd: opts.cwd, model: opts.model, bin: opts.bin, resumeId: opts.resumeId, systemReference: opts.systemReference })
     case 'codex':       return createCodexSession({ cwd: opts.cwd, model: opts.model, resumeId: opts.resumeId })
     case 'mock':        return createMockSession(opts)
     default:            throw new Error(`unknown harness: ${harness}`)

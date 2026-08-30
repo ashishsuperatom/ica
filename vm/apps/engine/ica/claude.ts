@@ -8,7 +8,8 @@
 import type { Session, RunHandlers, RunResult } from './session.js'
 import { randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { statSync, openSync, readSync, closeSync } from 'node:fs'
+import { statSync, openSync, readSync, closeSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { makeClaudeEventLog, transcriptPath } from './claude-events.js'
 
@@ -20,6 +21,7 @@ export interface ClaudeSessionOpts {
   firstGraceMs?: number       // long grace for the FIRST output after submit (default 60000)
   bufferCap?: number          // rolling output buffer size (default 64000)
   resumeId?: string           // resume this claude session id (--resume); else a fresh id we own (--session-id)
+  systemReference?: string    // authoritative authoring reference → injected via --append-system-prompt-file (no PTY typing)
 }
 
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|[\r\b]/g, '')
@@ -29,6 +31,15 @@ const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
 export function createClaudeSession(opts: ClaudeSessionOpts): Session {
   const model = opts.model ?? 'claude-sonnet-5'
   const bin = opts.bin ?? process.env.CLAUDE_BIN ?? 'claude'
+  // Authoritative authoring reference → the REAL system prompt via --append-system-prompt-file (a spawn arg, so
+  // no fragile PTY typing; it survives compaction, unlike a file the agent must remember to re-read). Written
+  // once here; the flag is added to the spawn args below. Absent ⇒ nothing injected (systemDelivery stays 'file').
+  let sysRefFlag: string[] = []
+  if (opts.systemReference?.trim()) {
+    const p = join(opts.cwd, '.ica-system-reference.md')
+    try { writeFileSync(p, opts.systemReference); sysRefFlag = ['--append-system-prompt-file', p] }
+    catch (e) { console.warn('[ica:claude] could not write system-reference file; falling back to file-read', e) }
+  }
   // Capture the claude-code version once — the interactive prompts we auto-answer (bypass dialog, session-age
   // resume menu) are claude-code TUI copy that Anthropic can reword between versions. We log the version next
   // to every auto-answer and WARN when expected wording is missing, so a drift is visible against a version.
@@ -119,7 +130,7 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
     // always a fresh top-level session, regardless of how the engine was started.
     const childEnv: Record<string, any> = { ...process.env, TERM: 'xterm-256color' }
     for (const k of Object.keys(childEnv)) if (k.startsWith('CLAUDE_CODE_')) delete childEnv[k]
-    pty = m.spawn(bin, ['--model', model, '--dangerously-skip-permissions', ...sessionArgs()],
+    pty = m.spawn(bin, ['--model', model, '--dangerously-skip-permissions', ...sysRefFlag, ...sessionArgs()],
       { name: 'xterm-256color', cols, rows, cwd: opts.cwd, env: childEnv as any })
     lastDataAt = Date.now()
     pty.onData((d: string) => {
@@ -273,6 +284,7 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
 
   return {
     kind: 'pty',                                                    // a real terminal stream → UI renders a terminal emulator
+    systemDelivery: sysRefFlag.length ? 'system' : 'file',          // injected via --append-system-prompt-file when present
     // Pre-spawn the PTY and wait until the input box is up — so the first real question doesn't pay the
     // ~10-15s claude startup. Idempotent: a second call is a cheap no-op once the box is ready.
     async warmup() { await ensure(); await waitForReady() },

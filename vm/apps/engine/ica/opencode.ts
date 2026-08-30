@@ -25,6 +25,7 @@ export interface OpencodeSessionOpts {
   port?: number       // default 0 ephemeral (only when spawning a private server)
   noTools?: boolean   // disable ALL tools for this session (pure text completion — no tool schemas, no tool calls)
   system?: string     // REPLACE opencode's default coding system prompt with this one (for pure-LLM agents)
+  systemReference?: string   // authoritative authoring reference → folded into the system prompt (for coding agents)
 }
 
 // ALL PERMISSIONS enabled — opencode gates edit/webfetch on "ask" by default, which HANGS a headless
@@ -89,6 +90,9 @@ function normPart(part: any): AgentEvent | null {
 export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
   const providerID = opts.provider ?? process.env.ICA_OC_PROVIDER ?? 'opencode-go'
   const modelID = opts.model ?? process.env.ICA_OC_MODEL ?? 'glm-5.2'
+  // The system prompt sent per turn: an explicit `system` (pure-LLM agents) plus the authoritative authoring
+  // reference (coding agents). Both fold into opencode's `system` field (which REPLACES its default coding prompt).
+  const effSystem = [opts.system, opts.systemReference].filter(Boolean).join('\n\n') || undefined
   let client: any = null
   let server: any = null
   let ownsServer = false   // true ONLY when this harness spawned the server — we stop what we start, and never touch a server we merely connected to
@@ -211,7 +215,7 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
         query: { directory: opts.cwd },
         // `system` REPLACES opencode's default coding prompt; `tools:{'*':false}` disables the whole toolset —
         // so a pure-LLM agent (narrator) pays for neither the agent scaffolding nor the tool schemas.
-        body: { model: { providerID, modelID }, parts: [{ type: 'text', text: prompt }], ...(opts.system ? { system: opts.system } : {}), ...(opts.noTools ? { tools: { '*': false } } : {}) },
+        body: { model: { providerID, modelID }, parts: [{ type: 'text', text: prompt }], ...(effSystem ? { system: effSystem } : {}), ...(opts.noTools ? { tools: { '*': false } } : {}) },
       })
       answer = partsText(res?.data?.parts ?? res?.parts ?? [])
       await pollMessages(h)                                            // final scan (with part-id dedupe) — catch a [[ui]] line that landed after the last poll
@@ -231,6 +235,7 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
   }
 
   return {
+    systemDelivery: opts.systemReference ? 'system' : 'file',           // folded into opencode's `system` when present
     async run(prompt, h) { return new Promise<RunResult>((resolve) => { queue.push({ prompt, h, resolve }); pump() }) },
     async compact() {                                                   // opencode summarizes its own context
       try { await client?.session?.summarize?.({ path: { id: sessionId }, query: { directory: opts.cwd } }) } catch {}
