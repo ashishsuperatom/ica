@@ -75,12 +75,14 @@ from what \`./sources\` shows, so every program runs on real, current sources.`
 export const PARAMETERISATION = `# One program, many runs
 This program answers the question now, and it is also the artifact that answers it again — at another time, or for
 a variant of the same question. Read the question for what would differ on such a run — a date or period, an
-entity, a threshold, a limit — and make each one a parameter with a sensible default. Everything else the program
-works out AS IT RUNS: from a query, or from the clock when the question means "now" or "latest". When the answer
-turns on a judgement — a cutoff that decides good or bad, in or out, worth it or not — that cutoff is a parameter
-too and the verdict is computed from it, so a different cutoff yields a different verdict; what you then present
-follows from that result. Each parameter you declare reaches the computation, and every label you print — the
-period, the as-of date, the scope — states what that run actually computed. So the same program, run tomorrow or
+entity, a threshold, a limit — and make each one a parameter with a sensible default. When the answer turns on a
+judgement the question never stated — a cutoff that decides good or bad, in or out, worth it or not — that cutoff
+is a parameter too, carrying the default you chose, and the verdict is computed from it, so a different cutoff
+yields a different verdict; what you then present follows from that result. Those two are the parameters: what the
+question varies, and the judgements you make. Everything else the program works out AS IT RUNS: from a query, or
+from the clock when the question means "now" or "latest". Each parameter you declare reaches the computation, and
+every label you print — the period, the as-of date, the scope — states what that run actually computed. So the
+same program, run tomorrow or
 for another entity, gives the truth for that run.`
 
 // The expectations, in the order they are presented. Add or remove sections here.
