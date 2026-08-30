@@ -38,26 +38,29 @@ export async function promptVersion(): Promise<string> {
 export type ReviewVerdict = { verdict: 'accept' | 'escalate'; reason?: string }
 
 // A COMPACT view of an answer for review — enough to judge if it answers the question, not the whole blob.
+// The WHOLE answer, with only BULK trimmed — never a hand-picked set of fields. Picking fields means the digest
+// encodes the answer's shape, so anything in a shape it doesn't know about silently disappears: reading `a.table`
+// while programs emitted `a.sections[{kind:'table'}]` showed the reviewer an answer with no list in it, and it
+// duly rejected a correct one. This walks whatever is there, keeps every key, and shortens only long arrays and
+// long strings — so a new field is summarised, not lost.
+const KEEP_ITEMS = 3, MAX_STR = 400, MAX_CHARS = 6000
+function trim(v: any, depth = 0): any {
+  if (typeof v === 'string') return v.length > MAX_STR ? v.slice(0, MAX_STR) + `… (${v.length} chars)` : v
+  if (Array.isArray(v)) {
+    const head = v.slice(0, KEEP_ITEMS).map(x => trim(x, depth + 1))
+    return v.length > KEEP_ITEMS ? [...head, `… ${v.length - KEEP_ITEMS} more of ${v.length}`] : head
+  }
+  if (v && typeof v === 'object' && depth < 6) {
+    const o: any = {}
+    for (const [k, val] of Object.entries(v)) o[k] = trim(val, depth + 1)
+    return o
+  }
+  return v
+}
 function answerDigest(a: any): string {
   if (!a || typeof a !== 'object') return String(a)
-  // Tables arrive EITHER flat (a.table) or inside a.sections[{kind:'table'}] — read both. Looking at only one
-  // shape makes every table in the other invisible, and the reviewer then rejects a perfectly good answer for
-  // "delivering no list", sending it to be rebuilt.
-  const secTables: any[] = Array.isArray(a.sections) ? a.sections.filter((s: any) => s?.kind === 'table') : []
-  const tables = [a.table, ...secTables].filter(Boolean).map((t: any) => ({
-    title: t.title ?? null,
-    columns: Array.isArray(t.columns) ? t.columns.length : 0,
-    rows: Array.isArray(t.rows) ? t.rows.length : 0,
-    totalRows: t.totalRows ?? null,
-    sample: Array.isArray(t.rows) ? t.rows.slice(0, 2) : [],   // a couple of real rows: is this the RIGHT list?
-  }))
-  return JSON.stringify({
-    status: a.status ?? null, answer: a.answer ?? null,
-    period: a.period ?? null, scope: a.scope ?? null,           // the window/scope actually computed
-    headline: a.headline ? { label: a.headline.label, display: a.headline.display } : null,
-    figures: Array.isArray(a.figures) ? a.figures.length : 0,
-    tables, caveat: a.caveat ?? null,
-  })
+  const s = JSON.stringify(trim(a))
+  return s.length > MAX_CHARS ? s.slice(0, MAX_CHARS) + '…' : s
 }
 
 /** A question normalised for matching: the canonical sentence, the values pulled out of it, and whatever the
