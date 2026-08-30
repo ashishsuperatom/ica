@@ -70,4 +70,9 @@ THEIR question and only mislead yours. Read your OWN program only when you are m
 different and encouraged: \`query\`, \`introspect\`, and \`find-concept\` freely — that is analysis, not machinery.`
 
 // The complete authoring surface, as ONE string, to install into a coding agent's system prompt (systemReference).
+// Use this when the caller's base does NOT already carry the authoring MECHANICS (the composer).
 export const AUTHORING_REFERENCE: string = [contract, ...PROGRAM_AUTHORING, example, rule].join('\n\n')
+
+// The surface WITHOUT the mechanics (contract + example + rule only) — for a caller whose generated base ALREADY
+// includes PROGRAM_AUTHORING (the analyst), so the mechanics aren't repeated.
+export const AUTHORING_SURFACE: string = [contract, example, rule].join('\n\n')
