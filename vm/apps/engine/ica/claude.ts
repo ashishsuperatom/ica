@@ -36,7 +36,7 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
   // once here; the flag is added to the spawn args below. Absent ⇒ nothing injected (referencePlacement 'file').
   let sysRefFlag: string[] = []
   if (opts.systemReference?.trim()) {
-    const p = join(opts.cwd, '.ica-system-reference.md')
+    const p = join(opts.cwd, 'SYSTEM_REFERENCE.md')   // clear name: an agent may be asked to READ it (the file fallback)
     try { writeFileSync(p, opts.systemReference); sysRefFlag = ['--append-system-prompt-file', p] }
     catch (e) { console.warn('[ica:claude] could not write system-reference file; falling back to file-read', e) }
   }
