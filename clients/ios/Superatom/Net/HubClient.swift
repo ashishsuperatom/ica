@@ -303,6 +303,10 @@ final class HubClient {
                 enriched = ["answer": "The engine returned an answer this app could not read."]
             }
             if enriched["category"] == nil, let category = msg["category"] { enriched["category"] = category }
+            // The agent's raw terminal must never be stored or shown. It is tens of
+            // kilobytes of internal stdout, and rendering it as an answer leaks how the
+            // system works to whoever asked a business question.
+            enriched.removeValue(forKey: "lastLines")
 
             let json = (try? JSONSerialization.data(withJSONObject: enriched))
                 .flatMap { String(data: $0, encoding: .utf8) }
