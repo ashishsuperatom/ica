@@ -56,7 +56,10 @@ const VM_ROOT = join(__dirname, '..', '..')                              // apps
 const STATE_ROOT = process.env.ENGINE_STATE_DIR ?? join(VM_ROOT, '.state')
 const WORKSPACE_ROOT = process.env.ENGINE_WORKSPACE_DIR ?? STATE_ROOT
 const DATA_ROOT = process.env.ENGINE_DATA_DIR ?? STATE_ROOT              // answers.sqlite co-locates with the workspace
-const WORKSPACE = join(WORKSPACE_ROOT, PROJECT)   // the project's home: seams + programs/ + out/ + its DBs
+// SEGREGATION (see ica/workspace.ts): the agent's write-root and the engine's DBs are SIBLING folders under the
+// project home, so the agent's cwd never contains our SQLite files.
+const WORKSPACE = join(WORKSPACE_ROOT, PROJECT, 'workspace')   // the AGENT's cwd: seams + programs/ + out/
+const DB_DIR    = join(WORKSPACE_ROOT, PROJECT, 'db')          // ENGINE-private DBs — a sibling, NOT under WORKSPACE
 const KEY = process.env.ICA_KEY || ''
 const HARNESS = (process.env.ICA_HARNESS as Harness) || 'opencode'   // read AFTER .env is loaded
 // ONE fleet switch for the WORK agents (analyst/connector/grounding): ICA_AGENT_HARNESS =
@@ -145,13 +148,13 @@ let conceptConsolidating = false
 // ── BOOTSTRAP: guarantee the engine's environment BEFORE opening any store or connecting. On a fresh
 // machine the per-project dirs don't exist yet; opening a sqlite in a missing dir throws. We create them
 // here, explicitly, and fail LOUD + clean (not a cryptic driver stack) if the volume isn't writable.
-// Every SQLite file lives under <workspace>/db/ (organized-by-concern workspace; the seams open them there).
-for (const d of [WORKSPACE, join(WORKSPACE, 'db'), join(DATA_ROOT, PROJECT), join(DATA_ROOT, PROJECT, 'db')]) {
+// Every SQLite file lives in DB_DIR — a SIBLING of the workspace, never inside it (segregation).
+for (const d of [WORKSPACE, DB_DIR]) {
   try { mkdirSync(d, { recursive: true }) }
   catch (e: any) { console.error(`[ica] FATAL bootstrap: cannot create ${d}: ${e?.message ?? e}`); process.exit(1) }
 }
 
-const answers = openAnswers(join(DATA_ROOT, PROJECT, 'db', 'answers.sqlite'))
+const answers = openAnswers(join(DB_DIR, 'answers.sqlite'))
 const genId = () => 'q_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
 
 // ── INTENT GRAPH (the new spine) ──────────────────────────────────────────────
@@ -161,7 +164,7 @@ const genId = () => 'q_' + Date.now().toString(36) + Math.random().toString(36).
 // and we mint the node below). Node id = hash(parent, normalised question) → deterministic.
 // ONE project database. The intent graph + concepts + units are all just nodes/edges in the project's
 // node-store, which lives in project.sqlite alongside the rest of the project's graph — not a separate file.
-const graph = new NodeStore(join(WORKSPACE, 'db', 'project.sqlite'))
+const graph = new NodeStore(join(DB_DIR, 'project.sqlite'))
 
 // ── CONCEPT SPECIFICITY (CSS-like) ─────────────────────────────────────────────
 // A concept's NAME is its set of "selector words". The concept whose selector the question COVERS THE MOST wins
@@ -749,7 +752,7 @@ async function handleGrounding(from: any, rebuild = false) {
   // (upsert-on-top, never destructive) — this deliberate reset is the one place a wipe happens. Safe here because
   // the grounding agent is COLD (no store open between builds).
   if (rebuild) {
-    const db = join(WORKSPACE, 'db', 'grounding.sqlite')
+    const db = join(DB_DIR, 'grounding.sqlite')
     for (const f of [db, `${db}-wal`, `${db}-shm`]) { try { rmSync(f) } catch { /* not there */ } }
     emit(from, { t: 'grounding:status', text: 'Cleared existing grounding — rebuilding from empty.' })
   }

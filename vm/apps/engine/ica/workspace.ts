@@ -23,12 +23,28 @@ export interface WorkspaceSpec {
 }
 
 export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
-  const dir = join(s.root, s.projectId)
-  // Organized by CONCERN, not dumped flat. db/ holds every SQLite file; each concern (data / model /
-  // grounding / analyst / connector) holds its own seam + role doc together. CONTEXT.md + run.mjs stay at
-  // the root as the entry point + the program runner.
-  for (const sub of ['', 'db', 'data', 'model', 'grounding', 'analyst', 'connector', 'composer', 'concepts', 'units', 'programs', 'out', '.tools'])
+  // ── HOW A PROJECT'S FILES ARE ORGANIZED (and why) ──────────────────────────────────────────────────────────
+  // Under each project home (<root>/<projectId>/) there are TWO sibling folders, deliberately separated:
+  //
+  //   workspace/   the AGENT's write-root — the only place the agent works. It is the agent's cwd, and holds
+  //                everything the agent should touch: programs/ + out/ (its work), the seams (data/ model/
+  //                grounding/ concepts/ + .tools/ CLIs) it calls to reach data/model, CONTEXT.md, run.mjs.
+  //                Organized by CONCERN, not dumped flat, so each concern keeps its seam + role doc together.
+  //   db/          the ENGINE's PRIVATE state — project.sqlite (concepts/intents/graph), grounding.sqlite,
+  //                answers.sqlite. The agent must NOT touch these, so they live OUTSIDE workspace/.
+  //
+  // WHY: an agent poking or corrupting the engine's own store would be a mess to debug. Keeping db/ out of the
+  // agent's cwd means its normal `ls`/`find` never even surfaces our databases. This is HYGIENE, not a hard wall
+  // (a determined shell can still reach `../db`) — the seams themselves reach the db by a relative path
+  // (`../../db/…`), which is exactly how the engine reads/writes the same files from its side.
+  const projectHome = join(s.root, s.projectId)
+  const dir = join(projectHome, 'workspace')
+  const dbDir = join(projectHome, 'db')
+  // Organized by CONCERN, not dumped flat: each concern (data / model / grounding / analyst / connector) holds its
+  // own seam + role doc together. CONTEXT.md + run.mjs stay at the workspace root as the entry point + runner.
+  for (const sub of ['', 'data', 'model', 'grounding', 'analyst', 'connector', 'composer', 'concepts', 'units', 'programs', 'out', '.tools'])
     await mkdir(join(dir, sub), { recursive: true })
+  await mkdir(dbDir, { recursive: true })   // engine-private, outside the workspace
 
   // Seed READ-ONLY example programs into programs/ so the analyst learns the SHAPE of a program from a real,
   // correct one instead of reverse-engineering the engine source. They ship with the engine (versioned), use an
@@ -67,7 +83,7 @@ Each prints JSON to stdout; run any of them with \`--help\` for its exact argume
 - Run:    ./run.mjs                — run a program: \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\`.
 
 ## Layout
-- db/       — every SQLite database (project.sqlite = the model/graph, grounding.sqlite, answers.sqlite). You never open these directly — the seams do.
+This folder is your whole workspace. The engine's databases (the model/graph, grounding, answers) live OUTSIDE it and you reach them only through the seams above — there is nothing for you to open directly.
 - programs/ — one folder per answered question: \`program.ts\` + \`units/*.ts\`. This is where an ANSWER is built. The \`example.*\` folders are read-only REFERENCE TEMPLATES (illustrative fake schema) — read one for the SHAPE of a program (imports, units, ctx.use/ctx.query, the view unit), then write your OWN against your real source (\`./find-schema\`); never run one or point built.json at it.
 - units/    — a shared library of earlier units you may read for reference.
 - out/      — you write \`built.json\` here (a pointer to the program you built); the ENGINE runs it and writes \`answer.json\`.
@@ -115,7 +131,7 @@ export async function sources() {   // list data sources + their kind/dialect
 `)
 
   await writeFile(join(dir, 'model', 'model.mjs'),
-`// The MODEL seam. The semantic model is CONCEPT + UNIT nodes in ../db/project.sqlite — the SAME node-store
+`// The MODEL seam. The semantic model is CONCEPT + UNIT nodes in ../../db/project.sqlite — the SAME node-store
 // graph the intent nodes and units already live in (one project, one store — no separate model DB).
 // You CONSOLIDATE finished analyses into this concept layer. Concepts are a FLAT, time-versioned set (no
 // tree). A concept is a GENERAL idea of computation — most are lean (a value + one or two facets); the
@@ -130,7 +146,7 @@ export async function sources() {   // list data sources + their kind/dialect
 //
 import { NodeStore, upsertConcept as _c, getConcept as _g, conceptHistory as _ch } from '@superatom/node-store'
 import { fileURLToPath } from 'node:url'
-const store = new NodeStore(fileURLToPath(new URL('../db/project.sqlite', import.meta.url)))
+const store = new NodeStore(fileURLToPath(new URL('../../../db/project.sqlite', import.meta.url)))
 export const concept = (name, props, meta) => _c(store, name, props, meta)
 export const getConcept = (name, asOf) => _g(store, name, asOf)
 export const conceptHistory = (name) => _ch(store, name)
@@ -201,14 +217,14 @@ export async function forSource(id) {
 
   await writeFile(join(dir, 'concepts', 'find.mjs'),
 `// The CONCEPT seam. Strong, EVALUATED concepts — discovery already paid for — live as concept nodes in
-// ../db/project.sqlite. Each says WHERE the data is, HOW to compute it (a runnable query step-list), HOW to
+// ../../db/project.sqlite. Each says WHERE the data is, HOW to compute it (a runnable query step-list), HOW to
 // present it, and its REVIEW checks. You answer by REWRITING the concepts that fit into your program — a
 // concept is a GUIDE, never an import.
 //   findConcept('revenue by pillar')  → up to \`limit\` matching concepts (guide fields), best match first
 //   listConcepts()                    → every concept's phrase (the menu) — see what exists before you search
 import { NodeStore } from '@superatom/node-store'
 import { fileURLToPath } from 'node:url'
-const store = new NodeStore(fileURLToPath(new URL('../db/project.sqlite', import.meta.url)))
+const store = new NodeStore(fileURLToPath(new URL('../../../db/project.sqlite', import.meta.url)))
 const propsOf = (n) => (typeof n.props === 'string' ? JSON.parse(n.props || '{}') : (n.props || {}))
 const guide = (n) => { const { _v, ...g } = propsOf(n); return { name: n.label, version: _v?.version, ...g } }   // name = the label; hide raw version metadata
 // SPECIFICITY ranking (same idea the engine uses to surface concept names): a concept's NAME is its set of
@@ -268,7 +284,7 @@ async function defaultSource() { if (!_default) _default = (await _sources())[0]
 // Hierarchies of the live kinds (column/derived-query/cross-source) resolve THROUGH this at query time — the
 // source's own tree is the single source of truth, so results are always fresh and nothing is copied/synced.
 const source = async (sql, src, params) => _query(src ?? await defaultSource(), sql, params ?? {})
-const store = new GroundingStore(fileURLToPath(new URL('../db/grounding.sqlite', import.meta.url)), { source })
+const store = new GroundingStore(fileURLToPath(new URL('../../db/grounding.sqlite', import.meta.url)), { source })
 // Grounding holds the CURRENT state only (not versioned). NOT DONE YET: re-running build() is not a clean
 // refresh — it upserts on top, so values gone from the source linger and a differently-shaped re-run leaves
 // both shapes. (Flagging the consequence; not a decision on how to fix it.)
@@ -299,7 +315,7 @@ console.log(JSON.stringify({ matched: full ? matches : matches.map(c => c.name),
 `,
     'find-schema': `// Datasource index. "<term>" = matching fields across ALL sources (SOURCE.CONTAINER.FIELD : type). Search by field/table name, by type (date/number), or by what a column MEANS. --source <S> filters to one source; --full adds PK/nullable/references.
 import { NodeStore, searchDataSource } from '@superatom/node-store'
-const store = new NodeStore(${JSON.stringify(join(dir, 'db', 'project.sqlite'))})
+const store = new NodeStore(${JSON.stringify(join(dbDir, 'project.sqlite'))})
 const args = process.argv.slice(2)
 const full = args.includes('--full')
 const si = args.indexOf('--source')
@@ -313,7 +329,7 @@ console.log(JSON.stringify(rows.map(view), null, 2))
 `,
     'find-program': `// Programs that answered a similar question. "<question>" = matching question/program/category (the INDEX). Add --full for its saved params.
 import { NodeStore } from '@superatom/node-store'
-const store = new NodeStore(${JSON.stringify(join(dir, 'db', 'project.sqlite'))})
+const store = new NodeStore(${JSON.stringify(join(dbDir, 'project.sqlite'))})
 const args = process.argv.slice(2)
 const full = args.includes('--full')
 const q = args.filter(a => a !== '--full').join(' ').trim()
