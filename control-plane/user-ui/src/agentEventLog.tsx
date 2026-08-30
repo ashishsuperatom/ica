@@ -3,7 +3,13 @@
 import React, { useState, useEffect } from 'react'
 import { renderInlineMd } from './format'
 
-export type AgentEvent = { kind: 'command' | 'message' | 'reasoning' | 'file' | 'turn' | 'user' | 'narration'; id?: string; text?: string; command?: string; output?: string; status?: string; done?: boolean; agent?: 'composer' | 'analyst' | 'narrator' }
+// A UNIT boundary in the stream is a generic concept: `user` is one KIND of it (a question), `segment` is the
+// general one (a modeller consolidation batch, a concept, any agent's unit of work). Both open a navigable,
+// collapsible unit — that's what the accordion + Shift-Arrow nav operate on, NOT "questions" specifically.
+export type AgentEvent = { kind: 'command' | 'message' | 'reasoning' | 'file' | 'turn' | 'user' | 'segment' | 'narration'; id?: string; text?: string; command?: string; output?: string; status?: string; done?: boolean; agent?: 'composer' | 'analyst' | 'narrator' | 'modeler' }
+
+// Is this event a unit boundary? (question OR generic segment) — the single predicate the nav/accordion key on.
+export const isUnitBoundary = (e: AgentEvent) => e.kind === 'user' || e.kind === 'segment'
 
 // Merge one live event into the log: update the block with the same id (started→updated→completed), else append.
 export function mergeEvent(evs: AgentEvent[], e: AgentEvent): AgentEvent[] {
@@ -74,6 +80,17 @@ function CodexEvent({ e, claude }: { e: AgentEvent; claude?: boolean }) {
       </div>
     </div>
   )
+  // A generic UNIT header — same strong divider as a question, but the eyebrow label is whatever the agent
+  // called this unit (e.g. "Batch", "Concept"), so non-question lanes (the modeller) get navigable units too.
+  if (e.kind === 'segment') return (
+    <div style={{ margin: '30px 0 14px' }}>
+      <div style={{ borderTop: '2px solid #b0a48c', marginBottom: 12 }} />
+      <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', color: '#1a1a1a', fontSize: 14.5, fontWeight: 700, lineHeight: 1.4 }}>
+        <span style={{ color: '#9aa79b', fontWeight: 500, fontSize: 12, letterSpacing: '.04em', textTransform: 'uppercase', flex: '0 0 auto', paddingTop: 1 }}>{e.status || 'Unit'}</span>
+        <span dangerouslySetInnerHTML={{ __html: renderInlineMd(e.text || '') }} />
+      </div>
+    </div>
+  )
   if (e.kind === 'command') return (
     <div style={{ margin: '9px 0' }}>
       <div style={{ color: '#2f3d2c', fontSize: 12.5, ...mono }}>
@@ -132,10 +149,10 @@ export function CodexEventLog({ events, busy, claude }: { events: AgentEvent[]; 
   let curQ = ''                          // id of the question the following events belong to
   const rows: React.ReactElement[] = []
   events.forEach((e, i) => {
-    const c = e.agent === 'composer' ? '#4a90d9' : e.agent === 'analyst' ? '#c08a2b' : e.agent === 'narrator' ? '#a99f8c' : ''
-    // A 'user' block is a QUESTION boundary → anchor it for Shift+Arrow nav (data-qlog, distinct from the chat
-    // feed's data-role="q") AND make it the accordion header (click to collapse/expand its steps).
-    if (e.kind === 'user') {
+    const c = e.agent === 'composer' ? '#4a90d9' : e.agent === 'analyst' ? '#c08a2b' : e.agent === 'modeler' ? '#7fae82' : e.agent === 'narrator' ? '#a99f8c' : ''
+    // A UNIT boundary (a question OR a generic segment) → anchor it for Shift+Arrow nav (data-qlog, distinct from
+    // the chat feed's data-role="q") AND make it the accordion header (click to collapse/expand its steps).
+    if (isUnitBoundary(e)) {
       const qid = e.id ?? `turn${i}`
       curQ = qid
       const isCol = collapsed.has(qid)

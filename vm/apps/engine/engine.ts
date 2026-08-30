@@ -355,13 +355,26 @@ function flushOutbox() {
   for (const frame of pending) { try { hub!.send(frame) } catch { /* socket died mid-flush; the rest waits for the next reconnect */ } }
 }
 
+// ── Agent-lane protocol ──────────────────────────────────────────────────────
+// ONE wire vocabulary for EVERY agent lane (composer, analyst, concept-modeller — and any future autonomous
+// agent). A lane is an observable work stream; the UI is a generic consumer that hardcodes no agent. Frames:
+//   agent:hello  {lane, label, hue, streamKind, pty, interactive, controls} — the lane announces what it IS
+//   agent:event  {lane, ev}          — one work atom (ev.kind: command|message|reasoning|file|turn|user|segment)
+//   agent:events {lane, events}      — full replay on reconnect
+//   agent:status {lane, text?|category?|progress?|state?} — the live "what it's doing" line + lifecycle
+// The raw-terminal byte stream (`analyst:chunk`) and the user-facing product (`narration`, `analyst:answer`,
+// gaps/enriching) are DIFFERENT protocols and keep their names. `lane` is the routing key: asker-direct frames
+// (status/hello/events) carry no channel, so the UI needs `lane` to place them. Implementation is free to move;
+// this shape is the contract.
+const A = (verb: string, lane: string, body: Record<string, any> = {}) => ({ t: `agent:${verb}`, lane, ...body })
+
 // Reuse a saved program (SYS-1, no LLM): run it against CURRENT data, emit the answer, persist. Shared by
 // the positional exact-hit and the reflex catalog-match. Returns false on failure so the caller rebuilds.
 async function reuseProgram(programDir: string, params: any, category: string,
   ctx: { sid: string; qid: string; question: string; norm: string; t0: number; nodeId: string; reply: any; channel: string }): Promise<boolean> {
   const { sid, qid, question, norm, t0, nodeId, reply, channel } = ctx
-  emit(reply, { t: 'analyst:category', category, sid })
-  emit(reply, { t: 'analyst:status', text: 'Re-running the saved program…', question, sid, qid })
+  emit(reply, A('status', 'analyst', { category, sid }))
+  emit(reply, A('status', 'analyst', { text: 'Re-running the saved program…', question, sid, qid }))
   const ka = setInterval(() => { if (reply) emit(reply, { t: 'tick', sid }) }, 8000)
   try {
     // Fresh subprocess (see exec-program.ts): a program edited by a prior modify is cached stale in this
@@ -398,12 +411,12 @@ async function reuseProgram(programDir: string, params: any, category: string,
       return false   // fall through to the analyst build (analyse handles the rebuild)
     }
     lastAnswer = answer; lastTiming = timing; lastCategory = category
-    emit(reply, { t: 'analyst:answer', category, answer, timing, sid, qid, reused: true })
+    emit(reply, { t: 'analyst:answer', category, answer, timing, sid, qid, reused: true })   // user-facing product — NOT a lane frame
     if (channel) emit({ type: 'channel' }, { t: 'channel:answer', channel, qid, answer, category })   // durable delivery to the chat channel
     // Follow-ups persisted on the node when it was first built → replay them on reuse (no analyst involved).
     const fu = (graph.getNode(nodeId)?.props as any)?.followups
     if (Array.isArray(fu) && fu.length && reply) emit(reply, { t: 'followups', items: fu, qid, sid })
-    emit(reply, { t: 'analyst:done', sid })
+    emit(reply, A('status', 'analyst', { state: 'done', sid }))
     answers.save({ qid, sessionId: sid, question, norm, category, status: 'answered', answer, createdAt: Date.now(), finishedAt: Date.now(), programDir, params })
     const n = graph.getNode(nodeId); if (n) graph.putNode({ ...n, props: { ...(n.props as any), lastShapeHash: (rr as any).finalShapeHash ?? (n.props as any)?.lastShapeHash } })
     setPosition(sid, nodeId)
@@ -424,7 +437,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   console.log(`[ica][session] analyse sid="${sid}" pos=${(position.get(sid) || 'ROOT').slice(0, 14)} busy=[${[...busySessions].map(s => `"${s}"`).join(',')}] q="${question.slice(0, 50)}"`)
   if (busySessions.has(sid)) {
     console.log(`[ica][session] REJECTED (one-at-a-time) sid="${sid}" — locked sessions: [${[...busySessions].map(s => `"${s}"`).join(',')}]`)
-    emit(from, { t: 'analyst:status', text: 'Already answering a question in this chat — one at a time.', sid }); return
+    emit(from, A('status', 'analyst', { text: 'Already answering a question in this chat — one at a time.', sid })); return
   }
   if (!question.trim()) return
   // ── EXPLICIT EDIT prefix ──────────────────────────────────────────────────────
@@ -537,7 +550,10 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // (from its JSONL transcript — the default) AND the raw PTY terminal (on demand). So announce 'events'
     // when the session exposes events() (claude + codex), plus `pty:true` when a raw terminal is available
     // (claude only) so the UI can offer a "Terminal" toggle. A pure event harness (codex) has no PTY.
-    emit(reply, { t: 'analyst:stream', kind: analyst.session.events ? 'events' : (analyst.session.kind ?? 'events'), pty: analyst.session.kind === 'pty', sid })
+    // Both lanes announce themselves (agent:hello). Composer runs first (events-only, read-only); the analyst
+    // lane declares its raw-terminal capability + interactive controls so the UI can offer them generically.
+    emit(reply, A('hello', 'composer', { label: 'Composer', hue: '#4a90d9', streamKind: 'events', pty: false, interactive: false, sid }))
+    emit(reply, A('hello', 'analyst', { label: 'Analyst', hue: '#c08a2b', streamKind: analyst.session.events ? 'events' : (analyst.session.kind ?? 'events'), pty: analyst.session.kind === 'pty', interactive: true, controls: ['terminal', 'compact', 'new'], sid }))
     // Kick off the narration: an immediate opener, then every few seconds translate whatever the analyst just did
     // into ONE business line. Overlap-guarded (skip a tick if the previous narrate is still running).
     if (reply) emit(reply, { t: 'narration', text: 'Looking into your question…', qid, sid })   // opener beat
@@ -569,21 +585,21 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // tracks who's watching — that decision moved to the DO.
     const emitLog = (msg: any) => emit({ type: 'log', channel: currentAgent === 'composer' ? 'composer-log' : 'analyst-log' }, { ...msg, qid, sid, agent: currentAgent })
     const handlers = {
-      onCategory: (c: string) => { curCategory = c; emit(reply, { t: 'analyst:category', category: c, sid, agent: currentAgent }) },
-      onOutput: (chunk: string) => emitLog({ t: 'analyst:chunk', text: chunk }),   // raw PTY bytes → the agent's log channel
+      onCategory: (c: string) => { curCategory = c; emit(reply, A('status', currentAgent, { category: c, sid })) },
+      onOutput: (chunk: string) => emitLog({ t: 'analyst:chunk', text: chunk }),   // raw PTY bytes → the terminal surface (own protocol, not a lane frame)
       onNarration: (text: string) => {
         if (!reply) return
         // The COMPOSER self-narrates — its [[ui]] line IS a business beat, so it drives the analysis tape directly
         // (no separate narrator runs during the composer phase). The ANALYST's [[ui]] is a side progress line; its
         // beats come from the deepseek narrator started on escalation.
         if (currentAgent === 'composer') emit(reply, { t: 'narration', text, qid, sid })
-        else emit(reply, { t: 'analyst:progress', text, sid, agent: 'analyst' })
+        else emit(reply, A('status', 'analyst', { progress: text, sid }))
       },
       // Structured events (codex/SDK harnesses only — claude PTY uses onOutput above). The session already
       // normalizes + buffers these (session.events()); the engine just mirrors each one live to the asker and
       // any attached viewers, same as onOutput. Reconnect replay is handled in resyncAnalyst via events().
       onEvent: (ev) => {
-        emitLog({ t: 'analyst:event', ev })   // structured event → the agent's log channel (composer-log / analyst-log)
+        emitLog(A('event', currentAgent, { ev }))   // structured event → the agent's log channel (composer-log / analyst-log)
         // Narrator digest — feed ONLY the business signal: commands + their RESULTS (query outputs = the
         // findings) and the analyst's own prose. SKIP file events (program code / diffs / paths) — that's pure
         // machinery the narrator must hide anyway: big input bloat + a leak risk, with no business value (every
@@ -634,7 +650,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     }
     if (!r) {   // composer escalated → the analyst (System 3) handles it (build or modify)
       currentAgent = 'analyst'
-      emit(reply, { t: 'analyst:progress', text: 'Handing off to the analyst for deeper analysis…', sid, agent: 'analyst' })
+      emit(reply, A('status', 'analyst', { progress: 'Handing off to the analyst for deeper analysis…', sid }))
       const askP = analyst.ask(question, handlers, { qid, conceptNames, reason: escalateReason, modify: modifyTarget ?? undefined })
       askP.catch(() => {})   // if we abandon it on timeout, don't leak an unhandled rejection
       let capT: ReturnType<typeof setTimeout> | undefined
@@ -732,7 +748,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     if (narrationTimer) { clearInterval(narrationTimer); narrationTimer = null }
     if (narrator) { narrator.stop(); narrator = null }
     curQuestion = ''
-    emit(reply, { t: 'analyst:done', sid })
+    emit(reply, A('status', 'analyst', { state: 'done', sid }))
     analystSlot.persist()   // capture the live ids (incl. any resume-fallback)
     busySessions.delete(sid)
   }
@@ -856,13 +872,13 @@ function inputTerminal(w: Which, data: string) {
 // Streams the modeller's work to the concept-log channel; returns its timing + summary note.
 async function consolidateBatch(items: any[], batchId: string, log: (m: any) => void): Promise<{ ms: number; lastLines?: string }> {
   const modeller = await modellerSlot.get()
-  log({ t: 'concept:stream', kind: modeller.session.events ? 'events' : (modeller.session.kind ?? 'events'), pty: modeller.session.kind === 'pty' })
+  log(A('hello', 'modeler', { label: 'Concept Modeller', hue: '#7fae82', streamKind: modeller.session.events ? 'events' : (modeller.session.kind ?? 'events'), pty: modeller.session.kind === 'pty', interactive: false }))
   try {
     const r = await modeller.consolidate(items, batchId, {
-      onEvent: (ev) => log({ t: 'concept:event', ev }),
-      onOutput: (chunk) => log({ t: 'concept:chunk', text: chunk }),
+      onEvent: (ev) => log(A('event', 'modeler', { ev })),
+      onOutput: (chunk) => log(A('chunk', 'modeler', { text: chunk })),
     })
-    log({ t: 'concept:status', text: `Consolidated ${r.changed} concept(s)` })
+    log(A('status', 'modeler', { text: `Consolidated ${r.changed} concept(s)` }))
     return { ms: r.ms, lastLines: r.note }
   } finally { modellerSlot.persist() }
 }
@@ -902,14 +918,14 @@ async function conceptConsolidateTick() {
       // Consolidation is a BACKGROUND, PROJECT-LEVEL task (no asker/qid). Its stream goes to the concept-log
       // channel; the DO delivers it to whoever ATTACHED to that channel (no owner → project-level, not user data).
       const semLog = (msg: any) => emit({ type: 'log', channel: 'concept-log' }, msg)
-      semLog({ t: 'concept:status', text: `Consolidating ${items.length} recent answer(s)…` })
+      semLog(A('status', 'modeler', { text: `Consolidating ${items.length} recent answer(s)…` }))
       try {
         const r = await consolidateBatch(items, batchId, semLog)
         // Advance PAST the last finished_at we consumed → those rows never re-enter a batch (strictly-greater cursor).
         answers.setMeta(CONCEPT_CONSOLIDATE_WM_KEY, nextWm)
         answers.setMeta(CONCEPT_CONSOLIDATE_FAIL_KEY, '0')     // clean pass → reset the failure streak
         console.log(`[concept-consolidation] ${batchId} done in ${(r.ms / 1000).toFixed(1)}s`)
-        semLog({ t: 'concept:status', text: 'Concepts consolidated ✓' })
+        semLog(A('status', 'modeler', { text: 'Concepts consolidated ✓' }))
       } catch (e: any) {
         // The agent SESSION errored (a crash, not a compaction — those are handled inside consolidate()).
         // Do NOT advance the watermark yet: a transient error should be retried. But bound it — after
@@ -934,29 +950,33 @@ async function conceptConsolidateTick() {
 // A client (re)connected (e.g. after reload). Replay the live analyst state so it doesn't see a blank
 // screen while the run continues server-side: the terminal buffer, and either the in-flight run
 // (re-targeted to this connection) or the last completed answer.
-function resyncAnalyst(from: any) {
+// `full` (a real reconnect, analyst:sync) repaints the whole event log; a plain sessions:list is just a SIDEBAR
+// refresh (e.g. after each answer) and must NOT replay events — that full-replace carries the harness transcript,
+// which has no question dividers, so it would wipe the UI-synthesized [data-qlog] markers the log-nav depends on.
+function resyncAnalyst(from: any, full = false) {
   emit(from, { t: 'sessions:res', sessions: [] })   // UI keeps its own chat list (localStorage); this is just the ack
   const aSession = analystSlot.session()
   if (!aSession) return
   const kind = aSession.events ? 'events' : (aSession.kind ?? 'events')
-  emit(from, { t: 'analyst:stream', kind, pty: aSession.kind === 'pty' })   // which renderer + whether a raw terminal exists
-  // Repaint the STRUCTURED event log by default (claude + codex); the raw PTY screen is replayed only when the
-  // client explicitly opens the terminal (term:attach), so PTY bytes never reach a client that didn't ask.
-  if (aSession.events) {
-    const evs = aSession.events()
-    if (evs.length) emit(from, { t: 'analyst:events', events: evs, replace: true })
-  } else {
-    const buf = aSession.buffer()
-    if (buf) emit(from, { t: 'analyst:chunk', text: buf, replace: true })
+  if (full) {
+    emit(from, A('hello', 'analyst', { label: 'Analyst', hue: '#c08a2b', streamKind: kind, pty: aSession.kind === 'pty', interactive: true, controls: ['terminal', 'compact', 'new'] }))
+    // Repaint the STRUCTURED event log by default (claude + codex); the raw PTY screen is replayed only when the
+    // client explicitly opens the terminal (term:attach), so PTY bytes never reach a client that didn't ask.
+    if (aSession.events) {
+      const evs = aSession.events()
+      if (evs.length) emit(from, A('events', 'analyst', { events: evs, replace: true }))
+    } else {
+      const buf = aSession.buffer()
+      if (buf) emit(from, { t: 'analyst:chunk', text: buf, replace: true })
+    }
   }
   if (busySessions.size > 0) {
     // No reply re-target under per-session concurrency (that would steal another session's live stream). A
     // reconnecting client recovers a missed answer from the durable ProjectDO answer-buffer instead.
-    emit(from, { t: 'analyst:status', text: curCategory ? `Answering — ${curCategory}…` : 'Answering…', question: curQuestion, sid: curSid })
-    if (curCategory) emit(from, { t: 'analyst:category', category: curCategory, sid: curSid })
+    emit(from, A('status', 'analyst', { text: curCategory ? `Answering — ${curCategory}…` : 'Answering…', question: curQuestion, category: curCategory || undefined, sid: curSid }))
   } else if (lastAnswer) {
     emit(from, { t: 'analyst:answer', category: lastCategory, answer: lastAnswer, timing: lastTiming, sid: curSid, replay: true })
-    emit(from, { t: 'analyst:done', sid: curSid })
+    emit(from, A('status', 'analyst', { state: 'done', sid: curSid }))
   }
 }
 
@@ -973,7 +993,8 @@ async function handle(payload: any, from: any) {
   else if (payload.t === 'inspect:req') {
     inspector.handle(payload).then((res) => emit(from, { t: 'inspect:res', reqId: payload.reqId, view: payload.view ?? 'overview', ...res }))
   }
-  else if (payload.t === 'sessions:list' || payload.t === 'analyst:sync') { resyncAnalyst(from) }   // (re)connect → replay the live analyst state
+  else if (payload.t === 'analyst:sync') { resyncAnalyst(from, true) }   // real (re)connect → full replay of the live analyst log
+  else if (payload.t === 'sessions:list') { resyncAnalyst(from, false) }   // sidebar refresh only → NO event replay (keeps the question dividers)
   else if (payload.t === 'session:load') { emit(from, { t: 'session:load:res', items: [] }) }
   else if (payload.t === 'suggestions:req') { emit(from, { t: 'suggestions:res', suggestions: { groups: [] } }) }
   else if (payload.t === 'ui:resize') {   // UI fitted its terminal → resize the matching agent's PTY (claude-code)
@@ -984,10 +1005,10 @@ async function handle(payload: any, from: any) {
     analystSlot.newSession(); emit(from, { t: 'session:reset', role: 'analyst' })
   }
   else if (payload.t === 'session:compact') {   // UI button → compact (shrink context) of the analyst's session
-    emit(from, { t: 'analyst:status', text: 'Compacting context…' })
+    emit(from, A('status', 'analyst', { text: 'Compacting context…' }))
     analystSlot.compact({ onOutput: (chunk) => emit(from, { t: 'analyst:chunk', text: chunk }) })
-      .then(() => emit(from, { t: 'analyst:status', text: 'Compacted ✓' }))
-      .catch((e: any) => emit(from, { t: 'analyst:status', text: `Compact failed: ${e?.message ?? e}` }))
+      .then(() => emit(from, A('status', 'analyst', { text: 'Compacted ✓' })))
+      .catch((e: any) => emit(from, A('status', 'analyst', { text: `Compact failed: ${e?.message ?? e}` })))
   }
   else if (payload.t === 'program:forget') {   // admin → completely delete a program + its answers/runs/out, so the question rebuilds
     // Identify by programDir, question text, or a qid it produced. Deterministic, engine-owned (no LLM).

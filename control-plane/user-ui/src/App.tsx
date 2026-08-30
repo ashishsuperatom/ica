@@ -47,7 +47,7 @@ export function CloudGate() {
   return <App token={token} projectId={projectId} />
 }
 
-type View = 'chat' | 'analyst' | 'composer'   // the tabs: chat (answers) + the two agent-log views
+type View = 'chat' | 'analyst' | 'composer' | 'modeler'   // the tabs: chat (answers) + the two agent-log views
 type FeedItem =
   | { id: string; type: 'user-msg'; text: string }
   | { id: string; type: 'step'; text: string }
@@ -93,7 +93,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // `navigate` pushes a history entry; popstate syncs it back.
   const readView = (): View => {
     const seg = location.pathname.replace(/\/+$/, '').split('/').pop()
-    return seg === 'analyst' || seg === 'composer' ? seg : 'chat'
+    return seg === 'analyst' || seg === 'composer' || seg === 'modeler' ? seg : 'chat'
   }
   const [view, setView] = useState<View>(readView)
   const navigate = useCallback((v: View) => {
@@ -134,6 +134,8 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [askTick, setAskTick] = useState(0)                    // bumps on every new question → useLogNav jumps each log view to it
   const anLogRef = useRef<HTMLDivElement>(null)
   const coLogRef = useRef<HTMLDivElement>(null)
+  const [moEvents, setMoEvents] = useState<AgentEvent[]>([])   // CONCEPT MODELLER log (concept-log channel)
+  const moLogRef = useRef<HTMLDivElement>(null)
   const [gaps, setGaps]             = useState<{ question: string; need: string; basis?: string; status: 'building' | 'done' }[]>([])
   const [role, setRole]         = useState<'user' | 'developer'>('developer')   // for now: everyone is developer (sees the agents)
   // Live as-you-type suggestions from the fast-router (optional; absent if not configured).
@@ -239,9 +241,11 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // Shift+Arrow between questions) — see logNav.ts. contentKey = a number that grows as the log grows.
   useLogNav(anLogRef,  view === 'analyst',  anEvents,  askTick)   // pass the ARRAY (new ref on every merge, incl. in-place streaming) — not .length; askTick = force-jump on a new question
   useLogNav(coLogRef,  view === 'composer', coEvents,  askTick)
+  useLogNav(moLogRef,  view === 'modeler',  moEvents,  askTick)
 
   usePersistLog('sa-anlog-', sessionId, anEvents, setAnEvents)   // analyst + composer logs both survive a reload
   usePersistLog('sa-colog-', sessionId, coEvents, setCoEvents)
+  usePersistLog('sa-molog-', sessionId, moEvents, setMoEvents)
 
   // Per-step timer (UI-only, nice-to-have): tick every second while busy so the CURRENT analysis beat counts up.
   useEffect(() => {
@@ -262,7 +266,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
       ws.onopen = () => {
         setConnected(true)
         if (CLOUD) ws.send(JSON.stringify({ type: 'hello', token, role: 'runtime' }))
-        else { send({ t: 'sessions:list', projectId }); send({ t: 'session:load', sessionId: sidRef.current }); send({ t: 'suggestions:req', projectId }); send({ t: 'term:attach', which: 'analyst' }); attachLogs() }
+        else { send({ t: 'analyst:sync' }); send({ t: 'sessions:list', projectId }); send({ t: 'session:load', sessionId: sidRef.current }); send({ t: 'suggestions:req', projectId }); send({ t: 'term:attach', which: 'analyst' }); attachLogs() }
       }
       ws.onclose = () => {
         setConnected(false); setBusy(false); setStatus(''); clearWatchdog(); busyRef.current = false
@@ -284,7 +288,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           // answering, the resync below re-sends analyst:status and the spinner comes back; we never keep a
           // stale one.
           if (busyRef.current) endTurn()
-          send({ t: 'sessions:list', projectId }); send({ t: 'session:load', sessionId: sidRef.current }); send({ t: 'suggestions:req', projectId }); send({ t: 'term:attach', which: 'analyst' })
+          send({ t: 'analyst:sync' }); send({ t: 'sessions:list', projectId }); send({ t: 'session:load', sessionId: sidRef.current }); send({ t: 'suggestions:req', projectId }); send({ t: 'term:attach', which: 'analyst' })
           attachLogs()   // this console WATCHES the agents → subscribe to all agent-log channels for the whole session, so you never miss a question's log by attaching late
           send({ t: 'sync:req' })   // pull recent sessions + any answers we missed while offline, straight from the always-on DO (no engine wake)
           return
@@ -330,35 +334,44 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           setStatus(msg.text)
         } else if (msg.t === 'analysis:chunk') {
           rawStreamRef.current = (rawStreamRef.current + (msg.text ?? '')).slice(-400000)   // capture only — never shown
-        } else if (msg.t === 'analyst:status') {
-          // "Answering" is a LIVE state: it lives only while ticks keep arriving. Arm the watchdog NOW so that
-          // a replayed/stale "answering" (e.g. from a reconnect after the engine restarted) self-clears if no
-          // ticks follow — the spinner is driven by the heartbeat, never by a flag we have to remember to clear.
-          setAnBusy(true); setBusy(true); busyRef.current = true; setAnStatus(msg.text); if (msg.question) setAnQuestion(msg.question); armWatchdog()
-        } else if (msg.t === 'analyst:category') {
-          setAnCategory(msg.category); setAnStatus(`Answering — ${msg.category}…`)
-        } else if (msg.t === 'analyst:stream') {
-          const k = msg.kind === 'pty' ? 'pty' : 'events'
-          anStreamKindRef.current = k; setAnStreamKind(k)
-          setAnHasPty(!!msg.pty)   // claude-code also has a raw PTY terminal → offer the "Terminal" toggle
-          // Do NOT clear the log here — the agent thread persists across questions, so the event log
-          // ACCUMULATES the whole session (cleared only on New session; a divider marks a compaction).
+        } else if (typeof msg.t === 'string' && msg.t.startsWith('agent:')) {
+          // ── GENERIC AGENT-LANE PROTOCOL ─────────────────────────────────────────────────────────────────
+          // ONE consumer for EVERY lane (composer / analyst / concept-modeller / any future agent). `lane` is
+          // the routing key. The engine owns the vocabulary (agent:hello|event|events|status); the UI hardcodes
+          // no agent name here — a new lane needs zero new handlers. (The raw-terminal byte stream keeps its own
+          // `analyst:chunk` type below; the answer/narration are a different, user-facing protocol.)
+          const verb = msg.t.slice(6)
+          const setEvents = msg.lane === 'composer' ? setCoEvents : msg.lane === 'modeler' ? setMoEvents : setAnEvents
+          if (verb === 'event') {
+            setEvents(evs => mergeEvent(evs, { ...msg.ev, agent: msg.lane }))   // merge by id → a streaming block updates in place
+          } else if (verb === 'events') {
+            setEvents(msg.events ?? [])                                          // reconnect: full replay (replace)
+          } else if (verb === 'hello') {
+            // A lane announces its render capabilities. Only the analyst has a raw PTY terminal today → wire the
+            // Terminal toggle. (label/hue/interactive/controls ride along for a later fully-declarative sidebar.)
+            if (msg.lane === 'analyst') { const k = msg.streamKind === 'pty' ? 'pty' : 'events'; anStreamKindRef.current = k; setAnStreamKind(k); setAnHasPty(!!msg.pty) }
+          } else if (verb === 'status') {
+            if (msg.lane === 'modeler') {
+              // The modeller is project-level (no shared question header) — surface its status IN its own log.
+              if (msg.text) setMoEvents(evs => mergeEvent(evs, { id: 'ms-' + Date.now(), kind: 'message', text: msg.text, agent: 'modeler', done: true }))
+            } else if (msg.state === 'done') {
+              setAnBusy(false); setAnStatus('Done ✓'); setAnProgress(''); setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []; setBusy(false); busyRef.current = false; clearWatchdog()
+            } else {
+              // Live turn state — the spinner is driven by the tick heartbeat (armWatchdog), never a flag we must
+              // remember to clear, so a replayed/stale "answering" self-clears if no ticks follow.
+              if (msg.question) setAnQuestion(msg.question)
+              if (msg.category) setAnCategory(msg.category)
+              if (msg.progress !== undefined) setAnProgress(msg.progress)   // clean prose narration → live progress line
+              if (msg.text) { setAnBusy(true); setBusy(true); busyRef.current = true; setAnStatus(msg.text); armWatchdog() }
+              else if (msg.category) setAnStatus(`Answering — ${msg.category}…`)
+            }
+          }
         } else if (msg.t === 'analyst:chunk') {
-          // Render the agent's LIVE terminal in the Analyst view (the operator surface — the main chat feed
-          // still shows only clean answer cards), and keep capturing the raw stream for later use. `replace`
-          // = a full repaint: the buffer replay the engine sends on attach (so the warm terminal shows up
-          // immediately when you open the tab) or a fresh session.
+          // The agent's raw LIVE terminal (own byte stream, shared with the admin console — NOT a lane frame).
+          // `replace` = a full repaint: the buffer replay the engine sends on term:attach, or a fresh session.
           if (msg.replace) anXtermRef.current?.clear()
           anXtermRef.current?.write(msg.text ?? '')
           rawStreamRef.current = msg.replace ? (msg.text ?? '') : (rawStreamRef.current + (msg.text ?? '')).slice(-400000)
-        } else if (msg.t === 'analyst:event') {
-          // One normalized AgentEvent (merge by id so a streaming block updates in place). Route by which agent
-          // produced it — the COMPOSER's work goes to the Composer view, the ANALYST's to the Analyst view.
-          const ev = { ...msg.ev, agent: msg.agent }
-          if (msg.agent === 'composer') setCoEvents(evs => mergeEvent(evs, ev))
-          else setAnEvents(evs => mergeEvent(evs, ev))
-        } else if (msg.t === 'analyst:events') {
-          setAnEvents(msg.events ?? [])   // reconnect: full event-log replay (replace)
         } else if (msg.t === 'followups') {
           // Suggested next questions — reveal as a card AFTER a delay, so the user reads the answer first.
           const items = Array.isArray(msg.items) ? msg.items.filter((x: any) => typeof x === 'string' && x.trim()).slice(0, 3) : []
@@ -372,8 +385,6 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
         } else if (msg.t === 'narration') {
           if (msg.text) { narrationLogRef.current = [...narrationLogRef.current, msg.text]; narrationTimesRef.current = [...narrationTimesRef.current, Date.now()]; setNarrationLog(narrationLogRef.current); setNowMs(Date.now())   // append a beat + stamp its arrival (chat-view analysis card)
             setAnEvents(evs => [...evs, { id: 'narr-' + narrationTimesRef.current.length, kind: 'narration', text: msg.text, agent: 'narrator', done: true }]) }   // ALSO drop it into the analyst-tab stream so it interleaves by time with the agent's events
-        } else if (msg.t === 'analyst:progress') {
-          setAnProgress(msg.text || '')   // clean prose narration → live progress line
         } else if (msg.t === 'analyst:gap') {
           // The structured gap → its own card in the conversation; the final answer lands below it.
           const g = msg.answer ?? { status: 'gap', answer: 'Not in the model yet.' }
@@ -410,8 +421,6 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
             else { const f = loadFeed(msg.sid); localStorage.setItem(fkey(msg.sid), JSON.stringify([...f, ...toAppend].slice(-100))) }
           }
           // Keep narrationLog as-is — the analyst-view mirror keeps showing it until the NEXT question starts (cleared in ask()).
-        } else if (msg.t === 'analyst:done') {
-          setAnBusy(false); setAnStatus('Done ✓'); setAnProgress(''); setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []; setBusy(false); busyRef.current = false; clearWatchdog()
         } else if (msg.t === 'analysis:step') {
           setFeed(f => [...f, { id: crypto.randomUUID(), type: 'step', text: msg.text }])
           scroll()
@@ -453,7 +462,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // Subscribe to every agent-log channel (called on connect). The DO forwards each only to THIS user's devices,
   // so the console always has the composer/analyst/semantic logs from the moment it connects — no missing a
   // question's log by attaching late. Stays for the connection's life (the DO drops it on WS close).
-  const attachLogs = () => ['analyst-log', 'composer-log'].forEach((channel) => send({ t: 'log:attach', channel }))
+  const attachLogs = () => ['analyst-log', 'composer-log', 'concept-log'].forEach((channel) => send({ t: 'log:attach', channel }))
 
   // Recover a full Q&A PAIR from the DO into the right session's feed. A qid is a pair, so we restore the
   // QUESTION card too — its id is the qid (matching how ask() writes it), so it dedups whether or not the
@@ -710,6 +719,44 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     </div>
   ) : null
 
+  // ONE general agent view — composer, analyst, and concept-modeller are the SAME surface (header + a
+  // scrollable question-segmented event log with identical accordion + Shift-Arrow nav). Only the per-view
+  // extras differ (analyst adds a terminal toggle + input bar; the modeller is read-only). Everything shared
+  // lives here so the three never drift; the differences ride in as `headerExtras` / `panels` / `footer` / `termRef`.
+  const agentLane = (cfg: {
+    key: Exclude<View, 'chat'>
+    label: string
+    desc: string
+    events: AgentEvent[]
+    logRef: React.RefObject<HTMLDivElement | null>
+    question?: string            // header context line; defaults to the live question (modeller passes '')
+    busy?: boolean
+    claude?: boolean
+    headerExtras?: React.ReactNode
+    panels?: React.ReactNode
+    termRef?: React.RefObject<HTMLDivElement | null>
+    showTerm?: boolean
+    footer?: React.ReactNode
+  }) => (
+    <div style={{ display: view === cfg.key ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+      <div style={s.semHeader}>
+        <button onClick={() => navigate('chat')} style={s.backBtn} title="Back to your chat">← Chat</button>
+        <span style={{ color: '#bcd0be', fontSize: 13, fontWeight: 600 }}>◇ {cfg.label}</span>
+        <span style={{ color: '#8a8276', fontSize: 13, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {(cfg.question ?? anQuestion) || cfg.desc}
+        </span>
+        {cfg.busy && <Spinner />}
+        {cfg.headerExtras}
+      </div>
+      {cfg.panels}
+      <div ref={cfg.logRef} style={{ flex: 1, overflow: 'auto', background: 'transparent', padding: 12, paddingBottom: 110 }}>
+        {cfg.termRef && <div ref={cfg.termRef} onMouseDown={() => anXtermRef.current?.focus()} style={{ display: cfg.showTerm ? 'block' : 'none' }} />}
+        {!cfg.showTerm && <CodexEventLog events={cfg.events} busy={cfg.busy} claude={cfg.claude} />}
+      </div>
+      {cfg.footer}
+    </div>
+  )
+
   return (
     <div style={s.shell}>
       {/* Sidebar — sectioned menu (Model / Agent), like a product nav */}
@@ -726,6 +773,10 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
         <div onClick={() => navigate('analyst')}
           style={{ ...s.sessionItem, ...(view === 'analyst' ? s.sessionItemActive : {}) }}>
           ◇ Analyst
+        </div>
+        <div onClick={() => navigate('modeler')}
+          style={{ ...s.sessionItem, ...(view === 'modeler' ? s.sessionItemActive : {}) }}>
+          ◇ Concept Modeller
         </div>
         <button style={s.newChat} onClick={() => { navigate('chat'); newChat() }}>+ New chat</button>
         <div style={s.sessionList}>
@@ -757,76 +808,60 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
       </div>
       </div>
 
-      {/* Composer view — the composer agent's work (reuse-or-compose, escalate). Its own tab, separate from the
-          analyst; per-session (one composer per session). Always mounted so its log persists across view switches. */}
-      <div style={{ display: view === 'composer' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-        <div style={s.semHeader}>
-          <button onClick={() => navigate('chat')} style={s.backBtn} title="Back to your chat">← Chat</button>
-          <span style={{ color: '#bcd0be', fontSize: 13, fontWeight: 600 }}>◇ Composer</span>
-          <span style={{ color: '#8a8276', fontSize: 13, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {anQuestion || 'The composer reuses a program or composes concepts — escalating to the analyst when needed.'}
-          </span>
-          {busy && <Spinner />}
-        </div>
-        <div ref={coLogRef} style={{ flex: 1, overflow: 'auto', background: 'transparent', padding: 12, paddingBottom: 110 }}>
-          <CodexEventLog events={coEvents} busy={busy} />
-        </div>
-      </div>
+      {/* Composer — reuse-or-compose (escalates to the analyst). Per-session; always mounted so its log persists. */}
+      {agentLane({
+        key: 'composer', label: 'Composer', events: coEvents, logRef: coLogRef, busy,
+        desc: 'The composer reuses a program or composes concepts — escalating to the analyst when needed.',
+      })}
 
-      {/* Analyst view — always mounted so xterm keeps its buffer; shown when selected. */}
-      <div style={{ display: view === 'analyst' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-        <div style={s.semHeader}>
-          <button onClick={() => navigate('chat')} style={s.backBtn} title="Back to your chat">← Chat</button>
-          <span style={{ color: '#bcd0be', fontSize: 13, fontWeight: 600 }}>◇ Analyst</span>
-          {anCategory && <span style={s.catChip}>{anCategory.replace('_', ' ')}</span>}
-          <span style={{ color: '#8a8276', fontSize: 13, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {anQuestion || 'Ask a question below — it classifies, then answers from the semantic model.'}
-          </span>
-          {anBusy && <Spinner />}
-          <span style={{ color: '#8a8276', fontSize: 12 }}>{anStatus}</span>
-          {anHasPty && (
-            <button
-              onClick={() => {
-                const next = !anTerminal; setAnTerminal(next)
-                if (next) { send({ t: 'ui:resize', which: 'analyst', cols: COLS, rows: ROWS }); send({ t: 'term:attach', which: 'analyst' }) }   // lazy: open the PTY only now
-                else send({ t: 'term:detach', which: 'analyst' })   // switching back → stop the PTY stream
-              }}
-              style={s.backBtn}
-              title={anTerminal ? 'Back to the structured view' : 'Open the raw claude-code terminal'}>
-              {anTerminal ? '≣ Structured' : '⌨ Terminal'}
-            </button>
-          )}
-          <button onClick={() => sessionCtl('compact')} style={s.backBtn} title="Compact the session's context">⇊ Compact</button>
-          <button onClick={() => sessionCtl('new')} style={s.backBtn} title="Start a completely fresh session">↻ New session</button>
-        </div>
-        {gapsPanel}
-        {/* Enriching banner — the model didn't cover it; the model-builder is filling the gap, then we re-ask. */}
-        {anEnriching && (
-          <div style={{ padding: '12px 16px', borderBottom: '1px solid #33402f', background: '#241d12' }}>
-            <div style={{ color: '#e0b070', fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Spinner /> I don't have this in the model yet — the model-builder is adding it, then I'll answer.
-            </div>
-            <div style={{ color: '#c9a86e', fontSize: 12, marginTop: 4 }}>Modeling: {anEnriching.need}</div>
-            {anEnriching.basis && <div style={{ color: '#8a8276', fontSize: 12, marginTop: 2 }}>Basis: {anEnriching.basis}</div>}
-          </div>
-        )}
-        {/* The structured ANSWER card is intentionally NOT shown here — the analyst view is the agent's WORK
-            (its steps/events), not the answer. The answer renders in the chat view. */}
-        <div ref={anLogRef} style={{ flex: 1, overflow: 'auto', background: 'transparent', padding: 12, paddingBottom: 110 }}>
-          {/* Narrator beats are no longer a separate block pinned at the top — they're pushed into the event
-              stream (kind:'narration') so they interleave in time order with the composer/analyst events below. */}
-          {/* Raw claude-code terminal (PTY) — shown only when the user opened it via the toggle, or for a
-              pure-pty agent. Kept mounted so its buffer survives view switches. */}
-          <div ref={anTermRef} onMouseDown={() => anXtermRef.current?.focus()} style={{ display: (anTerminal || anStreamKind === 'pty') ? 'block' : 'none' }} />
-          {/* DEFAULT: the STRUCTURED event log — claude-code (from its JSONL transcript) AND codex, same view. */}
-          {!(anTerminal || anStreamKind === 'pty') && <CodexEventLog events={anEvents} busy={anBusy} claude={anHasPty} />}
-        </div>
-        {view === 'analyst' && (
-          <div style={s.bottomBar}>
-            <div style={{ width: '100%', maxWidth: 720, margin: '0 auto' }}>{composer()}</div>
-          </div>
-        )}
-      </div>
+      {/* Analyst — the from-scratch agent. Adds the category chip, live status, a raw-terminal toggle, session
+          controls, the buildable-gaps panel, the enriching banner, its PTY mount, and its own input bar. */}
+      {agentLane({
+        key: 'analyst', label: 'Analyst', events: anEvents, logRef: anLogRef, busy: anBusy, claude: anHasPty,
+        desc: 'Ask a question below — it classifies, then answers from the semantic model.',
+        termRef: anTermRef, showTerm: anTerminal || anStreamKind === 'pty',
+        headerExtras: (
+          <>
+            {anCategory && <span style={s.catChip}>{anCategory.replace('_', ' ')}</span>}
+            <span style={{ color: '#8a8276', fontSize: 12 }}>{anStatus}</span>
+            {anHasPty && (
+              <button
+                onClick={() => {
+                  const next = !anTerminal; setAnTerminal(next)
+                  if (next) { send({ t: 'ui:resize', which: 'analyst', cols: COLS, rows: ROWS }); send({ t: 'term:attach', which: 'analyst' }) }
+                  else send({ t: 'term:detach', which: 'analyst' })
+                }}
+                style={s.backBtn}
+                title={anTerminal ? 'Back to the structured view' : 'Open the raw claude-code terminal'}>
+                {anTerminal ? '≣ Structured' : '⌨ Terminal'}
+              </button>
+            )}
+            <button onClick={() => sessionCtl('compact')} style={s.backBtn} title="Compact the session's context">⇊ Compact</button>
+            <button onClick={() => sessionCtl('new')} style={s.backBtn} title="Start a completely fresh session">↻ New session</button>
+          </>
+        ),
+        panels: (
+          <>
+            {gapsPanel}
+            {anEnriching && (
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid #33402f', background: '#241d12' }}>
+                <div style={{ color: '#e0b070', fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Spinner /> I don't have this in the model yet — the model-builder is adding it, then I'll answer.
+                </div>
+                <div style={{ color: '#c9a86e', fontSize: 12, marginTop: 4 }}>Modeling: {anEnriching.need}</div>
+                {anEnriching.basis && <div style={{ color: '#8a8276', fontSize: 12, marginTop: 2 }}>Basis: {anEnriching.basis}</div>}
+              </div>
+            )}
+          </>
+        ),
+      })}
+
+      {/* Concept Modeller (System 4) — the OFFLINE consolidation agent that distils finished analyses into
+          concepts. Read-only, project-level (no per-question input); same log surface as the other two. */}
+      {agentLane({
+        key: 'modeler', label: 'Concept Modeller', events: moEvents, logRef: moLogRef, claude: false, question: '',
+        desc: 'Offline consolidation — distils finished analyses into reusable concepts.',
+      })}
 
       {/* Chat/answer view */}
       {view === 'chat' && (feed.length === 0 && !busy ? (

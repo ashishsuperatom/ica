@@ -56,38 +56,44 @@ export function useLogNav(ref: RefObject<HTMLElement | null>, active: boolean, c
     return () => cancelAnimationFrame(raf)
   }, [content, active, ref])
 
-  // Shift+Arrow → previous / next question, scrolling the CONTAINER.
+  // Shift+Arrow → previous / next question, scrolling the log panel ITSELF.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!active || !e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return
       const dir = e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0
       if (!dir) return
-      // These are WATCH views (the input is incidental), so Shift+Arrow is always a question-nav gesture — don't
-      // bail when a field is focused; blur it so the caret isn't fighting the scroll.
-      const ae = document.activeElement as HTMLElement | null
-      if (isTyping(ae)) ae?.blur?.()
       const el = ref.current
       if (!el) return
       const qs = Array.from(el.querySelectorAll('[data-qlog]')) as HTMLElement[]   // the question dividers, THIS log only
       if (!qs.length) return
       e.preventDefault()
+      // These are WATCH views (any input is incidental), so Shift+Arrow is ALWAYS question-nav — blur a focused
+      // field so the caret isn't fighting the scroll. (We also listen in the CAPTURE phase below so a focused
+      // textarea's own key handling can never swallow this first — that's why it worked in Composer, which has no
+      // input, but not in the Analyst, which does.)
+      const ae = document.activeElement as HTMLElement | null
+      if (isTyping(ae)) ae?.blur?.()
 
-      // Move RELATIVE TO THE CURRENT VIEW — never by a running index. A running index drifts out of sync near the
-      // ends (the last questions can't scroll to the top, so the index runs ahead of the real scroll and then
-      // Shift+Down snaps back UP). Instead, anchor on where the questions actually are right now: measure each
-      // question's offset below the container top, then Down = the first one below the top line, Up = the last one
-      // above it. This can only ever move in the pressed direction.
-      // Anchor on the question nearest the VIEWPORT CENTER (measured in viewport coords, so it doesn't matter which
-      // element actually scrolls — window or container), move exactly one from it (idx = anchor ± 1, so it can only
-      // go the way you pressed), and let scrollIntoView bring it in. block:'center' keeps it clearly visible and is
-      // consistent with anchoring on the centre — so repeated presses step one question each time.
-      const REF = window.innerHeight / 2
+      // Find the element that ACTUALLY scrolls: the log panel itself, else the nearest scrollable ancestor, else
+      // the window. Assuming the panel scrolls is wrong (its parent often does) — scrollTo on a non-scrolling
+      // element silently does nothing, which is exactly how nav "stops working".
+      let sc: HTMLElement | null = el
+      while (sc && !(sc.scrollHeight > sc.clientHeight + 4 && /(auto|scroll)/.test(getComputedStyle(sc).overflowY))) sc = sc.parentElement
+      const scTopY = sc ? sc.getBoundingClientRect().top : 0
+      const scTop  = sc ? sc.scrollTop : window.scrollY
+      const maxTop = sc ? sc.scrollHeight - sc.clientHeight : document.documentElement.scrollHeight - window.innerHeight
+      const goTo = (top: number) => (sc ? sc.scrollTo({ top, behavior: 'smooth' }) : window.scrollTo({ top, behavior: 'smooth' }))
+      // Anchor on the question nearest the top, step exactly one in the pressed direction (so it can only move the
+      // way you pressed), and park it just below the top so its answer reads underneath.
+      const MARGIN = 14
       let anchor = 0, best = Infinity
-      qs.forEach((q, i) => { const d = q.getBoundingClientRect().top - REF; if (Math.abs(d) < best) { best = Math.abs(d); anchor = i } })
-      const idx = Math.max(0, Math.min(qs.length - 1, anchor + dir))
-      qs[idx].scrollIntoView({ behavior: 'smooth', block: 'center' })
+      qs.forEach((q, i) => { const d = q.getBoundingClientRect().top - scTopY - MARGIN; if (Math.abs(d) < best) { best = Math.abs(d); anchor = i } })
+      const idx = anchor + dir
+      if (idx < 0)             { goTo(0); return }        // past the first → very top
+      if (idx > qs.length - 1) { goTo(maxTop); return }   // past the last → very bottom
+      goTo(scTop + (qs[idx].getBoundingClientRect().top - scTopY - MARGIN))
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, true)   // CAPTURE: fire before any focused input can handle the key
+    return () => window.removeEventListener('keydown', onKey, true)
   }, [active, ref])
 }
