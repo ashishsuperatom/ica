@@ -181,20 +181,7 @@ ${answerRel} yourself, and do NOT answer in chat.` : ''
 Your task is in ${taskRel} — read it and follow it exactly. ${m ? 'Modify the current program as it describes.' : 'It is a FRESH, standalone question — answer it from scratch; assume no earlier conversation.'}`
 
       // Completion: the analyst either points at a built program (built.json) or writes an unknowable answer.json.
-      // COMPLETE only on a STABLE built.json — not its first appearance. The analyst often writes built.json and
-      // then EDITS it (fixing a param name, adding terms); if we finish the moment `programDir` exists, we read a
-      // half-written pointer and run the WRONG params, discarding the analyst's real answer. So require the pointer
-      // to be unchanged for a short settle window before we treat the turn as done.
-      let builtSig = '', builtSince = 0
-      const hasBuilt  = async () => {
-        try {
-          const ptr = JSON.parse(await readFile(builtPath, 'utf8'))
-          if (!ptr?.programDir) return false
-          const sig = JSON.stringify([ptr.programDir, ptr.params])
-          if (sig !== builtSig) { builtSig = sig; builtSince = Date.now(); return false }   // just changed → let it settle
-          return Date.now() - builtSince >= 1500                                            // stable ⇒ the analyst is done with it
-        } catch { return false }
-      }
+      const hasBuilt  = async () => { try { return !!JSON.parse(await readFile(builtPath, 'utf8'))?.programDir } catch { return false } }
       // A directly-written answer.json ends the turn ONLY when it is a NON-answered terminal (unknowable/gap —
       // those have no program). We never complete on an "answered" file: a real answer comes solely from the
       // ENGINE running the program, so an agent-left "answered" answer.json is stale scaffolding to ignore, not
