@@ -69,7 +69,13 @@ seams give you the data — \`./sources\` and \`./find-schema\` show the real so
 \`./query\` and \`./introspect\` look at the data, and \`./find-concept\` finds reusable logic. Build your queries
 from what \`./sources\` shows, so every program runs on real, current sources.
 
-Every value comes from a parameter or a query — dates and times included.`
+# Your program will run again
+Write it for a LATER run: the same question at a different time, or a near variant of it. Read the question for
+what would differ on that run — a date or period, an entity, a threshold, a limit — and make each one a parameter
+with a sensible default. Everything else the program works out AS IT RUNS: from a query, or from the clock when
+the question means "now" or "latest". Each parameter you declare reaches the computation, and every label you
+print — the period, the as-of date, the scope — states what that run actually computed. So the same program, run
+tomorrow or for another entity, gives the truth for that run.`
 
 // The complete authoring surface, as ONE string, to install into a coding agent's system prompt (systemReference).
 // Use this when the caller's base does NOT already carry the authoring MECHANICS (the composer).
