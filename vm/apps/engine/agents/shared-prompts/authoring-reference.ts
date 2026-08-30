@@ -82,8 +82,7 @@ yields a different verdict; what you then present follows from that result. Thos
 question varies, and the judgements you make. Everything else the program works out AS IT RUNS: from a query, or
 from the clock when the question means "now" or "latest". Each parameter you declare reaches the computation, and
 every label you print — the period, the as-of date, the scope — states what that run actually computed. So the
-same program, run tomorrow or
-for another entity, gives the truth for that run.`
+same program, run tomorrow or for another entity, gives the truth for that run.`
 
 // The expectations, in the order they are presented. Add or remove sections here.
 const EXPECTATIONS = [WORKSPACE, PARAMETERISATION]
