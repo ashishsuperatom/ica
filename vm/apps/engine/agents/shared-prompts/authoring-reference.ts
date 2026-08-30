@@ -63,24 +63,33 @@ ${read('units/single-metric-view.ts')}
 \`\`\`
 That is the complete pattern. Write your OWN program + units in this shape against your real source.`
 
-const rule = `# Your workspace
+const WORKSPACE = `# Your workspace
 Everything you need to write a program is right here. The contract and the example above give you the shape; the
 seams give you the data — \`./sources\` and \`./find-schema\` show the real sources and their tables and columns,
 \`./query\` and \`./introspect\` look at the data, and \`./find-concept\` finds reusable logic. Build your queries
-from what \`./sources\` shows, so every program runs on real, current sources.
+from what \`./sources\` shows, so every program runs on real, current sources.`
 
-# Your program will run again
-Write it for a LATER run: the same question at a different time, or a near variant of it. Read the question for
-what would differ on that run — a date or period, an entity, a threshold, a limit — and make each one a parameter
-with a sensible default. Everything else the program works out AS IT RUNS: from a query, or from the clock when
-the question means "now" or "latest". Each parameter you declare reaches the computation, and every label you
-print — the period, the as-of date, the scope — states what that run actually computed. So the same program, run
-tomorrow or for another entity, gives the truth for that run.`
+// What we expect from a program WRITER, one named section per expectation. Both program-writing agents (the
+// composer and the analyst) get every section, so an expectation is stated once and never drifts between them.
+// Sections are added and removed here — keep each one self-contained under its own heading.
+export const PARAMETERISATION = `# One program, many runs
+This program answers the question now, and it is also the artifact that answers it again — at another time, or for
+a variant of the same question. Read the question for what would differ on such a run — a date or period, an
+entity, a threshold, a limit — and make each one a parameter with a sensible default. Everything else the program
+works out AS IT RUNS: from a query, or from the clock when the question means "now" or "latest". When the answer
+turns on a judgement — a cutoff that decides good or bad, in or out, worth it or not — that cutoff is a parameter
+too and the verdict is computed from it, so a different cutoff yields a different verdict; what you then present
+follows from that result. Each parameter you declare reaches the computation, and every label you print — the
+period, the as-of date, the scope — states what that run actually computed. So the same program, run tomorrow or
+for another entity, gives the truth for that run.`
+
+// The expectations, in the order they are presented. Add or remove sections here.
+const EXPECTATIONS = [WORKSPACE, PARAMETERISATION]
 
 // The complete authoring surface, as ONE string, to install into a coding agent's system prompt (systemReference).
 // Use this when the caller's base does NOT already carry the authoring MECHANICS (the composer).
-export const AUTHORING_REFERENCE: string = [contract, ...PROGRAM_AUTHORING, example, rule].join('\n\n')
+export const AUTHORING_REFERENCE: string = [contract, ...PROGRAM_AUTHORING, example, ...EXPECTATIONS].join('\n\n')
 
-// The surface WITHOUT the mechanics (contract + example + rule only) — for a caller whose generated base ALREADY
-// includes PROGRAM_AUTHORING (the analyst), so the mechanics aren't repeated.
-export const AUTHORING_SURFACE: string = [contract, example, rule].join('\n\n')
+// The surface WITHOUT the mechanics — for a caller whose generated base ALREADY includes PROGRAM_AUTHORING (the
+// analyst), so the mechanics aren't repeated. The expectations are identical in both.
+export const AUTHORING_SURFACE: string = [contract, example, ...EXPECTATIONS].join('\n\n')
