@@ -235,7 +235,7 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
   }
 
   return {
-    systemDelivery: opts.systemReference ? 'system' : 'file',           // folded into opencode's `system` when present
+    referencePlacement: opts.systemReference ? 'in-context' : 'file',   // folded into opencode's `system` when present
     async run(prompt, h) { return new Promise<RunResult>((resolve) => { queue.push({ prompt, h, resolve }); pump() }) },
     async compact() {                                                   // opencode summarizes its own context
       try { await client?.session?.summarize?.({ path: { id: sessionId }, query: { directory: opts.cwd } }) } catch {}

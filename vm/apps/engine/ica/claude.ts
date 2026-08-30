@@ -33,7 +33,7 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
   const bin = opts.bin ?? process.env.CLAUDE_BIN ?? 'claude'
   // Authoritative authoring reference → the REAL system prompt via --append-system-prompt-file (a spawn arg, so
   // no fragile PTY typing; it survives compaction, unlike a file the agent must remember to re-read). Written
-  // once here; the flag is added to the spawn args below. Absent ⇒ nothing injected (systemDelivery stays 'file').
+  // once here; the flag is added to the spawn args below. Absent ⇒ nothing injected (referencePlacement 'file').
   let sysRefFlag: string[] = []
   if (opts.systemReference?.trim()) {
     const p = join(opts.cwd, '.ica-system-reference.md')
@@ -284,7 +284,7 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
 
   return {
     kind: 'pty',                                                    // a real terminal stream → UI renders a terminal emulator
-    systemDelivery: sysRefFlag.length ? 'system' : 'file',          // injected via --append-system-prompt-file when present
+    referencePlacement: sysRefFlag.length ? 'in-context' : 'file',  // injected via --append-system-prompt-file when present
     // Pre-spawn the PTY and wait until the input box is up — so the first real question doesn't pay the
     // ~10-15s claude startup. Idempotent: a second call is a cheap no-op once the box is ready.
     async warmup() { await ensure(); await waitForReady() },

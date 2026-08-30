@@ -9,6 +9,8 @@
 //   ALL PERMISSIONS enabled: sandbox danger-full-access + approvals never (see ensure()).
 
 import { Codex, type Thread } from '@openai/codex-sdk'
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { Session, RunHandlers, RunResult, AgentEvent } from './session.js'
 
 export interface CodexSessionOpts {
@@ -16,6 +18,7 @@ export interface CodexSessionOpts {
   model?: string                                                     // default 'gpt-5.6-terra'
   reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'  // default 'medium'
   resumeId?: string                                                  // resume a prior thread (persisted in ~/.codex/sessions)
+  systemReference?: string    // authoritative authoring reference → written to AGENTS.md (codex auto-loads it from cwd)
 }
 
 // Turn one ThreadEvent into a readable stream chunk. `seen` tracks per-item emitted length so the
@@ -67,6 +70,13 @@ function normEvent(ev: any): AgentEvent | null {
 export function createCodexSession(opts: CodexSessionOpts): Session {
   const model = opts.model ?? process.env.ICA_CODEX_MODEL ?? 'gpt-5.6-terra'
   const effort = (opts.reasoningEffort ?? process.env.ICA_CODEX_EFFORT ?? 'medium') as CodexSessionOpts['reasoningEffort']
+  // Authoritative authoring reference → AGENTS.md, which codex auto-loads from the working directory (its
+  // equivalent of CLAUDE.md). So the reference is always in-context with no read-instruction. Written once here.
+  let refPlacement: 'in-context' | 'file' = 'file'
+  if (opts.systemReference?.trim()) {
+    try { writeFileSync(join(opts.cwd, 'AGENTS.md'), opts.systemReference); refPlacement = 'in-context' }
+    catch (e) { console.warn('[ica:codex] could not write AGENTS.md; falling back to file-read', e) }
+  }
   let codex: Codex | null = null
   let thread: Thread | null = null
   let resumeId = opts.resumeId                                      // mutable: cleared if the resume can't be found
@@ -131,6 +141,7 @@ export function createCodexSession(opts: CodexSessionOpts): Session {
 
   return {
     kind: 'events',                                                  // discrete agent events → UI renders an event log, not a terminal
+    referencePlacement: refPlacement,                                // via AGENTS.md (auto-loaded) when a systemReference was given
     async run(prompt, h) { return new Promise<RunResult>((resolve) => { queue.push({ prompt, h, resolve }); pump() }) },
     async compact() { return { lastLines: '(codex manages its own context)', ms: 0 } },
     buffer: () => buf,

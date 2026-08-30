@@ -34,7 +34,7 @@ export interface SessionOpts {
   // The AUTHORITATIVE authoring reference (program contract + unit interface + one canonical example) to install
   // into the system prompt of a CODING agent (composer/analyst), so it never reads engine source or other
   // programs to learn the shape. Harness-agnostic: each harness delivers it its own way and reports how via
-  // Session.systemDelivery; if a harness can't, it degrades to 'file' and the caller writes it to the workspace.
+  // Session.referencePlacement; if a harness can't, it degrades to 'file' and the caller writes it to the workspace.
   systemReference?: string
 }
 
@@ -46,7 +46,7 @@ export function createSession(harness: Harness, opts: SessionOpts): Session {
     case 'opencode':    return createOpencodeSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model, baseUrl: opts.baseUrl, noTools: opts.noTools, system: opts.system, systemReference: opts.systemReference })
     case 'pi':          return createPiSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model })
     case 'claude-code': return createClaudeSession({ cwd: opts.cwd, model: opts.model, bin: opts.bin, resumeId: opts.resumeId, systemReference: opts.systemReference })
-    case 'codex':       return createCodexSession({ cwd: opts.cwd, model: opts.model, resumeId: opts.resumeId })
+    case 'codex':       return createCodexSession({ cwd: opts.cwd, model: opts.model, resumeId: opts.resumeId, systemReference: opts.systemReference })
     case 'mock':        return createMockSession(opts)
     default:            throw new Error(`unknown harness: ${harness}`)
   }
