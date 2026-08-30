@@ -55,25 +55,22 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
   const context = (() => { try { return readFileSync(join(cwd, 'CONTEXT.md'), 'utf8') } catch { return '' } })()
   const systemReference = [sysFile(), AUTHORING_REFERENCE, context].filter(Boolean).join('\n\n')
   const session = createSession(harness, { cwd, model, provider, baseUrl: opts.ica?.baseUrl, systemReference })
-  // If the harness put the reference in-context (opencode `system`), we DON'T tell the agent to read files.
-  // If it fell back to 'file' (a harness that can't inject), we keep the legacy read-preamble + write the file.
-  const inContext = session.referencePlacement === 'in-context'
+  // ONE linear path: the composer's harnesses (opencode/claude/codex) all carry the reference in the system
+  // prompt, so the agent never reads an instruction file. If a harness can't inject (pi/mock), fail LOUD here
+  // rather than branch the whole flow — a misconfiguration is easier to debug than a silent second code path.
+  if (session.referencePlacement !== 'in-context')
+    console.warn(`[composer] harness "${harness}" cannot put the reference in the system prompt — instructions will be missing; use opencode/claude/codex`)
 
-  const preamble = inContext
-    ? 'Compose a PROGRAM the engine runs to answer the question. Your role, the program contract + example, and the ' +
-      'data context are already in your instructions. Search concepts with `./find-concept "<phrase>"`; explore the ' +
-      'data with `./query`/`./introspect`; escalate to the analyst on a hard problem (many composers share one analyst).'
-    : 'Read ./CONTEXT.md FIRST (the tools + seams), then ./composer/COMPOSER.md (your instructions) — follow it ' +
-      'exactly. Search concepts with `./find-concept "<phrase>"` and compose them into a PROGRAM the engine runs. ' +
-      'If the concepts don\'t fully cover it, explore the data yourself (`./query`/`./introspect`) and analyse — ' +
-      'escalate to the analyst when it\'s a hard problem or you can\'t figure it out (many composers share one analyst).'
+  const preamble =
+    'Compose a PROGRAM the engine runs to answer the question. Your role, the program contract + example, and the ' +
+    'data context are already in your instructions. Search concepts with `./find-concept "<phrase>"`; explore the ' +
+    'data with `./query`/`./introspect`; escalate to the analyst on a hard problem (many composers share one analyst).'
 
   return {
     cwd,
     session,
     async ask(question, handlers, o = {}) {
       const t0 = Date.now()
-      if (!inContext) await writeFile(join(cwd, 'composer/COMPOSER.md'), fullSystem())   // fallback only: the agent reads it
       const dir = o.qid ? join(cwd, 'out', o.qid) : join(cwd, 'out')
       await mkdir(dir, { recursive: true })
       const builtRel    = o.qid ? `./out/${o.qid}/built.json`    : `./out/built.json`
@@ -170,8 +167,8 @@ ${conceptBlock}
   }
 }
 
-// Deterministic hash of the instruction (role prompt + shared program-authoring) — the slot resumes a warm
-// session only while this is unchanged, else starts fresh.
+// Deterministic hash of the instruction the agent actually gets (role + the authoring reference) — the slot
+// resumes a warm session only while this is unchanged, else starts fresh, so a reference edit takes effect.
 export async function promptVersion(): Promise<string> {
-  return createHash('sha256').update(fullSystem()).digest('hex').slice(0, 12)
+  return createHash('sha256').update(sysFile() + AUTHORING_REFERENCE).digest('hex').slice(0, 12)
 }

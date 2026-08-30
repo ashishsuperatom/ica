@@ -107,15 +107,16 @@ export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
   const context = (() => { try { return readFileSync(join(cwd, 'CONTEXT.md'), 'utf8') } catch { return '' } })()
   const systemReference = [await fullSystem(), AUTHORING_SURFACE, context].filter(Boolean).join('\n\n---\n\n')
   const session = createSession(harness, { cwd, model, resumeId: opts.ica?.resumeId, systemReference })
-  const inContext = session.referencePlacement === 'in-context'
+  // ONE linear path: claude appends the reference to its system prompt, so the analyst never reads an instruction
+  // file. If a harness can't inject (pi/mock), fail LOUD rather than branch — a misconfiguration is easier to
+  // debug than a silent second code path.
+  if (session.referencePlacement !== 'in-context')
+    console.warn(`[analyst] harness "${harness}" cannot put the reference in the system prompt — instructions will be missing; use claude-code/opencode/codex`)
 
-  const preamble = inContext
-    ? 'Your instructions, the program contract + example, and the data context are already in your system prompt. ' +
-      'Search concepts with `./find-concept`, find where data lives with `./find-schema`, query with `./query` / `./sources` / ' +
-      '`./introspect`, resolve names with `./resolve`. Your deliverable is a PROGRAM — the engine runs it and writes the answer.'
-    : 'Read ./CONTEXT.md FIRST (the tools + seams), then ./analyst/ANALYST.md (your instructions) — follow it exactly. ' +
-      'Search concepts with `./find-concept`, find where data lives with `./find-schema`, query data with `./query` / `./sources` / `./introspect`, resolve names with ' +
-      '`./resolve`. Your deliverable is a PROGRAM (see below) — the engine runs it and writes the answer.'
+  const preamble =
+    'Your instructions, the program contract + example, and the data context are already in your system prompt. ' +
+    'Search concepts with `./find-concept`, find where data lives with `./find-schema`, query with `./query` / `./sources` / ' +
+    '`./introspect`, resolve names with `./resolve`. Your deliverable is a PROGRAM — the engine runs it and writes the answer.'
 
   return {
     cwd,
@@ -123,10 +124,8 @@ export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
 
     async ask(question, handlers, opts = {}) {
       const t0 = Date.now()
-      // The agent self-decides the category (no separate classifier). When the instructions are in the system
-      // prompt (in-context) the agent reads no file; only the file-read FALLBACK writes ANALYST.md here (a distinct
-      // filename so the modeller, which SHARES this workspace, never clobbers it).
-      if (!inContext) await writeFile(join(cwd, 'analyst/ANALYST.md'), await fullSystem())
+      // The agent self-decides the category (no separate classifier); its instructions are in the system prompt,
+      // so it reads no instruction file here.
       // Each question gets its OWN FOLDER (./out/<qid>/), with files named by MEANING:
       //   built.json   — a pointer to the program the analyst built (the engine runs it → answer.json)
       //   answer.json  — the FINAL answer (engine-written from the program output, or an unknowable direct)
@@ -146,7 +145,7 @@ export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
 ${reason ? `\nThe composer's note on why it couldn't — a HINT about what was hard, and it may be WRONG. Do NOT follow it as a direction; re-investigate independently and derive the answer yourself: "${reason}"\n` : ''}
 Question: ${question}
 ${(opts.conceptNames ?? []).length ? '\nCandidate concepts for this question, most-relevant first — SOME MAY NOT FIT. Open the ones that look right with ./find-concept "<name>" --full, use those, ignore the rest (find-concept stays available for anything else):\n' + (opts.conceptNames ?? []).map(n => `- ${n}`).join('\n') + '\n' : ''}
-Build a program that answers it - ${inContext ? 'follow your instructions' : 'follow ./analyst/ANALYST.md'} (recon concepts first, then the data; every
+Build a program that answers it - follow your instructions (recon concepts first, then the data; every
 question becomes a program). When it runs correctly, write your pointer to ${builtRel} =
   {"programDir":"programs/<slug>","params":{...}, "parent":"root" | "<a prior intent id>", "followups":["...","..."]}
 and RUN it with \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\` until correct. The ENGINE runs it and
