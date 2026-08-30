@@ -61,7 +61,7 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
   let serialize: any = null       // @xterm/addon-serialize — term.serialize() → the snapshot
   let idle: ReturnType<typeof setTimeout> | null = null
   let donePoll: ReturnType<typeof setInterval> | null = null   // fast completion: poll the caller's doneWhen()
-  let lastNarr = '', lastNarrAt = 0                            // last clean narration line emitted (dedup + throttle)
+  let lastNarr = ''                                           // last clean narration line emitted (dedup)
   let lastDataAt = 0                          // timestamp of the last PTY byte — drives readiness (settle) detection
   let cols = 120, rows = 34                   // PTY size — the UI resizes this to fill its terminal width (SIGWINCH)
   interface Job { prompt: string; h?: RunHandlers; resolve: (r: RunResult) => void; startedAt: number; submitted: boolean }
@@ -95,7 +95,10 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
       const line = tailBuf.slice(0, nl); tailBuf = tailBuf.slice(nl + 1)
       if (!line.trim()) continue
       let o: any; try { o = JSON.parse(line) } catch { continue }
-      for (const ev of eventLog.handleEntry(o)) current?.h?.onEvent?.(ev)   // live to the active run; events() has the full log for replay
+      for (const ev of eventLog.handleEntry(o)) {
+        current?.h?.onEvent?.(ev)                                          // live to the active run; events() has the full log for replay
+        if (ev.kind === 'message' && ev.text) emitNarration(ev.text)       // clean [[ui]] progress line, from the JSONL (never the PTY)
+      }
     }
   }
   const startTail = () => { if (!tailTimer) tailTimer = setInterval(pollTranscript, 400) }
@@ -171,8 +174,10 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
         }
       }
       current?.h?.onOutput?.(d)
-      // Clean progress: pull the agent's latest NARRATION line (bulleted prose), never tool calls.
-      if (current?.h?.onNarration && Date.now() - lastNarrAt > 350) { lastNarrAt = Date.now(); emitNarration() }
+      // NOTE: narration ([[ui]] progress lines) is sourced from the JSONL transcript in pollTranscript(), NOT from
+      // this raw PTY byte stream. The stream interleaves cursor-addressed writes from all over the TUI (spinner,
+      // token counter, the code being written) — stripAnsi can't reconstruct screen lines, so reading it here once
+      // mashed the spinner + diff + source into a single "line" and leaked it to the user. Clean text only, below.
       // Completion tracking runs ONLY after we've submitted — before that, output is the TUI
       // starting up / echoing the typed prompt, which must NOT trip the "done" timer.
       if (current?.submitted) { if (idle) clearTimeout(idle); idle = setTimeout(maybeFinish, IDLE) }
@@ -196,19 +201,16 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
     }
   }
 
-  // The agent's latest DELIBERATE progress note: a line the agent marked with `[[ui]]` (the system prompt
-  // tells it to prefix user-facing progress with that tag). We only ever surface these — never bullets,
-  // tool calls, reasoning, or errors. Robust: no TUI-format guessing, just find the marker. Deduped.
-  function emitNarration() {
-    const lines = stripAnsi(buf).split('\n')
-    for (let i = lines.length - 1; i >= 0; i--) {
-      // claude renders each assistant line with a leading bullet; drop it so the marker is at the start.
-      const line = lines[i].replace(/^\s*[●⏺]\s*/, '')
-      const m = line.match(/^\[\[ui\]\]\s+(.+?)\s*$/i)   // a line the agent MARKED as user-facing progress
+  // The agent's DELIBERATE progress note: a line it marked with `[[ui]]` (the system prompt tells it to prefix
+  // user-facing progress with that tag). Sourced from the CLEAN JSONL assistant text — never the PTY buffer — so
+  // it can never carry terminal chrome (spinner/token-counter/diff). We surface only [[ui]] lines, deduped.
+  function emitNarration(text: string) {
+    if (!current?.h?.onNarration) return
+    for (const raw of text.split('\n')) {
+      const m = raw.trim().match(/^\[\[ui\]\]\s+(.+)$/i)   // a line the agent MARKED as user-facing progress
       if (!m) continue
       const t = m[1].trim()
-      if (t && t !== lastNarr) { lastNarr = t; current?.h?.onNarration?.(t) }
-      return
+      if (t && t !== lastNarr) { lastNarr = t; current.h.onNarration(t) }
     }
   }
 

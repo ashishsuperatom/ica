@@ -657,7 +657,10 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     let programDir: string | undefined, programParams: any, programTerms: any[] = [], programFollowups: string[] = []
     const b = await readJsonSafe<any>(join(WORKSPACE, 'out', qid, 'built.json'), null, 'analyst')   // absent = unknowable/gap (no program)
     if (b) { programDir = b.programDir; programParams = b.params; programTerms = Array.isArray(b.terms) ? b.terms : []; programFollowups = Array.isArray(b.followups) ? b.followups.filter((x: any) => typeof x === 'string' && x.trim()).slice(0, 3) : [] }
-    emit(reply, { t: 'analyst:answer', category: r.category, answer: r.answer, lastLines: r.lastLines, timing, sid, qid })
+    // NB: r.lastLines (the raw claude PTY tail — a garbled, cursor-addressed terminal snapshot) is deliberately NOT
+    // sent to the client. It has no user value, isn't stored, and shipping ~20KB of raw terminal per answer is a
+    // standing leak risk (a client that didn't strip it would render it). The clean answer is r.answer.
+    emit(reply, { t: 'analyst:answer', category: r.category, answer: r.answer, timing, sid, qid })
     if (channel) emit({ type: 'channel' }, { t: 'channel:answer', channel, qid, answer: r.answer, category: r.category })   // durable delivery to the chat channel
     // Follow-ups are NICE-TO-HAVE — emitted AFTER the answer, never gating or delaying it. The UI reveals them on
     // a delay so the user reads the answer first. Persisted on the node below → free on a later reuse (no analyst).
