@@ -61,6 +61,33 @@ type FeedItem =
 // A ROLLING localStorage copy of an agent-log (last 6 sessions, ≤400 events each) so a RELOAD restores it — the DO
 // deliberately doesn't store this heavy real-time log. Restore on mount only (never clobber live events). Shared by
 // every agent-log view (analyst / composer) so they persist identically.
+// ── localStorage, quota-safe ─────────────────────────────────────────────────────────────────────────────────
+// The browser gives us ~5MB and THROWS once it's full — an uncaught QuotaExceededError breaks the render, which
+// is how a long session took the UI down. Every write goes through here: on a quota failure we free space in
+// least-precious-first order and retry, and give up quietly rather than throw.
+//   1. agent LOGS of other sessions  — biggest by far, and replayable from the engine
+//   2. FEEDS of other sessions       — the answers you're not looking at
+// The current session's data is never evicted, so what's on screen survives.
+const LOG_PREFIXES = ['sa-anlog-', 'sa-colog-', 'sa-molog-']
+function safeSetItem(key: string, value: string, keepSuffix: string): boolean {
+  const put = () => { try { localStorage.setItem(key, value); return true } catch { return false } }
+  if (put()) return true
+  const drop = (pred: (k: string) => boolean) => {
+    const victims = Object.keys(localStorage).filter(k => k !== key && pred(k))
+    victims.forEach(k => { try { localStorage.removeItem(k) } catch { /* ignore */ } })
+    return victims.length > 0
+  }
+  if (drop(k => LOG_PREFIXES.some(p => k.startsWith(p)) && !k.endsWith(keepSuffix)) && put()) return true
+  if (drop(k => k.startsWith('sa-feed:') && !k.endsWith(keepSuffix)) && put()) return true
+  return false   // still full — skip this write; the app keeps running on in-memory state
+}
+
+// What gets PERSISTED is trimmed hard: command output is the bulk of a log and is only useful live, so keep a
+// head of it. This is what stops the quota being reached in the first place.
+const OUT_CAP = 1200
+const slimForStorage = (evs: AgentEvent[]) => evs.slice(-200).map(e =>
+  e.output && e.output.length > OUT_CAP ? { ...e, output: e.output.slice(0, OUT_CAP) + '\n… (truncated)' } : e)
+
 function usePersistLog(prefix: string, sessionId: string, events: AgentEvent[], setEvents: React.Dispatch<React.SetStateAction<AgentEvent[]>>) {
   useEffect(() => {
     // Restore this session's saved log. Decide "is it empty?" from the CURRENT state inside the setter, not from
@@ -75,9 +102,9 @@ function usePersistLog(prefix: string, sessionId: string, events: AgentEvent[], 
     if (!events.length) return
     const t = setTimeout(() => {
       try {
-        localStorage.setItem(prefix + sessionId, JSON.stringify(events.slice(-400)))
+        safeSetItem(prefix + sessionId, JSON.stringify(slimForStorage(events)), sessionId)
         const idx: string[] = [sessionId, ...(JSON.parse(localStorage.getItem(prefix + 'index') || '[]') as string[]).filter((s) => s !== sessionId)]
-        while (idx.length > 6) { const drop = idx.pop(); if (drop) localStorage.removeItem(prefix + drop) }
+        while (idx.length > 4) { const drop = idx.pop(); if (drop) localStorage.removeItem(prefix + drop) }
         localStorage.setItem(prefix + 'index', JSON.stringify(idx))
       } catch { /* localStorage full/blocked — best-effort */ }
     }, 500)
@@ -203,7 +230,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // Persist the feed + keep the chat in the sidebar list (title = first question) whenever it changes.
   useEffect(() => {
     if (!feed.length) return
-    localStorage.setItem(fkey(sessionId), JSON.stringify(feed.slice(-100)))
+    safeSetItem(fkey(sessionId), JSON.stringify(feed.slice(-100)), sessionId)
     const title = feed.find(i => i.type === 'user-msg')?.text?.slice(0, 60) || 'New chat'
     setSessions(prev => {
       // Order is CREATION order and nothing else. (This used to unshift the session to the front on every feed
@@ -418,7 +445,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           const g = msg.answer ?? { status: 'gap', answer: 'Not in the model yet.' }
           const card: FeedItem = { id: crypto.randomUUID(), type: 'answer', category: msg.category, answer: g }
           if (!msg.sid || msg.sid === sidRef.current) { setFeed(f => [...f, card]); scroll() }
-          else { const f = loadFeed(msg.sid); localStorage.setItem(fkey(msg.sid), JSON.stringify([...f, card].slice(-100))) }
+          else { const f = loadFeed(msg.sid); safeSetItem(fkey(msg.sid), JSON.stringify([...f, card].slice(-100)), msg.sid) }
         } else if (msg.t === 'analyst:enriching') {
           setAnEnriching({ need: msg.need, basis: msg.basis })
           setAnStatus(`Learning: ${msg.need}…`); setAnAnswer(null)
@@ -446,7 +473,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
             const toAppend = analysisCard ? [analysisCard, card] : [card]
             // Keep the last question pinned at the top (question → analysis → answer read top-down).
             if (!msg.sid || msg.sid === sidRef.current) { setFeed(f => [...f, ...toAppend]); scroll() }
-            else { const f = loadFeed(msg.sid); localStorage.setItem(fkey(msg.sid), JSON.stringify([...f, ...toAppend].slice(-100))) }
+            else { const f = loadFeed(msg.sid); safeSetItem(fkey(msg.sid), JSON.stringify([...f, ...toAppend].slice(-100)), msg.sid) }
           }
           // Keep narrationLog as-is — the analyst-view mirror keeps showing it until the NEXT question starts (cleared in ask()).
         } else if (msg.t === 'analysis:step') {
@@ -509,7 +536,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
       return [...arr, ...(!hasQ && question ? [qCard] : []), aCard, ...(fuCard ? [fuCard] : [])]
     }
     if (sid === sidRef.current) setFeed(f => add(f))
-    else { const f = loadFeed(sid); localStorage.setItem(fkey(sid), JSON.stringify(add(f).slice(-100))) }
+    else { const f = loadFeed(sid); safeSetItem(fkey(sid), JSON.stringify(add(f).slice(-100)), sid) }
   }
 
   // Merge the DO's recent-session snapshot into the local sidebar list (dedup by id, newest first, bounded 50).
