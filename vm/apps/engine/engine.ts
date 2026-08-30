@@ -682,8 +682,10 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // Capture the PROGRAM the agent built (its built.json pointer) so a repeat of this question re-runs
     // that program (fresh query) instead of re-invoking the LLM.
     let programDir: string | undefined, programParams: any, programTerms: any[] = [], programFollowups: string[] = []
+    let programCanonical: string[] = []   // what the program ANSWERS, in question form — the retrieval substrate
     const b = await readJsonSafe<any>(join(WORKSPACE, 'out', qid, 'built.json'), null, 'analyst')   // absent = unknowable/gap (no program)
-    if (b) { programDir = b.programDir; programParams = b.params; programTerms = Array.isArray(b.terms) ? b.terms : []; programFollowups = Array.isArray(b.followups) ? b.followups.filter((x: any) => typeof x === 'string' && x.trim()).slice(0, 3) : [] }
+    if (b) { programDir = b.programDir; programParams = b.params; programTerms = Array.isArray(b.terms) ? b.terms : []; programFollowups = Array.isArray(b.followups) ? b.followups.filter((x: any) => typeof x === 'string' && x.trim()).slice(0, 3) : []
+             programCanonical = Array.isArray(b.canonicalQuestions) ? b.canonicalQuestions.filter((x: any) => typeof x === 'string' && x.trim()).map((x: string) => x.trim()).slice(0, 3) : [] }
     // NB: r.lastLines (the raw claude PTY tail — a garbled, cursor-addressed terminal snapshot) is deliberately NOT
     // sent to the client. It has no user value, isn't stored, and shipping ~20KB of raw terminal per answer is a
     // standing leak risk (a client that didn't strip it would render it). The clean answer is r.answer.
@@ -740,9 +742,16 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       const authoredMeta = authoredBy === 'composer'
         ? { by: 'composer', harness: process.env.ICA_COMPOSER_HARNESS || 'opencode', provider: process.env.ICA_COMPOSER_PROVIDER || 'opencode-go', model: process.env.ICA_COMPOSER_MODEL || 'deepseek-v4-flash', at: Date.now() }
         : { by: 'analyst', harness: ANALYST_HARNESS, provider: process.env.ICA_ANALYST_PROVIDER || null, model: ANALYST_MODEL ?? null, at: Date.now() }
+      // canonicalQuestions accumulate on the PROGRAM (not the intent): they describe what this program answers,
+      // and a program can be reached by several phrasings. Union with what's already there, so a rebuild/modify
+      // ADDS a phrasing rather than dropping the ones already known. The user's real question is kept too — the
+      // writer's canonical form can encode its own misreading, so the phrasing actually asked stays in the index.
+      const priorCanon: string[] = ((graph.getNode(`prog:${slug}`)?.props as any)?.canonicalQuestions ?? []) as string[]
+      const canonical = Array.from(new Set([...priorCanon, ...programCanonical, question.trim()].filter(Boolean)))
       graph.putNode({ id: `prog:${slug}`, kind: 'program', label: slug, summary: authoredProgramDir,
-        props: { dir: authoredProgramDir, authoredBy: authoredMeta, category: r.category } })
+        props: { dir: authoredProgramDir, authoredBy: authoredMeta, category: r.category, canonicalQuestions: canonical } })
       graph.putEdge({ from: builtIntentId, to: `prog:${slug}`, type: 'program' })
+      console.log(`[ica] program ${slug} answers ${canonical.length} question form(s)${programCanonical.length ? '' : ' (writer declared none — user question only)'}`)
     }
     // No explicit wake needed — the always-running consolidation timer picks this up on its next tick. That
     // is deliberate: the timer, not this signal, is the guarantee (it survives restarts and missed signals).

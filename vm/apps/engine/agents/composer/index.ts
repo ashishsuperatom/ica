@@ -26,7 +26,10 @@ export interface ComposerOpts {
   managerUrl?: string
   ica?: { harness?: Harness; model?: string; provider?: string; baseUrl?: string }
 }
-export interface BuiltPtr { programDir: string; params?: any; terms?: any[]; followups?: string[] }
+// canonicalQuestions — what this program ANSWERS, in question form, written by whoever built it. This is the
+// retrieval substrate: a new question is matched against these (question ↔ question), never against program
+// source, so a near-miss can't pull program code into the matching agent's context.
+export interface BuiltPtr { programDir: string; params?: any; terms?: any[]; followups?: string[]; canonicalQuestions?: string[] }
 export interface ComposerResult {
   escalate?: { reason: string }        // set when concepts didn't cover it → engine hands off to the analyst
   answer?: any                         // the engine-run program output (when composed)
@@ -127,7 +130,10 @@ ${conceptBlock}
 2. Otherwise COMPOSE from the concepts (\`./find-concept "<phrase>" --full\` for a concept's runnable query). If they
    don't fully cover it, do the work yourself — \`./query\`/\`./introspect\` the data, analyse, write the units +
    program. Run it (\`tsx run.mjs programs/<slug>/program.ts '<json>'\`), verify against the review checks, write
-   ${builtRel}. The engine runs it — do NOT write answer.json.
+   ${builtRel} = {"programDir":"programs/<slug>","params":{…},"canonicalQuestions":["…"]}. The engine runs it — do
+   NOT write answer.json. \`canonicalQuestions\` — the question this program answers, phrased so its parameters are
+   visible ("… for customer <customer> in <period>"); add another only when it genuinely answers a differently-
+   phrased question.
 3. Escalate to the analyst when it's a hard problem or you can't figure it out. Write ${escalateRel} =
    {"reason":"<what's blocking you>"} and STOP. Many composers share one analyst, so do the rest yourself.`
       const prompt = m ? modifyPrompt : composePrompt

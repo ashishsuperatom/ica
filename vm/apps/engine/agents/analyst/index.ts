@@ -147,7 +147,10 @@ Question: ${question}
 ${(opts.conceptNames ?? []).length ? '\nCandidate concepts for this question, most-relevant first — SOME MAY NOT FIT. Open the ones that look right with ./find-concept "<name>" --full, use those, ignore the rest (find-concept stays available for anything else):\n' + (opts.conceptNames ?? []).map(n => `- ${n}`).join('\n') + '\n' : ''}
 Build a program that answers it - follow your instructions (recon concepts first, then the data; every
 question becomes a program). When it runs correctly, write your pointer to ${builtRel} =
-  {"programDir":"programs/<slug>","params":{...}, "parent":"root" | "<a prior intent id>", "followups":["...","..."]}
+  {"programDir":"programs/<slug>","params":{...}, "parent":"root" | "<a prior intent id>", "followups":["...","..."],
+   "canonicalQuestions":["..."]}
+\`canonicalQuestions\` — the question this program answers, phrased so its parameters are visible ("… for customer
+<customer> in <period>"). Add another only when the program genuinely answers a differently-phrased question.
 and RUN it with \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\` until correct. The ENGINE runs it and
 writes the answer - never write ${answerRel} yourself, and never answer in chat.
 
