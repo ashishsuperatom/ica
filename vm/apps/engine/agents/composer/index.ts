@@ -108,9 +108,11 @@ Question: ${question}
 
 ${candBlock}
 ${conceptBlock}
-1. Can any program above CORRECTLY answer this question — as-is or with different params? If one genuinely fits,
-   pick it, run it to confirm, and write ${builtRel} = {"programDir":"<that program>","params":{…}}. If none
-   truly answers it, do NOT force-fit one — build a new program from concepts (step 2). Accuracy over reuse.
+1. Can a program above answer THIS question EXACTLY — the SAME measure, scope and grain, differing at most by a
+   parameter (a date, a top-N)? Only then reuse it: pick it, run it, write ${builtRel} = {"programDir":"<that program>","params":{…}}.
+   A program built for a RELATED-but-different question is NOT a fit — "amount billed" is not "net spend", a header
+   total is not a line-level breakdown, gross is not net. Do NOT adapt or force-fit a program; when it is not an
+   EXACT match, go to step 2 and build from the CONCEPTS — never from a not-quite program. Accuracy over reuse.
 2. Otherwise COMPOSE from the concepts (\`./find-concept "<phrase>" --full\` for a concept's runnable query). If they
    don't fully cover it, do the work yourself — \`./query\`/\`./introspect\` the data, analyse, write the units +
    program. Run it (\`tsx run.mjs programs/<slug>/program.ts '<json>'\`), verify against the review checks, write
