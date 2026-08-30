@@ -77,12 +77,16 @@ export function useLogNav(ref: RefObject<HTMLElement | null>, active: boolean, c
       // Shift+Down snaps back UP). Instead, anchor on where the questions actually are right now: measure each
       // question's offset below the container top, then Down = the first one below the top line, Up = the last one
       // above it. This can only ever move in the pressed direction.
-      const ctop = el.getBoundingClientRect().top
-      const tops = qs.map(q => q.getBoundingClientRect().top - ctop)
-      let idx: number
-      if (dir > 0) { idx = tops.findIndex(t => t > 18); if (idx < 0) idx = qs.length - 1 }   // first question below the top
-      else { idx = 0; tops.forEach((t, i) => { if (t < 6) idx = i }) }                        // last question at/above the top
-      qs[idx].scrollIntoView({ behavior: 'smooth', block: 'start' })   // bring it to the top, animated like the chat
+      const cRect = el.getBoundingClientRect()
+      const PIN = 12
+      // The question NEAREST the top line is the one you're on; move exactly one from it (idx = anchor ± 1), so it
+      // can only go the way you pressed. Then scroll the CONTAINER directly — scrollIntoView guesses the wrong
+      // scroll ancestor (it was scrolling the window), which is what made Shift+Down snap back up.
+      let anchor = 0, best = Infinity
+      qs.forEach((q, i) => { const d = q.getBoundingClientRect().top - cRect.top - PIN; if (Math.abs(d) < best) { best = Math.abs(d); anchor = i } })
+      const idx = Math.max(0, Math.min(qs.length - 1, anchor + dir))
+      const delta = qs[idx].getBoundingClientRect().top - cRect.top - PIN
+      el.scrollTo({ top: el.scrollTop + delta, behavior: 'smooth' })
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
