@@ -40,8 +40,12 @@ export interface ComposerResult {
 }
 export interface ProgramCandidate { question: string; program?: string; score: number }
 export interface ModifyTarget { programDir: string; prevQuestion?: string }
+
+/** A program whose DECLARED canonical question is the one just asked, with this question's values already bound.
+ *  Retrieval found it; the composer still decides — it is a strong lead, not a verdict. */
+export interface CanonicalMatch { programDir: string; params: Record<string, unknown>; canonical: string }
 export interface Composer {
-  ask(question: string, handlers?: RunHandlers, opts?: { qid?: string; candidates?: ProgramCandidate[]; modify?: ModifyTarget; conceptNames?: string[] }): Promise<ComposerResult>
+  ask(question: string, handlers?: RunHandlers, opts?: { qid?: string; candidates?: ProgramCandidate[]; modify?: ModifyTarget; conceptNames?: string[]; canonicalMatch?: CanonicalMatch }): Promise<ComposerResult>
   session: Session
   cwd: string
 }
@@ -122,6 +126,9 @@ Question: ${question}
 
 ${candBlock}
 ${conceptBlock}
+${o.canonicalMatch ? `MATCHED PROGRAM — \`${o.canonicalMatch.programDir}\` declares that it answers "${o.canonicalMatch.canonical}", which is this question with its values filled in: ${JSON.stringify(o.canonicalMatch.params)}.
+Start here: run it with those values (\`tsx run.mjs ${o.canonicalMatch.programDir}/program.ts '${JSON.stringify(o.canonicalMatch.params)}'\`) and read the output as the person who asked would. If it answers them, write ${builtRel} = {"programDir":"${o.canonicalMatch.programDir}","params":${JSON.stringify(o.canonicalMatch.params)}} and stop. If it does not, carry on below.
+` : ''}
 1. Can a program above answer THIS question EXACTLY — the SAME measure, scope and grain, differing at most by a
    parameter (a date, a top-N)? Only then reuse it: pick it, run it, write ${builtRel} = {"programDir":"<that program>","params":{…}}.
    A program built for a RELATED-but-different question is NOT a fit — "amount billed" is not "net spend", a header

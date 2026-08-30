@@ -535,28 +535,27 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // failed → fall through to rebuild via the analyst
   }
 
-  // ── CANONICAL MATCH — the same question asked differently, or with different values ──────────────────────
-  // The verbatim key above only fires on identical text. Here the question is normalised to its CANONICAL form
-  // (a no-tools completion, ~1s) and matched against the canonical forms programs declared when they were built.
-  // Both sides are then in the same shape, so "…last 12 months?" and "…last 6 months?" become the SAME string
-  // and differ only in a parameter — no similarity threshold to tune. A miss costs one completion and falls
-  // through to the composer unchanged; it can never trap a question here.
+  // ── CANONICAL MATCH — retrieval only ────────────────────────────────────────────────────────────────────
+  // The question is normalised to its CANONICAL form (a no-tools completion, ~1-2s) and matched against the forms
+  // programs declared when they were built. Both sides are then the same shape, so "…last 12 months?" and
+  // "…last 6 months?" are the SAME string differing only in a parameter — no similarity threshold to tune.
+  // This FINDS; it never runs and never ships. The match is handed to the composer, which owns deciding whether
+  // it truly fits, running it, and verifying the output — one place with the conversation in front of it, instead
+  // of two components that can each answer.
   let askedCanonical: string | undefined
+  let canonicalMatch: { programDir: string; params: Record<string, unknown>; canonical: string } | undefined
   if (!explicitEdit) {
     try {
       const canon = await reflex.canonicalize(question, sessionContext(sid))
       askedCanonical = canon.canonical
-      // `unresolved` = the question leans on something the conversation didn't settle. It is NOT self-contained,
-      // so it must not be matched against a context-free program — that is how you answer about the wrong thing.
+      // `unresolved` = the question leans on something the conversation didn't settle, so it is not self-contained
+      // and must not be bound to a context-free program.
       const target = canon.unresolved ? null : findByCanonical(canon.canonical, canon.params)
       if (target) {
-        console.log(`[ica] canonical: "${canon.canonical}" → REUSE ${target.program} ${JSON.stringify(target.bound)}`)
-        if (await reuseProgram(target.program, { ...(target.params ?? {}), ...target.bound }, target.category,
-              { sid, qid, question, norm, t0, nodeId: target.nodeId, reply, channel })) return
-      } else if (canon.unresolved) {
-        console.log(`[ica] canonical: unresolved (${canon.unresolved}) → composer`)
+        canonicalMatch = { programDir: target.program, params: { ...(target.params ?? {}), ...target.bound }, canonical: canon.canonical }
+        console.log(`[ica] canonical: "${canon.canonical}" → match ${target.program} ${JSON.stringify(target.bound)} → composer`)
       } else {
-        console.log(`[ica] canonical: "${canon.canonical}" → no match, composer`)
+        console.log(`[ica] canonical: "${canon.canonical}"${canon.unresolved ? ` unresolved (${canon.unresolved})` : ' — no match'} → composer`)
       }
     } catch (e: any) {
       console.log(`[ica] canonicalize failed (${e?.message ?? e}) — composer`)   // fail-open: never block a question
@@ -727,7 +726,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       // The COMPOSER handles both a fresh question (compose/reuse) AND a MODIFY (edit the current program in
       // place). It escalates only when it genuinely can't — then the analyst takes over.
       const composer = await getComposer(sid)
-      const c = await composer.ask(question, handlers, { qid, candidates: programCandidates, conceptNames, modify: modifyTarget ?? undefined })
+      const c = await composer.ask(question, handlers, { qid, candidates: programCandidates, conceptNames, modify: modifyTarget ?? undefined, canonicalMatch })
       if (c.escalate) { escalateReason = c.escalate.reason; console.log(`[ica] composer → escalate · ${c.escalate.reason}`) }
       else {
         authoredBy = 'composer'
