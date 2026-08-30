@@ -584,6 +584,12 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // OWNER's attached devices only (never another user, never a device that didn't attach). The engine no longer
     // tracks who's watching — that decision moved to the DO.
     const emitLog = (msg: any) => emit({ type: 'log', channel: currentAgent === 'composer' ? 'composer-log' : 'analyst-log' }, { ...msg, qid, sid, agent: currentAgent })
+    // The QUESTION is a unit boundary IN the lane stream — emitted to both lanes up front, keyed by qid. Being
+    // real lane data (not a UI-synthesized marker) it survives replay/reload, and any lane gets its dividers the
+    // same way. The UI merges by id, so its own optimistic marker collapses into this one.
+    for (const channel of ['composer-log', 'analyst-log'])
+      emit({ type: 'log', channel }, A('event', channel === 'composer-log' ? 'composer' : 'analyst',
+        { ev: { kind: 'user', id: qid, text: question, done: true }, qid, sid }))
     const handlers = {
       onCategory: (c: string) => { curCategory = c; emit(reply, A('status', currentAgent, { category: c, sid })) },
       onOutput: (chunk: string) => emitLog({ t: 'analyst:chunk', text: chunk }),   // raw PTY bytes → the terminal surface (own protocol, not a lane frame)

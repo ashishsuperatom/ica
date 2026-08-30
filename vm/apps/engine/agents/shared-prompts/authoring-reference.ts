@@ -67,7 +67,9 @@ const rule = `# Your workspace
 Everything you need to write a program is right here. The contract and the example above give you the shape; the
 seams give you the data — \`./sources\` and \`./find-schema\` show the real sources and their tables and columns,
 \`./query\` and \`./introspect\` look at the data, and \`./find-concept\` finds reusable logic. Build your queries
-from what \`./sources\` shows, so every program runs on real, current sources.`
+from what \`./sources\` shows, so every program runs on real, current sources.
+
+Every value comes from a parameter or a query — dates and times included.`
 
 // The complete authoring surface, as ONE string, to install into a coding agent's system prompt (systemReference).
 // Use this when the caller's base does NOT already carry the authoring MECHANICS (the composer).

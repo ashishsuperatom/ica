@@ -61,10 +61,15 @@ type FeedItem =
 // A ROLLING localStorage copy of an agent-log (last 6 sessions, ≤400 events each) so a RELOAD restores it — the DO
 // deliberately doesn't store this heavy real-time log. Restore on mount only (never clobber live events). Shared by
 // every agent-log view (analyst / composer) so they persist identically.
-function usePersistLog(prefix: string, sessionId: string, events: AgentEvent[], setEvents: (e: AgentEvent[]) => void) {
+function usePersistLog(prefix: string, sessionId: string, events: AgentEvent[], setEvents: React.Dispatch<React.SetStateAction<AgentEvent[]>>) {
   useEffect(() => {
-    if (events.length) return
-    try { const raw = localStorage.getItem(prefix + sessionId); if (raw) setEvents(JSON.parse(raw)) } catch { /* corrupt/oversized */ }
+    // Restore this session's saved log. Decide "is it empty?" from the CURRENT state inside the setter, not from
+    // the `events` captured when this effect was created — that stale closure is why a log sometimes stayed blank
+    // until you asked a question or reopened a chat (the effect saw a non-empty snapshot and bailed).
+    try {
+      const raw = localStorage.getItem(prefix + sessionId)
+      if (raw) { const saved = JSON.parse(raw) as AgentEvent[]; if (saved?.length) setEvents(cur => cur.length ? cur : saved) }
+    } catch { /* corrupt/oversized */ }
   }, [sessionId])   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!events.length) return
@@ -171,15 +176,24 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // and their answers. (The engine separately re-syncs the LIVE terminal + in-flight run on reconnect.)
   // Keys are SCOPED BY PROJECT so switching projects doesn't show another project's chats/feeds/history.
   const SKEY = `sa-sessions:${projectId}`, fkey = (id: string) => `sa-feed:${projectId}:${id}`
-  const loadSessions = (): { id: string; title: string; updatedAt: number }[] => {
-    try { return JSON.parse(localStorage.getItem(SKEY) || '[]') } catch { return [] }
+  const loadSessions = (): { id: string; title: string; createdAt: number }[] => {
+    // Chats already saved before this carried `updatedAt` (which selection kept bumping) — adopt it as the
+    // creation stamp so existing lists keep a sensible order and stop moving from here on.
+    try {
+      const raw = JSON.parse(localStorage.getItem(SKEY) || '[]') as any[]
+      return raw.map(s => ({ id: s.id, title: s.title, createdAt: s.createdAt ?? s.updatedAt ?? 0 }))
+    } catch { return [] }
   }
   const loadFeed = (id: string): FeedItem[] => { try { return JSON.parse(localStorage.getItem(fkey(id)) || '[]') } catch { return [] } }
   const [sessions, setSessions] = useState(loadSessions)
   const [proj, setProj] = useState<{ id?: string; name?: string } | null>(null)   // read-only project info from the ProjectDO (welcome)
   const newId = () => (crypto.randomUUID?.() ?? Math.random().toString(36).slice(2))
   const readSid = () => (location.pathname.match(/^\/c\/([A-Za-z0-9_-]+)/)?.[1] ?? '')
-  const [sessionId, setSessionId] = useState<string>(() => readSid() || newId())
+  // The session id comes from the URL (/c/<id>). Opening an agent tab directly (/composer, /analyst, /modeler) has
+  // no /c/<id>, so falling straight to newId() would mint a FRESH session — and every per-session store (the logs,
+  // the feed) would look up a key that has never existed and come back empty. Fall back to the most recent saved
+  // session first, so a cold load on any tab lands on the chat you were actually in.
+  const [sessionId, setSessionId] = useState<string>(() => readSid() || loadSessions()[0]?.id || newId())
   const sidRef = useRef(sessionId); sidRef.current = sessionId
   const vtagCtr = useRef(0)
   // Make sure the CHAT view's URL carries the session id — but don't clobber /analyst or /semantic on load.
@@ -192,8 +206,14 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     localStorage.setItem(fkey(sessionId), JSON.stringify(feed.slice(-100)))
     const title = feed.find(i => i.type === 'user-msg')?.text?.slice(0, 60) || 'New chat'
     setSessions(prev => {
-      const rest = prev.filter(s => s.id !== sessionId)
-      const next = [{ id: sessionId, title, updatedAt: Date.now() }, ...rest].slice(0, 50)
+      // Order is CREATION order and nothing else. (This used to unshift the session to the front on every feed
+      // change — and selecting a chat loads its feed, so merely clicking a chat reshuffled the list.) createdAt is
+      // stamped once and never rewritten; the title can change, the position cannot.
+      const existing = prev.find(s => s.id === sessionId)
+      const createdAt = existing?.createdAt ?? Date.now()
+      const next = [{ id: sessionId, title, createdAt }, ...prev.filter(s => s.id !== sessionId)]
+        .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))   // newest chat on top, stable
+        .slice(0, 50)
       localStorage.setItem(SKEY, JSON.stringify(next))
       return next
     })
@@ -341,11 +361,19 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           // no agent name here — a new lane needs zero new handlers. (The raw-terminal byte stream keeps its own
           // `analyst:chunk` type below; the answer/narration are a different, user-facing protocol.)
           const verb = msg.t.slice(6)
+          // LANE SCOPE. The composer is SESSION-scoped — the engine runs one per chat (composersBySession) — while
+          // the analyst and modeller are PROJECT-scoped singletons. So a composer frame belongs to exactly one chat:
+          // drop it unless it's this chat's, otherwise a second chat's composer streams into the view you're on.
+          if (msg.lane === 'composer' && msg.sid && msg.sid !== sidRef.current) return
           const setEvents = msg.lane === 'composer' ? setCoEvents : msg.lane === 'modeler' ? setMoEvents : setAnEvents
           if (verb === 'event') {
             setEvents(evs => mergeEvent(evs, { ...msg.ev, agent: msg.lane }))   // merge by id → a streaming block updates in place
           } else if (verb === 'events') {
-            setEvents(msg.events ?? [])                                          // reconnect: full replay (replace)
+            // Replay repopulates an EMPTY log after a reload — it must never overwrite a log we already have.
+            // The replay carries the harness transcript, which has no question boundaries, so replacing a live
+            // log would delete the UI-synthesized [data-qlog] dividers (and with them the Shift+Arrow anchors).
+            // The composer never gets a replay, which is why only the analyst lost its dividers.
+            setEvents(evs => evs.length ? evs : (msg.events ?? []))
           } else if (verb === 'hello') {
             // A lane announces its render capabilities. Only the analyst has a raw PTY terminal today → wire the
             // Terminal toggle. (label/hue/interactive/controls ride along for a later fully-declarative sidebar.)
@@ -596,7 +624,9 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     scroll()   // pin the new (now last) question to the top of the viewport
     setAnQuestion(text); setAnAnswer(null); setAnCategory(''); setAnStatus('Classifying…'); setAnBusy(true); setAnEnriching(null); setAnProgress(''); setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []
     anXtermRef.current?.clear()   // claude PTY: fresh TUI per question (harmless when the analyst is codex)
-    const qMarker: AgentEvent = { kind: 'user', text }   // QUESTION-boundary divider (+ Shift+Arrow anchor) — put it in BOTH agent-log views
+    // QUESTION-boundary divider (+ Shift+Arrow anchor) — shown optimistically in BOTH agent-log views. Keyed by
+    // qid so the engine's authoritative boundary event (same id) MERGES with it rather than adding a second one.
+    const qMarker: AgentEvent = { kind: 'user', id: qid, text, done: true }
     setAnEvents(l => [...l, qMarker]); setCoEvents(l => [...l, qMarker])
     setAskTick(t => t + 1)   // force each log view to jump to this newest question, even if it was scrolled up (see useLogNav jumpKey)
     setStatus('')
@@ -812,6 +842,9 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
       {agentLane({
         key: 'composer', label: 'Composer', events: coEvents, logRef: coLogRef, busy,
         desc: 'The composer reuses a program or composes concepts — escalating to the analyst when needed.',
+        // SESSION-scoped lane: there's one composer per chat, so name the chat this log belongs to — without it
+        // the view silently changes meaning when you switch chats.
+        headerExtras: <span style={s.catChip} title="This composer belongs to this chat">{sessions.find(se => se.id === sessionId)?.title || 'New chat'}</span>,
       })}
 
       {/* Analyst — the from-scratch agent. Adds the category chip, live status, a raw-terminal toggle, session

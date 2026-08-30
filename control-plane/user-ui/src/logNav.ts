@@ -11,6 +11,17 @@ import { useEffect, useRef, type RefObject } from 'react'
 
 const NEAR_BOTTOM = 240  // px from the bottom still counts as "following"
 
+// Which element ACTUALLY scrolls: the log panel itself, else the nearest scrollable ancestor (null ⇒ the window).
+// Every effect below must agree on this — assuming the panel scrolls makes scrollTop a silent no-op, which is how
+// "it doesn't start at the bottom" and "it doesn't follow new content" both happen.
+function scrollerOf(el: HTMLElement | null): HTMLElement | null {
+  let sc: HTMLElement | null = el
+  while (sc && !(sc.scrollHeight > sc.clientHeight + 4 && /(auto|scroll)/.test(getComputedStyle(sc).overflowY))) sc = sc.parentElement
+  return sc
+}
+const toBottom = (sc: HTMLElement | null) =>
+  sc ? (sc.scrollTop = sc.scrollHeight) : window.scrollTo(0, document.documentElement.scrollHeight)
+
 function isTyping(el: Element | null): boolean {
   if (!el) return false
   const t = el as HTMLElement
@@ -27,11 +38,15 @@ export function useLogNav(ref: RefObject<HTMLElement | null>, active: boolean, c
 
   // Track whether we're near the bottom, so auto-follow only fires when the user hasn't scrolled up.
   useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const onScroll = () => { pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM }
-    el.addEventListener('scroll', onScroll, { passive: true })
-    return () => el.removeEventListener('scroll', onScroll)
+    const sc = scrollerOf(ref.current)
+    const target: HTMLElement | Window = sc ?? window
+    const onScroll = () => {
+      pinned.current = sc
+        ? sc.scrollHeight - sc.scrollTop - sc.clientHeight < NEAR_BOTTOM
+        : document.documentElement.scrollHeight - window.scrollY - window.innerHeight < NEAR_BOTTOM
+    }
+    target.addEventListener('scroll', onScroll, { passive: true })
+    return () => target.removeEventListener('scroll', onScroll)
   }, [ref, active])
 
   // FORCE to the bottom when the view OPENS (active) or a NEW question is asked (jumpKey) — pin repeatedly and
@@ -40,7 +55,7 @@ export function useLogNav(ref: RefObject<HTMLElement | null>, active: boolean, c
   useEffect(() => {
     if (!active) return
     pinned.current = true
-    const pin = () => { const el = ref.current; if (el) el.scrollTop = el.scrollHeight }
+    const pin = () => toBottom(scrollerOf(ref.current))
     pin()
     const raf = requestAnimationFrame(pin)
     const ts = [0, 30, 80, 160, 300, 500, 800, 1200].map(d => window.setTimeout(pin, d))
@@ -52,7 +67,7 @@ export function useLogNav(ref: RefObject<HTMLElement | null>, active: boolean, c
   // never fires), which is why the live question didn't follow. rAF fires the next frame regardless.
   useEffect(() => {
     if (!active || !pinned.current) return
-    const raf = requestAnimationFrame(() => { const el = ref.current; if (el) el.scrollTop = el.scrollHeight })
+    const raf = requestAnimationFrame(() => toBottom(scrollerOf(ref.current)))
     return () => cancelAnimationFrame(raf)
   }, [content, active, ref])
 
@@ -65,7 +80,6 @@ export function useLogNav(ref: RefObject<HTMLElement | null>, active: boolean, c
       const el = ref.current
       if (!el) return
       const qs = Array.from(el.querySelectorAll('[data-qlog]')) as HTMLElement[]   // the question dividers, THIS log only
-      if (!qs.length) return
       e.preventDefault()
       // These are WATCH views (any input is incidental), so Shift+Arrow is ALWAYS question-nav — blur a focused
       // field so the caret isn't fighting the scroll. (We also listen in the CAPTURE phase below so a focused
@@ -83,6 +97,10 @@ export function useLogNav(ref: RefObject<HTMLElement | null>, active: boolean, c
       const scTop  = sc ? sc.scrollTop : window.scrollY
       const maxTop = sc ? sc.scrollHeight - sc.clientHeight : document.documentElement.scrollHeight - window.innerHeight
       const goTo = (top: number) => (sc ? sc.scrollTo({ top, behavior: 'smooth' }) : window.scrollTo({ top, behavior: 'smooth' }))
+      // NO question dividers in this log → nothing to step between, so go ALL THE WAY (top or bottom). The unit of
+      // movement is a question; without questions there are no intermediate stops, and paging block-by-block is
+      // just noise.
+      if (!qs.length) { goTo(dir > 0 ? maxTop : 0); return }
       // Anchor on the question nearest the top, step exactly one in the pressed direction (so it can only move the
       // way you pressed), and park it just below the top so its answer reads underneath.
       const MARGIN = 14
