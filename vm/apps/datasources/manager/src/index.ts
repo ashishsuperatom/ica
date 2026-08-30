@@ -22,7 +22,7 @@ import { rewriteSql } from './sqlglot-pool.js'
 // rows. The trusted raw path (grounding/introspect, {raw:true}) skips the rewrite and both caps.
 // 1000 is the HARD ceiling, enforced here so it holds whatever a program asks for. The SOFT limit (100 rows
 // unless the question asks for more) lives in the authoring rule — the agent chooses that; this only backstops it.
-const MAX_ROWS = Number(process.env.ICA_MAX_ROWS ?? 1000)
+const MAX_ROWS = Number(process.env.ICA_MAX_ROWS ?? 5000)
 const MAX_BYTES = Number(process.env.ICA_MAX_BYTES ?? 8_000_000)
 
 const PORT = Number(process.env.DATASOURCE_PORT ?? process.env.MANAGER_PORT ?? 4000)
