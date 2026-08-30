@@ -67,7 +67,9 @@ const WORKSPACE = `# Your workspace
 Everything you need to write a program is right here. The contract and the example above give you the shape; the
 seams give you the data — \`./sources\` and \`./find-schema\` show the real sources and their tables and columns,
 \`./query\` and \`./introspect\` look at the data, and \`./find-concept\` finds reusable logic. Build your queries
-from what \`./sources\` shows, so every program runs on real, current sources.`
+from what \`./sources\` shows, so every program runs on real, current sources.
+
+List at most 100 rows unless the question asks for more, and say how many there are in total.`
 
 // What we expect from a program WRITER, one named section per expectation. Both program-writing agents (the
 // composer and the analyst) get every section, so an expectation is stated once and never drifts between them.
