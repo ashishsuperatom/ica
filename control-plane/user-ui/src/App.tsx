@@ -759,7 +759,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
 
       {/* Composer view — the composer agent's work (reuse-or-compose, escalate). Its own tab, separate from the
           analyst; per-session (one composer per session). Always mounted so its log persists across view switches. */}
-      <div style={{ display: view === 'composer' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0, height: '100vh', overflow: 'hidden' }}>
+      <div style={{ display: view === 'composer' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
         <div style={s.semHeader}>
           <button onClick={() => navigate('chat')} style={s.backBtn} title="Back to your chat">← Chat</button>
           <span style={{ color: '#bcd0be', fontSize: 13, fontWeight: 600 }}>◇ Composer</span>
@@ -774,7 +774,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
       </div>
 
       {/* Analyst view — always mounted so xterm keeps its buffer; shown when selected. */}
-      <div style={{ display: view === 'analyst' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0, height: '100vh', overflow: 'hidden' }}>
+      <div style={{ display: view === 'analyst' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
         <div style={s.semHeader}>
           <button onClick={() => navigate('chat')} style={s.backBtn} title="Back to your chat">← Chat</button>
           <span style={{ color: '#bcd0be', fontSize: 13, fontWeight: 600 }}>◇ Analyst</span>
