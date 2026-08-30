@@ -23,8 +23,10 @@ export interface VectorIndex {
   upsert(id: string, vec: Float32Array): void
   remove(id: string): void
   has(id: string): boolean
-  // cosine DESC; `keep` (if given) restricts candidates to ids it approves (liveness / kind filter)
-  search(vec: Float32Array, opts: { limit: number; keep?: (id: string) => boolean }): Array<{ id: string; score: number }>
+  // cosine DESC; `keep` (if given) restricts candidates to ids it approves (liveness / kind filter).
+  // `sim` is the cosine similarity itself (0..1) — the only value here that says HOW CLOSE the match is;
+  // `score` just orders the list.
+  search(vec: Float32Array, opts: { limit: number; keep?: (id: string) => boolean }): Array<{ id: string; score: number; sim: number }>
 }
 
 // Reciprocal Rank Fusion — rank-based, so lexical (BM25) and semantic (cosine) never need score calibration.

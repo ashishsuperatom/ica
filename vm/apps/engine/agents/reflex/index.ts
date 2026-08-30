@@ -1,12 +1,12 @@
 // ── Reflex Agent ──────────────────────────────────────────────────────────────
-// The fast FRONT DOOR every question hits first. It has ONE job and answers nothing itself: look at the
-// programs that ALREADY EXIST in the DB (the catalog) and decide —
-//   • a program already computes this question → REUSE it (run it, filling in this question's values), or
-//   • nothing fits → BUILD (hand to the analyst, which always produces a program).
-// The ENGINE hands it the top-K candidate intents that a SEMANTIC search already surfaced (not the whole
-// catalog) — the reflex reads them in plain LANGUAGE and picks reuse/build + where the new node hangs
-// (placement). One prompt in (question + candidates), one JSON out — it never touches data or writes files.
-// (No basis coordinate: retrieval is the semantic index; the reflex reasons over the words.)
+// The cheap TEXT tier in front of the expensive tool tier. It has no tools and answers nothing itself; it does
+// the two jobs that are pure judgment on text, at the two edges of the fast path:
+//   • canonicalize(question) → the question's canonical form + its parameters, so retrieval can match
+//     question-to-question (both sides in the same shape) instead of question-to-program.
+//   • review(question, answer) → did a reused program's answer actually answer the question?
+// It never decides WHAT to build, never picks concepts, never places nodes — those belong to the engine and the
+// composer. A no-tools completion costs ~1s where booting a tool session costs ~40s, which is the whole reason
+// this tier exists: decide before paying for tools, and fall through to the composer whenever it can't.
 //
 // Harness/model default to opencode + deepseek-v4-flash (the 2026-07-31 snapshot on the opencode-go gateway),
 // overridable per-agent from .env (ICA_REFLEX_HARNESS / ICA_REFLEX_MODEL / ICA_REFLEX_PROVIDER) with NO code change.
@@ -17,22 +17,21 @@ import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { createSession, type Harness, type Session } from '../../ica/index.js'
 import { loadPrompt } from '../../prompts.js'
-import type { NodeStore } from '@superatom/node-store'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 // The reflex prompt, via the override layer (volume override for the current image → baked fallback).
-const reflexPrompt = () => loadPrompt(join(__dirname, 'SYSTEM.md'), 'reflex/SYSTEM.md')
+const canonicalPrompt = () => loadPrompt(join(__dirname, 'CANONICAL.md'), 'reflex/CANONICAL.md')
 // The reflex's REVIEW instruction (a second, distinct job: judge a reused program's answer).
 const reviewPrompt = () => loadPrompt(join(__dirname, 'REVIEW.md'), 'reflex/REVIEW.md')
 
-// Reflex is a pure CLASSIFIER — it never uses tools or writes files. This minimal system prompt REPLACES
+// Reflex never uses tools or writes files. This minimal system prompt REPLACES
 // opencode's default coding agent prompt (the per-message SYSTEM.md/REVIEW.md carry the real task), and paired
 // with noTools it strips the whole toolset — no schemas, no tool calls, far fewer tokens.
 const REFLEX_SYS = 'You are a fast classifier. Follow the instructions in each message exactly and reply with ONLY what they ask for — strict JSON when requested, no prose, no code fences. You have NO tools: never read or write files, never run commands.'
 
 /** Deterministic hash of the EFFECTIVE instructions — a prompt (or override) change → fresh session. */
 export async function promptVersion(): Promise<string> {
-  return createHash('sha1').update(reflexPrompt() + reviewPrompt()).digest('hex').slice(0, 12)
+  return createHash('sha1').update(canonicalPrompt() + reviewPrompt()).digest('hex').slice(0, 12)
 }
 
 /** The reflex's verdict on a reused program's answer. */
@@ -51,12 +50,9 @@ function answerDigest(a: any): string {
   })
 }
 
-// A candidate the ENGINE retrieved by semantic search: an existing intent + the program it runs (if any).
-export type Candidate = { intentId: string; question: string; program?: string; params?: any }
-// Where the new question's node hangs: 'root' (a fresh topic) or an existing intentId (a follow-up of it).
-export type Placement = 'root' | string
-// What the reflex needs for placement: the session's first question forces root; else the current intent is context.
-export type RouteCtx = { firstInSession: boolean; currentIntentId?: string; currentQuestion?: string }
+/** A question normalised for matching: the canonical sentence, the values pulled out of it, and whatever the
+ *  conversation could not resolve (present ⇒ do NOT reuse on this; it isn't self-contained yet). */
+export type Canonical = { canonical: string; params: Record<string, unknown>; unresolved?: string }
 
 export interface ReflexOpts {
   cwd: string
@@ -78,20 +74,6 @@ function extractJson(s: string): any {
   throw new Error('unbalanced JSON object in reflex output')
 }
 
-/** The routing decision for one input: reuse an existing program, or build (analyst). The reflex NEVER decides
- * "modify" — editing an answer is deterministic and engine-side (only on an explicit `edit:`/`modify:` prefix). */
-export type Route =
-  | { decision: 'reuse'; intentId: string; program: string; params: Record<string, unknown>; placement: Placement }
-  | { decision: 'build'; adapt?: { program: string }; placement: Placement }   // adapt = a related program the analyst should start from
-
-// Render the retrieved candidates for the prompt: id + its question + the program's param shape, so the agent
-// can reuse one that computes the SAME thing (filling in THIS question's values), or adapt/build.
-function renderCandidates(cands: Candidate[]): string {
-  if (!cands.length) return 'CANDIDATES: none found — nothing to reuse, so BUILD.'
-  return 'CANDIDATES (existing intents most similar to the question; reuse ONLY one that computes the SAME thing, just with different values):\n'
-    + cands.map((c, i) => `${i + 1}. intentId=${c.intentId} · question="${c.question}"${c.program ? ` · params=${JSON.stringify(c.params ?? {})}` : ' · (no program)'}`).join('\n')
-}
-
 export function createReflex(opts: ReflexOpts) {
   const harness: Harness = opts.ica?.harness ?? (process.env.ICA_REFLEX_HARNESS as Harness) ?? 'opencode'
   const model = opts.ica?.model ?? process.env.ICA_REFLEX_MODEL ?? 'deepseek-v4-flash'
@@ -99,18 +81,22 @@ export function createReflex(opts: ReflexOpts) {
   let session: Session | null = null
 
   /**
-   * Question + the top-K semantically-retrieved CANDIDATES + placement context → one JSON judgment. Each call is
-   * a turn on the ONE reused session (stateful). The candidates are the search results (not the whole catalog),
-   * so the reflex reasons over a bounded, relevant set in plain language.
+   * Question (+ the recent conversation, when there is one) → its CANONICAL form and the values in it. Both the
+   * stored question and the asked one go through this, so retrieval compares like with like. Binding falls out of
+   * the same call — the parameters are exactly what canonicalisation had to pull out — so this costs one
+   * completion, not two.
    */
-  async function decide(question: string, candidates: Candidate[], ctx: RouteCtx): Promise<any> {
-    const system = reflexPrompt()   // fresh each turn → an edited override goes live without a restart
+  async function canonicalize(question: string, context?: string): Promise<Canonical> {
+    const system = canonicalPrompt()
     session ??= createSession(harness, { cwd: opts.cwd, model, provider, baseUrl: opts.ica?.baseUrl, noTools: true, system: REFLEX_SYS })
-    const place = ctx.firstInSession
-      ? 'PLACEMENT: this is the FIRST question of the session → placement MUST be "root".'
-      : `PLACEMENT: the user is currently on intent "${ctx.currentQuestion ?? ''}" (id=${ctx.currentIntentId ?? 'root'}). Set placement = "root" for a new topic, or the intentId this question follows from.`
-    const { lastLines } = await session.run(`${system}\n\n---\n${renderCandidates(candidates)}\n\n${place}\n\n---\nQUESTION: ${question}\n\nJSON:`)
-    return extractJson(lastLines)
+    const ctx = context?.trim() ? `RECENT CONVERSATION:\n${context.trim()}\n\n` : ''
+    const { lastLines } = await session.run(`${system}\n\n---\n${ctx}QUESTION: ${question}\n\nJSON:`)
+    const parsed = extractJson(lastLines)
+    return {
+      canonical: typeof parsed?.canonical === 'string' ? parsed.canonical.trim() : question,
+      params: (parsed?.params && typeof parsed.params === 'object') ? parsed.params : {},
+      unresolved: typeof parsed?.unresolved === 'string' && parsed.unresolved.trim() ? parsed.unresolved.trim() : undefined,
+    }
   }
 
   /**
@@ -130,30 +116,10 @@ export function createReflex(opts: ReflexOpts) {
   }
 
   return {
+    canonicalize,
     review,
-    /** Pre-create the session (connect to the warm opencode server) so the first route() has no cold start. */
+    /** Pre-create the session (connect to the warm opencode server) so the first call has no cold start. */
     async warmup() { session ??= createSession(harness, { cwd: opts.cwd, model, provider, baseUrl: opts.ica?.baseUrl, noTools: true, system: REFLEX_SYS }); await session.warmup?.() },
-    /**
-     * Every question goes through here (after the engine's exact-match miss + semantic retrieval). The agent
-     * reads the retrieved CANDIDATES and either picks one to REUSE (its program computes THIS question — just
-     * different values) or routes to BUILD (optionally pointing at a related program to adapt) — plus WHERE the
-     * node hangs (placement). We validate every id against the DB; a stale pick or a bad reuse falls through to
-     * the analyst downstream, so a wrong guess is self-correcting.
-     */
-    async route(store: NodeStore, question: string, candidates: Candidate[], ctx: RouteCtx): Promise<Route> {
-      const d = await decide(question, candidates, ctx)
-      // Placement: first question of a session is always root; otherwise accept a real intentId, else fall to root.
-      const placement: Placement = ctx.firstInSession ? 'root'
-        : (typeof d.placement === 'string' && d.placement !== 'root' && store.getNode(d.placement)) ? d.placement : 'root'
-      if (d.action === 'reuse' && typeof d.reuseId === 'string') {
-        const prog = (store.getNode(d.reuseId)?.props as any)?.program
-        if (prog) return { decision: 'reuse', intentId: d.reuseId, program: prog, params: (d.params && typeof d.params === 'object') ? d.params : {}, placement }
-        // named a stale / programless intent → build instead
-      }
-      let adapt: { program: string } | undefined
-      if (typeof d.adaptId === 'string') { const p = (store.getNode(d.adaptId)?.props as any)?.program; if (p) adapt = { program: p } }
-      return { decision: 'build', adapt, placement }
-    },
     stop() { session?.stop() },
   }
 }

@@ -6,61 +6,41 @@
 //   2. CONCISE — state the rule, trust the model; no piled-on examples. Keep this file SMALL.
 //   3. POSITIVE (what to do, not "never X"), and WHAT + OUTPUT, not HOW (let the agent choose mechanics).
 // Each section is a const with a WHY comment; a section may exist here yet be left out of a SECTIONS array.
-// Two outputs: SYSTEM.md (the reuse/route decision) and REVIEW.md (judging a reused answer). Never hand-edit
-// either .md; edit here.
+// Two outputs: CANONICAL.md (normalising a question into its canonical form + parameters) and REVIEW.md
+// (judging a reused answer). Never hand-edit either .md; edit here.
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { writeMd } from '../render-md.js'
 
 const here = (name: string) => join(fileURLToPath(new URL('.', import.meta.url)), name)
 
-// ── SYSTEM.md — the front-door reuse/build decision ─────────────────────────────────────────────────────
+// ── CANONICAL.md — normalise a question into its canonical form + parameters ────────────────────────────
 
-// WHY: (pre-existing — reason not verified)
-const intro = `# The Reflex Agent — reuse an existing program, or route to build
+// WHY: retrieval matches question-to-question. Comparing a raw question against a stored canonical one puts two
+// different SHAPES side by side, so phrasing and values dominate the comparison. Normalising both sides first is
+// what makes a genuine match look like a match.
+const canonIntro = `# The canonical form of a question
 
-You are a fast front-door. You do NOT answer the question and you do NOT touch any data or tools. You NEVER
-reply to the user yourself — not even to a greeting; that goes to the analyst too. Given the question and a
-short list of CANDIDATE intents (the most similar existing ones, retrieved for you — not the whole catalog),
-make ONE decision:
+You are given a question, and the recent conversation when there is one. Rewrite the question in its canonical
+form: a single, self-contained sentence that states exactly what is being asked, with each value that could
+differ on another asking replaced by a named placeholder — and report those values separately.`
 
-- **REUSE** — a candidate's program already computes THIS question — the SAME thing, only the values differ.
-  Pick it and fill in THIS question's values in that candidate's param shape. The SAME question asked again is
-  always a REUSE (it re-runs against current data). A candidate that answers this only as ONE PART of a
-  broader output is NOT a reuse — BUILD, and point to it as \`adaptId\`.
-- **BUILD** — no candidate computes this question. Route to the analyst (which builds a new program). If a
-  candidate is CLOSE (a good starting point to adapt), name it \`adaptId\`; otherwise omit it.
+// WHY: a canonical form is only useful if the SAME question always canonicalises the same way; and a follow-up
+// only becomes reusable once the conversation's context is resolved INTO the parameters.
+const canonRules = `Write it the way the question would be asked with no conversation around it: resolve anything
+that refers to the conversation ("those", "that one", an ordinal, an implied filter) into the thing itself, so the
+sentence stands alone. Keep the words the question and the data already use. Placeholders are named for what they
+hold, in angle brackets.
 
-There is NO "modify" decision — editing an answer is handled elsewhere (only on an explicit \`edit:\`/\`modify:\`
-prefix) and never reaches you. When in doubt between reuse and build, BUILD — a wrong reuse wastes a round; a
-build is always safe.`
+Report a value for every placeholder you introduce. When the question refers to something you cannot resolve from
+the conversation, say so instead of guessing.`
 
-// WHY: the reflex also places the question's node in the intent graph (root vs follow-up of an existing one).
-const placement = `## Placement — where this question's node hangs
+// WHY: strict JSON so the engine can act on it without parsing prose.
+const canonOutput = `Reply with ONE JSON object and nothing else:
 
-Also say WHERE the new node belongs in the intent graph:
-- \`"root"\` — a self-contained new topic. (The FIRST question of a session is always \`"root"\`.)
-- an existing intentId — when this question is a FOLLOW-UP of one (it depends on, narrows, or continues it),
-  usually the current intent shown to you. Prefer \`root\` unless it clearly follows from another intent.`
+{ "canonical": "<the canonical sentence>", "params": { "<name>": <value> }, "unresolved": "<what you could not resolve, omit when all resolved>" }`
 
-// WHY: the strict output the engine parses.
-const jsonShape = `Respond with STRICT JSON only — no prose, no code fences, no tool calls:
-
-{
-  "action":    "reuse" | "build",
-  "reuseId":   "<intentId of the candidate to reuse — only when action is reuse>",
-  "params":    { "<the chosen candidate program's param keys>": <this question's values> },
-  "adaptId":   "<optional intentId of a CLOSE candidate for the analyst to start from — only when action is build>",
-  "placement": "root" | "<intentId this question follows from>"
-}
-
-\`params\` uses the SAME KEYS as the chosen candidate's params, carrying THIS question's values. Omit \`reuseId\`
-and \`params\` when building; omit \`adaptId\` when nothing is close.`
-
-// WHY: (pre-existing — reason not verified)
-const outro = `Output the JSON and nothing else.`
-
-export const SYSTEM = [intro, placement, jsonShape, outro]
+export const CANONICAL = [canonIntro, canonRules, canonOutput]
 
 // ── REVIEW.md — judging a reused program's answer ───────────────────────────────────────────────────────
 
@@ -90,5 +70,5 @@ else:
 
 export const REVIEW = [reviewIntro, reviewJudge, reviewOutput]
 
-writeMd(here('SYSTEM.md'), SYSTEM)
+writeMd(here('CANONICAL.md'), CANONICAL)
 writeMd(here('REVIEW.md'), REVIEW)
