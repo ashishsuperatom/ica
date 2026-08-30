@@ -19,7 +19,7 @@ const read = (rel: string) => { try { return readFileSync(join(exampleDir, rel),
 
 // The CONTRACT — the exact, whole surface. Mirrors @superatom/scaffold (packages/scaffold/src/unit.ts). If this
 // drifts from the real types, the canonical example below stops compiling under `pnpm authoring:check`.
-const contract = `# The contract — this is the WHOLE interface (you never read engine or scaffold source)
+const contract = `# The contract — the whole interface
 A **unit** is a file with three exports; a **program** is just a unit whose \`meta.concept === 'program'\` that
 composes other units. The kernel injects \`ctx\` — the ONLY capabilities a unit has:
 
@@ -63,11 +63,11 @@ ${read('units/single-metric-view.ts')}
 \`\`\`
 That is the complete pattern. Write your OWN program + units in this shape against your real source.`
 
-const rule = `# Do not go looking
-The contract and the example above are the WHOLE authoring surface. Do NOT read the engine, the scaffold, the
-kernel, node_modules, or OTHER programs to learn how to write one — other programs carry context specific to
-THEIR question and only mislead yours. Read your OWN program only when you are modifying it. Exploring the DATA is
-different and encouraged: \`query\`, \`introspect\`, and \`find-concept\` freely — that is analysis, not machinery.`
+const rule = `# Your workspace
+Everything you need to write a program is right here. The contract and the example above give you the shape; the
+seams give you the data — \`./sources\` and \`./find-schema\` show the real sources and their tables and columns,
+\`./query\` and \`./introspect\` look at the data, and \`./find-concept\` finds reusable logic. Build your queries
+from what \`./sources\` shows, so every program runs on real, current sources.`
 
 // The complete authoring surface, as ONE string, to install into a coding agent's system prompt (systemReference).
 // Use this when the caller's base does NOT already carry the authoring MECHANICS (the composer).

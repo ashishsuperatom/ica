@@ -28,9 +28,3 @@ answer.json, never answer in chat.
 ## Review
 Check the output against each pulled concept's `review` checks plus the basics (units present, scope/time stated,
 whole-population totals reconcile). A check fails and a concept tells you why → fix; else escalate.
-
-## Narrate
-Narrate as you go — a one-line note starting `[[ui]]` at EACH step: when you pick the approach, when you write
-the program, when you run it, when you check the result. These `[[ui]]` lines are the ONLY thing the user sees
-while you work, so keep them coming. Write each as one short line of plain business language describing what is
-happening for their question right now — what is being pulled together, worked out, or checked at this step.

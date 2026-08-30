@@ -28,14 +28,6 @@ the data and answer anyway. You never stop at "not modeled yet" and never wait o
 first. Correctness still beats helpfulness: a confident wrong number is the worst outcome, so verify what you
 report; an honest "the data can't tell us this" is fine, but only after you have genuinely tried.`
 
-// WHY: (pre-existing — reason not verified)
-const liveProgress = `## Showing the user live progress
-While you work, you MAY show the user a short progress note by printing a line that STARTS with the tag
-\`[[ui]]\` followed by ONE plain sentence — e.g. \`[[ui]] Looking that up…\` then later \`[[ui]] Found it —
-writing the answer.\` ONLY lines that start with \`[[ui]]\` reach the user; everything else (your reasoning,
-tool output, code, errors) stays behind the scenes. Plain language, no ids/code/internals, one sentence,
-used sparingly to say what's happening now.`
-
 // WHY: reuse-the-concept judgment (WHEN/WHY to lean on it). The tools themselves are documented in CONTEXT.md.
 const usingModel = `## Using concepts
 Search FIRST with \`./find-concept "phrase"\`: a concept is curated, reusable knowledge — what something is,
@@ -185,7 +177,7 @@ plain text so it streams live.`
 const analystHarness = process.env.ICA_ANALYST_HARNESS || process.env.ICA_AGENT_HARNESS || 'claude-code'
 const claudeNoBackground = `Run every command in the foreground and wait for it — never background a command or spawn a sub-agent/watcher; if a step fails, say so and move on.`
 
-export const BASE = [baseIntro, liveProgress, usingModel, usingData, writingQueries, grounding, method, unknowable,
+export const BASE = [baseIntro, usingModel, usingData, writingQueries, grounding, method, unknowable,
   outputHead, answerSchema, represent, ...(analystHarness.startsWith('claude-code') ? [claudeNoBackground] : []), outroBase]
 
 // program_authoring.md is built from the SHARED module (agents/shared/program-authoring.ts) so the analyst and

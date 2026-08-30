@@ -617,6 +617,9 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // post-processing below. Skip for a MODIFY (the composer doesn't edit). On escalation → the analyst (System 3).
     let authoredBy: 'composer' | 'analyst' = 'analyst'
     let escalateReason: string | undefined   // the composer's note on WHY it escalated — handed to the analyst as a non-authoritative hint
+    // The narrator is ALWAYS-ON: it turns whichever agent is working (composer first, then the analyst on
+    // escalation) into the live progress the user follows. The agents themselves write nothing user-facing.
+    startNarrator()
     {
       // The COMPOSER handles both a fresh question (compose/reuse) AND a MODIFY (edit the current program in
       // place). It escalates only when it genuinely can't — then the analyst takes over.
@@ -631,7 +634,6 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     }
     if (!r) {   // composer escalated → the analyst (System 3) handles it (build or modify)
       currentAgent = 'analyst'
-      startNarrator()   // the narrator runs ONLY for the analyst phase (the composer narrated itself)
       emit(reply, { t: 'analyst:progress', text: 'Handing off to the analyst for deeper analysis…', sid, agent: 'analyst' })
       const askP = analyst.ask(question, handlers, { qid, conceptNames, reason: escalateReason, modify: modifyTarget ?? undefined })
       askP.catch(() => {})   // if we abandon it on timeout, don't leak an unhandled rejection
