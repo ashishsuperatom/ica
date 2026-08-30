@@ -5,6 +5,8 @@
 // guess). The engine runs the program it points at and stamps authoredBy.by='composer'.
 import './generate-system.js'   // FIRST: (re)writes SYSTEM.md from generate-system.ts before it's read below
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
+import { AUTHORING_REFERENCE } from '../shared-prompts/authoring-reference.js'
 import { loadPrompt } from '../../prompts.js'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -46,20 +48,32 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
   const model = opts.ica?.model ?? process.env.ICA_COMPOSER_MODEL ?? 'deepseek-v4-flash'
   const provider = opts.ica?.provider ?? process.env.ICA_COMPOSER_PROVIDER ?? 'opencode-go'
   const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl })
-  const session = createSession(harness, { cwd, model, provider, baseUrl: opts.ica?.baseUrl })
+  // The composer's WHOLE instruction — its role + the authoritative authoring reference (contract + example +
+  // mechanics) + the per-project data CONTEXT — installed into the agent's system prompt via systemReference.
+  // The agent then never reads a file to learn how to write a program or what the data is. CONTEXT.md is written
+  // into the workspace by prepareWorkspace; we fold its text in here.
+  const context = (() => { try { return readFileSync(join(cwd, 'CONTEXT.md'), 'utf8') } catch { return '' } })()
+  const systemReference = [sysFile(), AUTHORING_REFERENCE, context].filter(Boolean).join('\n\n')
+  const session = createSession(harness, { cwd, model, provider, baseUrl: opts.ica?.baseUrl, systemReference })
+  // If the harness put the reference in-context (opencode `system`), we DON'T tell the agent to read files.
+  // If it fell back to 'file' (a harness that can't inject), we keep the legacy read-preamble + write the file.
+  const inContext = session.referencePlacement === 'in-context'
 
-  const preamble =
-    'Read ./CONTEXT.md FIRST (the tools + seams), then ./composer/COMPOSER.md (your instructions) — follow it ' +
-    'exactly. Search concepts with `./find-concept "<phrase>"` and compose them into a PROGRAM the engine runs. ' +
-    'If the concepts don\'t fully cover it, explore the data yourself (`./query`/`./introspect`) and analyse — ' +
-    'escalate to the analyst when it\'s a hard problem or you can\'t figure it out (many composers share one analyst).'
+  const preamble = inContext
+    ? 'Compose a PROGRAM the engine runs to answer the question. Your role, the program contract + example, and the ' +
+      'data context are already in your instructions. Search concepts with `./find-concept "<phrase>"`; explore the ' +
+      'data with `./query`/`./introspect`; escalate to the analyst on a hard problem (many composers share one analyst).'
+    : 'Read ./CONTEXT.md FIRST (the tools + seams), then ./composer/COMPOSER.md (your instructions) — follow it ' +
+      'exactly. Search concepts with `./find-concept "<phrase>"` and compose them into a PROGRAM the engine runs. ' +
+      'If the concepts don\'t fully cover it, explore the data yourself (`./query`/`./introspect`) and analyse — ' +
+      'escalate to the analyst when it\'s a hard problem or you can\'t figure it out (many composers share one analyst).'
 
   return {
     cwd,
     session,
     async ask(question, handlers, o = {}) {
       const t0 = Date.now()
-      await writeFile(join(cwd, 'composer/COMPOSER.md'), fullSystem())
+      if (!inContext) await writeFile(join(cwd, 'composer/COMPOSER.md'), fullSystem())   // fallback only: the agent reads it
       const dir = o.qid ? join(cwd, 'out', o.qid) : join(cwd, 'out')
       await mkdir(dir, { recursive: true })
       const builtRel    = o.qid ? `./out/${o.qid}/built.json`    : `./out/built.json`
