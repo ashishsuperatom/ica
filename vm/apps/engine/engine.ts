@@ -21,7 +21,7 @@ import { randomUUID } from 'node:crypto'
 import { execProgram } from './exec-program.js'
 import { createSession, prepareWorkspace, type Session, type Harness, type RunHandlers } from './ica/index.js'
 import { createReflex } from './agents/reflex/index.js'
-import { createNarrator, capResultData } from './agents/narrator/index.js'
+import { createNarrator, capResultData, stripCode } from './agents/narrator/index.js'
 import { createAnalyst, promptVersion as analystPromptVersion } from './agents/analyst/index.js'
 import { createComposer, type Composer } from './agents/composer/index.js'
 import { createConnector, promptVersion as connectorPromptVersion } from './agents/connector/index.js'
@@ -588,7 +588,9 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         // Feed the narrator the SIGNAL only: the analyst's own PROSE (already business-ish), plus the OUTPUT of a
         // genuine DATA RUN (a tsx/node query). NEVER feed raw command text or file-read/plumbing output (cat/ls/
         // grep… = machinery) — it's noise, and it tempts the model to echo tool-call syntax (the Teams DSML leak).
-        if (ev.kind === 'message' && ev.text?.trim()) narrationBuf.push(ev.text.trim().slice(0, 600))
+        // The analyst's prose often EMBEDS program source/diffs while it explains its code — strip that out so the
+        // narrator never even sees machinery (defence in depth with isCleanBeat on the output side).
+        if (ev.kind === 'message' && ev.text?.trim()) { const prose = stripCode(ev.text); if (prose) narrationBuf.push(prose.slice(0, 600)) }
         else if (ev.kind === 'command' && ev.output?.trim() && /\b(tsx|node|run\.mjs|query\.mjs|program\.ts)\b/.test(ev.command || '')) narrationBuf.push(('RESULT: ' + capResultData(ev.output)).slice(0, 1800))
       },
     }
