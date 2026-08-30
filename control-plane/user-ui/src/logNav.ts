@@ -9,7 +9,6 @@
 // One hook instance per log (call it once per agent log view) — they don't share state.
 import { useEffect, useRef, type RefObject } from 'react'
 
-const COOLDOWN = 800     // ms: rapid repeat presses chain off the cursor instead of re-deriving position
 const NEAR_BOTTOM = 240  // px from the bottom still counts as "following"
 
 function isTyping(el: Element | null): boolean {
@@ -25,7 +24,6 @@ function isTyping(el: Element | null): boolean {
 // even if they'd scrolled up. Streaming of the SAME question follows only when already near the bottom.
 export function useLogNav(ref: RefObject<HTMLElement | null>, active: boolean, content: unknown, jumpKey?: unknown) {
   const pinned = useRef(true)   // is the log scrolled near the bottom? (so new content follows, but reading-up doesn't yank)
-  const cursor = useRef<{ idx: number; at: number }>({ idx: -1, at: 0 })
 
   // Track whether we're near the bottom, so auto-follow only fires when the user hasn't scrolled up.
   useEffect(() => {
@@ -74,15 +72,17 @@ export function useLogNav(ref: RefObject<HTMLElement | null>, active: boolean, c
       if (!qs.length) return
       e.preventDefault()
 
-      // Which divider are we on? Chain off the cursor for rapid presses; else the last divider at/above the top.
-      const now = Date.now()
-      let cur: number
-      if (cursor.current.idx >= 0 && now - cursor.current.at < COOLDOWN) cur = cursor.current.idx
-      else { const ctop = el.getBoundingClientRect().top; cur = 0; qs.forEach((q, i) => { if (q.getBoundingClientRect().top - ctop <= 12) cur = i }) }
-
-      const idx = Math.max(0, Math.min(qs.length - 1, cur + dir))
-      qs[idx].scrollIntoView({ behavior: 'smooth', block: 'start' })   // bring the divider to the top, animated like the chat
-      cursor.current = { idx, at: now }
+      // Move RELATIVE TO THE CURRENT VIEW — never by a running index. A running index drifts out of sync near the
+      // ends (the last questions can't scroll to the top, so the index runs ahead of the real scroll and then
+      // Shift+Down snaps back UP). Instead, anchor on where the questions actually are right now: measure each
+      // question's offset below the container top, then Down = the first one below the top line, Up = the last one
+      // above it. This can only ever move in the pressed direction.
+      const ctop = el.getBoundingClientRect().top
+      const tops = qs.map(q => q.getBoundingClientRect().top - ctop)
+      let idx: number
+      if (dir > 0) { idx = tops.findIndex(t => t > 18); if (idx < 0) idx = qs.length - 1 }   // first question below the top
+      else { idx = 0; tops.forEach((t, i) => { if (t < 6) idx = i }) }                        // last question at/above the top
+      qs[idx].scrollIntoView({ behavior: 'smooth', block: 'start' })   // bring it to the top, animated like the chat
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

@@ -117,20 +117,41 @@ function ThinkingLine() {
 }
 
 export function CodexEventLog({ events, busy, claude }: { events: AgentEvent[]; busy?: boolean; claude?: boolean }) {
+  // ACCORDION: click a question to collapse everything under it (until the next question), so you can scan across
+  // questions. State is the set of collapsed question ids.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const toggle = (qid: string) => setCollapsed(s => { const n = new Set(s); n.has(qid) ? n.delete(qid) : n.add(qid); return n })
+
   const last = events[events.length - 1]
   const streaming = !!last && last.done === false && (last.kind === 'command' || last.kind === 'message' || last.kind === 'reasoning')
   const thinking = !!busy && !streaming   // busy but nothing actively streaming ⇒ reasoning between steps
   if (!events.length && !thinking) return null
-  return <div>
-    {/* A coloured left rail per agent — composer (blue), analyst (amber), narrator (grey) — so you can see at a
-        glance who produced each line, all interleaved in time order. */}
-    {events.map((e, i) => {
-      const c = e.agent === 'composer' ? '#4a90d9' : e.agent === 'analyst' ? '#c08a2b' : e.agent === 'narrator' ? '#a99f8c' : ''
-      // A 'user' block is a QUESTION boundary → anchor it for Shift+Arrow nav. Uses its OWN attribute (data-qlog),
-      // NOT data-role="q", so it never collides with the CHAT feed's nav (which scans document-wide for that).
-      if (e.kind === 'user') return <div key={e.id ?? `turn${i}`} data-qlog="" style={{ scrollMarginTop: 10 }}><CodexEvent e={e} claude={claude} /></div>
-      return <div key={e.id ?? `turn${i}`} style={c ? { borderLeft: `3px solid ${c}`, paddingLeft: 10 } : undefined}><CodexEvent e={e} claude={claude} /></div>
-    })}
-    {thinking && <ThinkingLine />}
-  </div>
+
+  // A coloured left rail per agent — composer (blue), analyst (amber), narrator (grey). Walk the events tracking
+  // which QUESTION each belongs to; a collapsed question hides its steps.
+  let curQ = ''                          // id of the question the following events belong to
+  const rows: React.ReactElement[] = []
+  events.forEach((e, i) => {
+    const c = e.agent === 'composer' ? '#4a90d9' : e.agent === 'analyst' ? '#c08a2b' : e.agent === 'narrator' ? '#a99f8c' : ''
+    // A 'user' block is a QUESTION boundary → anchor it for Shift+Arrow nav (data-qlog, distinct from the chat
+    // feed's data-role="q") AND make it the accordion header (click to collapse/expand its steps).
+    if (e.kind === 'user') {
+      const qid = e.id ?? `turn${i}`
+      curQ = qid
+      const isCol = collapsed.has(qid)
+      rows.push(
+        <div key={qid} data-qlog="" style={{ scrollMarginTop: 10, cursor: 'pointer' }} onClick={() => toggle(qid)}
+             title={isCol ? 'Click to expand this question' : 'Click to collapse this question'}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+            <span style={{ color: '#b0a48c', fontSize: 12, userSelect: 'none', paddingTop: 2 }}>{isCol ? '▸' : '▾'}</span>
+            <div style={{ flex: 1, minWidth: 0 }}><CodexEvent e={e} claude={claude} /></div>
+          </div>
+        </div>,
+      )
+      return
+    }
+    if (curQ && collapsed.has(curQ)) return   // this step's question is collapsed → hide it
+    rows.push(<div key={e.id ?? `turn${i}`} style={c ? { borderLeft: `3px solid ${c}`, paddingLeft: 10 } : undefined}><CodexEvent e={e} claude={claude} /></div>)
+  })
+  return <div>{rows}{thinking && <ThinkingLine />}</div>
 }
