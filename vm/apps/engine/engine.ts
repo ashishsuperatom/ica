@@ -35,6 +35,7 @@ import { createInspector } from './inspect.js'
 import { NodeStore, ROOT, ensureRoot, intentId, SqliteVecIndex, indexText, backfillMissing, hybridSearch } from '@superatom/node-store'
 import { bgeEmbedder } from './embed.js'
 import { createSpanFirer } from './retrieval/span-firing.js'
+import type { EngineMsgType } from '../../../clients/protocol.js'
 import { buildDatasourceIndex } from './datasource-index/build.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -348,7 +349,11 @@ let lastAnswer: any = null, lastTiming: any = null, lastCategory = ''
 // fine: a flushed tick simply re-arms the client watchdog, so a flap no longer trips a false "engine went silent".)
 let outbox: string[] = []
 const MAX_OUTBOX = 1000
-const emit = (to: any, msg: unknown) => {
+// Every frame the engine puts on the wire goes through here, and `t` must be a type the protocol knows about.
+// clients/protocol.ts calls itself the single canonical description of this wire, but nothing imported it, so it
+// drifted: it still described analyst:status/stream/category/progress/done long after those became agent:*.
+// A type-only import costs nothing at runtime and turns that drift into a compile error.
+const emit = (to: any, msg: { t: EngineMsgType; [k: string]: unknown }) => {
   const frame = JSON.stringify({ to, payload: msg })
   if (hub?.readyState === WebSocket.OPEN) hub.send(frame)
   else { outbox.push(frame); if (outbox.length > MAX_OUTBOX) outbox.shift() }
@@ -370,7 +375,8 @@ function flushOutbox() {
 // gaps/enriching) are DIFFERENT protocols and keep their names. `lane` is the routing key: asker-direct frames
 // (status/hello/events) carry no channel, so the UI needs `lane` to place them. Implementation is free to move;
 // this shape is the contract.
-const A = (verb: string, lane: string, body: Record<string, any> = {}) => ({ t: `agent:${verb}`, lane, ...body })
+const A = (verb: 'hello' | 'event' | 'events' | 'status' | 'chunk', lane: string, body: Record<string, any> = {}) =>
+  ({ t: `agent:${verb}` as EngineMsgType, lane, ...body })
 
 // The recent conversation, for canonicalisation only — enough to resolve what a follow-up points AT ("those",
 // "the third one"). Compact on purpose: the last couple of turns, each one question + a short answer digest.

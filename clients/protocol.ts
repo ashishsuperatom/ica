@@ -51,21 +51,56 @@ export type ClientPayload = Analyse | { t: Exclude<ClientMsgType, 'analyse'>; [k
 // ── Engine → client payloads ──────────────────────────────────────────────────
 // `t` values a surface may RECEIVE. A surface can ignore any it doesn't render.
 export type EngineMsgType =
-  | 'tick' | 'welcome' | 'machine:waking' | 'error'
-  | 'analyst:status' | 'analyst:stream' | 'analyst:category' | 'analyst:chunk'
-  | 'analyst:progress' | 'analyst:gap' | 'analyst:enriching' | 'analyst:enriched'
-  | 'analyst:answer' | 'analyst:done'
+  | 'tick' | 'welcome' | 'machine:waking' | 'error' | 'done'
+  // THE ANSWER and its story — what every surface renders, however differently.
+  | 'analyst:answer' | 'narration' | 'followups'
+  // AGENT LANES — one vocabulary for every agent (composer, analyst, concept-modeller, and any later one),
+  // keyed by `lane`. This replaced a per-agent set (analyst:status/stream/category/progress/done,
+  // concept:event/status/stream): a new agent needed new message types, and every consumer had to learn them.
+  | 'agent:hello'      // the lane announces itself: label, stream kind, whether it has a raw terminal
+  | 'agent:event'      // one work atom (ev.kind: command|message|reasoning|file|turn|user|segment|narration)
+  | 'agent:events'     // full replay after a reconnect
+  | 'agent:status'     // live state: text | category | progress | state:'done'
+  | 'agent:chunk'      // raw output for a lane that has no structured events
+  // The analyst's raw TERMINAL bytes. Deliberately NOT a lane frame: it is a byte stream for an xterm, shared
+  // with the admin console, and only sent to a client that asked for it (term:attach).
+  | 'analyst:chunk'
+  // DATASOURCE INDEX build, driven from the admin console.
+  | 'index:status' | 'index:line' | 'index:done'
+  // Session/suggestion plumbing.
   | 'sessions:res' | 'session:load:res' | 'suggestions:res' | 'suggestions'
+  | 'sync:res' | 'answer:res' | 'session:reset' | 'inspect:res' | 'program:forget:res'
+  // ADMIN CONSOLE surfaces. Same wire, different reader — the console watches agents that never face an end
+  // user (the connector wiring up a source, the grounding build) and can open a raw terminal into one.
+  | 'grounding:status' | 'grounding:done'
+  | 'connector:status' | 'connector:done' | 'term:stream'
+  // …and their work streams, still in the OLDER per-agent shape (`<agent>:event|events|stream|chunk`) that the
+  // lane frames above replaced everywhere else. The user-facing surfaces moved to agent:*; these three admin
+  // consoles did not, so the same idea is carried twice. Migrating them is a mechanical change (emit the lane
+  // frame, filter by `lane` in each console) and is worth doing — recorded here rather than left implicit.
+  | 'analyst:event' | 'analyst:events' | 'analyst:stream'
+  | 'connector:chunk' | 'connector:event' | 'connector:events' | 'connector:stream'
+  | 'grounding:chunk' | 'grounding:event' | 'grounding:events' | 'grounding:stream'
+  // CHAT-CHANNEL delivery (Teams/Slack): the answer is addressed to a channel, not to a live socket.
+  | 'channel:answer' | 'channel:narration'
 
 // The ones a headless surface actually acts on; others share the generic shape.
 export type EnginePayload =
   | { t: 'tick' }                                                     // liveness ping
   | { t: 'machine:waking' }                                           // engine is suspended, coming up
-  | { t: 'analyst:status'; text: string }                            // interim progress line
   | { t: 'analyst:answer'; category?: string; answer: Answer; timing?: unknown; sid?: string; qid?: string; reused?: boolean }
-  | { t: 'analyst:done' }
+  | { t: 'narration'; text: string; qid?: string; sid?: string }      // a business-language beat while work happens
+  | { t: 'followups'; items: string[]; qid?: string; sid?: string }
+  | { t: 'agent:status'; lane: Lane; text?: string; category?: string; progress?: string; state?: 'done'; question?: string; sid?: string }
+  | { t: 'agent:event'; lane: Lane; ev: unknown; qid?: string; sid?: string }
+  | { t: 'agent:events'; lane: Lane; events: unknown[]; replace?: boolean }
+  | { t: 'agent:hello'; lane: Lane; label?: string; streamKind?: 'events' | 'pty'; pty?: boolean; interactive?: boolean }
   | { t: 'error'; message: string; source?: string }
-  | { t: EngineMsgType; [k: string]: unknown }                       // catch-all for stream/session variants
+  | { t: EngineMsgType; [k: string]: unknown }                       // catch-all for the plumbing variants
+
+// WHICH AGENT a lane frame belongs to. A lane is one agent's observable work stream; `lane` is the routing key
+// so a consumer places the frame without knowing anything about the agent behind it.
+export type Lane = 'composer' | 'analyst' | 'modeler' | (string & {})
 
 // ── The Answer (the JSON every surface renders, each in its own way) ──────────
 export type AnswerStatus = 'answered' | 'unknowable' | 'cannot_answer' | 'error'
