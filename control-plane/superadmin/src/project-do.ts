@@ -125,6 +125,12 @@ export class ProjectDO extends DurableObject<Env> {
     await this.ctx.storage.put('projectName', name)
   }
 
+  // WHICH ORG owns this project. Written once at creation, then read locally — it is how the admin console
+  // knows where to send an assignment (only the org may hand out access), without the project reading the org.
+  private async orgId(): Promise<string | null> {
+    return (await this.ctx.storage.get<string>('orgId')) ?? null
+  }
+
   // Grace for a briefly-absent EXTERNAL engine before a routed message errors "offline": only if it
   // heartbeated within ENGINE_RECENT_MS (so we don't stall a genuinely-off box), wait up to ENGINE_GRACE_MS.
   private static ENGINE_RECENT_MS = 30_000
@@ -829,7 +835,7 @@ export class ProjectDO extends DurableObject<Env> {
 
   // ── REST handlers ──────────────────────────────────────────────────────────
 
-  private getStatus(): Response {
+  private async getStatus(): Promise<Response> {
     const machineRows = [...this.ctx.storage.sql.exec(
       'SELECT machine_id, status, last_heartbeat, idle_phase, provider FROM fly_machine'
     )]
@@ -844,7 +850,8 @@ export class ProjectDO extends DurableObject<Env> {
       idleMin: Math.round((Date.now() - m.last_heartbeat) / 60000),
     } : null
     const connections = [...this.connByWs.values()].map(c => ({ wsId: c.wsId, type: c.type }))
-    return Response.json({ machine, connections, provider })
+    // name + orgId travel with status so the admin console can label the project and know where assignments go.
+    return Response.json({ machine, connections, provider, name: await this.projectName(), orgId: await this.orgId() })
   }
 
   // Write-only project info from the admin/org side (create + rename). ProjectDO = source of truth for the
@@ -856,8 +863,9 @@ export class ProjectDO extends DurableObject<Env> {
   }
 
   private async setup(req: Request): Promise<Response> {
-    const { apiKey, provider, name } = await req.json() as any
+    const { apiKey, provider, name, orgId } = await req.json() as any
     await this.setName(name)                                   // seed the name at creation (source of truth, no org guess)
+    if (typeof orgId === 'string' && orgId) await this.ctx.storage.put('orgId', orgId)
     const prov = (provider === 'external' || provider === 'local') ? 'external' : 'fly'
     // Replace any existing key
     this.ctx.storage.sql.exec('DELETE FROM api_key')

@@ -199,6 +199,10 @@ export default {
       // `org-admins` is the ORG writing into the project (who administers it). It is reached DO-to-DO only —
       // exposing it here would let a project admin mirror themselves in as one.
       if (subPath === 'org-admins') return new Response('not found', { status: 404 })
+      // Granting or revoking someone's access goes through the ORG (POST /api/assignments), which checks they are
+      // a member of it first — a project may not invent its own users. Reading the list here is fine.
+      if (subPath === 'access' && request.method !== 'GET')
+        return new Response('use /api/assignments — access is granted by the organisation', { status: 405 })
       // status: ONE generalized machine view — the backend fills it per provider
       // (Fly state for managed, hub-connection liveness for local/EC2). No separate
       // provider-specific endpoint; the frontend just renders status.machine.
@@ -371,7 +375,7 @@ async function handleCreateProject(request: Request, env: Env, url: URL, ctx: Ex
   await projStub.fetch(new Request('http://do/setup', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ apiKey, provider, name: reqName }),   // ProjectDO is source of truth for the name
+    body: JSON.stringify({ apiKey, provider, name: reqName, orgId }),   // ProjectDO is source of truth for the name; orgId says who owns it
   }))
 
   // External compute: no Fly machine to create. Return the connection info so the user
@@ -589,5 +593,7 @@ async function handleProjectStatus(projectId: string, env: Env): Promise<Respons
     machine.state = s.machine?.status ?? 'creating'   // Fly machine not created yet
   }
 
-  return Response.json({ provider, machine, connections })
+  // Pass through what the project knows about itself — its name, and which org owns it. The admin console needs
+  // the org to route an assignment (only the org grants access), and /pro/<id> has no org in the URL.
+  return Response.json({ provider, machine, connections, name: s.name ?? null, orgId: s.orgId ?? null })
 }

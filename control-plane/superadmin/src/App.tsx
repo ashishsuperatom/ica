@@ -568,6 +568,95 @@ function ChannelsPanel({ projectId, api }: { projectId: string; api: (path: stri
   )
 }
 
+// ── Access (per project) ────────────────────────────────────────────────────
+// Who may use THIS project, and as what. People are created once in the organisation; here they are assigned.
+// The assignment call goes to the ORG (it is the one that knows who belongs to it) and the org writes into this
+// project — so a project can never invent a user of its own. Roles are the project's own.
+function AccessPanel({ projectId, orgId, api, token }: { projectId: string; orgId: string | null; api: ReturnType<typeof useApi>; token: string | null }) {
+  const [access, setAccess] = useState<any[]>([])
+  const [roles, setRoles] = useState<any[]>([])
+  const [orgUsers, setOrgUsers] = useState<any[]>([])
+  const [err, setErr] = useState('')
+  const orgApi = useApi(token, orgId)
+
+  const load = useCallback(async () => {
+    if (!token) return
+    api(`/projects/${projectId}/access`).then(r => r.json()).then(d => setAccess(d.access ?? [])).catch(() => {})
+    api(`/projects/${projectId}/roles`).then(r => r.json()).then(d => setRoles(d.roles ?? [])).catch(() => {})
+    if (orgId) orgApi('/users').then(r => r.json()).then(d => setOrgUsers(Array.isArray(d) ? d : (d.users ?? []))).catch(() => {})
+  }, [api, orgApi, projectId, orgId, token])
+  useEffect(() => { load() }, [load])
+
+  const assigned = new Set(access.map(a => String(a.email).toLowerCase()))
+  const available = orgUsers.filter(u => !assigned.has(String(u.email).toLowerCase()))
+
+  async function assign(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault(); setErr('')
+    const fd = new FormData(e.currentTarget)
+    const r = await orgApi('/assignments', { method: 'POST', body: JSON.stringify({ projectId, email: fd.get('email'), roleId: fd.get('roleId') }) })
+    if (!r.ok) { setErr(await r.text()); return }
+    ;(e.target as HTMLFormElement).reset(); load()
+  }
+  async function unassign(email: string) {
+    setErr('')
+    const r = await orgApi('/assignments', { method: 'DELETE', body: JSON.stringify({ projectId, email }) })
+    if (!r.ok) { setErr(await r.text()); return }
+    load()
+  }
+
+  return (
+    <>
+      {err && <div className="card" style={{ padding: 10, borderColor: 'var(--bad)', marginBottom: 12 }}>{err}</div>}
+      {!orgId && <div className="muted" style={{ marginBottom: 12 }}>Loading the organisation…</div>}
+
+      <form onSubmit={assign} className="row" style={{ marginBottom: 18, gap: 8 }}>
+        <select name="email" required className="input" style={{ flex: 1 }} disabled={!available.length}>
+          {available.length
+            ? available.map(u => <option key={u.email} value={u.email}>{u.email}{u.name ? ` — ${u.name}` : ''}</option>)
+            : <option value="">everyone in the organisation already has access</option>}
+        </select>
+        <select name="roleId" className="input">
+          {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+        </select>
+        <button className="btn" disabled={!available.length || !orgId}>Give access</button>
+      </form>
+
+      <div className="grid" style={{ gridTemplateColumns: '1fr' }}>
+        {access.map(a => (
+          <div key={a.email} className="card" style={{ padding: 12 }}>
+            <div className="between">
+              <div>
+                <strong>{a.email}</strong>
+                <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
+                  {a.role_name ?? a.role_id}
+                  {a.source === 'org-admin' && ' · administers the organisation'}
+                </div>
+              </div>
+              {a.source === 'org-admin'
+                ? <span className="muted" style={{ fontSize: 12 }}>managed by the organisation</span>
+                : <button className="btn danger" onClick={() => unassign(a.email)}>Remove</button>}
+            </div>
+          </div>
+        ))}
+      </div>
+      {access.length === 0 && <div className="empty">Nobody has been given access yet.</div>}
+
+      <h3 style={{ marginTop: 26 }}>Roles</h3>
+      <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>
+        Roles belong to this project — the same person can hold a different one elsewhere.
+      </div>
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))' }}>
+        {roles.map(r => (
+          <div key={r.id} className="card" style={{ padding: 12 }}>
+            <div className="between"><strong>{r.name}</strong>{r.builtin && <span className="muted" style={{ fontSize: 11 }}>built-in</span>}</div>
+            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{(r.permissions ?? []).join(', ') || '—'}</div>
+          </div>
+        ))}
+      </div>
+    </>
+  )
+}
+
 function ProjectDetailPage() {
   const token = useAuth(); const params = useParams<{ orgId: string; projectId: string; '*': string }>()
   const { orgId, projectId } = params
@@ -581,7 +670,10 @@ function ProjectDetailPage() {
   // It lives in the URL PATH (the route splat), so a reload / shared link lands on the same view — e.g.
   // /admin/org/<org>/projects/<id>/semantic or /inspector/db-kinds. setView navigates instead of setState.
   const view = params['*'] || 'overview'
-  const setView = (v: string) => navigate(`/org/${orgId}/projects/${projectId}${v && v !== 'overview' ? '/' + v : ''}`)
+  // Two ways in: /org/<org>/projects/<id>/… (from the org) and /pro/<id>/… (straight to the project). Keep the
+  // reader on whichever they used, so a shared link and the back button behave.
+  const base = orgId ? `/org/${orgId}/projects/${projectId}` : `/pro/${projectId}`
+  const setView = (v: string) => navigate(`${base}${v && v !== 'overview' ? '/' + v : ''}`)
   const [openGroup, setOpenGroup] = useState<string | null>(null)
   // The org + project NAMES (the sidebar/crumbs/header show real names, not just truncated ids).
   const [meta, setMeta] = useState<{ project?: string; org?: string }>({})
@@ -677,6 +769,7 @@ function ProjectDetailPage() {
       { id: 'analyst', label: 'Analyst' },
       { id: 'grounding', label: 'Grounding' },
     ] },
+    { id: 'access', label: 'Access', icon: I.grid },
     { id: 'channels', label: 'Channels', icon: I.chat },
     { id: 'settings', label: 'Settings', icon: I.grid },
   ]
@@ -873,6 +966,7 @@ function ProjectDetailPage() {
         </div>
       )}
 
+      {view === 'access' && <AccessPanel projectId={projectId!} orgId={orgId ?? status?.orgId ?? null} api={api} token={token} />}
       {view === 'channels' && <ChannelsPanel projectId={projectId!} api={api} />}
     </Shell>
   )
