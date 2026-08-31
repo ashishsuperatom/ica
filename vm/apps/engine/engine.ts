@@ -538,6 +538,10 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // failed → fall through to rebuild via the analyst
   }
 
+  // FIRST SIGN OF LIFE, before any model call. Canonicalisation alone is ~2s and retrieval follows it, so the
+  // asker used to sit in silence until the analyst slot was warm — the turn felt stalled before it had begun.
+  if (reply) emit(reply, { t: 'narration', text: 'Looking into your question…', qid, sid })
+
   // ── CANONICAL MATCH — retrieval only ────────────────────────────────────────────────────────────────────
   // The question is normalised to its CANONICAL form (a no-tools completion, ~1-2s) and matched against the forms
   // programs declared when they were built. Both sides are then the same shape, so "…last 12 months?" and
@@ -646,7 +650,6 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     emit(reply, A('hello', 'analyst', { label: 'Analyst', hue: '#c08a2b', streamKind: analyst.session.events ? 'events' : (analyst.session.kind ?? 'events'), pty: analyst.session.kind === 'pty', interactive: true, controls: ['terminal', 'compact', 'new'], sid }))
     // Kick off the narration: an immediate opener, then every few seconds translate whatever the analyst just did
     // into ONE business line. Overlap-guarded (skip a tick if the previous narrate is still running).
-    if (reply) emit(reply, { t: 'narration', text: 'Looking into your question…', qid, sid })   // opener beat
     // The COMPOSER narrates ITSELF (its [[ui]] lines become beats — see onNarration). The separate deepseek
     // NARRATOR is spun up ONLY when we escalate to the analyst (claude-code has no clean self-narration): it
     // translates the analyst's raw activity into business beats. startNarrator() begins that loop on demand.
