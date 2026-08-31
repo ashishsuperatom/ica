@@ -95,6 +95,12 @@ export class OrgDO extends DurableObject<Env> {
     if (request.method === 'GET'  && path === '/users')        return this.getUsers()
     if (request.method === 'POST' && path === '/users')        return this.createUser(request)
     if (request.method === 'POST' && path === '/user-by-clerk-id') return this.userByClerkId(request)
+    if (request.method === 'DELETE' && path === '/users')      return this.deleteUser(request)
+    // MEMBERSHIP — who in this org may reach which project. The org owns the master list; the project holds its
+    // own copy (ProjectDO /access), so the two are written together and never drift.
+    if (request.method === 'GET'  && path === '/assignments')  return this.listAssignments(url)
+    if (request.method === 'POST' && path === '/assignments')  return this.assign(request)
+    if (request.method === 'DELETE' && path === '/assignments') return this.unassign(request)
     if (request.method === 'GET'  && path.startsWith('/conversations')) return this.getConversations(url)
     if (request.method === 'POST' && path === '/messages')     return this.addMessage(request)
 
@@ -214,12 +220,67 @@ export class OrgDO extends DurableObject<Env> {
 
   private async createUser(req: Request): Promise<Response> {
     const { email, name, role } = await req.json() as any
+    const addr = String(email ?? '').trim().toLowerCase()
+    if (!addr) return Response.json({ error: 'email required' }, { status: 400 })
+    // Lower-cased on the way in: this address IS the identity every later check matches on.
+    const [existing] = this.ctx.storage.sql.exec('SELECT id FROM users WHERE email = ?', addr) as any[]
+    if (existing) {
+      if (role) this.ctx.storage.sql.exec('UPDATE users SET role = ? WHERE id = ?', role, existing.id)
+      return Response.json({ id: existing.id, existed: true })
+    }
     const id = crypto.randomUUID()
     this.ctx.storage.sql.exec(
       'INSERT INTO users (id, email, name, role) VALUES (?, ?, ?, ?)',
-      id, email, name ?? '', role ?? 'user'
+      id, addr, name ?? '', role ?? 'user'
     )
     return Response.json({ id }, { status: 201 })
+  }
+
+  // Removing someone from the ORG removes them from every project in it — otherwise a revoked person keeps
+  // project access through the copy the project holds.
+  private async deleteUser(req: Request): Promise<Response> {
+    const { email } = await req.json() as any
+    const addr = String(email ?? '').trim().toLowerCase()
+    if (!addr) return Response.json({ error: 'email required' }, { status: 400 })
+    const projects = [...this.ctx.storage.sql.exec('SELECT id FROM projects WHERE deleted = 0')] as any[]
+    for (const p of projects) await this.projectAccess(p.id, 'DELETE', { email: addr })
+    this.ctx.storage.sql.exec('DELETE FROM users WHERE email = ?', addr)
+    return Response.json({ ok: true, email: addr, removedFromProjects: projects.length })
+  }
+
+  // ── Assignment: org user → project ─────────────────────────────────────────
+  // The write goes to the PROJECT (its own access table). The org list stays the source of who exists; the
+  // project decides what they can do there, with its own roles.
+  private async projectAccess(projectId: string, method: 'GET' | 'POST' | 'DELETE', body?: unknown): Promise<any> {
+    const id = this.env.PROJECT.idFromName(`proj:${projectId}`)   // same naming everywhere — a bare id addresses a DIFFERENT DO
+    const stub = this.env.PROJECT.get(id)
+    const res = await stub.fetch(new Request('https://do/access', {
+      method, ...(body ? { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } } : {}),
+    }))
+    return res.json().catch(() => ({}))
+  }
+
+  private async listAssignments(url: URL): Promise<Response> {
+    const projectId = url.searchParams.get('projectId')
+    if (!projectId) return Response.json({ error: 'projectId required' }, { status: 400 })
+    return Response.json(await this.projectAccess(projectId, 'GET'))
+  }
+
+  private async assign(req: Request): Promise<Response> {
+    const { projectId, email, roleId } = await req.json() as any
+    const addr = String(email ?? '').trim().toLowerCase()
+    if (!projectId || !addr) return Response.json({ error: 'projectId and email required' }, { status: 400 })
+    // Only someone already in the org can be assigned — a project cannot invent its own users.
+    const [u] = this.ctx.storage.sql.exec('SELECT id FROM users WHERE email = ?', addr) as any[]
+    if (!u) return Response.json({ error: 'no such user in this organisation — add them to the org first' }, { status: 400 })
+    return Response.json(await this.projectAccess(projectId, 'POST', { email: addr, roleId: roleId ?? 'member' }))
+  }
+
+  private async unassign(req: Request): Promise<Response> {
+    const { projectId, email } = await req.json() as any
+    const addr = String(email ?? '').trim().toLowerCase()
+    if (!projectId || !addr) return Response.json({ error: 'projectId and email required' }, { status: 400 })
+    return Response.json(await this.projectAccess(projectId, 'DELETE', { email: addr }))
   }
 
   // ── Conversations + messages ─────────────────────────────────────────────────

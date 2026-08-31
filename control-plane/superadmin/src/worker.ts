@@ -38,6 +38,63 @@ async function requireSuperadmin(request: Request, env: Env): Promise<JwtClaims 
   return claims && claims.role === 'superadmin' ? claims : null
 }
 
+// ── Authorization ───────────────────────────────────────────────────────────
+// Three levels, checked HERE rather than in a UI: a hidden button is not access control, and the admin SPA is
+// served to anyone who asks for it.
+//   superadmin  — the hard-coded address in auth/tokens.ts. Everything.
+//   org admin   — users.role='admin' in that org's OrgDO. Its org and every project in it.
+//   member      — has a row in that project's own access table. That project only, as its role says.
+// Each answer needs one DO read, so it stays cheap enough to run on every request.
+
+async function claimsOf(request: Request, env: Env): Promise<JwtClaims | null> {
+  const m = (request.headers.get('authorization') || '').match(/^Bearer\s+(.+)$/i)
+  return m ? await verifyJwt(m[1], env.JWT_SECRET) : null
+}
+
+/** The caller's standing in ONE project: superadmin / org admin / its own access row / nothing. */
+async function projectAccessOf(request: Request, env: Env, projectId: string):
+    Promise<{ ok: boolean; level: 'superadmin' | 'org-admin' | 'member' | 'none'; email: string; roleId?: string; permissions?: string[] }> {
+  const claims = await claimsOf(request, env)
+  const email = (claims?.email || '').toLowerCase()
+  if (!claims) return { ok: false, level: 'none', email: '' }
+  if (claims.role === 'superadmin') return { ok: true, level: 'superadmin', email }
+
+  // Org admin? The project tells us which org owns it; that org's user list says whether this person runs it.
+  const proj = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
+  const info: any = await proj.fetch('https://do/status').then(r => r.json()).catch(() => ({}))
+  const orgId = info?.project?.orgId ?? info?.orgId
+  if (orgId && email) {
+    const org = env.ORG.get(env.ORG.idFromName(orgId))
+    const users: any = await org.fetch('https://do/users').then(r => r.json()).catch(() => ({}))
+    const me = (users?.users ?? users ?? []).find?.((u: any) => String(u.email || '').toLowerCase() === email)
+    if (me && me.role === 'admin') return { ok: true, level: 'org-admin', email }
+  }
+
+  // Otherwise: does this project itself grant them anything?
+  if (email) {
+    const acc: any = await proj.fetch('https://do/access').then(r => r.json()).catch(() => ({}))
+    const row = (acc?.access ?? []).find((a: any) => String(a.email || '').toLowerCase() === email)
+    if (row) return { ok: true, level: 'member', email, roleId: row.role_id, permissions: row.permissions ?? [] }
+  }
+  return { ok: false, level: 'none', email }
+}
+
+/** The caller's standing in ONE org: superadmin, its admin, or a member of at least one of its projects. */
+async function orgAccessOf(request: Request, env: Env, orgId: string):
+    Promise<{ ok: boolean; level: 'superadmin' | 'org-admin' | 'member' | 'none'; email: string }> {
+  const claims = await claimsOf(request, env)
+  const email = (claims?.email || '').toLowerCase()
+  if (!claims) return { ok: false, level: 'none', email: '' }
+  if (claims.role === 'superadmin') return { ok: true, level: 'superadmin', email }
+  if (!email) return { ok: false, level: 'none', email }
+  const org = env.ORG.get(env.ORG.idFromName(orgId))
+  const users: any = await org.fetch('https://do/users').then(r => r.json()).catch(() => ({}))
+  const me = (users?.users ?? users ?? []).find?.((u: any) => String(u.email || '').toLowerCase() === email)
+  if (me?.role === 'admin') return { ok: true, level: 'org-admin', email }
+  if (me) return { ok: true, level: 'member', email }
+  return { ok: false, level: 'none', email }
+}
+
 // ── Token exchange: Clerk session → our JWT ─────────────────────────────────
 // Strategy: decode the Clerk JWT to extract the session id, then validate the
 // session against Clerk's REST API. If Clerk says it's valid, we trust it and
@@ -131,13 +188,18 @@ export default {
 
     const projMatch = path.match(/^\/api\/projects\/([^/]+)\/(.+)/)
     if (projMatch) {
-      // Admin/provisioning surface — require a valid superadmin JWT (the admin SPA sends it as
-      // `Authorization: Bearer <jwt>`). Previously these forwarded to the DO with NO auth, so anyone
-      // could reset a project's API key via /setup, add members, mutate the machine, etc.
-      if (!(await requireSuperadmin(request, env))) return new Response('unauthorized', { status: 401 })
-
       const projectId = projMatch[1]
       const subPath   = projMatch[2]
+      // Who is asking, and what may they do HERE? Superadmin and the owning org's admin get the provisioning
+      // surface; a project member gets read-only. Enforced at this boundary, so hiding a button in the SPA is
+      // never what protects anything.
+      const acc = await projectAccessOf(request, env, projectId)
+      if (!acc.ok) return new Response('unauthorized', { status: 401 })
+      // Anything that changes the project — machine lifecycle, access, roles, datasources, keys, tokens — is for
+      // whoever administers it. A member may look, not provision.
+      const PROVISIONING = /^(machine|service-token|access|roles|datasources|members|verify-conn|info|fly|suspend|resume|stop|delete)/
+      const isProvisioning = request.method !== 'GET' || PROVISIONING.test(subPath)
+      if (isProvisioning && acc.level === 'member') return new Response('forbidden', { status: 403 })
       // `setup` overwrites the project's API key. It's an INTERNAL provisioning primitive — only ever
       // called by handleCreateProject via a direct DO stub — so it must not be reachable publicly.
       if (subPath === 'setup') return new Response('not found', { status: 404 })
@@ -153,6 +215,7 @@ export default {
       // member. Superadmin-only (guarded above). This is the headless equivalent of the Clerk→JWT web login.
       if (subPath === 'service-token') {
         if (request.method !== 'POST') return new Response('method not allowed', { status: 405 })
+        if (acc.level !== 'superadmin') return new Response('forbidden', { status: 403 })   // mints long-lived credentials
         const secret = env.JWT_SECRET
         if (!secret) return new Response('server misconfigured: JWT_SECRET not set', { status: 500 })
         const body = await request.json().catch(() => ({})) as { channel?: string; ttlDays?: number }
@@ -219,16 +282,39 @@ export default {
     }
 
     // ── Global routes (organizations) ──────────────────────────────────────
+    // CREATING or DELETING an organisation is superadmin's alone. LISTING is allowed to anyone signed in, but
+    // the result is filtered to the orgs they actually belong to — otherwise the org list is a directory of
+    // every customer on the platform. This forwarded to the DO with NO auth before.
     if (path.startsWith('/api/organizations')) {
+      const claims = await claimsOf(request, env)
+      if (!claims) return new Response('unauthorized', { status: 401 })
+      const isSuper = claims.role === 'superadmin'
+      if (request.method !== 'GET' && !isSuper) return new Response('forbidden', { status: 403 })
       const stub = env.GLOBAL.get(env.GLOBAL.idFromName('global'))
-      return stub.fetch(new Request(
-        request.url.replace(/^(https?:\/\/[^/]+)\/api/, '$1'), request
-      ))
+      const res = await stub.fetch(new Request(request.url.replace(/^(https?:\/\/[^/]+)\/api/, '$1'), request))
+      if (isSuper || request.method !== 'GET') return res
+      // Filter to the caller's own orgs — one membership check per org, and only their own comes back.
+      const body: any = await res.json().catch(() => null)
+      const list: any[] = body?.organizations ?? body?.orgs ?? (Array.isArray(body) ? body : [])
+      const mine: any[] = []
+      for (const o of list) {
+        const id = o?.id ?? o?.orgId
+        if (!id) continue
+        const a = await orgAccessOf(request, env, String(id))
+        if (a.ok) mine.push({ ...o, myLevel: a.level })
+      }
+      return Response.json(Array.isArray(body) ? mine : { ...body, organizations: mine })
     }
 
     // ── Org routes (admin WS + REST API) ──────────────────────────────────────
     if (path.startsWith('/api/') || (isWs && path === '/ws')) {
       const orgId = request.headers.get('x-org-id') ?? 'default'
+      // x-org-id comes from the CLIENT, so it is a request, not a fact: without this check anyone could name any
+      // org and read or mutate it. Membership decides. Changing an org (users, assignments, projects) is for its
+      // admin; a plain member may read.
+      const oa = await orgAccessOf(request, env, orgId)
+      if (!oa.ok) return new Response('unauthorized', { status: 401 })
+      if (request.method !== 'GET' && oa.level === 'member') return new Response('forbidden', { status: 403 })
       const doUrl = request.url.replace(/^(https?:\/\/[^/]+)\/api/, '$1')
       let doReq: Request
       if (request.method === 'GET' || request.method === 'HEAD') {
