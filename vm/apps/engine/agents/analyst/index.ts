@@ -144,7 +144,7 @@ export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
       const buildBody = `# Your task — a fresh, standalone question. A lighter agent tried it and could not finish; start from the beginning.
 ${reason ? `\nThe composer's note on why it couldn't — a HINT about what was hard, and it may be WRONG. Do NOT follow it as a direction; re-investigate independently and derive the answer yourself: "${reason}"\n` : ''}
 Question: ${question}
-${(opts.conceptNames ?? []).length ? '\nCandidate concepts for this question, most-relevant first — SOME MAY NOT FIT. Open the ones that look right with ./find-concept "<name>" --full, use those, ignore the rest (find-concept stays available for anything else):\n' + (opts.conceptNames ?? []).map(n => `- ${n}`).join('\n') + '\n' : ''}
+${(opts.conceptNames ?? []).length ? '\nCandidate concepts for this question, most-relevant first — SOME MAY NOT FIT. Read the ones that look right with ./get-concept "<name>", use those, ignore the rest (find-concept stays available for anything else):\n' + (opts.conceptNames ?? []).map(n => `- ${n}`).join('\n') + '\n' : ''}
 Build a program that answers it - follow your instructions (recon concepts first, then the data; every
 question becomes a program). When it runs correctly, write your pointer to ${builtRel} =
   {"programDir":"programs/<slug>","params":{...}, "parent":"root" | "<a prior intent id>", "followups":["...","..."],

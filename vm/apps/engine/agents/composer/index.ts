@@ -92,11 +92,11 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
           cands.slice(0, 6).map(c => `- ${c.program} — "${c.question}" (${c.score.toFixed(2)})`).join('\n')
         : 'No existing program matched this question.'
       // Concept NAMES the engine surfaced for this question (names only — no method, so it can't bias you toward
-      // a formula you might not use). Open the ones that look right with `./find-concept "<name>" --full`. This is
+      // a formula you might not use). Read the ones that look right with `./get-concept "<name>"`. This is
       // a head-start, NOT the whole set — find-concept is still live for anything else you need.
       const conceptBlock = (o.conceptNames ?? []).length
         ? '\nCandidate concepts for this question, most-relevant first — SOME MAY NOT FIT. Open the ones that look' +
-          ' right with `./find-concept "<name>" --full`, use those, ignore the rest (find-concept stays available):\n' +
+          ' right with `./get-concept "<name>"`, use those, ignore the rest (find-concept stays available):\n' +
           (o.conceptNames ?? []).map(n => `- ${n}`).join('\n') + '\n'
         // No concept fits this question → nothing to compose from. That is fresh analysis, which is the analyst's
         // job — escalate immediately rather than attempt discovery yourself.
@@ -134,7 +134,7 @@ Start here: run it with those values (\`tsx run.mjs ${o.canonicalMatch.programDi
    A program built for a RELATED-but-different question is NOT a fit — "amount billed" is not "net spend", a header
    total is not a line-level breakdown, gross is not net. Do NOT adapt or force-fit a program; when it is not an
    EXACT match, go to step 2 and build from the CONCEPTS — never from a not-quite program. Accuracy over reuse.
-2. Otherwise COMPOSE from the concepts (\`./find-concept "<phrase>" --full\` for a concept's runnable query). If they
+2. Otherwise COMPOSE from the concepts (\`./find-concept "<phrase>"\` for names, \`./get-concept "<name>"\` for one concept's runnable query). If they
    don't fully cover it, do the work yourself — \`./query\`/\`./introspect\` the data, analyse, write the units +
    program. Run it (\`tsx run.mjs programs/<slug>/program.ts '<json>'\`), verify against the review checks, write
    ${builtRel} = {"programDir":"programs/<slug>","params":{…},"canonicalQuestions":["…"]}. The engine runs it — do

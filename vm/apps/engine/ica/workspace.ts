@@ -301,15 +301,32 @@ export const raw = store
   // path and runs its driver with tsx (node can't resolve node-store's .ts imports; tsx can), so `./find-*`
   // returns clean JSON on the FIRST try from ANY directory. The agent never reads the .mjs source.
   const drivers: Record<string, string> = {
-    'find-concept': `// Concepts. "<phrase or name>" → matching concept NAMES + how many concepts exist IN TOTAL (so you know if the library is empty vs just no match). Add --full for a matched concept's method (compute/rules/query). A query is required.
+    'find-concept': `// Concepts. "<phrase>" → the NAMES of matching concepts (+ how many exist in total, so an empty library is distinguishable from no match). Read one with \`./get-concept "<exact name>"\`. A query is required.
 import { findConcept, listConcepts } from ${JSON.stringify(join(dir, 'concepts', 'find.mjs'))}
-const args = process.argv.slice(2)
-const full = args.includes('--full')
-const q = args.filter(a => a !== '--full').join(' ').trim()
+const q = process.argv.slice(2).join(' ').trim()
 const total = listConcepts().length
 if (!q) { console.log(JSON.stringify(total ? { total, note: total + ' concepts in the library — pass a phrase to search' } : { total: 0, note: 'the concept library is empty (0 concepts)' })); process.exit(0) }
-const matches = findConcept(q)
-console.log(JSON.stringify({ matched: full ? matches : matches.map(c => c.name), of: total, note: total === 0 ? 'the concept library is empty (0 of 0)' : (matches.length + ' matched of ' + total + ' concepts') }, null, 2))
+const matched = findConcept(q).map(c => c.name)
+console.log(JSON.stringify({ matched, of: total, note: total === 0 ? 'the concept library is empty (0 of 0)' : (matched.length + ' matched of ' + total + ' concepts') + (matched.length ? ' — read one with ./get-concept "<name>"' : '') }, null, 2))
+`,
+    'get-concept': `// ONE concept, in full guide form: "<exact name>" (as listed by ./find-concept). Returns the guide only — what it is, its rules, where the data lives, how to compute it, how to present it.
+import { findConcept, listConcepts } from ${JSON.stringify(join(dir, 'concepts', 'find.mjs'))}
+const name = process.argv.slice(2).join(' ').trim()
+if (!name) { console.log(JSON.stringify({ error: 'a concept name is required — list them with ./find-concept "<phrase>"' })); process.exit(0) }
+const norm = (x) => String(x || '').toLowerCase().replace(/\\s+/g, ' ').trim()
+const hit = findConcept(name, 50).find(c => norm(c.name) === norm(name))
+if (!hit) {
+  const near = findConcept(name, 5).map(c => c.name)
+  console.log(JSON.stringify({ error: 'no concept by that exact name', didYouMean: near, note: 'names come from ./find-concept' }, null, 2))
+  process.exit(0)
+}
+// The GUIDE fields only. Retrieval metadata (aliases), audit trail (evidence, provenance, verifiedAt) and
+// versioning are what got this concept FOUND and TRUSTED — they are not instructions for writing a program,
+// so they stay out of the caller's context.
+const KEEP = ['name', 'value', 'status', 'rules', 'requires', 'supersedes', 'dataSource', 'find', 'compute', 'present', 'review', 'source', 'grain', 'keying', 'time', 'measures', 'dimensions', 'parameters']
+const out = {}
+for (const k of KEEP) if (hit[k] !== undefined) out[k] = hit[k]
+console.log(JSON.stringify(out, null, 2))
 `,
     'find-schema': `// Datasource index. "<term>" = matching fields across ALL sources (SOURCE.CONTAINER.FIELD : type). Search by field/table name, by type (date/number), or by what a column MEANS. --source <S> filters to one source; --full adds PK/nullable/references.
 import { NodeStore, searchDataSource } from '@superatom/node-store'
@@ -382,7 +399,8 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
   // Each tool is SELF-DOCUMENTING: `<tool> --help` prints how to use it (args/subcommands) — so the agent
   // never needs to read the .mjs to learn what to pass, and never sees the implementation.
   const usages: Record<string, string> = {
-    'find-concept': 'find-concept "<phrase or name>" [--full]   → matching concept NAMES; add --full for a matched concept method. A query is required.',
+    'find-concept': 'find-concept "<phrase>"   → the NAMES of matching concepts. A query is required. Read one with get-concept.',
+    'get-concept':  'get-concept "<exact name>"   → ONE concept\'s guide: what it is, its rules, where the data lives, how to compute and present it',
     'find-schema':  'find-schema "<term>" [--source <SOURCE>] [--full]   → search ALL datasources for a field/table by name, type, or description (SOURCE.TABLE.COLUMN : type); --source filters to one; --full adds PK/nullable/references',
     'find-program': 'find-program "<question>" [--full]   → programs that answered a similar question (question/program/category); add --full for the saved params',
     'sources':      'sources   → every data source with its kind + dialect (JSON)',

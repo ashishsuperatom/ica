@@ -13,7 +13,7 @@ the concept genuinely IS an entity or a measure.
 
 A concept answers something a USER would ASK — a business quantity or idea (revenue, headcount, vendor spend), named the way they say it. The query mechanics you discover on the way (a dialect quirk, a BUILTIN, a join trick) belong in `rules` on the concept they serve; they are never a concept of their own.
 
-A concept's world is the BUSINESS and the DATA SOURCE it comes from: the source, its tables and columns, and the rules for computing the quantity. It reads the same wherever it is used, so it holds nothing about the system that stores or runs it.
+A concept's world is the BUSINESS and the DATA SOURCE it comes from: the source, its tables and columns, and the rules for computing the quantity.
 
 Write with `concept(name, props, meta)`. `meta = { changedBy: 'consolidator', reason: '<why this change>' }`.
 `props`:
