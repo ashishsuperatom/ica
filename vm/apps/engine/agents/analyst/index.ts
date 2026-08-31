@@ -73,6 +73,7 @@ export interface AskOpts {
   // source of truth), so we never pass a stale answer string around.
   modify?: { programDir: string; prevQuestion?: string }
   conceptNames?: string[] // concept NAMES the engine surfaced for this question (names only — open with find-concept for the method)
+  resolvedQuestion?: string   // the question with what it refers to written in (a follow-up made self-contained)
   reason?: string         // the composer's escalation note — a NON-authoritative hint of what was hard (the analyst re-derives from scratch)
 }
 
@@ -143,7 +144,7 @@ export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
       const reason = opts.reason
       const buildBody = `# Your task — a fresh, standalone question. A lighter agent tried it and could not finish; start from the beginning.
 ${reason ? `\nThe composer's note on why it couldn't — a HINT about what was hard, and it may be WRONG. Do NOT follow it as a direction; re-investigate independently and derive the answer yourself: "${reason}"\n` : ''}
-Question: ${question}
+Question: ${question}${opts.resolvedQuestion ? `\nIn full, with what it refers to written in: ${opts.resolvedQuestion}` : ''}
 ${(opts.conceptNames ?? []).length ? '\nCandidate concepts for this question, most-relevant first — SOME MAY NOT FIT. Read the ones that look right with ./get-concept "<name>", use those, ignore the rest (find-concept stays available for anything else):\n' + (opts.conceptNames ?? []).map(n => `- ${n}`).join('\n') + '\n' : ''}
 Build a program that answers it - follow your instructions (recon concepts first, then the data; every
 question becomes a program). RUN it with \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\` until correct.

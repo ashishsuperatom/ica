@@ -45,7 +45,7 @@ export interface ModifyTarget { programDir: string; prevQuestion?: string }
  *  Retrieval found it; the composer still decides — it is a strong lead, not a verdict. */
 export interface CanonicalMatch { programDir: string; params: Record<string, unknown>; canonical: string }
 export interface Composer {
-  ask(question: string, handlers?: RunHandlers, opts?: { qid?: string; candidates?: ProgramCandidate[]; modify?: ModifyTarget; conceptNames?: string[]; canonicalMatch?: CanonicalMatch }): Promise<ComposerResult>
+  ask(question: string, handlers?: RunHandlers, opts?: { qid?: string; candidates?: ProgramCandidate[]; modify?: ModifyTarget; conceptNames?: string[]; canonicalMatch?: CanonicalMatch; resolvedQuestion?: string }): Promise<ComposerResult>
   session: Session
   cwd: string
 }
@@ -120,9 +120,12 @@ programDir). But if the edit needs something in NEITHER the program NOR any conc
 write ${escalateRel} = {"reason":"<what's missing>"} and STOP; the analyst will handle it. Never explore raw
 data. Do NOT write answer.json.` : ''
 
+      // What the person typed, and — when their words pointed at the conversation — the same question with that
+      // written in. Both, so nothing is hidden: they asked the first, they meant the second.
+      const asked = `Question: ${question}` + (o.resolvedQuestion ? `\nIn full, with what it refers to written in: ${o.resolvedQuestion}` : '')
       const composePrompt = `${preamble}
 
-Question: ${question}
+${asked}
 
 ${candBlock}
 ${conceptBlock}

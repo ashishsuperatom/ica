@@ -524,13 +524,21 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   // NEVER creates or places a node — a miss falls straight through to the unchanged reflex+build path, which alone
   // decides node identity/placement (still the reflex agent's job). For now we only OBSERVE whether the regex
   // agreed with where the analyst ends up placing the node (logged at the build site) to see if we were right.
+  // The cue regex is a SAFETY GATE, which is what its own header calls it — not a router. Used as a router it
+  // looked the question up at `intentId(pos, question)`, a key nothing writes (nodes are placed by the reflex,
+  // overwhelmingly at ROOT), so a question it called a follow-up could never hit this path however often it was
+  // asked. And it is wrong about 1 in 6: "In <source>, what's our total invoice amount this year, and the top 5
+  // customers by it?" reads as a follow-up to it and is entirely self-contained.
+  // So: cues fire → SKIP this text-identical shortcut and let canonicalisation handle it, which resolves what the
+  // question points at using the conversation. Cues quiet → the question stands alone, and identical text means
+  // the same question.
   const cues = explicitEdit ? [] : followUpCues(question)
   const rootQuestion = !explicitEdit && cues.length === 0
-  const matchId = rootQuestion ? intentId(ROOT, question) : nid
-  if (!explicitEdit) console.log(`[ica] regex: ${rootQuestion ? 'ROOT → reuse-match at ROOT' : `FOLLOW-UP (${cues.join(',')}) → reuse-match @ ${pos === ROOT ? 'ROOT' : pos.slice(0, 14)}`}`)
-  const hitNode = graph.getNode(matchId)
+  const matchId = intentId(ROOT, question)
+  if (!explicitEdit) console.log(`[ica] regex: ${rootQuestion ? 'self-contained → verbatim reuse-match' : `FOLLOW-UP (${cues.join(',')}) → skip verbatim, canonicalise with context`}`)
+  const hitNode = rootQuestion ? graph.getNode(matchId) : null
   const hp: any = hitNode?.props
-  if (!explicitEdit && hp?.program && existsSync(join(WORKSPACE, hp.program, 'program.ts'))) {
+  if (rootQuestion && hp?.program && existsSync(join(WORKSPACE, hp.program, 'program.ts'))) {
     if (await reuseProgram(hp.program, hp.params, hp.category, { sid, qid, question, norm, t0, nodeId: matchId, reply, channel })) return
     // failed → fall through to rebuild via the analyst
   }
@@ -547,11 +555,17 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   // it truly fits, running it, and verifying the output — one place with the conversation in front of it, instead
   // of two components that can each answer.
   let askedCanonical: string | undefined
+  // The question with everything it points AT written in ("their project managers" → the managers of which
+  // projects). The engine resolves this to match on it; handing the agent the fragment instead is why the
+  // composer once escalated with "'their' has nothing to bind to" while the engine already knew the answer.
+  let resolvedQuestion: string | undefined
   let canonicalMatch: { programDir: string; params: Record<string, unknown>; canonical: string } | undefined
   if (!explicitEdit) {
     try {
       const canon = await reflex.canonicalize(question, sessionContext(sid))
       askedCanonical = canon.canonical
+      // Only worth passing on when it actually says more than the words typed.
+      if (canon.resolved && normalizeQuestion(canon.resolved) !== normalizeQuestion(question)) resolvedQuestion = canon.resolved
       // `unresolved` = the question leans on something the conversation didn't settle, so it is not self-contained
       // and must not be bound to a context-free program.
       const target = canon.unresolved ? null : findByCanonical(canon.canonical)
@@ -738,7 +752,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       // The COMPOSER handles both a fresh question (compose/reuse) AND a MODIFY (edit the current program in
       // place). It escalates only when it genuinely can't — then the analyst takes over.
       const composer = await getComposer(sid)
-      const c = await composer.ask(question, handlers, { qid, candidates: programCandidates, conceptNames, modify: modifyTarget ?? undefined, canonicalMatch })
+      const c = await composer.ask(question, handlers, { qid, candidates: programCandidates, conceptNames, modify: modifyTarget ?? undefined, canonicalMatch, resolvedQuestion })
       if (c.escalate) { escalateReason = c.escalate.reason; console.log(`[ica] composer → escalate · ${c.escalate.reason}`) }
       else {
         authoredBy = 'composer'
@@ -749,7 +763,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     if (!r) {   // composer escalated → the analyst (System 3) handles it (build or modify)
       currentAgent = 'analyst'
       emit(reply, A('status', 'analyst', { progress: 'Handing off to the analyst for deeper analysis…', sid }))
-      const askP = analyst.ask(question, handlers, { qid, conceptNames, reason: escalateReason, modify: modifyTarget ?? undefined })
+      const askP = analyst.ask(question, handlers, { qid, conceptNames, reason: escalateReason, modify: modifyTarget ?? undefined, resolvedQuestion })
       askP.catch(() => {})   // if we abandon it on timeout, don't leak an unhandled rejection
       let capT: ReturnType<typeof setTimeout> | undefined
       const raced: any = await Promise.race([askP, new Promise((res) => { capT = setTimeout(() => res(TIMED_OUT), MAX_TURN_MS) })])

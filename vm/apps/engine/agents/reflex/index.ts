@@ -65,7 +65,7 @@ function answerDigest(a: any): string {
 
 /** A question normalised for matching: the canonical sentence, the values pulled out of it, and whatever the
  *  conversation could not resolve (present ⇒ do NOT reuse on this; it isn't self-contained yet). */
-export type Canonical = { canonical: string; params: Record<string, unknown>; unresolved?: string }
+export type Canonical = { canonical: string; resolved: string; params: Record<string, unknown>; unresolved?: string }
 
 export interface ReflexOpts {
   cwd: string
@@ -105,8 +105,12 @@ export function createReflex(opts: ReflexOpts) {
     const ctx = context?.trim() ? `RECENT CONVERSATION:\n${context.trim()}\n\n` : ''
     const { lastLines } = await session.run(`${system}\n\n---\n${ctx}QUESTION: ${question}\n\nJSON:`)
     const parsed = extractJson(lastLines)
+    const canonical = typeof parsed?.canonical === 'string' ? parsed.canonical.trim() : question
     return {
-      canonical: typeof parsed?.canonical === 'string' ? parsed.canonical.trim() : question,
+      canonical,
+      // The same sentence with the values written in — a self-contained question. This is what an agent should
+      // be told the person is asking when their words point at the conversation ("their project managers").
+      resolved: typeof parsed?.resolved === 'string' && parsed.resolved.trim() ? parsed.resolved.trim() : canonical,
       params: (parsed?.params && typeof parsed.params === 'object') ? parsed.params : {},
       unresolved: typeof parsed?.unresolved === 'string' && parsed.unresolved.trim() ? parsed.unresolved.trim() : undefined,
     }

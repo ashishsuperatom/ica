@@ -37,13 +37,14 @@ that refers to the conversation ("those", "that one", an ordinal, an implied fil
 sentence stands alone. Keep the words the question and the data already use, and keep the unit next to its
 placeholder when the question states one. Placeholders are named for what they hold, in angle brackets.
 
-Report a value for every placeholder you introduce. When the question refers to something you cannot resolve from
-the conversation, say so instead of guessing.`
+Report a value for every placeholder you introduce, and give the same sentence once more with those values
+written in — that one is what someone reads to know what is being asked, with nothing left pointing at the
+conversation. When the question refers to something you cannot resolve from it, say so instead of guessing.`
 
 // WHY: strict JSON so the engine can act on it without parsing prose.
 const canonOutput = `Reply with ONE JSON object and nothing else:
 
-{ "canonical": "<the canonical sentence>", "params": { "<name>": <value> }, "unresolved": "<what you could not resolve, omit when all resolved>" }`
+{ "canonical": "<the canonical sentence>", "resolved": "<the same sentence with the values written in>", "params": { "<name>": <value> }, "unresolved": "<what you could not resolve, omit when all resolved>" }`
 
 export const CANONICAL = [canonIntro, canonRules, canonOutput]
 
