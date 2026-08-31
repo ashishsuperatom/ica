@@ -16,7 +16,7 @@
 import WebSocket from 'ws'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { existsSync, mkdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, readFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { execProgram } from './exec-program.js'
 import { createSession, prepareWorkspace, type Session, type Harness, type RunHandlers } from './ica/index.js'
@@ -35,6 +35,7 @@ import { createInspector } from './inspect.js'
 import { NodeStore, ROOT, ensureRoot, intentId, SqliteVecIndex, indexText, backfillMissing, hybridSearch } from '@superatom/node-store'
 import { bgeEmbedder } from './embed.js'
 import { createSpanFirer } from './retrieval/span-firing.js'
+import { buildDatasourceIndex } from './datasource-index/build.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 try { process.loadEnvFile(join(__dirname, '.env')) } catch { /* no .env — rely on the ambient environment */ }
@@ -60,6 +61,8 @@ const DATA_ROOT = process.env.ENGINE_DATA_DIR ?? STATE_ROOT              // answ
 // project home, so the agent's cwd never contains our SQLite files.
 const WORKSPACE = join(WORKSPACE_ROOT, PROJECT, 'workspace')   // the AGENT's cwd: seams + programs/ + out/
 const DB_DIR    = join(WORKSPACE_ROOT, PROJECT, 'db')          // ENGINE-private DBs — a sibling, NOT under WORKSPACE
+// Committed per-project CONFIG (index seeds, datasource notes) — distinct from generated state above.
+const PROJECT_DIR = process.env.ENGINE_PROJECT_DIR ?? join(__dirname, '..', '..', 'projects', PROJECT)
 const KEY = process.env.ICA_KEY || ''
 const HARNESS = (process.env.ICA_HARNESS as Harness) || 'opencode'   // read AFTER .env is loaded
 // ONE fleet switch for the WORK agents (analyst/connector/grounding): ICA_AGENT_HARNESS =
@@ -113,6 +116,7 @@ let hub: WebSocket | null = null
 const busySessions = new Set<string>()
 let connectorBusy = false
 let groundingBusy = false
+let indexBusy = false   // the datasource-index build — one at a time per project
 
 // ── Semantic-model consolidation (System 4) state ─────────────────────────────
 // This is the SEMANTIC-MODEL consolidation specifically — the bottom layer (meaning + the implementation
@@ -863,6 +867,33 @@ async function listSources(): Promise<string[]> {
 // this project's value→id resolution indexes. Streamed RAW (PTY) to the admin's xterm, same machinery as the
 // modeler/connector. It reads data via the seam and persists via build(config) on grounding.mjs; it never
 // answers user questions and never touches the semantic model.
+// ── DATASOURCE INDEX — admin-triggered ──────────────────────────────────────
+// The index (what tables and fields each source has) used to be a manual CLI run on the box, which meant a new
+// project could not be made useful without someone with shell access. Same builder, driven from the console,
+// streaming its progress back so the admin can watch rather than guess. Resumable: re-running continues.
+async function handleIndexBuild(from: any, opts: { rebuild?: boolean; only?: string }) {
+  if (indexBusy) { emit(from, { t: 'index:status', text: 'An index build is already running.' }); return }
+  indexBusy = true
+  const t0 = Date.now()
+  try {
+    // Per-project seed tables, when the project ships them (a source with no catalog to enumerate).
+    let seedTables: Record<string, string[]> = {}
+    try { seedTables = JSON.parse(readFileSync(join(PROJECT_DIR, 'datasources', 'index-seeds.json'), 'utf8')) }
+    catch { /* none — the source's own catalog is enough */ }
+    emit(from, { t: 'index:status', text: `Building the datasource index${opts.only ? ` for ${opts.only}` : ''}${opts.rebuild ? ' (from empty)' : ' (resuming)'}…` })
+    const r = await buildDatasourceIndex({
+      store: graph, managerUrl: DATASOURCE, seedTables, only: opts.only, wipe: !!opts.rebuild,
+      log: (line) => emit(from, { t: 'index:line', text: line }),
+    })
+    const total = r.sources.reduce((n, x) => n + x.fields, 0)
+    emit(from, { t: 'index:done', ok: true, sources: r.sources, totals: r.totals, ms: Date.now() - t0 })
+    console.log(`[ica] datasource index built in ${((Date.now() - t0) / 1000).toFixed(1)}s · ${total} fields across ${r.sources.length} source(s)`)
+  } catch (e: any) {
+    emit(from, { t: 'index:done', ok: false, error: e?.message ?? String(e), ms: Date.now() - t0 })
+    console.warn(`[ica] datasource index build failed: ${e?.message ?? e}`)
+  } finally { indexBusy = false }
+}
+
 async function handleGrounding(from: any, rebuild = false) {
   if (groundingBusy) { emit(from, { t: 'grounding:status', text: 'Grounding build already running.' }); return }
   groundingBusy = true
@@ -1082,6 +1113,7 @@ function resyncAnalyst(from: any, full = false) {
 
 async function handle(payload: any, from: any) {
   if (payload.t === 'analyse') { analyse(String(payload.question || ''), from, String(payload.sessionId || ''), String(payload.questionId || ''), String(payload.channel || '')) }   // UI supplies both ids; channel set for chat-channel turns
+  else if (payload.t === 'index:build') { handleIndexBuild(from, { rebuild: !!payload.rebuild, only: payload.only ? String(payload.only) : undefined }) }   // admin console → build/refresh the datasource index
   else if (payload.t === 'grounding:build') { handleGrounding(from, !!payload.rebuild) }        // admin console → grounding agent builds (rebuild:true = wipe first, else additive)
   else if (payload.t === 'connector:ask') { handleConnector(String(payload.text || ''), from) }   // admin console → connector agent (raw PTY back)
   else if (payload.t === 'term:attach') { attachTerminal(normWhich(payload.which), from) }         // open a live typeable terminal into an agent's PTY (e.g. /login)

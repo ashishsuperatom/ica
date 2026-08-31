@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useProjectHub } from './hub'
 import { Inspector, SECTIONS, SECTION_LABEL, type Section } from './Inspector'
 import { ConnectorConsole } from './ConnectorConsole'
@@ -657,6 +657,71 @@ function AccessPanel({ projectId, orgId, api, token }: { projectId: string; orgI
   )
 }
 
+// ── Datasource index (per project) ──────────────────────────────────────────
+// What tables and fields each source has — the map the agents search before writing a query. Building it used to
+// mean shell access to the box, so a new project could not be made useful without one. Same builder, run from
+// here, streaming progress. It RESUMES: re-running continues where it stopped, so a failed run is not wasted.
+function IndexPanel({ hub }: { hub: ReturnType<typeof useProjectHub> }) {
+  const [lines, setLines] = useState<string[]>([])
+  const [busy, setBusy] = useState(false)
+  const [summary, setSummary] = useState<any>(null)
+  const endRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => hub.subscribe((m: any) => {
+    if (m?.t === 'index:status' || m?.t === 'index:line') setLines(l => [...l, m.text])
+    if (m?.t === 'index:done') {
+      setBusy(false); setSummary(m)
+      setLines(l => [...l, m.ok ? `finished in ${(m.ms / 1000).toFixed(1)}s` : `failed: ${m.error}`])
+    }
+  }), [hub])
+  useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }) }, [lines])
+
+  const start = (rebuild: boolean) => {
+    setLines([]); setSummary(null); setBusy(true)
+    hub.send({ to: { type: 'code-engine' }, payload: { t: 'index:build', rebuild } })
+  }
+
+  return (
+    <>
+      <div className="muted" style={{ marginBottom: 12, maxWidth: 720 }}>
+        The index records the tables and fields each connected source has, so an agent can find where something
+        lives instead of guessing. Building is resumable — running it again picks up where it left off and skips
+        what is already indexed.
+      </div>
+      <div className="row" style={{ gap: 8, marginBottom: 16 }}>
+        <button className="btn" disabled={busy || hub.status !== 'live'} onClick={() => start(false)}>
+          {busy ? 'Building…' : 'Build / resume'}
+        </button>
+        <button className="btn danger" disabled={busy || hub.status !== 'live'} onClick={() => start(true)}>
+          Rebuild from empty
+        </button>
+        {hub.status !== 'live' && <span className="muted" style={{ alignSelf: 'center', fontSize: 12.5 }}>the engine is not connected</span>}
+      </div>
+
+      {summary?.sources && (
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(230px,1fr))', marginBottom: 16 }}>
+          {summary.sources.map((s: any) => (
+            <div key={s.id} className="card" style={{ padding: 12 }}>
+              <div className="between"><strong>{s.id}</strong><span className="muted" style={{ fontSize: 11 }}>{s.dialect}</span></div>
+              <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>
+                {s.error ? <span style={{ color: 'var(--bad)' }}>{s.error}</span>
+                         : `${s.containers} tables · +${s.indexed} indexed · ${s.fields} fields`}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {lines.length > 0 && (
+        <pre style={{ background: 'var(--panel, #f6f6f4)', border: '1px solid var(--line, #ddd)', borderRadius: 6,
+                      padding: 12, maxHeight: 420, overflow: 'auto', fontSize: 12.5, lineHeight: 1.5 }}>
+          {lines.join('\n')}<div ref={endRef} />
+        </pre>
+      )}
+    </>
+  )
+}
+
 function ProjectDetailPage() {
   const token = useAuth(); const params = useParams<{ orgId: string; projectId: string; '*': string }>()
   const { orgId, projectId } = params
@@ -770,6 +835,7 @@ function ProjectDetailPage() {
       { id: 'grounding', label: 'Grounding' },
     ] },
     { id: 'access', label: 'Access', icon: I.grid },
+    { id: 'index', label: 'Data index', icon: I.map },
     { id: 'channels', label: 'Channels', icon: I.chat },
     { id: 'settings', label: 'Settings', icon: I.grid },
   ]
@@ -966,6 +1032,7 @@ function ProjectDetailPage() {
         </div>
       )}
 
+      {view === 'index' && <IndexPanel hub={hub} />}
       {view === 'access' && <AccessPanel projectId={projectId!} orgId={orgId ?? status?.orgId ?? null} api={api} token={token} />}
       {view === 'channels' && <ChannelsPanel projectId={projectId!} api={api} />}
     </Shell>
