@@ -17,13 +17,14 @@ import WebSocket from 'ws'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { existsSync, mkdirSync, rmSync, readFileSync } from 'node:fs'
+import { execSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { execProgram } from './exec-program.js'
 import { createSession, prepareWorkspace, type Session, type Harness, type RunHandlers } from './ica/index.js'
-import { createReflex } from './agents/reflex/index.js'
+import { createReflex, promptVersion as reflexPromptVersion } from './agents/reflex/index.js'
 import { createNarrator, capResultData, stripCode } from './agents/narrator/index.js'
 import { createAnalyst, promptVersion as analystPromptVersion } from './agents/analyst/index.js'
-import { createComposer, type Composer } from './agents/composer/index.js'
+import { promptVersion as composerPromptVersion, createComposer, type Composer } from './agents/composer/index.js'
 import { createConnector, promptVersion as connectorPromptVersion } from './agents/connector/index.js'
 import { createGroundingAgent, promptVersion as groundingPromptVersion } from './agents/grounding/index.js'
 import { createConceptModeller, promptVersion as modellerPromptVersion } from './agents/concept-modeller/index.js'
@@ -367,6 +368,25 @@ function flushOutbox() {
   for (const frame of pending) { try { hub!.send(frame) } catch { /* socket died mid-flush; the rest waits for the next reconnect */ } }
 }
 
+// ── What produced an answer ─────────────────────────────────────────────────
+// An answer that cannot be attributed cannot be evaluated: when one changes, the question is always whether the
+// DATA moved, a PROMPT changed, a CONCEPT was rewritten, or the ENGINE was rebuilt — and without this we are
+// guessing. Cheap to record, and it is the difference between "it ran" and "that change helped".
+// buildId: the image's own id when running from one (the Dockerfile writes /app/BUILD_ID), else the git sha.
+let BUILD: { buildId: string; prompts: Record<string, string> } | null = null
+async function buildIdentity(): Promise<{ buildId: string; prompts: Record<string, string> }> {
+  if (BUILD) return BUILD
+  let buildId = 'dev'
+  try { buildId = readFileSync('/app/BUILD_ID', 'utf8').trim() } catch {
+    try { buildId = execSync('git rev-parse --short HEAD', { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() } catch { /* not a checkout */ }
+  }
+  const prompts: Record<string, string> = {}
+  for (const [role, fn] of [['analyst', analystPromptVersion], ['composer', composerPromptVersion], ['modeller', modellerPromptVersion], ['reflex', reflexPromptVersion]] as const) {
+    try { prompts[role] = await (fn as any)() } catch { /* a version we cannot read is simply absent */ }
+  }
+  return (BUILD = { buildId, prompts })
+}
+
 // ── Agent-lane protocol ──────────────────────────────────────────────────────
 // ONE wire vocabulary for EVERY agent lane (composer, analyst, concept-modeller — and any future autonomous
 // agent). A lane is an observable work stream; the UI is a generic consumer that hardcodes no agent. Frames:
@@ -424,8 +444,9 @@ function findByCanonical(canonical: string): { program: string; category?: strin
 // Reuse a saved program (SYS-1, no LLM): run it against CURRENT data, emit the answer, persist. Shared by
 // the positional exact-hit and the reflex catalog-match. Returns false on failure so the caller rebuilds.
 async function reuseProgram(programDir: string, params: any, category: string,
-  ctx: { sid: string; qid: string; question: string; norm: string; t0: number; nodeId: string; reply: any; channel: string }): Promise<boolean> {
+  ctx: { sid: string; qid: string; question: string; norm: string; t0: number; nodeId: string; reply: any; channel: string; route?: string }): Promise<boolean> {
   const { sid, qid, question, norm, t0, nodeId, reply, channel } = ctx
+  const route = ctx.route ?? 'verbatim'
   emit(reply, A('status', 'analyst', { category, sid }))
   emit(reply, A('status', 'analyst', { text: 'Re-running the saved program…', question, sid, qid }))
   const ka = setInterval(() => { if (reply) emit(reply, { t: 'tick', sid }) }, 8000)
@@ -470,7 +491,7 @@ async function reuseProgram(programDir: string, params: any, category: string,
     const fu = (graph.getNode(nodeId)?.props as any)?.followups
     if (Array.isArray(fu) && fu.length && reply) emit(reply, { t: 'followups', items: fu, qid, sid })
     emit(reply, A('status', 'analyst', { state: 'done', sid }))
-    answers.save({ qid, sessionId: sid, question, norm, category, status: 'answered', answer, createdAt: Date.now(), finishedAt: Date.now(), programDir, params })
+    answers.save({ qid, sessionId: sid, question, norm, category, status: 'answered', answer, createdAt: Date.now(), finishedAt: Date.now(), programDir, params, build: await buildIdentity(), route })
     const n = graph.getNode(nodeId); if (n) graph.putNode({ ...n, props: { ...(n.props as any), lastShapeHash: (rr as any).finalShapeHash ?? (n.props as any)?.lastShapeHash } })
     setPosition(sid, nodeId)
     clearInterval(ka)
@@ -809,7 +830,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // For a MODIFY the answer belongs to the ORIGINAL question (the node we edited), not the edit instruction.
     const savedQ = modifyTarget && curNode ? (curNode.summary ?? curQ ?? question) : question
     const savedNorm = modifyTarget && curNode ? (((curNode.props as any)?.question as string) ?? norm) : norm
-    answers.save({ qid, sessionId: sid, question: savedQ, norm: savedNorm, category: r.category, status: r.answer?.status ?? 'error', answer: r.answer, createdAt: Date.now(), finishedAt: Date.now(), programDir: programDir ?? modifyTarget?.programDir, params: programParams })
+    answers.save({ qid, sessionId: sid, question: savedQ, norm: savedNorm, category: r.category, status: r.answer?.status ?? 'error', answer: r.answer, createdAt: Date.now(), finishedAt: Date.now(), programDir: programDir ?? modifyTarget?.programDir, params: programParams, build: await buildIdentity(), route: authoredBy })
     // ── INTENT GRAPH ──
     let builtIntentId: string | undefined
     if (modifyTarget && curNode) {

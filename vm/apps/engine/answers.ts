@@ -18,6 +18,8 @@ export interface AnswerRow {
   programDir?: string   // the program that produced this answer (relative to the workspace) — re-run it on a repeat
   params?: any          // the bindings it was run with (identity bindings only; time defaults to now each run)
   finishedAt?: number   // when the analyst FINISHED (artifact written) — the cursor the offline modeler consolidates by
+  build?: any           // engine build + prompt versions at the moment of answering — what to attribute a change to
+  route?: string        // which path answered: 'verbatim' | 'canonical' | 'composer' | 'analyst'
 }
 
 // Deterministic normalization for the "have we answered this before?" match — no LLM.
@@ -45,6 +47,17 @@ export function openAnswers(path: string) {
   try { db.exec(`ALTER TABLE answers ADD COLUMN program_dir TEXT`) } catch { /* already there */ }
   try { db.exec(`ALTER TABLE answers ADD COLUMN params_json TEXT`) } catch { /* already there */ }
   try { db.exec(`ALTER TABLE answers ADD COLUMN finished_at INTEGER`) } catch { /* already there */ }
+  // WHAT PRODUCED THIS ANSWER. Without it an answer is unattributable: when one changes we cannot say whether
+  // the data moved, a prompt changed, a concept was rewritten or the engine was rebuilt — so we cannot tell an
+  // improvement from a regression, which is the whole of "did that change help?".
+  //   build  — engine build id + each agent's prompt-version hash at the moment of answering
+  //   route  — which path answered: verbatim | canonical | composer | analyst
+  try { db.exec(`ALTER TABLE answers ADD COLUMN build_json TEXT`) } catch { /* already there */ }
+  try { db.exec(`ALTER TABLE answers ADD COLUMN route TEXT`) } catch { /* already there */ }
+  // VERIFIED — a human said this answer is right (and, when it was wrong, what the right answer is). This is
+  // what turns the answer log into something to evaluate AGAINST; a run that merely completes proves nothing.
+  try { db.exec(`ALTER TABLE answers ADD COLUMN verified INTEGER`) } catch { /* already there */ }
+  try { db.exec(`ALTER TABLE answers ADD COLUMN verified_note TEXT`) } catch { /* already there */ }
   db.exec(`CREATE INDEX IF NOT EXISTS idx_finished ON answers(finished_at);
     -- tiny KV for engine-owned cursors (e.g. the offline modeler's consolidation watermark).
     CREATE TABLE IF NOT EXISTS engine_meta (k TEXT PRIMARY KEY, v TEXT);
@@ -57,7 +70,7 @@ export function openAnswers(path: string) {
       status TEXT, empty INTEGER, shape_hash TEXT, ms INTEGER, at INTEGER NOT NULL);
     CREATE INDEX IF NOT EXISTS idx_program_runs_dir ON program_runs(program_dir, at);`)
   const insert = db.prepare(`INSERT OR REPLACE INTO answers
-    (qid, session_id, question, norm, category, status, answer_json, created_at, program_dir, params_json, finished_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    (qid, session_id, question, norm, category, status, answer_json, created_at, program_dir, params_json, finished_at, build_json, route) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
   const findStmt = db.prepare(`SELECT * FROM answers WHERE norm = ? AND status = 'answered' ORDER BY created_at DESC LIMIT 1`)
   // Consolidation cursor: analyses that FINISHED after the watermark, oldest-first — the offline modeler's inbox.
   const sinceStmt = db.prepare(`SELECT * FROM answers WHERE finished_at > ? ORDER BY finished_at ASC LIMIT ?`)
@@ -83,17 +96,27 @@ export function openAnswers(path: string) {
   const delAnsProg   = db.prepare(`DELETE FROM answers WHERE program_dir = ?`)
   const delAnsNorm   = db.prepare(`DELETE FROM answers WHERE norm = ?`)
   const delRunsProg  = db.prepare(`DELETE FROM program_runs WHERE program_dir = ?`)
+  const verifyStmt = db.prepare(`UPDATE answers SET verified = ?, verified_note = ? WHERE qid = ?`)
+  const verifiedStmt = db.prepare(`SELECT * FROM answers WHERE verified IS NOT NULL ORDER BY created_at DESC LIMIT ?`)
   const row = (r: any): AnswerRow | null => r ? {
     qid: r.qid, sessionId: r.session_id, question: r.question, norm: r.norm,
     category: r.category, status: r.status, answer: safeParse(r.answer_json), createdAt: r.created_at,
     programDir: r.program_dir ?? undefined, params: r.params_json ? safeParse(r.params_json) : undefined,
     finishedAt: r.finished_at ?? undefined,
+    build: r.build_json ? safeParse(r.build_json) : undefined,
+    route: r.route ?? undefined,
   } : null
   return {
     save(a: AnswerRow) {
       insert.run(a.qid, a.sessionId, a.question, a.norm, a.category, a.status, JSON.stringify(a.answer ?? null), a.createdAt,
-        a.programDir ?? null, a.params != null ? JSON.stringify(a.params) : null, a.finishedAt ?? null)
+        a.programDir ?? null, a.params != null ? JSON.stringify(a.params) : null, a.finishedAt ?? null,
+        a.build != null ? JSON.stringify(a.build) : null, a.route ?? null)
     },
+    /** Mark an answer right (or record what the right answer was). A human decides this — never the system:
+     *  an answer that merely RAN proves nothing, and this is what later change is measured against. */
+    markVerified(qid: string, ok: boolean, note?: string) { verifyStmt.run(ok ? 1 : 0, note ?? null, qid) },
+    /** The evaluation set: answers a human has ruled on, newest first. */
+    verified(limit = 200): AnswerRow[] { return verifiedStmt.all(limit).map(row).filter(Boolean) as AnswerRow[] },
     // ── Offline-modeler rail ──────────────────────────────────────────────────
     // Analyses that finished after `after` (a finished_at watermark), oldest-first. The consolidation loop
     // reads this batch, studies it, then advances the watermark past the last one it consumed.
