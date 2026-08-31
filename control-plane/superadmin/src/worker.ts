@@ -51,32 +51,25 @@ async function claimsOf(request: Request, env: Env): Promise<JwtClaims | null> {
   return m ? await verifyJwt(m[1], env.JWT_SECRET) : null
 }
 
-/** The caller's standing in ONE project: superadmin / org admin / its own access row / nothing. */
+/** The caller's standing in ONE project. ONE read, of the PROJECT's own DO — never the org's.
+ *  A project is asked about on every request, so it has to answer alone: its access table already holds
+ *  everyone who may touch it, including the org's admins, mirrored in whenever that list changes. Reading the
+ *  org here would put every project's traffic through a single organisation object. */
 async function projectAccessOf(request: Request, env: Env, projectId: string):
-    Promise<{ ok: boolean; level: 'superadmin' | 'org-admin' | 'member' | 'none'; email: string; roleId?: string; permissions?: string[] }> {
+    Promise<{ ok: boolean; level: 'superadmin' | 'org-admin' | 'project-admin' | 'member' | 'none'; email: string; roleId?: string; permissions?: string[] }> {
   const claims = await claimsOf(request, env)
   const email = (claims?.email || '').toLowerCase()
   if (!claims) return { ok: false, level: 'none', email: '' }
-  if (claims.role === 'superadmin') return { ok: true, level: 'superadmin', email }
-
-  // Org admin? The project tells us which org owns it; that org's user list says whether this person runs it.
+  if (claims.role === 'superadmin') return { ok: true, level: 'superadmin', email }   // token alone; no DO at all
+  if (!email) return { ok: false, level: 'none', email }
   const proj = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
-  const info: any = await proj.fetch('https://do/status').then(r => r.json()).catch(() => ({}))
-  const orgId = info?.project?.orgId ?? info?.orgId
-  if (orgId && email) {
-    const org = env.ORG.get(env.ORG.idFromName(orgId))
-    const users: any = await org.fetch('https://do/users').then(r => r.json()).catch(() => ({}))
-    const me = (users?.users ?? users ?? []).find?.((u: any) => String(u.email || '').toLowerCase() === email)
-    if (me && me.role === 'admin') return { ok: true, level: 'org-admin', email }
-  }
-
-  // Otherwise: does this project itself grant them anything?
-  if (email) {
-    const acc: any = await proj.fetch('https://do/access').then(r => r.json()).catch(() => ({}))
-    const row = (acc?.access ?? []).find((a: any) => String(a.email || '').toLowerCase() === email)
-    if (row) return { ok: true, level: 'member', email, roleId: row.role_id, permissions: row.permissions ?? [] }
-  }
-  return { ok: false, level: 'none', email }
+  const acc: any = await proj.fetch('https://do/access').then(r => r.json()).catch(() => ({}))
+  const row = (acc?.access ?? []).find((a: any) => String(a.email || '').toLowerCase() === email)
+  if (!row) return { ok: false, level: 'none', email }
+  // Only a row the ORG put here means org admin. A project's own 'admin' role administers THAT project — it
+  // does not confer anything over the organisation, and must not be able to edit what the org owns.
+  const level = row.source === 'org-admin' ? 'org-admin' : row.role_id === 'admin' ? 'project-admin' : 'member'
+  return { ok: true, level, email, roleId: row.role_id, permissions: row.permissions ?? [] }
 }
 
 /** The caller's standing in ONE org: superadmin, its admin, or a member of at least one of its projects. */
@@ -203,6 +196,9 @@ export default {
       // `setup` overwrites the project's API key. It's an INTERNAL provisioning primitive — only ever
       // called by handleCreateProject via a direct DO stub — so it must not be reachable publicly.
       if (subPath === 'setup') return new Response('not found', { status: 404 })
+      // `org-admins` is the ORG writing into the project (who administers it). It is reached DO-to-DO only —
+      // exposing it here would let a project admin mirror themselves in as one.
+      if (subPath === 'org-admins') return new Response('not found', { status: 404 })
       // status: ONE generalized machine view — the backend fills it per provider
       // (Fly state for managed, hub-connection liveness for local/EC2). No separate
       // provider-specific endpoint; the frontend just renders status.machine.

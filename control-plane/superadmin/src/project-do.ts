@@ -236,6 +236,7 @@ export class ProjectDO extends DurableObject<Env> {
         CREATE TABLE IF NOT EXISTS access (
           email       TEXT PRIMARY KEY,                -- lower-cased; the allowlist identity
           role_id     TEXT,
+          source      TEXT NOT NULL DEFAULT 'direct',  -- 'direct' = assigned here | 'org-admin' = replicated from the org
           added_by    TEXT,
           created_at  INTEGER NOT NULL DEFAULT (unixepoch())
         );
@@ -306,6 +307,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (request.method === 'GET'    && path === '/access')     return this.listAccess()
     if (request.method === 'POST'   && path === '/access')     return this.grantAccess(request)
     if (request.method === 'DELETE' && path === '/access')     return this.revokeAccess(request)
+    if (request.method === 'POST'   && path === '/org-admins')  return this.syncOrgAdmins(request)
     if (request.method === 'GET'    && path === '/roles')      return this.listRoles()
     if (request.method === 'POST'   && path === '/roles')      return this.upsertRole(request)
     if (request.method === 'DELETE' && path === '/roles')      return this.deleteRole(request)
@@ -869,6 +871,89 @@ export class ProjectDO extends DurableObject<Env> {
       prov === 'external' ? 'external' : 'creating', prov, Date.now()
     )
     return Response.json({ ok: true, provider: prov })
+  }
+
+  // ── ACCESS + ROLES (project-local) ─────────────────────────────────────────
+  // Keyed by lower-cased EMAIL. This table answers the one question asked on every request — "may this person
+  // touch this project, and as what?" — without leaving the DO. Rows with source='org-admin' are placed by the
+  // organisation and are read-only here.
+  private j(body: unknown, status = 200) {
+    return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+  }
+
+  private listAccess(): Response {
+    const rows = [...this.ctx.storage.sql.exec(
+      `SELECT a.email, a.role_id, a.source, a.created_at, r.name AS role_name, r.permissions
+         FROM access a LEFT JOIN roles r ON r.id = a.role_id ORDER BY a.email`)] as any[]
+    return this.j({ access: rows.map(r => ({ ...r, permissions: JSON.parse(r.permissions ?? '[]') })) })
+  }
+
+  private async grantAccess(request: Request): Promise<Response> {
+    const b = await request.json().catch(() => ({})) as any
+    const email = String(b.email ?? '').trim().toLowerCase()
+    if (!email) return this.j({ error: 'email required' }, 400)
+    const roleId = b.roleId ? String(b.roleId) : 'member'
+    // 'org-admin' is set ONLY by the org's own sync (POST /org-admins), never by a grant arriving here.
+    const exists = [...this.ctx.storage.sql.exec('SELECT 1 FROM roles WHERE id = ?', roleId)].length
+    if (!exists) return this.j({ error: `unknown role "${roleId}"` }, 400)
+    this.ctx.storage.sql.exec(
+      "INSERT INTO access (email, role_id, source, added_by) VALUES (?, ?, 'direct', ?) " +
+      "ON CONFLICT(email) DO UPDATE SET role_id = excluded.role_id",
+      email, roleId, String(b.addedBy ?? ''))
+    return this.j({ ok: true, email, roleId })
+  }
+
+  private async revokeAccess(request: Request): Promise<Response> {
+    const b = await request.json().catch(() => ({})) as any
+    const email = String(b.email ?? '').trim().toLowerCase()
+    if (!email) return this.j({ error: 'email required' }, 400)
+    // The people who administer the ORGANISATION are its to manage — a project cannot lock its owner out.
+    const [row] = this.ctx.storage.sql.exec('SELECT source FROM access WHERE email = ?', email) as any[]
+    if (row?.source === 'org-admin') return this.j({ error: 'this person administers the organisation — change it there' }, 403)
+    this.ctx.storage.sql.exec('DELETE FROM access WHERE email = ?', email)
+    return this.j({ ok: true, email })
+  }
+
+  /** Replace the mirrored set of ORG ADMINS. Called by the org when its admin list changes, so this project can
+   *  authorise alone rather than reading the organisation on every request. */
+  private async syncOrgAdmins(request: Request): Promise<Response> {
+    const b = await request.json().catch(() => ({})) as any
+    const emails: string[] = Array.isArray(b.emails) ? b.emails.map((e: any) => String(e).trim().toLowerCase()).filter(Boolean) : []
+    this.ctx.storage.sql.exec("DELETE FROM access WHERE source = 'org-admin'")
+    for (const e of emails)
+      this.ctx.storage.sql.exec(
+        "INSERT INTO access (email, role_id, source, added_by) VALUES (?, 'admin', 'org-admin', 'org') " +
+        "ON CONFLICT(email) DO UPDATE SET role_id = 'admin', source = 'org-admin'", e)
+    return this.j({ ok: true, orgAdmins: emails.length })
+  }
+
+  private listRoles(): Response {
+    const rows = [...this.ctx.storage.sql.exec('SELECT id, name, permissions, builtin FROM roles ORDER BY builtin DESC, name')] as any[]
+    return this.j({ roles: rows.map(r => ({ ...r, permissions: JSON.parse(r.permissions ?? '[]'), builtin: !!r.builtin })) })
+  }
+
+  private async upsertRole(request: Request): Promise<Response> {
+    const b = await request.json().catch(() => ({})) as any
+    const id = String(b.id ?? '').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-')
+    const name = String(b.name ?? '').trim()
+    if (!id || !name) return this.j({ error: 'id and name required' }, 400)
+    const perms = Array.isArray(b.permissions) ? b.permissions.map(String) : []
+    this.ctx.storage.sql.exec(
+      'INSERT INTO roles (id, name, permissions) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, permissions = excluded.permissions',
+      id, name, JSON.stringify(perms))
+    return this.j({ ok: true, id, name, permissions: perms })
+  }
+
+  private async deleteRole(request: Request): Promise<Response> {
+    const b = await request.json().catch(() => ({})) as any
+    const id = String(b.id ?? '')
+    const [row] = this.ctx.storage.sql.exec('SELECT builtin FROM roles WHERE id = ?', id) as any[]
+    if (!row) return this.j({ error: 'no such role' }, 404)
+    if (row.builtin) return this.j({ error: 'built-in roles cannot be deleted' }, 400)
+    // Holders fall back to the default rather than losing access mid-session.
+    this.ctx.storage.sql.exec("UPDATE access SET role_id = 'member' WHERE role_id = ?", id)
+    this.ctx.storage.sql.exec('DELETE FROM roles WHERE id = ?', id)
+    return this.j({ ok: true, id })
   }
 
   private async addMember(req: Request): Promise<Response> {

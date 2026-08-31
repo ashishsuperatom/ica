@@ -169,6 +169,9 @@ export class OrgDO extends DurableObject<Env> {
       'INSERT INTO projects (id, name, description, created_by, deleted) VALUES (?, ?, ?, ?, 0)',
       id, name, description ?? '', createdBy ?? 'system'
     )
+    // A new project inherits this org's admins immediately, so whoever created it can administer it without a
+    // second step — and without the project ever reading the org.
+    await this.syncOrgAdminsToProjects([id])
     this.broadcast({ t: 'project:created', id, name })
     return Response.json({ id }, { status: 201 })
   }
@@ -225,7 +228,10 @@ export class OrgDO extends DurableObject<Env> {
     // Lower-cased on the way in: this address IS the identity every later check matches on.
     const [existing] = this.ctx.storage.sql.exec('SELECT id FROM users WHERE email = ?', addr) as any[]
     if (existing) {
-      if (role) this.ctx.storage.sql.exec('UPDATE users SET role = ? WHERE id = ?', role, existing.id)
+      if (role) {
+        this.ctx.storage.sql.exec('UPDATE users SET role = ? WHERE id = ?', role, existing.id)
+        await this.syncOrgAdminsToProjects()   // promoted or demoted → every project's mirror follows
+      }
       return Response.json({ id: existing.id, existed: true })
     }
     const id = crypto.randomUUID()
@@ -233,6 +239,7 @@ export class OrgDO extends DurableObject<Env> {
       'INSERT INTO users (id, email, name, role) VALUES (?, ?, ?, ?)',
       id, addr, name ?? '', role ?? 'user'
     )
+    if ((role ?? 'user') === 'admin') await this.syncOrgAdminsToProjects()
     return Response.json({ id }, { status: 201 })
   }
 
@@ -245,6 +252,7 @@ export class OrgDO extends DurableObject<Env> {
     const projects = [...this.ctx.storage.sql.exec('SELECT id FROM projects WHERE deleted = 0')] as any[]
     for (const p of projects) await this.projectAccess(p.id, 'DELETE', { email: addr })
     this.ctx.storage.sql.exec('DELETE FROM users WHERE email = ?', addr)
+    await this.syncOrgAdminsToProjects()   // if they were an admin, drop the mirrored rows too
     return Response.json({ ok: true, email: addr, removedFromProjects: projects.length })
   }
 
@@ -258,6 +266,22 @@ export class OrgDO extends DurableObject<Env> {
       method, ...(body ? { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } } : {}),
     }))
     return res.json().catch(() => ({}))
+  }
+
+  /** Push this org's ADMIN list into every one of its projects. Called whenever that list changes, and when a
+   *  project is created, so each project can authorise on its own. Duplicated on purpose: the copy is what keeps
+   *  a project's traffic off this object. */
+  private async syncOrgAdminsToProjects(projectIds?: string[]): Promise<number> {
+    const admins = [...this.ctx.storage.sql.exec("SELECT email FROM users WHERE role = 'admin'")] as any[]
+    const emails = admins.map(a => String(a.email || '').toLowerCase()).filter(Boolean)
+    const ids = projectIds ?? ([...this.ctx.storage.sql.exec('SELECT id FROM projects WHERE deleted = 0')] as any[]).map(p => p.id)
+    for (const pid of ids) {
+      const stub = this.env.PROJECT.get(this.env.PROJECT.idFromName(`proj:${pid}`))
+      await stub.fetch(new Request('https://do/org-admins', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ emails }),
+      })).catch(() => {})
+    }
+    return ids.length
   }
 
   private async listAssignments(url: URL): Promise<Response> {
