@@ -181,14 +181,27 @@ export class GlobalDO extends DurableObject<Env> {
   }
 
   private async createOrg(req: Request): Promise<Response> {
-    const { name } = await req.json() as any
+    const { name, adminEmail } = await req.json() as any
     const id = crypto.randomUUID()
     const doName = `org:${id}`
     this.ctx.storage.sql.exec(
       'INSERT INTO organizations (id, name, do_name, deleted) VALUES (?, ?, ?, 0)',
       id, name, doName
     )
-    return Response.json({ id, name, doName }, { status: 201 })
+    // A new organisation with nobody in it cannot be entered — only superadmin could reach it, which is not
+    // the point of creating one. So the first admin is named here and created with it.
+    let admin: string | null = null
+    const addr = String(adminEmail ?? '').trim().toLowerCase()
+    if (addr) {
+      try {
+        await this.env.ORG.get(this.env.ORG.idFromName(id)).fetch(new Request('https://do/users', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ email: addr, role: 'admin' }),
+        }))
+        admin = addr
+      } catch { /* the org exists; its admin can still be added from the org page */ }
+    }
+    return Response.json({ id, name, doName, admin }, { status: 201 })
   }
 
   private async deleteOrg(req: Request): Promise<Response> {

@@ -266,13 +266,18 @@ export default {
 
     // ── Project creation (with Fly Machine provisioning) ────────────────────
     if (request.method === 'POST' && path === '/api/projects') {
-      if (!(await requireSuperadmin(request, env))) return new Response('unauthorized', { status: 401 })
+      // An organisation runs its own projects — its admin creates them. Superadmin may act anywhere.
+      const oa = await orgAccessOf(request, env, request.headers.get('x-org-id') ?? 'default')
+      if (!oa.ok) return new Response('unauthorized', { status: 401 })
+      if (oa.level === 'member') return new Response('forbidden', { status: 403 })
       return handleCreateProject(request, env, url, ctx)
     }
 
     // ── Project deletion / restore (body-forwarding for DO) ─────────────────
     if ((request.method === 'DELETE' || request.method === 'PUT') && path === '/api/projects') {
-      if (!(await requireSuperadmin(request, env))) return new Response('unauthorized', { status: 401 })
+      const oa = await orgAccessOf(request, env, request.headers.get('x-org-id') ?? 'default')
+      if (!oa.ok) return new Response('unauthorized', { status: 401 })
+      if (oa.level === 'member') return new Response('forbidden', { status: 403 })
       return handleProjectMutate(request, env, ctx)
     }
 

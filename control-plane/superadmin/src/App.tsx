@@ -325,7 +325,9 @@ function OrgListPage() {
   const nav = useNavigate()
   const fetchOrgs = useCallback(() => { if (token) api(`/organizations?deleted=${showDeleted ? '1' : '0'}`).then(r => r.json()).then(setOrgs).catch(() => {}) }, [token, api, showDeleted])
   useEffect(() => { fetchOrgs() }, [fetchOrgs])
-  async function create(e: React.FormEvent<HTMLFormElement>) { e.preventDefault(); const fd = new FormData(e.currentTarget); await api('/organizations', { method: 'POST', body: JSON.stringify({ name: fd.get('name') }) }); (e.target as HTMLFormElement).reset(); fetchOrgs() }
+  // The first admin is created WITH the organisation: an org nobody can enter is not much use, and this is the
+  // only moment where forgetting is easy to do and annoying to notice.
+  async function create(e: React.FormEvent<HTMLFormElement>) { e.preventDefault(); const fd = new FormData(e.currentTarget); await api('/organizations', { method: 'POST', body: JSON.stringify({ name: fd.get('name'), adminEmail: fd.get('adminEmail') }) }); (e.target as HTMLFormElement).reset(); fetchOrgs() }
   // Deletion is NOT here — it lives on the org page's Danger zone (deliberate, type-to-confirm). Restore is safe.
   const restore = async (id: string) => { await api('/organizations', { method: 'PUT', body: JSON.stringify({ id }) }); fetchOrgs() }
 
@@ -340,6 +342,7 @@ function OrgListPage() {
       {/* Creating organisations belongs to the platform console alone. */}
       {HOST_SCOPE !== 'admin' && <form onSubmit={create} className="row" style={{ marginBottom: 20 }}>
         <input name="name" placeholder="New organization name" required className="input" style={{ flex: 1 }} />
+        <input name="adminEmail" type="email" placeholder="First admin's email" className="input" style={{ flex: 1 }} />
         <button className="btn">Create</button>
       </form>}
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))' }}>
