@@ -131,10 +131,9 @@ export async function sources() {   // list data sources + their kind/dialect
 `)
 
   await writeFile(join(dir, 'model', 'model.mjs'),
-`// The MODEL seam. The semantic model is CONCEPT + UNIT nodes in ../../db/project.sqlite — the SAME node-store
-// graph the intent nodes and units already live in (one project, one store — no separate model DB).
-// You CONSOLIDATE finished analyses into this concept layer. Concepts are a FLAT, time-versioned set (no
-// tree). A concept is a GENERAL idea of computation — most are lean (a value + one or two facets); the
+`// The MODEL seam — how you WRITE what you learn. You CONSOLIDATE finished analyses into the concept layer.
+// Concepts are a FLAT, time-versioned set (no tree). Where they are kept is the engine's business, not yours:
+// a concept describes where the DATA lives and how a quantity is computed, never anything about this system. A concept is a GENERAL idea of computation — most are lean (a value + one or two facets); the
 // data-model block (measures/dimensions/…) is an OPTIONAL specialization for entities/measures only.
 //   concept(name, props, meta)  — upsert a concept (versioned). meta: { changedBy, reason? }. props:
 //        { value, aliases?, status:'unverified'|'corroborated'|'verified', rules?, requires?, supersedes?,
@@ -216,9 +215,8 @@ export async function forSource(id) {
 `)
 
   await writeFile(join(dir, 'concepts', 'find.mjs'),
-`// The CONCEPT seam. Strong, EVALUATED concepts — discovery already paid for — live as concept nodes in
-// ../../db/project.sqlite. Each says WHERE the data is, HOW to compute it (a runnable query step-list), HOW to
-// present it, and its REVIEW checks. You answer by REWRITING the concepts that fit into your program — a
+`// The CONCEPT seam — knowledge whose discovery has already been paid for. Each concept says WHERE the data
+// lives, HOW to compute it (a runnable query step-list), HOW to present it, and its REVIEW checks. You answer by REWRITING the concepts that fit into your program — a
 // concept is a GUIDE, never an import.
 //   findConcept('revenue by pillar')  → up to \`limit\` matching concepts (guide fields), best match first
 //   listConcepts()                    → every concept's phrase (the menu) — see what exists before you search
