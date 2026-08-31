@@ -149,13 +149,21 @@ export default {
 
       // Onboarding: store the hub service token + per-channel bot secrets. Superadmin only.
       if (hook === 'config') {
-        if (!(await requireSuperadmin(request, env))) return new Response('unauthorized', { status: 401 })
+        // Administering THIS PROJECT's channels — its admins, not only superadmin, or an organisation cannot
+        // run its own. (projectAccessOf grants superadmin everywhere.)
+        { const acc = await projectAccessOf(request, env, projectId)
+          if (!acc.ok) return new Response('unauthorized', { status: 401 })
+          if (acc.level === 'member') return new Response('forbidden', { status: 403 }) }
         return chan.fetch('https://do/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: await request.text() })
       }
 
       // Read-only connection status for the admin UI (masked ids + secret-present flag; never the secret). Superadmin only.
       if (hook === 'status') {
-        if (!(await requireSuperadmin(request, env))) return new Response('unauthorized', { status: 401 })
+        // Administering THIS PROJECT's channels — its admins, not only superadmin, or an organisation cannot
+        // run its own. (projectAccessOf grants superadmin everywhere.)
+        { const acc = await projectAccessOf(request, env, projectId)
+          if (!acc.ok) return new Response('unauthorized', { status: 401 })
+          if (acc.level === 'member') return new Response('forbidden', { status: 403 }) }
         return chan.fetch('https://do/status', { method: 'GET' })
       }
 
@@ -163,6 +171,11 @@ export default {
       // service token goes in the body (it IS the credential), so this proves the
       // ChannelDO↔hub↔engine loop in Cloudflare without any Azure/Teams setup.
       if (hook === 'selftest') {
+        // Had no check at all. It runs a REAL engine turn — compute someone pays for — and took the project id
+        // from the caller, so possession of a service token was the only thing standing in the way.
+        const acc = await projectAccessOf(request, env, projectId)
+        if (!acc.ok) return new Response('unauthorized', { status: 401 })
+        if (acc.level === 'member') return new Response('forbidden', { status: 403 })
         const body = JSON.parse((await request.text()) || '{}'); body.projectId = projectId
         return chan.fetch('https://do/selftest', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
       }
@@ -275,14 +288,35 @@ export default {
 
     // ── Project deletion / restore (body-forwarding for DO) ─────────────────
     if ((request.method === 'DELETE' || request.method === 'PUT') && path === '/api/projects') {
-      const oa = await orgAccessOf(request, env, request.headers.get('x-org-id') ?? 'default')
-      if (!oa.ok) return new Response('unauthorized', { status: 401 })
-      if (oa.level === 'member') return new Response('forbidden', { status: 403 })
+      // Authorise against the PROJECT NAMED IN THE BODY, not the org header. The row update is scoped to the
+      // caller's own OrgDO and would harmlessly match nothing, but the delete path also tears down the Fly
+      // MACHINE by that id — so trusting the header alone let an admin of one organisation destroy another's
+      // engine by naming its project.
+      const target = String(((await request.clone().json().catch(() => ({}))) as any)?.id ?? '')
+      if (!target) return new Response('id required', { status: 400 })
+      const acc = await projectAccessOf(request, env, target)
+      if (!acc.ok) return new Response('unauthorized', { status: 401 })
+      // Removing a project from the organisation is the ORGANISATION's act. Someone who administers the project
+      // runs it; they do not get to delete it out from under the org.
+      if (acc.level !== 'superadmin' && acc.level !== 'org-admin') return new Response('forbidden', { status: 403 })
       return handleProjectMutate(request, env, ctx)
     }
 
     // ── Domains API (subdomain → projectId registry; forwarded to GlobalDO) ──
     if (path.startsWith('/api/domains')) {
+      // A subdomain decides which project a visitor's browser is handed, so claiming one is an act ON that
+      // project and needs the same standing as provisioning it. Releasing one takes a customer's address away.
+      // This forwarded to the DO with no auth at all.
+      const claims = await claimsOf(request, env)
+      if (!claims) return new Response('unauthorized', { status: 401 })
+      if (request.method !== 'GET') {
+        const b = await request.clone().json().catch(() => ({})) as any
+        const target = String(b?.projectId ?? '')
+        if (!target) return new Response('projectId required', { status: 400 })
+        const acc = await projectAccessOf(request, env, target)
+        if (!acc.ok) return new Response('unauthorized', { status: 401 })
+        if (acc.level === 'member') return new Response('forbidden', { status: 403 })
+      }
       return handleDomainsApi(request, env, url)
     }
 
@@ -337,8 +371,12 @@ export default {
     }
 
     // ── Any other WS ──────────────────────────────────────────────────────────
+    // Same rule as /ws above: x-org-id is the client asking, not a fact. Without this, a socket to any path
+    // other than /ws reached an organisation unauthenticated.
     if (isWs) {
       const orgId = request.headers.get('x-org-id') ?? 'default'
+      const oa = await orgAccessOf(request, env, orgId)
+      if (!oa.ok) return new Response('unauthorized', { status: 401 })
       return env.ORG.get(env.ORG.idFromName(orgId)).fetch(request)
     }
 

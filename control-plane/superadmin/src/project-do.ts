@@ -45,8 +45,9 @@ interface Envelope {
 
 interface JwtClaims {
   userId: string
-  orgId: string
-  role: string       // "admin" | "member"
+  email?: string     // what access is granted by — people are added to a project by address
+  orgId?: string
+  role: string       // PLATFORM role: "superadmin" | "user" | "service"
   exp: number
 }
 
@@ -347,9 +348,12 @@ export class ProjectDO extends DurableObject<Env> {
       if (!secret) return Response.json({ ok: false, reason: 'no JWT secret' }, { status: 500 })
       const claims = await verifyJwt(token, secret)
       if (!claims) return Response.json({ ok: false, reason: 'invalid token' }, { status: 401 })
-      const memberRows = [...this.ctx.storage.sql.exec('SELECT role FROM members WHERE user_id = ?', claims.userId)]
-      if (!memberRows.length) return Response.json({ ok: false, reason: 'not a member' }, { status: 403 })
-      return Response.json({ ok: true, role: (memberRows[0] as any).role }, { status: 200 })
+      if (claims.role === 'superadmin') return Response.json({ ok: true, role: 'superadmin' }, { status: 200 })
+      const email = String((claims as any).email || '').toLowerCase()
+      const byEmail = email ? [...this.ctx.storage.sql.exec('SELECT role_id AS role FROM access WHERE email = ?', email)] : []
+      const rows = byEmail.length ? byEmail : [...this.ctx.storage.sql.exec('SELECT role FROM members WHERE user_id = ?', claims.userId)]
+      if (!rows.length) return Response.json({ ok: false, reason: 'no access' }, { status: 403 })
+      return Response.json({ ok: true, role: (rows[0] as any).role }, { status: 200 })
     }
 
     return Response.json({ ok: false, reason: 'no credential' }, { status: 401 })
@@ -542,9 +546,15 @@ export class ProjectDO extends DurableObject<Env> {
 
       // Runtime surface — a human's client app. A superadmin may open ANY project here without membership; every
       // other user must be a member of this project. Either way it registers as 'runtime' (real user activity).
+      // ACCESS is granted by EMAIL (the org assigns a person to this project, and that lands in `access`).
+      // `members` remains for SERVICE identities — a bot has a userId and no address — so both are consulted,
+      // in that order. Checking only `members`, as this did, meant assigning someone in the console did not
+      // actually let them in: two lists, one of which nothing wrote to any more.
       if (claims.role !== 'superadmin') {
-        const memberRows = [...this.ctx.storage.sql.exec('SELECT role FROM members WHERE user_id = ?', claims.userId)]
-        if (!memberRows.length) { ws.close(4003, 'Not a member of this project'); return }
+        const email = String(claims.email || '').toLowerCase()
+        const byEmail = email ? [...this.ctx.storage.sql.exec('SELECT role_id FROM access WHERE email = ?', email)] : []
+        const byUserId = byEmail.length ? [] : [...this.ctx.storage.sql.exec('SELECT role FROM members WHERE user_id = ?', claims.userId)]
+        if (!byEmail.length && !byUserId.length) { ws.close(4003, 'No access to this project'); return }
       }
       this.markUserActivity()
       this.wakeMachine()
