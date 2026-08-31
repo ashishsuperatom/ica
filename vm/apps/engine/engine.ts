@@ -608,7 +608,14 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       console.log(`[retrieval] specificity → [${specificity.join(', ')}]`)
       console.log(`[retrieval] span-firing → fires [${fired.concepts.join(', ')}]  ·  ranked [${fired.scored.slice(0, 6).map(s => `${s.name} ${s.activation.toFixed(2)}`).join(', ')}]${fired.unexplained.length ? `  ·  unexplained [${fired.unexplained.slice(0, 8).join(' | ')}]` : ''}`)
       // CLEAN A/B — surface EXACTLY ONE retriever, no mixing/fallback. Default = span-firing (B); USE_SPECIFICITY=1 = specificity (A).
-      conceptNames = process.env.USE_SPECIFICITY ? specificity : fired.concepts
+      // Span-firing surfaces the concepts that FIRED plus the rest of its own ranking (still one retriever — it just
+      // stops discarding what it already scored). Only NAMES travel, and reading one is now a deliberate
+      // ./get-concept call, so an extra candidate costs a line and never lands unread in the agent's context.
+      // Firing alone was too tight: "which projects are at risk" fired only 'project name, customer, manager and
+      // type' (6.23) and dropped 'at-risk project' (5.75) — the concept that defines the question.
+      const TOP_CONCEPTS = 6
+      const spanNames = Array.from(new Set([...fired.concepts, ...fired.scored.map(s => s.name)])).slice(0, TOP_CONCEPTS)
+      conceptNames = process.env.USE_SPECIFICITY ? specificity : spanNames
       if (conceptNames.length) console.log(`[ica] concepts surfaced: ${conceptNames.join(', ')}`)
     } catch (e: any) { console.log(`[ica] concept search failed (${e?.message ?? e})`) }
   }
