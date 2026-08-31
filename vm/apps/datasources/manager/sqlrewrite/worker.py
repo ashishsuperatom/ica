@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+# SQLGlot rewrite worker — one long-lived process in the manager's pool.
+#
+# PROTOCOL: line-delimited JSON on stdin/stdout. One request per line, one response per line, flushed. The
+# manager (Node) owns the pool, checkout, idle-reaping and lifecycle; this process just does CPU work and never
+# holds state between requests. It must NEVER die on a bad request — every request is answered (ok:false on error)
+# so the manager's checkout slot is always returned.
+#
+#   request : {"id": <any>, "op": "rewrite"|"ping",
+#              "sql": "...", "read": "tsql", "write": "tsql",
+#              "source_dialect": "mssql", "policies": [...], "maxRows": 5000}
+#   response: {"id": <any>, "ok": true,  "sql": "...", "lineage": null}
+#             {"id": <any>, "ok": false, "error": "message"}
+#
+# Pipeline: parse(read) → SELECT-only allow-list → OUR pre-AST hooks → inject policies → enforce row cap
+#           → render(write) → OUR post-text hooks → final SQL.
+
+import json
+import os
+import re
+import sys
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")  # SQLGlot highlights the error span with terminal codes — strip for the agent
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor"))
+
+import sqlglot  # noqa: E402  (vendor path must be set first)
+from sqlglot import exp  # noqa: E402
+from sqlglot.errors import ParseError  # noqa: E402
+import hooks  # noqa: E402  (sibling module)
+
+# Our source-dialect name → the SQLGlot dialect we parse/render as. Unknown → None (SQLGlot's permissive default).
+DIALECTS = {
+    "mssql": "tsql", "tsql": "tsql", "sqlserver": "tsql",
+    "suiteql": "oracle", "oracle": "oracle", "netsuite": "oracle",
+    "postgres": "postgres", "postgresql": "postgres",
+    "sqlite": "sqlite", "duckdb": "duckdb", "mysql": "mysql",
+    "snowflake": "snowflake", "bigquery": "bigquery",
+    "ansi": None, "": None,
+}
+
+# READ-ONLY GATE (default access control): a query is rejected unless it is a pure read. Any of these anywhere in
+# the tree fails it — the mutating statements, plus `Into` (T-SQL `SELECT … INTO t` creates a table while looking
+# like a Select), plus a raw unparsed `Command` (EXEC/etc. — if SQLGlot can't model it, we can't secure it).
+# NOTE: stacked injection (`SELECT 1; DROP …`) is also neutralised structurally — we parse+re-render only the
+# FIRST statement, so a trailing statement never reaches the bridge. This is the blunt default; finer per-source
+# authorization comes later and plugs in at inject_policies().
+FORBIDDEN = (
+    exp.Insert, exp.Update, exp.Delete, exp.Merge, exp.Create, exp.Drop,
+    exp.Alter, exp.TruncateTable, exp.Command, exp.Grant, exp.Into,
+)
+
+
+def _dialect(name):
+    return DIALECTS.get((name or "").lower().strip(), None)
+
+
+def _limit_value(node):
+    """The integer row count from a limit clause — whether it's a LIMIT (exp.Limit) or an Oracle/SuiteQL
+    FETCH FIRST n ROWS (exp.Fetch). Both live under the select's `limit` arg. None if not a plain integer."""
+    if node is None:
+        return None
+    lit = node.args.get("count") if isinstance(node, exp.Fetch) else node.expression
+    try:
+        return int(lit.this) if lit is not None else None
+    except (AttributeError, ValueError, TypeError):
+        return None
+
+
+def enforce_cap(root, max_rows):
+    """Ensure the outermost SELECT returns at most max_rows (the smaller of any existing limit and max_rows).
+    A safety cap so a runaway query can't dump a whole table; a no-op semantics-wise for aggregations.
+    Returns (root, capped_to) — capped_to is the injected limit when WE added/tightened one, else None. The
+    caller REPORTS that: a cap the caller can't see is indistinguishable from "that's all the data", which is
+    how a truncated read becomes a confidently wrong total."""
+    if not max_rows or max_rows <= 0:
+        return root, None
+    select = root if isinstance(root, exp.Select) else root.find(exp.Select)
+    if select is None:
+        return root, None
+    n = _limit_value(select.args.get("limit"))   # holds exp.Limit OR exp.Fetch
+    if n is not None and n <= max_rows:
+        return root, None                         # agent asked for fewer — keep it
+    select.limit(max_rows, copy=False)            # no limit, or one bigger than the cap → clamp to the cap
+    return root, max_rows
+
+
+def inject_policies(root, policies):
+    """Authorization seam. policies is a list; each item is either:
+        {"predicate": "<sql bool expr>"}                 → AND-ed into the outermost WHERE, or
+        {"table": "<name>", "predicate": "<sql expr>"}   → AND-ed wherever that table is queried.
+    Empty/None → no-op. (Row-level security is injected HERE, server-side; the agent never sees it.)"""
+    if not policies:
+        return root
+    for pol in policies:
+        pred = pol.get("predicate")
+        if not pred:
+            continue
+        table = pol.get("table")
+        if table:
+            for tbl in root.find_all(exp.Table):
+                if (tbl.name or "").lower() == str(table).lower():
+                    sel = tbl.find_ancestor(exp.Select)
+                    if sel is not None:
+                        sel.where(pred, copy=False)
+                    break
+        else:
+            target = root if isinstance(root, exp.Select) else root.find(exp.Select)
+            if target is not None:
+                target.where(pred, copy=False)
+    return root
+
+
+def rewrite(req):
+    sql = req.get("sql")
+    if not sql or not str(sql).strip():
+        raise ValueError("empty sql")
+    read = _dialect(req.get("read") or req.get("source_dialect"))
+    write = _dialect(req.get("write") or req.get("source_dialect") or req.get("read"))
+    ctx = {"read": read, "write": write, "source_dialect": req.get("source_dialect")}
+
+    root = sqlglot.parse_one(sql, read=read)  # raises ParseError (with position) on bad SQL
+
+    # READ-ONLY BY DEFAULT — but a switch, not a wall. A source/request that is allowed to take ACTION passes
+    # allowWrites:true (finer per-source authorization plugs in at inject_policies() later). Analytics/BI stays
+    # locked to reads. When rejecting, say WHY and WHAT to do — a bare rejection makes the agent go blind.
+    if not req.get("allowWrites"):
+        forbidden = root.find(*FORBIDDEN)
+        if forbidden is not None or not root.find(exp.Select):
+            verb = (type(forbidden).__name__ if forbidden is not None else type(root).__name__).upper()
+            raise ValueError(
+                f"query rejected — this source is READ-ONLY, so only SELECT (read) queries run here, but this is "
+                f"a {verb} statement. Rewrite it to READ the data with SELECT; writes are not permitted on this source."
+            )
+
+    root = hooks.apply_pre_ast(root, ctx)
+    root = inject_policies(root, req.get("policies"))
+    root, cappedTo = enforce_cap(root, int(req.get("maxRows") or 0))
+    out = root.sql(dialect=write)
+    out = hooks.apply_post_text(out, ctx)
+    # cappedTo travels back so the CALLER can tell the agent a limit was applied — an invisible cap
+    # reads as "that is all the data".
+    return {"sql": out, "lineage": None, "cappedTo": cappedTo}
+
+
+def handle(req):
+    op = req.get("op", "rewrite")
+    if op == "ping":
+        return {"ok": True, "pong": True}
+    result = rewrite(req)
+    return {"ok": True, **result}
+
+
+def main():
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        rid = None
+        try:
+            req = json.loads(line)
+            rid = req.get("id")
+            resp = handle(req)
+            resp["id"] = rid
+        except ParseError as e:  # bad SQL — the message carries the line/col so the agent can fix it
+            resp = {"id": rid, "ok": False, "error": "SQL error — " + _ANSI.sub("", str(e))}
+        except Exception as e:  # our rejections already carry a clean, actionable message; never let one kill the worker
+            resp = {"id": rid, "ok": False, "error": _ANSI.sub("", str(e))}
+        sys.stdout.write(json.dumps(resp, default=str) + "\n")
+        sys.stdout.flush()
+
+
+if __name__ == "__main__":
+    main()

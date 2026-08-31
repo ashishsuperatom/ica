@@ -3,6 +3,26 @@ import GRDB
 
 // Record types — one per table. Plain structs; GRDB maps them by property name.
 
+/// Identifiers minted on this device.
+///
+/// Session and question ids carry an `IOS` prefix because they do not stay here: the qid
+/// travels to the engine, becomes `out/<qid>/answer.json` on its disk and a row in its
+/// database, and is echoed back on the answer. The prefix makes the originating surface
+/// visible wherever the id turns up — a log line, a filename, a support question — with no
+/// lookup and no extra field to thread through.
+///
+/// Hyphen-separated, matching the UUID's own grouping — the id reads as one thing rather
+/// than a prefix jammed onto a value. Still a single token: no spaces, filename-safe, and
+/// safe unquoted in a URL or a log line. Named `SurfaceID`
+/// rather than `ID` because `Identifiable` already gives every record an `ID` typealias,
+/// which would shadow it inside them.
+enum SurfaceID {
+    /// Uppercase to match the rest of the id — UUID strings are uppercase hex, and a
+    /// lowercase prefix made the id read as two different things stuck together.
+    static let surface = "IOS"
+    static func mint() -> String { surface + "-" + UUID().uuidString }
+}
+
 struct Account: Codable, Identifiable, Hashable, FetchableRecord, PersistableRecord {
     static let databaseTableName = "account"
     var id: String
@@ -45,7 +65,7 @@ struct ProjectAccess: Codable, Hashable, FetchableRecord, PersistableRecord {
 
 struct Session: Codable, Identifiable, Hashable, FetchableRecord, PersistableRecord {
     static let databaseTableName = "session"
-    var id: String = UUID().uuidString
+    var id: String = SurfaceID.mint()
     var projectId: String
     var accountId: String
     var title: String?
@@ -61,7 +81,7 @@ struct Question: Codable, Identifiable, Hashable, FetchableRecord, PersistableRe
     enum State: String, Codable { case draft, transcribing, asking, answered, failed }
     enum Source: String, Codable { case text, voice }
 
-    var id: String = UUID().uuidString      // the qid — the platform's idempotency key
+    var id: String = SurfaceID.mint()              // the qid — the platform's idempotency key
     var sessionId: String
     var seq: Int
     var text: String = ""
@@ -167,4 +187,20 @@ final class AnswerCache: @unchecked Sendable {
 
     func value(for id: String) -> EngineAnswer? { cache.object(forKey: id as NSString)?.value }
     func store(_ value: EngineAnswer, for id: String) { cache.setObject(Box(value), forKey: id as NSString) }
+}
+
+/// The plain-text form of an answer, built once per feed item.
+///
+/// Assembling a whole report — prose, figures, every table row, the provenance footer —
+/// is not something to do during layout. It is built on demand and cached, so a Share
+/// sheet and a Copy tap reuse the same string.
+enum AnswerText {
+    private static let cache = NSCache<NSString, NSString>()
+
+    static func of(_ item: FeedItem) -> String {
+        if let hit = cache.object(forKey: item.id as NSString) { return hit as String }
+        let text = item.answer?.plainText(questionId: item.questionId) ?? item.payload
+        cache.setObject(text as NSString, forKey: item.id as NSString)
+        return text
+    }
 }

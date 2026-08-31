@@ -11,8 +11,9 @@
 //     units/              — the partial UNIT library                          [filled over time]
 //     out/                — where the agent writes this run's answer + UI
 
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, writeFile, chmod, cp } from 'node:fs/promises'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 export interface WorkspaceSpec {
   root: string                 // e.g. <repo>/vm/apps/workspace or an absolute scratch root
@@ -22,12 +23,34 @@ export interface WorkspaceSpec {
 }
 
 export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
-  const dir = join(s.root, s.projectId)
-  // Organized by CONCERN, not dumped flat. db/ holds every SQLite file; each concern (data / model /
-  // grounding / analyst / connector) holds its own seam + role doc together. CONTEXT.md + run.mjs stay at
-  // the root as the entry point + the program runner.
-  for (const sub of ['', 'db', 'data', 'model', 'grounding', 'analyst', 'connector', 'composer', 'concepts', 'units', 'programs', 'out'])
+  // ── HOW A PROJECT'S FILES ARE ORGANIZED (and why) ──────────────────────────────────────────────────────────
+  // Under each project home (<root>/<projectId>/) there are TWO sibling folders, deliberately separated:
+  //
+  //   workspace/   the AGENT's write-root — the only place the agent works. It is the agent's cwd, and holds
+  //                everything the agent should touch: programs/ + out/ (its work), the seams (data/ model/
+  //                grounding/ concepts/ + .tools/ CLIs) it calls to reach data/model, CONTEXT.md, run.mjs.
+  //                Organized by CONCERN, not dumped flat, so each concern keeps its seam + role doc together.
+  //   db/          the ENGINE's PRIVATE state — project.sqlite (concepts/intents/graph), grounding.sqlite,
+  //                answers.sqlite. The agent must NOT touch these, so they live OUTSIDE workspace/.
+  //
+  // WHY: an agent poking or corrupting the engine's own store would be a mess to debug. Keeping db/ out of the
+  // agent's cwd means its normal `ls`/`find` never even surfaces our databases. This is HYGIENE, not a hard wall
+  // (a determined shell can still reach `../db`) — the seams themselves reach the db by a relative path
+  // (`../../db/…`), which is exactly how the engine reads/writes the same files from its side.
+  const projectHome = join(s.root, s.projectId)
+  const dir = join(projectHome, 'workspace')
+  const dbDir = join(projectHome, 'db')
+  // Organized by CONCERN, not dumped flat: each concern (data / model / grounding / analyst / connector) holds its
+  // own seam + role doc together. CONTEXT.md + run.mjs stay at the workspace root as the entry point + runner.
+  for (const sub of ['', 'data', 'model', 'grounding', 'analyst', 'connector', 'composer', 'concepts', 'units', 'programs', 'out', '.tools'])
     await mkdir(join(dir, sub), { recursive: true })
+  await mkdir(dbDir, { recursive: true })   // engine-private, outside the workspace
+
+  // Seed READ-ONLY example programs into programs/ so the analyst learns the SHAPE of a program from a real,
+  // correct one instead of reverse-engineering the engine source. They ship with the engine (versioned), use an
+  // ILLUSTRATIVE fake schema (so they can't be copy-run — the analyst must adapt to the real source), and are
+  // named example.* so reuse ignores them (reuse is node-based; examples are never registered as nodes).
+  await cp(fileURLToPath(new URL('../examples', import.meta.url)), join(dir, 'programs'), { recursive: true, force: true }).catch(() => {})
 
   await writeFile(join(dir, 'CONTEXT.md'),
 `# Project ${s.projectId} — workspace
@@ -40,20 +63,28 @@ role file (./model/MODEL.md if you build the model, ./analyst/ANALYST.md if you 
 from the monorepo, so there is nothing to install and no package.json to create. Run and explore code
 however you see fit — there is no setup to do.
 
-## Seams (grouped by concern)
-- **Model — check FIRST.** ./model/model.mjs — what's already been figured out for this project. Probe it before
-  touching data: \`find('term', …)\` (search concepts/units/past questions), \`concepts()\`, \`intents()\`,
-  \`getConcept(name)\`, \`relationships(name)\`, \`conceptTree()\`. Reusing a modeled unit is deterministic and
-  carries the corrections we've made — that's why it comes first.
-- Data:       ./data/query.mjs      — write PRQL to query the data source: \`query(sourceId, prql, params)\` + \`sources()\`.
-- Introspect: ./data/introspect.mjs — schema/evidence helpers over the data.
-- Grounding:  ./grounding/grounding.mjs — resolve a fuzzy human reference to concrete ids: \`resolveEntity(text)\`,
-  \`resolveHierarchy(node, dir, name)\`, \`resolveValueByPattern(value)\` (built per-project by the grounding agent).
-- Run:        ./run.mjs        — run a program: \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\` (prints the output; writes the graph/shape to program.json).
+## Tools — just RUN these (they work from ANY directory, first try; each prints JSON to stdout)
+Search the project's knowledge:
+- \`./find-concept "<phrase or name>" [--full]\` → matching concept NAMES (the engine already surfaced the likely ones); add \`--full\` for a matched concept's method. A query is required.
+Query the data:
+- \`./sources\`                        → the data sources + their kind/dialect.
+- \`./find-schema "<term>" [--source <S>] [--full]\` → search ALL sources for where a field/table lives (SOURCE.TABLE.COLUMN : type); the fastest way to find where data is before querying.
+- \`./query "<source>" "<query>"\`     → run a query against a source → JSON rows.
+- \`./introspect "<source>" <tables|columns|sample|profile|verify-join> [args]\` → schema/evidence.
+- \`./resolve "<text>"\`               → a fuzzy name/value → concrete ids (grounding).
+Each prints JSON to stdout; run any of them with \`--help\` for its exact arguments. NEVER \`node\`/\`require\`/\`cat\` a \`.mjs\` to do these — just run the tool.
+
+## Write/run seams (import these in your program/unit/model CODE — they take rich args, not a CLI)
+- Concepts: ./model/model.mjs      — WRITE concepts: \`concept(name, props, meta)\`, \`getConcept(name, asOf?)\`, \`conceptHistory(name)\`. (To SEARCH, use \`./find-concept\`.)
+- Ground: ./grounding/grounding.mjs — \`build(config)\` the grounding indexes (grounding agent).
+- Data:   ./data/query.mjs         — \`query()\`/\`sources()\` inside program/unit code.
+- Format: \`import { money, pct, abbrev, num } from '@superatom/scaffold'\` — OPTIONAL display helpers (IN/AU/US
+  locale profiles). Always emit the RAW \`{ value, currency, unit }\`; call these only if you also want a display string.
+- Run:    ./run.mjs                — run a program: \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\`.
 
 ## Layout
-- db/       — every SQLite database (project.sqlite = the model/graph, grounding.sqlite, answers.sqlite). You never open these directly — the seams do.
-- programs/ — one folder per answered question: \`program.ts\` + \`units/*.ts\`. This is where an ANSWER is built.
+This folder is your whole workspace. The engine's databases (the model/graph, grounding, answers) live OUTSIDE it and you reach them only through the seams above — there is nothing for you to open directly.
+- programs/ — one folder per answered question: \`program.ts\` + \`units/*.ts\`. This is where an ANSWER is built. The \`example.*\` folders are read-only REFERENCE TEMPLATES (illustrative fake schema) — read one for the SHAPE of a program (imports, units, ctx.use/ctx.query, the view unit), then write your OWN against your real source (\`./find-schema\`); never run one or point built.json at it.
 - units/    — a shared library of earlier units you may read for reference.
 - out/      — you write \`built.json\` here (a pointer to the program you built); the ENGINE runs it and writes \`answer.json\`.
 
@@ -63,7 +94,7 @@ A UNIT is one file with three exports: \`meta\` (its MEANING — name, inputs, o
 relative time like "this month" from an \`asOf\` param, never a frozen date), and \`ui\` (\`{ category }\`).
 A PROGRAM is just a unit with \`meta.concept === 'program'\` that COMPOSES units with \`ctx.use\` and ends in a
 final UI unit. The kernel injects \`ctx\` with exactly four capabilities:
-- \`query(sourceId, prql, params)\` — query the source in PRQL (the seam compiles it to SQL; the model tells you WHICH tables/joins).
+- \`query(sourceId, query, params)\` — query the source (\`./sources\` says what it is; the model tells you WHICH tables/joins).
 - \`use(unitName, params)\`        — run/compose another unit (records the step + its output shape).
 - \`decide(label, cond, reason)\`  — mark a branch: records which path and why; returns \`cond\`.
 - \`log(message)\`                  — an optional human progress note (each step is auto-narrated anyway).
@@ -73,7 +104,7 @@ ${s.context ? '\n' + s.context + '\n' : ''}`)
 
   await writeFile(join(dir, 'data', 'query.mjs'),
 `// The data seam. You never see databases, ports, dialects, or credentials — you call
-// query(dataSourceId, prql, params) — the query text is PRQL; the manager compiles it to the source SQL. There is ONE endpoint: the datasource-manager, which routes
+// query(dataSourceId, query, params) — the manager runs the query against the source. There is ONE endpoint: the datasource-manager, which routes
 // by id to the right bridge; the bridge binds @name params in its own dialect and runs the query.
 // Ask the manager 'GET /sources' for each source's kind/dialect BEFORE writing queries.
 const MANAGER = process.env.DATASOURCE_URL ?? '${s.managerUrl ?? 'http://localhost:4000'}'
@@ -85,8 +116,8 @@ export async function query(dataSourceId, sql, params = {}) {
   return p?.rows ?? []
 }
 // SYSTEM-only raw-SQL path (NOT for agent data queries): the introspect/grounding seams read catalogs and build
-// indexes in raw dialect SQL. This posts { raw:true } so the manager runs it as-is instead of compiling PRQL.
-// Agent queries must go through query() above (PRQL only) — that is the access-control boundary.
+// indexes in raw dialect SQL. This posts { raw:true } so the manager runs it as-is, skipping the agent query path.
+// Agent queries must go through query() above — that is the access-control boundary.
 export async function rawQuery(dataSourceId, sql, params = {}) {
   const r = await fetch(MANAGER + '/query', { method:'POST', headers:{'content-type':'application/json'},
     body: JSON.stringify({ id: dataSourceId, sql, params, raw: true }) })
@@ -100,45 +131,24 @@ export async function sources() {   // list data sources + their kind/dialect
 `)
 
   await writeFile(join(dir, 'model', 'model.mjs'),
-`// The MODEL seam. The semantic model is CONCEPT + UNIT nodes in ../db/project.sqlite — the SAME node-store
-// graph the intent nodes and units already live in (one project, one store — no separate model DB).
-// You CONSOLIDATE finished analyses into this concept layer:
-//   concept(name, props, summary?)     — upsert an entity/concept. props:
-//        { status:'verified'|'candidate'|'blocked', grain, time:'snapshot'|'during'|'trailing', asOf,
-//          measures:[{name,additive,stock,note}], dimensions:[{name,values}], parameters:[{name,default,learned}],
-//          rules:[..], identity, source, unit }   ← one entity = one parameterised unit (its id)
-//   relate(fromName, toName, rel)       — a typed edge. rel: { via, cardinality:'N:1'|'1:1'|'N:N', coverage, ok }
-//   bindUnit(name, unitId)             — bind a concept to its one big unit (immutable)
-//   setParent(childName, parentName?)  — place a concept in the TREE under a parent (omit/'root' → the root)
-//   getConcept(name) · relationships(name) · concepts() · intents() · units() · conceptTree()
-//   put(node) · edge({from,to,type,props}) · node(id) · search(q)   — low-level (register unit/program nodes)
-// The concept layer is a TREE (root → concepts → their unit): every concept has ONE parent (a broader
-// composite concept, or the root) via setParent, is 'simple' (one unit) or 'composite' (has sub-concepts)
-// via props.form, and may declare parameters. Units are IMMUTABLE; the concept tree is what you rearrange.
+`// The MODEL seam — how you WRITE what you learn. You CONSOLIDATE finished analyses into the concept layer.
+// Concepts are a FLAT, time-versioned set (no tree). Where they are kept is the engine's business, not yours:
+// a concept describes where the DATA lives and how a quantity is computed, never anything about this system. A concept is a GENERAL idea of computation — most are lean (a value + one or two facets); the
+// data-model block (measures/dimensions/…) is an OPTIONAL specialization for entities/measures only.
+//   concept(name, props, meta)  — upsert a concept (versioned). meta: { changedBy, reason? }. props:
+//        { value, aliases?, status:'unverified'|'corroborated'|'verified', rules?, requires?, supersedes?,
+//          find?, compute?, present?,           ← general facets; compute is a runnable query
+//          source?, grain?, keying?, time?, measures?, dimensions?, parameters?, provenance? }  ← optional
+//   getConcept(name, asOf?)  — the live concept, or (asOf = unix ms) the version live at that instant
+//   conceptHistory(name)     — the full timeline (each version + who/when/why)
+//   concepts() · intents() · units() · put(node) · edge({from,to,type,props}) · node(id) · search(q)
 //
-// SEMANTIC ATOMS — small typed knowledge units indexed by an entity NAME (a simple word/phrase). Each says,
-// about one subject: where it lives, how to compute/join it, how a value resolves, or — most valuable — how
-// RELIABLE a path is (data-quality). Atoms are usage-learned (from real analysis), never invented cold.
-//   putAtom({ atomKind:'where-to-find'|'how-to-compute'|'how-to-join'|'resolution-method'|'data-quality',
-//             subject, location?, method?, coverage?, confidence?, evidence?, provenance?, note?, source? })
-//        — write/update. Re-emitting the SAME content is a no-op; DIFFERENT content VERSIONS the atom (the old
-//          one is archived + timestamped and kept, the new one goes live, linked back). Never a silent overwrite.
-//   atomsFor(subject) · findAtoms({subject?,atomKind?,q?}) · atomHistory(id)   — read (live only; history = all versions)
-import { NodeStore, upsertConcept as _c, relate as _r, bindUnit as _b, getConcept as _g, relationships as _rel, setParent as _sp, conceptTree as _ct,
-  putAtom as _pa, findAtoms as _fa, atomsFor as _af, atomHistory as _ah } from '@superatom/node-store'
+import { NodeStore, upsertConcept as _c, getConcept as _g, conceptHistory as _ch } from '@superatom/node-store'
 import { fileURLToPath } from 'node:url'
-const store = new NodeStore(fileURLToPath(new URL('../db/project.sqlite', import.meta.url)))
-export const concept = (name, props, summary) => _c(store, name, props, summary)
-export const relate = (fromName, toName, rel) => _r(store, fromName, toName, rel)
-export const bindUnit = (name, unitId) => _b(store, name, unitId)
-export const setParent = (childName, parentName) => _sp(store, childName, parentName)
-export const getConcept = (name) => _g(store, name)
-export const relationships = (name) => _rel(store, name)
-export const conceptTree = () => _ct(store)
-export const putAtom = (atom) => _pa(store, atom)
-export const findAtoms = (opts) => _fa(store, opts)
-export const atomsFor = (subject) => _af(store, subject)
-export const atomHistory = (id) => _ah(store, id)
+const store = new NodeStore(fileURLToPath(new URL('../../db/project.sqlite', import.meta.url)))
+export const concept = (name, props, meta) => _c(store, name, props, meta)
+export const getConcept = (name, asOf) => _g(store, name, asOf)
+export const conceptHistory = (name) => _ch(store, name)
 export const concepts = () => store.listKind('concept')
 export const intents  = () => store.listKind('intent')
 export const units    = () => store.listKind('unit')
@@ -148,7 +158,7 @@ export const node = (id) => store.getNode(id)
 export const search = (q, opts) => store.search(q, opts)
 // find(...terms): RECON. Run a search per term (probe several angles of what you think you need), dedupe, and
 // return a COMPACT view (id, kind, name, summary, key props) so you can inspect + judge fit fast. Then use
-// getConcept(name) / relationships(name) / node(id) for full detail on a candidate. Kept simple on purpose.
+// getConcept(name) / node(id) for full detail on a candidate. Kept simple on purpose.
 export const find = (...terms) => {
   const seen = new Map()
   for (const t of terms.flat()) for (const h of store.search(String(t), { limit: 8 }))
@@ -205,24 +215,36 @@ export async function forSource(id) {
 `)
 
   await writeFile(join(dir, 'concepts', 'find.mjs'),
-`// The CONCEPT seam. Strong, EVALUATED concepts — discovery already paid for — live as concept nodes in
-// ../db/project.sqlite. Each says WHERE the data is, HOW to compute it (a runnable PRQL step-list), HOW to
-// present it, and its REVIEW checks. You answer by REWRITING the concepts that fit into your program — a
+`// The CONCEPT seam — knowledge whose discovery has already been paid for. Each concept says WHERE the data
+// lives, HOW to compute it (a runnable query step-list), HOW to present it, and its REVIEW checks. You answer by REWRITING the concepts that fit into your program — a
 // concept is a GUIDE, never an import.
 //   findConcept('revenue by pillar')  → up to \`limit\` matching concepts (guide fields), best match first
 //   listConcepts()                    → every concept's phrase (the menu) — see what exists before you search
 import { NodeStore } from '@superatom/node-store'
 import { fileURLToPath } from 'node:url'
-const store = new NodeStore(fileURLToPath(new URL('../db/project.sqlite', import.meta.url)))
+const store = new NodeStore(fileURLToPath(new URL('../../db/project.sqlite', import.meta.url)))
 const propsOf = (n) => (typeof n.props === 'string' ? JSON.parse(n.props || '{}') : (n.props || {}))
-const guide = (n) => { const { strong: _s, ...g } = propsOf(n); return g }   // drop the metadata flag
+const guide = (n) => { const { _v, ...g } = propsOf(n); return { name: n.label, version: _v?.version, ...g } }   // name = the label; hide raw version metadata
+// SPECIFICITY ranking (same idea the engine uses to surface concept names): a concept's NAME is its set of
+// selector-words; the concept whose selector the query covers the MOST wins (most-specific match), falling back
+// to fewer-word / more-general concepts. Pure lexical. Returns the top specificity tier (within 1 of the best).
+const C_STOP = new Set(('a an the of on in for by per to and or is are was be with as at this that it id what ' +
+  'which who how me my we our you your can do get give show tell find value from over under across').split(' '))
+const stemw = (w) => { for (const suf of ['ing','ed','es','s','ly']) { if (w.endsWith(suf) && w.length - suf.length >= 3) { w = w.slice(0, -suf.length); break } } if (w.length > 3 && w.endsWith('e')) w = w.slice(0, -1); return w }
+const cWords = (s) => new Set(String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !C_STOP.has(w)).map(stemw))
 export function findConcept(query, limit = 8) {
-  return store.search(String(query || ''), { kind: 'concept', limit: limit * 3 })
-    .filter((n) => propsOf(n).strong === true).slice(0, limit).map(guide)
+  const qw = cWords(query)
+  if (!qw.size) return []
+  const rows = store.db.prepare("SELECT * FROM nodes WHERE kind = 'concept' AND valid_to IS NULL").all()
+  const scored = rows
+    .map((n) => { const cw = cWords(n.label); if (!cw.size) return { n, matched: 0, cover: 0 }; let m = 0; for (const w of cw) if (qw.has(w)) m++; return { n, matched: m, cover: m / cw.size } })
+    .filter((x) => x.matched > 0)
+    .sort((a, b) => (b.matched - a.matched) || (b.cover - a.cover))
+  return scored.slice(0, limit).map((x) => guide(x.n))   // generous: top matches by specificity (best first), no tight tier — the agent filters
 }
 export function listConcepts() {
-  return store.db.prepare("SELECT props FROM nodes WHERE kind = 'concept' AND valid_to IS NULL").all()
-    .map((r) => JSON.parse(r.props || '{}')).filter((p) => p.strong === true).map((p) => p.phrase)
+  return store.db.prepare("SELECT label FROM nodes WHERE kind = 'concept' AND valid_to IS NULL ORDER BY label").all()
+    .map((r) => r.label).filter(Boolean)
 }
 `)
 
@@ -260,7 +282,7 @@ async function defaultSource() { if (!_default) _default = (await _sources())[0]
 // Hierarchies of the live kinds (column/derived-query/cross-source) resolve THROUGH this at query time — the
 // source's own tree is the single source of truth, so results are always fresh and nothing is copied/synced.
 const source = async (sql, src, params) => _query(src ?? await defaultSource(), sql, params ?? {})
-const store = new GroundingStore(fileURLToPath(new URL('../db/grounding.sqlite', import.meta.url)), { source })
+const store = new GroundingStore(fileURLToPath(new URL('../../db/grounding.sqlite', import.meta.url)), { source })
 // Grounding holds the CURRENT state only (not versioned). NOT DONE YET: re-running build() is not a clean
 // refresh — it upserts on top, so values gone from the source linger and a differently-shaped re-run leaves
 // both shapes. (Flagging the consequence; not a decision on how to fix it.)
@@ -272,5 +294,136 @@ export const resolveValueByPattern = (value) => store.resolveValueByPattern(valu
 export const stats = () => store.stats()   // the ONE structural reader (defined on GroundingStore)
 export const raw = store
 `)
+
+  // ── Search TOOLS: robust, CWD-independent bash wrappers over the seams ────────────────────────────────────
+  // The agents kept failing to search (require() an ESM file, `node` not resolving @superatom, a relative path
+  // from the wrong CWD) then falling back to `ls`. These wrappers END that: each bakes the ABSOLUTE workspace
+  // path and runs its driver with tsx (node can't resolve node-store's .ts imports; tsx can), so `./find-*`
+  // returns clean JSON on the FIRST try from ANY directory. The agent never reads the .mjs source.
+  const drivers: Record<string, string> = {
+    'find-concept': `// Concepts. "<phrase>" → the NAMES of matching concepts (+ how many exist in total, so an empty library is distinguishable from no match). Read one with \`./get-concept "<exact name>"\`. A query is required.
+import { findConcept, listConcepts } from ${JSON.stringify(join(dir, 'concepts', 'find.mjs'))}
+const q = process.argv.slice(2).join(' ').trim()
+const total = listConcepts().length
+if (!q) { console.log(JSON.stringify(total ? { total, note: total + ' concepts in the library — pass a phrase to search' } : { total: 0, note: 'the concept library is empty (0 concepts)' })); process.exit(0) }
+const matched = findConcept(q).map(c => c.name)
+console.log(JSON.stringify({ matched, of: total, note: total === 0 ? 'the concept library is empty (0 of 0)' : (matched.length + ' matched of ' + total + ' concepts') + (matched.length ? ' — read one with ./get-concept "<name>"' : '') }, null, 2))
+`,
+    'get-concept': `// ONE concept, in full guide form: "<exact name>" (as listed by ./find-concept). Returns the guide only — what it is, its rules, where the data lives, how to compute it, how to present it.
+import { findConcept, listConcepts } from ${JSON.stringify(join(dir, 'concepts', 'find.mjs'))}
+const name = process.argv.slice(2).join(' ').trim()
+if (!name) { console.log(JSON.stringify({ error: 'a concept name is required — list them with ./find-concept "<phrase>"' })); process.exit(0) }
+const norm = (x) => String(x || '').toLowerCase().replace(/\\s+/g, ' ').trim()
+const hit = findConcept(name, 50).find(c => norm(c.name) === norm(name))
+if (!hit) {
+  const near = findConcept(name, 5).map(c => c.name)
+  console.log(JSON.stringify({ error: 'no concept by that exact name', didYouMean: near, note: 'names come from ./find-concept' }, null, 2))
+  process.exit(0)
+}
+// The GUIDE fields only. Retrieval metadata (aliases), audit trail (evidence, provenance, verifiedAt) and
+// versioning are what got this concept FOUND and TRUSTED — they are not instructions for writing a program,
+// so they stay out of the caller's context.
+const KEEP = ['name', 'value', 'status', 'rules', 'requires', 'supersedes', 'dataSource', 'find', 'compute', 'present', 'review', 'source', 'grain', 'keying', 'time', 'measures', 'dimensions', 'parameters']
+const out = {}
+for (const k of KEEP) if (hit[k] !== undefined) out[k] = hit[k]
+console.log(JSON.stringify(out, null, 2))
+`,
+    'find-schema': `// Datasource index. "<term>" = matching fields across ALL sources (SOURCE.CONTAINER.FIELD : type). Search by field/table name, by type (date/number), or by what a column MEANS. --source <S> filters to one source; --full adds PK/nullable/references.
+import { NodeStore, searchDataSource } from '@superatom/node-store'
+const store = new NodeStore(${JSON.stringify(join(dbDir, 'project.sqlite'))})
+const args = process.argv.slice(2)
+const full = args.includes('--full')
+const si = args.indexOf('--source')
+const source = si >= 0 ? args[si + 1] : undefined
+const skip = si >= 0 ? si + 1 : -1   // index of the source VALUE to drop (only when --source is present)
+const q = args.filter((a, i) => a !== '--full' && a !== '--source' && i !== skip).join(' ').trim()
+if (!q) { console.log(JSON.stringify({ hint: 'find-schema "<term>" [--source <SOURCE>] [--full] — search every datasource for a field/table by name, type, or description' })); process.exit(0) }
+const rows = searchDataSource(store, q, { source, limit: full ? 40 : 60 })
+const view = (e) => full ? e : (e.key + ' : ' + (e.type || '?') + (e.isKey ? ' [PK]' : '') + (e.references ? (' → ' + e.references) : ''))
+console.log(JSON.stringify(rows.map(view), null, 2))
+`,
+    'find-program': `// Programs that answered a similar question. "<question>" = matching question/program/category (the INDEX). Add --full for its saved params.
+import { NodeStore } from '@superatom/node-store'
+const store = new NodeStore(${JSON.stringify(join(dbDir, 'project.sqlite'))})
+const args = process.argv.slice(2)
+const full = args.includes('--full')
+const q = args.filter(a => a !== '--full').join(' ').trim()
+const P = (n) => (typeof n.props === 'string' ? JSON.parse(n.props || '{}') : (n.props || {}))
+const out = []
+for (const h of store.search(q, { limit: 20 })) {
+  const p = P(h)
+  const row = h.kind === 'intent' && p.program ? { question: p.question ?? h.label, program: p.program, category: p.category, params: p.params }
+            : h.kind === 'program' ? { question: h.label, program: p.dir, category: p.category }
+            : null
+  if (row) out.push(full ? row : { question: row.question, program: row.program, category: row.category })
+}
+const seen = new Set()
+console.log(JSON.stringify(out.filter(o => o.program && !seen.has(o.program) && seen.add(o.program)).slice(0, 8), null, 2))
+`,
+    'sources': `// List data sources + their kind/dialect. Run: ./sources. Prints JSON.
+import { sources } from ${JSON.stringify(join(dir, 'data', 'query.mjs'))}
+console.log(JSON.stringify(await sources(), null, 2))
+`,
+    'query': `// Run a query against a source. Run: ./query "<source>" "<query>". Prints JSON rows.
+import { query } from ${JSON.stringify(join(dir, 'data', 'query.mjs'))}
+const [src, ...rest] = process.argv.slice(2)
+if (!src || !rest.length) { console.error('usage: ./query "<source>" "<query>"  (list sources with ./sources)'); process.exit(1) }
+console.log(JSON.stringify(await query(src, rest.join(' ')), null, 2))
+`,
+    'introspect': `// Inspect data schema/evidence. Run ONE of:
+//   ./introspect "<source>" tables
+//   ./introspect "<source>" columns "<table>"
+//   ./introspect "<source>" sample "<table>" [n]
+//   ./introspect "<source>" profile "<table>" "<column>"
+//   ./introspect "<source>" verify-join "<fromT>" "<fromCol>" "<toT>" "<toCol>"
+import { forSource } from ${JSON.stringify(join(dir, 'data', 'introspect.mjs'))}
+const [src, cmd, ...a] = process.argv.slice(2)
+if (!src || !cmd) { console.error('usage: ./introspect "<source>" <tables|columns|sample|profile|verify-join> [args]'); process.exit(1) }
+const I = await forSource(src)
+let r
+if (cmd === 'tables') r = await I.tables()
+else if (cmd === 'columns') r = await I.columns(a[0])
+else if (cmd === 'sample') { const n = a.slice(1).map(Number).find(x => Number.isFinite(x) && x > 0); r = await I.sampleRows(a[0], n ?? 8) }
+else if (cmd === 'profile') r = await I.profile(a[0], a[1])
+else if (cmd === 'verify-join') r = await I.verifyJoin(a[0], a[1], a[2], a[3])
+else { console.error('unknown subcommand: ' + cmd); process.exit(1) }
+console.log(JSON.stringify(r, null, 2))
+`,
+    'resolve': `// Resolve a fuzzy human reference (a name/value) to concrete ids. Run: ./resolve "<text>". Prints JSON.
+import { resolveEntity } from ${JSON.stringify(join(dir, 'grounding', 'grounding.mjs'))}
+const t = process.argv.slice(2).join(' ').trim()
+if (!t) { console.error('usage: ./resolve "<text>"'); process.exit(1) }
+console.log(JSON.stringify(await resolveEntity(t), null, 2))
+`,
+  }
+  // Each tool is SELF-DOCUMENTING: `<tool> --help` prints how to use it (args/subcommands) — so the agent
+  // never needs to read the .mjs to learn what to pass, and never sees the implementation.
+  const usages: Record<string, string> = {
+    'find-concept': 'find-concept "<phrase>"   → the NAMES of matching concepts. A query is required. Read one with get-concept.',
+    'get-concept':  'get-concept "<exact name>"   → ONE concept\'s guide: what it is, its rules, where the data lives, how to compute and present it',
+    'find-schema':  'find-schema "<term>" [--source <SOURCE>] [--full]   → search ALL datasources for a field/table by name, type, or description (SOURCE.TABLE.COLUMN : type); --source filters to one; --full adds PK/nullable/references',
+    'find-program': 'find-program "<question>" [--full]   → programs that answered a similar question (question/program/category); add --full for the saved params',
+    'sources':      'sources   → every data source with its kind + dialect (JSON)',
+    'query':        'query "<source>" "<query>"   → run a query against a source → JSON rows   (list sources: ./sources)',
+    'introspect':   'introspect "<source>" <cmd>   where <cmd> = tables | columns "<table>" | sample "<table>" [n] | profile "<table>" "<column>" | verify-join "<fromT>" "<fromCol>" "<toT>" "<toCol>"',
+    'resolve':      'resolve "<text>"   → resolve a fuzzy name/value to concrete ids (JSON)',
+  }
+  for (const [name, body] of Object.entries(drivers)) {
+    // Prepend a --help guard. ESM hoists the body's imports above this, but they only OPEN cheap handles; the
+    // guard still short-circuits before any query/search runs, printing usage and nothing else.
+    // Clean errors (message only, no stack) + a --help guard. Any failure inside the tool prints one actionable
+    // line and exits 1 — the agent reads a clear reason, not a Node stack trace.
+    const help = `process.on('unhandledRejection', (e) => { console.error(String(e && e.message || e)); process.exit(1) })
+process.on('uncaughtException', (e) => { console.error(String(e && e.message || e)); process.exit(1) })
+if (process.argv.slice(2).some(a => a === '-h' || a === '--help')) { console.log(${JSON.stringify(usages[name])}); process.exit(0) }\n`
+    await writeFile(join(dir, '.tools', name + '.mjs'), help + body)
+    await writeFile(join(dir, name),
+`#!/usr/bin/env bash
+D=${JSON.stringify(join(dir, '.tools', name + '.mjs'))}
+if command -v tsx >/dev/null 2>&1; then exec tsx "$D" "$@"; else exec npx --yes tsx "$D" "$@"; fi
+`)
+    await chmod(join(dir, name), 0o755)
+  }
+
   return dir
 }

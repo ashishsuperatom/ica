@@ -12,7 +12,7 @@
 FROM node:22-slim
 
 # Dependencies for native modules (better-sqlite3, node-pty) + CA certs for the CLI downloads
-RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ git ca-certificates curl \
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ git ca-certificates curl jq \
     && rm -rf /var/lib/apt/lists/*
 
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0

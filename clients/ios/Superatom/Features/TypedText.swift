@@ -15,7 +15,13 @@ import SwiftUI
 
 struct TypedText: View {
     let text: String
-    /// Per-word stagger. ~45ms reads as writing; faster becomes a flash, slower drags.
+    /// Per-word stagger.
+    ///
+    /// This started at 45ms, tuned when the transcript came from the server a second or
+    /// more after you stopped speaking — the reveal filled a wait that already existed.
+    /// On-device transcription removed that wait, so the animation became the ONLY thing
+    /// to wait for. It is now a flourish that confirms the words arrived, not a reveal
+    /// that paces them.
     let step: Double
     /// The whole reveal is capped, so a long transcript animates faster per word rather
     /// than making anyone wait longer to read it.
@@ -28,7 +34,7 @@ struct TypedText: View {
     private let words: [String]
     private let stagger: Double
 
-    init(text: String, step: Double = 0.045, maxDuration: Double = 1.1) {
+    init(text: String, step: Double = 0.016, maxDuration: Double = 0.3) {
         self.text = text
         self.step = step
         self.maxDuration = maxDuration
@@ -45,7 +51,7 @@ struct TypedText: View {
                     .blur(radius: revealed ? 0 : 2.5)
                     .offset(y: revealed ? 0 : 5)
                     .animation(
-                        .easeOut(duration: 0.34).delay(Double(index) * stagger),
+                        .easeOut(duration: 0.18).delay(Double(index) * stagger),
                         value: revealed
                     )
             }

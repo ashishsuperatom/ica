@@ -23,7 +23,7 @@
 // time-entry, with an embedded rule), and its compute is an ORDERED LIST of steps, not one query.
 //
 // STATUS: schema proposal on the `concept-fast-path` branch. Not yet a registered node kind / wired into the
-// engine — it exists to be validated by the extractor against PRQL's real evaluated concepts + the question bank.
+// engine — it exists to be validated by the extractor against the real evaluated concepts + the question bank.
 
 // TWO KINDS OF FIELD. The composer LLM sees only the GUIDE fields (phrase, what, entities, strategy, compute,
 // represent, review) — keep those tight, since the composer already has the whole program context around them.
@@ -46,10 +46,10 @@
  *  field is here now so concepts are shaped for it; resolution isn't built yet). Routing metadata. */
 export type ConceptScope = 'global' | 'branch' | 'user'
 
-/** One step of the recipe: plain-language intent + the runnable PRQL fragment that is its reference. */
+/** One step of the recipe: plain-language intent + the runnable query fragment that is its reference. */
 export interface ConceptComputeStep {
   do: string             // what this step computes, in plain language
-  prql: string           // the runnable PRQL fragment — the EXECUTABLE reference the composer rewrites from (never prose)
+  query: string          // the runnable query fragment — the EXECUTABLE reference the composer rewrites from (never prose)
   source?: string        // datasource id this fragment runs against (a concept may cross sources)
 }
 

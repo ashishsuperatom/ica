@@ -1,5 +1,3 @@
-<!-- GENERATED — edit the generate-*.ts source, not this .md. -->
-
 # Reviewing a saved program's answer
 
 A saved program just ran to answer a user's question. You are shown the QUESTION and the ANSWER it produced.

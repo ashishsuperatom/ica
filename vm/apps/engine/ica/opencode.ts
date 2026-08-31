@@ -25,6 +25,7 @@ export interface OpencodeSessionOpts {
   port?: number       // default 0 ephemeral (only when spawning a private server)
   noTools?: boolean   // disable ALL tools for this session (pure text completion — no tool schemas, no tool calls)
   system?: string     // REPLACE opencode's default coding system prompt with this one (for pure-LLM agents)
+  systemReference?: string   // authoritative authoring reference → folded into the system prompt (for coding agents)
 }
 
 // ALL PERMISSIONS enabled — opencode gates edit/webfetch on "ask" by default, which HANGS a headless
@@ -89,6 +90,9 @@ function normPart(part: any): AgentEvent | null {
 export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
   const providerID = opts.provider ?? process.env.ICA_OC_PROVIDER ?? 'opencode-go'
   const modelID = opts.model ?? process.env.ICA_OC_MODEL ?? 'glm-5.2'
+  // The system prompt sent per turn: an explicit `system` (pure-LLM agents) plus the authoritative authoring
+  // reference (coding agents). Both fold into opencode's `system` field (which REPLACES its default coding prompt).
+  const effSystem = [opts.system, opts.systemReference].filter(Boolean).join('\n\n') || undefined
   let client: any = null
   let server: any = null
   let ownsServer = false   // true ONLY when this harness spawned the server — we stop what we start, and never touch a server we merely connected to
@@ -98,6 +102,8 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
   let buf = ''
   const eventLog: AgentEvent[] = []                 // structured events (the 'events' view), fed by POLLING (SSE is broken)
   const polled = new Map<string, string>()          // part id → last signature, so we emit only on change
+  const emittedNarr = new Set<string>()             // [[ui]] lines already shown for the CURRENT question (cleared per turn, so a poll doesn't repeat a line)
+  let turnStartAt = 0                                // when the current question started; narration is scoped to messages created at/after it
   let running = false
   let activeHandler: RunHandlers | undefined
   const queue: { prompt: string; h?: RunHandlers; resolve: (r: RunResult) => void }[] = []
@@ -159,13 +165,32 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
   }
   // Poll the session's messages → normalize the assistant parts → emit changed events. This is the live event
   // source (opencode's SSE part stream is broken since 1.14.42, #27966), polled every ~1s during a turn.
+  // Surface the agent's DELIBERATE progress notes: lines it marked with `[[ui]]` (the composer's system prompt
+  // tells it to). Only these reach onNarration — never tool calls, reasoning, or answer prose. Each distinct
+  // line is emitted once (deduped for the turn); opencode's SSE parts are broken so this runs off the poll.
+  function scanNarration(text: string, h?: RunHandlers) {
+    for (const raw of String(text).split('\n')) {
+      const m = raw.match(/\[\[ui\]\]\s+(.+?)\s*$/i)
+      if (!m) continue
+      const t = m[1].trim()
+      if (t && !emittedNarr.has(t)) { emittedNarr.add(t); h?.onNarration?.(t) }
+    }
+  }
+
   async function pollMessages(h?: RunHandlers) {
     try {
       const res: any = await client.session.messages({ path: { id: sessionId }, query: { directory: opts.cwd } })
       for (const m of (res?.data ?? res ?? [])) {
         const info = m.info ?? m
         if (info?.role !== 'assistant') continue
-        for (const part of (m.parts ?? info.parts ?? [])) { const ne = normPart(part); if (ne) emit(ne, h) }
+        // ONE opencode session multiplexes MANY questions (its history is the whole session). Attribute a message
+        // to the CURRENT question by TIME: only narrate from messages created at/after this turn started, so a new
+        // question never re-shows a prior question's progress lines. (Structured events use `polled` sig-dedupe.)
+        const narrate = Number(info?.time?.created ?? 0) >= turnStartAt
+        for (const part of (m.parts ?? info.parts ?? [])) {
+          if (narrate && part?.type === 'text' && typeof part.text === 'string') scanNarration(part.text, h)
+          const ne = normPart(part); if (ne) emit(ne, h)
+        }
       }
     } catch { /* transient — next poll retries */ }
   }
@@ -176,7 +201,12 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
     const { prompt, h, resolve } = queue.shift()!
     await ensure()
     activeHandler = h
-    const t0 = Date.now()
+    // Stamp the question's start BEFORE prompting: pollMessages only narrates from messages created at/after this,
+    // so a prior question's [[ui]] lines (still in the shared session history) are never re-shown here. emittedNarr
+    // (line-level, cleared per turn) just stops one poll from repeating a line it already showed this question.
+    turnStartAt = Date.now()
+    emittedNarr.clear()
+    const t0 = turnStartAt
     let answer = ''
     const poll = setInterval(() => { void pollMessages(h) }, 1000)      // live events via polling (SSE parts broken)
     try {
@@ -185,9 +215,10 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
         query: { directory: opts.cwd },
         // `system` REPLACES opencode's default coding prompt; `tools:{'*':false}` disables the whole toolset —
         // so a pure-LLM agent (narrator) pays for neither the agent scaffolding nor the tool schemas.
-        body: { model: { providerID, modelID }, parts: [{ type: 'text', text: prompt }], ...(opts.system ? { system: opts.system } : {}), ...(opts.noTools ? { tools: { '*': false } } : {}) },
+        body: { model: { providerID, modelID }, parts: [{ type: 'text', text: prompt }], ...(effSystem ? { system: effSystem } : {}), ...(opts.noTools ? { tools: { '*': false } } : {}) },
       })
       answer = partsText(res?.data?.parts ?? res?.parts ?? [])
+      await pollMessages(h)                                            // final scan (with part-id dedupe) — catch a [[ui]] line that landed after the last poll
       // Cost visibility: log this turn's token usage + $cost. The prompt prefix identifies the caller
       // (reflex vs narrator, etc.). opencode's message info carries tokens{input,output,reasoning,cache} + cost.
       try {
@@ -204,6 +235,7 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
   }
 
   return {
+    referencePlacement: opts.systemReference ? 'in-context' : 'file',   // folded into opencode's `system` when present
     async run(prompt, h) { return new Promise<RunResult>((resolve) => { queue.push({ prompt, h, resolve }); pump() }) },
     async compact() {                                                   // opencode summarizes its own context
       try { await client?.session?.summarize?.({ path: { id: sessionId }, query: { directory: opts.cwd } }) } catch {}

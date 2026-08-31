@@ -8,7 +8,9 @@
 
 import './generate-system.js'   // FIRST: (re)writes system/*.md from generate-system.ts before they're read below
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { loadPrompt } from '../../prompts.js'
+import { AUTHORING_SURFACE } from '../shared-prompts/authoring-reference.js'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
@@ -70,7 +72,8 @@ export interface AskOpts {
   // answers + the program's location (the id) — the analyst OPENS and READS the program itself (that is the
   // source of truth), so we never pass a stale answer string around.
   modify?: { programDir: string; prevQuestion?: string }
-  hint?: string           // an optional pointer from reflex (e.g. a close existing program to reuse or ignore)
+  conceptNames?: string[] // concept NAMES the engine surfaced for this question (names only — open with find-concept for the method)
+  reason?: string         // the composer's escalation note — a NON-authoritative hint of what was hard (the analyst re-derives from scratch)
 }
 
 export interface Analyst {
@@ -98,12 +101,22 @@ export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
   const model = opts.ica?.model ?? 'claude-sonnet-5'
 
   const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl })
-  const session = createSession(harness, { cwd, model, resumeId: opts.ica?.resumeId })
+  // The analyst's whole instruction into its system prompt (claude --append-system-prompt-file, so it APPENDS to
+  // claude's own coding prompt): its generated system (already carries the mechanics) + the authoring SURFACE it
+  // was missing (contract + example + rule) + the per-project data CONTEXT. Then it reads no instruction files.
+  const context = (() => { try { return readFileSync(join(cwd, 'CONTEXT.md'), 'utf8') } catch { return '' } })()
+  const systemReference = [await fullSystem(), AUTHORING_SURFACE, context].filter(Boolean).join('\n\n---\n\n')
+  const session = createSession(harness, { cwd, model, resumeId: opts.ica?.resumeId, systemReference })
+  // ONE linear path: claude appends the reference to its system prompt, so the analyst never reads an instruction
+  // file. If a harness can't inject (pi/mock), fail LOUD rather than branch — a misconfiguration is easier to
+  // debug than a silent second code path.
+  if (session.referencePlacement !== 'in-context')
+    console.warn(`[analyst] harness "${harness}" cannot put the reference in the system prompt — instructions will be missing; use claude-code/opencode/codex`)
 
   const preamble =
-    'Read ./CONTEXT.md FIRST (environment: `node` for quick checks/probes, `tsx` for units/programs; and the seams), then ./analyst/ANALYST.md ' +
-    '(your instructions) — follow it exactly. The semantic model is ./model/model.mjs; data is ONLY ./data/query.mjs / ' +
-    './data/introspect.mjs. Your deliverable is a PROGRAM (see below) — the engine runs it and writes the answer.'
+    'Your instructions, the program contract + example, and the data context are already in your system prompt. ' +
+    'Search concepts with `./find-concept`, find where data lives with `./find-schema`, query with `./query` / `./sources` / ' +
+    '`./introspect`, resolve names with `./resolve`. Your deliverable is a PROGRAM — the engine runs it and writes the answer.'
 
   return {
     cwd,
@@ -111,9 +124,8 @@ export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
 
     async ask(question, handlers, opts = {}) {
       const t0 = Date.now()
-      // The agent self-decides the category (no separate classifier). Full instructions → ./analyst/ANALYST.md
-      // (a distinct filename so the modeller, which SHARES this workspace, never clobbers it).
-      await writeFile(join(cwd, 'analyst/ANALYST.md'), await fullSystem())
+      // The agent self-decides the category (no separate classifier); its instructions are in the system prompt,
+      // so it reads no instruction file here.
       // Each question gets its OWN FOLDER (./out/<qid>/), with files named by MEANING:
       //   built.json   — a pointer to the program the analyst built (the engine runs it → answer.json)
       //   answer.json  — the FINAL answer (engine-written from the program output, or an unknowable direct)
@@ -128,40 +140,27 @@ export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
       // Answer the question fresh (self-contained — never "continue the last one"; the queue means the
       // session may have moved on). The analyst is self-sufficient: it ALWAYS produces an answer — it never
       // defers to the model-builder (that is now an offline consolidation pass, not something in this path).
-      const buildPrompt = `${preamble}
-
+      const reason = opts.reason
+      const buildBody = `# Your task — a fresh, standalone question. A lighter agent tried it and could not finish; start from the beginning.
+${reason ? `\nThe composer's note on why it couldn't — a HINT about what was hard, and it may be WRONG. Do NOT follow it as a direction; re-investigate independently and derive the answer yourself: "${reason}"\n` : ''}
 Question: ${question}
-${opts.hint ? '\n' + opts.hint + '\n' : ''}
-There is ONE path: BUILD A PROGRAM. Every question becomes a program — no exceptions. This includes a
-greeting, small talk, or a question about you / the system / whether data sources are connected: for those,
-build a small program whose output IS your reply. Whatever you would say goes INTO the program's output
-(which becomes the answer card + UI) — never into chat.
+${(opts.conceptNames ?? []).length ? '\nCandidate concepts for this question, most-relevant first — SOME MAY NOT FIT. Read the ones that look right with ./get-concept "<name>", use those, ignore the rest (find-concept stays available for anything else):\n' + (opts.conceptNames ?? []).map(n => `- ${n}`).join('\n') + '\n' : ''}
+Build a program that answers it - follow your instructions (recon concepts first, then the data; every
+question becomes a program). RUN it with \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\` until correct.
 
-1. Decide which answer-shape (\`category\`) from ./analyst/ANALYST.md fits THIS question, and report it as \`category\`.
-2. RECON THE MODEL FIRST — before touching raw data. Decide what this question needs (entity, measure, grain,
-   filters), then PROBE the model for it with a few targeted queries: ./model/model.mjs — \`find('term','term'…)\`,
-   \`concepts()\`, \`intents()\`, \`getConcept(name)\`. Inspect what comes back; if a concept / unit / past program
-   CONFIDENTLY fits, reuse or compose it — deterministic, and it carries the corrections we've made. ONLY if
-   nothing confidently fits, analyze the raw data yourself (./data/query.mjs / ./data/introspect.mjs). Probe, judge, move
-   on — never force an ill-fitting unit. Always PRODUCE AN ANSWER.
-3. Write ${builtRel} = {"programDir":"programs/<slug>","params":{...the params...}, "parent":"root" | "<a prior intent id>", "followups":["…", "…"]}
-   pointing at the program you built, and RUN it with \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\` until
-   it is correct. Reuse an existing ./programs/ program if one fits. \`parent\` PLACES this question in the intent
-   graph: "root" for a NEW topic, or the id of a prior intent (from \`intents()\`) if this FOLLOWS UP that
-   question. Omit \`parent\` if unsure (it stays in the current thread).
-   \`followups\` (OPTIONAL, best-effort): up to 3 short questions the user might naturally ask NEXT — VARY them
-   (one deeper, one broader, one a different angle; not always deeper), each phrased as a standalone question.
-   Purely a suggestion for the UI; it never changes the answer. Omit if none are obvious.
+Then COMMIT, as your final action: write ${builtRel} — once everything else is finished and verified.
+  {"programDir":"programs/<slug>","params":{...}, "parent":"root" | "<a prior intent id>", "followups":["...","..."],
+   "canonicalQuestions":["..."]}
+\`canonicalQuestions\` — the question this program answers, phrased so its parameters are visible ("… for customer
+<customer> in <period>"). Add another only when the program genuinely answers a differently-phrased question.
+The ENGINE runs the program and writes the answer - the answer is its to write, never yours in chat.
 
-The ENGINE runs your program and writes the answer from its REAL output — so the user sees the program's
-result, never a figure or reply you typed. Do NOT write ${answerRel} yourself, and do NOT answer in chat. A
-genuine unknowable (needs an assumption recorded NOWHERE in the data) is STILL a program: one that verifies
-the gap against the data and outputs status "unknowable" + a \`missing\` reason.`
+`
 
       // MODIFY: edit the EXISTING program in place. The engine supplies the target (it may have been built long
       // ago / by a reuse, so it is NOT in your context) — everything you need is below; don't guess.
       const m = opts.modify
-      const modifyPrompt = m ? `${preamble}
+      const modifyBody = m ? `# Your task — MODIFY the current answer
 
 The user wants to MODIFY the CURRENT answer — the SAME program, changed as they ask (a different calculation,
 different columns/outputs, extra context, a different filter or top-N). Do NOT build a new program.
@@ -177,7 +176,13 @@ until correct. Then write ${builtRel} = {"programDir":"${m.programDir}","params"
 pointing at the SAME program (do NOT change programDir, do NOT set parent). \`followups\` = up to 3 FRESH
 next questions for the CORRECTED answer (optional; vary them). The ENGINE runs it and writes the answer — do NOT write
 ${answerRel} yourself, and do NOT answer in chat.` : ''
-      const prompt = m ? modifyPrompt : buildPrompt
+      const taskRel = opts.qid ? `./out/${opts.qid}/task.md` : `./out/task.md`
+      await writeFile(join(dir, 'task.md'), m ? modifyBody : buildBody)   // the long content lives in a FILE the analyst READS
+      // The TYPED message stays SHORT so it is delivered reliably: a long line typed into the TUI can truncate
+      // under load, which once sent the analyst a stray prompt fragment instead of the actual question.
+      const prompt = `${preamble}
+
+Your task is in ${taskRel} — read it and follow it exactly. ${m ? 'Modify the current program as it describes.' : 'It is a FRESH, standalone question — answer it from scratch; assume no earlier conversation.'}`
 
       // Completion: the analyst either points at a built program (built.json) or writes an unknowable answer.json.
       const hasBuilt  = async () => { try { return !!JSON.parse(await readFile(builtPath, 'utf8'))?.programDir } catch { return false } }

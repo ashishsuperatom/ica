@@ -132,11 +132,27 @@ struct FigureBand: View {
                         }
                         cell(figure, isFirst: position == 0)
                     }
-                    if row.count == 1 { Color.clear.frame(maxWidth: .infinity) }
+                    // A filler keeps columns aligned when a LAST odd figure sits under a
+                    // full row. But with only one figure in the whole band there is no
+                    // column to align to, and the filler would steal half the width and
+                    // truncate a value that fits perfectly well.
+                    if row.count == 1, figures.count > 1 {
+                        Color.clear.frame(maxWidth: .infinity)
+                    }
                 }
                 .fixedSize(horizontal: false, vertical: true)
             }
             Rectangle().fill(Theme.rule).frame(height: 1)
+        }
+    }
+
+    /// Long values step down a size rather than being crushed — 25pt suits "-$736k",
+    /// not a two-currency rate string.
+    private func valueSize(_ display: String) -> CGFloat {
+        switch display.count {
+        case ..<12:  return 25
+        case ..<20:  return 21
+        default:     return 18
         }
     }
 
@@ -148,12 +164,17 @@ struct FigureBand: View {
                 .foregroundStyle(Theme.inkFaint)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
+            // Values are not always short. A rate can be a composite like
+            // "AUD $200.00/hr / AUD $180.00/hr", and shrinking it to a single line either
+            // makes it unreadable or clips it. Wrap to a second line first, and only then
+            // scale — a figure you cannot read is not a figure.
             Text(figure.display)
-                .font(.system(size: 25, weight: .semibold))
+                .font(.system(size: valueSize(figure.display), weight: .semibold))
                 .monospacedDigit()
-                .foregroundStyle(figure.neg == true ? Theme.warning : Theme.ink)
-                .minimumScaleFactor(0.5)
-                .lineLimit(1)
+                .foregroundStyle(figure.neg ? Theme.warning : Theme.ink)
+                .minimumScaleFactor(0.7)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
             if let sub = figure.sub, !sub.isEmpty {
                 Text(sub)
                     .font(Theme.sans(11.5))
@@ -188,7 +209,8 @@ struct SectionView: View {
                 FigureBand(figures: section.items)
             case .table:
                 TableView(columns: section.columns, rows: section.rows,
-                          total: section.total.isEmpty ? nil : section.total)
+                          total: section.total.isEmpty ? nil : section.total,
+                          totalRows: section.totalRows, title: section.title)
             case .text:
                 if let body = section.body, !body.isEmpty {
                     MarkdownText(raw: body, font: Theme.sans(14.5), color: Theme.inkSoft, lineSpacing: 6)

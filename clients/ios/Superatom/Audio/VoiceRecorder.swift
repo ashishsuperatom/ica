@@ -29,6 +29,11 @@ final class VoiceRecorder: NSObject {
     /// What the UI observes. Separate object so the audio engine needs no isolation.
     let state = VoiceState()
 
+    /// On-device transcription, fed from the same tap. It sees EVERY buffer, not just the
+    /// speech the VAD keeps, because the analyzer does its own endpointing and hearing the
+    /// silences helps it decide where phrases end.
+    let speech = SpeechBridge()
+
     private var engine: AVAudioEngine?
     private var vad: VADWrapper?
     private let audioQueue = DispatchQueue(label: "ai.superatom.audio", qos: .userInitiated)
@@ -43,6 +48,7 @@ final class VoiceRecorder: NSObject {
     private var observers: [NSObjectProtocol] = []
     private var converter: AVAudioConverter?
     private var targetFormat: AVAudioFormat?
+    private var useOnDevice = true
 
     private let sampleRate: Double = 16_000
     private let minSamples = 10 * 16_000
@@ -115,8 +121,10 @@ final class VoiceRecorder: NSObject {
         }
     }
 
-    func start() {
+    /// `onDevice` decides which transcriber runs — never both. See Preferences.
+    func start(onDevice: Bool) {
         guard !state.isRecording else { return }
+        useOnDevice = onDevice
         requestPermission { [weak self] granted in
             guard let self, granted else { return }
             self.beginSession()
@@ -149,6 +157,7 @@ final class VoiceRecorder: NSObject {
             chunkIndex = 0
             didCaptureSpeech = false
         }
+        if useOnDevice { speech.start() }
         state.isRecording = true
         state.startedAt = .now
         state.speechSeconds = 0
@@ -233,6 +242,7 @@ final class VoiceRecorder: NSObject {
         guard error == nil, converted.frameLength > 0,
               let channel = converted.floatChannelData?[0] else { return }
         vad?.processAudioData(withBuffer: channel, count: UInt(converted.frameLength))
+        if useOnDevice { speech.append(buffer) }   // raw tap buffer: the analyzer picks its own format
     }
 
     // ── Flushing ─────────────────────────────────────────────────────────────
@@ -258,6 +268,7 @@ final class VoiceRecorder: NSObject {
     /// and converting those on the main queue is a visible hitch on every flush.
     private func flush(isFinal: Bool) {
         guard !speechSamples.isEmpty else { return }
+        guard !useOnDevice else { speechSamples = []; return }   // nothing to upload
         let samples = speechSamples
         speechSamples = []
         let index = chunkIndex

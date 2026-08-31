@@ -13,86 +13,17 @@ import http from 'node:http'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { dirname, join, isAbsolute } from 'node:path'
-import { createRequire } from 'node:module'
+import { rewriteSqlDetailed } from './sqlglot-pool.js'
 
-// Compile PRQL → the source's SQL dialect. PRQL has NATIVE targets for some dialects (mssql/postgres/…); for
-// ones it does NOT (e.g. NetSuite SuiteQL = Oracle-flavoured) we compile to the closest STANDARD target
-// (`sql.ansi`) and apply a small per-dialect FIXUP to bridge the remaining gap. `sql.ansi` is far closer to
-// Oracle than `sql.mssql` (standard COALESCE/||/CHAR_LENGTH, no [brackets] or ISNULL) — only pagination differs.
-// This is the ONE place a new source declares how its PRQL compiles; keep each fixup small and targeted.
-const PRQL_TARGET: Record<string, string> = { mssql: 'sql.mssql', postgres: 'sql.postgres', sqlite: 'sql.sqlite', duckdb: 'sql.duckdb', suiteql: 'sql.ansi' }
-// A post-compile PLUGIN registry: per-dialect rewrites applied to the emitted SQL. RULE: only add a transform
-// that is DETERMINISTIC and GUARANTEED-correct (a mechanical dialect rewrite that is ALWAYS valid for that
-// source) — never a heuristic guess. Anything a rewrite can't safely express belongs in an s"…" native fragment
-// the analyst writes, not here.
-const DIALECT_FIXUP: Record<string, (sql: string) => string> = {
-  // SuiteQL/Oracle: no LIMIT — it uses `FETCH FIRST n ROWS ONLY` (with an optional leading `OFFSET m ROWS`).
-  // Guaranteed: ANSI `LIMIT n [OFFSET m]` → the exact Oracle row-limiting clause, always valid.
-  suiteql: (sql) => sql.replace(/\bLIMIT\s+(\d+)(?:\s+OFFSET\s+(\d+))?/gi, (_m, n, off) => (off ? `OFFSET ${off} ROWS ` : '') + `FETCH FIRST ${n} ROWS ONLY`),
-}
-// prqlc runs as a WASM module (prql-js). A specific input can make the Rust compiler PANIC, which POISONS the
-// WASM instance — every LATER compile then throws "memory access out of bounds"/"unreachable" until the process
-// restarts (a single-point wedge for the whole data path). This is an upstream prqlc bug, not our code. We make
-// it SELF-HEAL: prql_js.js builds a fresh WebAssembly.Instance on each require, so dropping it from the CJS cache
-// and re-requiring gives a clean instance + clean memory. Compiles are SYNCHRONOUS (serialized on the JS thread),
-// so nothing is ever mid-flight in the instance when we swap it — safe even under many concurrent users.
-const _require = createRequire(import.meta.url)
-const loadPrqlCompile = (): ((s: string) => string) => {
-  const m: any = _require('prql-js')
-  const c = m.compile ?? m.default?.compile
-  if (typeof c !== 'function') throw new Error('prql-js: no compile() export')
-  return c
-}
-let _prqlCompileFn = loadPrqlCompile()
-const reloadPrqlCompiler = () => { try { delete _require.cache[_require.resolve('prql-js')] } catch { /* ignore */ }; _prqlCompileFn = loadPrqlCompile() }
-// A poisoned-instance/panic signature — NOT a normal PRQL syntax error (which must propagate unchanged).
-const isWasmFault = (msg: string) => /out of bounds|unreachable|RuntimeError|recursive use|table index|null function|memory access|\bwasm\b/i.test(String(msg))
-// Compile with self-healing: on a WASM fault, LOG the offending PRQL (so we can capture + report the trigger),
-// re-instantiate, and retry ONCE. If the SAME input faults again it reliably crashes prqlc → reset for the NEXT
-// query and reject THIS one clearly, so a bad input can never wedge the compiler for everyone else.
-const _prqlCompile = (src: string): string => {
-  try { return _prqlCompileFn(src) }
-  catch (e: any) {
-    if (!isWasmFault(e?.message ?? '')) throw e
-    console.error('[manager] prqlc WASM FAULT — re-instantiating compiler. Offending PRQL:\n' + src + '\n' + (e?.message ?? e))
-    reloadPrqlCompiler()
-    try { return _prqlCompileFn(src) }
-    catch (e2: any) {
-      if (isWasmFault(e2?.message ?? '')) reloadPrqlCompiler()   // input reliably crashes prqlc → reset so the NEXT query is clean
-      throw new Error('this query crashed the PRQL compiler (upstream prqlc bug on this input) — rephrase the pipeline: ' + (e2?.message ?? e2))
-    }
-  }
-}
 // Result caps for AGENT queries — a runaway/unbounded query must not dump a whole table (192K rows would
-// overwhelm the bridge WS AND the UI, which shows hundreds at most). MAX_ROWS is enforced AT THE SOURCE (a `take`
-// appended to the PRQL, so the DB returns no more) — a no-op for aggregations, only bites a raw row list.
-// MAX_BYTES is a secondary guard for very wide rows. The trusted raw path (grounding/introspect) is exempt.
+// overwhelm the bridge WS AND the UI, which shows hundreds at most). MAX_ROWS is enforced AT THE SOURCE — the
+// rewrite injects a LIMIT/FETCH FIRST into the query's AST, so the DB never returns more (a no-op for
+// aggregations; the smaller of any agent-supplied limit wins). MAX_BYTES is a secondary guard for very wide
+// rows. The trusted raw path (grounding/introspect, {raw:true}) skips the rewrite and both caps.
+// 1000 is the HARD ceiling, enforced here so it holds whatever a program asks for. The SOFT limit (100 rows
+// unless the question asks for more) lives in the authoring rule — the agent chooses that; this only backstops it.
 const MAX_ROWS = Number(process.env.ICA_MAX_ROWS ?? 5000)
 const MAX_BYTES = Number(process.env.ICA_MAX_BYTES ?? 8_000_000)
-// Compile an AGENT query, which MUST be a PRQL pipeline — this is the access-control chokepoint where row/tenant
-// filters get injected before compilation. There is NO SQL-keyword allow-list: raw SQL simply fails to compile
-// as PRQL and is rejected with a clear message. Trusted SYSTEM reads (introspect/grounding) never come here —
-// they use POST /query {raw:true}, which skips compilation entirely. So the split is by PATH, not by string shape.
-function compilePrql(prql: string, dialect?: string): string {
-  const target = PRQL_TARGET[dialect ?? ''] ?? 'sql.ansi'   // unknown source → standard ANSI (safest, most portable)
-  const hasHeader = /^\s*prql\s+target:/.test(prql)
-  const body = hasHeader ? prql.replace(/^\s*prql\s+target:[^\n]*\n?/, '') : prql
-  // A whole-query raw-SQL escape (`s"…SELECT…"`) is opaque and would bypass filter injection — reject it with a
-  // targeted message. A scoped `s"…"`/`f"…"` fragment INSIDE a pipeline is fine (the pipeline still starts `from`).
-  if (/^\s*s"/.test(body)) throw new Error('whole-query raw SQL is not allowed here — write a PRQL pipeline (start with `from …`); use s"…" only for a specific expression inside it')
-  // Hard row cap at the source: append `take MAX_ROWS` so the DB never returns more (protects the bridge WS + UI).
-  // A no-op for aggregations; if the agent already `take`s fewer, the smaller wins. Only an unbounded list is capped.
-  const src = (hasHeader ? prql : `prql target:${target}\n${prql}`) + `\ntake ${MAX_ROWS}`
-  try {
-    let sql = String(_prqlCompile(src)).replace(/\n?-- Generated by PRQL.*$/s, '').trim()
-    const fixup = dialect ? DIALECT_FIXUP[dialect] : undefined   // bridge the target→source dialect gap (e.g. suiteql LIMIT→FETCH FIRST)
-    if (fixup) sql = fixup(sql)
-    return sql
-  } catch (e: any) {
-    // Bare SQL (SELECT/WITH/EXEC/…) doesn't parse as PRQL → this is where it's caught, no keyword list needed.
-    throw new Error('query must be a PRQL pipeline (start with `from …`), not raw SQL: ' + (e?.message ?? e))
-  }
-}
 
 const PORT = Number(process.env.DATASOURCE_PORT ?? process.env.MANAGER_PORT ?? 4000)
 
@@ -186,7 +117,9 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url!, 'http://localhost')
   if (req.method === 'GET' && url.pathname === '/health') return send(res, 200, { ok: true })
   if (req.method === 'GET' && url.pathname === '/sources')   // the agent reads kind/dialect here before writing queries
-    return send(res, 200, { sources: [...bridges.values()].map((b) => ({ id: b.id, kind: b.kind, dialect: b.dialect, description: b.description, ready: b.ready() })) })
+    // id is the REGISTRY KEY (what the manager routes by), NOT the bridge's own id — one authoritative name so
+    // /sources, /query, the index and grounding always agree (a source is renamed by its registry key alone).
+    return send(res, 200, { sources: [...bridges.entries()].map(([id, b]) => ({ id, kind: b.kind, dialect: b.dialect, description: b.description, ready: b.ready() })) })
 
   // Dynamic registration (the connector agent): add or remove a bridge live, no restart.
   if (req.method === 'POST' && url.pathname === '/sources') {
@@ -211,14 +144,33 @@ const server = http.createServer(async (req, res) => {
   try {
     if (url.pathname === '/query') {
       if (!body.sql) return send(res, 400, { error: 'body must have { id, sql, params? }' })
-      // Agent path (default): the query text is PRQL → compile to the source dialect. Trusted SYSTEM path
-      // (introspect/grounding, via {raw:true}): run the SQL as-is. This is the access-control boundary — only the
-      // raw path may pass raw SQL, and the agent can't reach it. `sql` (the executed SQL) is returned for visibility.
-      const sql = body.raw ? String(body.sql) : compilePrql(body.sql, bridge.dialect)
+      // Agent path (default): for a kind:'sql' source the query goes through the rewrite — parsed to an AST,
+      // SELECT-only-checked, policy- and row-cap-injected, rendered to the source dialect (sqlrewrite/worker.py).
+      // A NON-SQL source (rest/file/json) owns its own query paradigm, so its query text passes to the bridge
+      // as-is (the rewrite only understands SQL). Trusted SYSTEM path (introspect/grounding, via {raw:true})
+      // always passes as-is. Only the raw path skips checks and the agent can't reach it; `sql` (what actually
+      // ran) is returned for visibility.
+      // Ask for ONE MORE than the cap. If that extra row comes back there genuinely IS more data; if it doesn't,
+      // the result is complete — even when it lands exactly on the cap. Comparing rows.length to the cap can't
+      // tell those apart, and guessing wrong in either direction is a lie about the data.
+      const passthrough = body.raw || bridge.kind !== 'sql'
+      const rw = passthrough
+        ? { sql: String(body.sql), cappedTo: null as number | null }
+        : await rewriteSqlDetailed(String(body.sql), { sourceDialect: bridge.dialect, maxRows: MAX_ROWS + 1 })
+      const sql = rw.sql
       const rows = await bridge.query(sql, body.params ?? {})
-      // Byte guard for wide rows (the row cap is already enforced in the PRQL for the agent path). Raw/system reads are exempt.
+      // Byte guard for wide rows (the row cap is already injected into the agent query's AST). Raw/system reads are exempt.
       if (!body.raw) { const bytes = JSON.stringify(rows).length; if (bytes > MAX_BYTES) return send(res, 413, { error: `result too large (${(bytes / 1e6).toFixed(1)} MB) — add a filter or aggregate` }) }
-      return send(res, 200, { rows, sql })
+      // REPORT what we did to the query. `notes` is only present when it changes how the result must be read:
+      // we injected a row limit AND the result reached it, so these rows are a PREFIX, not the whole answer.
+      // Without this the caller cannot tell a capped read from a complete one — the difference between a
+      // partial list and a wrong total.
+      const truncated = rw.cappedTo != null && rows.length > MAX_ROWS   // the probe row came back ⇒ there IS more
+      const out = truncated ? rows.slice(0, MAX_ROWS) : rows            // never hand back the probe row
+      const notes = truncated
+        ? [`Row limit ${MAX_ROWS} was applied and there is more data beyond it: these are the FIRST ${MAX_ROWS} rows, not the full result. Aggregate in the query (COUNT/SUM/GROUP BY) for totals, or narrow it with a filter.`]
+        : undefined
+      return send(res, 200, { rows: out, sql, ...(truncated ? { cappedTo: MAX_ROWS } : {}), ...(notes ? { notes } : {}) })
     }
     if (url.pathname === '/introspect') return send(res, 200, await bridge.introspect())
     return send(res, 404, { error: 'not found — use POST /query, POST /introspect, GET /sources' })

@@ -73,6 +73,8 @@ final class ConversationStore {
     /// In-flight transcription work, so it can actually be stopped rather than merely
     /// forgotten about.
     private var voiceTasks: [Task<Void, Never>] = []
+    /// Which transcriber this turn is using — fixed when recording starts.
+    private var usingOnDevice = true
     /// Something went wrong with the last spoken turn — shown above the composer.
     private(set) var voiceError: String?
 
@@ -116,6 +118,9 @@ final class ConversationStore {
 
     func submitPending() {
         guard let pending = state.pending else { return }
+        // This turn is no longer a voice draft — drop the handle so any transcription
+        // still in flight cannot find it and reopen it.
+        voiceQuestionId = nil
         let text = pending.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         try? db.setQuestionText(id: pending.id, text: text)
@@ -133,6 +138,7 @@ final class ConversationStore {
     /// this lands on a question that no longer exists and is discarded.
     func cancelPending() {
         guard let pending = state.pending else { return }
+        services.recorder.speech.cancel()
         voiceTasks.forEach { $0.cancel() }
         voiceTasks = []
         voiceQuestionId = nil
@@ -167,29 +173,37 @@ final class ConversationStore {
     // durable to attach to and a crash mid-sentence still leaves a recoverable question.
 
     func startVoice() {
-        // NOTHING is written here. The conversation and the question come into existence
-        // only when the voice-activity detector actually delivers speech — so tapping the
-        // mic, hearing nothing, and stopping leaves no trace. The VAD is the gate.
+        // ONE transcriber per turn, chosen up front. On-device unless the reader asked for
+        // hosted, or unless this device has no on-device model at all — in which case
+        // hosted is not a preference, it is the only option.
+        let onDevice = services.preferences.transcribeOnDevice && services.recorder.speech.available
+        usingOnDevice = onDevice
         voiceQuestionId = nil
-        let outbox = services.outbox
         voiceTasks = []
         voiceError = nil
-        services.recorder.onChunk = { [weak self] wav, ms, index, isFinal in
-            guard let self else { return }
-            guard let qid = self.beginVoiceQuestionIfNeeded() else { return }
-            let task = Task {
-                await outbox.submit(wav: wav, questionId: qid, chunkIndex: index,
-                                    sessionId: self.sessionId, durationMs: ms, isFinal: isFinal)
-                guard !Task.isCancelled else { return }
-                if isFinal { await self.finishVoice(questionId: qid) }
+
+        if onDevice {
+            // No uploads: the text comes from the device when recording stops.
+            services.recorder.onChunk = nil
+        } else {
+            let outbox = services.outbox
+            services.recorder.onChunk = { [weak self] wav, ms, index, isFinal in
+                guard let self else { return }
+                guard let qid = self.beginVoiceQuestionIfNeeded() else { return }
+                let task = Task {
+                    await outbox.submit(wav: wav, questionId: qid, chunkIndex: index,
+                                        sessionId: self.sessionId, durationMs: ms, isFinal: isFinal)
+                    guard !Task.isCancelled else { return }
+                    if isFinal { await self.finishVoice(questionId: qid) }
+                }
+                self.voiceTasks.append(task)
             }
-            self.voiceTasks.append(task)
         }
-        services.recorder.start()
+        services.recorder.start(onDevice: onDevice)
     }
 
     /// Called from the FIRST chunk of a spoken turn — i.e. once the VAD has confirmed
-    /// there is speech. Idempotent for the chunks that follow.
+    /// there is speech. Idempotent for the chunks that follow. Hosted path only.
     private func beginVoiceQuestionIfNeeded() -> String? {
         if let existing = voiceQuestionId { return existing }
         try? db.persist(session: session)
@@ -202,7 +216,27 @@ final class ConversationStore {
 
     func stopVoice() {
         services.recorder.stop()
+        guard usingOnDevice else { return }
+        // On-device: the text is ready as soon as recording ends. The question is created
+        // HERE, once, from a single source — so there is no second transcript arriving
+        // later to argue with it.
+        Task { [weak self] in
+            guard let self else { return }
+            let text = await self.services.recorder.speech.finish()
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else {
+                self.voiceError = "Didn't catch that — try again."
+                return
+            }
+            try? self.db.persist(session: self.session)
+            guard let question = try? self.db.appendQuestion(sessionId: self.sessionId,
+                                                             text: text, source: .voice) else { return }
+            try? self.db.markQuestion(id: question.id, state: .draft)
+        }
     }
+
+    /// Live on-device text, for display while speaking.
+    var liveTranscript: String { services.recorder.speech.text }
 
     /// All chunks are in and assembled. The question is now a DRAFT for review — it is
     /// NOT sent. If nothing was heard there is nothing to review, so the draft is simply
@@ -215,14 +249,23 @@ final class ConversationStore {
         // would resurrect a question the user threw away.
         guard let question = try? db.question(id: questionId) else { return }
 
+        // ONLY a turn still being transcribed may be touched here.
+        //
+        // The server transcript can land AFTER the reader has already pressed Send — the
+        // on-device text was there first, so the question is by then `asking` and on its
+        // way to the engine. Moving it back to `draft` resurrected it in the composer,
+        // removed it from the feed (drafts are not history), and left the screen blank —
+        // so it got sent a second time and the engine reported it was already answering.
+        guard question.state == .transcribing else { return }
+
         let text = question.text.trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.isEmpty {
             try? db.markQuestion(id: questionId, state: .draft)
             return
         }
 
-        // No text. Say WHY rather than quietly dropping something the user just spoke —
-        // a failed transcription and an unheard one need different responses from them.
+        // No text at all. Say WHY rather than quietly dropping something just spoken — a
+        // failed transcription and an unheard one deserve different responses.
         let failure = (try? db.transcriptionFailure(questionId: questionId)) ?? nil
         voiceError = failure ?? "Didn't catch that — try again."
         try? db.discard(questionId: questionId)

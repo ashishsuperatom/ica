@@ -7,14 +7,24 @@
 import type { Introspect, QueryFn } from './index.js'
 
 const q = (t: string) => t.replace(/[^A-Za-z0-9_.]/g, '')   // SuiteQL identifiers are plain; strip anything odd
-const lim = (n: number, cap = 100) => Math.max(1, Math.min(n, cap))
+const lim = (n: number, cap = 100) => Math.max(1, Math.min(Number.isFinite(n) ? n : 5, cap))   // guard NaN → a bad limit must never reach the query
 
 export function suiteqlIntrospect(query: QueryFn, source: string): Introspect {
   return {
-    // oa_tables is SuiteQL's own catalog. Row counts aren't cheaply available here, so leave rows undefined.
+    // NetSuite SuiteQL over REST has NO queryable system catalog — `oa_tables` exists only in the ODBC/Connect
+    // driver, so table enumeration is impossible here. Try it anyway (some accounts/drivers differ), but on the
+    // expected failure raise ACTIONABLE guidance instead of the raw SuiteQL 400 the agent can't act on.
     async tables() {
-      const rows = await query(source, `SELECT table_name FROM oa_tables`)
-      return rows.map((r: any) => ({ name: r.table_name ?? r.tablename ?? r.name })).filter((t: any) => t.name)
+      try {
+        const rows = await query(source, `SELECT table_name FROM oa_tables`)
+        return rows.map((r: any) => ({ name: r.table_name ?? r.tablename ?? r.name })).filter((t: any) => t.name)
+      } catch {
+        throw new Error(
+          'SuiteQL (NetSuite over REST) cannot list all tables — there is no queryable catalog. ' +
+          'Find where data lives: `./find-schema "<term>"`. ' +
+          'To inspect a table you know by name: `./introspect "<source>" columns "<table>"` or `sample "<table>"`.'
+        )
+      }
     },
 
     // No cheap column catalog in SuiteQL — read the keys off ONE row (ROWNUM stopkey → fast even on big tables).

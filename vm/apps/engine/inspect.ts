@@ -5,7 +5,7 @@
 // touches the data sources except to list them.
 //
 // Everything it exposes comes from two places:
-//   • project.sqlite — the node-store graph: concepts, units, programs, intents, basis axes
+//   • project.sqlite — the node-store graph: concepts, units, programs, intents
 //   • answers.sqlite — the engine-owned question/answer history + consolidation watermark
 // …plus the FILES those nodes point at (a unit node's file_path, a program's directory), so a
 // node is inspectable all the way down to its source without SSH.
@@ -18,12 +18,9 @@ import { readFile, readdir } from 'node:fs/promises'
 import { existsSync, statSync } from 'node:fs'
 import { join, resolve, sep, relative, dirname } from 'node:path'
 import type { NodeStore, Node } from '@superatom/node-store'
-import { findAtoms, atomHistory } from '@superatom/node-store'   // semantic-atom reads (System A)
 import { GroundingStore } from '@superatom/grounding'   // the ONE loader/reader for the grounding store
 import type { AnswerStore } from './answers.js'
 import { log } from './log.js'   // the central log/error channel — surfaced read-only here
-
-const CONCEPT_ROOT = 'concept:root'
 const INTENT_ROOT = 'intent:root'
 
 /** Biggest file we'll ship to the browser. A unit is a few KB; anything past this is a data dump. */
@@ -81,8 +78,7 @@ export function createInspector(deps: InspectorDeps) {
       // A compact preview of props so a list row can show status/program/etc without a second round-trip.
       propKeys: Object.keys(props),
       status: props.status ?? null, program: props.program ?? null,
-      category: props.category ?? null, unit: props.unit ?? null,
-      basisType: props.type ?? null, basisToken: props.token ?? null, seed: props.seed ?? null,
+      category: props.category ?? null, version: props._v?.version ?? null,
     }
   }
 
@@ -171,20 +167,19 @@ export function createInspector(deps: InspectorDeps) {
 
   // ── composed views ─────────────────────────────────────────────────────────
 
-  /** The concept tree, read-only (never plants the root — that's the engine's job at boot). */
-  function conceptTree() {
-    if (!graph.getNode(CONCEPT_ROOT)) return { root: null, tree: [] }
-    const tree = graph.walk(CONCEPT_ROOT, { type: 'belongs_to', direction: 'in' }).map((n: any) => {
+  /** Live concepts, flat (concepts are a flat set now — no tree). Current versions only (valid_to IS NULL). */
+  function conceptList() {
+    const list = graph.listKind('concept', 2000).map((n: any) => {
       const p = (n.props ?? {}) as any
       return {
-        id: n.id, label: n.label, summary: n.summary ?? null, depth: n.depth,
-        status: p.status ?? null, form: p.form ?? null, unit: p.unit ?? null,
-        grain: p.grain ?? null, asOf: p.asOf ?? null, population: p.population ?? null,
+        id: n.id, name: n.label, summary: n.summary ?? null,
+        status: p.status ?? null, version: p._v?.version ?? 1, changedBy: p._v?.changedBy ?? null,
+        source: p.source ?? null, grain: p.grain ?? null, verifiedAt: p.verifiedAt ?? null,
         measures: (p.measures ?? []).length, dimensions: (p.dimensions ?? []).length,
-        parameters: p.parameters ?? [], rules: p.rules ?? [],
+        requires: p.requires ?? [], rules: p.rules ?? [],
       }
     })
-    return { root: CONCEPT_ROOT, tree }
+    return { total: list.length, concepts: list }
   }
 
   /**
@@ -285,30 +280,6 @@ export function createInspector(deps: InspectorDeps) {
     return { intents: out }
   }
 
-  /** The basis space grouped by facet, with how many intents sit on each axis (usage = what's real). */
-  function basis() {
-    const usage = new Map<string, number>()
-    for (const e of graph.db.prepare(`SELECT to_id, COUNT(*) AS n FROM edges WHERE type='has_basis' GROUP BY to_id`).all() as any[])
-      usage.set(e.to_id, e.n)
-    const facets = new Map<string, any[]>()
-    for (const n of graph.nodesByKind('basis', 5000)) {
-      const p = (n.props ?? {}) as any
-      if (!p.type || !p.token) continue
-      const list = facets.get(p.type) ?? []
-      list.push({ id: n.id, token: p.token, plane: p.plane ?? null, seed: !!p.seed, used: usage.get(n.id) ?? 0 })
-      facets.set(p.type, list)
-    }
-    return {
-      facets: [...facets.entries()]
-        .map(([type, axes]) => ({
-          type, plane: axes.find(a => a.plane)?.plane ?? null,
-          used: axes.reduce((s, a) => s + a.used, 0),
-          axes: axes.sort((a, b) => b.used - a.used || a.token.localeCompare(b.token)),
-        }))
-        .sort((a, b) => b.used - a.used || a.type.localeCompare(b.type)),
-    }
-  }
-
   /** Question history straight from answers.sqlite — what was asked, what it cost, which program ran. */
   function answerList(a: any) {
     const limit = Math.min(Number(a.limit) || 50, MAX_ROWS)
@@ -342,22 +313,6 @@ export function createInspector(deps: InspectorDeps) {
     return { counts: log.counts(), entries: log.recent({ level: a.level || undefined, limit: Math.min(Number(a.limit) || 200, MAX_ROWS) }) }
   }
 
-  /** SEMANTIC ATOMS — small learned facts (where/how/quality) the modeler + analyst crystallized from real
-   *  analyses. Live versions only; `history` (per id) shows the superseded ones. Read via the node-store API. */
-  function atoms(a: any) {
-    const slimAtom = (n: Node) => {
-      const p = (n.props ?? {}) as any
-      return { id: n.id, subject: p.subject ?? n.label, atomKind: p.atomKind ?? null, location: p.location ?? null,
-        method: p.method ?? null, coverage: p.coverage ?? null, confidence: p.confidence ?? null,
-        evidence: p.evidence ?? null, note: p.note ?? null, hash: p.hash ?? null, provenance: p.provenance ?? null,
-        summary: n.summary ?? null, validFrom: n.valid_from ?? null }
-    }
-    if (a.history) return { history: atomHistory(graph, String(a.history)).map((n) => ({ ...slimAtom(n), retired: n.valid_to != null, validTo: n.valid_to ?? null })) }
-    const list = findAtoms(graph, { q: a.q || undefined, atomKind: a.atomKind || undefined, subject: a.subject || undefined, limit: 400 })
-    const byKind: Record<string, number> = {}
-    for (const n of list) { const k = (n.props as any)?.atomKind ?? 'other'; byKind[k] = (byKind[k] ?? 0) + 1 }
-    return { total: list.length, byKind, atoms: list.map(slimAtom) }
-  }
 
   /** GROUNDING — what the grounding agent indexed for this project: entity types (+ value/entity counts),
    *  the hierarchies (live vs materialized, with their join spec) and value patterns. Read through the ONE
@@ -429,7 +384,7 @@ export function createInspector(deps: InspectorDeps) {
     const answered = (answers.db.prepare(`SELECT COUNT(*) AS n FROM answers WHERE status='answered'`).get() as any).n
     const totalQ = (answers.db.prepare(`SELECT COUNT(*) AS n FROM answers`).get() as any).n
     const last = answers.db.prepare(`SELECT created_at FROM answers ORDER BY created_at DESC LIMIT 1`).get() as any
-    const watermark = Number(answers.getMeta('semantic_model:consolidation_watermark') ?? '0')
+    const watermark = Number(answers.getMeta('concept_model:consolidation_watermark') ?? '0')
     const pending = (answers.db.prepare(`SELECT COUNT(*) AS n FROM answers WHERE finished_at > ?`).get(watermark) as any).n
 
     return {
@@ -448,8 +403,8 @@ export function createInspector(deps: InspectorDeps) {
   }
 
   const VIEWS: Record<string, (a: any) => any> = {
-    overview, nodes, node, file, dir, programs, basis, db: dbInfo, grounding, atoms, logs, runs,
-    concepts: conceptTree, intents: intentTree,
+    overview, nodes, node, file, dir, programs, db: dbInfo, grounding, logs, runs,
+    concepts: conceptList, intents: intentTree,
     answers: answerList, answer: answerDetail,
   }
 

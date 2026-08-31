@@ -20,20 +20,21 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { execProgram } from './exec-program.js'
 import { createSession, prepareWorkspace, type Session, type Harness, type RunHandlers } from './ica/index.js'
-import { createSemanticModeller, promptVersion as semanticPromptVersion } from './agents/semantic-model/index.js'
 import { createReflex } from './agents/reflex/index.js'
-import { createNarrator, capResultData } from './agents/narrator/index.js'
+import { createNarrator, capResultData, stripCode } from './agents/narrator/index.js'
 import { createAnalyst, promptVersion as analystPromptVersion } from './agents/analyst/index.js'
 import { createComposer, type Composer } from './agents/composer/index.js'
 import { createConnector, promptVersion as connectorPromptVersion } from './agents/connector/index.js'
 import { createGroundingAgent, promptVersion as groundingPromptVersion } from './agents/grounding/index.js'
+import { createConceptModeller, promptVersion as modellerPromptVersion } from './agents/concept-modeller/index.js'
 import { openAnswers, normalizeQuestion } from './answers.js'
 import { followUpCues } from './followup.js'
 import { forgetProgram } from './forget.js'
 import { log, readJsonSafe } from './log.js'
 import { createInspector } from './inspect.js'
-import { NodeStore, ROOT, ensureRoot, ensureConceptTree, ensureBasisSeed, intentId, SqliteVecIndex, indexText, backfillMissing, hybridSearch } from '@superatom/node-store'
+import { NodeStore, ROOT, ensureRoot, intentId, SqliteVecIndex, indexText, backfillMissing, hybridSearch } from '@superatom/node-store'
 import { bgeEmbedder } from './embed.js'
+import { createSpanFirer } from './retrieval/span-firing.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 try { process.loadEnvFile(join(__dirname, '.env')) } catch { /* no .env — rely on the ambient environment */ }
@@ -55,10 +56,13 @@ const VM_ROOT = join(__dirname, '..', '..')                              // apps
 const STATE_ROOT = process.env.ENGINE_STATE_DIR ?? join(VM_ROOT, '.state')
 const WORKSPACE_ROOT = process.env.ENGINE_WORKSPACE_DIR ?? STATE_ROOT
 const DATA_ROOT = process.env.ENGINE_DATA_DIR ?? STATE_ROOT              // answers.sqlite co-locates with the workspace
-const WORKSPACE = join(WORKSPACE_ROOT, PROJECT)   // the project's home: seams + programs/ + out/ + its DBs
+// SEGREGATION (see ica/workspace.ts): the agent's write-root and the engine's DBs are SIBLING folders under the
+// project home, so the agent's cwd never contains our SQLite files.
+const WORKSPACE = join(WORKSPACE_ROOT, PROJECT, 'workspace')   // the AGENT's cwd: seams + programs/ + out/
+const DB_DIR    = join(WORKSPACE_ROOT, PROJECT, 'db')          // ENGINE-private DBs — a sibling, NOT under WORKSPACE
 const KEY = process.env.ICA_KEY || ''
 const HARNESS = (process.env.ICA_HARNESS as Harness) || 'opencode'   // read AFTER .env is loaded
-// ONE fleet switch for the four WORK agents (analyst/semantic/connector/grounding): ICA_AGENT_HARNESS =
+// ONE fleet switch for the WORK agents (analyst/connector/grounding): ICA_AGENT_HARNESS =
 // claude-code | codex | opencode picks the brain for ALL of them, and each agent's MODEL is INHERITED from
 // that harness (claude-code→claude-sonnet-5, codex→gpt-5.6-terra) — you don't set a model. Any single agent
 // can still be pinned with ICA_<AGENT>_HARNESS / _MODEL, which wins. Reflex is independent (own opencode-go).
@@ -75,9 +79,9 @@ const agentCfg = (name: string): { harness: Harness; model: string | undefined }
   return { harness, model }
 }
 const { harness: ANALYST_HARNESS,   model: ANALYST_MODEL }   = agentCfg('ANALYST')
-const { harness: SEMANTIC_HARNESS,  model: SEMANTIC_MODEL }  = agentCfg('SEMANTIC')
 const { harness: CONNECTOR_HARNESS, model: CONNECTOR_MODEL } = agentCfg('CONNECTOR')
 const { harness: GROUNDING_HARNESS, model: GROUNDING_MODEL } = agentCfg('GROUNDING')
+const { harness: MODELLER_HARNESS,  model: MODELLER_MODEL }  = agentCfg('MODELLER')   // the concept modeller (System 4)
 // Where the connector agent writes bridges (shared with the datasource-manager, which loads them by absolute
 // path). Defaults to the project's COMMITTED inputs folder so connector-written bridges land beside any
 // hand-authored ones (one place, no duplicate); on Fly override via env to the mounted volume.
@@ -101,38 +105,41 @@ if (!PROJECT || !KEY) {
 // The engine only picks the harness — each harness manages ITS OWN binary/server lifecycle
 // internally (opencode ensures `opencode serve`; codex spawns the codex CLI per turn; claude-code
 // runs a PTY; pi is in-process). The engine never touches a server directly.
-let busy = false
-let reply: any = null                                // who to stream the current turn back to
-let curChannel = ''                                  // non-empty when the current turn came from a chat channel (Teams/…) — deliver the answer to the durable channel consumer, not a live socket
 let hub: WebSocket | null = null
 
-let semanticBusy = false
-let analystBusy = false
+// PER-SESSION answer lock: DIFFERENT sessions answer CONCURRENTLY; one session still answers one at a time. The
+// stream target (reply) + channel are LOCAL per analyse() call now — no cross-session clobber. curQuestion/
+// lastAnswer below stay global as a best-effort reconnect-status snapshot only, never for answer routing.
+const busySessions = new Set<string>()
 let connectorBusy = false
 let groundingBusy = false
 
 // ── Semantic-model consolidation (System 4) state ─────────────────────────────
 // This is the SEMANTIC-MODEL consolidation specifically — the bottom layer (meaning + the implementation
 // embedded in units). It is deliberately NOT "the" consolidation: other consolidation tasks (higher layers)
-// will come later, so everything here is namespaced `semanticConsolidate*` to keep them distinct.
+// will come later, so everything here is namespaced `conceptConsolidate*` to keep them distinct.
 //
-// The modeler runs OFFLINE over the stream of finished analyses. A watermark (a finished_at value, stored in
+// The concept modeller runs OFFLINE over the stream of finished analyses. A watermark (a finished_at value, stored in
 // answers.engine_meta) marks how far it has consumed. The trigger is a TIMER, not a per-question signal: a
 // single interval, started at boot and always running, that checks "is there anything past the watermark?"
 // and drains it. This is robust to restarts — if the server stops with un-consolidated answers and comes
 // back days later with no new questions, the timer still catches up (a finished-question signal might never
 // arrive; the timer always does). While a pass is running the tick is a no-op (single-runner) — the timer
 // keeps ticking but does nothing until the current pass finishes, then the next tick continues.
-const SEMANTIC_CONSOLIDATE_WM_KEY = 'semantic_model:consolidation_watermark'
+const CONCEPT_CONSOLIDATE_WM_KEY = 'concept_model:consolidation_watermark'
 // TODO: once this is proven, bump the default interval to 3 minutes (180000) so a real burst of questions
 // coalesces into ONE consolidation pass. Kept short (30s) for now so testing is fast — you don't want to
-// wait 3 min to see the modeler wake.
-const SEMANTIC_CONSOLIDATE_INTERVAL_MS = Number(process.env.SEMANTIC_CONSOLIDATE_INTERVAL_MS || 30000)
+// wait 3 min to see the concept modeller wake.
+const CONCEPT_CONSOLIDATE_INTERVAL_MS = Number(process.env.CONCEPT_CONSOLIDATE_INTERVAL_MS || 30000)
 // A batch that makes the agent SESSION crash is retried at most this many times (across ticks), then skipped
 // so a poison batch can never retry forever. Tracked in answers.engine_meta; reset on any clean pass.
-const SEMANTIC_CONSOLIDATE_FAIL_KEY = 'semantic_model:consolidation_failstreak'
-const SEMANTIC_CONSOLIDATE_MAX_FAILS = 3
-let semanticConsolidating = false
+const CONCEPT_CONSOLIDATE_FAIL_KEY = 'concept_model:consolidation_failstreak'
+const CONCEPT_CONSOLIDATE_MAX_FAILS = 3
+// The offline consolidator is WIRED to the concept modeller (System 4): each tick hands a batch of finished
+// analyses to consolidateBatch(), which spins up the modeller to distil verified concepts. Set false to make
+// the tick inert (it then never advances the watermark, so no backlog is consumed).
+const CONSOLIDATOR_WIRED = true
+let conceptConsolidating = false
 
 // Every question + answer for this project, in one sqlite the ENGINE owns (the LLM never writes it).
 // Enables deterministic reuse ("already answered?") + full history + agent session ids. See answers.ts.
@@ -141,13 +148,13 @@ let semanticConsolidating = false
 // ── BOOTSTRAP: guarantee the engine's environment BEFORE opening any store or connecting. On a fresh
 // machine the per-project dirs don't exist yet; opening a sqlite in a missing dir throws. We create them
 // here, explicitly, and fail LOUD + clean (not a cryptic driver stack) if the volume isn't writable.
-// Every SQLite file lives under <workspace>/db/ (organized-by-concern workspace; the seams open them there).
-for (const d of [WORKSPACE, join(WORKSPACE, 'db'), join(DATA_ROOT, PROJECT), join(DATA_ROOT, PROJECT, 'db')]) {
+// Every SQLite file lives in DB_DIR — a SIBLING of the workspace, never inside it (segregation).
+for (const d of [WORKSPACE, DB_DIR]) {
   try { mkdirSync(d, { recursive: true }) }
   catch (e: any) { console.error(`[ica] FATAL bootstrap: cannot create ${d}: ${e?.message ?? e}`); process.exit(1) }
 }
 
-const answers = openAnswers(join(DATA_ROOT, PROJECT, 'db', 'answers.sqlite'))
+const answers = openAnswers(join(DB_DIR, 'answers.sqlite'))
 const genId = () => 'q_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
 
 // ── INTENT GRAPH (the new spine) ──────────────────────────────────────────────
@@ -157,21 +164,65 @@ const genId = () => 'q_' + Date.now().toString(36) + Math.random().toString(36).
 // and we mint the node below). Node id = hash(parent, normalised question) → deterministic.
 // ONE project database. The intent graph + concepts + units are all just nodes/edges in the project's
 // node-store, which lives in project.sqlite alongside the rest of the project's graph — not a separate file.
-const graph = new NodeStore(join(WORKSPACE, 'db', 'project.sqlite'))
+const graph = new NodeStore(join(DB_DIR, 'project.sqlite'))
+
+// ── CONCEPT SPECIFICITY (CSS-like) ─────────────────────────────────────────────
+// A concept's NAME is its set of "selector words". The concept whose selector the question COVERS THE MOST wins
+// (most-specific match), falling back to fewer-word / more-general concepts when the specific combination isn't
+// present. Pure lexical over the node-store (no vectors). Returns NAMES only — the agent opens the winner via
+// find-concept. Dynamic count: the top specificity tier (within 1 of the best), capped.
+const CONCEPT_STOP = new Set(('a an the of on in for by per to and or is are was be with as at this that it id ' +
+  'what which who how me my we our you your can do get give show tell find value from over under across').split(' '))
+// Light stem so word-FORMS match (rate/rates/rating -> rat, charge/charged -> charg, bill/billing -> bill).
+// Morphology only — deliberately NOT synonyms (bill != charge). If a question uses a different word than the
+// concept name, it simply won't match; we keep it simple rather than maintain a synonym layer.
+const stem = (w: string): string => {
+  for (const suf of ['ing', 'ed', 'es', 's', 'ly']) { if (w.endsWith(suf) && w.length - suf.length >= 3) { w = w.slice(0, -suf.length); break } }
+  if (w.length > 3 && w.endsWith('e')) w = w.slice(0, -1)
+  return w
+}
+const conceptWords = (s: string): Set<string> =>
+  new Set(String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 1 && !CONCEPT_STOP.has(w)).map(stem))
+// Favour RECALL, not precision: surface anything plausibly relevant and let the AGENT reject/pick. Two cheap
+// recall sources unioned — LEXICAL (name-word overlap) and SEMANTIC (the vector index, which catches paraphrase/
+// synonyms for free, no synonym map to maintain). We ORDER by specificity (most name-words covered first) so the
+// best is on top, but we do NOT cut the tail — better the agent sees an extra it can ignore than miss the right one.
+async function rankConceptsBySpecificity(question: string, cap: number): Promise<string[]> {
+  const qw = conceptWords(question)
+  if (!qw.size) return []   // boundary: empty / all-stopword question -> surface nothing
+  const byId = new Map<string, { name: string; matched: number; cover: number; sem: number }>()
+  for (const c of graph.listKind('concept', 1000) as any[]) {
+    // Surface ALL live concepts, ordered by specificity — the agent filters (recall over precision).
+    const cw = conceptWords(c.label)
+    let m = 0; for (const w of cw) if (qw.has(w)) m++
+    byId.set(c.id, { name: c.label, matched: m, cover: cw.size ? m / cw.size : 0, sem: 0 })
+  }
+  if (vectors) {   // semantic recall: rank the vector hits so paraphrase-only matches still surface
+    try {
+      const hits = await hybridSearch(graph, vectors, bgeEmbedder, question, { kind: 'concept', limit: cap })
+      let r = hits.length; for (const h of hits) { const e = byId.get(h.id); if (e) e.sem = r; r-- }
+    } catch { /* semantic is optional; lexical still works */ }
+  }
+  return [...byId.values()]
+    .filter(c => c.matched > 0 || c.sem > 0)                                            // lexical OR semantic relevance
+    .sort((a, b) => (b.matched - a.matched) || (b.cover - a.cover) || (b.sem - a.sem))  // specificity first, semantic as recall/tiebreak
+    .slice(0, cap)
+    .map(c => c.name)
+}
 // Semantic index (sqlite-vec) over the SAME db — GUARDED: if the native extension or model isn't present on
 // this host yet, semantic search is simply disabled (FTS keeps working), never a crash. See embed.ts.
 let vectors: SqliteVecIndex | null = null
 try { vectors = new SqliteVecIndex(graph.db, bgeEmbedder.id, bgeEmbedder.dim) }
 catch (e: any) { console.warn('[semantic] sqlite-vec unavailable — semantic index disabled:', e?.message ?? e) }
+// §3 span-firing retriever — an A/B alternative to rankConceptsBySpecificity, logged side-by-side for comparison.
+const spanFirer = createSpanFirer(graph, bgeEmbedder)
 // Backfill pre-existing intents on boot so semantic reuse can search history, not just newly-built ones.
 // Best-effort + non-blocking (never delays boot); degrades silently if the model/native deps aren't present.
 if (vectors) void backfillMissing(graph, vectors, bgeEmbedder, { kind: 'intent' })
   .then(n => { if (n) log.info('semantic', `backfilled ${n} intent embedding(s)`) })
   .catch(e => log.warn('semantic', 'intent backfill failed', e))
 ensureRoot(graph)
-ensureConceptTree(graph)   // concept tree root + place any orphan concept under it (structural)
-ensureBasisSeed(graph)     // plant the grounded three-plane axis vocabulary (subject / operation / mode)
-// The FRONT DOOR: every question is routed here first — reuse a program on a basis match, else build.
+// The FRONT DOOR: every question is routed here first — reuse a program on a match, else build.
 const reflex = createReflex({ cwd: WORKSPACE })   // the reflex agent — the fast front door
 // READ-ONLY window into the graph + answer history + the files behind them, served over the hub to the
 // admin console. The engine runs on a Fly VM with nothing listening, so this is the only way to see
@@ -182,13 +233,13 @@ const inspector = createInspector({
   runtime: () => ({
     harness: HARNESS,
     agents: {
-      analyst:   { harness: ANALYST_HARNESS,   model: ANALYST_MODEL,   busy: analystBusy },
-      semantic:  { harness: SEMANTIC_HARNESS,  model: SEMANTIC_MODEL,  busy: semanticBusy, consolidating: semanticConsolidating },
+      analyst:   { harness: ANALYST_HARNESS,   model: ANALYST_MODEL,   busy: busySessions.size > 0 },
       connector: { harness: CONNECTOR_HARNESS, model: CONNECTOR_MODEL, busy: connectorBusy },
       grounding: { harness: GROUNDING_HARNESS, model: GROUNDING_MODEL, busy: groundingBusy },
       reflex:    { harness: process.env.ICA_REFLEX_HARNESS ?? 'opencode', model: process.env.ICA_REFLEX_MODEL ?? 'deepseek-v4-flash' },
     },
-    consolidateIntervalMs: SEMANTIC_CONSOLIDATE_INTERVAL_MS,
+    consolidating: conceptConsolidating,
+    consolidateIntervalMs: CONCEPT_CONSOLIDATE_INTERVAL_MS,
     uptimeMs: Date.now() - EPOCH,
   }),
 })
@@ -247,7 +298,6 @@ function makeAgentSlot<A extends Agent>(role: string, promptVersion: () => Promi
   }
 }
 const analystSlot  = makeAgentSlot('analyst',  analystPromptVersion,  (resumeId) => listSources().then(sources => createAnalyst({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { harness: ANALYST_HARNESS, model: ANALYST_MODEL, resumeId } })))
-const semanticSlot = makeAgentSlot('semantic', semanticPromptVersion, (resumeId) => listSources().then(sources => createSemanticModeller({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { harness: SEMANTIC_HARNESS, model: SEMANTIC_MODEL, resumeId } })))
 // The COMPOSER (System 2), ONE PER SESSION: each chat session gets its own composer (a cheap opencode CLIENT
 // session on the shared server, so N sessions ≈ free). Created on the session's first question, reused for the
 // session; only the in-flight question needs memory. Idle sessions are disposed by the sweep below.
@@ -278,21 +328,93 @@ setInterval(() => {
 const connectorSlot = makeAgentSlot('connector', connectorPromptVersion, (resumeId) => createConnector({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, datasourcesDir: DATASOURCES_DIR, ica: { harness: CONNECTOR_HARNESS, model: CONNECTOR_MODEL, resumeId } }))
 // COLD by design: never warmed at boot (below); spun up only when the admin triggers a grounding build.
 const groundingSlot = makeAgentSlot('grounding', groundingPromptVersion, (resumeId) => listSources().then(sources => createGroundingAgent({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { harness: GROUNDING_HARNESS, model: GROUNDING_MODEL, resumeId } })))
-console.log(`[ica] analyst=${ANALYST_HARNESS ?? 'claude-code'}:${ANALYST_MODEL ?? 'claude-sonnet-5'} · modeler=${SEMANTIC_HARNESS ?? 'claude-code'}:${SEMANTIC_MODEL ?? 'claude-sonnet-5'} · connector=${CONNECTOR_HARNESS}:${CONNECTOR_MODEL} · grounding=${GROUNDING_HARNESS}:${GROUNDING_MODEL} (cold)`)
+// The CONCEPT MODELLER (System 4 — "sleep"): LAZY, never warmed at boot — spun up only when the offline
+// consolidation tick has a batch to study, then it distils verified concepts from finished analyses.
+const modellerSlot = makeAgentSlot('modeller', modellerPromptVersion, (resumeId) => listSources().then(sources => createConceptModeller({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { harness: MODELLER_HARNESS, model: MODELLER_MODEL, resumeId } })))
+console.log(`[ica] analyst=${ANALYST_HARNESS ?? 'claude-code'}:${ANALYST_MODEL ?? 'claude-sonnet-5'} · connector=${CONNECTOR_HARNESS}:${CONNECTOR_MODEL} · grounding=${GROUNDING_HARNESS}:${GROUNDING_MODEL} (cold)`)
 // Live analyst state, kept so a (re)connecting client can RE-SYNC after a reload (the engine stores
 // no history — this is just the current run + last result, replayed on demand).
 let curQuestion = '', curCategory = '', curSid = ''
 let lastAnswer: any = null, lastTiming: any = null, lastCategory = ''
 
-const emit = (to: any, msg: unknown) => { if (hub?.readyState === WebSocket.OPEN) hub.send(JSON.stringify({ to, payload: msg })) }
+// Outbound is RESILIENT to a brief hub flap: if the socket is momentarily down (reconnecting), queue the frame
+// and flush it once we're re-registered — otherwise an answer/log emitted in a down window is lost forever and
+// the user sees "engine went silent" with no answer. Bounded so a long outage can't grow memory without limit.
+// (The 12s heartbeat uses hub.send directly, NOT this — a stale heartbeat is useless. Ticks DO queue, which is
+// fine: a flushed tick simply re-arms the client watchdog, so a flap no longer trips a false "engine went silent".)
+let outbox: string[] = []
+const MAX_OUTBOX = 1000
+const emit = (to: any, msg: unknown) => {
+  const frame = JSON.stringify({ to, payload: msg })
+  if (hub?.readyState === WebSocket.OPEN) hub.send(frame)
+  else { outbox.push(frame); if (outbox.length > MAX_OUTBOX) outbox.shift() }
+}
+function flushOutbox() {
+  if (!outbox.length || hub?.readyState !== WebSocket.OPEN) return
+  const pending = outbox; outbox = []
+  for (const frame of pending) { try { hub!.send(frame) } catch { /* socket died mid-flush; the rest waits for the next reconnect */ } }
+}
+
+// ── Agent-lane protocol ──────────────────────────────────────────────────────
+// ONE wire vocabulary for EVERY agent lane (composer, analyst, concept-modeller — and any future autonomous
+// agent). A lane is an observable work stream; the UI is a generic consumer that hardcodes no agent. Frames:
+//   agent:hello  {lane, label, hue, streamKind, pty, interactive, controls} — the lane announces what it IS
+//   agent:event  {lane, ev}          — one work atom (ev.kind: command|message|reasoning|file|turn|user|segment)
+//   agent:events {lane, events}      — full replay on reconnect
+//   agent:status {lane, text?|category?|progress?|state?} — the live "what it's doing" line + lifecycle
+// The raw-terminal byte stream (`analyst:chunk`) and the user-facing product (`narration`, `analyst:answer`,
+// gaps/enriching) are DIFFERENT protocols and keep their names. `lane` is the routing key: asker-direct frames
+// (status/hello/events) carry no channel, so the UI needs `lane` to place them. Implementation is free to move;
+// this shape is the contract.
+const A = (verb: string, lane: string, body: Record<string, any> = {}) => ({ t: `agent:${verb}`, lane, ...body })
+
+// The recent conversation, for canonicalisation only — enough to resolve what a follow-up points AT ("those",
+// "the third one"). Compact on purpose: the last couple of turns, each one question + a short answer digest.
+function sessionContext(sid: string, turns = 2): string {
+  try {
+    const rows = answers.bySession(sid).slice(-turns)
+    if (!rows.length) return ''
+    return rows.map(r => {
+      const a: any = r.answer
+      const lines = Array.isArray(a?.answer) ? a.answer.join(' ') : (a?.answer ?? '')
+      const head = a?.headline?.display ? ` [${a.headline.display}]` : ''
+      const rowsTxt = a?.sections?.find((s: any) => s.kind === 'table')?.rows?.slice(0, 5)
+        ?.map((row: any[]) => row.join(' | ')).join('\n   ') ?? ''
+      return `Q: ${r.question}\nA:${head} ${String(lines).slice(0, 300)}${rowsTxt ? '\n   ' + rowsTxt : ''}`
+    }).join('\n\n')
+  } catch { return '' }
+}
+
+// Find a program whose DECLARED canonical question is the one just asked. Exact on the normalised string — the
+// canonical form is generated by the same instruction on both sides, so a true match IS the same sentence; a
+// near-miss is deliberately not a match (it goes to the composer, which can judge with tools).
+// Every placeholder in the stored form must be bound by the params we extracted: a program that expects
+// <months> and receives nothing would silently run on its DEFAULT window and answer a different question.
+function findByCanonical(canonical: string): { program: string; category?: string; nodeId: string } | null {
+  // Match the canonical FORM, whole and as written — normalised only for case, spacing and trailing punctuation
+  // (normalizeQuestion), which is the same normalisation the rest of the engine uses on questions.
+  // No parsing of the sentence: the canonicaliser already returns the parameters as data, and the names a
+  // program was actually written against live in its own meta.inputs — which the composer reads. Taking the
+  // sentence apart to guess a mapping was inventing a fragile step to recover something already in hand.
+  const want = normalizeQuestion(canonical)
+  if (!want) return null
+  for (const n of graph.nodesByKind('program')) {
+    const p: any = n.props ?? {}
+    const forms: string[] = Array.isArray(p.canonicalQuestions) ? p.canonicalQuestions : []
+    if (!forms.some(f => normalizeQuestion(String(f)) === want)) continue
+    if (!p.dir || !existsSync(join(WORKSPACE, p.dir, 'program.ts'))) continue
+    return { program: p.dir, category: p.category, nodeId: n.id }
+  }
+  return null
+}
 
 // Reuse a saved program (SYS-1, no LLM): run it against CURRENT data, emit the answer, persist. Shared by
 // the positional exact-hit and the reflex catalog-match. Returns false on failure so the caller rebuilds.
 async function reuseProgram(programDir: string, params: any, category: string,
-  ctx: { sid: string; qid: string; question: string; norm: string; t0: number; nodeId: string }): Promise<boolean> {
-  const { sid, qid, question, norm, t0, nodeId } = ctx
-  emit(reply, { t: 'analyst:category', category, sid })
-  emit(reply, { t: 'analyst:status', text: 'Re-running the saved program…', question, sid, qid })
+  ctx: { sid: string; qid: string; question: string; norm: string; t0: number; nodeId: string; reply: any; channel: string }): Promise<boolean> {
+  const { sid, qid, question, norm, t0, nodeId, reply, channel } = ctx
+  emit(reply, A('status', 'analyst', { category, sid }))
+  emit(reply, A('status', 'analyst', { text: 'Re-running the saved program…', question, sid, qid }))
   const ka = setInterval(() => { if (reply) emit(reply, { t: 'tick', sid }) }, 8000)
   try {
     // Fresh subprocess (see exec-program.ts): a program edited by a prior modify is cached stale in this
@@ -329,17 +451,17 @@ async function reuseProgram(programDir: string, params: any, category: string,
       return false   // fall through to the analyst build (analyse handles the rebuild)
     }
     lastAnswer = answer; lastTiming = timing; lastCategory = category
-    emit(reply, { t: 'analyst:answer', category, answer, timing, sid, qid, reused: true })
-    if (curChannel) emit({ type: 'channel' }, { t: 'channel:answer', channel: curChannel, qid, answer, category })   // durable delivery to the chat channel
+    emit(reply, { t: 'analyst:answer', category, answer, timing, sid, qid, reused: true })   // user-facing product — NOT a lane frame
+    if (channel) emit({ type: 'channel' }, { t: 'channel:answer', channel, qid, answer, category })   // durable delivery to the chat channel
     // Follow-ups persisted on the node when it was first built → replay them on reuse (no analyst involved).
     const fu = (graph.getNode(nodeId)?.props as any)?.followups
     if (Array.isArray(fu) && fu.length && reply) emit(reply, { t: 'followups', items: fu, qid, sid })
-    emit(reply, { t: 'analyst:done', sid })
+    emit(reply, A('status', 'analyst', { state: 'done', sid }))
     answers.save({ qid, sessionId: sid, question, norm, category, status: 'answered', answer, createdAt: Date.now(), finishedAt: Date.now(), programDir, params })
     const n = graph.getNode(nodeId); if (n) graph.putNode({ ...n, props: { ...(n.props as any), lastShapeHash: (rr as any).finalShapeHash ?? (n.props as any)?.lastShapeHash } })
     setPosition(sid, nodeId)
     clearInterval(ka)
-    analystBusy = false; busy = false; curQuestion = ''
+    busySessions.delete(sid); curQuestion = ''
     console.log(`[ica] REUSE ${programDir} · ${((Date.now() - t0) / 1000).toFixed(1)}s`)
     return true
   } catch (e: any) {
@@ -349,10 +471,14 @@ async function reuseProgram(programDir: string, params: any, category: string,
   }
 }
 
-// Answer a question: classify → analyst ICA (per-category SYSTEM.md, semantic-model-first) → stream
+// Answer a question: classify → analyst ICA (per-category SYSTEM.md) → stream
 // the raw claude terminal to the "Analyst" tab and emit the final structured answer.
 async function analyse(question: string, from: any, sid = '', qidIn = '', channel = '') {
-  if (analystBusy) { emit(from, { t: 'analyst:status', text: 'Already answering a question — one at a time.' }); return }
+  console.log(`[ica][session] analyse sid="${sid}" pos=${(position.get(sid) || 'ROOT').slice(0, 14)} busy=[${[...busySessions].map(s => `"${s}"`).join(',')}] q="${question.slice(0, 50)}"`)
+  if (busySessions.has(sid)) {
+    console.log(`[ica][session] REJECTED (one-at-a-time) sid="${sid}" — locked sessions: [${[...busySessions].map(s => `"${s}"`).join(',')}]`)
+    emit(from, A('status', 'analyst', { text: 'Already answering a question in this chat — one at a time.', sid })); return
+  }
   if (!question.trim()) return
   // ── EXPLICIT EDIT prefix ──────────────────────────────────────────────────────
   // An input that, after any leading whitespace, begins with "edit:" or "modify:" (case-insensitive) is the
@@ -364,7 +490,8 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   if (editMatch) question = (question.replace(/^\s+/, '').slice(editMatch[0].length).trim()) || question
   // Stream everything to `reply` (re-targetable): a reload reconnects and sessions:list points reply
   // at the new connection, so the in-flight run's output + final answer reach the reloaded client.
-  analystBusy = true; busy = true; reply = from; curChannel = channel
+  busySessions.add(sid)
+  const reply = from                                   // LOCAL to this turn — no cross-session clobber (channel is the param)
   const norm = normalizeQuestion(question)
   // ONE id end to end: the UI mints it and sends it; we use it verbatim (agent writes ./out/<qid>.json,
   // DB keys on it). Fall back to minting our own if a non-UI caller omitted it. Trust-but-verify: if the
@@ -394,17 +521,52 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   const hitNode = graph.getNode(matchId)
   const hp: any = hitNode?.props
   if (!explicitEdit && hp?.program && existsSync(join(WORKSPACE, hp.program, 'program.ts'))) {
-    if (await reuseProgram(hp.program, hp.params, hp.category, { sid, qid, question, norm, t0, nodeId: matchId })) return
+    if (await reuseProgram(hp.program, hp.params, hp.category, { sid, qid, question, norm, t0, nodeId: matchId, reply, channel })) return
     // failed → fall through to rebuild via the analyst
+  }
+
+  // FIRST SIGN OF LIFE, before any model call. Canonicalisation alone is ~2s and retrieval follows it, so the
+  // asker used to sit in silence until the analyst slot was warm — the turn felt stalled before it had begun.
+  if (reply) emit(reply, { t: 'narration', text: 'Looking into your question…', qid, sid })
+
+  // ── CANONICAL MATCH — retrieval only ────────────────────────────────────────────────────────────────────
+  // The question is normalised to its CANONICAL form (a no-tools completion, ~1-2s) and matched against the forms
+  // programs declared when they were built. Both sides are then the same shape, so "…last 12 months?" and
+  // "…last 6 months?" are the SAME string differing only in a parameter — no similarity threshold to tune.
+  // This FINDS; it never runs and never ships. The match is handed to the composer, which owns deciding whether
+  // it truly fits, running it, and verifying the output — one place with the conversation in front of it, instead
+  // of two components that can each answer.
+  let askedCanonical: string | undefined
+  let canonicalMatch: { programDir: string; params: Record<string, unknown>; canonical: string } | undefined
+  if (!explicitEdit) {
+    try {
+      const canon = await reflex.canonicalize(question, sessionContext(sid))
+      askedCanonical = canon.canonical
+      // `unresolved` = the question leans on something the conversation didn't settle, so it is not self-contained
+      // and must not be bound to a context-free program.
+      const target = canon.unresolved ? null : findByCanonical(canon.canonical)
+      if (target) {
+        // The canonicaliser's params travel as a HINT. The composer maps them onto the program's real inputs and
+        // verifies by running it — deciding parameters is its job, not something to infer here.
+        canonicalMatch = { programDir: target.program, params: canon.params, canonical: canon.canonical }
+        console.log(`[ica] canonical: "${canon.canonical}" → match ${target.program} ${JSON.stringify(canon.params)} → composer`)
+      } else {
+        console.log(`[ica] canonical: "${canon.canonical}"${canon.unresolved ? ` unresolved (${canon.unresolved})` : ' — no match'} → composer`)
+      }
+    } catch (e: any) {
+      console.log(`[ica] canonicalize failed (${e?.message ?? e}) — composer`)   // fail-open: never block a question
+    }
   }
 
   // ── Routing: MODIFY is DETERMINISTIC (explicit "edit:"/"modify:" prefix only) — never guessed. Otherwise the
   // REFLEX (stateless) classifies REUSE vs BUILD; it has no "modify" decision. The SAME question is a reuse.
   const curNode = pos !== ROOT ? graph.getNode(pos) : null
   const curQ = curNode ? ((curNode.props as any)?.question ?? curNode.summary) : undefined
-  let overlapHint: { program: string; relation: string } | undefined   // the closest existing program → a pointer for the composer/analyst to adapt
   let reflexPlacement: string | undefined                               // 'root' or an intentId — where this question's node hangs
-  let programCandidates: { question: string; program?: string; score: number }[] = []   // engine-searched matches handed to the composer
+  // `sim` = cosine similarity to the asked question (0..1) — the number that says HOW CLOSE this candidate is.
+  // `score` is only the RRF rank-fusion value used for ordering; it is a position, not a measure of fit.
+  let programCandidates: { question: string; program?: string; score: number; sim: number | null }[] = []   // engine-searched matches handed to the composer
+  let conceptNames: string[] = []   // engine-searched CONCEPT names (names only) surfaced to composer + analyst
   let modifyTarget: { programDir: string; prevQuestion?: string } | null = null
   if (explicitEdit) {
     // The user explicitly prefixed "edit:"/"modify:" — edit the current node's program in place; if there's
@@ -425,13 +587,33 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     try {
       const hits = vectors ? await hybridSearch(graph, vectors, bgeEmbedder, question, { kind: 'intent', limit: 6 }) : []
       programCandidates = hits
-        .map(h => { const p = graph.getNode(h.id)?.props as any; return { question: (p?.question ?? h.label ?? '') as string, program: p?.program as string | undefined, score: h.score } })
+        .map(h => { const p = graph.getNode(h.id)?.props as any; return { question: (p?.question ?? h.label ?? '') as string, program: p?.program as string | undefined, score: h.score, sim: h.sim } })
         .filter(c => c.program && existsSync(join(WORKSPACE, c.program!, 'program.ts')))
-      if (programCandidates[0]?.program) overlapHint = { program: programCandidates[0].program!, relation: 'closest' }
-      console.log(`[ica] search: ${programCandidates.length} program candidate(s)${programCandidates[0] ? ` · top ${programCandidates[0].program} (${programCandidates[0].score.toFixed(2)})` : ''} → composer`)
+      const top = programCandidates[0]
+      console.log(`[ica] search: ${programCandidates.length} program candidate(s)${top ? ` · top ${top.program} (sim ${top.sim == null ? 'n/a' : top.sim.toFixed(2)})` : ''} → composer`)
     } catch (e: any) {
       console.log(`[ica] candidate search failed (${e?.message ?? e}) — composer builds from concepts`)
     }
+    // Surface relevant CONCEPT NAMES by SPECIFICITY (CSS-like: most-question-words-covered wins), names only —
+    // the agent opens the winner via find-concept for the method, so we never bias it with a formula.
+    try {
+      const specificity = await rankConceptsBySpecificity(question, 8)   // current retriever (name-word specificity + semantic recall)
+      let fired: { concepts: string[]; scored: { name: string; activation: number }[]; unexplained: string[] } = { concepts: [], scored: [], unexplained: [] }
+      try { fired = await spanFirer.fire(question) } catch (e: any) { log.warn('span-firing', 'fire failed', e) }
+      // Log BOTH retrievers side-by-side so we can compare which surfaces the right concepts.
+      console.log(`[retrieval] specificity → [${specificity.join(', ')}]`)
+      console.log(`[retrieval] span-firing → fires [${fired.concepts.join(', ')}]  ·  ranked [${fired.scored.slice(0, 6).map(s => `${s.name} ${s.activation.toFixed(2)}`).join(', ')}]${fired.unexplained.length ? `  ·  unexplained [${fired.unexplained.slice(0, 8).join(' | ')}]` : ''}`)
+      // CLEAN A/B — surface EXACTLY ONE retriever, no mixing/fallback. Default = span-firing (B); USE_SPECIFICITY=1 = specificity (A).
+      // Span-firing surfaces the concepts that FIRED plus the rest of its own ranking (still one retriever — it just
+      // stops discarding what it already scored). Only NAMES travel, and reading one is now a deliberate
+      // ./get-concept call, so an extra candidate costs a line and never lands unread in the agent's context.
+      // Firing alone was too tight: "which projects are at risk" fired only 'project name, customer, manager and
+      // type' (6.23) and dropped 'at-risk project' (5.75) — the concept that defines the question.
+      const TOP_CONCEPTS = 6
+      const spanNames = Array.from(new Set([...fired.concepts, ...fired.scored.map(s => s.name)])).slice(0, TOP_CONCEPTS)
+      conceptNames = process.env.USE_SPECIFICITY ? specificity : spanNames
+      if (conceptNames.length) console.log(`[ica] concepts surfaced: ${conceptNames.join(', ')}`)
+    } catch (e: any) { console.log(`[ica] concept search failed (${e?.message ?? e})`) }
   }
 
   // Liveness keepalive: the UI arms a 25s watchdog and re-arms on every message. Claude-code's PTY streams
@@ -451,44 +633,61 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // (from its JSONL transcript — the default) AND the raw PTY terminal (on demand). So announce 'events'
     // when the session exposes events() (claude + codex), plus `pty:true` when a raw terminal is available
     // (claude only) so the UI can offer a "Terminal" toggle. A pure event harness (codex) has no PTY.
-    emit(reply, { t: 'analyst:stream', kind: analyst.session.events ? 'events' : (analyst.session.kind ?? 'events'), pty: analyst.session.kind === 'pty', sid })
+    // Both lanes announce themselves (agent:hello). Composer runs first (events-only, read-only); the analyst
+    // lane declares its raw-terminal capability + interactive controls so the UI can offer them generically.
+    emit(reply, A('hello', 'composer', { label: 'Composer', hue: '#4a90d9', streamKind: 'events', pty: false, interactive: false, sid }))
+    emit(reply, A('hello', 'analyst', { label: 'Analyst', hue: '#c08a2b', streamKind: analyst.session.events ? 'events' : (analyst.session.kind ?? 'events'), pty: analyst.session.kind === 'pty', interactive: true, controls: ['terminal', 'compact', 'new'], sid }))
     // Kick off the narration: an immediate opener, then every few seconds translate whatever the analyst just did
     // into ONE business line. Overlap-guarded (skip a tick if the previous narrate is still running).
-    narrator = createNarrator({ cwd: WORKSPACE })
-    if (reply) emit(reply, { t: 'narration', text: 'Looking into your question…', qid, sid })
-    narrationTimer = setInterval(async () => {
-      if (narrating || !reply || narrationBuf.length === 0) return
-      narrating = true
-      const activity = narrationBuf.splice(0).join('\n')
-      try {
-        // TIMEOUT the narrate call: if the narrator (deepseek) hangs, `finally` would never run, `narrating`
-        // would stay true, and EVERY later tick early-returns → narration frozen on one line while the analyst
-        // keeps working. Race it so a hung beat is abandoned (settles in the background) and the guard clears.
-        const line = await Promise.race([narrator!.narrate(question, activity), new Promise<null>((res) => setTimeout(() => res(null), 20000))])
-        if (line) {
-          if (reply) emit(reply, { t: 'narration', text: line, qid, sid })
-          if (channel) emit({ type: 'channel' }, { t: 'channel:narration', channel, qid, text: line })   // stream to the chat channel (Teams/…) as a tiny message
-        }
-      } catch { /* narration is best-effort */ } finally { narrating = false }
-    }, 4000)
+    // The COMPOSER narrates ITSELF (its [[ui]] lines become beats — see onNarration). The separate deepseek
+    // NARRATOR is spun up ONLY when we escalate to the analyst (claude-code has no clean self-narration): it
+    // translates the analyst's raw activity into business beats. startNarrator() begins that loop on demand.
+    const startNarrator = () => {
+      narrator = createNarrator({ cwd: WORKSPACE })
+      narrationTimer = setInterval(async () => {
+        if (narrating || !reply || narrationBuf.length === 0) return
+        narrating = true
+        const activity = narrationBuf.splice(0).join('\n')
+        try {
+          // TIMEOUT the narrate call so a hung beat (deepseek) can't freeze narration (finally never running).
+          const line = await Promise.race([narrator!.narrate(question, activity), new Promise<null>((res) => setTimeout(() => res(null), 20000))])
+          if (line) {
+            if (reply) emit(reply, { t: 'narration', text: line, qid, sid })
+            if (channel) emit({ type: 'channel' }, { t: 'channel:narration', channel, qid, text: line })   // stream to the chat channel (Teams/…)
+          }
+        } catch { /* narration is best-effort */ } finally { narrating = false }
+      }, 4000)
+    }
+    // Whose events these are — the composer runs first, the analyst only if it escalates. Every event/progress
+    // line carries `agent` so the UI can colour + separate composer vs analyst, and interleave the narrator.
+    let currentAgent: 'composer' | 'analyst' = 'composer'
+    // Agent-LOG emission: the engine LABELS each structured event / PTY chunk with its channel (composer-log while
+    // the composer runs, analyst-log while the analyst runs) + the qid, and sends it ONCE. The DO fans it to the
+    // OWNER's attached devices only (never another user, never a device that didn't attach). The engine no longer
+    // tracks who's watching — that decision moved to the DO.
+    const emitLog = (msg: any) => emit({ type: 'log', channel: currentAgent === 'composer' ? 'composer-log' : 'analyst-log' }, { ...msg, qid, sid, agent: currentAgent })
+    // The QUESTION is a unit boundary IN the lane stream — emitted to both lanes up front, keyed by qid. Being
+    // real lane data (not a UI-synthesized marker) it survives replay/reload, and any lane gets its dividers the
+    // same way. The UI merges by id, so its own optimistic marker collapses into this one.
+    for (const channel of ['composer-log', 'analyst-log'])
+      emit({ type: 'log', channel }, A('event', channel === 'composer-log' ? 'composer' : 'analyst',
+        { ev: { kind: 'user', id: qid, text: question, done: true }, qid, sid }))
     const handlers = {
-      onCategory: (c: string) => { curCategory = c; emit(reply, { t: 'analyst:category', category: c, sid }) },
-      onOutput: (chunk: string) => {
-        // PTY bytes are the RAW-TERMINAL view — streamed ONLY to viewers who explicitly opened the terminal
-        // (termViewers). The default view is driven by onEvent below (structured, from the JSONL), so a claude
-        // run streams clean events by default and the PTY never reaches a client that didn't ask for it.
-        if (!termViewers.analyst.size) return
-        const m = { t: 'analyst:chunk', text: chunk }
-        for (const v of termViewers.analyst) emit(v, m)
+      onCategory: (c: string) => { curCategory = c; emit(reply, A('status', currentAgent, { category: c, sid })) },
+      onOutput: (chunk: string) => emitLog({ t: 'analyst:chunk', text: chunk }),   // raw PTY bytes → the terminal surface (own protocol, not a lane frame)
+      onNarration: (text: string) => {
+        if (!reply) return
+        // The COMPOSER self-narrates — its [[ui]] line IS a business beat, so it drives the analysis tape directly
+        // (no separate narrator runs during the composer phase). The ANALYST's [[ui]] is a side progress line; its
+        // beats come from the deepseek narrator started on escalation.
+        if (currentAgent === 'composer') emit(reply, { t: 'narration', text, qid, sid })
+        else emit(reply, A('status', 'analyst', { progress: text, sid }))
       },
-      onNarration: (text: string) => { if (reply) emit(reply, { t: 'analyst:progress', text, sid }) },  // clean prose → New chat progress
       // Structured events (codex/SDK harnesses only — claude PTY uses onOutput above). The session already
       // normalizes + buffers these (session.events()); the engine just mirrors each one live to the asker and
       // any attached viewers, same as onOutput. Reconnect replay is handled in resyncAnalyst via events().
       onEvent: (ev) => {
-        const m = { t: 'analyst:event', ev, sid }
-        if (reply) emit(reply, m)
-        for (const v of termViewers.analyst) if (v !== reply) emit(v, m)
+        emitLog(A('event', currentAgent, { ev }))   // structured event → the agent's log channel (composer-log / analyst-log)
         // Narrator digest — feed ONLY the business signal: commands + their RESULTS (query outputs = the
         // findings) and the analyst's own prose. SKIP file events (program code / diffs / paths) — that's pure
         // machinery the narrator must hide anyway: big input bloat + a leak risk, with no business value (every
@@ -496,11 +695,17 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         // Feed the narrator the SIGNAL only: the analyst's own PROSE (already business-ish), plus the OUTPUT of a
         // genuine DATA RUN (a tsx/node query). NEVER feed raw command text or file-read/plumbing output (cat/ls/
         // grep… = machinery) — it's noise, and it tempts the model to echo tool-call syntax (the Teams DSML leak).
-        if (ev.kind === 'message' && ev.text?.trim()) narrationBuf.push(ev.text.trim().slice(0, 600))
+        // The analyst's prose often EMBEDS program source/diffs while it explains its code — strip that out so the
+        // narrator never even sees machinery (defence in depth with isCleanBeat on the output side).
+        if (ev.kind === 'message' && ev.text?.trim()) { const prose = stripCode(ev.text); if (prose) narrationBuf.push(prose.slice(0, 600)) }
         else if (ev.kind === 'command' && ev.output?.trim() && /\b(tsx|node|run\.mjs|query\.mjs|program\.ts)\b/.test(ev.command || '')) narrationBuf.push(('RESULT: ' + capResultData(ev.output)).slice(0, 1800))
       },
     }
-    const hint = overlapHint ? `An existing program is a ${overlapHint.relation} of this question: ${overlapHint.program}. Open it and reuse what fits, or ignore it.` : undefined
+    // The analyst does its OWN search (find-concept) and is a strong model (Sonnet),
+    // so we deliberately do NOT hand it the engine's "closest program" pointer. That pointer is a RANK-based RRF
+    // top, not a real-relevance match, and injecting it ANCHORED the analyst onto look-alike programs (e.g. an
+    // actual-billable-hours program for a forecast question). The analyst starts from the question alone; only the
+    // faster composer gets the candidate list.
     // LAST-RESORT backstop, deliberately BIG. The real fix for stuck turns is the prompt (foreground-only, no
     // background/sub-agents — see generate-system.ts). But if claude STILL wedges — a query in a retry loop, or
     // a background step it waits on — its "done" signal never fires and ask() would hang forever (the user sees
@@ -515,12 +720,16 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // and writes the same out/<qid>/{built,answer}.json, so a composed result flows through the IDENTICAL
     // post-processing below. Skip for a MODIFY (the composer doesn't edit). On escalation → the analyst (System 3).
     let authoredBy: 'composer' | 'analyst' = 'analyst'
+    let escalateReason: string | undefined   // the composer's note on WHY it escalated — handed to the analyst as a non-authoritative hint
+    // The narrator is ALWAYS-ON: it turns whichever agent is working (composer first, then the analyst on
+    // escalation) into the live progress the user follows. The agents themselves write nothing user-facing.
+    startNarrator()
     {
       // The COMPOSER handles both a fresh question (compose/reuse) AND a MODIFY (edit the current program in
       // place). It escalates only when it genuinely can't — then the analyst takes over.
       const composer = await getComposer(sid)
-      const c = await composer.ask(question, handlers, { qid, candidates: programCandidates, modify: modifyTarget ?? undefined })
-      if (c.escalate) console.log(`[ica] composer → escalate · ${c.escalate.reason}`)
+      const c = await composer.ask(question, handlers, { qid, candidates: programCandidates, conceptNames, modify: modifyTarget ?? undefined, canonicalMatch })
+      if (c.escalate) { escalateReason = c.escalate.reason; console.log(`[ica] composer → escalate · ${c.escalate.reason}`) }
       else {
         authoredBy = 'composer'
         r = { answer: c.answer, category: c.category ?? 'analysis', ms: c.ms, lastLines: c.lastLines ?? '' }
@@ -528,7 +737,9 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       }
     }
     if (!r) {   // composer escalated → the analyst (System 3) handles it (build or modify)
-      const askP = analyst.ask(question, handlers, { qid, modify: modifyTarget ?? undefined, hint })
+      currentAgent = 'analyst'
+      emit(reply, A('status', 'analyst', { progress: 'Handing off to the analyst for deeper analysis…', sid }))
+      const askP = analyst.ask(question, handlers, { qid, conceptNames, reason: escalateReason, modify: modifyTarget ?? undefined })
       askP.catch(() => {})   // if we abandon it on timeout, don't leak an unhandled rejection
       let capT: ReturnType<typeof setTimeout> | undefined
       const raced: any = await Promise.race([askP, new Promise((res) => { capT = setTimeout(() => res(TIMED_OUT), MAX_TURN_MS) })])
@@ -553,9 +764,14 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // Capture the PROGRAM the agent built (its built.json pointer) so a repeat of this question re-runs
     // that program (fresh query) instead of re-invoking the LLM.
     let programDir: string | undefined, programParams: any, programTerms: any[] = [], programFollowups: string[] = []
+    let programCanonical: string[] = []   // what the program ANSWERS, in question form — the retrieval substrate
     const b = await readJsonSafe<any>(join(WORKSPACE, 'out', qid, 'built.json'), null, 'analyst')   // absent = unknowable/gap (no program)
-    if (b) { programDir = b.programDir; programParams = b.params; programTerms = Array.isArray(b.terms) ? b.terms : []; programFollowups = Array.isArray(b.followups) ? b.followups.filter((x: any) => typeof x === 'string' && x.trim()).slice(0, 3) : [] }
-    emit(reply, { t: 'analyst:answer', category: r.category, answer: r.answer, lastLines: r.lastLines, timing, sid, qid })
+    if (b) { programDir = b.programDir; programParams = b.params; programTerms = Array.isArray(b.terms) ? b.terms : []; programFollowups = Array.isArray(b.followups) ? b.followups.filter((x: any) => typeof x === 'string' && x.trim()).slice(0, 3) : []
+             programCanonical = Array.isArray(b.canonicalQuestions) ? b.canonicalQuestions.filter((x: any) => typeof x === 'string' && x.trim()).map((x: string) => x.trim()).slice(0, 3) : [] }
+    // NB: r.lastLines (the raw claude PTY tail — a garbled, cursor-addressed terminal snapshot) is deliberately NOT
+    // sent to the client. It has no user value, isn't stored, and shipping ~20KB of raw terminal per answer is a
+    // standing leak risk (a client that didn't strip it would render it). The clean answer is r.answer.
+    emit(reply, { t: 'analyst:answer', category: r.category, answer: r.answer, timing, sid, qid })
     if (channel) emit({ type: 'channel' }, { t: 'channel:answer', channel, qid, answer: r.answer, category: r.category })   // durable delivery to the chat channel
     // Follow-ups are NICE-TO-HAVE — emitted AFTER the answer, never gating or delaying it. The UI reveals them on
     // a delay so the user reads the answer first. Persisted on the node below → free on a later reuse (no analyst).
@@ -590,6 +806,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       // semantically searchable, never a broken turn.
       if (vectors) void indexText(vectors, bgeEmbedder, nodeId, norm).catch(e => log.warn('semantic', `embed ${nodeId.slice(0, 14)} failed`, e))
       setPosition(sid, nodeId)
+      console.log(`[ica][session] setPosition sid="${sid}" → ${nodeId.slice(0, 14)}  q="${question.slice(0, 40)}"`)
       console.log(`[ica] intent node ${nodeId.slice(0, 14)} under ${parent === ROOT ? 'ROOT' : parent.slice(0, 14)} (reflex-placed)${programDir ? ` · program ${programDir}` : ' · no program'}`)
       // OBSERVE-only: did the cheap exact-match regex agree with where the reflex placed the node?
       if (!explicitEdit) console.log(`[ica] regex-check: guessed ${rootQuestion ? 'ROOT' : 'FOLLOW-UP'} · reflex placed ${parent === ROOT ? 'ROOT' : 'FOLLOW-UP'} → ${rootQuestion === (parent === ROOT) ? 'MATCH ✓' : 'MISMATCH ✗'}`)
@@ -607,9 +824,19 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       const authoredMeta = authoredBy === 'composer'
         ? { by: 'composer', harness: process.env.ICA_COMPOSER_HARNESS || 'opencode', provider: process.env.ICA_COMPOSER_PROVIDER || 'opencode-go', model: process.env.ICA_COMPOSER_MODEL || 'deepseek-v4-flash', at: Date.now() }
         : { by: 'analyst', harness: ANALYST_HARNESS, provider: process.env.ICA_ANALYST_PROVIDER || null, model: ANALYST_MODEL ?? null, at: Date.now() }
+      // canonicalQuestions accumulate on the PROGRAM (not the intent): they describe what this program answers,
+      // and a program can be reached by several phrasings. Union with what's already there, so a rebuild/modify
+      // ADDS a phrasing rather than dropping the ones already known. The user's real question is kept too — the
+      // writer's canonical form can encode its own misreading, so the phrasing actually asked stays in the index.
+      // Three sources, unioned: what the WRITER declared, the ENGINE's own canonical form of what was asked (so a
+      // later variant matches even when the writer phrased its form differently), and the raw question (the
+      // writer's canonical form can encode its own misreading; the words actually typed stay in the index).
+      const priorCanon: string[] = ((graph.getNode(`prog:${slug}`)?.props as any)?.canonicalQuestions ?? []) as string[]
+      const canonical = Array.from(new Set([...priorCanon, ...programCanonical, ...(askedCanonical ? [askedCanonical] : []), question.trim()].filter(Boolean)))
       graph.putNode({ id: `prog:${slug}`, kind: 'program', label: slug, summary: authoredProgramDir,
-        props: { dir: authoredProgramDir, authoredBy: authoredMeta, category: r.category } })
+        props: { dir: authoredProgramDir, authoredBy: authoredMeta, category: r.category, canonicalQuestions: canonical } })
       graph.putEdge({ from: builtIntentId, to: `prog:${slug}`, type: 'program' })
+      console.log(`[ica] program ${slug} answers ${canonical.length} question form(s)${programCanonical.length ? '' : ' (writer declared none — user question only)'}`)
     }
     // No explicit wake needed — the always-running consolidation timer picks this up on its next tick. That
     // is deliberate: the timer, not this signal, is the guarantee (it survives restarts and missed signals).
@@ -621,32 +848,15 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     if (narrationTimer) { clearInterval(narrationTimer); narrationTimer = null }
     if (narrator) { narrator.stop(); narrator = null }
     curQuestion = ''
-    emit(reply, { t: 'analyst:done', sid })
-    analystSlot.persist(); semanticSlot.persist()   // capture the live ids (incl. any resume-fallback)
-    analystBusy = false; busy = false
+    emit(reply, A('status', 'analyst', { state: 'done', sid }))
+    analystSlot.persist()   // capture the live ids (incl. any resume-fallback)
+    busySessions.delete(sid)
   }
 }
 
 async function listSources(): Promise<string[]> {
   try { const r = await fetch(`${DATASOURCE}/sources`); const j: any = await r.json(); return (j.sources || []).map((s: any) => s.id) }
   catch { return [] }
-}
-
-// Run the semantic-model agent and stream its raw claude-code terminal to the UI panel.
-async function buildSemanticModel(from: any) {
-  if (semanticBusy) { emit(from, { t: 'semantic:status', text: 'Semantic model build already running.' }); return }
-  semanticBusy = true
-  const sources = await listSources()
-  emit(from, { t: 'semantic:status', text: `Building semantic model — sources: ${sources.join(', ') || '(none)'}` })
-  try {
-    const semantic = await semanticSlot.get()
-    announceKind('semantic', from, semantic)   // tell the panel which renderer: 'pty' (claude) or 'events' (codex)
-    const r = await semantic.buildFirstPass(agentStream('semantic', from))
-    emit(from, { t: 'semantic:done', summary: r.lastLines })
-    console.log(`[ica] semantic build done in ${(r.ms / 1000).toFixed(1)}s`)
-  } catch (e: any) {
-    emit(from, { t: 'semantic:status', text: `Semantic build failed: ${e?.message ?? e}` })
-  } finally { semanticSlot.persist(); semanticBusy = false }
 }
 
 // The admin's GROUNDING agent — a COLD claude-code session (spun up on demand, never warmed) that builds
@@ -660,7 +870,7 @@ async function handleGrounding(from: any, rebuild = false) {
   // (upsert-on-top, never destructive) — this deliberate reset is the one place a wipe happens. Safe here because
   // the grounding agent is COLD (no store open between builds).
   if (rebuild) {
-    const db = join(WORKSPACE, 'db', 'grounding.sqlite')
+    const db = join(DB_DIR, 'grounding.sqlite')
     for (const f of [db, `${db}-wal`, `${db}-shm`]) { try { rmSync(f) } catch { /* not there */ } }
     emit(from, { t: 'grounding:status', text: 'Cleared existing grounding — rebuilding from empty.' })
   }
@@ -707,10 +917,10 @@ async function handleConnector(text: string, from: any) {
 // back to the PTY. claude auth is SHARED across all three agents (one $HOME on the volume), so a login in any
 // one authenticates them all. To avoid double output, the raw stream is emitted only while the agent is IDLE
 // — during a run the existing per-run stream already feeds the asker.
-type Which = 'analyst' | 'semantic' | 'connector' | 'grounding'
-const normWhich = (w: any): Which => (w === 'connector' ? 'connector' : w === 'grounding' ? 'grounding' : w === 'semantic' ? 'semantic' : 'analyst')
-const slotFor = (w: Which) => (w === 'connector' ? connectorSlot : w === 'grounding' ? groundingSlot : w === 'semantic' ? semanticSlot : analystSlot)
-const termChunkT = (w: Which) => (w === 'connector' ? 'connector:chunk' : w === 'grounding' ? 'grounding:chunk' : w === 'semantic' ? 'semantic:chunk' : 'analyst:chunk')
+type Which = 'analyst' | 'connector' | 'grounding'
+const normWhich = (w: any): Which => (w === 'connector' ? 'connector' : w === 'grounding' ? 'grounding' : 'analyst')
+const slotFor = (w: Which) => (w === 'connector' ? connectorSlot : w === 'grounding' ? groundingSlot : analystSlot)
+const termChunkT = (w: Which) => (w === 'connector' ? 'connector:chunk' : w === 'grounding' ? 'grounding:chunk' : 'analyst:chunk')
 
 // Standard streaming for the from-based agent flows (semantic/connector/grounding): forward BOTH the harness's
 // text chunks (the pty view) AND its structured events (the codex/events view) to the requester, tagged by agent.
@@ -721,9 +931,9 @@ const agentStream = (w: Which, from: any): RunHandlers => ({
   onEvent: (ev) => emit(from, { t: `${w}:event`, ev }),
 })
 const announceKind = (w: Which, from: any, agent: any) => emit(from, { t: `${w}:stream`, kind: agent?.session?.kind ?? 'events' })
-const isAgentBusy = (w: Which) => (w === 'connector' ? connectorBusy : w === 'grounding' ? groundingBusy : w === 'semantic' ? semanticBusy : analystBusy)
-const termViewers: Record<Which, Set<any>> = { analyst: new Set(), semantic: new Set(), connector: new Set(), grounding: new Set() }
-const termUnsub: Record<Which, (() => void) | null> = { analyst: null, semantic: null, connector: null, grounding: null }
+const isAgentBusy = (w: Which) => (w === 'connector' ? connectorBusy : w === 'grounding' ? groundingBusy : busySessions.size > 0)
+const termViewers: Record<Which, Set<any>> = { analyst: new Set(), connector: new Set(), grounding: new Set() }
+const termUnsub: Record<Which, (() => void) | null> = { analyst: null, connector: null, grounding: null }
 async function attachTerminal(w: Which, from: any) {
   termViewers[w].add(from)
   const agent = await slotFor(w).get()
@@ -752,17 +962,36 @@ function inputTerminal(w: Which, data: string) {
 
 // ── Semantic-model consolidation tick ─────────────────────────────────────────
 // Fired by the always-running interval (below). Idempotent and cheap when there's nothing to do. It NEVER
-// blocks the analyst (separate busy flags). If the modeler is busy with a manual build, this tick skips and
+// blocks the analyst (separate busy flags). If the concept modeller is busy with a manual build, this tick skips and
 // the next one retries. When it does run, it drains ALL pending batches (a 3-day backlog is processed in
 // order, 50 at a time) until nothing is left past the watermark.
-async function semanticConsolidateTick() {
-  if (semanticConsolidating || semanticBusy) return            // already consolidating, or modeler busy → no-op; next tick retries
-  const wmPeek = Number(answers.getMeta(SEMANTIC_CONSOLIDATE_WM_KEY) ?? '0')
-  if (!answers.sinceFinished(wmPeek, 1).length) return         // nothing past the watermark → cheap exit, no session spin-up
-  semanticConsolidating = true; semanticBusy = true            // hold the modeler mutex for the whole drain
+// SEAM: process one batch of freshly-finished answers offline. The semantic-model modeler was removed;
+// repoint this at the new learning loop (record the verified concept set per solved question + learn
+// requires-edges, spec §6/§10/§11). Until then the tick is gated off by CONSOLIDATOR_WIRED.
+// Hand one batch of finished analyses to the concept modeller (System 4) → it distils verified concepts.
+// Streams the modeller's work to the concept-log channel; returns its timing + summary note.
+async function consolidateBatch(items: any[], batchId: string, log: (m: any) => void): Promise<{ ms: number; lastLines?: string }> {
+  const modeller = await modellerSlot.get()
+  log(A('hello', 'modeler', { label: 'Concept Modeller', hue: '#7fae82', streamKind: modeller.session.events ? 'events' : (modeller.session.kind ?? 'events'), pty: modeller.session.kind === 'pty', interactive: false }))
+  try {
+    const r = await modeller.consolidate(items, batchId, {
+      onEvent: (ev) => log(A('event', 'modeler', { ev })),
+      onOutput: (chunk) => log(A('chunk', 'modeler', { text: chunk })),
+    })
+    log(A('status', 'modeler', { text: `Consolidated ${r.changed} concept(s)` }))
+    return { ms: r.ms, lastLines: r.note }
+  } finally { modellerSlot.persist() }
+}
+
+async function conceptConsolidateTick() {
+  if (!CONSOLIDATOR_WIRED) return                              // seam disabled → inert, never advances the watermark (backlog waits)
+  if (conceptConsolidating) return                            // already consolidating → no-op; next tick retries
+  const wmPeek = Number(answers.getMeta(CONCEPT_CONSOLIDATE_WM_KEY) ?? '0')
+  if (!answers.sinceFinished(wmPeek, 1).length) return         // nothing past the watermark → cheap exit
+  conceptConsolidating = true                                 // single-runner: hold for the whole drain
   try {
     for (;;) {
-      const wm = Number(answers.getMeta(SEMANTIC_CONSOLIDATE_WM_KEY) ?? '0')
+      const wm = Number(answers.getMeta(CONCEPT_CONSOLIDATE_WM_KEY) ?? '0')
       const batch = answers.sinceFinished(wm)                   // finished after the watermark, oldest-first
       if (!batch.length) break
       const nextWm = String(Math.max(...batch.map((b) => b.finishedAt ?? wm)))   // where the watermark goes once this batch is done
@@ -779,87 +1008,80 @@ async function semanticConsolidateTick() {
       if (!fresh.length) {
         // Nothing new — every answer here re-runs an already-consolidated program (or has no program). Advance
         // PAST them WITHOUT spending an agent run. This is the "asked again, nothing changed → don't re-model" case.
-        console.log(`[semantic-consolidation] ${batch.length} answer(s) since wm=${wm} — all already-consolidated repeats; skipping the modeler`)
-        answers.setMeta(SEMANTIC_CONSOLIDATE_WM_KEY, nextWm)
+        console.log(`[concept-consolidation] ${batch.length} answer(s) since wm=${wm} — all already-consolidated repeats; skipping the modeler`)
+        answers.setMeta(CONCEPT_CONSOLIDATE_WM_KEY, nextWm)
         continue
       }
       const batchId = 'b_' + Date.now().toString(36)
       const items = fresh.map((r) => ({ question: r.question, status: r.status, programDir: r.programDir, usedNodes: (r.answer as any)?.usedNodes }))
-      console.log(`[semantic-consolidation] ${batchId}: ${items.length} new program(s) of ${batch.length} answer(s) since wm=${wm}`)
-      if (reply) emit(reply, { t: 'semantic:status', text: `Consolidating ${items.length} recent answer(s) into the model…` })
+      console.log(`[concept-consolidation] ${batchId}: ${items.length} new program(s) of ${batch.length} answer(s) since wm=${wm}`)
+      // Consolidation is a BACKGROUND, PROJECT-LEVEL task (no asker/qid). Its stream goes to the concept-log
+      // channel; the DO delivers it to whoever ATTACHED to that channel (no owner → project-level, not user data).
+      const semLog = (msg: any) => emit({ type: 'log', channel: 'concept-log' }, msg)
+      semLog(A('status', 'modeler', { text: `Consolidating ${items.length} recent answer(s)…` }))
       try {
-        const semantic = await semanticSlot.get()
-        // Same dual-view as the analyst: announce the STRUCTURED view (from the modeler's JSONL) + whether a raw
-        // terminal exists; stream events by default; the PTY (semantic:chunk) goes ONLY to explicit terminal viewers.
-        const semViewers = () => { const s = new Set(termViewers.semantic); if (reply) s.add(reply); return s }
-        if (reply) emit(reply, { t: 'semantic:stream', kind: semantic.session.events ? 'events' : (semantic.session.kind ?? 'events'), pty: semantic.session.kind === 'pty' })
-        const r = await semantic.consolidate(items, batchId, {
-          onEvent: (ev) => { for (const v of semViewers()) emit(v, { t: 'semantic:event', ev }) },
-          onOutput: (chunk) => { if (termViewers.semantic.size) for (const v of termViewers.semantic) emit(v, { t: 'semantic:chunk', text: chunk }) },
-        })
+        const r = await consolidateBatch(items, batchId, semLog)
         // Advance PAST the last finished_at we consumed → those rows never re-enter a batch (strictly-greater cursor).
-        answers.setMeta(SEMANTIC_CONSOLIDATE_WM_KEY, nextWm)
-        answers.setMeta(SEMANTIC_CONSOLIDATE_FAIL_KEY, '0')     // clean pass → reset the failure streak
-        console.log(`[semantic-consolidation] ${batchId} done in ${(r.ms / 1000).toFixed(1)}s`)
-        if (reply) emit(reply, { t: 'semantic:status', text: 'Model consolidated ✓' })
+        answers.setMeta(CONCEPT_CONSOLIDATE_WM_KEY, nextWm)
+        answers.setMeta(CONCEPT_CONSOLIDATE_FAIL_KEY, '0')     // clean pass → reset the failure streak
+        console.log(`[concept-consolidation] ${batchId} done in ${(r.ms / 1000).toFixed(1)}s`)
+        semLog(A('status', 'modeler', { text: 'Concepts consolidated ✓' }))
       } catch (e: any) {
         // The agent SESSION errored (a crash, not a compaction — those are handled inside consolidate()).
         // Do NOT advance the watermark yet: a transient error should be retried. But bound it — after
         // MAX_FAILS consecutive failures on the SAME batch, skip it (advance past) so a poison batch can
         // never retry forever and burn money. The skipped analyses' concepts resurface if re-asked.
-        const streak = Number(answers.getMeta(SEMANTIC_CONSOLIDATE_FAIL_KEY) ?? '0') + 1
-        console.log(`[semantic-consolidation] ${batchId} FAILED (streak ${streak}/${SEMANTIC_CONSOLIDATE_MAX_FAILS}): ${e?.message ?? e}`)
-        if (streak >= SEMANTIC_CONSOLIDATE_MAX_FAILS) {
-          console.log(`[semantic-consolidation] skipping poison batch — advancing watermark past ${nextWm}`)
-          answers.setMeta(SEMANTIC_CONSOLIDATE_WM_KEY, nextWm); answers.setMeta(SEMANTIC_CONSOLIDATE_FAIL_KEY, '0')
+        const streak = Number(answers.getMeta(CONCEPT_CONSOLIDATE_FAIL_KEY) ?? '0') + 1
+        console.log(`[concept-consolidation] ${batchId} FAILED (streak ${streak}/${CONCEPT_CONSOLIDATE_MAX_FAILS}): ${e?.message ?? e}`)
+        if (streak >= CONCEPT_CONSOLIDATE_MAX_FAILS) {
+          console.log(`[concept-consolidation] skipping poison batch — advancing watermark past ${nextWm}`)
+          answers.setMeta(CONCEPT_CONSOLIDATE_WM_KEY, nextWm); answers.setMeta(CONCEPT_CONSOLIDATE_FAIL_KEY, '0')
         } else {
-          answers.setMeta(SEMANTIC_CONSOLIDATE_FAIL_KEY, String(streak))
+          answers.setMeta(CONCEPT_CONSOLIDATE_FAIL_KEY, String(streak))
         }
         break                                                    // stop this drain; the next tick retries (or has moved on if skipped)
       }
     }
   } catch (e: any) {
-    console.log(`[semantic-consolidation] error: ${e?.message ?? e}`)
-  } finally { semanticConsolidating = false; semanticBusy = false; semanticSlot.persist() }
+    console.log(`[concept-consolidation] error: ${e?.message ?? e}`)
+  } finally { conceptConsolidating = false }
 }
 
 // A client (re)connected (e.g. after reload). Replay the live analyst state so it doesn't see a blank
 // screen while the run continues server-side: the terminal buffer, and either the in-flight run
 // (re-targeted to this connection) or the last completed answer.
-function resyncAnalyst(from: any) {
+// `full` (a real reconnect, analyst:sync) repaints the whole event log; a plain sessions:list is just a SIDEBAR
+// refresh (e.g. after each answer) and must NOT replay events — that full-replace carries the harness transcript,
+// which has no question dividers, so it would wipe the UI-synthesized [data-qlog] markers the log-nav depends on.
+function resyncAnalyst(from: any, full = false) {
   emit(from, { t: 'sessions:res', sessions: [] })   // UI keeps its own chat list (localStorage); this is just the ack
-  const aSession = analystSlot.session(), sSession = semanticSlot.session()
+  const aSession = analystSlot.session()
   if (!aSession) return
   const kind = aSession.events ? 'events' : (aSession.kind ?? 'events')
-  emit(from, { t: 'analyst:stream', kind, pty: aSession.kind === 'pty' })   // which renderer + whether a raw terminal exists
-  // Repaint the STRUCTURED event log by default (claude + codex); the raw PTY screen is replayed only when the
-  // client explicitly opens the terminal (term:attach), so PTY bytes never reach a client that didn't ask.
-  if (aSession.events) {
-    const evs = aSession.events()
-    if (evs.length) emit(from, { t: 'analyst:events', events: evs, replace: true })
-  } else {
-    const buf = aSession.buffer()
-    if (buf) emit(from, { t: 'analyst:chunk', text: buf, replace: true })
+  if (full) {
+    emit(from, A('hello', 'analyst', { label: 'Analyst', hue: '#c08a2b', streamKind: kind, pty: aSession.kind === 'pty', interactive: true, controls: ['terminal', 'compact', 'new'] }))
+    // Repaint the STRUCTURED event log by default (claude + codex); the raw PTY screen is replayed only when the
+    // client explicitly opens the terminal (term:attach), so PTY bytes never reach a client that didn't ask.
+    if (aSession.events) {
+      const evs = aSession.events()
+      if (evs.length) emit(from, A('events', 'analyst', { events: evs, replace: true }))
+    } else {
+      const buf = aSession.buffer()
+      if (buf) emit(from, { t: 'analyst:chunk', text: buf, replace: true })
+    }
   }
-  if (sSession) {                                                          // repaint the semantic view too (e.g. mid consolidation)
-    emit(from, { t: 'semantic:stream', kind: sSession.events ? 'events' : (sSession.kind ?? 'events'), pty: sSession.kind === 'pty' })
-    if (sSession.events) { const evs = sSession.events(); if (evs.length) emit(from, { t: 'semantic:events', events: evs, replace: true }) }
-    else { const sbuf = sSession.buffer(); if (sbuf) emit(from, { t: 'semantic:chunk', text: sbuf, replace: true }) }
-    if (semanticBusy) emit(from, { t: 'semantic:status', text: 'Building the model…' })
-  }
-  if (analystBusy) {
-    reply = from                                                          // re-target the running run to this (new) connection
-    emit(from, { t: 'analyst:status', text: curCategory ? `Answering — ${curCategory}…` : 'Answering…', question: curQuestion, sid: curSid })
-    if (curCategory) emit(from, { t: 'analyst:category', category: curCategory, sid: curSid })
+  if (busySessions.size > 0) {
+    // No reply re-target under per-session concurrency (that would steal another session's live stream). A
+    // reconnecting client recovers a missed answer from the durable ProjectDO answer-buffer instead.
+    emit(from, A('status', 'analyst', { text: curCategory ? `Answering — ${curCategory}…` : 'Answering…', question: curQuestion, category: curCategory || undefined, sid: curSid }))
   } else if (lastAnswer) {
     emit(from, { t: 'analyst:answer', category: lastCategory, answer: lastAnswer, timing: lastTiming, sid: curSid, replay: true })
-    emit(from, { t: 'analyst:done', sid: curSid })
+    emit(from, A('status', 'analyst', { state: 'done', sid: curSid }))
   }
 }
 
 async function handle(payload: any, from: any) {
   if (payload.t === 'analyse') { analyse(String(payload.question || ''), from, String(payload.sessionId || ''), String(payload.questionId || ''), String(payload.channel || '')) }   // UI supplies both ids; channel set for chat-channel turns
-  else if (payload.t === 'semantic:build') { buildSemanticModel(from) }                      // build/refine the semantic model (watchable)
   else if (payload.t === 'grounding:build') { handleGrounding(from, !!payload.rebuild) }        // admin console → grounding agent builds (rebuild:true = wipe first, else additive)
   else if (payload.t === 'connector:ask') { handleConnector(String(payload.text || ''), from) }   // admin console → connector agent (raw PTY back)
   else if (payload.t === 'term:attach') { attachTerminal(normWhich(payload.which), from) }         // open a live typeable terminal into an agent's PTY (e.g. /login)
@@ -871,25 +1093,22 @@ async function handle(payload: any, from: any) {
   else if (payload.t === 'inspect:req') {
     inspector.handle(payload).then((res) => emit(from, { t: 'inspect:res', reqId: payload.reqId, view: payload.view ?? 'overview', ...res }))
   }
-  else if (payload.t === 'sessions:list' || payload.t === 'analyst:sync') { resyncAnalyst(from) }   // (re)connect → replay the live analyst state
+  else if (payload.t === 'analyst:sync') { resyncAnalyst(from, true) }   // real (re)connect → full replay of the live analyst log
+  else if (payload.t === 'sessions:list') { resyncAnalyst(from, false) }   // sidebar refresh only → NO event replay (keeps the question dividers)
   else if (payload.t === 'session:load') { emit(from, { t: 'session:load:res', items: [] }) }
   else if (payload.t === 'suggestions:req') { emit(from, { t: 'suggestions:res', suggestions: { groups: [] } }) }
   else if (payload.t === 'ui:resize') {   // UI fitted its terminal → resize the matching agent's PTY (claude-code)
     const slot = slotFor(normWhich(payload.which))
     slot.session()?.resize?.(Number(payload.cols) || 120, Number(payload.rows) || 40)
   }
-  else if (payload.t === 'session:new') {   // UI button → fresh session for that agent (drop resume + history)
-    const slot = payload.role === 'semantic' ? semanticSlot : analystSlot
-    slot.newSession(); emit(from, { t: 'session:reset', role: payload.role || 'analyst' })
+  else if (payload.t === 'session:new') {   // UI button → fresh session for the analyst (drop resume + history)
+    analystSlot.newSession(); emit(from, { t: 'session:reset', role: 'analyst' })
   }
-  else if (payload.t === 'session:compact') {   // UI button → compact (shrink context) of that agent's session
-    const role = payload.role === 'semantic' ? 'semantic' : 'analyst'
-    const slot = role === 'semantic' ? semanticSlot : analystSlot
-    const chunkT = role === 'semantic' ? 'semantic:chunk' : 'analyst:chunk'
-    emit(from, { t: role === 'semantic' ? 'semantic:status' : 'analyst:status', text: 'Compacting context…' })
-    slot.compact({ onOutput: (chunk) => emit(from, { t: chunkT, text: chunk }) })
-      .then(() => emit(from, { t: role === 'semantic' ? 'semantic:status' : 'analyst:status', text: 'Compacted ✓' }))
-      .catch((e: any) => emit(from, { t: role === 'semantic' ? 'semantic:status' : 'analyst:status', text: `Compact failed: ${e?.message ?? e}` }))
+  else if (payload.t === 'session:compact') {   // UI button → compact (shrink context) of the analyst's session
+    emit(from, A('status', 'analyst', { text: 'Compacting context…' }))
+    analystSlot.compact({ onOutput: (chunk) => emit(from, { t: 'analyst:chunk', text: chunk }) })
+      .then(() => emit(from, A('status', 'analyst', { text: 'Compacted ✓' })))
+      .catch((e: any) => emit(from, A('status', 'analyst', { text: `Compact failed: ${e?.message ?? e}` })))
   }
   else if (payload.t === 'program:forget') {   // admin → completely delete a program + its answers/runs/out, so the question rebuilds
     // Identify by programDir, question text, or a qid it produced. Deterministic, engine-owned (no LLM).
@@ -931,6 +1150,7 @@ function connect() {
     const t = m.payload?.t
     if (t === 'welcome') {
       console.log(`[ica] registered (${m.payload.wsId}) — running self-check…`)
+      flushOutbox()   // re-registered → deliver anything queued while the socket was flapping (answers, logs)
       // Only claim READY after the self-check passes. The hub/DO can trust this signal to mean the engine
       // can actually answer, not merely that a socket is open.
       selfCheck().then((res) => {
@@ -958,12 +1178,12 @@ function connect() {
 
 // Heartbeat: the DO drops its in-memory role registry when it hibernates. A heartbeat keeps
 // it warm so this engine STAYS the registered code-engine (else the UI shows "Starting machine…").
-setInterval(() => { if (hub?.readyState === WebSocket.OPEN) hub.send(JSON.stringify({ type: 'heartbeat', busy })) }, 12000)
+setInterval(() => { if (hub?.readyState === WebSocket.OPEN) hub.send(JSON.stringify({ type: 'heartbeat', busy: busySessions.size > 0 })) }, 12000)
 // Semantic-model consolidation heartbeat: ALWAYS running from boot, independent of any question signal. Every
 // tick it checks for analyses past the watermark and drains them — so a restart with a backlog (even days
 // later, with no new question asked) still gets consolidated. A no-op while a pass is in flight or the
 // modeler is otherwise busy. (This is the SEMANTIC-MODEL consolidation; other layers get their own timers.)
-setInterval(() => { semanticConsolidateTick().catch((e) => console.log('[semantic-consolidation] tick error:', e?.message ?? e)) }, SEMANTIC_CONSOLIDATE_INTERVAL_MS)
+setInterval(() => { conceptConsolidateTick().catch((e) => console.log('[concept-consolidation] tick error:', e?.message ?? e)) }, CONCEPT_CONSOLIDATE_INTERVAL_MS)
 // ── Eager agent warm-up ───────────────────────────────────────────────────────
 // The ESSENTIAL agents are pre-spawned at boot, not lazily on the first question. On a Fly VM that
 // suspends/resumes to save money, a lazily-spawned claude costs ~10-15s on the FIRST question after a
@@ -975,7 +1195,7 @@ setInterval(() => { semanticConsolidateTick().catch((e) => console.log('[semanti
 let warmed = false
 async function warmEssentialAgents() {
   if (warmed) return; warmed = true
-  console.log('[ica] warming essential agents (analyst · connector · modeler · reflex)…')
+  console.log('[ica] warming essential agents (analyst · connector · reflex)…')
   const warm = async (name: string, p: Promise<unknown>): Promise<{ name: string; ok: boolean; ms: number }> => {
     const t0 = Date.now()
     try { await p; const ms = Date.now() - t0; console.log(`[ica] warm: ${name} ready (${(ms / 1000).toFixed(1)}s)`); return { name, ok: true, ms } }
@@ -985,7 +1205,6 @@ async function warmEssentialAgents() {
     warm('reflex', (reflex as any).warmup?.() ?? Promise.resolve()),
     warm('analyst',   analystSlot.get().then(a => a.session.warmup?.())),
     warm('connector', connectorSlot.get().then(a => a.session.warmup?.())),
-    warm('modeler',   semanticSlot.get().then(a => a.session.warmup?.())),
   ])
   // ONE unmistakable line the user can look for: the engine has finished booting and every essential agent
   // is up (or which one failed). "Fully ready" vs "ready with warnings" — never ambiguous.
@@ -1008,7 +1227,7 @@ const shutdown = () => {
   // Graceful goodbye: free the singleton slot NOW so the replacement process connects into an empty slot
   // (no restart-window eviction war). Then stop sessions and exit.
   try { if (hub?.readyState === WebSocket.OPEN) hub.send(JSON.stringify({ type: 'bye', instanceId: INSTANCE_ID })) } catch { /* socket already gone */ }
-  analystSlot.stop(); semanticSlot.stop(); connectorSlot.stop(); groundingSlot.stop(); setTimeout(() => process.exit(0), 300)
+  analystSlot.stop(); connectorSlot.stop(); groundingSlot.stop(); modellerSlot.stop(); setTimeout(() => process.exit(0), 300)
 }
 process.once('SIGINT', shutdown); process.once('SIGTERM', shutdown)
 connect()

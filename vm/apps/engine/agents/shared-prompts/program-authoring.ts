@@ -11,10 +11,10 @@ answer it produces. A program is the reusable, inspectable artifact; the number 
 output of *running* it. Do your discovery however you like (probe with \`query\`, read the model), but once
 you know how to answer, crystallize it into a program.`
 
-const paExisting = `## First: can an existing program answer this?
-Look in \`./programs/\`. If one already fits this question (exactly, or with different parameters like a
-different name/date/lane), REUSE it — run it with the right params and use its output. Author a new
-program only when none fits. Fewer new programs over time is the goal.`
+const paExisting = `## Build from CONCEPTS
+Compose what THIS question needs from the CONCEPTS that fit (\`find-concept\`) — concepts are your reusable logic.
+(The model-builder turns common program patterns into concepts offline, so building from concepts is how reuse
+compounds.)`
 
 const paShape = `## The shape
 Create \`./programs/<slug>/\` (a short, descriptive slug for the question). Inside:
@@ -43,14 +43,16 @@ own resolver unit**, and the program composes it first:
   thousands of ids), keep the pattern INSIDE the unit's query; do not pre-resolve it to a passed id-list
   (\`type:"pattern"\`, \`resolvedBy:"inline"\`).
 
+- **Never pull ids out and paste them back** as \`id==1 || id==2 || …\` (it scans badly and crashes the compiler).
+  Match in ONE query: JOIN to the id source; or, for a literal list, a flat \`filter (id | in [1,2,…])\` — never \`||\`.
+
 The point: the **compute unit is identical** whether the caller has a name or an id — the only difference is
 whether a resolver runs first. (A later search layer will do name→id globally; the shape is the same, so
 author to it now.)`
 
 const paCtx = `## The four ctx capabilities (nothing else)
-- \`ctx.query(sourceId, prql, params)\` — your own **PRQL** to the source (the seam compiles it to SQL). The
-  model tells you WHICH tables/joins/measures; you write the PRQL pipeline. Values go **inline** (no \`@name\`
-  binds); use \`s"…raw sql…"\` only for a specific expression PRQL can't produce, never for the whole query.
+- \`ctx.query(sourceId, query, params)\` — your own query to the source (\`./sources\` says what it is). The
+  model tells you WHICH tables/joins/measures. Values go **inline** (no \`@name\` binds).
 - \`ctx.use(name, params)\` — run/compose another unit in this program.
 - \`ctx.decide(label, condition, reason)\` — mark a branch (records which path and why); returns the condition.
 - \`ctx.log(message)\` — an optional human progress line.
@@ -102,4 +104,10 @@ missed), the same program re-runs and can flip to answered. The engine keeps you
 an unknowable program stays unknowable; an answered program's output omits \`status\` (defaults to answered) or
 sets it to \`"answered"\`.`
 
-export const PROGRAM_AUTHORING: string[] = [paIntro, paExisting, paShape, paKeys, paCtx, paRun]
+const paStyle = `## Style
+- Comments: short, only where the code's intent isn't obvious. No big top-of-file blocks; don't restate the code.
+- Values: always carry the RAW number WITH its currency/unit as separate fields (e.g. \`{ value: 3810000, currency:
+  'AUD' }\`) alongside your display value — so a global layer can re-format or convert currency later. Format for
+  display however fits; just keep the raw value + unit too.`
+
+export const PROGRAM_AUTHORING: string[] = [paIntro, paExisting, paShape, paKeys, paCtx, paRun, paStyle]

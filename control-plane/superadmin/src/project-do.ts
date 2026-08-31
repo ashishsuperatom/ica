@@ -34,10 +34,11 @@ interface ConnInfo {
   orgRole?: string   // "admin" | "member" — from JWT, used for persona enforcement
   instanceId?: string // singleton identity: which process this connection belongs to (stable per boot)
   epoch?: number     // singleton generation: the process boot time — a NEWER process has a higher epoch
+  channels?: Set<string>   // agent-LOG channels this connection has attached to (analyst-log / composer-log / concept-log)
 }
 
 interface Envelope {
-  to?: { id: string; type: string }
+  to?: { id?: string; type: string; channel?: string }   // channel: agent-log fan-out (the engine LABELS, the DO fans to the owner's attached devices)
   from: { id: string; type: string }
   payload: unknown
 }
@@ -476,25 +477,27 @@ export class ProjectDO extends DurableObject<Env> {
       catch { ws.close(4001, 'JWT verify error'); return }
       if (!claims) { ws.close(4001, 'Invalid JWT'); return }
 
-      // Superadmin (admin UI): accesses ANY project — no membership required. Registers as
-      // the 'admin' role (distinct from 'runtime'/'code-engine') so it can req/res with the
-      // code-engine over the relay (the Inspector's inspect:req) without evicting either of them.
-      // An admin frame is NOT user activity — it never bumps last_active, so watching the Inspector
-      // does not extend the idle countdown. It CAN still wake a suspended machine (see relay()):
-      // an inspect request needs the engine up to answer, and the Inspector only fetches on
-      // open/refresh, never on a poll.
-      if (claims.role === 'superadmin') {
+      // SURFACE and AUTHORIZATION are SEPARATE. The connection TYPE follows the surface the client DECLARES in its
+      // hello `role` ('admin' = the superadmin console app; 'runtime' = a human's client: web/voice/mobile). The JWT
+      // claims.role ('superadmin' | …) is the user's AUTHORIZATION — it only gates WHICH surface is allowed and is
+      // carried on the connection (orgRole) for downstream role checks. A user's privilege must NEVER silently change
+      // what KIND of connection this is: a superadmin using the user app is a 'runtime' like anyone else (this is why
+      // superadmins previously got no logs — they were mistyped 'admin' and skipped the runtime-only log:attach).
+      if (role === 'admin') {
+        // Admin-console surface — allowed ONLY for a superadmin. Accesses any project without membership, relays the
+        // Inspector's inspect:req to the engine, and is NOT counted as user activity (watching ≠ using), so it never
+        // bumps last_active / extends the idle countdown. It can still wake a suspended machine (see relay()).
+        if (claims.role !== 'superadmin') { ws.close(4003, 'Admin surface requires superadmin'); return }
         this.register(ws, 'admin', claims.userId, claims.role)
         return
       }
 
-      // Verify user is a member of this project
-      const memberRows = [...this.ctx.storage.sql.exec(
-        'SELECT role FROM members WHERE user_id = ?', claims.userId
-      )]
-      if (!memberRows.length) { ws.close(4003, 'Not a member of this project'); return }
-
-      // Runtime (a human's client surface: web/voice/mobile) connected — real activity; wake machine.
+      // Runtime surface — a human's client app. A superadmin may open ANY project here without membership; every
+      // other user must be a member of this project. Either way it registers as 'runtime' (real user activity).
+      if (claims.role !== 'superadmin') {
+        const memberRows = [...this.ctx.storage.sql.exec('SELECT role FROM members WHERE user_id = ?', claims.userId)]
+        if (!memberRows.length) { ws.close(4003, 'Not a member of this project'); return }
+      }
       this.markUserActivity()
       this.wakeMachine()
       this.register(ws, 'runtime', claims.userId, claims.role)
@@ -632,19 +635,32 @@ export class ProjectDO extends DurableObject<Env> {
     // they pass through so an offline client can recover them. All user-scoped by the runtime's JWT userId.
     const pl = msg.payload || {}
     const hubReply = (payload: any) => senderWs.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload }))
+    const envelope: Envelope = { from: { id: sender.wsId, type: sender.type }, payload: msg.payload }   // built once — reused by the base routing below AND the fan-out
     if (sender.type === 'runtime') {
       if (pl.t === 'sync:req')   { hubReply(this.buffer.sync(sender.userId || '')); return }
       if (pl.t === 'answer:get') { hubReply(this.buffer.get(sender.userId || '', pl.qid)); return }
       if (pl.t === 'answer:ack') { this.buffer.ack(sender.userId || '', pl.qids); return }
+      // Agent-LOG subscriptions live in the DO (not the engine): a client attaches when it opens a log view and
+      // detaches when it leaves, so the DO alone decides who receives which channel. Ephemeral (re-attach on reconnect).
+      // Runtime-only is correct: the browser is ALWAYS a runtime surface (see handleHello — type follows the declared
+      // surface, not the user's role), so a superadmin's user app attaches here like any user; the admin console is a
+      // different surface and deliberately gets no log feed. Re-serialize after mutating channels: a hibernation wake
+      // is transparent to the browser (it never re-attaches), so the subscription MUST live in the socket's attachment
+      // or hydrate() rebuilds it empty and the log dies.
+      if (pl.t === 'log:attach' && typeof pl.channel === 'string') { (sender.channels ??= new Set()).add(pl.channel); senderWs.serializeAttachment(sender); return }
+      if (pl.t === 'log:detach' && typeof pl.channel === 'string') { sender.channels?.delete(pl.channel); senderWs.serializeAttachment(sender); return }
       if (pl.t === 'analyse' && pl.questionId) this.buffer.recordPending(sender.userId || '', pl)   // capture, then route on
     } else if (sender.type === 'code-engine') {
+      // The engine addresses an answer/followups to the ASKER's connection (base routing, below). Here we (a)
+      // record it for durable per-user recovery, and (b) — LAYER 1, separate from the base reply — fan it out to
+      // the same user's OTHER devices. Keyed by the qid's OWNER, so it can reach ONLY that user (authz by
+      // construction). Agent LOGS are a different layer (analyst-log/composer-log) and are never fanned out here.
       if (pl.t === 'analyst:answer' && pl.qid && !pl.replay) this.buffer.recordAnswer(pl)
       else if (pl.t === 'followups' && pl.qid) this.buffer.recordFollowups(pl)
-    }
-
-    const envelope: Envelope = {
-      from: { id: sender.wsId, type: sender.type },
-      payload: msg.payload,
+      if ((pl.t === 'analyst:answer' || pl.t === 'followups') && pl.qid && !pl.replay) {
+        const owner = this.buffer.ownerOf(pl.qid)
+        if (owner) this.deliverToUser(owner, envelope, (msg.to as any)?.id)   // Tier 2 — the user's other devices (skip the base-routed asker)
+      }
     }
 
     // If target is code-engine and the engine is DOWN, queue + wake it from OUTSIDE (the DO — on Cloudflare —
@@ -653,7 +669,7 @@ export class ProjectDO extends DurableObject<Env> {
     // socket leaves a stale "connected" engine that silently swallows messages. `idle_phase` is the DO's own
     // truth — it set 'suspended'/'stopped' when it put the machine to sleep. A user message is the only wake
     // trigger; an idle browser tab never wakes the machine.
-    const to = msg.to as { id?: string; type?: string } | undefined
+    const to = msg.to as { id?: string; type?: string; channel?: string } | undefined
     if (to?.type === 'code-engine') {
       const [pm] = this.ctx.storage.sql.exec('SELECT provider, idle_phase, last_heartbeat FROM fly_machine LIMIT 1')
       const phase = (pm as any)?.idle_phase as string | undefined
@@ -692,6 +708,15 @@ export class ProjectDO extends DurableObject<Env> {
       return
     }
 
+    // ── Agent-LOG channel fan-out (Tier 2, attach-filtered, owner-scoped) ────
+    // The engine LABELS a log message `to: {type:'log', channel}` (payload carries the qid). The DO looks up the
+    // qid's OWNER and delivers only to that user's connections attached to the channel — never another user's.
+    if (to.type === 'log' && to.channel) {
+      const owner = (msg.payload as any)?.qid ? this.buffer.ownerOf((msg.payload as any).qid) : ''
+      this.deliverToChannel(to.channel, owner, envelope)
+      return
+    }
+
     // ── Role-based routing ──────────────────────────────────────────────────
     if (to.type && !to.id) {
       const targetWsId = this.roleRegistry.get(to.type)
@@ -712,9 +737,7 @@ export class ProjectDO extends DurableObject<Env> {
         }))
         return
       }
-      const target = this.connByWs.get(targetWs)!
-      envelope.to = { id: target.wsId, type: target.type }
-      targetWs.send(JSON.stringify(envelope))
+      this.deliverToConn(targetWs, this.connByWs.get(targetWs)!, envelope)   // Tier 1 — one connection (by role)
       return
     }
 
@@ -728,23 +751,38 @@ export class ProjectDO extends DurableObject<Env> {
         }))
         return
       }
-      const target = this.connByWs.get(targetWs)!
-      envelope.to = { id: target.wsId, type: target.type }
-      targetWs.send(JSON.stringify(envelope))
+      this.deliverToConn(targetWs, this.connByWs.get(targetWs)!, envelope)   // Tier 1 — one connection (by wsId)
       return
     }
   }
 
-  private broadcastToAll(senderWs: WebSocket, envelope: Envelope) {
-    const payload = JSON.stringify(envelope)
+  // ── Delivery tiers — the ONLY ways a message leaves the DO to clients, narrowest → widest ─────────────────
+  // Every outbound path goes through exactly ONE of these:
+  //   1. deliverToConn  — one CONNECTION (a specific wsId).                    used by base routing (role / id)
+  //   2. deliverToUser  — one USER: all their devices (web + iOS). The AUTHZ   used by Layer 1 (per-user answers)
+  //                        boundary — a message can never reach another user.
+  //   3. broadcastToAll — EVERY connection (project-wide). Rare / unused.
+  private deliverToConn(ws: WebSocket, conn: ConnInfo, envelope: Envelope) {
+    try { ws.send(JSON.stringify({ ...envelope, to: { id: conn.wsId, type: conn.type } })) } catch {}   // stamp per-recipient `to`
+  }
+  private deliverToUser(userId: string, envelope: Envelope, exceptWsId?: string) {
+    if (!userId) return   // never fan out to '' (that would be every unauthenticated connection)
+    for (const [ws, conn] of this.connByWs)
+      if (conn.userId === userId && conn.wsId !== exceptWsId && conn.type !== 'code-engine') this.deliverToConn(ws, conn, envelope)
+  }
+  // Tier-2 variant for AGENT LOGS: deliver only to the OWNER's connections that have ATTACHED to `channel`.
+  // Owner-scoped = the authz boundary (a user's logs reach only that user); attach-filtered = bandwidth (a
+  // client that isn't watching gets nothing). owner '' (project-level, e.g. semantic consolidation — no user
+  // data) → all attached connections of the channel.
+  private deliverToChannel(channel: string, owner: string, envelope: Envelope) {
     for (const [ws, conn] of this.connByWs) {
-      if (ws === senderWs) continue
-      try {
-        // Stamp individual `to` per recipient for broadcast
-        const withTo = { ...envelope, to: { id: conn.wsId, type: conn.type } }
-        ws.send(JSON.stringify(withTo))
-      } catch {}
+      if (conn.type === 'code-engine' || !conn.channels?.has(channel)) continue
+      if (owner && conn.userId !== owner) continue
+      this.deliverToConn(ws, conn, envelope)
     }
+  }
+  private broadcastToAll(senderWs: WebSocket, envelope: Envelope) {
+    for (const [ws, conn] of this.connByWs) if (ws !== senderWs) this.deliverToConn(ws, conn, envelope)
   }
 
   // ── REST handlers ──────────────────────────────────────────────────────────

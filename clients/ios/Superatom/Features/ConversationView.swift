@@ -21,7 +21,7 @@ struct ConversationView: View {
     @State private var pendingText = ""
     @State private var draft = ""
     @State private var now = Date.now
-    @State private var lastTurnHeight: CGFloat = 0
+    @State private var copiedItem: String?
     @FocusState private var composerFocused: Bool
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -60,24 +60,39 @@ struct ConversationView: View {
                 ScrollView(showsIndicators: false) {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(conversation.state.questions.enumerated()), id: \.element.id) { index, question in
-                            turn(question, conversation: conversation, isFirst: index == 0)
+                            // The separator is a SIBLING of the turn, not part of it.
+                            // Inside, it became the top of the identified view — so
+                            // scrolling a new question to the top actually parked the
+                            // separator there, leaving the previous answer's actions still
+                            // on screen and stealing a chunk of the view from the answer
+                            // about to arrive.
+                            if index > 0 { TurnBreak().padding(.vertical, 26) }
+                            turn(question, conversation: conversation)
                                 .id(question.id)
-                                // Measure the LAST turn so the tail below it can be sized
-                                // exactly — no more, no less.
-                                .background(alignment: .top) {
-                                    if question.id == conversation.state.questions.last?.id {
-                                        GeometryReader { turn in
-                                            Color.clear.preference(key: LastTurnHeight.self, value: turn.size.height)
-                                        }
-                                    }
-                                }
                         }
                         // Enough room below the newest question that it can travel all the
                         // way to the top of the screen, even when its answer hasn't arrived
                         // yet and there is nothing under it. Sized to the gap rather than a
                         // fixed slab, so a long answer doesn't leave dead space beneath it.
+                        // The same mark that separates turns, closing the last one — so
+                        // scrolling to the bottom you can see the conversation has ended
+                        // rather than wondering whether more is still loading.
+                        if !conversation.state.questions.isEmpty {
+                            TurnBreak().padding(.top, 26)
+                        }
+
+                        // Half a screen of tail: enough for the newest question to travel
+                        // to the top, never enough to scroll into emptiness.
+                        //
+                        // This used to be computed from a measurement of the last turn,
+                        // which created a feedback loop — measuring set state, state
+                        // resized the tail, resizing re-triggered the measurement, and
+                        // sub-pixel differences kept it oscillating forever. The view
+                        // rebuilt continuously, which is what made the selection menu
+                        // flicker on and off while nothing was being touched. A constant
+                        // cannot oscillate.
                         Color.clear
-                            .frame(height: max(56, viewport.size.height - lastTurnHeight - 30))
+                            .frame(height: max(56, viewport.size.height * 0.5))
                             .id(bottomAnchor)
                     }
                     .padding(.top, 24)
@@ -88,34 +103,35 @@ struct ConversationView: View {
                     }
                 }
                 .scrollDismissesKeyboard(.interactively)
-                .onPreferenceChange(LastTurnHeight.self) { lastTurnHeight = $0 }
                 // A new question goes to the TOP, not the bottom: you asked it, so it should
                 // be the thing you are looking at while the answer builds underneath it.
                 .onChange(of: conversation.state.questions.count) { _, _ in
                     pinLastQuestion(proxy, in: conversation)
                 }
-                .onAppear { pinLastQuestion(proxy, in: conversation, animated: false) }
+                .onAppear { pinLastQuestion(proxy, in: conversation) }
             }
         }
     }
 
-    private func pinLastQuestion(_ proxy: ScrollViewProxy, in conversation: ConversationStore, animated: Bool = true) {
+    /// Put the newest question at the top. Deliberately NOT animated.
+    ///
+    /// Animating it meant the feed visibly travelled from wherever it was to the top on
+    /// every single ask — which reads as the app fidgeting, and is doubly odd for a
+    /// question that was already near the top. You asked; it is there. The answer building
+    /// underneath is the thing worth watching, not the journey to it.
+    private func pinLastQuestion(_ proxy: ScrollViewProxy, in conversation: ConversationStore) {
         guard let last = conversation.state.questions.last else { return }
         // One frame for the new row to exist before scrolling to it.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            withAnimation(animated ? .easeOut(duration: 0.3) : nil) {
-                proxy.scrollTo(last.id, anchor: .top)
-            }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
+            proxy.scrollTo(last.id, anchor: .top)
         }
     }
 
     private let bottomAnchor = "bottom"
 
     @ViewBuilder
-    private func turn(_ question: Question, conversation: ConversationStore, isFirst: Bool) -> some View {
+    private func turn(_ question: Question, conversation: ConversationStore) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            if !isFirst { TurnBreak().padding(.vertical, 26) }
-
             VStack(alignment: .leading, spacing: 15) {
                 // The question is the handle for its whole exchange. Deleting is
                 // deliberately absent: removing a question mid-thread would strand its
@@ -190,6 +206,10 @@ struct ConversationView: View {
             VStack(alignment: .leading, spacing: 8) {
                 speaker("superatom", accent: true)
                 if let answer = item.answer {
+                    // Deliberately NOT selectable. Selectable text needs per-glyph hit
+                    // testing, selection rects and the edit menu on the most-instantiated
+                    // view in the app — real cost in a long feed, for something the Copy
+                    // button below does better anyway.
                     AnswerView(answer: answer)
                 } else {
                     // The payload didn't decode into the shape we expect. Show it raw
@@ -197,6 +217,9 @@ struct ConversationView: View {
                     // hole where an answer should be.
                     MarkdownText(raw: item.payload, font: Theme.mono(12), color: Theme.inkSoft, lineSpacing: 3)
                 }
+                // Cheap check — do NOT build the report text just to decide whether to
+                // show the row. That ran on every render pass.
+                if item.answer != nil { answerActions(item) }
             }
         case .error:
             VStack(alignment: .leading, spacing: 6) {
@@ -204,8 +227,10 @@ struct ConversationView: View {
                 Text(item.payload).font(Theme.sans(13)).foregroundStyle(Theme.warning)
             }
         case .followups:
-            FollowUps(items: item.followups) { question in
-                conversation.proposeFollowUp(question)
+            if services.preferences.showFollowUps {
+                FollowUps(items: item.followups) { question in
+                    conversation.proposeFollowUp(question)
+                }
             }
         case .note:
             EmptyView()
@@ -216,6 +241,67 @@ struct ConversationView: View {
     /// glance down the page separates your questions from its answers without reading.
     private func hasAnswer(_ question: Question, in conversation: ConversationStore) -> Bool {
         conversation.state.itemsByQuestion[question.id]?.contains { $0.kind == .answer } ?? false
+    }
+
+    /// Copy / share under each answer.
+    ///
+    /// Both are real tap targets — padded to the 44pt Apple asks for and given an explicit
+    /// content shape. Before, the hit area was the glyphs themselves, so a tap that looked
+    /// like it landed usually missed, and nothing happened. A control that works one time
+    /// in five is worse than no control.
+    @ViewBuilder
+    private func answerActions(_ item: FeedItem) -> some View {
+        let copied = copiedItem == item.id
+        VStack(alignment: .leading, spacing: 0) {
+        // A faint rule closes the answer before the handles for taking it away — the
+        // actions are about the answer, not part of it.
+        Rectangle()
+            .fill(Theme.rule.opacity(0.45))
+            .frame(height: 0.5)
+            .padding(.top, 14)
+
+        HStack(spacing: 10) {
+            Button {
+                // Built HERE, on the tap, not during layout.
+                UIPasteboard.general.string = AnswerText.of(item)
+                Haptics.success()
+                copiedItem = item.id
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+                    if copiedItem == item.id { copiedItem = nil }
+                }
+            } label: {
+                actionChip(copied ? "Copied" : "Copy",
+                           icon: copied ? "checkmark" : "doc.on.doc",
+                           active: copied)
+            }
+            .buttonStyle(.plain)
+            .disabled(copied)          // nothing to gain from copying twice in a second
+
+            ShareLink(item: AnswerText.of(item)) {
+                actionChip("Share", icon: "square.and.arrow.up", active: false)
+            }
+            Spacer()
+        }
+        .animation(.easeOut(duration: 0.15), value: copied)
+        .padding(.top, 4)
+        }
+    }
+
+    /// A visible, pressable target — not bare text.
+    private func actionChip(_ title: String, icon: String, active: Bool) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon).font(Theme.sans(11, .semibold))
+            Text(title).font(Theme.sans(12, .medium))
+        }
+        .foregroundStyle(active ? Theme.accent : Theme.inkSoft)
+        .padding(.horizontal, 12)
+        .frame(height: 32)
+        .background(
+            Capsule().fill(active ? Theme.accent.opacity(0.12) : Theme.paperInset)
+        )
+        // The visible chip is 32pt; the TAPPABLE area is padded out to 44.
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
     }
 
     /// The answer to a question as copyable text, if it has one.
@@ -289,6 +375,22 @@ struct ConversationView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, Theme.gutter)
             }
+            if services.recorder.state.isRecording, !conversation.liveTranscript.isEmpty {
+                Text(conversation.liveTranscript)
+                    .font(Theme.serif(17))
+                    .foregroundStyle(Theme.inkSoft)
+                    .lineSpacing(5)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18).fill(Theme.paperInset)
+                    )
+                    .padding(.horizontal, Theme.gutter)
+                    .transition(.opacity)
+            }
+
             if let pending = conversation.state.pending {
                 reviewComposer(pending)
             } else if typing {
@@ -302,6 +404,7 @@ struct ConversationView: View {
         .animation(.easeInOut(duration: 0.22), value: typing)
         .animation(.easeInOut(duration: 0.22), value: services.recorder.state.isRecording)
         .animation(.easeInOut(duration: 0.22), value: conversation.state.pending?.id)
+        .animation(.easeOut(duration: 0.15), value: conversation.liveTranscript.isEmpty)
     }
 
     /// A spoken question, transcribed and awaiting your say-so. Transcription is not
@@ -654,14 +757,17 @@ struct NarrationView: View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             MarkdownText(raw: beat.text, font: Theme.sans(13),
                          color: isCurrent ? Theme.ink : Theme.inkSoft, lineSpacing: 3)
-            // Held back for the first second: a step stamped "0s" reads as though it never
-            // ran, when it has only just started.
-            if seconds >= 1 {
-                Text("\(seconds)s")
-                    .font(Theme.mono(11))
-                    .foregroundStyle(isCurrent ? Theme.accent : Theme.inkFaint)
-                    .monospacedDigit()
-            }
+            // A FIXED column for the elapsed time, wide enough for "999s".
+            //
+            // Without it the text column is whatever is left over, so "2s" and "92s" give
+            // the content different widths and every line re-wraps as the timer ticks past
+            // 9 and 99. The space is reserved even while the label is hidden for the first
+            // second, so nothing shifts when it appears.
+            Text(seconds >= 1 ? "\(seconds)s" : "")
+                .font(Theme.mono(11))
+                .foregroundStyle(isCurrent ? Theme.accent : Theme.inkFaint)
+                .monospacedDigit()
+                .frame(width: 34, alignment: .trailing)
         }
         .padding(.vertical, 7)
     }
@@ -672,11 +778,4 @@ struct NarrationView: View {
         let secs = max(0, Int((end - first.atMs) / 1000))
         return secs >= 1 ? "\(secs)s" : nil
     }
-}
-
-/// Height of the newest turn, so the scroll tail can be sized to exactly the room that
-/// question needs to reach the top of the screen.
-private struct LastTurnHeight: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }

@@ -9,8 +9,5 @@
   },
   "devDependencies": {
     "tsx": "^4.19.2"
-  },
-  "dependencies": {
-    "prql-js": "^0.12.1"
   }
 }

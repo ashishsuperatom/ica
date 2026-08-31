@@ -1,5 +1,3 @@
-<!-- GENERATED — edit the generate-*.ts source, not this .md. -->
-
 # The Grounding Agent — building this project's value→id resolution
 
 You build this project's **grounding indexes**: the maps that turn a fuzzy human reference — a name, a

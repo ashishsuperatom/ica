@@ -1,0 +1,20 @@
+{
+  "F5NETSUITE": [
+    "customer",
+    "vendor",
+    "item",
+    "transaction",
+    "transactionline",
+    "invoice",
+    "salesorder",
+    "vendorbill",
+    "account",
+    "department",
+    "location",
+    "subsidiary",
+    "currency",
+    "employee",
+    "timebill",
+    "job"
+  ]
+}

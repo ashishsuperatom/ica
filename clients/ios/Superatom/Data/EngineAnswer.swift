@@ -46,6 +46,9 @@ struct EngineAnswer: Hashable {
         var note: String?
         var items: [Figure] = []
         var body: String?
+        /// How many rows MATCHED, when the engine sent only a sample. Without it a
+        /// truncated table silently reads as the whole answer.
+        var totalRows: Int?
         /// Position within the answer. STABLE across re-parses — see above.
         var index: Int = 0
         var id: String { "\(index)-\(kind.rawValue)-\(title ?? "")" }
@@ -106,10 +109,28 @@ struct EngineAnswer: Hashable {
         self.init(object: root)
     }
 
-    init(object: [String: Any]) {
+    init(object raw: [String: Any]) {
+        // UNWRAP a doubly-wrapped answer.
+        //
+        // The hub's answer buffer stores the whole `analyst:answer` envelope, so a
+        // recovered answer arrives as { t, qid, sid, timing, lastLines, answer: {...} }
+        // rather than the answer itself. Reading that as the answer produced a report with
+        // no prose and a wall of raw agent terminal — `lastLines` is 22k characters of the
+        // analyst's stdout, which must never reach a reader.
+        //
+        // A nested dictionary under `answer` always means the real answer is inside it.
+        var object = raw
+        if let inner = raw["answer"] as? [String: Any] {
+            object = inner
+            // Carry across the fields the envelope holds and the answer does not.
+            if object["category"] == nil, let category = raw["category"] { object["category"] = category }
+        }
+
         status   = Coerce.string(object["status"])
         category = Coerce.string(object["category"])
-        answer   = Coerce.string(object["answer"])
+        // Prose may arrive as a string OR an array of paragraphs — the web joins the
+        // array, and so do we, rather than dropping it for being the wrong type.
+        answer   = Self.prose(object["answer"])
         period   = Coerce.string(object["period"])
         scope    = Coerce.string(object["scope"])
         source   = Coerce.string(object["source"])
@@ -133,8 +154,22 @@ struct EngineAnswer: Hashable {
             promoted.columns = (table["columns"] as? [Any] ?? []).map { Coerce.string($0) ?? "" }
             promoted.rows = Self.rows(table["rows"])
             promoted.total = Self.row(table["total"])
+            promoted.totalRows = (table["totalRows"] as? NSNumber)?.intValue
             sections = [promoted]
         }
+    }
+
+    /// Prose, however it arrived.
+    ///
+    /// A string is a paragraph. An array is the engine having several separate things to
+    /// say — so ONE entry stays a paragraph, and several become a list, which is what they
+    /// actually are. Emitted as markdown bullets so the existing renderer draws them; no
+    /// new rendering path.
+    private static func prose(_ raw: Any?) -> String? {
+        if let text = Coerce.string(raw) { return text }
+        guard let parts = (raw as? [Any])?.compactMap(Coerce.string), !parts.isEmpty else { return nil }
+        if parts.count == 1 { return parts[0] }
+        return parts.map { "- " + $0 }.joined(separator: "\n")
     }
 
     private static func figures(_ raw: Any?) -> [Figure] {
@@ -177,6 +212,7 @@ struct EngineAnswer: Hashable {
         section.rows = rows
         section.total = Self.row(item["total"])
         section.note = Coerce.string(item["note"])
+        section.totalRows = (item["totalRows"] as? NSNumber)?.intValue
         section.items = items
         section.body = body
         return section

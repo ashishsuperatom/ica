@@ -2,15 +2,13 @@
 // The engine runs on a Fly VM with nothing listening, so everything here comes over the hub
 // relay (admin → ProjectDO → code-engine) as `inspect:req` / `inspect:res`. See vm/apps/engine/inspect.ts.
 //
-// This replaces the old "Concept map", which was built for an architecture we no longer have
-// (concepts + missing-units + lazy frontier). What actually exists now is a node-store graph with
-// four live layers, and this shows each one honestly — including where they DISAGREE (a program on
-// disk with no program node means the offline modeler hasn't consolidated it yet):
+// A read-only window into the node-store graph — plus grounding and answer history. Each view shows a
+// layer honestly, including where they DISAGREE (a program on disk with no program node means the concept
+// modeller hasn't consolidated it yet):
 //
-//   semantic model  concepts (a tree) → each bound to one parameterised unit
+//   concepts        flat, time-versioned units of reusable knowledge (general ideas of computation)
 //   programs        one directory per answered question: program.ts + units/*.ts
 //   intent graph    the conversation tree — position is context; each node may carry a program
-//   basis space     the evolving typed-pair axis vocabulary the reflex locates questions in
 //
 // Every node that points at a file is inspectable down to its SOURCE, so you never need to SSH in.
 
@@ -18,15 +16,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Hub } from './hub'
 
 export type Section =
-  | 'summary' | 'concepts' | 'atoms' | 'grounding' | 'basis' | 'programs' | 'units' | 'runs' | 'intents' | 'answers' | 'files' | 'db' | 'logs'
+  | 'summary' | 'concepts' | 'grounding' | 'programs' | 'units' | 'runs' | 'intents' | 'answers' | 'files' | 'db' | 'logs'
 
-// Grouped so the 13 views read as a few coherent buckets, not one flat list.
+// Grouped so the views read as a few coherent buckets, not one flat list.
 export const SECTIONS: { id: Section; label: string; group?: string }[] = [
   { id: 'summary',  label: 'Summary' },
-  { id: 'concepts', label: 'Semantic model', group: 'Knowledge' },
-  { id: 'atoms',    label: 'Atoms',          group: 'Knowledge' },
+  { id: 'concepts', label: 'Concepts',       group: 'Knowledge' },
   { id: 'grounding', label: 'Grounding',     group: 'Knowledge' },
-  { id: 'basis',    label: 'Basis space',    group: 'Knowledge' },
   { id: 'programs', label: 'Programs',       group: 'Programs' },
   { id: 'units',    label: 'Units',          group: 'Programs' },
   { id: 'runs',     label: 'Runs',           group: 'Programs' },
@@ -100,7 +96,7 @@ const when = (ms?: number | null) => {
   return new Date(ms).toLocaleDateString()
 }
 const STATUS_COLOR: Record<string, string> = {
-  verified: 'var(--ok)', answered: 'var(--ok)', candidate: 'var(--warn)', blocked: 'var(--bad)',
+  verified: 'var(--ok)', answered: 'var(--ok)', corroborated: 'var(--warn)', unverified: 'var(--sub)',
   error: 'var(--bad)', cannot_answer: 'var(--bad)',
 }
 function Tag({ t }: { t?: string | null }) {
@@ -173,8 +169,8 @@ export function Inspector({ hub, section }: { hub: Hub; section: Section }) {
   }
 
   const Body = {
-    summary: SummaryView, concepts: ConceptsView, atoms: AtomsView, grounding: GroundingView, programs: ProgramsView, units: UnitsView,
-    runs: RunsView, intents: IntentsView, basis: BasisView, answers: AnswersView, files: FilesView, db: DbView, logs: LogsView,
+    summary: SummaryView, concepts: ConceptsView, grounding: GroundingView, programs: ProgramsView, units: UnitsView,
+    runs: RunsView, intents: IntentsView, answers: AnswersView, files: FilesView, db: DbView, logs: LogsView,
   }[section]
 
   return (
@@ -252,34 +248,35 @@ function SummaryView({ hub }: ViewProps) {
   )
 }
 
-// ── Semantic model (concept tree) ────────────────────────────────────────────
+// ── Concepts (flat, time-versioned) ──────────────────────────────────────────
 function ConceptsView({ hub, open }: ViewProps) {
   const { data, err, loading, reload } = useInspect(hub, 'concepts', {}, 'concepts')
   if (err) return <Err msg={err} retry={reload} />
   if (!data) return <Loading on={loading} />
-  const tree: any[] = data.tree ?? []
+  const list: any[] = data.concepts ?? []
   return (
     <div className="card" style={{ padding: '14px 16px' }}>
       <div className="bar" style={{ marginBottom: 10 }}>
         <strong>Concepts</strong>
-        <span className="muted" style={{ fontSize: 12.5 }}>{tree.length} under the model root · each bound to one parameterised unit</span>
+        <span className="muted" style={{ fontSize: 12.5 }}>{data.total ?? list.length} concepts · the concept modeller writes them from finished analyses</span>
         <button className="btn sm ghost" style={{ marginLeft: 'auto' }} onClick={reload}>Refresh</button>
       </div>
-      {!tree.length && <div className="empty">The semantic model is empty — the offline modeler builds it from finished analyses.</div>}
-      {!!tree.length && <table>
-        <thead><tr><th>Concept</th><th>Status</th><th>Grain</th><th>Unit</th><th className="num">Params</th><th className="num">Rules</th></tr></thead>
+      {!list.length && <div className="empty">No concepts yet — the concept modeller builds them from finished analyses.</div>}
+      {!!list.length && <table>
+        <thead><tr><th>Concept</th><th>Status</th><th className="num">v</th><th>Source</th><th>Grain</th><th className="num">M</th><th className="num">D</th><th className="num">Rules</th></tr></thead>
         <tbody>
-          {tree.map(c => (
+          {list.map(c => (
             <tr key={c.id} onClick={() => open({ kind: 'node', id: c.id })}>
               <td style={{ minWidth: 200 }}>
-                <Indent depth={c.depth - 1} />
-                <strong>{c.label}</strong>
+                <strong>{c.name}</strong>
                 {c.summary && <span className="clamp" style={{ fontSize: 12.5, marginTop: 2 }}>{c.summary}</span>}
               </td>
-              <td><Tag t={c.status} />{c.form === 'composite' && <span className="chip" style={{ marginLeft: 5 }}>composite</span>}</td>
-              <td style={{ maxWidth: 280 }}><span className="clamp" style={{ fontSize: 12.5 }}>{c.grain ?? '—'}</span></td>
-              <td>{c.unit ? <span className="chip link" onClick={e => { e.stopPropagation(); open({ kind: 'node', id: c.unit }) }}>{c.unit.replace(/^unit:/, '')}</span> : <span className="muted">—</span>}</td>
-              <td className="num">{c.parameters?.length ?? 0}</td>
+              <td><Tag t={c.status} /></td>
+              <td className="num">{c.version ?? 1}</td>
+              <td>{c.source ?? <span className="muted">—</span>}</td>
+              <td style={{ maxWidth: 260 }}><span className="clamp" style={{ fontSize: 12.5 }}>{c.grain ?? '—'}</span></td>
+              <td className="num">{c.measures ?? 0}</td>
+              <td className="num">{c.dimensions ?? 0}</td>
               <td className="num">{c.rules?.length ?? 0}</td>
             </tr>
           ))}
@@ -379,48 +376,6 @@ function RunsView({ hub }: ViewProps) {
         </table>
       </div>}
     </>
-  )
-}
-
-// ── Semantic atoms (learned where/how/quality facts) ─────────────────────────
-const ATOM_KINDS = ['where-to-find', 'how-to-compute', 'how-to-join', 'resolution-method', 'data-quality']
-function AtomsView({ hub }: ViewProps) {
-  const [q, setQ] = useState(''); const [debounced, setDebounced] = useState('')
-  const [kind, setKind] = useState('')
-  useEffect(() => { const t = setTimeout(() => setDebounced(q), 250); return () => clearTimeout(t) }, [q])
-  const { data, err, loading, reload } = useInspect(hub, 'atoms', { q: debounced, atomKind: kind || undefined }, `atoms|${debounced}|${kind}`)
-  if (err) return <Err msg={err} retry={reload} />
-  const list: any[] = data?.atoms ?? []
-  return (
-    <div className="card" style={{ padding: '14px 16px' }}>
-      <div className="bar" style={{ marginBottom: 10 }}>
-        <strong>Semantic atoms</strong>
-        <span className="muted" style={{ fontSize: 12.5 }}>{data ? `${data.total} facts` : ''} · learned from real analyses (versioned on contradiction)</span>
-        <select className="input" value={kind} onChange={e => setKind(e.target.value)} style={{ fontSize: 13, padding: '5px 9px', marginLeft: 'auto' }}>
-          <option value="">all kinds</option>
-          {ATOM_KINDS.map(k => <option key={k} value={k}>{k}{data?.byKind?.[k] ? ` (${data.byKind[k]})` : ''}</option>)}
-        </select>
-        <input className="input search" placeholder="Search atoms…" value={q} onChange={e => setQ(e.target.value)} style={{ maxWidth: 240 }} />
-        <button className="btn sm ghost" onClick={reload}>Refresh</button>
-      </div>
-      {!data && <Loading on={loading} />}
-      {data && !list.length && <div className="empty">No atoms{debounced || kind ? ' match' : ' yet'} — the modeler crystallizes them from finished analyses, and the analyst records data-quality facts it discovers.</div>}
-      {data && !!list.length && <table>
-        <thead><tr><th>Subject</th><th>Kind</th><th>Where / how</th><th className="num">Coverage</th><th className="num">Conf.</th><th>Evidence</th></tr></thead>
-        <tbody>
-          {list.map((a: any) => (
-            <tr key={a.id} style={{ cursor: 'default' }}>
-              <td><strong>{a.subject}</strong></td>
-              <td><span className="tag" style={{ background: a.atomKind === 'data-quality' ? '#fff3d6' : '#eef0ff', color: a.atomKind === 'data-quality' ? '#8a5a00' : '#4340a0' }}>{a.atomKind}</span></td>
-              <td style={{ maxWidth: 320 }}><span className="trunc mono" style={{ fontSize: 11 }}>{a.location || a.method || '—'}</span></td>
-              <td className="num muted">{a.coverage != null ? `${Math.round(a.coverage * 100)}%` : '—'}</td>
-              <td className="num muted">{a.confidence != null ? a.confidence : '—'}</td>
-              <td style={{ maxWidth: 260 }}><span className="clamp" style={{ fontSize: 12 }}>{a.evidence || a.note || '—'}</span></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>}
-    </div>
   )
 }
 
@@ -532,7 +487,7 @@ function ProgramsView({ hub, open }: ViewProps) {
               </td>
               <td className="num muted">{p.runs ?? 0}{p.empties ? <span style={{ color: 'var(--bad)' }} title="runs that returned nothing"> · {p.empties} empty</span> : ''}</td>
               <td className="num">{p.files.length}</td>
-              {/* A program node exists only once the offline modeler (System 4) has studied it. */}
+              {/* A program node exists only once the concept modeller (System 4) has studied it. */}
               <td>{p.node ? <Tag t="verified" /> : <span className="muted" style={{ fontSize: 12.5 }}>pending</span>}</td>
               <td className="num muted">{when(p.modified)}</td>
             </tr>
@@ -610,43 +565,6 @@ function IntentsView({ hub, open }: ViewProps) {
         </tbody>
       </table>}
     </div>
-  )
-}
-
-// ── Basis space ──────────────────────────────────────────────────────────────
-function BasisView({ hub, open }: ViewProps) {
-  const { data, err, loading, reload } = useInspect(hub, 'basis', {}, 'basis')
-  if (err) return <Err msg={err} retry={reload} />
-  if (!data) return <Loading on={loading} />
-  const facets: any[] = data.facets ?? []
-  return (
-    <>
-      <div className="bar">
-        <strong>Basis space</strong>
-        <span className="muted" style={{ fontSize: 12.5 }}>{facets.length} facets · axes the reflex locates questions on. Bold = actually used by an intent.</span>
-        <button className="btn sm ghost" style={{ marginLeft: 'auto' }} onClick={reload}>Refresh</button>
-      </div>
-      {!facets.length && <div className="card"><div className="empty">The basis space is empty — it is seeded at engine boot and grows as questions are asked.</div></div>}
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))' }}>
-        {facets.map(f => (
-          <div className="facet" key={f.type}>
-            <div className="between">
-              <strong style={{ fontSize: 13.5 }}>{f.type}</strong>
-              <span className="muted" style={{ fontSize: 11.5 }}>{f.plane ?? 'discovered'} · {f.axes.length} axes · {f.used} uses</span>
-            </div>
-            <div className="axes">
-              {f.axes.map((a: any) => (
-                <span key={a.id} className="chip link" onClick={() => open({ kind: 'node', id: a.id })}
-                  style={{ fontWeight: a.used ? 700 : 400, opacity: a.used ? 1 : .62 }}
-                  title={a.seed ? 'seeded vocabulary' : 'discovered from a question'}>
-                  {a.token}{a.used ? ` · ${a.used}` : ''}
-                </span>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </>
   )
 }
 
@@ -957,7 +875,7 @@ function ProgramDetail({ dir, programs, open, close }: { dir: string; programs: 
       <div className="pb">
         <dl className="kv">
           <dt>runnable</dt><dd>{p.runnable ? 'yes — program.ts present' : 'no program.ts on disk'}</dd>
-          <dt>consolidated</dt><dd>{p.node ? <>yes — <span className="chip link" onClick={() => open({ kind: 'node', id: p.node.id })}>{p.node.id}</span></> : 'not yet — the offline modeler has not studied it'}</dd>
+          <dt>consolidated</dt><dd>{p.node ? <>yes — <span className="chip link" onClick={() => open({ kind: 'node', id: p.node.id })}>{p.node.id}</span></> : 'not yet — the concept modeller has not studied it'}</dd>
           <dt>changed</dt><dd>{when(p.modified)}</dd>
         </dl>
 

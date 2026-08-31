@@ -27,6 +27,7 @@ echo "[roll] 1/3 syncing vm/ → box:~/$BUNDLE/vm/"
 rsync -az --delete -e "ssh ${SSH_OPTS[*]}" \
   --exclude='node_modules/' --exclude='.state/' --exclude='.git/' --exclude='dist/' --exclude='out/' \
   --exclude='*.log' --exclude='.turbo/' --exclude='.DS_Store' --exclude='._*' --exclude='.data/' \
+  --exclude='_*.mts' --exclude='_*.cjs' --exclude='_*.mjs' \
   "$REPO/vm/" "$HOST:$BUNDLE/vm/"
 
 if [ "$MODE" = "permanent" ]; then

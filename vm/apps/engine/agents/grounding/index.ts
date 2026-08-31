@@ -43,7 +43,7 @@ export async function createGroundingAgent(opts: GroundingAgentOpts): Promise<Gr
   await cp(join(__dirname, 'SYSTEM.md'), join(cwd, 'grounding/GROUNDING.md'))
 
   const session = createSession(harness, { cwd, model, resumeId: opts.ica?.resumeId })
-  const preamble = 'Read ./CONTEXT.md FIRST (the environment + the seams — where things are stored, the datasources; nothing to install), then ./grounding/GROUNDING.md (your instructions) and follow it exactly. The ONLY data access is data/query.mjs (call sources() before writing queries; use the right dialect). You PERSIST what you discover by calling build(config) on ./grounding/grounding.mjs.'
+  const preamble = 'Read ./CONTEXT.md FIRST (the tools + seams), then ./grounding/GROUNDING.md (your instructions) and follow it exactly. Explore data with `./sources` / `./introspect` / `./query`. You PERSIST what you discover by calling build(config) on ./grounding/grounding.mjs.'
 
   return {
     cwd,
