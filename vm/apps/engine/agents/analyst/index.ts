@@ -148,8 +148,7 @@ ${(opts.conceptNames ?? []).length ? '\nCandidate concepts for this question, mo
 Build a program that answers it - follow your instructions (recon concepts first, then the data; every
 question becomes a program). RUN it with \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\` until correct.
 
-Then COMMIT, as your final action: write ${builtRel}. The engine runs the program the moment that file appears,
-so write it once everything else is finished and verified.
+Then COMMIT, as your final action: write ${builtRel} — once everything else is finished and verified.
   {"programDir":"programs/<slug>","params":{...}, "parent":"root" | "<a prior intent id>", "followups":["...","..."],
    "canonicalQuestions":["..."]}
 \`canonicalQuestions\` — the question this program answers, phrased so its parameters are visible ("… for customer

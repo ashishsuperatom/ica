@@ -137,8 +137,8 @@ Start here: run it with those values (\`tsx run.mjs ${o.canonicalMatch.programDi
 2. Otherwise COMPOSE from the concepts (\`./find-concept "<phrase>"\` for names, \`./get-concept "<name>"\` for one concept's runnable query). If they
    don't fully cover it, do the work yourself — \`./query\`/\`./introspect\` the data, analyse, write the units +
    program. Run it (\`tsx run.mjs programs/<slug>/program.ts '<json>'\`), verify against the review checks, write
-   Then COMMIT, as your final action: write ${builtRel} = {"programDir":"programs/<slug>","params":{…},"canonicalQuestions":["…"]}.
-   The engine runs the program the moment that file appears, so write it once everything else is finished and verified. \`canonicalQuestions\` — the question this program answers, phrased so its parameters are
+   Then COMMIT, as your final action — once everything else is finished and verified: write
+   ${builtRel} = {"programDir":"programs/<slug>","params":{…},"canonicalQuestions":["…"]}. \`canonicalQuestions\` — the question this program answers, phrased so its parameters are
    visible ("… for customer <customer> in <period>"); add another only when it genuinely answers a differently-
    phrased question.
 3. Escalate to the analyst when it's a hard problem or you can't figure it out. Write ${escalateRel} =
