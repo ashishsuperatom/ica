@@ -115,7 +115,7 @@ THE EDIT: ${question}
 
 OPEN and READ ./${m.programDir} (program.ts + its units). If the edit can be made from its code + the concepts you
 can pull, EDIT it, RUN it (\`tsx run.mjs ${m.programDir}/program.ts '<json>'\`) until correct, then write
-${builtRel} = {"programDir":"${m.programDir}","params":{…}} pointing at the SAME program (do NOT change
+${builtRel} = {"programDir":"${m.programDir}","params":{…}} as your final action, pointing at the SAME program (do NOT change
 programDir). But if the edit needs something in NEITHER the program NOR any concept — you'd have to discover it —
 write ${escalateRel} = {"reason":"<what's missing>"} and STOP; the analyst will handle it. Never explore raw
 data. Do NOT write answer.json.` : ''
@@ -127,18 +127,18 @@ Question: ${question}
 ${candBlock}
 ${conceptBlock}
 ${o.canonicalMatch ? `MATCHED PROGRAM — \`${o.canonicalMatch.programDir}\` declares that it answers "${o.canonicalMatch.canonical}", which is this question with its values filled in: ${JSON.stringify(o.canonicalMatch.params)}.
-Start here: run it with those values (\`tsx run.mjs ${o.canonicalMatch.programDir}/program.ts '${JSON.stringify(o.canonicalMatch.params)}'\`) and read the output as the person who asked would. If it answers them, write ${builtRel} = {"programDir":"${o.canonicalMatch.programDir}","params":${JSON.stringify(o.canonicalMatch.params)}} and stop. If it does not, carry on below.
+Start here: run it with those values (\`tsx run.mjs ${o.canonicalMatch.programDir}/program.ts '${JSON.stringify(o.canonicalMatch.params)}'\`) and read the output as the person who asked would. If it answers them, COMMIT as your final action: write ${builtRel} = {"programDir":"${o.canonicalMatch.programDir}","params":${JSON.stringify(o.canonicalMatch.params)}} and stop. If it does not, carry on below.
 ` : ''}
 1. Can a program above answer THIS question EXACTLY — the SAME measure, scope and grain, differing at most by a
-   parameter (a date, a top-N)? Only then reuse it: pick it, run it, write ${builtRel} = {"programDir":"<that program>","params":{…}}.
+   parameter (a date, a top-N)? Only then reuse it: pick it, run it, and COMMIT — write ${builtRel} = {"programDir":"<that program>","params":{…}} as your final action.
    A program built for a RELATED-but-different question is NOT a fit — "amount billed" is not "net spend", a header
    total is not a line-level breakdown, gross is not net. Do NOT adapt or force-fit a program; when it is not an
    EXACT match, go to step 2 and build from the CONCEPTS — never from a not-quite program. Accuracy over reuse.
 2. Otherwise COMPOSE from the concepts (\`./find-concept "<phrase>"\` for names, \`./get-concept "<name>"\` for one concept's runnable query). If they
    don't fully cover it, do the work yourself — \`./query\`/\`./introspect\` the data, analyse, write the units +
    program. Run it (\`tsx run.mjs programs/<slug>/program.ts '<json>'\`), verify against the review checks, write
-   ${builtRel} = {"programDir":"programs/<slug>","params":{…},"canonicalQuestions":["…"]}. The engine runs it — do
-   NOT write answer.json. \`canonicalQuestions\` — the question this program answers, phrased so its parameters are
+   Then COMMIT, as your final action: write ${builtRel} = {"programDir":"programs/<slug>","params":{…},"canonicalQuestions":["…"]}.
+   The engine runs the program the moment that file appears, so write it once everything else is finished and verified. \`canonicalQuestions\` — the question this program answers, phrased so its parameters are
    visible ("… for customer <customer> in <period>"); add another only when it genuinely answers a differently-
    phrased question.
 3. Escalate to the analyst when it's a hard problem or you can't figure it out. Write ${escalateRel} =

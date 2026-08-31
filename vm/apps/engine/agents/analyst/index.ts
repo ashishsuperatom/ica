@@ -146,13 +146,15 @@ ${reason ? `\nThe composer's note on why it couldn't — a HINT about what was h
 Question: ${question}
 ${(opts.conceptNames ?? []).length ? '\nCandidate concepts for this question, most-relevant first — SOME MAY NOT FIT. Read the ones that look right with ./get-concept "<name>", use those, ignore the rest (find-concept stays available for anything else):\n' + (opts.conceptNames ?? []).map(n => `- ${n}`).join('\n') + '\n' : ''}
 Build a program that answers it - follow your instructions (recon concepts first, then the data; every
-question becomes a program). When it runs correctly, write your pointer to ${builtRel} =
+question becomes a program). RUN it with \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\` until correct.
+
+Then COMMIT, as your final action: write ${builtRel}. The engine runs the program the moment that file appears,
+so write it once everything else is finished and verified.
   {"programDir":"programs/<slug>","params":{...}, "parent":"root" | "<a prior intent id>", "followups":["...","..."],
    "canonicalQuestions":["..."]}
 \`canonicalQuestions\` — the question this program answers, phrased so its parameters are visible ("… for customer
 <customer> in <period>"). Add another only when the program genuinely answers a differently-phrased question.
-and RUN it with \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\` until correct. The ENGINE runs it and
-writes the answer - never write ${answerRel} yourself, and never answer in chat.
+The ENGINE runs the program and writes the answer - the answer is its to write, never yours in chat.
 
 `
 
