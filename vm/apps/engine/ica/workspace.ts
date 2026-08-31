@@ -146,7 +146,7 @@ export async function sources() {   // list data sources + their kind/dialect
 //
 import { NodeStore, upsertConcept as _c, getConcept as _g, conceptHistory as _ch } from '@superatom/node-store'
 import { fileURLToPath } from 'node:url'
-const store = new NodeStore(fileURLToPath(new URL('../../../db/project.sqlite', import.meta.url)))
+const store = new NodeStore(fileURLToPath(new URL('../../db/project.sqlite', import.meta.url)))
 export const concept = (name, props, meta) => _c(store, name, props, meta)
 export const getConcept = (name, asOf) => _g(store, name, asOf)
 export const conceptHistory = (name) => _ch(store, name)
@@ -224,7 +224,7 @@ export async function forSource(id) {
 //   listConcepts()                    → every concept's phrase (the menu) — see what exists before you search
 import { NodeStore } from '@superatom/node-store'
 import { fileURLToPath } from 'node:url'
-const store = new NodeStore(fileURLToPath(new URL('../../../db/project.sqlite', import.meta.url)))
+const store = new NodeStore(fileURLToPath(new URL('../../db/project.sqlite', import.meta.url)))
 const propsOf = (n) => (typeof n.props === 'string' ? JSON.parse(n.props || '{}') : (n.props || {}))
 const guide = (n) => { const { _v, ...g } = propsOf(n); return { name: n.label, version: _v?.version, ...g } }   // name = the label; hide raw version metadata
 // SPECIFICITY ranking (same idea the engine uses to surface concept names): a concept's NAME is its set of
