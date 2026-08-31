@@ -40,12 +40,14 @@ export function AnalystConsole({ hub }: { hub: Hub }) {
     setTimeout(() => { sendResize(); attach() }, 0)
     return hub.subscribe((m) => {
       if (m?.t === 'welcome') setTimeout(() => { sendResize(); attach() }, 0)
-      else if (m?.t === 'analyst:stream') setStreamKind(m.kind === 'pty' ? 'pty' : 'events')
-      else if (m?.t === 'analyst:event') setEvents((e) => mergeEvent(e, m.ev))          // codex event (live)
-      else if (m?.t === 'analyst:events') setEvents(m.events ?? [])                     // codex replay (reconnect)
+      else if ((m?.t === 'agent:hello' && m.lane === 'analyst') || m?.t === 'term:stream') setStreamKind((m.streamKind ?? m.kind) === 'pty' ? 'pty' : 'events')
+      else if (m?.t === 'agent:event' && m.lane === 'analyst') setEvents((e) => mergeEvent(e, m.ev))          // codex event (live)
+      else if (m?.t === 'agent:events' && m.lane === 'analyst') setEvents(m.events ?? [])                     // codex replay (reconnect)
       else if (m?.t === 'analyst:chunk') { if (m.replace) termRef.current?.clear(); termRef.current?.write(m.text ?? '') }
       else if (m?.t === 'analyst:answer') { setBusy(false); const a = m.answer; setAnswer(a?.answer ? String(a.answer) : (a ? JSON.stringify(a).slice(0, 500) : '')) }
-      else if (m?.t === 'analyst:done') setBusy(false)
+      // The turn ending is a lane STATUS now (agent:status state:'done'); analyst:done stopped being sent
+      // when the lanes landed, so this console's spinner never cleared.
+      else if (m?.t === 'agent:status' && m.lane === 'analyst' && m.state === 'done') setBusy(false)
     })
   }, [hub])
 

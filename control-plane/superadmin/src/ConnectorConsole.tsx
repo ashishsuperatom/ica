@@ -19,7 +19,7 @@ export function ConnectorConsole({ hub }: { hub: Hub }) {
   const [busy, setBusy] = useState(false)
   const [input, setInput] = useState('')
   // The connector agent may run on claude (pty → xterm) OR codex (events → CodexEventLog). The engine tells us
-  // which via connector:stream; we render accordingly. Input works for both (connector:ask runs a turn).
+  // which the lane announces (agent:hello); we render accordingly. Input works for both (connector:ask runs a turn).
   const [streamKind, setStreamKind] = useState<'pty' | 'events'>('pty')
   const [events, setEvents] = useState<AgentEvent[]>([])
 
@@ -55,9 +55,9 @@ export function ConnectorConsole({ hub }: { hub: Hub }) {
     setTimeout(() => { sendResize(); attach() }, 0)   // size the PTY + open the live terminal stream
     return hub.subscribe((m) => {
       if (m?.t === 'welcome') setTimeout(() => { sendResize(); attach() }, 0)   // reconnect → re-attach
-      else if (m?.t === 'connector:stream') setStreamKind(m.kind === 'pty' ? 'pty' : 'events')
-      else if (m?.t === 'connector:event') setEvents((e) => mergeEvent(e, m.ev))       // codex structured event (live)
-      else if (m?.t === 'connector:events') setEvents(m.events ?? [])                  // codex event-log replay (reconnect)
+      else if ((m?.t === 'agent:hello' && m.lane === 'connector') || m?.t === 'term:stream') setStreamKind((m.streamKind ?? m.kind) === 'pty' ? 'pty' : 'events')
+      else if (m?.t === 'agent:event' && m.lane === 'connector') setEvents((e) => mergeEvent(e, m.ev))       // codex structured event (live)
+      else if (m?.t === 'agent:events' && m.lane === 'connector') setEvents(m.events ?? [])                  // codex event-log replay (reconnect)
       else if (m?.t === 'connector:chunk') { if (m.replace) termRef.current?.clear(); termRef.current?.write(m.text ?? '') }
       else if (m?.t === 'connector:status' && m.text) termRef.current?.writeln(`\r\n\x1b[2m— ${m.text}\x1b[0m`)
       else if (m?.t === 'connector:done') setBusy(false)

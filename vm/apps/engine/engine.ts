@@ -963,11 +963,15 @@ const termChunkT = (w: Which) => (w === 'connector' ? 'connector:chunk' : w === 
 // text chunks (the pty view) AND its structured events (the codex/events view) to the requester, tagged by agent.
 // The console renders per the kind we announce with `<w>:stream` — which is the SESSION's real kind, so a codex
 // agent gets the event view and a claude agent gets the terminal, with no per-flow hardcoding.
+// One vocabulary for every agent's STRUCTURED work, admin console included: the lane frames, keyed by `lane`.
+// Raw terminal BYTES keep their own `<agent>:chunk` type — a byte stream for an xterm is a different thing from
+// a structured event, and the analyst's is read by the user app too.
 const agentStream = (w: Which, from: any): RunHandlers => ({
-  onOutput: (chunk) => emit(from, { t: `${w}:chunk`, text: chunk }),
-  onEvent: (ev) => emit(from, { t: `${w}:event`, ev }),
+  onOutput: (chunk) => emit(from, { t: `${w}:chunk` as EngineMsgType, text: chunk }),
+  onEvent: (ev) => emit(from, A('event', w, { ev })),
 })
-const announceKind = (w: Which, from: any, agent: any) => emit(from, { t: `${w}:stream`, kind: agent?.session?.kind ?? 'events' })
+const announceKind = (w: Which, from: any, agent: any) =>
+  emit(from, A('hello', w, { streamKind: agent?.session?.kind ?? 'events', pty: agent?.session?.kind === 'pty' }))
 const isAgentBusy = (w: Which) => (w === 'connector' ? connectorBusy : w === 'grounding' ? groundingBusy : busySessions.size > 0)
 const termViewers: Record<Which, Set<any>> = { analyst: new Set(), connector: new Set(), grounding: new Set() }
 const termUnsub: Record<Which, (() => void) | null> = { analyst: null, connector: null, grounding: null }
@@ -981,7 +985,7 @@ async function attachTerminal(w: Which, from: any) {
     // codex/SDK: replay the structured EVENT LOG (the last turns' work) — the text buffer + raw byte passthrough
     // don't apply. So a reload shows the previous events, just like claude's screen replay below.
     const evs = agent.session.events?.() ?? []
-    if (evs.length) emit(from, { t: `${w}:events`, events: evs, replace: true })
+    if (evs.length) emit(from, A('events', w, { events: evs, replace: true }))
     return
   }
   emit(from, { t, text: agent.session.buffer?.() ?? '', replace: true })    // claude (pty): replay the current screen (incl. any login prompt)

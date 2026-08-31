@@ -74,13 +74,11 @@ export type EngineMsgType =
   // user (the connector wiring up a source, the grounding build) and can open a raw terminal into one.
   | 'grounding:status' | 'grounding:done'
   | 'connector:status' | 'connector:done' | 'term:stream'
-  // …and their work streams, still in the OLDER per-agent shape (`<agent>:event|events|stream|chunk`) that the
-  // lane frames above replaced everywhere else. The user-facing surfaces moved to agent:*; these three admin
-  // consoles did not, so the same idea is carried twice. Migrating them is a mechanical change (emit the lane
-  // frame, filter by `lane` in each console) and is worth doing — recorded here rather than left implicit.
-  | 'analyst:event' | 'analyst:events' | 'analyst:stream'
-  | 'connector:chunk' | 'connector:event' | 'connector:events' | 'connector:stream'
-  | 'grounding:chunk' | 'grounding:event' | 'grounding:events' | 'grounding:stream'
+  // Their STRUCTURED work arrives as the lane frames above (lane: 'connector' | 'grounding' | 'analyst'), the
+  // same vocabulary the user-facing surfaces use — one idea, carried once.
+  // Raw terminal BYTES keep a per-agent type: a byte stream feeding an xterm is a different thing from a
+  // structured event, and it is only sent to a client that asked for it (term:attach).
+  | 'connector:chunk' | 'grounding:chunk'
   // CHAT-CHANNEL delivery (Teams/Slack): the answer is addressed to a channel, not to a live socket.
   | 'channel:answer' | 'channel:narration'
 

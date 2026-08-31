@@ -46,9 +46,9 @@ export function GroundingConsole({ hub }: { hub: Hub }) {
     setTimeout(() => { sendResize(); attach() }, 0)
     return hub.subscribe((m) => {
       if (m?.t === 'welcome') setTimeout(() => { sendResize(); attach() }, 0)
-      else if (m?.t === 'grounding:stream') setStreamKind(m.kind === 'pty' ? 'pty' : 'events')
-      else if (m?.t === 'grounding:event') setEvents((e) => mergeEvent(e, m.ev))       // codex structured event (live)
-      else if (m?.t === 'grounding:events') setEvents(m.events ?? [])                  // codex event-log replay (reconnect)
+      else if ((m?.t === 'agent:hello' && m.lane === 'grounding') || m?.t === 'term:stream') setStreamKind((m.streamKind ?? m.kind) === 'pty' ? 'pty' : 'events')
+      else if (m?.t === 'agent:event' && m.lane === 'grounding') setEvents((e) => mergeEvent(e, m.ev))       // codex structured event (live)
+      else if (m?.t === 'agent:events' && m.lane === 'grounding') setEvents(m.events ?? [])                  // codex event-log replay (reconnect)
       else if (m?.t === 'grounding:chunk') { if (m.replace) termRef.current?.clear(); termRef.current?.write(m.text ?? '') }
       else if (m?.t === 'grounding:status' && m.text) termRef.current?.writeln(`\r\n\x1b[2m— ${m.text}\x1b[0m`)
       else if (m?.t === 'grounding:done') { setBusy(false); if (m.summary && streamKind === 'pty') termRef.current?.writeln(`\r\n\x1b[32m✓ ${m.summary}\x1b[0m`) }
