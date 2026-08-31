@@ -13,7 +13,11 @@ export function b64urlDecode(s: string): string {
   return atob(s)
 }
 
-export interface JwtClaims { userId: string; role?: string; exp: number }
+// `email` is the identity every membership decision keys on: org users are added by EMAIL (an allowlist —
+// people sign in through Clerk themselves), so a token without it cannot answer 'which orgs/projects is this
+// person in?'. `role` here is PLATFORM role only ('superadmin' | 'user'); org and project roles are stored
+// with the org and the project, never in the token, so revoking access takes effect immediately.
+export interface JwtClaims { userId: string; email?: string; role?: string; exp: number }
 
 export async function signJwt(payload: JwtClaims, secret: string): Promise<string> {
   const header = b64url(encoder.encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' })))
@@ -56,7 +60,7 @@ export async function fetchClerkPrimaryEmail(userId: string, env: Env): Promise<
 }
 
 export type MintResult =
-  | { ok: true; token: string; userId: string; role: string }
+  | { ok: true; token: string; userId: string; email: string; role: string }
   | { ok: false; status: number; error: string }
 
 // Validate a Clerk session token → mint OUR platform JWT (Clerk validation + superadmin gate + 30-day expiry).
@@ -79,9 +83,10 @@ export async function mintPlatformTokenFromClerk(clerkToken: string | undefined,
   const primaryEmail = await fetchClerkPrimaryEmail(userId, env)
   const isSuperadmin = !!primaryEmail && SUPERADMIN_EMAILS.includes(primaryEmail.toLowerCase())
   const role = isSuperadmin ? 'superadmin' : 'user'
-  const token = await signJwt({ userId, role, exp: Math.floor(Date.now() / 1000) + 30 * 24 * 3600 }, env.JWT_SECRET)
-  console.log(`[auth] issued ${role} token for ${primaryEmail || userId}`)
-  return { ok: true, token, userId, role }
+  const email = (primaryEmail || '').toLowerCase()
+  const token = await signJwt({ userId, email, role, exp: Math.floor(Date.now() / 1000) + 30 * 24 * 3600 }, env.JWT_SECRET)
+  console.log(`[auth] issued ${role} token for ${email || userId}`)
+  return { ok: true, token, userId, email, role }
 }
 
 // PKCE (RFC 7636) S256 challenge: base64url( SHA-256( verifier ) ).

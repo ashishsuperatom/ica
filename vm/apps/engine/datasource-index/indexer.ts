@@ -24,7 +24,7 @@ import { dsiKey, type DataSourceEntry } from '@superatom/node-store'
 //                 (→ feed the authorization layer). Keep costly full-scan counts OFF NetSuite.
 //   5. LINK       cross- AND intra-source relationships by VALUE OVERLAP — the actual values intersect (name/
 //                 pattern similarity is at most a weak hint, not this). Infer FKs WITHIN a source (e.g.
-//                 totalgroup has 0 declared FKs) and join keys ACROSS sources; CONFORMED ENTITIES (the same
+//                 some sources declare none) and join keys ACROSS sources; CONFORMED ENTITIES (the same
 //                 business thing in two systems); FRESHNESS / AUTHORITY (which source is more complete/recent
 //                 for a shared entity).
 //   6. DESCRIBE   AI writes table/column descriptions (→ the desc_ai field). LAST on purpose: it is richest once

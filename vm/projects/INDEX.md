@@ -7,8 +7,7 @@ and `.state/<id>/` are the truth; this file (and each `projects/<id>/PROJECT.md`
 
 | name       | project id                             |
 |------------|----------------------------------------|
-| totalgroup | `22dd6ecd-7878-4739-bb23-bc7703737807` |
-| fusion5    | `1c20400d-99b6-4afb-ba71-0e458a78b1a2` |
+| prql       | `96b7087f-e3bb-4e8b-a96e-b3cafcea1cef` |
 
 Layout per project:
 - `vm/projects/<id>/`  — committed config: `PROJECT.md`, `datasources/`, `units/`, `programs/`, `.env` (gitignored)

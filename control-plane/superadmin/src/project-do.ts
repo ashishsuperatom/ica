@@ -145,7 +145,7 @@ export class ProjectDO extends DurableObject<Env> {
   // at the latest version in one shot (CREATE IF NOT EXISTS) then jump to the
   // current version number. Existing DOs only run migrations they haven't seen.
 
-  private static CURRENT_SCHEMA = 6
+  private static CURRENT_SCHEMA = 7
 
   private async migrate() {
     // Ensure version tracking table exists
@@ -217,6 +217,39 @@ export class ProjectDO extends DurableObject<Env> {
     // already user-scoped for the eventual per-user-DO split. Bounded: pruned to newest 20 per user / 7 days.
     if (v < 6) AnswerBuffer.migrate(this.ctx.storage.sql)
 
+    // V7 — ACCESS lives with the PROJECT. Users are created once in the ORG (the master list); assigning one to
+    // a project copies them in here, so every check the project makes is local — no cross-DO call on the hot
+    // path, and a project keeps working on its own. Removing access deletes the row here as well as in the org.
+    // Keyed by EMAIL because that is what an admin adds (people sign in through Clerk themselves and are matched
+    // on it) — a Clerk user id does not exist until they first log in.
+    // ROLES are per-project too: the same person can be an editor on one project and a viewer on another, so a
+    // project owns its own catalogue rather than inheriting one.
+    if (v < 7) {
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS roles (
+          id          TEXT PRIMARY KEY,
+          name        TEXT NOT NULL,
+          permissions TEXT NOT NULL DEFAULT '[]',      -- JSON array of permission strings
+          builtin     INTEGER NOT NULL DEFAULT 0,      -- 1 = seeded default, kept undeletable
+          created_at  INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        CREATE TABLE IF NOT EXISTS access (
+          email       TEXT PRIMARY KEY,                -- lower-cased; the allowlist identity
+          role_id     TEXT,
+          added_by    TEXT,
+          created_at  INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+      `)
+      // Seeded defaults so a new project is usable immediately; an admin can add their own alongside these.
+      const seed: Array<[string, string, string[]]> = [
+        ['admin',  'Admin',  ['project.manage', 'access.manage', 'data.manage', 'ask']],
+        ['member', 'Member', ['ask']],
+        ['viewer', 'Viewer', ['read']],
+      ]
+      for (const [id, name, perms] of seed)
+        this.ctx.storage.sql.exec('INSERT OR IGNORE INTO roles (id, name, permissions, builtin) VALUES (?, ?, ?, 1)', id, name, JSON.stringify(perms))
+    }
+
     // Advance to current version
     this.ctx.storage.sql.exec('DELETE FROM _schema_version')
     this.ctx.storage.sql.exec('INSERT INTO _schema_version (version) VALUES (?)', ProjectDO.CURRENT_SCHEMA)
@@ -269,6 +302,13 @@ export class ProjectDO extends DurableObject<Env> {
     if (request.method === 'POST' && path === '/info')         return this.setInfo(request)
     if (request.method === 'GET'  && path === '/debug')        return this.debugInfo()
     if (request.method === 'POST' && path === '/members')      return this.addMember(request)
+    // ACCESS + ROLES — project-local (see V7). The worker authorises the CALLER before routing here.
+    if (request.method === 'GET'    && path === '/access')     return this.listAccess()
+    if (request.method === 'POST'   && path === '/access')     return this.grantAccess(request)
+    if (request.method === 'DELETE' && path === '/access')     return this.revokeAccess(request)
+    if (request.method === 'GET'    && path === '/roles')      return this.listRoles()
+    if (request.method === 'POST'   && path === '/roles')      return this.upsertRole(request)
+    if (request.method === 'DELETE' && path === '/roles')      return this.deleteRole(request)
     if (request.method === 'POST' && path === '/datasources')  return this.addDatasource(request)
     if (request.method === 'GET'  && path === '/conversations') return this.getConversations(url)
     if (request.method === 'GET'  && path === '/logs')         return this.getLogs(url)
