@@ -394,8 +394,11 @@ function findByCanonical(canonical: string, params: Record<string, unknown>):
     { program: string; params?: any; category?: string; nodeId: string; bound: Record<string, unknown> } | null {
   // Compare with placeholder NAMES neutralised: the same question canonicalised twice can name the same slot
   // differently (<months> one time, <duration> the next), and that must not decide whether a program is reused.
-  const slotsOf = (s: string) => [...s.matchAll(/<([a-zA-Z_][\w]*)>/g)].map(m => m[1])
-  const neutral = (s: string) => normalizeQuestion(s.replace(/<[a-zA-Z_][\w]*>/g, '<>'))
+  // A placeholder name is whatever sits between the angle brackets — including spaces and hyphens
+  // (<number of months>, <as-of date>). Matching only single words silently found NO slots, so binding was
+  // skipped and the program would have run on its defaults: a 6-month question answered for 3 months.
+  const slotsOf = (s: string) => [...s.matchAll(/<([^<>]+)>/g)].map(m => m[1].trim())
+  const neutral = (s: string) => normalizeQuestion(s.replace(/<[^<>]+>/g, '<>'))
   const want = neutral(canonical)
   if (!want) return null
   const askedSlots = slotsOf(canonical)
