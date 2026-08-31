@@ -1,6 +1,6 @@
 // Fly Machines API client — used by the Worker to manage project VMs
 //
-// One Fly App ("superatom-vm") contains one Machine per project.
+// One Fly App contains one Machine per project.
 // Machines are created on project creation, started on user connection,
 // stopped after idle timeout, and destroyed on project deletion.
 
@@ -9,7 +9,7 @@ export interface MachineConfig {
   apiKey: string             // per-project key for WS auth
   workerWsHost: string       // e.g. "superatom.example.com"
   claudeOAuthToken?: string  // Claude subscription token
-  flyAppName?: string        // defaults to "superatom-vm"
+  flyAppName?: string        // defaults to FLY_APP
   flyOrgSlug?: string        // org slug
   region?: string            // defaults to "ord"
 }
@@ -47,6 +47,11 @@ async function flyRequest(token: string, path: string, init?: RequestInit): Prom
 
 // Resolve the app's current deployed image via Fly GraphQL API (the REST
 // v1/apps endpoint doesn't include image info; only GraphQL has currentRelease).
+// THE app. It was written in three places and the default here was a DIFFERENT name than the one that exists,
+// so any caller that omitted the argument would have talked to an app that is not there — and silently, since
+// Fly answers 404 and a wake just never happens. One constant, and the defaults point at it.
+export const FLY_APP = 'superatom-code-engine-vm'
+
 export async function getAppImage(token: string, appName: string): Promise<string> {
   const res = await fetch('https://api.fly.io/graphql', {
     method: 'POST',
@@ -69,7 +74,7 @@ export async function getAppImage(token: string, appName: string): Promise<strin
 }
 
 export async function createMachine(token: string, config: MachineConfig): Promise<MachineInfo> {
-  const appName = config.flyAppName || 'superatom-vm'
+  const appName = config.flyAppName || FLY_APP
   const region = config.region || 'ord'
   const machineName = safeName('proj', config.projectId)
 
@@ -151,7 +156,7 @@ export async function createMachine(token: string, config: MachineConfig): Promi
 
 // ── Start / stop / destroy ────────────────────────────────────────────────────
 
-export async function startMachine(token: string, machineId: string, appName: string = 'superatom-vm'): Promise<void> {
+export async function startMachine(token: string, machineId: string, appName: string = FLY_APP): Promise<void> {
   const res = await flyRequest(token, `/apps/${appName}/machines/${machineId}/start`, { method: 'POST' })
   if (!res.ok) {
     const body = await res.text()
@@ -160,7 +165,7 @@ export async function startMachine(token: string, machineId: string, appName: st
   console.log(`[fly] started machine ${machineId}`)
 }
 
-export async function stopMachine(token: string, machineId: string, appName: string = 'superatom-vm'): Promise<void> {
+export async function stopMachine(token: string, machineId: string, appName: string = FLY_APP): Promise<void> {
   const res = await flyRequest(token, `/apps/${appName}/machines/${machineId}/stop`, { method: 'POST' })
   if (!res.ok) {
     const body = await res.text()
@@ -169,7 +174,7 @@ export async function stopMachine(token: string, machineId: string, appName: str
   console.log(`[fly] stopped machine ${machineId}`)
 }
 
-export async function suspendMachine(token: string, machineId: string, appName: string = 'superatom-vm'): Promise<void> {
+export async function suspendMachine(token: string, machineId: string, appName: string = FLY_APP): Promise<void> {
   const res = await flyRequest(token, `/apps/${appName}/machines/${machineId}/suspend`, { method: 'POST' })
   if (!res.ok) {
     const body = await res.text()
@@ -178,7 +183,7 @@ export async function suspendMachine(token: string, machineId: string, appName: 
   console.log(`[fly] suspended machine ${machineId}`)
 }
 
-export async function destroyMachine(token: string, machineId: string, appName: string = 'superatom-vm'): Promise<void> {
+export async function destroyMachine(token: string, machineId: string, appName: string = FLY_APP): Promise<void> {
   // Fetch machine first to get attached volume ID
   let volumeId: string | undefined
   try {
@@ -206,7 +211,7 @@ export async function destroyMachine(token: string, machineId: string, appName: 
 
 // ── Status ────────────────────────────────────────────────────────────────────
 
-export async function getMachineStatus(token: string, machineId: string, appName: string = 'superatom-vm'): Promise<MachineInfo> {
+export async function getMachineStatus(token: string, machineId: string, appName: string = FLY_APP): Promise<MachineInfo> {
   const res = await flyRequest(token, `/apps/${appName}/machines/${machineId}`)
   if (!res.ok) {
     const body = await res.text()
@@ -218,7 +223,7 @@ export async function getMachineStatus(token: string, machineId: string, appName
 
 // ── Wait for machine to be ready ──────────────────────────────────────────────
 
-export async function waitForMachine(token: string, machineId: string, appName: string = 'superatom-vm', timeoutMs: number = 60000): Promise<void> {
+export async function waitForMachine(token: string, machineId: string, appName: string = FLY_APP, timeoutMs: number = 60000): Promise<void> {
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
     const { state } = await getMachineStatus(token, machineId, appName)

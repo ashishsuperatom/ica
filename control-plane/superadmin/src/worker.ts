@@ -19,7 +19,7 @@ import { channelAdapter } from '../../../clients/messaging/index.js'
 // Speech-to-text for voice clients (mobile). A SELF-CONTAINED module in src/transcription/ —
 // this import and the /api/transcribe route below are its ONLY touchpoints in the worker.
 import { handleTranscribe } from './transcription/index.js'
-import { createMachine, stopMachine } from './fly.js'
+import { createMachine, stopMachine, FLY_APP } from './fly.js'
 // Auth: token primitives + Clerk→platform-token mint (./auth/tokens.ts) and the mobile browser-redirect
 // device flow (./auth/mobile.ts). worker.ts only routes to these; the rules live in the module.
 import { verifyJwt, signJwt, mintPlatformTokenFromClerk, type JwtClaims } from './auth/tokens.js'
@@ -442,7 +442,7 @@ async function handleCreateProject(request: Request, env: Env, url: URL, ctx: Ex
       projectId, apiKey,
       workerWsHost: url.host,
       flyOrgSlug: env.FLY_ORG_SLUG ?? 'personal',
-      flyAppName: 'superatom-code-engine-vm',
+      flyAppName: FLY_APP,
     })
       .then(m => {
         console.log(`[fly] machine created: ${m.id}`)
@@ -492,7 +492,7 @@ async function handleProjectMutate(request: Request, env: Env, ctx: ExecutionCon
           const statusRes = await projStub.fetch(new Request('http://do/status'))
           const status = await statusRes.json() as any
           if (status.machine?.id) {
-            try { await stopMachine(env.FLY_API_TOKEN, status.machine.id, 'superatom-code-engine-vm') } catch {}
+            try { await stopMachine(env.FLY_API_TOKEN, status.machine.id, FLY_APP) } catch {}
           }
         })()
       )
@@ -623,7 +623,7 @@ async function handleProjectStatus(projectId: string, env: Env): Promise<Respons
   } else if (s.machine?.id && env.FLY_API_TOKEN) {
     // managed Fly: enrich with the live Fly machine state.
     try {
-      const flyRes = await fetch(`https://api.machines.dev/v1/apps/superatom-code-engine-vm/machines/${s.machine.id}`,
+      const flyRes = await fetch(`https://api.machines.dev/v1/apps/${FLY_APP}/machines/${s.machine.id}`,
         { headers: { Authorization: `Bearer ${env.FLY_API_TOKEN}` } })
       if (flyRes.ok) {
         const fm = await flyRes.json() as any

@@ -18,10 +18,10 @@
 // Clients send `to` (optional; absent = broadcast); the DO resolves `to.type` via role registry.
 
 import { DurableObject } from 'cloudflare:workers'
-import { suspendMachine, stopMachine as flyStopMachine, startMachine as flyStartMachine, getMachineStatus, safeName } from './fly.js'
+import { suspendMachine, stopMachine as flyStopMachine, startMachine as flyStartMachine, getMachineStatus, safeName, FLY_APP } from './fly.js'
 import { AnswerBuffer } from './answer-buffer.js'
 
-const FLY_APP = 'superatom-code-engine-vm'
+
 const SUSPEND_AFTER_MS = 60 * 60 * 1000        // 60 min idle (no real activity) → suspend (RAM snapshot kept → ~1-2s WARM wake, no agent re-warm)
 const STOP_AFTER_MS    = 24 * 60 * 60 * 1000   // 24 h idle → stop (release the RAM snapshot; next wake is a COLD boot + agent warm-up)
 

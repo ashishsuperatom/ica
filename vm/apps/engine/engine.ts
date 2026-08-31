@@ -35,6 +35,9 @@ import { createInspector } from './inspect.js'
 import { NodeStore, ROOT, ensureRoot, intentId, SqliteVecIndex, indexText, backfillMissing, hybridSearch } from '@superatom/node-store'
 import { bgeEmbedder } from './embed.js'
 import { createSpanFirer } from './retrieval/span-firing.js'
+// TYPE-ONLY, and it must stay that way: the deploy bundles package vm/ alone, so this path does not exist in a
+// built image. tsx erases a type-only import, which is why the container runs without it. Making it a value
+// import would break every deploy while working perfectly here.
 import type { EngineMsgType } from '../../../clients/protocol.js'
 import { buildDatasourceIndex } from './datasource-index/build.js'
 
