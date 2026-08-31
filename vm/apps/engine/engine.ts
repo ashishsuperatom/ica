@@ -390,33 +390,20 @@ function sessionContext(sid: string, turns = 2): string {
 // near-miss is deliberately not a match (it goes to the composer, which can judge with tools).
 // Every placeholder in the stored form must be bound by the params we extracted: a program that expects
 // <months> and receives nothing would silently run on its DEFAULT window and answer a different question.
-function findByCanonical(canonical: string, params: Record<string, unknown>):
-    { program: string; params?: any; category?: string; nodeId: string; bound: Record<string, unknown> } | null {
-  // Compare with placeholder NAMES neutralised: the same question canonicalised twice can name the same slot
-  // differently (<months> one time, <duration> the next), and that must not decide whether a program is reused.
-  // A placeholder name is whatever sits between the angle brackets — including spaces and hyphens
-  // (<number of months>, <as-of date>). Matching only single words silently found NO slots, so binding was
-  // skipped and the program would have run on its defaults: a 6-month question answered for 3 months.
-  const slotsOf = (s: string) => [...s.matchAll(/<([^<>]+)>/g)].map(m => m[1].trim())
-  const neutral = (s: string) => normalizeQuestion(s.replace(/<[^<>]+>/g, '<>'))
-  const want = neutral(canonical)
+function findByCanonical(canonical: string): { program: string; category?: string; nodeId: string } | null {
+  // Match the canonical FORM, whole and as written — normalised only for case, spacing and trailing punctuation
+  // (normalizeQuestion), which is the same normalisation the rest of the engine uses on questions.
+  // No parsing of the sentence: the canonicaliser already returns the parameters as data, and the names a
+  // program was actually written against live in its own meta.inputs — which the composer reads. Taking the
+  // sentence apart to guess a mapping was inventing a fragile step to recover something already in hand.
+  const want = normalizeQuestion(canonical)
   if (!want) return null
-  const askedSlots = slotsOf(canonical)
   for (const n of graph.nodesByKind('program')) {
     const p: any = n.props ?? {}
     const forms: string[] = Array.isArray(p.canonicalQuestions) ? p.canonicalQuestions : []
-    const hit = forms.find(f => neutral(String(f)) === want)
-    if (!hit) continue
-    // Bind POSITIONALLY onto the stored form's names — those are the names the program was written against.
-    const storedSlots = slotsOf(String(hit))
-    if (storedSlots.length !== askedSlots.length) continue
-    const bound: Record<string, unknown> = {}
-    for (let i = 0; i < storedSlots.length; i++) bound[storedSlots[i]] = params[askedSlots[i]]
-    // An unbound slot means running on the program's DEFAULT instead of what was asked — a different question,
-    // answered confidently. Not safe: hand it to the composer.
-    if (storedSlots.some(s => bound[s] === undefined)) continue
+    if (!forms.some(f => normalizeQuestion(String(f)) === want)) continue
     if (!p.dir || !existsSync(join(WORKSPACE, p.dir, 'program.ts'))) continue
-    return { program: p.dir, params: p.params, category: p.category, nodeId: n.id, bound }
+    return { program: p.dir, category: p.category, nodeId: n.id }
   }
   return null
 }
@@ -557,10 +544,12 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       askedCanonical = canon.canonical
       // `unresolved` = the question leans on something the conversation didn't settle, so it is not self-contained
       // and must not be bound to a context-free program.
-      const target = canon.unresolved ? null : findByCanonical(canon.canonical, canon.params)
+      const target = canon.unresolved ? null : findByCanonical(canon.canonical)
       if (target) {
-        canonicalMatch = { programDir: target.program, params: { ...(target.params ?? {}), ...target.bound }, canonical: canon.canonical }
-        console.log(`[ica] canonical: "${canon.canonical}" → match ${target.program} ${JSON.stringify(target.bound)} → composer`)
+        // The canonicaliser's params travel as a HINT. The composer maps them onto the program's real inputs and
+        // verifies by running it — deciding parameters is its job, not something to infer here.
+        canonicalMatch = { programDir: target.program, params: canon.params, canonical: canon.canonical }
+        console.log(`[ica] canonical: "${canon.canonical}" → match ${target.program} ${JSON.stringify(canon.params)} → composer`)
       } else {
         console.log(`[ica] canonical: "${canon.canonical}"${canon.unresolved ? ` unresolved (${canon.unresolved})` : ' — no match'} → composer`)
       }
