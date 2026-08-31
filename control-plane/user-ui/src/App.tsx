@@ -149,7 +149,6 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [anQuestion, setAnQuestion] = useState('')
   const [anAnswer, setAnAnswer]     = useState<any>(null)   // structured out/answer.json
   const [anBusy, setAnBusy]         = useState(false)
-  const [anEnriching, setAnEnriching] = useState<{ need: string; basis?: string } | null>(null)
   const [anProgress, setAnProgress] = useState('')   // clean live narration from the agent (no tool calls)
   const [narrationLog, setNarrationLog]     = useState<string[]>([])   // receptionist (narrator) beats for THIS question — ACCUMULATE (never overwrite)
   const narrationLogRef                 = useRef<string[]>([])     // latest beats, readable inside ws handlers (state is stale in closures)
@@ -168,7 +167,6 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const coLogRef = useRef<HTMLDivElement>(null)
   const [moEvents, setMoEvents] = useState<AgentEvent[]>([])   // CONCEPT MODELLER log (concept-log channel)
   const moLogRef = useRef<HTMLDivElement>(null)
-  const [gaps, setGaps]             = useState<{ question: string; need: string; basis?: string; status: 'building' | 'done' }[]>([])
   const [role, setRole]         = useState<'user' | 'developer'>('developer')   // for now: everyone is developer (sees the agents)
   // Live as-you-type suggestions from the fast-router (optional; absent if not configured).
   const [liveSuggest, setLiveSuggest] = useState<{ items: any[]; intent?: any } | null>(null)
@@ -377,11 +375,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           setFeed(items); scroll(true); return
         }
 
-        if (msg.t === 'analysis:status') {
-          setStatus(msg.text)
-        } else if (msg.t === 'analysis:chunk') {
-          rawStreamRef.current = (rawStreamRef.current + (msg.text ?? '')).slice(-400000)   // capture only — never shown
-        } else if (typeof msg.t === 'string' && msg.t.startsWith('agent:')) {
+        if (typeof msg.t === 'string' && msg.t.startsWith('agent:')) {
           // ── GENERIC AGENT-LANE PROTOCOL ─────────────────────────────────────────────────────────────────
           // ONE consumer for EVERY lane (composer / analyst / concept-modeller / any future agent). `lane` is
           // the routing key. The engine owns the vocabulary (agent:hello|event|events|status); the UI hardcodes
@@ -440,21 +434,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
         } else if (msg.t === 'narration') {
           if (msg.text) { narrationLogRef.current = [...narrationLogRef.current, msg.text]; narrationTimesRef.current = [...narrationTimesRef.current, Date.now()]; setNarrationLog(narrationLogRef.current); setNowMs(Date.now())   // append a beat + stamp its arrival (chat-view analysis card)
             setAnEvents(evs => [...evs, { id: 'narr-' + narrationTimesRef.current.length, kind: 'narration', text: msg.text, agent: 'narrator', done: true }]) }   // ALSO drop it into the analyst-tab stream so it interleaves by time with the agent's events
-        } else if (msg.t === 'analyst:gap') {
-          // The structured gap → its own card in the conversation; the final answer lands below it.
-          const g = msg.answer ?? { status: 'gap', answer: 'Not in the model yet.' }
-          const card: FeedItem = { id: crypto.randomUUID(), type: 'answer', category: msg.category, answer: g }
-          if (!msg.sid || msg.sid === sidRef.current) { setFeed(f => [...f, card]); scroll() }
-          else { const f = loadFeed(msg.sid); safeSetItem(fkey(msg.sid), JSON.stringify([...f, card].slice(-100)), msg.sid) }
-        } else if (msg.t === 'analyst:enriching') {
-          setAnEnriching({ need: msg.need, basis: msg.basis })
-          setAnStatus(`Learning: ${msg.need}…`); setAnAnswer(null)
-          setGaps(gs => [{ question: msg.question, need: msg.need, basis: msg.basis, status: 'building' as const }, ...gs].slice(0, 20))
-        } else if (msg.t === 'analyst:enriched') {
-          setAnEnriching(null); setAnStatus('Model updated — answering…')
-          setGaps(gs => gs.map((g, i) => i === 0 ? { ...g, status: 'done' as const } : g))
         } else if (msg.t === 'analyst:answer') {
-          setAnEnriching(null)
           // NEVER surface the agent's raw terminal (lastLines) as an answer — that leaks internal logs.
           // The agent is expected to always produce an answer (incl. a plain-text reply for conversational
           // input); this neutral fallback only guards a true failure and is NOT a restriction on what it answers.
@@ -476,11 +456,6 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
             else { const f = loadFeed(msg.sid); safeSetItem(fkey(msg.sid), JSON.stringify([...f, ...toAppend].slice(-100)), msg.sid) }
           }
           // Keep narrationLog as-is — the analyst-view mirror keeps showing it until the NEXT question starts (cleared in ask()).
-        } else if (msg.t === 'analysis:step') {
-          setFeed(f => [...f, { id: crypto.randomUUID(), type: 'step', text: msg.text }])
-          scroll()
-        } else if (msg.t === 'analysis:done') {
-          setStatus('Generating UI…')
         } else if (msg.t === 'ui:status') {
           setStatus(msg.text)
         } else if (msg.t === 'ui:text') {
@@ -649,7 +624,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     // card. The Analyst tab keeps the raw terminal for when you WANT to look under the hood.
     setFeed(f => [...f, { id: qid, type: 'user-msg', text }])
     scroll()   // pin the new (now last) question to the top of the viewport
-    setAnQuestion(text); setAnAnswer(null); setAnCategory(''); setAnStatus('Classifying…'); setAnBusy(true); setAnEnriching(null); setAnProgress(''); setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []
+    setAnQuestion(text); setAnAnswer(null); setAnCategory(''); setAnStatus('Classifying…'); setAnBusy(true); setAnProgress(''); setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []
     anXtermRef.current?.clear()   // claude PTY: fresh TUI per question (harmless when the analyst is codex)
     // QUESTION-boundary divider (+ Shift+Arrow anchor) — shown optimistically in BOTH agent-log views. Keyed by
     // qid so the engine's authoritative boundary event (same id) MERGES with it rather than adding a second one.
@@ -763,18 +738,6 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
 
   // Buildable-gap queue — questions the analyst couldn't answer because the model lacked a concept,
   // now being (or already) modeled. Shown on BOTH the Analyst and Semantic-model views.
-  const gapsPanel = gaps.length ? (
-    <div style={{ padding: '8px 14px', borderBottom: '1px solid #23281f', background: '#14180f' }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: '#9db29e', letterSpacing: 0.5, marginBottom: 6 }}>BUILDABLE GAPS</div>
-      {gaps.map((g, i) => (
-        <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 12, padding: '2px 0' }}>
-          <span style={{ color: g.status === 'done' ? '#7fae82' : '#e0b070' }}>{g.status === 'done' ? '✓' : '◷'}</span>
-          <span style={{ color: '#cfe3d0' }}>{g.need}</span>
-          <span style={{ color: '#6f7a68', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>— {g.question}</span>
-        </div>
-      ))}
-    </div>
-  ) : null
 
   // ONE general agent view — composer, analyst, and concept-modeller are the SAME surface (header + a
   // scrollable question-segmented event log with identical accordion + Shift-Arrow nav). Only the per-view
@@ -900,20 +863,6 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
             <button onClick={() => sessionCtl('new')} style={s.backBtn} title="Start a completely fresh session">↻ New session</button>
           </>
         ),
-        panels: (
-          <>
-            {gapsPanel}
-            {anEnriching && (
-              <div style={{ padding: '12px 16px', borderBottom: '1px solid #33402f', background: '#241d12' }}>
-                <div style={{ color: '#e0b070', fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Spinner /> I don't have this in the model yet — the model-builder is adding it, then I'll answer.
-                </div>
-                <div style={{ color: '#c9a86e', fontSize: 12, marginTop: 4 }}>Modeling: {anEnriching.need}</div>
-                {anEnriching.basis && <div style={{ color: '#8a8276', fontSize: 12, marginTop: 2 }}>Basis: {anEnriching.basis}</div>}
-              </div>
-            )}
-          </>
-        ),
       })}
 
       {/* Concept Modeller (System 4) — the OFFLINE consolidation agent that distils finished analyses into
@@ -957,7 +906,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
                     ))}
                   </div>
                 )}
-                {narrationLog.length === 0 && <div style={{ marginTop: 8, fontSize: 13.5, color: '#8a8276' }}>{anEnriching ? `Learning this part of your data: ${anEnriching.need}` : (anProgress || anStatus || 'Analyzing…')}</div>}
+                {narrationLog.length === 0 && <div style={{ marginTop: 8, fontSize: 13.5, color: '#8a8276' }}>{anProgress || anStatus || 'Analyzing…'}</div>}
               </div>
             )}
             {/* Reserve a screenful of scroll room after the last content so the LAST QUESTION can always reach the
