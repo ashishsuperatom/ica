@@ -28,15 +28,18 @@ export async function signJwt(payload: JwtClaims, secret: string): Promise<strin
   return `${input}.${b64url(sig)}`
 }
 
+// A bad token is a NORMAL event — anyone can send anything — so every failure returns null and the caller
+// answers 401. Decoding used to throw on malformed base64, which surfaced as a 500: a crash reported as a
+// server fault when the truthful answer is "your token is not valid".
 export async function verifyJwt(token: string, secret: string): Promise<JwtClaims | null> {
-  const parts = token.split('.')
-  if (parts.length !== 3) return null
-  const [header, body, sig] = parts
-  const key = await crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify'])
-  const sigBytes = Uint8Array.from(b64urlDecode(sig), c => c.charCodeAt(0))
-  const ok = await crypto.subtle.verify('HMAC', key, sigBytes, encoder.encode(`${header}.${body}`))
-  if (!ok) return null
   try {
+    const parts = token.split('.')
+    if (parts.length !== 3) return null
+    const [header, body, sig] = parts
+    const key = await crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify'])
+    const sigBytes = Uint8Array.from(b64urlDecode(sig), c => c.charCodeAt(0))
+    const ok = await crypto.subtle.verify('HMAC', key, sigBytes, encoder.encode(`${header}.${body}`))
+    if (!ok) return null
     const claims = JSON.parse(b64urlDecode(body)) as JwtClaims
     if (claims.exp && claims.exp * 1000 < Date.now()) return null
     return claims

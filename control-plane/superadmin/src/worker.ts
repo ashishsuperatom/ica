@@ -498,13 +498,20 @@ async function handleSiteRequest(host: string, request: Request, env: Env): Prom
   const label = host === 'superatom.site' ? '' : host.slice(0, -SITE_SUFFIX.length)
   const sub = label.split('.')[0].toLowerCase()
 
-  // admin.superatom.site → admin SPA. The admin app is built with base /admin/ (router
-  // basename /admin), so the root path renders nothing — redirect / to /admin/. Real
-  // assets under /admin/* are served by the asset layer before us; deeper SPA routes
-  // fall back to the admin index.
-  if (sub === 'admin') {
+  // TWO admin hosts, and the difference is who they are for:
+  //   superadmin.superatom.site — the platform console. Only the hard-coded address in auth/tokens.ts gets
+  //                               anything back from its API; the app is served to anyone, and is useless to them.
+  //   admin.superatom.site      — the customer console. /org/<orgId> and /pro/<projectId> say what is being
+  //                               looked at, so no slug registry and no org-vs-project guessing. Bare / lands
+  //                               on the org the signed-in person belongs to.
+  // Both are the same SPA (built with base /admin/); it renders per scope, and the API decides what it may have.
+  if (sub === 'superadmin' || sub === 'admin') {
     const p = new URL(request.url).pathname
-    if (!p.startsWith('/admin')) return Response.redirect(new URL('/admin/', request.url).toString(), 302)
+    // Built assets live under /admin/ and are fetched by absolute path, so they resolve wherever the page sits.
+    if (p.startsWith('/admin/assets/') || p.startsWith('/assets/')) return env.ASSETS.fetch(request)
+    // Every other path is an SPA route — /org/<id>, /pro/<id>, or / — and gets the same document. Bare / is not
+    // redirected here: the server does not know which org this person belongs to, and the app does as soon as it
+    // has their token, so it navigates itself rather than us guessing.
     return env.ASSETS.fetch(new Request(new URL('/admin/index.html', request.url)))
   }
 

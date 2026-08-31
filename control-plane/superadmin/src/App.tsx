@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useProjectHub } from './hub'
 import { Inspector, SECTIONS, SECTION_LABEL, type Section } from './Inspector'
 import { ConnectorConsole } from './ConnectorConsole'
@@ -138,6 +138,25 @@ function tokenValid(t: string | null): boolean {
   return jwtExp(t) * 1000 - Date.now() > 60_000
 }
 
+// ── Where are we, and who is looking? ───────────────────────────────────────
+// superadmin.superatom.site — the platform console (org creation, every org).
+// admin.superatom.site      — the customer console: /org/<orgId> and /pro/<projectId>. The path says which,
+//                             so nothing has to be looked up to know what is being viewed.
+// The apex still serves the app under /admin/ (unchanged), so the basename follows the host.
+export const HOST_SCOPE: 'superadmin' | 'admin' | 'apex' =
+  /^superadmin\./.test(location.host) ? 'superadmin' : /^admin\./.test(location.host) ? 'admin' : 'apex'
+export const ROUTER_BASE = HOST_SCOPE === 'apex' ? '/admin' : ''
+
+/** The platform role carried by our own JWT. Superadmin features are not RENDERED without it — and the API
+ *  refuses them regardless, so this only decides what is worth showing. */
+export function useRole(token: string | null): 'superadmin' | 'user' | null {
+  return useMemo(() => {
+    if (!token) return null
+    try { return JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).role ?? 'user' }
+    catch { return null }
+  }, [token])
+}
+
 function useAuth() {
   const { session } = useSession()
   const [token, setToken] = useState<string | null>(() => {
@@ -215,10 +234,14 @@ export function App() {
     )
   }
   return (
-    <BrowserRouter basename="/admin">
+    <BrowserRouter basename={ROUTER_BASE}>
       <Routes>
-        <Route path="/" element={<OrgListPage />} />
+        {/* Landing: the platform console lists every org; the customer console sends you to your own. */}
+        <Route path="/" element={HOST_SCOPE === 'admin' ? <MyOrgLanding /> : <OrgListPage />} />
         <Route path="/org/:orgId" element={<OrgDetailPage />} />
+        {/* /pro/<projectId> — a project on its own, no org in the path. */}
+        <Route path="/pro/:projectId/*" element={<ProjectDetailPage />} />
+        {/* The older nested form still resolves, so existing links keep working. */}
         <Route path="/org/:orgId/projects/:projectId/*" element={<ProjectDetailPage />} />
       </Routes>
     </BrowserRouter>
@@ -258,6 +281,44 @@ function ConfirmDelete({ kind, name, consequences, onConfirm, onClose }: {
 }
 
 // ── Org list ─────────────────────────────────────────────────────────────────
+// Landing for admin.superatom.site. The API already returns only the orgs this person belongs to, so the
+// common case (exactly one) goes straight there and the URL becomes /org/<id> as if they had typed it.
+// Someone in several orgs picks; someone in none is told, rather than shown an empty console.
+function MyOrgLanding() {
+  const token = useAuth(); const api = useApi(token)
+  const [orgs, setOrgs] = useState<any[] | null>(null)
+  const nav = useNavigate()
+  useEffect(() => {
+    if (!token) return
+    api('/organizations?deleted=0').then(r => r.json()).then((d: any) => {
+      const list: any[] = Array.isArray(d) ? d : (d?.organizations ?? [])
+      setOrgs(list)
+      if (list.length === 1) nav(`/org/${list[0].id}`, { replace: true })
+    }).catch(() => setOrgs([]))
+  }, [token, api, nav])
+
+  if (!orgs) return <Shell><div className="muted" style={{ padding: 24 }}>Loading…</div></Shell>
+  if (orgs.length === 0) return (
+    <Shell><div style={{ padding: 24 }}>
+      <h2 style={{ marginTop: 0 }}>No access yet</h2>
+      <div className="muted">This account is not a member of any organisation. Ask an administrator to add your email address.</div>
+    </div></Shell>
+  )
+  return (
+    <Shell>
+      <h2 style={{ marginTop: 0 }}>Your organisations</h2>
+      <div className="grid">
+        {orgs.map(o => (
+          <Link key={o.id} to={`/org/${o.id}`} className="card">
+            <div className="card-title">{o.name}</div>
+            {o.myLevel && <div className="muted" style={{ fontSize: 12 }}>{o.myLevel === 'org-admin' ? 'administrator' : 'member'}</div>}
+          </Link>
+        ))}
+      </div>
+    </Shell>
+  )
+}
+
 function OrgListPage() {
   const token = useAuth(); const api = useApi(token)
   const [orgs, setOrgs] = useState<any[]>([]); const [showDeleted, setShowDeleted] = useState(false)
@@ -276,10 +337,11 @@ function OrgListPage() {
           <input type="checkbox" checked={showDeleted} onChange={e => setShowDeleted(e.target.checked)} /> Show deleted
         </label>
       </div>
-      <form onSubmit={create} className="row" style={{ marginBottom: 20 }}>
+      {/* Creating organisations belongs to the platform console alone. */}
+      {HOST_SCOPE !== 'admin' && <form onSubmit={create} className="row" style={{ marginBottom: 20 }}>
         <input name="name" placeholder="New organization name" required className="input" style={{ flex: 1 }} />
         <button className="btn">Create</button>
-      </form>
+      </form>}
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))' }}>
         {orgs.map(o => (
           <div key={o.id} className="card clickable" style={{ opacity: o.deleted ? .55 : 1 }} onClick={() => !o.deleted && nav(`/org/${o.id}`)}>
@@ -396,7 +458,9 @@ function OrgDetailPage() {
         {users.length === 0 && <div className="empty">No users yet.</div>}
       </>}
 
-      {tab === 'settings' && (
+      {/* Deleting an ORGANISATION is a platform act — the customer console never offers it, and the API refuses
+          it for anyone but superadmin regardless. */}
+      {tab === 'settings' && HOST_SCOPE !== 'admin' && (
         <div className="card" style={{ padding: 18, borderColor: 'var(--bad)', maxWidth: 720 }}>
           <h3 style={{ margin: '0 0 4px', color: 'var(--bad)' }}>Danger zone</h3>
           <div className="between">
