@@ -6,7 +6,31 @@ import { renderInlineMd } from './format'
 // A UNIT boundary in the stream is a generic concept: `user` is one KIND of it (a question), `segment` is the
 // general one (a modeller consolidation batch, a concept, any agent's unit of work). Both open a navigable,
 // collapsible unit — that's what the accordion + Shift-Arrow nav operate on, NOT "questions" specifically.
-export type AgentEvent = { kind: 'command' | 'message' | 'reasoning' | 'file' | 'turn' | 'user' | 'segment' | 'narration'; id?: string; text?: string; command?: string; output?: string; status?: string; done?: boolean; agent?: 'composer' | 'analyst' | 'narrator' | 'modeler' }
+export type AgentEvent = { kind: 'command' | 'message' | 'reasoning' | 'file' | 'turn' | 'user' | 'segment' | 'narration'; id?: string; text?: string; command?: string; output?: string; status?: string; done?: boolean; at?: number; ms?: number; agent?: 'composer' | 'analyst' | 'narrator' | 'modeler' }
+
+// Everything upstream measures in milliseconds; nobody reads milliseconds.
+export function fmtDur(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
+  return `${Math.floor(ms / 60_000)}m ${String(Math.round((ms % 60_000) / 1000)).padStart(2, '0')}s`
+}
+// A clock that is still RUNNING, read in whole seconds — a decimal changing five times a second is not readable.
+export function fmtClock(ms: number): string {
+  const t = Math.floor(ms / 1000)
+  return t < 60 ? `${t}s` : `${Math.floor(t / 60)}m ${String(t % 60).padStart(2, '0')}s`
+}
+const Took = ({ ms }: { ms?: number }) =>
+  ms === undefined ? null : <span style={{ color: '#a0a89f', fontSize: 11.5, marginLeft: 8 }}>{fmtDur(ms)}</span>
+
+// Does this event PUT ANYTHING ON THE SCREEN? An event with nothing to show still arrived, and treating the
+// two as the same produced a visible contradiction: the clock restarted (an event landed) while the log stayed
+// empty (it drew nothing). A `turn` marker and an empty message both fall through to a div with no content.
+export function hasContent(e: AgentEvent): boolean {
+  if (e.kind === 'command') return !!(e.command || e.output)
+  if (e.kind === 'file') return !!e.text
+  if (e.kind === 'user' || e.kind === 'segment') return true
+  return !!e.text?.trim()
+}
 
 // Is this event a unit boundary? (question OR generic segment) — the single predicate the nav/accordion key on.
 export const isUnitBoundary = (e: AgentEvent) => e.kind === 'user' || e.kind === 'segment'
@@ -95,7 +119,7 @@ function CodexEvent({ e, claude }: { e: AgentEvent; claude?: boolean }) {
     <div style={{ margin: '9px 0' }}>
       <div style={{ color: '#2f3d2c', fontSize: 12.5, ...mono }}>
         <span style={{ color: e.status === 'in_progress' ? '#b07d1a' : '#3a7d3a' }}>●</span>{' '}
-        <span style={{ color: '#6b7a6c' }}>Ran</span> {e.command}
+        <span style={{ color: '#6b7a6c' }}>Ran</span> {e.command}<Took ms={e.ms} />
       </div>
       {e.output ? <CmdOutput text={e.output} claude={claude} /> : null}
     </div>
@@ -103,7 +127,7 @@ function CodexEvent({ e, claude }: { e: AgentEvent; claude?: boolean }) {
   if (e.kind === 'file') return (
     <div style={{ margin: '9px 0' }}>
       <div style={{ color: '#2f3d2c', fontSize: 12.5, ...mono }}>
-        <span style={{ color: '#3a7d3a' }}>●</span> <span style={{ color: '#6b7a6c' }}>Edited</span> {(e.text || '').split('/').slice(-3).join('/')}
+        <span style={{ color: '#3a7d3a' }}>●</span> <span style={{ color: '#6b7a6c' }}>Edited</span> {(e.text || '').split('/').slice(-3).join('/')}<Took ms={e.ms} />
       </div>
       {e.output ? <CmdOutput text={e.output} claude={claude} /> : null}
     </div>
@@ -127,10 +151,27 @@ function CodexEvent({ e, claude }: { e: AgentEvent; claude?: boolean }) {
 // Codex reasons SILENTLY before its next action (no event streams during that phase), so a turn can look
 // stuck. Show a "thinking…" line whenever the turn is busy but nothing is actively streaming (the last event
 // has completed / there's no event yet) — the fact it's working, without exposing the reasoning content.
-function ThinkingLine() {
+function ThinkingLine({ since }: { since: number }) {
   const [n, setN] = useState(1)
-  useEffect(() => { const t = setInterval(() => setN(x => (x % 3) + 1), 420); return () => clearInterval(t) }, [])
-  return <div style={{ color: '#9a7b1a', fontSize: 12.5, fontStyle: 'italic', margin: '9px 0' }}>◐ agent is thinking{'.'.repeat(n)}</div>
+  const [, tick] = useState(0)
+  // THE CLOCK RUNS ITSELF, off the wall clock, sharing nothing with the dots or the event stream. Driving it
+  // from events was wrong: they do not arrive on a schedule, so the number advanced in whatever steps they
+  // happened to land in — 4, 5, 7, 8 — which reads as flicker rather than as time passing. Ticking at 200ms
+  // while DISPLAYING whole seconds means a second boundary is never missed, however busy the page is.
+  useEffect(() => {
+    const t = setInterval(() => tick(x => x + 1), 200)
+    const d = setInterval(() => setN(x => (x % 3) + 1), 420)
+    return () => { clearInterval(t); clearInterval(d) }
+  }, [])
+  const ms = Date.now() - since
+  return (
+    <div style={{ color: '#9a7b1a', fontSize: 12.5, fontStyle: 'italic', margin: '9px 0' }}>
+      ◐ agent is thinking
+      {/* fixed-width dots: growing them in place shoved the number sideways four times a second */}
+      <span style={{ display: 'inline-block', width: '1.4em', textAlign: 'left' }}>{'.'.repeat(n)}</span>
+      {ms >= 1000 && <span style={{ fontStyle: 'normal', color: '#9a9a92', fontVariantNumeric: 'tabular-nums' }}>{fmtClock(ms)}</span>}
+    </div>
+  )
 }
 
 export function CodexEventLog({ events, busy, claude }: { events: AgentEvent[]; busy?: boolean; claude?: boolean }) {
@@ -141,7 +182,14 @@ export function CodexEventLog({ events, busy, claude }: { events: AgentEvent[]; 
 
   const last = events[events.length - 1]
   const streaming = !!last && last.done === false && (last.kind === 'command' || last.kind === 'message' || last.kind === 'reasoning')
-  const thinking = !!busy && !streaming   // busy but nothing actively streaming ⇒ reasoning between steps
+  // Shown for as long as the turn is BUSY. Hiding it mid-stream unmounted the component and threw its clock
+  // away several times a minute, and a timer that vanishes and reappears is worse than no timer.
+  const thinking = !!busy
+  // Counted over events that actually SHOW something, so the clock and the log agree: it restarts when, and
+  // only when, there is something new on screen to have restarted for.
+  const visibleCount = events.reduce((n, e) => n + (hasContent(e) ? 1 : 0), 0)
+  const sinceRef = React.useRef({ n: -1, at: Date.now() })
+  if (sinceRef.current.n !== visibleCount) sinceRef.current = { n: visibleCount, at: Date.now() }
   if (!events.length && !thinking) return null
 
   // A coloured left rail per agent — composer (blue), analyst (amber), narrator (grey). Walk the events tracking
@@ -168,7 +216,8 @@ export function CodexEventLog({ events, busy, claude }: { events: AgentEvent[]; 
       return
     }
     if (curQ && collapsed.has(curQ)) return   // this step's question is collapsed → hide it
+    if (!hasContent(e)) return                // nothing to draw — don't emit an empty row for it
     rows.push(<div key={e.id ?? `turn${i}`} style={c ? { borderLeft: `3px solid ${c}`, paddingLeft: 10 } : undefined}><CodexEvent e={e} claude={claude} /></div>)
   })
-  return <div>{rows}{thinking && <ThinkingLine />}</div>
+  return <div>{rows}{thinking && <ThinkingLine since={sinceRef.current.at} />}</div>
 }

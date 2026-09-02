@@ -99,7 +99,9 @@ module.exports = {
       cwd:         `${root}/vm/apps/datasources/manager`,
       interpreter: 'none',
       watch:       false,
-      env:         { PATH: process.env.PATH, DATASOURCE_PORT: '4020', DATASOURCE_DATA_DIR: `${root}/vm/projects/${IDS.prql}/datasources` },
+      // The project's .env too — a bridge reads its credentials from process.env (NETSUITE_*, SA_*), and the
+      // MANAGER is the process that loads bridges, so without this they load and can never become ready.
+      env:         { PATH: process.env.PATH, ...prql, DATASOURCE_PORT: '4020', DATASOURCE_DATA_DIR: `${root}/vm/projects/${IDS.prql}/datasources` },
     },
     {
       name:        'sa-engine-prql',

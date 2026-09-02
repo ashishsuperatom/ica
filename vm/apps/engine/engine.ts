@@ -19,7 +19,7 @@ import { dirname, join } from 'node:path'
 import { existsSync, mkdirSync, rmSync, readFileSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { execProgram } from './exec-program.js'
+import { execProgram, answerView, withProseAlias } from './exec-program.js'
 import { createSession, prepareWorkspace, type Session, type Harness, type RunHandlers } from './ica/index.js'
 import { createReflex, promptVersion as reflexPromptVersion } from './agents/reflex/index.js'
 import { createNarrator, capResultData, stripCode } from './agents/narrator/index.js'
@@ -368,6 +368,48 @@ function flushOutbox() {
   for (const frame of pending) { try { hub!.send(frame) } catch { /* socket died mid-flush; the rest waits for the next reconnect */ } }
 }
 
+/** Does this answer match the shape the UI actually renders? Returns what is wrong, or '' if it is fine.
+ *
+ *  The renderer reads `headline.display`, `figures[]`, `table.columns/rows`, `sections[]`, `caveat`. An agent
+ *  that writes `headline` as a STRING gets none of that: the card draws nothing, or stringifies an object and
+ *  shows "[object Object]". That is not hypothetical — it reached a user, because nothing between the agent
+ *  and the screen ever checked, and the answer was stored in the database in that state too.
+ *
+ *  Deliberately narrow: it flags shapes that CANNOT render, not answers it dislikes. A quiet answer is fine;
+ *  an unrenderable one is a bug, and it should say so rather than reach the screen. */
+export function answerShapeProblem(a: any): string {
+  if (!a || typeof a !== 'object') return 'answer is not an object'
+  if (a.status && a.status !== 'answered') return ''            // cannot_answer / uncertain carry prose, not a card
+  if (typeof a.headline === 'string') return 'headline is a string — the renderer needs { label, display, value }'
+  if (a.headline && typeof a.headline === 'object' && !a.headline.display) return 'headline has no `display`'
+  // The unit envelope, left unwrapped: `answer` holding the whole view-model instead of prose. The card prints
+  // it as "[object Object]" and finds no headline or sections beside it, so the KPI and every table vanish.
+  if (a.answer && typeof a.answer === 'object' && !Array.isArray(a.answer)) {
+    return 'answer is a nested object — the unit envelope was not unwrapped (expected prose text or an array)'
+  }
+  // Deliberately NOT flagging unknown keys: an answer may carry extra data the renderer ignores, and treating
+  // that as an error would cry wolf on perfectly good answers.
+  const prose = a.text ?? (typeof a.answer === 'string' || Array.isArray(a.answer) ? a.answer : null)
+  const renders = a.headline?.display || a.figures?.length || a.table?.columns || a.sections?.length || prose
+  return renders ? '' : 'nothing renderable — no headline, figures, table, sections or text'
+}
+
+// A NARRATION BEAT, SENT SO A RECONNECT CANNOT LOSE IT.
+//
+// `reply` is the wsId of the socket that asked. It is the right address until the browser reconnects — then
+// every beat, and the answer, keep going to a socket that no longer exists. That is why a user watching a
+// healthy ten-minute turn saw an empty analysis card: the beats were produced, logged, and addressed to a
+// dead client. Agent LOG rows never had this problem because they travel by CHANNEL, which the DO fans to the
+// question's OWNER rather than to one connection.
+//
+// So beats go both ways: to `reply` (still the fast path for the asking tab) and to the owner-scoped channel
+// (which survives reconnects). The client dedupes on qid+text.
+const emitBeat = (reply: any, text: string, qid: string, sid: string) => {
+  console.log(`[beat] ${text.replace(/\s+/g, ' ').trim().slice(0, 300)}`)
+  if (reply) emit(reply, { t: 'narration', text, qid, sid })
+  emit({ type: 'log', channel: 'narration' }, { t: 'narration', text, qid, sid })
+}
+
 // ── What produced an answer ─────────────────────────────────────────────────
 // An answer that cannot be attributed cannot be evaluated: when one changes, the question is always whether the
 // DATA moved, a PROMPT changed, a CONCEPT was rewritten, or the ENGINE was rebuilt — and without this we are
@@ -454,8 +496,8 @@ async function reuseProgram(programDir: string, params: any, category: string,
     // Fresh subprocess (see exec-program.ts): a program edited by a prior modify is cached stale in this
     // long-lived tsx process, so an in-process reuse would re-run yesterday's code. Spawn it clean.
     const rr = await execProgram(WORKSPACE, programDir, params ?? {})
-    const out = rr.output as any
-    const answer = { ...out, status: out?.status ?? 'answered' }
+    const answer = withProseAlias(answerView(rr.output))   // out of the envelope, then both prose key names
+    const out = answer                      // downstream shape checks read the VIEW, not the envelope
     const timing = { ms: Date.now() - t0, reused: true }
     // Deterministic AUDIT of this run (no LLM): the input at this moment, the output's shape, and a rough
     // "degenerate" flag (answered-but-nothing-came-back) so we can later see how the program behaves + count failures.
@@ -526,6 +568,15 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   // at the new connection, so the in-flight run's output + final answer reach the reloaded client.
   busySessions.add(sid)
   const reply = from                                   // LOCAL to this turn — no cross-session clobber (channel is the param)
+  // LIVENESS, FROM THE FIRST MOMENT. The UI arms a 25s watchdog on asking and re-arms on any message, so this
+  // tick is the only thing telling it the engine is alive between steps. It used to be armed AFTER
+  // canonicalisation and concept retrieval — tens of seconds — leaving a silent window at the START of every
+  // turn, exactly where the watchdog is most likely to fire.
+  //
+  // The cost was never a stray message. The watchdog calls endTurn(), which clears `busy`, and `busy` is what
+  // draws the thinking line and its timer. So one early gap told the user the engine had died, removed the
+  // only sign it was working, and left it that way for the rest of a turn that ran fine for ten more minutes.
+  let keepalive: ReturnType<typeof setInterval> | null = setInterval(() => { if (reply) emit(reply, { t: 'tick', sid }) }, 8000)
   const norm = normalizeQuestion(question)
   // ONE id end to end: the UI mints it and sends it; we use it verbatim (agent writes ./out/<qid>.json,
   // DB keys on it). Fall back to minting our own if a non-UI caller omitted it. Trust-but-verify: if the
@@ -569,7 +620,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
 
   // FIRST SIGN OF LIFE, before any model call. Canonicalisation alone is ~2s and retrieval follows it, so the
   // asker used to sit in silence until the analyst slot was warm — the turn felt stalled before it had begun.
-  if (reply) emit(reply, { t: 'narration', text: 'Looking into your question…', qid, sid })
+  emitBeat(reply, 'Looking into your question…', qid, sid)
 
   // ── CANONICAL MATCH — retrieval only ────────────────────────────────────────────────────────────────────
   // The question is normalised to its CANONICAL form (a no-tools completion, ~1-2s) and matched against the forms
@@ -667,7 +718,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   // Liveness keepalive: the UI arms a 25s watchdog and re-arms on every message. Claude-code's PTY streams
   // constantly so it's always fed, but SDK harnesses (codex) reason/exec silently for long stretches — and
   // the gap-loop model build is silent too. Tick every 8s for the whole turn so the watchdog never false-fires.
-  let keepalive: ReturnType<typeof setInterval> | null = setInterval(() => { if (reply) emit(reply, { t: 'tick', sid }) }, 8000)
+  // (armed at the top of the turn — see where `reply` is taken)
   // ── Receptionist narration (a SEPARATE throwaway agent): while the analyst works behind the scenes, translate
   // its raw activity into business-language 'narration' beats for the USER UI. Fresh per question; best-effort — a
   // narration failure must NEVER affect the answer.
@@ -700,7 +751,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
           // TIMEOUT the narrate call so a hung beat (deepseek) can't freeze narration (finally never running).
           const line = await Promise.race([narrator!.narrate(question, activity), new Promise<null>((res) => setTimeout(() => res(null), 20000))])
           if (line) {
-            if (reply) emit(reply, { t: 'narration', text: line, qid, sid })
+            emitBeat(reply, line, qid, sid)
             if (channel) emit({ type: 'channel' }, { t: 'channel:narration', channel, qid, text: line })   // stream to the chat channel (Teams/…)
           }
         } catch { /* narration is best-effort */ } finally { narrating = false }
@@ -709,6 +760,8 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // Whose events these are — the composer runs first, the analyst only if it escalates. Every event/progress
     // line carries `agent` so the UI can colour + separate composer vs analyst, and interleave the narrator.
     let currentAgent: 'composer' | 'analyst' = 'composer'
+    // When each in-flight step began, by event id — drained as each completes, so it holds only what is running.
+    const stepStarted = new Map<string, number>()
     // Agent-LOG emission: the engine LABELS each structured event / PTY chunk with its channel (composer-log while
     // the composer runs, analyst-log while the analyst runs) + the qid, and sends it ONCE. The DO fans it to the
     // OWNER's attached devices only (never another user, never a device that didn't attach). The engine no longer
@@ -728,13 +781,23 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         // The COMPOSER self-narrates — its [[ui]] line IS a business beat, so it drives the analysis tape directly
         // (no separate narrator runs during the composer phase). The ANALYST's [[ui]] is a side progress line; its
         // beats come from the deepseek narrator started on escalation.
-        if (currentAgent === 'composer') emit(reply, { t: 'narration', text, qid, sid })
+        if (currentAgent === 'composer') emitBeat(reply, text, qid, sid)
         else emit(reply, A('status', 'analyst', { progress: text, sid }))
       },
       // Structured events (codex/SDK harnesses only — claude PTY uses onOutput above). The session already
       // normalizes + buffers these (session.events()); the engine just mirrors each one live to the asker and
       // any attached viewers, same as onOutput. Reconnect replay is handled in resyncAnalyst via events().
       onEvent: (ev) => {
+        // TIME every step in ONE place, so every harness is measured the same way and the numbers are
+        // comparable. A command spans two events (in_progress → completed); the duration belongs on the one
+        // that closes it.
+        ev.at ??= Date.now()
+        if (ev.kind === 'command' && ev.id) {
+          if (ev.done || ev.status === 'completed' || ev.status === 'failed') {
+            const startedAt = stepStarted.get(ev.id)
+            if (startedAt !== undefined) { ev.ms ??= ev.at - startedAt; stepStarted.delete(ev.id) }
+          } else if (!stepStarted.has(ev.id)) stepStarted.set(ev.id, ev.at)
+        }
         emitLog(A('event', currentAgent, { ev }))   // structured event → the agent's log channel (composer-log / analyst-log)
         // Narrator digest — feed ONLY the business signal: commands + their RESULTS (query outputs = the
         // findings) and the analyst's own prose. SKIP file events (program code / diffs / paths) — that's pure
@@ -819,7 +882,17 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // NB: r.lastLines (the raw claude PTY tail — a garbled, cursor-addressed terminal snapshot) is deliberately NOT
     // sent to the client. It has no user value, isn't stored, and shipping ~20KB of raw terminal per answer is a
     // standing leak risk (a client that didn't strip it would render it). The clean answer is r.answer.
-    emit(reply, { t: 'analyst:answer', category: r.category, answer: r.answer, timing, sid, qid })
+    // NEVER SHIP A SHAPE THE UI CANNOT DRAW — and never do it silently. This is the last point before the
+    // answer becomes what the user sees and what the database keeps.
+    // Checked here because EVERY route lands on this line — composer, analyst, recovered-after-timeout. The
+    // first version of this check only ran on the analyst's answer, and the bug that reached the user came
+    // back through the composer.
+    // Both key names on the wire — see withProseAlias. Applied HERE because every route reaches this line, so
+    // no client can be broken by which agent happened to answer.
+    r.answer = withProseAlias(r.answer)
+    const shapeProblem = answerShapeProblem(r.answer)
+    if (shapeProblem) console.error(`[answer] SHAPE PROBLEM for qid=${qid} (${authoredBy ?? 'unknown'}): ${shapeProblem}`)
+    emit(reply, { t: 'analyst:answer', category: r.category, answer: r.answer, timing, sid, qid, shapeProblem: shapeProblem || undefined })
     if (channel) emit({ type: 'channel' }, { t: 'channel:answer', channel, qid, answer: r.answer, category: r.category })   // durable delivery to the chat channel
     // Follow-ups are NICE-TO-HAVE — emitted AFTER the answer, never gating or delaying it. The UI reveals them on
     // a delay so the user reads the answer first. Persisted on the node below → free on a later reuse (no analyst).
@@ -1219,8 +1292,21 @@ function connect() {
   console.log(`[ica] connecting to hub ${url} as code-engine (no ports opened)`)
   const ws = new WebSocket(url)
   hub = ws
+  // KEEPALIVE. An idle WebSocket is closed at the edge, and this one is idle most of the time — the engine
+  // speaks when there is a question and is silent in between. The symptom is a clean register followed by a
+  // 1006 about half a minute later, forever. Not cosmetic: every reconnect re-announces presence, and anything
+  // in flight is riding a socket that keeps going away underneath it.
+  //
+  // A literal `ping`, because the Durable Object registers it as an AUTO-RESPONSE pair — Cloudflare answers
+  // `pong` at the edge and never wakes the DO, so staying connected costs no compute. The reply is not JSON
+  // and the message handler already drops anything that will not parse.
+  let beat: ReturnType<typeof setInterval> | null = null
+  const stopBeat = () => { if (beat) { clearInterval(beat); beat = null } }
   ws.on('open', () => {
     reconnectDelay = 1000   // stable connection → reset backoff
+    stopBeat()
+    beat = setInterval(() => { if (ws.readyState === WebSocket.OPEN) { try { ws.send('ping') } catch { /* the close handler reconnects */ } } }, 12_000)
+    beat.unref?.()
     // machineId lets the hub self-heal which Fly machine it tracks (survives recreate/resize). Fly injects
     // FLY_MACHINE_ID automatically; undefined off-Fly (EC2/Docker) so it's simply omitted there.
     ws.send(JSON.stringify({ type: 'hello', key: KEY, role: 'code-engine', instanceId: INSTANCE_ID, epoch: EPOCH, machineId: process.env.FLY_MACHINE_ID }))
@@ -1246,6 +1332,7 @@ function connect() {
     if (m.payload) await handle(m.payload, m.from)
   })
   ws.on('close', (code: number) => {
+    stopBeat()
     if (ws !== hub) return                       // a stale/superseded socket closed — ignore, we already moved on
     if (code === 4006) { console.log('[ica] fenced by a newer engine — not reconnecting'); return }   // don't fight
     const delay = Math.min(reconnectDelay, 30000) + Math.floor(Math.random() * 1000)   // backoff + jitter

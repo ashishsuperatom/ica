@@ -34,6 +34,18 @@ export interface OpencodeSessionOpts {
 // connect to — auto-approve works in every case and needs no server config.)
 
 // Best-effort text extraction from an opencode message's parts.
+/** fetch with undici's idle-body deadline removed. A coding turn is a single long request with nothing on the
+ *  wire until it finishes; Node's default 300s body timeout treats that as a stalled connection and aborts it.
+ *  Falls back to plain fetch where the undici Agent is unavailable — a working request beats a tuned one. */
+const noTimeoutFetch: any = async (input: any, init: any = {}) => {
+  try {
+    const { Agent } = await import('undici')
+    return await (fetch as any)(input, { ...init, dispatcher: new Agent({ bodyTimeout: 0, headersTimeout: 0 }) })
+  } catch {
+    return await (fetch as any)(input, init)
+  }
+}
+
 function partsText(parts: any[]): string {
   return (parts || []).filter(p => p?.type === 'text' && p.text).map(p => p.text).join('').trim()
 }
@@ -116,7 +128,12 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
     const oc = await ensureOpencodeServer(opts.baseUrl ?? process.env.ICA_OC_URL)
     ownsServer = oc.owned
     managed = oc.owned ? oc : null
-    client = createOpencodeClient({ baseUrl: oc.url })
+    // NO BODY TIMEOUT. `session.prompt()` is one POST that returns only when the whole turn is finished, and
+    // undici aborts a request whose body has been idle for 300s by default. A turn that thinks for longer than
+    // five minutes was killed mid-work, every time, at exactly 300s — caught into an error string, so it read
+    // as an agent that had simply run out of things to say: no program, no escalation, no reason given.
+    // Measured at 300s, 301s and 301s on three consecutive composer turns before the cause was found.
+    client = createOpencodeClient({ baseUrl: oc.url, fetch: noTimeoutFetch })
     server = null
     if (ownsServer) {
       // Reap a server WE started on process termination. close() SIGTERMs the ~370MB binary but needs

@@ -54,7 +54,9 @@ const MACHINERY = [
   /programs?\//i, /\.(ts|tsx|js|mjs|json|sql|py)\b/i,        // paths / filenames
   /^\s*[+-]\s|\n\s*[+-]\s/, /^\s*\d+\s*[-+]\s/m,             // diff hunks
   /\b(dataSources?|inputs|logic|source|params|units?)\s*:/i, // program-source keys (name:, source:, dataSources:)
-  /=>|\bfunction\b|\bconst\b|\breturn\b|\bawait\b/,          // code
+  // CODE — but only shapes that cannot be ordinary prose. `return` was in this list, and it is an everyday
+  // word in project finance ("returns", "return on budget"), so real beats were deleted as source code.
+  /=>|\bfunction\s+\w+\s*\(|\bconst\s+\w+\s*=|\bawait\s+\w+\(/,
   /\[\[ui\]\]|❯|●|⏺|Combobulating|Ran \d+ shell/i,          // TUI chrome / spinner
   /```|<\/?\w+>/,                                            // fenced code / xml
 ]
@@ -73,12 +75,18 @@ export function stripCode(s: string): string {
 // A finished narration beat must READ like a business update. Reject anything that smells of machinery or is too
 // long to be one (an echo of the raw activity). A dropped beat is invisible; a leaked one is the bug — so when in
 // doubt, drop.
-export function isCleanBeat(s: string): boolean {
+/** Why a beat was rejected, or '' if it is fine. Named so a drop can be REPORTED rather than just happening —
+ *  a filter that silently deletes its input is indistinguishable from an agent that produced nothing, and that
+ *  cost a full day of looking in the wrong place. */
+export function beatRejection(s: string): string {
   const t = (s ?? '').trim()
-  if (!t) return false
-  if (t.length > 320) return false                           // a real beat is a sentence or a few bullets, never a dump
-  return !MACHINERY.some((re) => re.test(t))
+  if (!t) return 'empty'
+  if (t.length > 320) return `too long (${t.length} chars)`
+  const hit = MACHINERY.find((re) => re.test(t))
+  return hit ? `matched ${hit}` : ''
 }
+
+export function isCleanBeat(s: string): boolean { return !beatRejection(s) }
 
 export interface NarratorOpts {
   cwd: string
@@ -109,7 +117,9 @@ export function createNarrator(opts: NarratorOpts) {
       // GUARD: a small model sometimes echoes its raw input instead of translating it (that is how program source
       // and diffs once leaked to the user). A narration beat is best-effort, so if it doesn't read like a clean
       // business update, drop it silently — the next tick will produce a good one. Better a missing beat than a leak.
-      return isCleanBeat(beat) ? beat : ''
+      const why = beatRejection(beat)
+      if (why) { console.log(`[beat:dropped] ${why} — "${beat.replace(/\s+/g, ' ').slice(0, 160)}"`); return '' }
+      return beat
     },
     /** Discard the per-question session. */
     stop() { try { session?.stop() } catch { /* best-effort */ } session = null },

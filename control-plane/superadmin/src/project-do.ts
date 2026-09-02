@@ -144,6 +144,15 @@ export class ProjectDO extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
     this.buffer = new AnswerBuffer(this.ctx.storage.sql, (e, d) => this.log(e, d))
+    // KEEPALIVE, ANSWERED AT THE EDGE. A client that sits idle — the engine between questions — has its socket
+    // closed by the edge, seen as a clean register followed by a 1006 every half-minute or so. The cure is a
+    // periodic frame, and Cloudflare provides exactly this pair for it: a literal `ping` is answered `pong`
+    // WITHOUT waking the Durable Object, so staying connected costs no compute.
+    //
+    // Without the pair, a `ping` reaches handleMessage, fails JSON.parse, and earns an `Invalid JSON` error
+    // reply — one every twelve seconds per client, forever. That is what a flood of 1,420 error frames turned
+    // out to be, and it is why this line is not optional once anything is sending a keepalive.
+    this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'))
     this.ctx.blockConcurrencyWhile(() => this.migrate())
   }
 

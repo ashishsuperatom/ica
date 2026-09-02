@@ -432,7 +432,9 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
             }, 3500)
           }
         } else if (msg.t === 'narration') {
-          if (msg.text) { narrationLogRef.current = [...narrationLogRef.current, msg.text]; narrationTimesRef.current = [...narrationTimesRef.current, Date.now()]; setNarrationLog(narrationLogRef.current); setNowMs(Date.now())   // append a beat + stamp its arrival (chat-view analysis card)
+          // Sent twice on purpose — once to this socket, once to the owner channel — so one of them survives a
+          // reconnect. Keep the first arrival and ignore the echo.
+          if (msg.text && !narrationLogRef.current.includes(msg.text)) { narrationLogRef.current = [...narrationLogRef.current, msg.text]; narrationTimesRef.current = [...narrationTimesRef.current, Date.now()]; setNarrationLog(narrationLogRef.current); setNowMs(Date.now())   // append a beat + stamp its arrival (chat-view analysis card)
             setAnEvents(evs => [...evs, { id: 'narr-' + narrationTimesRef.current.length, kind: 'narration', text: msg.text, agent: 'narrator', done: true }]) }   // ALSO drop it into the analyst-tab stream so it interleaves by time with the agent's events
         } else if (msg.t === 'analyst:answer') {
           // NEVER surface the agent's raw terminal (lastLines) as an answer — that leaks internal logs.
@@ -486,13 +488,25 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // code-engine role. Local: send the raw payload directly.
   function send(payload: any) {
     const ws = wsRef.current
-    if (ws?.readyState !== 1) return
+    // A CLOSED SOCKET MUST NOT EAT THE MESSAGE SILENTLY. This returned quietly, so a question typed while the
+    // socket was between reconnects was destroyed in the browser — never sent, never logged — while the UI
+    // still flipped to "thinking" and the watchdog then blamed the engine 25s later. The engine was idle and
+    // healthy the whole time. Say so instead.
+    if (ws?.readyState !== 1) {
+      console.warn('[ws] not open — dropping', payload?.t, '(readyState', ws?.readyState, ')')
+      if (payload?.t === 'analyse') endTurn('Not connected — your question was not sent. Reconnecting…')
+      return
+    }
     ws.send(JSON.stringify(CLOUD ? { to: { type: 'code-engine' }, payload } : payload))
   }
   // Subscribe to every agent-log channel (called on connect). The DO forwards each only to THIS user's devices,
   // so the console always has the composer/analyst/semantic logs from the moment it connects — no missing a
   // question's log by attaching late. Stays for the connection's life (the DO drops it on WS close).
-  const attachLogs = () => ['analyst-log', 'composer-log', 'concept-log'].forEach((channel) => send({ t: 'log:attach', channel }))
+  // 'narration' is here for the same reason as the log channels: a channel is fanned to the QUESTION'S OWNER,
+  // so it keeps arriving across a reconnect, whereas anything addressed to our old wsId is lost the moment we
+  // reconnect. Beats used to travel only that second way, which is why a healthy turn could show an empty
+  // analysis card for ten minutes.
+  const attachLogs = () => ['analyst-log', 'composer-log', 'concept-log', 'narration'].forEach((channel) => send({ t: 'log:attach', channel }))
 
   // Recover a full Q&A PAIR from the DO into the right session's feed. A qid is a pair, so we restore the
   // QUESTION card too — its id is the qid (matching how ask() writes it), so it dedups whether or not the
@@ -589,7 +603,14 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // wake+boot legitimately takes ~60s, so `machine:waking` arms a longer window instead of false-firing.
   function armWatchdog(ms = 25000) {
     clearWatchdog()
-    watchdog.current = setTimeout(() => endTurn('The engine went silent — it may have restarted or is still starting. Please ask again.'), ms)
+    // Say what we ACTUALLY know. This fires when THIS BROWSER has heard nothing for `ms` — which is just as
+    // often our own socket dropping as the engine stopping, and the engine frequently keeps working and lands
+    // the answer afterwards. Blaming the engine sent us hunting a healthy process for hours.
+    watchdog.current = setTimeout(() => endTurn(
+      navigator.onLine === false
+        ? 'You appear to be offline — reconnecting. Any answer already running will arrive when the connection is back.'
+        : 'No updates received for a while. The engine may still be working — this page will show the answer if it arrives.'
+    ), ms)
   }
 
   // A follow-up chip FILLS the input (editable) and focuses it — it does NOT submit, so the user can tweak it
@@ -1161,7 +1182,13 @@ function ensureAnswerCSS() {
   _cssInjected = true
   const el = document.createElement('style'); el.id = 'sa-answer-css'; el.textContent = ANSWER_CSS
   document.head.appendChild(el)
-}
+}// Inject on LOAD, not when the first answer renders. This sheet does not only style answers: the live analysis
+// indicator (.sa-live), its beats and the follow-up chips are all on screen BEFORE there is an answer to card.
+// Hanging the injection off AnswerCard meant a page that loaded with a question already in flight showed the
+// whole thing unstyled — the flex row collapsed, so "Analysis" and "details" ran together — and then silently
+// corrected itself the moment an answer landed. A stylesheet the page needs from its first paint belongs here.
+ensureAnswerCSS()
+
 
 // ── Front-end-only helpers for the card actions (Copy / CSV) ─────────────────────────────────────────
 // We HAVE the structured answer JSON here, so copy is built from it (clean), generic across the fields the
@@ -1171,7 +1198,8 @@ function ensureAnswerCSS() {
 function answerToText(a: any, cat: string, meta?: { qid?: string; at?: number; timing?: { ms: number; classifyMs?: number; modelMs?: number } }): string {
   const out: string[] = []
   if (cat) out.push(cat.toUpperCase())
-  if (a.answer) out.push(Array.isArray(a.answer) ? a.answer.join('; ') : String(a.answer))
+  const prose = a.text ?? (typeof a.answer === 'string' || Array.isArray(a.answer) ? a.answer : null)   // `text` since the rename; `answer` for older ones
+  if (prose) out.push(Array.isArray(prose) ? prose.join('; ') : String(prose))
   if (a.periods?.length) out.push('Time filter: ' + a.periods.map((p: any) => `${p.label}${p.detail ? ' — ' + p.detail : ''}`).join(' · '))
   else if (a.period) out.push('Time filter: ' + a.period)
   const figs = Array.isArray(a.figures) && a.figures.length ? a.figures : a.headline?.display ? [{ label: a.headline.label, display: a.headline.display, sub: a.headline.sub }] : []
@@ -1363,7 +1391,14 @@ function AnswerCard({ answer: a, category, timing, qid, at }: { answer: any; cat
         <button className="sa-ic" onClick={toggleFull} title={full ? 'Exit full screen' : 'Full screen'} aria-label="Full screen">{full ? IC.close : IC.expand}</button>
       </div>
       <div className={`sa-type${isTerminal ? ' warn' : ''}`}>{isTerminal ? "Can't answer" : (cat || 'Answer')}</div>
-      {a.answer && <div className="sa-prose" dangerouslySetInnerHTML={{ __html: renderAnswerBody(a.answer) }} />}
+      {/* PROSE is `text`. It used to be `answer`, which collided with the unit envelope's own `answer` key one
+          level up — so an unwrapped envelope put the whole view-model here and the card printed
+          "[object Object]" while the KPI and tables vanished. `answer` is still read for the many programs and
+          stored answers written before the rename, but only when it is genuinely prose. */}
+      {(() => {
+        const prose = a.text ?? (typeof a.answer === 'string' || Array.isArray(a.answer) ? a.answer : null)
+        return prose ? <div className="sa-prose" dangerouslySetInnerHTML={{ __html: renderAnswerBody(prose) }} /> : null
+      })()}
       {(a.periods?.length > 0 || a.period) && (
         <div className="sa-period"><span className="pk">Time filter</span>
           {a.periods?.length > 0

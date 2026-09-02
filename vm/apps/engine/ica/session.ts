@@ -16,6 +16,8 @@ export interface AgentEvent {
   output?: string     // kind:'command' — its aggregated output
   status?: string     // kind:'command' — 'in_progress' | 'completed' | 'failed'
   done?: boolean      // the item reached completion (item.completed)
+  at?: number         // WHEN, epoch ms — stamped as close to the source as the harness can manage
+  ms?: number         // how long the step TOOK; a command is paired in_progress → completed by id
 }
 
 // ── Usage / cost — ABSTRACT INTERFACE every ICA harness SHOULD provide ────────────────────────────────

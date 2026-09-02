@@ -7,6 +7,7 @@
 // and units accumulate in ./units/ — so a calculation is defined once and reused across questions.
 
 import './generate-system.js'   // FIRST: (re)writes system/*.md from generate-system.ts before they're read below
+import { answerView } from '../../exec-program.js'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import { loadPrompt } from '../../prompts.js'
@@ -210,8 +211,7 @@ Your task is in ${taskRel} — read it and follow it exactly. ${m ? 'Modify the 
           const rr = await execProgram(cwd, ptr.programDir, ptr.params ?? {})
           // Keep the program's OWN status (an unknowable program outputs status:"unknowable"); default to
           // "answered" only when the program didn't declare one.
-          const out = rr.output as any
-          await writeFile(answerPath, JSON.stringify({ ...out, status: out?.status ?? 'answered' }, null, 2))
+          await writeFile(answerPath, JSON.stringify(answerView(rr.output), null, 2))   // out of the unit envelope
         } catch (e: any) {
           await writeFile(answerPath, JSON.stringify({ status: 'cannot_answer',
             answer: `The program was built but failed to run: ${String(e?.message ?? e).slice(0, 240)}` }, null, 2)).catch(() => {})

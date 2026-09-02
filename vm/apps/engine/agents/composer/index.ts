@@ -4,6 +4,7 @@
 // instruction (compose from concepts via ./concepts/find.mjs; on any gap, ESCALATE to the analyst rather than
 // guess). The engine runs the program it points at and stamps authoredBy.by='composer'.
 import './generate-system.js'   // FIRST: (re)writes SYSTEM.md from generate-system.ts before it's read below
+import { answerView } from '../../exec-program.js'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import { AUTHORING_REFERENCE } from '../shared-prompts/authoring-reference.js'
@@ -168,8 +169,7 @@ Start here: run it with those values (\`tsx run.mjs ${o.canonicalMatch.programDi
         try {
           handlers?.onNarration?.('Running the numbers…')   // shown as a business beat (composer self-narrates)
           const rr = await execProgram(cwd, built.programDir, built.params ?? {})
-          const out = rr.output as any
-          answer = { ...out, status: out?.status ?? 'answered' }
+          answer = answerView(rr.output)   // out of the unit envelope — see answerView
           await writeFile(answerPath, JSON.stringify(answer, null, 2)).catch(() => {})
         } catch (e: any) {
           answer = { status: 'cannot_answer', answer: `The composed program failed to run: ${String(e?.message ?? e).slice(0, 240)}` }
