@@ -30,6 +30,8 @@ export interface PiSessionOpts {
   provider?: string   // default: codex when `codex login` has been done, else openrouter
   model?: string
   systemReference?: string   // the authoring reference → AGENTS.md, which pi's resource loader reads from cwd
+  noTools?: boolean          // a PURE TEXT agent (the narrator): no tools at all
+  system?: string            // REPLACES the coding prompt — for an agent that only writes prose
 }
 
 // Turn one SDK event into a human-readable stream chunk (tool starts + assistant text).
@@ -121,7 +123,11 @@ export function createPiSession(opts: PiSessionOpts): Session {
   // Without this, pi ran the composer with NO instructions at all: no canonicalisation, no route rules, no
   // built.json contract. It still answered, which is the dangerous part — a turn that looks like it worked.
   let refPlacement: 'in-context' | 'file' = 'file'
-  if (opts.systemReference?.trim()) {
+  // NOT for a pure-text agent. AGENTS.md lives in the cwd, and the narrator shares the composer's workspace —
+  // writing there would overwrite the composer's instructions with narration rules. That exact collision, one
+  // file claimed by two roles, is what once handed the analyst the composer's prompt for a whole question.
+  // A no-tools agent has no workspace to describe anyway: its instructions ride on the prompt instead.
+  if (opts.systemReference?.trim() && !opts.noTools) {
     try { writeFileSync(join(opts.cwd, 'AGENTS.md'), opts.systemReference); refPlacement = 'in-context' }
     catch (e) { console.warn('[ica:pi] could not write AGENTS.md; instructions will be missing', e) }
   }
@@ -144,7 +150,12 @@ export function createPiSession(opts: PiSessionOpts): Session {
     // `cd <absolute workspace> &&` onto every command, which costs tokens on each call, makes the step log
     // unreadable, and puts the machine's filesystem layout in the transcript. Every other harness is given its
     // directory and uses plain relative paths (`./get-concept "…"`); this one simply was not.
-    ;({ session } = await createAgentSession({ cwd: opts.cwd, resourceLoader: rl, sessionManager: SessionManager.inMemory(), model }))
+    ;({ session } = await createAgentSession({
+      cwd: opts.cwd, resourceLoader: rl, sessionManager: SessionManager.inMemory(), model,
+      // A pure-text agent gets NO tools. Until now `noTools` was not even passed to pi, so the narrator — which
+      // is meant to write one sentence — ran with bash, read, edit and write available to it.
+      ...(opts.noTools ? { noTools: 'all' as const } : {}),
+    }))
     session.subscribe?.((ev: any) => {                                   // ONE subscription; routes to the active turn
       const norm = normPiEvent(ev, liveCommands)                          // the SHARED shape — see normPiEvent
       if (norm) activeHandler?.onEvent?.(norm)
@@ -163,9 +174,12 @@ export function createPiSession(opts: PiSessionOpts): Session {
     running = true
     const { prompt, h, resolve } = queue.shift()!
     const s = await ensure()
+    // pi has no `system` slot, so an agent whose whole job is described by one it does carry it on the prompt.
+    // Dropping it silently is how the narrator came to run with no instructions at all.
+    const text = opts.system?.trim() ? `${opts.system.trim()}\n\n${prompt}` : prompt
     activeHandler = h; activeAnswer = ''
     const t0 = Date.now()
-    try { await s.prompt(prompt); await s.waitForIdle?.() }
+    try { await s.prompt(text); await s.waitForIdle?.() }
     catch (e: any) { activeAnswer = `pi error: ${e?.message ?? e}` }
     activeHandler = undefined
     running = false
