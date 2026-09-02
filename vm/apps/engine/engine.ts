@@ -610,24 +610,20 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   // the same question.
   const cues = explicitEdit ? [] : followUpCues(question)
   const rootQuestion = !explicitEdit && cues.length === 0
-  const matchId = intentId(ROOT, question)
-  if (!explicitEdit) console.log(`[ica] regex: ${rootQuestion ? 'self-contained → verbatim reuse-match' : `FOLLOW-UP (${cues.join(',')}) → skip verbatim, canonicalise with context`}`)
-  const hitNode = rootQuestion ? graph.getNode(matchId) : null
-  const hp: any = hitNode?.props
-  // AN EXACT REPEAT IS A FINDING, NOT A SHORTCUT. This used to run the saved program and return, answering
-  // without the composer ever seeing the question. That is precisely the case that most needs looking at: the
-  // program was written for an earlier asking, and the data has moved since — a stale one still returns a tidy,
-  // well-formed result that no longer answers. Nothing was reading it except a separate reviewer that could not
-  // see the run it was judging.
+  // The cue regex no longer gates any lookup — it only suggests where this question's node hangs, and the
+  // agent's own placement still wins. Kept because the guess is logged against that placement, which is how
+  // we know it is wrong about one in six.
+  if (!explicitEdit) console.log(`[ica] regex: ${rootQuestion ? 'reads as self-contained' : `reads as FOLLOW-UP (${cues.join(',')})`}`)
+  // NO LOOKUP HERE. The composer canonicalises the question and searches with `./find-program` itself, so a
+  // pre-match in the engine finds nothing it would have missed — an identical question produces an identical
+  // stored form, which ranks first in that search anyway.
   //
-  // So the match is handed to the composer as a strong starting point. It runs it, reads the output as the
-  // person who asked would, and commits or carries on. Every question goes through one agent, and the review
-  // happens where the run, the question and the result are all in the same context.
-  let exactMatch: { programDir: string; canonical: string; params: Record<string, unknown> } | undefined
-  if (rootQuestion && hp?.program && existsSync(join(WORKSPACE, hp.program, 'program.ts'))) {
-    exactMatch = { programDir: hp.program, canonical: question, params: hp.params ?? {} }
-    console.log(`[ica] exact repeat → ${hp.program} — handed to the composer to run and check`)
-  }
+  // And matching raw text was unsafe for a FOLLOW-UP. It looked the question up at ROOT, so "what about 2025?"
+  // would be matched as though it stood alone and could collide with the same words from an unrelated thread.
+  // The only guard was the follow-up cue regex, which this file's own notes admit is wrong about one time in
+  // six. Canonicalisation is what solves that — it resolves what a follow-up points AT using the conversation
+  // and searches with a sentence that stands on its own — so putting a raw-text match in front of it puts back
+  // the very problem it exists to remove.
 
   // FIRST SIGN OF LIFE, before any model call. Canonicalisation alone is ~2s and retrieval follows it, so the
   // asker used to sit in silence until the analyst slot was warm — the turn felt stalled before it had begun.
@@ -833,7 +829,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       // The COMPOSER handles both a fresh question (compose/reuse) AND a MODIFY (edit the current program in
       // place). It escalates only when it genuinely can't — then the analyst takes over.
       const composer = await getComposer(sid)
-      const c = await composer.ask(question, handlers, { qid, candidates: programCandidates, conceptNames, modify: modifyTarget ?? undefined, canonicalMatch: exactMatch, resolvedQuestion })
+      const c = await composer.ask(question, handlers, { qid, candidates: programCandidates, conceptNames, modify: modifyTarget ?? undefined, resolvedQuestion })
       if (c.escalate) { escalateReason = c.escalate.reason; console.log(`[ica] composer → escalate · ${c.escalate.reason}`) }
       else {
         authoredBy = 'composer'
