@@ -116,7 +116,7 @@ THE EDIT: ${question}
 
 OPEN and READ ./${m.programDir} (program.ts + its units). If the edit can be made from its code + the concepts you
 can pull, EDIT it, RUN it (\`tsx run.mjs ${m.programDir}/program.ts '<json>'\`) until correct, then write
-${builtRel} = {"programDir":"${m.programDir}","params":{…}} as your final action, pointing at the SAME program (do NOT change
+${builtRel} = {"programDir":"${m.programDir}","params":{…},"canonicalQuestions":["<the canonical form of THIS question>"]} as your final action, pointing at the SAME program (do NOT change
 programDir). But if the edit needs something in NEITHER the program NOR any concept — you'd have to discover it —
 write ${escalateRel} = {"reason":"<what's missing>"} and STOP; the analyst will handle it. Never explore raw
 data. Do NOT write answer.json.` : ''
@@ -135,7 +135,7 @@ That is a starting point, not a verdict: it was written for the earlier asking a
 RUN it (\`tsx run.mjs ${o.canonicalMatch.programDir}/program.ts '${JSON.stringify(o.canonicalMatch.params)}'\`) and read the output as the person who asked would — nothing after you checks this. If it genuinely answers, COMMIT as your final action: write ${builtRel} = {"programDir":"${o.canonicalMatch.programDir}","params":${JSON.stringify(o.canonicalMatch.params)},"canonicalQuestions":["<the canonical form>"]} and stop. If it is empty, sidesteps the question, or the figures do not fit, carry on below.
 ` : ''}
 1. Can a program above answer THIS question EXACTLY — the SAME measure, scope and grain, differing at most by a
-   parameter (a date, a top-N)? Only then reuse it: pick it, run it, and COMMIT — write ${builtRel} = {"programDir":"<that program>","params":{…}} as your final action.
+   parameter (a date, a top-N)? Only then reuse it: pick it, run it, and COMMIT — write ${builtRel} = {"programDir":"<that program>","params":{…},"canonicalQuestions":["<the canonical form of THIS question>"]} as your final action. Reusing ADDS this question's form to the ones that program already answers — that is how it becomes findable for the next person who phrases it your way.
    A program built for a RELATED-but-different question is NOT a fit — "amount billed" is not "net spend", a header
    total is not a line-level breakdown, gross is not net. Do NOT adapt or force-fit a program; when it is not an
    EXACT match, go to step 2 and build from the CONCEPTS — never from a not-quite program. Accuracy over reuse.
