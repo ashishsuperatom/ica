@@ -91,7 +91,7 @@ The answer JSON the engine produces / you write has this shape:
   "status": "answered" | "unknowable" | "uncertain",
   "doubt": "<only when uncertain: one short reason the program couldn't confidently answer this input>",
   "category": "simple_lookup | complex_lookup | comparison | causal | counterfactual | analysis (the shape you chose)",
-  "text": "the KEY takeaway — a string (≤2 sentences) OR an array of short item strings when there's more to convey. When there is a table, do NOT restate its rows here.",
+  "answer": "the KEY takeaway — a string (≤2 sentences) OR an array of short item strings when there's more to convey. When there is a table, do NOT restate its rows here.",
   "period": "<the time window in plain words, when the answer is time-scoped>",
   "periods": [ { "label": "<a compared scope>", "detail": "<its exact range + how comparable, e.g. N days>" } ],
   "scope":  "<the non-time filters you applied>",

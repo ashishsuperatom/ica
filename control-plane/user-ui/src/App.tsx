@@ -1198,7 +1198,7 @@ ensureAnswerCSS()
 function answerToText(a: any, cat: string, meta?: { qid?: string; at?: number; timing?: { ms: number; classifyMs?: number; modelMs?: number } }): string {
   const out: string[] = []
   if (cat) out.push(cat.toUpperCase())
-  const prose = a.text ?? (typeof a.answer === 'string' || Array.isArray(a.answer) ? a.answer : null)   // `text` since the rename; `answer` for older ones
+  const prose = typeof a.answer === 'string' || Array.isArray(a.answer) ? a.answer : null   // never stringify an unwrapped envelope
   if (prose) out.push(Array.isArray(prose) ? prose.join('; ') : String(prose))
   if (a.periods?.length) out.push('Time filter: ' + a.periods.map((p: any) => `${p.label}${p.detail ? ' — ' + p.detail : ''}`).join(' · '))
   else if (a.period) out.push('Time filter: ' + a.period)
@@ -1391,14 +1391,12 @@ function AnswerCard({ answer: a, category, timing, qid, at }: { answer: any; cat
         <button className="sa-ic" onClick={toggleFull} title={full ? 'Exit full screen' : 'Full screen'} aria-label="Full screen">{full ? IC.close : IC.expand}</button>
       </div>
       <div className={`sa-type${isTerminal ? ' warn' : ''}`}>{isTerminal ? "Can't answer" : (cat || 'Answer')}</div>
-      {/* PROSE is `text`. It used to be `answer`, which collided with the unit envelope's own `answer` key one
-          level up — so an unwrapped envelope put the whole view-model here and the card printed
-          "[object Object]" while the KPI and tables vanished. `answer` is still read for the many programs and
-          stored answers written before the rename, but only when it is genuinely prose. */}
-      {(() => {
-        const prose = a.text ?? (typeof a.answer === 'string' || Array.isArray(a.answer) ? a.answer : null)
-        return prose ? <div className="sa-prose" dangerouslySetInnerHTML={{ __html: renderAnswerBody(prose) }} /> : null
-      })()}
+      {/* Prose only. `answer` is also the unit envelope's key one level up, so an output that was never
+          unwrapped lands here as the whole view-model — and String()ing it printed "[object Object]" to a user
+          while the KPI and tables silently vanished. Render it when it IS prose; an object is a bug upstream,
+          not something to stringify. */}
+      {(typeof a.answer === 'string' || Array.isArray(a.answer)) &&
+        <div className="sa-prose" dangerouslySetInnerHTML={{ __html: renderAnswerBody(a.answer) }} />}
       {(a.periods?.length > 0 || a.period) && (
         <div className="sa-period"><span className="pk">Time filter</span>
           {a.periods?.length > 0

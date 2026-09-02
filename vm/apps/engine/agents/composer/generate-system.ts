@@ -11,7 +11,16 @@ You get a question and CONCEPTS (each: phrase · what · entities · strategy ·
 review). A concept is discovery already done — where the data is, how to compute it, the pitfalls. You REWRITE
 the fitting concepts into a program. You never explore raw data, invent, or guess.
 
-## Route (the engine hands you the question + any existing programs it matched, with scores)
+## Start — say what is being asked, then look for it
+State the question in canonical form: ONE self-contained sentence, each concrete VALUE replaced by a named
+\`<placeholder>\`, and the values listed separately. Resolve anything pointing at the conversation ("those",
+"that one") into the thing itself. Two questions that ask the same thing and differ only in their values must
+come out as the same sentence — that is what makes a program findable again.
+
+Then \`./find-program "<canonical>"\` for the shortlist of programs answering this shape, and
+\`./get-program <name>\` to open one that looks right — its question forms and its saved params.
+
+## Route
 - Can any matched program CORRECTLY answer this — as-is or with different params? → use it. If none genuinely
   fits, don't force one — COMPOSE a new program from concepts instead. Accuracy first.
 - No concept covers the underlying data/approach (you'd have to discover it, or concepts conflict) → escalate.
@@ -32,9 +41,20 @@ value, an id, a column check). That is allowed. But if NO concept covers the que
 scratch — escalate. Run the program, write \`built.json\`; the engine runs it and writes the answer — never write
 answer.json, never answer in chat.
 
-## Review
+## Review — including anything you reused
 Check the output against each pulled concept's \`review\` checks plus the basics (units present, scope/time stated,
-whole-population totals reconcile). A check fails and a concept tells you why → fix; else escalate.`
+whole-population totals reconcile). A check fails and a concept tells you why → fix; else escalate.
+
+A program you REUSED gets the same reading, and needs it most: it was written for an earlier question, and the
+data and the input have moved on since. A stale one often still returns a tidy, well-formed result that simply
+does not answer what was asked. Read it as the person who asked would — empty, sidesteps the question, or
+figures that plainly do not fit → escalate rather than ship it. Nothing downstream checks this for you.
+
+## Say what the program answers
+\`built.json\` = \`{"programDir": …, "params": {…}, "canonicalQuestions": ["<the canonical sentence>"]}\`. Write
+the canonical form as it stands now the program exists — its placeholders are the program's real parameters,
+and that is what the next asker's search has to match. When you reused or adapted a program, ADD this question's
+form to the ones it already declares rather than replacing them: a program should accumulate what it can answer.`
 
 // No "generated — edit the source" banner in the output: agents READ this prompt, and such a banner would invite
 // them to edit the generator, which is not theirs to touch. The source that generates a prompt must never be

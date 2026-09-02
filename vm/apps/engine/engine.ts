@@ -19,9 +19,8 @@ import { dirname, join } from 'node:path'
 import { existsSync, mkdirSync, rmSync, readFileSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { execProgram, answerView, withProseAlias } from './exec-program.js'
+import { execProgram, answerView } from './exec-program.js'
 import { createSession, prepareWorkspace, type Session, type Harness, type RunHandlers } from './ica/index.js'
-import { createReflex, promptVersion as reflexPromptVersion } from './agents/reflex/index.js'
 import { createNarrator, capResultData, stripCode } from './agents/narrator/index.js'
 import { createAnalyst, promptVersion as analystPromptVersion } from './agents/analyst/index.js'
 import { promptVersion as composerPromptVersion, createComposer, type Composer } from './agents/composer/index.js'
@@ -232,7 +231,6 @@ if (vectors) void backfillMissing(graph, vectors, bgeEmbedder, { kind: 'intent' 
   .catch(e => log.warn('semantic', 'intent backfill failed', e))
 ensureRoot(graph)
 // The FRONT DOOR: every question is routed here first — reuse a program on a match, else build.
-const reflex = createReflex({ cwd: WORKSPACE })   // the reflex agent — the fast front door
 // READ-ONLY window into the graph + answer history + the files behind them, served over the hub to the
 // admin console. The engine runs on a Fly VM with nothing listening, so this is the only way to see
 // what it knows without SSH. It answers `inspect:req` and never writes anything. See inspect.ts.
@@ -245,7 +243,6 @@ const inspector = createInspector({
       analyst:   { harness: ANALYST_HARNESS,   model: ANALYST_MODEL,   busy: busySessions.size > 0 },
       connector: { harness: CONNECTOR_HARNESS, model: CONNECTOR_MODEL, busy: connectorBusy },
       grounding: { harness: GROUNDING_HARNESS, model: GROUNDING_MODEL, busy: groundingBusy },
-      reflex:    { harness: process.env.ICA_REFLEX_HARNESS ?? 'opencode', model: process.env.ICA_REFLEX_MODEL ?? 'deepseek-v4-flash' },
     },
     consolidating: conceptConsolidating,
     consolidateIntervalMs: CONCEPT_CONSOLIDATE_INTERVAL_MS,
@@ -389,7 +386,7 @@ export function answerShapeProblem(a: any): string {
   }
   // Deliberately NOT flagging unknown keys: an answer may carry extra data the renderer ignores, and treating
   // that as an error would cry wolf on perfectly good answers.
-  const prose = a.text ?? (typeof a.answer === 'string' || Array.isArray(a.answer) ? a.answer : null)
+  const prose = typeof a.answer === 'string' || Array.isArray(a.answer) ? a.answer : null
   const renders = a.headline?.display || a.figures?.length || a.table?.columns || a.sections?.length || prose
   return renders ? '' : 'nothing renderable — no headline, figures, table, sections or text'
 }
@@ -423,7 +420,7 @@ async function buildIdentity(): Promise<{ buildId: string; prompts: Record<strin
     try { buildId = execSync('git rev-parse --short HEAD', { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() } catch { /* not a checkout */ }
   }
   const prompts: Record<string, string> = {}
-  for (const [role, fn] of [['analyst', analystPromptVersion], ['composer', composerPromptVersion], ['modeller', modellerPromptVersion], ['reflex', reflexPromptVersion]] as const) {
+  for (const [role, fn] of [['analyst', analystPromptVersion], ['composer', composerPromptVersion], ['modeller', modellerPromptVersion]] as const) {
     try { prompts[role] = await (fn as any)() } catch { /* a version we cannot read is simply absent */ }
   }
   return (BUILD = { buildId, prompts })
@@ -445,6 +442,7 @@ const A = (verb: 'hello' | 'event' | 'events' | 'status' | 'chunk', lane: string
 
 // The recent conversation, for canonicalisation only — enough to resolve what a follow-up points AT ("those",
 // "the third one"). Compact on purpose: the last couple of turns, each one question + a short answer digest.
+// UNUSED since the reflex was removed — the canonicaliser that used it is gone. Kept only until the next clean-up pass.
 function sessionContext(sid: string, turns = 2): string {
   try {
     const rows = answers.bySession(sid).slice(-turns)
@@ -465,6 +463,7 @@ function sessionContext(sid: string, turns = 2): string {
 // near-miss is deliberately not a match (it goes to the composer, which can judge with tools).
 // Every placeholder in the stored form must be bound by the params we extracted: a program that expects
 // <months> and receives nothing would silently run on its DEFAULT window and answer a different question.
+// UNUSED since the reflex was removed — exact canonical matching moved into the composer (./find-program). Kept only until the next clean-up pass.
 function findByCanonical(canonical: string): { program: string; category?: string; nodeId: string } | null {
   // Match the canonical FORM, whole and as written — normalised only for case, spacing and trailing punctuation
   // (normalizeQuestion), which is the same normalisation the rest of the engine uses on questions.
@@ -496,7 +495,7 @@ async function reuseProgram(programDir: string, params: any, category: string,
     // Fresh subprocess (see exec-program.ts): a program edited by a prior modify is cached stale in this
     // long-lived tsx process, so an in-process reuse would re-run yesterday's code. Spawn it clean.
     const rr = await execProgram(WORKSPACE, programDir, params ?? {})
-    const answer = withProseAlias(answerView(rr.output))   // out of the envelope, then both prose key names
+    const answer = answerView(rr.output)   // out of the unit envelope — see answerView
     const out = answer                      // downstream shape checks read the VIEW, not the envelope
     const timing = { ms: Date.now() - t0, reused: true }
     // Deterministic AUDIT of this run (no LLM): the input at this moment, the output's shape, and a rough
@@ -514,16 +513,17 @@ async function reuseProgram(programDir: string, params: any, category: string,
     const doubtReason = answer.status === 'uncertain'
       ? (typeof (out as any)?.doubt === 'string' ? (out as any).doubt : (out as any)?.doubt?.reason ?? 'the program was not confident')
       : ((out as any)?.doubt != null ? (typeof (out as any).doubt === 'string' ? (out as any).doubt : (out as any).doubt?.reason ?? 'the program flagged doubt') : null)
+    // DETERMINISTIC ONLY. A separate reviewing agent used to read the answer here and judge whether it really
+    // answered; it is gone, and with it the ability to catch a well-formed answer that is simply about the
+    // wrong thing. What remains catches the cases a machine can see for certain: the program said it was not
+    // confident, or it came back with nothing to show. Anything subtler now reaches the user — which is the
+    // trade accepted when the front door became one agent.
     let escalate = false, why = ''
     if (doubtReason) { escalate = true; why = `program raised doubt — ${doubtReason}` }
-    else {
-      // Otherwise the reflex REVIEWS whether the (confident-looking) answer actually answers the question.
-      try { const v = await reflex.review(question, answer); escalate = v.verdict === 'escalate'; why = v.reason ?? '' }
-      catch (e: any) { escalate = emptyRun; why = 'reviewer unavailable' + (emptyRun ? ' + degenerate answer' : ''); log.warn('reflex-review', `review failed for ${programDir}`, e) }
-    }
+    else if (emptyRun) { escalate = true; why = 'the run produced nothing to show' }
     if (escalate) {
       clearInterval(ka)
-      log.info('reflex-review', `reused ${programDir} did not answer → escalating to the analyst`, why)
+      log.info('reuse', `reused ${programDir} did not answer → escalating`, why)
       return false   // fall through to the analyst build (analyse handles the rebuild)
     }
     lastAnswer = answer; lastTiming = timing; lastCategory = category
@@ -629,39 +629,22 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   // This FINDS; it never runs and never ships. The match is handed to the composer, which owns deciding whether
   // it truly fits, running it, and verifying the output — one place with the conversation in front of it, instead
   // of two components that can each answer.
-  let askedCanonical: string | undefined
   // The question with everything it points AT written in ("their project managers" → the managers of which
   // projects). The engine resolves this to match on it; handing the agent the fragment instead is why the
   // composer once escalated with "'their' has nothing to bind to" while the engine already knew the answer.
+  // NO CANONICALISER HERE. The composer states the canonical form itself, as its first step, and looks up
+  // matching programs with `./find-program` — so the form it searches with, the candidates it saw, the run and
+  // the result all sit in ONE session and ONE log. A separate agent doing it up front was invisible to the
+  // composer: it could not see what had been matched or why, and neither could anyone reading the tape.
+  //
+  // The exact-repeat fast path above is untouched and needs no agent — it keys on the NORMALISED question.
   let resolvedQuestion: string | undefined
-  let canonicalMatch: { programDir: string; params: Record<string, unknown>; canonical: string } | undefined
-  if (!explicitEdit) {
-    try {
-      const canon = await reflex.canonicalize(question, sessionContext(sid))
-      askedCanonical = canon.canonical
-      // Only worth passing on when it actually says more than the words typed.
-      if (canon.resolved && normalizeQuestion(canon.resolved) !== normalizeQuestion(question)) resolvedQuestion = canon.resolved
-      // `unresolved` = the question leans on something the conversation didn't settle, so it is not self-contained
-      // and must not be bound to a context-free program.
-      const target = canon.unresolved ? null : findByCanonical(canon.canonical)
-      if (target) {
-        // The canonicaliser's params travel as a HINT. The composer maps them onto the program's real inputs and
-        // verifies by running it — deciding parameters is its job, not something to infer here.
-        canonicalMatch = { programDir: target.program, params: canon.params, canonical: canon.canonical }
-        console.log(`[ica] canonical: "${canon.canonical}" → match ${target.program} ${JSON.stringify(canon.params)} → composer`)
-      } else {
-        console.log(`[ica] canonical: "${canon.canonical}"${canon.unresolved ? ` unresolved (${canon.unresolved})` : ' — no match'} → composer`)
-      }
-    } catch (e: any) {
-      console.log(`[ica] canonicalize failed (${e?.message ?? e}) — composer`)   // fail-open: never block a question
-    }
-  }
 
   // ── Routing: MODIFY is DETERMINISTIC (explicit "edit:"/"modify:" prefix only) — never guessed. Otherwise the
   // REFLEX (stateless) classifies REUSE vs BUILD; it has no "modify" decision. The SAME question is a reuse.
   const curNode = pos !== ROOT ? graph.getNode(pos) : null
   const curQ = curNode ? ((curNode.props as any)?.question ?? curNode.summary) : undefined
-  let reflexPlacement: string | undefined                               // 'root' or an intentId — where this question's node hangs
+  let placement: string | undefined                               // 'root' or an intentId — where this question's node hangs
   // `sim` = cosine similarity to the asked question (0..1) — the number that says HOW CLOSE this candidate is.
   // `score` is only the RRF rank-fusion value used for ordering; it is a position, not a measure of fit.
   let programCandidates: { question: string; program?: string; score: number; sim: number | null }[] = []   // engine-searched matches handed to the composer
@@ -682,7 +665,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // else the ENGINE searches (semantic) and hands the composer the candidate programs + scores — the composer
     // judges (reuse a strong match / compose from concepts / escalate). Placement is the regex heuristic: a
     // self-contained question is a new ROOT topic; a follow-up hangs under the current node.
-    reflexPlacement = rootQuestion ? 'root' : pos
+    placement = rootQuestion ? 'root' : pos
     try {
       const hits = vectors ? await hybridSearch(graph, vectors, bgeEmbedder, question, { kind: 'intent', limit: 6 }) : []
       programCandidates = hits
@@ -839,7 +822,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       // The COMPOSER handles both a fresh question (compose/reuse) AND a MODIFY (edit the current program in
       // place). It escalates only when it genuinely can't — then the analyst takes over.
       const composer = await getComposer(sid)
-      const c = await composer.ask(question, handlers, { qid, candidates: programCandidates, conceptNames, modify: modifyTarget ?? undefined, canonicalMatch, resolvedQuestion })
+      const c = await composer.ask(question, handlers, { qid, candidates: programCandidates, conceptNames, modify: modifyTarget ?? undefined, resolvedQuestion })
       if (c.escalate) { escalateReason = c.escalate.reason; console.log(`[ica] composer → escalate · ${c.escalate.reason}`) }
       else {
         authoredBy = 'composer'
@@ -887,9 +870,6 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // Checked here because EVERY route lands on this line — composer, analyst, recovered-after-timeout. The
     // first version of this check only ran on the analyst's answer, and the bug that reached the user came
     // back through the composer.
-    // Both key names on the wire — see withProseAlias. Applied HERE because every route reaches this line, so
-    // no client can be broken by which agent happened to answer.
-    r.answer = withProseAlias(r.answer)
     const shapeProblem = answerShapeProblem(r.answer)
     if (shapeProblem) console.error(`[answer] SHAPE PROBLEM for qid=${qid} (${authoredBy ?? 'unknown'}): ${shapeProblem}`)
     emit(reply, { t: 'analyst:answer', category: r.category, answer: r.answer, timing, sid, qid, shapeProblem: shapeProblem || undefined })
@@ -915,7 +895,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     } else {
       // The REFLEX placed this node (reflexPlacement): 'root' (a new topic under ROOT) or an existing intent's id
       // (a follow-up of it). Default to ROOT if unset (reflex failed). Node id = hash(parent, question).
-      const parent = (reflexPlacement && reflexPlacement !== 'root' && graph.getNode(reflexPlacement)) ? reflexPlacement : ROOT
+      const parent = (placement && placement !== 'root' && graph.getNode(placement)) ? placement : ROOT
       const nodeId = intentId(parent, question)
       graph.putNode({ id: nodeId, kind: 'intent', label: question.slice(0, 80), summary: question,
         // rawAnalysis (r.lastLines) intentionally NOT stored — garbled TUI snapshot, low value; re-enable here if reworked.
@@ -928,9 +908,9 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       if (vectors) void indexText(vectors, bgeEmbedder, nodeId, norm).catch(e => log.warn('semantic', `embed ${nodeId.slice(0, 14)} failed`, e))
       setPosition(sid, nodeId)
       console.log(`[ica][session] setPosition sid="${sid}" → ${nodeId.slice(0, 14)}  q="${question.slice(0, 40)}"`)
-      console.log(`[ica] intent node ${nodeId.slice(0, 14)} under ${parent === ROOT ? 'ROOT' : parent.slice(0, 14)} (reflex-placed)${programDir ? ` · program ${programDir}` : ' · no program'}`)
+      console.log(`[ica] intent node ${nodeId.slice(0, 14)} under ${parent === ROOT ? 'ROOT' : parent.slice(0, 14)} (placed)${programDir ? ` · program ${programDir}` : ' · no program'}`)
       // OBSERVE-only: did the cheap exact-match regex agree with where the reflex placed the node?
-      if (!explicitEdit) console.log(`[ica] regex-check: guessed ${rootQuestion ? 'ROOT' : 'FOLLOW-UP'} · reflex placed ${parent === ROOT ? 'ROOT' : 'FOLLOW-UP'} → ${rootQuestion === (parent === ROOT) ? 'MATCH ✓' : 'MISMATCH ✗'}`)
+      if (!explicitEdit) console.log(`[ica] regex-check: guessed ${rootQuestion ? 'ROOT' : 'FOLLOW-UP'} · placed ${parent === ROOT ? 'ROOT' : 'FOLLOW-UP'} → ${rootQuestion === (parent === ROOT) ? 'MATCH ✓' : 'MISMATCH ✗'}`)
     }
     // PROGRAM NODE — the program's OWN identity in the DB (kind:'program'), distinct from the question/intent
     // node. props.dir is the pointer to where the program lives; props.authoredBy records WHO wrote it —
@@ -953,7 +933,9 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       // later variant matches even when the writer phrased its form differently), and the raw question (the
       // writer's canonical form can encode its own misreading; the words actually typed stay in the index).
       const priorCanon: string[] = ((graph.getNode(`prog:${slug}`)?.props as any)?.canonicalQuestions ?? []) as string[]
-      const canonical = Array.from(new Set([...priorCanon, ...programCanonical, ...(askedCanonical ? [askedCanonical] : []), question.trim()].filter(Boolean)))
+      // The composer declares this turn's canonical form in built.json (programCanonical); there is no separate
+      // canonicaliser any more, so the raw question is the only other form guaranteed to be here.
+      const canonical = Array.from(new Set([...priorCanon, ...programCanonical, question.trim()].filter(Boolean)))
       graph.putNode({ id: `prog:${slug}`, kind: 'program', label: slug, summary: authoredProgramDir,
         props: { dir: authoredProgramDir, authoredBy: authoredMeta, category: r.category, canonicalQuestions: canonical } })
       graph.putEdge({ from: builtIntentId, to: `prog:${slug}`, type: 'program' })
@@ -1362,14 +1344,13 @@ setInterval(() => { conceptConsolidateTick().catch((e) => console.log('[concept-
 let warmed = false
 async function warmEssentialAgents() {
   if (warmed) return; warmed = true
-  console.log('[ica] warming essential agents (analyst · connector · reflex)…')
+  console.log('[ica] warming essential agents (analyst · connector)…')
   const warm = async (name: string, p: Promise<unknown>): Promise<{ name: string; ok: boolean; ms: number }> => {
     const t0 = Date.now()
     try { await p; const ms = Date.now() - t0; console.log(`[ica] warm: ${name} ready (${(ms / 1000).toFixed(1)}s)`); return { name, ok: true, ms } }
     catch (e: any) { console.warn(`[ica] warm: ${name} failed (falls back to lazy) — ${e?.message ?? e}`); return { name, ok: false, ms: Date.now() - t0 } }
   }
   const results = await Promise.all([
-    warm('reflex', (reflex as any).warmup?.() ?? Promise.resolve()),
     warm('analyst',   analystSlot.get().then(a => a.session.warmup?.())),
     warm('connector', connectorSlot.get().then(a => a.session.warmup?.())),
   ])

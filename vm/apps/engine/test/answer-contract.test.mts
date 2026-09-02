@@ -12,7 +12,7 @@
 // point — a wrong example is obeyed perfectly.
 //
 // So this asserts the example produces something the renderer can actually draw.
-import { answerView, withProseAlias } from '../exec-program.js'
+import { answerView } from '../exec-program.js'
 
 let failed = 0
 const check = (name: string, ok: boolean, detail = '') => {
@@ -39,7 +39,7 @@ const renderable = (a: any) => ({
 
   // The program's contract: hand back the VIEW. Simulated here the way the example now does it.
   const programOut = unitOut.answer
-  const a = withProseAlias(answerView(programOut))
+  const a = answerView(programOut)
   const r = renderable(a)
 
   check('headline is an OBJECT with `display`', typeof a.headline === 'object' && !!a.headline?.display,
@@ -56,13 +56,24 @@ const renderable = (a: any) => ({
   check('flat prose array is not unwrapped', Array.isArray(answerView({ answer: ['line'] }).answer))
 }
 
-// ── 3. Both prose key names travel, so no client is broken by the rename ─────
+// ── 3. EVERY seeded example renders ──────────────────────────────────────────
+// Both are copied by agents, and the ranking one teaches TABLES — the most-copied shape of all. It shipped
+// with a string headline, a `subtitle` key that exists nowhere in the contract, and an enveloped return.
 {
-  const a = withProseAlias({ text: ['one', 'two'], headline: { label: 'x', display: '1', value: 1 } })
-  check('web reads `text`',   Array.isArray(a.text))
-  check('iOS/Teams read `answer`', Array.isArray(a.answer), 'EngineAnswer.swift reads object["answer"]')
-  const legacy = withProseAlias({ answer: ['old'], headline: { label: 'x', display: '1', value: 1 } })
-  check('a legacy `answer`-only program gains `text`', Array.isArray(legacy.text))
+  const ranking = await import('../examples/example.grouped-ranking/units/ranking-view.js')
+  const grouped = { year: 2026, total: 9_876_543, rows: Array.from({ length: 25 }, (_, i) => ({ customerName: `Customer ${i + 1}`, total: 1000 * (25 - i) })) }
+  const out: any = await (ranking as any).default({}, { grouped, topN: 10 })
+  const a = answerView(out.answer)          // the program returns view.answer
+  const r = renderable(a)
+
+  check('ranking: headline is an object with `display`', typeof a.headline === 'object' && !!a.headline?.display,
+        typeof a.headline === 'string' ? 'STRING — no KPI renders' : String(a.headline?.display))
+  check('ranking: headline carries `value`', typeof a.headline?.value === 'number',
+        'the degenerate-run check reads headline.value')
+  check('ranking: renders a table', r.tables > 0, `${r.tables} table(s)`)
+  check('ranking: prose is never an object', !r.proseIsObject)
+  check('ranking: no keys outside the contract',
+        !('subtitle' in a), 'subtitle renders nowhere')
 }
 
 console.log(failed ? `\n${failed} failed` : '\nthe example teaches what the renderer draws')

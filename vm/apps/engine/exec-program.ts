@@ -57,23 +57,3 @@ export function answerView(out: any): any {
     && typeof out.answer === 'object' && !Array.isArray(out.answer) ? out.answer : out
   return { ...view, status: view?.status ?? 'answered' }
 }
-
-/** Keep `answer` as an alias of `text` on the way out.
- *
- *  The view-model's prose field is `text` now — `answer` used to name BOTH the prose and, one level up, the
- *  whole view-model, and that collision is what put an object where prose belonged and printed
- *  "[object Object]" to a user.
- *
- *  But the wire is shared: the iOS client reads `answer` for prose (EngineAnswer.swift), and the Teams channel
- *  passes `answer` through untouched. Renaming the field without an alias would silently blank the prose in
- *  both — a client that cannot be rebuilt in the same breath as the engine must not be broken by an engine
- *  rename. So both keys travel, `text` is authoritative, and `answer` follows it until those clients move.
- *
- *  Only ever set when `answer` is not already prose, so an older program that still writes `answer` wins. */
-export function withProseAlias(a: any): any {
-  if (!a || typeof a !== 'object') return a
-  const answerIsProse = typeof a.answer === 'string' || Array.isArray(a.answer)
-  if (a.text !== undefined && !answerIsProse) return { ...a, answer: a.text }
-  if (a.text === undefined && answerIsProse) return { ...a, text: a.answer }
-  return a
-}

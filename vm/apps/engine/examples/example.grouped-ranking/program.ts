@@ -21,7 +21,11 @@ export const question = 'EXAMPLE: Who are our top 10 customers by sales this yea
 export default async function (ctx, params) {
   const g = await ctx.use('sales-by-customer', { year: params?.year, asOf: params?.asOf });
   ctx.log(`Ranked ${g.rows.length} customers for ${g.year}.`);
-  return ctx.use('ranking-view', { grouped: g, topN: params?.topN ?? 10 });
+  // A PROGRAM RETURNS THE VIEW-MODEL, not the unit's envelope. `ctx.use()` hands back the unit's named
+  // outputs; a UI unit's is `answer`. Returning that object directly leaves the view one level down, and a
+  // consumer that forgets to unwrap it puts the whole view-model where the prose belongs.
+  const view = await ctx.use('ranking-view', { grouped: g, topN: params?.topN ?? 10 });
+  return view.answer;
 }
 
 export const ui = { category: 'dashboard' };

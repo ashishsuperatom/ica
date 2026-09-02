@@ -328,6 +328,29 @@ const out = {}
 for (const k of KEEP) if (hit[k] !== undefined) out[k] = hit[k]
 console.log(JSON.stringify(out, null, 2))
 `,
+    'get-program': `// ONE program, in full: every question form it answers, its saved params, its category.
+// The shortlist (./find-program) says which one to open; this opens it. Read its code from programs/<name>/.
+import { NodeStore } from '@superatom/node-store'
+const store = new NodeStore(${JSON.stringify(join(dbDir, 'project.sqlite'))})
+const name = process.argv.slice(2).filter(a => !a.startsWith('--')).join(' ').trim()
+if (!name) { console.log(JSON.stringify({ hint: 'get-program <program>   — one program, with every question form it answers and its saved params' })); process.exit(0) }
+const P = (n) => (typeof n.props === 'string' ? JSON.parse(n.props || '{}') : (n.props || {}))
+const strip = (d) => String(d || '').replace('programs/', '')
+const want = strip(name)
+const questions = []
+const params = {}
+let found = null
+for (const h of store.search(want, { limit: 40 })) {
+  const p = P(h)
+  const dir = h.kind === 'program' ? p.dir : p.program
+  if (!dir || strip(dir) !== want) continue
+  if (!found) found = { program: dir, category: p.category }
+  const qs = h.kind === 'program' ? h.label : (p.question || h.label)
+  if (qs && !questions.includes(qs)) questions.push(qs)
+  if (p.params && typeof p.params === 'object') Object.assign(params, p.params)
+}
+console.log(JSON.stringify(found ? { program: found.program, category: found.category, answers: questions, params } : { error: 'no such program: ' + name }, null, 2))
+`,
     'find-schema': `// Datasource index. "<term>" = matching fields across ALL sources (SOURCE.CONTAINER.FIELD : type). Search by field/table name, by type (date/number), or by what a column MEANS. --source <S> filters to one source; --full adds PK/nullable/references.
 import { NodeStore, searchDataSource } from '@superatom/node-store'
 const store = new NodeStore(${JSON.stringify(join(dbDir, 'project.sqlite'))})
@@ -342,20 +365,19 @@ const rows = searchDataSource(store, q, { source, limit: full ? 40 : 60 })
 const view = (e) => full ? e : (e.key + ' : ' + (e.type || '?') + (e.isKey ? ' [PK]' : '') + (e.references ? (' → ' + e.references) : ''))
 console.log(JSON.stringify(rows.map(view), null, 2))
 `,
-    'find-program': `// Programs that answered a similar question. "<question>" = matching question/program/category (the INDEX). Add --full for its saved params.
+    'find-program': `// Programs that answered a similar question — the SHORTLIST: what each answers, and its name.
+// Deliberately no params and no source: a list is for choosing which one to look at. ./get-program <name> opens one.
 import { NodeStore } from '@superatom/node-store'
 const store = new NodeStore(${JSON.stringify(join(dbDir, 'project.sqlite'))})
-const args = process.argv.slice(2)
-const full = args.includes('--full')
-const q = args.filter(a => a !== '--full').join(' ').trim()
+const q = process.argv.slice(2).filter(a => !a.startsWith('--')).join(' ').trim()
 const P = (n) => (typeof n.props === 'string' ? JSON.parse(n.props || '{}') : (n.props || {}))
 const out = []
 for (const h of store.search(q, { limit: 20 })) {
   const p = P(h)
-  const row = h.kind === 'intent' && p.program ? { question: p.question ?? h.label, program: p.program, category: p.category, params: p.params }
+  const row = h.kind === 'intent' && p.program ? { question: p.question ?? h.label, program: p.program, category: p.category }
             : h.kind === 'program' ? { question: h.label, program: p.dir, category: p.category }
             : null
-  if (row) out.push(full ? row : { question: row.question, program: row.program, category: row.category })
+  if (row) out.push(row)
 }
 const seen = new Set()
 console.log(JSON.stringify(out.filter(o => o.program && !seen.has(o.program) && seen.add(o.program)).slice(0, 8), null, 2))
@@ -402,7 +424,8 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
     'find-concept': 'find-concept "<phrase>"   → the NAMES of matching concepts. A query is required. Read one with get-concept.',
     'get-concept':  'get-concept "<exact name>"   → ONE concept\'s guide: what it is, its rules, where the data lives, how to compute and present it',
     'find-schema':  'find-schema "<term>" [--source <SOURCE>] [--full]   → search ALL datasources for a field/table by name, type, or description (SOURCE.TABLE.COLUMN : type); --source filters to one; --full adds PK/nullable/references',
-    'find-program': 'find-program "<question>" [--full]   → programs that answered a similar question (question/program/category); add --full for the saved params',
+    'find-program': 'find-program "<question>"   → the shortlist: programs that answered a similar question (what it answers · name · category)',
+    'get-program': 'get-program <program>   → ONE program in full: every question form it answers, its saved params, its category',
     'sources':      'sources   → every data source with its kind + dialect (JSON)',
     'query':        'query "<source>" "<query>"   → run a query against a source → JSON rows   (list sources: ./sources)',
     'introspect':   'introspect "<source>" <cmd>   where <cmd> = tables | columns "<table>" | sample "<table>" [n] | profile "<table>" "<column>" | verify-join "<fromT>" "<fromCol>" "<toT>" "<toCol>"',
