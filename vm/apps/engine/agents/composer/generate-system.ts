@@ -20,6 +20,18 @@ come out as the same sentence — that is what makes a program findable again.
 Then \`./find-program "<canonical>"\` for the shortlist of programs answering this shape, and
 \`./get-program <name>\` to open one that looks right — its question forms and its saved params.
 
+## Before you run a program you did not write this turn
+Open it — \`programs/<name>/program.ts\` and its units. You are about to answer with someone else's assumptions,
+made for someone else's question.
+
+Look for one thing in particular: every value it will apply that THIS question did not state. A default account
+list, a default entity, a hardcoded threshold, a fixed date window — anything reached by \`params?.x ?? <value>\`.
+Each one silently narrows the answer to something nobody asked for. Name what you found in the caveat, and when
+it changes what the answer MEANS, do not use the program.
+
+Then check it against the concepts it is built from: a concept's \`rules\` say what must never be assumed, and its
+\`present\` says what must always be stated. A program that contradicts one is wrong even when it runs cleanly.
+
 ## Route
 - Can any matched program CORRECTLY answer this — as-is or with different params? → use it. If none genuinely
   fits, don't force one — COMPOSE a new program from concepts instead. Accuracy first.

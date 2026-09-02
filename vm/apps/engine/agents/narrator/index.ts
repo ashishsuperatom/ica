@@ -7,16 +7,17 @@
 // router's context either), created when a build starts and discarded when the answer lands. Same cheap model
 // as the reflex router (opencode · deepseek-v4-flash) — the terse one-line output keeps deliberation minimal.
 import { createSession, type Harness, type Session } from '../../ica/index.js'
+import { agentProse, hasToolMarkup } from '../../ica/prose.js'
 
 const NARRATE = `You narrate a data analysis AS IT HAPPENS, for the person who asked. A short, live, plain-English
 update on what is happening right now — so they follow along and never feel like they are just waiting.
 
 TELL A STORY OF PROGRESS
 - Each update is a step FORWARD: what we're looking at, then what we've FOUND. It should feel like momentum, not
-  a status log. ("Pulling the sales records now." → "Found the regions — totalling each one." → "Numbers are in,
-  just double-checking them before we show you.")
-- When the calculation is done, say we've worked it out and are confirming it once more — then the final answer
-  follows. Keep the person leaning in and interested, not watching a clock.
+  a status log. ("Pulling the sales records now." → "Found the regions — totalling each one." → "The totals are
+  in — putting them together now.")
+- When the calculation is done, say so plainly and let the answer follow. Keep the person leaning in and
+  interested, not watching a clock.
 
 PLAIN, PROFESSIONAL LANGUAGE
 - Write as you would to a client in a business update: simple, common words, said professionally.
@@ -30,7 +31,15 @@ DON'T DWELL ON ERRORS
   NOT report a failed step, a retry, or "an error"; the next step fixes it. Just keep telling the progress story.
 - Only if the work is genuinely stuck with no way forward, say so simply ("This one is taking a little longer").
 
-- Report only what the activity actually shows — never invent a number. Progress notes, not the final answer.`
+SAY WHAT IS HAPPENING — NEVER THAT IT IS RIGHT
+- Report only what the activity actually shows: never invent a number, and never claim a check that is not in
+  front of you. You cannot see one. Words like verified, confirmed, reconciled, validated, cross-checked,
+  "matches the proven figures", "ties out" and "all correct" assert that something was tested — and a reader
+  acts on a number differently when told it was. Say what is being done ("totalling revenue by month"), not
+  that it came out right.
+- Nothing has been "built before" or "already proven" unless the activity says so in those terms. A list of
+  candidate programs is not a proven answer.
+- Progress notes, not the final answer.`
 
 // Cap the data we feed the narrator. Query results can be huge (long lists/tables, possibly NESTED — the array
 // may not be at the top). The narrator only needs a SAMPLE to summarise, so keep the first N items of every
@@ -62,16 +71,9 @@ const MACHINERY = [
 ]
 // Strip fenced code blocks and drop lines that are mostly code, so the narrator only ever SEES findings — never
 // program source. Returns '' when nothing business-meaningful survives.
-export function stripCode(s: string): string {
-  return (s ?? '')
-    .replace(/```[\s\S]*?```/g, ' ')                         // fenced blocks
-    .replace(/`[^`]*`/g, ' ')                                // inline code
-    .split('\n')
-    .filter((l) => { const t = l.trim(); return t && !/programs?\/|=>|[{};]\s*$|^\s*[+-]\s|\.(ts|tsx|js|mjs)\b/.test(t) })
-    .join('\n')
-    .replace(/\s{2,}/g, ' ')
-    .trim()
-}
+// The narrator's view of an agent's output is the same view every reader needs, so it is not defined here.
+// See ica/prose.ts — one rule, so switching harness cannot change what a reader gets.
+export const stripCode = agentProse
 // A finished narration beat must READ like a business update. Reject anything that smells of machinery or is too
 // long to be one (an echo of the raw activity). A dropped beat is invisible; a leaked one is the bug — so when in
 // doubt, drop.
@@ -81,7 +83,7 @@ export function stripCode(s: string): string {
 export function beatRejection(s: string): string {
   const t = (s ?? '').trim()
   if (!t) return 'empty'
-  if (t.length > 320) return `too long (${t.length} chars)`
+  if (t.length > 700) return `too long (${t.length} chars)`   // 320 dropped every closing summary; the machinery check is the real guard
   const hit = MACHINERY.find((re) => re.test(t))
   return hit ? `matched ${hit}` : ''
 }
@@ -109,7 +111,11 @@ export function createNarrator(opts: NarratorOpts) {
       )
       // Keep the full update (may be a couple of sentences when there's a real finding). Strip any stray
       // wrapping quotes / markdown the model adds, and collapse blank lines.
-      const beat = (lastLines || '').trim()
+      // The narrator's OWN output, through the same filter. A model with no tools still writes tool-call syntax
+      // when it has just read some, and that is exactly how every beat of a turn came to be discarded.
+      const raw = (lastLines || '').trim()
+      if (hasToolMarkup(raw)) console.log('[beat] stripped tool-call markup from the narrator\'s own output')
+      const beat = agentProse(raw)
         .replace(/^\s*(here('| i)s (an |the )?(update|latest|progress)[:.]?\s*)/i, '')   // drop a preamble if it slipped in
         .replace(/^["'`*\s]+|["'`*\s]+$/g, '')
         .replace(/\n{2,}/g, '\n')

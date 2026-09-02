@@ -110,7 +110,10 @@ module.exports = {
       cwd:         `${root}/vm/apps/engine`,
       interpreter: 'none',
       watch:       false,
-      env:         { PATH: process.env.PATH, ...prql, DATASOURCES_DIR: `${root}/vm/projects/${IDS.prql}/datasources` },
+      // COMPOSER on pi/gpt-5.6-luna. pi reaches the same ChatGPT subscription `codex login` already set up, but
+      // through pi-ai's provider rather than by spawning the codex CLI — 5.4s against 24.9s on the same prompt.
+      env:         { PATH: process.env.PATH, ...prql, DATASOURCES_DIR: `${root}/vm/projects/${IDS.prql}/datasources`,
+                     ICA_COMPOSER_HARNESS: 'pi', ICA_COMPOSER_MODEL: 'gpt-5.6-luna' },
     },
   ],
 }
