@@ -5,7 +5,7 @@
 //
 //   OPENROUTER_API_KEY must be set. Model via opts.model / ICA_PI_MODEL (default deepseek-v4-flash).
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createAgentSession, DefaultResourceLoader, getAgentDir, SessionManager } from '@earendil-works/pi-coding-agent'
@@ -29,6 +29,7 @@ export interface PiSessionOpts {
   cwd: string
   provider?: string   // default: codex when `codex login` has been done, else openrouter
   model?: string
+  systemReference?: string   // the authoring reference → AGENTS.md, which pi's resource loader reads from cwd
 }
 
 // Turn one SDK event into a human-readable stream chunk (tool starts + assistant text).
@@ -88,6 +89,18 @@ export function createPiSession(opts: PiSessionOpts): Session {
   const provider = opts.provider ?? process.env.ICA_PI_PROVIDER ?? (cred ? 'openai-codex-responses' : 'openrouter')
   const usingCodex = provider === 'openai-codex-responses'
   const modelId = opts.model ?? process.env.ICA_PI_MODEL ?? (usingCodex ? 'gpt-5.6-luna' : 'deepseek/deepseek-v4-flash')
+
+  // THE AGENT'S INSTRUCTIONS. pi's DefaultResourceLoader reads AGENTS.md / CLAUDE.md / SYSTEM.md from cwd and
+  // folds them into the system prompt, so the reference goes in the same way codex takes it — as a file the
+  // harness loads itself, not as text prepended to the question.
+  //
+  // Without this, pi ran the composer with NO instructions at all: no canonicalisation, no route rules, no
+  // built.json contract. It still answered, which is the dangerous part — a turn that looks like it worked.
+  let refPlacement: 'in-context' | 'file' = 'file'
+  if (opts.systemReference?.trim()) {
+    try { writeFileSync(join(opts.cwd, 'AGENTS.md'), opts.systemReference); refPlacement = 'in-context' }
+    catch (e) { console.warn('[ica:pi] could not write AGENTS.md; instructions will be missing', e) }
+  }
   let session: any = null
   let buf = ''
   let running = false
@@ -133,6 +146,7 @@ export function createPiSession(opts: PiSessionOpts): Session {
   return {
     async run(prompt, h) { return new Promise<RunResult>((resolve) => { queue.push({ prompt, h, resolve }); pump() }) },
     async compact() { return { lastLines: '(pi manages its own context — no /compact needed)', ms: 0 } },
+    referencePlacement: refPlacement,          // via AGENTS.md, which pi's resource loader picks up from cwd
     buffer: () => buf,
     busy: () => running,
     stop: () => { try { session?.close?.() } catch {} session = null },

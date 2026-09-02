@@ -44,7 +44,7 @@ export const DEFAULT_HARNESS: Harness = (process.env.ICA_HARNESS as Harness) || 
 export function createSession(harness: Harness, opts: SessionOpts): Session {
   switch (harness) {
     case 'opencode':    return createOpencodeSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model, baseUrl: opts.baseUrl, noTools: opts.noTools, system: opts.system, systemReference: opts.systemReference })
-    case 'pi':          return createPiSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model })
+    case 'pi':          return createPiSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model, systemReference: opts.systemReference })
     case 'claude-code': return createClaudeSession({ cwd: opts.cwd, model: opts.model, bin: opts.bin, resumeId: opts.resumeId, systemReference: opts.systemReference })
     case 'codex':       return createCodexSession({ cwd: opts.cwd, model: opts.model, resumeId: opts.resumeId, systemReference: opts.systemReference })
     case 'mock':        return createMockSession(opts)

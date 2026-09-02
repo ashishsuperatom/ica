@@ -407,6 +407,24 @@ const emitBeat = (reply: any, text: string, qid: string, sid: string) => {
   emit({ type: 'log', channel: 'narration' }, { t: 'narration', text, qid, sid })
 }
 
+/** Did this command go and GET something — a query, an introspection, a program run — as opposed to shuffling
+ *  files about? Only the first kind is worth narrating: it produces findings, where reading a file produces
+ *  machinery the narrator is meant to hide.
+ *
+ *  Matched on what the command DOES, never on how a harness spells it. The previous test was
+ *  `/\b(tsx|node|run\.mjs|query\.mjs|program\.ts)\b/`, which described opencode's and claude's command lines.
+ *  pi wraps everything as `bash ./query …` and `read …`, so nothing matched, the narrator was fed nothing, and
+ *  a turn that was working produced no narration at all — a harness change silently removing a feature.
+ *
+ *  pi also emits assistant prose only when the turn ENDS, so on that harness these results are the only live
+ *  signal there is. */
+export function isDataCall(command?: string): boolean {
+  const c = String(command ?? '').toLowerCase()
+  if (!c) return false
+  if (/^\s*(bash\s+)?(read|ls|cat|head|tail|grep|find|write|edit|mkdir|touch|rm|mv|cp)\b/.test(c)) return false
+  return /\b(query|introspect|resolve|find-concept|get-concept|find-schema|find-program|get-program|sources|run\.mjs|program\.ts|tsx|node)\b/.test(c)
+}
+
 // ── What produced an answer ─────────────────────────────────────────────────
 // An answer that cannot be attributed cannot be evaluated: when one changes, the question is always whether the
 // DATA moved, a PROMPT changed, a CONCEPT was rewritten, or the ENGINE was rebuilt — and without this we are
@@ -799,7 +817,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         // The analyst's prose often EMBEDS program source/diffs while it explains its code — strip that out so the
         // narrator never even sees machinery (defence in depth with isCleanBeat on the output side).
         if (ev.kind === 'message' && ev.text?.trim()) { const prose = stripCode(ev.text); if (prose) narrationBuf.push(prose.slice(0, 600)) }
-        else if (ev.kind === 'command' && ev.output?.trim() && /\b(tsx|node|run\.mjs|query\.mjs|program\.ts)\b/.test(ev.command || '')) narrationBuf.push(('RESULT: ' + capResultData(ev.output)).slice(0, 1800))
+        else if (ev.kind === 'command' && ev.output?.trim() && isDataCall(ev.command)) narrationBuf.push(('RESULT: ' + capResultData(ev.output)).slice(0, 1800))
       },
     }
     // The analyst does its OWN search (find-concept) and is a strong model (Sonnet),
