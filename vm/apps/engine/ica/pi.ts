@@ -139,7 +139,12 @@ export function createPiSession(opts: PiSessionOpts): Session {
     const rl = new DefaultResourceLoader({ cwd: opts.cwd, agentDir: getAgentDir() } as any)
     await rl.reload()
     const model = getModel(provider as any, modelId)
-    ;({ session } = await createAgentSession({ resourceLoader: rl, sessionManager: SessionManager.inMemory(), model }))
+    // TELL IT WHERE TO WORK. Without `cwd` the SDK defaults to process.cwd() — the ENGINE's directory, not the
+    // agent's workspace — so every tool ran in the wrong place. The model worked around it by prefixing
+    // `cd <absolute workspace> &&` onto every command, which costs tokens on each call, makes the step log
+    // unreadable, and puts the machine's filesystem layout in the transcript. Every other harness is given its
+    // directory and uses plain relative paths (`./get-concept "…"`); this one simply was not.
+    ;({ session } = await createAgentSession({ cwd: opts.cwd, resourceLoader: rl, sessionManager: SessionManager.inMemory(), model }))
     session.subscribe?.((ev: any) => {                                   // ONE subscription; routes to the active turn
       const norm = normPiEvent(ev, liveCommands)                          // the SHARED shape — see normPiEvent
       if (norm) activeHandler?.onEvent?.(norm)
