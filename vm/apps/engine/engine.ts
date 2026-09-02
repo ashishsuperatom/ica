@@ -482,6 +482,7 @@ function findByCanonical(canonical: string): { program: string; category?: strin
   return null
 }
 
+// UNUSED since every question began going through the composer — kept for one clean-up pass, not called.
 // Reuse a saved program (SYS-1, no LLM): run it against CURRENT data, emit the answer, persist. Shared by
 // the positional exact-hit and the reflex catalog-match. Returns false on failure so the caller rebuilds.
 async function reuseProgram(programDir: string, params: any, category: string,
@@ -613,9 +614,19 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   if (!explicitEdit) console.log(`[ica] regex: ${rootQuestion ? 'self-contained → verbatim reuse-match' : `FOLLOW-UP (${cues.join(',')}) → skip verbatim, canonicalise with context`}`)
   const hitNode = rootQuestion ? graph.getNode(matchId) : null
   const hp: any = hitNode?.props
+  // AN EXACT REPEAT IS A FINDING, NOT A SHORTCUT. This used to run the saved program and return, answering
+  // without the composer ever seeing the question. That is precisely the case that most needs looking at: the
+  // program was written for an earlier asking, and the data has moved since — a stale one still returns a tidy,
+  // well-formed result that no longer answers. Nothing was reading it except a separate reviewer that could not
+  // see the run it was judging.
+  //
+  // So the match is handed to the composer as a strong starting point. It runs it, reads the output as the
+  // person who asked would, and commits or carries on. Every question goes through one agent, and the review
+  // happens where the run, the question and the result are all in the same context.
+  let exactMatch: { programDir: string; canonical: string; params: Record<string, unknown> } | undefined
   if (rootQuestion && hp?.program && existsSync(join(WORKSPACE, hp.program, 'program.ts'))) {
-    if (await reuseProgram(hp.program, hp.params, hp.category, { sid, qid, question, norm, t0, nodeId: matchId, reply, channel })) return
-    // failed → fall through to rebuild via the analyst
+    exactMatch = { programDir: hp.program, canonical: question, params: hp.params ?? {} }
+    console.log(`[ica] exact repeat → ${hp.program} — handed to the composer to run and check`)
   }
 
   // FIRST SIGN OF LIFE, before any model call. Canonicalisation alone is ~2s and retrieval follows it, so the
@@ -822,7 +833,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       // The COMPOSER handles both a fresh question (compose/reuse) AND a MODIFY (edit the current program in
       // place). It escalates only when it genuinely can't — then the analyst takes over.
       const composer = await getComposer(sid)
-      const c = await composer.ask(question, handlers, { qid, candidates: programCandidates, conceptNames, modify: modifyTarget ?? undefined, resolvedQuestion })
+      const c = await composer.ask(question, handlers, { qid, candidates: programCandidates, conceptNames, modify: modifyTarget ?? undefined, canonicalMatch: exactMatch, resolvedQuestion })
       if (c.escalate) { escalateReason = c.escalate.reason; console.log(`[ica] composer → escalate · ${c.escalate.reason}`) }
       else {
         authoredBy = 'composer'

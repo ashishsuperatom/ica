@@ -130,8 +130,9 @@ ${asked}
 
 ${candBlock}
 ${conceptBlock}
-${o.canonicalMatch ? `MATCHED PROGRAM — \`${o.canonicalMatch.programDir}\` declares that it answers "${o.canonicalMatch.canonical}", which is this question with its values filled in: ${JSON.stringify(o.canonicalMatch.params)}.
-Start here: run it with those values (\`tsx run.mjs ${o.canonicalMatch.programDir}/program.ts '${JSON.stringify(o.canonicalMatch.params)}'\`) and read the output as the person who asked would. If it answers them, COMMIT as your final action: write ${builtRel} = {"programDir":"${o.canonicalMatch.programDir}","params":${JSON.stringify(o.canonicalMatch.params)}} and stop. If it does not, carry on below.
+${o.canonicalMatch ? `ASKED BEFORE — this exact question was answered by \`${o.canonicalMatch.programDir}\` with ${JSON.stringify(o.canonicalMatch.params)}.
+That is a starting point, not a verdict: it was written for the earlier asking and the data has moved since.
+RUN it (\`tsx run.mjs ${o.canonicalMatch.programDir}/program.ts '${JSON.stringify(o.canonicalMatch.params)}'\`) and read the output as the person who asked would — nothing after you checks this. If it genuinely answers, COMMIT as your final action: write ${builtRel} = {"programDir":"${o.canonicalMatch.programDir}","params":${JSON.stringify(o.canonicalMatch.params)},"canonicalQuestions":["<the canonical form>"]} and stop. If it is empty, sidesteps the question, or the figures do not fit, carry on below.
 ` : ''}
 1. Can a program above answer THIS question EXACTLY — the SAME measure, scope and grain, differing at most by a
    parameter (a date, a top-N)? Only then reuse it: pick it, run it, and COMMIT — write ${builtRel} = {"programDir":"<that program>","params":{…}} as your final action.
