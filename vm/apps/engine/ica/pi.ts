@@ -54,18 +54,27 @@ function fmtEvent(e: any): string {
  *
  *  `id` matters as much as `kind`: the engine pairs a command's start with its completion by id to work out how
  *  long the step took. Without a stable one, nothing can be timed. */
-function normPiEvent(e: any): AgentEvent | null {
+function normPiEvent(e: any, cmds: Map<string, string>): AgentEvent | null {
   if (!e?.type) return null
   const id = e.toolCallId ?? e.id ?? (e.toolName ? `${e.toolName}:${e.callIndex ?? ''}` : undefined)
   const a = e.args || {}
   const cmd = a.command || a.path || a.file_path || (a.sql ? String(a.sql).replace(/\s+/g, ' ').slice(0, 300) : '')
 
-  if (e.type === 'tool_execution_start')
-    return { kind: 'command', id, command: `${e.toolName || e.tool?.name || 'tool'} ${cmd}`.trim(), status: 'in_progress', done: false }
+  // pi puts the ARGS on the start event and the OUTPUT on the end event, and the two never meet. Remember the
+  // command here so the completion can carry it: without that, a finished step reads "bash" with no command,
+  // the log row says only `Ran bash`, and the narrator — which needs to see WHAT was run to know a query from a
+  // file read — is fed nothing at all for the whole turn.
+  if (e.type === 'tool_execution_start') {
+    const command = `${e.toolName || e.tool?.name || 'tool'} ${cmd}`.trim()
+    if (id) cmds.set(id, command)
+    return { kind: 'command', id, command, status: 'in_progress', done: false }
+  }
 
   if (e.type === 'tool_execution_end' || e.type === 'tool_result') {
     const failed = e.isError || e.error || e.result?.isError
-    return { kind: 'command', id, command: `${e.toolName || e.tool?.name || 'tool'} ${cmd}`.trim(),
+    const remembered = id ? cmds.get(id) : undefined
+    if (id) cmds.delete(id)                                    // drained as it completes — only live steps are held
+    return { kind: 'command', id, command: remembered ?? `${e.toolName || e.tool?.name || 'tool'} ${cmd}`.trim(),
              output: typeof e.result === 'string' ? e.result : (e.result?.output ?? e.output ?? undefined),
              status: failed ? 'failed' : 'completed', done: true }
   }
@@ -106,6 +115,7 @@ export function createPiSession(opts: PiSessionOpts): Session {
   let running = false
   let activeHandler: RunHandlers | undefined
   let activeAnswer = ''
+  const liveCommands = new Map<string, string>()   // a step's command text, start → completion (see normPiEvent)
   const queue: { prompt: string; h?: RunHandlers; resolve: (r: RunResult) => void }[] = []
 
   async function ensure() {
@@ -116,7 +126,7 @@ export function createPiSession(opts: PiSessionOpts): Session {
     const model = getModel(provider as any, modelId)
     ;({ session } = await createAgentSession({ resourceLoader: rl, sessionManager: SessionManager.inMemory(), model }))
     session.subscribe?.((ev: any) => {                                   // ONE subscription; routes to the active turn
-      const norm = normPiEvent(ev)                                       // the SHARED shape — see normPiEvent
+      const norm = normPiEvent(ev, liveCommands)                          // the SHARED shape — see normPiEvent
       if (norm) activeHandler?.onEvent?.(norm)
       const chunk = fmtEvent(ev)
       if (chunk) { buf = (buf + chunk).slice(-64000); activeHandler?.onOutput?.(chunk) }
