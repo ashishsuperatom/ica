@@ -54,6 +54,21 @@ function fmtEvent(e: any): string {
  *
  *  `id` matters as much as `kind`: the engine pairs a command's start with its completion by id to work out how
  *  long the step took. Without a stable one, nothing can be timed. */
+/** The text a pi tool produced. pi returns `{ content: [{ type:'text', text }] }` — not a string and not
+ *  `.output`, which is where the first version of this looked, so every completion arrived with no output at
+ *  all. The narrator is fed from command RESULTS, so an empty output there meant it was never called once in a
+ *  whole turn while the run itself worked perfectly. */
+function piResultText(result: any): string | undefined {
+  if (result == null) return undefined
+  if (typeof result === 'string') return result
+  const parts = Array.isArray(result?.content) ? result.content : null
+  if (parts) {
+    const t = parts.filter((c: any) => c?.type === 'text' || typeof c?.text === 'string').map((c: any) => c.text).join('\n').trim()
+    return t || undefined
+  }
+  return typeof result?.output === 'string' ? result.output : undefined
+}
+
 function normPiEvent(e: any, cmds: Map<string, string>): AgentEvent | null {
   if (!e?.type) return null
   const id = e.toolCallId ?? e.id ?? (e.toolName ? `${e.toolName}:${e.callIndex ?? ''}` : undefined)
@@ -75,7 +90,7 @@ function normPiEvent(e: any, cmds: Map<string, string>): AgentEvent | null {
     const remembered = id ? cmds.get(id) : undefined
     if (id) cmds.delete(id)                                    // drained as it completes — only live steps are held
     return { kind: 'command', id, command: remembered ?? `${e.toolName || e.tool?.name || 'tool'} ${cmd}`.trim(),
-             output: typeof e.result === 'string' ? e.result : (e.result?.output ?? e.output ?? undefined),
+             output: piResultText(e.result) ?? piResultText(e.output),
              status: failed ? 'failed' : 'completed', done: true }
   }
 
