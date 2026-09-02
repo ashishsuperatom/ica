@@ -22,6 +22,7 @@ export interface OpencodeSessionOpts {
   // server (createOpencode) — the ~370MB is then paid per engine.
   baseUrl?: string
   hostname?: string   // default '127.0.0.1' (only when spawning a private server)
+  resumeId?: string   // a prior session id — opencode prompts BY id, so continuing one is just not creating one
   port?: number       // default 0 ephemeral (only when spawning a private server)
   noTools?: boolean   // disable ALL tools for this session (pure text completion — no tool schemas, no tool calls)
   system?: string     // REPLACE opencode's default coding system prompt with this one (for pure-LLM agents)
@@ -110,7 +111,8 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
   let ownsServer = false   // true ONLY when this harness spawned the server — we stop what we start, and never touch a server we merely connected to
   let managed: { stop: () => void } | null = null   // the standalone server WE started (to reap it)
   let sse: AbortController | null = null   // aborts OUR event subscription on stop (so closing a server doesn't ECONNRESET-reject)
-  let sessionId = ''
+  let sessionId = opts.resumeId ?? ''        // reuse a prior session when given one — see ensure()
+  const rawSubs = new Set<(chunk: string) => void>()
   let buf = ''
   const eventLog: AgentEvent[] = []                 // structured events (the 'events' view), fed by POLLING (SSE is broken)
   const polled = new Map<string, string>()          // part id → last signature, so we emit only on change
@@ -142,8 +144,12 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
       process.once('SIGINT', term); process.once('SIGTERM', term)
       process.once('exit', () => { try { managed?.stop() } catch {} })
     }
-    const created = await client.session.create({ body: { title: 'ica' }, query: { directory: opts.cwd } })
-    sessionId = created?.data?.id ?? created?.id
+    // RESUME when we were handed one. opencode addresses a session by id on every prompt, so continuing a
+    // conversation is simply not creating a new one — it had no resume path only because nobody wired it.
+    if (!sessionId) {
+      const created = await client.session.create({ body: { title: 'ica' }, query: { directory: opts.cwd } })
+      sessionId = created?.data?.id ?? created?.id
+    }
     // ONE background SSE consumer for the whole server; route events to the active turn.
     sse = new AbortController()
     const seen = new Map<string, number>()                               // per-part emitted length (incremental text)
@@ -164,7 +170,10 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
             if (m?.role === 'assistant' && m.id) asst.add(m.id)
           }
           const chunk = fmtEvent(ev, seen, asst)
-          if (chunk) { buf = (buf + chunk).slice(-64000); activeHandler?.onOutput?.(chunk) }
+          if (chunk) {
+            buf = (buf + chunk).slice(-64000); activeHandler?.onOutput?.(chunk)
+            for (const cb of rawSubs) { try { cb(chunk) } catch { /* one bad watcher cannot break the rest */ } }
+          }
         }
       } catch { /* aborted on stop() or stream closed — expected */ }
     })().catch(() => {})
@@ -258,6 +267,24 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
       try { await client?.session?.summarize?.({ path: { id: sessionId }, query: { directory: opts.cwd } }) } catch {}
       return { lastLines: '(opencode summarized session context)', ms: 0 }
     },
+    // Built BEFORE a question arrives, so the first one does not pay to start the server and open a session.
+    async warmup() { await ensure() },
+
+    // Throw the conversation away. The next turn opens a fresh session; this is the in-place recovery for a
+    // wedged one, which otherwise needs the whole engine restarted.
+    reset: () => { sessionId = ''; buf = ''; running = false },
+
+    // Watch the live stream without owning it. Returns its own unsubscribe.
+    onRaw: (cb: (chunk: string) => void) => { rawSubs.add(cb); return () => rawSubs.delete(cb) },
+
+    // The session id, so the engine can persist it and resume this conversation later. It was held as a local
+    // and never handed back, which is why opencode alone could not be resumed across a restart.
+    sessionId: () => sessionId || undefined,
+
+    // Text pushed into a turn already running. Fire and forget: the caller is a keystroke stream, and awaiting
+    // a round trip per character would make typing unusable.
+    input: (data: string) => { void client?.session?.prompt?.({ path: { id: sessionId }, query: { directory: opts.cwd }, body: { parts: [{ type: 'text', text: data }] } })?.catch?.(() => {}) },
+
     buffer: () => buf,
     events: () => eventLog,
     busy: () => running,

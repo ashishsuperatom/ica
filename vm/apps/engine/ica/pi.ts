@@ -32,6 +32,7 @@ export interface PiSessionOpts {
   systemReference?: string   // the authoring reference → AGENTS.md, which pi's resource loader reads from cwd
   noTools?: boolean          // a PURE TEXT agent (the narrator): no tools at all
   system?: string            // REPLACES the coding prompt — for an agent that only writes prose
+  resumeId?: string          // a prior session's file, to continue the conversation instead of starting over
 }
 
 // Turn one SDK event into a human-readable stream chunk (tool starts + assistant text).
@@ -56,6 +57,14 @@ function fmtEvent(e: any): string {
  *
  *  `id` matters as much as `kind`: the engine pairs a command's start with its completion by id to work out how
  *  long the step took. Without a stable one, nothing can be timed. */
+/** Reopen a prior session, or nothing if it has gone. A stored path can outlive the file it names — the
+ *  session directory is cleaned, a workspace is rebuilt — and every CLI treats that as a hard failure rather
+ *  than starting fresh. One quiet fallback turns "the agent is broken" into "the agent lost its memory". */
+function tryOpenSession(path: string, cwd: string): any | null {
+  try { return SessionManager.open(path, undefined, cwd) }
+  catch (e: any) { console.warn(`[ica:pi] could not resume ${path} (${e?.message ?? e}) — starting a fresh session`); return null }
+}
+
 /** The text a pi tool produced. pi returns `{ content: [{ type:'text', text }] }` — not a string and not
  *  `.output`, which is where the first version of this looked, so every completion arrived with no output at
  *  all. The narrator is fed from command RESULTS, so an empty output there meant it was never called once in a
@@ -136,6 +145,11 @@ export function createPiSession(opts: PiSessionOpts): Session {
   let running = false
   let activeHandler: RunHandlers | undefined
   let activeAnswer = ''
+  const rawSubs = new Set<(chunk: string) => void>()
+  // Every normalised event of the CURRENT turn, kept so a client that connects late — or reconnects — can be
+  // shown what it missed instead of a blank panel. Every other harness keeps one; pi kept none, so a reload
+  // mid-turn lost the whole step list.
+  let eventLog: AgentEvent[] = []
   const liveCommands = new Map<string, string>()   // a step's command text, start → completion (see normPiEvent)
   const queue: { prompt: string; h?: RunHandlers; resolve: (r: RunResult) => void }[] = []
 
@@ -150,17 +164,34 @@ export function createPiSession(opts: PiSessionOpts): Session {
     // `cd <absolute workspace> &&` onto every command, which costs tokens on each call, makes the step log
     // unreadable, and puts the machine's filesystem layout in the transcript. Every other harness is given its
     // directory and uses plain relative paths (`./get-concept "…"`); this one simply was not.
+    // ON DISK, NOT IN MEMORY. inMemory() threw the conversation away when the process ended, so pi could
+    // neither report a session nor resume one — every engine restart started the composer from nothing, while
+    // claude and codex both carried on. A pure-text agent (the narrator) keeps no conversation worth resuming,
+    // so it stays in memory.
+    //
+    // `resumeId` is the session FILE: pi identifies a session by its path, and open() reads it back.
+    const sm = opts.noTools ? SessionManager.inMemory()
+             : (opts.resumeId ? tryOpenSession(opts.resumeId, opts.cwd) : null) ?? SessionManager.create(opts.cwd)
     ;({ session } = await createAgentSession({
-      cwd: opts.cwd, resourceLoader: rl, sessionManager: SessionManager.inMemory(), model,
+      cwd: opts.cwd, resourceLoader: rl, sessionManager: sm, model,
       // A pure-text agent gets NO tools. Until now `noTools` was not even passed to pi, so the narrator — which
       // is meant to write one sentence — ran with bash, read, edit and write available to it.
       ...(opts.noTools ? { noTools: 'all' as const } : {}),
     }))
     session.subscribe?.((ev: any) => {                                   // ONE subscription; routes to the active turn
       const norm = normPiEvent(ev, liveCommands)                          // the SHARED shape — see normPiEvent
-      if (norm) activeHandler?.onEvent?.(norm)
+      if (norm) {
+        const at = eventLog.findIndex((e) => e.id && e.id === norm.id)     // a step UPDATES in place, start → completion
+        if (at >= 0) eventLog[at] = norm; else eventLog.push(norm)
+        if (eventLog.length > 400) eventLog = eventLog.slice(-400)
+        activeHandler?.onEvent?.(norm)
+      }
       const chunk = fmtEvent(ev)
-      if (chunk) { buf = (buf + chunk).slice(-64000); activeHandler?.onOutput?.(chunk) }
+      if (chunk) {
+        buf = (buf + chunk).slice(-64000)
+        activeHandler?.onOutput?.(chunk)
+        for (const cb of rawSubs) { try { cb(chunk) } catch { /* one bad watcher cannot break the rest */ } }
+      }
       if (ev.type === 'message_end' && ev.message?.role === 'assistant') {
         const t = (ev.message.content || []).filter((c: any) => c?.type === 'text').map((c: any) => c.text).join(' ').trim()
         if (t) activeAnswer = t                                          // last assistant message = the answer
@@ -189,10 +220,31 @@ export function createPiSession(opts: PiSessionOpts): Session {
 
   return {
     async run(prompt, h) { return new Promise<RunResult>((resolve) => { queue.push({ prompt, h, resolve }); pump() }) },
-    async compact() { return { lastLines: '(pi manages its own context — no /compact needed)', ms: 0 } },
+    async compact() { const r = await session?.compact?.(); return { lastLines: r ? '(context compacted)' : '(nothing to compact)', ms: 0 } },
     referencePlacement: refPlacement,          // via AGENTS.md, which pi's resource loader picks up from cwd
+
+    // The session FILE is pi's identity — what to hand back as `resumeId` next time. claude and codex both
+    // report theirs and the engine persists it; pi reported nothing, so its conversation died with the process.
+    sessionId: () => session?.sessionFile ?? undefined,
+
+    // Built BEFORE a question arrives, so the first one does not pay for it. The engine warms every agent it
+    // can at boot; pi offered nothing to warm, so its first turn was always cold.
+    async warmup() { await ensure() },
+
+    // Throw the conversation away and start clean. This is the recovery when a session wedges — the failure
+    // that once needed a whole container restarted because nothing could reset an agent in place.
+    reset: () => { try { session?.dispose?.() } catch { /* already gone */ } session = null; buf = ''; eventLog = []; liveCommands.clear() },
+
+    // Steering: text pushed into a turn that is already running, which is what pi calls it. Fire and forget —
+    // the caller is a keystroke stream, and awaiting a round trip per character would make typing unusable.
+    input: (data: string) => { void session?.steer?.(data)?.catch?.(() => {}) },
+
+    // Watch the live stream without owning it. Returns its own unsubscribe.
+    onRaw: (cb: (chunk: string) => void) => { rawSubs.add(cb); return () => rawSubs.delete(cb) },
+
     buffer: () => buf,
+    events: () => eventLog,
     busy: () => running,
-    stop: () => { try { session?.close?.() } catch {} session = null },
+    stop: () => { try { session?.abort?.() } catch { /* not running */ } try { session?.dispose?.() } catch { /* already gone */ } session = null },
   }
 }

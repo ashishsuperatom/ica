@@ -79,6 +79,7 @@ export function createCodexSession(opts: CodexSessionOpts): Session {
   }
   let codex: Codex | null = null
   let thread: Thread | null = null
+  const rawSubs = new Set<(chunk: string) => void>()
   let resumeId = opts.resumeId                                      // mutable: cleared if the resume can't be found
   let threadId: string | null = opts.resumeId ?? null              // current thread id — persist this to resume across restarts
   let resumeFailed = false
@@ -118,7 +119,8 @@ export function createCodexSession(opts: CodexSessionOpts): Session {
         const norm = normEvent(ev)                                 // structured event for the UI event log
         if (norm) { eventLog.push(norm); if (eventLog.length > 600) eventLog.shift(); h?.onEvent?.(norm) }
         const chunk = fmtEvent(ev, seen)
-        if (chunk) { buf = (buf + chunk).slice(-64000); h?.onOutput?.(chunk) }
+        if (chunk) { buf = (buf + chunk).slice(-64000); h?.onOutput?.(chunk)
+        for (const cb of rawSubs) { try { cb(chunk) } catch { /* one bad watcher cannot break the rest */ } } }
         if ((ev.type === 'item.completed' || ev.type === 'item.updated') && ev.item?.type === 'agent_message') {
           answer = ev.item.text                                     // last assistant message = the answer
         }
@@ -147,6 +149,18 @@ export function createCodexSession(opts: CodexSessionOpts): Session {
     buffer: () => buf,
     events: () => eventLog,
     busy: () => running,
+    // Built BEFORE a question arrives, so the first one does not pay to start the thread.
+    async warmup() { await ensure() },
+
+    // Throw the conversation away — the in-place recovery for a wedged thread. resumeId is cleared too, so the
+    // next turn genuinely starts over instead of reopening the thread that got stuck.
+    reset: () => { thread = null; codex = null; threadId = null; resumeId = undefined; buf = '' },
+
+    // Watch the live stream without owning it. Returns its own unsubscribe.
+    onRaw: (cb: (chunk: string) => void) => { rawSubs.add(cb); return () => rawSubs.delete(cb) },
+
+    // No `input`: the codex SDK's thread exposes only `id` and `run`, with no way to steer or abort a turn in
+    // flight. Stated rather than silently missing, so the gap is a known property of that SDK.
     stop: () => { thread = null; codex = null },
     sessionId: () => threadId ?? undefined,   // the codex thread id — persisted so we resume it after a restart
   }
