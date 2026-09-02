@@ -96,9 +96,12 @@ export interface NarratorOpts {
 }
 
 export function createNarrator(opts: NarratorOpts) {
-  const harness: Harness = opts.ica?.harness ?? (process.env.ICA_REFLEX_HARNESS as Harness) ?? 'opencode'
+  // Named for THIS agent. These read ICA_REFLEX_* until now — the reflex was deleted, so the narrator was being
+  // configured through a variable named after an agent that no longer exists. ICA_REFLEX_* is still honoured so
+  // an existing deployment does not silently change model on the next restart.
+  const harness: Harness = opts.ica?.harness ?? (process.env.ICA_NARRATOR_HARNESS ?? process.env.ICA_REFLEX_HARNESS) as Harness ?? 'opencode'
   const model = opts.ica?.model ?? process.env.ICA_NARRATOR_MODEL ?? process.env.ICA_REFLEX_MODEL ?? 'deepseek-v4-flash'
-  const provider = opts.ica?.provider ?? process.env.ICA_REFLEX_PROVIDER ?? 'opencode-go'
+  const provider = opts.ica?.provider ?? process.env.ICA_NARRATOR_PROVIDER ?? process.env.ICA_REFLEX_PROVIDER ?? 'opencode-go'
   let session: Session | null = null
   return {
     /** Translate a batch of raw system activity into ONE business-language line for the user. Best-effort. */

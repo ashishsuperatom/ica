@@ -113,7 +113,10 @@ module.exports = {
       // COMPOSER on pi/gpt-5.6-luna. pi reaches the same ChatGPT subscription `codex login` already set up, but
       // through pi-ai's provider rather than by spawning the codex CLI — 5.4s against 24.9s on the same prompt.
       env:         { PATH: process.env.PATH, ...prql, DATASOURCES_DIR: `${root}/vm/projects/${IDS.prql}/datasources`,
-                     ICA_COMPOSER_HARNESS: 'pi', ICA_COMPOSER_MODEL: 'gpt-5.6-luna' },
+                     ICA_COMPOSER_HARNESS: 'pi', ICA_COMPOSER_MODEL: 'gpt-5.6-luna',
+                     // Narrator on pi too, against the opencode-go subscription pi already holds a credential
+                     // for — same brain as before, one fewer harness running.
+                     ICA_NARRATOR_HARNESS: 'pi', ICA_NARRATOR_PROVIDER: 'opencode-go', ICA_NARRATOR_MODEL: 'deepseek-v4-flash' },
     },
   ],
 }
