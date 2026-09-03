@@ -803,6 +803,9 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // and the narrator covers the whole of it.
     const startNarrator = () => {
       narrator = createNarrator({ cwd: WORKSPACE })
+      // Which context strategy this turn ran under, said once per question — an A/B is only worth running if
+      // you can tell afterwards which arm produced the beats you were reading.
+      console.log(`[beat] narrator context = ${narrator.context}`)
       narrationTimer = setInterval(async () => {
         if (narrating || !reply || narrationBuf.length === 0) return
         narrating = true

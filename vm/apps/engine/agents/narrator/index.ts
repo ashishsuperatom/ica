@@ -3,9 +3,10 @@
 // sentence — what the system is doing RIGHT NOW to answer THEIR question. It reads the system's raw, technical
 // activity and TRANSLATES it; it never repeats the machinery.
 //
-// V1 is deliberately simple: a FRESH session per question (no context kept across questions, none of the
-// router's context either), created when a build starts and discarded when the answer lands. Same cheap model
-// as the reflex router (opencode · deepseek-v4-flash) — the terse one-line output keeps deliberation minimal.
+// A FRESH narrator per question, created when the work starts and discarded when the answer lands — nothing is
+// carried between questions, because narrating this question has nothing to learn from the last one. Within a
+// question there are two ways of carrying context and BOTH are live; see the strategies below. Cheap model
+// (deepseek-v4-flash) — the terse one-line output keeps deliberation minimal.
 import { createSession, type Harness, type Session } from '../../ica/index.js'
 import { agentProse, hasToolMarkup } from '../../ica/prose.js'
 
@@ -67,7 +68,7 @@ const MACHINERY = [
   // CODE — but only shapes that cannot be ordinary prose. `return` was in this list, and it is an everyday
   // word in project finance ("returns", "return on budget"), so real beats were deleted as source code.
   /=>|\bfunction\s+\w+\s*\(|\bconst\s+\w+\s*=|\bawait\s+\w+\(/,
-  /\[\[ui\]\]|❯|●|⏺|Combobulating|Ran \d+ shell/i,          // TUI chrome / spinner
+  /❯|●|⏺|Combobulating|Ran \d+ shell/i,                      // TUI chrome / spinner
   /```|<\/?\w+>/,                                            // fenced code / xml
 ]
 // Strip fenced code blocks and drop lines that are mostly code, so the narrator only ever SEES findings — never
@@ -94,6 +95,48 @@ export function isCleanBeat(s: string): boolean { return !beatRejection(s) }
 export interface NarratorOpts {
   cwd: string
   ica?: { harness?: Harness; model?: string; provider?: string; baseUrl?: string }
+  /** Which context strategy to run. Omitted ⇒ ICA_NARRATOR_CONTEXT, else 'stateless'. */
+  context?: NarratorContext
+}
+
+// ── THE TWO WAYS OF CARRYING CONTEXT, SIDE BY SIDE ─────────────────────────────────────────────────────────
+// Both are live. This is an A/B we intend to keep running for a while, so neither is "the old one": each is
+// meant to be improved on its own terms until we can see which reads better, and switching is a variable, not
+// a revert. Only the CONTEXT differs — the system prompt is shared, so a comparison is about the thing being
+// compared and not about who got the better instructions.
+//
+//   stateful   the session keeps every beat, so the model sees the whole turn as one conversation. Continuity
+//              is free and the cached prefix keeps growing with it. The cost is that a long turn accumulates
+//              hundreds of stale RESULT blocks that cannot help write the next line.
+//   stateless  each beat is a single shot: the session is reset and the last few beats are passed back in as
+//              "already said". Context stays small and constant, the system prompt stays the cached prefix.
+//              The bet is that a narrator needs the last few lines, not the whole history.
+export type NarratorContext = 'stateful' | 'stateless'
+
+interface ContextStrategy {
+  /** Called before each run. May abandon the session so the next run starts clean. */
+  prepare(session: Session): void
+  /** The per-beat user message. */
+  prompt(question: string, activity: string, recent: string[]): string
+}
+
+const ACTIVITY = (activity: string) =>
+  `\n\nRECENT SYSTEM ACTIVITY (raw + technical — TRANSLATE it, never repeat it):\n${activity}\n\nThe one line:`
+
+const STRATEGIES: Record<NarratorContext, ContextStrategy> = {
+  stateful: {
+    prepare() { /* keep the session — the history IS the continuity */ },
+    prompt: (question, activity) => `USER QUESTION: ${question}${ACTIVITY(activity)}`,
+  },
+  stateless: {
+    prepare(session) { session.reset?.() },
+    prompt: (question, activity, recent) => {
+      const said = recent.length
+        ? `\n\nALREADY SAID — carry on from these, do not repeat them:\n${recent.map(s => `- ${s}`).join('\n')}`
+        : ''
+      return `USER QUESTION: ${question}${said}${ACTIVITY(activity)}`
+    },
+  },
 }
 
 export function createNarrator(opts: NarratorOpts) {
@@ -104,28 +147,23 @@ export function createNarrator(opts: NarratorOpts) {
   const harness: Harness = opts.ica?.harness ?? (process.env.ICA_NARRATOR_HARNESS ?? process.env.ICA_REFLEX_HARNESS) as Harness ?? 'pi'
   const model = opts.ica?.model ?? process.env.ICA_NARRATOR_MODEL ?? process.env.ICA_REFLEX_MODEL ?? 'deepseek-v4-flash'
   const provider = opts.ica?.provider ?? process.env.ICA_NARRATOR_PROVIDER ?? process.env.ICA_REFLEX_PROVIDER ?? 'opencode-go'
+  // Which context strategy this narrator runs. Default stateless; ICA_NARRATOR_CONTEXT=stateful switches it,
+  // and opts wins over both so a caller can run the two against each other in one process.
+  const context: NarratorContext =
+    opts.context ?? (process.env.ICA_NARRATOR_CONTEXT === 'stateful' ? 'stateful' : 'stateless')
+  const strategy = STRATEGIES[context]
   let session: Session | null = null
   return {
+    /** Which strategy produced these beats — logged with each one, so an A/B is readable after the fact. */
+    context,
     /** Translate a batch of raw system activity into ONE business-language line for the user. Best-effort.
-     *  `recent` = the last few beats already shown, so it carries on rather than repeating itself. */
+     *  `recent` = the last few beats already shown (used by the stateless strategy). */
     async narrate(question: string, activity: string, recent: string[] = []): Promise<string> {
       // noTools + system=NARRATE → a PURE text completion: no coding-agent scaffolding, no tool schemas, no tool
       // calls. The instructions live in the (well-cached) system prompt; only the per-turn activity travels here.
       session ??= createSession(harness, { cwd: opts.cwd, model, provider, baseUrl: opts.ica?.baseUrl, noTools: true, system: NARRATE })
-      // EVERY BEAT IS A SINGLE SHOT. The session used to keep each call in its history, so over a ten-minute
-      // turn at a beat every four seconds it carried every scrap of activity it had ever been shown — hundreds
-      // of stale RESULT blocks, none of which help write the next line. Reset first: the system prompt stays as
-      // the cached prefix, and the only variable part is this tick's activity plus the lines already said.
-      //
-      // A rolling window over that history was the other option. It bounds the size too, but evicting the
-      // oldest entries changes the cached PREFIX — the part caching actually pays for.
-      session.reset?.()
-      const said = recent.length
-        ? `\n\nALREADY SAID — carry on from these, do not repeat them:\n${recent.map(s => `- ${s}`).join('\n')}`
-        : ''
-      const { lastLines } = await session.run(
-        `USER QUESTION: ${question}${said}\n\nRECENT SYSTEM ACTIVITY (raw + technical — TRANSLATE it, never repeat it):\n${activity}\n\nThe one line:`,
-      )
+      strategy.prepare(session)
+      const { lastLines } = await session.run(strategy.prompt(question, activity, recent))
       // Keep the full update (may be a couple of sentences when there's a real finding). Strip any stray
       // wrapping quotes / markdown the model adds, and collapse blank lines.
       // The narrator's OWN output, through the same filter. A model with no tools still writes tool-call syntax
