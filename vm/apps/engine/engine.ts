@@ -693,7 +693,19 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     if (stopped || !reply) return
     if (!ownsProgramEvent(sid, qid, ev)) return
     const text = describeProgramEvent(ev)
-    emit(reply, { t: 'program:event', ev: { ...ev, text }, qid, sid })
+    if (!text) return
+    const msg = { t: 'program:event', ev: { ...ev, text }, qid, sid }
+    // TWO AUDIENCES, and the split is what each event is FOR.
+    //
+    // A program STARTING, ENDING or FAILING answers the question that made us build this: is anything actually
+    // happening? Two or three lines per run, and everyone gets them — a client that opts out of the rest still
+    // knows the silence is a program working and not a hang.
+    //
+    // Everything else — each unit, each decision, each query — is operator detail, and it is the volume: a real
+    // program emits dozens. It goes to the `program` channel, so a client receives it only by asking. Later a
+    // preference can simply stop asking, with nothing to change here.
+    if (ev.t === 'program:start' || ev.t === 'program:end' || ev.t === 'program:failed') emit(reply, msg)
+    else emit({ type: 'log', channel: 'program' }, msg)
   })
   // SAY WHAT KIND OF TURN THIS IS, IMMEDIATELY. The card that shows while the work runs had "Analysis" written
   // into it, so a check: or an explain: announced itself as an analysis for its whole duration and only became
