@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3'
 import { DATASOURCE_INDEX_SCHEMA } from './datasource-index.js'
-import { EMBED_CACHE_SCHEMA } from './embed-cache.js'
+import { RETRIEVAL_STATE_SCHEMA } from './retrieval-state.js'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { SCHEMA } from './schema.js'
@@ -65,9 +65,9 @@ export class NodeStore {
     // The datasource index belongs to every project's database, so it is created HERE with everything else
     // rather than by whichever caller happens to reach it first. See DATASOURCE_INDEX_SCHEMA.
     this.db.exec(DATASOURCE_INDEX_SCHEMA)
-    // Same reasoning: embeddings are deterministic and belong to the project, not to a process. Created here
-    // so no caller has to remember to, and so a fresh database has it from the first read.
-    this.db.exec(EMBED_CACHE_SCHEMA)
+    // The retrieval system's frozen parameters (see RETRIEVAL_STATE_SCHEMA). Created here with the rest so a
+    // fresh database has it from the first read, and no caller has to remember to.
+    this.db.exec(RETRIEVAL_STATE_SCHEMA)
   }
 
   close() { this.db.close() }

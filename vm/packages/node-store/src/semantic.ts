@@ -23,6 +23,8 @@ export interface VectorIndex {
   upsert(id: string, vec: Float32Array): void
   remove(id: string): void
   has(id: string): boolean
+  /** Ids currently indexed under a prefix — so a caller that owns a family of ids can retire the stale ones. */
+  idsWithPrefix(prefix: string): string[]
   // cosine DESC; `keep` (if given) restricts candidates to ids it approves (liveness / kind filter).
   // `sim` is the cosine similarity itself (0..1) — the only value here that says HOW CLOSE the match is;
   // `score` just orders the list.
@@ -67,6 +69,10 @@ export class SqliteVecIndex implements VectorIndex {
   }
   remove(id: string) { this.db.prepare(`DELETE FROM ${this.tbl} WHERE node_id = ?`).run(id) }
   has(id: string) { return !!this.db.prepare(`SELECT 1 FROM ${this.tbl} WHERE node_id = ?`).get(id) }
+  idsWithPrefix(prefix: string) {
+    return (this.db.prepare(`SELECT node_id FROM ${this.tbl} WHERE node_id LIKE ?`).all(prefix + '%') as Array<{ node_id: string }>)
+      .map(r => r.node_id)
+  }
   search(q: Float32Array, opts: { limit: number; keep?: (id: string) => boolean }) {
     const k = Math.max(opts.limit * 4, 32)   // over-fetch so post-filtering (keep) still fills `limit`
     const rows = this.db.prepare(`SELECT node_id, distance FROM ${this.tbl} WHERE embedding MATCH ? AND k = ? ORDER BY distance`)

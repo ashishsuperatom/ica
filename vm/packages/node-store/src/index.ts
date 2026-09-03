@@ -17,4 +17,4 @@ export type { DataSourceEntry } from './datasource-index.js'
 // VectorIndex (SqliteVecIndex now / Qdrant later), rrfFuse (reranker).
 export { SqliteVecIndex, rrfFuse, hybridSearch, indexText, backfillMissing } from './semantic.js'
 export type { Embedder, VectorIndex, Hit } from './semantic.js'
-export * from './embed-cache.js'
+export * from './retrieval-state.js'

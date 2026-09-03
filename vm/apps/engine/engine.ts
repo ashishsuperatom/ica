@@ -226,7 +226,7 @@ let vectors: SqliteVecIndex | null = null
 try { vectors = new SqliteVecIndex(graph.db, bgeEmbedder.id, bgeEmbedder.dim) }
 catch (e: any) { console.warn('[semantic] sqlite-vec unavailable — semantic index disabled:', e?.message ?? e) }
 // §3 span-firing retriever — an A/B alternative to rankConceptsBySpecificity, logged side-by-side for comparison.
-const spanFirer = createSpanFirer(graph, bgeEmbedder)
+const spanFirer = createSpanFirer(graph, bgeEmbedder, vectors)   // the ONE vector store — forms are indexed there like everything else
 // Backfill pre-existing intents on boot so semantic reuse can search history, not just newly-built ones.
 // Best-effort + non-blocking (never delays boot); degrades silently if the model/native deps aren't present.
 if (vectors) void backfillMissing(graph, vectors, bgeEmbedder, { kind: 'intent' })
