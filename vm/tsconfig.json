@@ -1,0 +1,46 @@
+{
+  // TYPES, AT LAST. Everything here runs through tsx, which strips types without checking them — so nothing in
+  // this workspace has ever been typechecked, and real bugs have been sitting in plain sight (a call passing an
+  // argument the function does not take, so the cap it meant to apply was silently ignored).
+  //
+  // Not part of the run: tsx still executes the source directly and this emits nothing. It is what `pnpm
+  // typecheck` reads, and what an editor reads, which is the point — the feedback should arrive while the code
+  // is being written rather than when a user hits it.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "types": ["node"],
+
+    // Emit nothing. tsx runs the sources; this exists only to check them.
+    "noEmit": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": false,
+
+    // STRICT, but not pedantic. `strict` catches the class of bug worth catching here — a value that can be
+    // undefined being used as though it cannot. The stylistic flags are left off: this is an existing codebase
+    // and a wall of unused-parameter warnings would train everyone to ignore the output, which is worse than
+    // having none.
+    "strict": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noImplicitOverride": true,
+    "forceConsistentCasingInFileNames": true,
+
+    // The dependencies are not ours to fix, and checking them buys nothing.
+    "skipLibCheck": true
+  },
+  "include": ["apps/**/*.ts", "apps/**/*.mts", "packages/**/*.ts"],
+  // Tests are excluded for the same reason as the examples, and because one of them imports an example: they
+  // are exercised by running them, and holding them to the same contract would mean annotating the example
+  // programs, which is the one thing we must not do.
+  //
+  // EXAMPLES ARE NOT ENGINE CODE. apps/engine/examples/* are reference programs the agent reads to learn the
+  // shape of a unit, written in the loose style an agent writes in — untyped ctx and params, exactly as a
+  // generated program looks. Typechecking them would mean annotating them, which would teach the agent to
+  // write something we do not actually want back.
+  "exclude": ["node_modules", "**/node_modules", "**/dist", ".state", "**/*.test.ts", "**/*.test.mts", "apps/engine/examples/**"]
+}

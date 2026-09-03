@@ -22,7 +22,7 @@ import { execSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { execProgram, answerView } from './exec-program.js'
 import { createSession, prepareWorkspace, type Session, type Harness, type RunHandlers } from './ica/index.js'
-import { createNarrator, capResultData, stripCode } from './agents/narrator/index.js'
+import { createNarrator, capResultData, stripCode, type Narrator } from './agents/narrator/index.js'
 import { createAnalyst, promptVersion as analystPromptVersion } from './agents/analyst/index.js'
 import { promptVersion as composerPromptVersion, createComposer, type Composer } from './agents/composer/index.js'
 import { createConnector, promptVersion as connectorPromptVersion } from './agents/connector/index.js'
@@ -42,6 +42,7 @@ import { createSpanFirer } from './retrieval/span-firing.js'
 import type { EngineMsgType } from '../../../clients/protocol.js'
 import { buildDatasourceIndex } from './datasource-index/build.js'
 import { parseVerb, VERBS } from './verbs/index.js'
+import type { AgentEvent } from './ica/session.js'
 import { diffAnswers, checkReport, checkAnswer } from './verbs/check.js'
 import { collectProgramFiles, programAnswer } from './verbs/program.js'
 import { watchProgramEvents, describeProgramEvent } from './program-events.js'
@@ -665,6 +666,11 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   if (qidIn) { const ex = answers.get(qidIn); if (ex && ex.norm !== norm) qid = genId() }
   curQuestion = question; curSid = sid; curCategory = ''; lastAnswer = null
   const t0 = Date.now()
+  // Declared HERE, above the stop closure that reads them, rather than with the rest of the narration state
+  // two hundred lines below: a closure referring to a variable declared later is legal at runtime only because
+  // it runs later, and it left the type checker narrowing this to `never`.
+  let narrator: Narrator | null = null
+  let narrationTimer: ReturnType<typeof setInterval> | null = null
   // STOPPING. Checked wherever this turn is about to produce something, because a promise already in flight
   // cannot be un-awaited: we tell the agent to stop, stop showing its output, and discard whatever eventually
   // comes back. All three matter — killing the agent alone would still let a late answer land on screen, and a
@@ -694,7 +700,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     if (!ownsProgramEvent(sid, qid, ev)) return
     const text = describeProgramEvent(ev)
     if (!text) return
-    const msg = { t: 'program:event', ev: { ...ev, text }, qid, sid }
+    const msg = { t: 'program:event' as const, ev: { ...ev, text }, qid, sid }
     // TWO AUDIENCES, and the split is what each event is FOR.
     //
     // A program STARTING, ENDING or FAILING answers the question that made us build this: is anything actually
@@ -865,8 +871,6 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   // ── Receptionist narration (a SEPARATE throwaway agent): while the analyst works behind the scenes, translate
   // its raw activity into business-language 'narration' beats for the USER UI. Fresh per question; best-effort — a
   // narration failure must NEVER affect the answer.
-  let narrator: ReturnType<typeof createNarrator> | null = null
-  let narrationTimer: ReturnType<typeof setInterval> | null = null
   const narrationBuf: string[] = []
   let narrating = false
   let lastDoing = ''                 // the last command announced, so a re-emitted event doesn't repeat it
@@ -947,7 +951,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       // Structured events (codex/SDK harnesses only — claude PTY uses onOutput above). The session already
       // normalizes + buffers these (session.events()); the engine just mirrors each one live to the asker and
       // any attached viewers, same as onOutput. Reconnect replay is handled in resyncAnalyst via events().
-      onEvent: (ev) => {
+      onEvent: (ev: AgentEvent) => {
         // TIME every step in ONE place, so every harness is measured the same way and the numbers are
         // comparable. A command spans two events (in_progress → completed); the duration belongs on the one
         // that closes it.
@@ -983,7 +987,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
           // Is the AGENT running a program right now? Its own run.mjs invocations cannot stamp the spool with
           // whose turn they are, so this flag is what lets an unstamped line be attributed — and only when this
           // is the one session with a run in flight. See ownsProgramEvent.
-          if (/\brun\.mjs\b/.test(String(ev.command ?? ''))) {
+          if (/\brun\.mjs\b/.test(String((ev as { command?: string }).command ?? ''))) {
             const t = inflight.get(sid)
             if (t) t.agentRunningProgram = ev.status !== 'completed' && ev.status !== 'failed'
           }
@@ -1628,7 +1632,7 @@ async function selfCheck(): Promise<{ ok: boolean; detail: string }> {
     if (!graph.getNode('meta:self-check')) return { ok: false, detail: 'graph read-back failed' }
     if (!existsSync(WORKSPACE)) return { ok: false, detail: `workspace missing: ${WORKSPACE}` }
     let sources: number | string = 'starting'
-    try { const r = await fetch(`${DATASOURCE}/sources`, { signal: AbortSignal.timeout(4000) }); sources = ((await r.json())?.sources ?? []).length } catch { /* manager may still be warming — not fatal */ }
+    try { const r = await fetch(`${DATASOURCE}/sources`, { signal: AbortSignal.timeout(4000) }); sources = (((await r.json()) as { sources?: unknown[] })?.sources ?? []).length } catch { /* manager may still be warming — not fatal */ }
     return { ok: true, detail: `stores ok · workspace ok · datasources=${sources}` }
   } catch (e: any) { return { ok: false, detail: e?.message ?? String(e) } }
 }

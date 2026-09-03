@@ -29,7 +29,10 @@ const detailOf = (err: unknown): string | undefined =>
   err == null ? undefined : (err as any)?.message ?? String(err)
 
 export const log = {
-  info: (scope: string, msg: string, detail?: string) => push('info', scope, msg, detail),
+  // `unknown`, like warn. They differed, so a caller choosing between them by condition —
+  // log[ok ? 'info' : 'warn'](…) — could not type at all, which is a strange reason for a log line to be a
+  // compile error.
+  info: (scope: string, msg: string, detail?: unknown) => push('info', scope, msg, detailOf(detail)),
   warn: (scope: string, msg: string, detail?: unknown) => push('warn', scope, msg, detailOf(detail)),
   error: (scope: string, msg: string, err?: unknown) => push('error', scope, msg, detailOf(err)),
   /** Recent entries, newest first. Optionally filter by level and cap the count. */

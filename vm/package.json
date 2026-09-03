@@ -2,7 +2,7 @@
   "name": "superatom-vm",
   "private": true,
   "packageManager": "pnpm@9.0.0",
-  "//dependencies": "The root imports none of these. They are declared so pnpm links them into the ROOT node_modules, which is an ancestor of every project home under ENGINE_STATE_DIR — that is how agent-written units resolve `@superatom/*`. Agents write those import lines themselves, so the path cannot be baked in the way the seams bake theirs. Delete these and every generated unit stops resolving.",
+  "//dependencies": "The root imports none of these. They are declared so pnpm links them into the ROOT node_modules, which is an ancestor of every project home under ENGINE_STATE_DIR \u2014 that is how agent-written units resolve `@superatom/*`. Agents write those import lines themselves, so the path cannot be baked in the way the seams bake theirs. Delete these and every generated unit stops resolving.",
   "dependencies": {
     "@superatom/grounding": "workspace:*",
     "@superatom/introspect": "workspace:*",
@@ -10,13 +10,14 @@
     "@superatom/scaffold": "workspace:*"
   },
   "scripts": {
-    "start":   "pm2 start ../ecosystem.config.cjs",
-    "stop":    "pm2 stop ../ecosystem.config.cjs",
+    "start": "pm2 start ../ecosystem.config.cjs",
+    "stop": "pm2 stop ../ecosystem.config.cjs",
     "restart": "pm2 restart ../ecosystem.config.cjs",
-    "status":  "pm2 status",
-    "logs":    "pm2 logs",
-    "flush":   "pm2 flush",
-    "dev":     "pnpm run --parallel --filter datasource-manager --filter datasource-demo --filter code-engine dev"
+    "status": "pm2 status",
+    "logs": "pm2 logs",
+    "flush": "pm2 flush",
+    "dev": "pnpm run --parallel --filter datasource-manager --filter datasource-demo --filter code-engine dev",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -29,5 +30,10 @@
       "@openai/codex",
       "onnxruntime-node"
     ]
+  },
+  "//devDependencies": "The typecheck belongs to the workspace, not to one app inside it: tsconfig.json at this root covers apps/ and packages/, so the compiler and the Node types have to resolve from here.",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
   }
 }

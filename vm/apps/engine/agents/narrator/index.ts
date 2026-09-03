@@ -139,7 +139,16 @@ const STRATEGIES: Record<NarratorContext, ContextStrategy> = {
   },
 }
 
-export function createNarrator(opts: NarratorOpts) {
+/** What a narrator is, stated rather than inferred. Left to inference, a caller holding one as
+ *  `ReturnType<typeof createNarrator> | null` had it narrowed to `never` — an explicit type costs a line and
+ *  removes a whole class of confusion at the call site. */
+export interface Narrator {
+  context: NarratorContext
+  narrate(question: string, activity: string, recent?: string[]): Promise<string>
+  stop(): void
+}
+
+export function createNarrator(opts: NarratorOpts): Narrator {
   // Named for THIS agent. These read ICA_REFLEX_* until now — the reflex was deleted, so the narrator was being
   // configured through a variable named after an agent that no longer exists. ICA_REFLEX_* is still honoured so
   // an existing deployment does not silently change model on the next restart.

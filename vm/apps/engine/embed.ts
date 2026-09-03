@@ -28,6 +28,14 @@ export const bgeEmbedder: Embedder = {
     const m = await model()
     const out: Float32Array[] = []
     if (opts?.asQuery) {
+      // One call per text, which is what fastembed's queryEmbed does. Batching them into a single embed() with
+      // the `query: ` prefix was tried and MEASURED: 24 spans took 1366ms one at a time and 1333ms batched —
+      // no difference. The cost is the model inference per text (~55ms on CPU), not per-call overhead, and
+      // fastembed does not parallelise across a batch. So the library's own API is used, and the prefix is not
+      // duplicated here where it could silently drift out of step with theirs.
+      //
+      // The lever, if this ever matters, is FEWER TEXTS — a question's 2..4-grams are two dozen spans — or a
+      // faster model. Not the loop.
       for (const t of texts) out.push(Float32Array.from(await m.queryEmbed(t)))
     } else {
       for await (const batch of m.passageEmbed(texts)) for (const v of batch) out.push(Float32Array.from(v))

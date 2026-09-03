@@ -42,7 +42,13 @@ export interface ComposerResult {
   ms: number
 }
 export interface ProgramCandidate { question: string; program?: string; score: number }
-export interface ModifyTarget { programDir: string; prevQuestion?: string }
+export interface ModifyTarget {
+  programDir: string
+  prevQuestion?: string
+  /** The concepts this program was built from. The engine has always passed these and the prompt has always
+   *  used them; the type simply never said so, which nothing checked until now. */
+  concepts?: string[]
+}
 
 /** A program whose DECLARED canonical question is the one just asked, with this question's values already bound.
  *  Retrieval found it; the composer still decides — it is a strong lead, not a verdict. */

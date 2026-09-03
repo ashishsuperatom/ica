@@ -186,9 +186,13 @@ export class NodeStore {
   /** Tree view: children under a container via `belongs_to`. */
   children(id: string)     { return this.neighbors(id, { type: 'belongs_to', direction: 'in' }) }
 
-  listKind(kind: string): Node[] {
-    return (this.db.prepare(`SELECT * FROM nodes WHERE kind=? AND valid_to IS NULL ORDER BY label`)
-      .all(kind) as any[]).map(rowToNode)
+  /** Every live node of a kind, by label. `limit` bounds it — callers were already passing one and it was
+   *  being silently dropped on the floor, because the parameter did not exist. Nothing has ever exceeded the
+   *  caps in use, so honouring them changes no behaviour today; it means the cap is there when it is needed. */
+  listKind(kind: string, limit?: number): Node[] {
+    const sql = `SELECT * FROM nodes WHERE kind=? AND valid_to IS NULL ORDER BY label${limit ? ' LIMIT ?' : ''}`
+    const rows = limit ? this.db.prepare(sql).all(kind, limit) : this.db.prepare(sql).all(kind)
+    return (rows as any[]).map(rowToNode)
   }
 
   // --- catalog binding + change-propagation -------------------------------

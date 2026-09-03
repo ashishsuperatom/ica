@@ -111,7 +111,10 @@ export function describeProgramEvent(ev: ProgramEventLine): string {
     case 'unit:end':       return `${ev.unit} (${n(ev.ms) ?? '?'}ms${n(ev.rows) != null ? `, ${n(ev.rows)} rows` : ''})`
     case 'decide':         return `${ev.label} → ${ev.took ? 'yes' : 'no'} — ${ev.reason}`
     case 'log':            return String(ev.text ?? '')
-    case 'query:start':    return `querying ${ev.source}…`
+    // THE QUERY ITSELF, not the fact that one is happening. "querying F5NETSUITE…" told a reader nothing they
+    // could act on — and this line is what stands for the whole wait, because a collapsed run shows only its
+    // latest beat. So it carries the statement, flattened and clipped; the chevron opens the rest.
+    case 'query:start':    return String(ev.sql ?? '').replace(/\s+/g, ' ').trim().slice(0, 140) || `querying ${ev.source}`
     case 'query:end':      return ev.error
       ? `query on ${ev.source} failed after ${n(ev.ms) ?? '?'}ms — ${String(ev.error).slice(0, 200)}`
       : `${ev.source} returned ${n(ev.rows) ?? '?'} rows in ${n(ev.ms) ?? '?'}ms`

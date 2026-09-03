@@ -138,10 +138,10 @@ export function createSpanFirer(store: NodeStore, embedder: Embedder, index: Vec
   /** Every indexed form whose centred cosine to `qc` exceeds FLOOR, plus the nearest few regardless — the exact
    *  input the aggregation needs. K expands while the tail is still above the floor, so nothing above it is
    *  missed; without that, a question matching many forms would silently lose the ones past K. */
-  const above = (qc: Float32Array): Array<{ id: string; sim: number }> => {
+  const above = (idx: VectorIndex, qc: Float32Array): Array<{ id: string; sim: number }> => {
     const keep = (id: string) => nameById.has(id)
     for (let k = 64; ; k *= 4) {
-      const hits = index.search(qc, { limit: k, keep })
+      const hits = idx.search(qc, { limit: k, keep })
       const last = hits[hits.length - 1]
       if (hits.length < k || (last && last.sim <= FLOOR) || k >= 4096) return hits.map(h => ({ id: h.id, sim: h.sim }))
     }
@@ -197,7 +197,7 @@ export function createSpanFirer(store: NodeStore, embedder: Embedder, index: Vec
     reindex() {
       mu = null; spanCache.clear(); nameById = new Map(); exact = new Map(); sig = ''
       state.clear()
-      for (const id of index.idsWithPrefix(FORM_PREFIX)) index.remove(id)
+      for (const id of index?.idsWithPrefix(FORM_PREFIX) ?? []) index!.remove(id)
     },
 
     // Fire the question. `extraForms` = hypothetical surface forms (for alias validation), embedded on the fly
@@ -226,7 +226,7 @@ export function createSpanFirer(store: NodeStore, embedder: Embedder, index: Vec
 
       const perSpan = qspans.map((span, si) => {
         const qc = centre(spanVecs![si], mu!)
-        const hits = above(qc).map(h => ({ name: nameById.get(h.id)!, sim: h.sim }))
+        const hits = above(index!, qc).map(h => ({ name: nameById.get(h.id)!, sim: h.sim }))
         for (const e of extra) hits.push({ name: e.name, sim: cosineCentred(spanVecs![si], e.vec, mu!) })
         return { span, hits }
       })

@@ -105,6 +105,10 @@ test('every event says something a person can read', () => {
     { ...base, t: 'query:end', id: 'q2', source: 'DB', ms: 10, error: 'syntax' },
   ]
   for (const l of lines) assert.ok(describeProgramEvent(l as any).length > 0, `no description for ${l.t}`)
+  // The in-flight line must carry the STATEMENT. It stands in for the whole wait — a collapsed run shows only
+  // its latest beat — so "querying <source>…" would leave the reader with nothing for the length of the query.
+  assert.ok(describeProgramEvent({ ...base, t: 'query:start', id: 'q1', source: 'DB', sql: 'SELECT  SUM(x)\n  FROM y' } as any)
+    .includes('SELECT SUM(x) FROM y'), 'the query text itself, whitespace flattened')
   // An event kind added later must not produce a mystery line.
   assert.equal(describeProgramEvent({ ...base, t: 'something:new' } as any), '')
 })
