@@ -788,6 +788,8 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   let narrating = false
   let lastDoing = ''                 // the last command announced, so a re-emitted event doesn't repeat it
   const saidBeats: string[] = []     // beats already shown — carried into each single-shot narrate call
+  let firstBeatAt = 0                // when the user first saw anything, so the opening gap is measurable
+  let firstActivityAt = 0            // when the AGENT first did anything — the other half of that gap
   try {
     const analyst = await analystSlot.get()
     // Tell the UI how to render this harness's stream. claude-code now has BOTH: a STRUCTURED event view
@@ -812,10 +814,18 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         if (narrating || !reply || narrationBuf.length === 0) return
         narrating = true
         const activity = narrationBuf.splice(0).join('\n')
+        // TIMED IN THREE PARTS, because "the narrator is slow" can mean any of them and they have different
+        // fixes: how long before there was anything to narrate at all (the agent had not done anything yet),
+        // how long the narrating model took, and the total to the first line the user sees.
+        const waited = Date.now() - t0
+        const callT0 = Date.now()
         try {
           // TIMEOUT the narrate call so a hung beat (deepseek) can't freeze narration (finally never running).
           const line = await Promise.race([narrator!.narrate(question, activity, saidBeats.slice(-3)), new Promise<null>((res) => setTimeout(() => res(null), 20000))])
+          const callMs = Date.now() - callT0
+          console.log(`[beat] ${line ? 'wrote' : 'produced nothing'} in ${callMs}ms · activity ${activity.length} chars · ${firstBeatAt ? `+${((Date.now() - t0) / 1000).toFixed(1)}s into the turn` : `FIRST BEAT at +${(waited / 1000).toFixed(1)}s (${((waited - callMs) / 1000).toFixed(1)}s of it waiting for the agent to do something)`}`)
           if (line) {
+            if (!firstBeatAt) firstBeatAt = Date.now()
             saidBeats.push(line)
             emitBeat(reply, line, qid, sid)
             if (channel) emit({ type: 'channel' }, { t: 'channel:narration', channel, qid, text: line })   // stream to the chat channel (Teams/…)
@@ -874,6 +884,10 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         // grep… = machinery) — it's noise, and it tempts the model to echo tool-call syntax (the Teams DSML leak).
         // The analyst's prose often EMBEDS program source/diffs while it explains its code — strip that out so the
         // narrator never even sees machinery (defence in depth with isCleanBeat on the output side).
+        if (!firstActivityAt && (ev.kind === 'message' || ev.kind === 'command')) {
+          firstActivityAt = Date.now()
+          console.log(`[beat] agent's first activity at +${((firstActivityAt - t0) / 1000).toFixed(1)}s (${ev.kind}) — nothing could be narrated before this`)
+        }
         if (ev.kind === 'message' && ev.text?.trim()) { const prose = stripCode(ev.text); if (prose) narrationBuf.push(prose.slice(0, 600)) }
         else if (ev.kind === 'command') {
           // WHAT IT IS DOING — every command, as one short line. This used to be withheld entirely, and the
@@ -955,7 +969,12 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // would be the one part of the answer nobody could check.
     if (explicitCheck) {
       const curProgram = (curNode?.props as any)?.program
-      const prior = curNode ? answers.findAnswered(((curNode.props as any)?.question as string) ?? '') : null
+      // The baseline, by the question first and then by the PROGRAM. The question-shaped lookup misses whenever
+      // the row was saved under different wording than the node carries — a reuse, a modify, a canonical form —
+      // and then check reported "nothing to re-run" about an answer plainly on screen. The program is what is
+      // being re-run, so it is the key that always resolves.
+      const prior = (curNode ? answers.findAnswered(((curNode.props as any)?.question as string) ?? '') : null)
+                 ?? (curProgram ? answers.latestForProgram(curProgram) : null)
       const dir = curProgram ?? prior?.programDir
       // The node's params are what produced what is on screen; the saved row is the fallback for a node that
       // predates them. Without them we would re-run with different inputs and report a change we caused.

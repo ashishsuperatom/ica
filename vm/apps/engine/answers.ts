@@ -72,6 +72,11 @@ export function openAnswers(path: string) {
   const insert = db.prepare(`INSERT OR REPLACE INTO answers
     (qid, session_id, question, norm, category, status, answer_json, created_at, program_dir, params_json, finished_at, build_json, route) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
   const findStmt = db.prepare(`SELECT * FROM answers WHERE norm = ? AND status = 'answered' ORDER BY created_at DESC LIMIT 1`)
+  // The most recent answer a given program produced, whatever question was being asked at the time. `check`
+  // needs a baseline to compare today's run against, and looking it up by the node's normalized question misses
+  // whenever the row was saved under a different wording — a reuse, a modify, a canonical form. The program is
+  // the thing being re-run, so the program is the stable key.
+  const latestProgStmt = db.prepare(`SELECT * FROM answers WHERE program_dir = ? AND status = 'answered' ORDER BY created_at DESC LIMIT 1`)
   // Consolidation cursor: analyses that FINISHED after the watermark, oldest-first — the offline modeler's inbox.
   const sinceStmt = db.prepare(`SELECT * FROM answers WHERE finished_at > ? ORDER BY finished_at ASC LIMIT ?`)
   // Programs already swept by consolidation (finished at or before the watermark) → their structure is already
@@ -140,6 +145,8 @@ export function openAnswers(path: string) {
     // Reuse the PROGRAM (not the answer): the latest run for this question that has a program to re-run.
     // We ALWAYS re-execute it (fresh query) — we never hand back a stale stored answer.
     findAnswered(norm: string): AnswerRow | null { return row(findStmt.get(norm)) },
+    /** The last answer this program produced — `check`'s baseline when the question's own row can't be found. */
+    latestForProgram(programDir: string): AnswerRow | null { return row(latestProgStmt.get(programDir)) },
     get(qid: string): AnswerRow | null { return row(getStmt.get(qid)) },
     bySession(sid: string): AnswerRow[] { return sessStmt.all(sid).map(row).filter(Boolean) as AnswerRow[] },
     // The ICA session to resume for (project, role): its id + the instruction hash it was created under.
