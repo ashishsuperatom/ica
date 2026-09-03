@@ -946,7 +946,7 @@ function ProjectDetailPage() {
         </div>
       )}
 
-      {view === 'dashboards' && <DashboardsPanel api={api} token={token} projectId={projectId!} host={typeof location !== 'undefined' ? location.host : ''} />}
+      {view === 'dashboards' && <DashboardsPanel api={api} token={token} projectId={projectId!} />}
       {view === 'subdomains' && (
         <div className="card">
           <strong>Subdomains</strong>

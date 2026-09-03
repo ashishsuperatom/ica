@@ -46,8 +46,18 @@ async function filesFromDrop(dt: DataTransfer): Promise<{ path: string; file: Fi
   return out
 }
 
-export function DashboardsPanel({ api, token, projectId, host }: { api: (p: string, i?: RequestInit) => Promise<Response>; token: string | null; projectId: string; host: string }) {
+export function DashboardsPanel({ api, token, projectId }: { api: (p: string, i?: RequestInit) => Promise<Response>; token: string | null; projectId: string }) {
   const [list, setList] = useState<Dash[]>([])
+  // WHERE the dashboard will be reachable — the project's own subdomain, not this console's host. Linking to
+  // location.host sent people to superadmin.superatom.site/dashboard/…, which is not where it is served.
+  // Falls back to <projectId>.superatom.site, which the worker resolves directly and always works.
+  const [host, setHost] = useState(`${projectId}.superatom.site`)
+  useEffect(() => {
+    api(`/domains/by-project?projectId=${projectId}`).then((r) => (r.ok ? r.json() : null))
+      .then((d) => { const s0 = (d as any)?.subdomains?.[0]; const name = typeof s0 === 'string' ? s0 : s0?.subdomain
+                     if (name) setHost(`${name}.superatom.site`) })
+      .catch(() => {})
+  }, [api, projectId])
   const [name, setName] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [err, setErr] = useState('')

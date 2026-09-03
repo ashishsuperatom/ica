@@ -279,6 +279,14 @@ export default {
       const up = subPath.match(/^dashboards\/([^/]+)\/upload$/)
       if (up && request.method === 'POST') return uploadDashboardBuild(up[1], projectId, acc.email, request, env)
 
+      // Deleting a dashboard has to take its BYTES with it. The DO row goes either way; without this the
+      // objects stay in R2 for a dashboard that no longer exists, and nothing will ever refer to them again.
+      const del = subPath.match(/^dashboards\/([^/]+)$/)
+      if (del && request.method === 'DELETE') {
+        await deleteDashboardObjects(del[1], projectId, env)
+        // fall through to the DO, which removes the row
+      }
+
       const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
       return stub.fetch(new Request(
         `http://do/${subPath}${url.search}`, request
@@ -619,6 +627,7 @@ async function uploadDashboardBuild(dashId: string, projectId: string, by: strin
   await stub.fetch(new Request(`http://do/dashboards/${encodeURIComponent(dashId)}`, {
     method: 'PUT', body: JSON.stringify({ buildId, files, bytes, by }),
   }))
+  buildCache.set(`${projectId}/${dashId}`, { buildId, at: Date.now() })   // publish takes effect here, not in 15s
   return Response.json({ ok: true, buildId, files, bytes })
 }
 
@@ -630,11 +639,44 @@ async function uploadDashboardBuild(dashId: string, projectId: string, by: strin
  *  The HTML is rewritten as it streams: a build made with the default base refers to `/assets/x.js`, which at
  *  this URL means the site root and not the dashboard. Rewriting here rather than at upload keeps the stored
  *  object exactly what was built. */
-async function serveDashboard(dashId: string, rest: string, projectId: string, request: Request, env: Env): Promise<Response> {
-  if (!env.PACKAGES) return new Response('no bucket bound', { status: 500 })
+/** Which build is current, remembered briefly.
+ *
+ *  A page is a document plus a dozen assets, and each one was asking the Durable Object which build to serve —
+ *  on top of the access check, so a single page load cost two DO round trips per file. The answer changes only
+ *  when someone publishes, so a few seconds of staleness costs nothing and a new build still appears almost at
+ *  once. Per isolate, so it needs no invalidation: an isolate that never sees the update simply expires. */
+const buildCache = new Map<string, { buildId: string; at: number }>()
+const BUILD_TTL_MS = 15_000
+
+async function currentBuild(dashId: string, projectId: string, env: Env): Promise<string | null> {
+  const key = `${projectId}/${dashId}`
+  const hit = buildCache.get(key)
+  if (hit && Date.now() - hit.at < BUILD_TTL_MS) return hit.buildId
   const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
   const meta: any = await stub.fetch(new Request(`http://do/dashboards/${encodeURIComponent(dashId)}`)).then((r) => r.ok ? r.json() : null).catch(() => null)
-  if (!meta?.build_id) return new Response('no such dashboard, or nothing published to it yet', { status: 404 })
+  const buildId = meta?.build_id ? String(meta.build_id) : null
+  if (buildId) buildCache.set(key, { buildId, at: Date.now() })
+  return buildId
+}
+
+/** Remove every object of every build of one dashboard. R2 lists 1000 at a time, so it pages. */
+async function deleteDashboardObjects(dashId: string, projectId: string, env: Env): Promise<void> {
+  if (!env.PACKAGES) return
+  const prefix = `dashboard/${projectId}/${dashId}/`
+  let cursor: string | undefined
+  do {
+    const page = await env.PACKAGES.list({ prefix, cursor })
+    if (page.objects.length) await env.PACKAGES.delete(page.objects.map((o) => o.key))
+    cursor = page.truncated ? page.cursor : undefined
+  } while (cursor)
+  buildCache.delete(`${projectId}/${dashId}`)
+}
+
+async function serveDashboard(dashId: string, rest: string, projectId: string, request: Request, env: Env): Promise<Response> {
+  if (!env.PACKAGES) return new Response('no bucket bound', { status: 500 })
+  const build = await currentBuild(dashId, projectId, env)
+  if (!build) return new Response('no such dashboard, or nothing published to it yet', { status: 404 })
+  const meta = { build_id: build }
 
   const base = `dashboard/${projectId}/${dashId}/${meta.build_id}`
   const wanted = rest.replace(/^\/+/, '')

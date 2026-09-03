@@ -41,6 +41,37 @@ export function CloudGate() {
     })
   }, [session, token])
 
+  // ── The session cookie ──────────────────────────────────────────────────────
+  // This app authenticates every call with a header, which is fine while its own JS is running. A plain
+  // NAVIGATION carries no header — nothing of ours has run yet — so anything served as a page rather than
+  // fetched by this app cannot be authorised at all. That is what a dashboard is.
+  //
+  // Handing the same token to the browser as a cookie closes it. Done on every load, not only when the token
+  // is first minted: the cookie expires on its own schedule and a token kept in localStorage would otherwise
+  // never renew it.
+  //
+  // `?next=` is how a gated page sends someone here to sign in. Once the cookie exists, go back to it.
+  useEffect(() => {
+    if (!token) return
+    let cancelled = false
+    fetch('/api/auth/session', { method: 'POST', headers: { authorization: `Bearer ${token}` } })
+      .then((r) => {
+        if (cancelled || !r.ok) return
+        const next = new URLSearchParams(location.search).get('next')
+        // Only a path on this site — never an absolute URL, which would be an open redirect.
+        if (!next || !next.startsWith('/') || next.startsWith('//')) return
+        // ONCE. Being signed in is not the same as being allowed: someone with no access to this project would
+        // otherwise bounce between the gated page and here for ever, each side doing exactly its job. One
+        // attempt, then the gate's own 401 is left to speak.
+        const tried = `sa-next:${next}`
+        if (sessionStorage.getItem(tried)) return
+        sessionStorage.setItem(tried, '1')
+        location.replace(next)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [token])
+
   if (!isSignedIn) return <div style={{ maxWidth: 420, margin: '110px auto', textAlign: 'center', fontFamily: 'system-ui' }}><h2>Superatom</h2><SignIn /></div>
   if (!projectId) return <div style={{ maxWidth: 480, margin: '110px auto', textAlign: 'center', fontFamily: 'system-ui', color: '#8a8276' }}>No project selected. Open this app with <code>?project=&lt;id&gt;</code>.</div>
   if (!token)     return <div style={{ maxWidth: 420, margin: '110px auto', textAlign: 'center', fontFamily: 'system-ui', color: '#8a8276' }}>Signing in…</div>
