@@ -27,9 +27,21 @@ test('parseVerb does NOT hijack an ordinary question', () => {
   // The whole reason the verb set is closed. Each of these would become a command under a "any word + colon"
   // rule, and the user would never be told their question had been reinterpreted.
   for (const input of ['Q1: revenue by region', 'Note: exclude internal jobs', '2026: how did we do',
-                       'what does edit: mean', 'check:  ', 'edit:']) {
+                       'what does edit: mean', 'edit:']) {
     assert.equal(parseVerb(input), null, input)
   }
+})
+
+test('check: and explain: stand alone — the verb IS the whole instruction', () => {
+  // check re-runs the same program with the same parameters; there is nothing to say beyond the word, and
+  // "check:" on its own is how anyone would type it. Requiring an argument sent that one word off to be
+  // answered as a brand-new question — a full build, narrator and all. edit: still needs to say what to change.
+  for (const input of ['check:', 'check:  ', 'explain:']) {
+    const got = parseVerb(input)
+    assert.ok(got, `${input} must parse`)
+    assert.equal(got!.rest, '')
+  }
+  assert.equal(parseVerb('edit:'), null, 'an edit with no change requested is not an instruction')
 })
 
 const answer = (value: number | null, rows: number, title = 'By pillar') => ({

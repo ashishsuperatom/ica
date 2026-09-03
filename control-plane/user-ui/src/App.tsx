@@ -1116,6 +1116,9 @@ const ANSWER_CSS = `
 .sa-answer .sa-prose code{font-family:var(--mono);font-size:12.5px;color:var(--ink);background:var(--panel);padding:1px 4px;border:1px solid var(--hair)}
 .sa-answer .sa-prose pre.sa-code{font-family:var(--mono);font-size:12.5px;color:var(--ink);background:var(--panel);border:1px solid var(--hair);padding:9px 11px;margin:9px 0;overflow-x:auto;line-height:1.5;white-space:pre}
 .sa-answer .sa-prose pre.sa-code code{background:none;border:0;padding:0;font-size:inherit}
+.sa-answer .sa-prose .sa-h{font-family:var(--grot);font-weight:700;color:var(--ink);font-size:14.5px;margin:14px 0 5px;letter-spacing:-.01em}
+.sa-answer .sa-prose .sa-h.sm{font-size:13.5px;margin:11px 0 4px}
+.sa-answer .sa-prose .sa-h:first-child{margin-top:0}
 .sa-answer .sa-prose ul.sa-list,.sa-answer .sa-caveat ul.sa-list{margin:7px 0 4px;padding-left:2px;list-style:none}
 .sa-answer .sa-prose ul.sa-list li,.sa-answer .sa-caveat ul.sa-list li{position:relative;padding-left:18px;margin:3px 0;line-height:1.55}
 .sa-answer .sa-prose ul.sa-list li::before,.sa-answer .sa-caveat ul.sa-list li::before{content:"";position:absolute;left:4px;top:9px;width:4px;height:4px;background:var(--navy);border-radius:50%}

@@ -47,6 +47,11 @@ export interface RunHandlers {
   // answer"), NEVER tool calls or raw terminal. Harness-specific: claude-code parses its TUI prose;
   // SDK harnesses forward assistant-text events. Safe to show a non-technical user.
   onNarration?: (text: string) => void
+  // LIVE TEXT, as the model produces it — one chunk per token-ish delta, in order, no buffering. OPT-IN: a
+  // caller that wants text to appear while it is being written supplies this; harnesses that cannot stream
+  // simply never call it, and every existing caller is unaffected because it does not ask for it. Chunks are
+  // fragments, not lines: the caller decides where to break them.
+  onText?: (chunk: string) => void
   // TODO(usage): the event form of the usage interface — EVERY ICA harness should call this as it learns its
   // token/cost numbers (a long turn may report incrementally, e.g. per assistant message), so the engine can
   // stream live cost to the UI just like onEvent streams activity. Not implemented by the harnesses yet.

@@ -39,6 +39,10 @@ export function renderInlineMd(text: string): string {
       continue
     }
     if (isFence) { flushAll(); fence = []; continue }
+    // ATX headings. Without this a `## Heading` reached the reader as literal hashes, and — worse — was glued
+    // onto the paragraph after it, because a heading line is not blank and nothing else broke the paragraph.
+    const h = ln.match(/^\s*(#{1,6})\s+(.*)$/)
+    if (h) { flushAll(); out.push(`<div class="sa-h${h[1].length <= 2 ? '' : ' sm'}">${inlineMd(h[2].trim())}</div>`); continue }
     const isTable = /^\s*\|(.+)\|\s*$/.test(ln)
     const b = ln.match(/^\s*[-\u2022]\s+(.*)/)
     const n = ln.match(/^\s*\d+[.)]\s+(.*)/)   // "1. " / "2) " \u2192 a real numbered list (needs a . or ) right after the digits, so "1338 lanes" is NOT a list item)

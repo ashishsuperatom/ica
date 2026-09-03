@@ -27,8 +27,11 @@ The person is asking how the answer already on screen was arrived at — explain
 ./${t.programDir}${t.prevQuestion ? ` (which answers: "${t.prevQuestion}")` : ''}: read the program, its units and the
 run it recorded in program.json${t.concepts?.length ? `, and the concepts it was built from (${t.concepts.join(', ')})` : ''}.
 
-Write it to ${o.mdRel} as markdown — plain language for someone who does not read code, showing the SQL or the one
-piece of logic that actually decides the answer. Don't write a program.`
+Answer what they actually asked, at the length that answers it — and no longer. Usually that is a few sentences
+in plain language: what was counted, over what period, and the choices that decided the number. If they asked for
+something particular — the query, one figure, why a row is missing — give them that instead.
+
+Write it to ${o.mdRel}. Don't write a program.`
 }
 
 /** The explanation as an answer card: markdown in a `text` section, which the UI renders. No headline — there is

@@ -926,12 +926,34 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       }
       currentAgent = 'composer'
       const composer = await getComposer(sid)
-      const c = await composer.ask(question, handlers, { qid, explain: explainTarget, raw: askedRaw })
+      // SHOW IT AS IT IS WRITTEN. Waiting in silence for a finished document is the opposite of a conversation,
+      // and there is no narrator here to fill the gap — the composer's own prose IS the explanation. pi streams
+      // the model's text as deltas (we were dropping them), so it goes to the chat while it is being written.
+      //
+      // Flushed at SENTENCE boundaries, not per token: the chat renders discrete lines, so a chunk per token
+      // would be hundreds of fragments. A sentence at a time reads the way someone typing to you reads. The
+      // long-line guard covers a model that writes a whole paragraph without a full stop.
+      let pending = ''
+      const flush = (force = false) => {
+        const text = pending.trim()
+        if (!text || (!force && text.length < 40)) return
+        pending = ''
+        const prose = stripCode(text)
+        if (prose) emitBeat(reply, prose.slice(0, 700), qid, sid)
+      }
+      const streamed = { ...handlers, onText: (chunk: string) => {
+        pending += chunk
+        // A boundary is a full stop followed by whitespace, a newline, or simply too much unbroken text.
+        if (/[.!?]\s$/.test(pending) || /\n\s*$/.test(pending) || pending.length > 400) flush()
+      } }
+      const c = await composer.ask(question, streamed, { qid, explain: explainTarget, raw: askedRaw })
+      flush(true)   // the tail, which by definition has no closing boundary after it
+      const cat = VERBS.explain.category
       const timing = { ms: Date.now() - t0 }
-      lastAnswer = c.answer; lastTiming = timing; lastCategory = c.category
+      lastAnswer = c.answer; lastTiming = timing; lastCategory = cat
       console.log(`[ica] explain · ${(c.ms / 1000).toFixed(1)}s · ${explainTarget.programDir}`)
-      emit(reply, { t: 'analyst:answer', category: c.category, answer: c.answer, timing, sid, qid })
-      if (channel) emit({ type: 'channel' }, { t: 'channel:answer', channel, qid, answer: c.answer, category: c.category })
+      emit(reply, { t: 'analyst:answer', category: cat, answer: c.answer, timing, sid, qid })
+      if (channel) emit({ type: 'channel' }, { t: 'channel:answer', channel, qid, answer: c.answer, category: cat })
       return
     }
 
@@ -967,9 +989,10 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         console.log(`[ica] check · ${dir} · FAILED TO RUN · ${String(e?.message ?? e).slice(0, 120)}`)
       }
       const timing = { ms: Date.now() - t0 }
-      lastAnswer = answer; lastTiming = timing; lastCategory = 'analysis'
-      emit(reply, { t: 'analyst:answer', category: 'analysis', answer, timing, sid, qid })
-      if (channel) emit({ type: 'channel' }, { t: 'channel:answer', channel, qid, answer, category: 'analysis' })
+      const cat = VERBS.check.category
+      lastAnswer = answer; lastTiming = timing; lastCategory = cat
+      emit(reply, { t: 'analyst:answer', category: cat, answer, timing, sid, qid })
+      if (channel) emit({ type: 'channel' }, { t: 'channel:answer', channel, qid, answer, category: cat })
       return
     }
 

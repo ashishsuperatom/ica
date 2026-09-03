@@ -35,18 +35,23 @@ const SPELLINGS: Record<string, Verb> = {
  *  and a new verb has to answer these questions rather than discovering them by breaking something. */
 export const VERBS: Record<Verb, {
   needsCurrentProgram: boolean   // does it act on the answer already on screen?
+  needsText: boolean             // is the text after the colon the instruction, or is the verb the whole thing?
   usesAgent: boolean             // false = deterministic, no LLM anywhere in the path
   persists: boolean              // may it write an answer row / intent node / program?
   nothingToActOn: string         // what to tell the user when there is no current program
+  category: string               // what the answer card calls this kind of turn
 }> = {
-  edit:    { needsCurrentProgram: true, usesAgent: true,  persists: true,
+  edit:    { needsCurrentProgram: true, needsText: true, usesAgent: true, persists: true, category: 'analysis',
              nothingToActOn: 'There is nothing on screen to edit yet — ask a question first.' },
   // Explain and check REPORT on an answer; they never become one. Persisting them would put "explain: …" into
   // the intent graph as a question in its own right, where retrieval could later match it and serve an
   // explanation to someone who asked for a number.
-  explain: { needsCurrentProgram: true, usesAgent: true,  persists: false,
+  explain: { needsCurrentProgram: true, needsText: false, usesAgent: true, persists: false, category: 'explanation',
              nothingToActOn: 'There is no answer on screen to explain yet — ask a question first, then `explain:` it.' },
-  check:   { needsCurrentProgram: true, usesAgent: false, persists: false,
+  // `check:` on its own is the natural way to ask it — there is nothing to say beyond the word. Requiring text
+  // after the colon made the bare form fall through as an ordinary QUESTION: a full build, narrator and all,
+  // for someone who typed one word expecting a re-run. `explain:` is the same; the text is optional colour.
+  check:   { needsCurrentProgram: true, needsText: false, usesAgent: false, persists: false, category: 'check',
              nothingToActOn: 'There is no answer on screen to check yet — ask a question first, then `check:` it.' },
 }
 
@@ -58,7 +63,9 @@ export function parseVerb(input: string): VerbMatch | null {
   const verb = SPELLINGS[m[1].toLowerCase()]
   if (!verb) return null
   const rest = raw.slice(m[0].length).trim()
-  // "edit:" with nothing after it is not an instruction. Treat it as ordinary text rather than an empty command.
-  if (!rest) return null
+  // An `edit:` with nothing after it is not an instruction — there is no change to make. But `check:` and
+  // `explain:` are complete on their own, and rejecting them sent the user's one word off to be answered as a
+  // brand-new question.
+  if (!rest && VERBS[verb].needsText) return null
   return { verb, raw, rest }
 }
