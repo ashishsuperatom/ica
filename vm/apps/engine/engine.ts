@@ -756,14 +756,19 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     }
     // Surface relevant CONCEPT NAMES by SPECIFICITY (CSS-like: most-question-words-covered wins), names only —
     // the agent opens the winner via find-concept for the method, so we never bias it with a formula.
-    const conceptT0 = Date.now()
+    // TIMED SEPARATELY. Both retrievers run on every question and only one is used, so when this stretch is slow
+    // the only useful question is WHICH — a single number across the pair says nothing about what to fix.
+    const specT0 = Date.now()
     try {
       const specificity = await rankConceptsBySpecificity(question, 8)   // current retriever (name-word specificity + semantic recall)
+      const specMs = Date.now() - specT0
       let fired: { concepts: string[]; scored: { name: string; activation: number }[]; unexplained: string[] } = { concepts: [], scored: [], unexplained: [] }
+      const fireT0 = Date.now()
       try { fired = await spanFirer.fire(question) } catch (e: any) { log.warn('span-firing', 'fire failed', e) }
+      const fireMs = Date.now() - fireT0
       // Log BOTH retrievers side-by-side so we can compare which surfaces the right concepts.
-      console.log(`[retrieval] specificity (${Date.now() - conceptT0}ms) → [${specificity.join(', ')}]`)
-      console.log(`[retrieval] span-firing → fires [${fired.concepts.join(', ')}]  ·  ranked [${fired.scored.slice(0, 6).map(s => `${s.name} ${s.activation.toFixed(2)}`).join(', ')}]${fired.unexplained.length ? `  ·  unexplained [${fired.unexplained.slice(0, 8).join(' | ')}]` : ''}`)
+      console.log(`[retrieval] specificity (${specMs}ms) → [${specificity.join(', ')}]`)
+      console.log(`[retrieval] span-firing (${fireMs}ms) → fires [${fired.concepts.join(', ')}]  ·  ranked [${fired.scored.slice(0, 6).map(s => `${s.name} ${s.activation.toFixed(2)}`).join(', ')}]${fired.unexplained.length ? `  ·  unexplained [${fired.unexplained.slice(0, 8).join(' | ')}]` : ''}`)
       // CLEAN A/B — surface EXACTLY ONE retriever, no mixing/fallback. Default = span-firing (B); USE_SPECIFICITY=1 = specificity (A).
       // Span-firing surfaces the concepts that FIRED plus the rest of its own ranking (still one retriever — it just
       // stops discarding what it already scored). Only NAMES travel, and reading one is now a deliberate
@@ -1585,7 +1590,7 @@ setInterval(() => { conceptConsolidateTick().catch((e) => console.log('[concept-
 let warmed = false
 async function warmEssentialAgents() {
   if (warmed) return; warmed = true
-  console.log('[ica] warming essential agents (analyst · connector)…')
+  console.log('[ica] warming essential agents (analyst · connector) and the concept index…')
   const warm = async (name: string, p: Promise<unknown>): Promise<{ name: string; ok: boolean; ms: number }> => {
     const t0 = Date.now()
     try { await p; const ms = Date.now() - t0; console.log(`[ica] warm: ${name} ready (${(ms / 1000).toFixed(1)}s)`); return { name, ok: true, ms } }
@@ -1594,6 +1599,11 @@ async function warmEssentialAgents() {
   const results = await Promise.all([
     warm('analyst',   analystSlot.get().then(a => a.session.warmup?.())),
     warm('connector', connectorSlot.get().then(a => a.session.warmup?.())),
+    // The concept index is an agent-shaped cost even though it is not an agent: every concept's surface forms
+    // have to be embedded before the first question can be retrieved for, it is cached in memory only, and so
+    // it was rebuilt on the first question after every restart — in the foreground, 27s, while the user waited.
+    // Warming it here moves that onto the boot where it belongs and off the question that happened to be first.
+    warm('concepts',  spanFirer.warm()),
   ])
   // ONE unmistakable line the user can look for: the engine has finished booting and every essential agent
   // is up (or which one failed). "Fully ready" vs "ready with warnings" — never ambiguous.

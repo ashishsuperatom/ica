@@ -130,6 +130,12 @@ export function createSpanFirer(store: NodeStore, embedder: Embedder) {
   }
 
   return {
+    // Build the index NOW, off the critical path. Every surface form of every concept has to be embedded before
+    // the first fire can happen, and that cache is in memory — so without this the FIRST question after every
+    // restart paid for the whole build while the user waited, and none of the questions after it paid anything.
+    // Twenty-seven seconds of an opening silence, attributable to nothing the question itself needed.
+    async warm(): Promise<boolean> { return build() },
+
     // Deliberate reindex (§4: model change / mu refresh) — the ONLY sanctioned way mu changes.
     reindex() { mu = null; vecOf.clear(); spanCache.clear(); forms = []; exact = new Map(); sig = '' },
 
