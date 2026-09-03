@@ -31,8 +31,13 @@ export function describeEntry(e: Pick<DataSourceEntry, 'descHuman' | 'descAi' | 
   return (e.descHuman?.trim() || e.descAi?.trim() || e.descDefault?.trim() || '')
 }
 
-export function ensureDataSourceIndex(store: NodeStore): void {
-  store.db.exec(`
+/** The index's SCHEMA. Exported so the STORE creates it when a database is opened, next to nodes and edges.
+ *
+ *  This is not an optional extra: every project has datasources, and this table is how an agent finds where a
+ *  field lives. Creating it lazily meant it existed only once something had already touched it — so on a
+ *  database nobody had used yet the builder read a table no writer had created, and the whole build died on
+ *  its first act. Foundational things are bootstrapped, not waited for. */
+export const DATASOURCE_INDEX_SCHEMA = `
     CREATE TABLE IF NOT EXISTS datasource_index (
       key          TEXT PRIMARY KEY,       -- SOURCE.CONTAINER.FIELD (flat, name-based)
       source       TEXT NOT NULL,
@@ -70,7 +75,12 @@ export function ensureDataSourceIndex(store: NodeStore): void {
       INSERT INTO datasource_index_fts(rowid, key, container, field, type, desc_default, desc_ai, desc_human)
       VALUES (new.rowid, new.key, new.container, new.field, new.type, new.desc_default, new.desc_ai, new.desc_human);
     END;
-  `)
+  `
+
+/** Still here because callers use it, and it costs nothing to call: every statement is IF NOT EXISTS and the
+ *  store has already run the same DDL at open. The ALTER is the one migration this table has ever needed. */
+export function ensureDataSourceIndex(store: NodeStore): void {
+  store.db.exec(DATASOURCE_INDEX_SCHEMA)
   try { store.db.exec(`ALTER TABLE datasource_index ADD COLUMN rows INTEGER`) } catch { /* column already present */ }
 }
 

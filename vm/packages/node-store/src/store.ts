@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3'
+import { DATASOURCE_INDEX_SCHEMA } from './datasource-index.js'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { SCHEMA } from './schema.js'
@@ -60,6 +61,9 @@ export class NodeStore {
     // SQLITE_BUSY when both write at once.
     this.db.pragma('busy_timeout = 5000')
     this.db.exec(SCHEMA)
+    // The datasource index belongs to every project's database, so it is created HERE with everything else
+    // rather than by whichever caller happens to reach it first. See DATASOURCE_INDEX_SCHEMA.
+    this.db.exec(DATASOURCE_INDEX_SCHEMA)
   }
 
   close() { this.db.close() }
