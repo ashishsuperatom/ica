@@ -743,24 +743,26 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // judges (reuse a strong match / compose from concepts / escalate). Placement is the regex heuristic: a
     // self-contained question is a new ROOT topic; a follow-up hangs under the current node.
     placement = rootQuestion ? 'root' : pos
+    const phaseT0 = Date.now()
     try {
       const hits = vectors ? await hybridSearch(graph, vectors, bgeEmbedder, question, { kind: 'intent', limit: 6 }) : []
       programCandidates = hits
         .map(h => { const p = graph.getNode(h.id)?.props as any; return { question: (p?.question ?? h.label ?? '') as string, program: p?.program as string | undefined, score: h.score, sim: h.sim } })
         .filter(c => c.program && existsSync(join(WORKSPACE, c.program!, 'program.ts')))
       const top = programCandidates[0]
-      console.log(`[ica] search: ${programCandidates.length} program candidate(s)${top ? ` · top ${top.program} (sim ${top.sim == null ? 'n/a' : top.sim.toFixed(2)})` : ''} → composer`)
+      console.log(`[ica] search: ${programCandidates.length} program candidate(s)${top ? ` · top ${top.program} (sim ${top.sim == null ? 'n/a' : top.sim.toFixed(2)})` : ''} → composer · ${Date.now() - phaseT0}ms`)
     } catch (e: any) {
       console.log(`[ica] candidate search failed (${e?.message ?? e}) — composer builds from concepts`)
     }
     // Surface relevant CONCEPT NAMES by SPECIFICITY (CSS-like: most-question-words-covered wins), names only —
     // the agent opens the winner via find-concept for the method, so we never bias it with a formula.
+    const conceptT0 = Date.now()
     try {
       const specificity = await rankConceptsBySpecificity(question, 8)   // current retriever (name-word specificity + semantic recall)
       let fired: { concepts: string[]; scored: { name: string; activation: number }[]; unexplained: string[] } = { concepts: [], scored: [], unexplained: [] }
       try { fired = await spanFirer.fire(question) } catch (e: any) { log.warn('span-firing', 'fire failed', e) }
       // Log BOTH retrievers side-by-side so we can compare which surfaces the right concepts.
-      console.log(`[retrieval] specificity → [${specificity.join(', ')}]`)
+      console.log(`[retrieval] specificity (${Date.now() - conceptT0}ms) → [${specificity.join(', ')}]`)
       console.log(`[retrieval] span-firing → fires [${fired.concepts.join(', ')}]  ·  ranked [${fired.scored.slice(0, 6).map(s => `${s.name} ${s.activation.toFixed(2)}`).join(', ')}]${fired.unexplained.length ? `  ·  unexplained [${fired.unexplained.slice(0, 8).join(' | ')}]` : ''}`)
       // CLEAN A/B — surface EXACTLY ONE retriever, no mixing/fallback. Default = span-firing (B); USE_SPECIFICITY=1 = specificity (A).
       // Span-firing surfaces the concepts that FIRED plus the rest of its own ranking (still one retriever — it just
@@ -1043,7 +1045,12 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     {
       // The COMPOSER handles both a fresh question (compose/reuse) AND a MODIFY (edit the current program in
       // place). It escalates only when it genuinely can't — then the analyst takes over.
+      const readyT0 = Date.now()
       const composer = await getComposer(sid)
+      // WHERE THE OPENING SILENCE GOES. A cold composer has to build its workspace, assemble a large system
+      // prompt and open a session before the model is even asked; a warm one is instant. Logged apart from the
+      // model's own first-token latency, because only one of the two is ours to fix.
+      console.log(`[ica] composer ready in ${Date.now() - readyT0}ms (question → composer: ${Date.now() - t0}ms)`)
       // CAPPED, like the analyst below. This await was unbounded: a composer that never returned held the
       // session's busy flag for good, and every later question in that chat was refused with "already
       // answering". The cap is generous — it exists so a turn always ends, not to hurry one along.

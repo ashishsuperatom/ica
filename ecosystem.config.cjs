@@ -110,6 +110,9 @@ module.exports = {
       cwd:         `${root}/vm/apps/engine`,
       interpreter: 'none',
       watch:       false,
+      // Stamp every line. Without this the log is a sequence with no clock, and the commonest question about a
+      // slow turn — where did the time go — cannot be answered from it at all, only re-measured live.
+      log_date_format: 'YYYY-MM-DD HH:mm:ss.SSS',
       // COMPOSER on pi/gpt-5.6-luna. pi reaches the same ChatGPT subscription `codex login` already set up, but
       // through pi-ai's provider rather than by spawning the codex CLI — 5.4s against 24.9s on the same prompt.
       env:         { PATH: process.env.PATH, ...prql, DATASOURCES_DIR: `${root}/vm/projects/${IDS.prql}/datasources`,
