@@ -225,6 +225,7 @@ export function createPiSession(opts: PiSessionOpts): Session {
 
     // The session FILE is pi's identity — what to hand back as `resumeId` next time. claude and codex both
     // report theirs and the engine persists it; pi reported nothing, so its conversation died with the process.
+    turnEnd: 'native' as const,   // the agent loop ends and we are told; doneWhen is never polled
     sessionId: () => session?.sessionFile ?? undefined,
 
     // Built BEFORE a question arrives, so the first one does not pay for it. The engine warms every agent it

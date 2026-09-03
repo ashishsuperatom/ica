@@ -54,6 +54,11 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
   const IDLE = opts.idleMs ?? 8000            // silence AFTER submit that means "done" (measured max working gap ≈ 3.7s)
   const FIRST = opts.firstGraceMs ?? 60000    // grace for the agent's FIRST output after we submit
   const HARD_SILENCE = 300000                 // absolute silence cap: even without the ❯ marker, give up after 5m
+  // ABSOLUTE cap on a single turn, however lively it is. HARD_SILENCE only catches an agent that goes QUIET;
+  // one that keeps printing runs forever, and with it the doneWhen poller, the idle timer and the queue behind
+  // it. Deliberately far longer than any real turn — this is not a deadline, it is the guarantee that a turn
+  // ends. Anything hit by it was never coming back.
+  const HARD_TURN = Number(process.env.ICA_MAX_TURN_MS) || 60 * 60 * 1000
   const READY_QUIET = 500                     // …and the TUI has been quiet this long (render settled)
   const READY_MAX = 25000                     // don't wait longer than this for startup
   const CAP = opts.bufferCap ?? 64000
@@ -72,6 +77,7 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
   let serialize: any = null       // @xterm/addon-serialize — term.serialize() → the snapshot
   let idle: ReturnType<typeof setTimeout> | null = null
   let donePoll: ReturnType<typeof setInterval> | null = null   // fast completion: poll the caller's doneWhen()
+  let hardCap: ReturnType<typeof setTimeout> | null = null     // absolute end-of-turn, so nothing can outlive it
   let lastDataAt = 0                          // timestamp of the last PTY byte — drives readiness (settle) detection
   let cols = 120, rows = 34                   // PTY size — the UI resizes this to fill its terminal width (SIGWINCH)
   interface Job { prompt: string; h?: RunHandlers; resolve: (r: RunResult) => void; startedAt: number; submitted: boolean }
@@ -227,6 +233,7 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
     if (!current) return
     if (idle) clearTimeout(idle)
     if (donePoll) { clearInterval(donePoll); donePoll = null }
+    if (hardCap) { clearTimeout(hardCap); hardCap = null }
     const job = current; current = null
     job.resolve({ lastLines: lastLines(buf), ms: Date.now() - job.startedAt })
     pump()
@@ -251,6 +258,12 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
     job.submitted = true
     if (idle) clearTimeout(idle)
     idle = setTimeout(finish, FIRST)          // grace for the FIRST agent output; onData then tightens to IDLE
+    if (hardCap) clearTimeout(hardCap)
+    hardCap = setTimeout(() => {
+      if (current !== job) return
+      console.warn(`[ica:claude] turn exceeded ${(HARD_TURN / 60000) | 0}m — ending it so the session is not held open`)
+      finish()
+    }, HARD_TURN)
     // Fast path: the instant the caller's deliverable exists (e.g. out/answer.json written), resolve —
     // don't sit through the idle timeout. Falls back to idle if doneWhen never fires.
     if (job.h?.doneWhen) {
@@ -269,6 +282,10 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
 
   return {
     kind: 'pty',                                                    // a real terminal stream → UI renders a terminal emulator
+    // No turn-end signal exists in a terminal: we deduce it from the ❯ prompt returning plus silence, and poll
+    // handlers.doneWhen so a caller whose deliverable is a file (built.json, escalate.json) ends the moment it
+    // lands rather than waiting the silence out. This is the ONLY harness where doneWhen does anything.
+    turnEnd: 'inferred' as const,
     referencePlacement: sysRefFlag.length ? 'in-context' : 'file',  // injected via --append-system-prompt-file when present
     // Pre-spawn the PTY and wait until the input box is up — so the first real question doesn't pay the
     // ~10-15s claude startup. Idempotent: a second call is a cheap no-op once the box is ready.

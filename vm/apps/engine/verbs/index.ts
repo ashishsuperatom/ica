@@ -2,6 +2,8 @@
 //
 //   edit: / modify:   change the program behind the answer on screen, in place
 //   explain:          say, in prose, how the answer on screen was arrived at
+//   check:            re-run that program with the same parameters and report what moved
+//   program:          show its source
 //
 // A verb is DETERMINISTIC routing: the user said which mode they want, so nothing guesses. It must be the very
 // first thing typed — a word, then a colon — because anywhere else it is just prose ("the edit: was wrong").
@@ -16,7 +18,10 @@
 // history — to tell an `edit:` turn from an ordinary one. Now `raw` travels into the prompt, so the literal
 // `edit:` / `explain:` is in the transcript and greppable.
 
-export type Verb = 'edit' | 'explain' | 'check'
+// The list lives in the shared protocol — the client filters verb:event on the same names the engine routes
+// on, and two copies of that list would drift the first time one of us added a verb.
+export type { Verb } from '../../../../clients/protocol.js'
+import type { Verb } from '../../../../clients/protocol.js'
 
 export interface VerbMatch {
   verb: Verb
@@ -29,6 +34,7 @@ const SPELLINGS: Record<string, Verb> = {
   modify: 'edit',      // same thing, and people reach for both
   explain: 'explain',
   check: 'check',
+  program: 'program',
 }
 
 /** What each verb needs and what it is allowed to leave behind. One table, so the whole set is visible at once
@@ -53,6 +59,10 @@ export const VERBS: Record<Verb, {
   // for someone who typed one word expecting a re-run. `explain:` is the same; the text is optional colour.
   check:   { needsCurrentProgram: true, needsText: false, usesAgent: false, persists: false, category: 'check',
              nothingToActOn: 'There is no answer on screen to check yet — ask a question first, then `check:` it.' },
+  // Reading files. Here so the program behind an answer can be seen from the chat it was asked in, rather than
+  // from the admin console — the difference between a system you can inspect and one you have to go and audit.
+  program: { needsCurrentProgram: true, needsText: false, usesAgent: false, persists: false, category: 'program',
+             nothingToActOn: 'There is no program on screen to show yet — ask a question first, then `program:` it.' },
 }
 
 /** A leading `verb:` if there is one. Case-insensitive, tolerates space before the colon ("edit :"). */

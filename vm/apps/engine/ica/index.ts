@@ -56,6 +56,7 @@ export function createSession(harness: Harness, opts: SessionOpts): Session {
 function createMockSession(opts: SessionOpts): Session {
   let buf = ''
   return {
+    turnEnd: 'native' as const,   // it answers and returns; there is nothing to infer
     async run(prompt: string, h?: RunHandlers): Promise<RunResult> {
       const answer = `mock answer for: "${prompt.slice(0, 60)}" (cwd ${opts.cwd})`
       buf = answer

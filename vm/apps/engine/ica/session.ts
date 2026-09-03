@@ -42,6 +42,8 @@ export interface RunHandlers {
   // Fast completion: polled (~250ms) after the prompt is submitted. When it returns true the run
   // resolves IMMEDIATELY, instead of waiting out the idle timeout. Use it when the agent's deliverable
   // is a file (e.g. out/answer.json) — the moment it's written, we're done; don't wait for silence.
+  // Only a harness with turnEnd: 'inferred' polls this — see Session.turnEnd. A 'native' one is TOLD when the
+  // turn ends, so it resolves on that and never looks at the predicate.
   doneWhen?: () => boolean | Promise<boolean>
   // Clean, human-readable PROGRESS — the agent's own narration ("Found an exact match … writing the
   // answer"), NEVER tool calls or raw terminal. Harness-specific: claude-code parses its TUI prose;
@@ -75,6 +77,15 @@ export interface Session {
   //                  agent to read it (the legacy behavior). Absent ⇒ treat as 'file'.
   // Lets the engine drop the "go read CONTEXT.md" preamble only when the reference is already in-context.
   referencePlacement?: 'in-context' | 'file'
+  // HOW THIS HARNESS KNOWS A TURN IS OVER — the difference that shapes everything above.
+  //   'native'   the SDK reports it (pi, opencode, codex). run() resolves on that signal. Exact.
+  //   'inferred' we are reading a terminal (claude-code) and there is no such signal, so it is deduced from
+  //              the prompt marker returning plus silence — and it additionally polls handlers.doneWhen so a
+  //              caller whose deliverable is a file can end the turn the moment the file appears, instead of
+  //              waiting out the silence.
+  // Stated per harness rather than left to be discovered, because "does doneWhen do anything here?" is
+  // otherwise unanswerable without reading four implementations.
+  turnEnd: 'native' | 'inferred'
   run(prompt: string, handlers?: RunHandlers): Promise<RunResult>   // queues one turn; resolves when it completes
   compact(handlers?: RunHandlers): Promise<RunResult>               // shrink context when it grows (same session)
   warmup?(): Promise<void>                                          // pre-spawn/connect so the first run is instant (no cold start)

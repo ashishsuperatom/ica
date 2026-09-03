@@ -154,6 +154,7 @@ export function createCodexSession(opts: CodexSessionOpts): Session {
 
     // Throw the conversation away — the in-place recovery for a wedged thread. resumeId is cleared too, so the
     // next turn genuinely starts over instead of reopening the thread that got stuck.
+    turnEnd: 'native' as const,   // the SDK reports the turn; doneWhen is never polled
     reset: () => { thread = null; codex = null; threadId = null; resumeId = undefined; buf = '' },
 
     // Watch the live stream without owning it. Returns its own unsubscribe.

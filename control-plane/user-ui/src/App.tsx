@@ -467,6 +467,21 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           // reconnect. Keep the first arrival and ignore the echo.
           if (msg.text && !narrationLogRef.current.includes(msg.text)) { narrationLogRef.current = [...narrationLogRef.current, msg.text]; narrationTimesRef.current = [...narrationTimesRef.current, Date.now()]; setNarrationLog(narrationLogRef.current); setNowMs(Date.now())   // append a beat + stamp its arrival (chat-view analysis card)
             setAnEvents(evs => [...evs, { id: 'narr-' + narrationTimesRef.current.length, kind: 'narration', text: msg.text, agent: 'narrator', done: true }]) }   // ALSO drop it into the analyst-tab stream so it interleaves by time with the agent's events
+        } else if (msg.t === 'verb:event') {
+          // A verb turn (explain:, check:) streams its own events straight to us — never gated on attaching to
+          // an agent lane, because the user asked for this turn by name.
+          //
+          // WHAT WE RENDER is a CLIENT choice. By default only `message`, the agent's prose, which for an
+          // explain IS the explanation; the tool calls and file reads arrive too and are dropped. A developer
+          // can see all of it by setting the flag below — nothing is being hidden, it is just noise for the
+          // person who asked a business question.
+          const ev: any = (msg as any).ev
+          const text = verbEventLine(ev)
+          if (text && !narrationLogRef.current.includes(text)) {
+            narrationLogRef.current = [...narrationLogRef.current, text]
+            narrationTimesRef.current = [...narrationTimesRef.current, Date.now()]
+            setNarrationLog(narrationLogRef.current); setNowMs(Date.now())
+          }
         } else if (msg.t === 'analyst:answer') {
           // NEVER surface the agent's raw terminal (lastLines) as an answer — that leaks internal logs.
           // The agent is expected to always produce an answer (incl. a plain-text reply for conversational
@@ -1119,6 +1134,13 @@ const ANSWER_CSS = `
 .sa-answer .sa-prose .sa-h{font-family:var(--grot);font-weight:700;color:var(--ink);font-size:14.5px;margin:14px 0 5px;letter-spacing:-.01em}
 .sa-answer .sa-prose .sa-h.sm{font-size:13.5px;margin:11px 0 4px}
 .sa-answer .sa-prose .sa-h:first-child{margin-top:0}
+.sa-answer .sa-files{margin-top:10px}
+.sa-answer .sa-files-tabs{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 0}
+.sa-answer .sa-file-tab{font-family:var(--mono);font-size:11.5px;color:var(--body);background:var(--panel);border:1px solid var(--hair);padding:3px 8px;cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sa-answer .sa-file-tab:hover{color:var(--ink)}
+.sa-answer .sa-file-tab.on{color:var(--ink);background:var(--bg);border-color:var(--ink);font-weight:600}
+.sa-answer .sa-file-src{font-family:var(--mono);font-size:12px;line-height:1.55;color:var(--ink);background:var(--panel);border:1px solid var(--hair);border-top:0;margin:0;padding:10px 12px;max-height:520px;overflow:auto;white-space:pre;tab-size:2}
+.sa-answer .sa-file-note{font-size:11.5px;color:var(--body);margin-top:5px}
 .sa-answer .sa-prose ul.sa-list,.sa-answer .sa-caveat ul.sa-list{margin:7px 0 4px;padding-left:2px;list-style:none}
 .sa-answer .sa-prose ul.sa-list li,.sa-answer .sa-caveat ul.sa-list li{position:relative;padding-left:18px;margin:3px 0;line-height:1.55}
 .sa-answer .sa-prose ul.sa-list li::before,.sa-answer .sa-caveat ul.sa-list li::before{content:"";position:absolute;left:4px;top:9px;width:4px;height:4px;background:var(--navy);border-radius:50%}
@@ -1253,6 +1275,30 @@ function asText(v: unknown): string {
   return ''
 }
 
+// DEVELOPER VIEW for verb turns. `null` = not looked up yet; read from localStorage once, on the first event
+// that arrives, then remembered. Absent or anything but "1"/"true" means off, which is the normal case.
+//
+//   localStorage.setItem('sa-verb-events', '1')   → show every event, not just the prose
+let showAllVerbEvents: boolean | null = null
+function wantsAllVerbEvents(): boolean {
+  if (showAllVerbEvents === null) {
+    try { const v = localStorage.getItem('sa-verb-events'); showAllVerbEvents = v === '1' || v === 'true' }
+    catch { showAllVerbEvents = false }   // private mode / blocked storage — the default is off anyway
+  }
+  return showAllVerbEvents
+}
+
+/** One chat line for a verb-turn event, or '' to drop it. Prose always; the machinery only when asked for. */
+function verbEventLine(ev: any): string {
+  if (!ev?.kind) return ''
+  if (ev.kind === 'message') return typeof ev.text === 'string' ? ev.text.trim() : ''
+  if (!wantsAllVerbEvents()) return ''
+  if (ev.kind === 'command') return '$ ' + String(ev.command ?? '').replace(/\s+/g, ' ').slice(0, 300)
+  if (ev.kind === 'file') return 'file · ' + String(ev.text ?? '').slice(0, 300)
+  if (ev.kind === 'reasoning') return String(ev.text ?? '').trim().slice(0, 300)
+  return ''   // 'turn' and anything a later harness adds: no line, rather than a mystery one
+}
+
 function answerToText(a: any, cat: string, meta?: { qid?: string; at?: number; timing?: { ms: number; classifyMs?: number; modelMs?: number } }): string {
   const out: string[] = []
   if (cat) out.push(cat.toUpperCase())
@@ -1268,6 +1314,9 @@ function answerToText(a: any, cat: string, meta?: { qid?: string; at?: number; t
     if (s?.kind === 'text' && s.body) out.push(String(s.body))
     else if (s?.kind === 'kpis' && Array.isArray(s.items)) out.push(s.items.map((f: any) => `${f.label}: ${f.display}${f.sub ? ` (${f.sub})` : ''}`).join('\n'))
     else if (s?.kind === 'table' && Array.isArray(s.columns)) out.push([s.columns.join('\t'), ...(s.rows || []).map((r: any[]) => r.map((v: any) => v == null ? '' : String(v)).join('\t'))].join('\n'))
+    // Copy takes the WHOLE program, not just the file on screen — you copy it to paste it somewhere, and a
+    // program is only useful entire.
+    else if (s?.kind === 'files' && Array.isArray(s.files)) out.push(s.files.map((f: any) => `--- ${f?.path ?? ''} ---\n${f?.text ?? ''}`).join('\n\n'))
   }
   if (a.caveat) out.push('Note: ' + (Array.isArray(a.caveat) ? a.caveat.join('; ') : a.caveat))
   if (a.scope) out.push('Scope: ' + asText(a.scope))
@@ -1340,7 +1389,35 @@ function SectionBlock({ s }: { s: any }) {
         </div>))}</div></div>
   }
   if (s.kind === 'table') return <DataTable columns={s.columns ?? []} rows={s.rows ?? []} total={s.total} totalRows={s.totalRows} title={s.title} note={s.note} csvName={s.title} />
+  if (s.kind === 'files') return <FileBrowser title={s.title} files={Array.isArray(s.files) ? s.files : []} />
   return null
+}
+
+// The source of a program, from `program:`. A path list and one pane — you came to read the code, so the code
+// gets the room. Paths are relative (the engine never sends anything else).
+//
+// Deliberately not syntax highlighted. Most answers are not programs, so shipping a highlighter in the bundle
+// would be paying for it on every page load to serve the rare one. If colour is wanted later: inject Prism
+// core + the typescript/json/sql components from a CDN on first use, once, and leave the plain <pre> standing
+// if the injection fails.
+function FileBrowser({ title, files }: { title?: string; files: any[] }) {
+  const [sel, setSel] = useState(0)
+  if (!files.length) return null
+  const cur = files[Math.min(sel, files.length - 1)] ?? files[0]
+  return (
+    <div className="sa-sec sa-files">
+      {title && <div className="sa-sec-title">{title}</div>}
+      <div className="sa-files-tabs">
+        {files.map((f: any, i: number) => (
+          <button key={i} className={`sa-file-tab${i === sel ? ' on' : ''}`} onClick={() => setSel(i)} title={String(f?.path ?? '')}>
+            {String(f?.path ?? `file ${i + 1}`)}
+          </button>
+        ))}
+      </div>
+      <pre className="sa-file-src"><code>{String(cur?.text ?? '')}</code></pre>
+      {cur?.truncated && <div className="sa-file-note">This file was shortened to keep the message a sensible size.</div>}
+    </div>
+  )
 }
 
 // ── Codex event log — the 'events'-kind analyst view (the structured counterpart of the xterm 'pty' view) ──

@@ -121,3 +121,37 @@ test('every report carries the caveat and the parameters — changed or not', ()
     assert.ok(!md.includes('<'), 'no raw HTML — the renderer escapes it and the reader sees the markup')
   }
 })
+
+test('program: collects source as RELATIVE paths, files before folders', async () => {
+  // An absolute path on someone's screen tells them nothing and exposes the machine's layout, so the engine
+  // only ever sends paths relative to the program directory.
+  const { mkdtemp, mkdir, writeFile } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { collectProgramFiles } = await import('./program.js')
+
+  const ws = await mkdtemp(join(tmpdir(), 'sa-prog-'))
+  await mkdir(join(ws, 'programs/p/units'), { recursive: true })
+  await mkdir(join(ws, 'programs/p/node_modules'), { recursive: true })
+  await writeFile(join(ws, 'programs/p/program.ts'), 'export default 1')
+  await writeFile(join(ws, 'programs/p/program.json'), '{"root":"x"}')
+  await writeFile(join(ws, 'programs/p/units/total.ts'), 'export default 2')
+  await writeFile(join(ws, 'programs/p/units/notes.txt'), 'ignored — not source')
+  await writeFile(join(ws, 'programs/p/node_modules/dep.ts'), 'must not appear')
+
+  const files = await collectProgramFiles(ws, 'programs/p')
+  assert.deepEqual(files.map(f => f.path), ['program.json', 'program.ts', 'units/total.ts'])
+  assert.ok(!files.some(f => f.path.includes('node_modules')), 'dependencies are not the program')
+  assert.ok(!files.some(f => f.path.startsWith('/')), 'never an absolute path')
+  assert.equal(files.find(f => f.path === 'program.ts')!.text, 'export default 1')
+})
+
+test('program: says so rather than showing an empty pane', async () => {
+  const { mkdtemp } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { programAnswer } = await import('./program.js')
+  await mkdtemp(join(tmpdir(), 'sa-prog-'))
+  const a: any = programAnswer('programs/gone', [])
+  assert.equal(a.status, 'cannot_answer')
+})

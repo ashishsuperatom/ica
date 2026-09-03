@@ -249,6 +249,7 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
 
     // Throw the conversation away. The next turn opens a fresh session; this is the in-place recovery for a
     // wedged one, which otherwise needs the whole engine restarted.
+    turnEnd: 'native' as const,   // the server reports the turn; doneWhen is never polled
     reset: () => { sessionId = ''; buf = ''; running = false },
 
     // Watch the live stream without owning it. Returns its own unsubscribe.

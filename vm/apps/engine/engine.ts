@@ -42,6 +42,7 @@ import type { EngineMsgType } from '../../../clients/protocol.js'
 import { buildDatasourceIndex } from './datasource-index/build.js'
 import { parseVerb, VERBS } from './verbs/index.js'
 import { diffAnswers, checkReport, checkAnswer } from './verbs/check.js'
+import { collectProgramFiles, programAnswer } from './verbs/program.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 try { process.loadEnvFile(join(__dirname, '.env')) } catch { /* no .env — rely on the ambient environment */ }
@@ -611,6 +612,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   const explicitEdit = verb?.verb === 'edit'
   const explicitExplain = verb?.verb === 'explain'
   const explicitCheck   = verb?.verb === 'check'
+  const explicitProgram = verb?.verb === 'program'
   const askedRaw = verb ? verb.raw : question
   if (verb) question = verb.rest
   // Stream everything to `reply` (re-targetable): a reload reconnects and sessions:list points reply
@@ -733,7 +735,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     } else {
       console.log('[ica] explicit edit, but no current program to edit → building fresh')
     }
-  } else if (!explicitExplain && !explicitCheck) {
+  } else if (!explicitExplain && !explicitCheck && !explicitProgram) {
     // Explain and check both report on a program that is already chosen — searching for candidates or ranking
     // concepts would be work whose result nothing reads, on the two verbs meant to come back quickly.
     // NO reflex routing. The exact-match fast-path above already handled exact repeats (no LLM). For everything
@@ -926,22 +928,17 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       }
       currentAgent = 'composer'
       const composer = await getComposer(sid)
-      // SHOW IT AS IT COMES, ONE EVENT AT A TIME. Waiting in silence for a finished document is the opposite
-      // of a conversation, and no narrator runs here to fill the gap. The unit is the EVENT the harness already
-      // gives us — one finished message, one tool call — which every harness normalizes to AgentEvent. So each
-      // thing the composer says reaches the chat as it is said, whichever agent is behind it.
+      // SEND EVERY EVENT, LET THE CLIENT CHOOSE. An explain turn IS the agent talking, so its events belong in
+      // the conversation rather than in an agent lane somebody has to go and attach to. All of them go — a
+      // message, a tool call, a file read — as `verb:event`, and the client renders what it wants: today
+      // only `kind: 'message'`, which is the explanation itself. Showing the tool calls becomes a client
+      // change with nothing to alter here.
       //
-      // (Streaming token deltas was the other option and is the wrong unit twice over: nobody wants half a
-      // word, and it would have worked for pi alone while quietly doing nothing for the other three.)
-      const shown = new Set<string>()
+      // This is explain ONLY. An ordinary question does not push its events at the asker; those stay in the
+      // agent lanes, for whoever has chosen to watch one.
       const streamed = { ...handlers, onEvent: (ev: any) => {
-        handlers.onEvent?.(ev)
-        if (ev.kind !== 'message' || !ev.text?.trim() || ev.done === false) return
-        const key = ev.id ?? ev.text
-        if (shown.has(key)) return                     // a harness that re-reads its transcript must not repeat itself
-        shown.add(key)
-        const prose = stripCode(ev.text)
-        if (prose) emitBeat(reply, prose.slice(0, 700), qid, sid)
+        handlers.onEvent?.(ev)                       // the agent lane still gets it, exactly as before
+        emit(reply, { t: 'verb:event', verb: 'explain', ev, qid, sid })
       } }
       const c = await composer.ask(question, streamed, { qid, explain: explainTarget, raw: askedRaw })
       const cat = VERBS.explain.category
@@ -969,12 +966,17 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
           answer: { status: 'answered', category: 'analysis', answer: VERBS.check.nothingToActOn } })
         return
       }
-      emit(reply, A('status', 'analyst', { text: 'Re-running it to compare…', sid, qid }))
+      // Check has no agent, so nothing produces events for it — the engine says what it is doing itself, on the
+      // same channel and in the same shape as an agent turn. The user asked for this by name; they should see
+      // it working whether or not a model happens to be involved.
+      const beat = (text: string) => emit(reply, { t: 'verb:event', verb: 'check', ev: { kind: 'message', text, done: true }, qid, sid })
+      beat(`Re-running ${dir} with the parameters it was answered with.`)
       let answer: any
       const runT0 = Date.now()
       try {
         const rr = await execProgram(WORKSPACE, dir, params)
         const now = answerView(rr.output)
+        beat('Comparing what came back against the saved answer.')
         const diff = diffAnswers(prior.answer, now)
         answers.recordRun({ programDir: dir, qid, question, params, status: now.status, shapeHash: (rr as any).finalShapeHash, ms: Date.now() - runT0 })
         answer = checkAnswer(checkReport({ programDir: dir, params, answeredAt: prior.createdAt, ms: Date.now() - runT0, diff }), dir)
@@ -992,6 +994,30 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       return
     }
 
+    // ── PROGRAM — show the source behind the answer on screen. ──────────────────────────────────────────────
+    // Reading files: no agent, no narrator, nothing persisted. The program stops being something you have to
+    // open the admin console to read.
+    //
+    // No walking back through the session to find it, either: explain/check/program never persist and never
+    // move the position, so `pos` still points at the last real question even after several of them in a row.
+    if (explicitProgram) {
+      const dir = (curNode?.props as any)?.program
+      if (!dir || !existsSync(join(WORKSPACE, dir))) {
+        console.log('[ica] program, but there is nothing on screen with a program behind it')
+        emit(reply, { t: 'analyst:answer', category: VERBS.program.category, sid, qid, timing: { ms: Date.now() - t0 },
+          answer: { status: 'answered', category: VERBS.program.category, answer: VERBS.program.nothingToActOn } })
+        return
+      }
+      const files = await collectProgramFiles(WORKSPACE, dir)
+      const answer = programAnswer(dir, files, (curNode?.props as any)?.params)
+      const timing = { ms: Date.now() - t0 }
+      lastAnswer = answer; lastTiming = timing; lastCategory = VERBS.program.category
+      console.log(`[ica] program · ${dir} · ${files.length} file(s)`)
+      emit(reply, { t: 'analyst:answer', category: VERBS.program.category, answer, timing, sid, qid })
+      if (channel) emit({ type: 'channel' }, { t: 'channel:answer', channel, qid, answer, category: VERBS.program.category })
+      return
+    }
+
     // The narrator is ALWAYS-ON for a question: it turns whichever agent is working (the composer, then the
     // analyst on escalation) into the live progress the user follows. Agents write nothing user-facing.
     startNarrator()
@@ -999,7 +1025,19 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       // The COMPOSER handles both a fresh question (compose/reuse) AND a MODIFY (edit the current program in
       // place). It escalates only when it genuinely can't — then the analyst takes over.
       const composer = await getComposer(sid)
-      const c = await composer.ask(question, handlers, { qid, candidates: programCandidates, conceptNames, modify: modifyTarget ?? undefined, resolvedQuestion })
+      // CAPPED, like the analyst below. This await was unbounded: a composer that never returned held the
+      // session's busy flag for good, and every later question in that chat was refused with "already
+      // answering". The cap is generous — it exists so a turn always ends, not to hurry one along.
+      const cAsk = composer.ask(question, handlers, { qid, candidates: programCandidates, conceptNames, modify: modifyTarget ?? undefined, resolvedQuestion })
+      cAsk.catch(() => {})   // if we abandon it, don't leak an unhandled rejection
+      let cCap: ReturnType<typeof setTimeout> | undefined
+      const cRaced: any = await Promise.race([cAsk, new Promise((res) => { cCap = setTimeout(() => res(TIMED_OUT), MAX_TURN_MS) })])
+      if (cCap) clearTimeout(cCap)
+      if (cRaced === TIMED_OUT) {
+        log.warn('composer', `turn exceeded ${(MAX_TURN_MS / 1000) | 0}s for ${qid} — escalating to the analyst and resetting the stuck session`)
+        try { (composer as any).session?.reset?.() } catch { /* best-effort */ }
+      }
+      const c: any = cRaced === TIMED_OUT ? { escalate: { reason: 'the composer did not finish in time' }, ms: Date.now() - t0 } : cRaced
       if (c.escalate) { escalateReason = c.escalate.reason; console.log(`[ica] composer → escalate · ${c.escalate.reason}`) }
       else {
         authoredBy = 'composer'
