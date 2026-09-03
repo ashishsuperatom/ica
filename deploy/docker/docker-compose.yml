@@ -12,6 +12,9 @@ services:
     env_file: .env                     # ICA_PROJECT / ICA_KEY / ICA_HUB / optional CLAUDE_CODE_OAUTH_TOKEN
     environment:
       # ONE unified state root on the persistent volume (same layout as Fly).
+      # HOME is set in the Dockerfile (ENV HOME=/app/data/agent-home) so every process agrees, including
+      # a shell someone exec's in with. Deliberately NOT repeated here — two places to set it is how it came
+      # to have two different values.
       ENGINE_STATE_DIR: /app/data/state
       DATASOURCES_DIR: /app/data/datasources
       DATASOURCE_DATA_DIR: /app/data/datasources

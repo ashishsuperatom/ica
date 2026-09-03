@@ -8,10 +8,27 @@ echo "[vm] starting services (project=${ICA_PROJECT:-unset})..."
 # the image on every stop/start), so auth done there is lost on restart. Point HOME at /app/data (the
 # mounted volume) so a login survives restarts — you auth ONCE. Also seed claude-code's onboarding flag so
 # its interactive first-run theme picker (which blocks the headless harness) never appears.
-export HOME=/app/data/agent-home
+# The Dockerfile owns HOME (ENV HOME=/app/data/agent-home) so that every process in this container agrees —
+# including a shell someone exec's in with. Defaulted here too, so running this script outside the image still
+# works, but the image is the source of truth and this must not disagree with it.
+export HOME="${HOME:-/app/data/agent-home}"
 mkdir -p "$HOME"
 [ -f "$HOME/.claude.json" ] || printf '{"hasCompletedOnboarding":true,"theme":"dark"}' > "$HOME/.claude.json"
 echo "[vm] HOME=$HOME (agent auth persists on the volume)"
+
+# WHO IS LOGGED IN, said at startup, every time.
+#
+# An agent that cannot authenticate fails in a way that looks like the agent being slow or stupid: the turn
+# runs, produces nothing, and the log says status=no-json. Finding out why meant going and looking inside the
+# container. It is one line of output and it answers the question before it is asked.
+for a in "claude:$HOME/.claude/.credentials.json" \
+         "codex:$HOME/.codex/auth.json" \
+         "pi:$HOME/.pi/agent/auth.json" \
+         "opencode:$HOME/.local/share/opencode/auth.json"; do
+  name="${a%%:*}"; file="${a#*:}"
+  if [ -s "$file" ]; then echo "[vm] auth: $name ✓"
+  else echo "[vm] auth: $name ✗ NOT LOGGED IN — run:  docker exec -it \$CONTAINER $name  (HOME is already correct)"; fi
+done
 
 # ── Warm the opencode server ──────────────────────────────────────────────────
 # The reflex agent (opencode-go) connects to a running opencode server. Cold-spawning it per question

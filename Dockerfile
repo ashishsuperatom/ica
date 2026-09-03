@@ -65,13 +65,20 @@ ENV FASTEMBED_CACHE_DIR=/opt/fastembed
 RUN cd /app/apps/engine \
     && node --input-type=module -e "const {FlagEmbedding,EmbeddingModel}=await import('fastembed'); const m=await FlagEmbedding.init({model:EmbeddingModel.BGESmallENV15,cacheDir:'/opt/fastembed'}); for await (const _ of m.passageEmbed(['warm'])){}; console.log('embedding model baked')"
 
-# `fly ssh console` opens an interactive shell that does NOT inherit the image's ENV PATH, so the agent
-# CLIs (needed for manual `... auth login`) aren't found. Put them on PATH for every SSH session:
+# An interactive shell (`fly ssh console`, `docker exec -it`) does NOT inherit the image's ENV PATH, so the
+# agent CLIs are not found when someone comes in to run a login by hand:
 #   - global pnpm bins  → claude, tsx           (/usr/local/share/pnpm)
 #   - workspace bins    → opencode, codex       (the engine's + hoisted node_modules/.bin)
-# HOME → the volume so an SSH `claude/opencode/codex auth login` writes to the SAME place the engine reads
-# (and survives restarts). PATH so the agent CLIs are found. Both for every `fly ssh console` session.
-RUN printf 'export HOME=/app/data/agent-home\nmkdir -p "$HOME" 2>/dev/null\nexport PATH="/usr/local/share/pnpm:/app/apps/engine/node_modules/.bin:/app/node_modules/.bin:$PATH"\n' >> /root/.bashrc
+#
+# PATH ONLY. This used to export HOME here as well, which was a third place deciding it — and the one that
+# quietly lost: bash reads $HOME/.bashrc, so once HOME is set properly by the image this file is not even
+# read. HOME belongs to `ENV HOME` below and nowhere else.
+#
+# Written to BOTH homes: the image's original /root (for a shell that somehow still lands there) and the real
+# one on the volume, which is where every shell arrives now.
+RUN printf 'export PATH="/usr/local/share/pnpm:/app/apps/engine/node_modules/.bin:/app/node_modules/.bin:$PATH"\n' > /tmp/sa-path.sh \
+    && cat /tmp/sa-path.sh >> /root/.bashrc \
+    && mkdir -p /app/data/agent-home && cat /tmp/sa-path.sh >> /app/data/agent-home/.bashrc && rm /tmp/sa-path.sh
 
 # ── Volume mount point (persisted across stop/start) ────────────────────────
 # Everything stateful lives here so it survives machine restarts: per project, ONE state home under
@@ -87,6 +94,19 @@ VOLUME ["/app/data"]
 # when its stamp matches this id — so a freshly built image's baked prompts always win over a stale override.
 # Placed last (after all COPYs) so it regenerates whenever anything above changed, without busting caches.
 RUN head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n' > /app/BUILD_ID
+
+# ── HOME, once, for everything in this container ─────────────────────────────
+# claude, codex, opencode and pi all keep their credentials under $HOME. The image's own /root is EPHEMERAL —
+# it resets to the image on every recreate — so a login there works, is invisible to the agents, and is thrown
+# away later.
+#
+# This is set HERE rather than in start.sh because an `export` in start.sh reaches only the processes it
+# starts. Someone who `docker exec`s in to run `claude` gets a fresh shell with the image's HOME, and lands in
+# the wrong place: the login appears to succeed and the agent still cannot authenticate. That happened, and
+# cost an evening. Set in the image, it is true for every process — the engine, the agents, and any shell.
+#
+# Placed after the build steps: /app/data is a mount point that does not exist while building.
+ENV HOME=/app/data/agent-home
 
 # ── Startup ─────────────────────────────────────────────────────────────────
 COPY vm/docker/start.sh /start.sh
