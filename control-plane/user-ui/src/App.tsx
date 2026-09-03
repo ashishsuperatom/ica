@@ -1195,13 +1195,35 @@ ensureAnswerCSS()
 // card shows; paragraphs separated by blank lines, the table as TSV. Add a field to the card → add it here.
 // meta (qid / timing / arrival time) is appended as a SEPARATE footer after the answer body, so a pasted
 // answer carries its provenance (which question, how long, when) without cluttering the answer itself.
+// ── Never hand React an object ───────────────────────────────────────────────
+// The view-model is written by an AGENT, so any field can arrive in a shape the contract did not describe. A
+// year-over-year answer put `period` — specified as a plain string — as
+// `{current:{…}, previous:{…}, asOf:…}`, and rendering that threw React error #31 and took the whole card
+// down. A wrong value should look wrong, never blank the page.
+//
+// Objects are rendered by their `label` where they have one (the shape `periods[]` already uses), else by the
+// values a person would want to read. Anything else is dropped rather than stringified into "[object Object]".
+function asText(v: unknown): string {
+  if (v == null) return ''
+  if (typeof v === 'string') return v
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+  if (Array.isArray(v)) return v.map(asText).filter(Boolean).join(' · ')
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>
+    if (typeof o.label === 'string') return o.label + (typeof o.detail === 'string' ? ` — ${o.detail}` : '')
+    const parts = Object.values(o).map(asText).filter(Boolean)
+    return parts.length ? parts.join(' · ') : ''
+  }
+  return ''
+}
+
 function answerToText(a: any, cat: string, meta?: { qid?: string; at?: number; timing?: { ms: number; classifyMs?: number; modelMs?: number } }): string {
   const out: string[] = []
   if (cat) out.push(cat.toUpperCase())
   const prose = typeof a.answer === 'string' || Array.isArray(a.answer) ? a.answer : null   // never stringify an unwrapped envelope
   if (prose) out.push(Array.isArray(prose) ? prose.join('; ') : String(prose))
   if (a.periods?.length) out.push('Time filter: ' + a.periods.map((p: any) => `${p.label}${p.detail ? ' — ' + p.detail : ''}`).join(' · '))
-  else if (a.period) out.push('Time filter: ' + a.period)
+  else if (a.period) out.push('Time filter: ' + asText(a.period))
   const figs = Array.isArray(a.figures) && a.figures.length ? a.figures : a.headline?.display ? [{ label: a.headline.label, display: a.headline.display, sub: a.headline.sub }] : []
   if (figs.length) out.push(figs.map((f: any) => `${f.label}: ${f.display}${f.sub ? ` (${f.sub})` : ''}`).join('\n'))
   if (a.table?.columns) out.push([a.table.columns.join('\t'), ...(a.table.rows || []).map((r: any[]) => r.map(v => v == null ? '' : String(v)).join('\t'))].join('\n'))
@@ -1212,8 +1234,8 @@ function answerToText(a: any, cat: string, meta?: { qid?: string; at?: number; t
     else if (s?.kind === 'table' && Array.isArray(s.columns)) out.push([s.columns.join('\t'), ...(s.rows || []).map((r: any[]) => r.map((v: any) => v == null ? '' : String(v)).join('\t'))].join('\n'))
   }
   if (a.caveat) out.push('Note: ' + (Array.isArray(a.caveat) ? a.caveat.join('; ') : a.caveat))
-  if (a.scope) out.push('Scope: ' + a.scope)
-  if (a.source) out.push('Source: ' + a.source)
+  if (a.scope) out.push('Scope: ' + asText(a.scope))
+  if (a.source) out.push('Source: ' + asText(a.source))
   if (a.missing) out.push('No source in the data: ' + a.missing)
   if (meta) {   // provenance footer — separated from the answer
     const fmt = (m: number) => m >= 1000 ? `${(m / 1000).toFixed(1)}s` : `${m}ms`
@@ -1400,8 +1422,8 @@ function AnswerCard({ answer: a, category, timing, qid, at }: { answer: any; cat
       {(a.periods?.length > 0 || a.period) && (
         <div className="sa-period"><span className="pk">Time filter</span>
           {a.periods?.length > 0
-            ? a.periods.map((p: any, i: number) => <span key={i}><b>{p.label}</b>{p.detail ? ` — ${p.detail}` : ''}{i < a.periods.length - 1 ? '   ·   ' : ''}</span>)
-            : <b>{a.period}</b>}
+            ? a.periods.map((p: any, i: number) => <span key={i}><b>{asText(p.label ?? p)}</b>{p.detail ? ` — ${asText(p.detail)}` : ''}{i < a.periods.length - 1 ? '   ·   ' : ''}</span>)
+            : <b>{asText(a.period)}</b>}
         </div>
       )}
       {figs.length > 0 && (
@@ -1424,9 +1446,9 @@ function AnswerCard({ answer: a, category, timing, qid, at }: { answer: any; cat
         <DataTable columns={a.table.columns} rows={a.table.rows ?? []} total={a.table.total} totalRows={a.table.totalRows} title={a.table.title} note={a.table.note} csvName={a.table.title} />
       )}
       {a.caveat && <div className="sa-caveat" dangerouslySetInnerHTML={{ __html: renderAnswerBody(a.caveat) }} />}
-      {a.scope && <div className="sa-src"><b>Scope:</b> {a.scope}</div>}
-      {a.source && <div className="sa-src"><b>Source:</b> {a.source}</div>}
-      {a.missing && <div className="sa-caveat">No source in the data: {a.missing}</div>}
+      {a.scope && <div className="sa-src"><b>Scope:</b> {asText(a.scope)}</div>}
+      {a.source && <div className="sa-src"><b>Source:</b> {asText(a.source)}</div>}
+      {a.missing && <div className="sa-caveat">No source in the data: {asText(a.missing)}</div>}
       {timing?.ms != null && (
         <div className="sa-foot">
           {timing.modelMs ? <span>model build {secs(timing.modelMs)}</span> : null}

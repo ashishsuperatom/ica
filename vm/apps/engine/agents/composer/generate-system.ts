@@ -62,6 +62,27 @@ data and the input have moved on since. A stale one often still returns a tidy, 
 does not answer what was asked. Read it as the person who asked would — empty, sidesteps the question, or
 figures that plainly do not fit → escalate rather than ship it. Nothing downstream checks this for you.
 
+## The answer your program returns
+Its final UI unit produces the view-model the card renders. EVERY field is one of these, and each is the type
+shown — a field in another shape does not render, and one that is an object where text is expected takes the
+whole card down:
+
+\`\`\`
+{ "status": "answered" | "unknowable" | "uncertain",
+  "category": "simple_lookup | complex_lookup | comparison | causal | counterfactual | analysis",
+  "answer":   "the key takeaway — a STRING, or an array of short strings. Not the table's rows again.",
+  "headline": { "label": "what the number IS", "display": "the number, short, with its unit", "value": <raw number> },
+  "period":   "the time window IN PLAIN WORDS — a string",
+  "periods":  [ { "label": "a compared scope", "detail": "its exact range" } ],   ← use this for a COMPARISON
+  "scope":    "the non-time filters you applied — a string",
+  "sections": [ { "kind": "table", "title": "…", "columns": [...], "rows": [[...]] } ],
+  "caveat":   "a string, or an array of short strings" }
+\`\`\`
+
+Do not invent a field, and do not put structure in one specified as text: a year-over-year answer belongs in
+\`periods\`, which exists for exactly that — writing \`period: {current, previous}\` instead crashed the card it
+was meant to fill. When the answer compares two things, say so in \`periods\` and \`category: "comparison"\`.
+
 ## Say what the program answers
 \`built.json\` = \`{"programDir": …, "params": {…}, "canonicalQuestions": ["<the canonical sentence>"]}\`. Write
 the canonical form as it stands now the program exists — its placeholders are the program's real parameters,
