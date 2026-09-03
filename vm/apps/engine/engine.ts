@@ -784,6 +784,8 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   let narrationTimer: ReturnType<typeof setInterval> | null = null
   const narrationBuf: string[] = []
   let narrating = false
+  let lastDoing = ''                 // the last command announced, so a re-emitted event doesn't repeat it
+  const saidBeats: string[] = []     // beats already shown — carried into each single-shot narrate call
   try {
     const analyst = await analystSlot.get()
     // Tell the UI how to render this harness's stream. claude-code now has BOTH: a STRUCTURED event view
@@ -807,8 +809,9 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         const activity = narrationBuf.splice(0).join('\n')
         try {
           // TIMEOUT the narrate call so a hung beat (deepseek) can't freeze narration (finally never running).
-          const line = await Promise.race([narrator!.narrate(question, activity), new Promise<null>((res) => setTimeout(() => res(null), 20000))])
+          const line = await Promise.race([narrator!.narrate(question, activity, saidBeats.slice(-3)), new Promise<null>((res) => setTimeout(() => res(null), 20000))])
           if (line) {
+            saidBeats.push(line)
             emitBeat(reply, line, qid, sid)
             if (channel) emit({ type: 'channel' }, { t: 'channel:narration', channel, qid, text: line })   // stream to the chat channel (Teams/…)
           }
@@ -867,7 +870,18 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         // The analyst's prose often EMBEDS program source/diffs while it explains its code — strip that out so the
         // narrator never even sees machinery (defence in depth with isCleanBeat on the output side).
         if (ev.kind === 'message' && ev.text?.trim()) { const prose = stripCode(ev.text); if (prose) narrationBuf.push(prose.slice(0, 600)) }
-        else if (ev.kind === 'command' && ev.output?.trim() && isDataCall(ev.command)) narrationBuf.push(('RESULT: ' + capResultData(ev.output)).slice(0, 1800))
+        else if (ev.kind === 'command') {
+          // WHAT IT IS DOING — every command, as one short line. This used to be withheld entirely, and the
+          // opening of a turn is mostly exploration (find-schema, a listing, reading a program), so for the
+          // first stretch of every question the buffer stayed empty and the narrator had nothing to say. That
+          // silence is what reads as the system being slow: it is working, and saying nothing about it.
+          const cmd = ev.command?.trim().replace(/\s+/g, ' ')
+          if (cmd && cmd !== lastDoing) { lastDoing = cmd; narrationBuf.push(('DOING: ' + cmd).slice(0, 200)) }
+          // WHAT CAME BACK — only for a genuine data call. A file read's output is program source, and feeding
+          // source to a small model is how program text once reached a user's screen; the command line above
+          // already says a file was read, which is the part the narrator needs.
+          if (ev.output?.trim() && isDataCall(ev.command)) narrationBuf.push(('RESULT: ' + capResultData(ev.output)).slice(0, 1800))
+        }
       },
     }
     // The analyst does its OWN search (find-concept) and is a strong model (Sonnet),

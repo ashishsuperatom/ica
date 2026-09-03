@@ -12,12 +12,12 @@ import { agentProse, hasToolMarkup } from '../../ica/prose.js'
 const NARRATE = `You narrate a data analysis AS IT HAPPENS, for the person who asked. A short, live, plain-English
 update on what is happening right now — so they follow along and never feel like they are just waiting.
 
-TELL A STORY OF PROGRESS
-- Each update is a step FORWARD: what we're looking at, then what we've FOUND. It should feel like momentum, not
-  a status log. ("Pulling the sales records now." → "Found the regions — totalling each one." → "The totals are
-  in — putting them together now.")
-- When the calculation is done, say so plainly and let the answer follow. Keep the person leaning in and
-  interested, not watching a clock.
+SAY WHAT WAS FOUND, NOT THAT WORK IS HAPPENING
+- Lead with the SUBSTANCE in front of you — the figure, the count, the name, the period. "31,560 jobs, 214 of
+  them billed this quarter" tells them something; "analysing the data" tells them nothing they didn't know.
+- If this tick's activity contains no finding yet, say the concrete thing being looked at in a few words and
+  stop. Do not pad it into a sentence that sounds like progress.
+- Each update moves FORWARD from the last. When the calculation is done, say so plainly and let the answer follow.
 
 PLAIN, PROFESSIONAL LANGUAGE
 - Write as you would to a client in a business update: simple, common words, said professionally.
@@ -26,10 +26,11 @@ PLAIN, PROFESSIONAL LANGUAGE
   update sentence(s) — no tool call, command, code, XML, or file path (you have no tools).
 - Very short: one or two sentences; **bold** a key figure or name. A short bullet list only for a set of items.
 
-DON'T DWELL ON ERRORS
-- The work is made of many small steps; some fail and are retried immediately — that is normal and NOT news. Do
-  NOT report a failed step, a retry, or "an error"; the next step fixes it. Just keep telling the progress story.
-- Only if the work is genuinely stuck with no way forward, say so simply ("This one is taking a little longer").
+FAILURES: ONE IS NOISE, MANY ARE NEWS
+- A single failed step that is retried immediately is normal and not worth a word. Skip it and carry on.
+- But when the SAME thing keeps failing across the activity you are shown, say so once, plainly and without
+  alarm ("The revenue figures still aren't coming back — trying another way"). Silence while something is stuck
+  reads as the system having died, which is worse than the setback itself.
 
 SAY WHAT IS HAPPENING — NEVER THAT IT IS RIGHT
 - Report only what the activity actually shows: never invent a number, and never claim a check that is not in
@@ -105,13 +106,25 @@ export function createNarrator(opts: NarratorOpts) {
   const provider = opts.ica?.provider ?? process.env.ICA_NARRATOR_PROVIDER ?? process.env.ICA_REFLEX_PROVIDER ?? 'opencode-go'
   let session: Session | null = null
   return {
-    /** Translate a batch of raw system activity into ONE business-language line for the user. Best-effort. */
-    async narrate(question: string, activity: string): Promise<string> {
+    /** Translate a batch of raw system activity into ONE business-language line for the user. Best-effort.
+     *  `recent` = the last few beats already shown, so it carries on rather than repeating itself. */
+    async narrate(question: string, activity: string, recent: string[] = []): Promise<string> {
       // noTools + system=NARRATE → a PURE text completion: no coding-agent scaffolding, no tool schemas, no tool
       // calls. The instructions live in the (well-cached) system prompt; only the per-turn activity travels here.
       session ??= createSession(harness, { cwd: opts.cwd, model, provider, baseUrl: opts.ica?.baseUrl, noTools: true, system: NARRATE })
+      // EVERY BEAT IS A SINGLE SHOT. The session used to keep each call in its history, so over a ten-minute
+      // turn at a beat every four seconds it carried every scrap of activity it had ever been shown — hundreds
+      // of stale RESULT blocks, none of which help write the next line. Reset first: the system prompt stays as
+      // the cached prefix, and the only variable part is this tick's activity plus the lines already said.
+      //
+      // A rolling window over that history was the other option. It bounds the size too, but evicting the
+      // oldest entries changes the cached PREFIX — the part caching actually pays for.
+      session.reset?.()
+      const said = recent.length
+        ? `\n\nALREADY SAID — carry on from these, do not repeat them:\n${recent.map(s => `- ${s}`).join('\n')}`
+        : ''
       const { lastLines } = await session.run(
-        `USER QUESTION: ${question}\n\nRECENT SYSTEM ACTIVITY (raw + technical — TRANSLATE it, never repeat it):\n${activity}\n\nThe one line:`,
+        `USER QUESTION: ${question}${said}\n\nRECENT SYSTEM ACTIVITY (raw + technical — TRANSLATE it, never repeat it):\n${activity}\n\nThe one line:`,
       )
       // Keep the full update (may be a couple of sentences when there's a real finding). Strip any stray
       // wrapping quotes / markdown the model adds, and collapse blank lines.
