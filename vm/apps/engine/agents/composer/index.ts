@@ -13,6 +13,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { createSession, prepareWorkspace, type Harness, type Session, type RunHandlers } from '../../ica/index.js'
+import { explainPrompt, explainAnswer, type ExplainTarget } from '../../verbs/explain.js'
 import { execProgram } from '../../exec-program.js'
 import { PROGRAM_AUTHORING } from '../shared-prompts/program-authoring.js'   // SHARED single source (analyst + composer)
 
@@ -46,7 +47,7 @@ export interface ModifyTarget { programDir: string; prevQuestion?: string }
  *  Retrieval found it; the composer still decides — it is a strong lead, not a verdict. */
 export interface CanonicalMatch { programDir: string; params: Record<string, unknown>; canonical: string }
 export interface Composer {
-  ask(question: string, handlers?: RunHandlers, opts?: { qid?: string; candidates?: ProgramCandidate[]; modify?: ModifyTarget; conceptNames?: string[]; canonicalMatch?: CanonicalMatch; resolvedQuestion?: string }): Promise<ComposerResult>
+  ask(question: string, handlers?: RunHandlers, opts?: { qid?: string; candidates?: ProgramCandidate[]; modify?: ModifyTarget; conceptNames?: string[]; canonicalMatch?: CanonicalMatch; resolvedQuestion?: string; explain?: ExplainTarget; raw?: string }): Promise<ComposerResult>
   session: Session
   cwd: string
 }
@@ -89,6 +90,23 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       const builtPath    = join(dir, 'built.json')
       const escalatePath = join(dir, 'escalate.json')
       const answerPath   = join(dir, 'answer.json')
+      const explainRel   = o.qid ? `./out/${o.qid}/explain.md`   : `./out/explain.md`
+      const explainPath  = join(dir, 'explain.md')
+
+      // ── EXPLAIN: report on the answer on screen, then stop. ──────────────────────────────────────────────
+      // Its own short path rather than a flag on the compose path: nothing here reuses candidates, concepts
+      // ranking, built.json or escalation, and threading a mode through all of that is how the compose prompt
+      // would slowly acquire branches that only ever fire for explain.
+      if (o.explain) {
+        const md = explainPrompt({ raw: o.raw ?? question, target: o.explain, mdRel: explainRel })
+        const done = async () => { try { return (await readFile(explainPath, 'utf8')).trim().length > 0 } catch { return false } }
+        const r = await session.run(md, { ...handlers, doneWhen: done })
+        let body = ''
+        try { body = await readFile(explainPath, 'utf8') } catch { /* nothing written */ }
+        // No explanation written is a failure to SAY so, not a reason to fall through to building something.
+        if (!body.trim()) return { answer: { status: 'cannot_answer', answer: 'I could not put together an explanation for that one.' }, category: 'analysis', lastLines: r.lastLines, ms: Date.now() - t0 }
+        return { answer: explainAnswer(body, o.explain.programDir), category: 'analysis', lastLines: r.lastLines, ms: Date.now() - t0 }
+      }
 
       const cands = (o.candidates ?? []).filter(c => c.program)
       const candBlock = cands.length

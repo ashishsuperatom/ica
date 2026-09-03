@@ -40,6 +40,7 @@ import { createSpanFirer } from './retrieval/span-firing.js'
 // import would break every deploy while working perfectly here.
 import type { EngineMsgType } from '../../../clients/protocol.js'
 import { buildDatasourceIndex } from './datasource-index/build.js'
+import { parseVerb, VERBS } from './verbs/index.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 try { process.loadEnvFile(join(__dirname, '.env')) } catch { /* no .env — rely on the ambient environment */ }
@@ -597,14 +598,19 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     emit(from, A('status', 'analyst', { text: 'Already answering a question in this chat — one at a time.', sid })); return
   }
   if (!question.trim()) return
-  // ── EXPLICIT EDIT prefix ──────────────────────────────────────────────────────
-  // An input that, after any leading whitespace, begins with "edit:" or "modify:" (case-insensitive) is the
-  // user DIRECTLY telling us to modify the current answer — a deterministic override with NO reflex guessing.
-  // We detect it here in the engine (we never tell the reflex about the prefix) and strip it so everything
-  // downstream — the analyst instruction, logs, the node — sees only the clean change request.
-  const editMatch = /^(?:edit|modify)\s*:/i.exec(question.replace(/^\s+/, ''))
-  const explicitEdit = !!editMatch
-  if (editMatch) question = (question.replace(/^\s+/, '').slice(editMatch[0].length).trim()) || question
+  // ── VERB prefix ───────────────────────────────────────────────────────────────
+  // A leading `edit:` / `modify:` / `explain:` is the user DIRECTLY saying what kind of turn this is —
+  // deterministic routing, nothing guessed. See verbs.ts for the rule and why the set is closed.
+  //
+  // The prefix is KEPT. `question` is the clean text to act on, `askedRaw` is what they actually typed, and the
+  // raw form is what goes into the prompt and the logs. Stripping it and discarding it meant that afterwards —
+  // reading a log, or an agent reading its own history — nothing distinguished an `edit:` turn from an ordinary
+  // one. Now the literal verb is in the transcript, so "when was explain asked?" is a search.
+  const verb = parseVerb(question)
+  const explicitEdit = verb?.verb === 'edit'
+  const explicitExplain = verb?.verb === 'explain'
+  const askedRaw = verb ? verb.raw : question
+  if (verb) question = verb.rest
   // Stream everything to `reply` (re-targetable): a reload reconnects and sessions:list points reply
   // at the new connection, so the in-flight run's output + final answer reach the reloaded client.
   busySessions.add(sid)
@@ -697,6 +703,21 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   let programCandidates: { question: string; program?: string; score: number; sim: number | null }[] = []   // engine-searched matches handed to the composer
   let conceptNames: string[] = []   // engine-searched CONCEPT names (names only) surfaced to composer + analyst
   let modifyTarget: { programDir: string; prevQuestion?: string; concepts?: string[] } | null = null
+  // EXPLAIN targets the answer already on screen. There is nothing to explain before one exists, and inventing
+  // an explanation of a program that was never run is the failure this verb is meant to prevent — so with no
+  // current program we say so plainly rather than letting it build one.
+  let explainTarget: { programDir: string; prevQuestion?: string; concepts?: string[] } | null = null
+  // Set here (curNode is in scope) but ACTED ON inside the try below — the try that owns the `finally` starts
+  // further down, so returning from here would skip it and leave the session flagged busy for good.
+  if (explicitExplain) {
+    const curProgram = (curNode?.props as any)?.program
+    if (curNode && curProgram && existsSync(join(WORKSPACE, curProgram, 'program.json'))) {
+      explainTarget = { programDir: curProgram, prevQuestion: curQ, concepts: conceptsFromProgram(curProgram) }
+      console.log(`[ica] explain → ${explainTarget.programDir} (node ${pos.slice(0, 14)})`)
+    } else {
+      console.log('[ica] explain, but nothing has been answered in this chat yet')
+    }
+  }
   if (explicitEdit) {
     // The user explicitly prefixed "edit:"/"modify:" — edit the current node's program in place; if there's
     // nothing on screen to edit, fall through to a normal build.
@@ -710,7 +731,9 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     } else {
       console.log('[ica] explicit edit, but no current program to edit → building fresh')
     }
-  } else {
+  } else if (!explicitExplain) {
+    // Explain reports on a program that is already chosen — searching for candidates or ranking concepts would
+    // be work whose result nothing reads, on the one verb that is supposed to come back quickly.
     // NO reflex routing. The exact-match fast-path above already handled exact repeats (no LLM). For everything
     // else the ENGINE searches (semantic) and hands the composer the candidate programs + scores — the composer
     // judges (reuse a strong match / compose from concepts / escalate). Placement is the regex heuristic: a
@@ -771,9 +794,9 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     emit(reply, A('hello', 'analyst', { label: 'Analyst', hue: '#c08a2b', streamKind: analyst.session.events ? 'events' : (analyst.session.kind ?? 'events'), pty: analyst.session.kind === 'pty', interactive: true, controls: ['terminal', 'compact', 'new'], sid }))
     // Kick off the narration: an immediate opener, then every few seconds translate whatever the analyst just did
     // into ONE business line. Overlap-guarded (skip a tick if the previous narrate is still running).
-    // The COMPOSER narrates ITSELF (its [[ui]] lines become beats — see onNarration). The separate deepseek
-    // NARRATOR is spun up ONLY when we escalate to the analyst (claude-code has no clean self-narration): it
-    // translates the analyst's raw activity into business beats. startNarrator() begins that loop on demand.
+    // The deepseek NARRATOR runs for BOTH agents — it is the only source of user-facing progress there is.
+    // The route is fixed: every question goes to the composer, which escalates to the analyst when it must,
+    // and the narrator covers the whole of it.
     const startNarrator = () => {
       narrator = createNarrator({ cwd: WORKSPACE })
       narrationTimer = setInterval(async () => {
@@ -811,9 +834,9 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       onOutput: (chunk: string) => emitLog({ t: 'analyst:chunk', text: chunk }),   // raw PTY bytes → the terminal surface (own protocol, not a lane frame)
       onNarration: (text: string) => {
         if (!reply) return
-        // The COMPOSER self-narrates — its [[ui]] line IS a business beat, so it drives the analysis tape directly
-        // (no separate narrator runs during the composer phase). The ANALYST's [[ui]] is a side progress line; its
-        // beats come from the deepseek narrator started on escalation.
+        // A progress line the ENGINE raises on the agent's behalf (e.g. the composer's "Running the numbers…").
+        // Agents do not narrate themselves — the deepseek narrator does that, for both of them. During the
+        // composer phase such a line is a business beat; during the analyst's it is a side progress line.
         if (currentAgent === 'composer') emitBeat(reply, text, qid, sid)
         else emit(reply, A('status', 'analyst', { progress: text, sid }))
       },
@@ -865,8 +888,36 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // post-processing below. Skip for a MODIFY (the composer doesn't edit). On escalation → the analyst (System 3).
     let authoredBy: 'composer' | 'analyst' = 'analyst'
     let escalateReason: string | undefined   // the composer's note on WHY it escalated — handed to the analyst as a non-authoritative hint
-    // The narrator is ALWAYS-ON: it turns whichever agent is working (composer first, then the analyst on
-    // escalation) into the live progress the user follows. The agents themselves write nothing user-facing.
+    // ── EXPLAIN — report on the answer on screen, then stop. ────────────────────────────────────────────────
+    // Placed INSIDE this try so the return runs the finally (which clears the keepalive and, crucially, the
+    // busy flag — returning from outside it would leave the chat wedged on "already answering").
+    //
+    // It returns BEFORE the persistence below on purpose. An explain turn must leave no answer row, no intent
+    // node and no program: the graph is the retrieval substrate, and an "explain: …" node in it could later be
+    // matched and hand somebody an explanation when they asked for a number.
+    //
+    // No narrator either. It exists to translate a long silent build into progress; an explanation is a short
+    // read of files that ends in the text itself, so a second model inventing progress lines over the top of it
+    // would be pure noise. The liveness tick still says we are alive.
+    if (explicitExplain) {
+      if (!explainTarget) {
+        emit(reply, { t: 'analyst:answer', category: 'analysis', sid, qid, timing: { ms: Date.now() - t0 },
+          answer: { status: 'answered', category: 'analysis', answer: VERBS.explain.nothingToActOn } })
+        return
+      }
+      currentAgent = 'composer'
+      const composer = await getComposer(sid)
+      const c = await composer.ask(question, handlers, { qid, explain: explainTarget, raw: askedRaw })
+      const timing = { ms: Date.now() - t0 }
+      lastAnswer = c.answer; lastTiming = timing; lastCategory = c.category
+      console.log(`[ica] explain · ${(c.ms / 1000).toFixed(1)}s · ${explainTarget.programDir}`)
+      emit(reply, { t: 'analyst:answer', category: c.category, answer: c.answer, timing, sid, qid })
+      if (channel) emit({ type: 'channel' }, { t: 'channel:answer', channel, qid, answer: c.answer, category: c.category })
+      return
+    }
+
+    // The narrator is ALWAYS-ON for a question: it turns whichever agent is working (the composer, then the
+    // analyst on escalation) into the live progress the user follows. Agents write nothing user-facing.
     startNarrator()
     {
       // The COMPOSER handles both a fresh question (compose/reuse) AND a MODIFY (edit the current program in
@@ -1072,7 +1123,7 @@ async function handleGrounding(from: any, rebuild = false) {
   }
 }
 
-// The admin's CONNECTOR agent — a claude-code session streamed RAW (PTY) to the admin's xterm (no [[ui]]
+// The admin's CONNECTOR agent — a claude-code session streamed RAW (PTY) to the admin's xterm (no
 // narration; the admin just watches it work). Same ICA machinery as analyst/modeler. The session persists,
 // so the admin's follow-up replies continue the same conversation.
 async function handleConnector(text: string, from: any) {

@@ -27,7 +27,18 @@ export function renderInlineMd(text: string): string {
     out.push(`<table class="sa-mdtable">${thead}${tbody}</table>`)
   }
   const flushAll = () => { flushPara(); flushBul(); flushNum(); flushTable() }
+  // A ``` fence becomes a real code block. `explain:` shows the SQL or the one line of logic that decides an
+  // answer, and without this the fence markers render as literal text with the query flattened into a
+  // paragraph — which is exactly the content the reader opened the explanation to see.
+  let fence: string[] | null = null
   for (const ln of esc.split('\n')) {
+    const isFence = /^\s*```/.test(ln)
+    if (fence !== null) {
+      if (isFence) { out.push(`<pre class="sa-code"><code>${fence.join('\n')}</code></pre>`); fence = null }
+      else fence.push(ln)
+      continue
+    }
+    if (isFence) { flushAll(); fence = []; continue }
     const isTable = /^\s*\|(.+)\|\s*$/.test(ln)
     const b = ln.match(/^\s*[-\u2022]\s+(.*)/)
     const n = ln.match(/^\s*\d+[.)]\s+(.*)/)   // "1. " / "2) " \u2192 a real numbered list (needs a . or ) right after the digits, so "1338 lanes" is NOT a list item)
@@ -37,6 +48,8 @@ export function renderInlineMd(text: string): string {
     else if (ln.trim() === '') { flushAll() }
     else { flushBul(); flushNum(); flushTable(); para.push(inlineMd(ln)) }
   }
+  // An unterminated fence still shows its content rather than swallowing it.
+  if (fence !== null && fence.length) out.push(`<pre class="sa-code"><code>${fence.join('\n')}</code></pre>`)
   flushAll()
   return out.join('')
 }
