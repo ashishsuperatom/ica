@@ -425,6 +425,28 @@ export function isDataCall(command?: string): boolean {
   return /\b(query|introspect|resolve|find-concept|get-concept|find-schema|find-program|get-program|sources|run\.mjs|program\.ts|tsx|node)\b/.test(c)
 }
 
+/** The concepts a program taught us — read from the provenance every concept already records.
+ *
+ *  A concept keeps `provenance: [{question, program}]`, so this link has existed all along; it was simply
+ *  never traversable, and nothing could go from a program back to what it produced.
+ *
+ *  It matters on an EDIT. A program is wrong because something is wrong — and when that something is a concept,
+ *  fixing the program alone leaves the bad knowledge in place to be built from again. `P&L revenue (GL
+ *  definition)` states nine account numbers in its prose AND says they must never be assumed; that
+ *  contradiction has since reached three separate programs. Editing any one of them would not have touched it.
+ *
+ *  Names only. The agent reads the ones it cares about with ./get-concept — the same way it finds any other. */
+function conceptsFromProgram(programDir: string): string[] {
+  const want = programDir.replace(/^programs\//, '')
+  const out = new Set<string>()   // a concept is versioned, so the same name can appear as several nodes
+  for (const n of graph.nodesByKind('concept')) {
+    const prov = (n.props as any)?.provenance
+    if (!Array.isArray(prov)) continue
+    if (prov.some((p: any) => String(p?.program ?? '').replace(/^programs\//, '') === want)) out.add(n.label)
+  }
+  return [...out]
+}
+
 // ── What produced an answer ─────────────────────────────────────────────────
 // An answer that cannot be attributed cannot be evaluated: when one changes, the question is always whether the
 // DATA moved, a PROMPT changed, a CONCEPT was rewritten, or the ENGINE was rebuilt — and without this we are
@@ -674,14 +696,17 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   // `score` is only the RRF rank-fusion value used for ordering; it is a position, not a measure of fit.
   let programCandidates: { question: string; program?: string; score: number; sim: number | null }[] = []   // engine-searched matches handed to the composer
   let conceptNames: string[] = []   // engine-searched CONCEPT names (names only) surfaced to composer + analyst
-  let modifyTarget: { programDir: string; prevQuestion?: string } | null = null
+  let modifyTarget: { programDir: string; prevQuestion?: string; concepts?: string[] } | null = null
   if (explicitEdit) {
     // The user explicitly prefixed "edit:"/"modify:" — edit the current node's program in place; if there's
     // nothing on screen to edit, fall through to a normal build.
     const curProgram = (curNode?.props as any)?.program
     if (curNode && curProgram && existsSync(join(WORKSPACE, curProgram, 'program.ts'))) {
-      modifyTarget = { programDir: curProgram, prevQuestion: curQ }
-      console.log(`[ica] explicit edit → editing ${modifyTarget.programDir} in place (node ${pos.slice(0, 14)})`)
+      // The concepts this program taught us travel WITH the edit: a fault is often in one of them, and a fix
+      // that stops at the program leaves the next build to inherit it.
+      const taught = conceptsFromProgram(curProgram)
+      modifyTarget = { programDir: curProgram, prevQuestion: curQ, concepts: taught }
+      console.log(`[ica] explicit edit → editing ${modifyTarget.programDir} in place (node ${pos.slice(0, 14)})${taught.length ? ` · it taught: ${taught.join(', ')}` : ''}`)
     } else {
       console.log('[ica] explicit edit, but no current program to edit → building fresh')
     }

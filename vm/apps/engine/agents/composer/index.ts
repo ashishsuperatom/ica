@@ -122,7 +122,15 @@ can pull, EDIT it, RUN it (\`tsx run.mjs ${m.programDir}/program.ts '<json>'\`) 
 ${builtRel} = {"programDir":"${m.programDir}","params":{…},"canonicalQuestions":["<the canonical form of THIS question>"]} as your final action, pointing at the SAME program (do NOT change
 programDir). But if the edit needs something in NEITHER the program NOR any concept — you'd have to discover it —
 write ${escalateRel} = {"reason":"<what's missing>"} and STOP; the analyst will handle it. Never explore raw
-data. Do NOT write answer.json.` : ''
+data. Do NOT write answer.json.${m.concepts?.length ? `
+
+THIS PROGRAM WAS BUILT FROM: ${m.concepts.join(', ')}.
+Ask where the fault actually IS. A program is usually wrong because something it was built from is wrong, and a
+fix that stops at the program leaves that to be built from again — the next question inherits it. Read the ones
+that bear on the correction (\`./get-concept "<name>"\`) and check them against what you are being told to fix:
+a value stated in a concept's prose that should be a parameter, a rule the program contradicts, a definition
+that has moved on. If the fault is in a concept, say so plainly in your commit note — name the concept and what
+is wrong with it — as well as fixing the program.` : ''}` : ''
 
       // What the person typed, and — when their words pointed at the conversation — the same question with that
       // written in. Both, so nothing is hidden: they asked the first, they meant the second.
