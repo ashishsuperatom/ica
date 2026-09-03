@@ -15,6 +15,7 @@ import { mkdir, writeFile, chmod, cp, symlink, readlink, rm } from 'node:fs/prom
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
 
 export interface WorkspaceSpec {
   root: string                 // e.g. <repo>/vm/apps/workspace or an absolute scratch root
@@ -47,29 +48,40 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
     await mkdir(join(dir, sub), { recursive: true })
   await mkdir(dbDir, { recursive: true })   // engine-private, outside the workspace
 
-  // ── MAKE `@superatom/*` RESOLVE FROM THE WORKSPACE ─────────────────────────
-  // The seam scripts the agent runs (concepts/find.mjs, modeller/model.mjs, …) import @superatom/node-store.
-  // Node finds a package by walking UP from the importing file looking for a node_modules that holds it, and
-  // nothing on that path does: pnpm links workspace packages into apps/engine/node_modules, which is not an
-  // ancestor of the project home.
+  // ── `@superatom/*` MUST RESOLVE FROM THE PROJECT HOME ──────────────────────
+  // Units the agent writes contain `import { money } from '@superatom/scaffold'`. We do not author those
+  // lines, so the specifier has to resolve on its own — unlike the seams below, which bake absolute paths.
   //
-  // A symlink here puts the engine's node_modules ON that path. It sits beside workspace/ rather than inside
-  // it, so it is not in the agent's write-root but is still walked through on the way up.
+  // Node resolves it by walking UP from the importing file looking for a node_modules that holds it. In the
+  // shipped layout that is enough: the packages are dependencies of the workspace root (see the root
+  // package.json), so pnpm links them into <root>/node_modules, and the state dir lives under the root —
+  // /app/data/state/<project>/… walks up to /app/node_modules and finds them. Nothing to do here.
   //
-  // This existed on the dev machine as a symlink somebody made by hand a fortnight ago, and nothing created
-  // it. The first genuinely fresh install therefore had every seam fail with ERR_MODULE_NOT_FOUND — the agent
-  // could not look up a single concept, and answered by escalating. Created here, every project gets it.
-  try {
-    const link = join(projectHome, 'node_modules')
-    const target = fileURLToPath(new URL('../node_modules', import.meta.url))   // apps/engine/node_modules
-    const current = await readlink(link).catch(() => null)
-    if (current !== target) {
-      if (current !== null) await rm(link, { force: true })
-      if (existsSync(target)) await symlink(target, link, 'dir')
+  // It stops being enough when ENGINE_STATE_DIR points somewhere that is NOT under the root — a separate
+  // mount, say. Then the walk never reaches the packages. So: ask Node, and only intervene if it says no.
+  //
+  // (Both halves were learned the hard way. The first fresh install had every seam fail with
+  // ERR_MODULE_NOT_FOUND because resolution rested on a symlink someone had made by hand a fortnight
+  // earlier and no code created — the agent could not look up a single concept, and answered by escalating.)
+  const resolvesAlready = (() => {
+    try { createRequire(join(projectHome, 'noop.js')).resolve('@superatom/scaffold'); return true }
+    catch { return false }
+  })()
+
+  if (!resolvesAlready) {
+    try {
+      const link = join(projectHome, 'node_modules')
+      const target = fileURLToPath(new URL('../node_modules', import.meta.url))   // apps/engine/node_modules
+      const current = await readlink(link).catch(() => null)
+      if (current !== target) {
+        if (current !== null) await rm(link, { force: true })
+        if (existsSync(target)) await symlink(target, link, 'dir')
+      }
+      console.warn(`[workspace] ${projectHome} is not under the workspace root, so @superatom/* did not resolve; linked node_modules into it. Putting ENGINE_STATE_DIR under the root avoids this.`)
+    } catch (e: any) {
+      // Not fatal on its own — but every seam and every generated unit will fail, so say it rather than swallow it.
+      console.warn(`[workspace] @superatom/* does not resolve from ${projectHome} and the fallback link failed — seams and generated units will not import: ${e?.message ?? e}`)
     }
-  } catch (e: any) {
-    // Not fatal on its own — but the seams will not work, so it must be said rather than swallowed.
-    console.warn(`[workspace] could not link node_modules into the project home — seam scripts will fail to import @superatom/*: ${e?.message ?? e}`)
   }
 
   // Seed READ-ONLY example programs into programs/ so the analyst learns the SHAPE of a program from a real,

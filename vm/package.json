@@ -2,6 +2,13 @@
   "name": "superatom-vm",
   "private": true,
   "packageManager": "pnpm@9.0.0",
+  "//dependencies": "The root imports none of these. They are declared so pnpm links them into the ROOT node_modules, which is an ancestor of every project home under ENGINE_STATE_DIR — that is how agent-written units resolve `@superatom/*`. Agents write those import lines themselves, so the path cannot be baked in the way the seams bake theirs. Delete these and every generated unit stops resolving.",
+  "dependencies": {
+    "@superatom/grounding": "workspace:*",
+    "@superatom/introspect": "workspace:*",
+    "@superatom/node-store": "workspace:*",
+    "@superatom/scaffold": "workspace:*"
+  },
   "scripts": {
     "start":   "pm2 start ../ecosystem.config.cjs",
     "stop":    "pm2 stop ../ecosystem.config.cjs",

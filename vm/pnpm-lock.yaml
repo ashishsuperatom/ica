@@ -6,7 +6,20 @@ settings:
 
 importers:
 
-  .: {}
+  .:
+    dependencies:
+      '@superatom/grounding':
+        specifier: workspace:*
+        version: link:packages/grounding
+      '@superatom/introspect':
+        specifier: workspace:*
+        version: link:packages/introspect
+      '@superatom/node-store':
+        specifier: workspace:*
+        version: link:packages/node-store
+      '@superatom/scaffold':
+        specifier: workspace:*
+        version: link:packages/scaffold
 
   apps/datasources/manager:
     devDependencies:
