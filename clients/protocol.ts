@@ -71,6 +71,10 @@ export type EngineMsgType =
   // running. A turn can span two agents and several minutes, so this is scoped to the SESSION, not a question:
   // by the time the message lands, the work may have moved from the composer to the analyst.
   | 'turn:stop' | 'turn:stopped'
+  // A PROGRAM RUNNING — what it is doing, while it does it. Sent for the whole turn, whether the engine started
+  // the program or the agent did from its own shell; run.mjs writes the same trace either way. This is the
+  // difference between a three-minute query and a hang, which from outside look identical.
+  | 'program:event'
   // AGENT LANES — one vocabulary for every agent (composer, analyst, concept-modeller, and any later one),
   // keyed by `lane`. This replaced a per-agent set (analyst:status/stream/category/progress/done,
   // concept:event/status/stream): a new agent needed new message types, and every consumer had to learn them.
@@ -104,6 +108,7 @@ export type EnginePayload =
   | { t: 'tick' }                                                     // liveness ping
   | { t: 'machine:waking' }                                           // engine is suspended, coming up
   | { t: 'analyst:answer'; category?: string; answer: Answer; timing?: unknown; sid?: string; qid?: string; reused?: boolean }
+  | { t: 'program:event'; ev: { t: string; text: string; run?: string; program?: string; sql?: string; ms?: number; rows?: number; error?: string }; sid?: string; qid?: string }
   | { t: 'turn:stop'; sessionId: string; reason?: string }
   | { t: 'turn:stopped'; sessionId: string; stopped: boolean }
   | { t: 'verb:event'; verb: Verb; ev: { kind: string; text?: string; command?: string; id?: string; done?: boolean }; sid?: string; qid?: string }

@@ -184,6 +184,11 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [narrationLog, setNarrationLog]     = useState<string[]>([])   // receptionist (narrator) beats for THIS question — ACCUMULATE (never overwrite)
   const narrationLogRef                 = useRef<string[]>([])     // latest beats, readable inside ws handlers (state is stale in closures)
   const narrationTimesRef               = useRef<number[]>([])     // arrival ms per beat — drives the per-step live timer (UI-only, nice-to-have)
+  // WHERE each beat came from. The narrator's beats are a story about the work; a program's are the work
+  // itself, and reading them as the same voice is how a three-minute query looked like the agent thinking.
+  // `detail` carries the full text behind a truncated line (a query's SQL), revealed on click.
+  const narrationMetaRef                = useRef<Array<{ kind: 'narrator' | 'program'; detail?: string }>>([])
+  const [openBeat, setOpenBeat]         = useState<number | null>(null)
   const [nowMs, setNowMs]           = useState(0)              // ticks every 1s while busy so the CURRENT beat's timer counts up
   // How to render the analyst's raw stream: 'pty' = a real terminal (claude-code) → xterm; 'events' =
   // discrete agent events (codex/SDK) → a plain event log (a terminal emulator makes no sense for these).
@@ -435,7 +440,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
               // The modeller is project-level (no shared question header) — surface its status IN its own log.
               if (msg.text) setMoEvents(evs => mergeEvent(evs, { id: 'ms-' + Date.now(), kind: 'message', text: msg.text, agent: 'modeler', done: true }))
             } else if (msg.state === 'done') {
-              setAnBusy(false); setAnStatus('Done ✓'); setAnProgress(''); setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []; setBusy(false); busyRef.current = false; clearWatchdog()
+              setAnBusy(false); setAnStatus('Done ✓'); setAnProgress(''); setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []; narrationMetaRef.current = []; setOpenBeat(null); setBusy(false); busyRef.current = false; clearWatchdog()
             } else {
               // Live turn state — the spinner is driven by the tick heartbeat (armWatchdog), never a flag we must
               // remember to clear, so a replayed/stale "answering" self-clears if no ticks follow.
@@ -465,7 +470,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
         } else if (msg.t === 'narration') {
           // Sent twice on purpose — once to this socket, once to the owner channel — so one of them survives a
           // reconnect. Keep the first arrival and ignore the echo.
-          if (msg.text && !narrationLogRef.current.includes(msg.text)) { narrationLogRef.current = [...narrationLogRef.current, msg.text]; narrationTimesRef.current = [...narrationTimesRef.current, Date.now()]; setNarrationLog(narrationLogRef.current); setNowMs(Date.now())   // append a beat + stamp its arrival (chat-view analysis card)
+          if (msg.text && !narrationLogRef.current.includes(msg.text)) { narrationLogRef.current = [...narrationLogRef.current, msg.text]; narrationTimesRef.current = [...narrationTimesRef.current, Date.now()]; narrationMetaRef.current = [...narrationMetaRef.current, { kind: 'narrator' }]; setNarrationLog(narrationLogRef.current); setNowMs(Date.now())   // append a beat + stamp its arrival (chat-view analysis card)
             setAnEvents(evs => [...evs, { id: 'narr-' + narrationTimesRef.current.length, kind: 'narration', text: msg.text, agent: 'narrator', done: true }]) }   // ALSO drop it into the analyst-tab stream so it interleaves by time with the agent's events
         } else if (msg.t === 'verb:event') {
           // A verb turn (explain:, check:) streams its own events straight to us — never gated on attaching to
@@ -480,6 +485,20 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           if (text && !narrationLogRef.current.includes(text)) {
             narrationLogRef.current = [...narrationLogRef.current, text]
             narrationTimesRef.current = [...narrationTimesRef.current, Date.now()]
+            narrationMetaRef.current = [...narrationMetaRef.current, { kind: 'narrator' }]
+            setNarrationLog(narrationLogRef.current); setNowMs(Date.now())
+          }
+        } else if (msg.t === 'program:event') {
+          // THE PROGRAM ITSELF, not the story about it. These arrive whether the engine started the program or
+          // the agent did from its own shell, so a long query no longer reads as the agent having stalled.
+          const ev: any = (msg as any).ev
+          const text = String(ev?.text ?? '').trim()
+          if (text) {
+            narrationLogRef.current = [...narrationLogRef.current, text]
+            narrationTimesRef.current = [...narrationTimesRef.current, Date.now()]
+            // A query's SQL is kept whole behind the line and shown on click — enough to recognise it at a
+            // glance, all of it when that is not enough.
+            narrationMetaRef.current = [...narrationMetaRef.current, { kind: 'program', detail: typeof ev?.sql === 'string' ? ev.sql : undefined }]
             setNarrationLog(narrationLogRef.current); setNowMs(Date.now())
           }
         } else if (msg.t === 'analyst:answer') {
@@ -532,6 +551,12 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
 
   // Send a code-engine payload. Cloud: wrap in the hub envelope addressed to the
   // code-engine role. Local: send the raw payload directly.
+  // Ask the engine to abandon the turn. The engine confirms with turn:stopped and emits the closing answer, so
+  // nothing is assumed here — the card clears when the engine says it has actually stopped, not when clicked.
+  function stopTurn() {
+    send({ t: 'turn:stop', sessionId: sessionId || sidRef.current, reason: 'the user stopped it' })
+  }
+
   function send(payload: any) {
     const ws = wsRef.current
     // A CLOSED SOCKET MUST NOT EAT THE MESSAGE SILENTLY. This returned quietly, so a question typed while the
@@ -641,7 +666,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   function endTurn(note?: string) {
     clearWatchdog()
     busyRef.current = false; setBusy(false); setStatus('')
-    setAnBusy(false); setAnStatus(''); setAnProgress(''); setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []
+    setAnBusy(false); setAnStatus(''); setAnProgress(''); setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []; narrationMetaRef.current = []; setOpenBeat(null)
     if (note) { setFeed(f => [...f, { id: crypto.randomUUID(), type: 'error', text: note }]); scroll() }
   }
   // Liveness: the engine ticks every ~8s while a turn runs; every incoming message re-arms this. If nothing
@@ -691,7 +716,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     // card. The Analyst tab keeps the raw terminal for when you WANT to look under the hood.
     setFeed(f => [...f, { id: qid, type: 'user-msg', text }])
     scroll()   // pin the new (now last) question to the top of the viewport
-    setAnQuestion(text); setAnAnswer(null); setAnCategory(''); setAnStatus('Classifying…'); setAnBusy(true); setAnProgress(''); setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []
+    setAnQuestion(text); setAnAnswer(null); setAnCategory(''); setAnStatus('Classifying…'); setAnBusy(true); setAnProgress(''); setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []; narrationMetaRef.current = []; setOpenBeat(null)
     anXtermRef.current?.clear()   // claude PTY: fresh TUI per question (harmless when the analyst is codex)
     // QUESTION-boundary divider (+ Shift+Arrow anchor) — shown optimistically in BOTH agent-log views. Keyed by
     // qid so the engine's authoritative boundary event (same id) MERGES with it rather than adding a second one.
@@ -969,15 +994,32 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
                 </div>
                 {narrationLog.length > 0 && (
                   <div className="sa-beats">
-                    {narrationLog.map((b, i) => (
-                      <div key={i} className={'sa-beat' + (i < narrationLog.length - 1 ? ' past' : '')}>
-                        <div className="sa-beat-b sa-md" dangerouslySetInnerHTML={{ __html: renderInlineMd(b) }} />
-                        <div className="sa-beat-t">{beatSecs(i, narrationLog.length)}s</div>
-                      </div>
-                    ))}
+                    {narrationLog.map((b, i) => {
+                      const meta = narrationMetaRef.current[i]
+                      const isProg = meta?.kind === 'program'
+                      const open = openBeat === i
+                      return (
+                        <div key={i} className={'sa-beat' + (i < narrationLog.length - 1 ? ' past' : '') + (isProg ? ' prog' : '')}>
+                          <div className="sa-beat-b sa-md"
+                               style={meta?.detail ? { cursor: 'pointer' } : undefined}
+                               onClick={meta?.detail ? () => setOpenBeat(open ? null : i) : undefined}
+                               dangerouslySetInnerHTML={{ __html: renderInlineMd(b + (meta?.detail && !open ? ' …' : '')) }} />
+                          {open && meta?.detail && <pre className="sa-beat-sql">{meta.detail}</pre>}
+                          <div className="sa-beat-t">{beatSecs(i, narrationLog.length)}s</div>
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
-                {narrationLog.length === 0 && <div style={{ marginTop: 8, fontSize: 13.5, color: '#8a8276' }}>{anProgress || anStatus || 'Analyzing…'}</div>}
+                {narrationLog.length === 0 && <div style={{ marginTop: 8, fontSize: 13.5, color: '#8a8276' }}>{anProgress || anStatus || 'Working…'}</div>}
+                {/* STOP. Bottom right of the card that is doing the work, which is where someone looks when
+                    they have changed their mind. Nothing is saved for a stopped question. */}
+                <div className="sa-live-f">
+                  <button className="sa-stop" onClick={stopTurn} title="Stop this question">
+                    <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden><rect width="10" height="10" rx="1.5" fill="currentColor" /></svg>
+                    Stop
+                  </button>
+                </div>
               </div>
             )}
             {/* Reserve a screenful of scroll room after the last content so the LAST QUESTION can always reach the
@@ -1183,12 +1225,19 @@ const ANSWER_CSS = `
 /* ── Receptionist UI (feed = light): live analysis, analysis card, follow-ups, narrator mirror, per-step timer ── */
 .sa-live{border:1px solid #e8e4de;border-radius:8px;background:#fbfaf8;padding:12px 14px;margin:4px 0}
 .sa-live-h{display:flex;align-items:center;gap:10px;color:#6b6459;font-size:12.5px;font-weight:600}
+.sa-live-f{display:flex;justify-content:flex-end;margin-top:10px}
+.sa-stop{display:inline-flex;align-items:center;gap:6px;font-family:var(--grot);font-size:12px;color:#6b6459;background:transparent;border:1px solid var(--hair);border-radius:999px;padding:4px 11px;cursor:pointer}
+.sa-stop:hover{color:#a33;border-color:#a33}
 .sa-live-h .lnk{margin-left:auto;font-weight:400;font-size:12px;color:#8a8276;cursor:pointer;text-decoration:underline}
 .sa-beats{margin-top:8px;display:flex;flex-direction:column;gap:8px}
 .sa-beat{display:flex;gap:12px;align-items:flex-start;border-top:1px solid #efece6;padding-top:8px}
 .sa-beat:first-child{border-top:none;padding-top:0}
 .sa-beat.past{opacity:.55}
 .sa-beat .sa-beat-b{flex:1;min-width:0}
+/* A PROGRAM's beat, not the narrator's. The difference is carried by the TYPEFACE — mono, slightly smaller,
+   slightly recessed — so the two streams read apart without any rule or block of colour dividing the card. */
+.sa-beat.prog .sa-beat-b{font-family:var(--mono);font-size:12px;color:#7d766a;letter-spacing:-.01em}
+.sa-beat-sql{font-family:var(--mono);font-size:12px;line-height:1.5;background:var(--panel);border:1px solid var(--hair);padding:8px 10px;margin:6px 0 0;overflow-x:auto;white-space:pre;color:var(--ink)}
 .sa-beat .sa-beat-t{flex-shrink:0;font-size:11.5px;color:#a49a8c;font-variant-numeric:tabular-nums;padding-top:1px;min-width:26px;text-align:right}
 .sa-analysis-card{border:1px solid #e8e4de;border-radius:10px;background:#fbfaf8;margin:2px 0 12px;font-size:13px}
 .sa-analysis-card>summary{cursor:pointer;padding:10px 16px;color:#6b6459;font-weight:600;user-select:none}

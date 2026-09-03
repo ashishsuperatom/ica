@@ -216,19 +216,50 @@ export default store
 // The rendered output goes to stdout; the provenance (DAG + per-unit shape + output) is written to
 // that program's program.json. ctx.use resolves unit names from <program>/units then <program>.
 import { runProgram } from '@superatom/scaffold'
-import { writeFile } from 'node:fs/promises'
+import { writeFile, appendFile, mkdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+// WHAT THE PROGRAM IS DOING, WHILE IT DOES IT. Two destinations, because there are two readers.
+//   stderr — you, if you ran this yourself in a terminal.
+//   ../run-events.jsonl — the engine, which tails it and turns each line into a live event for the user.
+//
+// A file because the program runs in its OWN OS PROCESS, started either by the engine or by the agent from its
+// shell — and it is the agent's runs that go quiet for minutes. A pipe would only carry the engine's. This
+// wrapper is the one thing both paths share, so the trace is identical either way.
+//
+// OUTSIDE the workspace, beside db/, for the same reason the databases are: this is the engine's business, not
+// the agent's. In out/ it would sit next to built.json in a directory the agent is told to write to, and an
+// unexplained file there is something to be read, tidied away, or wondered about.
+//
+// A SPOOL, not a log. Every line is consumed the moment it is read, so history has no value — it is truncated
+// once it grows, which keeps a workspace from accumulating a file nobody will ever open.
+const EVENTS = join(process.cwd(), '..', 'run-events.jsonl')
+const SPOOL_MAX = 2 * 1024 * 1024
+const run = String(Date.now()) + '-' + process.pid   // several programs can be in flight in one workspace
 async function main() {
   const [, , entry, paramsJson] = process.argv
   if (!entry) { console.error('usage: tsx run.mjs <programs/<slug>/program.ts> [jsonParams]'); process.exit(1) }
   const params = paramsJson ? JSON.parse(paramsJson) : {}
-  const r = await runProgram({ entry, params, emit: (t) => process.stderr.write('  ' + t + '\\n') })
-  const manifest = { root: r.root, ui: r.ui, finalShapeHash: r.finalShapeHash, ms: r.ms,
-    nodes: r.nodes.map(n => ({ id: n.id, unit: n.unit, kind: n.kind, ms: n.ms, rows: n.rows, shapeHash: n.shapeHash })),
-    edges: r.edges, branches: r.branches, output: r.output }
-  await writeFile(join(dirname(entry), 'program.json'), JSON.stringify(manifest, null, 2))
-  process.stderr.write(\`\\n  graph: \${r.nodes.length} nodes, \${r.edges.length} edges, \${r.branches.length} branches · shape \${r.finalShapeHash} · \${r.ms}ms\\n\`)
-  console.log(JSON.stringify(r.output, null, 2))
+  await mkdir(dirname(EVENTS), { recursive: true }).catch(() => {})
+  const note = (ev) => appendFile(EVENTS, JSON.stringify({ ...ev, run, program: entry, at: Date.now() }) + '\\n').catch(() => {})
+  // Truncate at the START of a run, never during one: the reader tolerates the file shrinking (it re-reads from
+  // the top) but doing it mid-run would drop this run's own earlier lines before anyone had seen them.
+  try { if ((await stat(EVENTS)).size > SPOOL_MAX) await writeFile(EVENTS, '') } catch { /* no file yet */ }
+  await note({ t: 'program:start' })
+  try {
+    const r = await runProgram({ entry, params, emit: (t) => process.stderr.write('  ' + t + '\\n'), onEvent: note })
+    const manifest = { root: r.root, ui: r.ui, finalShapeHash: r.finalShapeHash, ms: r.ms,
+      nodes: r.nodes.map(n => ({ id: n.id, unit: n.unit, kind: n.kind, ms: n.ms, rows: n.rows, shapeHash: n.shapeHash })),
+      edges: r.edges, branches: r.branches, output: r.output }
+    await writeFile(join(dirname(entry), 'program.json'), JSON.stringify(manifest, null, 2))
+    process.stderr.write(\`\\n  graph: \${r.nodes.length} nodes, \${r.edges.length} edges, \${r.branches.length} branches · shape \${r.finalShapeHash} · \${r.ms}ms\\n\`)
+    await note({ t: 'program:end', ms: r.ms, nodes: r.nodes.length })
+    console.log(JSON.stringify(r.output, null, 2))
+  } catch (e) {
+    // A crash is the most useful event of all — it is the one the watcher is waiting to hear about, and
+    // without it a failed program is indistinguishable from a slow one right up until the turn gives up.
+    await note({ t: 'program:failed', error: String(e?.message ?? e).slice(0, 400) })
+    throw e
+  }
 }
 main().catch((e) => { console.error(e); process.exit(1) })
 `)

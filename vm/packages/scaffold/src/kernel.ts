@@ -53,15 +53,37 @@ async function findUnit(name: string, dirs: string[]): Promise<string | null> {
  * resolved from `unitDirs` (defaults: <entryDir>/units then <entryDir>) — so a program's own units win,
  * and a shared library dir can be appended. `emit` receives one human progress line per step.
  */
+/** What a running program is DOING, as it does it. The human line (`emit`) reads well in a terminal; this is
+ *  the same moment in a shape a UI can render — a timer against a step, a query you can expand.
+ *
+ *  It exists because a program that takes three minutes is indistinguishable from a stuck one. Every emit here
+ *  was already being produced and thrown away: `run.mjs` wrote it to stderr, and the engine buffered stderr and
+ *  never read it. */
+export type ProgramEvent =
+  | { t: 'unit:start'; id: string; unit: string }
+  | { t: 'unit:end'; id: string; unit: string; ms: number; rows?: number }
+  | { t: 'decide'; label: string; took: boolean; reason: string }
+  | { t: 'log'; text: string }
+  | { t: 'query:start'; id: string; source: string; sql: string }
+  | { t: 'query:end'; id: string; source: string; ms: number; rows?: number; error?: string }
+
+// Every start carries an `id` its end repeats, so a reader can pair them — that is what lets a UI show a row
+// the moment work begins and resolve it when the work finishes. A counter, not a hash of the SQL: a program
+// that runs the same query twice (a loop over departments, say) would collide on a hash and the second start
+// would resolve the first end.
+
 export async function runProgram(opts: {
   entry: string
   params?: any
   unitDirs?: string[]
   emit?: (text: string) => void
+  onEvent?: (ev: ProgramEvent) => void
 }): Promise<RunResult> {
   const entry = resolve(opts.entry)
   const dirs = [join(dirname(entry), 'units'), dirname(entry), ...(opts.unitDirs ?? [])]
   const emit = opts.emit ?? (() => {})
+  const ev = opts.onEvent ?? (() => {})
+  let queries = 0
 
   const nodes: GraphNode[] = []
   const edges: GraphEdge[] = []
@@ -86,7 +108,24 @@ export async function runProgram(opts: {
     Array.isArray(out) ? out.length : Array.isArray(out?.rows) ? out.rows.length : undefined
 
   const makeCtx = (selfId: string): UnitCtx => ({
-    query: (ds, sql, p) => dsQuery(ds, sql, p),
+    // TIMED AND ANNOUNCED. This was a bare pass-through, so the single slowest thing a program does — waiting
+    // on a data source — produced no trace at all: no query, no duration, no row count. A three-minute query
+    // and a hung process looked exactly alike from outside.
+    query: async (ds, sql, p) => {
+      const qid = `q${++queries}`
+      // Capped: each event is one appended line from a separate process, and an append is atomic only while it
+      // is small. An unbounded query could tear across a write boundary and be lost as unparseable.
+      ev({ t: 'query:start', id: qid, source: ds, sql: String(sql).slice(0, 2000) })
+      const t = Date.now()
+      try {
+        const rows = await dsQuery(ds, sql, p)
+        ev({ t: 'query:end', id: qid, source: ds, ms: Date.now() - t, rows: Array.isArray(rows) ? rows.length : undefined })
+        return rows
+      } catch (e: any) {
+        ev({ t: 'query:end', id: qid, source: ds, ms: Date.now() - t, error: String(e?.message ?? e).slice(0, 300) })
+        throw e
+      }
+    },
     use: async (name, p) => {
       const mod = await load(name)
       return invoke(mod, p, selfId, name, 'unit')
@@ -94,9 +133,10 @@ export async function runProgram(opts: {
     decide: (label, condition, reason) => {
       branches.push({ node: selfId, label, took: !!condition, reason })
       emit(`◆ ${label} → ${condition ? 'yes' : 'no'} — ${reason}`)
+      ev({ t: 'decide', label, took: !!condition, reason })
       return condition
     },
-    log: (msg) => emit(msg),
+    log: (msg) => { emit(msg); ev({ t: 'log', text: String(msg).slice(0, 1000) }) },
   })
 
   async function invoke(mod: UnitModule, params: any, parentId: string | null, name: string, kind: GraphNode['kind']) {
@@ -105,6 +145,7 @@ export async function runProgram(opts: {
     nodes.push(node)
     if (parentId) edges.push({ from: parentId, to: id })
     emit(`▶ ${name}`)
+    ev({ t: 'unit:start', id, unit: name })
     const t = Date.now()
     const out = await mod.default(makeCtx(id), params ?? {})
     node.ms = Date.now() - t
@@ -112,6 +153,7 @@ export async function runProgram(opts: {
     node.shape = shapeOf(out)
     node.shapeHash = shapeHash(out)
     emit(`✓ ${name} (${node.ms}ms${node.rows != null ? `, ${node.rows} rows` : ''})`)
+    ev({ t: 'unit:end', id, unit: name, ms: node.ms!, rows: node.rows })
     return out
   }
 

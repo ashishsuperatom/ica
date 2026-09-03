@@ -44,6 +44,7 @@ import { buildDatasourceIndex } from './datasource-index/build.js'
 import { parseVerb, VERBS } from './verbs/index.js'
 import { diffAnswers, checkReport, checkAnswer } from './verbs/check.js'
 import { collectProgramFiles, programAnswer } from './verbs/program.js'
+import { watchProgramEvents, describeProgramEvent } from './program-events.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 try { process.loadEnvFile(join(__dirname, '.env')) } catch { /* no .env — rely on the ambient environment */ }
@@ -669,6 +670,14 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       answer: { status: 'answered', category: 'stopped', answer: 'Stopped — nothing was saved for this question.' } })
   }
   inflight.set(sid, { qid, stop: stopThisTurn })
+  // WATCH FOR A PROGRAM RUNNING, for the whole turn. Not only around execProgram: the long runs are the ones
+  // the AGENT starts from its own shell while authoring, and those are exactly the minutes that look like a
+  // hang. run.mjs writes the same trace either way; this reads it and sends it on.
+  const unwatchPrograms = watchProgramEvents(WORKSPACE, (ev) => {
+    if (stopped || !reply) return
+    const text = describeProgramEvent(ev)
+    emit(reply, { t: 'program:event', ev: { ...ev, text }, qid, sid })
+  })
   // SAY WHAT KIND OF TURN THIS IS, IMMEDIATELY. The card that shows while the work runs had "Analysis" written
   // into it, so a check: or an explain: announced itself as an analysis for its whole duration and only became
   // what it was once finished. The verb is known here, before anything has been done — so it is said here. An
@@ -1265,6 +1274,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     analystSlot.persist()   // capture the live ids (incl. any resume-fallback)
     busySessions.delete(sid)
     if (inflight.get(sid)?.qid === qid) inflight.delete(sid)   // only ours — a newer turn may already own the slot
+    unwatchPrograms()
   }
 }
 
