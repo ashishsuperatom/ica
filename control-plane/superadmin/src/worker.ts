@@ -602,25 +602,39 @@ async function uploadDashboardBuild(dashId: string, projectId: string, by: strin
   const form = await request.formData().catch(() => null)
   if (!form) return new Response('send the build as multipart/form-data, one part per file', { status: 400 })
 
-  const buildId = new Date().toISOString().replace(/[:.]/g, '-')
-  const base = `dashboard/${projectId}/${dashId}/${buildId}`
-  let files = 0, bytes = 0, sawIndex = false
-
+  // Gather first, decide the root, then write. index.html has to end up at the TOP of what gets stored, because
+  // that is the only place the serving side looks — an upload that put it one level down succeeded and then
+  // 404'd on every visit, which is a miserable way to find out.
+  const incoming: { rel: string; part: File }[] = []
   for (const [rawPath, part] of form.entries()) {
     if (typeof part === 'string') continue
-    // A path from a browser's directory picker is `dist/assets/x.js`; strip any leading folder so the build's
-    // root is the URL root, and refuse anything climbing out of it.
     const rel = rawPath.replace(/^\.?\//, '').split('/').filter((p) => p && p !== '.' && p !== '..').join('/')
+    if (rel) incoming.push({ rel, part: part as File })
+  }
+  if (!incoming.length) return new Response('nothing to upload', { status: 400 })
+
+  // Someone drops the folder CONTAINING their build as often as the build itself. If everything sits under one
+  // directory and the index is in there, that directory is the build — strip it, rather than refusing.
+  let strip = ''
+  if (!incoming.some((f) => f.rel === 'index.html')) {
+    const tops = new Set(incoming.map((f) => f.rel.split('/')[0]))
+    const only = tops.size === 1 ? [...tops][0] : ''
+    if (only && incoming.some((f) => f.rel === `${only}/index.html`)) strip = `${only}/`
+  }
+  if (!incoming.some((f) => f.rel === (strip ? `${strip}index.html` : 'index.html')))
+    return new Response('no index.html at the top of that upload — choose the build directory itself (the folder index.html is in), not its parent', { status: 400 })
+
+  const buildId = new Date().toISOString().replace(/[:.]/g, '-')
+  const base = `dashboard/${projectId}/${dashId}/${buildId}`
+  let files = 0, bytes = 0
+
+  for (const f of incoming) {
+    const rel = strip && f.rel.startsWith(strip) ? f.rel.slice(strip.length) : f.rel
     if (!rel) continue
-    if (rel === 'index.html' || rel.endsWith('/index.html')) sawIndex = true
-    const body = await part.arrayBuffer()
+    const body = await f.part.arrayBuffer()
     await env.PACKAGES.put(`${base}/${rel}`, body, { httpMetadata: { contentType: mimeOf(rel) } })
     files++; bytes += body.byteLength
   }
-
-  // No index.html is not a dashboard. Said now, while the person is looking at the upload, rather than as a
-  // 404 when they open it.
-  if (!sawIndex) return new Response('that build has no index.html — upload the contents of the build directory', { status: 400 })
 
   // Pointed at LAST: until this line the old build is still the one being served.
   const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
@@ -628,6 +642,10 @@ async function uploadDashboardBuild(dashId: string, projectId: string, by: strin
     method: 'PUT', body: JSON.stringify({ buildId, files, bytes, by }),
   }))
   buildCache.set(`${projectId}/${dashId}`, { buildId, at: Date.now() })   // publish takes effect here, not in 15s
+  // Keep a few builds back so a rollback has somewhere to go, and let the rest go. Every publish otherwise
+  // leaves its predecessor in the bucket for ever — free-ish, but unbounded, and nobody would notice until it
+  // was a bill. Best-effort: a failed sweep must never fail the publish that just succeeded.
+  await pruneOldBuilds(dashId, projectId, buildId, env).catch(() => {})
   return Response.json({ ok: true, buildId, files, bytes })
 }
 
@@ -657,6 +675,30 @@ async function currentBuild(dashId: string, projectId: string, env: Env): Promis
   const buildId = meta?.build_id ? String(meta.build_id) : null
   if (buildId) buildCache.set(key, { buildId, at: Date.now() })
   return buildId
+}
+
+/** Drop all but the newest few builds. Build ids are ISO timestamps, so sorting them as strings is sorting
+ *  them by time. The CURRENT one is always kept, whatever its age. */
+async function pruneOldBuilds(dashId: string, projectId: string, keepBuild: string, env: Env, keep = 5): Promise<void> {
+  if (!env.PACKAGES) return
+  const prefix = `dashboard/${projectId}/${dashId}/`
+  const builds = new Set<string>()
+  let cursor: string | undefined
+  do {
+    const page = await env.PACKAGES.list({ prefix, delimiter: '/', cursor })
+    for (const p of page.delimitedPrefixes ?? []) builds.add(p.slice(prefix.length).replace(/\/$/, ''))
+    cursor = page.truncated ? page.cursor : undefined
+  } while (cursor)
+
+  const doomed = [...builds].sort().reverse().slice(keep).filter((b) => b && b !== keepBuild)
+  for (const b of doomed) {
+    let c: string | undefined
+    do {
+      const page = await env.PACKAGES.list({ prefix: `${prefix}${b}/`, cursor: c })
+      if (page.objects.length) await env.PACKAGES.delete(page.objects.map((o) => o.key))
+      c = page.truncated ? page.cursor : undefined
+    } while (c)
+  }
 }
 
 /** Remove every object of every build of one dashboard. R2 lists 1000 at a time, so it pages. */
