@@ -12,6 +12,7 @@
 // fire() takes an optional `extraForms` — hypothetical surface forms embedded on the fly (never persisted) so
 // alias-validation.ts can fire AS IF a candidate alias were present, against the same frozen mu.
 import type { NodeStore, Embedder } from '@superatom/node-store'
+import { createEmbedCache } from '@superatom/node-store'
 
 const N_MIN = 2, N_MAX = 4, TOP_K = 6, GAP = 0.10, BETA = 0.25, FLOOR = 0.30
 
@@ -54,8 +55,12 @@ export type FireResult = {
 export type SpanFirer = ReturnType<typeof createSpanFirer>
 
 export function createSpanFirer(store: NodeStore, embedder: Embedder) {
-  let mu: Float32Array | null = null                 // FROZEN once (§4); only reindex() resets it
-  const vecOf = new Map<string, Float32Array>()      // append-only cache: a form is embedded once, never again
+  // VECTORS LIVE IN THE DATABASE. They were process-local, so every restart re-embedded every surface form and
+  // up to 300 background spans — ~26s, in the foreground of whichever question came first, again and again for
+  // work whose answer had not changed. Embedding is deterministic; it belongs to the project, not the process.
+  const cache = createEmbedCache(store.db, embedder.id)
+  let mu: Float32Array | null = null                 // FROZEN (§4) — and now frozen across restarts too, see below
+  const vecOf = new Map<string, Float32Array>()      // this run's working set, filled from the cache, not instead of it
   const spanCache = new Map<string, Float32Array[]>() // per-question span vectors (bounded) — repeated fires of the
                                                      // same question (alias validation) reuse them instead of re-embedding
   let forms: Form[] = []
@@ -76,16 +81,32 @@ export function createSpanFirer(store: NodeStore, embedder: Embedder) {
   const build = async (): Promise<boolean> => {
     const rows = surfaceForms()
     if (!rows.length) return false
-    const missing = rows.filter(r => !vecOf.has(key(r.name, r.form)))
-    if (missing.length) {
-      const vecs = await embedder.embed(missing.map(r => r.form))
-      missing.forEach((r, i) => vecOf.set(key(r.name, r.form), vecs[i]))
+    // The DATABASE first, the model only for what it has never seen. A restart with no new concepts embeds
+    // nothing at all and this returns in milliseconds.
+    const needed = rows.filter(r => !vecOf.has(key(r.name, r.form)))
+    if (needed.length) {
+      const known = cache.get('doc', needed.map(r => r.form))
+      for (const r of needed) { const v = known.get(r.form); if (v) vecOf.set(key(r.name, r.form), v) }
+      const missing = needed.filter(r => !vecOf.has(key(r.name, r.form)))
+      if (missing.length) {
+        const vecs = await embedder.embed(missing.map(r => r.form))
+        missing.forEach((r, i) => vecOf.set(key(r.name, r.form), vecs[i]))
+        cache.put('doc', missing.map((r, i) => [r.form, vecs[i]] as [string, Float32Array]))
+      }
+    }
+    if (!mu) {
+      // mu IS THE FROZEN REFERENCE, and it was not frozen. It was recomputed at every process start from
+      // whatever intents existed then, so the background it is measured against drifted as questions
+      // accumulated — the same question could score differently after a restart, for no reason the user could
+      // see. Persisted, it is finally what §4 says it is; reindex() is the one way it changes.
+      mu = cache.getOne('mu', 'background')
     }
     if (!mu) {
       const intents = (store.listKind('intent') as any[]).map(n => n.label).filter(Boolean)
       const bgSpans = [...new Set(intents.flatMap(spansOf))].slice(0, 300)
       const bgVecs = bgSpans.length ? await embedder.embed(bgSpans, { asQuery: true }) : []
       mu = meanNormalised([...rows.map(r => vecOf.get(key(r.name, r.form))!), ...bgVecs])
+      cache.putOne('mu', 'background', mu)
     }
     const newSig = rows.map(r => key(r.name, r.form)).sort().join('\n')
     if (newSig !== sig) {
@@ -137,7 +158,7 @@ export function createSpanFirer(store: NodeStore, embedder: Embedder) {
     async warm(): Promise<boolean> { return build() },
 
     // Deliberate reindex (§4: model change / mu refresh) — the ONLY sanctioned way mu changes.
-    reindex() { mu = null; vecOf.clear(); spanCache.clear(); forms = []; exact = new Map(); sig = '' },
+    reindex() { mu = null; vecOf.clear(); spanCache.clear(); forms = []; exact = new Map(); sig = ''; cache.clear() },
 
     // Fire the question. `extraForms` = hypothetical surface forms (for alias validation), embedded on the fly
     // against the FROZEN mu and never persisted.

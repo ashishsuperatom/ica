@@ -797,6 +797,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   const saidBeats: string[] = []     // beats already shown — carried into each single-shot narrate call
   let firstBeatAt = 0                // when the user first saw anything, so the opening gap is measurable
   let firstActivityAt = 0            // when the AGENT first did anything — the other half of that gap
+  let agentAskedAt = 0               // when we actually handed the question over, so THINKING time is separable
   try {
     const analyst = await analystSlot.get()
     // Tell the UI how to render this harness's stream. claude-code now has BOTH: a STRUCTURED event view
@@ -893,7 +894,13 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         // narrator never even sees machinery (defence in depth with isCleanBeat on the output side).
         if (!firstActivityAt && (ev.kind === 'message' || ev.kind === 'command')) {
           firstActivityAt = Date.now()
-          console.log(`[beat] agent's first activity at +${((firstActivityAt - t0) / 1000).toFixed(1)}s (${ev.kind}) — nothing could be narrated before this`)
+          // THE AGENT'S OWN LATENCY, measured from the moment it was handed the question rather than from the
+          // start of the turn — everything before that is ours (retrieval, warm-up) and is already timed above.
+          // This number alone is the model thinking before it does anything.
+          const thinking = agentAskedAt ? firstActivityAt - agentAskedAt : -1
+          console.log(`[beat] agent's first action at +${((firstActivityAt - t0) / 1000).toFixed(1)}s into the turn` +
+            (thinking >= 0 ? ` · ${(thinking / 1000).toFixed(1)}s of thinking after being asked` : '') +
+            ` (${ev.kind}) — nothing could be narrated before this`)
         }
         if (ev.kind === 'message' && ev.text?.trim()) { const prose = stripCode(ev.text); if (prose) narrationBuf.push(prose.slice(0, 600)) }
         else if (ev.kind === 'command') {
@@ -1056,6 +1063,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       // prompt and open a session before the model is even asked; a warm one is instant. Logged apart from the
       // model's own first-token latency, because only one of the two is ours to fix.
       console.log(`[ica] composer ready in ${Date.now() - readyT0}ms (question → composer: ${Date.now() - t0}ms)`)
+      agentAskedAt = Date.now()
       // CAPPED, like the analyst below. This await was unbounded: a composer that never returned held the
       // session's busy flag for good, and every later question in that chat was refused with "already
       // answering". The cap is generous — it exists so a turn always ends, not to hurry one along.
