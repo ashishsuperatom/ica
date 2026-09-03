@@ -52,9 +52,12 @@ export interface Composer {
 }
 
 export async function createComposer(opts: ComposerOpts): Promise<Composer> {
-  const harness: Harness = opts.ica?.harness ?? (process.env.ICA_COMPOSER_HARNESS as Harness) ?? 'opencode'
-  const model = opts.ica?.model ?? process.env.ICA_COMPOSER_MODEL ?? 'deepseek-v4-flash'
-  const provider = opts.ica?.provider ?? process.env.ICA_COMPOSER_PROVIDER ?? 'opencode-go'
+  // pi on the ChatGPT subscription, which is what this agent is tuned against: the fastest to start (no CLI
+  // process between us and the model) and the richest event stream, which is what puts real per-step timings
+  // in the log. Overridable per project by ICA_COMPOSER_*.
+  const harness: Harness = opts.ica?.harness ?? (process.env.ICA_COMPOSER_HARNESS as Harness) ?? 'pi'
+  const model = opts.ica?.model ?? process.env.ICA_COMPOSER_MODEL ?? 'gpt-5.6-luna'
+  const provider = opts.ica?.provider ?? process.env.ICA_COMPOSER_PROVIDER ?? undefined   // pi picks: codex when logged in
   const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl })
   // The composer's WHOLE instruction — its role + the authoritative authoring reference (contract + example +
   // mechanics) + the per-project data CONTEXT — installed into the agent's system prompt via systemReference.

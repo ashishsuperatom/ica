@@ -78,3 +78,10 @@ not_found_handling = "none"
 [[routes]]
   pattern = "superatom.site/*"
   zone_name = "superatom.site"
+
+# Built dashboards: a React bundle per project, uploaded through the admin console and served from
+# /dashboard/<id>/. The bucket is shared; the prefix dashboard/<project>/<dashId>/<build>/ keeps projects
+# apart, and a build id in the path makes rollback a metadata change rather than a re-upload.
+[[r2_buckets]]
+binding = "PACKAGES"
+bucket_name = "frontend-packages"

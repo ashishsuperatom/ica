@@ -161,7 +161,7 @@ export class ProjectDO extends DurableObject<Env> {
   // at the latest version in one shot (CREATE IF NOT EXISTS) then jump to the
   // current version number. Existing DOs only run migrations they haven't seen.
 
-  private static CURRENT_SCHEMA = 7
+  private static CURRENT_SCHEMA = 8
 
   private async migrate() {
     // Ensure version tracking table exists
@@ -267,6 +267,24 @@ export class ProjectDO extends DurableObject<Env> {
         this.ctx.storage.sql.exec('INSERT OR IGNORE INTO roles (id, name, permissions, builtin) VALUES (?, ?, ?, 1)', id, name, JSON.stringify(perms))
     }
 
+    // V8 — dashboards: a built React bundle per project, uploaded through the admin console and served from
+    // /dashboard/<id>/. The BYTES live in R2; this table holds only what the worker needs to find them and to
+    // know which build is current — so a rollback is one UPDATE, not a re-upload.
+    if (v < 8) {
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS dashboards (
+          id          TEXT PRIMARY KEY,                -- appears in the URL: /dashboard/<id>/
+          name        TEXT NOT NULL,
+          build_id    TEXT,                            -- CURRENT build; R2 prefix dashboard/<proj>/<id>/<build>/
+          files       INTEGER NOT NULL DEFAULT 0,
+          bytes       INTEGER NOT NULL DEFAULT 0,
+          uploaded_by TEXT,
+          uploaded_at INTEGER,
+          created_at  INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+      `)
+    }
+
     // Advance to current version
     this.ctx.storage.sql.exec('DELETE FROM _schema_version')
     this.ctx.storage.sql.exec('INSERT INTO _schema_version (version) VALUES (?)', ProjectDO.CURRENT_SCHEMA)
@@ -317,6 +335,18 @@ export class ProjectDO extends DurableObject<Env> {
     if (request.method === 'GET'  && path === '/status')       return this.getStatus()
     if (request.method === 'POST' && path === '/setup')        return this.setup(request)
     if (request.method === 'POST' && path === '/info')         return this.setInfo(request)
+    // ── Dashboards ──────────────────────────────────────────────────────────
+    // Metadata only. The bytes are in R2 under dashboard/<project>/<id>/<build>/ — this says which build is
+    // current, so publishing a new one or rolling back is a single UPDATE and never a re-upload.
+    if (request.method === 'GET'    && path === '/dashboards')  return this.listDashboards()
+    if (request.method === 'POST'   && path === '/dashboards')  return this.createDashboard(request)
+    if (path.startsWith('/dashboards/')) {
+      const id = decodeURIComponent(path.slice('/dashboards/'.length).split('/')[0])
+      if (request.method === 'GET')    return this.getDashboard(id)
+      if (request.method === 'PUT')    return this.setDashboardBuild(id, request)
+      if (request.method === 'DELETE') return this.deleteDashboard(id)
+    }
+
     if (request.method === 'GET'  && path === '/debug')        return this.debugInfo()
     if (request.method === 'POST' && path === '/members')      return this.addMember(request)
     // ACCESS + ROLES — project-local (see V7). The worker authorises the CALLER before routing here.
@@ -1239,6 +1269,48 @@ export class ProjectDO extends DurableObject<Env> {
 
   /** Returns the current machine ID if one exists, null otherwise */
   /** Debug: returns the stored API key so we can verify it matches the machine */
+  // ── Dashboards ────────────────────────────────────────────────────────────
+  private listDashboards(): Response {
+    const rows = [...this.ctx.storage.sql.exec(
+      'SELECT id, name, build_id, files, bytes, uploaded_by, uploaded_at, created_at FROM dashboards ORDER BY created_at DESC')]
+    return Response.json({ dashboards: rows })
+  }
+
+  private async createDashboard(request: Request): Promise<Response> {
+    const b: any = await request.json().catch(() => ({}))
+    const name = String(b?.name ?? '').trim()
+    if (!name) return new Response('a dashboard needs a name', { status: 400 })
+    // A readable id, because it is what people see in the URL. Suffixed so two dashboards named alike do not
+    // collide, and so a deleted one's URL cannot be silently reused by the next.
+    const slug = (String(b?.id ?? name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'dashboard').slice(0, 40)
+    const id = `${slug}-${crypto.randomUUID().slice(0, 6)}`
+    this.ctx.storage.sql.exec('INSERT INTO dashboards (id, name) VALUES (?, ?)', id, name)
+    return Response.json({ id, name })
+  }
+
+  private getDashboard(id: string): Response {
+    const rows = [...this.ctx.storage.sql.exec('SELECT * FROM dashboards WHERE id = ?', id)]
+    return rows.length ? Response.json(rows[0]) : new Response('no such dashboard', { status: 404 })
+  }
+
+  /** Point a dashboard at a build that has finished uploading. Written LAST, so a half-uploaded build is never
+   *  the one being served: until this runs, the old build stays current and the new objects are just sitting
+   *  in R2 unreferenced. */
+  private async setDashboardBuild(id: string, request: Request): Promise<Response> {
+    const b: any = await request.json().catch(() => ({}))
+    const rows = [...this.ctx.storage.sql.exec('SELECT id FROM dashboards WHERE id = ?', id)]
+    if (!rows.length) return new Response('no such dashboard', { status: 404 })
+    this.ctx.storage.sql.exec(
+      'UPDATE dashboards SET build_id = ?, files = ?, bytes = ?, uploaded_by = ?, uploaded_at = ? WHERE id = ?',
+      String(b?.buildId ?? ''), Number(b?.files ?? 0), Number(b?.bytes ?? 0), String(b?.by ?? ''), Date.now(), id)
+    return Response.json({ ok: true })
+  }
+
+  private deleteDashboard(id: string): Response {
+    this.ctx.storage.sql.exec('DELETE FROM dashboards WHERE id = ?', id)
+    return Response.json({ ok: true })   // the R2 objects are removed by the worker, which owns the bucket
+  }
+
   private debugInfo(): Response {
     const keyRows = [...this.ctx.storage.sql.exec('SELECT key FROM api_key LIMIT 1')]
     const machineRows = [...this.ctx.storage.sql.exec('SELECT * FROM fly_machine LIMIT 1')]

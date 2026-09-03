@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { DashboardsPanel } from './Dashboards'
 import { useProjectHub } from './hub'
 import { Inspector, SECTIONS, SECTION_LABEL, type Section } from './Inspector'
 import { ConnectorConsole } from './ConnectorConsole'
@@ -832,6 +833,7 @@ function ProjectDetailPage() {
     { id: 'inspector', label: 'Inspector', icon: I.map, children: SECTIONS.map(s => ({ id: `inspector/${s.id}`, label: s.label, group: s.group })) },
     { id: 'events', label: 'Event log', icon: I.pulse },
     { id: 'subdomains', label: 'Subdomains', icon: I.globe },
+    { id: 'dashboards', label: 'Dashboards', icon: I.globe },
     { id: 'agents', label: 'Agents', icon: I.term, children: [
       { id: 'agent', label: 'Connector' },
       { id: 'analyst', label: 'Analyst' },
@@ -944,6 +946,7 @@ function ProjectDetailPage() {
         </div>
       )}
 
+      {view === 'dashboards' && <DashboardsPanel api={api} token={token} projectId={projectId!} host={typeof location !== 'undefined' ? location.host : ''} />}
       {view === 'subdomains' && (
         <div className="card">
           <strong>Subdomains</strong>

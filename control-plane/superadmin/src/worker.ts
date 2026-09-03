@@ -46,9 +46,33 @@ async function requireSuperadmin(request: Request, env: Env): Promise<JwtClaims 
 //   member      — has a row in that project's own access table. That project only, as its role says.
 // Each answer needs one DO read, so it stays cheap enough to run on every request.
 
+/** The name the session cookie goes by. One constant, because it is read in the worker and written by the
+ *  browser and the two have to agree. */
+const SESSION_COOKIE = 'sa_session'
+
+function cookieToken(request: Request): string | null {
+  const raw = request.headers.get('cookie')
+  if (!raw) return null
+  for (const part of raw.split(';')) {
+    const [k, ...v] = part.trim().split('=')
+    if (k === SESSION_COOKIE) return decodeURIComponent(v.join('=')) || null
+  }
+  return null
+}
+
+/** WHO is asking — from the Authorization header, or failing that the session cookie.
+ *
+ *  The header is how an SPA calls an API: its JS attaches the token. A browser NAVIGATING to a page attaches
+ *  nothing, because no JS of ours has run yet — so a header-only check can never protect a document, only the
+ *  calls a page makes after it has loaded. That is why the SPA shells are public today.
+ *
+ *  The cookie closes that, for every path at once. It is the same JWT, set once by /api/auth/session and sent
+ *  by the browser on every request to this host: the document, its assets, and any static thing served later.
+ *  Header first, so an explicit token always wins over an ambient one. */
 async function claimsOf(request: Request, env: Env): Promise<JwtClaims | null> {
   const m = (request.headers.get('authorization') || '').match(/^Bearer\s+(.+)$/i)
-  return m ? await verifyJwt(m[1], env.JWT_SECRET) : null
+  const token = m ? m[1] : cookieToken(request)
+  return token ? await verifyJwt(token, env.JWT_SECRET) : null
 }
 
 /** The caller's standing in ONE project. ONE read, of the PROJECT's own DO — never the org's.
@@ -203,7 +227,7 @@ export default {
       if (!acc.ok) return new Response('unauthorized', { status: 401 })
       // Anything that changes the project — machine lifecycle, access, roles, datasources, keys, tokens — is for
       // whoever administers it. A member may look, not provision.
-      const PROVISIONING = /^(machine|service-token|access|roles|datasources|members|verify-conn|info|fly|suspend|resume|stop|delete)/
+      const PROVISIONING = /^(machine|service-token|access|roles|datasources|members|verify-conn|info|fly|suspend|resume|stop|delete|dashboards)/
       const isProvisioning = request.method !== 'GET' || PROVISIONING.test(subPath)
       if (isProvisioning && acc.level === 'member') return new Response('forbidden', { status: 403 })
       // `setup` overwrites the project's API key. It's an INTERNAL provisioning primitive — only ever
@@ -248,6 +272,13 @@ export default {
         const wsUrl = 'wss://superatom.site'
         return Response.json({ token, userId, channel, projectId, wsUrl, expiresAt: exp * 1000 })
       }
+      // Uploading a BUILD: multipart, one part per file, the field name being its path inside the build
+      // (`index.html`, `assets/index-abc.js`). Everything lands under a fresh build id and the dashboard is
+      // only pointed at it once every object is written — so a failed upload leaves the previous build serving
+      // rather than a half-written one.
+      const up = subPath.match(/^dashboards\/([^/]+)\/upload$/)
+      if (up && request.method === 'POST') return uploadDashboardBuild(up[1], projectId, acc.email, request, env)
+
       const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
       return stub.fetch(new Request(
         `http://do/${subPath}${url.search}`, request
@@ -257,6 +288,35 @@ export default {
     // ── Auth: exchange Clerk session for our JWT ─────────────────────────────
     if (request.method === 'POST' && path === '/api/auth/token') {
       return handleTokenExchange(request, env)
+    }
+
+    // ── The session cookie ──────────────────────────────────────────────────
+    // The SPA already holds a JWT; this hands the same token to the BROWSER so it travels on plain navigations
+    // — a document, its assets, anything static served later — where no JS of ours has run to set a header.
+    //
+    // Set for every path, ENFORCED only where a route asks for it (today: /dashboard). Existing routes keep
+    // authenticating by header exactly as before, so nothing that works now changes behaviour.
+    //
+    // HttpOnly so page scripts cannot read it, Secure, SameSite=Lax so it survives a normal navigation but not
+    // a cross-site POST, and the same lifetime as the token it carries.
+    if (request.method === 'POST' && path === '/api/auth/session') {
+      const claims = await claimsOf(request, env)
+      if (!claims) return new Response('unauthorized', { status: 401 })
+      const m = (request.headers.get('authorization') || '').match(/^Bearer\s+(.+)$/i)
+      if (!m) return new Response('send the token as a Bearer header', { status: 400 })
+      const maxAge = claims.exp ? Math.max(0, claims.exp - Math.floor(Date.now() / 1000)) : 3600
+      return new Response(JSON.stringify({ ok: true, expiresIn: maxAge }), {
+        headers: {
+          'content-type': 'application/json',
+          'set-cookie': `${SESSION_COOKIE}=${encodeURIComponent(m[1])}; Path=/; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`,
+        },
+      })
+    }
+    if (request.method === 'DELETE' && path === '/api/auth/session') {
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { 'content-type': 'application/json',
+                   'set-cookie': `${SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax` },
+      })
     }
 
     // ── Mobile / device login (browser-redirect PKCE flow — see clients/ios/AUTH-HANDOFF.md) ──
@@ -513,6 +573,124 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // Resolve a named subdomain → projectId. Hot path: Workers KV (edge-cached,
 // globally distributed). Cold miss: GlobalDO (authoritative), then warm KV.
 // The DO is therefore only hit on claims + cache misses, never per page-load.
+// ── Dashboards: a built React app per project ────────────────────────────────
+// The bytes live in R2 under dashboard/<project>/<dashId>/<build>/, and the DO holds which build is current.
+// Nothing is rewritten on the way IN — the object stays exactly what was built, so the same bundle can be
+// served at any path and a rollback is a metadata change. The path fixing happens on the way out.
+
+/** Content-Type from the extension. R2 does not infer one, and a .js served as octet-stream is refused as a
+ *  module by the browser — the page then goes blank with nothing in the network tab that looks wrong. */
+const MIME: Record<string, string> = {
+  html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', mjs: 'text/javascript; charset=utf-8',
+  css: 'text/css; charset=utf-8', json: 'application/json; charset=utf-8', map: 'application/json; charset=utf-8',
+  svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+  webp: 'image/webp', ico: 'image/x-icon', woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf',
+  txt: 'text/plain; charset=utf-8', wasm: 'application/wasm',
+}
+const mimeOf = (path: string) => MIME[path.split('.').pop()?.toLowerCase() ?? ''] ?? 'application/octet-stream'
+
+async function uploadDashboardBuild(dashId: string, projectId: string, by: string, request: Request, env: Env): Promise<Response> {
+  if (!env.PACKAGES) return new Response('no bucket bound', { status: 500 })
+  const form = await request.formData().catch(() => null)
+  if (!form) return new Response('send the build as multipart/form-data, one part per file', { status: 400 })
+
+  const buildId = new Date().toISOString().replace(/[:.]/g, '-')
+  const base = `dashboard/${projectId}/${dashId}/${buildId}`
+  let files = 0, bytes = 0, sawIndex = false
+
+  for (const [rawPath, part] of form.entries()) {
+    if (typeof part === 'string') continue
+    // A path from a browser's directory picker is `dist/assets/x.js`; strip any leading folder so the build's
+    // root is the URL root, and refuse anything climbing out of it.
+    const rel = rawPath.replace(/^\.?\//, '').split('/').filter((p) => p && p !== '.' && p !== '..').join('/')
+    if (!rel) continue
+    if (rel === 'index.html' || rel.endsWith('/index.html')) sawIndex = true
+    const body = await part.arrayBuffer()
+    await env.PACKAGES.put(`${base}/${rel}`, body, { httpMetadata: { contentType: mimeOf(rel) } })
+    files++; bytes += body.byteLength
+  }
+
+  // No index.html is not a dashboard. Said now, while the person is looking at the upload, rather than as a
+  // 404 when they open it.
+  if (!sawIndex) return new Response('that build has no index.html — upload the contents of the build directory', { status: 400 })
+
+  // Pointed at LAST: until this line the old build is still the one being served.
+  const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
+  await stub.fetch(new Request(`http://do/dashboards/${encodeURIComponent(dashId)}`, {
+    method: 'PUT', body: JSON.stringify({ buildId, files, bytes, by }),
+  }))
+  return Response.json({ ok: true, buildId, files, bytes })
+}
+
+/** Serve one file of a dashboard build.
+ *
+ *  Assets are content-hashed by the bundler, so the path IS the version and they can be cached hard. index.html
+ *  never is, or a new build would not take effect and would look broken.
+ *
+ *  The HTML is rewritten as it streams: a build made with the default base refers to `/assets/x.js`, which at
+ *  this URL means the site root and not the dashboard. Rewriting here rather than at upload keeps the stored
+ *  object exactly what was built. */
+async function serveDashboard(dashId: string, rest: string, projectId: string, request: Request, env: Env): Promise<Response> {
+  if (!env.PACKAGES) return new Response('no bucket bound', { status: 500 })
+  const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
+  const meta: any = await stub.fetch(new Request(`http://do/dashboards/${encodeURIComponent(dashId)}`)).then((r) => r.ok ? r.json() : null).catch(() => null)
+  if (!meta?.build_id) return new Response('no such dashboard, or nothing published to it yet', { status: 404 })
+
+  const base = `dashboard/${projectId}/${dashId}/${meta.build_id}`
+  const wanted = rest.replace(/^\/+/, '')
+  let key = wanted && !wanted.endsWith('/') ? `${base}/${wanted}` : `${base}/index.html`
+  let obj = await env.PACKAGES.get(key)
+  // Unknown path → index.html, so a client-side route survives a refresh. Only for documents: a missing ASSET
+  // must stay a 404, or a bad script URL silently returns HTML and the failure moves somewhere confusing.
+  const isAsset = /\.[a-z0-9]+$/i.test(wanted)
+  if (!obj && !isAsset) { key = `${base}/index.html`; obj = await env.PACKAGES.get(key) }
+  if (!obj) return new Response('not found', { status: 404 })
+
+  const path = key.slice(base.length + 1)
+  const headers = new Headers({
+    'content-type': obj.httpMetadata?.contentType ?? mimeOf(path),
+    'cache-control': path.endsWith('index.html') ? 'no-cache' : 'public, max-age=31536000, immutable',
+  })
+  if (!path.endsWith('.html')) return new Response(obj.body, { headers })
+
+  const prefix = `/dashboard/${dashId}`
+  const inject = `<script>window.__PROJECT_ID__=${JSON.stringify(projectId)};window.__DASHBOARD_ID__=${JSON.stringify(dashId)};window.__HUB_URL__="wss://"+location.host</script>`
+  return new HTMLRewriter()
+    // Root-absolute references mean the SITE root; here they must mean the dashboard's root.
+    .on('script[src], link[href], img[src], source[src], use[href]', {
+      element(e) {
+        const attr = e.hasAttribute('src') ? 'src' : 'href'
+        const v = e.getAttribute(attr)
+        if (v && v.startsWith('/') && !v.startsWith('//')) e.setAttribute(attr, prefix + v)
+      },
+    })
+    // <base> catches what the rewriter cannot see: a URL built at runtime by the app itself.
+    .on('head', { element(e) { e.prepend(`<base href="${prefix}/">`, { html: true }); e.append(inject, { html: true }) } })
+    .transform(new Response(obj.body, { headers }))
+}
+
+/** The only place a dashboard is let through.
+ *
+ *  This is where the session COOKIE earns its keep: a browser navigating here sends no Authorization header, so
+ *  a header-only check could never protect a document — which is why the SPA shells are public. Every request
+ *  for a dashboard, the page and each asset alike, passes the same projectAccessOf() the API uses.
+ *
+ *  Enforced HERE and nowhere else, deliberately: existing routes keep authenticating exactly as they did, so
+ *  turning this on cannot change how anything that already works behaves.
+ *
+ *  A missing session redirects to the app rather than showing a bare 401 — the person is not signed in yet, and
+ *  the app knows how to fix that; ?next= brings them back. Assets do not redirect: an HTML login page arriving
+ *  where a script was expected is a worse failure than an honest 401. */
+async function gateDashboard(dashId: string, rest: string, projectId: string, request: Request, env: Env): Promise<Response> {
+  const acc = await projectAccessOf(request, env, projectId)
+  if (!acc.ok) {
+    if (/\.[a-z0-9]+$/i.test(rest)) return new Response('unauthorized', { status: 401 })
+    const back = encodeURIComponent(new URL(request.url).pathname)
+    return Response.redirect(new URL(`/u/?next=${back}`, request.url).toString(), 302)
+  }
+  return serveDashboard(dashId, rest, projectId, request, env)
+}
+
 async function resolveSubdomain(sub: string, env: Env): Promise<string | null> {
   if (env.DOMAINS) {
     const cached = await env.DOMAINS.get(`dom:${sub}`)
@@ -568,10 +746,15 @@ async function handleSiteRequest(host: string, request: Request, env: Env): Prom
   }
 
   // <projectid>.superatom.site → projectId straight from the label (no lookup)
-  if (UUID_RE.test(sub)) return serveUserApp(request, env, sub)
+  const pathname = new URL(request.url).pathname
+  const dash = pathname.match(/^\/dashboard\/([^/]+)(\/.*)?$/)
+
+  if (UUID_RE.test(sub))
+    return dash ? gateDashboard(dash[1], dash[2] ?? '', sub, request, env) : serveUserApp(request, env, sub)
 
   // <subdomain>.superatom.site → resolve via KV → GlobalDO
   const projectId = await resolveSubdomain(sub, env)
+  if (dash && projectId) return gateDashboard(dash[1], dash[2] ?? '', projectId, request, env)
   return serveUserApp(request, env, projectId)   // null → "no project" screen
 }
 
