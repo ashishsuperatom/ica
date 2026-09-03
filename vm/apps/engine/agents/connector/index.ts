@@ -1,6 +1,6 @@
 // ── Connector Agent ───────────────────────────────────────────────────────────
 // The admin's infrastructure coding agent. A real claude-code session (default claude-code:sonnet-5) that
-// the admin talks to in a terminal (raw PTY → xterm; NO [[ui]] narration — you just watch it work). Its
+// the admin talks to in a terminal (raw PTY → xterm; no narration — you just watch it work). Its
 // main job is connecting data sources: it writes a bridge, tests it against the datasource-manager, and
 // registers it live. It shares the ICA workspace machinery with the analyst/modeler; its instructions are
 // in ./SYSTEM.md (copied in as ./connector/CONNECTOR.md so it never clobbers the other agents' role files).

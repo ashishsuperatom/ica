@@ -72,7 +72,6 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
   let serialize: any = null       // @xterm/addon-serialize — term.serialize() → the snapshot
   let idle: ReturnType<typeof setTimeout> | null = null
   let donePoll: ReturnType<typeof setInterval> | null = null   // fast completion: poll the caller's doneWhen()
-  let lastNarr = ''                                           // last clean narration line emitted (dedup)
   let lastDataAt = 0                          // timestamp of the last PTY byte — drives readiness (settle) detection
   let cols = 120, rows = 34                   // PTY size — the UI resizes this to fill its terminal width (SIGWINCH)
   interface Job { prompt: string; h?: RunHandlers; resolve: (r: RunResult) => void; startedAt: number; submitted: boolean }
@@ -108,7 +107,6 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
       let o: any; try { o = JSON.parse(line) } catch { continue }
       for (const ev of eventLog.handleEntry(o)) {
         current?.h?.onEvent?.(ev)                                          // live to the active run; events() has the full log for replay
-        if (ev.kind === 'message' && ev.text) emitNarration(ev.text)       // clean [[ui]] progress line, from the JSONL (never the PTY)
       }
     }
   }
@@ -185,8 +183,8 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
         }
       }
       current?.h?.onOutput?.(d)
-      // NOTE: narration ([[ui]] progress lines) is sourced from the JSONL transcript in pollTranscript(), NOT from
-      // this raw PTY byte stream. The stream interleaves cursor-addressed writes from all over the TUI (spinner,
+      // NOTE: nothing user-facing is EVER sourced from this raw PTY byte stream — it goes to the terminal
+      // surface and nowhere else. The stream interleaves cursor-addressed writes from all over the TUI (spinner,
       // token counter, the code being written) — stripAnsi can't reconstruct screen lines, so reading it here once
       // mashed the spinner + diff + source into a single "line" and leaked it to the user. Clean text only, below.
       // Completion tracking runs ONLY after we've submitted — before that, output is the TUI
@@ -209,19 +207,6 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
       const quiet = Date.now() - lastDataAt >= READY_QUIET
       if (boxReady && quiet) return
       await delay(100)
-    }
-  }
-
-  // The agent's DELIBERATE progress note: a line it marked with `[[ui]]` (the system prompt tells it to prefix
-  // user-facing progress with that tag). Sourced from the CLEAN JSONL assistant text — never the PTY buffer — so
-  // it can never carry terminal chrome (spinner/token-counter/diff). We surface only [[ui]] lines, deduped.
-  function emitNarration(text: string) {
-    if (!current?.h?.onNarration) return
-    for (const raw of text.split('\n')) {
-      const m = raw.trim().match(/^\[\[ui\]\]\s+(.+)$/i)   // a line the agent MARKED as user-facing progress
-      if (!m) continue
-      const t = m[1].trim()
-      if (t && t !== lastNarr) { lastNarr = t; current.h.onNarration(t) }
     }
   }
 
