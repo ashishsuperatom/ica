@@ -41,6 +41,7 @@ import { createSpanFirer } from './retrieval/span-firing.js'
 import type { EngineMsgType } from '../../../clients/protocol.js'
 import { buildDatasourceIndex } from './datasource-index/build.js'
 import { parseVerb, VERBS } from './verbs/index.js'
+import { diffAnswers, checkReport, checkAnswer } from './verbs/check.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 try { process.loadEnvFile(join(__dirname, '.env')) } catch { /* no .env — rely on the ambient environment */ }
@@ -609,6 +610,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   const verb = parseVerb(question)
   const explicitEdit = verb?.verb === 'edit'
   const explicitExplain = verb?.verb === 'explain'
+  const explicitCheck   = verb?.verb === 'check'
   const askedRaw = verb ? verb.raw : question
   if (verb) question = verb.rest
   // Stream everything to `reply` (re-targetable): a reload reconnects and sessions:list points reply
@@ -731,9 +733,9 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     } else {
       console.log('[ica] explicit edit, but no current program to edit → building fresh')
     }
-  } else if (!explicitExplain) {
-    // Explain reports on a program that is already chosen — searching for candidates or ranking concepts would
-    // be work whose result nothing reads, on the one verb that is supposed to come back quickly.
+  } else if (!explicitExplain && !explicitCheck) {
+    // Explain and check both report on a program that is already chosen — searching for candidates or ranking
+    // concepts would be work whose result nothing reads, on the two verbs meant to come back quickly.
     // NO reflex routing. The exact-match fast-path above already handled exact repeats (no LLM). For everything
     // else the ENGINE searches (semantic) and hands the composer the candidate programs + scores — the composer
     // judges (reuse a strong match / compose from concepts / escalate). Placement is the regex heuristic: a
@@ -913,6 +915,44 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       console.log(`[ica] explain · ${(c.ms / 1000).toFixed(1)}s · ${explainTarget.programDir}`)
       emit(reply, { t: 'analyst:answer', category: c.category, answer: c.answer, timing, sid, qid })
       if (channel) emit({ type: 'channel' }, { t: 'channel:answer', channel, qid, answer: c.answer, category: c.category })
+      return
+    }
+
+    // ── CHECK — re-run the same program with the same parameters and report what moved. ─────────────────────
+    // No agent at all: running the program is computation and comparing the numbers is arithmetic. A model here
+    // would be the one part of the answer nobody could check.
+    if (explicitCheck) {
+      const curProgram = (curNode?.props as any)?.program
+      const prior = curNode ? answers.findAnswered(((curNode.props as any)?.question as string) ?? '') : null
+      const dir = curProgram ?? prior?.programDir
+      // The node's params are what produced what is on screen; the saved row is the fallback for a node that
+      // predates them. Without them we would re-run with different inputs and report a change we caused.
+      const params = (curNode?.props as any)?.params ?? prior?.params ?? {}
+      if (!dir || !prior?.answer || !existsSync(join(WORKSPACE, dir, 'program.ts'))) {
+        console.log('[ica] check, but there is no saved answer with a program to re-run')
+        emit(reply, { t: 'analyst:answer', category: 'analysis', sid, qid, timing: { ms: Date.now() - t0 },
+          answer: { status: 'answered', category: 'analysis', answer: VERBS.check.nothingToActOn } })
+        return
+      }
+      emit(reply, A('status', 'analyst', { text: 'Re-running it to compare…', sid, qid }))
+      let answer: any
+      const runT0 = Date.now()
+      try {
+        const rr = await execProgram(WORKSPACE, dir, params)
+        const now = answerView(rr.output)
+        const diff = diffAnswers(prior.answer, now)
+        answers.recordRun({ programDir: dir, qid, question, params, status: now.status, shapeHash: (rr as any).finalShapeHash, ms: Date.now() - runT0 })
+        answer = checkAnswer(checkReport({ programDir: dir, params, answeredAt: prior.createdAt, ms: Date.now() - runT0, diff }), dir)
+        console.log(`[ica] check · ${dir} · ${diff.changed ? `${diff.movements.length} moved` : 'unchanged'} · ${((Date.now() - runT0) / 1000).toFixed(1)}s`)
+      } catch (e: any) {
+        // A program that no longer runs is itself the finding, and the most important one check can report.
+        answer = checkAnswer(`**It no longer runs.** Re-running \`${dir}\` with the parameters it was answered with failed:\n\n\`\`\`\n${String(e?.message ?? e).slice(0, 600)}\n\`\`\`\n\nThe answer on screen was produced before this broke, so it is still what it was — but the program behind it cannot be re-run as it stands.`, dir)
+        console.log(`[ica] check · ${dir} · FAILED TO RUN · ${String(e?.message ?? e).slice(0, 120)}`)
+      }
+      const timing = { ms: Date.now() - t0 }
+      lastAnswer = answer; lastTiming = timing; lastCategory = 'analysis'
+      emit(reply, { t: 'analyst:answer', category: 'analysis', answer, timing, sid, qid })
+      if (channel) emit({ type: 'channel' }, { t: 'channel:answer', channel, qid, answer, category: 'analysis' })
       return
     }
 
