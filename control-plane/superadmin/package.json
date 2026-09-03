@@ -6,8 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "deploy": "pnpm typecheck && vite build && wrangler deploy",
-    "typecheck": "tsc --noEmit -p tsconfig.worker.json && tsc --noEmit -p tsconfig.json"
+    "deploy": "pnpm --filter user-ui build && pnpm typecheck && vite build && wrangler deploy",
+    "typecheck": "tsc --noEmit -p tsconfig.worker.json && tsc --noEmit -p tsconfig.json",
+    "//deploy": "Builds the USER UI first. It lands in this package's dist/client/u and is served from here, but it is a separate package with its own build \u2014 so for a long time a failed or forgotten user-ui build still deployed, shipping whatever bundle happened to be on disk. Four times."
   },
   "dependencies": {
     "@clerk/react": "^6.7.3",

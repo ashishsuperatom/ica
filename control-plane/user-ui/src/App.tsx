@@ -1284,9 +1284,13 @@ const ANSWER_CSS = `
 .sa-beat:first-child{border-top:none;padding-top:0}
 .sa-beat.past{opacity:.55}
 .sa-beat .sa-beat-b{flex:1;min-width:0}
-/* A PROGRAM's beat, not the narrator's. The difference is carried by the TYPEFACE — mono, slightly smaller,
-   slightly recessed — so the two streams read apart without any rule or block of colour dividing the card. */
+/* A PROGRAM's beat, not the narrator's. Typeface AND a very faint ground: once a beat greys out as a past one,
+   the typeface alone stopped being enough to tell the two streams apart at a glance, which is the whole job.
+   The tint is near-invisible in isolation and only reads as a band when several sit together. */
+.sa-beat.prog{background:#f4f1ea;margin-left:-10px;margin-right:-10px;padding-left:10px;padding-right:10px}
+.sa-beat.prog + .sa-beat.prog{border-top-color:#e7e2d8}
 .sa-beat.prog .sa-beat-b{font-family:var(--mono);font-size:12px;color:#7d766a;letter-spacing:-.01em}
+.sa-beat.clickable{cursor:pointer}
 .sa-beat-x{opacity:0;transition:opacity .12s;background:transparent;border:0;padding:2px 4px;color:#9a9285;cursor:pointer;line-height:0;align-self:flex-start}
 .sa-beat:hover .sa-beat-x{opacity:1}
 .sa-beat-x:hover{color:var(--ink)}
@@ -1419,7 +1423,13 @@ const Beat = memo(function Beat(props: {
 }) {
   const { text, secs, prog, past, detail, chevron, count, head, onToggle } = props
   return (
-    <div className={'sa-beat' + (past ? ' past' : '') + (prog ? ' prog' : '')}>
+    <div className={'sa-beat' + (past ? ' past' : '') + (prog ? ' prog' : '') + (chevron !== 'none' ? ' clickable' : '')}
+         onClick={chevron === 'none' ? undefined : () => {
+           // The ROW toggles, not just the chevron — a 11px target was a poor thing to have to hit. But a click
+           // that ends a text selection is someone copying a line, not asking to collapse it, so that wins.
+           if (!window.getSelection()?.isCollapsed) return
+           onToggle(head)
+         }}>
       <div className="sa-beat-b sa-md" dangerouslySetInnerHTML={{ __html: renderInlineMd(text) }} />
       {detail && <pre className="sa-beat-sql">{detail}</pre>}
       {chevron !== 'none' && (
