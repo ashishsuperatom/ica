@@ -226,7 +226,7 @@ export class OrgDO extends DurableObject<Env> {
     const addr = String(email ?? '').trim().toLowerCase()
     if (!addr) return Response.json({ error: 'email required' }, { status: 400 })
     // Lower-cased on the way in: this address IS the identity every later check matches on.
-    const [existing] = this.ctx.storage.sql.exec('SELECT id FROM users WHERE email = ?', addr) as any[]
+    const [existing] = [...this.ctx.storage.sql.exec('SELECT id FROM users WHERE email = ?', addr)]
     if (existing) {
       if (role) {
         this.ctx.storage.sql.exec('UPDATE users SET role = ? WHERE id = ?', role, existing.id)
@@ -295,7 +295,7 @@ export class OrgDO extends DurableObject<Env> {
     const addr = String(email ?? '').trim().toLowerCase()
     if (!projectId || !addr) return Response.json({ error: 'projectId and email required' }, { status: 400 })
     // Only someone already in the org can be assigned — a project cannot invent its own users.
-    const [u] = this.ctx.storage.sql.exec('SELECT id FROM users WHERE email = ?', addr) as any[]
+    const [u] = [...this.ctx.storage.sql.exec('SELECT id FROM users WHERE email = ?', addr)]
     if (!u) return Response.json({ error: 'no such user in this organisation — add them to the org first' }, { status: 400 })
     return Response.json(await this.projectAccess(projectId, 'POST', { email: addr, roleId: roleId ?? 'member' }))
   }

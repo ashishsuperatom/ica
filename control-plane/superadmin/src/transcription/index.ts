@@ -113,7 +113,7 @@ export async function handleTranscribe(
   }
 }
 
-function str(value: FormDataEntryValue | null): string | undefined {
+function str(value: File | string | null): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined
 }
 

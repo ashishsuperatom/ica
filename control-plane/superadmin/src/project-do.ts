@@ -75,7 +75,7 @@ async function verifyJwt(token: string, secret: string): Promise<JwtClaims | nul
     const valid = await crypto.subtle.verify(
       'HMAC',
       key,
-      base64urlDecode(sigB64),
+      base64urlDecode(sigB64) as BufferSource,   // see above: Uint8Array is generic over its buffer since TS 5.7
       new TextEncoder().encode(data)
     )
 
@@ -965,7 +965,7 @@ export class ProjectDO extends DurableObject<Env> {
     const email = String(b.email ?? '').trim().toLowerCase()
     if (!email) return this.j({ error: 'email required' }, 400)
     // The people who administer the ORGANISATION are its to manage — a project cannot lock its owner out.
-    const [row] = this.ctx.storage.sql.exec('SELECT source FROM access WHERE email = ?', email) as any[]
+    const [row] = [...this.ctx.storage.sql.exec('SELECT source FROM access WHERE email = ?', email)]
     if (row?.source === 'org-admin') return this.j({ error: 'this person administers the organisation — change it there' }, 403)
     this.ctx.storage.sql.exec('DELETE FROM access WHERE email = ?', email)
     return this.j({ ok: true, email })
@@ -1004,7 +1004,7 @@ export class ProjectDO extends DurableObject<Env> {
   private async deleteRole(request: Request): Promise<Response> {
     const b = await request.json().catch(() => ({})) as any
     const id = String(b.id ?? '')
-    const [row] = this.ctx.storage.sql.exec('SELECT builtin FROM roles WHERE id = ?', id) as any[]
+    const [row] = [...this.ctx.storage.sql.exec('SELECT builtin FROM roles WHERE id = ?', id)]
     if (!row) return this.j({ error: 'no such role' }, 404)
     if (row.builtin) return this.j({ error: 'built-in roles cannot be deleted' }, 400)
     // Holders fall back to the default rather than losing access mid-session.

@@ -52,7 +52,9 @@ export const teamsAdapter: ChannelAdapter = {
       if (!jwk) return false
       const key = await crypto.subtle.importKey('jwk', { kty: 'RSA', n: jwk.n, e: jwk.e, alg: 'RS256', ext: true },
         { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify'])
-      return await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, b64urlBytes(s64), new TextEncoder().encode(`${h64}.${p64}`))
+      // `as BufferSource`: TS 5.7 made Uint8Array generic over its buffer, so the general type admits a
+      // SharedArrayBuffer-backed view that WebCrypto will not take. These bytes are always plain.
+      return await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, b64urlBytes(s64) as BufferSource, new TextEncoder().encode(`${h64}.${p64}`) as BufferSource)
     } catch { return false }
   },
 

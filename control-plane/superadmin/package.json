@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "deploy": "vite build && wrangler deploy"
+    "deploy": "pnpm typecheck && vite build && wrangler deploy",
+    "typecheck": "tsc --noEmit -p tsconfig.worker.json && tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@clerk/react": "^6.7.3",

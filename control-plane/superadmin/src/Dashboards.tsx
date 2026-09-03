@@ -56,7 +56,7 @@ export function DashboardsPanel({ api, token, projectId, host }: { api: (p: stri
 
   const load = useCallback(() => {
     api(`/projects/${projectId}/dashboards`).then((r) => (r.ok ? r.json() : { dashboards: [] }))
-      .then((d) => setList(d.dashboards ?? [])).catch(() => {})
+      .then((d) => setList((d as { dashboards?: Dash[] }).dashboards ?? [])).catch(() => {})
   }, [api, projectId])
   useEffect(load, [load])
 

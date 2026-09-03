@@ -1,0 +1,13 @@
+{
+  // The BROWSER half: the admin SPA and the client-side hub. Typechecked against DOM, never Workers —
+  // Response.json() returns `any` in one and `unknown` in the other, so checking React code against Workers
+  // types invents two dozen errors that are not real.
+  "compilerOptions": {
+    "target": "ES2022", "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext", "moduleResolution": "bundler", "jsx": "react-jsx",
+    "strict": true, "noEmit": true, "skipLibCheck": true, "esModuleInterop": true, "resolveJsonModule": true,
+    "types": ["vite/client"]
+  },
+  "include": ["src/**/*.tsx", "src/hub.ts", "src/hub-core.ts", "src/termColors.ts"],
+  "exclude": ["src/__tests__/**"]
+}
