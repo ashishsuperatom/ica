@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, memo } from 'react'
 import { renderInlineMd, renderAnswerBody } from './format'
 import { CodexEventLog, mergeEvent, type AgentEvent } from './agentEventLog'
 import { useSession, SignIn, UserButton, useUser } from '@clerk/react'
@@ -706,6 +706,48 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'concept-log', 'narrati
     return Math.max(1, Math.floor(Math.max(0, end - t[i]) / 1000) + 1)
   }
 
+  // Stable, so memo on a row actually holds — a fresh closure on every render would defeat it.
+  const toggleBeatGroup = useCallback((head: number) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(head)) next.delete(head); else next.add(head)
+      return next
+    })
+  }, [])
+
+  // The rows to draw, flat and stably keyed. Consecutive PROGRAM beats become one row showing the latest,
+  // unless the reader has opened that run. Recomputed when the beats, the clock or an expansion change — the
+  // rows themselves are memoised, so a tick only re-renders the one row whose seconds actually moved.
+  const beatRows = (() => {
+    const groups: Array<{ prog: boolean; idxs: number[] }> = []
+    narrationLog.forEach((_, i) => {
+      const prog = narrationMetaRef.current[i]?.kind === 'program'
+      const last = groups[groups.length - 1]
+      if (last && last.prog && prog) last.idxs.push(i)
+      else groups.push({ prog, idxs: [i] })
+    })
+    const rows: Array<{ key: string; text: string; secs: number; prog: boolean; past: boolean
+                        detail?: string; chevron: 'none' | 'open' | 'closed'; count: number; head: number }> = []
+    for (const g of groups) {
+      const head = g.idxs[0]
+      const open = expandedGroups.has(head)
+      const many = g.prog && g.idxs.length > 1
+      const shown = g.prog && !open ? [g.idxs[g.idxs.length - 1]] : g.idxs
+      shown.forEach((i, n) => rows.push({
+        key: `${head}:${i}`,
+        text: narrationLog[i],
+        secs: beatSecs(i, narrationLog.length),
+        prog: g.prog,
+        past: i !== narrationLog.length - 1,
+        detail: open ? narrationMetaRef.current[i]?.detail : undefined,
+        chevron: many && n === 0 ? (open ? 'open' : 'closed') : 'none',
+        count: g.idxs.length,
+        head,
+      }))
+    }
+    return rows
+  })()
+
   const submit = useCallback((preset?: string) => {
     const text = (typeof preset === 'string' ? preset : inputRef.current?.value)?.trim()
     if (!text || busy || wsRef.current?.readyState !== 1) return
@@ -998,55 +1040,22 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'concept-log', 'narrati
                 </div>
                 {narrationLog.length > 0 && (
                   <div className="sa-beats">
-                    {/* A RUN OF PROGRAM BEATS COLLAPSES TO ONE. A program emits a line per unit, per decision
-                        and per query, so a real one buries the narrator's few sentences under thirty of its
-                        own and the card grows without end. Consecutive program lines therefore show only their
-                        LATEST — each replacing the last, which is what you want from a progress line — with a
-                        chevron to open the rest.
-                        The chevron, not the text, is what expands: clicking the line itself would mean you
-                        could never select any of it. It appears on hover only, so a card at rest is quiet. */}
-                    {(() => {
-                      const groups: Array<{ prog: boolean; idxs: number[] }> = []
-                      narrationLog.forEach((_, i) => {
-                        const prog = narrationMetaRef.current[i]?.kind === 'program'
-                        const last = groups[groups.length - 1]
-                        if (last && last.prog && prog) last.idxs.push(i)
-                        else groups.push({ prog, idxs: [i] })
-                      })
-                      return groups.map((g) => {
-                        const head = g.idxs[0]
-                        const open = expandedGroups.has(head)
-                        const many = g.prog && g.idxs.length > 1
-                        const shown = g.prog && !open ? [g.idxs[g.idxs.length - 1]] : g.idxs
-                        return shown.map((i, n) => {
-                          const meta = narrationMetaRef.current[i]
-                          const isLastOverall = i === narrationLog.length - 1
-                          const showChevron = many && n === 0
-                          return (
-                            <div key={i} className={'sa-beat' + (isLastOverall ? '' : ' past') + (g.prog ? ' prog' : '')}>
-                              <div className="sa-beat-b sa-md" dangerouslySetInnerHTML={{ __html: renderInlineMd(narrationLog[i]) }} />
-                              {/* The query itself, only once the run is open — a collapsed line is a progress
-                                  line, and a screen of SQL is the opposite of that. */}
-                              {open && meta?.detail && <pre className="sa-beat-sql">{meta.detail}</pre>}
-                              {showChevron && (
-                                <button className="sa-beat-x" title={open ? 'Collapse' : `Show all ${g.idxs.length} steps`}
-                                        onClick={() => setExpandedGroups(prev => {
-                                          const next = new Set(prev)
-                                          next.has(head) ? next.delete(head) : next.add(head)
-                                          return next
-                                        })}>
-                                  <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden>
-                                    <path d={open ? 'M2.5 7.5L6 4l3.5 3.5' : 'M2.5 4.5L6 8l3.5-3.5'}
-                                          fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                                  </svg>
-                                </button>
-                              )}
-                              <div className="sa-beat-t">{beatSecs(i, narrationLog.length)}s</div>
-                            </div>
-                          )
-                        })
-                      })
-                    })()}
+                    {/* A RUN OF PROGRAM BEATS COLLAPSES TO ONE. A program emits a line per unit, per
+                        decision and per query, so a real one buries the narrator's few sentences under thirty
+                        of its own. Consecutive program lines show only their LATEST — each replacing the last,
+                        which is what a progress line is for — with a chevron to open the rest.
+
+                        The chevron expands, not the text: clicking the line would mean never being able to
+                        select any of it. It shows on hover only, so a card at rest is quiet.
+
+                        Built as a FLAT list of rows with stable keys, and each row memoised. Nested arrays
+                        without keys made React remount the subtree on every tick, which is what destroyed a
+                        selection the instant you made one. */}
+                    {beatRows.map(r => (
+                      <Beat key={r.key} text={r.text} secs={r.secs} prog={r.prog} past={r.past}
+                            detail={r.detail} chevron={r.chevron} count={r.count} head={r.head}
+                            onToggle={toggleBeatGroup} />
+                    ))}
                   </div>
                 )}
                 {narrationLog.length === 0 && <div style={{ marginTop: 8, fontSize: 13.5, color: '#8a8276' }}>{anProgress || anStatus || 'Working…'}</div>}
@@ -1395,6 +1404,37 @@ function verbEventLine(ev: any): string {
   if (ev.kind === 'reasoning') return String(ev.text ?? '').trim().slice(0, 300)
   return ''   // 'turn' and anything a later harness adds: no line, rather than a mystery one
 }
+
+// ONE BEAT, memoised. The card ticks once a second so the CURRENT beat's timer can count up — but a past
+// beat's seconds are the gap to the beat after it, which never changes again. Without memo every row
+// re-rendered every second: wasted work, and it destroyed a text selection the moment you made one, because
+// the row you were selecting was being rebuilt underneath you.
+//
+// Every prop here is a primitive except `onToggle`, which the parent must keep stable (useCallback) or memo
+// buys nothing.
+const Beat = memo(function Beat(props: {
+  text: string; secs: number; prog: boolean; past: boolean
+  detail?: string; chevron: 'none' | 'open' | 'closed'; count: number
+  head: number; onToggle: (head: number) => void
+}) {
+  const { text, secs, prog, past, detail, chevron, count, head, onToggle } = props
+  return (
+    <div className={'sa-beat' + (past ? ' past' : '') + (prog ? ' prog' : '')}>
+      <div className="sa-beat-b sa-md" dangerouslySetInnerHTML={{ __html: renderInlineMd(text) }} />
+      {detail && <pre className="sa-beat-sql">{detail}</pre>}
+      {chevron !== 'none' && (
+        <button className="sa-beat-x" onClick={() => onToggle(head)}
+                title={chevron === 'open' ? 'Collapse' : `Show all ${count} steps`}>
+          <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden>
+            <path d={chevron === 'open' ? 'M2.5 7.5L6 4l3.5 3.5' : 'M2.5 4.5L6 8l3.5-3.5'}
+                  fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      )}
+      <div className="sa-beat-t">{secs}s</div>
+    </div>
+  )
+})
 
 function answerToText(a: any, cat: string, meta?: { qid?: string; at?: number; timing?: { ms: number; classifyMs?: number; modelMs?: number } }): string {
   const out: string[] = []
