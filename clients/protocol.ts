@@ -67,6 +67,10 @@ export type EngineMsgType =
   // One type carrying `verb` rather than one type per verb: the client filters on the field, and the next
   // verb needs no new message and no new case anywhere that already handles this one.
   | 'verb:event'
+  // STOP — the client asks for the turn in a session to be abandoned; the engine confirms whether one was
+  // running. A turn can span two agents and several minutes, so this is scoped to the SESSION, not a question:
+  // by the time the message lands, the work may have moved from the composer to the analyst.
+  | 'turn:stop' | 'turn:stopped'
   // AGENT LANES — one vocabulary for every agent (composer, analyst, concept-modeller, and any later one),
   // keyed by `lane`. This replaced a per-agent set (analyst:status/stream/category/progress/done,
   // concept:event/status/stream): a new agent needed new message types, and every consumer had to learn them.
@@ -100,6 +104,8 @@ export type EnginePayload =
   | { t: 'tick' }                                                     // liveness ping
   | { t: 'machine:waking' }                                           // engine is suspended, coming up
   | { t: 'analyst:answer'; category?: string; answer: Answer; timing?: unknown; sid?: string; qid?: string; reused?: boolean }
+  | { t: 'turn:stop'; sessionId: string; reason?: string }
+  | { t: 'turn:stopped'; sessionId: string; stopped: boolean }
   | { t: 'verb:event'; verb: Verb; ev: { kind: string; text?: string; command?: string; id?: string; done?: boolean }; sid?: string; qid?: string }
   | { t: 'narration'; text: string; qid?: string; sid?: string }      // a business-language beat while work happens
   | { t: 'followups'; items: string[]; qid?: string; sid?: string }

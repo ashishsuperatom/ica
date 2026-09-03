@@ -960,7 +960,11 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
             {anBusy && (
               <div className="sa-live">
                 <div className="sa-live-h">
-                  <Spinner /><span>Analysis</span>
+                  {/* What is actually running, not a fixed word. The engine says so as soon as it knows — for a
+                      verb turn that is immediately, for a question it is the agent's own judgement, arriving a
+                      little later. Until then "Working" is honest, where "Analysis" was a guess that was often
+                      simply wrong. */}
+                  <Spinner /><span>{anCategory ? anCategory.replace(/_/g, ' ') : 'Working'}</span>
                   <span className="lnk" onClick={() => navigate('analyst')}>details ↗</span>
                 </div>
                 {narrationLog.length > 0 && (

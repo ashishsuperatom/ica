@@ -17,6 +17,7 @@ import WebSocket from 'ws'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { existsSync, mkdirSync, rmSync, readFileSync } from 'node:fs'
+import { writeFile } from 'node:fs/promises'
 import { execSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { execProgram, answerView } from './exec-program.js'
@@ -121,6 +122,17 @@ let hub: WebSocket | null = null
 // stream target (reply) + channel are LOCAL per analyse() call now — no cross-session clobber. curQuestion/
 // lastAnswer below stay global as a best-effort reconnect-status snapshot only, never for answer routing.
 const busySessions = new Set<string>()
+// THE TURN IN FLIGHT, per session — so it can be STOPPED. A question can run for minutes across two agents; a
+// person who has changed their mind should not have to wait it out, and the machine should not keep spending
+// on an answer nobody wants. `stop()` is filled in by the turn itself, which is the only thing that knows what
+// it currently owns (which agent is working, the narrator, the timers).
+const inflight = new Map<string, { qid: string; stop: (why: string) => void }>()
+export function stopTurn(sid: string, why = 'the user stopped it'): boolean {
+  const t = inflight.get(sid)
+  if (!t) return false
+  t.stop(why)
+  return true
+}
 let connectorBusy = false
 let groundingBusy = false
 let indexBusy = false   // the datasource-index build — one at a time per project
@@ -636,6 +648,32 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   if (qidIn) { const ex = answers.get(qidIn); if (ex && ex.norm !== norm) qid = genId() }
   curQuestion = question; curSid = sid; curCategory = ''; lastAnswer = null
   const t0 = Date.now()
+  // STOPPING. Checked wherever this turn is about to produce something, because a promise already in flight
+  // cannot be un-awaited: we tell the agent to stop, stop showing its output, and discard whatever eventually
+  // comes back. All three matter — killing the agent alone would still let a late answer land on screen, and a
+  // flag alone would leave the model running and billing.
+  let stopped: string | null = null
+  let stopSession: (() => void) | null = null          // set once we know which agent is working
+  let workingAgent = 'engine'                          // for the log and the record; the inner currentAgent is out of scope here
+  const stopThisTurn = (why: string) => {
+    if (stopped) return
+    stopped = why
+    console.log(`[ica] STOP requested for ${qid.slice(0, 8)} (${workingAgent}) — ${why}`)
+    try { narrator?.stop() } catch { /* best-effort */ }
+    if (narrationTimer) { clearInterval(narrationTimer); narrationTimer = null }
+    // Tell whichever agent is working to abandon the turn. reset() is the harness's own "drop this session";
+    // it is optional, so a harness without it keeps running and we simply ignore its answer.
+    try { stopSession?.() } catch { /* best-effort */ }
+    emit(reply, A('status', 'analyst', { text: 'Stopped.', sid, qid }))
+    emit(reply, { t: 'analyst:answer', category: 'stopped', sid, qid, timing: { ms: Date.now() - t0 },
+      answer: { status: 'answered', category: 'stopped', answer: 'Stopped — nothing was saved for this question.' } })
+  }
+  inflight.set(sid, { qid, stop: stopThisTurn })
+  // SAY WHAT KIND OF TURN THIS IS, IMMEDIATELY. The card that shows while the work runs had "Analysis" written
+  // into it, so a check: or an explain: announced itself as an analysis for its whole duration and only became
+  // what it was once finished. The verb is known here, before anything has been done — so it is said here. An
+  // ordinary question stays as it was: its category is a judgement the agent makes, and it arrives later.
+  if (verb) emit(reply, A('status', 'analyst', { category: VERBS[verb.verb].category, sid, qid }))
 
   // ── INTENT GRAPH match at the current position (SYS-1 fast path, no LLM) ──────
   // Position = where this session currently sits in the tree. hash(pos, question) is the
@@ -819,7 +857,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       // you can tell afterwards which arm produced the beats you were reading.
       console.log(`[beat] narrator context = ${narrator.context}`)
       narrationTimer = setInterval(async () => {
-        if (narrating || !reply || narrationBuf.length === 0) return
+        if (stopped || narrating || !reply || narrationBuf.length === 0) return
         narrating = true
         const activity = narrationBuf.splice(0).join('\n')
         // TIMED IN THREE PARTS, because "the narrator is slow" can mean any of them and they have different
@@ -968,7 +1006,9 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         handlers.onEvent?.(ev)                       // the agent lane still gets it, exactly as before
         emit(reply, { t: 'verb:event', verb: 'explain', ev, qid, sid })
       } }
+      workingAgent = 'composer'; stopSession = () => { try { (composer as any).session?.reset?.() } catch { /* best-effort */ } }
       const c = await composer.ask(question, streamed, { qid, explain: explainTarget, raw: askedRaw })
+      if (stopped) return                                     // stopThisTurn already told the user
       const cat = VERBS.explain.category
       const timing = { ms: Date.now() - t0 }
       lastAnswer = c.answer; lastTiming = timing; lastCategory = cat
@@ -1064,6 +1104,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       // model's own first-token latency, because only one of the two is ours to fix.
       console.log(`[ica] composer ready in ${Date.now() - readyT0}ms (question → composer: ${Date.now() - t0}ms)`)
       agentAskedAt = Date.now()
+      workingAgent = 'composer'; stopSession = () => { try { (composer as any).session?.reset?.() } catch { /* best-effort */ } }
       // CAPPED, like the analyst below. This await was unbounded: a composer that never returned held the
       // session's busy flag for good, and every later question in that chat was refused with "already
       // answering". The cap is generous — it exists so a turn always ends, not to hurry one along.
@@ -1087,6 +1128,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     if (!r) {   // composer escalated → the analyst (System 3) handles it (build or modify)
       currentAgent = 'analyst'
       emit(reply, A('status', 'analyst', { progress: 'Handing off to the analyst for deeper analysis…', sid }))
+      workingAgent = 'analyst'; stopSession = () => { try { (analyst as any).session?.reset?.() } catch { /* best-effort */ } }
       const askP = analyst.ask(question, handlers, { qid, conceptNames, reason: escalateReason, modify: modifyTarget ?? undefined, resolvedQuestion })
       askP.catch(() => {})   // if we abandon it on timeout, don't leak an unhandled rejection
       let capT: ReturnType<typeof setTimeout> | undefined
@@ -1107,6 +1149,20 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // model behind the scenes. So there is no synchronous gap loop here anymore; the analyst's answer is final.
 
     // Timing metadata for the answer card: total wall time.
+    // STOPPED — go no further. The user's answer already went out from stopThisTurn; what must NOT happen is
+    // everything below: an answer row, an intent node, an embedding, a program node. A question somebody
+    // abandoned should leave the model exactly as it found it, or it becomes a reusable answer to a question
+    // nobody wanted answered.
+    //
+    // The record of the stop goes in the question's own folder, beside whatever the agent had written, so it
+    // is visible where anyone debugging this question is already looking.
+    if (stopped) {
+      await writeFile(join(WORKSPACE, 'out', qid, 'stopped.json'),
+        JSON.stringify({ at: Date.now(), reason: stopped, afterMs: Date.now() - t0, agent: workingAgent, question }, null, 2))
+        .catch(() => { /* the folder may not exist if we stopped before the agent ran */ })
+      console.log(`[ica] ${qid.slice(0, 8)} stopped after ${((Date.now() - t0) / 1000).toFixed(1)}s — nothing persisted`)
+      return
+    }
     const timing = { ms: Date.now() - t0 }
     lastAnswer = r.answer; lastTiming = timing; lastCategory = r.category
     // Capture the PROGRAM the agent built (its built.json pointer) so a repeat of this question re-runs
@@ -1208,6 +1264,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     emit(reply, A('status', 'analyst', { state: 'done', sid }))
     analystSlot.persist()   // capture the live ids (incl. any resume-fallback)
     busySessions.delete(sid)
+    if (inflight.get(sid)?.qid === qid) inflight.delete(sid)   // only ours — a newer turn may already own the slot
   }
 }
 
@@ -1481,6 +1538,14 @@ async function handle(payload: any, from: any) {
   // several panels in flight on the ONE shared project socket without confusing the replies.
   else if (payload.t === 'inspect:req') {
     inspector.handle(payload).then((res) => emit(from, { t: 'inspect:res', reqId: payload.reqId, view: payload.view ?? 'overview', ...res }))
+  }
+  // STOP the turn running in this session. Deliberately not scoped to a qid: the person is looking at one chat
+  // and wants what is happening in it to stop, and by the time the message arrives the turn may have moved from
+  // the composer to the analyst. Answering `stopped:false` when nothing was running is information, not an error.
+  else if (payload.t === 'turn:stop') {
+    const sid = String(payload.sessionId || '')
+    const did = stopTurn(sid, String(payload.reason || 'the user stopped it'))
+    emit(from, { t: 'turn:stopped', sessionId: sid, stopped: did })
   }
   else if (payload.t === 'analyst:sync') { resyncAnalyst(from, true) }   // real (re)connect → full replay of the live analyst log
   else if (payload.t === 'sessions:list') { resyncAnalyst(from, false) }   // sidebar refresh only → NO event replay (keeps the question dividers)
