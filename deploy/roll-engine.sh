@@ -18,7 +18,11 @@ MODE="${1:-fast}"
 SSH_USER="${SSH_USER:?set SSH_USER}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/superatom_vm}"
 HOST="${SSH_HOST:?set SSH_HOST}"; PORT="${SSH_PORT:?set SSH_PORT}"
-CONTAINER="${CONTAINER:-superatom-engine-1}"
+# <compose project>-<service>-<n>. The project is the bundle dir (superatom-engine) and the service is
+# `engine`, so "engine" appears twice. The old default omitted the service, so every `fast` roll aborted on
+# the first docker cp until CONTAINER was passed by hand. It failed loudly, which is why it never became a
+# wrong-code incident — but it made the documented invocation one that does not work.
+CONTAINER="${CONTAINER:-superatom-engine-engine-1}"
 BUNDLE="${BUNDLE:-superatom-engine}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 SSH_OPTS=(-i "$SSH_KEY" -p "$PORT" -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new -l "$SSH_USER")
