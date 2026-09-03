@@ -11,6 +11,8 @@
 // The prompt stays short on purpose. These are capable agents: told what the person wants and where the
 // material is, they do not need to be told how to read a file or what prose is.
 
+import { VERBS } from './index.js'
+
 export interface ExplainTarget {
   programDir: string
   prevQuestion?: string
@@ -19,7 +21,7 @@ export interface ExplainTarget {
 
 /** The instruction for an explain turn. `raw` is what the user typed, `explain:` prefix and all — it stays in
  *  the prompt so the transcript records which kind of turn this was and stays searchable. */
-export function explainPrompt(o: { raw: string; target: ExplainTarget; mdRel: string }): string {
+export function explainPrompt(o: { raw: string; target: ExplainTarget }): string {
   const t = o.target
   return `${o.raw}
 
@@ -31,7 +33,7 @@ Answer what they actually asked, at the length that answers it — and no longer
 in plain language: what was counted, over what period, and the choices that decided the number. If they asked for
 something particular — the query, one figure, why a row is missing — give them that instead.
 
-Write it to ${o.mdRel}. Don't write a program.`
+Just tell them — no file, no program.`
 }
 
 /** The explanation as an answer card: markdown in a `text` section, which the UI renders. No headline — there is
@@ -39,7 +41,7 @@ Write it to ${o.mdRel}. Don't write a program.`
 export function explainAnswer(markdown: string, programDir: string) {
   return {
     status: 'answered',
-    category: 'analysis',
+    category: VERBS.explain.category,
     sections: [{ kind: 'text', body: markdown.trim() }],
     scope: `Explanation of ${programDir} — no data was re-queried.`,
   }

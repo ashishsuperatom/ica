@@ -926,28 +926,24 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       }
       currentAgent = 'composer'
       const composer = await getComposer(sid)
-      // SHOW IT AS IT IS WRITTEN. Waiting in silence for a finished document is the opposite of a conversation,
-      // and there is no narrator here to fill the gap — the composer's own prose IS the explanation. pi streams
-      // the model's text as deltas (we were dropping them), so it goes to the chat while it is being written.
+      // SHOW IT AS IT COMES, ONE EVENT AT A TIME. Waiting in silence for a finished document is the opposite
+      // of a conversation, and no narrator runs here to fill the gap. The unit is the EVENT the harness already
+      // gives us — one finished message, one tool call — which every harness normalizes to AgentEvent. So each
+      // thing the composer says reaches the chat as it is said, whichever agent is behind it.
       //
-      // Flushed at SENTENCE boundaries, not per token: the chat renders discrete lines, so a chunk per token
-      // would be hundreds of fragments. A sentence at a time reads the way someone typing to you reads. The
-      // long-line guard covers a model that writes a whole paragraph without a full stop.
-      let pending = ''
-      const flush = (force = false) => {
-        const text = pending.trim()
-        if (!text || (!force && text.length < 40)) return
-        pending = ''
-        const prose = stripCode(text)
+      // (Streaming token deltas was the other option and is the wrong unit twice over: nobody wants half a
+      // word, and it would have worked for pi alone while quietly doing nothing for the other three.)
+      const shown = new Set<string>()
+      const streamed = { ...handlers, onEvent: (ev: any) => {
+        handlers.onEvent?.(ev)
+        if (ev.kind !== 'message' || !ev.text?.trim() || ev.done === false) return
+        const key = ev.id ?? ev.text
+        if (shown.has(key)) return                     // a harness that re-reads its transcript must not repeat itself
+        shown.add(key)
+        const prose = stripCode(ev.text)
         if (prose) emitBeat(reply, prose.slice(0, 700), qid, sid)
-      }
-      const streamed = { ...handlers, onText: (chunk: string) => {
-        pending += chunk
-        // A boundary is a full stop followed by whitespace, a newline, or simply too much unbroken text.
-        if (/[.!?]\s$/.test(pending) || /\n\s*$/.test(pending) || pending.length > 400) flush()
       } }
       const c = await composer.ask(question, streamed, { qid, explain: explainTarget, raw: askedRaw })
-      flush(true)   // the tail, which by definition has no closing boundary after it
       const cat = VERBS.explain.category
       const timing = { ms: Date.now() - t0 }
       lastAnswer = c.answer; lastTiming = timing; lastCategory = cat

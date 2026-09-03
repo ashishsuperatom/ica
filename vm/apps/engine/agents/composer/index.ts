@@ -91,28 +91,21 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       const builtPath    = join(dir, 'built.json')
       const escalatePath = join(dir, 'escalate.json')
       const answerPath   = join(dir, 'answer.json')
-      const explainRel   = o.qid ? `./out/${o.qid}/explain.md`   : `./out/explain.md`
-      const explainPath  = join(dir, 'explain.md')
 
-      // ── EXPLAIN: report on the answer on screen, then stop. ──────────────────────────────────────────────
-      // Its own short path rather than a flag on the compose path: nothing here reuses candidates, concepts
-      // ranking, built.json or escalation, and threading a mode through all of that is how the compose prompt
-      // would slowly acquire branches that only ever fire for explain.
+      // ── EXPLAIN: say how the answer was reached, then stop. ─────────────────────────────────────────────
+      // NO FILE. Every other outcome here is an artifact the engine has to act on — a program to run, an
+      // escalation to route — so it is written down and the engine picks it up. An explanation is not an
+      // artifact: it is the agent talking, and asking it to write prose to a file first only delayed the words
+      // and added a way to fail. `run` already resolves when the turn ends; doneWhen was an early exit, never
+      // the completion itself.
+      //
+      // The words reach the user twice over, and both matter: each message streams into the chat as it is said
+      // (see the engine's explain branch), and the final text becomes the answer card, which is what gets
+      // buffered, replayed to a reconnecting client, and delivered to a chat channel.
       if (o.explain) {
-        const md = explainPrompt({ raw: o.raw ?? question, target: o.explain, mdRel: explainRel })
-        const done = async () => { try { return (await readFile(explainPath, 'utf8')).trim().length > 0 } catch { return false } }
-        const r = await session.run(md, { ...handlers, doneWhen: done })
-        let body = ''
-        try { body = await readFile(explainPath, 'utf8') } catch { /* nothing written — the reply itself may be it */ }
-        // THE FILE IS THE SIGNAL, NOT THE POINT. All we want is the explanation, and an agent asked to explain
-        // something will often simply reply with it rather than writing a file first. The file exists because
-        // it is how the engine knows the turn is FINISHED (doneWhen polls for an artifact) and because it is
-        // the same convention as built.json/escalate.json — and because `lastLines` is only clean prose on some
-        // harnesses; on the claude PTY it is a garbled terminal snapshot. So: prefer the file, and when there
-        // isn't one, take the reply, put through the same filter that keeps machinery off a user's screen.
-        if (!body.trim()) body = agentProse((r.lastLines || '').trim())
-        // Neither a file nor usable prose is a failure to SAY so, not a reason to fall through to building.
-        if (!body.trim()) return { answer: { status: 'cannot_answer', answer: 'I could not put together an explanation for that one.' }, category: 'analysis', lastLines: r.lastLines, ms: Date.now() - t0 }
+        const r = await session.run(explainPrompt({ raw: o.raw ?? question, target: o.explain }), handlers)
+        const body = agentProse((r.lastLines || '').trim())
+        if (!body) return { answer: { status: 'cannot_answer', answer: 'I could not put together an explanation for that one.' }, category: 'analysis', lastLines: r.lastLines, ms: Date.now() - t0 }
         return { answer: explainAnswer(body, o.explain.programDir), category: 'analysis', lastLines: r.lastLines, ms: Date.now() - t0 }
       }
 

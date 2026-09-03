@@ -192,9 +192,6 @@ export function createPiSession(opts: PiSessionOpts): Session {
         activeHandler?.onOutput?.(chunk)
         for (const cb of rawSubs) { try { cb(chunk) } catch { /* one bad watcher cannot break the rest */ } }
       }
-      // Live text, straight through. We normalize only message_end into an AgentEvent, so until now the model's
-      // output appeared in one lump when it had finished writing. The deltas were always there.
-      if (ev.type === 'text_delta' && typeof ev.delta === 'string' && ev.delta) activeHandler?.onText?.(ev.delta)
       if (ev.type === 'message_end' && ev.message?.role === 'assistant') {
         const t = (ev.message.content || []).filter((c: any) => c?.type === 'text').map((c: any) => c.text).join(' ').trim()
         if (t) activeAnswer = t                                          // last assistant message = the answer
