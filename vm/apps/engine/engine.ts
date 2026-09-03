@@ -667,9 +667,13 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   curQuestion = question; curSid = sid; curCategory = ''; lastAnswer = null
   const t0 = Date.now()
   // Declared HERE, above the stop closure that reads them, rather than with the rest of the narration state
-  // two hundred lines below: a closure referring to a variable declared later is legal at runtime only because
-  // it runs later, and it left the type checker narrowing this to `never`.
-  let narrator: Narrator | null = null
+  // two hundred lines below — a closure referring to a variable declared later works at runtime only because
+  // it runs later, which is a poor thing to rely on.
+  //
+  // `null as Narrator | null` rather than `: Narrator | null = null`, and it is not noise: the only assignment
+  // is inside startNarrator, a nested function, so from the outer scope the checker holds the initialiser's
+  // narrowed `null` and every later use collapses to `never`. Annotating the initialiser keeps the union.
+  let narrator = null as Narrator | null
   let narrationTimer: ReturnType<typeof setInterval> | null = null
   // STOPPING. Checked wherever this turn is about to produce something, because a promise already in flight
   // cannot be un-awaited: we tell the agent to stop, stop showing its output, and discard whatever eventually
@@ -1308,7 +1312,8 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   } finally {
     if (keepalive) { clearInterval(keepalive); keepalive = null }
     if (narrationTimer) { clearInterval(narrationTimer); narrationTimer = null }
-    if (narrator) { narrator.stop(); narrator = null }
+    try { narrator?.stop() } catch { /* best-effort */ }
+    narrator = null
     curQuestion = ''
     emit(reply, A('status', 'analyst', { state: 'done', sid }))
     analystSlot.persist()   // capture the live ids (incl. any resume-fallback)

@@ -5,7 +5,7 @@
 // guess). The engine runs the program it points at and stamps authoredBy.by='composer'.
 import './generate-system.js'   // FIRST: (re)writes SYSTEM.md from generate-system.ts before it's read below
 import { answerView } from '../../exec-program.js'
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, rm } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import { AUTHORING_REFERENCE } from '../shared-prompts/authoring-reference.js'
 import { loadPrompt } from '../../prompts.js'
@@ -14,7 +14,6 @@ import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { createSession, prepareWorkspace, type Harness, type Session, type RunHandlers } from '../../ica/index.js'
 import { explainPrompt, explainAnswer, type ExplainTarget } from '../../verbs/explain.js'
-import { agentProse } from '../../ica/prose.js'
 import { execProgram } from '../../exec-program.js'
 import { PROGRAM_AUTHORING } from '../shared-prompts/program-authoring.js'   // SHARED single source (analyst + composer)
 
@@ -99,19 +98,28 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       const answerPath   = join(dir, 'answer.json')
 
       // ── EXPLAIN: say how the answer was reached, then stop. ─────────────────────────────────────────────
-      // NO FILE. Every other outcome here is an artifact the engine has to act on — a program to run, an
-      // escalation to route — so it is written down and the engine picks it up. An explanation is not an
-      // artifact: it is the agent talking, and asking it to write prose to a file first only delayed the words
-      // and added a way to fail. `run` already resolves when the turn ends; doneWhen was an early exit, never
-      // the completion itself.
+      // IT WRITES A MARKDOWN FILE. This took a reply instead for a while, because a file seemed to only delay
+      // the words — but the words were not arriving sooner either way: the harness reports a COMPLETED message,
+      // so a reply lands in one block at the end exactly as a file does. There was no streaming to trade the
+      // quality for, and the quality is plainly better written as a document than said in a chat.
       //
-      // The words reach the user twice over, and both matter: each message streams into the chat as it is said
-      // (see the engine's explain branch), and the final text becomes the answer card, which is what gets
-      // buffered, replayed to a reconnecting client, and delivered to a chat channel.
+      // The file is also the completion signal, which is what doneWhen wants — the same convention as
+      // built.json and escalate.json. And if an agent answers in the reply instead of writing one, that reply
+      // is taken, through the same filter that keeps machinery off a user's screen. All we want is the
+      // explanation; the file is how we usually get the best one.
+      // ONE file, always the same one. Explaining again rewrites it rather than leaving a folder of
+      // explanations nobody will open. It is REMOVED first: doneWhen waits for a non-empty file, and a
+      // previous explanation still sitting there would satisfy that instantly — the agent would appear to have
+      // answered in no time, with the last question's answer.
+      const explainRel  = `./out/explain.md`
+      const explainPath = join(cwd, 'out', 'explain.md')
       if (o.explain) {
-        const r = await session.run(explainPrompt({ raw: o.raw ?? question, target: o.explain }), handlers)
-        const body = agentProse((r.lastLines || '').trim())
-        if (!body) return { answer: { status: 'cannot_answer', answer: 'I could not put together an explanation for that one.' }, category: 'analysis', lastLines: r.lastLines, ms: Date.now() - t0 }
+        await rm(explainPath, { force: true }).catch(() => {})
+        const prompt = explainPrompt({ raw: o.raw ?? question, target: o.explain, mdRel: explainRel })
+        const done = async () => { try { return (await readFile(explainPath, 'utf8')).trim().length > 0 } catch { return false } }
+        const r = await session.run(prompt, { ...handlers, doneWhen: done })
+        const body = await readFile(explainPath, 'utf8').catch(() => '')
+        if (!body.trim()) return { answer: { status: 'cannot_answer', answer: 'I could not put together an explanation for that one.' }, category: 'analysis', lastLines: r.lastLines, ms: Date.now() - t0 }
         return { answer: explainAnswer(body, o.explain.programDir), category: 'analysis', lastLines: r.lastLines, ms: Date.now() - t0 }
       }
 

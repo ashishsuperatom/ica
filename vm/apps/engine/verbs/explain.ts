@@ -1,6 +1,12 @@
 // EXPLAIN — say how the answer on screen was arrived at, in prose. No program is written and nothing is
 // persisted: this turn reports on an answer, it never becomes one.
 //
+// IT WRITES A FILE, and that is not incidental. This asked for a reply instead for a while, on the grounds
+// that a file only delayed the words — but the words were not arriving any sooner: the harness reports a
+// COMPLETED message, so a reply lands in one block at the end exactly as a file does. What differed was the
+// quality. Writing a document and answering in a chat are different registers, and a coding agent is tuned to
+// be brief in chat; asked for a file it composes something with a shape, and can revise it before it is final.
+//
 // GROUNDED IN THE ARTIFACTS, NOT IN MEMORY. An answer reaches the screen three ways — the composer built it,
 // the analyst built it, or `reuseProgram` re-ran a saved program with no LLM involved at all. In the last case
 // nobody has any recollection to draw on, and in the middle case the recollection belongs to a different
@@ -21,7 +27,7 @@ export interface ExplainTarget {
 
 /** The instruction for an explain turn. `raw` is what the user typed, `explain:` prefix and all — it stays in
  *  the prompt so the transcript records which kind of turn this was and stays searchable. */
-export function explainPrompt(o: { raw: string; target: ExplainTarget }): string {
+export function explainPrompt(o: { raw: string; target: ExplainTarget; mdRel: string }): string {
   const t = o.target
   return `${o.raw}
 
@@ -33,7 +39,7 @@ Answer what they actually asked, at the length that answers it — and no longer
 in plain language: what was counted, over what period, and the choices that decided the number. If they asked for
 something particular — the query, one figure, why a row is missing — give them that instead.
 
-Just tell them — no file, no program.`
+Write it to ${o.mdRel} as markdown. Don't write a program.`
 }
 
 /** The explanation as an answer card: markdown in a `text` section, which the UI renders. No headline — there is

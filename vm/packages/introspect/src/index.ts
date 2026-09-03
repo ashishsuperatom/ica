@@ -29,7 +29,9 @@ export interface RelationCheck {
   sampleViolations: any[]                           // actual rows that break the relation
 }
 export interface Introspect {
-  tables(): Promise<Array<{ name: string; rows: number }>>
+  /** `rows` is absent where the source cannot count them — some engines expose no queryable catalog, and a
+   *  fabricated zero there reads as "this table is empty", which is a different and much worse claim. */
+  tables(): Promise<Array<{ name: string; rows?: number }>>
   columns(table: string): Promise<Array<{ name: string; type: string }>>
   sampleRows(table: string, n?: number): Promise<any[]>                                   // SEE real rows
   profile(table: string, column: string): Promise<ColumnProfile>
