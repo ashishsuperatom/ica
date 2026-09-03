@@ -22,6 +22,12 @@ export interface ProgramEventLine {
   run: string               // which run produced it — several programs can be in flight in one workspace
   program: string
   at: number
+  // WHOSE turn this run belongs to, when the starter knew. Present when the ENGINE started the program (it
+  // stamps SA_QID/SA_SID); absent when the agent started one from its own shell, whose environment comes from
+  // the agent's session rather than the turn. A reader must handle both — the spool is shared by every chat in
+  // the project, and an unattributed line delivered to the wrong person shows them someone else's data.
+  qid?: string
+  sid?: string
   [k: string]: unknown
 }
 

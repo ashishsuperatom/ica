@@ -48,7 +48,7 @@ export interface ModifyTarget { programDir: string; prevQuestion?: string }
  *  Retrieval found it; the composer still decides — it is a strong lead, not a verdict. */
 export interface CanonicalMatch { programDir: string; params: Record<string, unknown>; canonical: string }
 export interface Composer {
-  ask(question: string, handlers?: RunHandlers, opts?: { qid?: string; candidates?: ProgramCandidate[]; modify?: ModifyTarget; conceptNames?: string[]; canonicalMatch?: CanonicalMatch; resolvedQuestion?: string; explain?: ExplainTarget; raw?: string }): Promise<ComposerResult>
+  ask(question: string, handlers?: RunHandlers, opts?: { qid?: string; candidates?: ProgramCandidate[]; modify?: ModifyTarget; conceptNames?: string[]; canonicalMatch?: CanonicalMatch; resolvedQuestion?: string; explain?: ExplainTarget; raw?: string; sid?: string }): Promise<ComposerResult>
   session: Session
   cwd: string
 }
@@ -199,7 +199,7 @@ RUN it (\`tsx run.mjs ${o.canonicalMatch.programDir}/program.ts '${JSON.stringif
         let answer: any
         try {
           handlers?.onNarration?.('Running the numbers…')   // shown as a business beat (composer self-narrates)
-          const rr = await execProgram(cwd, built.programDir, built.params ?? {})
+          const rr = await execProgram(cwd, built.programDir, built.params ?? {}, { qid: o.qid, sid: o.sid })
           answer = answerView(rr.output)   // out of the unit envelope — see answerView
           await writeFile(answerPath, JSON.stringify(answer, null, 2)).catch(() => {})
         } catch (e: any) {

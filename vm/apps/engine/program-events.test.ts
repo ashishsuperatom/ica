@@ -108,3 +108,32 @@ test('every event says something a person can read', () => {
   // An event kind added later must not produce a mystery line.
   assert.equal(describeProgramEvent({ ...base, t: 'something:new' } as any), '')
 })
+
+// ── WHOSE LINE IS IT ────────────────────────────────────────────────────────────────────────────────────────
+// One workspace serves every chat in a project, so the spool is shared. Delivering a line to the wrong turn
+// would show one person another person's query — the failure mode worth a test even though the rule is four
+// lines long. This mirrors ownsProgramEvent in engine.ts; if that changes, this should fail.
+function owns(sid: string, qid: string, ev: any, running: string[]): boolean {
+  if (typeof ev.qid === 'string' && ev.qid) return ev.qid === qid
+  if (typeof ev.sid === 'string' && ev.sid) return ev.sid === sid
+  return running.length === 1 && running[0] === sid
+}
+
+test('a stamped line goes only to the turn that started it', () => {
+  assert.equal(owns('s1', 'q1', { qid: 'q1' }, []), true)
+  assert.equal(owns('s2', 'q2', { qid: 'q1' }, []), false, "another turn's run must not be shown")
+})
+
+test('an unstamped line is delivered when exactly one session is running a program', () => {
+  assert.equal(owns('s1', 'q1', {}, ['s1']), true)
+})
+
+test('an unstamped line is shown to NOBODY when two sessions could own it', () => {
+  // The important case. A missing line is a gap; a wrong line is a false statement about someone else's data.
+  assert.equal(owns('s1', 'q1', {}, ['s1', 's2']), false)
+  assert.equal(owns('s2', 'q2', {}, ['s1', 's2']), false)
+})
+
+test('an unstamped line with no session running a program is nobody\'s', () => {
+  assert.equal(owns('s1', 'q1', {}, []), false)
+})

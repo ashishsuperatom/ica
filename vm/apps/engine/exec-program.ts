@@ -32,11 +32,14 @@ export type ProgramRun = {
  * Run `<cwd>/<programDir>/program.ts` with `params` in a fresh `tsx run.mjs` subprocess and return its manifest.
  * Throws if the program errors (non-zero exit) — callers already wrap this to record a run failure.
  */
-export async function execProgram(cwd: string, programDir: string, params: any): Promise<ProgramRun> {
+export async function execProgram(cwd: string, programDir: string, params: any, owner?: { qid?: string; sid?: string }): Promise<ProgramRun> {
   // tsx is on PATH (the engine is started via `pnpm exec tsx`, which the child inherits). stdout carries the
   // program's rendered output; the authoritative manifest is written to program.json — we read that.
+  //
+  // SA_QID/SA_SID stamp every line this run writes to the event spool. The spool is shared by every chat in the
+  // project, so without them a reader cannot tell one person's query from another's.
   await execFileP('tsx', ['run.mjs', `${programDir}/program.ts`, JSON.stringify(params ?? {})],
-    { cwd, env: process.env, maxBuffer: 64 * 1024 * 1024 })
+    { cwd, env: { ...process.env, ...(owner?.qid ? { SA_QID: owner.qid } : {}), ...(owner?.sid ? { SA_SID: owner.sid } : {}) }, maxBuffer: 64 * 1024 * 1024 })
   return JSON.parse(await readFile(join(cwd, programDir, 'program.json'), 'utf8')) as ProgramRun
 }
 

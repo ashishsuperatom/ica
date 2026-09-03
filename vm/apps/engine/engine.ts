@@ -127,7 +127,23 @@ const busySessions = new Set<string>()
 // person who has changed their mind should not have to wait it out, and the machine should not keep spending
 // on an answer nobody wants. `stop()` is filled in by the turn itself, which is the only thing that knows what
 // it currently owns (which agent is working, the narrator, the timers).
-const inflight = new Map<string, { qid: string; stop: (why: string) => void }>()
+const inflight = new Map<string, { qid: string; stop: (why: string) => void; agentRunningProgram: boolean }>()
+/** Does this spool line belong to this turn? One workspace serves every chat in a project, so the spool is
+ *  shared and the question is real: with two people asking at once, guessing wrong shows one of them the
+ *  other's query.
+ *
+ *  A run the ENGINE started says so — it stamps SA_QID, and the answer is exact. A run the AGENT started from
+ *  its own shell cannot: its environment comes from the agent's session, not from the turn. For those we use
+ *  the only thing we do know — which sessions have a run.mjs command in flight — and deliver ONLY when exactly
+ *  one does. When it is ambiguous nobody is shown it, because a missing line is a gap and a wrong line is a
+ *  lie about someone else's data. */
+function ownsProgramEvent(sid: string, qid: string, ev: { qid?: unknown; sid?: unknown }): boolean {
+  if (typeof ev.qid === 'string' && ev.qid) return ev.qid === qid          // stamped: exact
+  if (typeof ev.sid === 'string' && ev.sid) return ev.sid === sid          // stamped by session only
+  const candidates = [...inflight.entries()].filter(([, t]) => t.agentRunningProgram)
+  return candidates.length === 1 && candidates[0][0] === sid
+}
+
 export function stopTurn(sid: string, why = 'the user stopped it'): boolean {
   const t = inflight.get(sid)
   if (!t) return false
@@ -551,7 +567,7 @@ async function reuseProgram(programDir: string, params: any, category: string,
   try {
     // Fresh subprocess (see exec-program.ts): a program edited by a prior modify is cached stale in this
     // long-lived tsx process, so an in-process reuse would re-run yesterday's code. Spawn it clean.
-    const rr = await execProgram(WORKSPACE, programDir, params ?? {})
+    const rr = await execProgram(WORKSPACE, programDir, params ?? {}, { qid, sid })
     const answer = answerView(rr.output)   // out of the unit envelope — see answerView
     const out = answer                      // downstream shape checks read the VIEW, not the envelope
     const timing = { ms: Date.now() - t0, reused: true }
@@ -669,12 +685,13 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     emit(reply, { t: 'analyst:answer', category: 'stopped', sid, qid, timing: { ms: Date.now() - t0 },
       answer: { status: 'answered', category: 'stopped', answer: 'Stopped — nothing was saved for this question.' } })
   }
-  inflight.set(sid, { qid, stop: stopThisTurn })
+  inflight.set(sid, { qid, stop: stopThisTurn, agentRunningProgram: false })
   // WATCH FOR A PROGRAM RUNNING, for the whole turn. Not only around execProgram: the long runs are the ones
   // the AGENT starts from its own shell while authoring, and those are exactly the minutes that look like a
   // hang. run.mjs writes the same trace either way; this reads it and sends it on.
   const unwatchPrograms = watchProgramEvents(WORKSPACE, (ev) => {
     if (stopped || !reply) return
+    if (!ownsProgramEvent(sid, qid, ev)) return
     const text = describeProgramEvent(ev)
     emit(reply, { t: 'program:event', ev: { ...ev, text }, qid, sid })
   })
@@ -951,6 +968,13 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         }
         if (ev.kind === 'message' && ev.text?.trim()) { const prose = stripCode(ev.text); if (prose) narrationBuf.push(prose.slice(0, 600)) }
         else if (ev.kind === 'command') {
+          // Is the AGENT running a program right now? Its own run.mjs invocations cannot stamp the spool with
+          // whose turn they are, so this flag is what lets an unstamped line be attributed — and only when this
+          // is the one session with a run in flight. See ownsProgramEvent.
+          if (/\brun\.mjs\b/.test(String(ev.command ?? ''))) {
+            const t = inflight.get(sid)
+            if (t) t.agentRunningProgram = ev.status !== 'completed' && ev.status !== 'failed'
+          }
           // WHAT IT IS DOING — every command, as one short line. This used to be withheld entirely, and the
           // opening of a turn is mostly exploration (find-schema, a listing, reading a program), so for the
           // first stretch of every question the buffer stayed empty and the narrator had nothing to say. That
@@ -1056,7 +1080,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       let answer: any
       const runT0 = Date.now()
       try {
-        const rr = await execProgram(WORKSPACE, dir, params)
+        const rr = await execProgram(WORKSPACE, dir, params, { qid, sid })
         const now = answerView(rr.output)
         beat('Comparing what came back against the saved answer.')
         const diff = diffAnswers(prior.answer, now)
@@ -1117,7 +1141,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       // CAPPED, like the analyst below. This await was unbounded: a composer that never returned held the
       // session's busy flag for good, and every later question in that chat was refused with "already
       // answering". The cap is generous — it exists so a turn always ends, not to hurry one along.
-      const cAsk = composer.ask(question, handlers, { qid, candidates: programCandidates, conceptNames, modify: modifyTarget ?? undefined, resolvedQuestion })
+      const cAsk = composer.ask(question, handlers, { qid, sid, candidates: programCandidates, conceptNames, modify: modifyTarget ?? undefined, resolvedQuestion })
       cAsk.catch(() => {})   // if we abandon it, don't leak an unhandled rejection
       let cCap: ReturnType<typeof setTimeout> | undefined
       const cRaced: any = await Promise.race([cAsk, new Promise((res) => { cCap = setTimeout(() => res(TIMED_OUT), MAX_TURN_MS) })])

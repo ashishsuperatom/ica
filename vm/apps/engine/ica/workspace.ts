@@ -234,13 +234,19 @@ import { dirname, join } from 'node:path'
 // once it grows, which keeps a workspace from accumulating a file nobody will ever open.
 const EVENTS = join(process.cwd(), '..', 'run-events.jsonl')
 const SPOOL_MAX = 2 * 1024 * 1024
+// WHOSE RUN THIS IS. One workspace serves every chat in a project, so the spool is shared and a reader has to
+// know which turn each line belongs to — otherwise two people asking at once see each other's queries. The
+// engine sets these when it starts a program; when the AGENT starts one they are inherited from the agent's
+// own session if its harness can carry them, and absent otherwise (the reader then attributes by which session
+// has a run in flight, and delivers to nobody rather than to the wrong person when that is ambiguous).
+const OWNER = { qid: process.env.SA_QID || undefined, sid: process.env.SA_SID || undefined }
 const run = String(Date.now()) + '-' + process.pid   // several programs can be in flight in one workspace
 async function main() {
   const [, , entry, paramsJson] = process.argv
   if (!entry) { console.error('usage: tsx run.mjs <programs/<slug>/program.ts> [jsonParams]'); process.exit(1) }
   const params = paramsJson ? JSON.parse(paramsJson) : {}
   await mkdir(dirname(EVENTS), { recursive: true }).catch(() => {})
-  const note = (ev) => appendFile(EVENTS, JSON.stringify({ ...ev, run, program: entry, at: Date.now() }) + '\\n').catch(() => {})
+  const note = (ev) => appendFile(EVENTS, JSON.stringify({ ...ev, ...OWNER, run, program: entry, at: Date.now() }) + '\\n').catch(() => {})
   // Truncate at the START of a run, never during one: the reader tolerates the file shrinking (it re-reads from
   // the top) but doing it mid-run would drop this run's own earlier lines before anyone had seen them.
   try { if ((await stat(EVENTS)).size > SPOOL_MAX) await writeFile(EVENTS, '') } catch { /* no file yet */ }
