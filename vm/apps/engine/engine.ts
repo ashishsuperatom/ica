@@ -907,6 +907,8 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         narrating = true
         const activity = narrationBuf.splice(0).join('\n')
         // TIMED IN THREE PARTS, because "the narrator is slow" can mean any of them and they have different
+        // fixes. `waited` is taken BEFORE the call, so it already excludes the call — subtracting it again
+        // reported a negative wait.
         // fixes: how long before there was anything to narrate at all (the agent had not done anything yet),
         // how long the narrating model took, and the total to the first line the user sees.
         const waited = Date.now() - t0
@@ -915,7 +917,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
           // TIMEOUT the narrate call so a hung beat (deepseek) can't freeze narration (finally never running).
           const line = await Promise.race([narrator!.narrate(question, activity, saidBeats.slice(-3)), new Promise<null>((res) => setTimeout(() => res(null), 20000))])
           const callMs = Date.now() - callT0
-          console.log(`[beat] ${line ? 'wrote' : 'produced nothing'} in ${callMs}ms · activity ${activity.length} chars · ${firstBeatAt ? `+${((Date.now() - t0) / 1000).toFixed(1)}s into the turn` : `FIRST BEAT at +${(waited / 1000).toFixed(1)}s (${((waited - callMs) / 1000).toFixed(1)}s of it waiting for the agent to do something)`}`)
+          console.log(`[beat] ${line ? 'wrote' : 'produced nothing'} in ${callMs}ms · activity ${activity.length} chars · ${firstBeatAt ? `+${((Date.now() - t0) / 1000).toFixed(1)}s into the turn` : `FIRST BEAT at +${((Date.now() - t0) / 1000).toFixed(1)}s (${(((firstActivityAt || Date.now()) - t0) / 1000).toFixed(1)}s of it before the agent did anything)`}`)
           if (line) {
             if (!firstBeatAt) firstBeatAt = Date.now()
             saidBeats.push(line)
