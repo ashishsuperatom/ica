@@ -7,7 +7,7 @@
 //
 // Progress is reported through `log` rather than printed, so the same run can go to a terminal or to an admin's
 // screen without the builder knowing which.
-import { NodeStore, putEntries, applyRowCounts, dataSourceStats } from '@superatom/node-store'
+import { NodeStore, putEntries, applyRowCounts, dataSourceStats, ensureDataSourceIndex} from '@superatom/node-store'
 import { getIndexer } from './indexer.js'
 
 export interface BuildOpts {
@@ -38,6 +38,13 @@ export async function buildDatasourceIndex(opts: BuildOpts): Promise<BuildResult
     if (j.error) throw new Error(j.error)
     return j.rows || []
   }
+
+  // THE SCHEMA MUST EXIST BEFORE ANYTHING TOUCHES IT. Every read and write helper in node-store calls this
+  // first, but the two statements below go at the table directly — the resume read and the wipe — so on a
+  // database that has never held an index, the build died on its first act with "no such table:
+  // datasource_index". Invisible for as long as every box happened to have an old table already; the first
+  // genuinely fresh volume hit it immediately, which is what a fresh volume is for.
+  ensureDataSourceIndex(store)
 
   let sources: Array<{ id: string; dialect: string }> =
     await (await fetch(managerUrl + '/sources')).json().then((j: any) => j.sources || [])
@@ -71,7 +78,11 @@ export async function buildDatasourceIndex(opts: BuildOpts): Promise<BuildResult
     try { containers = await indexer.listContainers(s.id, rawQuery, { seedTables: seeds[s.id], catalogTables }) }
     catch (e: any) { log(`  step 1 FAILED: ${e.message}`); result.push({ id: s.id, dialect: s.dialect, containers: 0, indexed: 0, fields: 0, skipped: 0, error: e.message }); continue }
 
-    const done = new Set<string>((store.db.prepare('SELECT DISTINCT container FROM datasource_index WHERE source=?').all(s.id) as any[]).map(r => r.container))
+    // What is already indexed, so a resume skips it. If this cannot be read for any reason, the honest
+    // fallback is to index everything rather than to stop: redoing work is a cost, refusing to build is a wall.
+    let done = new Set<string>()
+    try { done = new Set<string>((store.db.prepare('SELECT DISTINCT container FROM datasource_index WHERE source=?').all(s.id) as any[]).map(r => r.container)) }
+    catch (e: any) { log(`  (could not read what is already indexed — ${e?.message ?? e}; indexing everything)`) }
     const todo = containers.filter(c => !done.has(c))
     log(`  step 1 · ${containers.length} tables (${done.size} already indexed, ${todo.length} to do)`)
 

@@ -3,7 +3,7 @@
 // Stages the Dockerfile + the workspace SOURCE (under vm/, matching the Dockerfile's COPY paths) + the
 // docker-compose deploy files, EXCLUDING node_modules / state / DBs / secrets, then zips into dist/.
 import { cp, mkdir, rm } from 'node:fs/promises'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join, dirname, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -38,6 +38,34 @@ async function main() {
 
   const VERSION = readFileSync(join(REPO, 'deploy', 'VERSION'), 'utf8').trim()
   const zip = join(OUT, `sa-engine-docker-${VERSION}.zip`)
+  // ── NOTHING OF ONE PROJECT'S MAY SHIP ────────────────────────────────────
+  // This image is the PRODUCT, and the laptop that builds it is a test bench: it has a project connected, a
+  // datasource pointed at someone's live data, credentials, and a state directory full of what that project
+  // has learned. None of it belongs in an artifact that goes to a customer's machine.
+  //
+  // Staging is already explicit — apps, packages, docker, and nothing else — so this is not fixing a leak. It
+  // is making sure the next person to add a `cp` here cannot cause one without being told. A build that would
+  // ship a secret should fail, not warn: a warning in a hundred lines of build output is not read.
+  const offenders = []
+  const scan = (dir, rel = '') => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const r = rel ? `${rel}/${e.name}` : e.name
+      if (e.isDirectory()) { scan(join(dir, e.name), r); continue }
+      // A project's own directory, anything holding state, and any shape a credential takes.
+      if (/(^|\/)projects\//.test(r) || /(^|\/)\.state\//.test(r) || /(^|\/)\.env$/.test(r)
+          || /\.(pem|key|p12|sqlite|sqlite-wal|sqlite-shm)$/.test(r) || /(^|\/)auth\.json$/.test(r)
+          || /(^|\/)registry\.json$/.test(r)) offenders.push(r)
+    }
+  }
+  scan(STAGE)
+  if (offenders.length) {
+    console.error('\nREFUSING TO BUILD — these belong to a project or are secrets, and must never ship:')
+    for (const o of offenders.slice(0, 20)) console.error('  ' + o)
+    console.error('\nThe image carries CODE. A project is connected by its .env at deploy time, and its data\n' +
+                  'sources are added afterwards through the connector agent.')
+    process.exit(1)
+  }
+
   execFileSync('zip', ['-r', '-q', zip, '.'], { cwd: STAGE })
   await rm(STAGE, { recursive: true, force: true })
   const sizeMb = execFileSync('du', ['-m', zip]).toString().split('\t')[0]
