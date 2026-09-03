@@ -28,7 +28,15 @@ rsync -az --delete -e "ssh ${SSH_OPTS[*]}" \
   --exclude='node_modules/' --exclude='.state/' --exclude='.git/' --exclude='dist/' --exclude='out/' \
   --exclude='*.log' --exclude='.turbo/' --exclude='.DS_Store' --exclude='._*' --exclude='.data/' \
   --exclude='_*.mts' --exclude='_*.cjs' --exclude='_*.mjs' \
+  --exclude='projects/' \
   "$REPO/vm/" "$HOST:$BUNDLE/vm/"
+
+# WHY projects/ IS EXCLUDED, and it is not an optimisation:
+#   --delete makes this rsync a MIRROR, and the box runs a different project from the laptop. Its
+#   vm/projects/<its id>/ holds that project's .env, its private key and its datasource bridges — none of
+#   which exist here, all of which --delete would remove. The engine would come up with no credentials and no
+#   sources, and the only copy of some of it is on that box, because secrets are deliberately not in git.
+#   Code is what this script rolls. Project CONFIG belongs to the box.
 
 if [ "$MODE" = "permanent" ]; then
   echo "[roll] 2/3 rebuilding image (permanent — build failure keeps the old container up)…"
