@@ -20,7 +20,9 @@ export interface BuildOpts {
 }
 
 export interface BuildResult {
-  sources: Array<{ id: string; dialect: string; containers: number; indexed: number; fields: number; skipped: number; error?: string }>
+  // `skipped` = genuinely returned no fields. `failed` = could not be read, which is NOT the same and must
+  // never be reported as emptiness — see step 2.
+  sources: Array<{ id: string; dialect: string; containers: number; indexed: number; fields: number; skipped: number; failed?: number; error?: string }>
   totals: unknown
 }
 
@@ -60,7 +62,7 @@ export async function buildDatasourceIndex(opts: BuildOpts): Promise<BuildResult
     log(`— ${s.id} [${s.dialect}] —`)
     let indexer
     try { indexer = getIndexer(s.dialect) }
-    catch (e: any) { log(`  ${e.message}`); result.push({ id: s.id, dialect: s.dialect, containers: 0, indexed: 0, fields: 0, skipped: 0, error: e.message }); continue }
+    catch (e: any) { log(`  ${e.message}`); result.push({ id: s.id, dialect: s.dialect, containers: 0, indexed: 0, fields: 0, skipped: 0, failed: 0, error: e.message }); continue }
 
     // STEP 1 — enumerate every container BEFORE indexing any, so progress is a known fraction.
     // The source's own catalog is the primary list; seeds and type-specific fallbacks fill in where there is none.
@@ -76,7 +78,7 @@ export async function buildDatasourceIndex(opts: BuildOpts): Promise<BuildResult
 
     let containers: string[]
     try { containers = await indexer.listContainers(s.id, rawQuery, { seedTables: seeds[s.id], catalogTables }) }
-    catch (e: any) { log(`  step 1 FAILED: ${e.message}`); result.push({ id: s.id, dialect: s.dialect, containers: 0, indexed: 0, fields: 0, skipped: 0, error: e.message }); continue }
+    catch (e: any) { log(`  step 1 FAILED: ${e.message}`); result.push({ id: s.id, dialect: s.dialect, containers: 0, indexed: 0, fields: 0, skipped: 0, failed: 0, error: e.message }); continue }
 
     // What is already indexed, so a resume skips it. If this cannot be read for any reason, the honest
     // fallback is to index everything rather than to stop: redoing work is a cost, refusing to build is a wall.
@@ -87,17 +89,40 @@ export async function buildDatasourceIndex(opts: BuildOpts): Promise<BuildResult
     log(`  step 1 · ${containers.length} tables (${done.size} already indexed, ${todo.length} to do)`)
 
     // STEP 2 — index the remainder one at a time, persisting each, so a failure loses only the current one.
-    let i = 0, ok = 0, empty = 0, fields = 0
+    //
+    // EMPTY AND FAILED ARE NOT THE SAME THING, and conflating them was worse than any bug it hid. A container
+    // that returns no fields is a FACT about the data. One that throws is an absence of information — and when
+    // the credentials were missing, all 118 threw, were counted as empty, and the build reported a clean
+    // finish in 1.3 seconds having never reached NetSuite at all. Read literally it said the customer's
+    // account was empty. It is also load-bearing: step 3 disables containers it believes have no rows, so
+    // believing an outage is emptiness would switch off every table the engine can see.
+    let i = 0, ok = 0, empty = 0, failed = 0, fields = 0
+    let firstError = ''
     if (todo.length) log(`  step 2 · indexing ${todo.length}…`)
     for (const c of todo) {
       i++
       try {
         const entries = await indexer.indexContainer(s.id, c, rawQuery)
         if (entries.length) { putEntries(store, entries); ok++; fields += entries.length } else empty++
-        if (i % 25 === 0 || i === todo.length) log(`  …${i}/${todo.length} (${ok} indexed, ${empty} empty or absent, ${fields} fields)`)
-      } catch { empty++ /* absent or unqueryable → skip; the index stays truthful about what it has */ }
+      } catch (e: any) {
+        failed++
+        if (!firstError) firstError = String(e?.message ?? e)
+      }
+      if (i % 25 === 0 || i === todo.length)
+        log(`  …${i}/${todo.length} (${ok} indexed, ${empty} empty, ${failed} failed, ${fields} fields)`)
     }
-    if (todo.length) log(`  step 2 · done: +${ok} tables, ${fields} new fields`)
+    if (todo.length) log(`  step 2 · done: +${ok} tables, ${fields} new fields${failed ? `, ${failed} FAILED` : ''}`)
+
+    // Everything failed and nothing succeeded — that is a source we could not reach, not a source with nothing
+    // in it. Say so, with the reason, and stop: continuing to step 3 would disable every container on the
+    // strength of row counts we never obtained.
+    if (failed && !ok && !empty) {
+      log(`  ✗ ${s.id} is UNREACHABLE — nothing was indexed. First error: ${firstError}`)
+      log(`    Nothing has been changed. Fix the source, then run this again.`)
+      result.push({ id: s.id, dialect: s.dialect, containers: containers.length, indexed: 0, fields: 0, skipped: 0, failed, error: firstError })
+      continue
+    }
+    if (failed) log(`  ⚠ ${failed} of ${todo.length} could not be read (first: ${firstError}) — they are NOT recorded as empty`)
 
     // STEP 3 — real row counts, so empty tables stop surfacing in search. Anything that could not be counted
     // stays enabled: silence is not evidence of emptiness.
@@ -108,7 +133,7 @@ export async function buildDatasourceIndex(opts: BuildOpts): Promise<BuildResult
         log(`  step 3 · ${disabled} empty (disabled), ${enabled} with rows`)
       } catch (e: any) { log(`  step 3 skipped (everything stays enabled): ${e.message}`) }
     }
-    result.push({ id: s.id, dialect: s.dialect, containers: containers.length, indexed: ok, fields, skipped: empty })
+    result.push({ id: s.id, dialect: s.dialect, containers: containers.length, indexed: ok, fields, skipped: empty, failed })
   }
 
   const totals = dataSourceStats(store)
