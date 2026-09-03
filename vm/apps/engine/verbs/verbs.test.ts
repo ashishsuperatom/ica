@@ -36,7 +36,7 @@ test('check: and explain: stand alone — the verb IS the whole instruction', ()
   // check re-runs the same program with the same parameters; there is nothing to say beyond the word, and
   // "check:" on its own is how anyone would type it. Requiring an argument sent that one word off to be
   // answered as a brand-new question — a full build, narrator and all. edit: still needs to say what to change.
-  for (const input of ['check:', 'check:  ', 'explain:']) {
+  for (const input of ['check:', 'check:  ', 'explain:', 'program:']) {
     const got = parseVerb(input)
     assert.ok(got, `${input} must parse`)
     assert.equal(got!.rest, '')
