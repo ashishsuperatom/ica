@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { createSession, prepareWorkspace, type Harness, type Session, type RunHandlers } from '../../ica/index.js'
 import { explainPrompt, explainAnswer, type ExplainTarget } from '../../verbs/explain.js'
+import { agentProse } from '../../ica/prose.js'
 import { execProgram } from '../../exec-program.js'
 import { PROGRAM_AUTHORING } from '../shared-prompts/program-authoring.js'   // SHARED single source (analyst + composer)
 
@@ -102,8 +103,15 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
         const done = async () => { try { return (await readFile(explainPath, 'utf8')).trim().length > 0 } catch { return false } }
         const r = await session.run(md, { ...handlers, doneWhen: done })
         let body = ''
-        try { body = await readFile(explainPath, 'utf8') } catch { /* nothing written */ }
-        // No explanation written is a failure to SAY so, not a reason to fall through to building something.
+        try { body = await readFile(explainPath, 'utf8') } catch { /* nothing written — the reply itself may be it */ }
+        // THE FILE IS THE SIGNAL, NOT THE POINT. All we want is the explanation, and an agent asked to explain
+        // something will often simply reply with it rather than writing a file first. The file exists because
+        // it is how the engine knows the turn is FINISHED (doneWhen polls for an artifact) and because it is
+        // the same convention as built.json/escalate.json — and because `lastLines` is only clean prose on some
+        // harnesses; on the claude PTY it is a garbled terminal snapshot. So: prefer the file, and when there
+        // isn't one, take the reply, put through the same filter that keeps machinery off a user's screen.
+        if (!body.trim()) body = agentProse((r.lastLines || '').trim())
+        // Neither a file nor usable prose is a failure to SAY so, not a reason to fall through to building.
         if (!body.trim()) return { answer: { status: 'cannot_answer', answer: 'I could not put together an explanation for that one.' }, category: 'analysis', lastLines: r.lastLines, ms: Date.now() - t0 }
         return { answer: explainAnswer(body, o.explain.programDir), category: 'analysis', lastLines: r.lastLines, ms: Date.now() - t0 }
       }
