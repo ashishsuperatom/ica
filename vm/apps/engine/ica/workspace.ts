@@ -49,8 +49,11 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
   await mkdir(dbDir, { recursive: true })   // engine-private, outside the workspace
 
   // ── `@superatom/*` MUST RESOLVE FROM THE PROJECT HOME ──────────────────────
-  // Units the agent writes contain `import { money } from '@superatom/scaffold'`. We do not author those
-  // lines, so the specifier has to resolve on its own — unlike the seams below, which bake absolute paths.
+  // `@superatom/*` is the standard specifier everywhere — the seams below, the units the agent writes, and
+  // the docs that teach it. That is deliberate: it is OUR package namespace, it reads the same in generated
+  // code as in the repo, and it stays correct wherever the code is moved to. So we do NOT bake absolute
+  // paths as a workaround; we make the specifier resolve. (Absolute paths were considered and rejected: they
+  // could only ever cover the seams, since the agent writes its own import lines.)
   //
   // Node resolves it by walking UP from the importing file looking for a node_modules that holds it. In the
   // shipped layout that is enough: the packages are dependencies of the workspace root (see the root
