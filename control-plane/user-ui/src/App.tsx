@@ -741,7 +741,9 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'concept-log', 'narrati
   useEffect(() => {
     const onClick = (ev: MouseEvent) => {
       const rr = (ev.target as HTMLElement | null)?.closest?.('.sa-rerun') as HTMLElement | null
-      if (rr?.dataset.qid) { ev.preventDefault(); submitRef.current?.(`check: ${rr.dataset.qid}`); return }
+      // `run:`, not `check:` — the button means "give me this answer again", not "tell me what drifted". The
+      // answer row carries the program and its parameters, so the qid is the whole instruction.
+      if (rr?.dataset.qid) { ev.preventDefault(); submitRef.current?.(`run: ${rr.dataset.qid}`); return }
       const el = (ev.target as HTMLElement | null)?.closest?.('.sa-ent') as HTMLElement | null
       if (!el) return
       const entity = el.dataset.entity, id = el.dataset.id
@@ -1746,7 +1748,7 @@ function AnswerCard({ answer: a, category, timing, qid, at }: { answer: any; cat
             the same words a user can type: the answer row carries the program and the parameters it was run
             with, so this re-runs that exact computation with no model anywhere in the path. Delegated to the
             document (like .sa-ent), so an answer card stays a pure renderer with nothing threaded into it. */}
-        {qid && <button className="sa-ic sa-rerun" data-qid={qid} title="Run this again and compare" aria-label="Run again">{IC.rerun}</button>}
+        {qid && <button className="sa-ic sa-rerun" data-qid={qid} title="Run this again" aria-label="Run again">{IC.rerun}</button>}
         <button className="sa-ic" onClick={doCopy} title={copied ? 'Copied' : 'Copy'} aria-label="Copy">{copied ? IC.check : IC.copy}</button>
         <button className="sa-ic" onClick={toggleFull} title={full ? 'Exit full screen' : 'Full screen'} aria-label="Full screen">{full ? IC.close : IC.expand}</button>
       </div>

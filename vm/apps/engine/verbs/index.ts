@@ -2,8 +2,13 @@
 //
 //   edit: / modify:   change the program behind the answer on screen, in place
 //   explain:          say, in prose, how the answer on screen was arrived at
-//   check:            re-run a program with the same parameters and report what moved. Bare = the answer on
-//                     screen; `check: <question id>` or `check: <program name>` re-runs that one instead
+//   run:              run a program again and show what it returns. Nothing else — the answer, as of now
+//   check:            run it again and report WHAT MOVED against the saved answer. Drift, not the figures
+//
+// `run:` and `check:` are the same computation and different questions. "What is it now?" wants the answer;
+// "has it changed?" wants the comparison. Fusing them made the re-run button hand back a diff nobody asked
+// for, with the figures it was about left out. Both take a subject: bare = the answer on screen,
+// `<question id>` or `<program name>` = that one instead.
 //   program:          show its source
 //
 // A verb is DETERMINISTIC routing: the user said which mode they want, so nothing guesses. It must be the very
@@ -47,6 +52,9 @@ const SPELLINGS: Record<string, Verb> = {
   edit: 'edit',
   modify: 'edit',      // same thing, and people reach for both
   explain: 'explain',
+  run: 'run',
+  rerun: 'run',        // and the button says "Run again", so both spellings arrive
+  're-run': 'run',
   check: 'check',
   program: 'program',
   view: 'view',
@@ -72,6 +80,11 @@ export const VERBS: Record<Verb, {
   // `check:` on its own is the natural way to ask it — there is nothing to say beyond the word. Requiring text
   // after the colon made the bare form fall through as an ordinary QUESTION: a full build, narrator and all,
   // for someone who typed one word expecting a re-run. `explain:` is the same; the text is optional colour.
+  // RUN — the plain one. No comparison, no caveat, no model: the program's own answer, as of now. It does not
+  // persist a new answer row (it is the same answer to the same question), but it does become what is on
+  // screen, carrying the ORIGINAL qid so a later `check:` still has its baseline.
+  run:     { needsCurrentProgram: false, needsText: false, usesAgent: false, persists: false, category: 'answer',
+             nothingToActOn: 'There is nothing on screen to run again yet — ask a question first, or name one: `run: <question id>`.' },
   // It does not NEED the answer on screen: `check: <question id>` / `check: <program name>` names its own
   // subject, which is how the re-run button on an old answer card works and how a program gets re-run from a
   // different chat. Bare `check:` still means what you are looking at.
@@ -90,7 +103,7 @@ export const VERBS: Record<Verb, {
 /** A leading `verb:` if there is one. Case-insensitive, tolerates space before the colon ("edit :"). */
 export function parseVerb(input: string): VerbMatch | null {
   const raw = input.replace(/^\s+/, '')
-  const m = /^([a-z]+)\s*:/i.exec(raw)
+  const m = /^([a-z][a-z-]*)\s*:/i.exec(raw)   // a hyphen so `re-run:` reaches the table; unknown words still fall through
   if (!m) return null
   const verb = SPELLINGS[m[1].toLowerCase()]
   if (!verb) return null

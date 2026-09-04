@@ -43,7 +43,7 @@ import type { EngineMsgType } from '../../../clients/protocol.js'
 import { buildDatasourceIndex } from './datasource-index/build.js'
 import { parseVerb, VERBS, type ProgramTarget } from './verbs/index.js'
 import type { AgentEvent } from './ica/session.js'
-import { diffAnswers, checkReport, checkAnswer, resolveCheckTarget, type CheckDiff } from './verbs/check.js'
+import { diffAnswers, checkReport, checkAnswer, resolveProgramSubject, type CheckDiff } from './verbs/check.js'
 import { collectProgramFiles, programAnswer } from './verbs/program.js'
 import { parseView, findView, viewDir, viewLabel, viewPrompt } from './verbs/view.js'
 import { watchProgramEvents, describeProgramEvent } from './program-events.js'
@@ -680,6 +680,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   const verb = parseVerb(question)
   const explicitEdit = verb?.verb === 'edit'
   const explicitExplain = verb?.verb === 'explain'
+  const explicitRun     = verb?.verb === 'run'
   const explicitCheck   = verb?.verb === 'check'
   const explicitProgram = verb?.verb === 'program'
   const explicitView    = verb?.verb === 'view'
@@ -847,6 +848,16 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       : null
   if (verb && VERBS[verb.verb].needsCurrentProgram && !target) console.log(`[ica] ${verb.verb}, but nothing has been answered in this chat yet`)
 
+  // How `run:` and `check:` find the program they act on. Both take a subject — the answer on screen, a
+  // question id, or a program name — and an answer row already carries the programDir AND the params it was
+  // run with, so any past answer re-runs exactly, with nothing guessed and no model in the path.
+  const subjectLookups = {
+    onScreen: target,
+    answerFor: (q: string) => { const r = answers.get(q); return r ? { programDir: r.programDir, params: r.params, question: r.question, answer: r.answer, createdAt: r.createdAt } : null },
+    latestForProgram: (d: string) => { const r = answers.latestForProgram(d); return r ? { qid: r.qid, params: r.params, question: r.question, answer: r.answer, createdAt: r.createdAt } : null },
+    programExists: (d: string) => existsSync(join(WORKSPACE, d, 'program.ts')),
+  }
+
   let explainTarget: ProgramTarget | null = null
   // Set here but ACTED ON inside the try below — the try that owns the `finally` starts further down, so
   // returning from here would skip it and leave the session flagged busy for good.
@@ -857,7 +868,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     modifyTarget = target
     if (target) console.log(`[ica] explicit edit → editing ${target.programDir} in place${target.concepts?.length ? ` · it taught: ${target.concepts.join(', ')}` : ''}`)
     else console.log('[ica] explicit edit, but no current program to edit → building fresh')
-  } else if (!explicitExplain && !explicitCheck && !explicitProgram && !explicitView) {
+  } else if (!explicitExplain && !explicitRun && !explicitCheck && !explicitProgram && !explicitView) {
     // Explain and check both report on a program that is already chosen — searching for candidates or ranking
     // concepts would be work whose result nothing reads, on the two verbs meant to come back quickly.
     // NO reflex routing. The exact-match fast-path above already handled exact repeats (no LLM). For everything
@@ -1109,6 +1120,49 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       return
     }
 
+    // ── RUN — the program again, and its answer. Nothing else. ─────────────────────────────────────────────
+    // Deliberately NOT check:. "What is it now?" and "has it changed?" are different questions, and answering
+    // the first with a diff hands back a comparison nobody asked for, with the figures it is about left out.
+    // No model here either: the program and its parameters are both recorded, so this is execution and nothing
+    // more.
+    if (explicitRun) {
+      const found = resolveProgramSubject(verb!.rest, subjectLookups)
+      if ('error' in found) {
+        console.log(`[ica] run — ${found.error}`)
+        emit(reply, { t: 'analyst:answer', category: VERBS.run.category, sid, qid, timing: { ms: Date.now() - t0 },
+          answer: { status: 'answered', category: VERBS.run.category, answer: found.error } })
+        return
+      }
+      const { programDir: dir, params, question: subjectQ, qid: subjectQid } = found.subject
+      const beat = (text: string) => emit(reply, { t: 'verb:event', verb: 'run', ev: { kind: 'message', text, done: true }, qid, sid })
+      beat(`Running ${dir}${params && Object.keys(params as any).length ? ` with ${JSON.stringify(params)}` : ''}.`)
+      let answer: any
+      const runT0 = Date.now()
+      try {
+        const rr = await execProgram(WORKSPACE, dir, params, { qid, sid })
+        answer = answerView(rr.output)
+        answers.recordRun({ programDir: dir, qid, question: subjectQ ?? question, params, status: answer.status, shapeHash: (rr as any).finalShapeHash, ms: Date.now() - runT0 })
+        // The answer as the program returned it, with one line saying where it came from — a re-run should
+        // look like the answer, because that is what it is.
+        const ran = `Re-ran \`${dir}\` · ${((Date.now() - runT0) / 1000).toFixed(1)}s`
+        answer = { ...answer, scope: answer.scope ? `${answer.scope} · ${ran}` : ran }
+        // It becomes what is on screen, so explain:/edit:/check: act on it — carrying the ORIGINAL qid, not
+        // this turn's, because that is the row holding the saved answer a later check: compares against.
+        if (subjectQid) setOnScreen(sid, { qid: subjectQid, question: subjectQ ?? question, programDir: dir, params })
+        console.log(`[ica] run · ${dir} · ${((Date.now() - runT0) / 1000).toFixed(1)}s`)
+      } catch (e: any) {
+        answer = { status: 'answered', category: VERBS.run.category,
+          answer: `**It no longer runs.** \`${dir}\` failed:\n\n\`\`\`\n${String(e?.message ?? e).slice(0, 600)}\n\`\`\`` }
+        console.log(`[ica] run · ${dir} · FAILED TO RUN · ${String(e?.message ?? e).slice(0, 120)}`)
+      }
+      const timing = { ms: Date.now() - t0 }
+      const cat = VERBS.run.category
+      lastAnswer = answer; lastTiming = timing; lastCategory = cat
+      emit(reply, { t: 'analyst:answer', category: cat, answer, timing, sid, qid })
+      if (channel) emit({ type: 'channel' }, { t: 'channel:answer', channel, qid, answer, category: cat })
+      return
+    }
+
     // ── CHECK — re-run the same program with the same parameters and report what moved. ─────────────────────
     // No agent at all: running the program is computation and comparing the numbers is arithmetic. A model here
     // would be the one part of the answer nobody could check.
@@ -1116,12 +1170,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       // WHICH PROGRAM — the answer on screen, or one the user named after the colon (a question id, or a
       // program name). Both are lookups in tables we already keep, so re-running any past answer costs no
       // model: an answer row carries the programDir AND the params it was run with.
-      const found = resolveCheckTarget(verb!.rest, {
-        onScreen: target,
-        answerFor: (q) => { const r = answers.get(q); return r ? { programDir: r.programDir, params: r.params, question: r.question, answer: r.answer, createdAt: r.createdAt } : null },
-        latestForProgram: (d) => { const r = answers.latestForProgram(d); return r ? { qid: r.qid, params: r.params, question: r.question, answer: r.answer, createdAt: r.createdAt } : null },
-        programExists: (d) => existsSync(join(WORKSPACE, d, 'program.ts')),
-      })
+      const found = resolveProgramSubject(verb!.rest, subjectLookups)
       if ('error' in found) {
         console.log(`[ica] check — ${found.error}`)
         emit(reply, { t: 'analyst:answer', category: VERBS.check.category, sid, qid, timing: { ms: Date.now() - t0 },

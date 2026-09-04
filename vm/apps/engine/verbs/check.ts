@@ -153,28 +153,30 @@ export function checkAnswer(markdown: string, programDir: string, fresh?: any) {
 
 
 // ── WHICH PROGRAM ─────────────────────────────────────────────────────────────────────────────────────────
-// `check:` on its own means the answer on screen. `check: <something>` names its own subject, so a program can
-// be re-run from anywhere — a different chat, days later, or from the re-run button on an old answer card.
+// Shared by `run:` and `check:` — they act on the same subject and differ only in what they say about it.
+//
+// Bare means the answer on screen. Naming one means a program can be re-run from anywhere — a different chat,
+// days later, or from the re-run button on an old answer card.
 //
 // TWO WAYS TO NAME ONE, and the qid is the good one: an answer row already carries the programDir AND the
 // params it was run with, so a qid re-runs that exact computation with nothing guessed. A program name re-runs
 // the program but has to borrow parameters from its most recent answer, which may have been someone else's
 // question. Both are lookups — no model is asked to work out what the user meant.
 
-export interface CheckSubject { programDir: string; params: unknown; question?: string; qid?: string; baseline?: { answer: any; createdAt: number } }
+export interface ProgramSubject { programDir: string; params: unknown; question?: string; qid?: string; baseline?: { answer: any; createdAt: number } }
 
-export function resolveCheckTarget(rest: string, d: {
+export function resolveProgramSubject(rest: string, d: {
   onScreen: ProgramTarget | null
   answerFor: (qid: string) => { programDir?: string; params?: unknown; question?: string; answer?: any; createdAt: number } | null
   latestForProgram: (dir: string) => { qid: string; params?: unknown; question?: string; answer?: any; createdAt: number } | null
   programExists: (dir: string) => boolean
-}): { subject: CheckSubject } | { error: string } {
+}): { subject: ProgramSubject } | { error: string } {
   const text = rest.trim()
 
   // Nothing named → what is on screen. Its baseline comes from its own qid, so it is the same lookup.
   if (!text) {
     const t = d.onScreen
-    if (!t?.programDir) return { error: 'There is no answer on screen to check yet — ask a question first, then `check:` it. You can also name one: `check: <question id>` or `check: <program name>`.' }
+    if (!t?.programDir) return { error: 'There is no answer on screen yet — ask a question first. You can also name one: `<question id>` or `<program name>` after the colon.' }
     const prior = t.qid ? d.answerFor(t.qid) : null
     return { subject: { programDir: t.programDir, params: t.params ?? {}, question: t.question, qid: t.qid,
                         baseline: prior?.answer ? { answer: prior.answer, createdAt: prior.createdAt } : undefined } }

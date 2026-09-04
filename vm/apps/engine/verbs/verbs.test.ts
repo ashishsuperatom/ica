@@ -174,17 +174,38 @@ test('view: needs something to look at', async () => {
   assert.equal(parseView(''), null)
 })
 
-test('only edit: and explain: are tied to the answer on screen; view: and check: can name their own subject', () => {
+test('only edit:, explain: and program: are tied to the answer on screen', () => {
   // A verb that names its subject can be used from anywhere — a different chat, an old card's re-run button.
   // edit: and explain: cannot: there is no way to say WHICH answer you mean except by looking at it.
   assert.equal(VERBS.view.needsCurrentProgram, false)
   assert.equal(VERBS.check.needsCurrentProgram, false)
+  assert.equal(VERBS.run.needsCurrentProgram, false)
   for (const v of ['edit', 'explain', 'program'] as const) assert.equal(VERBS[v].needsCurrentProgram, true, v)
   // Only a view PERSISTS: a view IS an answer, which is what lets edit: improve it afterwards. The reporting
   // verbs must not enter the intent graph, or retrieval could later serve an explanation to someone who asked
   // for a number.
   assert.equal(VERBS.view.persists, true)
-  for (const v of ['explain', 'check', 'program'] as const) assert.equal(VERBS[v].persists, false, v)
+  for (const v of ['explain', 'run', 'check', 'program'] as const) assert.equal(VERBS[v].persists, false, v)
+})
+
+test('run: and check: are different verbs over the same subject, and neither uses a model', () => {
+  // The re-run button asks "what is it now?" — answering that with a diff hands back a comparison nobody asked
+  // for, with the figures it is about left out. They share resolveProgramSubject and nothing else.
+  assert.notEqual(VERBS.run.category, VERBS.check.category)
+  for (const v of ['run', 'check', 'program'] as const) assert.equal(VERBS[v].usesAgent, false, v)
+})
+
+test('re-run:, rerun: and run: are the same verb', async () => {
+  const { parseVerb } = await import('./index.js')
+  for (const spelled of ['run: q-old', 'rerun: q-old', 're-run: q-old', 'RUN: q-old']) {
+    const m = parseVerb(spelled)
+    assert.equal(m?.verb, 'run', spelled)
+    assert.equal(m?.rest, 'q-old', spelled)
+  }
+  // Bare, with no subject, still fires — it means the answer on screen.
+  assert.equal(parseVerb('run:')?.verb, 'run')
+  // The hyphen in the pattern must not turn an ordinary question into a command.
+  assert.equal(parseVerb('Year-on-year: how did we do'), null)
 })
 
 // ── check: naming its own subject ─────────────────────────────────────────────────────────────────────────
@@ -200,8 +221,8 @@ const store = {
 }
 
 test('bare check: is the answer on screen, with its own saved answer as the baseline', async () => {
-  const { resolveCheckTarget } = await import('./check.js')
-  const r = resolveCheckTarget('', store) as any
+  const { resolveProgramSubject } = await import('./check.js')
+  const r = resolveProgramSubject('', store) as any
   assert.equal(r.subject.programDir, 'programs/on-screen')
   assert.deepEqual(r.subject.params, { a: 1 })
   assert.equal(r.subject.baseline.createdAt, 100)
@@ -210,17 +231,17 @@ test('bare check: is the answer on screen, with its own saved answer as the base
 test('check: <question id> re-runs THAT answer with the parameters it was answered with', async () => {
   // The whole point: an answer row carries the program AND its parameters, so any past answer can be re-run
   // exactly, from any chat, with no model asked to work out what was meant.
-  const { resolveCheckTarget } = await import('./check.js')
-  const r = resolveCheckTarget('q-old', store) as any
+  const { resolveProgramSubject } = await import('./check.js')
+  const r = resolveProgramSubject('q-old', store) as any
   assert.equal(r.subject.programDir, 'programs/revenue')
   assert.deepEqual(r.subject.params, { year: 2025 })
   assert.equal(r.subject.baseline.createdAt, 50)
 })
 
 test('check: <program name> works with or without the programs/ prefix', async () => {
-  const { resolveCheckTarget } = await import('./check.js')
+  const { resolveProgramSubject } = await import('./check.js')
   for (const named of ['revenue', 'programs/revenue', 'programs/revenue/']) {
-    const r = resolveCheckTarget(named, store) as any
+    const r = resolveProgramSubject(named, store) as any
     assert.equal(r.subject.programDir, 'programs/revenue', named)
   }
 })
@@ -228,13 +249,13 @@ test('check: <program name> works with or without the programs/ prefix', async (
 test('check: says what went wrong rather than re-running something else', async () => {
   // Every failure names the thing that was not found. Falling back to the answer on screen would re-run the
   // wrong program and report its figures under the name the user typed.
-  const { resolveCheckTarget } = await import('./check.js')
+  const { resolveProgramSubject } = await import('./check.js')
   for (const bad of ['nope', 'q-noprog', 'q-gone']) {
-    const r = resolveCheckTarget(bad, store) as any
+    const r = resolveProgramSubject(bad, store) as any
     assert.ok(r.error, bad)
     assert.equal(r.subject, undefined, bad)
   }
-  const empty = resolveCheckTarget('', { ...store, onScreen: null }) as any
+  const empty = resolveProgramSubject('', { ...store, onScreen: null }) as any
   assert.ok(empty.error)
 })
 
