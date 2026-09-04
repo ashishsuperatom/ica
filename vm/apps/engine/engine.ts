@@ -1180,7 +1180,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         const composer = await getComposer(sid)
         workingAgent = 'composer'
         stopSession = () => { try { (composer as any).session?.reset?.() } catch { /* best-effort */ } }
-        const built = await composer.ask(viewPrompt({ v, dir, builtRel: `./out/${qid}/built.json` }), handlers, { qid, sid })
+        const built = await composer.ask(viewLabel(v), handlers, { qid, sid, build: viewPrompt({ v, dir, builtRel: `./out/${qid}/built.json` }) })
         if (stopped) return
         if (built.escalate || !findView(WORKSPACE, v)) {
           // FAIL LOUDLY. A half-built view that silently falls back to something else is a view that never

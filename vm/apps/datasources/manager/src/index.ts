@@ -43,8 +43,11 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 // `delays` is a parameter so a test can run this in milliseconds instead of the real eight seconds. Exported
 // for the same reason: the rule about what must NOT be retried is the half worth pinning.
-export async function withRetry<T>(run: () => Promise<T>, sourceId?: unknown, delays: number[] = RETRY_DELAYS): Promise<T> {
+export async function withRetry<T>(run: () => Promise<T>, sourceId?: unknown, delays: number[] = RETRY_DELAYS,
+                                   isTransient?: (err: unknown) => boolean): Promise<T> {
   const who = sourceId ? String(sourceId) : 'source'
+  const transient = (e: unknown) => isTransient ? isTransient(e) : TRANSIENT.test(String((e as any)?.message ?? e))
+  const began = Date.now()
   for (let attempt = 0; ; attempt++) {
     try {
       const out = await run()
@@ -52,10 +55,14 @@ export async function withRetry<T>(run: () => Promise<T>, sourceId?: unknown, de
       return out
     } catch (e: any) {
       const msg = String(e?.message ?? e)
-      // Out of attempts, or not the kind of failure waiting can fix.
-      if (attempt >= delays.length || !TRANSIENT.test(msg)) {
-        if (attempt) console.warn(`[query] ${who} failed after ${attempt + 1} attempts — ${msg.slice(0, 200)}`)
-        throw e
+      if (!transient(e)) throw e                        // waiting cannot fix this one
+      if (attempt >= delays.length) {
+        // SAY THAT WE ALREADY TRIED. The caller is an agent, and an agent that does not know a query was
+        // retried four times over eight seconds will reason about the failure and issue it again — which is
+        // the expensive loop this exists to remove, now running on top of it rather than instead of it.
+        const secs = ((Date.now() - began) / 1000).toFixed(1)
+        console.warn(`[query] ${who} failed after ${attempt + 1} attempts in ${secs}s — ${msg.slice(0, 200)}`)
+        throw new Error(`${msg} — the source was unreachable; already retried ${attempt + 1} times over ${secs}s, so this is not worth repeating`)
       }
       const wait = delays[attempt] + Math.floor(Math.random() * 250)
       console.warn(`[query] ${who} transient failure (attempt ${attempt + 1}), retrying in ${wait}ms — ${msg.slice(0, 160)}`)
@@ -81,6 +88,12 @@ interface Bridge {
   ready(): boolean
   query(sql: string, params?: Record<string, unknown>): Promise<any[]>
   introspect(): Promise<{ tables: any[]; kind?: string; dialect?: string }>
+  // IS THIS FAILURE WORTH WAITING OUT? Optional, and the default below covers the shapes we have seen. But a
+  // source knows its own outages best — one engine reports a busy pool as a bare code, another wraps a
+  // timeout in its own error class, and neither has to look like an HTTP 503. A bridge that knows says so;
+  // one that does not is read by the default. Returning false is an override too: a source can declare a
+  // failure permanent that the default would otherwise sit and retry.
+  isTransient?(err: unknown): boolean
   close?(): void
 }
 
@@ -208,7 +221,7 @@ const server = http.createServer(async (req, res) => {
       // retry turns into a double write. Those callers can opt in once they can say they are idempotent.
       const rows = passthrough
         ? await bridge.query(sql, body.params ?? {})
-        : await withRetry(() => bridge.query(sql, body.params ?? {}), body.id)
+        : await withRetry(() => bridge.query(sql, body.params ?? {}), body.id, undefined, bridge.isTransient?.bind(bridge))
       // Byte guard for wide rows (the row cap is already injected into the agent query's AST). Raw/system reads are exempt.
       if (!body.raw) { const bytes = JSON.stringify(rows).length; if (bytes > MAX_BYTES) return send(res, 413, { error: `result too large (${(bytes / 1e6).toFixed(1)} MB) — add a filter or aggregate` }) }
       // REPORT what we did to the query. `notes` is only present when it changes how the result must be read:

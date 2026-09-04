@@ -7,7 +7,7 @@ export const meta = {
   description: 'EXAMPLE: formats a ranked group list into the answer card (headline total + top-N table).',
   inputs: { grouped: 'output of sales-by-customer', topN: 'number' },
   outputs: { answer: 'the answer view-model' },
-  logic: 'headline = money(grand total); table = top-N rows [name, amount].',
+  logic: 'headline = money(grand total); table = top-N rows, the customer carrying its id and the amount its raw value.',
   dataSources: [],
 };
 
@@ -25,11 +25,25 @@ export default async function (_ctx, params) {
     answer: {
       headline: { label: `Total sales ${g.year}`, display: money(g.total, 'AUD'), value: g.total },
       answer: `Top ${top.length} of ${num(g.rows.length)} customers by sales in ${g.year}.`,
+      // THE PROGRAM DECIDES HOW A CELL READS, because it is the only thing holding both the raw value and what
+      // the value means. A cell is the VALUE — that is what sorts, right-aligns and totals — and it is wrapped
+      // only to carry what the number or the name cannot:
+      //   { value, id }        this cell NAMES something; the reader can open it. The id is already here, and
+      //                        dropping it is dropping the only handle on the thing.
+      //   { value, display }   the form cannot be derived from the number — a currency, here. Send BOTH, never
+      //                        the formatted string alone, or the column stops being numeric.
+      // Anything true of the whole COLUMN is declared once on the column, not repeated on every row.
       sections: [{
         kind: 'table',
         title: 'Sales by customer',
-        columns: ['Customer', 'Sales'],
-        rows: top.map((r) => [r.customerName, money(r.total, 'AUD')]),
+        columns: [
+          { label: 'Customer', entity: 'customer' },
+          { label: 'Sales', good: 'high', bar: true },
+        ],
+        rows: top.map((r) => [
+          { value: r.customerName, id: r.customerId },
+          { value: r.total, display: money(r.total, 'AUD') },
+        ]),
       }],
       status: 'answered',
     },

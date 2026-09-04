@@ -69,12 +69,20 @@ whole card down:
   "periods":  [ { "label": "a compared scope", "detail": "its exact range" } ],   ← use this for a COMPARISON
   "scope":    "the non-time filters you applied — a string",
   "sections": [ { "kind": "table", "title": "…", "columns": [...], "rows": [[...]] } ],
-A table CELL is a plain value. When it names a THING the reader may want to look at on its own, give it its id
-too: `{"v": "<the name>", "id": "<its id in the source>"}`, and declare what kind of thing the column holds:
-`{"label": "<heading>", "entity": "<the kind>"}`. A row with no id stays a plain value.
-A column may also say how to present it: `format` ('percent' renders 0.83 as 83%), `good` ('high'|'low' — which
-direction is favourable, so the figure can be toned; omit it and nothing is coloured), `mid` (the line `good`
-turns on, default 0), `bar` (an in-cell magnitude bar).
+### A table
+YOU decide how each figure reads — you are the only thing holding both the raw value and what it means.
+
+A CELL is the value: a number is a number, a name is a string. That is what sorts, right-aligns and totals.
+Wrap one only to carry what the value itself cannot:
+- `{"value": <the name>, "id": <its id>}` — this cell NAMES something the reader can open on its own. If you
+  have the id, send it; it is the only handle on that thing.
+- `{"value": <the number>, "display": "<how it reads>"}` — a form that cannot be derived from the number, a
+  currency being the usual one. Send BOTH: the formatted string alone stops the column being numeric.
+
+Anything true of the whole COLUMN is said once on the column, never repeated per row:
+`{"label": "<heading>", "entity": "<what kind of thing this column names>", "format": "percent" (0.83 reads as
+83%), "good": "high"|"low" (which direction is favourable, so the figure can be toned — omit it and nothing is
+coloured), "mid": <the line good turns on, default 0>, "bar": true (an in-cell magnitude bar)}`.
   "caveat":   "a string, or an array of short strings" }
 ```
 

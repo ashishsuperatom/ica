@@ -42,6 +42,31 @@ test('it gives up after the attempts are spent and reports the real error', asyn
   assert.equal(calls, FAST.length + 1, 'one initial attempt plus one per delay')
 })
 
+test('when it gives up it SAYS it already tried — so the agent does not try again', async () => {
+  // The failure this prevents: the agent reads a bare "503", reasons about it, and re-issues the query — the
+  // expensive retry loop we removed, now running on top of the cheap one instead of instead of it.
+  const always = async () => { throw new Error('HTTP 503 Service Unavailable') }
+  await assert.rejects(withRetry(always, 'src', FAST), (e: Error) => {
+    assert.match(e.message, /HTTP 503/, 'the real error survives')
+    assert.match(e.message, /already retried 4 times/, 'and says how many times')
+    assert.match(e.message, /not worth repeating/, 'in words an agent will act on')
+    return true
+  })
+})
+
+test('a bridge may classify its own failures, in both directions', async () => {
+  // Not every source words an outage like an HTTP error. One that knows says so; one that does not gets the
+  // default. And a bridge can call a failure PERMANENT that the default would otherwise sit and retry.
+  let calls = 0
+  const odd = async () => { calls++; if (calls < 2) throw new Error('ORA-12520: listener could not hand off'); return 'ok' }
+  assert.equal(await withRetry(odd, 'src', FAST, () => true), 'ok', 'a source can opt a failure IN')
+
+  calls = 0
+  const looksTransient = async () => { calls++; throw new Error('HTTP 503 Service Unavailable') }
+  await assert.rejects(withRetry(looksTransient, 'src', FAST, () => false))
+  assert.equal(calls, 1, 'a source can opt a failure OUT, and it is tried exactly once')
+})
+
 test('a success on the first attempt costs nothing', async () => {
   let calls = 0
   assert.equal(await withRetry(async () => { calls++; return 'v' }, 'src', FAST), 'v')

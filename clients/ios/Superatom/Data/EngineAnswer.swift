@@ -240,11 +240,13 @@ enum JSONValue: Hashable {
         case let value as NSNumber:
             self = CFGetTypeID(value) == CFBooleanGetTypeID() ? .bool(value.boolValue) : .number(value.doubleValue)
         case let value as String:  self = .string(value)
-        // A cell may carry an identity alongside its value — {"v": "<name>", "id": "<id>"} — so that the web
-        // client can offer a view of that thing. Here only the value is wanted. Without this case it falls to
-        // String(describing:) below and the reader sees a printed dictionary where a name should be.
-        case let ref as [String: Any] where ref["v"] != nil:
-            self = JSONValue(any: ref["v"]!)
+        // A cell may carry more than its value — {"value": …, "id": …} to name something the reader can open,
+        // or {"value": …, "display": …} where the form cannot be derived. Here the readable form is wanted, and
+        // the raw value otherwise. Without this it falls to String(describing:) and the reader sees a printed
+        // dictionary where a name should be.
+        case let cell as [String: Any] where cell["value"] != nil:
+            if let shown = cell["display"] as? String { self = .string(shown) }
+            else { self = JSONValue(any: cell["value"]!) }
         default:                   self = .string(String(describing: any))
         }
     }

@@ -77,17 +77,39 @@ export function renderAnswerBody(answer: unknown): string {
 // Every reader goes through these. The same rule spelled out at each `String(cell)` site is how it drifts —
 // and there are five of them, two in copy and CSV rather than rendering, which is exactly where an
 // "[object Object]" gets missed.
-export type Cell = string | number | boolean | null | { v: string | number; id: string | number; e?: string }
-const isRef = (c: unknown): c is { v: string | number; id: string | number; e?: string } =>
-  !!c && typeof c === 'object' && 'v' in (c as any)
+// ── ONE SHAPE FOR A CELL ────────────────────────────────────────────────────────────────────────────────────
+// A cell is the VALUE. A number is a number, a name is a string — that is what sorts, right-aligns and totals,
+// and the column says how it should look.
+//
+// It is wrapped only to carry what the value cannot:
+//   { value, id }        it names a thing the reader can open on its own
+//   { value, display }   its form cannot be derived from the number — a currency, say
+//
+// The keys are spelled out — `value`, `entity` — and never abbreviated. The short forms were a saving that
+// does not exist: nobody writes this JSON. An agent writes a PROGRAM, so the object appears once in a loop and
+// the rows come out of it. All the abbreviation ever bought was a second name for the same idea, which is how
+// a renderer and a prompt drift apart. `value` is also already the contract's word: a headline is
+// {label, display, value}.
+//
+// A cell does NOT carry a label — the column is its label. That asymmetry with headline/KPI is the whole rule:
+// PRESENTATION LIVES WHERE THE THING IS NAMED. A headline names itself, so it carries its own; a cell is named
+// once by its column, so the column carries it for every row.
+export type CellObject = { value: unknown; display?: string; id?: string | number; entity?: string }
+export type Cell = string | number | boolean | null | CellObject
+const isObj = (c: unknown): c is CellObject =>
+  !!c && typeof c === 'object' && !Array.isArray(c) && 'value' in (c as any)
 
-export const cellValue = (c: Cell): string | number | boolean | null => isRef(c) ? c.v : (c as any)
-export const cellText  = (c: Cell): string => { const v = cellValue(c); return v == null ? '' : String(v) }
-export const cellId    = (c: Cell): string | undefined => isRef(c) && c.id != null ? String(c.id) : undefined
-/** The entity TYPE for a cell: the column's, unless the cell overrides it (a column mixing customers and
- *  vendors). Long key on the column where it appears once, short key on the cell where it repeats per row. */
+export const cellValue = (c: Cell): any => isObj(c) ? c.value : c
+export const cellText  = (c: Cell): string => {
+  if (isObj(c) && typeof c.display === 'string') return c.display
+  const v = cellValue(c)
+  return v == null ? '' : String(v)
+}
+export const cellId    = (c: Cell): string | undefined => isObj(c) && c.id != null ? String(c.id) : undefined
+/** The kind of thing a cell names: the column's, unless the cell overrides it — which a column mixing kinds
+ *  needs, and which costs one word in a program that was going to be written anyway. */
 export const cellEntity = (c: Cell, columnEntity?: string): string | undefined =>
-  isRef(c) && c.id != null ? (c.e || columnEntity) : undefined   // no id, no entity — there is nothing to view
+  isObj(c) && c.id != null ? (c.entity || columnEntity) : undefined
 
 // A column is a label, or a label with what the renderer needs to present it properly. `good` says which
 // DIRECTION is favourable — only the program knows whether high utilisation or low cost is the good news, and

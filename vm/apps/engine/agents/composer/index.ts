@@ -49,7 +49,7 @@ export type ModifyTarget = ProgramTarget
  *  Retrieval found it; the composer still decides — it is a strong lead, not a verdict. */
 export interface CanonicalMatch { programDir: string; params: Record<string, unknown>; canonical: string }
 export interface Composer {
-  ask(question: string, handlers?: RunHandlers, opts?: { qid?: string; candidates?: ProgramCandidate[]; modify?: ModifyTarget; conceptNames?: string[]; canonicalMatch?: CanonicalMatch; resolvedQuestion?: string; explain?: ProgramTarget; raw?: string; sid?: string }): Promise<ComposerResult>
+  ask(question: string, handlers?: RunHandlers, opts?: { qid?: string; candidates?: ProgramCandidate[]; modify?: ModifyTarget; conceptNames?: string[]; canonicalMatch?: CanonicalMatch; resolvedQuestion?: string; explain?: ProgramTarget; raw?: string; sid?: string; build?: string }): Promise<ComposerResult>
   session: Session
   cwd: string
 }
@@ -188,7 +188,12 @@ RUN it (\`tsx run.mjs ${o.canonicalMatch.programDir}/program.ts '${JSON.stringif
    phrased question.
 3. Escalate to the analyst when it's a hard problem or you can't figure it out. Write ${escalateRel} =
    {"reason":"<what's blocking you>"} and STOP. Many composers share one analyst, so do the rest yourself.`
-      const prompt = m ? modifyPrompt : composePrompt
+      // `build` is a COMPLETE instruction, handed over whole — a view, and anything later that knows exactly
+      // what it wants written. It bypasses the compose preamble and the concept block on purpose: that block
+      // says "no concept fits this question, ESCALATE now" whenever no concepts were passed, so wrapping a
+      // self-contained instruction in it made the agent give up in thirteen seconds without reading it.
+      // Everything after this is shared — same built.json, same run, same result.
+      const prompt = o.build ?? (m ? modifyPrompt : composePrompt)
 
       const hasBuilt     = async () => { try { return !!JSON.parse(await readFile(builtPath, 'utf8'))?.programDir } catch { return false } }
       const hasEscalated = async () => { try { return !!JSON.parse(await readFile(escalatePath, 'utf8')) } catch { return false } }

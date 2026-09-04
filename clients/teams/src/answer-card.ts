@@ -75,12 +75,12 @@ function tableRow(cells: string[], header = false): any {
   }
 }
 
-// A CELL may carry an identity — {v, id} — and a COLUMN may be declared rather than named — {label, entity,
-// …} — so that a richer client can offer a view of the thing. Here only the text is wanted. Without these two
-// lines each renders as "[object Object]", which is the failure this shape has already caused once.
+// A CELL may carry more than its value — {value, id} to name something, {value, display} where the form cannot
+// be derived — and a COLUMN may be declared rather than named: {label, entity, format, …}. Here only the text
+// is wanted. Without these lines each renders as "[object Object]", which this shape has already caused once.
 function fmt(v: any): string {
   if (v == null) return ''
-  if (typeof v === 'object' && 'v' in v) return fmt(v.v)
+  if (typeof v === 'object' && 'value' in v) return typeof v.display === 'string' ? v.display : fmt(v.value)
   return typeof v === 'number' ? v.toLocaleString() : String(v)
 }
 const colText = (c: any): string => (c && typeof c === 'object' && 'label' in c) ? String(c.label ?? '') : String(c ?? '')
