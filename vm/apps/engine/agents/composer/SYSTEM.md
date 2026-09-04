@@ -91,6 +91,9 @@ coloured), "mid": <the line good turns on, default 0>, "bar": true (shade the ce
 Send the number as it should READ: a percentage is 83.4, not 0.834. And say `decimals` — 686.76895 hours is not
 five-decimal data, and without it the figure is printed at whatever precision the arithmetic happened to leave.
 
+`entity` is the kind of THING in the business, not the table it was read from. The same kind may be assembled
+from several tables, or from more than one source; name it the way someone here would say it.
+
 Do not invent a field, and do not put structure in one specified as text: a year-over-year answer belongs in
 `periods`, which exists for exactly that — writing `period: {current, previous}` instead crashed the card it
 was meant to fill. When the answer compares two things, say so in `periods` and `category: "comparison"`.
