@@ -14,6 +14,8 @@
 // sometimes compare this answer with a different asking of the same program and report a change that never
 // happened to the person reading.
 
+import type { ProgramTarget } from './index.js'
+
 export interface Movement {
   what: string                 // what moved, in the reader's words ("Total billed revenue", "Jobs by pillar")
   before: string
@@ -92,45 +94,107 @@ export function diffAnswers(before: any, after: any): CheckDiff {
   return { changed: movements.length > 0, movements, note }
 }
 
-/** The report, as markdown. Deterministic — same inputs, same words. */
+/** The report, as markdown. Deterministic — same inputs, same words. Kept SHORT: it sits above the answer
+ *  itself now, so it says what moved and then gets out of the way.
+ *
+ *  `diff` is absent when there is no earlier answer to compare against — a program named directly that has
+ *  never been answered in this project. That is a re-run, not a check, and it says so rather than inventing a
+ *  baseline of zero. */
 export function checkReport(o: {
   programDir: string
   params: unknown
   answeredAt?: number
   ms: number
-  diff: CheckDiff
+  diff?: CheckDiff
 }): string {
   const when = o.answeredAt ? new Date(o.answeredAt).toISOString().replace('T', ' ').slice(0, 16) + ' UTC' : 'earlier'
-  const head = o.diff.changed
-    ? `**The figures have moved** since this was answered (${when}).`
-    : `**Unchanged.** Re-running it now gives the same figures as when it was answered (${when}).`
 
-  const table = o.diff.movements.length
+  const head = !o.diff
+    ? `**Re-ran \`${o.programDir}\`.** There is no saved answer for it to compare against, so this is the result as of now.`
+    : o.diff.changed
+      ? `**The figures have moved** since ${when}.`
+      : `**Unchanged** since ${when} — re-running it now gives the same figures.`
+
+  const table = o.diff?.movements.length
     ? '\n\n| | was | now | change |\n| --- | --- | --- | --- |\n' +
       o.diff.movements.map(m => `| ${m.what} | ${m.before} | ${m.after} | ${m.delta ?? ''} |`).join('\n')
     : ''
 
-  const params = o.params && Object.keys(o.params as any).length
-    ? `\n\nRe-run with the same parameters it was answered with: \`${JSON.stringify(o.params)}\`.`
-    : '\n\nRe-run with no parameters, exactly as it was answered.'
+  // Said on every comparison, including "unchanged" — the sentence that stops a green tick being read as
+  // verification. One line, at the end, where it does not push the finding down the page.
+  const caveat = o.diff
+    ? '\n\nThis catches the data changing underneath; it cannot tell you the answer is right — a wrong program is wrong the same way twice.'
+    : ''
+  const params = o.params && Object.keys(o.params as any).length ? ` · ${JSON.stringify(o.params)}` : ''
+  const foot = `\n\n\`${o.programDir}\`${params} · ${(o.ms / 1000).toFixed(1)}s` + (o.diff?.note ? ` · ${o.diff.note}` : '')
 
-  // Said every time, including when nothing moved — this is the sentence that stops "check passed" being read
-  // as "the answer is correct".
-  const caveat = `\n\nThis compares today's run against the saved answer, so it catches the data changing underneath. It cannot tell you the answer is right — if the program itself is wrong, it is wrong the same way both times.`
-
-  // Plain text, no HTML: the renderer escapes tags, so a `<small>` here reaches the reader as literal markup.
-  const foot = `\n\n\`${o.programDir}\` · re-ran in ${(o.ms / 1000).toFixed(1)}s${o.diff.note ? ` · ${o.diff.note}` : ''}`
-  return `${head}${table}${params}${caveat}${foot}`
+  return `${head}${table}${caveat}${foot}`
 }
 
-/** The report as an answer card — markdown in a text section, like explain. No headline: the figure here
- *  belongs to the answer being checked, and repeating it as this card's own would invite reading the check as
- *  a fresh result. */
-export function checkAnswer(markdown: string, programDir: string) {
-  return {
-    status: 'answered',
-    category: 'analysis',
-    sections: [{ kind: 'text', body: markdown }],
-    scope: `Re-ran ${programDir} to compare against the saved answer.`,
+/** The check, ON TOP OF the answer it just produced.
+ *
+ *  We ran the program in order to compare it, so the fresh result is already in hand — and a comparison
+ *  shown without it describes figures the reader cannot see. `fresh` is that run's answer card; the report
+ *  goes in as its first section, so the verdict comes first and today's actual numbers follow.
+ *
+ *  With no fresh answer (the program failed to run) the report stands alone — which is itself the finding. */
+export function checkAnswer(markdown: string, programDir: string, fresh?: any) {
+  const note = { kind: 'text', body: markdown }
+  if (!fresh || typeof fresh !== 'object') {
+    return { status: 'answered', category: 'check', sections: [note], scope: `Re-ran ${programDir}.` }
   }
+  return {
+    ...fresh,
+    category: 'check',
+    sections: [note, ...(Array.isArray(fresh.sections) ? fresh.sections : [])],
+    scope: fresh.scope ? `${fresh.scope} · re-run to compare` : `Re-ran ${programDir} to compare against the saved answer.`,
+  }
+}
+
+
+// ── WHICH PROGRAM ─────────────────────────────────────────────────────────────────────────────────────────
+// `check:` on its own means the answer on screen. `check: <something>` names its own subject, so a program can
+// be re-run from anywhere — a different chat, days later, or from the re-run button on an old answer card.
+//
+// TWO WAYS TO NAME ONE, and the qid is the good one: an answer row already carries the programDir AND the
+// params it was run with, so a qid re-runs that exact computation with nothing guessed. A program name re-runs
+// the program but has to borrow parameters from its most recent answer, which may have been someone else's
+// question. Both are lookups — no model is asked to work out what the user meant.
+
+export interface CheckSubject { programDir: string; params: unknown; question?: string; qid?: string; baseline?: { answer: any; createdAt: number } }
+
+export function resolveCheckTarget(rest: string, d: {
+  onScreen: ProgramTarget | null
+  answerFor: (qid: string) => { programDir?: string; params?: unknown; question?: string; answer?: any; createdAt: number } | null
+  latestForProgram: (dir: string) => { qid: string; params?: unknown; question?: string; answer?: any; createdAt: number } | null
+  programExists: (dir: string) => boolean
+}): { subject: CheckSubject } | { error: string } {
+  const text = rest.trim()
+
+  // Nothing named → what is on screen. Its baseline comes from its own qid, so it is the same lookup.
+  if (!text) {
+    const t = d.onScreen
+    if (!t?.programDir) return { error: 'There is no answer on screen to check yet — ask a question first, then `check:` it. You can also name one: `check: <question id>` or `check: <program name>`.' }
+    const prior = t.qid ? d.answerFor(t.qid) : null
+    return { subject: { programDir: t.programDir, params: t.params ?? {}, question: t.question, qid: t.qid,
+                        baseline: prior?.answer ? { answer: prior.answer, createdAt: prior.createdAt } : undefined } }
+  }
+
+  // A question id. Exact — an id either exists or it does not, so there is no near-match to get wrong.
+  const byQid = d.answerFor(text)
+  if (byQid?.programDir && d.programExists(byQid.programDir)) {
+    return { subject: { programDir: byQid.programDir, params: byQid.params ?? {}, question: byQid.question, qid: text,
+                        baseline: byQid.answer ? { answer: byQid.answer, createdAt: byQid.createdAt } : undefined } }
+  }
+  if (byQid && !byQid.programDir) return { error: `Answer \`${text}\` was not produced by a program, so there is nothing to re-run.` }
+  if (byQid) return { error: `Answer \`${text}\` names \`${byQid.programDir}\`, but that program is no longer in the workspace.` }
+
+  // A program name. Accept it with or without the `programs/` prefix, and with a trailing slash — all three
+  // are what a person copies out of a report.
+  const bare = text.replace(/\/+$/, '')
+  const dir = [bare, `programs/${bare}`].find(c => d.programExists(c))
+  if (!dir) return { error: `Nothing here is called \`${text}\` — it is neither a question id nor a program in this workspace.` }
+  const last = d.latestForProgram(dir)
+  return { subject: { programDir: dir, params: last?.params ?? {}, question: last?.question, qid: last?.qid,
+                      baseline: last?.answer ? { answer: last.answer, createdAt: last.createdAt } : undefined } }
 }

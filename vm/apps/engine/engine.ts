@@ -43,7 +43,7 @@ import type { EngineMsgType } from '../../../clients/protocol.js'
 import { buildDatasourceIndex } from './datasource-index/build.js'
 import { parseVerb, VERBS, type ProgramTarget } from './verbs/index.js'
 import type { AgentEvent } from './ica/session.js'
-import { diffAnswers, checkReport, checkAnswer } from './verbs/check.js'
+import { diffAnswers, checkReport, checkAnswer, resolveCheckTarget, type CheckDiff } from './verbs/check.js'
 import { collectProgramFiles, programAnswer } from './verbs/program.js'
 import { parseView, findView, viewDir, viewLabel, viewPrompt } from './verbs/view.js'
 import { watchProgramEvents, describeProgramEvent } from './program-events.js'
@@ -1113,38 +1113,43 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // No agent at all: running the program is computation and comparing the numbers is arithmetic. A model here
     // would be the one part of the answer nobody could check.
     if (explicitCheck) {
-      // THE BASELINE is the answer this program actually produced, fetched by its own id. That used to be a
-      // two-step guess — look the question up by its text, then fall back to the program's most recent run —
-      // because the intent node's wording often did not match the row that was saved, and check then reported
-      // "nothing to re-run" about an answer plainly on screen. The session records the qid, so it is exact.
-      const prior = target?.qid ? answers.get(target.qid) : null
-      if (!target || !prior?.answer) {
-        console.log('[ica] check, but there is no saved answer with a program to re-run')
+      // WHICH PROGRAM — the answer on screen, or one the user named after the colon (a question id, or a
+      // program name). Both are lookups in tables we already keep, so re-running any past answer costs no
+      // model: an answer row carries the programDir AND the params it was run with.
+      const found = resolveCheckTarget(verb!.rest, {
+        onScreen: target,
+        answerFor: (q) => { const r = answers.get(q); return r ? { programDir: r.programDir, params: r.params, question: r.question, answer: r.answer, createdAt: r.createdAt } : null },
+        latestForProgram: (d) => { const r = answers.latestForProgram(d); return r ? { qid: r.qid, params: r.params, question: r.question, answer: r.answer, createdAt: r.createdAt } : null },
+        programExists: (d) => existsSync(join(WORKSPACE, d, 'program.ts')),
+      })
+      if ('error' in found) {
+        console.log(`[ica] check — ${found.error}`)
         emit(reply, { t: 'analyst:answer', category: VERBS.check.category, sid, qid, timing: { ms: Date.now() - t0 },
-          answer: { status: 'answered', category: VERBS.check.category, answer: VERBS.check.nothingToActOn } })
+          answer: { status: 'answered', category: VERBS.check.category, answer: found.error } })
         return
       }
-      const dir = target.programDir
-      // The SAME parameters, or the re-run measures something else and reports a change we caused ourselves.
-      const params = target.params ?? {}
+      const { programDir: dir, params, baseline } = found.subject
       // Check has no agent, so nothing produces events for it — the engine says what it is doing itself, on the
       // same channel and in the same shape as an agent turn. The user asked for this by name; they should see
       // it working whether or not a model happens to be involved.
       const beat = (text: string) => emit(reply, { t: 'verb:event', verb: 'check', ev: { kind: 'message', text, done: true }, qid, sid })
-      beat(`Re-running ${dir} with the parameters it was answered with.`)
+      beat(baseline ? `Re-running ${dir} with the parameters it was answered with.` : `Running ${dir}.`)
       let answer: any
       const runT0 = Date.now()
       try {
         const rr = await execProgram(WORKSPACE, dir, params, { qid, sid })
         const now = answerView(rr.output)
-        beat('Comparing what came back against the saved answer.')
-        const diff = diffAnswers(prior.answer, now)
+        let diff: CheckDiff | undefined
+        if (baseline) { beat('Comparing what came back against the saved answer.'); diff = diffAnswers(baseline.answer, now) }
         answers.recordRun({ programDir: dir, qid, question, params, status: now.status, shapeHash: (rr as any).finalShapeHash, ms: Date.now() - runT0 })
-        answer = checkAnswer(checkReport({ programDir: dir, params, answeredAt: prior.createdAt, ms: Date.now() - runT0, diff }), dir)
-        console.log(`[ica] check · ${dir} · ${diff.changed ? `${diff.movements.length} moved` : 'unchanged'} · ${((Date.now() - runT0) / 1000).toFixed(1)}s`)
+        // The fresh answer IS the card; the comparison rides on top of it as a first section. We ran the
+        // program to compare it, so withholding the result it produced would be describing figures the reader
+        // cannot see — and re-running to SEE the current numbers is half of why anyone presses this.
+        answer = checkAnswer(checkReport({ programDir: dir, params, answeredAt: baseline?.createdAt, ms: Date.now() - runT0, diff }), dir, now)
+        console.log(`[ica] check · ${dir} · ${diff ? (diff.changed ? `${diff.movements.length} moved` : 'unchanged') : 're-run, no baseline'} · ${((Date.now() - runT0) / 1000).toFixed(1)}s`)
       } catch (e: any) {
         // A program that no longer runs is itself the finding, and the most important one check can report.
-        answer = checkAnswer(`**It no longer runs.** Re-running \`${dir}\` with the parameters it was answered with failed:\n\n\`\`\`\n${String(e?.message ?? e).slice(0, 600)}\n\`\`\`\n\nThe answer on screen was produced before this broke, so it is still what it was — but the program behind it cannot be re-run as it stands.`, dir)
+        answer = checkAnswer(`**It no longer runs.** Re-running \`${dir}\`${baseline ? ' with the parameters it was answered with' : ''} failed:\n\n\`\`\`\n${String(e?.message ?? e).slice(0, 600)}\n\`\`\`\n\nAnything already on screen was produced before this broke, so it is still what it was — but the program behind it cannot be re-run as it stands.`, dir)
         console.log(`[ica] check · ${dir} · FAILED TO RUN · ${String(e?.message ?? e).slice(0, 120)}`)
       }
       const timing = { ms: Date.now() - t0 }

@@ -740,6 +740,8 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'concept-log', 'narrati
   // the answer to it either exists already or is one build away.
   useEffect(() => {
     const onClick = (ev: MouseEvent) => {
+      const rr = (ev.target as HTMLElement | null)?.closest?.('.sa-rerun') as HTMLElement | null
+      if (rr?.dataset.qid) { ev.preventDefault(); submitRef.current?.(`check: ${rr.dataset.qid}`); return }
       const el = (ev.target as HTMLElement | null)?.closest?.('.sa-ent') as HTMLElement | null
       if (!el) return
       const entity = el.dataset.entity, id = el.dataset.id
@@ -1100,7 +1102,7 @@ function AccountSection() {
   const { user } = useUser()
   return (
     <div style={s.acct}>
-      <UserButton afterSignOutUrl="/" />
+      <UserButton />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={s.acctName}>{user?.fullName || user?.username || 'Account'}</div>
         <div style={s.acctPlan}>{user?.primaryEmailAddress?.emailAddress || ''}</div>
@@ -1220,6 +1222,8 @@ const ANSWER_CSS = `
 .sa-answer .sa-type{font-family:var(--grot);font-size:10px;letter-spacing:.14em;text-transform:uppercase;font-weight:800;color:var(--navy)}
 .sa-answer .sa-type.warn{color:var(--muted)}
 .sa-answer .sa-prose{font-family:var(--grot);font-size:15px;font-weight:400;color:var(--body);line-height:1.62;margin:9px 0 14px}
+.sa-answer .sa-prose p{margin:0 0 9px}
+.sa-answer .sa-prose p:last-child{margin-bottom:0}
 .sa-answer .sa-prose b,.sa-answer .sa-prose strong{color:var(--ink);font-weight:700}
 .sa-answer .sa-prose em{font-style:italic}
 .sa-answer .sa-prose code{font-family:var(--mono);font-size:12.5px;color:var(--ink);background:var(--panel);padding:1px 4px;border:1px solid var(--hair)}
@@ -1527,6 +1531,7 @@ function downloadText(text: string, filename: string, mime = 'text/csv;charset=u
 // Small inline icons (no icon dependency) — Feather-style, inherit currentColor. Tooltips come from the
 // button's title/aria-label. Reused as shared immutable React elements.
 const IC = {
+  rerun: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>,
   copy: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>,
   check: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>,
   expand: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>,
@@ -1737,6 +1742,11 @@ function AnswerCard({ answer: a, category, timing, qid, at }: { answer: any; cat
       onMouseEnter={() => { hoverRef.current = true }} onMouseLeave={() => { hoverRef.current = false }}>
       {/* hover actions — small icon buttons, top-right (tooltips via title); always visible in fullscreen */}
       <div className="sa-actions">
+        {/* RE-RUN — first, because it is the one action that produces something new. It submits `check: <qid>`,
+            the same words a user can type: the answer row carries the program and the parameters it was run
+            with, so this re-runs that exact computation with no model anywhere in the path. Delegated to the
+            document (like .sa-ent), so an answer card stays a pure renderer with nothing threaded into it. */}
+        {qid && <button className="sa-ic sa-rerun" data-qid={qid} title="Run this again and compare" aria-label="Run again">{IC.rerun}</button>}
         <button className="sa-ic" onClick={doCopy} title={copied ? 'Copied' : 'Copy'} aria-label="Copy">{copied ? IC.check : IC.copy}</button>
         <button className="sa-ic" onClick={toggleFull} title={full ? 'Exit full screen' : 'Full screen'} aria-label="Full screen">{full ? IC.close : IC.expand}</button>
       </div>

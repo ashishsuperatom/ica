@@ -2,7 +2,8 @@
 //
 //   edit: / modify:   change the program behind the answer on screen, in place
 //   explain:          say, in prose, how the answer on screen was arrived at
-//   check:            re-run that program with the same parameters and report what moved
+//   check:            re-run a program with the same parameters and report what moved. Bare = the answer on
+//                     screen; `check: <question id>` or `check: <program name>` re-runs that one instead
 //   program:          show its source
 //
 // A verb is DETERMINISTIC routing: the user said which mode they want, so nothing guesses. It must be the very
@@ -71,8 +72,11 @@ export const VERBS: Record<Verb, {
   // `check:` on its own is the natural way to ask it — there is nothing to say beyond the word. Requiring text
   // after the colon made the bare form fall through as an ordinary QUESTION: a full build, narrator and all,
   // for someone who typed one word expecting a re-run. `explain:` is the same; the text is optional colour.
-  check:   { needsCurrentProgram: true, needsText: false, usesAgent: false, persists: false, category: 'check',
-             nothingToActOn: 'There is no answer on screen to check yet — ask a question first, then `check:` it.' },
+  // It does not NEED the answer on screen: `check: <question id>` / `check: <program name>` names its own
+  // subject, which is how the re-run button on an old answer card works and how a program gets re-run from a
+  // different chat. Bare `check:` still means what you are looking at.
+  check:   { needsCurrentProgram: false, needsText: false, usesAgent: false, persists: false, category: 'check',
+             nothingToActOn: 'There is no answer on screen to check yet — ask a question first, then `check:` it, or name one: `check: <question id>`.' },
   // Reading files. Here so the program behind an answer can be seen from the chat it was asked in, rather than
   // from the admin console — the difference between a system you can inspect and one you have to go and audit.
   program: { needsCurrentProgram: true, needsText: false, usesAgent: false, persists: false, category: 'program',

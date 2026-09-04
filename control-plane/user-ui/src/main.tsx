@@ -11,7 +11,7 @@ const PUBLISHABLE_KEY = 'pk_test_YXB0LWFsaWVuLTIxLmNsZXJrLmFjY291bnRzLmRldiQ'
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {HUB
-      ? <ClerkProvider publishableKey={PUBLISHABLE_KEY}><CloudGate /></ClerkProvider>
+      ? <ClerkProvider publishableKey={PUBLISHABLE_KEY} afterSignOutUrl="/"><CloudGate /></ClerkProvider>
       : <App />}
   </StrictMode>
 )

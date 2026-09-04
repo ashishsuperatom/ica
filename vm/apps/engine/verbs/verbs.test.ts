@@ -174,13 +174,73 @@ test('view: needs something to look at', async () => {
   assert.equal(parseView(''), null)
 })
 
-test('a view is the ONLY verb that does not act on the answer on screen, and the only one that persists', () => {
-  // It names its own subject; the others report on whatever is already there. And it persists because a view
-  // IS an answer — which is what lets edit: improve it afterwards with no special case.
+test('only edit: and explain: are tied to the answer on screen; view: and check: can name their own subject', () => {
+  // A verb that names its subject can be used from anywhere — a different chat, an old card's re-run button.
+  // edit: and explain: cannot: there is no way to say WHICH answer you mean except by looking at it.
   assert.equal(VERBS.view.needsCurrentProgram, false)
+  assert.equal(VERBS.check.needsCurrentProgram, false)
+  for (const v of ['edit', 'explain', 'program'] as const) assert.equal(VERBS[v].needsCurrentProgram, true, v)
+  // Only a view PERSISTS: a view IS an answer, which is what lets edit: improve it afterwards. The reporting
+  // verbs must not enter the intent graph, or retrieval could later serve an explanation to someone who asked
+  // for a number.
   assert.equal(VERBS.view.persists, true)
-  for (const v of ['explain', 'check', 'program'] as const) {
-    assert.equal(VERBS[v].needsCurrentProgram, true, v)
-    assert.equal(VERBS[v].persists, false, v)
+  for (const v of ['explain', 'check', 'program'] as const) assert.equal(VERBS[v].persists, false, v)
+})
+
+// ── check: naming its own subject ─────────────────────────────────────────────────────────────────────────
+const store = {
+  onScreen: { programDir: 'programs/on-screen', question: 'what is on screen', params: { a: 1 }, qid: 'q-screen' } as any,
+  answerFor: (q: string) => q === 'q-screen' ? { programDir: 'programs/on-screen', params: { a: 1 }, answer: { status: 'answered' }, createdAt: 100 }
+            : q === 'q-old' ? { programDir: 'programs/revenue', params: { year: 2025 }, question: 'revenue?', answer: { status: 'answered' }, createdAt: 50 }
+            : q === 'q-noprog' ? { programDir: undefined, params: undefined, answer: {}, createdAt: 10 }
+            : q === 'q-gone' ? { programDir: 'programs/deleted', params: {}, answer: {}, createdAt: 10 }
+            : null,
+  latestForProgram: (d: string) => d === 'programs/revenue' ? { qid: 'q-old', params: { year: 2025 }, question: 'revenue?', answer: { status: 'answered' }, createdAt: 50 } : null,
+  programExists: (d: string) => d === 'programs/on-screen' || d === 'programs/revenue',
+}
+
+test('bare check: is the answer on screen, with its own saved answer as the baseline', async () => {
+  const { resolveCheckTarget } = await import('./check.js')
+  const r = resolveCheckTarget('', store) as any
+  assert.equal(r.subject.programDir, 'programs/on-screen')
+  assert.deepEqual(r.subject.params, { a: 1 })
+  assert.equal(r.subject.baseline.createdAt, 100)
+})
+
+test('check: <question id> re-runs THAT answer with the parameters it was answered with', async () => {
+  // The whole point: an answer row carries the program AND its parameters, so any past answer can be re-run
+  // exactly, from any chat, with no model asked to work out what was meant.
+  const { resolveCheckTarget } = await import('./check.js')
+  const r = resolveCheckTarget('q-old', store) as any
+  assert.equal(r.subject.programDir, 'programs/revenue')
+  assert.deepEqual(r.subject.params, { year: 2025 })
+  assert.equal(r.subject.baseline.createdAt, 50)
+})
+
+test('check: <program name> works with or without the programs/ prefix', async () => {
+  const { resolveCheckTarget } = await import('./check.js')
+  for (const named of ['revenue', 'programs/revenue', 'programs/revenue/']) {
+    const r = resolveCheckTarget(named, store) as any
+    assert.equal(r.subject.programDir, 'programs/revenue', named)
   }
+})
+
+test('check: says what went wrong rather than re-running something else', async () => {
+  // Every failure names the thing that was not found. Falling back to the answer on screen would re-run the
+  // wrong program and report its figures under the name the user typed.
+  const { resolveCheckTarget } = await import('./check.js')
+  for (const bad of ['nope', 'q-noprog', 'q-gone']) {
+    const r = resolveCheckTarget(bad, store) as any
+    assert.ok(r.error, bad)
+    assert.equal(r.subject, undefined, bad)
+  }
+  const empty = resolveCheckTarget('', { ...store, onScreen: null }) as any
+  assert.ok(empty.error)
+})
+
+test('with no baseline it reports a re-run, and does not claim a comparison it did not make', async () => {
+  const { checkReport } = await import('./check.js')
+  const md = checkReport({ programDir: 'programs/revenue', params: {}, ms: 1200 })
+  assert.ok(md.includes('Re-ran'))
+  assert.ok(!md.toLowerCase().includes('unchanged'))
 })

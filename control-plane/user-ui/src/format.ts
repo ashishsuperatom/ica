@@ -13,7 +13,10 @@ export function renderInlineMd(text: string): string {
   const esc = clean.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   const out: string[] = []
   let para: string[] = [], bullets: string[] = [], numbers: string[] = [], tableRows: string[] = []
-  const flushPara = () => { if (para.length) { out.push(para.join('<br/>')); para = [] } }
+  // A PARAGRAPH IS A PARAGRAPH. These were pushed as bare text and the pieces joined with nothing between
+  // them, so every blank line in every answer collapsed and prose arrived as one run-on wall — "…11:40 UTC).Re-run
+  // with…". Wrapping restores the break the writer put there.
+  const flushPara = () => { if (para.length) { out.push(`<p>${para.join('<br/>')}</p>`); para = [] } }
   const flushBul = () => { if (bullets.length) { out.push(`<ul class="sa-list">${bullets.join('')}</ul>`); bullets = [] } }
   const flushNum = () => { if (numbers.length) { out.push(`<ol class="sa-olist">${numbers.join('')}</ol>`); numbers = [] } }
   const flushTable = () => {   // GFM pipe table: first row = header when row 2 is a `--- | ---` separator
