@@ -1321,8 +1321,8 @@ const ANSWER_CSS = `
 .sa-fin td.down{color:#a33}
 /* An openable cell. Carried by COLOUR, not an underline: a dotted rule under every name in a column made the
    column harder to read than it was before, and the affordance is worth less than the reading. */
-.sa-ent{color:#2f6f5e;cursor:pointer}
-.sa-ent:hover{color:#1f7a4d;text-decoration:underline}
+.sa-ent{color:#3d5a6c;cursor:pointer}
+.sa-ent:hover{color:#24404f;text-decoration:underline}
 .sa-beat-x{opacity:0;transition:opacity .12s;background:transparent;border:0;padding:2px 4px;color:#9a9285;cursor:pointer;line-height:0;align-self:flex-start}
 .sa-beat:hover .sa-beat-x{opacity:1}
 .sa-beat-x:hover{color:var(--ink)}
