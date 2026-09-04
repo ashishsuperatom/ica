@@ -30,3 +30,7 @@ vm/projects/totalgroup/programs/**/program.json
 
 # Linux-deploy build output (the packaged zip)
 /dist/
+
+# The fastembed model cache — a 127MB download, regenerated on first use. It was committed by accident and
+# rejected by GitHub, which is how it was found. It is a cache, not source.
+.fastembed/
