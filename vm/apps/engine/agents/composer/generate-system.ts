@@ -86,13 +86,17 @@ MOST CELLS ARE PLAIN: a number is a number, a name is a string. That is what sor
 and it is the default. Wrap one only to carry what the value itself cannot:
 - \`{"value": <the name>, "id": <its id>}\` — this cell NAMES something the reader can open on its own. If you
   have the id, send it; it is the only handle on that thing.
-- \`{"value": <the number>, "display": "<how it reads>"}\` — a form that cannot be derived from the number, a
-  currency being the usual one. Send BOTH: the formatted string alone stops the column being numeric.
+- \`{"value": <the number>, "display": "<how it reads>"}\` — only when the wording varies ROW BY ROW, such as a
+  column holding several currencies. A whole column's formatting belongs on the column.
 
-Anything true of the whole COLUMN is said once on the column, never repeated per row:
-\`{"label": "<heading>", "entity": "<what kind of thing this column names>", "format": "percent" (0.83 reads as
-83%), "good": "high"|"low" (which direction is favourable, so the figure can be toned — omit it and nothing is
-coloured), "mid": <the line good turns on, default 0>, "bar": true (an in-cell magnitude bar)}\`.
+HOW A NUMBER READS is said once on the COLUMN, never per row. Money, hours and percentages are the same thing —
+a number with a unit and a precision — so there is one set of keys and money is simply \`unit: "AUD"\`:
+\`{"label": "<heading>", "entity": "<what kind of thing this column names>", "unit": "<AUD | h | % | kg …>",
+"decimals": <how precise the figure really is>, "scale": "compact" (4.16 M rather than 4,160,000),
+"good": "high"|"low" (which direction is favourable, so the figure can be toned — omit it and nothing is
+coloured), "mid": <the line good turns on, default 0>, "bar": true (shade the cell by magnitude)}\`.
+Send the number as it should READ: a percentage is 83.4, not 0.834. And say \`decimals\` — 686.76895 hours is not
+five-decimal data, and without it the figure is printed at whatever precision the arithmetic happened to leave.
 
 Do not invent a field, and do not put structure in one specified as text: a year-over-year answer belongs in
 \`periods\`, which exists for exactly that — writing \`period: {current, previous}\` instead crashed the card it

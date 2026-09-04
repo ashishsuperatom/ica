@@ -105,23 +105,55 @@ export const cellText  = (c: Cell): string => {
   const v = cellValue(c)
   return v == null ? '' : String(v)
 }
+/** Does this cell bring its own wording? Only then does the column's formatting stand aside. */
+export const isObj_display = (c: Cell): boolean =>
+  !!c && typeof c === 'object' && !Array.isArray(c) && typeof (c as CellObject).display === 'string'
 export const cellId    = (c: Cell): string | undefined => isObj(c) && c.id != null ? String(c.id) : undefined
 /** The kind of thing a cell names: the column's, unless the cell overrides it — which a column mixing kinds
  *  needs, and which costs one word in a program that was going to be written anyway. */
 export const cellEntity = (c: Cell, columnEntity?: string): string | undefined =>
   isObj(c) && c.id != null ? (c.entity || columnEntity) : undefined
 
-// A column is a label, or a label with what the renderer needs to present it properly. `good` says which
-// DIRECTION is favourable — only the program knows whether high utilisation or low cost is the good news, and
-// a renderer that guesses will confidently colour a number wrong, which is worse than leaving it plain.
+// ── ONE SHAPE FOR A COLUMN ──────────────────────────────────────────────────────────────────────────────────
+// A money column, an hours column and a percentage are the same thing: a number with a UNIT and a PRECISION.
+// Giving money its own mechanism would mean the next unit needs one too, so there is one set of keys and money
+// is just `unit: 'AUD'`.
+//
+// The program sends the raw number and says how it should read. It cannot send the formatted string instead —
+// that loses the number, and with it sorting, alignment and the bar.
 export interface ColumnSpec {
   label: string
-  entity?: string                    // cells in this column identify an entity of this type
-  format?: 'percent' | 'number'      // percent renders 0.83 as 83%
-  good?: 'high' | 'low'              // colour by direction; absent ⇒ no colour
-  mid?: number                       // the dividing line for `good` (default 0, which is right for deltas)
-  bar?: boolean                      // an in-cell proportional bar, scaled to the column's largest value
+  entity?: string                    // cells in this column name a thing of this kind, and carry its id
+  unit?: string                      // 'AUD', 'h', '%', 'kg' — a currency code leads, anything else follows
+  decimals?: number                  // how precise the figure actually is; 686.76895 hours is not 5-decimal data
+  scale?: 'compact'                  // 4.16 M rather than 4,160,000
+  good?: 'high' | 'low'              // which direction is favourable; absent ⇒ no colour
+  mid?: number                       // the line `good` turns on (default 0, which is what a delta wants)
+  bar?: boolean                      // shade the cell by magnitude, behind the figure
 }
 export type Column = string | ColumnSpec
+
+// A currency reads before the number, a unit of measure after it — "AUD 4.16 M", "686.8 h", "83.4%". The test
+// is what a currency code looks like, because that is the only class that leads.
+const LEADS = /^[A-Z]{3}$|^[$€£¥₹]$/
+export function formatNumber(n: number, c: ColumnSpec): string {
+  const dp = c.decimals ?? (c.scale === 'compact' ? 2 : Number.isInteger(n) ? 0 : 1)
+  const body = c.scale === 'compact'
+    ? compact(n, dp)
+    : n.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp })
+  if (!c.unit) return body
+  return c.unit === '%' ? `${body}%`                       // no space, the way a percentage is written
+       : LEADS.test(c.unit) ? `${c.unit} ${body}`
+       : `${body} ${c.unit}`
+}
+function compact(n: number, dp: number): string {
+  const abs = Math.abs(n)
+  const [div, suffix] = abs >= 1e9 ? [1e9, ' B'] : abs >= 1e6 ? [1e6, ' M'] : abs >= 1e3 ? [1e3, ' K'] : [1, '']
+  // Trailing zeros stripped from the NUMBER, before the suffix goes on — "2.5 B", not "2.50 B". Doing it after
+  // meant the pattern never matched, because the string ended in " B".
+  const body = (n / div).toFixed(suffix ? dp : Math.min(dp, 2)).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1')
+  return body + suffix
+}
+
 export const colLabel = (c: Column): string => typeof c === 'string' ? c : (c?.label ?? '')
 export const colSpec  = (c: Column): ColumnSpec => typeof c === 'string' ? { label: c } : (c ?? { label: '' })

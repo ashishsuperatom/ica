@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, memo } from 'react'
-import { renderInlineMd, renderAnswerBody, cellValue, cellText, cellId, cellEntity, colLabel, colSpec, type Cell, type Column, type ColumnSpec } from './format'
+import { renderInlineMd, renderAnswerBody, cellValue, cellText, cellId, cellEntity, colLabel, colSpec, formatNumber, isObj_display, type Cell, type Column, type ColumnSpec } from './format'
 import { CodexEventLog, mergeEvent, type AgentEvent } from './agentEventLog'
 import { useSession, SignIn, UserButton, useUser } from '@clerk/react'
 import { Terminal } from '@xterm/xterm'
@@ -1319,12 +1319,6 @@ const ANSWER_CSS = `
    red blocks stops being readable, and the point is to draw the eye to the few that matter. */
 .sa-fin td.up{color:#1f7a4d}
 .sa-fin td.down{color:#a33}
-/* The in-cell bar sits BEHIND the figure, right-aligned with it, so the column still reads as numbers first. */
-.sa-fin td{position:relative}
-.sa-cbar{position:absolute;right:0;bottom:2px;left:0;height:2px;display:block;pointer-events:none}
-.sa-cbar>span{position:absolute;right:0;bottom:0;height:100%;background:#cfc7b6;display:block}
-.sa-fin td.up .sa-cbar>span{background:#a8cfba}
-.sa-fin td.down .sa-cbar>span{background:#e0b4b4}
 /* An identifiable cell — carries its id, and becomes clickable once the view verb exists to receive it. */
 .sa-ent{border-bottom:1px dotted #c4bcac;cursor:pointer}
 .sa-ent:hover{color:var(--ink);border-bottom-color:var(--ink)}
@@ -1625,8 +1619,10 @@ function Td({ cell, spec, numeric, peak }: { cell: Cell; spec: ColumnSpec; numer
   const id = cellId(cell)
   const entity = cellEntity(cell, spec.entity)
 
-  const text = n != null && spec.format === 'percent' ? `${(n * 100).toFixed(1)}%`
-             : n != null ? n.toLocaleString()
+  // The column says how the figure reads. A raw toLocaleString gave "686.769" for hours — three decimals of
+  // precision the data never had — because nothing had said what the number was.
+  const text = isObj_display(cell) ? cellText(cell)
+             : n != null ? formatNumber(n, spec)
              : cellText(cell)
 
   // GOOD OR BAD is the program's call, never ours. `good` says which direction is favourable and `mid` is the
@@ -1637,10 +1633,13 @@ function Td({ cell, spec, numeric, peak }: { cell: Cell; spec: ColumnSpec; numer
     : ''
 
   return (
-    <td className={(numeric ? 'r fig' : '') + tone} title={id ? `${entity ?? 'id'} ${id}` : undefined}>
-      {spec.bar && n != null && peak > 0 && (
-        <span className="sa-cbar" aria-hidden><span style={{ width: `${Math.min(100, (Math.abs(n) / peak) * 100)}%` }} /></span>
-      )}
+    // THE BAR IS THE CELL'S OWN BACKGROUND, filling from the right behind a right-aligned figure. It was a rule
+    // UNDER the number, which read as an underline belonging to nothing, pushed every row taller and widened
+    // the table — a table's whole value is being compact. A shaded ground costs no space at all.
+    <td className={(numeric ? 'r fig' : '') + tone} title={id ? `${entity ?? 'id'} ${id}` : undefined}
+        style={spec.bar && n != null && peak > 0
+          ? { backgroundImage: `linear-gradient(to left, ${tone === ' down' ? 'rgba(163,51,51,.13)' : 'rgba(31,122,77,.13)'} ${Math.min(100, (Math.abs(n) / peak) * 100)}%, transparent 0)` }
+          : undefined}>
       {id ? <span className="sa-ent" data-entity={entity} data-id={id}>{text}</span> : text}
     </td>
   )
