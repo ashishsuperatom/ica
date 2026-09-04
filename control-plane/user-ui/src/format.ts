@@ -157,3 +157,37 @@ function compact(n: number, dp: number): string {
 
 export const colLabel = (c: Column): string => typeof c === 'string' ? c : (c?.label ?? '')
 export const colSpec  = (c: Column): ColumnSpec => typeof c === 'string' ? { label: c } : (c ?? { label: '' })
+
+// GROUPING THE BEATS — used by the live card AND by a finished question's card, because they show the same
+// thing and drifted apart the moment only one of them learned to group. A run of consecutive PROGRAM beats
+// collapses to its latest, which is what a progress line is for; a chevron opens the rest.
+export type BeatMeta = { kind: 'narrator' | 'program'; detail?: string }
+export interface BeatRow { key: string; text: string; secs: number; prog: boolean; past: boolean
+                           detail?: string; chevron: 'none' | 'open' | 'closed'; count: number; head: number }
+export function buildBeatRows(log: string[], meta: BeatMeta[], secs: (i: number) => number, expanded: Set<number>): BeatRow[] {
+  const groups: Array<{ prog: boolean; idxs: number[] }> = []
+  log.forEach((_, i) => {
+    const prog = meta[i]?.kind === 'program'
+    const last = groups[groups.length - 1]
+    if (last && last.prog && prog) last.idxs.push(i)
+    else groups.push({ prog, idxs: [i] })
+  })
+  const rows: BeatRow[] = []
+  for (const g of groups) {
+    const head = g.idxs[0]
+    const open = expanded.has(head)
+    const many = g.prog && g.idxs.length > 1
+    const shown = g.prog && !open ? [g.idxs[g.idxs.length - 1]] : g.idxs
+    // A COLLAPSED ROW STANDS FOR THE WHOLE RUN, so it carries the whole run's time. Showing the last beat's
+    // own duration said "2s" for twelve steps that took the better part of a minute — the one number on the
+    // row, and it was describing something the reader could not see.
+    const total = g.idxs.reduce((sum, i) => sum + secs(i), 0)
+    shown.forEach((i, n) => rows.push({
+      key: `${head}:${i}`, text: log[i], secs: (g.prog && !open && many) ? total : secs(i), prog: g.prog,
+      past: i !== log.length - 1, detail: open ? meta[i]?.detail : undefined,
+      chevron: many && n === 0 ? (open ? 'open' : 'closed') : 'none',
+      count: g.idxs.length, head,
+    }))
+  }
+  return rows
+}

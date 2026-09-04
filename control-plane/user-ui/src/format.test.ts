@@ -5,7 +5,7 @@
 // are five readers, and two of them are copy and CSV rather than the visible one.
 import { test } from 'node:test'
 import assert from 'node:assert'
-import { cellValue, cellText, cellId, cellEntity, colLabel, colSpec, formatNumber } from './format.js'
+import { cellValue, cellText, cellId, cellEntity, colLabel, colSpec, formatNumber, buildBeatRows } from './format.js'
 
 test('a plain cell is untouched', () => {
   assert.equal(cellText('Acme Ltd'), 'Acme Ltd')
@@ -77,4 +77,43 @@ test('compact scaling stays readable at every magnitude', () => {
   assert.equal(formatNumber(950, c), '950')
   assert.equal(formatNumber(4_160_000, c), '4.16 M')
   assert.equal(formatNumber(2_500_000_000, c), '2.5 B')
+})
+
+// ── GROUPING THE BEATS ──────────────────────────────────────────────────────────────────────────────────────
+const beats = (kinds: string) => kinds.split('').map(k => ({ kind: k === 'p' ? 'program' as const : 'narrator' as const }))
+
+test('a run of program beats collapses to one row', () => {
+  const rows = buildBeatRows(['n1', 'p1', 'p2', 'p3', 'n2'], beats('nppp n'.replace(' ', '')), () => 1, new Set())
+  assert.deepEqual(rows.map(r => r.text), ['n1', 'p3', 'n2'], 'the run shows its latest and hides the rest')
+  assert.equal(rows[1].chevron, 'closed')
+  assert.equal(rows[1].count, 3)
+})
+
+test('a COLLAPSED row carries the whole run\'s time, not the last beat\'s', () => {
+  // The bug: twelve steps taking most of a minute showed "2s" — the one number on the row, describing
+  // something the reader could not see.
+  const secsOf = [1, 1, 12, 1, 14, 1]          // n, then a 5-beat run
+  const rows = buildBeatRows(['n', 'a', 'b', 'c', 'd', 'e'], beats('nppppp'), i => secsOf[i], new Set())
+  assert.equal(rows.length, 2)
+  assert.equal(rows[1].secs, 1 + 12 + 1 + 14 + 1, 'the run total, 29s')
+})
+
+test('an EXPANDED run gives each beat its own time back', () => {
+  const secsOf = [1, 1, 12, 1, 14, 1]
+  const rows = buildBeatRows(['n', 'a', 'b', 'c', 'd', 'e'], beats('nppppp'), i => secsOf[i], new Set([1]))
+  assert.deepEqual(rows.map(r => r.secs), secsOf, 'every step, its own duration')
+  assert.equal(rows[1].chevron, 'open')
+})
+
+test('a lone program beat is not a run — no chevron, its own time', () => {
+  const rows = buildBeatRows(['n', 'p', 'n'], beats('npn'), () => 7, new Set())
+  assert.equal(rows.length, 3)
+  assert.equal(rows[1].chevron, 'none')
+  assert.equal(rows[1].secs, 7)
+})
+
+test('narrator beats are never grouped, however many in a row', () => {
+  const rows = buildBeatRows(['a', 'b', 'c'], beats('nnn'), () => 1, new Set())
+  assert.equal(rows.length, 3)
+  assert.ok(rows.every(r => r.chevron === 'none'))
 })
