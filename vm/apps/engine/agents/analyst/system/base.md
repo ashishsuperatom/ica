@@ -118,9 +118,6 @@ a number with a unit and a precision — so there is one set of keys and money i
 coloured), "mid": <the line good turns on, default 0>, "bar": true (shade the cell by magnitude)}`.
 Send the number as it should READ: a percentage is 83.4, not 0.834. And say `decimals` — 686.76895 hours is not
 five-decimal data, and without it the figure is printed at whatever precision the arithmetic happened to leave.
-
-`entity` is the kind of THING in the business, not the table it was read from. The same kind may be assembled
-from several tables, or from more than one source; name it the way someone here would say it.
   "missing": "<only when unknowable: ONE short plain reason for the user — NOT column names, counts, or sentinels>"
 }
 ```

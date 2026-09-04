@@ -1319,9 +1319,10 @@ const ANSWER_CSS = `
    red blocks stops being readable, and the point is to draw the eye to the few that matter. */
 .sa-fin td.up{color:#1f7a4d}
 .sa-fin td.down{color:#a33}
-/* An identifiable cell — carries its id, and becomes clickable once the view verb exists to receive it. */
-.sa-ent{border-bottom:1px dotted #c4bcac;cursor:pointer}
-.sa-ent:hover{color:var(--ink);border-bottom-color:var(--ink)}
+/* An openable cell. Carried by COLOUR, not an underline: a dotted rule under every name in a column made the
+   column harder to read than it was before, and the affordance is worth less than the reading. */
+.sa-ent{color:#2f6f5e;cursor:pointer}
+.sa-ent:hover{color:#1f7a4d;text-decoration:underline}
 .sa-beat-x{opacity:0;transition:opacity .12s;background:transparent;border:0;padding:2px 4px;color:#9a9285;cursor:pointer;line-height:0;align-self:flex-start}
 .sa-beat:hover .sa-beat-x{opacity:1}
 .sa-beat-x:hover{color:var(--ink)}
