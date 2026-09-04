@@ -240,6 +240,11 @@ enum JSONValue: Hashable {
         case let value as NSNumber:
             self = CFGetTypeID(value) == CFBooleanGetTypeID() ? .bool(value.boolValue) : .number(value.doubleValue)
         case let value as String:  self = .string(value)
+        // A cell may carry an identity alongside its value — {"v": "<name>", "id": "<id>"} — so that the web
+        // client can offer a view of that thing. Here only the value is wanted. Without this case it falls to
+        // String(describing:) below and the reader sees a printed dictionary where a name should be.
+        case let ref as [String: Any] where ref["v"] != nil:
+            self = JSONValue(any: ref["v"]!)
         default:                   self = .string(String(describing: any))
         }
     }
@@ -286,6 +291,9 @@ enum Coerce {
         switch any {
         case let value as String: return value.isEmpty ? nil : value
         case let value as NSNumber: return JSONValue(any: value).display
+        // A column may be declared rather than named — {"label": …, "entity": …, "format": …} — so that a
+        // richer client can present it. Its label is the name. Without this the header renders empty.
+        case let spec as [String: Any]: return spec["label"].flatMap { string($0) }
         case is NSNull, .none: return nil
         default: return nil
         }

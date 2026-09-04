@@ -46,7 +46,7 @@ export function toAdaptiveCard(a: EngineAnswer): Attachment {
       columns: cols.map(() => ({ width: 1 })),
       firstRowAsHeaders: true,
       rows: [
-        tableRow(cols.map(String), true),
+        tableRow(cols.map(colText), true),
         ...shown.map((r) => tableRow(cols.map((_, i) => fmt(r[i])))),
       ],
       spacing: 'Medium',
@@ -75,7 +75,12 @@ function tableRow(cells: string[], header = false): any {
   }
 }
 
+// A CELL may carry an identity — {v, id} — and a COLUMN may be declared rather than named — {label, entity,
+// …} — so that a richer client can offer a view of the thing. Here only the text is wanted. Without these two
+// lines each renders as "[object Object]", which is the failure this shape has already caused once.
 function fmt(v: any): string {
   if (v == null) return ''
+  if (typeof v === 'object' && 'v' in v) return fmt(v.v)
   return typeof v === 'number' ? v.toLocaleString() : String(v)
 }
+const colText = (c: any): string => (c && typeof c === 'object' && 'label' in c) ? String(c.label ?? '') : String(c ?? '')

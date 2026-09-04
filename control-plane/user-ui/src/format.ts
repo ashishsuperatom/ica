@@ -68,3 +68,38 @@ export function renderAnswerBody(answer: unknown): string {
   }
   return renderInlineMd(String(answer ?? ''))
 }
+
+// ── TABLE CELLS AND COLUMNS ─────────────────────────────────────────────────────────────────────────────────
+// A cell is a scalar, or a scalar WITH an identity: `{ v: 'Fusion5 PTY LTD', id: 431 }`. Co-located, so the id
+// can never drift out of step with the value it belongs to, and a row that has no id is simply a plain value
+// with no special case anywhere.
+//
+// Every reader goes through these. The same rule spelled out at each `String(cell)` site is how it drifts —
+// and there are five of them, two in copy and CSV rather than rendering, which is exactly where an
+// "[object Object]" gets missed.
+export type Cell = string | number | boolean | null | { v: string | number; id: string | number; e?: string }
+const isRef = (c: unknown): c is { v: string | number; id: string | number; e?: string } =>
+  !!c && typeof c === 'object' && 'v' in (c as any)
+
+export const cellValue = (c: Cell): string | number | boolean | null => isRef(c) ? c.v : (c as any)
+export const cellText  = (c: Cell): string => { const v = cellValue(c); return v == null ? '' : String(v) }
+export const cellId    = (c: Cell): string | undefined => isRef(c) && c.id != null ? String(c.id) : undefined
+/** The entity TYPE for a cell: the column's, unless the cell overrides it (a column mixing customers and
+ *  vendors). Long key on the column where it appears once, short key on the cell where it repeats per row. */
+export const cellEntity = (c: Cell, columnEntity?: string): string | undefined =>
+  isRef(c) && c.id != null ? (c.e || columnEntity) : undefined   // no id, no entity — there is nothing to view
+
+// A column is a label, or a label with what the renderer needs to present it properly. `good` says which
+// DIRECTION is favourable — only the program knows whether high utilisation or low cost is the good news, and
+// a renderer that guesses will confidently colour a number wrong, which is worse than leaving it plain.
+export interface ColumnSpec {
+  label: string
+  entity?: string                    // cells in this column identify an entity of this type
+  format?: 'percent' | 'number'      // percent renders 0.83 as 83%
+  good?: 'high' | 'low'              // colour by direction; absent ⇒ no colour
+  mid?: number                       // the dividing line for `good` (default 0, which is right for deltas)
+  bar?: boolean                      // an in-cell proportional bar, scaled to the column's largest value
+}
+export type Column = string | ColumnSpec
+export const colLabel = (c: Column): string => typeof c === 'string' ? c : (c?.label ?? '')
+export const colSpec  = (c: Column): ColumnSpec => typeof c === 'string' ? { label: c } : (c ?? { label: '' })

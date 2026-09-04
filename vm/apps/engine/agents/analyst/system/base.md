@@ -97,6 +97,12 @@ The answer JSON the engine produces / you write has this shape:
   "scope":  "<the non-time filters you applied>",
   "headline": { "label": "<what the number IS>", "display": "<the number, short-form, with its unit>", "value": <raw number> },
   "sections": [ { "kind": "table|kpis|text", "title": "<heading>", "columns": ["…"], "rows": [[…]], "total": ["…"], "totalRows": <int>, "note": "…", "items": [ {"label","display","sub"} ], "body": "<text>" } ],
+A table CELL is a plain value. When it names a THING the reader may want to look at on its own, give it its id
+too: `{"v": "<the name>", "id": "<its id in the source>"}`, and declare what kind of thing the column holds:
+`{"label": "<heading>", "entity": "<the kind>"}`. A row with no id stays a plain value.
+A column may also say how to present it: `format` ('percent' renders 0.83 as 83%), `good` ('high'|'low' — which
+direction is favourable, so the figure can be toned; omit it and nothing is coloured), `mid` (the line `good`
+turns on, default 0), `bar` (an in-cell magnitude bar).
   "caveat": "<optional — a string, or an array of short item strings for several points>",
   "usedNodes": ["<model node ids you relied on, when you reused the model>"],
   "missing": "<only when unknowable: ONE short plain reason for the user — NOT column names, counts, or sentinels>"

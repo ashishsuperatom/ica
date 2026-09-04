@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, memo } from 'react'
-import { renderInlineMd, renderAnswerBody } from './format'
+import { renderInlineMd, renderAnswerBody, cellValue, cellText, cellId, cellEntity, colLabel, colSpec, type Cell, type Column, type ColumnSpec } from './format'
 import { CodexEventLog, mergeEvent, type AgentEvent } from './agentEventLog'
 import { useSession, SignIn, UserButton, useUser } from '@clerk/react'
 import { Terminal } from '@xterm/xterm'
@@ -1291,6 +1291,18 @@ const ANSWER_CSS = `
 .sa-beat.prog + .sa-beat.prog{border-top-color:#e7e2d8}
 .sa-beat.prog .sa-beat-b{font-family:var(--mono);font-size:12px;color:#7d766a;letter-spacing:-.01em}
 .sa-beat.clickable{cursor:pointer}
+/* A number the program has told us reads well or badly. Tinted text, not a filled cell: a table of green and
+   red blocks stops being readable, and the point is to draw the eye to the few that matter. */
+.sa-fin td.up{color:#1f7a4d}
+.sa-fin td.down{color:#a33}
+/* The in-cell bar sits BEHIND the figure, right-aligned with it, so the column still reads as numbers first. */
+.sa-fin td{position:relative}
+.sa-cbar{position:absolute;right:0;bottom:2px;left:0;height:2px;display:block;pointer-events:none}
+.sa-cbar>span{position:absolute;right:0;bottom:0;height:100%;background:#cfc7b6;display:block}
+.sa-fin td.up .sa-cbar>span{background:#a8cfba}
+.sa-fin td.down .sa-cbar>span{background:#e0b4b4}
+/* An identifiable cell — carries its id, and becomes clickable once the view verb exists to receive it. */
+.sa-ent{border-bottom:1px dotted #c4bcac}
 .sa-beat-x{opacity:0;transition:opacity .12s;background:transparent;border:0;padding:2px 4px;color:#9a9285;cursor:pointer;line-height:0;align-self:flex-start}
 .sa-beat:hover .sa-beat-x{opacity:1}
 .sa-beat-x:hover{color:var(--ink)}
@@ -1455,12 +1467,12 @@ function answerToText(a: any, cat: string, meta?: { qid?: string; at?: number; t
   else if (a.period) out.push('Time filter: ' + asText(a.period))
   const figs = Array.isArray(a.figures) && a.figures.length ? a.figures : a.headline?.display ? [{ label: a.headline.label, display: a.headline.display, sub: a.headline.sub }] : []
   if (figs.length) out.push(figs.map((f: any) => `${f.label}: ${f.display}${f.sub ? ` (${f.sub})` : ''}`).join('\n'))
-  if (a.table?.columns) out.push([a.table.columns.join('\t'), ...(a.table.rows || []).map((r: any[]) => r.map(v => v == null ? '' : String(v)).join('\t'))].join('\n'))
+  if (a.table?.columns) out.push([a.table.columns.map(colLabel).join('\t'), ...(a.table.rows || []).map((r: any[]) => r.map(cellText).join('\t'))].join('\n'))
   if (Array.isArray(a.sections)) for (const s of a.sections) {   // report blocks → readable text, in order
     if (s?.title) out.push(String(s.title).toUpperCase())
     if (s?.kind === 'text' && s.body) out.push(String(s.body))
     else if (s?.kind === 'kpis' && Array.isArray(s.items)) out.push(s.items.map((f: any) => `${f.label}: ${f.display}${f.sub ? ` (${f.sub})` : ''}`).join('\n'))
-    else if (s?.kind === 'table' && Array.isArray(s.columns)) out.push([s.columns.join('\t'), ...(s.rows || []).map((r: any[]) => r.map((v: any) => v == null ? '' : String(v)).join('\t'))].join('\n'))
+    else if (s?.kind === 'table' && Array.isArray(s.columns)) out.push([s.columns.map(colLabel).join('\t'), ...(s.rows || []).map((r: any[]) => r.map(cellText).join('\t'))].join('\n'))
     // Copy takes the WHOLE program, not just the file on screen — you copy it to paste it somewhere, and a
     // program is only useful entire.
     else if (s?.kind === 'files' && Array.isArray(s.files)) out.push(s.files.map((f: any) => `--- ${f?.path ?? ''} ---\n${f?.text ?? ''}`).join('\n\n'))
@@ -1483,9 +1495,14 @@ function answerToText(a: any, cat: string, meta?: { qid?: string; at?: number; t
   }
   return out.join('\n\n')
 }
-function tableToCSV(cols: string[], rows: any[][], total?: any[]): string {
+function tableToCSV(cols: Column[], rows: Cell[][], total?: any[]): string {
   const esc = (v: any) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s }
-  const lines = [cols.map(esc).join(','), ...rows.map(r => r.map(esc).join(','))]
+  // An id column is added beside any entity column: the export is the place someone takes the data elsewhere,
+  // and a name without its id is the thing they cannot join back.
+  const spec = cols.map(colSpec)
+  const header = spec.flatMap(c => c.entity ? [c.label, `${c.label} id`] : [c.label])
+  const line = (r: Cell[]) => r.flatMap((cell, i) => spec[i]?.entity ? [cellText(cell), cellId(cell) ?? ''] : [cellText(cell)])
+  const lines = [header.map(esc).join(','), ...rows.map(r => line(r).map(esc).join(','))]
   if (Array.isArray(total) && total.length) lines.push(total.map(esc).join(','))   // the agent's total row, if any
   return lines.join('\n')
 }
@@ -1507,9 +1524,9 @@ const IC = {
 const PAGE = 25   // tables show this many rows at a time; "show more" reveals another page (CSV exports ALL rows)
 
 // Which columns read as numeric (so they right-align + get the figure weight). Same rule as the main table.
-function numColsOf(cols: string[], rows: any[][]): boolean[] {
+function numColsOf(cols: Column[], rows: Cell[][]): boolean[] {
   return cols.map((_, ci) => rows.length > 0 && rows.every(r => {
-    const v = r[ci]; if (v == null) return true
+    const v = cellValue(r[ci]); if (v == null) return true
     return typeof v === 'number' || (typeof v === 'string' && /^[₹$€£]?\s?-?[\d,.\s]+%?$/.test(v.trim()) && /\d/.test(v))
   }))
 }
@@ -1575,14 +1592,47 @@ function FileBrowser({ title, files }: { title?: string; files: any[] }) {
 
 // The ONE table renderer — used by both the flat answer table AND each report section, so both get the same
 // features: numeric right-alignment, a total/summary footer, "show more" pagination, CSV download, and the honest
+// ONE CELL. Everything it can be is decided by the column's declaration plus the value itself — nothing here
+// guesses. A plain column with a plain value renders exactly as it always did.
+function Td({ cell, spec, numeric, peak }: { cell: Cell; spec: ColumnSpec; numeric: boolean; peak: number }) {
+  const v = cellValue(cell)
+  const n = typeof v === 'number' ? v : null
+  const id = cellId(cell)
+  const entity = cellEntity(cell, spec.entity)
+
+  const text = n != null && spec.format === 'percent' ? `${(n * 100).toFixed(1)}%`
+             : n != null ? n.toLocaleString()
+             : cellText(cell)
+
+  // GOOD OR BAD is the program's call, never ours. `good` says which direction is favourable and `mid` is the
+  // line it turns on — 0 by default, which is what a delta column wants. No declaration, no colour: a number
+  // confidently shaded the wrong way is worse than one left alone.
+  const tone = spec.good && n != null
+    ? (n === (spec.mid ?? 0) ? '' : ((n > (spec.mid ?? 0)) === (spec.good === 'high') ? ' up' : ' down'))
+    : ''
+
+  return (
+    <td className={(numeric ? 'r fig' : '') + tone} title={id ? `${entity ?? 'id'} ${id}` : undefined}>
+      {spec.bar && n != null && peak > 0 && (
+        <span className="sa-cbar" aria-hidden><span style={{ width: `${Math.min(100, (Math.abs(n) / peak) * 100)}%` }} /></span>
+      )}
+      {id ? <span className="sa-ent" data-entity={entity} data-id={id}>{text}</span> : text}
+    </td>
+  )
+}
+
 // "N of TOTAL matching rows" count. Each instance owns its own pagination + download state.
 function DataTable({ columns, rows, total, totalRows, title, note, csvName }: {
-  columns: string[]; rows: any[][]; total?: any[]; totalRows?: number; title?: string; note?: string; csvName?: string
+  columns: Column[]; rows: Cell[][]; total?: any[]; totalRows?: number; title?: string; note?: string; csvName?: string
 }) {
   const [shown, setShown] = useState(PAGE)
   const [downloaded, setDownloaded] = useState(false)
+  const spec = columns.map(colSpec)
   const numc = numColsOf(columns, rows)
   const visible = rows.slice(0, shown)
+  // The largest magnitude per column, for the in-cell bar. Computed from the data because a bar is only
+  // meaningful against the column it sits in — nothing to declare, and nothing to keep in step.
+  const peak = spec.map((c, ci) => c.bar ? Math.max(0, ...rows.map(r => { const v = cellValue(r[ci]); return typeof v === 'number' ? Math.abs(v) : 0 })) : 0)
   const doDownload = () => { downloadText(tableToCSV(columns, rows, total), `${(csvName || 'table').trim().replace(/\s+/g, '-') || 'table'}.csv`); setDownloaded(true); setTimeout(() => setDownloaded(false), 1600) }
   return (
     <div className="sa-tblsec">
@@ -1593,14 +1643,14 @@ function DataTable({ columns, rows, total, totalRows, title, note, csvName }: {
       </div>
       <div className="sa-scroll">
         <table className="sa-fin num">
-          <thead><tr>{columns.map((c, i) => <th key={i} className={numc[i] ? 'r' : ''}>{c}</th>)}</tr></thead>
+          <thead><tr>{columns.map((c, i) => <th key={i} className={numc[i] ? 'r' : ''}>{colLabel(c)}</th>)}</tr></thead>
           <tbody>{visible.map((r, ri) => (
-            <tr key={ri}>{r.map((v, ci) => (
-              <td key={ci} className={numc[ci] ? 'r fig' : ''}>{typeof v === 'number' ? v.toLocaleString() : String(v ?? '')}</td>
+            <tr key={ri}>{r.map((cell, ci) => (
+              <Td key={ci} cell={cell} spec={spec[ci]} numeric={!!numc[ci]} peak={peak[ci]} />
             ))}</tr>))}</tbody>
           {Array.isArray(total) && total.length > 0 && (
             <tfoot><tr className="sa-total">{columns.map((_, i) => {
-              const v = total[i]
+              const v = cellValue(total[i])
               return <td key={i} className={numc[i] ? 'r' : ''}>{typeof v === 'number' ? v.toLocaleString() : String(v ?? '')}</td>
             })}</tr></tfoot>)}
         </table>

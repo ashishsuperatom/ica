@@ -69,6 +69,12 @@ whole card down:
   "periods":  [ { "label": "a compared scope", "detail": "its exact range" } ],   ← use this for a COMPARISON
   "scope":    "the non-time filters you applied — a string",
   "sections": [ { "kind": "table", "title": "…", "columns": [...], "rows": [[...]] } ],
+A table CELL is a plain value. When it names a THING the reader may want to look at on its own, give it its id
+too: `{"v": "<the name>", "id": "<its id in the source>"}`, and declare what kind of thing the column holds:
+`{"label": "<heading>", "entity": "<the kind>"}`. A row with no id stays a plain value.
+A column may also say how to present it: `format` ('percent' renders 0.83 as 83%), `good` ('high'|'low' — which
+direction is favourable, so the figure can be toned; omit it and nothing is coloured), `mid` (the line `good`
+turns on, default 0), `bar` (an in-cell magnitude bar).
   "caveat":   "a string, or an array of short strings" }
 ```
 
