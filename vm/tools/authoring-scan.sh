@@ -2,8 +2,23 @@
 # Is anything in the program corpus FROZEN that should be decided at run time? A program must not bake in a
 # date, a specific entity's id, or a value that varies from one asking to the next.
 #
-# Findings go in vm/AUTHORING_OBSERVATIONS.md — a LOG, not a rulebook. One sighting is an anecdote; several of
-# a kind are what tells you whether the fix belongs in a prompt, an example, a check, or nowhere at all.
+# Findings go in vm/AUTHORING_OBSERVATIONS.jsonl — a LOG, not a rulebook. One sighting is an anecdote and says
+# nothing about where a fix belongs; several of a kind say whether it wants a prompt line, an example, a check,
+# or nothing. Acting on the first sighting is how a generic engine fills with rules about one dataset.
+#
+# One JSON object per line:
+#   at        when it was seen
+#   project   which project's workspace
+#   source    which data source it came through
+#   category  the KIND — this is the field that matters, because counting it is the whole point
+#   program   which program, or a family (pl-revenue-*)
+#   where     file:line
+#   observed  the thing itself, quoted
+#   why       what makes it a drift, and where a fix would belong IF it earns one
+#   evidence  how it was established — a query, a count, this scan
+#   acted     false unless something was changed, then `action` says what
+#
+#   count by category:  jq -r .category vm/AUTHORING_OBSERVATIONS.jsonl | sort | uniq -c | sort -rn
 #
 #   usage: vm/tools/authoring-scan.sh [workspace]     (default: the first project under vm/.state)
 set -u
