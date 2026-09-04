@@ -126,11 +126,14 @@ const answerSchema = `The answer JSON the engine produces / you write has this s
   "scope":  "<the non-time filters you applied>",
   "headline": { "label": "<what the number IS>", "display": "<the number, short-form, with its unit>", "value": <raw number> },
   "sections": [ { "kind": "table|kpis|text", "title": "<heading>", "columns": ["…"], "rows": [[…]], "total": ["…"], "totalRows": <int>, "note": "…", "items": [ {"label","display","sub"} ], "body": "<text>" } ],
+  "caveat": "<optional — a string, or an array of short item strings for several points>",
+  "usedNodes": ["<model node ids you relied on, when you reused the model>"],
+
 ### A table
 YOU decide how each figure reads — you are the only thing holding both the raw value and what it means.
 
-A CELL is the value: a number is a number, a name is a string. That is what sorts, right-aligns and totals.
-Wrap one only to carry what the value itself cannot:
+MOST CELLS ARE PLAIN: a number is a number, a name is a string. That is what sorts, right-aligns and totals,
+and it is the default. Wrap one only to carry what the value itself cannot:
 - \`{"value": <the name>, "id": <its id>}\` — this cell NAMES something the reader can open on its own. If you
   have the id, send it; it is the only handle on that thing.
 - \`{"value": <the number>, "display": "<how it reads>"}\` — a form that cannot be derived from the number, a
@@ -140,8 +143,6 @@ Anything true of the whole COLUMN is said once on the column, never repeated per
 \`{"label": "<heading>", "entity": "<what kind of thing this column names>", "format": "percent" (0.83 reads as
 83%), "good": "high"|"low" (which direction is favourable, so the figure can be toned — omit it and nothing is
 coloured), "mid": <the line good turns on, default 0>, "bar": true (an in-cell magnitude bar)}\`.
-  "caveat": "<optional — a string, or an array of short item strings for several points>",
-  "usedNodes": ["<model node ids you relied on, when you reused the model>"],
   "missing": "<only when unknowable: ONE short plain reason for the user — NOT column names, counts, or sentinels>"
 }
 \`\`\``

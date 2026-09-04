@@ -6,9 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "deploy": "pnpm --filter user-ui build && pnpm typecheck && vite build && wrangler deploy",
+    "deploy": "pnpm -C ../user-ui build && pnpm typecheck && vite build && wrangler deploy",
     "typecheck": "tsc --noEmit -p tsconfig.worker.json && tsc --noEmit -p tsconfig.json",
-    "//deploy": "Builds the USER UI first. It lands in this package's dist/client/u and is served from here, but it is a separate package with its own build \u2014 so for a long time a failed or forgotten user-ui build still deployed, shipping whatever bundle happened to be on disk. Four times."
+    "//deploy": "Builds the USER UI first, BY PATH. It is served from this package's dist/client/u but is a separate package with its own build, so a stale bundle used to ship whenever it was not rebuilt. `pnpm --filter user-ui` was tried and is worse than nothing: control-plane is not a pnpm workspace, so it matches no project, prints 'No projects matched', and EXITS 0 \u2014 a build step that silently does nothing and reports success. `-C` takes a path and fails loudly."
   },
   "dependencies": {
     "@clerk/react": "^6.7.3",

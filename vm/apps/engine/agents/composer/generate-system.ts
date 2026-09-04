@@ -76,11 +76,14 @@ whole card down:
   "periods":  [ { "label": "a compared scope", "detail": "its exact range" } ],   ← use this for a COMPARISON
   "scope":    "the non-time filters you applied — a string",
   "sections": [ { "kind": "table", "title": "…", "columns": [...], "rows": [[...]] } ],
+  "caveat":   "a string, or an array of short strings" }
+\`\`\`
+
 ### A table
 YOU decide how each figure reads — you are the only thing holding both the raw value and what it means.
 
-A CELL is the value: a number is a number, a name is a string. That is what sorts, right-aligns and totals.
-Wrap one only to carry what the value itself cannot:
+MOST CELLS ARE PLAIN: a number is a number, a name is a string. That is what sorts, right-aligns and totals,
+and it is the default. Wrap one only to carry what the value itself cannot:
 - \`{"value": <the name>, "id": <its id>}\` — this cell NAMES something the reader can open on its own. If you
   have the id, send it; it is the only handle on that thing.
 - \`{"value": <the number>, "display": "<how it reads>"}\` — a form that cannot be derived from the number, a
@@ -90,8 +93,6 @@ Anything true of the whole COLUMN is said once on the column, never repeated per
 \`{"label": "<heading>", "entity": "<what kind of thing this column names>", "format": "percent" (0.83 reads as
 83%), "good": "high"|"low" (which direction is favourable, so the figure can be toned — omit it and nothing is
 coloured), "mid": <the line good turns on, default 0>, "bar": true (an in-cell magnitude bar)}\`.
-  "caveat":   "a string, or an array of short strings" }
-\`\`\`
 
 Do not invent a field, and do not put structure in one specified as text: a year-over-year answer belongs in
 \`periods\`, which exists for exactly that — writing \`period: {current, previous}\` instead crashed the card it
