@@ -748,6 +748,29 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'concept-log', 'narrati
     return rows
   })()
 
+  // Holds the CURRENT submit, so the listener below can be registered once and still call the live one.
+  const submitRef = useRef<((preset?: string) => void) | null>(null)
+
+  // CLICKING A THING IN A TABLE asks to look at it. One delegated listener rather than a handler threaded
+  // through DataTable and every cell: the cells already carry what is needed on the element itself, and a
+  // table of a thousand rows should not mean a thousand closures.
+  //
+  // It submits rather than filling the box, because this is not a question being composed — it is a key, and
+  // the answer to it either exists already or is one build away.
+  useEffect(() => {
+    const onClick = (ev: MouseEvent) => {
+      const el = (ev.target as HTMLElement | null)?.closest?.('.sa-ent') as HTMLElement | null
+      if (!el) return
+      const entity = el.dataset.entity, id = el.dataset.id
+      if (!entity || !id) return                       // a cell with an id but no kind names nothing to open
+      if (!window.getSelection()?.isCollapsed) return  // a click that ends a selection is someone copying
+      ev.preventDefault()
+      submitRef.current?.(`view: ${entity} ${id}`)
+    }
+    document.addEventListener('click', onClick)
+    return () => document.removeEventListener('click', onClick)
+  }, [])
+
   const submit = useCallback((preset?: string) => {
     const text = (typeof preset === 'string' ? preset : inputRef.current?.value)?.trim()
     if (!text || busy || wsRef.current?.readyState !== 1) return
@@ -777,6 +800,7 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'concept-log', 'narrati
     send({ t: 'analyse', question: text, projectId, role, sessionId: sidRef.current, questionId: qid })
     scroll()
   }, [busy, role])
+  submitRef.current = submit   // keep the delegated entity-click listener pointed at the live submit
 
   // Developer-only: trigger System-4 consolidation. Auto-opens the live-output drawer
   // since the whole point is to watch Claude Code consolidate.
@@ -1302,7 +1326,8 @@ const ANSWER_CSS = `
 .sa-fin td.up .sa-cbar>span{background:#a8cfba}
 .sa-fin td.down .sa-cbar>span{background:#e0b4b4}
 /* An identifiable cell — carries its id, and becomes clickable once the view verb exists to receive it. */
-.sa-ent{border-bottom:1px dotted #c4bcac}
+.sa-ent{border-bottom:1px dotted #c4bcac;cursor:pointer}
+.sa-ent:hover{color:var(--ink);border-bottom-color:var(--ink)}
 .sa-beat-x{opacity:0;transition:opacity .12s;background:transparent;border:0;padding:2px 4px;color:#9a9285;cursor:pointer;line-height:0;align-self:flex-start}
 .sa-beat:hover .sa-beat-x{opacity:1}
 .sa-beat-x:hover{color:var(--ink)}

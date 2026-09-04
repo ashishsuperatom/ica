@@ -45,6 +45,7 @@ import { parseVerb, VERBS, type ProgramTarget } from './verbs/index.js'
 import type { AgentEvent } from './ica/session.js'
 import { diffAnswers, checkReport, checkAnswer } from './verbs/check.js'
 import { collectProgramFiles, programAnswer } from './verbs/program.js'
+import { parseView, findView, viewDir, viewLabel, viewPrompt } from './verbs/view.js'
 import { watchProgramEvents, describeProgramEvent } from './program-events.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -681,6 +682,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   const explicitExplain = verb?.verb === 'explain'
   const explicitCheck   = verb?.verb === 'check'
   const explicitProgram = verb?.verb === 'program'
+  const explicitView    = verb?.verb === 'view'
   const askedRaw = verb ? verb.raw : question
   if (verb) question = verb.rest
   // Stream everything to `reply` (re-targetable): a reload reconnects and sessions:list points reply
@@ -855,7 +857,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     modifyTarget = target
     if (target) console.log(`[ica] explicit edit → editing ${target.programDir} in place${target.concepts?.length ? ` · it taught: ${target.concepts.join(', ')}` : ''}`)
     else console.log('[ica] explicit edit, but no current program to edit → building fresh')
-  } else if (!explicitExplain && !explicitCheck && !explicitProgram) {
+  } else if (!explicitExplain && !explicitCheck && !explicitProgram && !explicitView) {
     // Explain and check both report on a program that is already chosen — searching for candidates or ranking
     // concepts would be work whose result nothing reads, on the two verbs meant to come back quickly.
     // NO reflex routing. The exact-match fast-path above already handled exact repeats (no LLM). For everything
@@ -1150,6 +1152,69 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       lastAnswer = answer; lastTiming = timing; lastCategory = cat
       emit(reply, { t: 'analyst:answer', category: cat, answer, timing, sid, qid })
       if (channel) emit({ type: 'channel' }, { t: 'channel:answer', channel, qid, answer, category: cat })
+      return
+    }
+
+    // ── VIEW — look at one thing. ───────────────────────────────────────────────────────────────────────────
+    // The one verb that names its own subject rather than acting on what is on screen, and the one that
+    // reuses by KEY: (kind, lens) is a directory, so finding the program is existsSync and nothing more. Built
+    // once per pair, then run with no model involved for every entity of that kind, ever.
+    if (explicitView) {
+      const v = parseView(question)
+      if (!v) {
+        emit(reply, { t: 'analyst:answer', category: VERBS.view.category, sid, qid, timing: { ms: Date.now() - t0 },
+          answer: { status: 'answered', category: VERBS.view.category, answer: VERBS.view.nothingToActOn } })
+        return
+      }
+      const existing = findView(WORKSPACE, v)
+      const dir = existing ?? viewDir(v)
+      const params = { id: v.id }
+      const say = (text: string) => emit(reply, { t: 'verb:event', verb: 'view', ev: { kind: 'message', text, done: true }, qid, sid })
+
+      // BUILD, only the first time this (kind, lens) is ever asked for.
+      if (!existing) {
+        console.log(`[ica] view → ${dir} does not exist yet · building it once`)
+        say(`No ${v.lens === 'canonical' ? '' : v.lens + ' '}view of a ${v.type} yet — building one. It will be instant from now on.`)
+        startNarrator()
+        currentAgent = 'composer'
+        const composer = await getComposer(sid)
+        workingAgent = 'composer'
+        stopSession = () => { try { (composer as any).session?.reset?.() } catch { /* best-effort */ } }
+        const built = await composer.ask(viewPrompt({ v, dir, builtRel: `./out/${qid}/built.json` }), handlers, { qid, sid })
+        if (stopped) return
+        if (built.escalate || !findView(WORKSPACE, v)) {
+          // FAIL LOUDLY. A half-built view that silently falls back to something else is a view that never
+          // becomes reliable, and the whole point is that the second asking needs no model at all.
+          const why = built.escalate?.reason ?? 'the program was not written where it was asked for'
+          console.log(`[ica] view → could not build ${dir} · ${why}`)
+          emit(reply, { t: 'analyst:answer', category: VERBS.view.category, sid, qid, timing: { ms: Date.now() - t0 },
+            answer: { status: 'cannot_answer', category: VERBS.view.category, answer: `I could not build a view of a ${v.type} — ${why}` } })
+          return
+        }
+      }
+
+      // RUN it — the path every asking after the first takes, and the first one too once it is built.
+      let answer: any
+      const runT0 = Date.now()
+      try {
+        const rr = await execProgram(WORKSPACE, dir, params, { qid, sid })
+        answer = answerView(rr.output)
+        answers.recordRun({ programDir: dir, qid, question: viewLabel(v), params, status: answer.status, shapeHash: (rr as any).finalShapeHash, ms: Date.now() - runT0 })
+        console.log(`[ica] view · ${dir} · ${existing ? 'reused' : 'built'} · ${((Date.now() - runT0) / 1000).toFixed(1)}s`)
+      } catch (e: any) {
+        console.log(`[ica] view · ${dir} · FAILED TO RUN · ${String(e?.message ?? e).slice(0, 160)}`)
+        answer = { status: 'cannot_answer', category: VERBS.view.category,
+                   answer: `The view of ${viewLabel(v)} failed to run: ${String(e?.message ?? e).slice(0, 300)}` }
+      }
+      const timing = { ms: Date.now() - t0 }
+      lastAnswer = answer; lastTiming = timing; lastCategory = VERBS.view.category
+      // A view IS an answer, so it becomes what is on screen — which is what lets `edit:` improve it, and
+      // `explain:`/`check:`/`program:` act on it, with no special case for views anywhere.
+      answers.save({ qid, sessionId: sid, question: viewLabel(v), norm: normalizeQuestion(viewLabel(v)), category: VERBS.view.category,
+        status: answer.status ?? 'error', answer, createdAt: Date.now(), finishedAt: Date.now(), programDir: dir, params, build: await buildIdentity(), route: 'view' })
+      setOnScreen(sid, { qid, question: viewLabel(v), programDir: dir, params })
+      emit(reply, { t: 'analyst:answer', category: VERBS.view.category, answer, timing, sid, qid })
+      if (channel) emit({ type: 'channel' }, { t: 'channel:answer', channel, qid, answer, category: VERBS.view.category })
       return
     }
 

@@ -48,6 +48,7 @@ const SPELLINGS: Record<string, Verb> = {
   explain: 'explain',
   check: 'check',
   program: 'program',
+  view: 'view',
 }
 
 /** What each verb needs and what it is allowed to leave behind. One table, so the whole set is visible at once
@@ -76,6 +77,10 @@ export const VERBS: Record<Verb, {
   // from the admin console — the difference between a system you can inspect and one you have to go and audit.
   program: { needsCurrentProgram: true, needsText: false, usesAgent: false, persists: false, category: 'program',
              nothingToActOn: 'There is no program on screen to show yet — ask a question first, then `program:` it.' },
+  // The one verb that does not act on the answer on screen — it names its own subject. It PERSISTS, because a
+  // view IS an answer (the others only report on one), which is also what lets `edit:` improve it afterwards.
+  view:    { needsCurrentProgram: false, needsText: true, usesAgent: true, persists: true, category: 'view',
+             nothingToActOn: 'Say what to look at — for example `view: customer 431`.' },
 }
 
 /** A leading `verb:` if there is one. Case-insensitive, tolerates space before the colon ("edit :"). */

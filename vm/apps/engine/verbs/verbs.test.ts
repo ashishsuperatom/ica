@@ -5,7 +5,7 @@
 // pinned here.
 import { test } from 'node:test'
 import assert from 'node:assert'
-import { parseVerb } from './index.js'
+import { parseVerb, VERBS } from './index.js'
 import { diffAnswers, checkReport } from './check.js'
 
 test('parseVerb recognises the verbs and keeps the raw text', () => {
@@ -154,4 +154,33 @@ test('program: says so rather than showing an empty pane', async () => {
   await mkdtemp(join(tmpdir(), 'sa-prog-'))
   const a: any = programAnswer('programs/gone', [])
   assert.equal(a.status, 'cannot_answer')
+})
+
+test('view: parses a kind, an id, and an optional lens', async () => {
+  const { parseView, viewDir, viewLabel } = await import('./view.js')
+  assert.deepEqual(parseView('customer 431'), { type: 'customer', id: '431', lens: 'canonical' })
+  assert.deepEqual(parseView('customer 431 projects'), { type: 'customer', id: '431', lens: 'projects' })
+  // However it was typed, the same view must land in the same directory — or the second asking builds a
+  // second program and the whole reuse argument is lost.
+  assert.equal(viewDir(parseView('Customer 431 Open Projects')!), 'programs/view.customer.open-projects')
+  assert.equal(viewDir(parseView('customer 431 open   projects')!), 'programs/view.customer.open-projects')
+  assert.equal(viewLabel(parseView('customer 431')!), 'customer 431')
+  assert.equal(viewLabel(parseView('customer 431 projects')!), 'customer 431 (projects)')
+})
+
+test('view: needs something to look at', async () => {
+  const { parseView } = await import('./view.js')
+  assert.equal(parseView('customer'), null, 'a kind with no id names nothing')
+  assert.equal(parseView(''), null)
+})
+
+test('a view is the ONLY verb that does not act on the answer on screen, and the only one that persists', () => {
+  // It names its own subject; the others report on whatever is already there. And it persists because a view
+  // IS an answer — which is what lets edit: improve it afterwards with no special case.
+  assert.equal(VERBS.view.needsCurrentProgram, false)
+  assert.equal(VERBS.view.persists, true)
+  for (const v of ['explain', 'check', 'program'] as const) {
+    assert.equal(VERBS[v].needsCurrentProgram, true, v)
+    assert.equal(VERBS[v].persists, false, v)
+  }
 })

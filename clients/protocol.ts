@@ -53,7 +53,7 @@ export type ClientPayload = Analyse | { t: Exclude<ClientMsgType, 'analyse'>; [k
 // THE VERBS a user can prefix a question with. Declared here, in the shared contract, because both sides need
 // the same list: the engine routes on it and the client filters on it. The engine's verbs/ module imports this
 // rather than keeping its own copy, so there is one place a new verb is added.
-export type Verb = 'edit' | 'explain' | 'check' | 'program'
+export type Verb = 'edit' | 'explain' | 'check' | 'program' | 'view'
 
 export type EngineMsgType =
   | 'tick' | 'welcome' | 'machine:waking' | 'error' | 'done'
