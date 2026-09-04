@@ -30,3 +30,29 @@ export function money(value: number, currency = 'USD', loc: Locale = localeFor(c
 export function pct(x: number, digits = 1): string { return `${(x * 100).toFixed(digits)}%` }
 /** Grouped integer: 1234567 → "1,234,567" (US) / "12,34,567" (IN). */
 export function num(n: number, loc: Locale = 'US'): string { return n.toLocaleString(PROFILES[loc].locale) }
+
+// ── WHAT THE AGENT IS TOLD ABOUT THESE ──────────────────────────────────────────────────────────────────────
+// A helper's usage lives WITH the helper. It used to live in a hand-written line of the workspace prompt, which
+// meant the two drifted the moment either changed: add a helper and the prompt never learns it, change a
+// signature and the prompt describes one that no longer exists.
+//
+// So the prompt is DERIVED. Adding a helper here is the whole job of teaching the agent about it — and
+// fmt.test.ts fails if an exported helper has no entry, so a new one cannot be added silently.
+//
+// A deployment that needs its own helper (a client's own conversion, a different rounding convention) adds it
+// here and it appears in the instructions, with nothing else to remember.
+export interface HelperDoc { sig: string; when: string }
+export const FORMAT_HELPERS: Record<string, HelperDoc> = {
+  money:  { sig: 'money(value, currency?, locale?)', when: 'a currency figure inside PROSE or a headline — the table column says `unit` instead' },
+  pct:    { sig: 'pct(fraction, digits?)',           when: 'a fraction as a percentage in prose: 0.1234 → "12.3%"' },
+  abbrev: { sig: 'abbrev(n, locale?)',               when: 'a large number shortened per locale: 1234567 → "1.23 M", or "12.35 L" in IN' },
+  num:    { sig: 'num(n, locale?)',                  when: 'a plain grouped integer: 1234567 → "1,234,567"' },
+}
+
+/** The instructions for these helpers, rendered from the helpers themselves. */
+export function formatHelpText(): string {
+  const lines = Object.entries(FORMAT_HELPERS).map(([name, d]) => `  ${d.sig.padEnd(34)} ${d.when}`)
+  return `Display helpers — \`import { ${Object.keys(FORMAT_HELPERS).join(', ')} } from '@superatom/scaffold'\`. OPTIONAL:
+a raw number is always fine, and a table column says how its own figures read. Use one when you are writing a
+figure INTO prose, a headline or a label, where nothing else can format it.\n${lines.join('\n')}`
+}

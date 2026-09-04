@@ -16,6 +16,9 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
+// The display helpers describe themselves — see FORMAT_HELPERS. Adding one there teaches the agent about it,
+// with no line here to remember to update.
+import { formatHelpText } from '@superatom/scaffold'
 
 export interface WorkspaceSpec {
   root: string                 // e.g. <repo>/vm/apps/workspace or an absolute scratch root
@@ -119,8 +122,7 @@ Each prints JSON to stdout; run any of them with \`--help\` for its exact argume
 - Concepts: ./model/model.mjs      — WRITE concepts: \`concept(name, props, meta)\`, \`getConcept(name, asOf?)\`, \`conceptHistory(name)\`. (To SEARCH, use \`./find-concept\`.)
 - Ground: ./grounding/grounding.mjs — \`build(config)\` the grounding indexes (grounding agent).
 - Data:   ./data/query.mjs         — \`query()\`/\`sources()\` inside program/unit code.
-- Format: \`import { money, pct, abbrev, num } from '@superatom/scaffold'\` — OPTIONAL display helpers (IN/AU/US
-  locale profiles). Always emit the RAW \`{ value, currency, unit }\`; call these only if you also want a display string.
+${formatHelpText().split('\n').map((l: string) => l ? `  ${l}` : l).join('\n')}
 - Run:    ./run.mjs                — run a program: \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\`.
 
 ## Layout
