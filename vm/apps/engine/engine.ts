@@ -17,7 +17,7 @@ import WebSocket from 'ws'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { existsSync, mkdirSync, rmSync, readFileSync } from 'node:fs'
-import { writeFile } from 'node:fs/promises'
+import { writeFile, rm } from 'node:fs/promises'
 import { execSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { execProgram, answerView } from './exec-program.js'
@@ -1183,8 +1183,11 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         const built = await composer.ask(viewLabel(v), handlers, { qid, sid, build: viewPrompt({ v, dir, builtRel: `./out/${qid}/built.json` }) })
         if (stopped) return
         if (built.escalate || !findView(WORKSPACE, v)) {
-          // FAIL LOUDLY. A half-built view that silently falls back to something else is a view that never
-          // becomes reliable, and the whole point is that the second asking needs no model at all.
+          // FAIL LOUDLY, AND LEAVE NOTHING BEHIND. A giving-up build still writes files — an observed one left
+          // a well-formed program.ts calling three units, having written one. findView only asks whether
+          // program.ts exists, so the next click would have found that and run it. A directory that exists is
+          // taken as a built view, so a build that did not finish must not leave one.
+          await rm(join(WORKSPACE, dir), { recursive: true, force: true }).catch(() => {})
           const why = built.escalate?.reason ?? 'the program was not written where it was asked for'
           console.log(`[ica] view → could not build ${dir} · ${why}`)
           emit(reply, { t: 'analyst:answer', category: VERBS.view.category, sid, qid, timing: { ms: Date.now() - t0 },
