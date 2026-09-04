@@ -91,7 +91,7 @@ and it is the default. Wrap one only to carry what the value itself cannot:
 
 HOW A NUMBER READS is said once on the COLUMN, never per row. Money, hours and percentages are the same thing —
 a number with a unit and a precision — so there is one set of keys and money is simply \`unit: "AUD"\`:
-\`{"label": "<heading>", "entity": "<what kind of thing this column names>", "unit": "<AUD | h | % | kg …>",
+\`{"label": "<heading>", "entity": "<what kind of thing this column names — defaults to the table name>", "unit": "<AUD | h | % | kg …>",
 "decimals": <how precise the figure really is>, "scale": "compact" (4.16 M rather than 4,160,000),
 "good": "high"|"low" (which direction is favourable, so the figure can be toned — omit it and nothing is
 coloured), "mid": <the line good turns on, default 0>, "bar": true (shade the cell by magnitude)}\`.
