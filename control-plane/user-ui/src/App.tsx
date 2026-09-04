@@ -85,7 +85,16 @@ type FeedItem =
   | { id: string; type: 'narrative'; text: string }
   | { id: string; type: 'component'; tag: string; vTag: string; code: string; data: any }
   | { id: string; type: 'answer'; category?: string; answer: any; timing?: { ms: number; classifyMs?: number; modelMs?: number }; qid?: string; at?: number }   // the analyst's structured result, rendered as a card (qid = the question id; at = when the answer arrived)
-  | { id: string; type: 'analysis'; beats: string[]; secs?: number[]; qid?: string }   // the receptionist's beats (+ frozen per-beat seconds) — its OWN collapsed card, rendered EXACTLY like the live analysis
+  // A finished question's beats: the text, how long each step took (`secs`), WHEN each one happened (`at`), and
+  // `meta` — which of them came from a running PROGRAM rather than the narrator.
+  //
+  // `at` because a duration is not a time. The arrival of every beat was already measured, used to derive the
+  // seconds, and then dropped — so a card read tomorrow could say a step took 12s but not when it ran, which
+  // is the question anyone actually asks of an old log.
+  //
+  // `meta` because without it the historical card cannot group, and it silently stopped matching the live one
+  // the moment grouping was added to only one of them.
+  | { id: string; type: 'analysis'; beats: string[]; secs?: number[]; at?: number[]; meta?: BeatMeta[]; qid?: string }
   | { id: string; type: 'followups'; items: string[]; qid?: string }   // suggested next questions — a DELAYED card below the answer; a chip FILLS the input (never auto-submits)
   | { id: string; type: 'error'; text: string }
 
@@ -516,7 +525,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
             const beats = narrationLogRef.current
             const times = narrationTimesRef.current, nowT = Date.now()
             const secs = beats.map((_, i) => { const end = i < beats.length - 1 ? (times[i + 1] ?? nowT) : nowT; return Math.max(1, Math.floor(Math.max(0, end - (times[i] ?? nowT)) / 1000) + 1) })
-            const analysisCard: FeedItem | null = beats.length ? { id: crypto.randomUUID(), type: 'analysis', beats: [...beats], secs, qid: msg.qid } : null
+            const analysisCard: FeedItem | null = beats.length ? { id: crypto.randomUUID(), type: 'analysis', beats: [...beats], secs, at: [...times], meta: [...narrationMetaRef.current], qid: msg.qid } : null
             const card: FeedItem = { id: crypto.randomUUID(), type: 'answer', category: msg.category, answer: ans, timing: msg.timing, qid: msg.qid, at: Date.now() }
             const toAppend = analysisCard ? [analysisCard, card] : [card]
             // Keep the last question pinned at the top (question → analysis → answer read top-down).
@@ -718,35 +727,7 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'concept-log', 'narrati
   // The rows to draw, flat and stably keyed. Consecutive PROGRAM beats become one row showing the latest,
   // unless the reader has opened that run. Recomputed when the beats, the clock or an expansion change — the
   // rows themselves are memoised, so a tick only re-renders the one row whose seconds actually moved.
-  const beatRows = (() => {
-    const groups: Array<{ prog: boolean; idxs: number[] }> = []
-    narrationLog.forEach((_, i) => {
-      const prog = narrationMetaRef.current[i]?.kind === 'program'
-      const last = groups[groups.length - 1]
-      if (last && last.prog && prog) last.idxs.push(i)
-      else groups.push({ prog, idxs: [i] })
-    })
-    const rows: Array<{ key: string; text: string; secs: number; prog: boolean; past: boolean
-                        detail?: string; chevron: 'none' | 'open' | 'closed'; count: number; head: number }> = []
-    for (const g of groups) {
-      const head = g.idxs[0]
-      const open = expandedGroups.has(head)
-      const many = g.prog && g.idxs.length > 1
-      const shown = g.prog && !open ? [g.idxs[g.idxs.length - 1]] : g.idxs
-      shown.forEach((i, n) => rows.push({
-        key: `${head}:${i}`,
-        text: narrationLog[i],
-        secs: beatSecs(i, narrationLog.length),
-        prog: g.prog,
-        past: i !== narrationLog.length - 1,
-        detail: open ? narrationMetaRef.current[i]?.detail : undefined,
-        chevron: many && n === 0 ? (open ? 'open' : 'closed') : 'none',
-        count: g.idxs.length,
-        head,
-      }))
-    }
-    return rows
-  })()
+  const beatRows = buildBeatRows(narrationLog, narrationMetaRef.current, i => beatSecs(i, narrationLog.length), expandedGroups)
 
   // Holds the CURRENT submit, so the listener below can be registered once and still call the live one.
   const submitRef = useRef<((preset?: string) => void) | null>(null)
@@ -1211,14 +1192,7 @@ function FeedCard({ item, onPick }: { item: FeedItem; onPick?: (t: string) => vo
     return (
       <details className="sa-analysis-card">
         <summary>Analysis · {item.beats.length} step{item.beats.length > 1 ? 's' : ''}</summary>
-        <div className="sa-ac-body">
-          {item.beats.map((b, i) => (
-            <div key={i} className="sa-beat">
-              <div className="sa-beat-b sa-md" dangerouslySetInnerHTML={{ __html: renderInlineMd(b) }} />
-              {item.secs?.[i] != null && <div className="sa-beat-t">{item.secs[i]}s</div>}
-            </div>
-          ))}
-        </div>
+        <div className="sa-ac-body"><AnalysisBeats item={item} /></div>
       </details>
     )
   }
@@ -1306,14 +1280,17 @@ const ANSWER_CSS = `
 .sa-beats{margin-top:8px;display:flex;flex-direction:column;gap:8px}
 .sa-beat{display:flex;gap:12px;align-items:flex-start;border-top:1px solid #efece6;padding-top:8px}
 .sa-beat:first-child{border-top:none;padding-top:0}
-.sa-beat.past{opacity:.55}
+/* A past beat recedes; it does not disappear. At .55 every line but the newest was washed out, and since a
+   program beat is already a lighter grey the two dimmings compounded into a card you had to squint at. The
+   newest line stands out because it is the only one at full strength, which .82 is enough to do. */
+.sa-beat.past{opacity:.82}
 .sa-beat .sa-beat-b{flex:1;min-width:0}
 /* A PROGRAM's beat, not the narrator's. Typeface AND a very faint ground: once a beat greys out as a past one,
    the typeface alone stopped being enough to tell the two streams apart at a glance, which is the whole job.
    The tint is near-invisible in isolation and only reads as a band when several sit together. */
 .sa-beat.prog{background:#f4f1ea;margin-left:-10px;margin-right:-10px;padding-left:10px;padding-right:10px}
 .sa-beat.prog + .sa-beat.prog{border-top-color:#e7e2d8}
-.sa-beat.prog .sa-beat-b{font-family:var(--mono);font-size:12px;color:#7d766a;letter-spacing:-.01em}
+.sa-beat.prog .sa-beat-b{font-family:var(--mono);font-size:12px;color:#5f5a52;letter-spacing:-.01em}
 .sa-beat.clickable{cursor:pointer}
 /* A number the program has told us reads well or badly. Tinted text, not a filled cell: a table of green and
    red blocks stops being readable, and the point is to draw the eye to the few that matter. */
@@ -1327,7 +1304,7 @@ const ANSWER_CSS = `
 .sa-beat:hover .sa-beat-x{opacity:1}
 .sa-beat-x:hover{color:var(--ink)}
 .sa-beat-sql{font-family:var(--mono);font-size:12px;line-height:1.5;background:var(--panel);border:1px solid var(--hair);padding:8px 10px;margin:6px 0 0;overflow-x:auto;white-space:pre;color:var(--ink)}
-.sa-beat .sa-beat-t{flex-shrink:0;font-size:11.5px;color:#a49a8c;font-variant-numeric:tabular-nums;padding-top:1px;min-width:26px;text-align:right}
+.sa-beat .sa-beat-t{flex-shrink:0;font-size:11.5px;color:#8b8377;font-variant-numeric:tabular-nums;padding-top:1px;min-width:26px;text-align:right}
 .sa-analysis-card{border:1px solid #e8e4de;border-radius:10px;background:#fbfaf8;margin:2px 0 12px;font-size:13px}
 .sa-analysis-card>summary{cursor:pointer;padding:10px 16px;color:#6b6459;font-weight:600;user-select:none}
 .sa-analysis-card>.sa-ac-body{padding:0 16px 12px;display:flex;flex-direction:column;gap:8px}
@@ -1441,6 +1418,51 @@ function verbEventLine(ev: any): string {
   return ''   // 'turn' and anything a later harness adds: no line, rather than a mystery one
 }
 
+// A FINISHED question's beats. Its own expand state, because a reader opening an old card wants it opened
+// there and not everywhere — but the same grouping and the same row, so the two views cannot drift again.
+function AnalysisBeats({ item }: { item: { beats: string[]; secs?: number[]; at?: number[]; meta?: BeatMeta[] } }) {
+  const [expanded, setExpanded] = useState<Set<number>>(new Set())
+  const toggle = useCallback((head: number) => setExpanded(prev => {
+    const next = new Set(prev); next.has(head) ? next.delete(head) : next.add(head); return next
+  }), [])
+  const meta = item.meta ?? []   // a card frozen before meta was carried: every beat reads as the narrator's
+  const rows = buildBeatRows(item.beats, meta, i => item.secs?.[i] ?? 0, expanded)
+  return <>{rows.map(r => (
+    <Beat key={r.key} text={r.text} secs={r.secs} prog={r.prog} past={false} at={item.at?.[Number(r.key.split(':')[1])]}
+          detail={r.detail} chevron={r.chevron} count={r.count} head={r.head} onToggle={toggle} />
+  ))}</>
+}
+
+// GROUPING THE BEATS — used by the live card AND by a finished question's card, because they show the same
+// thing and drifted apart the moment only one of them learned to group. A run of consecutive PROGRAM beats
+// collapses to its latest, which is what a progress line is for; a chevron opens the rest.
+export type BeatMeta = { kind: 'narrator' | 'program'; detail?: string }
+export interface BeatRow { key: string; text: string; secs: number; prog: boolean; past: boolean
+                           detail?: string; chevron: 'none' | 'open' | 'closed'; count: number; head: number }
+export function buildBeatRows(log: string[], meta: BeatMeta[], secs: (i: number) => number, expanded: Set<number>): BeatRow[] {
+  const groups: Array<{ prog: boolean; idxs: number[] }> = []
+  log.forEach((_, i) => {
+    const prog = meta[i]?.kind === 'program'
+    const last = groups[groups.length - 1]
+    if (last && last.prog && prog) last.idxs.push(i)
+    else groups.push({ prog, idxs: [i] })
+  })
+  const rows: BeatRow[] = []
+  for (const g of groups) {
+    const head = g.idxs[0]
+    const open = expanded.has(head)
+    const many = g.prog && g.idxs.length > 1
+    const shown = g.prog && !open ? [g.idxs[g.idxs.length - 1]] : g.idxs
+    shown.forEach((i, n) => rows.push({
+      key: `${head}:${i}`, text: log[i], secs: secs(i), prog: g.prog,
+      past: i !== log.length - 1, detail: open ? meta[i]?.detail : undefined,
+      chevron: many && n === 0 ? (open ? 'open' : 'closed') : 'none',
+      count: g.idxs.length, head,
+    }))
+  }
+  return rows
+}
+
 // ONE BEAT, memoised. The card ticks once a second so the CURRENT beat's timer can count up — but a past
 // beat's seconds are the gap to the beat after it, which never changes again. Without memo every row
 // re-rendered every second: wasted work, and it destroyed a text selection the moment you made one, because
@@ -1452,8 +1474,9 @@ const Beat = memo(function Beat(props: {
   text: string; secs: number; prog: boolean; past: boolean
   detail?: string; chevron: 'none' | 'open' | 'closed'; count: number
   head: number; onToggle: (head: number) => void
+  at?: number            // when it happened — shown on the duration, because a duration is not a time
 }) {
-  const { text, secs, prog, past, detail, chevron, count, head, onToggle } = props
+  const { text, secs, prog, past, detail, chevron, count, head, onToggle, at } = props
   return (
     <div className={'sa-beat' + (past ? ' past' : '') + (prog ? ' prog' : '') + (chevron !== 'none' ? ' clickable' : '')}
          onClick={chevron === 'none' ? undefined : () => {
@@ -1473,7 +1496,7 @@ const Beat = memo(function Beat(props: {
           </svg>
         </button>
       )}
-      <div className="sa-beat-t">{secs}s</div>
+      <div className="sa-beat-t" title={at ? new Date(at).toLocaleString() : undefined}>{secs}s</div>
     </div>
   )
 })

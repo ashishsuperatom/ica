@@ -235,8 +235,12 @@ enum JSONValue: Hashable {
     init(any: Any) {
         switch any {
         case is NSNull:            self = .null
-        case let value as Bool where CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID():
-            self = .bool(value)
+        // NSNumber covers BOTH numbers and booleans, and only its CFTypeID can tell them
+        // apart. There used to be a `case let value as Bool` above this, which turned the
+        // number 1 into "yes" and 0 into "no" — so the first row of every rank column read
+        // "yes". Two mistakes compounded: Swift bridges an NSNumber to Bool for exactly 0
+        // and 1, and the guard meant to catch that (`value as CFTypeRef`) re-bridged the
+        // already-converted Swift Bool back to a CFBoolean, so it was always true.
         case let value as NSNumber:
             self = CFGetTypeID(value) == CFBooleanGetTypeID() ? .bool(value.boolValue) : .number(value.doubleValue)
         case let value as String:  self = .string(value)
