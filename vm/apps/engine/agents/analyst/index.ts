@@ -15,6 +15,7 @@ import { AUTHORING_SURFACE } from '../shared-prompts/authoring-reference.js'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
+import type { ProgramTarget } from '../../verbs/index.js'
 import { createSession, prepareWorkspace, type Harness, type Session, type RunHandlers } from '../../ica/index.js'
 import { execProgram } from '../../exec-program.js'
 import { CATEGORIES, type Category } from './classify.js'
@@ -72,7 +73,7 @@ export interface AskOpts {
   // MODIFY: the user wants the CURRENT answer changed, not a new one. The engine passes only the QUESTION it
   // answers + the program's location (the id) — the analyst OPENS and READS the program itself (that is the
   // source of truth), so we never pass a stale answer string around.
-  modify?: { programDir: string; prevQuestion?: string }
+  modify?: ProgramTarget
   conceptNames?: string[] // concept NAMES the engine surfaced for this question (names only — open with find-concept for the method)
   resolvedQuestion?: string   // the question with what it refers to written in (a follow-up made self-contained)
   reason?: string         // the composer's escalation note — a NON-authoritative hint of what was hard (the analyst re-derives from scratch)
@@ -167,7 +168,7 @@ The ENGINE runs the program and writes the answer - the answer is its to write, 
 The user wants to MODIFY the CURRENT answer — the SAME program, changed as they ask (a different calculation,
 different columns/outputs, extra context, a different filter or top-N). Do NOT build a new program.
 
-CURRENT PROGRAM: ./${m.programDir}  (it answers: "${m.prevQuestion ?? '(the current question)'}")
+CURRENT PROGRAM: ./${m.programDir}  (it answers: "${m.question ?? '(the current question)'}")
 
 THE USER'S CHANGE REQUEST: ${question}
 

@@ -23,6 +23,19 @@
 export type { Verb } from '../../../../clients/protocol.js'
 import type { Verb } from '../../../../clients/protocol.js'
 
+/** THE PROGRAM A VERB ACTS ON — the answer currently on screen, and how it was computed.
+ *
+ *  One shape for all of them. `edit:` and `explain:` had a private interface each, identical field for field,
+ *  and `check:` and `program:` reassembled the same thing inline from the intent node with different fallbacks.
+ *  Four spellings of "what am I looking at" is four places for it to mean something slightly different. */
+export interface ProgramTarget {
+  programDir: string
+  question?: string      // what it answers, in the asker's words
+  params?: unknown       // the bindings it was run with — check: re-runs with exactly these
+  qid?: string           // the answer it produced, so check: can diff against the real baseline
+  concepts?: string[]    // what this program taught, so an edit can correct the concept and not just the code
+}
+
 export interface VerbMatch {
   verb: Verb
   raw: string    // exactly what the user typed, prefix and all — for prompts, logs and the node

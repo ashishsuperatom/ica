@@ -17,13 +17,10 @@
 // The prompt stays short on purpose. These are capable agents: told what the person wants and where the
 // material is, they do not need to be told how to read a file or what prose is.
 
-import { VERBS } from './index.js'
+import { VERBS, type ProgramTarget } from './index.js'
 
-export interface ExplainTarget {
-  programDir: string
-  prevQuestion?: string
-  concepts?: string[]
-}
+// The shape every verb uses — see ProgramTarget. Named here for the reader of this file.
+export type ExplainTarget = ProgramTarget
 
 /** The instruction for an explain turn. `raw` is what the user typed, `explain:` prefix and all — it stays in
  *  the prompt so the transcript records which kind of turn this was and stays searchable. */
@@ -32,7 +29,7 @@ export function explainPrompt(o: { raw: string; target: ExplainTarget; mdRel: st
   return `${o.raw}
 
 The person is asking how the answer already on screen was arrived at — explain it, don't rebuild it. It came from
-./${t.programDir}${t.prevQuestion ? ` (which answers: "${t.prevQuestion}")` : ''}: read the program, its units and the
+./${t.programDir}${t.question ? ` (which answers: "${t.question}")` : ''}: read the program, its units and the
 run it recorded in program.json${t.concepts?.length ? `, and the concepts it was built from (${t.concepts.join(', ')})` : ''}.
 
 Answer what they actually asked, at the length that answers it — and no longer. Usually that is a few sentences

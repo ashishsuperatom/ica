@@ -13,7 +13,8 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { createSession, prepareWorkspace, type Harness, type Session, type RunHandlers } from '../../ica/index.js'
-import { explainPrompt, explainAnswer, type ExplainTarget } from '../../verbs/explain.js'
+import { explainPrompt, explainAnswer } from '../../verbs/explain.js'
+import type { ProgramTarget } from '../../verbs/index.js'
 import { execProgram } from '../../exec-program.js'
 import { PROGRAM_AUTHORING } from '../shared-prompts/program-authoring.js'   // SHARED single source (analyst + composer)
 
@@ -41,19 +42,14 @@ export interface ComposerResult {
   ms: number
 }
 export interface ProgramCandidate { question: string; program?: string; score: number }
-export interface ModifyTarget {
-  programDir: string
-  prevQuestion?: string
-  /** The concepts this program was built from. The engine has always passed these and the prompt has always
-   *  used them; the type simply never said so, which nothing checked until now. */
-  concepts?: string[]
-}
+// The shape every verb uses — defined once in verbs/. Kept as an alias so existing call sites read naturally.
+export type ModifyTarget = ProgramTarget
 
 /** A program whose DECLARED canonical question is the one just asked, with this question's values already bound.
  *  Retrieval found it; the composer still decides — it is a strong lead, not a verdict. */
 export interface CanonicalMatch { programDir: string; params: Record<string, unknown>; canonical: string }
 export interface Composer {
-  ask(question: string, handlers?: RunHandlers, opts?: { qid?: string; candidates?: ProgramCandidate[]; modify?: ModifyTarget; conceptNames?: string[]; canonicalMatch?: CanonicalMatch; resolvedQuestion?: string; explain?: ExplainTarget; raw?: string; sid?: string }): Promise<ComposerResult>
+  ask(question: string, handlers?: RunHandlers, opts?: { qid?: string; candidates?: ProgramCandidate[]; modify?: ModifyTarget; conceptNames?: string[]; canonicalMatch?: CanonicalMatch; resolvedQuestion?: string; explain?: ProgramTarget; raw?: string; sid?: string }): Promise<ComposerResult>
   session: Session
   cwd: string
 }
@@ -147,7 +143,7 @@ The user wants to EDIT the CURRENT program — the SAME program, changed as they
 columns/outputs, a filter, or a top-N). Make the edit from what you ALREADY have: the program's own code plus the
 concepts (\`./find-concept "<phrase>"\`). Do NOT discover raw data, and do NOT build a new program.
 
-CURRENT PROGRAM: ./${m.programDir}${m.prevQuestion ? `  (it answers: "${m.prevQuestion}")` : ''}
+CURRENT PROGRAM: ./${m.programDir}${m.question ? `  (it answers: "${m.question}")` : ''}
 THE EDIT: ${question}
 
 OPEN and READ ./${m.programDir} (program.ts + its units). If the edit can be made from its code + the concepts you

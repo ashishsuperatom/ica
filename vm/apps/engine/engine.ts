@@ -41,7 +41,7 @@ import { createSpanFirer } from './retrieval/span-firing.js'
 // import would break every deploy while working perfectly here.
 import type { EngineMsgType } from '../../../clients/protocol.js'
 import { buildDatasourceIndex } from './datasource-index/build.js'
-import { parseVerb, VERBS } from './verbs/index.js'
+import { parseVerb, VERBS, type ProgramTarget } from './verbs/index.js'
 import type { AgentEvent } from './ica/session.js'
 import { diffAnswers, checkReport, checkAnswer } from './verbs/check.js'
 import { collectProgramFiles, programAnswer } from './verbs/program.js'
@@ -295,6 +295,43 @@ for (const r of graph.db.prepare(`SELECT session_id, node_id FROM session_positi
   if (graph.getNode(r.node_id)) position.set(r.session_id, r.node_id)   // skip a persisted node that no longer exists
 }
 const setPosition = (sid: string, nodeId: string) => { position.set(sid, nodeId); try { _posUpsert.run(sid, nodeId, Date.now()) } catch { /* position is best-effort; a write failure must not break answering */ } }
+
+// ── WHAT IS ON SCREEN, per chat ───────────────────────────────────────────────
+// The question that was answered and the program that answered it. `edit:`, `explain:`, `check:` and
+// `program:` all act on "the thing I am looking at", and each of them used to work that out for itself by
+// reaching into the current INTENT NODE — four hand-rolled lookups with four different fallbacks.
+//
+// That coupling was wrong twice over. The intent graph is a map of QUESTIONS and it moves for reasons of its
+// own; and a view (`view: customer 431`) is deliberately not in it at all, so a verb reading the graph would
+// act on whatever unrelated question happened to be there instead.
+//
+// So it is one record, written by every path that PUTS an answer on screen — a question, a reused program, a
+// view — and untouched by the verbs that only REPORT on one. It moves when a new answer arrives and at no
+// other time, which is exactly what "the last thing I asked" means to the person reading it.
+interface OnScreen { qid: string; question: string; programDir?: string; params?: unknown }
+graph.db.exec(`CREATE TABLE IF NOT EXISTS session_screen (session_id TEXT PRIMARY KEY, qid TEXT NOT NULL, question TEXT NOT NULL, program_dir TEXT, params_json TEXT, updated_at INTEGER)`)
+const _screenGet = graph.db.prepare(`SELECT qid, question, program_dir, params_json FROM session_screen WHERE session_id = ?`)
+const _screenSet = graph.db.prepare(`INSERT INTO session_screen (session_id, qid, question, program_dir, params_json, updated_at) VALUES (?,?,?,?,?,?)
+  ON CONFLICT(session_id) DO UPDATE SET qid=excluded.qid, question=excluded.question, program_dir=excluded.program_dir, params_json=excluded.params_json, updated_at=excluded.updated_at`)
+
+// THE DATABASE IS THE STATE — there is no in-memory copy. It was a Map hydrated at boot and written through,
+// which survives a restart but adds a second place the truth can live: a failed write leaves memory ahead of
+// disk, and every later read agrees with the wrong one. A row read costs microseconds and happens once a turn.
+const getOnScreen = (sid: string): OnScreen | null => {
+  const r = _screenGet.get(sid) as { qid: string; question: string; program_dir: string | null; params_json: string | null } | undefined
+  if (!r) return null
+  let params: unknown
+  if (r.params_json) { try { params = JSON.parse(r.params_json) } catch { /* unreadable params are no params */ } }
+  return { qid: r.qid, question: r.question, programDir: r.program_dir ?? undefined, params }
+}
+const setOnScreen = (sid: string, v: OnScreen) => {
+  try { _screenSet.run(sid, v.qid, v.question, v.programDir ?? null, v.params === undefined ? null : JSON.stringify(v.params), Date.now()) }
+  catch (e: any) {
+    // NOT swallowed. The answer still reaches the user, but every verb that follows will act on the PREVIOUS
+    // answer — an edit applied to the wrong program is a silent wrong action, so it is said out loud.
+    log.error('session', `could not record what is on screen for ${sid} — edit/check/explain will target the previous answer`, e)
+  }
+}
 
 // ── Agent slots — one uniform session lifecycle per agent ─────────────────────
 // A slot owns EVERYTHING about an agent's session: lazy create on first use; RESUME the prior session
@@ -608,6 +645,7 @@ async function reuseProgram(programDir: string, params: any, category: string,
     if (Array.isArray(fu) && fu.length && reply) emit(reply, { t: 'followups', items: fu, qid, sid })
     emit(reply, A('status', 'analyst', { state: 'done', sid }))
     answers.save({ qid, sessionId: sid, question, norm, category, status: 'answered', answer, createdAt: Date.now(), finishedAt: Date.now(), programDir, params, build: await buildIdentity(), route })
+    setOnScreen(sid, { qid, question, programDir, params })   // a reused answer is on screen exactly like a fresh one
     const n = graph.getNode(nodeId); if (n) graph.putNode({ ...n, props: { ...(n.props as any), lastShapeHash: (rr as any).finalShapeHash ?? (n.props as any)?.lastShapeHash } })
     setPosition(sid, nodeId)
     clearInterval(ka)
@@ -792,35 +830,31 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   // `score` is only the RRF rank-fusion value used for ordering; it is a position, not a measure of fit.
   let programCandidates: { question: string; program?: string; score: number; sim: number | null }[] = []   // engine-searched matches handed to the composer
   let conceptNames: string[] = []   // engine-searched CONCEPT names (names only) surfaced to composer + analyst
-  let modifyTarget: { programDir: string; prevQuestion?: string; concepts?: string[] } | null = null
-  // EXPLAIN targets the answer already on screen. There is nothing to explain before one exists, and inventing
-  // an explanation of a program that was never run is the failure this verb is meant to prevent — so with no
-  // current program we say so plainly rather than letting it build one.
-  let explainTarget: { programDir: string; prevQuestion?: string; concepts?: string[] } | null = null
-  // Set here (curNode is in scope) but ACTED ON inside the try below — the try that owns the `finally` starts
-  // further down, so returning from here would skip it and leave the session flagged busy for good.
-  if (explicitExplain) {
-    const curProgram = (curNode?.props as any)?.program
-    if (curNode && curProgram && existsSync(join(WORKSPACE, curProgram, 'program.json'))) {
-      explainTarget = { programDir: curProgram, prevQuestion: curQ, concepts: conceptsFromProgram(curProgram) }
-      console.log(`[ica] explain → ${explainTarget.programDir} (node ${pos.slice(0, 14)})`)
-    } else {
-      console.log('[ica] explain, but nothing has been answered in this chat yet')
-    }
-  }
+  let modifyTarget: ProgramTarget | null = null
+  // ── WHAT THIS VERB ACTS ON ────────────────────────────────────────────────────────────────────────────
+  // Resolved ONCE, from the session's record of what is on screen, for every verb that needs it. Each used to
+  // work it out itself from the intent node, with a different fallback each time — and a view is not in that
+  // graph at all, so those lookups would have found an unrelated question.
+  //
+  // A program whose file is gone is the same as no program: it cannot be explained, checked, edited or shown.
+  const screen = getOnScreen(sid)
+  const target: ProgramTarget | null =
+    screen?.programDir && existsSync(join(WORKSPACE, screen.programDir, 'program.ts'))
+      ? { programDir: screen.programDir, question: screen.question, params: screen.params, qid: screen.qid,
+          concepts: conceptsFromProgram(screen.programDir) }
+      : null
+  if (verb && VERBS[verb.verb].needsCurrentProgram && !target) console.log(`[ica] ${verb.verb}, but nothing has been answered in this chat yet`)
+
+  let explainTarget: ProgramTarget | null = null
+  // Set here but ACTED ON inside the try below — the try that owns the `finally` starts further down, so
+  // returning from here would skip it and leave the session flagged busy for good.
+  if (explicitExplain) { explainTarget = target; if (target) console.log(`[ica] explain → ${target.programDir}`) }
   if (explicitEdit) {
-    // The user explicitly prefixed "edit:"/"modify:" — edit the current node's program in place; if there's
-    // nothing on screen to edit, fall through to a normal build.
-    const curProgram = (curNode?.props as any)?.program
-    if (curNode && curProgram && existsSync(join(WORKSPACE, curProgram, 'program.ts'))) {
-      // The concepts this program taught us travel WITH the edit: a fault is often in one of them, and a fix
-      // that stops at the program leaves the next build to inherit it.
-      const taught = conceptsFromProgram(curProgram)
-      modifyTarget = { programDir: curProgram, prevQuestion: curQ, concepts: taught }
-      console.log(`[ica] explicit edit → editing ${modifyTarget.programDir} in place (node ${pos.slice(0, 14)})${taught.length ? ` · it taught: ${taught.join(', ')}` : ''}`)
-    } else {
-      console.log('[ica] explicit edit, but no current program to edit → building fresh')
-    }
+    // The concepts this program taught travel WITH the edit: a fault is often in one of them, and a fix that
+    // stops at the program leaves the next build to inherit it. With nothing on screen, fall through and build.
+    modifyTarget = target
+    if (target) console.log(`[ica] explicit edit → editing ${target.programDir} in place${target.concepts?.length ? ` · it taught: ${target.concepts.join(', ')}` : ''}`)
+    else console.log('[ica] explicit edit, but no current program to edit → building fresh')
   } else if (!explicitExplain && !explicitCheck && !explicitProgram) {
     // Explain and check both report on a program that is already chosen — searching for candidates or ranking
     // concepts would be work whose result nothing reads, on the two verbs meant to come back quickly.
@@ -1077,23 +1111,20 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // No agent at all: running the program is computation and comparing the numbers is arithmetic. A model here
     // would be the one part of the answer nobody could check.
     if (explicitCheck) {
-      const curProgram = (curNode?.props as any)?.program
-      // The baseline, by the question first and then by the PROGRAM. The question-shaped lookup misses whenever
-      // the row was saved under different wording than the node carries — a reuse, a modify, a canonical form —
-      // and then check reported "nothing to re-run" about an answer plainly on screen. The program is what is
-      // being re-run, so it is the key that always resolves.
-      const prior = (curNode ? answers.findAnswered(((curNode.props as any)?.question as string) ?? '') : null)
-                 ?? (curProgram ? answers.latestForProgram(curProgram) : null)
-      const dir = curProgram ?? prior?.programDir
-      // The node's params are what produced what is on screen; the saved row is the fallback for a node that
-      // predates them. Without them we would re-run with different inputs and report a change we caused.
-      const params = (curNode?.props as any)?.params ?? prior?.params ?? {}
-      if (!dir || !prior?.answer || !existsSync(join(WORKSPACE, dir, 'program.ts'))) {
+      // THE BASELINE is the answer this program actually produced, fetched by its own id. That used to be a
+      // two-step guess — look the question up by its text, then fall back to the program's most recent run —
+      // because the intent node's wording often did not match the row that was saved, and check then reported
+      // "nothing to re-run" about an answer plainly on screen. The session records the qid, so it is exact.
+      const prior = target?.qid ? answers.get(target.qid) : null
+      if (!target || !prior?.answer) {
         console.log('[ica] check, but there is no saved answer with a program to re-run')
-        emit(reply, { t: 'analyst:answer', category: 'analysis', sid, qid, timing: { ms: Date.now() - t0 },
-          answer: { status: 'answered', category: 'analysis', answer: VERBS.check.nothingToActOn } })
+        emit(reply, { t: 'analyst:answer', category: VERBS.check.category, sid, qid, timing: { ms: Date.now() - t0 },
+          answer: { status: 'answered', category: VERBS.check.category, answer: VERBS.check.nothingToActOn } })
         return
       }
+      const dir = target.programDir
+      // The SAME parameters, or the re-run measures something else and reports a change we caused ourselves.
+      const params = target.params ?? {}
       // Check has no agent, so nothing produces events for it — the engine says what it is doing itself, on the
       // same channel and in the same shape as an agent turn. The user asked for this by name; they should see
       // it working whether or not a model happens to be involved.
@@ -1129,15 +1160,15 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // No walking back through the session to find it, either: explain/check/program never persist and never
     // move the position, so `pos` still points at the last real question even after several of them in a row.
     if (explicitProgram) {
-      const dir = (curNode?.props as any)?.program
-      if (!dir || !existsSync(join(WORKSPACE, dir))) {
+      const dir = target?.programDir
+      if (!dir) {
         console.log('[ica] program, but there is nothing on screen with a program behind it')
         emit(reply, { t: 'analyst:answer', category: VERBS.program.category, sid, qid, timing: { ms: Date.now() - t0 },
           answer: { status: 'answered', category: VERBS.program.category, answer: VERBS.program.nothingToActOn } })
         return
       }
       const files = await collectProgramFiles(WORKSPACE, dir)
-      const answer = programAnswer(dir, files, (curNode?.props as any)?.params)
+      const answer = programAnswer(dir, files, target?.params)
       const timing = { ms: Date.now() - t0 }
       lastAnswer = answer; lastTiming = timing; lastCategory = VERBS.program.category
       console.log(`[ica] program · ${dir} · ${files.length} file(s)`)
@@ -1245,10 +1276,17 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // PERSIST: the engine reads the agent's file result and writes the DB — the agent never touches the DB.
     // finishedAt is stamped HERE, deterministically, the moment the analyst's artifact is in hand — this is
     // the cursor the offline modeler consolidates by (never a time the agent self-reports).
-    // For a MODIFY the answer belongs to the ORIGINAL question (the node we edited), not the edit instruction.
-    const savedQ = modifyTarget && curNode ? (curNode.summary ?? curQ ?? question) : question
-    const savedNorm = modifyTarget && curNode ? (((curNode.props as any)?.question as string) ?? norm) : norm
+    // For a MODIFY the answer belongs to the ORIGINAL question, not to the edit instruction — nobody asked
+    // "make it top 5", they asked what they asked and now want it computed differently.
+    //
+    // Taken from the session record. It used to require a live intent NODE as well, so an edit made when the
+    // graph had moved on — or against a view, which is not in the graph at all — silently saved the answer
+    // under the edit instruction as if that were the question.
+    const savedQ = modifyTarget?.question ?? question
+    const savedNorm = modifyTarget?.question ? normalizeQuestion(modifyTarget.question) : norm
     answers.save({ qid, sessionId: sid, question: savedQ, norm: savedNorm, category: r.category, status: r.answer?.status ?? 'error', answer: r.answer, createdAt: Date.now(), finishedAt: Date.now(), programDir: programDir ?? modifyTarget?.programDir, params: programParams, build: await buildIdentity(), route: authoredBy })
+    // An EDIT keeps the question it edited: the thing on screen is still that answer, now computed differently.
+    setOnScreen(sid, { qid, question: savedQ, programDir: programDir ?? modifyTarget?.programDir, params: programParams })
     // ── INTENT GRAPH ──
     let builtIntentId: string | undefined
     if (modifyTarget && curNode) {
