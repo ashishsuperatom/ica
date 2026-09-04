@@ -25,6 +25,45 @@ import { rewriteSqlDetailed } from './sqlglot-pool.js'
 const MAX_ROWS = Number(process.env.ICA_MAX_ROWS ?? 5000)
 const MAX_BYTES = Number(process.env.ICA_MAX_BYTES ?? 8_000_000)
 
+// ── RETRYING A FLAKY SOURCE ─────────────────────────────────────────────────────────────────────────────────
+// TRANSIENT means the source could not be reached or was busy — not that the query was wrong. The distinction
+// is the whole design: a syntax error retried three times is just a slow syntax error, and the caller waits
+// longer to learn something it could have known immediately.
+//
+// Matched on the message because a bridge may be HTTP, a driver, or a socket, and they report the same outage
+// in different shapes. Anything unrecognised is treated as permanent — failing fast on something we could have
+// retried is a worse-than-necessary answer, while retrying a genuine error is a wrong answer arriving slowly.
+const TRANSIENT = /(\b50[234]\b|\b429\b|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|EPIPE|socket hang up|network|timed? ?out|temporarily unavailable|service unavailable|too many requests)/i
+
+// Delays before attempts 2, 3 and 4 — about 8.5s of cover in total. Sized against what it replaces: the agent
+// noticing a failure costs a full LLM turn, so even several seconds of silent waiting is the cheaper path.
+// Jittered, so a burst of queries failing together does not retry in lockstep.
+const RETRY_DELAYS = [500, 2000, 6000]
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+
+// `delays` is a parameter so a test can run this in milliseconds instead of the real eight seconds. Exported
+// for the same reason: the rule about what must NOT be retried is the half worth pinning.
+export async function withRetry<T>(run: () => Promise<T>, sourceId?: unknown, delays: number[] = RETRY_DELAYS): Promise<T> {
+  const who = sourceId ? String(sourceId) : 'source'
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const out = await run()
+      if (attempt) console.log(`[query] ${who} recovered on attempt ${attempt + 1}`)
+      return out
+    } catch (e: any) {
+      const msg = String(e?.message ?? e)
+      // Out of attempts, or not the kind of failure waiting can fix.
+      if (attempt >= delays.length || !TRANSIENT.test(msg)) {
+        if (attempt) console.warn(`[query] ${who} failed after ${attempt + 1} attempts — ${msg.slice(0, 200)}`)
+        throw e
+      }
+      const wait = delays[attempt] + Math.floor(Math.random() * 250)
+      console.warn(`[query] ${who} transient failure (attempt ${attempt + 1}), retrying in ${wait}ms — ${msg.slice(0, 160)}`)
+      await sleep(wait)
+    }
+  }
+}
+
 const PORT = Number(process.env.DATASOURCE_PORT ?? process.env.MANAGER_PORT ?? 4000)
 
 // Dynamically-registered sources (from the connector agent) persist here (id → absolute bridge path) so they
@@ -158,7 +197,18 @@ const server = http.createServer(async (req, res) => {
         ? { sql: String(body.sql), cappedTo: null as number | null }
         : await rewriteSqlDetailed(String(body.sql), { sourceDialect: bridge.dialect, maxRows: MAX_ROWS + 1 })
       const sql = rw.sql
-      const rows = await bridge.query(sql, body.params ?? {})
+      // RETRIED HERE, not by the agent. A flaky source used to surface as a failed query, which the agent
+      // noticed, reasoned about, and re-issued — a whole LLM turn, fifteen seconds and a pile of tokens, to
+      // repeat a statement that would have worked a second later. One observed question spent a third of four
+      // minutes doing exactly that. Retrying inside the seam turns six visible failures into one slow call.
+      //
+      // ONLY THE CHECKED PATH. `rewriteSqlDetailed` has proven this is a SELECT, so repeating it is safe.
+      // The passthrough — `raw` (system-only; the agent cannot set it) or a non-SQL source with its own query
+      // paradigm — carries no such proof, and repeating a statement nothing has shown to be a read is how a
+      // retry turns into a double write. Those callers can opt in once they can say they are idempotent.
+      const rows = passthrough
+        ? await bridge.query(sql, body.params ?? {})
+        : await withRetry(() => bridge.query(sql, body.params ?? {}), body.id)
       // Byte guard for wide rows (the row cap is already injected into the agent query's AST). Raw/system reads are exempt.
       if (!body.raw) { const bytes = JSON.stringify(rows).length; if (bytes > MAX_BYTES) return send(res, 413, { error: `result too large (${(bytes / 1e6).toFixed(1)} MB) — add a filter or aggregate` }) }
       // REPORT what we did to the query. `notes` is only present when it changes how the result must be read:
