@@ -816,6 +816,22 @@ function ProjectDetailPage() {
   // never one click from a card.
   const [svc, setSvc] = useState<{ projectId: string; channel: string; token: string; wsUrl: string; expiresAt: number } | null>(null)
   const [delProj, setDelProj] = useState(false)
+  // ROTATING THIS PROJECT'S KEY, on the project's own Settings — which is where someone looks for it. It was
+  // put only on the org's project ROW first, next to "Open →", and the row opens the project when clicked, so
+  // in practice everyone navigated straight past it and reported the button missing. A control nobody can
+  // find is a control that does not exist.
+  const [rot, setRot] = useState<{ apiKey: string; done?: boolean } | null>(null)
+  const rotateKey = async () => {
+    const r = await api(`/project-key/${projectId}/rotate`, { method: 'POST' })
+    if (!r.ok) { alert(`Could not rotate: ${r.status} ${await r.text()}`); return }
+    setRot({ apiKey: (await r.json() as any).apiKey })
+  }
+  const finishRotation = async () => {
+    if (!rot) return
+    const r = await api(`/project-key/${projectId}/prune`, { method: 'POST', body: JSON.stringify({ keep: rot.apiKey }) })
+    if (!r.ok) { alert(`Could not finish: ${r.status} ${await r.text()}`); return }
+    setRot({ ...rot, done: true })
+  }
   const genServiceToken = async (channel: string) => {
     const r = await api(`/projects/${projectId}/service-token`, { method: 'POST', body: JSON.stringify({ channel }) })
     if (r.ok) setSvc(await r.json())
@@ -1044,6 +1060,30 @@ function ProjectDetailPage() {
             <strong>Teams bot credential</strong>
             <div className="muted" style={{ fontSize: 12.5, margin: '4px 0 12px' }}>Generate a scoped service token so a Teams bot can act as this project’s runtime. Shown once.</div>
             <button className="btn ghost" onClick={() => genServiceToken('teams')}>Generate Teams token</button>
+          </div>
+          <div className="card" style={{ padding: 18 }}>
+            <strong>Project API key</strong>
+            <div className="muted" style={{ fontSize: 12.5, margin: '4px 0 12px' }}>
+              This key is in every engine’s <code>.env</code> and unlocks this project’s pooled provider credentials.
+              Rotating issues a <strong>second</strong> key — both work, so nothing goes down — then “Finish” retires the old one.
+            </div>
+            {!rot
+              ? <button className="btn ghost" onClick={rotateKey}>Rotate key</button>
+              : <>
+                  <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>
+                    {rot.done
+                      ? 'Done — the old key no longer works. Any box still holding it will fail to connect until its .env is updated.'
+                      : 'Shown once. Put it in every engine’s .env and restart, then press Finish.'}
+                  </div>
+                  <textarea readOnly value={`ICA_PROJECT=${projectId}\nICA_KEY=${rot.apiKey}`} rows={2}
+                    onFocus={e => e.currentTarget.select()}
+                    style={{ width: '100%', fontFamily: 'monospace', fontSize: 13, padding: 12, borderRadius: 8, whiteSpace: 'pre' }} />
+                  <div className="row" style={{ gap: 8, marginTop: 10 }}>
+                    <button className="btn" onClick={() => navigator.clipboard?.writeText(`ICA_PROJECT=${projectId}\nICA_KEY=${rot.apiKey}`)}>Copy</button>
+                    {!rot.done && <button className="btn" onClick={finishRotation}>Finish — retire the old key</button>}
+                    <button className="btn ghost" onClick={() => setRot(null)} style={{ marginLeft: 'auto' }}>Close</button>
+                  </div>
+                </>}
           </div>
           <div className="card" style={{ padding: 18, borderColor: 'var(--bad)' }}>
             <h3 style={{ margin: '0 0 4px', color: 'var(--bad)' }}>Danger zone</h3>
