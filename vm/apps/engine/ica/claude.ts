@@ -132,8 +132,15 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
     // passing them down makes the spawned claude think it's a CHILD session — which DISABLES transcript saving
     // (so --resume then fails with "No conversation found"). Strip every CLAUDE_CODE_* var so the agent is
     // always a fresh top-level session, regardless of how the engine was started.
+    //
+    // EXCEPT the credential. CLAUDE_CODE_OAUTH_TOKEN is how a box authenticates when nobody has logged into
+    // it — the whole point of a fleet machine you never SSH into — and it shares the prefix of the session
+    // markers by coincidence, not by kind. Stripping it makes an engine that was started with a perfectly
+    // good credential report itself as not logged in, with nothing in the logs to say why. The markers this
+    // guard exists for are all about session IDENTITY; the token is not one of them.
+    const KEEP = new Set(['CLAUDE_CODE_OAUTH_TOKEN'])
     const childEnv: Record<string, any> = { ...process.env, TERM: 'xterm-256color' }
-    for (const k of Object.keys(childEnv)) if (k.startsWith('CLAUDE_CODE_')) delete childEnv[k]
+    for (const k of Object.keys(childEnv)) if (k.startsWith('CLAUDE_CODE_') && !KEEP.has(k)) delete childEnv[k]
     pty = m.spawn(bin, ['--model', model, '--dangerously-skip-permissions', ...sysRefFlag, ...sessionArgs()],
       { name: 'xterm-256color', cols, rows, cwd: opts.cwd, env: childEnv as any })
     lastDataAt = Date.now()
