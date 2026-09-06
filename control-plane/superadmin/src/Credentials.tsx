@@ -11,6 +11,40 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
+// The table markup used a class that was never defined anywhere, so it rendered with no borders, no padding
+// and headers that did not line up with their columns. Styles live here, scoped to this screen, rather than in
+// a shared sheet: this is the only table with these columns, and a shared rule is one another screen inherits
+// by accident.
+const CSS = `
+.cred-tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+.cred-tbl th{
+  text-align:left;font-weight:600;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--sa-text-faint,#9a9285);padding:0 12px 8px;border-bottom:1px solid var(--sa-border,#e8e4de);white-space:nowrap}
+.cred-tbl td{padding:11px 12px;border-bottom:1px solid var(--sa-border-soft,#f0ede8);vertical-align:top}
+.cred-tbl tr:last-child td{border-bottom:none}
+.cred-tbl tbody tr:hover{background:var(--sa-bg,#faf9f7)}
+/* The id is the thing you scan for, so it leads and is monospaced; the note explains without competing. */
+.cred-tbl .id{font-family:var(--sa-font-mono,ui-monospace,monospace);font-weight:600;white-space:nowrap}
+.cred-tbl .note{font-size:12px;color:var(--sa-text-muted,#6b6560);margin-top:2px;max-width:280px}
+.cred-tbl .sub{font-size:11px;color:var(--sa-text-faint,#9a9285);margin-top:2px;white-space:nowrap}
+.cred-tbl td.acts{text-align:right;white-space:nowrap}
+.cred-tbl td.acts .btn{margin-left:6px;padding:4px 10px;font-size:12px}
+.cred-tbl .num{font-variant-numeric:tabular-nums}
+.cred-row-off td{opacity:.5}
+/* A state worth acting on should read as one; everything normal should stay quiet. */
+.cred-tag{font-size:11px;font-weight:600;padding:2px 7px;border-radius:10px;white-space:nowrap}
+.cred-ok{color:var(--sa-text-faint,#9a9285);font-weight:400}
+.cred-warn{background:#fef3e2;color:#b45309}
+.cred-bad{background:#fee;color:#b91c1c}
+.cred-off{background:#f1f0ee;color:#6b6560}
+`
+let cssDone = false
+function ensureCSS() {
+  if (cssDone || typeof document === 'undefined') return
+  cssDone = true
+  const el = document.createElement('style'); el.textContent = CSS; document.head.appendChild(el)
+}
+
 interface Entry {
   id: string
   provider: string
@@ -56,10 +90,10 @@ async function call(api: Api, path: string, init?: RequestInit): Promise<any> {
 // The figure comes from the PROVIDER, not from anything we counted — so it is absolute, and a stale read is
 // simply an older truth rather than a wrong one.
 function usageCell(e: Entry) {
-  if (!e?.canAskUsage) return <span className="muted" title="this provider exposes no usage endpoint">—</span>
+  if (!e?.canAskUsage) return <span className="cred-ok" title="this provider exposes no usage endpoint">—</span>
   const u = e.usage
-  if (!u) return <span className="muted">not checked</span>
-  if (u.error) return <span className="muted" title={u.error}>unavailable</span>
+  if (!u) return <span className="cred-ok">not checked</span>
+  if (u.error) return <span className="cred-ok" title={u.error}>unavailable</span>
   const age = Math.round((Date.now() - u.observedAt) / 60000)
   const pct = typeof u.percentUsed === 'number' ? u.percentUsed : null
   const money = u.unit === 'usd' && typeof u.limit === 'number' ? `$${(u.used ?? 0).toFixed(2)} of $${u.limit}` : null
@@ -68,13 +102,14 @@ function usageCell(e: Entry) {
     : u.resetsAt ? `resets ${String(u.resetsAt).slice(0, 10)}` : ''
   return (
     <span title={`observed ${age}m ago${detail ? ' · ' + detail : ''}`}>
-      <span style={{ color: pct !== null && pct >= 80 ? '#d97706' : undefined }}>{money ?? (pct !== null ? `${pct}%` : '—')}</span>
-      {detail && <div className="muted" style={{ fontSize: 12 }}>{detail}</div>}
+      <span className={pct !== null && pct >= 80 ? 'cred-tag cred-warn' : 'num'}>{money ?? (pct !== null ? `${pct}%` : '—')}</span>
+      {detail && <div className="sub">{detail}</div>}
     </span>
   )
 }
 
 export function Credentials({ api }: { api: Api }) {
+  ensureCSS()
   const [d, setD] = useState<Partial<Data> | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -169,8 +204,11 @@ export function Credentials({ api }: { api: Api }) {
           Values are never shown here and never returned by the API — only a box that proves which project it is
           ever receives one.
         </div>
-        <table className="tbl">
-          <thead><tr><th>ID</th><th>Provider</th><th>Groups</th><th>Used</th><th>Expires</th><th>State</th><th></th></tr></thead>
+        <table className="cred-tbl">
+          <thead><tr>
+            <th style={{ width: '30%' }}>Credential</th><th>Provider</th><th>Groups</th>
+            <th>Used</th><th>Expires</th><th>State</th><th style={{ width: 170 }} />
+          </tr></thead>
           <tbody>
             {entries.length === 0 && <tr><td colSpan={7} className="muted">
               Nothing in the vault yet. There is no fallback — a provider with no entry here simply fails, which
@@ -182,19 +220,20 @@ export function Credentials({ api }: { api: Api }) {
                 <td>{e.provider}</td>
                 <td>{e.groups?.length ? e.groups.join(', ') : <span className="muted">any</span>}</td>
                 <td>{usageCell(e)}</td>
-                <td>
+                <td className="num">
                   {e.expiresInDays === null
                     // Said explicitly: this kind of key HAS no expiry, which is different from not knowing.
-                    ? <span className="muted">no expiry</span>
-                    : e.expired ? <b style={{ color: '#b91c1c' }}>expired</b>
-                    : <span style={{ color: e.expiresInDays <= 3 ? '#d97706' : undefined }}>{e.expiresInDays}d</span>}
+                    ? <span className="cred-ok">none</span>
+                    : e.expired ? <span className="cred-tag cred-bad">expired</span>
+                    : e.expiresInDays <= 3 ? <span className="cred-tag cred-warn">{e.expiresInDays}d</span>
+                    : <span>{e.expiresInDays}d</span>}
                 </td>
                 <td>
-                  {e.disabled ? <b className="muted" title="parked — kept, but never used">disabled</b>
-                    : e.exhausted ? <b style={{ color: '#d97706' }}>exhausted</b>
-                    : <span className="muted">ok</span>}
+                  {e.disabled ? <span className="cred-tag cred-off" title="parked — kept, but never used">parked</span>
+                    : e.exhausted ? <span className="cred-tag cred-warn">exhausted</span>
+                    : <span className="cred-ok">ok</span>}
                 </td>
-                <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                <td className="acts">
                   {e.exhausted && !e.disabled && <button className="btn ghost" disabled={busy}
                     onClick={() => act(`/credentials/revive/${encodeURIComponent(e.id)}`, { method: 'POST' })}>Revive</button>}
                   {/* Parking keeps the key and stops it being spent — the middle ground between using it and
@@ -238,7 +277,7 @@ export function Credentials({ api }: { api: Api }) {
           Which pool a project draws on. Unassigned projects are <code className="mono">default</code>, deliberately
           the least privileged — a project nobody has classified should not inherit production's quota.
         </div>
-        <table className="tbl">
+        <table className="cred-tbl">
           <thead><tr><th>Project</th><th>Group</th></tr></thead>
           <tbody>
             {Object.keys(groups).length === 0 && <tr><td colSpan={2} className="muted">None assigned — everything is <code className="mono">default</code>.</td></tr>}

@@ -21,12 +21,20 @@ echo "[vm] HOME=$HOME (agent auth persists on the volume)"
 # An agent that cannot authenticate fails in a way that looks like the agent being slow or stupid: the turn
 # runs, produces nothing, and the log says status=no-json. Finding out why meant going and looking inside the
 # container. It is one line of output and it answers the question before it is asked.
+#
+# THIS CHECK ONLY SEES DISK. It runs before Node starts, so it cannot see a credential the engine fetches
+# from the vault seconds later — and a box that is about to be given one is not "NOT LOGGED IN", it is not
+# logged in YET. Saying the wrong one sends people SSH-ing into a healthy machine to fix nothing. So where a
+# vault fetch is coming, say that instead, and leave the verdict to the engine, which is the only thing here
+# that knows how it turned out.
 for a in "claude:$HOME/.claude/.credentials.json" \
          "codex:$HOME/.codex/auth.json" \
          "pi:$HOME/.pi/agent/auth.json" \
          "opencode:$HOME/.local/share/opencode/auth.json"; do
   name="${a%%:*}"; file="${a#*:}"
-  if [ -s "$file" ]; then echo "[vm] auth: $name ✓"
+  if [ -s "$file" ]; then echo "[vm] auth: $name ✓ (on disk)"
+  elif [ "$name" = "claude" ] && [ -n "$SUPERATOM_PLATFORM" ] && [ -n "$ICA_PROJECT" ] && [ -n "$ICA_KEY" ]; then
+    echo "[vm] auth: claude — none on disk; the engine fetches it from the vault at boot (watch for: CLAUDE_CODE_OAUTH_TOKEN <- vault)"
   else echo "[vm] auth: $name ✗ NOT LOGGED IN — run:  docker exec -it \$CONTAINER $name  (HOME is already correct)"; fi
 done
 

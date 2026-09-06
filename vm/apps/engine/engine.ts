@@ -16,7 +16,7 @@
 // FIRST IMPORT, deliberately: it installs the fetch dispatcher, and anything that fetches before it runs
 // would bypass the proxy. Does nothing unless HTTPS_PROXY is set.
 import './ica/proxy-dispatcher.js'
-import { fetchBoxCredentials } from './ica/box-credentials.js'
+import { fetchBoxCredentials, isFleetBox } from './ica/box-credentials.js'
 import WebSocket from 'ws'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
@@ -1811,7 +1811,11 @@ async function selfCheck(): Promise<{ ok: boolean; detail: string }> {
 let reconnectDelay = 1000
 function connect() {
   const url = `${HUB}/_ws/${encodeURIComponent(PROJECT)}?key=${encodeURIComponent(KEY)}`
-  console.log(`[ica] connecting to hub ${url} as code-engine (no ports opened)`)
+  // THE KEY NEVER GOES IN THE LOG. It is in the query string because that is the only channel a WebSocket
+  // handshake gives us, but `docker logs` is read by anyone who can reach the host, and this key is what
+  // authenticates the vault handout for this project — printing it puts every pooled provider credential one
+  // `docker logs` away. Log the destination, never the credential.
+  console.log(`[ica] connecting to hub ${HUB}/_ws/${PROJECT} as code-engine (no ports opened)`)
   const ws = new WebSocket(url)
   hub = ws
   // KEEPALIVE. An idle WebSocket is closed at the edge, and this one is idle most of the time — the engine
@@ -1881,11 +1885,28 @@ setInterval(() => { conceptConsolidateTick().catch((e) => console.log('[concept-
 // analyst (answers), connector (data sources), modeler (consolidation), reflex (front door). Other
 // agents stay on-demand. Fire-and-forget + per-agent logs so they're visible in the boot log; failures are
 // non-fatal (the agent just falls back to lazy spawn on first use).
+// One turn on a disposable claude session, purely to prove the box's credential authenticates. Throws on
+// failure so the readiness banner shows it, and names the specific "not logged in" case: that string is what
+// a stripped or expired credential looks like from the outside, and reading it as a broken agent has cost
+// real hours before.
+async function verifyBoxCredential(): Promise<void> {
+  const probe = createSession('claude-code', { cwd: WORKSPACE, model: 'claude-haiku-4-5-20251001' })
+  try {
+    const r = await probe.run('Reply with exactly: OK')
+    const text = (r?.lastLines ?? '').trim()
+    if (/not logged in|please run \/login|login expired|invalid api key/i.test(text)) {
+      throw new Error('credential rejected — the agent reports it is not logged in')
+    }
+    if (!text) throw new Error('no reply — could not confirm the credential works')
+  } finally { try { probe.stop() } catch { /* nothing to clean up if it never started */ } }
+}
+
 let warmed = false
 async function warmEssentialAgents() {
   // BEFORE any agent is spawned. A credential that arrives after the agent has started is a credential the
   // agent never sees — it inherits this process's environment once, at spawn.
-  try { await fetchBoxCredentials() }
+  let credGap: string[] = []
+  try { const c = await fetchBoxCredentials(); if (c.fleet) credGap = c.missing }
   catch (e: any) { console.warn(`[ica] box credentials: ${e?.message ?? e} — continuing with whatever this box has`) }
 
   if (warmed) return; warmed = true
@@ -1897,6 +1918,16 @@ async function warmEssentialAgents() {
   }
   const results = await Promise.all([
     warm('analyst',   analystSlot.get().then(a => a.session.warmup?.())),
+    // DOES THE CREDENTIAL ACTUALLY WORK? warm-up above only proves a process started and its prompt appeared,
+    // which stays true with no credential at all — that is exactly how a box that could not answer anything
+    // reported every agent healthy. One real round trip is the difference between "the TUI is up" and "this
+    // box can answer", and boot is the cheapest possible moment to find out: the alternative is finding out
+    // from a user's question, hours later, where it reads as an expired token rather than a bad boot.
+    //
+    // On a THROWAWAY session, never the analyst's — a probe turn on the analyst would sit in its transcript
+    // and in the context of every question that followed. And only on a fleet box: a laptop has its own login
+    // and gets restarted constantly, so this would be a pointless tax on the inner loop.
+    ...(credGap.length === 0 && isFleetBox() ? [warm('credential', verifyBoxCredential())] : []),
     warm('connector', connectorSlot.get().then(a => a.session.warmup?.())),
     // The concept index is an agent-shaped cost even though it is not an agent: every concept's surface forms
     // have to be embedded before the first question can be retrieved for, it is cached in memory only, and so
@@ -1906,13 +1937,18 @@ async function warmEssentialAgents() {
   ])
   // ONE unmistakable line the user can look for: the engine has finished booting and every essential agent
   // is up (or which one failed). "Fully ready" vs "ready with warnings" — never ambiguous.
-  const allOk = results.every(r => r.ok)
+  // A MISSING CREDENTIAL IS NOT READY. Warm-up proves a process started and its prompt appeared, which on a
+  // box with no credential is still true — that is how a machine that could not answer a single question
+  // printed FULLY READY. The banner is the one line people trust, so anything it cannot back up must not
+  // appear in it.
+  const allOk = results.every(r => r.ok) && credGap.length === 0
   const roster = results.map(r => `${r.name} ${r.ok ? '✓' : '✗'} ${(r.ms / 1000).toFixed(1)}s`).join(' · ')
   const sources = await listSources().then(s => s.length).catch(() => 0)
   const bar = '═'.repeat(64)
   console.log(`\n${bar}`)
   console.log(`  ${allOk ? '✅ ENGINE FULLY READY' : '⚠️  ENGINE READY (with warnings)'} — project ${PROJECT}`)
   console.log(`     agents: ${roster}`)
+  if (credGap.length > 0) console.log(`     ✗ NO CREDENTIAL: ${credGap.join(', ')} — those agents cannot answer (retrying the vault)`)
   console.log(`     datasources=${sources} · idle, waiting for questions`)
   console.log(`${bar}\n`)
 }

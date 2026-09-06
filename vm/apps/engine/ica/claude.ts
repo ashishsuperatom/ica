@@ -12,6 +12,7 @@ import { statSync, openSync, readSync, closeSync, writeFileSync, readFileSync, r
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { makeClaudeEventLog, transcriptPath } from './claude-events.js'
+import { boxCredentialsReady } from './box-credentials.js'
 
 // ── FIRST-RUN GATES ──────────────────────────────────────────────────────────────────────────────────────
 // A freshly provisioned box has a credential but no history, and claude-code asks three questions before it
@@ -180,6 +181,12 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
       serialize = new SerializeAddon(); term.loadAddon(serialize)
     }
     const m = await import('node-pty')
+    // A box-side credential is inherited ONCE, at spawn. Warm-up already waits for the vault before starting
+    // anything, but agents are also spawned lazily on first use — and a question that arrives while the vault
+    // is still being retried would otherwise spawn an agent with no credential, which then stays broken for
+    // its whole life while every log line says "not logged in". Wait here instead. Returns immediately on a
+    // machine with its own login, and is capped so a vault outage delays the answer rather than hanging it.
+    await boxCredentialsReady()
     // Before the very first spawn in this cwd: clear the prompts that would otherwise hang an unattended box.
     seedFirstRunGates(opts.cwd)
     // Each agent PTY must be a CLEAN, top-level claude-code session. If the engine was itself launched from
