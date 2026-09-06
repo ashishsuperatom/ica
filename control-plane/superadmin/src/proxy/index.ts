@@ -63,6 +63,13 @@ interface Upstream {
   keyOf: (env: ProxyEnv) => string | undefined
 }
 
+// THE PROXY IS DELIBERATELY DUMB. It knows keys and it counts tokens. It does NOT decide which account should
+// serve a model — the ENGINE decides that (ica/providers.ts) and names the provider in the URL it calls.
+//
+// That split is on purpose. The engine knows what it is trying to do, which credentials the box actually
+// holds, and what to fall back to when one fails; reproducing any of that here would be a second, divergent
+// copy of a decision already made, in a place with less information. A proxy that routes is a proxy you have
+// to debug when the answer is wrong.
 const UPSTREAMS: Record<string, Upstream> = {
   openrouter: {
     base: 'https://openrouter.ai/api/v1',
@@ -152,7 +159,7 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
   // every route below is written once and does not care how the caller identified itself.
   let pathToken: string | null = null
   if (seg[0] === PATH_PREFIX && seg.length > 1) { pathToken = seg[1]; seg = seg.slice(2) }
-  const head = seg[0] ?? ''
+  const head = seg[0] ?? ''          // a service route (_health/_whoami/_key) or the provider the engine chose
 
   if (head === '_health') {
     return json({ ok: true, providers: Object.keys(UPSTREAMS).filter(p => UPSTREAMS[p].keyOf(env)) })
@@ -178,9 +185,17 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
     return json({ provider: name, key })
   }
 
-  const up = UPSTREAMS[head]
-  if (!up) return json({ error: `unknown route /${head}`, providers: Object.keys(UPSTREAMS) }, 404)
-  if (!project) return json({ error: `no project token — call /${PATH_PREFIX}/<token>/${head}/…` }, 401)
+  // The provider is NAMED by the caller: the engine already chose it. We look up its key and forward.
+  const name = head
+  const up = UPSTREAMS[name]
+  if (!up) return json({ error: `unknown provider /${name}`, providers: Object.keys(UPSTREAMS) }, 404)
+  if (!project) return json({ error: `no project token — call /${PATH_PREFIX}/<token>/${name}/…` }, 401)
+
+  // The model is read only to LABEL the meter, never to route. Clone: a body can be read once.
+  let model: string | undefined
+  if (request.body) {
+    try { model = (await request.clone().json() as any)?.model } catch { /* not JSON, or empty */ }
+  }
 
   const headers = new Headers(request.headers)
   headers.delete(PROJECT_HEADER)     // our concern, not the provider's
@@ -196,17 +211,13 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
     up.auth(headers, key)
   }
 
-  // Read the model for the meter without consuming the body: a request body can only be read once, so clone.
-  let model: string | undefined
-  if (request.body) {
-    try { model = (await request.clone().json() as any)?.model } catch { /* not JSON, or empty */ }
-  }
-
+  // The client's own path is forwarded as-is: it built a request for a real API and we are standing in
+  // for that API, so rewriting its path would change the call it meant to make.
   const target = up.base + '/' + seg.slice(1).join('/') + url.search
   const t0 = Date.now()
   const res = await fetch(target, { method: request.method, headers, body: request.body, redirect: 'manual' })
 
-  const rec = { project, provider: head, model, ms: 0, in: 0, out: 0 }
+  const rec = { project, provider: name, model, ms: 0, in: 0, out: 0 }
   if (!res.body) return res
 
   // A stream is metered as it flows; a plain JSON response is metered after the fact from a clone, so neither
