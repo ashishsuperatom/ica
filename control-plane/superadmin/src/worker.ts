@@ -19,6 +19,8 @@ import { channelAdapter } from '../../../clients/messaging/index.js'
 // Speech-to-text for voice clients (mobile). A SELF-CONTAINED module in src/transcription/ —
 // this import and the /api/transcribe route below are its ONLY touchpoints in the worker.
 import { handleTranscribe } from './transcription/index.js'
+// proxy.superatom.site — self-contained. Delete src/proxy/ and these two lines and nothing else changes.
+import { handleProxyHost, PROXY_SUBDOMAIN } from './proxy/index.js'
 import { createMachine, stopMachine, FLY_APP } from './fly.js'
 // Auth: token primitives + Clerk→platform-token mint (./auth/tokens.ts) and the mobile browser-redirect
 // device flow (./auth/mobile.ts). worker.ts only routes to these; the rules live in the module.
@@ -135,6 +137,11 @@ export default {
     const url  = new URL(request.url)
     const path = url.pathname
     const isWs = request.headers.get('upgrade') === 'websocket'
+
+    // ── proxy.superatom.site — model traffic ──────────────────────────────────
+    // BEFORE the site routing below, which would otherwise resolve `proxy` as a project subdomain and hand
+    // back an app. Everything behind this line lives in src/proxy/ and is reachable only from here.
+    if (url.hostname === `${PROXY_SUBDOMAIN}${SITE_SUFFIX}`) return handleProxyHost(request, env, ctx)
 
     // ── *.superatom.site — subdomain-addressed apps ───────────────────────────
     // Only document/SPA requests are host-routed here; /_ws/*, /api/*, and /mobile/* (the device-login page)
@@ -372,6 +379,18 @@ export default {
 
     // ── Domains API (subdomain → projectId registry; forwarded to GlobalDO) ──
     if (path.startsWith('/api/domains')) {
+      // RESERVED NAMES. Some subdomains are answered by this worker itself, so letting a project claim one
+      // would take an address the platform is already using — the claim would appear to succeed and then
+      // quietly never route, which is the worst way for it to fail. Checked here, at the only place a name is
+      // taken, rather than trusted to nobody trying.
+      if (request.method === 'POST' && path === '/api/domains/claim') {
+        const b = await request.clone().json().catch(() => ({})) as any
+        const want = String(b?.subdomain ?? '').toLowerCase().trim()
+        if (want && RESERVED_SUBDOMAINS.has(want)) {
+          return new Response(JSON.stringify({ ok: false, error: `"${want}" is reserved by the platform` }),
+            { status: 409, headers: { 'content-type': 'application/json' } })
+        }
+      }
       // A subdomain decides which project a visitor's browser is handed, so claiming one is an act ON that
       // project and needs the same standing as provisioning it. Releasing one takes a customer's address away.
       // This forwarded to the DO with no auth at all.
@@ -576,6 +595,16 @@ async function handleProjectMutate(request: Request, env: Env, ctx: ExecutionCon
 // ── *.superatom.site host routing ────────────────────────────────────────────
 
 const SITE_SUFFIX = '.superatom.site'
+// Names the platform answers on, or intends to. A project claiming one would shadow a service, so they are
+// refused at claim time. Add to this list BEFORE shipping anything that answers on a new subdomain — the
+// alternative is discovering a customer already owns the name.
+const RESERVED_SUBDOMAINS = new Set([
+  PROXY_SUBDOMAIN,
+  'www', 'api', 'app', 'admin', 'auth', 'login', 'account', 'accounts',
+  'hub', 'ws', 'gateway', 'gw', 'cdn', 'static', 'assets', 'docs', 'status',
+  'mail', 'smtp', 'ftp', 'ns1', 'ns2', 'mx',          // infrastructure names mail/DNS tooling assumes
+  'superatom', 'system', 'internal', 'test', 'staging', 'dev',
+])
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 // Resolve a named subdomain → projectId. Hot path: Workers KV (edge-cached,
