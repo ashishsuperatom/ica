@@ -928,13 +928,20 @@ async function handleCredentialsAdmin(request: Request, env: Env, path: string):
   const kv: any = (env as any).CREDENTIALS
   if (!kv) return Response.json({ error: 'no CREDENTIALS KV bound' }, { status: 503 })
   const master = (env as any).CREDENTIALS_MASTER_KEY
-  const { readVault, writeVault, redact, tidy } = await import('./proxy/vault.js')
+  const { readVault, writeVault, redact, tidy, expiryOf, expiring } = await import('./proxy/vault.js')
+  const { readUsage, askUsage, writeUsage, canAsk } = await import('./proxy/usage.js')
   const { UPSTREAMS } = await import('../../../agent-proxy/contract.mjs')
 
   // GET /api/credentials — the whole picture, values removed. One read, one decrypt.
   if (request.method === 'GET' && path === '/api/credentials') {
     const v = await readVault(kv, master)
-    return Response.json({ ...redact(v), providers: Object.keys(UPSTREAMS), sealed: !!master })
+    const r = redact(v)
+    // One read per entry, in parallel — usage lives in its OWN key per credential so nothing can clobber
+    // anything else, which is the whole reason it is not in the vault document.
+    const usage = await Promise.all(r.entries.map((e: any) => readUsage(kv, e.id)))
+    r.entries.forEach((e: any, i: number) => { e.usage = usage[i]; e.canAskUsage = canAsk(e.provider) })
+    // Warnings first, because the thing an operator needs to see is what is about to stop working.
+    return Response.json({ ...r, providers: Object.keys(UPSTREAMS), sealed: !!master, expiring: expiring(v, 3) })
   }
 
   // Everything below is read-modify-write on the one document, so each change is atomic and there is never a
@@ -944,8 +951,13 @@ async function handleCredentialsAdmin(request: Request, env: Env, path: string):
     if (!b?.id || !b?.provider || !b?.value) return Response.json({ error: 'body: { id, provider, value, groups?, note? }' }, { status: 400 })
     if (!Object.keys(UPSTREAMS).includes(b.provider)) return Response.json({ error: `no provider named ${b.provider}` }, { status: 400 })
     const v = tidy(await readVault(kv, master))
+    // Expiry is READ from the credential, not asked for: a JWT says when it dies, and a field someone types
+    // is a field someone forgets to update. `expiresAt` in the body is honoured only for credentials that
+    // cannot tell us themselves.
     const entry = { id: String(b.id), provider: String(b.provider), value: String(b.value),
-                    groups: Array.isArray(b.groups) ? b.groups : undefined, note: b.note, addedAt: new Date().toISOString() }
+                    groups: Array.isArray(b.groups) ? b.groups : undefined, note: b.note,
+                    addedAt: new Date().toISOString(),
+                    expiresAt: expiryOf(String(b.value)) ?? (typeof b.expiresAt === 'number' ? b.expiresAt : undefined) }
     const next = { ...v, entries: [...v.entries.filter((e) => e.id !== entry.id), entry] }
     await writeVault(kv, next, master)
     return Response.json(redact(next))
@@ -966,6 +978,20 @@ async function handleCredentialsAdmin(request: Request, env: Env, path: string):
     const next = { ...v, groups: { ...v.groups, [b.projectId]: String(b.group) } }
     await writeVault(kv, next, master)
     return Response.json(redact(next))
+  }
+
+  // POST /api/credentials/refresh — ask every provider that can tell us how much is left, and store the
+  // ABSOLUTE answer per credential. Nothing is accumulated here, so two of these running at once cannot lose
+  // each other's work: they write the same observed truth, and the later one is the better one.
+  if (request.method === 'POST' && path === '/api/credentials/refresh') {
+    const v = await readVault(kv, master)
+    const asked = await Promise.all(v.entries.map(async (e) => {
+      if (!canAsk(e.provider)) return { id: e.id, skipped: 'provider cannot tell us' }
+      const snap = await askUsage(e.provider, e.value)
+      if (snap) await writeUsage(kv, e.id, snap)
+      return { id: e.id, provider: e.provider, ...(snap?.error ? { error: snap.error } : { percentUsed: snap?.percentUsed, remaining: snap?.remaining }) }
+    }))
+    return Response.json({ refreshed: asked })
   }
 
   // Put a key back in service by hand, when you know it reset before its cooldown expired.

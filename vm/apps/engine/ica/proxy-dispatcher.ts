@@ -24,12 +24,28 @@
 // Unset ⇒ nothing is installed and the process behaves exactly as it does now.
 
 import { setGlobalDispatcher, getGlobalDispatcher, ProxyAgent, Dispatcher } from 'undici'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const tunnel = process.env.SUPERATOM_TUNNEL
-// The ChatGPT backend and its token endpoint. Nothing else needs a tunnel: every other provider is a public
-// API we can reverse-proxy, which is cheaper and lets us count tokens.
-const HOSTS = (process.env.SUPERATOM_TUNNEL_HOSTS ?? 'chatgpt.com,auth.openai.com')
-  .split(',').map((h) => h.trim().toLowerCase()).filter(Boolean)
+// LOAD THE ENV OURSELVES. This module must be imported before anything can fetch, and imports run before any
+// statement in engine.ts — including its own loadEnvFile. So a dispatcher that read process.env directly saw
+// nothing and silently installed nothing, which looks exactly like working correctly.
+try { process.loadEnvFile(join(dirname(fileURLToPath(import.meta.url)), '..', '.env')) } catch { /* fine: pm2 supplies the environment */ }
+
+// ONE variable, and the project credentials the engine already holds. proxy.<platform> and tunnel.<platform>
+// follow from the domain, so moving the platform is one edit rather than three that can disagree — and there
+// is no way to point the two halves at different places by accident.
+const PLATFORM = process.env.SUPERATOM_PLATFORM
+const PROJECT = process.env.ICA_PROJECT
+const KEY = process.env.ICA_KEY
+const tunnel = PLATFORM && PROJECT && KEY
+  ? `http://${PROJECT}:${KEY}@tunnel.${PLATFORM}:443`
+  : undefined
+
+// The ChatGPT backend and its token endpoint, and nothing else. Fixed rather than configurable because it is a
+// FACT about that backend — it refuses any relayed request — not a preference someone should be tuning. Every
+// other provider is a public API the Worker can reverse-proxy, which is cheaper and lets us count tokens.
+const HOSTS = ['chatgpt.com', 'auth.openai.com']
 
 if (tunnel) {
   const direct = getGlobalDispatcher()

@@ -40,11 +40,25 @@ import zlib from 'node:zlib'
 // own plumbing, which is why the two files look nothing alike below this line.
 import { UPSTREAMS, PATH_PREFIX, parsePath, bearerOf, decide, usageFromSseTail, usageFrom } from './contract.mjs'
 
-const PORT = Number(process.env.PROXY_PORT ?? 8080)
-// Where reverse-mode traffic goes when the request does not name an upstream itself.
-const UPSTREAM = process.env.PROXY_UPSTREAM ?? 'https://api.anthropic.com'
-const VERBOSE = process.env.PROXY_VERBOSE === '1'      // log every header name we saw (never a value)
-const BODIES = process.env.PROXY_BODIES === '1'        // log a short prefix of request bodies (may contain prompts)
+// ── CONFIGURATION: three variables; everything else is a decision already made ───────────────────────────
+//
+//   SUPERATOM_PLATFORM   the domain the platform lives on — proxy.<domain> follows from it, so there is one
+//                        thing to change when it moves rather than several that can disagree
+//   PROXY_PROJECT        who this box is
+//   PROXY_PROJECT_KEY    proof of it, checked against ProjectDO
+//
+// Everything that used to be a knob is now decided. The port is 443, because a network restrictive enough to
+// need this proxy will not admit an odd one. The tunnel's destinations are fixed because they are a FACT — the
+// ChatGPT backend refuses relayed requests — rather than a preference. Ten minutes of cache keeps ProjectDO,
+// single-threaded per project, out of the request path. A setting for each of those is a way to get one wrong
+// on one box and spend an afternoon finding out.
+const PLATFORM = process.env.SUPERATOM_PLATFORM || 'superatom.site'
+const PROJECT = process.env.PROXY_PROJECT || ''
+const PROJECT_KEY = process.env.PROXY_PROJECT_KEY || ''
+
+const PORT = 443
+const VERIFY_URL = `https://proxy.${PLATFORM}`
+const TTL_MS = 10 * 60 * 1000        // both "is this project real" and "which credential is current"
 
 // Headers whose VALUE is a credential. Reported by fingerprint, never printed.
 const SECRET_HEADERS = new Set(['authorization', 'x-api-key', 'proxy-authorization', 'cookie', 'set-cookie'])
@@ -61,22 +75,11 @@ const fp = (v) => {
 const ts = () => new Date().toISOString().slice(11, 23)
 const log = (...a) => console.log(`${ts()}`, ...a)
 
-// What credentials do WE hold? Injected in reverse mode when the client sent none of its own.
-//
-// PROXY_ANTHROPIC_AUTH is deliberately raw and whole ("Bearer eyJ…" or an oauth token) rather than assembled
-// from parts here: the agents differ in which header they use, and guessing wrongly produces a 401 that reads
-// like a bad credential rather than a bad guess.
-const HELD = {
-  'x-api-key': process.env.PROXY_ANTHROPIC_API_KEY || '',
-  authorization: process.env.PROXY_ANTHROPIC_AUTH || '',
-}
-const heldSummary = () => Object.entries(HELD).filter(([, v]) => v).map(([k]) => k).join(', ') || 'none'
 
 // ── PARITY MODE — the same URL contract the Worker serves ────────────────────────────────────────────────
 // Enabled by PROXY_VERIFY_URL. This box is the SECONDARY proxy: the Worker is primary, and this exists so
 // neither is a single point of failure, and so a provider can be moved here unchanged if a Worker limit ever
 // bites. Same paths, same auth rule, same key attaching — only the plumbing differs.
-const VERIFY_URL = process.env.PROXY_VERIFY_URL || ''      // e.g. https://proxy.superatom.site
 // ── CREDENTIALS COME FROM THE VAULT, NOT FROM THIS BOX ───────────────────────────────────────────────────
 // This machine holds no provider keys. It asks the Worker for one, exactly the way an engine does, using the
 // project credentials it already needs for verification — so there is ONE place a key lives and one place to
@@ -85,18 +88,17 @@ const VERIFY_URL = process.env.PROXY_VERIFY_URL || ''      // e.g. https://proxy
 // PROXY_PROJECT / PROXY_PROJECT_KEY identify this box to the vault. Absent, or the vault unreachable, it
 // falls back to a provider key in the environment — a box has to keep working when the control plane is
 // having a bad day, and saying so in the log is better than failing silently either way.
-const VAULT_TTL_MS = Number(process.env.PROXY_KEY_TTL_MS ?? 10 * 60 * 1000)
 const keyCache = new Map()   // provider → { key, id, at }
 
 async function keyFor(name) {
   const u = UPSTREAMS[name]
   const fromEnv = u?.envKey ? process.env[u.envKey] : undefined
 
-  const pid = process.env.PROXY_PROJECT, pkey = process.env.PROXY_PROJECT_KEY
+  const pid = PROJECT, pkey = PROJECT_KEY
   if (!VERIFY_URL || !pid || !pkey) return fromEnv
 
   const hit = keyCache.get(name)
-  if (hit && Date.now() - hit.at < VAULT_TTL_MS) return hit.key
+  if (hit && Date.now() - hit.at < TTL_MS) return hit.key
 
   try {
     const r = await fetch(`${VERIFY_URL}/${PATH_PREFIX}/${encodeURIComponent(pid)}/_key/${encodeURIComponent(name)}`,
@@ -132,20 +134,19 @@ const forgetKey = (name) => keyCache.delete(name)
 // The cost is revocation lag: a key stays usable for up to the TTL after it is revoked. Acceptable here
 // because this credential gates EGRESS to an allowlist of model providers, not access to data — and because
 // we own this box, so shortening it is a restart, not a release.
-const VERIFY_TTL_MS = Number(process.env.PROXY_VERIFY_TTL_MS ?? 10 * 60 * 1000)
 const verifyCache = new Map()   // projectId+key → { ok, at }
 async function provenProject(projectId, key) {
   if (!projectId || !key || !VERIFY_URL) return false
   const ck = projectId + '\u0000' + key
   const hit = verifyCache.get(ck)
-  if (hit && Date.now() - hit.at < VERIFY_TTL_MS) return hit.ok
+  if (hit && Date.now() - hit.at < TTL_MS) return hit.ok
   try {
     const r = await fetch(`${VERIFY_URL}/${PATH_PREFIX}/${encodeURIComponent(projectId)}/_verify`,
       { headers: { authorization: `Bearer ${key}` } })
     const ok = r.status === 200
     // Only SUCCESS is cached for the full term. A refusal is cached briefly — long enough to blunt a guessing
     // loop, short enough that a box whose key was just fixed is not locked out for ten minutes.
-    verifyCache.set(ck, { ok, at: ok ? Date.now() : Date.now() - VERIFY_TTL_MS + 30_000 })
+    verifyCache.set(ck, { ok, at: ok ? Date.now() : Date.now() - TTL_MS + 30_000 })
     return ok
   } catch (e) { log(`   xx verify failed (${e.message}) — refusing rather than guessing`); return false }
 }
@@ -164,7 +165,7 @@ async function contractRoute(req, res) {
     const have = []
     for (const n of Object.keys(UPSTREAMS)) if (await keyFor(n)) have.push(n)
     return send(200, { ok: true, mode: 'ec2', providers: have, tunnel: true,
-                       vault: !!(VERIFY_URL && process.env.PROXY_PROJECT && process.env.PROXY_PROJECT_KEY) })
+                       vault: !!(PROJECT && PROJECT_KEY) })
   }
 
   const sent = bearerOf((h) => req.headers[h] ?? null)
@@ -216,106 +217,6 @@ async function contractRoute(req, res) {
   req.pipe(fwd)
 }
 
-function reverse(req, res) {
-  const up = new URL(UPSTREAM)
-  const target = new URL(req.url, UPSTREAM)
-  const headers = { ...req.headers }
-
-  // Host must become the upstream's or TLS/SNI and routing disagree with the certificate.
-  delete headers.host
-  delete headers['content-length']   // recomputed by the upstream request as we stream
-
-  const sentByAgent = Object.keys(headers).filter((h) => SECRET_HEADERS.has(h) && headers[h])
-  const injected = []
-  for (const [h, v] of Object.entries(HELD)) {
-    if (!v) continue
-    // The agent's own credential WINS. This proxy is a fallback for an agent that has none, not a way to
-    // silently answer as somebody else — an agent that authenticated itself should keep its own identity.
-    if (headers[h]) continue
-    headers[h] = v
-    injected.push(h)
-  }
-  // Extra headers an upstream needs that the client did not send. A client pointed at a CUSTOM provider often
-  // omits headers it would send to the real one — codex, for instance, sends neither its credential nor its
-  // account id — so standing in for that API means supplying them.
-  try { for (const [k, v] of Object.entries(JSON.parse(process.env.PROXY_EXTRA_HEADERS || '{}'))) if (!headers[k]) headers[k] = v } catch { /* not JSON */ }
-
-  // Anthropic rejects a request with no version header; an agent that sent none was relying on a client
-  // default we are now standing in for.
-  if (up.hostname.endsWith('anthropic.com') && !headers['anthropic-version']) headers['anthropic-version'] = '2023-06-01'
-
-  log(`→ ${req.method} ${target.pathname}${target.search}`)
-  log(`   agent sent: ${sentByAgent.length ? sentByAgent.map((h) => `${h}=${fp(headers[h])}`).join(' ') : 'NO credential headers'}`)
-  log(`   injected  : ${injected.length ? injected.join(', ') : 'nothing (agent had its own, or we hold none)'}`)
-  if (VERBOSE) log(`   headers   : ${Object.keys(headers).join(', ')}`)
-
-  const client = up.protocol === 'http:' ? http : https
-  const fwd = client.request(
-    { protocol: up.protocol, hostname: up.hostname, port: up.port || (up.protocol === 'http:' ? 80 : 443),
-      method: req.method, path: target.pathname + target.search, headers },
-    (upRes) => {
-      log(`← ${upRes.statusCode} ${upRes.statusMessage ?? ''} for ${req.method} ${target.pathname}`)
-      // A redirect says precisely what the upstream wanted instead, which is the one thing a status code alone
-      // never tells you — and chasing it blind is how an afternoon disappears.
-      if (upRes.statusCode >= 300 && upRes.statusCode < 400) log(`   ↪ Location: ${upRes.headers.location ?? '(none)'}`)
-      // A 401/403 is the whole point of the experiment, so make it loud and keep the body: that body is the
-      // upstream telling us exactly which credential shape it wanted.
-      if (upRes.statusCode === 401 || upRes.statusCode === 403) {
-        let body = ''
-        upRes.on('data', (c) => { if (body.length < 2000) body += c })
-        upRes.on('end', () => log(`   !! auth rejected: ${body.slice(0, 800)}`))
-      }
-      res.writeHead(upRes.statusCode ?? 502, upRes.headers)
-      upRes.pipe(res)
-    })
-
-  fwd.on('error', (e) => {
-    log(`   xx upstream error: ${e.message}`)
-    if (!res.headersSent) res.writeHead(502, { 'content-type': 'application/json' })
-    res.end(JSON.stringify({ error: { type: 'proxy_error', message: e.message } }))
-  })
-
-  // BUFFER THE BODY when asked. Streaming a request through re-chunks it and drops content-length, and some
-  // upstreams simply will not accept a chunked POST — they answer with a redirect rather than an error, which
-  // looks like an auth problem and is not. Buffering costs a little memory on a request we already hold.
-  if (process.env.PROXY_BUFFER_BODY === '1') {
-    const chunks = []
-    req.on('data', (c) => chunks.push(c))
-    req.on('end', () => {
-      const body = Buffer.concat(chunks)
-      if (body.length) fwd.setHeader('content-length', String(body.length))
-      fwd.end(body)
-    })
-    return
-  }
-
-  if (BODIES) {
-    let seen = ''
-    req.on('data', (c) => { if (seen.length < 400) seen += c })
-    req.on('end', () => { if (seen) log(`   body      : ${seen.slice(0, 400).replace(/\s+/g, ' ')}`) })
-  }
-  req.pipe(fwd)
-}
-
-// ── FORWARD MODE, plain HTTP ─────────────────────────────────────────────────────────────────────────────
-// An absolute-form URI ("GET http://host/path") means the client is treating us as a proxy. Plain HTTP is
-// readable, so this path CAN see credentials — but agents talk to https:// endpoints, so in practice this
-// mostly catches health checks and anything misconfigured to plaintext.
-function forwardHttp(req, res) {
-  const target = new URL(req.url)
-  log(`→ [proxy:http] ${req.method} ${target.href}`)
-  const creds = Object.keys(req.headers).filter((h) => SECRET_HEADERS.has(h) && req.headers[h])
-  log(`   agent sent: ${creds.length ? creds.map((h) => `${h}=${fp(req.headers[h])}`).join(' ') : 'NO credential headers'}`)
-
-  const headers = { ...req.headers }
-  delete headers['proxy-connection']
-  const fwd = http.request(
-    { hostname: target.hostname, port: target.port || 80, method: req.method, path: target.pathname + target.search, headers },
-    (upRes) => { log(`← [proxy:http] ${upRes.statusCode} ${target.href}`); res.writeHead(upRes.statusCode ?? 502, upRes.headers); upRes.pipe(res) })
-  fwd.on('error', (e) => { log(`   xx ${e.message}`); res.writeHead(502).end(e.message) })
-  req.pipe(fwd)
-}
-
 // ── FORWARD MODE, CONNECT ────────────────────────────────────────────────────────────────────────────────
 // We open a raw socket to the destination and copy bytes. The TLS session is between the client and the REAL
 // server, so what we learn is: this agent honours proxy env, and it is talking to THIS host. Not one header
@@ -323,8 +224,8 @@ function forwardHttp(req, res) {
 // Which hosts the tunnel will open a socket to. An open CONNECT proxy is a resource anyone on the internet
 // can use once they find it, so the destination is checked as well as the caller — a stolen credential then
 // buys access to our model providers and nothing else.
-const TUNNEL_ALLOW = (process.env.PROXY_TUNNEL_ALLOW ??
-  'chatgpt.com,api.openai.com,auth.openai.com,api.anthropic.com,opencode.ai,openrouter.ai').split(',').map((h) => h.trim()).filter(Boolean)
+const TUNNEL_ALLOW = ['chatgpt.com', 'auth.openai.com', 'api.openai.com',
+                      'api.anthropic.com', 'opencode.ai', 'openrouter.ai']
 const allowed = (host) => TUNNEL_ALLOW.some((d) => host === d || host.endsWith('.' + d))
 
 // ── FORWARD MODE, CONNECT ────────────────────────────────────────────────────────────────────────────────
@@ -386,29 +287,25 @@ async function connect(req, clientSocket, head) {
 }
 
 // ── ONE PORT, BOTH MODES ─────────────────────────────────────────────────────────────────────────────────
+// A CONNECT means a tunnel; any other request means the contract path. There is no third case: the
+// single-upstream reverse handler and the plaintext forward handler both existed to run the experiments that
+// established the ChatGPT backend cannot be relayed, and that question is settled.
 const server = http.createServer((req, res) => {
-  // Our own liveness, answered before anything is forwarded, so "is the proxy up" never depends on upstream
-  // credentials being right.
-  if (req.url === '/__proxy/health') {
-    res.writeHead(200, { 'content-type': 'application/json' })
-    return res.end(JSON.stringify({ ok: true, upstream: UPSTREAM, holds: heldSummary() }))
-  }
-  if (/^https?:\/\//i.test(req.url)) return forwardHttp(req, res)
-  // Contract paths when this box is running in parity mode; otherwise the original single-upstream behaviour,
-  // which is what the experiment scripts still use.
-  if (VERIFY_URL && req.url.startsWith(`/${PATH_PREFIX}/`)) return contractRoute(req, res).catch((e) => {
-    log(`   xx ${e.message}`); if (!res.headersSent) res.writeHead(500); res.end()
+  contractRoute(req, res).catch((e) => {
+    log(`   xx ${e.message}`)
+    if (!res.headersSent) res.writeHead(500, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ error: 'proxy error' }))
   })
-  return reverse(req, res)
 })
 
-server.on('connect', (req, sock, head) => { connect(req, sock, head).catch((e) => { log(`   xx connect: ${e.message}`); sock.destroy() }) })
+server.on('connect', (req, sock, head) => {
+  connect(req, sock, head).catch((e) => { log(`   xx connect: ${e.message}`); sock.destroy() })
+})
 server.on('clientError', (e, sock) => { log(`   xx client error: ${e.message}`); sock.destroy() })
 
 server.listen(PORT, () => {
   log(`agent-proxy on :${PORT}`)
-  log(`  reverse  → ${UPSTREAM}   (point an agent here with ANTHROPIC_BASE_URL=http://127.0.0.1:${PORT})`)
-  log(`  forward  → CONNECT tunnel (point an agent here with HTTPS_PROXY=http://127.0.0.1:${PORT})`)
-  log(`  holding  → ${heldSummary()}`)
+  log(`  platform → ${PLATFORM}   (verifying against ${VERIFY_URL})`)
+  log(`  project  → ${PROJECT || 'NOT SET — this box cannot fetch credentials or authenticate callers'}`)
   log('')
 })

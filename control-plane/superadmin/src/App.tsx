@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Credentials } from './Credentials'
 import { DashboardsPanel } from './Dashboards'
 import { useProjectHub } from './hub'
 import { Inspector, SECTIONS, SECTION_LABEL, type Section } from './Inspector'
@@ -93,6 +94,7 @@ function Style() { return <style dangerouslySetInnerHTML={{ __html: CSS }} /> }
 
 // minimal Stripe-ish line icons
 const I = {
+  key: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><circle cx="7.5" cy="15.5" r="3.5"/><path d="M10 13 20 3M17 6l2 2M14 9l2 2"/></svg>,
   home: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>,
   grid: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>,
   users: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><path d="M16 5.5a3 3 0 0 1 0 5.8M20.5 20a5 5 0 0 0-4-4.9"/></svg>,
@@ -211,6 +213,7 @@ function Shell({ children, crumbs, nav }: { children: React.ReactNode; crumbs?: 
         <nav>
           <div className="grp">Manage</div>
           <Link to="/" className="nav">{I.home}Organizations</Link>
+          <Link to="/credentials" className="nav">{I.key}Credentials</Link>
           {nav}
         </nav>
         <div className="foot"><UserButton /></div>
@@ -240,6 +243,7 @@ export function App() {
         {/* Landing: the platform console lists every org; the customer console sends you to your own. */}
         <Route path="/" element={HOST_SCOPE === 'admin' ? <MyOrgLanding /> : <OrgListPage />} />
         <Route path="/org/:orgId" element={<OrgDetailPage />} />
+        <Route path="/credentials" element={<CredentialsPage />} />
         {/* /pro/<projectId> — a project on its own, no org in the path. */}
         <Route path="/pro/:projectId/*" element={<ProjectDetailPage />} />
         {/* The older nested form still resolves, so existing links keep working. */}
@@ -365,6 +369,21 @@ function OrgListPage() {
 }
 
 // ── Org detail ─────────────────────────────────────────────────────────────
+// Platform-wide, not per-org: one pool of provider keys serves every project, and which project may use which
+// is exactly what the screen is for.
+function CredentialsPage() {
+  const token = useAuth(); const api = useApi(token)
+  return (
+    <Shell crumbs={<><Link to="/">Organizations</Link><span>/</span>Credentials</>}>
+      <h2 style={{ margin: '0 0 4px' }}>Credentials</h2>
+      <div className="muted" style={{ marginBottom: 18 }}>
+        The keys the coding agents use, and who may use them. Stored sealed; values are never shown here.
+      </div>
+      <Credentials api={api} />
+    </Shell>
+  )
+}
+
 function OrgDetailPage() {
   const token = useAuth(); const { orgId } = useParams<{ orgId: string }>(); const api = useApi(token, orgId)
   const [search, setSearch] = useSearchParams()

@@ -32,7 +32,8 @@ import { UPSTREAMS as CONTRACT, PATH_PREFIX as SHARED_PREFIX, PROJECT_HEADER as 
          parsePath, bearerOf as sharedBearer, decide, usageFrom as sharedUsage, usageFromSseTail } from '../../../../agent-proxy/contract.mjs'
 
 import type { KV } from './pool.js'
-import { readVault, writeVault, candidates, groupOf, markSpent, tidy, type Vault } from './vault.js'
+import { readVault, writeVault, candidates, groupOf, markSpent, tidy, expiring, type Vault } from './vault.js'
+import { refreshIfStale } from './usage.js'
 
 export interface ProxyEnv {
   // Credential POLICY and STATE — which key serves which group, and which are spent. Never the values.
@@ -186,6 +187,10 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
         const v = await vaultOf(env)
         vault.entries = v.entries.length
         vault.providers = [...new Set(v.entries.map((e: any) => e.provider))]
+        // Named on the health check so it is visible to anything that polls, rather than only to someone who
+        // thinks to look. An expired credential fails at the agent as something unrelated.
+        const soon = expiring(v, 3)
+        if (soon.length) vault.expiring = soon.map((e) => `${e.id} in ${e.inDays}d`)
       } catch (e: any) { vault.error = String(e?.message ?? e).slice(0, 120) }
     }
     return json({ ok: true, vault,
@@ -230,8 +235,13 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
     const usable = candidates(vault, name, project!)
     if (usable.length) {
       const c = usable[0]
-      console.log(`[proxy] KEY ISSUED ${name}/${c.id} → project ${project} (group ${group})`)
-      return json({ provider: name, keyId: c.id, key: c.value })
+      const days = c.expiresAt ? Math.floor((c.expiresAt - Date.now()) / 86_400_000) : null
+      console.log(`[proxy] KEY ISSUED ${name}/${c.id} → project ${project} (group ${group}${days !== null ? `, expires in ${days}d` : ''})`)
+      // Ask the provider how much is left, off the response path and only when what we have has gone stale.
+      // A figure nobody is looking at yet must never delay an agent's turn.
+      if (env.CREDENTIALS) ctx.waitUntil(refreshIfStale(env.CREDENTIALS, c.id, c.provider, c.value))
+      // The box is told when its credential dies, so it can re-ask before rather than after.
+      return json({ provider: name, keyId: c.id, key: c.value, expiresAt: c.expiresAt ?? null })
     }
 
     // Nothing in the vault: fall back to the single configured key, so a provider works before anyone has

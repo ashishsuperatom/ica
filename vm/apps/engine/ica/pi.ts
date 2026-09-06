@@ -208,13 +208,16 @@ export function createPiSession(opts: PiSessionOpts): Session {
     //
     // Unset ⇒ the model keeps the provider's own URL and the box talks to the provider directly — exactly what
     // every existing box does today, so this changes nothing until it is switched on.
-    const proxyBase = process.env.SUPERATOM_PROXY?.replace(/\/+$/, '')
+    // proxy.<platform>/p/<projectId> — derived, so the engine is configured by naming the platform once.
+    const platform = process.env.SUPERATOM_PLATFORM
+    const proxyBase = platform && process.env.ICA_PROJECT
+      ? `https://proxy.${platform}/p/${process.env.ICA_PROJECT}` : undefined
     if (proxyBase) {
       model.baseUrl = `${proxyBase}/${provider}`
       // The project's own API key travels as the provider credential, because that is the only slot an agent
       // will populate — the proxy recognises `sk-proj-…`, proves it, and substitutes the real key. A provider
       // that brings its own credential (codex) keeps it; the proxy forwards that untouched.
-      if (process.env.SUPERATOM_PROJECT_KEY && !model.apiKey) model.apiKey = process.env.SUPERATOM_PROJECT_KEY
+      if (process.env.ICA_KEY && !model.apiKey) model.apiKey = process.env.ICA_KEY
       console.log(`[ica:pi] via proxy → ${model.baseUrl}`)
     }
 

@@ -31,6 +31,11 @@ export interface VaultEntry {
   groups?: string[]     // project groups that may use it; absent ⇒ any
   note?: string
   addedAt?: string
+  // WHEN IT DIES. A ChatGPT access token lasts about ten days, and when it lapses the symptom is an agent that
+  // looks broken rather than a token that looks expired — which is exactly the confusion that has cost real
+  // time here before. Read from the credential itself where it says so (a JWT carries `exp`), so it is a fact
+  // rather than someone's note, and reported before it bites.
+  expiresAt?: number    // epoch ms
 }
 
 export interface Vault {
@@ -63,7 +68,8 @@ export function candidates(v: Vault, provider: string, projectId: string, now = 
   return v.entries.filter((e) =>
     e.provider === provider &&
     (!e.groups?.length || e.groups.includes(group)) &&
-    !((v.spent?.[e.id] ?? 0) > now))
+    !((v.spent?.[e.id] ?? 0) > now) &&
+    usable(e, now))
 }
 
 /** Mark a credential spent for a while. The cooldown is how long before it is tried again — hours for a
@@ -85,8 +91,39 @@ export const groupOf = (v: Vault, projectId: string): string => v.groups[project
 export function redact(v: Vault) {
   const now = Date.now()
   return {
-    entries: v.entries.map(({ value, ...rest }) => ({ ...rest, spentUntil: v.spent?.[rest.id] ?? null,
-                                                      exhausted: (v.spent?.[rest.id] ?? 0) > now })),
+    entries: v.entries.map(({ value, ...rest }) => ({
+      ...rest,
+      spentUntil: v.spent?.[rest.id] ?? null,
+      exhausted: (v.spent?.[rest.id] ?? 0) > now,
+      // Days, not a timestamp: "expires in 2 days" is read correctly at a glance, where an epoch is not read
+      // at all. Negative means it already has.
+      expiresInDays: rest.expiresAt ? Math.floor((rest.expiresAt - now) / 86_400_000) : null,
+      expired: rest.expiresAt ? rest.expiresAt <= now : false,
+    })),
     groups: v.groups,
   }
 }
+
+/** Anything expiring within `days` (or already gone). What a warning is built from. */
+export function expiring(v: Vault, days = 3, now = Date.now()) {
+  return v.entries
+    .filter((e) => e.expiresAt && e.expiresAt - now < days * 86_400_000)
+    .map((e) => ({ id: e.id, provider: e.provider, expiresAt: e.expiresAt!,
+                   inDays: Math.floor((e.expiresAt! - now) / 86_400_000) }))
+}
+
+/** A credential that says when it dies — read it rather than trust a note. JWTs carry `exp`; anything else
+ *  simply has no expiry we can know, and claiming one would be worse than admitting we cannot tell. */
+export function expiryOf(value: string): number | undefined {
+  const parts = value.split('.')
+  if (parts.length !== 3) return undefined
+  try {
+    const b = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+    const claims = JSON.parse(atob(b + '='.repeat((4 - (b.length % 4)) % 4)))
+    return typeof claims?.exp === 'number' ? claims.exp * 1000 : undefined
+  } catch { return undefined }
+}
+
+/** An entry the pool should not hand out: expired credentials are worse than missing ones, because the failure
+ *  surfaces at the agent as something unrelated. */
+export const usable = (e: VaultEntry, now = Date.now()) => !e.expiresAt || e.expiresAt > now
