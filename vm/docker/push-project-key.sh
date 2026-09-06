@@ -19,7 +19,15 @@ DIR="${4:-superatom-engine}"
 KEYF="${SSH_KEY:-$HOME/.ssh/superatom_vm}"
 
 [ -f "$FILE" ] || { echo "✗ no key file at $FILE"; exit 1; }
-KEY="$(tr -d ' \t\r\n' < "$FILE")"
+# EITHER a bare key OR the block the admin UI copies (ICA_PROJECT=… / ICA_KEY=…). The Copy button hands over
+# both lines, so demanding a bare key means every real use of this script fails on the first try — and the
+# person then edits a file containing a live credential to satisfy a validator, which is worse than accepting
+# the format they were actually given.
+if grep -q '^ICA_KEY=' "$FILE"; then
+  KEY="$(grep '^ICA_KEY=' "$FILE" | head -1 | cut -d= -f2- | tr -d ' \t\r\n')"
+else
+  KEY="$(tr -d ' \t\r\n' < "$FILE")"
+fi
 [ -n "$KEY" ] || { echo "✗ the key file is empty"; exit 1; }
 # Shape only. Never the value — an error message is a place credentials leak, and "it did not look right" is
 # all anyone needs to know.

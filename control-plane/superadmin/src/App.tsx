@@ -9,6 +9,40 @@ import { AnalystConsole } from './AnalystConsole'
 import { useSession, SignIn, UserButton } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useSearchParams } from 'react-router-dom'
 
+// ── COPY, AND SAY SO ─────────────────────────────────────────────────────────
+// Four copy buttons did their work in total silence. Copying a credential is the one moment you MUST know it
+// worked: the value is shown once, and "did that copy?" cannot be answered by looking at the screen — so
+// people click again, or paste into the wrong window and lose a key they can no longer see.
+//
+// It was worse than silent. Every one of them called `navigator.clipboard?.writeText(...)`, and the optional
+// chaining means that where the clipboard API is missing — any insecure context, which includes plain http on
+// a LAN box — the click did NOTHING and reported nothing. A button that silently does nothing is indis-
+// tinguishable from one that worked, which is how you end up pasting a stale key you copied minutes ago.
+//
+// So: confirm on success, say so on failure, and fall back to selecting the text if there is no clipboard at
+// all, because "select this and press ⌘C" is still an answer.
+function CopyButton({ text, label = 'Copy', className = 'btn' }: { text: string; label?: string; className?: string }) {
+  const [state, setState] = useState<'idle' | 'done' | 'failed'>('idle')
+  useEffect(() => {
+    if (state === 'idle') return
+    const t = setTimeout(() => setState('idle'), 2000)
+    return () => clearTimeout(t)
+  }, [state])
+  const copy = async () => {
+    try {
+      if (!navigator.clipboard) throw new Error('no clipboard in this context')
+      await navigator.clipboard.writeText(text)
+      setState('done')
+    } catch { setState('failed') }
+  }
+  return (
+    <button className={className} onClick={copy} title={state === 'failed' ? 'Select the text above and press ⌘C' : undefined}>
+      {state === 'done' ? '✓ Copied' : state === 'failed' ? 'Select it above and ⌘C' : label}
+    </button>
+  )
+}
+
+
 const VM_URL = import.meta.env.VITE_VM_URL ?? 'http://localhost:5050'
 
 // ── Design system — Stripe dashboard look (injected once) ─────────────────────
@@ -446,7 +480,7 @@ function OrgDetailPage() {
               <textarea readOnly value={env} onFocus={e => e.currentTarget.select()} rows={3}
                 style={{ width: '100%', fontFamily: 'monospace', fontSize: 13, padding: 12, borderRadius: 8, resize: 'vertical', whiteSpace: 'pre' }} />
               <div className="row" style={{ gap: 8, marginTop: 12, alignItems: 'center' }}>
-                <button className="btn" onClick={() => { navigator.clipboard?.writeText(env); }}>Copy</button>
+                <CopyButton text={env} />
                 <button className="btn ghost" onClick={() => { const id = conn.id; setConn(null); nav(`/org/${orgId}/projects/${id}`) }}>Open project</button>
                 <button className="btn ghost" onClick={() => setConn(null)} style={{ marginLeft: 'auto' }}>Close</button>
               </div>
@@ -466,7 +500,7 @@ function OrgDetailPage() {
               <textarea readOnly value={env} onFocus={e => e.currentTarget.select()} rows={2}
                 style={{ width: '100%', fontFamily: 'monospace', fontSize: 13, padding: 12, borderRadius: 8, resize: 'vertical', whiteSpace: 'pre' }} />
               <div className="row" style={{ gap: 8, marginTop: 12, alignItems: 'center' }}>
-                <button className="btn" onClick={() => { navigator.clipboard?.writeText(env) }}>Copy</button>
+                <CopyButton text={env} />
                 {!rot.done && <button className="btn" onClick={finishRotation}>Finish — retire the old key</button>}
                 <button className="btn ghost" onClick={() => setRot(null)} style={{ marginLeft: 'auto' }}>Close</button>
               </div>
@@ -1079,7 +1113,7 @@ function ProjectDetailPage() {
                     onFocus={e => e.currentTarget.select()}
                     style={{ width: '100%', fontFamily: 'monospace', fontSize: 13, padding: 12, borderRadius: 8, whiteSpace: 'pre' }} />
                   <div className="row" style={{ gap: 8, marginTop: 10 }}>
-                    <button className="btn" onClick={() => navigator.clipboard?.writeText(`ICA_PROJECT=${projectId}\nICA_KEY=${rot.apiKey}`)}>Copy</button>
+                    <CopyButton text={`ICA_PROJECT=${projectId}\nICA_KEY=${rot.apiKey}`} />
                     {!rot.done && <button className="btn" onClick={finishRotation}>Finish — retire the old key</button>}
                     <button className="btn ghost" onClick={() => setRot(null)} style={{ marginLeft: 'auto' }}>Close</button>
                   </div>
@@ -1105,7 +1139,7 @@ function ProjectDetailPage() {
               <p className="muted" style={{ marginTop: 4 }}>Paste into the surface’s <code>.env</code>. Authorizes the bot as a <code>runtime</code> for this project only, until {exp}.</p>
               <textarea readOnly value={env} onFocus={e => e.currentTarget.select()} rows={4} style={{ width: '100%', fontFamily: 'monospace', fontSize: 13, padding: 12, borderRadius: 8, resize: 'vertical', whiteSpace: 'pre' }} />
               <div className="row" style={{ gap: 8, marginTop: 12, alignItems: 'center' }}>
-                <button className="btn" onClick={() => { navigator.clipboard?.writeText(env) }}>Copy</button>
+                <CopyButton text={env} />
                 <button className="btn ghost" onClick={() => setSvc(null)} style={{ marginLeft: 'auto' }}>Close</button>
               </div>
             </div>
