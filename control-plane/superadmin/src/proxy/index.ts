@@ -31,10 +31,6 @@ export interface ProxyEnv {
   OPENROUTER_API_KEY?: string
   OPENCODE_API_KEY?: string
   ANTHROPIC_API_KEY?: string
-  // Which project each box token belongs to: {"<token>":"<projectId>"}. A secret for now, deliberately: it
-  // makes the whole path testable before choosing where tokens should really live, and moving to D1 or
-  // ProjectDO later changes only `projectOf` below.
-  PROXY_TOKENS?: string
 }
 
 // ── HOW A BOX IDENTIFIES ITSELF ──────────────────────────────────────────────────────────────────────────
@@ -42,20 +38,22 @@ export interface ProxyEnv {
 // API-key env var and construct everything else themselves, so the only two things we can influence are those
 // two values. A custom header is unreachable — there is no way to ask any of them to send one.
 //
-// So the project token rides in the BASE URL PATH, which every client appends its own path to:
+// So the PROJECT ID rides in the base URL path, which every client appends its own path to:
 //
-//   https://proxy.superatom.site/p/<project-token>/<provider>
+//   https://proxy.superatom.site/p/<projectId>/<provider>
 //
-// claude-code then requests /p/<tok>/anthropic/v1/messages, pi requests
-// /p/<tok>/openrouter/chat/completions, and neither had to be taught anything.
+// claude-code then requests /p/<id>/anthropic/v1/messages, pi requests
+// /p/<id>/openrouter/chat/completions, and neither had to be taught anything.
 //
-// This matters most for the client we CANNOT re-credential: claude-code arrives holding its own subscription
-// token in Authorization, which we must forward untouched. Identity in the path means we still know which
-// project is calling without touching that header.
+// WHAT IS IN THE PATH IS NOT A SECRET, and that is the point. A project id names WHICH project; the project's
+// API key, in a header, PROVES it. Paths reach access logs, shell history and `ps` output, so nothing that
+// grants anything is allowed to live there. The id is needed even for an authenticated call, because it says
+// which project's key to check against — one addresses, the other proves.
 //
-// A token in a URL is a secret in a path, so it is project-scoped, revocable on its own, and worth keeping out
-// of access logs. The header form is kept as a convenience for our own tooling, which can set headers.
-const PROJECT_HEADER = 'x-superatom-project-token'
+// claude-code is the case that cannot prove anything: its Authorization already carries its own subscription
+// token, which we forward untouched. So it is identified and not authenticated — acceptable only because such
+// a call is given nothing. It brings its own credential, so a forged id misattributes a meter reading.
+const PROJECT_HEADER = 'x-superatom-project-id'
 const PATH_PREFIX = 'p'
 
 interface Upstream {
@@ -93,15 +91,6 @@ const UPSTREAMS: Record<string, Upstream> = {
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body, null, 2), { status, headers: { 'content-type': 'application/json' } })
-
-/** Which project is calling? The seam that will become a real lookup — everything else is written not to care. */
-function projectOf(env: ProxyEnv, token: string | null): string | null {
-  if (!token) return null
-  try {
-    const map = JSON.parse(env.PROXY_TOKENS || '{}') as Record<string, string>
-    return map[token] ?? null
-  } catch { return null }
-}
 
 /** PROOF that the caller really is this project — its own API key, checked against ProjectDO, which is the
  *  source of truth and the thing that can revoke it.
@@ -186,16 +175,16 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
 
   // /p/<token>/... — pull the project token out of the path and carry on as if the rest were the whole URL, so
   // every route below is written once and does not care how the caller identified itself.
-  let pathToken: string | null = null
-  if (seg[0] === PATH_PREFIX && seg.length > 1) { pathToken = seg[1]; seg = seg.slice(2) }
+  let pathProjectId: string | null = null
+  if (seg[0] === PATH_PREFIX && seg.length > 1) { pathProjectId = seg[1]; seg = seg.slice(2) }
   const head = seg[0] ?? ''          // a service route (_health/_whoami/_key) or the provider the engine chose
 
   if (head === '_health') {
     return json({ ok: true, providers: Object.keys(UPSTREAMS).filter(p => UPSTREAMS[p].keyOf(env)) })
   }
 
-  const token = pathToken ?? request.headers.get(PROJECT_HEADER)
-  const project = projectOf(env, token)
+  // Claimed, not yet proven. Whether that is enough depends entirely on what is being asked for.
+  const project = pathProjectId ?? request.headers.get(PROJECT_HEADER)
 
   if (head === '_whoami') {
     return project ? json({ project }) : json({ error: 'unknown or missing project token' }, 401)
@@ -207,12 +196,11 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
     // NOT the path token. Handing out a credential requires the project to PROVE it is that project, with the
     // API key it already holds, in a header — see provenProject. Without this, anyone who ever saw a URL in a
     // log could collect our provider keys.
-    const projectId = pathToken ?? ''
+    const projectId = project ?? ''
     if (!(await provenProject(env, projectId, bearerOf(request.headers)))) {
       console.log(`[proxy] KEY REFUSED for ${projectId || '(no project)'} — bad or missing project API key`)
       return json({ error: 'send the project API key as `Authorization: Bearer sk-proj-…`' }, 401)
     }
-    const project = projectId
     const name = seg[1] ?? ''
     const up = UPSTREAMS[name]
     if (!up) return json({ error: `no provider named ${name}` }, 404)
@@ -226,7 +214,25 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
   const name = head
   const up = UPSTREAMS[name]
   if (!up) return json({ error: `unknown provider /${name}`, providers: Object.keys(UPSTREAMS) }, 404)
-  if (!project) return json({ error: `no project token — call /${PATH_PREFIX}/<token>/${name}/…` }, 401)
+
+  // ── WHO IS CALLING, AND HOW WELL DO WE KNOW ─────────────────────────────────────────────────────────────
+  // Two answers, and the stronger one is used whenever it is available.
+  //
+  //   AUTHENTICATED — the caller sent the project's own API key. pi and opencode set a provider key from the
+  //   environment, so we simply put `sk-proj-…` in that variable and it arrives here as an ordinary bearer.
+  //   Verified against ProjectDO, this is proof, and it is required because these calls spend OUR key.
+  //
+  //   IDENTIFIED ONLY — the path says which project, and nothing proves it. That is all claude-code can offer:
+  //   its Authorization already carries its own subscription token, which we must forward untouched. Weaker,
+  //   and acceptable here for one reason only — such a call is GIVEN nothing. It brings its own credential, so
+  //   a forged path misattributes a meter reading rather than obtaining a key.
+  //
+  // The rule that falls out: WE ONLY SPEND OUR OWN KEY FOR AN AUTHENTICATED CALLER.
+  const sent = bearerOf(request.headers)
+  const isProjectKey = !!sent && /^sk-proj-/.test(sent)
+  const proven = isProjectKey && await provenProject(env, project ?? '', sent ?? '')
+  if (isProjectKey && !proven) return json({ error: 'project API key not valid for this project' }, 401)
+  if (!project && !proven) return json({ error: `no project — call /${PATH_PREFIX}/<projectId>/${name}/…` }, 401)
 
   // The model is read only to LABEL the meter, never to route. Clone: a body can be read once.
   let model: string | undefined
@@ -241,10 +247,15 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
   // THE CALLER'S OWN CREDENTIAL WINS. claude-code arrives holding its subscription token, and replacing it
   // would bill the wrong account and answer as the wrong identity. We supply a key only to a caller that has
   // none — which is the whole point for a box that holds no keys at all.
-  const hasOwn = headers.has('authorization') || headers.has('x-api-key')
+  // A caller holding its OWN provider credential keeps it: replacing claude-code's subscription token would
+  // bill the wrong account and answer as the wrong identity. A caller holding OUR project key is asking us to
+  // supply one — and only a PROVEN one gets that, because from here on it spends our money.
+  const hasOwn = !!sent && !isProjectKey
   if (!hasOwn) {
+    if (!proven) return json({ error: 'send the project API key to use a provider key held here' }, 401)
     const key = up.keyOf(env)
-    if (!key) return json({ error: `no key configured for ${head}` }, 503)
+    if (!key) return json({ error: `no key configured for ${name}` }, 503)
+    headers.delete('authorization'); headers.delete('x-api-key')   // never forward our own project key upstream
     up.auth(headers, key)
   }
 
@@ -254,7 +265,7 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
   const t0 = Date.now()
   const res = await fetch(target, { method: request.method, headers, body: request.body, redirect: 'manual' })
 
-  const rec = { project, provider: name, model, ms: 0, in: 0, out: 0 }
+  const rec = { project: project ?? 'unknown', provider: name, model, ms: 0, in: 0, out: 0 }
   if (!res.body) return res
 
   // A stream is metered as it flows; a plain JSON response is metered after the fact from a clone, so neither
