@@ -49,7 +49,7 @@ export type ModifyTarget = ProgramTarget
  *  Retrieval found it; the composer still decides — it is a strong lead, not a verdict. */
 export interface CanonicalMatch { programDir: string; params: Record<string, unknown>; canonical: string }
 export interface Composer {
-  ask(question: string, handlers?: RunHandlers, opts?: { qid?: string; candidates?: ProgramCandidate[]; modify?: ModifyTarget; conceptNames?: string[]; canonicalMatch?: CanonicalMatch; resolvedQuestion?: string; explain?: ProgramTarget; raw?: string; sid?: string; build?: string }): Promise<ComposerResult>
+  ask(question: string, handlers?: RunHandlers, opts?: { qid?: string; candidates?: ProgramCandidate[]; modify?: ModifyTarget; canonicalMatch?: CanonicalMatch; resolvedQuestion?: string; explain?: ProgramTarget; raw?: string; sid?: string; build?: string }): Promise<ComposerResult>
   session: Session
   cwd: string
 }
@@ -127,13 +127,18 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       // Concept NAMES the engine surfaced for this question (names only — no method, so it can't bias you toward
       // a formula you might not use). Read the ones that look right with `./get-concept "<name>"`. This is
       // a head-start, NOT the whole set — find-concept is still live for anything else you need.
-      const conceptBlock = (o.conceptNames ?? []).length
-        ? '\nCandidate concepts for this question, most-relevant first — SOME MAY NOT FIT. Open the ones that look' +
-          ' right with `./get-concept "<name>"`, use those, ignore the rest (find-concept stays available):\n' +
-          (o.conceptNames ?? []).map(n => `- ${n}`).join('\n') + '\n'
-        // No concept fits this question → nothing to compose from. That is fresh analysis, which is the analyst's
-        // job — escalate immediately rather than attempt discovery yourself.
-        : `\nNo concept fits this question — there is nothing to compose from. ESCALATE now: write ${escalateRel} = {"reason":"no relevant concept — needs fresh analysis"} and STOP. Do not do the discovery yourself.\n`
+      // SEARCH FOR THEM YOURSELF. The engine used to pre-search and hand over six names; it no longer does,
+      // because the phrase YOU pick is a better cue than n-grams of the user's wording — it is your current
+      // hypothesis, chosen after seeing the problem — and you can search again when the first phrase misses,
+      // which a single pre-fire never could.
+      //
+      // The escalate path is unchanged in meaning and now has a condition attached: it is what you do when the
+      // search genuinely finds nothing that fits, not the default when we happened to hand you an empty list.
+      const conceptBlock = '\nFind the concepts this question needs: `./find-concept "<phrase>"` (full-text, fast —' +
+        ' search in your own words, and search again with different words if the first misses). Open the ones that' +
+        ' look right with `./get-concept "<name>"` and compose from those.\n' +
+        `If nothing found fits, there is nothing to compose from — ESCALATE: write ${escalateRel} =` +
+        ' {"reason":"no relevant concept — needs fresh analysis"} and STOP. Do not do the discovery yourself.\n'
       const m = o.modify
       // MODIFY: edit the SAME program in place (the engine supplies the current program — it may be from a
       // reuse, so it is NOT in your context). No new program, no escalate — just apply the edit and rerun.

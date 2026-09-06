@@ -39,7 +39,6 @@ import { log, readJsonSafe } from './log.js'
 import { createInspector } from './inspect.js'
 import { NodeStore, ROOT, ensureRoot, intentId, SqliteVecIndex, indexText, backfillMissing, hybridSearch } from '@superatom/node-store'
 import { bgeEmbedder } from './embed.js'
-import { createSpanFirer } from './retrieval/span-firing.js'
 // TYPE-ONLY, and it must stay that way: the deploy bundles package vm/ alone, so this path does not exist in a
 // built image. tsx erases a type-only import, which is why the container runs without it. Making it a value
 // import would break every deploy while working perfectly here.
@@ -260,8 +259,6 @@ async function rankConceptsBySpecificity(question: string, cap: number): Promise
 let vectors: SqliteVecIndex | null = null
 try { vectors = new SqliteVecIndex(graph.db, bgeEmbedder.id, bgeEmbedder.dim) }
 catch (e: any) { console.warn('[semantic] sqlite-vec unavailable — semantic index disabled:', e?.message ?? e) }
-// §3 span-firing retriever — an A/B alternative to rankConceptsBySpecificity, logged side-by-side for comparison.
-const spanFirer = createSpanFirer(graph, bgeEmbedder, vectors)   // the ONE vector store — forms are indexed there like everything else
 // Backfill pre-existing intents on boot so semantic reuse can search history, not just newly-built ones.
 // Best-effort + non-blocking (never delays boot); degrades silently if the model/native deps aren't present.
 if (vectors) void backfillMissing(graph, vectors, bgeEmbedder, { kind: 'intent' })
@@ -836,7 +833,6 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   // `sim` = cosine similarity to the asked question (0..1) — the number that says HOW CLOSE this candidate is.
   // `score` is only the RRF rank-fusion value used for ordering; it is a position, not a measure of fit.
   let programCandidates: { question: string; program?: string; score: number; sim: number | null }[] = []   // engine-searched matches handed to the composer
-  let conceptNames: string[] = []   // engine-searched CONCEPT names (names only) surfaced to composer + analyst
   let modifyTarget: ProgramTarget | null = null
   // ── WHAT THIS VERB ACTS ON ────────────────────────────────────────────────────────────────────────────
   // Resolved ONCE, from the session's record of what is on screen, for every verb that needs it. Each used to
@@ -891,32 +887,18 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     } catch (e: any) {
       console.log(`[ica] candidate search failed (${e?.message ?? e}) — composer builds from concepts`)
     }
-    // Surface relevant CONCEPT NAMES by SPECIFICITY (CSS-like: most-question-words-covered wins), names only —
-    // the agent opens the winner via find-concept for the method, so we never bias it with a formula.
-    // TIMED SEPARATELY. Both retrievers run on every question and only one is used, so when this stretch is slow
-    // the only useful question is WHICH — a single number across the pair says nothing about what to fix.
-    const specT0 = Date.now()
-    try {
-      const specificity = await rankConceptsBySpecificity(question, 8)   // current retriever (name-word specificity + semantic recall)
-      const specMs = Date.now() - specT0
-      let fired: { concepts: string[]; scored: { name: string; activation: number }[]; unexplained: string[] } = { concepts: [], scored: [], unexplained: [] }
-      const fireT0 = Date.now()
-      try { fired = await spanFirer.fire(question) } catch (e: any) { log.warn('span-firing', 'fire failed', e) }
-      const fireMs = Date.now() - fireT0
-      // Log BOTH retrievers side-by-side so we can compare which surfaces the right concepts.
-      console.log(`[retrieval] specificity (${specMs}ms) → [${specificity.join(', ')}]`)
-      console.log(`[retrieval] span-firing (${fireMs}ms) → fires [${fired.concepts.join(', ')}]  ·  ranked [${fired.scored.slice(0, 6).map(s => `${s.name} ${s.activation.toFixed(2)}`).join(', ')}]${fired.unexplained.length ? `  ·  unexplained [${fired.unexplained.slice(0, 8).join(' | ')}]` : ''}`)
-      // CLEAN A/B — surface EXACTLY ONE retriever, no mixing/fallback. Default = span-firing (B); USE_SPECIFICITY=1 = specificity (A).
-      // Span-firing surfaces the concepts that FIRED plus the rest of its own ranking (still one retriever — it just
-      // stops discarding what it already scored). Only NAMES travel, and reading one is now a deliberate
-      // ./get-concept call, so an extra candidate costs a line and never lands unread in the agent's context.
-      // Firing alone was too tight: "which projects are at risk" fired only 'project name, customer, manager and
-      // type' (6.23) and dropped 'at-risk project' (5.75) — the concept that defines the question.
-      const TOP_CONCEPTS = 6
-      const spanNames = Array.from(new Set([...fired.concepts, ...fired.scored.map(s => s.name)])).slice(0, TOP_CONCEPTS)
-      conceptNames = process.env.USE_SPECIFICITY ? specificity : spanNames
-      if (conceptNames.length) console.log(`[ica] concepts surfaced: ${conceptNames.join(', ')}`)
-    } catch (e: any) { console.log(`[ica] concept search failed (${e?.message ?? e})`) }
+    // NO ENGINE-SIDE CONCEPT RETRIEVAL. The engine used to pre-search concepts and hand the agent a shortlist of
+    // six names. Two retrievers ran on every question — specificity (lexical, ~250ms) and span firing (a model
+    // forward pass per 2-4-gram of the question, MEASURED at 8.4s, 8.6s and 16.5s on three consecutive real
+    // questions) — and only one was used. Span firing was 93-96% of everything that happened before the composer
+    // was even asked, and on all three it surfaced what the 250ms lexical pass had already ranked first; on one
+    // of them every span came back unexplained, because most 2-grams of a sentence are function words that
+    // cannot match a concept name by construction.
+    //
+    // The agent searches for itself now. `./find-concept` is full-text over the concept store, it answers in
+    // milliseconds, and the phrase the AGENT chooses is a better cue than n-grams of the user's wording — it is
+    // the agent's current hypothesis, formed after seeing the problem. It can also search more than once, which
+    // a single pre-fire never could.
   }
 
   // Liveness keepalive: the UI arms a 25s watchdog and re-arms on every message. Claude-code's PTY streams
@@ -1320,7 +1302,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       // CAPPED, like the analyst below. This await was unbounded: a composer that never returned held the
       // session's busy flag for good, and every later question in that chat was refused with "already
       // answering". The cap is generous — it exists so a turn always ends, not to hurry one along.
-      const cAsk = composer.ask(question, handlers, { qid, sid, candidates: programCandidates, conceptNames, modify: modifyTarget ?? undefined, resolvedQuestion })
+      const cAsk = composer.ask(question, handlers, { qid, sid, candidates: programCandidates, modify: modifyTarget ?? undefined, resolvedQuestion })
       cAsk.catch(() => {})   // if we abandon it, don't leak an unhandled rejection
       let cCap: ReturnType<typeof setTimeout> | undefined
       const cRaced: any = await Promise.race([cAsk, new Promise((res) => { cCap = setTimeout(() => res(TIMED_OUT), MAX_TURN_MS) })])
@@ -1341,7 +1323,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       currentAgent = 'analyst'
       emit(reply, A('status', 'analyst', { progress: 'Handing off to the analyst for deeper analysis…', sid }))
       workingAgent = 'analyst'; stopSession = () => { try { (analyst as any).session?.reset?.() } catch { /* best-effort */ } }
-      const askP = analyst.ask(question, handlers, { qid, conceptNames, reason: escalateReason, modify: modifyTarget ?? undefined, resolvedQuestion })
+      const askP = analyst.ask(question, handlers, { qid, reason: escalateReason, modify: modifyTarget ?? undefined, resolvedQuestion })
       askP.catch(() => {})   // if we abandon it on timeout, don't leak an unhandled rejection
       let capT: ReturnType<typeof setTimeout> | undefined
       const raced: any = await Promise.race([askP, new Promise((res) => { capT = setTimeout(() => res(TIMED_OUT), MAX_TURN_MS) })])
@@ -1933,7 +1915,7 @@ async function warmEssentialAgents() {
     // have to be embedded before the first question can be retrieved for, it is cached in memory only, and so
     // it was rebuilt on the first question after every restart — in the foreground, 27s, while the user waited.
     // Warming it here moves that onto the boot where it belongs and off the question that happened to be first.
-    warm('concepts',  spanFirer.warm()),
+
   ])
   // ONE unmistakable line the user can look for: the engine has finished booting and every essential agent
   // is up (or which one failed). "Fully ready" vs "ready with warnings" — never ambiguous.
