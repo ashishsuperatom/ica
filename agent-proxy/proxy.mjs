@@ -38,7 +38,11 @@ import zlib from 'node:zlib'
 // The RULES both proxies obey. Only `decide` — when we may spend a key of ours — is genuinely shared, because
 // a security rule with two copies is one that gets fixed in one place. Everything else here is this runtime's
 // own plumbing, which is why the two files look nothing alike below this line.
-import { UPSTREAMS, PATH_PREFIX, parsePath, bearerOf, decide, usageFromSseTail, usageFrom } from './contract.mjs'
+// contract.mjs here is a COPY, placed by deploy.sh from vm/packages/agent-contract — the single source. This
+// box gets only agent-proxy/, so the file has to be beside the proxy; making it a build-time copy of one
+// original is the difference between a mirror and a second opinion. deploy.sh refuses to deploy without it.
+import { UPSTREAMS, PATH_PREFIX, parsePath, bearerOf, decide, usageFromSseTail, usageFrom,
+         allHosts, hostMatches } from './contract.mjs'
 
 // ── CONFIGURATION: three variables; everything else is a decision already made ───────────────────────────
 //
@@ -172,7 +176,9 @@ async function contractRoute(req, res) {
 
   const up = UPSTREAMS[p.provider]
   if (!up) return send(404, { error: `unknown provider /${p.provider}`, providers: Object.keys(UPSTREAMS) })
-  if (up.tunnelOnly || !up.base) return send(421, { error: `${p.provider} is served by the CONNECT tunnel on this same box`, use: `HTTPS_PROXY=http://<this host>:${PORT}` })
+  if (up.disabled) return send(403, { error: `${p.provider} is disabled: ${up.disabled}`, provider: p.provider })
+  if (up.route === 'box') return send(421, { error: `${p.provider} is a box-side credential — fetch it from /_key/${p.provider}`, envVar: up.envVar ?? null })
+  if (up.route === 'tunnel' || !up.base) return send(421, { error: `${p.provider} is served by the CONNECT tunnel on this same box`, use: `HTTPS_PROXY=http://<this host>:${PORT}` })
 
   const verdict = decide({ projectId: p.projectId, sentCredential: sent, proven })
   if (!verdict.ok) return send(verdict.status, { error: verdict.error })
@@ -222,9 +228,10 @@ async function contractRoute(req, res) {
 // Which hosts the tunnel will open a socket to. An open CONNECT proxy is a resource anyone on the internet
 // can use once they find it, so the destination is checked as well as the caller — a stolen credential then
 // buys access to our model providers and nothing else.
-const TUNNEL_ALLOW = ['chatgpt.com', 'auth.openai.com', 'api.openai.com',
-                      'api.anthropic.com', 'opencode.ai', 'openrouter.ai']
-const allowed = (host) => TUNNEL_ALLOW.some((d) => host === d || host.endsWith('.' + d))
+// Every host any provider in the contract talks to — derived, so adding a provider opens its host here and
+// nowhere else, and removing one closes it. This was a hand-maintained literal in parallel with three others.
+const TUNNEL_ALLOW = allHosts()
+const allowed = (host) => hostMatches(host, TUNNEL_ALLOW)
 
 // ── FORWARD MODE, CONNECT ────────────────────────────────────────────────────────────────────────────────
 // We open a raw socket to the destination and copy bytes. The TLS session is between the client and the REAL

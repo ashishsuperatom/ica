@@ -17,10 +17,7 @@
 // across edge locations may take a few extra attempts to be noticed, which is irrelevant against a keyspace
 // this size, and each counter self-expires so nothing has to clean up.
 
-export interface KVLike {
-  get(key: string, type?: 'text' | 'json'): Promise<any>
-  put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>
-}
+import type { KV } from './vault.js'
 
 const WINDOW_S = 300      // five minutes
 const MAX_FAILURES = 10   // per identity per window
@@ -28,7 +25,7 @@ const MAX_FAILURES = 10   // per identity per window
 const K = (who: string) => `throttle:${who}`
 
 /** Has this caller failed too often lately? Consulted only AFTER a credential has already been rejected. */
-export async function throttled(kv: KVLike | undefined, who: string): Promise<boolean> {
+export async function throttled(kv: KV | undefined, who: string): Promise<boolean> {
   if (!kv) return false
   const n = Number((await kv.get(K(who), 'text')) ?? 0)
   return n >= MAX_FAILURES
@@ -36,7 +33,7 @@ export async function throttled(kv: KVLike | undefined, who: string): Promise<bo
 
 /** Record a failure. Absolute count in a fixed window, written through waitUntil by the caller: a lost
  *  increment under a race costs one extra attempt out of ten, which does not change the answer. */
-export async function noteFailure(kv: KVLike | undefined, who: string): Promise<void> {
+export async function noteFailure(kv: KV | undefined, who: string): Promise<void> {
   if (!kv) return
   const n = Number((await kv.get(K(who), 'text')) ?? 0)
   await kv.put(K(who), String(n + 1), { expirationTtl: WINDOW_S })
@@ -58,7 +55,7 @@ export const identityOf = (projectId: string | null, request: Request): string =
 // self-expires, so the trail is bounded without anything having to prune it.
 const AUDIT_TTL_S = 30 * 24 * 3600   // thirty days
 
-export async function auditIssue(kv: KVLike | undefined, e: {
+export async function auditIssue(kv: KV | undefined, e: {
   project: string; provider: string; keyId: string | null; ip: string; agent?: string
 }): Promise<void> {
   if (!kv) return
@@ -72,7 +69,7 @@ export async function auditIssue(kv: KVLike | undefined, e: {
 export const plausible = (cred: string | null): boolean => !!cred && /^sk-proj-[A-Za-z0-9-]{8,}$/.test(cred)
 
 /** A success clears the record: a box that had a bad key and was fixed should not stay in the doghouse. */
-export async function noteSuccess(kv: KVLike | undefined, who: string): Promise<void> {
+export async function noteSuccess(kv: KV | undefined, who: string): Promise<void> {
   if (!kv) return
   await kv.put(K(who), '0', { expirationTtl: 60 })
 }

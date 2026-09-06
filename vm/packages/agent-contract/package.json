@@ -1,0 +1,8 @@
+{
+  "name": "@superatom/agent-contract",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./contract.mjs",
+  "types": "./contract.d.mts",
+  "exports": { ".": { "types": "./contract.d.mts", "default": "./contract.mjs" } }
+}

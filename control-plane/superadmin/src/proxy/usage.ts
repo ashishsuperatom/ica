@@ -78,19 +78,21 @@ export async function askUsage(provider: string, key: string): Promise<UsageSnap
   catch (e: any) { return { observedAt: Date.now(), provider, error: String(e?.message ?? e).slice(0, 120) } }
 }
 
+import type { KV } from './vault.js'
+
 const K = (entryId: string) => `usage:${entryId}`
 
-export async function readUsage(kv: any, entryId: string): Promise<UsageSnapshot | null> {
+export async function readUsage(kv: KV, entryId: string): Promise<UsageSnapshot | null> {
   return (await kv.get(K(entryId), 'json')) || null
 }
 
-export async function writeUsage(kv: any, entryId: string, snap: UsageSnapshot): Promise<void> {
+export async function writeUsage(kv: KV, entryId: string, snap: UsageSnapshot): Promise<void> {
   await kv.put(K(entryId), JSON.stringify(snap))
 }
 
 /** Ask, but only if what we have is old. The staleness check is a READ, which is cheap and edge-cached; the
  *  point is to stay well under the per-key write limit rather than to be exactly on time. */
-export async function refreshIfStale(kv: any, entryId: string, provider: string, key: string, maxAgeMs = 5 * 60_000): Promise<void> {
+export async function refreshIfStale(kv: KV, entryId: string, provider: string, key: string, maxAgeMs = 5 * 60_000): Promise<void> {
   if (!canAsk(provider)) return
   const have = await readUsage(kv, entryId)
   if (have && Date.now() - have.observedAt < maxAgeMs) return

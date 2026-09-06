@@ -13,15 +13,19 @@
 // process, which the agent inherits when it is spawned — so the token lives as long as the process and
 // vanishes with it. A box that is stopped keeps nothing.
 //
-// NO CROSS-PACKAGE IMPORT. This once read the proxy's contract for the list of box-side providers, which
-// broke the deployable: the engine image copies vm/ and nothing else, so agent-proxy/ simply is not there.
-// The engine needs one fact — which providers to ask for — and the proxy's answer carries the rest, including
-// the environment variable the credential belongs in. One name here, everything else from the reply.
-const BOX_SIDE = ['claude-code']
+// FROM THE CONTRACT, not from a literal here. This list was inlined once because the contract lived in
+// agent-proxy/ and the engine image copies only vm/ — so the import broke the deployable and the fact got
+// copied instead. The contract now lives inside vm/packages, which the image does carry, so the fix is the
+// import it should always have been.
+import { boxSide } from '../../../packages/agent-contract/contract.mjs'
 
-// The variable each box-side provider's client reads. The vault's reply carries this too and is authoritative;
-// this is only so we can tell whether a credential is ALREADY present before asking for one.
-const ENV_FALLBACK: Record<string, string> = { 'claude-code': 'CLAUDE_CODE_OAUTH_TOKEN' }
+const BOX = boxSide()
+const BOX_SIDE = BOX.map((b) => b.provider)
+
+// The variable each box-side client reads. The vault's reply carries this too and stays authoritative; this
+// is only so we can tell whether a credential is ALREADY present before asking for one.
+const ENV_FALLBACK: Record<string, string> =
+  Object.fromEntries(BOX.map((b) => [b.provider, b.envVar]))
 
 export interface Fetched { provider: string; envVar: string; keyId: string | null; expiresAt: number | null }
 

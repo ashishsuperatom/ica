@@ -3,3 +3,6 @@
 logs/
 node_modules/
 *.pem
+
+# Generated at deploy time from vm/packages/agent-contract — never edit here.
+contract.mjs

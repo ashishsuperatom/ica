@@ -38,6 +38,13 @@ const ROUTES: { name: string; match: RegExp; chain: ProviderId[] }[] = [
 // OpenRouter, which used to sit here, is metered usage nobody chose.
 const FALLBACK: ProviderId[] = []
 
+/** Every provider some model on this box would actually be sent to. A provider absent from here is not
+ *  broken when it has no key — it is unused, and reporting it as a fault is how a health check earns the
+ *  reputation that makes people stop reading it. */
+export function providersInUse(): ProviderId[] {
+  return [...new Set([...ROUTES.flatMap((r) => r.chain), ...FALLBACK])]
+}
+
 /** The accounts that could serve this model, best first. EMPTY when nothing is routed for it. */
 export function providersFor(model: string): ProviderId[] {
   return ROUTES.find(r => r.match.test(model))?.chain ?? FALLBACK

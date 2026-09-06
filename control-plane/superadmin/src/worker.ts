@@ -930,7 +930,7 @@ async function handleCredentialsAdmin(request: Request, env: Env, path: string):
   const master = (env as any).CREDENTIALS_MASTER_KEY
   const { readVault, writeVault, redact, tidy, expiryOf, expiring } = await import('./proxy/vault.js')
   const { readUsage, askUsage, writeUsage, canAsk } = await import('./proxy/usage.js')
-  const { UPSTREAMS } = await import('../../../agent-proxy/contract.mjs')
+  const { UPSTREAMS } = await import('../../../vm/packages/agent-contract/contract.mjs')
 
   // GET /api/credentials — the whole picture, values removed. One read, one decrypt.
   if (request.method === 'GET' && path === '/api/credentials') {

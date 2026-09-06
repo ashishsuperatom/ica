@@ -26,6 +26,7 @@
 import { setGlobalDispatcher, getGlobalDispatcher, ProxyAgent, Dispatcher } from 'undici'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { hostsOn, hostMatches } from '../../../packages/agent-contract/contract.mjs'
 
 // LOAD THE ENV OURSELVES. This module must be imported before anything can fetch, and imports run before any
 // statement in engine.ts — including its own loadEnvFile. So a dispatcher that read process.env directly saw
@@ -42,15 +43,16 @@ const tunnel = PLATFORM && PROJECT && KEY
   ? `http://${PROJECT}:${KEY}@tunnel.${PLATFORM}:443`
   : undefined
 
-// The ChatGPT backend and its token endpoint, and nothing else. Fixed rather than configurable because it is a
-// FACT about that backend — it refuses any relayed request — not a preference someone should be tuning. Every
-// other provider is a public API the Worker can reverse-proxy, which is cheaper and lets us count tokens.
-const HOSTS = ['chatgpt.com', 'auth.openai.com']
+// WHICH HOSTS GO THROUGH THE TUNNEL — asked, not restated. These are the hosts of every provider the contract
+// puts on the 'tunnel' route, so moving a provider between routes changes this automatically. It was a literal
+// array once, in parallel with three other literals elsewhere, and keeping four lists in step by hand is the
+// duplication the contract exists to remove.
+const HOSTS = hostsOn('tunnel')
 
 if (tunnel) {
   const direct = getGlobalDispatcher()
   const viaTunnel = new ProxyAgent(tunnel)
-  const tunnelled = (host: string) => HOSTS.some((h) => host === h || host.endsWith('.' + h))
+  const tunnelled = (host: string) => hostMatches(host, HOSTS)
 
   // A dispatcher is just "given a request, connect it". Ours reads the origin and picks one of two real
   // dispatchers — no interception, no rewriting, nothing to go wrong beyond choosing the wrong door.

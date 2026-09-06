@@ -29,9 +29,9 @@ export const PROXY_SUBDOMAIN = 'proxy'
 // shape, the upstream table, the auth decision and the usage parsing live in ONE file that both import.
 // esbuild follows the relative path when the Worker is bundled.
 import { UPSTREAMS as CONTRACT, PATH_PREFIX as SHARED_PREFIX, PROJECT_HEADER as SHARED_HEADER,
-         parsePath, bearerOf as sharedBearer, decide, usageFrom as sharedUsage, usageFromSseTail } from '../../../../agent-proxy/contract.mjs'
+         parsePath, bearerOf as sharedBearer, decide, usageFrom as sharedUsage, usageFromSseTail } from '../../../../vm/packages/agent-contract/contract.mjs'
 
-import type { KV } from './pool.js'
+import type { KV } from './vault.js'
 import { readVault, writeVault, candidates, groupOf, markSpent, tidy, expiring, type Vault } from './vault.js'
 import { refreshIfStale } from './usage.js'
 import { throttled, noteFailure, noteSuccess, plausible, identityOf, auditIssue } from './throttle.js'
@@ -201,7 +201,7 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
     }
     return json({ ok: true, vault,
                   known: Object.keys(CONTRACT),
-                  tunnelOnly: Object.keys(CONTRACT).filter(p => CONTRACT[p].tunnelOnly) })
+                  routes: Object.fromEntries(Object.entries(CONTRACT).map(([p, v]) => [p, v.route])) })
   }
 
   // Claimed, not yet proven. Whether that is enough depends entirely on what is being asked for.
@@ -237,7 +237,21 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
   if (head === '_whoami') {
     const ok = await provenProject(env, project ?? '', sharedBearer((h) => request.headers.get(h)))
     if (!ok) return fail()
-    return json({ project })
+    // WHAT THIS PROJECT CAN ACTUALLY USE, per provider — the question a box on the other side is really
+    // asking. It answered only `{ project }` before, so a diagnostic could say "the proxy is up" and nothing
+    // about whether a key exists for this project's group, which is the failure that actually happens: a new
+    // project lands in `default`, every entry is scoped to another group, and every call 503s with the proxy
+    // looking perfectly healthy. Names and routes only — never a value, and no upstream call, so this stays
+    // free to run and safe to expose to any box that has proven itself.
+    const v = await vaultOf(env).catch(() => null)
+    const providers: Record<string, { route: string; available: boolean }> = {}
+    for (const [name, spec] of Object.entries(CONTRACT)) {
+      providers[name] = {
+        route: (spec as any).route,
+        available: !!v && candidates(v, name, project!).length > 0,
+      }
+    }
+    return json({ project, group: v ? groupOf(v, project!) : null, providers })
   }
 
   // A key handed to a box is a key that has left our control, so it is refused unless that provider genuinely
@@ -287,10 +301,15 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
   // A provider the tunnel serves must not be relayed: the ChatGPT backend refuses anything relayed (403 from
   // a Worker, 302 from a Node reverse proxy, while the same request direct succeeds), so a call arriving here
   // is misrouted and is told where to go rather than left to fail as an upstream error.
-  if (up.boxOnly) {
+  // TURNED OFF MEANS TURNED OFF. Checked before authentication and before the vault, because the point is
+  // that nothing reaches the upstream — not that only authorised callers may spend on it.
+  if (up.disabled) {
+    return json({ error: `${name} is disabled: ${up.disabled}`, provider: name }, 403)
+  }
+  if (up.route === 'box') {
     return json({ error: `${name} is a box-side credential — fetch it from /_key/${name} and set ${up.envVar ?? 'its env var'}` }, 421)
   }
-  if (up.tunnelOnly || !up.base) {
+  if (up.route === 'tunnel' || !up.base) {
     return json({ error: `${name} is served by the CONNECT tunnel, not by this proxy`, use: 'HTTPS_PROXY=<tunnel host>' }, 421)
   }
 

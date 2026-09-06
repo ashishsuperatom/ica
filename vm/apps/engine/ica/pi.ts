@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import { createAgentSession, DefaultResourceLoader, getAgentDir, SessionManager, SettingsManager, ModelRuntime } from '@earendil-works/pi-coding-agent'
 import type { Session, RunHandlers, RunResult, AgentEvent } from './session.js'   // the shared session interface
 import { resolveProvider, describeResolution } from './providers.js'
+import { providersOn } from '../../../packages/agent-contract/contract.mjs'
 
 /** The ChatGPT credential `codex login` already wrote. pi-ai ships an `openai-codex-responses` provider that
  *  wants a Bearer token, and codex keeps a live one — so the two only need introducing, not a second login.
@@ -204,7 +205,7 @@ export function createPiSession(opts: PiSessionOpts): Session {
     // happened: the composer got a 421 rather than a model, produced nothing, and escalated three seconds
     // later. So these providers keep their real URL and ica/proxy-dispatcher.ts tunnels the connection
     // underneath.
-    const TUNNELLED = new Set(['openai-codex'])
+    const TUNNELLED = new Set(providersOn('tunnel'))
     const platform = process.env.SUPERATOM_PLATFORM
     const proxyBase = platform && process.env.ICA_PROJECT && !TUNNELLED.has(provider)
       ? `https://proxy.${platform}/p/${process.env.ICA_PROJECT}` : undefined

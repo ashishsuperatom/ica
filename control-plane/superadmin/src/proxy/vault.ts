@@ -17,7 +17,16 @@
 // (read-modify-write on one key), and the consequence is one extra 429 before it is marked again.
 
 import { seal, unseal, isSealed } from './seal.js'
-import type { KV } from './pool.js'
+// ── THE ONE KV TYPE ──────────────────────────────────────────────────────────────────────────────────────
+// There were three ways to say "a KV store" across this directory: `KV` in pool.js, `KVLike` in throttle.ts,
+// and a bare `any` in usage.ts. Nothing was wrong yet, which is exactly when to fix it — three spellings of
+// one idea is how a signature quietly drifts and the compiler stops being able to tell you.
+export interface KV {
+  get(key: string, type?: 'text' | 'json'): Promise<any>
+  put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>
+  delete(key: string): Promise<void>
+  list(opts: { prefix: string }): Promise<{ keys: { name: string }[] }>
+}
 
 // The one entry in the CREDENTIALS namespace that holds every coding-agent key. Named for its CONTENTS, not
 // for the mechanism — "vault" in a store called CREDENTIALS says the same word twice and tells a reader

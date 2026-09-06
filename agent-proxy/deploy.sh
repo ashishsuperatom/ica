@@ -15,6 +15,15 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 : "${AP_PEM:?set AP_PEM=/path/to/key.pem in agent-proxy/.deploy.env}"
 SSH="ssh -i ${AP_PEM/#\~/$HOME} -o StrictHostKeyChecking=no -o ConnectTimeout=15"
 
+# ONE SOURCE. The contract lives in vm/packages/agent-contract because the engine's Docker image copies only
+# vm/ and must be able to import it; this box gets only agent-proxy/, so it needs a copy beside the proxy.
+# Placed on EVERY deploy from the one original, never edited here — a copy that is refreshed is a mirror, a
+# copy that is edited is the four-places problem coming back.
+CONTRACT="$HERE/../vm/packages/agent-contract/contract.mjs"
+[ -f "$CONTRACT" ] || { echo "✗ contract not found at $CONTRACT — refusing to deploy a proxy with no rules"; exit 1; }
+cp "$CONTRACT" "$HERE/contract.mjs"
+echo "→ contract copied from vm/packages/agent-contract (single source)"
+
 echo "→ syncing source to $AP_HOST"
 rsync -az --delete \
   --exclude node_modules --exclude logs --exclude .git \
