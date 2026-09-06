@@ -24,6 +24,9 @@
 export const PROXY_SUBDOMAIN = 'proxy'
 
 export interface ProxyEnv {
+  // Verifying a project's API key is ProjectDO's job — it is the source of truth and can revoke. We never
+  // keep a second copy of a key here to compare against.
+  PROJECT?: { get(id: DurableObjectId): { fetch(req: Request): Promise<Response> }; idFromName(name: string): DurableObjectId }
   // Provider keys — Worker secrets, never sent to a box.
   OPENROUTER_API_KEY?: string
   OPENCODE_API_KEY?: string
@@ -100,6 +103,32 @@ function projectOf(env: ProxyEnv, token: string | null): string | null {
   } catch { return null }
 }
 
+/** PROOF that the caller really is this project — its own API key, checked against ProjectDO, which is the
+ *  source of truth and the thing that can revoke it.
+ *
+ *  Required for anything that HANDS OUT a credential. An identifier in a URL path is not proof of anything:
+ *  paths reach access logs, shell history and `ps` output, and a credential that unlocks other credentials
+ *  must not be something that leaks by being written down. So `_key` takes the project's API key in a HEADER,
+ *  and the path alone will never be enough to get one.
+ *
+ *  We reuse the key the engine already holds to reach the hub rather than minting a second project
+ *  credential: one secret per project, provisioned once, revoked in one place. */
+async function provenProject(env: ProxyEnv, projectId: string, apiKey: string | null): Promise<boolean> {
+  if (!projectId || !apiKey || !env.PROJECT) return false
+  try {
+    const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
+    const res = await stub.fetch(new Request('http://do/auth', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: apiKey }),
+    }))
+    return res.ok
+  } catch { return false }
+}
+
+/** The bearer credential the caller sent, whatever header it chose. Agents can only set their provider's own
+ *  key variable, so this is where a project API key arrives from pi or opencode. */
+const bearerOf = (h: Headers): string | null =>
+  (h.get('authorization')?.replace(/^Bearer\s+/i, '') ?? h.get('x-api-key') ?? null) || null
+
 /** Token counts, wherever this provider chose to put them. Shapes differ (OpenAI's `usage`, Anthropic's
  *  `message_start`/`message_delta`), so this reads the ones we know and reports nothing rather than a wrong
  *  number for the ones we don't. */
@@ -175,7 +204,15 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
   // A key handed to a box is a key that has left our control, so it is refused unless that provider genuinely
   // cannot be proxied, and it is logged loudly enough to notice if it starts happening often.
   if (head === '_key') {
-    if (!project) return json({ error: 'unknown or missing project token' }, 401)
+    // NOT the path token. Handing out a credential requires the project to PROVE it is that project, with the
+    // API key it already holds, in a header — see provenProject. Without this, anyone who ever saw a URL in a
+    // log could collect our provider keys.
+    const projectId = pathToken ?? ''
+    if (!(await provenProject(env, projectId, bearerOf(request.headers)))) {
+      console.log(`[proxy] KEY REFUSED for ${projectId || '(no project)'} — bad or missing project API key`)
+      return json({ error: 'send the project API key as `Authorization: Bearer sk-proj-…`' }, 401)
+    }
+    const project = projectId
     const name = seg[1] ?? ''
     const up = UPSTREAMS[name]
     if (!up) return json({ error: `no provider named ${name}` }, 404)
