@@ -25,28 +25,14 @@ if (!TOKEN) {
   process.exit(2)
 }
 
-// A HOME with no credential in it, so a pass cannot be an existing login quietly answering for us.
-//
-// Two first-run gates are pre-cleared, and NEITHER is auth — both would simply hang a PTY nobody is watching,
-// turning a clear result into a timeout:
-//   hasCompletedOnboarding       — the welcome flow
-//   hasTrustDialogAccepted       — "Do you trust the files in this folder?", asked per working directory
-//   bypassPermissionsModeAccepted — the warning shown because the engine spawns with
-//                                   --dangerously-skip-permissions; the flag sets the mode, it does not
-//                                   accept the dialog
-// These matter for the fleet beyond this test: a spawned box has no trusted-directory list either, so an
-// engine that only sets the token still stops on the trust prompt. --dangerously-skip-permissions does NOT
-// cover it; trust is recorded per project path in ~/.claude.json, so a fresh machine needs it seeded.
-// realpath, because on macOS the temp dir is /var/... which is a symlink to /private/var/... — claude records
-// trust under the RESOLVED path, so the un-resolved key silently fails to match and the prompt appears anyway.
+// A HOME with NOTHING in it — no credential, and no config either. Nothing is pre-seeded here on purpose:
+// the first-run gates (onboarding, per-directory trust, the bypass-permissions warning) are the engine's job
+// to clear, in ica/claude.ts, because a box nobody is watching HANGS on those dialogs rather than failing.
+// Seeding them here instead would test a machine we had prepared by hand, which is not the machine that gets
+// deployed.
 const home = await realpath(await mkdtemp(join(tmpdir(), 'fleet-auth-')))
 const cwd = join(home, 'work')
 await mkdir(cwd, { recursive: true })
-await writeFile(join(home, '.claude.json'), JSON.stringify({
-  hasCompletedOnboarding: true, installMethod: 'native', theme: 'light',
-  bypassPermissionsModeAccepted: true,
-  projects: { [cwd]: { hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true } },
-}))
 
 // The environment of a fleet box: the token, and no other way to authenticate. Anything left over from this
 // terminal could answer in the token's place and we would learn nothing.
