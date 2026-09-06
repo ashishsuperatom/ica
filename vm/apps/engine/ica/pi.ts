@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import { createAgentSession, DefaultResourceLoader, getAgentDir, SessionManager } from '@earendil-works/pi-coding-agent'
 import { registerBuiltInApiProviders, getModel } from '@earendil-works/pi-ai'
 import type { Session, RunHandlers, RunResult, AgentEvent } from './session.js'   // the shared session interface
+import { resolveProvider, describeResolution } from './providers.js'
 
 /** The ChatGPT credential `codex login` already wrote. pi-ai ships an `openai-codex-responses` provider that
  *  wants a Bearer token, and codex keeps a live one — so the two only need introducing, not a second login.
@@ -118,12 +119,22 @@ function normPiEvent(e: any, cmds: Map<string, string>): AgentEvent | null {
 }
 
 export function createPiSession(opts: PiSessionOpts): Session {
-  // Prefer the ChatGPT subscription when it is there — one login for pi and codex both — and fall back to
-  // OpenRouter otherwise. Explicit opts/env always win, so this is a default and never a surprise.
+  // WHICH ACCOUNT PAYS — decided from the MODEL, not pinned globally. The chain per model lives in
+  // providers.ts; here we just take the first account we actually hold a credential for. This used to be
+  // "codex if a codex login exists, else OpenRouter", which quietly put every model on one account —
+  // including models that account does not carry, and including models we would rather bill elsewhere.
+  //
+  // An explicit opts.provider / ICA_PI_PROVIDER still wins outright: routing is the default, never a veto.
+  const modelId = opts.model ?? process.env.ICA_PI_MODEL ?? 'gpt-5.6-luna'
+  const pinned = opts.provider ?? process.env.ICA_PI_PROVIDER
+  const routed = pinned ? null : resolveProvider(modelId)
+  if (routed) console.log(`[ica:pi] ${describeResolution(modelId, routed)}`)
+  // No credential for anything in the chain is still a real attempt: the SDK's own error names the missing
+  // key far better than a guess here would, and failing at selection time would hide which model was asked
+  // for. So fall through to the end of the chain and let the request say what is wrong.
+  const provider = pinned ?? routed?.provider ?? 'openrouter'
   const cred = codexCredential()
-  const provider = opts.provider ?? process.env.ICA_PI_PROVIDER ?? (cred ? 'openai-codex-responses' : 'openrouter')
   const usingCodex = provider === 'openai-codex-responses'
-  const modelId = opts.model ?? process.env.ICA_PI_MODEL ?? (usingCodex ? 'gpt-5.6-luna' : 'deepseek/deepseek-v4-flash')
 
   // THE AGENT'S INSTRUCTIONS. pi's DefaultResourceLoader reads AGENTS.md / CLAUDE.md / SYSTEM.md from cwd and
   // folds them into the system prompt, so the reference goes in the same way codex takes it — as a file the
