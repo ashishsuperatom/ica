@@ -141,7 +141,15 @@ export default {
     // ── proxy.superatom.site — model traffic ──────────────────────────────────
     // BEFORE the site routing below, which would otherwise resolve `proxy` as a project subdomain and hand
     // back an app. Everything behind this line lives in src/proxy/ and is reachable only from here.
-    if (url.hostname === `${PROXY_SUBDOMAIN}${SITE_SUFFIX}`) return handleProxyHost(request, env, ctx)
+    // The HOST HEADER, not url.hostname: `wrangler dev` rewrites the request URL to localhost, so a hostname
+    // check cannot be exercised locally at all. Reading the header is also simply what a worker behind any
+    // proxy should do, and in production Cloudflare sets both to the same thing.
+    // x-forwarded-host first: `wrangler dev` rewrites BOTH url.hostname and the Host header to localhost, so
+    // without it this route cannot be exercised outside production at all. Cloudflare sets it in front of the
+    // worker, and it is the conventional header for "the host the client actually asked for".
+    const reqHost = (request.headers.get('x-forwarded-host') ?? request.headers.get('host') ?? url.hostname)
+      .split(':')[0].toLowerCase()
+    if (reqHost === `${PROXY_SUBDOMAIN}${SITE_SUFFIX}`) return handleProxyHost(request, env, ctx)
 
     // ── *.superatom.site — subdomain-addressed apps ───────────────────────────
     // Only document/SPA requests are host-routed here; /_ws/*, /api/*, and /mobile/* (the device-login page)
@@ -350,6 +358,16 @@ export default {
     // the import above are the only lines it adds to the worker.
     if (request.method === 'POST' && path === '/api/transcribe') {
       return handleTranscribe(request, env, (token, secret) => verifyJwt(token, secret))
+    }
+
+    // ── Credentials: what keys exist, who may use them ──────────────────────
+    // Superadmin only, and POLICY only. It reports whether each named secret is PRESENT, never its value —
+    // an admin screen that can display a key is an admin screen that leaks one. Putting a value in stays a
+    // deliberate `wrangler secret put`, because a worker able to write its own secrets is a worker able to
+    // hand them out.
+    if (path.startsWith('/api/credentials')) {
+      if (!(await requireSuperadmin(request, env))) return new Response('unauthorized', { status: 401 })
+      return handleCredentialsAdmin(request, env, path)
     }
 
     // ── Project creation (with Fly Machine provisioning) ────────────────────
@@ -600,6 +618,9 @@ const SITE_SUFFIX = '.superatom.site'
 // alternative is discovering a customer already owns the name.
 const RESERVED_SUBDOMAINS = new Set([
   PROXY_SUBDOMAIN,
+  'tunnel',                                            // the EC2 CONNECT proxy — DNS-only, so it never reaches
+                                                       // this worker, but a project claiming the name would
+                                                       // still take an address the platform depends on
   'www', 'api', 'app', 'admin', 'auth', 'login', 'account', 'accounts',
   'hub', 'ws', 'gateway', 'gw', 'cdn', 'static', 'assets', 'docs', 'status',
   'mail', 'smtp', 'ftp', 'ns1', 'ns2', 'mx',          // infrastructure names mail/DNS tooling assumes
@@ -898,6 +919,66 @@ async function handleDomainsApi(request: Request, env: Env, url: URL): Promise<R
     } catch {}
   }
   return res
+}
+
+// ── Credentials admin ────────────────────────────────────────────────────────
+// The superadmin's view of the credential pool. Everything here is about WHICH key is used and by WHOM; the
+// values live in Worker secrets and are only ever reported as present or missing.
+async function handleCredentialsAdmin(request: Request, env: Env, path: string): Promise<Response> {
+  const kv: any = (env as any).CREDENTIALS
+  if (!kv) return Response.json({ error: 'no CREDENTIALS KV bound' }, { status: 503 })
+  const master = (env as any).CREDENTIALS_MASTER_KEY
+  const { readVault, writeVault, redact, tidy } = await import('./proxy/vault.js')
+  const { UPSTREAMS } = await import('../../../agent-proxy/contract.mjs')
+
+  // GET /api/credentials — the whole picture, values removed. One read, one decrypt.
+  if (request.method === 'GET' && path === '/api/credentials') {
+    const v = await readVault(kv, master)
+    return Response.json({ ...redact(v), providers: Object.keys(UPSTREAMS), sealed: !!master })
+  }
+
+  // Everything below is read-modify-write on the one document, so each change is atomic and there is never a
+  // moment where a credential exists without the policy that governs it.
+  if (request.method === 'POST' && path === '/api/credentials/entry') {
+    const b = await request.json().catch(() => ({})) as any
+    if (!b?.id || !b?.provider || !b?.value) return Response.json({ error: 'body: { id, provider, value, groups?, note? }' }, { status: 400 })
+    if (!Object.keys(UPSTREAMS).includes(b.provider)) return Response.json({ error: `no provider named ${b.provider}` }, { status: 400 })
+    const v = tidy(await readVault(kv, master))
+    const entry = { id: String(b.id), provider: String(b.provider), value: String(b.value),
+                    groups: Array.isArray(b.groups) ? b.groups : undefined, note: b.note, addedAt: new Date().toISOString() }
+    const next = { ...v, entries: [...v.entries.filter((e) => e.id !== entry.id), entry] }
+    await writeVault(kv, next, master)
+    return Response.json(redact(next))
+  }
+
+  const mEntry = /^\/api\/credentials\/entry\/(.+)$/.exec(path)
+  if (request.method === 'DELETE' && mEntry) {
+    const v = await readVault(kv, master)
+    const next = { ...v, entries: v.entries.filter((e) => e.id !== mEntry[1]) }
+    await writeVault(kv, next, master)
+    return Response.json(redact(next))
+  }
+
+  if (request.method === 'POST' && path === '/api/credentials/group') {
+    const b = await request.json().catch(() => ({})) as any
+    if (!b?.projectId || !b?.group) return Response.json({ error: 'body: { projectId, group }' }, { status: 400 })
+    const v = await readVault(kv, master)
+    const next = { ...v, groups: { ...v.groups, [b.projectId]: String(b.group) } }
+    await writeVault(kv, next, master)
+    return Response.json(redact(next))
+  }
+
+  // Put a key back in service by hand, when you know it reset before its cooldown expired.
+  const mRevive = /^\/api\/credentials\/revive\/(.+)$/.exec(path)
+  if (request.method === 'POST' && mRevive) {
+    const v = await readVault(kv, master)
+    const spent = { ...(v.spent ?? {}) }; delete spent[mRevive[1]]
+    const next = { ...v, spent }
+    await writeVault(kv, next, master)
+    return Response.json(redact(next))
+  }
+
+  return new Response('not found', { status: 404 })
 }
 
 // ── Machine details: proxy from Fly API ──────────────────────────────────────

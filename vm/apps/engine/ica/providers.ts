@@ -13,14 +13,14 @@
 
 import { codexCredential } from './pi.js'
 
-export type ProviderId = 'openai-codex-responses' | 'opencode-go' | 'anthropic' | 'openrouter'
+export type ProviderId = 'openai-codex' | 'opencode-go' | 'anthropic' | 'openrouter'
 
 // The chains, most specific first. A model that matches nothing falls through to OpenRouter, which is the
 // correct answer for a model we have not thought about: it is the account that carries almost everything.
 const ROUTES: { name: string; match: RegExp; chain: ProviderId[] }[] = [
   // Luna is carried by BOTH the ChatGPT subscription and opencode-go, so it is the one model where the second
   // choice is another subscription rather than metered usage.
-  { name: 'luna', match: /luna/i, chain: ['openai-codex-responses', 'opencode-go', 'openrouter'] },
+  { name: 'luna', match: /luna/i, chain: ['openai-codex', 'opencode-go', 'openrouter'] },
   // DeepSeek is not on the ChatGPT subscription at all, so codex is not in this chain — asking it would be a
   // guaranteed miss, and a miss costs a round trip and an error before the fallback is tried.
   { name: 'deepseek', match: /deepseek/i, chain: ['opencode-go', 'openrouter'] },
@@ -29,7 +29,7 @@ const ROUTES: { name: string; match: RegExp; chain: ProviderId[] }[] = [
   // through here.
   { name: 'anthropic', match: /^(anthropic\/)?claude[-.]/i, chain: ['anthropic', 'openrouter'] },
   // Everything else from OpenAI rides the ChatGPT subscription.
-  { name: 'openai', match: /^(openai\/)?(gpt-|o\d|chatgpt)/i, chain: ['openai-codex-responses', 'openrouter'] },
+  { name: 'openai', match: /^(openai\/)?(gpt-|o\d|chatgpt)/i, chain: ['openai-codex', 'openrouter'] },
 ]
 
 const FALLBACK: ProviderId[] = ['openrouter']
@@ -44,7 +44,7 @@ export function providersFor(model: string): ProviderId[] {
  *  a long-running engine ends up choosing an account whose token died hours ago. */
 export function available(p: ProviderId): boolean {
   switch (p) {
-    case 'openai-codex-responses': return !!codexCredential()
+    case 'openai-codex':            return !!codexCredential()
     case 'opencode-go':            return !!process.env.OPENCODE_API_KEY
     case 'anthropic':              return !!process.env.ANTHROPIC_API_KEY
     case 'openrouter':             return !!process.env.OPENROUTER_API_KEY

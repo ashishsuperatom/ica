@@ -13,6 +13,9 @@
 //   ICA_OC_URL=http://127.0.0.1:4096   (opencode: share ONE standalone server, no per-engine spawn)
 //   pnpm exec tsx engine.ts
 
+// FIRST IMPORT, deliberately: it installs the fetch dispatcher, and anything that fetches before it runs
+// would bypass the proxy. Does nothing unless HTTPS_PROXY is set.
+import './ica/proxy-dispatcher.js'
 import WebSocket from 'ws'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'

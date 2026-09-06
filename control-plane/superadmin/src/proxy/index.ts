@@ -23,7 +23,22 @@
  *  constant — two copies of a name is how a service and a customer end up claiming the same address. */
 export const PROXY_SUBDOMAIN = 'proxy'
 
+// THE RULES ARE SHARED. There are two proxies — this Worker (primary) and the Node server on EC2 (secondary,
+// and the only one that can carry a CONNECT tunnel) — because neither may be a single point of failure for
+// every agent on every project. Two copies of a rule is how one gets fixed and the other does not, so the URL
+// shape, the upstream table, the auth decision and the usage parsing live in ONE file that both import.
+// esbuild follows the relative path when the Worker is bundled.
+import { UPSTREAMS as CONTRACT, PATH_PREFIX as SHARED_PREFIX, PROJECT_HEADER as SHARED_HEADER,
+         parsePath, bearerOf as sharedBearer, decide, usageFrom as sharedUsage, usageFromSseTail } from '../../../../agent-proxy/contract.mjs'
+
+import type { KV } from './pool.js'
+import { readVault, writeVault, candidates, groupOf, markSpent, tidy, type Vault } from './vault.js'
+
 export interface ProxyEnv {
+  // Credential POLICY and STATE — which key serves which group, and which are spent. Never the values.
+  CREDENTIALS?: KV
+  // The one key that must NOT be in KV: it is what makes everything in KV unreadable on its own.
+  CREDENTIALS_MASTER_KEY?: string
   // Verifying a project's API key is ProjectDO's job — it is the source of truth and can revoke. We never
   // keep a second copy of a key here to compare against.
   PROJECT?: { get(id: DurableObjectId): { fetch(req: Request): Promise<Response> }; idFromName(name: string): DurableObjectId }
@@ -53,40 +68,20 @@ export interface ProxyEnv {
 // claude-code is the case that cannot prove anything: its Authorization already carries its own subscription
 // token, which we forward untouched. So it is identified and not authenticated — acceptable only because such
 // a call is given nothing. It brings its own credential, so a forged id misattributes a meter reading.
-const PROJECT_HEADER = 'x-superatom-project-id'
-const PATH_PREFIX = 'p'
+const PROJECT_HEADER = SHARED_HEADER
+const PATH_PREFIX = SHARED_PREFIX
 
-interface Upstream {
-  base: string
-  /** Put the provider key on a request that arrived without one. Providers disagree about the header, and
-   *  guessing wrongly yields a 401 that reads like a bad key rather than a bad guess. */
-  auth: (h: Headers, key: string) => void
-  keyOf: (env: ProxyEnv) => string | undefined
-}
+// The upstream table comes from the contract; here we only add how THIS runtime reads a key from its env.
+// A credential by NAME. KV first — that is where the pool's values live and there is no limit on how many —
+// then the Worker-secret binding, so a provider configured before any pool existed keeps working untouched.
+// One read, one decrypt, and every question about credentials is answerable from memory for this request.
+const vaultOf = async (env: ProxyEnv): Promise<Vault> =>
+  env.CREDENTIALS ? readVault(env.CREDENTIALS, env.CREDENTIALS_MASTER_KEY) : { entries: [], groups: {} }
 
-// THE PROXY IS DELIBERATELY DUMB. It knows keys and it counts tokens. It does NOT decide which account should
-// serve a model — the ENGINE decides that (ica/providers.ts) and names the provider in the URL it calls.
-//
-// That split is on purpose. The engine knows what it is trying to do, which credentials the box actually
-// holds, and what to fall back to when one fails; reproducing any of that here would be a second, divergent
-// copy of a decision already made, in a place with less information. A proxy that routes is a proxy you have
-// to debug when the answer is wrong.
-const UPSTREAMS: Record<string, Upstream> = {
-  openrouter: {
-    base: 'https://openrouter.ai/api/v1',
-    auth: (h, k) => h.set('authorization', `Bearer ${k}`),
-    keyOf: (e) => e.OPENROUTER_API_KEY,
-  },
-  'opencode-go': {
-    base: 'https://opencode.ai/zen/go/v1',
-    auth: (h, k) => h.set('authorization', `Bearer ${k}`),
-    keyOf: (e) => e.OPENCODE_API_KEY,
-  },
-  anthropic: {
-    base: 'https://api.anthropic.com',
-    auth: (h, k) => { h.set('x-api-key', k); if (!h.has('anthropic-version')) h.set('anthropic-version', '2023-06-01') },
-    keyOf: (e) => e.ANTHROPIC_API_KEY,
-  },
+// The single fallback credential for a provider nobody has pooled yet.
+const keyOf = async (name: string, env: ProxyEnv): Promise<string | undefined> => {
+  const u = CONTRACT[name]
+  return u?.envKey ? (env as any)[u.envKey] : undefined
 }
 
 const json = (body: unknown, status = 200) =>
@@ -106,7 +101,9 @@ async function provenProject(env: ProxyEnv, projectId: string, apiKey: string | 
   if (!projectId || !apiKey || !env.PROJECT) return false
   try {
     const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
-    const res = await stub.fetch(new Request('http://do/auth', {
+    // /verify-conn is the SAME check the hub makes when the engine connects, so a key that works there works
+    // here and there is only one notion of "is this really that project".
+    const res = await stub.fetch(new Request('http://do/verify-conn', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: apiKey }),
     }))
     return res.ok
@@ -171,20 +168,40 @@ function teeForUsage(body: ReadableStream, onDone: (u: { in: number; out: number
  */
 export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url)
-  let seg = url.pathname.replace(/^\/+/, '').split('/')
+  const parsed = parsePath(url.pathname)
+  let seg = (parsed.provider ? [parsed.provider, ...(parsed.rest ? parsed.rest.split('/') : [])]
+                             : [parsed.service ?? '', ...(parsed.arg ? [parsed.arg] : [])]).filter(Boolean)
 
-  // /p/<token>/... — pull the project token out of the path and carry on as if the rest were the whole URL, so
-  // every route below is written once and does not care how the caller identified itself.
-  let pathProjectId: string | null = null
-  if (seg[0] === PATH_PREFIX && seg.length > 1) { pathProjectId = seg[1]; seg = seg.slice(2) }
+  const pathProjectId = parsed.projectId
   const head = seg[0] ?? ''          // a service route (_health/_whoami/_key) or the provider the engine chose
 
   if (head === '_health') {
-    return json({ ok: true, providers: Object.keys(UPSTREAMS).filter(p => UPSTREAMS[p].keyOf(env)) })
+    // What the VAULT looks like from in here. A binding that is present but reads nothing, or a document that
+    // will not decrypt, are the two failures worth naming rather than inferring from an empty candidate list.
+    let vault: any = { bound: !!env.CREDENTIALS, masterKey: !!env.CREDENTIALS_MASTER_KEY }
+    if (env.CREDENTIALS) {
+      try {
+        const raw = await env.CREDENTIALS.get('agent-credentials', 'text')
+        vault.documentBytes = raw ? String(raw).length : 0
+        const v = await vaultOf(env)
+        vault.entries = v.entries.length
+        vault.providers = [...new Set(v.entries.map((e: any) => e.provider))]
+      } catch (e: any) { vault.error = String(e?.message ?? e).slice(0, 120) }
+    }
+    return json({ ok: true, vault,
+                  providers: (await Promise.all(Object.keys(CONTRACT).map(async p => (await keyOf(p, env)) ? p : null))).filter(Boolean),
+                  tunnelOnly: Object.keys(CONTRACT).filter(p => CONTRACT[p].tunnelOnly) })
   }
 
   // Claimed, not yet proven. Whether that is enough depends entirely on what is being asked for.
   const project = pathProjectId ?? request.headers.get(PROJECT_HEADER)
+
+  // The EC2 proxy has no Durable Object access, so it asks US whether a project key is genuine. One source of
+  // truth (ProjectDO) for both implementations, rather than a second copy of the check on a second machine.
+  if (head === '_verify') {
+    const ok = await provenProject(env, project ?? '', sharedBearer((h) => request.headers.get(h)))
+    return json({ ok, project: ok ? project : null }, ok ? 200 : 401)
+  }
 
   if (head === '_whoami') {
     return project ? json({ project }) : json({ error: 'unknown or missing project token' }, 401)
@@ -202,18 +219,40 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
       return json({ error: 'send the project API key as `Authorization: Bearer sk-proj-…`' }, 401)
     }
     const name = seg[1] ?? ''
-    const up = UPSTREAMS[name]
-    if (!up) return json({ error: `no provider named ${name}` }, 404)
-    const key = up.keyOf(env)
-    if (!key) return json({ error: `no key configured for ${name}` }, 503)
-    console.log(`[proxy] KEY ISSUED ${name} → project ${project}`)
-    return json({ provider: name, key })
+    if (!CONTRACT[name]) return json({ error: `no provider named ${name}` }, 404)
+
+    // THE VAULT FIRST. A box asking for a credential should get one that suits ITS project — its group's
+    // subscription, and one that has not run out — rather than a single global key everyone shares. This is
+    // the only rotation ChatGPT can ever have: the tunnel carries bytes it cannot read, so it can never
+    // substitute a credential mid-flight the way the reverse path does. Choosing well here IS the mechanism.
+    const vault = await vaultOf(env)
+    const group = groupOf(vault, project!)
+    const usable = candidates(vault, name, project!)
+    if (usable.length) {
+      const c = usable[0]
+      console.log(`[proxy] KEY ISSUED ${name}/${c.id} → project ${project} (group ${group})`)
+      return json({ provider: name, keyId: c.id, key: c.value })
+    }
+
+    // Nothing in the vault: fall back to the single configured key, so a provider works before anyone has
+    // filled it in. Said out loud, because silently serving the shared key would hide that this project's
+    // group has no capacity of its own.
+    const key = await keyOf(name, env)
+    if (!key) return json({ error: `no credential available for ${name}`, group, tried: vault.entries.filter(e => e.provider === name).length }, 503)
+    console.log(`[proxy] KEY ISSUED ${name}/<unvaulted> → project ${project} (group ${group}; nothing in the vault matched)`)
+    return json({ provider: name, keyId: null, key })
   }
 
   // The provider is NAMED by the caller: the engine already chose it. We look up its key and forward.
   const name = head
-  const up = UPSTREAMS[name]
-  if (!up) return json({ error: `unknown provider /${name}`, providers: Object.keys(UPSTREAMS) }, 404)
+  const up = CONTRACT[name]
+  if (!up) return json({ error: `unknown provider /${name}`, providers: Object.keys(CONTRACT) }, 404)
+  // A provider the tunnel serves must not be relayed: the ChatGPT backend refuses anything relayed (403 from
+  // a Worker, 302 from a Node reverse proxy, while the same request direct succeeds), so a call arriving here
+  // is misrouted and is told where to go rather than left to fail as an upstream error.
+  if (up.tunnelOnly || !up.base) {
+    return json({ error: `${name} is served by the CONNECT tunnel, not by this proxy`, use: 'HTTPS_PROXY=<tunnel host>' }, 421)
+  }
 
   // ── WHO IS CALLING, AND HOW WELL DO WE KNOW ─────────────────────────────────────────────────────────────
   // Two answers, and the stronger one is used whenever it is available.
@@ -228,16 +267,32 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
   //   a forged path misattributes a meter reading rather than obtaining a key.
   //
   // The rule that falls out: WE ONLY SPEND OUR OWN KEY FOR AN AUTHENTICATED CALLER.
-  const sent = bearerOf(request.headers)
-  const isProjectKey = !!sent && /^sk-proj-/.test(sent)
-  const proven = isProjectKey && await provenProject(env, project ?? '', sent ?? '')
-  if (isProjectKey && !proven) return json({ error: 'project API key not valid for this project' }, 401)
-  if (!project && !proven) return json({ error: `no project — call /${PATH_PREFIX}/<projectId>/${name}/…` }, 401)
+  const sent = sharedBearer((h) => request.headers.get(h))
+  const proven = !!sent && /^sk-proj-/.test(sent) && await provenProject(env, project ?? '', sent)
+  const verdict = decide({ projectId: project, sentCredential: sent, proven })
+  if (!verdict.ok) return json({ error: verdict.error }, verdict.status)
 
   // The model is read only to LABEL the meter, never to route. Clone: a body can be read once.
   let model: string | undefined
   if (request.body) {
     try { model = (await request.clone().json() as any)?.model } catch { /* not JSON, or empty */ }
+  }
+
+  // ── WEBSOCKET: RELAY, DO NOT INTERPRET ──────────────────────────────────────────────────────────────────
+  // pi's codex transport is "auto", which means WebSocket first and an HTTP POST only as a fallback. So the
+  // normal, working path for that provider is a wss:// stream — and a proxy that speaks only HTTP forces the
+  // fallback, which is the path that fails.
+  //
+  // Workers relay an upgrade natively: hand the request to fetch and return what comes back, upgrade and all.
+  // We deliberately do NOT look inside. Nothing here parses frames, so a transport change upstream cannot
+  // break us — which is the whole reason to relay rather than to stand in.
+  //
+  // The cost is metering: token counts live in the message stream, and we are not reading it. Byte-level
+  // accounting is what this provider gets, which is the accepted trade for a path that keeps working.
+  if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
+    const wsTarget = up.base + '/' + seg.slice(1).join('/') + url.search
+    console.log(`[proxy] ${project} ${name} websocket → ${wsTarget}`)
+    return fetch(wsTarget, request as any)
   }
 
   const headers = new Headers(request.headers)
@@ -250,13 +305,11 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
   // A caller holding its OWN provider credential keeps it: replacing claude-code's subscription token would
   // bill the wrong account and answer as the wrong identity. A caller holding OUR project key is asking us to
   // supply one — and only a PROVEN one gets that, because from here on it spends our money.
-  const hasOwn = !!sent && !isProjectKey
-  if (!hasOwn) {
-    if (!proven) return json({ error: 'send the project API key to use a provider key held here' }, 401)
-    const key = up.keyOf(env)
+  if (verdict.attachKey) {
+    const key = await keyOf(name, env)
     if (!key) return json({ error: `no key configured for ${name}` }, 503)
     headers.delete('authorization'); headers.delete('x-api-key')   // never forward our own project key upstream
-    up.auth(headers, key)
+    for (const [h, v] of Object.entries(up.header!(key))) if (!headers.has(h)) headers.set(h, v)
   }
 
   // The client's own path is forwarded as-is: it built a request for a real API and we are standing in

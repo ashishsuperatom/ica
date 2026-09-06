@@ -8,8 +8,7 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { createAgentSession, DefaultResourceLoader, getAgentDir, SessionManager } from '@earendil-works/pi-coding-agent'
-import { registerBuiltInApiProviders, getModel } from '@earendil-works/pi-ai'
+import { createAgentSession, DefaultResourceLoader, getAgentDir, SessionManager, SettingsManager, ModelRuntime } from '@earendil-works/pi-coding-agent'
 import type { Session, RunHandlers, RunResult, AgentEvent } from './session.js'   // the shared session interface
 import { resolveProvider, describeResolution } from './providers.js'
 
@@ -118,6 +117,24 @@ function normPiEvent(e: any, cmds: Map<string, string>): AgentEvent | null {
   return null
 }
 
+// ONE shared model runtime, reading the SAME ~/.pi/agent that the `pi` CLI writes.
+//
+// This replaces the static getModel() catalog, and the difference is the whole point: the built-in catalog is
+// frozen at the version of pi-ai we happen to have installed, so a model released since then simply does not
+// exist to us — gpt-5.6-luna was selectable in the terminal and invisible here for exactly that reason. The
+// runtime reads the live catalog instead, so authorising a model once with `pi` → /login → /model is enough
+// and a newer model is adopted by upgrading pi rather than by editing this file.
+let runtimeP: Promise<any> | null = null
+function modelRuntime(): Promise<any> {
+  const agentDir = getAgentDir()
+  runtimeP ??= (ModelRuntime as any).create({
+    authPath: `${agentDir}/auth.json`,
+    modelsStorePath: `${agentDir}/models-store.json`,
+    allowModelNetwork: true,
+  })
+  return runtimeP!
+}
+
 export function createPiSession(opts: PiSessionOpts): Session {
   // WHICH ACCOUNT PAYS — decided from the MODEL, not pinned globally. The chain per model lives in
   // providers.ts; here we just take the first account we actually hold a credential for. This used to be
@@ -134,7 +151,7 @@ export function createPiSession(opts: PiSessionOpts): Session {
   // for. So fall through to the end of the chain and let the request say what is wrong.
   const provider = pinned ?? routed?.provider ?? 'openrouter'
   const cred = codexCredential()
-  const usingCodex = provider === 'openai-codex-responses'
+  const usingCodex = provider === 'openai-codex'
 
   // THE AGENT'S INSTRUCTIONS. pi's DefaultResourceLoader reads AGENTS.md / CLAUDE.md / SYSTEM.md from cwd and
   // folds them into the system prompt, so the reference goes in the same way codex takes it — as a file the
@@ -166,10 +183,41 @@ export function createPiSession(opts: PiSessionOpts): Session {
 
   async function ensure() {
     if (session) return session
-    registerBuiltInApiProviders()
     const rl = new DefaultResourceLoader({ cwd: opts.cwd, agentDir: getAgentDir() } as any)
     await rl.reload()
-    const model = getModel(provider as any, modelId)
+
+    // The model comes from the LIVE catalog, not a compiled-in list. Falling back to whatever that provider
+    // does have means a missing model degrades to a working agent rather than a crash, and says so once.
+    const runtime = await modelRuntime()
+    const available: any[] = await runtime.getAvailable(provider)
+    const model: any = available.find((m) => m?.id === modelId) ?? available[0]
+    if (!model) throw new Error(`pi: no model available from "${provider}" — authorise one with \`pi\` → /login`)
+    if (model.id !== modelId) console.warn(`[ica:pi] ${modelId} not available from ${provider}; using ${model.id}`)
+
+    // ── ROUTE THROUGH OUR PROXY, when there is one ────────────────────────────────────────────────────────
+    // SUPERATOM_PROXY (e.g. https://proxy.superatom.site/p/<projectId>) makes every model call leave the box
+    // through one host we control: one domain to whitelist, no provider key on the machine, and usage counted
+    // where it can be trusted rather than self-reported.
+    //
+    // It is set on the MODEL because that is what pi-ai reads — the codex provider does
+    // `fetch(resolveCodexUrl(model.baseUrl))` and only falls back to its own default when that is empty. There
+    // is no environment override for these providers the way there is for Anthropic.
+    //
+    // The provider name becomes a path segment, which is how the proxy knows which key to attach: the ENGINE
+    // decides where a call should go, and the proxy only carries it.
+    //
+    // Unset ⇒ the model keeps the provider's own URL and the box talks to the provider directly — exactly what
+    // every existing box does today, so this changes nothing until it is switched on.
+    const proxyBase = process.env.SUPERATOM_PROXY?.replace(/\/+$/, '')
+    if (proxyBase) {
+      model.baseUrl = `${proxyBase}/${provider}`
+      // The project's own API key travels as the provider credential, because that is the only slot an agent
+      // will populate — the proxy recognises `sk-proj-…`, proves it, and substitutes the real key. A provider
+      // that brings its own credential (codex) keeps it; the proxy forwards that untouched.
+      if (process.env.SUPERATOM_PROJECT_KEY && !model.apiKey) model.apiKey = process.env.SUPERATOM_PROJECT_KEY
+      console.log(`[ica:pi] via proxy → ${model.baseUrl}`)
+    }
+
     // TELL IT WHERE TO WORK. Without `cwd` the SDK defaults to process.cwd() — the ENGINE's directory, not the
     // agent's workspace — so every tool ran in the wrong place. The model worked around it by prefixing
     // `cd <absolute workspace> &&` onto every command, which costs tokens on each call, makes the step log
@@ -184,7 +232,9 @@ export function createPiSession(opts: PiSessionOpts): Session {
     const sm = opts.noTools ? SessionManager.inMemory()
              : (opts.resumeId ? tryOpenSession(opts.resumeId, opts.cwd) : null) ?? SessionManager.create(opts.cwd)
     ;({ session } = await createAgentSession({
-      cwd: opts.cwd, resourceLoader: rl, sessionManager: sm, model,
+      cwd: opts.cwd, agentDir: getAgentDir(), modelRuntime: runtime,
+      settingsManager: SettingsManager.create(opts.cwd, getAgentDir()),
+      resourceLoader: rl, sessionManager: sm, model,
       // A pure-text agent gets NO tools. Until now `noTools` was not even passed to pi, so the narrator — which
       // is meant to write one sentence — ran with bash, read, edit and write available to it.
       ...(opts.noTools ? { noTools: 'all' as const } : {}),

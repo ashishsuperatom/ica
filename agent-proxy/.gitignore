@@ -1,0 +1,5 @@
+.deploy.env
+.env
+logs/
+node_modules/
+*.pem
