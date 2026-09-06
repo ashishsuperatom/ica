@@ -34,10 +34,26 @@ export interface ProxyEnv {
   PROXY_TOKENS?: string
 }
 
-// The caller's own identity travels in its OWN header, never in Authorization. That separation is what lets a
-// client keep its provider credential: claude-code authenticates with its subscription token in Authorization
-// and we must forward that untouched, while still knowing which project is calling.
+// ── HOW A BOX IDENTIFIES ITSELF ──────────────────────────────────────────────────────────────────────────
+// THE AGENTS BUILD THEIR OWN REQUESTS. We do not. pi, opencode and claude-code each take a base URL and an
+// API-key env var and construct everything else themselves, so the only two things we can influence are those
+// two values. A custom header is unreachable — there is no way to ask any of them to send one.
+//
+// So the project token rides in the BASE URL PATH, which every client appends its own path to:
+//
+//   https://proxy.superatom.site/p/<project-token>/<provider>
+//
+// claude-code then requests /p/<tok>/anthropic/v1/messages, pi requests
+// /p/<tok>/openrouter/chat/completions, and neither had to be taught anything.
+//
+// This matters most for the client we CANNOT re-credential: claude-code arrives holding its own subscription
+// token in Authorization, which we must forward untouched. Identity in the path means we still know which
+// project is calling without touching that header.
+//
+// A token in a URL is a secret in a path, so it is project-scoped, revocable on its own, and worth keeping out
+// of access logs. The header form is kept as a convenience for our own tooling, which can set headers.
 const PROJECT_HEADER = 'x-superatom-project-token'
+const PATH_PREFIX = 'p'
 
 interface Upstream {
   base: string
@@ -130,14 +146,19 @@ function teeForUsage(body: ReadableStream, onDone: (u: { in: number; out: number
  */
 export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url)
-  const seg = url.pathname.replace(/^\/+/, '').split('/')
+  let seg = url.pathname.replace(/^\/+/, '').split('/')
+
+  // /p/<token>/... — pull the project token out of the path and carry on as if the rest were the whole URL, so
+  // every route below is written once and does not care how the caller identified itself.
+  let pathToken: string | null = null
+  if (seg[0] === PATH_PREFIX && seg.length > 1) { pathToken = seg[1]; seg = seg.slice(2) }
   const head = seg[0] ?? ''
 
   if (head === '_health') {
     return json({ ok: true, providers: Object.keys(UPSTREAMS).filter(p => UPSTREAMS[p].keyOf(env)) })
   }
 
-  const token = request.headers.get(PROJECT_HEADER)
+  const token = pathToken ?? request.headers.get(PROJECT_HEADER)
   const project = projectOf(env, token)
 
   if (head === '_whoami') {
@@ -159,7 +180,7 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
 
   const up = UPSTREAMS[head]
   if (!up) return json({ error: `unknown route /${head}`, providers: Object.keys(UPSTREAMS) }, 404)
-  if (!project) return json({ error: `missing ${PROJECT_HEADER}` }, 401)
+  if (!project) return json({ error: `no project token — call /${PATH_PREFIX}/<token>/${head}/…` }, 401)
 
   const headers = new Headers(request.headers)
   headers.delete(PROJECT_HEADER)     // our concern, not the provider's
