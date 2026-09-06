@@ -15,39 +15,52 @@ import { codexCredential } from './pi.js'
 
 export type ProviderId = 'openai-codex' | 'opencode-go' | 'anthropic' | 'openrouter'
 
-// The chains, most specific first. A model that matches nothing falls through to OpenRouter, which is the
-// correct answer for a model we have not thought about: it is the account that carries almost everything.
+// THE CHAINS. Subscriptions we already pay for, and nothing else.
+//
+// OpenRouter is deliberately absent. It was the universal fallback and it is not wanted: metered usage that
+// nobody chose is exactly the surprise this whole system exists to prevent. A model with no account behind it
+// FAILS, and says which accounts it tried — which is information, where a silent fallback is a bill.
+//
+// Claude models are not here either, and that is not an omission. `claude-sonnet-5` is served by the
+// CLAUDE-CODE harness, which authenticates with its own subscription token on the box; it never comes through
+// this table, which only decides which account PI should use.
 const ROUTES: { name: string; match: RegExp; chain: ProviderId[] }[] = [
-  // Luna is carried by BOTH the ChatGPT subscription and opencode-go, so it is the one model where the second
-  // choice is another subscription rather than metered usage.
-  { name: 'luna', match: /luna/i, chain: ['openai-codex', 'opencode-go', 'openrouter'] },
-  // DeepSeek is not on the ChatGPT subscription at all, so codex is not in this chain — asking it would be a
-  // guaranteed miss, and a miss costs a round trip and an error before the fallback is tried.
-  { name: 'deepseek', match: /deepseek/i, chain: ['opencode-go', 'openrouter'] },
-  // Anthropic models go to Anthropic. NOTE this is the Anthropic API (an API key), NOT the Claude
-  // subscription — that one belongs to the claude-code harness, which authenticates itself and never comes
-  // through here.
-  { name: 'anthropic', match: /^(anthropic\/)?claude[-.]/i, chain: ['anthropic', 'openrouter'] },
+  // Luna is carried by BOTH subscriptions, so it is the one model with a real second choice.
+  { name: 'luna', match: /luna/i, chain: ['openai-codex', 'opencode-go'] },
+  // DeepSeek is not on the ChatGPT subscription at all, so codex is not in this chain — asking would be a
+  // guaranteed miss, and a miss costs a round trip and an error before anything else is tried.
+  { name: 'deepseek', match: /deepseek/i, chain: ['opencode-go'] },
   // Everything else from OpenAI rides the ChatGPT subscription.
-  { name: 'openai', match: /^(openai\/)?(gpt-|o\d|chatgpt)/i, chain: ['openai-codex', 'openrouter'] },
+  { name: 'openai', match: /^(openai\/)?(gpt-|o\d|chatgpt)/i, chain: ['openai-codex'] },
 ]
 
-const FALLBACK: ProviderId[] = ['openrouter']
+// No universal fallback. A model nobody has routed is a decision to make, not one to make silently — and
+// OpenRouter, which used to sit here, is metered usage nobody chose.
+const FALLBACK: ProviderId[] = []
 
-/** The accounts that could serve this model, best first. Never empty. */
+/** The accounts that could serve this model, best first. EMPTY when nothing is routed for it. */
 export function providersFor(model: string): ProviderId[] {
   return ROUTES.find(r => r.match.test(model))?.chain ?? FALLBACK
 }
 
-/** Is this account usable RIGHT NOW — do we hold a credential for it? Checked at selection time and never
- *  cached, because the codex credential is a file another process refreshes, and a value read at boot is how
+/** Is this account REACHABLE right now?
+ *
+ *  Not "does this box hold the key" — it deliberately does not, and asking that was a real bug: once
+ *  credentials moved into the vault, every box answered "no" to everything and routing fell through to a
+ *  provider nobody wanted. Reachable means the proxy can supply it, and if the vault has nothing the proxy
+ *  says so plainly with a 503 naming the provider.
+ *
+ *  The exception is a credential the box must hold ITSELF: codex authenticates from ~/.codex/auth.json,
+ *  because the ChatGPT backend refuses relayed requests. That one is still a local question, and it is asked
+ *  every time rather than cached — the file is refreshed by another process, and a value read at boot is how
  *  a long-running engine ends up choosing an account whose token died hours ago. */
 export function available(p: ProviderId): boolean {
+  const proxied = !!process.env.SUPERATOM_PLATFORM
   switch (p) {
-    case 'openai-codex':            return !!codexCredential()
-    case 'opencode-go':            return !!process.env.OPENCODE_API_KEY
-    case 'anthropic':              return !!process.env.ANTHROPIC_API_KEY
-    case 'openrouter':             return !!process.env.OPENROUTER_API_KEY
+    case 'openai-codex': return !!codexCredential()
+    case 'opencode-go':  return proxied || !!process.env.OPENCODE_API_KEY
+    case 'anthropic':    return proxied || !!process.env.ANTHROPIC_API_KEY
+    case 'openrouter':   return proxied || !!process.env.OPENROUTER_API_KEY
   }
 }
 
@@ -71,8 +84,17 @@ export function resolveProvider(model: string): Resolution {
 
 /** One line for the log, said the same way every time so it can be grepped and diffed across boxes. */
 export function describeResolution(model: string, r: Resolution): string {
-  const why = r.skipped.length ? ` (no credential for ${r.skipped.join(', ')})` : ''
-  return r.provider
-    ? `${model} → ${r.provider}${why}`
-    : `${model} → NOTHING AVAILABLE: tried ${r.chain.join(' → ')}, no credential for any`
+  if (r.provider) {
+    const why = r.skipped.length ? ` (no credential for ${r.skipped.join(', ')})` : ''
+    return `${model} → ${r.provider}${why}`
+  }
+  // An empty chain and an exhausted one are different problems and need different sentences: one is "nobody
+  // routed this model", the other is "every account that could serve it is unavailable".
+  if (!r.chain.length) {
+    const claude = /^(anthropic\/)?claude[-.]/i.test(model)
+    return claude
+      ? `${model} → NOT A PI MODEL: Claude models are served by the claude-code harness, which uses its own subscription token`
+      : `${model} → NO ROUTE: no account is configured to serve it (add one in ROUTES, or use a model that is)`
+  }
+  return `${model} → NOTHING AVAILABLE: tried ${r.chain.join(' → ')}, no credential for any`
 }

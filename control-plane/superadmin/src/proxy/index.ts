@@ -34,6 +34,7 @@ import { UPSTREAMS as CONTRACT, PATH_PREFIX as SHARED_PREFIX, PROJECT_HEADER as 
 import type { KV } from './pool.js'
 import { readVault, writeVault, candidates, groupOf, markSpent, tidy, expiring, type Vault } from './vault.js'
 import { refreshIfStale } from './usage.js'
+import { throttled, noteFailure, noteSuccess, plausible, identityOf, auditIssue } from './throttle.js'
 
 export interface ProxyEnv {
   // Credential POLICY and STATE — which key serves which group, and which are spent. Never the values.
@@ -73,17 +74,21 @@ const PROJECT_HEADER = SHARED_HEADER
 const PATH_PREFIX = SHARED_PREFIX
 
 // The upstream table comes from the contract; here we only add how THIS runtime reads a key from its env.
-// A credential by NAME. KV first — that is where the pool's values live and there is no limit on how many —
-// then the Worker-secret binding, so a provider configured before any pool existed keeps working untouched.
+// THE VAULT IS THE ONLY SOURCE. There is deliberately no fallback to a Worker secret.
+//
+// There used to be one, and it was actively harmful: OPENROUTER_API_KEY on this Worker belongs to the
+// transcription service, so every forwarded request was quietly spending an unrelated card-backed key that
+// nothing here tracked. A fallback that reaches for whatever happens to be named similarly is not resilience,
+// it is a way to spend money you did not mean to.
+//
+// So a provider with nothing in the vault fails, loudly and immediately. "No credential available" is a far
+// better outcome than a bill against something else.
 // One read, one decrypt, and every question about credentials is answerable from memory for this request.
 const vaultOf = async (env: ProxyEnv): Promise<Vault> =>
   env.CREDENTIALS ? readVault(env.CREDENTIALS, env.CREDENTIALS_MASTER_KEY) : { entries: [], groups: {} }
 
 // The single fallback credential for a provider nobody has pooled yet.
-const keyOf = async (name: string, env: ProxyEnv): Promise<string | undefined> => {
-  const u = CONTRACT[name]
-  return u?.envKey ? (env as any)[u.envKey] : undefined
-}
+
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body, null, 2), { status, headers: { 'content-type': 'application/json' } })
@@ -130,8 +135,9 @@ function usageFrom(obj: any): { in: number; out: number } | null {
 /** Record what a call cost. Deliberately fire-and-forget through ctx.waitUntil: metering must never be able to
  *  slow down or fail a model request — a proxy that breaks inference to write a counter is worse than no
  *  counter. Storage is the next decision (D1 / ProjectDO); the call site is already correct. */
-function meter(ctx: ExecutionContext, rec: { project: string; provider: string; model?: string; in: number; out: number; ms: number }) {
-  console.log(`[proxy] ${rec.project} ${rec.provider} ${rec.model ?? '?'} in=${rec.in} out=${rec.out} ${rec.ms}ms`)
+function meter(ctx: ExecutionContext, rec: { project: string; provider: string; keyId?: string | null; model?: string; in: number; out: number; ms: number }) {
+  // The credential id is in the line because 'which key paid for this' is the question a bill raises.
+  console.log(`[proxy] ${rec.project} ${rec.provider}${rec.keyId ? '/' + rec.keyId : ''} ${rec.model ?? '?'} in=${rec.in} out=${rec.out} ${rec.ms}ms`)
 }
 
 /** Pass the body through untouched while watching it go by, so usage can be read from a STREAM without
@@ -194,22 +200,44 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
       } catch (e: any) { vault.error = String(e?.message ?? e).slice(0, 120) }
     }
     return json({ ok: true, vault,
-                  providers: (await Promise.all(Object.keys(CONTRACT).map(async p => (await keyOf(p, env)) ? p : null))).filter(Boolean),
+                  known: Object.keys(CONTRACT),
                   tunnelOnly: Object.keys(CONTRACT).filter(p => CONTRACT[p].tunnelOnly) })
   }
 
   // Claimed, not yet proven. Whether that is enough depends entirely on what is being asked for.
   const project = pathProjectId ?? request.headers.get(PROJECT_HEADER)
 
+  // Too many recent failures from this project+address? Refused before any work, so a caller learns nothing
+  // from how long we took and cannot keep guessing. Only failures count, so a working box is never slowed.
+  const who = identityOf(project, request)
+  // Called when a credential has ALREADY been rejected. A caller that has failed repeatedly is refused with a
+  // 429 instead of a 401 — the same answer, arrived at without another Durable Object call. A valid credential
+  // never reaches here, so a working box is genuinely never slowed.
+  const fail = async (): Promise<Response> => {
+    const over = await throttled(env.CREDENTIALS, who)
+    if (env.CREDENTIALS) ctx.waitUntil(noteFailure(env.CREDENTIALS, who))
+    if (over) console.log(`[proxy] THROTTLED ${who}`)
+    return over
+      ? json({ error: 'too many failed attempts; wait a few minutes' }, 429)
+      : json({ error: 'send the project API key as `Authorization: Bearer sk-proj-…`' }, 401)
+  }
+
   // The EC2 proxy has no Durable Object access, so it asks US whether a project key is genuine. One source of
   // truth (ProjectDO) for both implementations, rather than a second copy of the check on a second machine.
   if (head === '_verify') {
     const ok = await provenProject(env, project ?? '', sharedBearer((h) => request.headers.get(h)))
-    return json({ ok, project: ok ? project : null }, ok ? 200 : 401)
+    if (!ok) return fail()
+    if (env.CREDENTIALS) ctx.waitUntil(noteSuccess(env.CREDENTIALS, who))
+    return json({ ok: true, project })
   }
 
+  // Proof, not an echo. This used to answer 200 with whatever id was in the path, which reads as confirmation
+  // that the project exists — it never told a caller anything they had not just sent, but an endpoint that
+  // looks like an oracle invites being used as one.
   if (head === '_whoami') {
-    return project ? json({ project }) : json({ error: 'unknown or missing project token' }, 401)
+    const ok = await provenProject(env, project ?? '', sharedBearer((h) => request.headers.get(h)))
+    if (!ok) return fail()
+    return json({ project })
   }
 
   // A key handed to a box is a key that has left our control, so it is refused unless that provider genuinely
@@ -221,7 +249,7 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
     const projectId = project ?? ''
     if (!(await provenProject(env, projectId, bearerOf(request.headers)))) {
       console.log(`[proxy] KEY REFUSED for ${projectId || '(no project)'} — bad or missing project API key`)
-      return json({ error: 'send the project API key as `Authorization: Bearer sk-proj-…`' }, 401)
+      return fail()
     }
     const name = seg[1] ?? ''
     if (!CONTRACT[name]) return json({ error: `no provider named ${name}` }, 404)
@@ -237,20 +265,19 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
       const c = usable[0]
       const days = c.expiresAt ? Math.floor((c.expiresAt - Date.now()) / 86_400_000) : null
       console.log(`[proxy] KEY ISSUED ${name}/${c.id} → project ${project} (group ${group}${days !== null ? `, expires in ${days}d` : ''})`)
+      if (env.CREDENTIALS) ctx.waitUntil(auditIssue(env.CREDENTIALS, { project: project!, provider: name, keyId: c.id,
+        ip: request.headers.get('cf-connecting-ip') ?? 'unknown', agent: request.headers.get('user-agent') ?? undefined }))
       // Ask the provider how much is left, off the response path and only when what we have has gone stale.
       // A figure nobody is looking at yet must never delay an agent's turn.
       if (env.CREDENTIALS) ctx.waitUntil(refreshIfStale(env.CREDENTIALS, c.id, c.provider, c.value))
       // The box is told when its credential dies, so it can re-ask before rather than after.
-      return json({ provider: name, keyId: c.id, key: c.value, expiresAt: c.expiresAt ?? null })
+      // envVar tells the box where to put it, so adding a box-side provider needs no engine change.
+      return json({ provider: name, keyId: c.id, key: c.value, expiresAt: c.expiresAt ?? null, envVar: CONTRACT[name]?.envVar ?? null })
     }
 
-    // Nothing in the vault: fall back to the single configured key, so a provider works before anyone has
-    // filled it in. Said out loud, because silently serving the shared key would hide that this project's
-    // group has no capacity of its own.
-    const key = await keyOf(name, env)
-    if (!key) return json({ error: `no credential available for ${name}`, group, tried: vault.entries.filter(e => e.provider === name).length }, 503)
-    console.log(`[proxy] KEY ISSUED ${name}/<unvaulted> → project ${project} (group ${group}; nothing in the vault matched)`)
-    return json({ provider: name, keyId: null, key })
+    // Nothing in the vault means nothing to give. There is no shared key to fall back to, by design.
+    return json({ error: `no credential in the vault for ${name}`, group,
+                  tried: vault.entries.filter(e => e.provider === name).length }, 503)
   }
 
   // The provider is NAMED by the caller: the engine already chose it. We look up its key and forward.
@@ -260,6 +287,9 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
   // A provider the tunnel serves must not be relayed: the ChatGPT backend refuses anything relayed (403 from
   // a Worker, 302 from a Node reverse proxy, while the same request direct succeeds), so a call arriving here
   // is misrouted and is told where to go rather than left to fail as an upstream error.
+  if (up.boxOnly) {
+    return json({ error: `${name} is a box-side credential — fetch it from /_key/${name} and set ${up.envVar ?? 'its env var'}` }, 421)
+  }
   if (up.tunnelOnly || !up.base) {
     return json({ error: `${name} is served by the CONNECT tunnel, not by this proxy`, use: 'HTTPS_PROXY=<tunnel host>' }, 421)
   }
@@ -278,9 +308,10 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
   //
   // The rule that falls out: WE ONLY SPEND OUR OWN KEY FOR AN AUTHENTICATED CALLER.
   const sent = sharedBearer((h) => request.headers.get(h))
-  const proven = !!sent && /^sk-proj-/.test(sent) && await provenProject(env, project ?? '', sent)
+  // A malformed credential costs a regex, not a Durable Object call.
+  const proven = plausible(sent) && await provenProject(env, project ?? '', sent!)
   const verdict = decide({ projectId: project, sentCredential: sent, proven })
-  if (!verdict.ok) return json({ error: verdict.error }, verdict.status)
+  if (!verdict.ok) return verdict.status === 401 ? fail() : json({ error: verdict.error }, verdict.status)
 
   // The model is read only to LABEL the meter, never to route. Clone: a body can be read once.
   let model: string | undefined
@@ -315,11 +346,23 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
   // A caller holding its OWN provider credential keeps it: replacing claude-code's subscription token would
   // bill the wrong account and answer as the wrong identity. A caller holding OUR project key is asking us to
   // supply one — and only a PROVEN one gets that, because from here on it spends our money.
+  // WHICH credential — from the VAULT, chosen for this project's group, exactly as /_key does.
+  //
+  // This path used to read the single environment secret instead, which quietly made pools, groups and
+  // exhaustion apply to credential HANDOUTS but not to the traffic that actually spends money — the majority
+  // of it. The isolation between prod and experiments was believed to be in place and was not: a live request
+  // through here spent a different OpenRouter key than the vault held, so one card-backed key was being drawn
+  // down invisibly. Both paths now choose the same way, because there is only one way to choose.
+  let usedEntryId: string | null = null
   if (verdict.attachKey) {
-    const key = await keyOf(name, env)
-    if (!key) return json({ error: `no key configured for ${name}` }, 503)
+    const fromVault = candidates(await vaultOf(env), name, project!)[0]
+    if (!fromVault) return json({ error: `no credential in the vault for ${name}`, project, hint: 'add one in the admin console' }, 503)
+    const key = fromVault.value
+    usedEntryId = fromVault.id
     headers.delete('authorization'); headers.delete('x-api-key')   // never forward our own project key upstream
     for (const [h, v] of Object.entries(up.header!(key))) if (!headers.has(h)) headers.set(h, v)
+    // Keep the usage figure attached to the credential actually being spent.
+    if (env.CREDENTIALS && fromVault) ctx.waitUntil(refreshIfStale(env.CREDENTIALS, fromVault.id, fromVault.provider, fromVault.value))
   }
 
   // The client's own path is forwarded as-is: it built a request for a real API and we are standing in
@@ -328,7 +371,7 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
   const t0 = Date.now()
   const res = await fetch(target, { method: request.method, headers, body: request.body, redirect: 'manual' })
 
-  const rec = { project: project ?? 'unknown', provider: name, model, ms: 0, in: 0, out: 0 }
+  const rec = { project: project ?? 'unknown', provider: name, keyId: usedEntryId, model, ms: 0, in: 0, out: 0 }
   if (!res.body) return res
 
   // A stream is metered as it flows; a plain JSON response is metered after the fact from a clone, so neither

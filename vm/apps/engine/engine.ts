@@ -16,6 +16,7 @@
 // FIRST IMPORT, deliberately: it installs the fetch dispatcher, and anything that fetches before it runs
 // would bypass the proxy. Does nothing unless HTTPS_PROXY is set.
 import './ica/proxy-dispatcher.js'
+import { fetchBoxCredentials } from './ica/box-credentials.js'
 import WebSocket from 'ws'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
@@ -1882,6 +1883,11 @@ setInterval(() => { conceptConsolidateTick().catch((e) => console.log('[concept-
 // non-fatal (the agent just falls back to lazy spawn on first use).
 let warmed = false
 async function warmEssentialAgents() {
+  // BEFORE any agent is spawned. A credential that arrives after the agent has started is a credential the
+  // agent never sees — it inherits this process's environment once, at spawn.
+  try { await fetchBoxCredentials() }
+  catch (e: any) { console.warn(`[ica] box credentials: ${e?.message ?? e} — continuing with whatever this box has`) }
+
   if (warmed) return; warmed = true
   console.log('[ica] warming essential agents (analyst · connector) and the concept index…')
   const warm = async (name: string, p: Promise<unknown>): Promise<{ name: string; ok: boolean; ms: number }> => {

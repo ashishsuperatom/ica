@@ -85,17 +85,15 @@ const log = (...a) => console.log(`${ts()}`, ...a)
 // project credentials it already needs for verification — so there is ONE place a key lives and one place to
 // revoke it. A key in a file here would be a second copy that nobody remembers to rotate.
 //
-// PROXY_PROJECT / PROXY_PROJECT_KEY identify this box to the vault. Absent, or the vault unreachable, it
-// falls back to a provider key in the environment — a box has to keep working when the control plane is
-// having a bad day, and saying so in the log is better than failing silently either way.
+// PROXY_PROJECT / PROXY_PROJECT_KEY identify this box to the vault. There is NO fallback to a key in the
+// environment: a fallback that reaches for whatever is named similarly is how an unrelated card-backed key
+// gets spent without anyone noticing, which is exactly what happened on the Worker side with a transcription
+// key. If the vault cannot be reached, this box serves nothing and says so.
 const keyCache = new Map()   // provider → { key, id, at }
 
 async function keyFor(name) {
-  const u = UPSTREAMS[name]
-  const fromEnv = u?.envKey ? process.env[u.envKey] : undefined
-
   const pid = PROJECT, pkey = PROJECT_KEY
-  if (!VERIFY_URL || !pid || !pkey) return fromEnv
+  if (!pid || !pkey) { log(`   xx no project identity on this box — cannot fetch a credential for ${name}`); return undefined }
 
   const hit = keyCache.get(name)
   if (hit && Date.now() - hit.at < TTL_MS) return hit.key
@@ -112,11 +110,11 @@ async function keyFor(name) {
         return b.key
       }
     }
-    log(`   xx vault has no credential for ${name} (${r.status})${fromEnv ? ' — falling back to the environment' : ''}`)
+    log(`   xx vault has no credential for ${name} (${r.status})`)
   } catch (e) {
-    log(`   xx vault unreachable for ${name} (${e.message})${fromEnv ? ' — falling back to the environment' : ''}`)
+    log(`   xx vault unreachable for ${name} (${e.message})`)
   }
-  return fromEnv
+  return undefined
 }
 
 /** Forget a cached credential, so the next call re-asks the vault. Used when a provider rejects the key we

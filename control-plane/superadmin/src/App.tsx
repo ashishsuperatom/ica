@@ -213,7 +213,10 @@ function Shell({ children, crumbs, nav }: { children: React.ReactNode; crumbs?: 
         <nav>
           <div className="grp">Manage</div>
           <Link to="/" className="nav">{I.home}Organizations</Link>
-          <Link to="/credentials" className="nav">{I.key}Credentials</Link>
+          {/* SUPERADMIN HOST ONLY. The API already refuses anyone else, so this is not what protects the
+              credentials — but an org admin should not be shown a door they may not open, and a menu item is
+              itself a statement about what exists. */}
+          {HOST_SCOPE === 'superadmin' && <Link to="/credentials" className="nav">{I.key}Credentials</Link>}
           {nav}
         </nav>
         <div className="foot"><UserButton /></div>
@@ -243,7 +246,7 @@ export function App() {
         {/* Landing: the platform console lists every org; the customer console sends you to your own. */}
         <Route path="/" element={HOST_SCOPE === 'admin' ? <MyOrgLanding /> : <OrgListPage />} />
         <Route path="/org/:orgId" element={<OrgDetailPage />} />
-        <Route path="/credentials" element={<CredentialsPage />} />
+        {HOST_SCOPE === 'superadmin' && <Route path="/credentials" element={<CredentialsPage />} />}
         {/* /pro/<projectId> — a project on its own, no org in the path. */}
         <Route path="/pro/:projectId/*" element={<ProjectDetailPage />} />
         {/* The older nested form still resolves, so existing links keep working. */}

@@ -10,6 +10,10 @@ export interface Upstream {
   header?: (key: string) => Record<string, string>
   envKey?: string
   tunnelOnly?: boolean
+  /** Handed to a box, never relayed — the client insists on a local credential. */
+  boxOnly?: boolean
+  /** Where the box should put it. */
+  envVar?: string
 }
 export const UPSTREAMS: Record<string, Upstream>
 

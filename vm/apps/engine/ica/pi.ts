@@ -194,31 +194,28 @@ export function createPiSession(opts: PiSessionOpts): Session {
     if (!model) throw new Error(`pi: no model available from "${provider}" — authorise one with \`pi\` → /login`)
     if (model.id !== modelId) console.warn(`[ica:pi] ${modelId} not available from ${provider}; using ${model.id}`)
 
-    // ── ROUTE THROUGH OUR PROXY, when there is one ────────────────────────────────────────────────────────
-    // SUPERATOM_PROXY (e.g. https://proxy.superatom.site/p/<projectId>) makes every model call leave the box
-    // through one host we control: one domain to whitelist, no provider key on the machine, and usage counted
-    // where it can be trusted rather than self-reported.
+    // ── ROUTE THROUGH OUR PROXY, when there is one and it can carry this provider ──────────────────────────
+    // SUPERATOM_PLATFORM makes model calls leave the box through one host we control: one domain to whitelist,
+    // no provider key on the machine, and usage counted where it can be trusted.
     //
-    // It is set on the MODEL because that is what pi-ai reads — the codex provider does
-    // `fetch(resolveCodexUrl(model.baseUrl))` and only falls back to its own default when that is empty. There
-    // is no environment override for these providers the way there is for Anthropic.
-    //
-    // The provider name becomes a path segment, which is how the proxy knows which key to attach: the ENGINE
-    // decides where a call should go, and the proxy only carries it.
-    //
-    // Unset ⇒ the model keeps the provider's own URL and the box talks to the provider directly — exactly what
-    // every existing box does today, so this changes nothing until it is switched on.
-    // proxy.<platform>/p/<projectId> — derived, so the engine is configured by naming the platform once.
+    // BUT NOT FOR EVERY PROVIDER. The ChatGPT backend refuses any relayed request, so it is served by the
+    // CONNECT tunnel instead — and a tunnel works at the TRANSPORT layer, not this one. Rewriting the URL for
+    // it points the request at a proxy that will (correctly) refuse to relay it, which is exactly what
+    // happened: the composer got a 421 rather than a model, produced nothing, and escalated three seconds
+    // later. So these providers keep their real URL and ica/proxy-dispatcher.ts tunnels the connection
+    // underneath.
+    const TUNNELLED = new Set(['openai-codex'])
     const platform = process.env.SUPERATOM_PLATFORM
-    const proxyBase = platform && process.env.ICA_PROJECT
+    const proxyBase = platform && process.env.ICA_PROJECT && !TUNNELLED.has(provider)
       ? `https://proxy.${platform}/p/${process.env.ICA_PROJECT}` : undefined
     if (proxyBase) {
       model.baseUrl = `${proxyBase}/${provider}`
       // The project's own API key travels as the provider credential, because that is the only slot an agent
-      // will populate — the proxy recognises `sk-proj-…`, proves it, and substitutes the real key. A provider
-      // that brings its own credential (codex) keeps it; the proxy forwards that untouched.
+      // will populate — the proxy recognises `sk-proj-…`, proves it, and substitutes the real key.
       if (process.env.ICA_KEY && !model.apiKey) model.apiKey = process.env.ICA_KEY
       console.log(`[ica:pi] via proxy → ${model.baseUrl}`)
+    } else if (platform && TUNNELLED.has(provider)) {
+      console.log(`[ica:pi] ${provider} keeps its own URL — carried by the tunnel, not relayed`)
     }
 
     // TELL IT WHERE TO WORK. Without `cwd` the SDK defaults to process.cwd() — the ENGINE's directory, not the

@@ -956,6 +956,7 @@ async function handleCredentialsAdmin(request: Request, env: Env, path: string):
     // cannot tell us themselves.
     const entry = { id: String(b.id), provider: String(b.provider), value: String(b.value),
                     groups: Array.isArray(b.groups) ? b.groups : undefined, note: b.note,
+                    disabled: b.disabled === true || undefined,
                     addedAt: new Date().toISOString(),
                     expiresAt: expiryOf(String(b.value)) ?? (typeof b.expiresAt === 'number' ? b.expiresAt : undefined) }
     const next = { ...v, entries: [...v.entries.filter((e) => e.id !== entry.id), entry] }
@@ -992,6 +993,26 @@ async function handleCredentialsAdmin(request: Request, env: Env, path: string):
       return { id: e.id, provider: e.provider, ...(snap?.error ? { error: snap.error } : { percentUsed: snap?.percentUsed, remaining: snap?.remaining }) }
     }))
     return Response.json({ refreshed: asked })
+  }
+
+  // GET /api/credentials/audit?project=… — who was handed what. Read from one key per event, so nothing was
+  // lost to a concurrent write and the trail can be trusted.
+  if (request.method === 'GET' && path === '/api/credentials/audit') {
+    const project = new URL(request.url).searchParams.get('project') ?? ''
+    const prefix = project ? `audit:${project}:` : 'audit:'
+    const keys = (await kv.list({ prefix })).keys.slice(-200)
+    const events = await Promise.all(keys.map((k: any) => kv.get(k.name, 'json')))
+    return Response.json({ events: events.filter(Boolean).sort((a: any, b: any) => b.at - a.at) })
+  }
+
+  // POST /api/credentials/enable/<id> — { enabled: boolean }. Park a credential without losing it.
+  const mEnable = /^\/api\/credentials\/enable\/(.+)$/.exec(path)
+  if (request.method === 'POST' && mEnable) {
+    const b = await request.json().catch(() => ({})) as any
+    const v = await readVault(kv, master)
+    const next = { ...v, entries: v.entries.map((e) => e.id === mEnable[1] ? { ...e, disabled: b?.enabled === false } : e) }
+    await writeVault(kv, next, master)
+    return Response.json(redact(next))
   }
 
   // Put a key back in service by hand, when you know it reset before its cooldown expired.

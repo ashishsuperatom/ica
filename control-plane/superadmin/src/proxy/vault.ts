@@ -36,6 +36,10 @@ export interface VaultEntry {
   // time here before. Read from the credential itself where it says so (a JWT carries `exp`), so it is a fact
   // rather than someone's note, and reported before it bites.
   expiresAt?: number    // epoch ms
+  // PARKED, not deleted. A credential we do not want spent right now — OpenRouter while its cost is being
+  // watched, a subscription being rested — but that we do not want to re-enter later either. Absent means
+  // usable, so an entry added without thinking about it works, and switching it off is the deliberate act.
+  disabled?: boolean
 }
 
 export interface Vault {
@@ -68,6 +72,7 @@ export function candidates(v: Vault, provider: string, projectId: string, now = 
   return v.entries.filter((e) =>
     e.provider === provider &&
     (!e.groups?.length || e.groups.includes(group)) &&
+    !e.disabled &&
     !((v.spent?.[e.id] ?? 0) > now) &&
     usable(e, now))
 }
@@ -104,10 +109,11 @@ export function redact(v: Vault) {
   }
 }
 
-/** Anything expiring within `days` (or already gone). What a warning is built from. */
+/** Anything expiring within `days` (or already gone). What a warning is built from. A disabled entry is not
+ *  warned about: it is not being used, so its expiry is not a problem to act on. */
 export function expiring(v: Vault, days = 3, now = Date.now()) {
   return v.entries
-    .filter((e) => e.expiresAt && e.expiresAt - now < days * 86_400_000)
+    .filter((e) => !e.disabled && e.expiresAt && e.expiresAt - now < days * 86_400_000)
     .map((e) => ({ id: e.id, provider: e.provider, expiresAt: e.expiresAt!,
                    inDays: Math.floor((e.expiresAt! - now) / 86_400_000) }))
 }

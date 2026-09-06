@@ -37,6 +37,13 @@ export const UPSTREAMS = {
     header: (key) => ({ 'x-api-key': key, 'anthropic-version': '2023-06-01' }),
     envKey: 'ANTHROPIC_API_KEY',
   },
+  // BOX-SIDE CREDENTIALS. Never relayed, only handed out. claude-code refuses to make any request at all
+  // without a local login — with a clean HOME it prints "Not logged in" and not one byte reaches a proxy — so
+  // its credential cannot be attached in flight the way an API key can. It still belongs in the vault: a
+  // freshly spawned engine fetches it at boot instead of having it pasted in by hand, which is the last place
+  // a credential was still being copied from machine to machine.
+  'claude-code': { base: null, boxOnly: true, envVar: 'CLAUDE_CODE_OAUTH_TOKEN' },
+
   // The ChatGPT backend. Present so the ROUTE is understood and reported honestly, with no key of ours: the
   // backend refuses a request relayed by anything — a Worker got 403 and a Node reverse proxy got 302 where
   // the same request direct got through — so this provider is served by the CONNECT tunnel, not by relaying.
