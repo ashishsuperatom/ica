@@ -334,6 +334,8 @@ export class ProjectDO extends DurableObject<Env> {
     // REST API
     if (request.method === 'GET'  && path === '/status')       return this.getStatus()
     if (request.method === 'POST' && path === '/setup')        return this.setup(request)
+    if (request.method === 'POST' && path === '/keys/add')     return this.addKey(request)
+    if (request.method === 'POST' && path === '/keys/prune')   return this.pruneKeys(request)
     if (request.method === 'POST' && path === '/info')         return this.setInfo(request)
     // ── Dashboards ──────────────────────────────────────────────────────────
     // Metadata only. The bytes are in R2 under dashboard/<project>/<id>/<build>/ — this says which build is
@@ -376,8 +378,11 @@ export class ProjectDO extends DurableObject<Env> {
 
     // Server-side clients (code-engine, adapters): per-project API key.
     if (key) {
-      const rows = [...this.ctx.storage.sql.exec('SELECT key FROM api_key LIMIT 1')]
-      const ok = rows.length > 0 && (rows[0] as any).key === key
+      // ANY stored key, not just the first. A project can hold more than one during a rotation, which is what
+      // makes rotating possible without downtime: issue the new key, move the boxes over one at a time, then
+      // drop the old one. With a single accepted key the only way to rotate is a hard cutover, and a rotation
+      // that costs an outage is a rotation nobody performs — which is how an exposed key stays live.
+      const ok = this.keyMatches(key)
       return Response.json({ ok }, { status: ok ? 200 : 401 })
     }
 
@@ -511,9 +516,7 @@ export class ProjectDO extends DurableObject<Env> {
     // ── Server-side (code-engine): validate the per-project API key from the hello
     // message (NOT at upgrade time — see fetch()). Close 4001 if missing/invalid.
     if (role === 'code-engine') {
-      const rows = [...this.ctx.storage.sql.exec('SELECT key FROM api_key LIMIT 1')]
-      const storedKey = rows.length ? (rows[0] as any).key : null
-      if (!key || !storedKey || storedKey !== key) {
+      if (!key || !this.keyMatches(key)) {
         this.log('ws:auth_failed', { role: 'code-engine', reason: key ? 'invalid key' : 'missing key' })
         ws.close(4001, 'Invalid API key')
         return
@@ -909,6 +912,36 @@ export class ProjectDO extends DurableObject<Env> {
     const { name } = await req.json() as any
     await this.setName(name)
     return Response.json({ ok: true, name: this._name })
+  }
+
+  /** Does this key match ANY of the project's live keys? Constant work per key and there are at most two,
+   *  so the cost of supporting rotation is nil. */
+  private keyMatches(key: string): boolean {
+    const rows = [...this.ctx.storage.sql.exec('SELECT key FROM api_key')]
+    return rows.some((r: any) => r.key === key)
+  }
+
+  /** Issue an ADDITIONAL key. Both work until the old one is dropped, so boxes can be moved across one at a
+   *  time and a rotation never takes the project offline. */
+  private async addKey(req: Request): Promise<Response> {
+    const apiKey = `sk-proj-${crypto.randomUUID()}`
+    this.ctx.storage.sql.exec('INSERT INTO api_key (key) VALUES (?)', apiKey)
+    const n = [...this.ctx.storage.sql.exec('SELECT key FROM api_key')].length
+    this.log('key:issued', { live: n })
+    return Response.json({ apiKey, live: n })
+  }
+
+  /** Drop every key except the one given — the second half of a rotation, run once the boxes are moved.
+   *  Refuses to drop the key it was handed, so a typo cannot leave a project with no way in. */
+  private async pruneKeys(req: Request): Promise<Response> {
+    const { keep } = await req.json() as any
+    if (!keep || !this.keyMatches(keep)) {
+      return Response.json({ error: 'keep must be one of this project\'s live keys' }, { status: 400 })
+    }
+    this.ctx.storage.sql.exec('DELETE FROM api_key WHERE key != ?', keep)
+    const n = [...this.ctx.storage.sql.exec('SELECT key FROM api_key')].length
+    this.log('key:pruned', { live: n })
+    return Response.json({ ok: true, live: n })
   }
 
   private async setup(req: Request): Promise<Response> {

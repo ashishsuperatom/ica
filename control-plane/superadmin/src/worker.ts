@@ -370,6 +370,29 @@ export default {
       return handleCredentialsAdmin(request, env, path)
     }
 
+    // ── Rotating a project's API key ────────────────────────────────────────
+    // Superadmin only. The key sits in every engine's .env and on the proxy box, and it unlocks that
+    // project's pooled provider credentials — so it must be rotatable, and rotating it must not require an
+    // outage. Two steps, deliberately separate: /rotate issues a SECOND key (both work), then /prune drops
+    // everything except the one now in use. A rotation that costs downtime is one nobody performs, which is
+    // how an exposed key stays live.
+    if (path.startsWith('/api/project-key/')) {
+      if (!(await requireSuperadmin(request, env))) return new Response('unauthorized', { status: 401 })
+      const rest = path.slice('/api/project-key/'.length)
+      const [projectId, action] = rest.split('/')
+      if (!projectId || !action) return Response.json({ error: 'use /api/project-key/<projectId>/rotate|prune' }, { status: 400 })
+      const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
+      if (request.method === 'POST' && action === 'rotate') {
+        return stub.fetch(new Request('http://do/keys/add', { method: 'POST' }))
+      }
+      if (request.method === 'POST' && action === 'prune') {
+        return stub.fetch(new Request('http://do/keys/prune', {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: await request.text(),
+        }))
+      }
+      return Response.json({ error: 'unknown action' }, { status: 404 })
+    }
+
     // ── Project creation (with Fly Machine provisioning) ────────────────────
     if (request.method === 'POST' && path === '/api/projects') {
       // An organisation runs its own projects — its admin creates them. Superadmin may act anywhere.

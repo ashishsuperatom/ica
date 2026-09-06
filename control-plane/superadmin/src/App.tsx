@@ -414,6 +414,26 @@ function OrgDetailPage() {
   // Project delete lives on the project's own Settings → Danger zone (type-to-confirm), not on this list.
   const restoreProject = async (id: string) => { await api('/projects', { method: 'PUT', body: JSON.stringify({ id }) }); fetchProjects() }
 
+  // ── ROTATING A PROJECT'S API KEY ──────────────────────────────────────────
+  // That key sits in every engine's .env and on the proxy box, and it unlocks the project's pooled provider
+  // credentials — so it has to be rotatable by someone who is not editing a database by hand. Two steps on
+  // purpose: rotating ISSUES a second key and both work, so boxes can be moved across without an outage;
+  // finishing drops the old one. Anything else means a rotation costs downtime, and a rotation that costs
+  // downtime is one nobody performs — which is how an exposed key stays live for months.
+  const [rot, setRot] = useState<{ id: string; apiKey: string; done?: boolean } | null>(null)
+  const rotateKey = async (id: string) => {
+    const r = await api(`/project-key/${id}/rotate`, { method: 'POST' })
+    if (!r.ok) { alert(`Could not rotate: ${r.status} ${await r.text()}`); return }
+    const b = await r.json() as any
+    setRot({ id, apiKey: b.apiKey })
+  }
+  const finishRotation = async () => {
+    if (!rot) return
+    const r = await api(`/project-key/${rot.id}/prune`, { method: 'POST', body: JSON.stringify({ keep: rot.apiKey }) })
+    if (!r.ok) { alert(`Could not finish: ${r.status} ${await r.text()}`); return }
+    setRot({ ...rot, done: true })
+  }
+
   return (
     <Shell crumbs={<><Link to="/">Organizations</Link><span>/</span><code className="mono">{orgId?.slice(0, 8)}…</code></>}>
       {conn && (() => {
@@ -429,6 +449,26 @@ function OrgDetailPage() {
                 <button className="btn" onClick={() => { navigator.clipboard?.writeText(env); }}>Copy</button>
                 <button className="btn ghost" onClick={() => { const id = conn.id; setConn(null); nav(`/org/${orgId}/projects/${id}`) }}>Open project</button>
                 <button className="btn ghost" onClick={() => setConn(null)} style={{ marginLeft: 'auto' }}>Close</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+      {rot && (() => {
+        const env = `ICA_PROJECT=${rot.id}\nICA_KEY=${rot.apiKey}`
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setRot(null)}>
+            <div className="card" style={{ maxWidth: 660, width: '92%', padding: 22 }} onClick={e => e.stopPropagation()}>
+              <h3 style={{ marginTop: 0 }}>{rot.done ? 'Rotation complete' : 'New key issued — both keys work'}</h3>
+              {rot.done
+                ? <p className="muted" style={{ marginTop: 4 }}>The old key no longer works. Any box still holding it will fail to connect until its <code>.env</code> is updated.</p>
+                : <p className="muted" style={{ marginTop: 4 }}>The old key still works, so nothing is down. Put this in every engine's <code>.env</code> and restart it, then press <strong>Finish</strong> to retire the old key. Shown <strong>once</strong>.</p>}
+              <textarea readOnly value={env} onFocus={e => e.currentTarget.select()} rows={2}
+                style={{ width: '100%', fontFamily: 'monospace', fontSize: 13, padding: 12, borderRadius: 8, resize: 'vertical', whiteSpace: 'pre' }} />
+              <div className="row" style={{ gap: 8, marginTop: 12, alignItems: 'center' }}>
+                <button className="btn" onClick={() => { navigator.clipboard?.writeText(env) }}>Copy</button>
+                {!rot.done && <button className="btn" onClick={finishRotation}>Finish — retire the old key</button>}
+                <button className="btn ghost" onClick={() => setRot(null)} style={{ marginLeft: 'auto' }}>Close</button>
               </div>
             </div>
           </div>
@@ -458,7 +498,11 @@ function OrgDetailPage() {
               <div><strong>{p.name}</strong><br/><code className="mono">{p.id}</code></div>
               {p.deleted
                 ? <button className="btn sm ok" onClick={e => { e.stopPropagation(); restoreProject(p.id) }}>Restore</button>
-                : <span className="muted" style={{ fontSize: 12 }}>Open →</span>}
+                : <span className="row" style={{ gap: 10, alignItems: 'center' }}>
+                    <button className="btn sm ghost" title="Issue a new API key; the old one keeps working until you finish"
+                            onClick={e => { e.stopPropagation(); rotateKey(p.id) }}>Rotate key</button>
+                    <span className="muted" style={{ fontSize: 12 }}>Open →</span>
+                  </span>}
             </div>
           ))}
         </div>
