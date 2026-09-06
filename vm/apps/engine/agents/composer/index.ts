@@ -124,21 +124,24 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
         ? 'Existing programs the engine matched to this question (score = similarity, higher = closer):\n' +
           cands.slice(0, 6).map(c => `- ${c.program} — "${c.question}" (${c.score.toFixed(2)})`).join('\n')
         : 'No existing program matched this question.'
-      // Concept NAMES the engine surfaced for this question (names only — no method, so it can't bias you toward
-      // a formula you might not use). Read the ones that look right with `./get-concept "<name>"`. This is
-      // a head-start, NOT the whole set — find-concept is still live for anything else you need.
-      // SEARCH FOR THEM YOURSELF. The engine used to pre-search and hand over six names; it no longer does,
-      // because the phrase YOU pick is a better cue than n-grams of the user's wording — it is your current
-      // hypothesis, chosen after seeing the problem — and you can search again when the first phrase misses,
-      // which a single pre-fire never could.
+      // SEARCH FOR THEM YOURSELF. The engine used to pre-search and hand over six concept names; it no longer
+      // does, because the phrase YOU pick is a better cue than n-grams of the user's wording — it is your
+      // current hypothesis, chosen after seeing the problem — and you can search again when the first phrase
+      // misses, which a single pre-fire never could.
       //
-      // The escalate path is unchanged in meaning and now has a condition attached: it is what you do when the
-      // search genuinely finds nothing that fits, not the default when we happened to hand you an empty list.
+      // ESCALATE NEEDS BOTH TO BE EMPTY. The first version of this said "no concept fits → escalate", which was
+      // inherited from when the engine handed over the list: an empty list then meant the engine had searched
+      // and found nothing. Now the composer does the searching, and a real search returns nothing far more
+      // often — so that wording threw away perfectly good program matches. Observed immediately: a question
+      // with an existing program at 0.87 similarity, which the agent had already recognised in its own words
+      // ("an existing program already answers this exact question"), escalated to the analyst because no
+      // CONCEPT matched. Reuse never needed a concept; the two are separate paths to an answer.
       const conceptBlock = '\nFind the concepts this question needs: `./find-concept "<phrase>"` (full-text, fast —' +
         ' search in your own words, and search again with different words if the first misses). Open the ones that' +
         ' look right with `./get-concept "<name>"` and compose from those.\n' +
-        `If nothing found fits, there is nothing to compose from — ESCALATE: write ${escalateRel} =` +
-        ' {"reason":"no relevant concept — needs fresh analysis"} and STOP. Do not do the discovery yourself.\n'
+        'ESCALATE only when you have BOTH: no program above fits, AND your searches found no concept that fits.' +
+        ` Then write ${escalateRel} = {"reason":"no relevant concept — needs fresh analysis"} and STOP; do not do` +
+        ' the discovery yourself. Reusing or adapting a program above does not need a concept at all.\n'
       const m = o.modify
       // MODIFY: edit the SAME program in place (the engine supplies the current program — it may be from a
       // reuse, so it is NOT in your context). No new program, no escalate — just apply the edit and rerun.
