@@ -78,8 +78,10 @@ YOU decide how each figure reads — you are the only thing holding both the raw
 MOST CELLS ARE PLAIN: a number is a number, a name is a string. That is what sorts, right-aligns and totals,
 and it is the default. Wrap one only to carry what the value itself cannot:
 - `{"value": <the name>, "id": <its id>}` — this cell NAMES something the reader can open on its own. If you
-  have the id, send it; it is the only handle on that thing. Its column must also carry `entity` (the KIND of
-  thing it names) — opening it means asking for that kind by that id, so an id with no kind opens nothing.
+  have the id, send it; it is the only handle on that thing. The KIND is said ONCE, on the column
+  (`entity`) — opening a cell means asking for that kind by that id, so an id with no kind opens nothing,
+  and a kind with no id opens nothing either. Put `entity` on a CELL only when one column mixes kinds;
+  repeating the column's own kind on every row is bulk that says nothing new.
 - `{"value": <the number>, "display": "<how it reads>"}` — only when the wording varies ROW BY ROW, such as a
   column holding several currencies. A whole column's formatting belongs on the column.
 

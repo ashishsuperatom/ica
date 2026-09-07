@@ -89,10 +89,44 @@ same program, run tomorrow or for another entity, gives the truth for that run.`
 // The expectations, in the order they are presented. Add or remove sections here.
 const EXPECTATIONS = [WORKSPACE, PARAMETERISATION]
 
+
+// ── FINDING A PROGRAM ────────────────────────────────────────────────────────────────────────────────────
+// One section, in both agents' prompts, because "is this already answered?" is the first question of every
+// turn and the answer decides whether the next two minutes are spent composing or rebuilding.
+//
+// The shape it teaches is NARROW-THEN-OPEN: a shortlist names what each program answers, and only the one or
+// two that look right are opened. That is not a style preference — the alternative is loading every program to
+// find out what it does, which costs a turn's worth of reading before any thinking has happened, and gets
+// worse with every program the project accumulates.
+const FINDING_A_PROGRAM: string = `# Finding a program
+
+Start every question here: something may already answer it.
+
+\`./find-program "<the question, in canonical form>"\` → a SHORTLIST. Each entry is one program:
+\`{ "question": "<what it answers>", "program": "programs/<slug>", "category": "<kind of question>" }\`
+The \`question\` is what to judge on — it is the question that program was written for, in the words it was
+written in. The \`program\` field is its directory: that is where its code lives, and how to open it.
+
+Narrow first, then open. From the shortlist pick the ONE or TWO whose \`question\` could plausibly be yours,
+and open only those:
+
+\`./get-program <slug>\` → what it answers (every phrasing it claims), its parameters and their current
+values, and its category. Enough to decide reuse-or-not without reading any code.
+
+Then, only for the one you have chosen, read the code at its \`program\` directory — \`program.ts\` first (the
+shape: which units, in what order), then the unit that carries the part you need to change.
+
+Judge on the QUESTION, not the slug. A slug is a name someone gave a directory; two programs can be a rename
+apart and answer different things, and a program whose slug matches your words can be built on a different
+source, grain or window. \`question\` and \`params\` are what tell you.
+
+Reuse, adapt, or build — in that order. An exact match runs as it is. A near match with different parameters
+is the same program with different arguments. Only when neither holds is a new program the right answer.`
+
 // The complete authoring surface, as ONE string, to install into a coding agent's system prompt (systemReference).
 // Use this when the caller's base does NOT already carry the authoring MECHANICS (the composer).
-export const AUTHORING_REFERENCE: string = [contract, ...PROGRAM_AUTHORING, example, ...EXPECTATIONS].join('\n\n')
+export const AUTHORING_REFERENCE: string = [contract, FINDING_A_PROGRAM, ...PROGRAM_AUTHORING, example, ...EXPECTATIONS].join('\n\n')
 
 // The surface WITHOUT the mechanics — for a caller whose generated base ALREADY includes PROGRAM_AUTHORING (the
 // analyst), so the mechanics aren't repeated. The expectations are identical in both.
-export const AUTHORING_SURFACE: string = [contract, example, ...EXPECTATIONS].join('\n\n')
+export const AUTHORING_SURFACE: string = [contract, FINDING_A_PROGRAM, example, ...EXPECTATIONS].join('\n\n')

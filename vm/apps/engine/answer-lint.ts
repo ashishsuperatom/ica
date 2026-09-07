@@ -13,6 +13,11 @@
 // without knowing anything about the data. "This customer id is wrong" is not, and never will be — that needs
 // the source, and a lint that guesses is a lint people learn to ignore.
 //
+// EVERY MESSAGE SAYS WHAT TO DO. A finding that only names the fault leaves the agent to infer a remedy, and
+// an inferred remedy is how "the customer cell needs its id" became "add a Customer ID column" — a reasonable
+// reading of a requirement nobody had actually stated. Each message therefore carries a FIX: clause naming the
+// change, in the vocabulary of the thing being edited.
+//
 // SEVERITY IS ABOUT THE READER, not about tidiness:
 //   error    the answer will visibly fail someone — a dead affordance, an unrenderable field.
 //   warning  it renders, but something was probably meant differently.
@@ -60,16 +65,18 @@ const idWithoutKind: Rule = (a) => {
       if (has) out.push({
         rule: 'id-without-kind', severity: 'error',
         where: `sections[${i}].columns[${c}] (${col?.label ?? '?'})`,
-        message: `cells carry an id but no kind — add entity:"<what this column names>" to the column, or the id opens nothing`,
+        message: `cells carry an id but no kind, so the id opens nothing. FIX: add entity:"<what this column names — e.g. customer, invoice, party>" to this column's definition. Change the column only; the rows already carry their ids.`,
       })
     })
   }
   return out
 }
 
-/** The mirror image, and the other failure we saw: a column tagged entity:"customer" whose cells were bare
- *  strings, with the id put in a SEPARATE "Customer ID" column. The tag promises an openable cell and the
- *  rows do not deliver one. */
+/** The mirror image, and an ERROR for the same reason: what the reader loses is identical. A column tagged
+ *  entity:"customer" whose cells are bare strings looks openable and is not — the click does nothing, exactly
+ *  as when the kind is missing instead of the id. This was a warning first, split on HOW it was wrong rather
+ *  than WHAT it costs, and the lint then watched a dead column ship in silence while saying nothing worth
+ *  acting on. The axis that matters is the reader's, not the taxonomy's. */
 const kindWithoutId: Rule = (a) => {
   const out: Finding[] = []
   for (const { i, sec } of tables(a)) {
@@ -77,9 +84,28 @@ const kindWithoutId: Rule = (a) => {
       if (!col?.entity) return
       const cells = sec.rows.map((r: any[]) => r?.[c]).filter((v: any) => v != null)
       if (cells.length && !cells.some((v: any) => isObj(v) && v.id != null)) out.push({
-        rule: 'kind-without-id', severity: 'warning',
+        rule: 'kind-without-id', severity: 'error',
         where: `sections[${i}].columns[${c}] (${col?.label ?? '?'})`,
-        message: `column is tagged entity:"${col.entity}" but no cell carries an id — send {"value": <name>, "id": <id>} so it can be opened`,
+        message: `column is tagged entity:"${col.entity}" but no cell carries an id, so nothing can be opened. FIX: emit each cell as {"value": <the name>, "id": <its id>} instead of a bare value. If the id is not in the query result, select it — usually a join to that entity's master table. If this column genuinely names nothing openable, drop the entity tag instead.`,
+      })
+    })
+  }
+  return out
+}
+
+/** The column's own kind, restated on every row. It renders correctly, so this is a warning — but it is pure
+ *  weight: one short string per cell, on every row of every entity column, saying what the column already
+ *  said. A cell carries `entity` for one reason only, a column that mixes kinds, and that is rare. */
+const redundantCellEntity: Rule = (a) => {
+  const out: Finding[] = []
+  for (const { i, sec } of tables(a)) {
+    sec.columns.forEach((col: any, c: number) => {
+      if (!col?.entity) return
+      const cells = sec.rows.map((r: any[]) => r?.[c]).filter((v: any) => isObj(v))
+      if (cells.length >= 2 && cells.every((v: any) => v.entity === col.entity)) out.push({
+        rule: 'redundant-cell-entity', severity: 'warning',
+        where: `sections[${i}].columns[${c}] (${col?.label ?? '?'})`,
+        message: `every cell repeats entity:"${col.entity}", which the column already declares. FIX: drop entity from the cells and keep {"value", "id"} — a cell states its own kind only when the column mixes kinds.`,
       })
     })
   }
@@ -96,7 +122,7 @@ const rowWidth: Rule = (a) => {
     if (bad >= 0) out.push({
       rule: 'row-width', severity: 'error',
       where: `sections[${i}].rows[${bad}]`,
-      message: `row has ${Array.isArray(sec.rows[bad]) ? sec.rows[bad].length : 'no'} cells, header has ${n}`,
+      message: `row has ${Array.isArray(sec.rows[bad]) ? sec.rows[bad].length : 'no'} cells, header has ${n}. FIX: every row must be an array with exactly one entry per column, in the same order — pad missing values with null rather than shortening the row.`,
     })
   }
   return out
@@ -112,7 +138,7 @@ const textIsText: Rule = (a) => {
     const ok = typeof v === 'string' || (Array.isArray(v) && v.every((x) => typeof x === 'string'))
     if (!ok) out.push({
       rule: 'text-is-text', severity: 'error', where: k,
-      message: `${k} must be a string or an array of strings, got ${Array.isArray(v) ? 'array of non-strings' : typeof v}`,
+      message: `${k} must be a string or an array of strings, got ${Array.isArray(v) ? 'array of non-strings' : typeof v}. FIX: put the prose here and the structure in sections[]; an object in this field renders as "[object Object]" and takes the card down.`,
     })
   }
   return out
@@ -124,17 +150,18 @@ const headlineShape: Rule = (a) => {
   const h = a?.headline
   if (h == null) return []
   if (typeof h !== 'object' || Array.isArray(h)) {
-    return [{ rule: 'headline-shape', severity: 'error', where: 'headline', message: 'headline must be an object {label, display, value}' }]
+    return [{ rule: 'headline-shape', severity: 'error', where: 'headline', message: 'headline must be an object. FIX: emit {"label": <what the number IS>, "display": <the number short, with its unit>, "value": <the raw number>}.' }]
   }
   const out: Finding[] = []
-  if (!h.label) out.push({ rule: 'headline-shape', severity: 'warning', where: 'headline.label', message: 'headline has no label — the reader cannot tell what the number IS' })
-  if (h.display == null && h.value == null) out.push({ rule: 'headline-shape', severity: 'error', where: 'headline', message: 'headline carries neither display nor value' })
+  if (!h.label) out.push({ rule: 'headline-shape', severity: 'warning', where: 'headline.label', message: 'headline has no label, so the reader cannot tell what the number IS. FIX: add "label" — a short phrase naming the quantity.' })
+  if (h.display == null && h.value == null) out.push({ rule: 'headline-shape', severity: 'error', where: 'headline', message: 'headline carries neither display nor value. FIX: add "value" (the raw number) and "display" (how it should read, with its unit).' })
   return out
 }
 
 const RULES: Array<{ name: string; run: Rule }> = [
   { name: 'id-without-kind', run: idWithoutKind },
   { name: 'kind-without-id', run: kindWithoutId },
+  { name: 'redundant-cell-entity', run: redundantCellEntity },
   { name: 'row-width', run: rowWidth },
   { name: 'text-is-text', run: textIsText },
   { name: 'headline-shape', run: headlineShape },

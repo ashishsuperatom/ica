@@ -21,7 +21,7 @@ import WebSocket from 'ws'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { existsSync, mkdirSync, rmSync, readFileSync } from 'node:fs'
-import { writeFile, rm } from 'node:fs/promises'
+import { writeFile, rm, readdir, stat } from 'node:fs/promises'
 import { execSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { execProgram, answerView } from './exec-program.js'
@@ -1883,10 +1883,49 @@ async function verifyBoxCredential(): Promise<void> {
   } finally { try { probe.stop() } catch { /* nothing to clean up if it never started */ } }
 }
 
+// ── ABANDONED PROGRAM DIRECTORIES ───────────────────────────────────────────────────────────────────────
+// A program becomes findable when its turn COMPLETES: built.json is read and a `prog:<slug>` node is written.
+// Kill the engine mid-turn and the directory is already on disk with no node — invisible to ./find-program and
+// to the engine's own search, but plainly visible to `ls`. So the agent sees a directory that looks like an
+// answer to the question it is being asked, and nothing can tell it that program never ran.
+//
+// TWO CONDITIONS, BOTH REQUIRED, because either alone deletes working code:
+//   not registered   — but view.* programs are found by FILE EXISTENCE (verbs/view.ts findView), never by a
+//                      node, so they are legitimately absent from the graph. Excluded by name.
+//   never ran        — run.mjs writes program.json on a successful run. Six directories here are unregistered
+//                      yet ran fine, left behind by graph rebuilds; they are somebody's work and are kept.
+// Only a directory that is both was abandoned before it ever produced anything.
+//
+// And nothing recent: a turn in flight during a restart is exactly the case that creates these, so anything
+// touched in the last ten minutes is left alone rather than raced.
+async function sweepAbandonedPrograms(): Promise<void> {
+  const dir = join(WORKSPACE, 'programs')
+  if (!existsSync(dir)) return
+  const registered = new Set(graph.nodesByKind('program').map((n) => n.id.replace(/^prog:/, '')))
+  const cutoff = Date.now() - 10 * 60_000
+  const gone: string[] = []
+  try {
+    for (const name of await readdir(dir)) {
+      if (name.startsWith('.') || name.startsWith('example.') || name.startsWith('view.')) continue
+      if (registered.has(name)) continue
+      const p = join(dir, name)
+      try {
+        const st = await stat(p)
+        if (!st.isDirectory() || st.mtimeMs > cutoff) continue
+        if (existsSync(join(p, 'program.json'))) continue   // it ran once — not abandoned, just unregistered
+        await rm(p, { recursive: true, force: true })
+        gone.push(name)
+      } catch { /* a directory that vanished under us needs no sweeping */ }
+    }
+  } catch { /* unreadable programs/ is the workspace's problem, not the sweep's */ }
+  if (gone.length) console.log(`[ica] removed ${gone.length} abandoned program director${gone.length === 1 ? 'y' : 'ies'} (never ran, not registered): ${gone.join(', ')}`)
+}
+
 let warmed = false
 async function warmEssentialAgents() {
   // BEFORE any agent is spawned. A credential that arrives after the agent has started is a credential the
   // agent never sees — it inherits this process's environment once, at spawn.
+  await sweepAbandonedPrograms()
   let credGap: string[] = []
   try { const c = await fetchBoxCredentials(); if (c.fleet) credGap = c.missing }
   catch (e: any) { console.warn(`[ica] box credentials: ${e?.message ?? e} — continuing with whatever this box has`) }
