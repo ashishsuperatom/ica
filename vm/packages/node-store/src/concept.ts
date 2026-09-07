@@ -59,6 +59,78 @@ export type ConceptProps = {
 // changedBy: 'human:<userId>' | 'consolidator' | 'grounding-agent' | 'connector-agent' | 'analyst' | …
 export type ChangeMeta = { changedBy: string; reason?: string }
 
+
+// ── IDENTITY: A CONCEPT IS ITS CONTENT; A NAME IS A POINTER TO ONE ──────────────────────────────────────
+//
+// The name used to BE the identity — `concept:customer-invoice-total` — which made three things impossible
+// and one thing wrong.
+//
+//   IMPOSSIBLE  Two names for one concept. 37 of 44 concepts already carried `aliases`, so the need was not
+//               hypothetical; a list of alternative names on the concept means the concept owns its names,
+//               which supports neither re-pointing nor merging.
+//   IMPOSSIBLE  Merge and split. Consolidation cannot fold two concepts into one, because "one" would have to
+//               pick a name and rewrite the other. With pointers it repoints and keeps both bodies.
+//   IMPOSSIBLE  A durable reference. A program recording what it was built from pointed at a name, so a
+//               rename dangled it. Provenance has to outlive naming.
+//   WRONG       A version was modelled as an edit. `@v4` archived `@v3` as though one became the other. It
+//               usually did not — a new version is a DIFFERENT belief that replaced the old one, and the
+//               honest record is "this name pointed there, then here".
+//
+// So: the body is content-addressed and never changes. `hash(body)` IS the id, which makes immutability
+// arithmetic rather than a rule anyone has to keep — edit the body and you have a different concept, by
+// construction. Names live in `index:` nodes that point at a hash, are bitemporal, and carry the history.
+// Aliases become ordinary index entries; nothing is special about the "primary" name.
+//
+// Namespacing rides on the name with a `.` separator (`totalgroup.customer`), so an index can be scoped when
+// two things share a word — the collision that broke `view.customer.canonical` across two sources.
+//
+// The agent never sees any of this. It searches phrases and opens by name exactly as before.
+
+import { createHash } from 'node:crypto'
+
+/** The id of a body: its content, hashed. Same content → same concept, always, everywhere. */
+export function conceptHash(props: ConceptProps): string {
+  return 'concept:' + createHash('sha256').update(contentOf(props)).digest('hex').slice(0, 16)
+}
+
+/** The id of a NAME. Namespaced segments keep their dots; everything else is slugged. */
+export function indexId(name: string): string {
+  const slug = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+  return 'index:' + String(name).split('.').map(slug).filter(Boolean).join('.')
+}
+
+/** Point a name at a concept. A name that already points there is a no-op; one that points elsewhere is
+ *  ARCHIVED with its window closed, so "what did this name mean in June" stays answerable. */
+export function putIndex(store: NodeStore, name: string, target: string, meta: ChangeMeta): void {
+  const id = indexId(name)
+  const cur = store.getNode(id)
+  const curTarget = (cur?.props as any)?.target
+  if (curTarget === target) return
+  const at = Date.now()
+  if (cur) {
+    const aid = `${id}@${cur.valid_from ?? at}`
+    store.putNode({ id: aid, kind: 'index', label: name, props: { ...(cur.props as any), retired: true } })
+    store.db.prepare('UPDATE nodes SET valid_from=?, valid_to=? WHERE id=?').run(cur.valid_from ?? at, at, aid)
+  }
+  store.putNode({ id, kind: 'index', label: name, summary: target,
+    props: { target, changedBy: meta.changedBy, reason: meta.reason } })
+  store.db.prepare('UPDATE nodes SET valid_from=?, valid_to=NULL WHERE id=?').run(at, id)
+}
+
+/** The concept a name currently points at. */
+export function resolveConcept(store: NodeStore, name: string): Node | undefined {
+  const idx = store.getNode(indexId(name))
+  const target = (idx?.props as any)?.target
+  return target ? store.getNode(target) : undefined
+}
+
+/** Every name that points at a concept — for showing a human what a hash is called. */
+export function namesFor(store: NodeStore, conceptId: string): string[] {
+  return (store.db.prepare(
+    "SELECT label FROM nodes WHERE kind='index' AND valid_to IS NULL AND json_extract(props,'$.target')=?"
+  ).all(conceptId) as any[]).map((r) => r.label).filter(Boolean)
+}
+
 export function conceptId(name: string): string {
   return 'concept:' + name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
 }
@@ -102,29 +174,35 @@ export function sanitizeAliases(aliases?: string[]): string[] {
 
 export function upsertConcept(store: NodeStore, name: string, props: ConceptProps, meta: ChangeMeta): Node {
   props = { ...props, aliases: sanitizeAliases(props.aliases) }   // §9 alias guard — applied before anything is stored
-  const id = conceptId(name)
-  const cur = store.getNode(id)
-  const curProps = (cur?.props ?? {}) as ConceptProps
-  if (cur && contentOf(curProps) === contentOf(props)) return cur   // identical content → keep the live version
 
-  const version = (curProps._v?.version ?? 0) + 1
+  // NOTHING IS OVERWRITTEN. The body is written under its own hash, and the NAME is moved to point at it. Same
+  // content → same hash → the write is a no-op and the name already points there. Different content → a new
+  // concept exists alongside the old one, and only the pointer moves. The previous body stays exactly as it
+  // was, which is what makes a program's record of what it was built from still true a month later.
+  const id = conceptHash(props)
+  const existing = store.getNode(id)
   const at = Date.now()
-  if (cur) {
-    const av = curProps._v?.version ?? 1
-    const aid = archiveId(name, av)
-    store.putNode({ id: aid, kind: 'concept', label: name, summary: cur.summary ?? undefined, props: curProps })
-    store.db.prepare(`UPDATE nodes SET valid_from=?, valid_to=? WHERE id=?`).run(cur.valid_from ?? at, at, aid)
-  }
-  const stamped: ConceptProps = { ...props, scope: props.scope ?? 'global', _v: { version, changedBy: meta.changedBy, reason: meta.reason } }
-  const node = store.putNode({ id, kind: 'concept', label: name, summary: props.value, props: stamped })
-  // putNode's ON CONFLICT(id) DO UPDATE keeps the OLD valid_from — force the live row to advance to `at`.
-  store.db.prepare(`UPDATE nodes SET valid_from=?, valid_to=NULL WHERE id=?`).run(at, id)
-  return { ...node, valid_from: at, valid_to: null }
+
+  // The version number is a courtesy for humans reading a log; it is not identity and nothing resolves by it.
+  const prior = resolveConcept(store, name)
+  const version = (((prior?.props as any)?._v?.version ?? 0) as number) + (prior && prior.id !== id ? 1 : 0) || 1
+  const stamped: ConceptProps = { ...props, scope: props.scope ?? 'global',
+    _v: { version, changedBy: meta.changedBy, reason: meta.reason } }
+
+  const node = existing ?? store.putNode({ id, kind: 'concept', label: name, summary: props.value, props: stamped })
+  if (!existing) store.db.prepare('UPDATE nodes SET valid_from=?, valid_to=NULL WHERE id=?').run(at, id)
+
+  // The primary name, and every alias, point at this body. An alias is not a lesser kind of name — it is the
+  // same pointer with a different phrase, which is what lets two wordings mean one thing.
+  putIndex(store, name, id, meta)
+  for (const a of props.aliases ?? []) putIndex(store, a, id, meta)
+
+  return existing ?? { ...node, valid_from: at, valid_to: null }
 }
 
 /** "now" = the live row (stable id); `asOf` (unix ms) → the version whose validity window contained that instant. */
 export function getConcept(store: NodeStore, name: string, asOf?: number): Node | undefined {
-  const cur = store.getNode(conceptId(name))
+  const cur = resolveConcept(store, name)
   if (asOf == null) return cur
   if (cur && (cur.valid_from ?? 0) <= asOf) return cur          // asOf at/after the live version → current
   const r = store.db.prepare(

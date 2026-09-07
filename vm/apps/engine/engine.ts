@@ -1921,10 +1921,15 @@ function recordConceptsUsed(slug: string, qid: string, declared: unknown): void 
     if (!names.size) return
     let written = 0
     for (const [name, how] of names) {
-      const node = graph.getNode(`concept:${name}`) ?? graph.nodesByKind('concept').find(
-        (n) => String(n.label ?? '').toLowerCase() === name.toLowerCase() && !(n as any).valid_to)
+      // THE EDGE POINTS AT THE BODY, NOT THE NAME. A concept is content-addressed, so this reference stays
+      // true when the name is later re-pointed at a different body — which is the whole reason the pointer
+      // exists. The NAME rides along in the edge's props, so nothing readable is lost: a human reading
+      // provenance sees "customer invoice total", and the graph still holds the exact body that was used.
+      const idx = graph.getNode(`index:${name.trim().toLowerCase().replace(/[^a-z0-9.]+/g, '-').replace(/(^-|-$)/g, '')}`)
+      const target = (idx?.props as any)?.target
+      const node = target ? graph.getNode(target) : undefined
       if (!node) continue   // a name that resolves to nothing is not an edge, it is a typo
-      graph.putEdge({ from: `prog:${slug}`, to: node.id, type: 'built_from', props: { how, at: Date.now() } })
+      graph.putEdge({ from: `prog:${slug}`, to: node.id, type: 'built_from', props: { how, name, at: Date.now() } })
       written++
     }
     const by = [...names.values()]

@@ -345,18 +345,30 @@ const C_STOP = new Set(('a an the of on in for by per to and or is are was be wi
   'which who how me my we our you your can do get give show tell find value from over under across').split(' '))
 const stemw = (w) => { for (const suf of ['ing','ed','es','s','ly']) { if (w.endsWith(suf) && w.length - suf.length >= 3) { w = w.slice(0, -suf.length); break } } if (w.length > 3 && w.endsWith('e')) w = w.slice(0, -1); return w }
 const cWords = (s) => new Set(String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !C_STOP.has(w)).map(stemw))
+// SEARCH RUNS OVER NAMES, NOT BODIES. A name is an \`index\` row pointing at a content-addressed concept, and
+// several names can point at one body — the primary phrase and every alias are the same kind of thing. Bodies
+// a name no longer points at still EXIST (a program built last month refers to one) but nothing indexes them,
+// so they cannot surface in a search. That is what the old \`valid_to\` was doing, moved to where it belongs.
+const bodyOf = (idx) => { const t = (propsOf(idx) || {}).target; return t ? store.getNode(t) : undefined }
 export function findConcept(query, limit = 8) {
   const qw = cWords(query)
   if (!qw.size) return []
-  const rows = store.db.prepare("SELECT * FROM nodes WHERE kind = 'concept' AND valid_to IS NULL").all()
+  const rows = store.db.prepare("SELECT * FROM nodes WHERE kind = 'index' AND valid_to IS NULL").all()
   const scored = rows
     .map((n) => { const cw = cWords(n.label); if (!cw.size) return { n, matched: 0, cover: 0 }; let m = 0; for (const w of cw) if (qw.has(w)) m++; return { n, matched: m, cover: m / cw.size } })
     .filter((x) => x.matched > 0)
     .sort((a, b) => (b.matched - a.matched) || (b.cover - a.cover))
-  return scored.slice(0, limit).map((x) => guide(x.n))   // generous: top matches by specificity (best first), no tight tier — the agent filters
+  // Several names can reach one body — return each body once, under the name that matched best.
+  const out = []; const seen = new Set()
+  for (const x of scored) {
+    const body = bodyOf(x.n); if (!body || seen.has(body.id)) continue
+    seen.add(body.id); out.push({ ...guide(body), name: x.n.label })
+    if (out.length >= limit) break
+  }
+  return out
 }
 export function listConcepts() {
-  return store.db.prepare("SELECT label FROM nodes WHERE kind = 'concept' AND valid_to IS NULL ORDER BY label").all()
+  return store.db.prepare("SELECT label FROM nodes WHERE kind = 'index' AND valid_to IS NULL ORDER BY label").all()
     .map((r) => r.label).filter(Boolean)
 }
 `)
@@ -433,7 +445,7 @@ const qid = qi >= 0 ? argv[qi + 1] : null
 const name = argv.filter((a, i) => a !== '--qid' && !(qi >= 0 && i === qi + 1)).join(' ').trim()   // qi is -1 when absent; qi+1 would then drop the NAME
 if (!name) { console.log(JSON.stringify({ error: 'a concept name is required — list them with ./find-concept "<phrase>"' })); process.exit(0) }
 const norm = (x) => String(x || '').toLowerCase().replace(/\\s+/g, ' ').trim()
-const hit = findConcept(name, 50).find(c => norm(c.name) === norm(name))
+const hit = findConcept(name, 200).find(c => norm(c.name) === norm(name))
 if (!hit) {
   const near = findConcept(name, 5).map(c => c.name)
   console.log(JSON.stringify({ error: 'no concept by that exact name', didYouMean: near, note: 'names come from ./find-concept' }, null, 2))
