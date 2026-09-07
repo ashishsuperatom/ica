@@ -266,6 +266,12 @@ const MIN_ROWS = 2            // one row cannot be "all the same"
 // same", "are they mostly null", "how wide is the range". Past the cap the line says so, because a statistic
 // over part of the data described as if it were all of it is the kind of small lie that gets believed.
 const SCAN_CAP = 1000
+// AND A CEILING ON THE WHOLE JOB, not just on each part of it. Four arrays × a thousand rows is bounded; four
+// thousand arrays is not, and neither is a header search that descends into every cell of every row before any
+// cap applies. None of that should happen — but "should not happen" is not a bound, and a summary that can
+// cost more than the answer it describes is a summary that gets switched off after the one time it does.
+const VISIT_BUDGET = 50_000   // nodes touched across BOTH passes, then it stops and says so
+const MAX_COLS_SCANNED = 40   // a five-hundred-column table costs forty columns, not five hundred
 
 type Row = unknown[] | Record<string, unknown>
 
@@ -297,11 +303,13 @@ interface ColStat {
   sample?: unknown
 }
 
-function statsFor(rows: Row[]): ColStat[] {
-  const keys: (string | number)[] = Array.isArray(rows[0])
+function statsFor(rows: Row[]): ColStat[] & { width: number } {
+  const all: (string | number)[] = Array.isArray(rows[0])
     ? (rows[0] as unknown[]).map((_, i) => i)
     : Object.keys(rows[0] as Record<string, unknown>)
-  return keys.map((k) => {
+  const keys = all.slice(0, MAX_COLS_SCANNED)
+  const width = all.length
+  return Object.assign(keys.map((k) => {
     // ONE PASS, and nothing that allocates per row beyond the distinct set. Six chained .filter() calls over
     // the same column was six walks to learn what one walk knows, and Math.min(...nums) spreads the array into
     // arguments — fine at a thousand rows, a stack overflow at a hundred thousand, and this file should not
@@ -325,7 +333,7 @@ function statsFor(rows: Row[]): ColStat[] {
     const st: ColStat = { name: String(k), n: rows.length, distinct: seen.size, nulls, sample }
     if (count) { st.min = min; st.max = max; st.mean = sum / count; st.zeros = zeros; st.negatives = negatives }
     return st
-  })
+  }), { width })
 }
 
 /** A column worth putting first: it says one thing on every row, says nothing at all, or is mostly empty. */
@@ -335,11 +343,20 @@ const notable = (c: ColStat, rows: number) =>
 
 const num = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2))
 
+/** A value, short enough to sit in a summary line. The point of this file is to be SMALLER than the answer;
+ *  a cell holding a nested array once put an entire table on one line, which is the failure it exists to
+ *  prevent, committed by the thing preventing it. */
+const brief = (v: unknown): string => {
+  if (typeof v === 'number') return num(v)
+  const s = typeof v === 'string' ? JSON.stringify(v) : (() => { try { return JSON.stringify(v) } catch { return String(v) } })()
+  return s.length > 40 ? s.slice(0, 37) + '…' : s
+}
+
 function describeCol(c: ColStat, rows: number, label: string): string {
   // The flags come first and stand alone: a column that is all one value has no useful range, and printing
   // one beside the flag invites reading past it.
   if (c.nulls === rows) return `⚠ '${label}' all ${rows} null`
-  if (c.distinct === 1) return `⚠ '${label}' all ${rows} rows = ${typeof c.sample === 'number' ? num(c.sample) : JSON.stringify(c.sample)}`
+  if (c.distinct === 1) return `⚠ '${label}' all ${rows} rows = ${brief(c.sample)}`
   const parts: string[] = [`${c.distinct} distinct`]
   if (c.min !== undefined && c.max !== undefined) parts.push(`${num(c.min)}–${num(c.max)}`)
   if (c.mean !== undefined && c.min !== c.max) parts.push(`mean ${num(c.mean)}`)
@@ -361,9 +378,13 @@ export function describeShape(output: unknown): string[] {
   // useless, and appears above the rows it describes because it comes first in the object. An array serving
   // as another's labels has already been accounted for. Still no schema knowledge: the test is the same
   // duck-typing labelsFor uses, applied in reverse.
+  let budget = VISIT_BUDGET
   const headers = new Set<unknown>()
   const findHeaders = (v: unknown) => {
-    if (v == null || typeof v !== 'object') return
+    if (v == null || typeof v !== 'object' || budget-- <= 0) return
+    // Never descend INTO a row array. Its elements are data, and walking them is how a header search over a
+    // hundred-thousand-row table costs a hundred thousand visits to learn nothing.
+    if (rowsOf(v)) return
     if (isRec(v)) {
       for (const child of Object.values(v)) {
         const rows = rowsOf(child)
@@ -382,7 +403,7 @@ export function describeShape(output: unknown): string[] {
 
   const walk = (v: unknown, parent: unknown) => {
     if (headers.has(v)) return
-    if (out.length >= MAX_ARRAYS || v == null || typeof v !== 'object' || seen.has(v)) return
+    if (out.length >= MAX_ARRAYS || v == null || typeof v !== 'object' || seen.has(v) || budget-- <= 0) return
     seen.add(v)
     const all = rowsOf(v)
     if (all) {
@@ -393,14 +414,16 @@ export function describeShape(output: unknown): string[] {
       const ordered = [...named].sort((a, b) =>
         Number(notable(b.c, rows.length)) - Number(notable(a.c, rows.length)))
       const shown = ordered.slice(0, MAX_COLS).map(({ c, label }) => describeCol(c, rows.length, label))
-      const more = ordered.length > MAX_COLS ? ` (+${ordered.length - MAX_COLS} more)` : ''
+      const unshown = stats.width - Math.min(ordered.length, MAX_COLS)
+      const more = unshown > 0 ? ` (+${unshown} more)` : ''
       const scanned = all.length > SCAN_CAP ? ` (first ${SCAN_CAP} of ${all.length})` : ''
-      out.push(`rows ${all.length} × ${stats.length}${scanned} · ${shown.join(' · ')}${more}`)
+      out.push(`rows ${all.length} × ${stats.width}${scanned} · ${shown.join(' · ')}${more}`)
       return   // do not descend into the rows themselves
     }
     for (const child of Array.isArray(v) ? v : Object.values(v)) walk(child, v)
   }
 
   try { walk(output, null) } catch { /* a summary that throws is worse than no summary */ }
+  if (budget <= 0) out.push('(summary stopped early — the answer is larger than this line can describe)')
   return out
 }
