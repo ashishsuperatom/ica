@@ -1906,6 +1906,27 @@ function recordConceptsUsed(slug: string, qid: string, declared: unknown): void 
   }
 }
 
+// ── IS THIS PROJECT'S CONCEPT STORE MIGRATED? ───────────────────────────────────────────────────────────
+// Concepts are content-addressed and reached through `index` nodes. A database written before that change has
+// concepts and no index — and every seam that finds one searches the index, so the project answers "no
+// concepts" to everything. That is indistinguishable from a project that genuinely has none: no error, no
+// empty result to notice, just an agent rebuilding from scratch on every question, for ever.
+//
+// One line at boot, because this is the only moment anyone would see it. It does not migrate on its own: a
+// rewrite of every concept in a project is not something a process should decide to do while starting up.
+function checkConceptIndex(): void {
+  try {
+    const concepts = graph.nodesByKind('concept').length
+    const indexes = graph.nodesByKind('index').length
+    if (concepts > 0 && indexes === 0) {
+      console.error(`[ica] ✗ ${concepts} concepts and NO index — this project predates content-addressed concepts.`)
+      console.error('[ica]   Every concept is invisible to ./find-concept until it is migrated. Nothing will say so again.')
+      console.error(`[ica]   Fix: pnpm exec tsx apps/engine/tools/migrate-concept-index.mts ${PROJECT}          (dry run)`)
+      console.error(`[ica]        pnpm exec tsx apps/engine/tools/migrate-concept-index.mts ${PROJECT} --apply`)
+    }
+  } catch { /* a boot check must never be the reason a boot fails */ }
+}
+
 // ── ABANDONED PROGRAM DIRECTORIES ───────────────────────────────────────────────────────────────────────
 // A program becomes findable when its turn COMPLETES: built.json is read and a `prog:<slug>` node is written.
 // Kill the engine mid-turn and the directory is already on disk with no node — invisible to ./find-program and
@@ -1948,6 +1969,7 @@ let warmed = false
 async function warmEssentialAgents() {
   // BEFORE any agent is spawned. A credential that arrives after the agent has started is a credential the
   // agent never sees — it inherits this process's environment once, at spawn.
+  checkConceptIndex()
   await sweepAbandonedPrograms()
   let credGap: string[] = []
   try { const c = await fetchBoxCredentials(); if (c.fleet) credGap = c.missing }
