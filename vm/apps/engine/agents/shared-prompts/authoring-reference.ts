@@ -37,7 +37,10 @@ A question becomes a PROGRAM, and the program's output is the answer.
 - The LAST unit returns a **view-model**: the shape the card renders.
 - You finish by writing **built.json**, which points at the program you built or reused.
 
-Reuse before you build: a program that already answers this question is the answer.`
+Reuse before you build: a program that already answers this question is the answer.
+
+When you are about to WRITE — a new program, or a unit inside one — read \`./authoring-guide\` first. It carries
+the contract, the mechanics and the canonical example. Read it again if a long turn has pushed it out of view.`
 
 // ── ONE LIST, IN THE ORDER THE WORK HAPPENS ─────────────────────────────────────────────────────────────
 // The tools were documented in three places — six in a list, the rest scattered into prose sections that
@@ -48,6 +51,9 @@ Reuse before you build: a program that already answers this question is the answ
 const TOOLS = `# Your tools
 
 Run them from the workspace root. Each takes \`--help\`.
+
+**About to write?**
+- \`./authoring-guide [type]\` → how to write a program: the contract, the mechanics, the canonical example
 
 **Is it already answered?**
 - \`./find-program "<question>"\` → the shortlist: programs that answered a similar question (what it answers · name · category)
@@ -161,8 +167,47 @@ program with different params; only when neither holds is a new program the righ
 
 // The complete authoring surface, as ONE string, to install into a coding agent's system prompt (systemReference).
 // Use this when the caller's base does NOT already carry the authoring MECHANICS (the composer).
-export const AUTHORING_REFERENCE: string = [HOW_IT_FITS, TOOLS, NARROW_THEN_OPEN, contract, ...PROGRAM_AUTHORING, example, ...EXPECTATIONS].join('\n\n')
+// ── WHAT EVERY TURN NEEDS, AND WHAT ONLY A WRITING TURN NEEDS ───────────────────────────────────────────
+// PULL, DON'T PRELOAD. The contract types, the authoring mechanics and the example only matter once the agent
+// is writing a unit — and most turns REUSE a program instead. Carrying ~12 KB of authoring tutorial through
+// every question that reuses is the same waste as pre-firing concepts for a question that needed none, and the
+// fix is the same shape: hand the agent a way to ask, and let it decide when.
+//
+// It also lands better. The guide pulled at the moment of writing arrives at the END of a long turn, where
+// attention is strongest — rather than 140 seconds earlier, behind a wall of query output.
+//
+// WHAT MAKES THIS SAFE NOW, and did not before: content in the system prompt is re-sent on every request and
+// cannot be compacted away; content the agent pulled can be. So a guide that is never pulled — or was pulled
+// and lost — used to mean a subtly wrong program shape that nothing detected. answer-lint.ts detects exactly
+// that now, and hands it back. The instrument came first; this depends on it.
+//
+// STAYS IN THE SYSTEM PROMPT: the map (it cannot ask for what it does not know exists), the tool list
+// (including this guide), and how to search. Everything else is a pull.
+
+/** Always in the system prompt. Small enough that every turn can carry it. */
+export const AUTHORING_REFERENCE: string = [HOW_IT_FITS, TOOLS, NARROW_THEN_OPEN, ...EXPECTATIONS].join('\n\n')
+
+/** The analyst's base already carries the mechanics, so it takes the same always-on surface. */
+export const AUTHORING_SURFACE: string = [HOW_IT_FITS, TOOLS, NARROW_THEN_OPEN, ...EXPECTATIONS].join('\n\n')
+
+/** The guide, pulled by `./authoring-guide [type]` when the agent is about to write.
+ *
+ *  `type` is open on purpose: today one shape is documented and the argument is accepted so a second — a
+ *  dashboard, a view — can be added without the base prompt growing by a byte. An unknown type returns the
+ *  default plus a line naming what exists, because a guide that errors at the moment of writing is worse than
+ *  one that hands over the general shape. */
+export function authoringGuide(type = 'default'): string {
+  const known: Record<string, string[]> = {
+    default: [contract, ...PROGRAM_AUTHORING, example],
+  }
+  const body = known[type] ?? known.default
+  const head = known[type]
+    ? `# Authoring guide — ${type}`
+    : `# Authoring guide — default (no guide named "${type}"; available: ${Object.keys(known).join(', ')})`
+  return [head, ...body].join('\n\n')
+}
+
 
 // The surface WITHOUT the mechanics — for a caller whose generated base ALREADY includes PROGRAM_AUTHORING (the
 // analyst), so the mechanics aren't repeated. The expectations are identical in both.
-export const AUTHORING_SURFACE: string = [HOW_IT_FITS, TOOLS, NARROW_THEN_OPEN, contract, example, ...EXPECTATIONS].join('\n\n')
+

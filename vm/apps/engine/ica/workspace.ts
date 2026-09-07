@@ -16,6 +16,11 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
+
+// The guide is generated from the engine's OWN shared prompts, so the tool and the system prompt can never
+// describe different contracts — one module, two readers.
+const guideImport = new URL('../agents/shared-prompts/authoring-reference.js', import.meta.url).href
+
 // The display helpers describe themselves — see FORMAT_HELPERS. Adding one there teaches the agent about it,
 // with no line here to remember to update.
 import { formatHelpText } from '@superatom/scaffold'
@@ -458,6 +463,14 @@ console.log(JSON.stringify({
     : 'all ' + r.matched + ' matching fields',
 }, null, 2))
 `,
+    'authoring-guide': `// The authoring guide — how to WRITE a program: the contract types, the mechanics, the canonical example.
+// Pulled rather than preloaded. It is only needed once the agent is about to write a unit, and most turns reuse
+// an existing program instead — so it lives here rather than in every question's system prompt. Read it when
+// you are ready to write, or again if a long turn has pushed it out of context.
+import { authoringGuide } from ${JSON.stringify(guideImport)}
+const type = process.argv.slice(2).filter((a) => !a.startsWith('-'))[0] || 'default'
+console.log(authoringGuide(type))
+`,
     'find-program': `// Programs that answered a similar question — the SHORTLIST: what each answers, and its name.
 // Deliberately no params and no source: a list is for choosing which one to look at. ./get-program <name> opens one.
 import { NodeStore } from '@superatom/node-store'
@@ -517,6 +530,7 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
     'find-concept': 'find-concept "<phrase>"   → the NAMES of matching concepts. A query is required. Read one with get-concept.',
     'get-concept':  'get-concept "<exact name>"   → ONE concept\'s guide: what it is, its rules, where the data lives, how to compute and present it',
     'find-schema':  'find-schema "<term>" [--source <SOURCE>] [--full]   → search ALL datasources for a field/table by name, type, or description (SOURCE.TABLE.COLUMN : type); --source filters to one; --full adds PK/nullable/references',
+    'authoring-guide': 'authoring-guide [type]   → how to WRITE a program: the contract, the mechanics, the canonical example. Read it when you are about to write.',
     'find-program': 'find-program "<question>"   → the shortlist: programs that answered a similar question (what it answers · name · category)',
     'get-program': 'get-program <program>   → ONE program in full: every question form it answers, its saved params, its category',
     'sources':      'sources   → every data source with its kind + dialect (JSON)',
