@@ -51,6 +51,9 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
   const projectHome = join(s.root, s.projectId)
   const dir = join(projectHome, 'workspace')
   const dbDir = join(projectHome, 'db')
+  // WHAT EACH TURN OPENED. Engine-private, beside the databases rather than in the workspace: it is a record
+  // ABOUT the agent's work, not part of it, and nothing in the workspace should be tempted to read it.
+  const conceptOpensLog = join(projectHome, 'concept-opens.jsonl')
   // Organized by CONCERN, not dumped flat: each concern (data / model / grounding / analyst / connector) holds its
   // own seam + role doc together. CONTEXT.md + run.mjs stay at the workspace root as the entry point + runner.
   for (const sub of ['', 'data', 'model', 'grounding', 'analyst', 'connector', 'composer', 'concepts', 'units', 'programs', 'out', '.tools'])
@@ -421,7 +424,13 @@ console.log(JSON.stringify({ matched, of: total, note: total === 0 ? 'the concep
 `,
     'get-concept': `// ONE concept, in full guide form: "<exact name>" (as listed by ./find-concept). Returns the guide only — what it is, its rules, where the data lives, how to compute it, how to present it.
 import { findConcept, listConcepts } from ${JSON.stringify(join(dir, 'concepts', 'find.mjs'))}
-const name = process.argv.slice(2).join(' ').trim()
+// WHICH TURN OPENED THIS. One workspace serves every question on a project, and two people asking at once
+// share it — so a timestamp cannot say who opened what, and an append keyed only by time would attribute
+// concepts to the wrong program the first time two turns overlap. The qid travels with the call.
+const argv = process.argv.slice(2)
+const qi = argv.indexOf('--qid')
+const qid = qi >= 0 ? argv[qi + 1] : null
+const name = argv.filter((a, i) => a !== '--qid' && i !== qi + 1).join(' ').trim()
 if (!name) { console.log(JSON.stringify({ error: 'a concept name is required — list them with ./find-concept "<phrase>"' })); process.exit(0) }
 const norm = (x) => String(x || '').toLowerCase().replace(/\\s+/g, ' ').trim()
 const hit = findConcept(name, 50).find(c => norm(c.name) === norm(name))
@@ -437,6 +446,17 @@ const KEEP = ['name', 'value', 'status', 'rules', 'requires', 'supersedes', 'dat
 const out = {}
 for (const k of KEEP) if (hit[k] !== undefined) out[k] = hit[k]
 console.log(JSON.stringify(out, null, 2))
+
+// RECORD THE OPEN, and never let recording cost the read. This is the mechanical half of "what was this
+// program built from": certain, needing no cooperation, and a superset — opened is not used. The agent's
+// declaration in built.json is the other half, and the difference is a signal of its own: a concept opened
+// and then not used was considered and rejected.
+try {
+  const { appendFileSync, statSync, writeFileSync } = await import('node:fs')
+  const LOG = ${JSON.stringify(conceptOpensLog)}
+  try { if (statSync(LOG).size > 4_000_000) writeFileSync(LOG, '') } catch { /* no file yet */ }
+  appendFileSync(LOG, JSON.stringify({ at: Date.now(), qid, name: hit.name }) + String.fromCharCode(10))
+} catch { /* a log that cannot be written must not cost the concept that was asked for */ }
 `,
     'get-program': `// ONE program, in full: every question form it answers, its saved params, its category.
 // The shortlist (./find-program) says which one to open; this opens it. Read its code from programs/<name>/.
@@ -553,7 +573,7 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
   // never needs to read the .mjs to learn what to pass, and never sees the implementation.
   const usages: Record<string, string> = {
     'find-concept': 'find-concept "<phrase>"   → the NAMES of matching concepts. A query is required. Read one with get-concept.',
-    'get-concept':  'get-concept "<exact name>"   → ONE concept\'s guide: what it is, its rules, where the data lives, how to compute and present it',
+    'get-concept':  'get-concept "<exact name>" [--qid <qid>]   → ONE concept\'s guide: what it is, its rules, where the data lives, how to compute and present it. Pass --qid so the program records what it was built from.',
     'find-schema':  'find-schema "<term>" [--source <SOURCE>] [--full]   → search ALL datasources for a field/table by name, type, or description (SOURCE.TABLE.COLUMN : type); --source filters to one; --full adds PK/nullable/references',
     'authoring-guide': 'authoring-guide [type]   → how to WRITE a program: the contract, the mechanics, the canonical example. Read it when you are about to write.',
     'find-program': 'find-program "<question>"   → the shortlist: programs that answered a similar question (what it answers · name · category)',

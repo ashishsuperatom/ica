@@ -1451,6 +1451,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         props: { dir: authoredProgramDir, authoredBy: authoredMeta, category: r.category, canonicalQuestions: canonical } })
       graph.putEdge({ from: builtIntentId, to: `prog:${slug}`, type: 'program' })
       console.log(`[ica] program ${slug} answers ${canonical.length} question form(s)${programCanonical.length ? '' : ' (writer declared none — user question only)'}`)
+      recordConceptsUsed(slug, qid, b?.usedConcepts)
     }
     // No explicit wake needed — the always-running consolidation timer picks this up on its next tick. That
     // is deliberate: the timer, not this signal, is the guarantee (it survives restarts and missed signals).
@@ -1881,6 +1882,57 @@ async function verifyBoxCredential(): Promise<void> {
     }
     if (!text) throw new Error('no reply — could not confirm the credential works')
   } finally { try { probe.stop() } catch { /* nothing to clean up if it never started */ } }
+}
+
+// ── WHAT A PROGRAM WAS BUILT FROM ───────────────────────────────────────────────────────────────────────
+// Nothing recorded this, so "have the concepts this program rests on changed since it was written" — the one
+// question that decides whether reusing it is safe — could not be asked. The agent judged it instead, from a
+// similarity score about the QUESTION, which says nothing about whether the program's foundations moved.
+//
+// TWO RECORDS, deliberately not merged:
+//   opened    ./get-concept wrote a line when it was read. Mechanical, certain, and a SUPERSET — opening is
+//             not using.
+//   declared  the writer named it in built.json. Meaningful, and only as reliable as the writer.
+// Opened-but-not-declared is a signal of its own: considered, and rejected. Collapsing the two early would
+// turn a mechanical fact into an assumption, so both are kept and each edge says which it is.
+//
+// STALENESS NEEDS NO VERSION PINNING. A concept's live node carries `valid_from` — when THIS version became
+// current — and a program node carries its own. A used concept whose valid_from is later than the program's
+// has moved since; that comparison is the whole check, and it works on edges written today.
+function recordConceptsUsed(slug: string, qid: string, declared: unknown): void {
+  try {
+    const names = new Map<string, 'declared' | 'opened' | 'both'>()
+    for (const n of Array.isArray(declared) ? declared : []) {
+      if (typeof n === 'string' && n.trim()) names.set(n.trim(), 'declared')
+    }
+    // Opens are keyed by QID, never by time: one workspace serves every question on a project, and two people
+    // asking at once would otherwise have their concepts attributed to each other's programs.
+    const log = join(WORKSPACE, '..', 'concept-opens.jsonl')   // engine-private, beside the DBs — see prepareWorkspace
+    if (existsSync(log)) {
+      for (const line of readFileSync(log, 'utf8').split('\n')) {
+        if (!line.trim()) continue
+        try {
+          const e = JSON.parse(line)
+          if (e?.qid !== qid || typeof e?.name !== 'string') continue
+          names.set(e.name, names.get(e.name) === 'declared' ? 'both' : 'opened')
+        } catch { /* a torn line at the end of an append-only log */ }
+      }
+    }
+    if (!names.size) return
+    let written = 0
+    for (const [name, how] of names) {
+      const node = graph.getNode(`concept:${name}`) ?? graph.nodesByKind('concept').find(
+        (n) => String(n.label ?? '').toLowerCase() === name.toLowerCase() && !(n as any).valid_to)
+      if (!node) continue   // a name that resolves to nothing is not an edge, it is a typo
+      graph.putEdge({ from: `prog:${slug}`, to: node.id, type: 'built_from', props: { how, at: Date.now() } })
+      written++
+    }
+    const by = [...names.values()]
+    console.log(`[ica] program ${slug} built_from ${written} concept(s) · ${by.filter(h => h !== 'opened').length} declared · ${by.filter(h => h !== 'declared').length} opened`)
+  } catch (e: any) {
+    // Provenance is worth having and never worth an answer.
+    console.warn(`[ica] could not record concepts for ${slug} (${e?.message ?? e})`)
+  }
 }
 
 // ── ABANDONED PROGRAM DIRECTORIES ───────────────────────────────────────────────────────────────────────

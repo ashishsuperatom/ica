@@ -139,8 +139,8 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       // CONCEPT matched. Reuse never needed a concept; the two are separate paths to an answer.
       const conceptBlock = '\nStart with what exists: `./find-concept "<phrase>"` (full-text, fast — search in your' +
         ' own words, and again with different words if the first misses), and open the ones that look right with' +
-        ' `./get-concept "<name>"`. A fitting concept is the fastest correct route, and a program above may answer' +
-        ' this already.\n' +
+        ` \`./get-concept "<name>" --qid ${o.qid ?? ''}\`. A fitting concept is the fastest correct route, and a` +
+        ' program above may answer this already.\n' +
         // ESCALATE ON FINISHABILITY, not on the absence of a concept. This used to read "no program AND no concept
         // → escalate", which contradicted the system prompt the moment the composer stopped being forbidden to
         // discover: it has every tool the analyst has, so "nothing matched" is the start of the work, not the end
@@ -200,7 +200,7 @@ RUN it (\`tsx run.mjs ${o.canonicalMatch.programDir}/program.ts '${JSON.stringif
    don't fully cover it, do the work yourself — \`./query\`/\`./introspect\` the data, analyse, write the units +
    program. Run it (\`tsx run.mjs programs/<slug>/program.ts '<json>'\`), verify against the review checks, write
    Then COMMIT, as your final action — once everything else is finished and verified: write
-   ${builtRel} = {"programDir":"programs/<slug>","params":{…},"canonicalQuestions":["…"]}. \`canonicalQuestions\` — the question this program answers, phrased so its parameters are
+   ${builtRel} = {"programDir":"programs/<slug>","params":{…},"canonicalQuestions":["…"],"usedConcepts":["<the concepts this program is actually built on>"]}. \`canonicalQuestions\` — the question this program answers, phrased so its parameters are
    visible ("… for customer <customer> in <period>"); add another only when it genuinely answers a differently-
    phrased question.
 3. Escalate to the analyst when it's a hard problem or you can't figure it out. Write ${escalateRel} =
