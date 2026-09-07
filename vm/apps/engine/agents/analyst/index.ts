@@ -216,8 +216,13 @@ Your task is in ${taskRel} — read it and follow it exactly. ${m ? 'Modify the 
           // turn away and still holds the trajectory. Errors only, capped, and the answer ships regardless.
           // Delete this block to switch repair off; the lint still logs.
           for (let round = 1; round <= MAX_REPAIR_ROUNDS; round++) {
-            const before = lintAnswer(answer)
-            const fix = repairInstruction(before)
+            // GUARDED, because this sits inside the try that turns a throw into "the program failed to run".
+            // A bug in a lint rule must not convert a good answer into cannot_answer — the whole point of the
+            // check is to make faults visible, not to invent one.
+            let before: ReturnType<typeof lintAnswer> = []
+            let fix: string | null = null
+            try { before = lintAnswer(answer); fix = repairInstruction(before) }
+            catch (e: any) { console.warn(`[answer] repair check FAILED (${String(e?.message ?? e).slice(0, 160)}) — shipping the answer as it is`); break }
             if (!fix) break
             const nBefore = before.filter((f) => f.severity === 'error').length
             try {

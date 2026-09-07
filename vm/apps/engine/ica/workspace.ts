@@ -278,9 +278,17 @@ async function main() {
     await writeFile(join(dirname(entry), 'program.json'), JSON.stringify(manifest, null, 2))
     process.stderr.write(\`\\n  graph: \${r.nodes.length} nodes, \${r.edges.length} edges, \${r.branches.length} branches · shape \${r.finalShapeHash} · \${r.ms}ms\\n\`)
     await note({ t: 'program:end', ms: r.ms, nodes: r.nodes.length })
+    // THE SUMMARY CANNOT FAIL THE RUN. It sits inside the same try as the program itself, so without this
+    // guard a bug in describeShape would emit program:failed and rethrow \u2014 reporting a program that ran
+    // perfectly, and whose output is already written to program.json, as a crash. The check exists to make
+    // failures visible; it must not manufacture one.
     const rel = join(dirname(entry), 'program.json')
     console.log('\u2713 ran \u00b7 full output \u2192 ' + rel)
-    for (const line of describeShape(r.output)) console.log('  ' + line)
+    try {
+      for (const line of describeShape(r.output)) console.log('  ' + line)
+    } catch (se) {
+      process.stderr.write('  [answer] shape summary FAILED (' + String(se?.message ?? se).slice(0, 160) + ') \u2014 the run itself is fine; read ' + rel + '\n')
+    }
     console.log('')
     console.log('Read the output as the person who asked would. Empty, sidesteps the question, or figures that')
     console.log('plainly do not fit \u2014 fix it or escalate.')

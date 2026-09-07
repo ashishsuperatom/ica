@@ -14,7 +14,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { lintAnswer, describeFindings } from './answer-review.js'
+import { lintAnswer, describeFindings, describeShape } from './answer-review.js'
 
 const execFileP = promisify(execFile)
 
@@ -64,7 +64,17 @@ export function answerView(out: any): any {
   // no other caller, no state and no side effects, so it can then be deleted outright. It sits HERE rather
   // than at the four places that call answerView, because this is the funnel every answer already passes
   // through — a check installed four times is a check that will one day be installed three times.
-  const findings = lintAnswer(answer)
-  if (findings.length) console.warn(`[answer] ${findings.length} contract issue(s):\n${describeFindings(findings)}`)
+  // ONE LINE PER ANSWER, ALWAYS — the shape it has, then anything wrong with it. The agent sees the shape at
+  // run time in its own output; this is the same view in the ENGINE's log, in turn order, so a question can be
+  // traced from one stream instead of two. Wrapped as a whole: reviewing an answer must never be able to stop
+  // one being returned.
+  try {
+    const shape = describeShape(answer)
+    if (shape.length) console.log(`[answer] ${shape.join(' | ')}`)
+    const findings = lintAnswer(answer)
+    if (findings.length) console.warn(`[answer] ${findings.length} contract issue(s):\n${describeFindings(findings)}`)
+  } catch (e: any) {
+    console.warn(`[answer] review FAILED (${String(e?.message ?? e).slice(0, 160)}) — the answer is unaffected`)
+  }
   return answer
 }

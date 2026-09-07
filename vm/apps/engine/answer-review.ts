@@ -36,6 +36,24 @@
 // side effects, no I/O and no state, and this file can then be deleted outright. That is the whole contract:
 // one call site, no hooks, no registry.
 
+// ── WHEN THE CHECK ITSELF BREAKS ────────────────────────────────────────────────────────────────────────
+// Every catch in this file was silent. That is right about one thing — a broken rule must never cost an
+// answer — and wrong about everything else: a check that fails quietly is a check you believe is running.
+// Months later the absence of findings reads as "nothing wrong" rather than "nothing looked".
+//
+// So every failure is reported, once, on the same `[answer]` prefix as the findings themselves, so one grep
+// over a turn shows what was checked, what it found, and what fell over trying. Never rethrown: the answer
+// goes out either way.
+function report(where: string, e: unknown): void {
+  try { console.warn(`[answer] check '${where}' FAILED (${String((e as any)?.message ?? e).slice(0, 160)}) — answer unaffected`) }
+  catch { /* a logger that throws is not worth a second attempt */ }
+}
+
+/** Run a check, and if it breaks say so and carry on with `fallback`. The one way this file fails. */
+function safely<T>(where: string, fn: () => T, fallback: T): T {
+  try { return fn() } catch (e) { report(where, e); return fallback }
+}
+
 export type Severity = 'error' | 'warning'
 
 export interface Finding {
@@ -199,8 +217,7 @@ export function lintAnswer(answer: unknown): Finding[] {
   if (!answer || typeof answer !== 'object') return []
   const out: Finding[] = []
   for (const r of RULES) {
-    try { out.push(...r.run(answer)) }
-    catch { /* a broken rule must never cost an answer — see the header */ }
+    out.push(...safely(`rule:${r.name}`, () => r.run(answer), []))
   }
   return out
 }
@@ -399,7 +416,7 @@ export function describeShape(output: unknown): string[] {
     }
     for (const child of Array.isArray(v) ? v : Object.values(v)) findHeaders(child)
   }
-  try { findHeaders(output) } catch { /* best effort */ }
+  safely('describeShape/findHeaders', () => findHeaders(output), undefined)
 
   const walk = (v: unknown, parent: unknown) => {
     if (headers.has(v)) return
@@ -423,7 +440,7 @@ export function describeShape(output: unknown): string[] {
     for (const child of Array.isArray(v) ? v : Object.values(v)) walk(child, v)
   }
 
-  try { walk(output, null) } catch { /* a summary that throws is worse than no summary */ }
+  safely('describeShape/walk', () => walk(output, null), undefined)
   if (budget <= 0) out.push('(summary stopped early — the answer is larger than this line can describe)')
   return out
 }
