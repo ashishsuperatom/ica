@@ -17,7 +17,7 @@ import { explainPrompt, explainAnswer } from '../../verbs/explain.js'
 import type { ProgramTarget } from '../../verbs/index.js'
 import { execProgram } from '../../exec-program.js'
 import { PROGRAM_AUTHORING } from '../shared-prompts/program-authoring.js'   // SHARED single source (analyst + composer)
-import { lintAnswer, repairInstruction, MAX_REPAIR_ROUNDS } from '../../answer-lint.js'
+import { lintAnswer, repairInstruction, MAX_REPAIR_ROUNDS } from '../../answer-review.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const sysFile = () => loadPrompt(join(__dirname, 'SYSTEM.md'), 'composer/SYSTEM')

@@ -1,4 +1,11 @@
-// ── ANSWER LINT — a compiler pass over a finished answer ─────────────────────────────────────────────────
+// ── LOOKING AT A FINISHED ANSWER — one module, two questions ────────────────────────────────────────────
+//
+//   lintAnswer(a)     what is WRONG with it   → findings, a repair round, the log
+//   describeShape(a)  what it IS              → three lines in the agent's own tool output at run time
+//
+// Both walk the same structure, so they live in one file and share one idea of what a row and a column are.
+//
+// ── PART 1 — WHAT IS WRONG.  lintAnswer(): a compiler pass over a finished answer ─────────────────────────────────────────────────
 //
 // An answer can satisfy every type in the contract and still be broken in a way nobody sees. A cell that
 // carries an id but no KIND renders as ordinary text: the reader clicks and nothing happens, no error, no log
@@ -43,8 +50,12 @@ export interface Finding {
  *  it is inspecting is a worse bug than anything it detects, so every rule is called inside a guard. */
 export type Rule = (answer: any) => Finding[]
 
-const isObj = (c: unknown): c is Record<string, any> =>
-  !!c && typeof c === 'object' && !Array.isArray(c) && 'value' in (c as any)
+/** A plain object. Shared by both halves — the single idea of "a record" this file is built on. */
+const isRec = (v: unknown): v is Record<string, unknown> =>
+  !!v && typeof v === 'object' && !Array.isArray(v)
+
+/** A CELL object specifically: a record carrying `value`. A bare scalar is a cell too, just not this. */
+const isObj = (c: unknown): c is Record<string, any> => isRec(c) && 'value' in c
 
 const tables = (a: any): Array<{ i: number; sec: any }> =>
   (Array.isArray(a?.sections) ? a.sections : [])
@@ -208,4 +219,135 @@ export function repairInstruction(f: Finding[]): string | null {
   return `The answer your program produced has ${errs.length} problem${errs.length > 1 ? 's' : ''} in its view-model:\n` +
     errs.map((e) => `- ${e.where ? e.where + ': ' : ''}${e.message}`).join('\n') +
     `\nFix the view unit and re-run the program. Change nothing else.`
+}
+
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════
+// PART 2 — WHAT THE ANSWER IS.  describeShape()
+//
+// The same traversal, asked a different question. Part 1 judges; this one describes, and they live together
+// because two modules walking the same structure is how two definitions of "a column" appear and then drift.
+//
+// Printed by run.mjs into the agent's own tool output, beside the path to the full result. It exists because
+// an agent shipped a twenty-row ranking of identical zeros having received the whole table — 4,773 characters,
+// nothing truncated — and reported "Built and verified". Twenty rows of the same number are easy to skim;
+// `1 distinct value` is not. This is LESS information than it already had, arranged so the pathology cannot be
+// skimmed past.
+//
+// IT MUST NOT KNOW WHAT A TABLE IS. The answer format has grown before and will again, and a summariser that
+// greps for sections[].kind === 'table' stops working the first time somebody adds a chart. It walks the VALUE,
+// not the schema: wherever it finds an array of rows, it describes that array. A component invented next month
+// is described on the day it is written, by nobody. Labels are taken opportunistically — duck-typed, never
+// required — so a component that names its columns the same way gets named output for free, and one that does
+// not falls back to positions and is still useful.
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+const MAX_ARRAYS = 4          // distinct row-arrays described
+const MAX_COLS = 6            // columns named per array, notable ones first
+const MIN_ROWS = 2            // one row cannot be "all the same"
+
+type Row = unknown[] | Record<string, unknown>
+
+/** An array worth describing: at least a couple of entries, all the same shape. */
+function rowsOf(v: unknown): Row[] | null {
+  if (!Array.isArray(v) || v.length < MIN_ROWS) return null
+  if (v.every((e) => Array.isArray(e))) return v as Row[]
+  if (v.every((e) => isRec(e))) return v as Row[]
+  return null
+}
+
+/** Labels for the columns, IF something beside the rows looks like headers. Never required. */
+function labelsFor(parent: unknown, width: number): string[] | null {
+  if (!isRec(parent)) return null
+  for (const v of Object.values(parent)) {
+    if (!Array.isArray(v) || v.length !== width) continue
+    const names = v.map((c) => (isRec(c) && typeof c.label === 'string' ? c.label : null))
+    if (names.every((n) => n)) return names as string[]
+  }
+  return null
+}
+
+interface ColStat { name: string; distinct: number; nulls: number; min?: number; max?: number; sample?: unknown }
+
+function statsFor(rows: Row[]): ColStat[] {
+  const keys: (string | number)[] = Array.isArray(rows[0])
+    ? (rows[0] as unknown[]).map((_, i) => i)
+    : Object.keys(rows[0] as Record<string, unknown>)
+  return keys.map((k) => {
+    const vals = rows.map((r) => (Array.isArray(r) ? (r as unknown[])[k as number] : (r as any)[k]))
+    const nulls = vals.filter((v) => v == null).length
+    const seen = new Set(vals.map((v) => (typeof v === 'object' ? JSON.stringify(v) : v)))
+    const nums = vals.filter((v) => typeof v === 'number') as number[]
+    return {
+      name: String(k), distinct: seen.size, nulls,
+      min: nums.length ? Math.min(...nums) : undefined,
+      max: nums.length ? Math.max(...nums) : undefined,
+      sample: vals.find((v) => v != null),
+    }
+  })
+}
+
+/** A column worth putting first: it says the same thing on every row, or says nothing at all. */
+const notable = (c: ColStat, rows: number) => c.nulls === rows || (rows >= MIN_ROWS && c.distinct === 1)
+
+const num = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2))
+
+function describeCol(c: ColStat, rows: number, label: string): string {
+  if (c.nulls === rows) return `⚠ '${label}' all null`
+  if (c.distinct === 1) return `⚠ '${label}' 1 distinct (${typeof c.sample === 'number' ? num(c.sample) : JSON.stringify(c.sample)})`
+  if (c.min !== undefined && c.max !== undefined) return `'${label}' ${c.distinct} distinct (${num(c.min)}–${num(c.max)})`
+  return `'${label}' ${c.distinct} distinct`
+}
+
+/** One line per row-array found anywhere in the value. Notable columns first, because the reason this is
+ *  printed at all is to make a degenerate one impossible to miss. */
+export function describeShape(output: unknown): string[] {
+  const out: string[] = []
+  const seen = new Set<unknown>()
+
+  // FIRST, find the arrays that are HEADERS for another array and take them out of consideration. Without
+  // this the column definitions get described as data — "rows 6 × 2 · 'label' 6 distinct" — which is true,
+  // useless, and appears above the rows it describes because it comes first in the object. An array serving
+  // as another's labels has already been accounted for. Still no schema knowledge: the test is the same
+  // duck-typing labelsFor uses, applied in reverse.
+  const headers = new Set<unknown>()
+  const findHeaders = (v: unknown) => {
+    if (v == null || typeof v !== 'object') return
+    if (isRec(v)) {
+      for (const child of Object.values(v)) {
+        const rows = rowsOf(child)
+        if (rows && Array.isArray(rows[0])) {
+          const w = (rows[0] as unknown[]).length
+          for (const sib of Object.values(v)) {
+            if (sib === child || !Array.isArray(sib) || sib.length !== w) continue
+            if (sib.every((c) => isRec(c) && typeof (c as any).label === 'string')) headers.add(sib)
+          }
+        }
+      }
+    }
+    for (const child of Array.isArray(v) ? v : Object.values(v)) findHeaders(child)
+  }
+  try { findHeaders(output) } catch { /* best effort */ }
+
+  const walk = (v: unknown, parent: unknown) => {
+    if (headers.has(v)) return
+    if (out.length >= MAX_ARRAYS || v == null || typeof v !== 'object' || seen.has(v)) return
+    seen.add(v)
+    const rows = rowsOf(v)
+    if (rows) {
+      const stats = statsFor(rows)
+      const labels = Array.isArray(rows[0]) ? labelsFor(parent, (rows[0] as unknown[]).length) : null
+      const named = stats.map((c, i) => ({ c, label: labels?.[i] ?? c.name }))
+      const ordered = [...named].sort((a, b) =>
+        Number(notable(b.c, rows.length)) - Number(notable(a.c, rows.length)))
+      const shown = ordered.slice(0, MAX_COLS).map(({ c, label }) => describeCol(c, rows.length, label))
+      const more = ordered.length > MAX_COLS ? ` (+${ordered.length - MAX_COLS} more)` : ''
+      out.push(`rows ${rows.length} × ${stats.length} · ${shown.join(' · ')}${more}`)
+      return   // do not descend into the rows themselves
+    }
+    for (const child of Array.isArray(v) ? v : Object.values(v)) walk(child, v)
+  }
+
+  try { walk(output, null) } catch { /* a summary that throws is worse than no summary */ }
+  return out
 }

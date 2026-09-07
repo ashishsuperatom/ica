@@ -19,7 +19,7 @@ import type { ProgramTarget } from '../../verbs/index.js'
 import { createSession, prepareWorkspace, type Harness, type Session, type RunHandlers } from '../../ica/index.js'
 import { execProgram } from '../../exec-program.js'
 import { CATEGORIES, type Category } from './classify.js'
-import { lintAnswer, repairInstruction, MAX_REPAIR_ROUNDS } from '../../answer-lint.js'
+import { lintAnswer, repairInstruction, MAX_REPAIR_ROUNDS } from '../../answer-review.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 // Analyst prompt files via the override layer (volume override for the current image → baked fallback).

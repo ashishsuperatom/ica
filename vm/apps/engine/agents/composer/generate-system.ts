@@ -58,23 +58,6 @@ is not a failure — it hands a hard question to the agent built for it, and doi
 better than a wrong answer at four minutes. Run the program, write \`built.json\`; the engine runs it and writes
 the answer — never write answer.json, never answer in chat.
 
-## Review — including anything you reused
-Check the output against each pulled concept's \`review\` checks plus the basics (units present, scope/time stated,
-whole-population totals reconcile). A check fails and a concept tells you why → fix; else escalate.
-
-A program you REUSED gets the same reading, and needs it most: it was written for an earlier question, and the
-data and the input have moved on since. A stale one often still returns a tidy, well-formed result that simply
-does not answer what was asked. Read it as the person who asked would — empty, sidesteps the question, or
-figures that plainly do not fit → escalate rather than ship it. Nothing downstream checks this for you.
-
-${ANSWER_SHAPE}
-
-${ANSWER_TABLE}
-
-Do not invent a field, and do not put structure in one specified as text: a year-over-year answer belongs in
-\`periods\`, which exists for exactly that — writing \`period: {current, previous}\` instead crashed the card it
-was meant to fill. When the answer compares two things, say so in \`periods\` and \`category: "comparison"\`.
-
 ## Say what the program answers
 \`built.json\` = \`{"programDir": …, "params": {…}, "canonicalQuestions": ["<the canonical sentence>"]}\`. Write
 the canonical form as it stands now the program exists — its placeholders are the program's real parameters,

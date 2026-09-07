@@ -20,6 +20,7 @@ import { createRequire } from 'node:module'
 // The guide is generated from the engine's OWN shared prompts, so the tool and the system prompt can never
 // describe different contracts — one module, two readers.
 const guideImport = new URL('../agents/shared-prompts/authoring-reference.js', import.meta.url).href
+const reviewImport = new URL('../answer-review.js', import.meta.url).href
 
 // The display helpers describe themselves — see FORMAT_HELPERS. Adding one there teaches the agent about it,
 // with no line here to remember to update.
@@ -220,9 +221,20 @@ export default store
   await writeFile(join(dir, 'run.mjs'),
 `// The RUN seam. Execute a program through the kernel and see what it produces:
 //   tsx run.mjs programs/<slug>/program.ts '{"someParam":"value"}'
-// The rendered output goes to stdout; the provenance (DAG + per-unit shape + output) is written to
-// that program's program.json. ctx.use resolves unit names from <program>/units then <program>.
+// stdout says it RAN, where the full result is, and the shape of what came back. The result itself — output,
+// DAG, per-unit shapes — goes to that program's program.json, which is also what the engine reads.
+//
+// IT USED TO PRINT THE WHOLE OUTPUT. That is how an agent came to ship a twenty-row ranking of identical
+// zeros: it received the entire table, said "Built and verified", and committed. It had the data and skimmed
+// it. So stdout now carries the SHAPE — "1 distinct (0)" cannot be skimmed the way twenty zeros can — plus
+// the path, so anything larger is fetched deliberately with whatever tool suits it, at any size.
+//
+// And the review line lives HERE, not in the system prompt, because it belongs beside the thing being
+// reviewed: it arrives every time a program runs, at the moment there is something to read, rather than six
+// kilobytes earlier in an instruction competing with finishing the turn.
+// ctx.use resolves unit names from <program>/units then <program>.
 import { runProgram } from '@superatom/scaffold'
+import { describeShape } from ${JSON.stringify(reviewImport)}
 import { writeFile, appendFile, mkdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 // WHAT THE PROGRAM IS DOING, WHILE IT DOES IT. Two destinations, because there are two readers.
@@ -266,7 +278,12 @@ async function main() {
     await writeFile(join(dirname(entry), 'program.json'), JSON.stringify(manifest, null, 2))
     process.stderr.write(\`\\n  graph: \${r.nodes.length} nodes, \${r.edges.length} edges, \${r.branches.length} branches · shape \${r.finalShapeHash} · \${r.ms}ms\\n\`)
     await note({ t: 'program:end', ms: r.ms, nodes: r.nodes.length })
-    console.log(JSON.stringify(r.output, null, 2))
+    const rel = join(dirname(entry), 'program.json')
+    console.log('\u2713 ran \u00b7 full output \u2192 ' + rel)
+    for (const line of describeShape(r.output)) console.log('  ' + line)
+    console.log('')
+    console.log('Read the output as the person who asked would. Empty, sidesteps the question, or figures that')
+    console.log('plainly do not fit \u2014 fix it or escalate. Nothing downstream checks this for you.')
   } catch (e) {
     // A crash is the most useful event of all — it is the one the watcher is waiting to hear about, and
     // without it a failed program is indistinguishable from a slow one right up until the turn gives up.

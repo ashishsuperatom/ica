@@ -14,7 +14,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { lintAnswer, describeFindings } from './answer-lint.js'
+import { lintAnswer, describeFindings } from './answer-review.js'
 
 const execFileP = promisify(execFile)
 
