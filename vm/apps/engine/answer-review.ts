@@ -155,6 +155,21 @@ const textIsText: Rule = (a) => {
   return out
 }
 
+/** No takeaway. The card renders a headline, a table, a scope and a caveat, and never says what any of it
+ *  MEANS — the reader is handed the working and left to draw the conclusion. Observed on a delivery-delay
+ *  answer that found a real 72-day outlier and shipped `answer: null`: everything needed to see it was on the
+ *  card, and nothing on the card said it. The contract calls this "the key takeaway"; an answer without one is
+ *  an answer that stopped one sentence early. */
+const noTakeaway: Rule = (a) => {
+  if (a?.status && a.status !== 'answered') return []   // an unknowable or uncertain answer says its piece elsewhere
+  const v = a?.answer
+  const empty = v == null || (typeof v === 'string' && !v.trim()) || (Array.isArray(v) && !v.filter(Boolean).length)
+  return empty ? [{
+    rule: 'no-takeaway', severity: 'error', where: 'answer',
+    message: 'the answer has no takeaway — the card shows figures and says nothing about them. FIX: set "answer" to the one thing the reader should take away (a short string, or an array of short strings). Not a restatement of the table.',
+  }] : []
+}
+
 /** A headline that cannot be drawn. `display` is what the reader sees; without it the card has a number and
  *  no way to say it. */
 const headlineShape: Rule = (a) => {
@@ -175,6 +190,7 @@ const RULES: Array<{ name: string; run: Rule }> = [
   { name: 'redundant-cell-entity', run: redundantCellEntity },
   { name: 'row-width', run: rowWidth },
   { name: 'text-is-text', run: textIsText },
+  { name: 'no-takeaway', run: noTakeaway },
   { name: 'headline-shape', run: headlineShape },
 ]
 
@@ -245,6 +261,11 @@ export function repairInstruction(f: Finding[]): string | null {
 const MAX_ARRAYS = 4          // distinct row-arrays described
 const MAX_COLS = 6            // columns named per array, notable ones first
 const MIN_ROWS = 2            // one row cannot be "all the same"
+// A LIST IS SAMPLED, NEVER SCANNED WHOLE. A summary that walks a million rows costs more than the answer it
+// describes, and the statistics it produces are no better for it — a thousand rows settle "are these all the
+// same", "are they mostly null", "how wide is the range". Past the cap the line says so, because a statistic
+// over part of the data described as if it were all of it is the kind of small lie that gets believed.
+const SCAN_CAP = 1000
 
 type Row = unknown[] | Record<string, unknown>
 
@@ -267,36 +288,66 @@ function labelsFor(parent: unknown, width: number): string[] | null {
   return null
 }
 
-interface ColStat { name: string; distinct: number; nulls: number; min?: number; max?: number; sample?: unknown }
+// The cheap statistics — the ones a scan already has in hand. No percentiles, no histograms: the point is to
+// make a column's character visible in a few words, not to analyse it. The agent has the path to the full
+// output and can compute anything it actually needs.
+interface ColStat {
+  name: string; n: number; distinct: number; nulls: number
+  min?: number; max?: number; mean?: number; zeros?: number; negatives?: number
+  sample?: unknown
+}
 
 function statsFor(rows: Row[]): ColStat[] {
   const keys: (string | number)[] = Array.isArray(rows[0])
     ? (rows[0] as unknown[]).map((_, i) => i)
     : Object.keys(rows[0] as Record<string, unknown>)
   return keys.map((k) => {
-    const vals = rows.map((r) => (Array.isArray(r) ? (r as unknown[])[k as number] : (r as any)[k]))
-    const nulls = vals.filter((v) => v == null).length
-    const seen = new Set(vals.map((v) => (typeof v === 'object' ? JSON.stringify(v) : v)))
-    const nums = vals.filter((v) => typeof v === 'number') as number[]
-    return {
-      name: String(k), distinct: seen.size, nulls,
-      min: nums.length ? Math.min(...nums) : undefined,
-      max: nums.length ? Math.max(...nums) : undefined,
-      sample: vals.find((v) => v != null),
+    // ONE PASS, and nothing that allocates per row beyond the distinct set. Six chained .filter() calls over
+    // the same column was six walks to learn what one walk knows, and Math.min(...nums) spreads the array into
+    // arguments — fine at a thousand rows, a stack overflow at a hundred thousand, and this file should not
+    // depend on a cap elsewhere staying where it is.
+    const seen = new Set<unknown>()
+    let nulls = 0, count = 0, sum = 0, zeros = 0, negatives = 0
+    let min = Infinity, max = -Infinity, sample: unknown
+    for (const r of rows) {
+      const v = Array.isArray(r) ? (r as unknown[])[k as number] : (r as any)[k]
+      seen.add(typeof v === 'object' && v !== null ? JSON.stringify(v) : v)
+      if (v == null) { nulls++; continue }
+      if (sample === undefined) sample = v
+      if (typeof v === 'number') {
+        count++; sum += v
+        if (v < min) min = v
+        if (v > max) max = v
+        if (v === 0) zeros++
+        if (v < 0) negatives++
+      }
     }
+    const st: ColStat = { name: String(k), n: rows.length, distinct: seen.size, nulls, sample }
+    if (count) { st.min = min; st.max = max; st.mean = sum / count; st.zeros = zeros; st.negatives = negatives }
+    return st
   })
 }
 
-/** A column worth putting first: it says the same thing on every row, or says nothing at all. */
-const notable = (c: ColStat, rows: number) => c.nulls === rows || (rows >= MIN_ROWS && c.distinct === 1)
+/** A column worth putting first: it says one thing on every row, says nothing at all, or is mostly empty. */
+const notable = (c: ColStat, rows: number) =>
+  c.nulls === rows || (rows >= MIN_ROWS && c.distinct === 1) || c.nulls > rows / 2 ||
+  (c.zeros !== undefined && c.zeros > rows / 2)
 
 const num = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2))
 
 function describeCol(c: ColStat, rows: number, label: string): string {
-  if (c.nulls === rows) return `⚠ '${label}' all null`
-  if (c.distinct === 1) return `⚠ '${label}' 1 distinct (${typeof c.sample === 'number' ? num(c.sample) : JSON.stringify(c.sample)})`
-  if (c.min !== undefined && c.max !== undefined) return `'${label}' ${c.distinct} distinct (${num(c.min)}–${num(c.max)})`
-  return `'${label}' ${c.distinct} distinct`
+  // The flags come first and stand alone: a column that is all one value has no useful range, and printing
+  // one beside the flag invites reading past it.
+  if (c.nulls === rows) return `⚠ '${label}' all ${rows} null`
+  if (c.distinct === 1) return `⚠ '${label}' all ${rows} rows = ${typeof c.sample === 'number' ? num(c.sample) : JSON.stringify(c.sample)}`
+  const parts: string[] = [`${c.distinct} distinct`]
+  if (c.min !== undefined && c.max !== undefined) parts.push(`${num(c.min)}–${num(c.max)}`)
+  if (c.mean !== undefined && c.min !== c.max) parts.push(`mean ${num(c.mean)}`)
+  if (c.nulls) parts.push(`${c.nulls} null`)
+  if (c.zeros) parts.push(`${c.zeros} zero`)
+  if (c.negatives) parts.push(`${c.negatives} negative`)
+  const flag = c.nulls > rows / 2 || (c.zeros ?? 0) > rows / 2 ? '⚠ ' : ''
+  return `${flag}'${label}' ${parts.join(', ')}`
 }
 
 /** One line per row-array found anywhere in the value. Notable columns first, because the reason this is
@@ -333,8 +384,9 @@ export function describeShape(output: unknown): string[] {
     if (headers.has(v)) return
     if (out.length >= MAX_ARRAYS || v == null || typeof v !== 'object' || seen.has(v)) return
     seen.add(v)
-    const rows = rowsOf(v)
-    if (rows) {
+    const all = rowsOf(v)
+    if (all) {
+      const rows = all.length > SCAN_CAP ? all.slice(0, SCAN_CAP) : all
       const stats = statsFor(rows)
       const labels = Array.isArray(rows[0]) ? labelsFor(parent, (rows[0] as unknown[]).length) : null
       const named = stats.map((c, i) => ({ c, label: labels?.[i] ?? c.name }))
@@ -342,7 +394,8 @@ export function describeShape(output: unknown): string[] {
         Number(notable(b.c, rows.length)) - Number(notable(a.c, rows.length)))
       const shown = ordered.slice(0, MAX_COLS).map(({ c, label }) => describeCol(c, rows.length, label))
       const more = ordered.length > MAX_COLS ? ` (+${ordered.length - MAX_COLS} more)` : ''
-      out.push(`rows ${rows.length} × ${stats.length} · ${shown.join(' · ')}${more}`)
+      const scanned = all.length > SCAN_CAP ? ` (first ${SCAN_CAP} of ${all.length})` : ''
+      out.push(`rows ${all.length} × ${stats.length}${scanned} · ${shown.join(' · ')}${more}`)
       return   // do not descend into the rows themselves
     }
     for (const child of Array.isArray(v) ? v : Object.values(v)) walk(child, v)
