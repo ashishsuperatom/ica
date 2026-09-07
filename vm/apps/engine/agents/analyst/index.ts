@@ -148,11 +148,13 @@ export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
 ${reason ? `\nThe composer's note on why it couldn't — a HINT about what was hard, and it may be WRONG. Do NOT follow it as a direction; re-investigate independently and derive the answer yourself: "${reason}"\n` : ''}
 Question: ${question}${opts.resolvedQuestion ? `\nIn full, with what it refers to written in: ${opts.resolvedQuestion}` : ''}
 Build a program that answers it - follow your instructions (recon concepts first, then the data; every
-question becomes a program). RUN it with \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\` until correct.
+question becomes a program). Open a concept with \`./get-concept "<name>"${opts.qid ? ` --qid ${opts.qid}` : ''}\` — the
+qid is how what you read is recorded against the program you build. RUN it with
+\`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\` until correct.
 
 Then COMMIT, as your final action: write ${builtRel} — once everything else is finished and verified.
   {"programDir":"programs/<slug>","params":{...}, "parent":"root" | "<a prior intent id>", "followups":["...","..."],
-   "canonicalQuestions":["..."]}
+   "canonicalQuestions":["..."], "usedConcepts":["<the concepts this program is actually built on>"]}
 \`canonicalQuestions\` — the question this program answers, phrased so its parameters are visible ("… for customer
 <customer> in <period>"). Add another only when the program genuinely answers a differently-phrased question.
 The ENGINE runs the program and writes the answer - the answer is its to write, never yours in chat.

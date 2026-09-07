@@ -139,7 +139,10 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       // CONCEPT matched. Reuse never needed a concept; the two are separate paths to an answer.
       const conceptBlock = '\nStart with what exists: `./find-concept "<phrase>"` (full-text, fast — search in your' +
         ' own words, and again with different words if the first misses), and open the ones that look right with' +
-        ` \`./get-concept "<name>" --qid ${o.qid ?? ''}\`. A fitting concept is the fastest correct route, and a` +
+        // The flag is OMITTED when there is no qid, never emitted empty: `--qid ` with nothing after it makes
+        // the tool swallow the next argument. builtRel above already treats qid as optional, so that path is
+        // real, not hypothetical.
+        ` \`./get-concept "<name>"${o.qid ? ` --qid ${o.qid}` : ''}\`. A fitting concept is the fastest correct route, and a` +
         ' program above may answer this already.\n' +
         // ESCALATE ON FINISHABILITY, not on the absence of a concept. This used to read "no program AND no concept
         // → escalate", which contradicted the system prompt the moment the composer stopped being forbidden to

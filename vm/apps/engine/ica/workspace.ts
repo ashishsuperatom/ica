@@ -430,7 +430,7 @@ import { findConcept, listConcepts } from ${JSON.stringify(join(dir, 'concepts',
 const argv = process.argv.slice(2)
 const qi = argv.indexOf('--qid')
 const qid = qi >= 0 ? argv[qi + 1] : null
-const name = argv.filter((a, i) => a !== '--qid' && i !== qi + 1).join(' ').trim()
+const name = argv.filter((a, i) => a !== '--qid' && !(qi >= 0 && i === qi + 1)).join(' ').trim()   // qi is -1 when absent; qi+1 would then drop the NAME
 if (!name) { console.log(JSON.stringify({ error: 'a concept name is required — list them with ./find-concept "<phrase>"' })); process.exit(0) }
 const norm = (x) => String(x || '').toLowerCase().replace(/\\s+/g, ' ').trim()
 const hit = findConcept(name, 50).find(c => norm(c.name) === norm(name))
