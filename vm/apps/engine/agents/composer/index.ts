@@ -137,12 +137,20 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       // with an existing program at 0.87 similarity, which the agent had already recognised in its own words
       // ("an existing program already answers this exact question"), escalated to the analyst because no
       // CONCEPT matched. Reuse never needed a concept; the two are separate paths to an answer.
-      const conceptBlock = '\nFind the concepts this question needs: `./find-concept "<phrase>"` (full-text, fast —' +
-        ' search in your own words, and search again with different words if the first misses). Open the ones that' +
-        ' look right with `./get-concept "<name>"` and compose from those.\n' +
-        'ESCALATE only when you have BOTH: no program above fits, AND your searches found no concept that fits.' +
-        ` Then write ${escalateRel} = {"reason":"no relevant concept — needs fresh analysis"} and STOP; do not do` +
-        ' the discovery yourself. Reusing or adapting a program above does not need a concept at all.\n'
+      const conceptBlock = '\nStart with what exists: `./find-concept "<phrase>"` (full-text, fast — search in your' +
+        ' own words, and again with different words if the first misses), and open the ones that look right with' +
+        ' `./get-concept "<name>"`. A fitting concept is the fastest correct route, and a program above may answer' +
+        ' this already.\n' +
+        // ESCALATE ON FINISHABILITY, not on the absence of a concept. This used to read "no program AND no concept
+        // → escalate", which contradicted the system prompt the moment the composer stopped being forbidden to
+        // discover: it has every tool the analyst has, so "nothing matched" is the start of the work, not the end
+        // of it. What it cannot do is spend an analyst's worth of time — so the test is whether the question is
+        // finishable from here, and escalating early is a good outcome, not a failure.
+        `Where nothing fits, work it out yourself — every tool is available. ESCALATE when the question is not` +
+        ` finishable from here: the data is not where you expected, the approach needs establishing from scratch,` +
+        ` or you have tried and it is not coming out right. Then write ${escalateRel} = {"reason":"<what is` +
+        ` missing or what you tried>"} and STOP. Escalating at ninety seconds beats a wrong answer at four` +
+        ` minutes.\n`
       const m = o.modify
       // MODIFY: edit the SAME program in place (the engine supplies the current program — it may be from a
       // reuse, so it is NOT in your context). No new program, no escalate — just apply the edit and rerun.
