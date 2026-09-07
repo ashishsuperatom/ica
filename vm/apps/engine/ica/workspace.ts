@@ -109,7 +109,7 @@ however you see fit — there is no setup to do.
 
 ## Tools — just RUN these (they work from ANY directory, first try; each prints JSON to stdout)
 Search the project's knowledge:
-- \`./find-concept "<phrase or name>" [--full]\` → matching concept NAMES (the engine already surfaced the likely ones); add \`--full\` for a matched concept's method. A query is required.
+- \`./find-concept "<phrase or name>" [--full]\` → the NAMES of matching concepts — search whenever you need one; nothing is surfaced for you. Add \`--full\` for a matched concept's method. A query is required.
 Query the data:
 - \`./sources\`                        → the data sources + their kind/dialect.
 - \`./find-schema "<term>" [--source <S>] [--full]\` → search ALL sources for where a field/table lives (SOURCE.TABLE.COLUMN : type); the fastest way to find where data is before querying.

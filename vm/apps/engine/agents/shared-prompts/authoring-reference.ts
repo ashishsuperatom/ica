@@ -17,6 +17,55 @@ const here = dirname(fileURLToPath(import.meta.url))
 const exampleDir = join(here, '..', '..', 'examples', 'example.single-metric')
 const read = (rel: string) => { try { return readFileSync(join(exampleDir, rel), 'utf8').trim() } catch { return '(example unavailable)' } }
 
+
+// ── HIGH LEVEL FIRST ─────────────────────────────────────────────────────────────────────────────────────
+// The reference used to begin in the middle — with the type of a unit's `meta`. An agent that loses the thread
+// has nothing to re-orient against, and every rule reads as equally weighted, so a structural requirement and a
+// piece of advice look the same. This is the spine: what the pieces are and how they fit, in a dozen lines,
+// before any detail. Everything after it hangs off one of these five steps.
+const HOW_IT_FITS = `# How this fits together
+
+A question becomes a PROGRAM, and the program's output is the answer.
+
+  question  →  program  →  units  →  sources
+                  ↓
+             view-model  →  the card the reader sees
+
+- A **unit** is one file with one job: a function of its params, computing over structured keys.
+- A **program** is a unit that composes other units — the root, one per question.
+- Units reach data only through **ctx** (query / use / decide / log). Nothing else.
+- The LAST unit returns a **view-model**: the shape the card renders.
+- You finish by writing **built.json**, which points at the program you built or reused.
+
+Reuse before you build: a program that already answers this question is the answer.`
+
+// ── ONE LIST, IN THE ORDER THE WORK HAPPENS ─────────────────────────────────────────────────────────────
+// The tools were documented in three places — six in a list, the rest scattered into prose sections that
+// mentioned them while explaining something else — so the agent had to assemble its own list from across the
+// prompt. A tool needs a name, its arguments, and what comes back; how it is implemented, where it lives, and
+// what runs it are not the agent's concern. Ordered by when they are reached, not alphabetically: the sequence
+// IS the method, so reading the list top to bottom is reading the approach.
+const TOOLS = `# Your tools
+
+Run them from the workspace root. Each takes \`--help\`.
+
+**Is it already answered?**
+- \`./find-program "<question>"\` → the shortlist: programs that answered a similar question (what it answers · name · category)
+- \`./get-program <name>\` → ONE program in full: every question form it answers, its saved params, its category
+
+**What logic already exists?**
+- \`./find-concept "<phrase>"\` → the NAMES of matching concepts
+- \`./get-concept "<exact name>"\` → ONE concept's guide: what it is, its rules, where the data lives, how to compute and present it
+
+**Where does the data live?**
+- \`./sources\` → every data source with its kind + dialect
+- \`./find-schema "<term>" [--source <S>] [--full]\` → where a field or table lives, across every source (SOURCE.TABLE.COLUMN : type)
+- \`./introspect "<source>" <tables | columns "<t>" | sample "<t>" [n] | profile "<t>" "<col>" | verify-join …>\` → structure and evidence for one source
+
+**What does the data say?**
+- \`./query "<source>" "<query>"\` → run a query against a source → JSON rows
+- \`./resolve "<text>"\` → a fuzzy name or value → concrete ids`
+
 // The CONTRACT — the exact, whole surface. Mirrors @superatom/scaffold (packages/scaffold/src/unit.ts). If this
 // drifts from the real types, the canonical example below stops compiling under `pnpm authoring:check`.
 const contract = `# The contract — the whole interface
@@ -46,28 +95,30 @@ type UnitCtx = {                           // the four primitives — nothing el
 Display helpers \`money\`, \`num\` import from \`@superatom/scaffold\`. That plus the four ctx primitives is the
 entire API — there is nothing else to discover.`
 
-// The one canonical example, pulled from the real (compiling) example files so it never rots.
-const example = `# The one canonical example — every program is this shape: compute unit(s) → one view unit
-\`programs/<slug>/program.ts\` — the composing root:
-\`\`\`ts
-${read('program.ts')}
-\`\`\`
-\`programs/<slug>/units/total-sales.ts\` — a compute unit (its source/columns are ILLUSTRATIVE; find your real
-ones with \`./find-schema\`, and write the query in that source's dialect):
-\`\`\`ts
-${read('units/total-sales.ts')}
-\`\`\`
-\`programs/<slug>/units/single-metric-view.ts\` — the final view unit (shapes the answer card):
-\`\`\`ts
-${read('units/single-metric-view.ts')}
-\`\`\`
-That is the complete pattern. Write your OWN program + units in this shape against your real source.`
+// THE EXAMPLE IS A POINTER NOW, not 5 KB of inlined code on every question.
+//
+// It was inlined so it would "survive compaction — no file to read", which is a real property and the reason to
+// think twice here. Weighed against it: the example is a sixth of every prompt the composer receives, on turns
+// that mostly REUSE a program rather than write one, and the file it copies is sitting in the workspace the
+// agent is already working in — verified byte-identical, because prepareWorkspace copies it from the same
+// canonical directory this module used to read.
+//
+// The drift guard is unaffected: examples/example.single-metric still type-checks against @superatom/scaffold
+// (contract.assert.ts + `pnpm authoring:check`), so a change to the unit contract still breaks its compile.
+// What changes is only WHERE the agent reads it from.
+const example = `# The canonical example
+
+\`programs/example.single-metric/\` in your workspace is the shape every program takes: one compute unit → one
+view unit, with \`program.ts\` composing them. Read it before writing your first program of a turn —
+\`program.ts\` for the shape, \`units/\` for what a unit looks like.
+
+It is a TEMPLATE: its source and columns are illustrative. Never run it, and never point built.json at it.
+\`programs/example.grouped-ranking/\` is the same shape for a ranking with openable cells.`
 
 const WORKSPACE = `# Your workspace
-Everything you need to write a program is right here. The contract and the example above give you the shape; the
-seams give you the data — \`./sources\` and \`./find-schema\` show the real sources and their tables and columns,
-\`./query\` and \`./introspect\` look at the data, and \`./find-concept\` finds reusable logic. Build your queries
-from what \`./sources\` shows, so every program runs on real, current sources.
+
+Everything needed to write a program is here: the tools above reach the data, and the canonical example gives
+the shape. Build every query from a source \`./sources\` actually lists, so a program runs on real, current data.
 
 List at most 100 rows unless the question asks for more, and say how many there are in total.`
 
@@ -90,43 +141,28 @@ same program, run tomorrow or for another entity, gives the truth for that run.`
 const EXPECTATIONS = [WORKSPACE, PARAMETERISATION]
 
 
-// ── FINDING A PROGRAM ────────────────────────────────────────────────────────────────────────────────────
-// One section, in both agents' prompts, because "is this already answered?" is the first question of every
-// turn and the answer decides whether the next two minutes are spent composing or rebuilding.
-//
-// The shape it teaches is NARROW-THEN-OPEN: a shortlist names what each program answers, and only the one or
-// two that look right are opened. That is not a style preference — the alternative is loading every program to
-// find out what it does, which costs a turn's worth of reading before any thinking has happened, and gets
-// worse with every program the project accumulates.
-const FINDING_A_PROGRAM: string = `# Finding a program
+// ── HOW TO SEARCH, not what the tools are ───────────────────────────────────────────────────────────────
+// The tools are in the list above; this is the only thing about them that is not obvious from their output.
+// NARROW THEN OPEN, because the alternative — reading every program to learn what it does — costs a turn of
+// reading before any thinking, and gets worse with every program a project accumulates.
+const NARROW_THEN_OPEN = `# Finding what already exists
 
-Start every question here: something may already answer it.
+Search, then open one — never the other way round.
 
-\`./find-program "<the question, in canonical form>"\` → a SHORTLIST. Each entry is one program:
-\`{ "question": "<what it answers>", "program": "programs/<slug>", "category": "<kind of question>" }\`
-The \`question\` is what to judge on — it is the question that program was written for, in the words it was
-written in. The \`program\` field is its directory: that is where its code lives, and how to open it.
+\`./find-program\` and \`./find-concept\` return SHORTLISTS: names and what each answers. Judge on that, pick the
+one or two that could be yours, and open only those with \`./get-program\` / \`./get-concept\`. Read a program's
+code only once you have chosen it.
 
-Narrow first, then open. From the shortlist pick the ONE or TWO whose \`question\` could plausibly be yours,
-and open only those:
+Judge on the QUESTION, never the slug: two programs can be a rename apart and answer different things, and a
+name that matches your words can be built on a different source, grain or window.
 
-\`./get-program <slug>\` → what it answers (every phrasing it claims), its parameters and their current
-values, and its category. Enough to decide reuse-or-not without reading any code.
-
-Then, only for the one you have chosen, read the code at its \`program\` directory — \`program.ts\` first (the
-shape: which units, in what order), then the unit that carries the part you need to change.
-
-Judge on the QUESTION, not the slug. A slug is a name someone gave a directory; two programs can be a rename
-apart and answer different things, and a program whose slug matches your words can be built on a different
-source, grain or window. \`question\` and \`params\` are what tell you.
-
-Reuse, adapt, or build — in that order. An exact match runs as it is. A near match with different parameters
-is the same program with different arguments. Only when neither holds is a new program the right answer.`
+Then reuse, adapt, or build — in that order. An exact match runs as it is; a near match is usually the same
+program with different params; only when neither holds is a new program the right answer.`
 
 // The complete authoring surface, as ONE string, to install into a coding agent's system prompt (systemReference).
 // Use this when the caller's base does NOT already carry the authoring MECHANICS (the composer).
-export const AUTHORING_REFERENCE: string = [contract, FINDING_A_PROGRAM, ...PROGRAM_AUTHORING, example, ...EXPECTATIONS].join('\n\n')
+export const AUTHORING_REFERENCE: string = [HOW_IT_FITS, TOOLS, NARROW_THEN_OPEN, contract, ...PROGRAM_AUTHORING, example, ...EXPECTATIONS].join('\n\n')
 
 // The surface WITHOUT the mechanics — for a caller whose generated base ALREADY includes PROGRAM_AUTHORING (the
 // analyst), so the mechanics aren't repeated. The expectations are identical in both.
-export const AUTHORING_SURFACE: string = [contract, FINDING_A_PROGRAM, example, ...EXPECTATIONS].join('\n\n')
+export const AUTHORING_SURFACE: string = [HOW_IT_FITS, TOOLS, NARROW_THEN_OPEN, contract, example, ...EXPECTATIONS].join('\n\n')
