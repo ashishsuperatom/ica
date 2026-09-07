@@ -14,6 +14,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { lintAnswer, describeFindings } from './answer-lint.js'
 
 const execFileP = promisify(execFile)
 
@@ -58,5 +59,12 @@ export async function execProgram(cwd: string, programDir: string, params: any, 
 export function answerView(out: any): any {
   const view = out && typeof out === 'object' && out.answer
     && typeof out.answer === 'object' && !Array.isArray(out.answer) ? out.answer : out
-  return { ...view, status: view?.status ?? 'answered' }
+  const answer = { ...view, status: view?.status ?? 'answered' }
+  // ── THE ONLY LINT CALL SITE. Delete these three lines to remove answer linting entirely; answer-lint.ts has
+  // no other caller, no state and no side effects, so it can then be deleted outright. It sits HERE rather
+  // than at the four places that call answerView, because this is the funnel every answer already passes
+  // through — a check installed four times is a check that will one day be installed three times.
+  const findings = lintAnswer(answer)
+  if (findings.length) console.warn(`[answer] ${findings.length} contract issue(s):\n${describeFindings(findings)}`)
+  return answer
 }

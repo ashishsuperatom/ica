@@ -13,6 +13,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { writeMd } from '../render-md.js'
 import { PROGRAM_AUTHORING } from '../shared-prompts/program-authoring.js'   // SHARED single source (analyst + composer)
+import { ANSWER_TABLE } from '../shared-prompts/answer-contract.js'
 
 const sys = (name: string) => join(fileURLToPath(new URL('.', import.meta.url)), 'system', name)
 
@@ -129,24 +130,7 @@ const answerSchema = `The answer JSON the engine produces / you write has this s
   "caveat": "<optional — a string, or an array of short item strings for several points>",
   "usedNodes": ["<model node ids you relied on, when you reused the model>"],
 
-### A table
-YOU decide how each figure reads — you are the only thing holding both the raw value and what it means.
-
-MOST CELLS ARE PLAIN: a number is a number, a name is a string. That is what sorts, right-aligns and totals,
-and it is the default. Wrap one only to carry what the value itself cannot:
-- \`{"value": <the name>, "id": <its id>}\` — this cell NAMES something the reader can open on its own. If you
-  have the id, send it; it is the only handle on that thing.
-- \`{"value": <the number>, "display": "<how it reads>"}\` — only when the wording varies ROW BY ROW, such as a
-  column holding several currencies. A whole column's formatting belongs on the column.
-
-HOW A NUMBER READS is said once on the COLUMN, never per row. Money, hours and percentages are the same thing —
-a number with a unit and a precision — so there is one set of keys and money is simply \`unit: "AUD"\`:
-\`{"label": "<heading>", "entity": "<what kind of thing this column names — defaults to the table name>", "unit": "<AUD | h | % | kg …>",
-"decimals": <how precise the figure really is>, "scale": "compact" (4.16 M rather than 4,160,000),
-"good": "high"|"low" (which direction is favourable, so the figure can be toned — omit it and nothing is
-coloured), "mid": <the line good turns on, default 0>, "bar": true (shade the cell by magnitude)}\`.
-Send the number as it should READ: a percentage is 83.4, not 0.834. And say \`decimals\` — 686.76895 hours is not
-five-decimal data, and without it the figure is printed at whatever precision the arithmetic happened to leave.
+${ANSWER_TABLE}
   "missing": "<only when unknowable: ONE short plain reason for the user — NOT column names, counts, or sentinels>"
 }
 \`\`\``

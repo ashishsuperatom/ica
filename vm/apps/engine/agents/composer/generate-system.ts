@@ -4,6 +4,7 @@
 import { writeFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ANSWER_SHAPE, ANSWER_TABLE } from '../shared-prompts/answer-contract.js'
 
 const SYSTEM = `# The Composer — compose concepts into a program. NO discovery.
 
@@ -62,41 +63,9 @@ data and the input have moved on since. A stale one often still returns a tidy, 
 does not answer what was asked. Read it as the person who asked would — empty, sidesteps the question, or
 figures that plainly do not fit → escalate rather than ship it. Nothing downstream checks this for you.
 
-## The answer your program returns
-Its final UI unit produces the view-model the card renders. EVERY field is one of these, and each is the type
-shown — a field in another shape does not render, and one that is an object where text is expected takes the
-whole card down:
+${ANSWER_SHAPE}
 
-\`\`\`
-{ "status": "answered" | "unknowable" | "uncertain",
-  "category": "simple_lookup | complex_lookup | comparison | causal | counterfactual | analysis",
-  "answer":   "the key takeaway — a STRING, or an array of short strings. Not the table's rows again.",
-  "headline": { "label": "what the number IS", "display": "the number, short, with its unit", "value": <raw number> },
-  "period":   "the time window IN PLAIN WORDS — a string",
-  "periods":  [ { "label": "a compared scope", "detail": "its exact range" } ],   ← use this for a COMPARISON
-  "scope":    "the non-time filters you applied — a string",
-  "sections": [ { "kind": "table", "title": "…", "columns": [...], "rows": [[...]] } ],
-  "caveat":   "a string, or an array of short strings" }
-\`\`\`
-
-### A table
-YOU decide how each figure reads — you are the only thing holding both the raw value and what it means.
-
-MOST CELLS ARE PLAIN: a number is a number, a name is a string. That is what sorts, right-aligns and totals,
-and it is the default. Wrap one only to carry what the value itself cannot:
-- \`{"value": <the name>, "id": <its id>}\` — this cell NAMES something the reader can open on its own. If you
-  have the id, send it; it is the only handle on that thing.
-- \`{"value": <the number>, "display": "<how it reads>"}\` — only when the wording varies ROW BY ROW, such as a
-  column holding several currencies. A whole column's formatting belongs on the column.
-
-HOW A NUMBER READS is said once on the COLUMN, never per row. Money, hours and percentages are the same thing —
-a number with a unit and a precision — so there is one set of keys and money is simply \`unit: "AUD"\`:
-\`{"label": "<heading>", "entity": "<what kind of thing this column names — defaults to the table name>", "unit": "<AUD | h | % | kg …>",
-"decimals": <how precise the figure really is>, "scale": "compact" (4.16 M rather than 4,160,000),
-"good": "high"|"low" (which direction is favourable, so the figure can be toned — omit it and nothing is
-coloured), "mid": <the line good turns on, default 0>, "bar": true (shade the cell by magnitude)}\`.
-Send the number as it should READ: a percentage is 83.4, not 0.834. And say \`decimals\` — 686.76895 hours is not
-five-decimal data, and without it the figure is printed at whatever precision the arithmetic happened to leave.
+${ANSWER_TABLE}
 
 Do not invent a field, and do not put structure in one specified as text: a year-over-year answer belongs in
 \`periods\`, which exists for exactly that — writing \`period: {current, previous}\` instead crashed the card it
