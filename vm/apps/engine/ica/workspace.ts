@@ -283,7 +283,7 @@ async function main() {
     for (const line of describeShape(r.output)) console.log('  ' + line)
     console.log('')
     console.log('Read the output as the person who asked would. Empty, sidesteps the question, or figures that')
-    console.log('plainly do not fit \u2014 fix it or escalate. Nothing downstream checks this for you.')
+    console.log('plainly do not fit \u2014 fix it or escalate.')
   } catch (e) {
     // A crash is the most useful event of all — it is the one the watcher is waiting to hear about, and
     // without it a failed program is indistinguishable from a slow one right up until the turn gives up.
