@@ -17,6 +17,7 @@ import { explainPrompt, explainAnswer } from '../../verbs/explain.js'
 import type { ProgramTarget } from '../../verbs/index.js'
 import { execProgram } from '../../exec-program.js'
 import { PROGRAM_AUTHORING } from '../shared-prompts/program-authoring.js'   // SHARED single source (analyst + composer)
+import { lintAnswer, repairInstruction, MAX_REPAIR_ROUNDS } from '../../answer-lint.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const sysFile = () => loadPrompt(join(__dirname, 'SYSTEM.md'), 'composer/SYSTEM')
@@ -224,6 +225,26 @@ RUN it (\`tsx run.mjs ${o.canonicalMatch.programDir}/program.ts '${JSON.stringif
           handlers?.onNarration?.('Running the numbers…')   // shown as a business beat (composer self-narrates)
           const rr = await execProgram(cwd, built.programDir, built.params ?? {}, { qid: o.qid, sid: o.sid })
           answer = answerView(rr.output)   // out of the unit envelope — see answerView
+          // ── REPAIR, HERE, BECAUSE THE SESSION IS STILL OPEN ──────────────────────────────────────────
+          // The agent that wrote this view unit is one turn away and still holds the whole trajectory. Handing
+          // the defect back now costs a short turn; noticing it downstream would mean re-establishing all of
+          // that context to fix a column tag. ERRORS only, at most MAX_REPAIR_ROUNDS attempts, and the answer
+          // ships either way — a table with one unclickable column is a far better outcome than a turn that
+          // loops until the user gives up. Delete this block to switch repair off; the lint still logs.
+          for (let round = 1; round <= MAX_REPAIR_ROUNDS; round++) {
+            const fix = repairInstruction(lintAnswer(answer))
+            if (!fix) break
+            console.log(`[answer] repair round ${round}/${MAX_REPAIR_ROUNDS} — handing the findings back to the composer`)
+            try {
+              await session.run(fix, handlers)
+              const again = await execProgram(cwd, built.programDir, built.params ?? {}, { qid: o.qid, sid: o.sid })
+              answer = answerView(again.output)
+            } catch (e: any) {
+              // A failed repair must never cost the answer we already have.
+              console.warn(`[answer] repair round ${round} failed (${String(e?.message ?? e).slice(0, 120)}) — keeping the previous answer`)
+              break
+            }
+          }
           await writeFile(answerPath, JSON.stringify(answer, null, 2)).catch(() => {})
         } catch (e: any) {
           answer = { status: 'cannot_answer', answer: `The composed program failed to run: ${String(e?.message ?? e).slice(0, 240)}` }

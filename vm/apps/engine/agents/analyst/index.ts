@@ -19,6 +19,7 @@ import type { ProgramTarget } from '../../verbs/index.js'
 import { createSession, prepareWorkspace, type Harness, type Session, type RunHandlers } from '../../ica/index.js'
 import { execProgram } from '../../exec-program.js'
 import { CATEGORIES, type Category } from './classify.js'
+import { lintAnswer, repairInstruction, MAX_REPAIR_ROUNDS } from '../../answer-lint.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 // Analyst prompt files via the override layer (volume override for the current image → baked fallback).
@@ -210,7 +211,23 @@ Your task is in ${taskRel} — read it and follow it exactly. ${m ? 'Modify the 
           const rr = await execProgram(cwd, ptr.programDir, ptr.params ?? {})
           // Keep the program's OWN status (an unknowable program outputs status:"unknowable"); default to
           // "answered" only when the program didn't declare one.
-          await writeFile(answerPath, JSON.stringify(answerView(rr.output), null, 2))   // out of the unit envelope
+          let answer = answerView(rr.output)   // out of the unit envelope
+          // Same repair round as the composer, for the same reason: the agent that wrote the view unit is one
+          // turn away and still holds the trajectory. Errors only, capped, and the answer ships regardless.
+          // Delete this block to switch repair off; the lint still logs.
+          for (let round = 1; round <= MAX_REPAIR_ROUNDS; round++) {
+            const fix = repairInstruction(lintAnswer(answer))
+            if (!fix) break
+            console.log(`[answer] repair round ${round}/${MAX_REPAIR_ROUNDS} — handing the findings back to the analyst`)
+            try {
+              await session.run(fix, handlers)
+              answer = answerView((await execProgram(cwd, ptr.programDir, ptr.params ?? {})).output)
+            } catch (e: any) {
+              console.warn(`[answer] repair round ${round} failed (${String(e?.message ?? e).slice(0, 120)}) — keeping the previous answer`)
+              break
+            }
+          }
+          await writeFile(answerPath, JSON.stringify(answer, null, 2))
         } catch (e: any) {
           await writeFile(answerPath, JSON.stringify({ status: 'cannot_answer',
             answer: `The program was built but failed to run: ${String(e?.message ?? e).slice(0, 240)}` }, null, 2)).catch(() => {})

@@ -159,6 +159,18 @@ export function describeFindings(f: Finding[]): string {
     .join('\n')
 }
 
+// ── HANDING IT BACK ─────────────────────────────────────────────────────────────────────────────────────
+// ERRORS ONLY. A warning means the answer renders and something was probably meant differently — not worth a
+// model turn, and worth seeing in aggregate in the log instead. Spending a turn on every nicety is how a
+// useful check becomes one that gets switched off.
+//
+// TWO ROUNDS, THEN SHIP WHATEVER WE HAVE. The failure mode of a repair loop is not that it fails, it is that
+// it does not: an agent that cannot see what is wrong will re-run and re-fail indefinitely, and the user
+// waits on a table that renders correctly except that a cell is not clickable. Two attempts is enough for a
+// slip and short enough that a genuine misunderstanding costs seconds rather than minutes. After that the
+// answer goes out with its findings in the log, because a slightly imperfect answer beats a late one.
+export const MAX_REPAIR_ROUNDS = 2
+
 /** What to hand back to the agent when it is worth one more turn. Says only what is wrong and where; it does
  *  NOT say what the value should be, because the engine does not know — only the program that wrote the query
  *  knows that a "Sub-account" is a party. Telling it the kind would be guessing, and a confident guess is how
