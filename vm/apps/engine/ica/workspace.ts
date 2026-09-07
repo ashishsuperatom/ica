@@ -128,7 +128,7 @@ Query the data:
 Each prints JSON to stdout; run any of them with \`--help\` for its exact arguments. NEVER \`node\`/\`require\`/\`cat\` a \`.mjs\` to do these — just run the tool.
 
 ## Write/run seams (import these in your program/unit/model CODE — they take rich args, not a CLI)
-- Concepts: ./model/model.mjs      — WRITE concepts: \`concept(name, props, meta)\`, \`getConcept(name, asOf?)\`, \`conceptHistory(name)\`. (To SEARCH, use \`./find-concept\`.)
+- Concepts: ./model/model.mjs      — WRITE concepts: \`concept(name, props, meta)\`, \`getConcept(name, asOf?)\`, \`indexHistory(name)\`. (To SEARCH, use \`./find-concept\`.)
 - Ground: ./grounding/grounding.mjs — \`build(config)\` the grounding indexes (grounding agent).
 - Data:   ./data/query.mjs         — \`query()\`/\`sources()\` inside program/unit code.
 ${formatHelpText().split('\n').map((l: string) => l ? `  ${l}` : l).join('\n')}
@@ -192,16 +192,21 @@ export async function sources() {   // list data sources + their kind/dialect
 //          find?, compute?, present?,           ← general facets; compute is a runnable query
 //          source?, grain?, keying?, time?, measures?, dimensions?, parameters?, provenance? }  ← optional
 //   getConcept(name, asOf?)  — the live concept, or (asOf = unix ms) the version live at that instant
-//   conceptHistory(name)     — the full timeline (each version + who/when/why)
+//   indexHistory(name)       — what this NAME has pointed at over time, and who moved it
+//   namesFor(conceptId)      — every name that currently reaches one concept body
 //   concepts() · intents() · units() · put(node) · edge({from,to,type,props}) · node(id) · search(q)
 //
-import { NodeStore, upsertConcept as _c, getConcept as _g, conceptHistory as _ch } from '@superatom/node-store'
+import { NodeStore, upsertConcept as _c, getConcept as _g, indexHistory as _ih, namesFor as _nf } from '@superatom/node-store'
 import { fileURLToPath } from 'node:url'
 const store = new NodeStore(fileURLToPath(new URL('../../db/project.sqlite', import.meta.url)))
 export const concept = (name, props, meta) => _c(store, name, props, meta)
 export const getConcept = (name, asOf) => _g(store, name, asOf)
-export const conceptHistory = (name) => _ch(store, name)
-export const concepts = () => store.listKind('concept')
+export const indexHistory = (name) => _ih(store, name)
+export const namesFor = (conceptId) => _nf(store, conceptId)
+// The concepts a NAME can reach. listKind('concept') would include bodies nothing points at any more —
+// they still exist, deliberately, but they are history, not the model.
+export const concepts = () => store.db.prepare(
+  "SELECT c.* FROM nodes c JOIN nodes i ON json_extract(i.props,'$.target') = c.id WHERE i.kind='index' AND i.valid_to IS NULL GROUP BY c.id").all()
 export const intents  = () => store.listKind('intent')
 export const units    = () => store.listKind('unit')
 export const put  = (n) => store.putNode(n)

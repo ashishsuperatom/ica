@@ -216,44 +216,10 @@ const graph = new NodeStore(join(DB_DIR, 'project.sqlite'))
 // (most-specific match), falling back to fewer-word / more-general concepts when the specific combination isn't
 // present. Pure lexical over the node-store (no vectors). Returns NAMES only — the agent opens the winner via
 // find-concept. Dynamic count: the top specificity tier (within 1 of the best), capped.
-const CONCEPT_STOP = new Set(('a an the of on in for by per to and or is are was be with as at this that it id ' +
-  'what which who how me my we our you your can do get give show tell find value from over under across').split(' '))
-// Light stem so word-FORMS match (rate/rates/rating -> rat, charge/charged -> charg, bill/billing -> bill).
-// Morphology only — deliberately NOT synonyms (bill != charge). If a question uses a different word than the
-// concept name, it simply won't match; we keep it simple rather than maintain a synonym layer.
-const stem = (w: string): string => {
-  for (const suf of ['ing', 'ed', 'es', 's', 'ly']) { if (w.endsWith(suf) && w.length - suf.length >= 3) { w = w.slice(0, -suf.length); break } }
-  if (w.length > 3 && w.endsWith('e')) w = w.slice(0, -1)
-  return w
-}
-const conceptWords = (s: string): Set<string> =>
-  new Set(String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 1 && !CONCEPT_STOP.has(w)).map(stem))
-// Favour RECALL, not precision: surface anything plausibly relevant and let the AGENT reject/pick. Two cheap
-// recall sources unioned — LEXICAL (name-word overlap) and SEMANTIC (the vector index, which catches paraphrase/
-// synonyms for free, no synonym map to maintain). We ORDER by specificity (most name-words covered first) so the
-// best is on top, but we do NOT cut the tail — better the agent sees an extra it can ignore than miss the right one.
-async function rankConceptsBySpecificity(question: string, cap: number): Promise<string[]> {
-  const qw = conceptWords(question)
-  if (!qw.size) return []   // boundary: empty / all-stopword question -> surface nothing
-  const byId = new Map<string, { name: string; matched: number; cover: number; sem: number }>()
-  for (const c of graph.listKind('concept', 1000) as any[]) {
-    // Surface ALL live concepts, ordered by specificity — the agent filters (recall over precision).
-    const cw = conceptWords(c.label)
-    let m = 0; for (const w of cw) if (qw.has(w)) m++
-    byId.set(c.id, { name: c.label, matched: m, cover: cw.size ? m / cw.size : 0, sem: 0 })
-  }
-  if (vectors) {   // semantic recall: rank the vector hits so paraphrase-only matches still surface
-    try {
-      const hits = await hybridSearch(graph, vectors, bgeEmbedder, question, { kind: 'concept', limit: cap })
-      let r = hits.length; for (const h of hits) { const e = byId.get(h.id); if (e) e.sem = r; r-- }
-    } catch { /* semantic is optional; lexical still works */ }
-  }
-  return [...byId.values()]
-    .filter(c => c.matched > 0 || c.sem > 0)                                            // lexical OR semantic relevance
-    .sort((a, b) => (b.matched - a.matched) || (b.cover - a.cover) || (b.sem - a.sem))  // specificity first, semantic as recall/tiebreak
-    .slice(0, cap)
-    .map(c => c.name)
-}
+// The engine-side concept ranker lived here — lexical specificity unioned with vector recall — and went with
+// span firing: the agent searches for its own concepts now. Deleted rather than kept, because it read
+// listKind('concept'), which after the index change returns BODIES including ones no name points at any more.
+// Dead code that would be subtly wrong if revived is worse than no code.
 // Semantic index (sqlite-vec) over the SAME db — GUARDED: if the native extension or model isn't present on
 // this host yet, semantic search is simply disabled (FTS keeps working), never a crash. See embed.ts.
 let vectors: SqliteVecIndex | null = null

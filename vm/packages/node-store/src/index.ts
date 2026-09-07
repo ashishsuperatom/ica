@@ -6,8 +6,9 @@ export { ROOT, ensureRoot, ask, intentId, normalizeQuestion, pathTo, nextSteps, 
 export type { IntentProps, RunOutput, Built, AskDeps, AskResult, ProgramEntry } from './intent.js'
 
 // Concepts — the single atomic knowledge kind, time-versioned (current row + concept_history audit).
-export { conceptId, upsertConcept, getConcept, conceptHistory } from './concept.js'
-export type { ConceptProps, ConceptStatus, TimeSemantics, Measure, Dimension, Parameter, Provenance, ChangeMeta, ConceptVersion } from './concept.js'
+export { upsertConcept, getConcept, conceptHash, indexId, putIndex, resolveConcept, resolveConceptAsOf,
+         indexHistory, namesFor, type IndexPointing } from './concept.js'
+export type { ConceptProps, ConceptStatus, TimeSemantics, Measure, Dimension, Parameter, Provenance, ChangeMeta } from './concept.js'
 
 // Datasource index — a flat, full-text map of every field in every source (SOURCE.CONTAINER.FIELD).
 export { ensureDataSourceIndex, putEntry, putEntries, searchDataSource, setEnabled, applyRowCounts, dataSourceStats, describeEntry, dsiKey } from './datasource-index.js'

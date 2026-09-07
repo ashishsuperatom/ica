@@ -106,7 +106,11 @@ export function putIndex(store: NodeStore, name: string, target: string, meta: C
   const cur = store.getNode(id)
   const curTarget = (cur?.props as any)?.target
   if (curTarget === target) return
-  const at = Date.now()
+  // STRICTLY AFTER the pointing it replaces. Two writes inside one millisecond — which consolidation can
+  // easily do — would otherwise close the old window at the instant it opened, giving a pointing that was
+  // never true for any `at`, and leaving two rows with the same valid_from for history to order arbitrarily.
+  // Clock granularity is not an invariant; this is.
+  const at = Math.max(Date.now(), ((cur?.valid_from as number) ?? 0) + 1)
   if (cur) {
     const aid = `${id}@${cur.valid_from ?? at}`
     store.putNode({ id: aid, kind: 'index', label: name, props: { ...(cur.props as any), retired: true } })
@@ -131,10 +135,6 @@ export function namesFor(store: NodeStore, conceptId: string): string[] {
   ).all(conceptId) as any[]).map((r) => r.label).filter(Boolean)
 }
 
-export function conceptId(name: string): string {
-  return 'concept:' + name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
-}
-const archiveId = (name: string, version: number) => conceptId(name) + '@v' + version
 const contentOf = (p: any) => { const { _v, ...rest } = p ?? {}; return JSON.stringify(rest) }
 
 function nodeFromRow(r: any): Node {
@@ -201,23 +201,45 @@ export function upsertConcept(store: NodeStore, name: string, props: ConceptProp
 }
 
 /** "now" = the live row (stable id); `asOf` (unix ms) → the version whose validity window contained that instant. */
+/** The body this name points at — now, or at an instant. Rewinding asks the INDEX what the name meant then,
+ *  because bodies have no windows: the same body may be current under one name and long-retired under another. */
 export function getConcept(store: NodeStore, name: string, asOf?: number): Node | undefined {
-  const cur = resolveConcept(store, name)
-  if (asOf == null) return cur
-  if (cur && (cur.valid_from ?? 0) <= asOf) return cur          // asOf at/after the live version → current
-  const r = store.db.prepare(
-    `SELECT * FROM nodes WHERE kind='concept' AND label=? AND valid_from<=? AND (valid_to>? ) ORDER BY valid_from DESC LIMIT 1`)
-    .get(name, asOf, asOf) as any
-  return r ? nodeFromRow(r) : undefined
+  return asOf == null ? resolveConcept(store, name) : resolveConceptAsOf(store, name, asOf)
 }
 
-export type ConceptVersion = { version: number; changedBy: string; reason?: string; validFrom: number; validTo: number | null; live: boolean }
-/** The full timeline for a concept: every version (live + archived), oldest-first. */
-export function conceptHistory(store: NodeStore, name: string): ConceptVersion[] {
-  const rows = store.db.prepare(`SELECT props, valid_from, valid_to FROM nodes WHERE kind='concept' AND label=? ORDER BY valid_from`).all(name) as any[]
+// ── HISTORY BELONGS TO THE NAME, NOT THE BODY ───────────────────────────────────────────────────────────
+// A body has no history: it is one immutable thing, and if it changed it would be a different body. What has
+// a history is the NAME — what it meant, when, and who moved it. conceptHistory() used to walk `@vN` rows and
+// report versions of a concept; there are no such rows now, and the question it was really answering is this
+// one.
+export type IndexPointing = {
+  target: string           // the concept body this name pointed at
+  changedBy: string        // who moved it — 'consolidator' | 'human:<id>' | 'migration' | …
+  reason?: string
+  from: number             // when this pointing took effect
+  to: number | null        // when it stopped, or null while current
+  live: boolean
+}
+
+/** Everything this name has ever pointed at, oldest first. Retired pointings are kept under
+ *  `index:<name>@<from>`, so the timeline is a query rather than a reconstruction. */
+export function indexHistory(store: NodeStore, name: string): IndexPointing[] {
+  const id = indexId(name)
+  const rows = store.db.prepare(
+    `SELECT props, valid_from, valid_to FROM nodes
+      WHERE kind='index' AND (id = ? OR id LIKE ?)
+      ORDER BY valid_from, CASE WHEN valid_to IS NULL THEN 1 ELSE 0 END`
+  ).all(id, id + '@%') as any[]
   return rows.map((r) => {
-    const p = (typeof r.props === 'string' ? JSON.parse(r.props || '{}') : (r.props ?? {})) as ConceptProps
-    return { version: p._v?.version ?? 1, changedBy: p._v?.changedBy ?? 'unknown', reason: p._v?.reason,
-      validFrom: r.valid_from, validTo: r.valid_to ?? null, live: r.valid_to == null }
+    const p = typeof r.props === 'string' ? JSON.parse(r.props || '{}') : (r.props ?? {})
+    return { target: p.target, changedBy: p.changedBy ?? 'unknown', reason: p.reason,
+             from: r.valid_from, to: r.valid_to ?? null, live: r.valid_to == null }
   })
+}
+
+/** What this name meant at an instant — the body it pointed at then, not the body it points at now. This is
+ *  how a program's answer from June can be read against the concept that actually produced it. */
+export function resolveConceptAsOf(store: NodeStore, name: string, at: number): Node | undefined {
+  const hit = indexHistory(store, name).find((h) => h.from <= at && (h.to == null || h.to > at))
+  return hit?.target ? store.getNode(hit.target) : undefined
 }

@@ -2,7 +2,7 @@
 //   pnpm exec tsx packages/node-store/src/intent.smoke.ts
 import { NodeStore } from './store.js'
 import { ROOT, ensureRoot, ask, pathTo, nextSteps, type AskDeps } from './intent.js'
-import { upsertConcept, getConcept, conceptHistory, conceptId, type ConceptProps } from './concept.js'
+import { upsertConcept, getConcept, indexHistory, indexId, type ConceptProps } from './concept.js'
 
 const ok = (c: boolean, m: string) => { if (!c) { console.error('FAIL:', m); process.exit(1) } }
 
@@ -61,15 +61,22 @@ async function main() {
   ok((cp.measures?.length ?? 0) === 2 && cp.verifiedAt === '2026-06-03', 'concept stores measures + freshness')
   ok((cp.requires ?? []).includes('branch'), 'Receivables requires branch')
 
-  // Time-versioning (SCD-2): control v1's valid_from so the as-of window is deterministic (no same-ms race).
+  // TIME TRAVEL NOW ASKS THE NAME, not the body. Control when the first pointing took effect so the as-of
+  // window is deterministic (no same-ms race).
   const T0 = 1_700_000_000_000
-  s.db.prepare(`UPDATE nodes SET valid_from=? WHERE id=?`).run(T0, conceptId('Receivables'))
+  s.db.prepare(`UPDATE nodes SET valid_from=? WHERE id=?`).run(T0, indexId('Receivables'))
+  const before = getConcept(s, 'Receivables')!.id
   upsertConcept(s, 'Receivables', { ...recv, status: 'corroborated' }, { changedBy: 'consolidator', reason: 're-corroborated' })
-  const now = getConcept(s, 'Receivables')!.props as ConceptProps
-  const past = getConcept(s, 'Receivables', T0)!.props as ConceptProps         // rewind into v1's window
-  ok(now.status === 'corroborated' && now._v?.version === 2, 'change bumped to version 2 (live)')
-  ok(past.status === 'verified' && past._v?.version === 1, 'get(asOf) rewinds to archived version 1')
-  ok(conceptHistory(s, 'Receivables').length === 2, 'timeline has 2 versions (archived + live)')
+  const nowNode = getConcept(s, 'Receivables')!
+  const now = nowNode.props as ConceptProps
+  const past = getConcept(s, 'Receivables', T0)!.props as ConceptProps         // what the NAME meant then
+  ok(now.status === 'corroborated', 'the name now points at the corroborated body')
+  ok(past.status === 'verified', 'rewinding the name reaches the body it pointed at then')
+  ok(nowNode.id !== before, 'a changed concept is a NEW body, not an edited one')
+  ok(s.getNode(before) !== undefined, 'the old body still exists — anything built on it is still true')
+  const hist = indexHistory(s, 'Receivables')
+  ok(hist.length === 2, 'the name has two pointings')
+  ok(hist[1].changedBy === 'consolidator' && hist[1].reason === 're-corroborated', 'who moved it, and why, is recorded')
 
   console.log(`intent+concept smoke: OK`)
   console.log(`  built=${built} ran=${ran}  path: ${path.map(n => n.label).join(' → ')}`)
