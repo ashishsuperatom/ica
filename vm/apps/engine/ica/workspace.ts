@@ -441,9 +441,22 @@ const source = si >= 0 ? args[si + 1] : undefined
 const skip = si >= 0 ? si + 1 : -1   // index of the source VALUE to drop (only when --source is present)
 const q = args.filter((a, i) => a !== '--full' && a !== '--source' && i !== skip).join(' ').trim()
 if (!q) { console.log(JSON.stringify({ hint: 'find-schema "<term>" [--source <SOURCE>] [--full] — search every datasource for a field/table by name, type, or description' })); process.exit(0) }
-const rows = searchDataSource(store, q, { source, limit: full ? 40 : 60 })
+const r = searchDataSource(store, q, { source, limit: full ? 40 : 60 })
 const view = (e) => full ? e : (e.key + ' : ' + (e.type || '?') + (e.isKey ? ' [PK]' : '') + (e.references ? (' → ' + e.references) : ''))
-console.log(JSON.stringify(rows.map(view), null, 2))
+// SAY WHAT WAS NOT SHOWN. This returns a bounded slice, and a bare array of six fields reads as "there are
+// six". That is not hypothetical: a search for "customer" showed 6 TotalGroup fields out of 324, and the
+// agent concluded TotalGroup held almost no customer data. The count and the per-source split make a slice
+// recognisable as one, and point at the flag that narrows it.
+const spread = Object.entries(r.bySource).map(([s, n]) => s + ':' + n).join(' · ')
+console.log(JSON.stringify({
+  fields: r.entries.map(view),
+  shown: r.shown,
+  matched: r.matched,
+  bySource: r.bySource,
+  note: r.shown < r.matched
+    ? 'showing ' + r.shown + ' of ' + r.matched + ' matching fields (' + spread + ') — narrow the term, or scope with --source <SOURCE>'
+    : 'all ' + r.matched + ' matching fields',
+}, null, 2))
 `,
     'find-program': `// Programs that answered a similar question — the SHORTLIST: what each answers, and its name.
 // Deliberately no params and no source: a list is for choosing which one to look at. ./get-program <name> opens one.
