@@ -19,6 +19,7 @@ import type { ProgramTarget } from '../../verbs/index.js'
 import { createSession, prepareWorkspace, type Harness, type Session, type RunHandlers } from '../../ica/index.js'
 import { execProgram } from '../../exec-program.js'
 import { CATEGORIES, type Category } from './classify.js'
+import { lintAnswer, repairInstruction, MAX_REPAIR_ROUNDS } from '../../answer-review.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 // Analyst prompt files via the override layer (volume override for the current image → baked fallback).
@@ -74,7 +75,6 @@ export interface AskOpts {
   // answers + the program's location (the id) — the analyst OPENS and READS the program itself (that is the
   // source of truth), so we never pass a stale answer string around.
   modify?: ProgramTarget
-  conceptNames?: string[] // concept NAMES the engine surfaced for this question (names only — open with find-concept for the method)
   resolvedQuestion?: string   // the question with what it refers to written in (a follow-up made self-contained)
   reason?: string         // the composer's escalation note — a NON-authoritative hint of what was hard (the analyst re-derives from scratch)
 }
@@ -147,13 +147,14 @@ export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
       const buildBody = `# Your task — a fresh, standalone question. A lighter agent tried it and could not finish; start from the beginning.
 ${reason ? `\nThe composer's note on why it couldn't — a HINT about what was hard, and it may be WRONG. Do NOT follow it as a direction; re-investigate independently and derive the answer yourself: "${reason}"\n` : ''}
 Question: ${question}${opts.resolvedQuestion ? `\nIn full, with what it refers to written in: ${opts.resolvedQuestion}` : ''}
-${(opts.conceptNames ?? []).length ? '\nCandidate concepts for this question, most-relevant first — SOME MAY NOT FIT. Read the ones that look right with ./get-concept "<name>", use those, ignore the rest (find-concept stays available for anything else):\n' + (opts.conceptNames ?? []).map(n => `- ${n}`).join('\n') + '\n' : ''}
 Build a program that answers it - follow your instructions (recon concepts first, then the data; every
-question becomes a program). RUN it with \`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\` until correct.
+question becomes a program). Open a concept with \`./get-concept "<name>"${opts.qid ? ` --qid ${opts.qid}` : ''}\` — the
+qid is how what you read is recorded against the program you build. RUN it with
+\`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\` until correct.
 
 Then COMMIT, as your final action: write ${builtRel} — once everything else is finished and verified.
   {"programDir":"programs/<slug>","params":{...}, "parent":"root" | "<a prior intent id>", "followups":["...","..."],
-   "canonicalQuestions":["..."]}
+   "canonicalQuestions":["..."], "usedConcepts":["<the concepts this program is actually built on>"]}
 \`canonicalQuestions\` — the question this program answers, phrased so its parameters are visible ("… for customer
 <customer> in <period>"). Add another only when the program genuinely answers a differently-phrased question.
 The ENGINE runs the program and writes the answer - the answer is its to write, never yours in chat.
@@ -212,7 +213,35 @@ Your task is in ${taskRel} — read it and follow it exactly. ${m ? 'Modify the 
           const rr = await execProgram(cwd, ptr.programDir, ptr.params ?? {})
           // Keep the program's OWN status (an unknowable program outputs status:"unknowable"); default to
           // "answered" only when the program didn't declare one.
-          await writeFile(answerPath, JSON.stringify(answerView(rr.output), null, 2))   // out of the unit envelope
+          let answer = answerView(rr.output)   // out of the unit envelope
+          // Same repair round as the composer, for the same reason: the agent that wrote the view unit is one
+          // turn away and still holds the trajectory. Errors only, capped, and the answer ships regardless.
+          // Delete this block to switch repair off; the lint still logs.
+          for (let round = 1; round <= MAX_REPAIR_ROUNDS; round++) {
+            // GUARDED, because this sits inside the try that turns a throw into "the program failed to run".
+            // A bug in a lint rule must not convert a good answer into cannot_answer — the whole point of the
+            // check is to make faults visible, not to invent one.
+            let before: ReturnType<typeof lintAnswer> = []
+            let fix: string | null = null
+            try { before = lintAnswer(answer); fix = repairInstruction(before) }
+            catch (e: any) { console.warn(`[answer] repair check FAILED (${String(e?.message ?? e).slice(0, 160)}) — shipping the answer as it is`); break }
+            if (!fix) break
+            const nBefore = before.filter((f) => f.severity === 'error').length
+            try {
+              await session.run(fix, handlers)
+              answer = answerView((await execProgram(cwd, ptr.programDir, ptr.params ?? {})).output)
+              // WAS THE ROUND WORTH IT — the only line that can answer "is the cap right?". A round that
+              // fixes nothing is a round that should not exist; a round 2 that regularly finishes what round 1
+              // started is the argument for keeping two. Without this the cap is a number someone picked.
+              const after = lintAnswer(answer).filter((f) => f.severity === 'error').length
+              console.log(`[answer] repair round ${round}/${MAX_REPAIR_ROUNDS}: ${nBefore} error(s) → ${after}` +
+                (after === 0 ? ' — fixed' : after < nBefore ? ' — partly fixed' : ' — no change'))
+            } catch (e: any) {
+              console.warn(`[answer] repair round ${round} failed (${String(e?.message ?? e).slice(0, 120)}) — keeping the previous answer`)
+              break
+            }
+          }
+          await writeFile(answerPath, JSON.stringify(answer, null, 2))
         } catch (e: any) {
           await writeFile(answerPath, JSON.stringify({ status: 'cannot_answer',
             answer: `The program was built but failed to run: ${String(e?.message ?? e).slice(0, 240)}` }, null, 2)).catch(() => {})

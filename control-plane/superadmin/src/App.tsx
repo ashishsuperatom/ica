@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Credentials } from './Credentials'
 import { DashboardsPanel } from './Dashboards'
 import { useProjectHub } from './hub'
 import { Inspector, SECTIONS, SECTION_LABEL, type Section } from './Inspector'
@@ -7,6 +8,40 @@ import { GroundingConsole } from './GroundingConsole'
 import { AnalystConsole } from './AnalystConsole'
 import { useSession, SignIn, UserButton } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useSearchParams } from 'react-router-dom'
+
+// ── COPY, AND SAY SO ─────────────────────────────────────────────────────────
+// Four copy buttons did their work in total silence. Copying a credential is the one moment you MUST know it
+// worked: the value is shown once, and "did that copy?" cannot be answered by looking at the screen — so
+// people click again, or paste into the wrong window and lose a key they can no longer see.
+//
+// It was worse than silent. Every one of them called `navigator.clipboard?.writeText(...)`, and the optional
+// chaining means that where the clipboard API is missing — any insecure context, which includes plain http on
+// a LAN box — the click did NOTHING and reported nothing. A button that silently does nothing is indis-
+// tinguishable from one that worked, which is how you end up pasting a stale key you copied minutes ago.
+//
+// So: confirm on success, say so on failure, and fall back to selecting the text if there is no clipboard at
+// all, because "select this and press ⌘C" is still an answer.
+function CopyButton({ text, label = 'Copy', className = 'btn' }: { text: string; label?: string; className?: string }) {
+  const [state, setState] = useState<'idle' | 'done' | 'failed'>('idle')
+  useEffect(() => {
+    if (state === 'idle') return
+    const t = setTimeout(() => setState('idle'), 2000)
+    return () => clearTimeout(t)
+  }, [state])
+  const copy = async () => {
+    try {
+      if (!navigator.clipboard) throw new Error('no clipboard in this context')
+      await navigator.clipboard.writeText(text)
+      setState('done')
+    } catch { setState('failed') }
+  }
+  return (
+    <button className={className} onClick={copy} title={state === 'failed' ? 'Select the text above and press ⌘C' : undefined}>
+      {state === 'done' ? '✓ Copied' : state === 'failed' ? 'Select it above and ⌘C' : label}
+    </button>
+  )
+}
+
 
 const VM_URL = import.meta.env.VITE_VM_URL ?? 'http://localhost:5050'
 
@@ -93,6 +128,7 @@ function Style() { return <style dangerouslySetInnerHTML={{ __html: CSS }} /> }
 
 // minimal Stripe-ish line icons
 const I = {
+  key: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><circle cx="7.5" cy="15.5" r="3.5"/><path d="M10 13 20 3M17 6l2 2M14 9l2 2"/></svg>,
   home: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>,
   grid: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>,
   users: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><path d="M16 5.5a3 3 0 0 1 0 5.8M20.5 20a5 5 0 0 0-4-4.9"/></svg>,
@@ -211,6 +247,10 @@ function Shell({ children, crumbs, nav }: { children: React.ReactNode; crumbs?: 
         <nav>
           <div className="grp">Manage</div>
           <Link to="/" className="nav">{I.home}Organizations</Link>
+          {/* SUPERADMIN HOST ONLY. The API already refuses anyone else, so this is not what protects the
+              credentials — but an org admin should not be shown a door they may not open, and a menu item is
+              itself a statement about what exists. */}
+          {HOST_SCOPE === 'superadmin' && <Link to="/credentials" className="nav">{I.key}Credentials</Link>}
           {nav}
         </nav>
         <div className="foot"><UserButton /></div>
@@ -240,6 +280,7 @@ export function App() {
         {/* Landing: the platform console lists every org; the customer console sends you to your own. */}
         <Route path="/" element={HOST_SCOPE === 'admin' ? <MyOrgLanding /> : <OrgListPage />} />
         <Route path="/org/:orgId" element={<OrgDetailPage />} />
+        {HOST_SCOPE === 'superadmin' && <Route path="/credentials" element={<CredentialsPage />} />}
         {/* /pro/<projectId> — a project on its own, no org in the path. */}
         <Route path="/pro/:projectId/*" element={<ProjectDetailPage />} />
         {/* The older nested form still resolves, so existing links keep working. */}
@@ -365,6 +406,21 @@ function OrgListPage() {
 }
 
 // ── Org detail ─────────────────────────────────────────────────────────────
+// Platform-wide, not per-org: one pool of provider keys serves every project, and which project may use which
+// is exactly what the screen is for.
+function CredentialsPage() {
+  const token = useAuth(); const api = useApi(token)
+  return (
+    <Shell crumbs={<><Link to="/">Organizations</Link><span>/</span>Credentials</>}>
+      <h2 style={{ margin: '0 0 4px' }}>Credentials</h2>
+      <div className="muted" style={{ marginBottom: 18 }}>
+        The keys the coding agents use, and who may use them. Stored sealed; values are never shown here.
+      </div>
+      <Credentials api={api} />
+    </Shell>
+  )
+}
+
 function OrgDetailPage() {
   const token = useAuth(); const { orgId } = useParams<{ orgId: string }>(); const api = useApi(token, orgId)
   const [search, setSearch] = useSearchParams()
@@ -392,6 +448,26 @@ function OrgDetailPage() {
   // Project delete lives on the project's own Settings → Danger zone (type-to-confirm), not on this list.
   const restoreProject = async (id: string) => { await api('/projects', { method: 'PUT', body: JSON.stringify({ id }) }); fetchProjects() }
 
+  // ── ROTATING A PROJECT'S API KEY ──────────────────────────────────────────
+  // That key sits in every engine's .env and on the proxy box, and it unlocks the project's pooled provider
+  // credentials — so it has to be rotatable by someone who is not editing a database by hand. Two steps on
+  // purpose: rotating ISSUES a second key and both work, so boxes can be moved across without an outage;
+  // finishing drops the old one. Anything else means a rotation costs downtime, and a rotation that costs
+  // downtime is one nobody performs — which is how an exposed key stays live for months.
+  const [rot, setRot] = useState<{ id: string; apiKey: string; done?: boolean } | null>(null)
+  const rotateKey = async (id: string) => {
+    const r = await api(`/project-key/${id}/rotate`, { method: 'POST' })
+    if (!r.ok) { alert(`Could not rotate: ${r.status} ${await r.text()}`); return }
+    const b = await r.json() as any
+    setRot({ id, apiKey: b.apiKey })
+  }
+  const finishRotation = async () => {
+    if (!rot) return
+    const r = await api(`/project-key/${rot.id}/prune`, { method: 'POST', body: JSON.stringify({ keep: rot.apiKey }) })
+    if (!r.ok) { alert(`Could not finish: ${r.status} ${await r.text()}`); return }
+    setRot({ ...rot, done: true })
+  }
+
   return (
     <Shell crumbs={<><Link to="/">Organizations</Link><span>/</span><code className="mono">{orgId?.slice(0, 8)}…</code></>}>
       {conn && (() => {
@@ -404,9 +480,29 @@ function OrgDetailPage() {
               <textarea readOnly value={env} onFocus={e => e.currentTarget.select()} rows={3}
                 style={{ width: '100%', fontFamily: 'monospace', fontSize: 13, padding: 12, borderRadius: 8, resize: 'vertical', whiteSpace: 'pre' }} />
               <div className="row" style={{ gap: 8, marginTop: 12, alignItems: 'center' }}>
-                <button className="btn" onClick={() => { navigator.clipboard?.writeText(env); }}>Copy</button>
+                <CopyButton text={env} />
                 <button className="btn ghost" onClick={() => { const id = conn.id; setConn(null); nav(`/org/${orgId}/projects/${id}`) }}>Open project</button>
                 <button className="btn ghost" onClick={() => setConn(null)} style={{ marginLeft: 'auto' }}>Close</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+      {rot && (() => {
+        const env = `ICA_PROJECT=${rot.id}\nICA_KEY=${rot.apiKey}`
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setRot(null)}>
+            <div className="card" style={{ maxWidth: 660, width: '92%', padding: 22 }} onClick={e => e.stopPropagation()}>
+              <h3 style={{ marginTop: 0 }}>{rot.done ? 'Rotation complete' : 'New key issued — both keys work'}</h3>
+              {rot.done
+                ? <p className="muted" style={{ marginTop: 4 }}>The old key no longer works. Any box still holding it will fail to connect until its <code>.env</code> is updated.</p>
+                : <p className="muted" style={{ marginTop: 4 }}>The old key still works, so nothing is down. Put this in every engine's <code>.env</code> and restart it, then press <strong>Finish</strong> to retire the old key. Shown <strong>once</strong>.</p>}
+              <textarea readOnly value={env} onFocus={e => e.currentTarget.select()} rows={2}
+                style={{ width: '100%', fontFamily: 'monospace', fontSize: 13, padding: 12, borderRadius: 8, resize: 'vertical', whiteSpace: 'pre' }} />
+              <div className="row" style={{ gap: 8, marginTop: 12, alignItems: 'center' }}>
+                <CopyButton text={env} />
+                {!rot.done && <button className="btn" onClick={finishRotation}>Finish — retire the old key</button>}
+                <button className="btn ghost" onClick={() => setRot(null)} style={{ marginLeft: 'auto' }}>Close</button>
               </div>
             </div>
           </div>
@@ -436,7 +532,11 @@ function OrgDetailPage() {
               <div><strong>{p.name}</strong><br/><code className="mono">{p.id}</code></div>
               {p.deleted
                 ? <button className="btn sm ok" onClick={e => { e.stopPropagation(); restoreProject(p.id) }}>Restore</button>
-                : <span className="muted" style={{ fontSize: 12 }}>Open →</span>}
+                : <span className="row" style={{ gap: 10, alignItems: 'center' }}>
+                    <button className="btn sm ghost" title="Issue a new API key; the old one keeps working until you finish"
+                            onClick={e => { e.stopPropagation(); rotateKey(p.id) }}>Rotate key</button>
+                    <span className="muted" style={{ fontSize: 12 }}>Open →</span>
+                  </span>}
             </div>
           ))}
         </div>
@@ -750,6 +850,22 @@ function ProjectDetailPage() {
   // never one click from a card.
   const [svc, setSvc] = useState<{ projectId: string; channel: string; token: string; wsUrl: string; expiresAt: number } | null>(null)
   const [delProj, setDelProj] = useState(false)
+  // ROTATING THIS PROJECT'S KEY, on the project's own Settings — which is where someone looks for it. It was
+  // put only on the org's project ROW first, next to "Open →", and the row opens the project when clicked, so
+  // in practice everyone navigated straight past it and reported the button missing. A control nobody can
+  // find is a control that does not exist.
+  const [rot, setRot] = useState<{ apiKey: string; done?: boolean } | null>(null)
+  const rotateKey = async () => {
+    const r = await api(`/project-key/${projectId}/rotate`, { method: 'POST' })
+    if (!r.ok) { alert(`Could not rotate: ${r.status} ${await r.text()}`); return }
+    setRot({ apiKey: (await r.json() as any).apiKey })
+  }
+  const finishRotation = async () => {
+    if (!rot) return
+    const r = await api(`/project-key/${projectId}/prune`, { method: 'POST', body: JSON.stringify({ keep: rot.apiKey }) })
+    if (!r.ok) { alert(`Could not finish: ${r.status} ${await r.text()}`); return }
+    setRot({ ...rot, done: true })
+  }
   const genServiceToken = async (channel: string) => {
     const r = await api(`/projects/${projectId}/service-token`, { method: 'POST', body: JSON.stringify({ channel }) })
     if (r.ok) setSvc(await r.json())
@@ -979,6 +1095,30 @@ function ProjectDetailPage() {
             <div className="muted" style={{ fontSize: 12.5, margin: '4px 0 12px' }}>Generate a scoped service token so a Teams bot can act as this project’s runtime. Shown once.</div>
             <button className="btn ghost" onClick={() => genServiceToken('teams')}>Generate Teams token</button>
           </div>
+          <div className="card" style={{ padding: 18 }}>
+            <strong>Project API key</strong>
+            <div className="muted" style={{ fontSize: 12.5, margin: '4px 0 12px' }}>
+              This key is in every engine’s <code>.env</code> and unlocks this project’s pooled provider credentials.
+              Rotating issues a <strong>second</strong> key — both work, so nothing goes down — then “Finish” retires the old one.
+            </div>
+            {!rot
+              ? <button className="btn ghost" onClick={rotateKey}>Rotate key</button>
+              : <>
+                  <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>
+                    {rot.done
+                      ? 'Done — the old key no longer works. Any box still holding it will fail to connect until its .env is updated.'
+                      : 'Shown once. Put it in every engine’s .env and restart, then press Finish.'}
+                  </div>
+                  <textarea readOnly value={`ICA_PROJECT=${projectId}\nICA_KEY=${rot.apiKey}`} rows={2}
+                    onFocus={e => e.currentTarget.select()}
+                    style={{ width: '100%', fontFamily: 'monospace', fontSize: 13, padding: 12, borderRadius: 8, whiteSpace: 'pre' }} />
+                  <div className="row" style={{ gap: 8, marginTop: 10 }}>
+                    <CopyButton text={`ICA_PROJECT=${projectId}\nICA_KEY=${rot.apiKey}`} />
+                    {!rot.done && <button className="btn" onClick={finishRotation}>Finish — retire the old key</button>}
+                    <button className="btn ghost" onClick={() => setRot(null)} style={{ marginLeft: 'auto' }}>Close</button>
+                  </div>
+                </>}
+          </div>
           <div className="card" style={{ padding: 18, borderColor: 'var(--bad)' }}>
             <h3 style={{ margin: '0 0 4px', color: 'var(--bad)' }}>Danger zone</h3>
             <div className="between">
@@ -999,7 +1139,7 @@ function ProjectDetailPage() {
               <p className="muted" style={{ marginTop: 4 }}>Paste into the surface’s <code>.env</code>. Authorizes the bot as a <code>runtime</code> for this project only, until {exp}.</p>
               <textarea readOnly value={env} onFocus={e => e.currentTarget.select()} rows={4} style={{ width: '100%', fontFamily: 'monospace', fontSize: 13, padding: 12, borderRadius: 8, resize: 'vertical', whiteSpace: 'pre' }} />
               <div className="row" style={{ gap: 8, marginTop: 12, alignItems: 'center' }}>
-                <button className="btn" onClick={() => { navigator.clipboard?.writeText(env) }}>Copy</button>
+                <CopyButton text={env} />
                 <button className="btn ghost" onClick={() => setSvc(null)} style={{ marginLeft: 'auto' }}>Close</button>
               </div>
             </div>

@@ -8,10 +8,64 @@
 import type { Session, RunHandlers, RunResult } from './session.js'
 import { randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { statSync, openSync, readSync, closeSync, writeFileSync } from 'node:fs'
+import { statSync, openSync, readSync, closeSync, writeFileSync, readFileSync, renameSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { makeClaudeEventLog, transcriptPath } from './claude-events.js'
+import { boxCredentialsReady } from './box-credentials.js'
+
+// ── FIRST-RUN GATES ──────────────────────────────────────────────────────────────────────────────────────
+// A freshly provisioned box has a credential but no history, and claude-code asks three questions before it
+// will do any work. Each is a TUI prompt, so on a machine nobody is watching they do not fail — they HANG,
+// which is far worse: the box looks alive, the turn never ends, and nothing in the logs says a dialog is
+// waiting. Auth is never even reached.
+//
+//   hasCompletedOnboarding        the welcome flow
+//   hasTrustDialogAccepted        "Do you trust the files in this folder?" — asked PER WORKING DIRECTORY, so
+//                                 every new project workspace re-asks it
+//   bypassPermissionsModeAccepted the warning raised because we spawn with --dangerously-skip-permissions.
+//                                 The flag selects the mode; it does not accept the dialog about it.
+//
+// Trust is keyed on the RESOLVED path: on macOS a workspace under /var/... is really /private/var/..., and the
+// unresolved key silently fails to match, so the prompt appears anyway and the seeding looks broken.
+//
+// EXISTING VALUES ARE NEVER OVERWRITTEN. On a developer's machine this file is the real one, holding real
+// preferences; we add what is missing and touch nothing that is already answered — including a `false`, which
+// is a decision someone made and not a gap to fill.
+const firstRunSeeded = new Set<string>()
+function seedFirstRunGates(cwd: string): void {
+  if (firstRunSeeded.has(cwd)) return
+  firstRunSeeded.add(cwd)
+  const file = join(homedir(), '.claude.json')
+  try {
+    // Resolve through symlinks so the trust key matches what claude will look up. A cwd that does not exist
+    // yet is not an error here — the caller creates it — so fall back to the literal path.
+    let key = cwd
+    try { key = realpathSync(cwd) } catch { /* not created yet; the literal path is the best guess */ }
+
+    let cfg: any = {}
+    try { cfg = JSON.parse(readFileSync(file, 'utf8')) || {} } catch { /* absent or unreadable ⇒ start fresh */ }
+
+    let changed = false
+    const put = (o: any, k: string, v: unknown) => { if (!(k in o)) { o[k] = v; changed = true } }
+    put(cfg, 'hasCompletedOnboarding', true)
+    put(cfg, 'bypassPermissionsModeAccepted', true)
+    if (!cfg.projects || typeof cfg.projects !== 'object') { cfg.projects = {}; changed = true }
+    if (!cfg.projects[key] || typeof cfg.projects[key] !== 'object') { cfg.projects[key] = {}; changed = true }
+    put(cfg.projects[key], 'hasTrustDialogAccepted', true)
+
+    if (!changed) return
+    // Write via a temp file and rename so a crash — or two agents warming up at once — can never leave a
+    // half-written config, which would lock the box out of every gate at the same time.
+    const tmp = `${file}.${process.pid}.tmp`
+    writeFileSync(tmp, JSON.stringify(cfg, null, 2))
+    renameSync(tmp, file)
+  } catch (e) {
+    // Never fatal: on a machine that is already set up this is a no-op anyway, and a spawn that proceeds and
+    // stops on a visible dialog beats one that refuses to start over a config file.
+    console.warn(`[ica:claude] could not seed first-run gates (${(e as any)?.message ?? e}) — a fresh box may stop on a prompt`)
+  }
+}
 
 export interface ClaudeSessionOpts {
   cwd: string                 // working directory the agent runs in
@@ -127,13 +181,28 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
       serialize = new SerializeAddon(); term.loadAddon(serialize)
     }
     const m = await import('node-pty')
+    // A box-side credential is inherited ONCE, at spawn. Warm-up already waits for the vault before starting
+    // anything, but agents are also spawned lazily on first use — and a question that arrives while the vault
+    // is still being retried would otherwise spawn an agent with no credential, which then stays broken for
+    // its whole life while every log line says "not logged in". Wait here instead. Returns immediately on a
+    // machine with its own login, and is capped so a vault outage delays the answer rather than hanging it.
+    await boxCredentialsReady()
+    // Before the very first spawn in this cwd: clear the prompts that would otherwise hang an unattended box.
+    seedFirstRunGates(opts.cwd)
     // Each agent PTY must be a CLEAN, top-level claude-code session. If the engine was itself launched from
     // inside a claude-code session (e.g. dev-restarting pm2 from the CLI), it inherits CLAUDE_CODE_* markers;
     // passing them down makes the spawned claude think it's a CHILD session — which DISABLES transcript saving
     // (so --resume then fails with "No conversation found"). Strip every CLAUDE_CODE_* var so the agent is
     // always a fresh top-level session, regardless of how the engine was started.
+    //
+    // EXCEPT the credential. CLAUDE_CODE_OAUTH_TOKEN is how a box authenticates when nobody has logged into
+    // it — the whole point of a fleet machine you never SSH into — and it shares the prefix of the session
+    // markers by coincidence, not by kind. Stripping it makes an engine that was started with a perfectly
+    // good credential report itself as not logged in, with nothing in the logs to say why. The markers this
+    // guard exists for are all about session IDENTITY; the token is not one of them.
+    const KEEP = new Set(['CLAUDE_CODE_OAUTH_TOKEN'])
     const childEnv: Record<string, any> = { ...process.env, TERM: 'xterm-256color' }
-    for (const k of Object.keys(childEnv)) if (k.startsWith('CLAUDE_CODE_')) delete childEnv[k]
+    for (const k of Object.keys(childEnv)) if (k.startsWith('CLAUDE_CODE_') && !KEEP.has(k)) delete childEnv[k]
     pty = m.spawn(bin, ['--model', model, '--dangerously-skip-permissions', ...sysRefFlag, ...sessionArgs()],
       { name: 'xterm-256color', cols, rows, cwd: opts.cwd, env: childEnv as any })
     lastDataAt = Date.now()

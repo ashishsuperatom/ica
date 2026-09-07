@@ -143,9 +143,37 @@ function rowToEntry(r: any): DataSourceEntry {
     rows: r.rows == null ? undefined : r.rows, enabled: !!r.enabled }
 }
 
+/** What a schema search found — the rows, AND how much it did not show.
+ *
+ *  The count is not a nicety. This returns a bounded slice, and an agent handed six fields with no total
+ *  concludes there are six. That happened: a search for "customer" returned 6 TotalGroup fields out of 324 in
+ *  the index, and the agent reasonably decided TotalGroup had almost no customer data. A truncated answer that
+ *  cannot be recognised as truncated is worse than a short one. */
+export interface DataSourceSearchResult {
+  entries: DataSourceEntry[]
+  shown: number
+  matched: number                    // total rows matching, before the cap
+  bySource: Record<string, number>   // matched per source, so a crowded-out source is visible
+}
+
 /** Full-text search across the whole index (all sources), or filtered to one `source`. Disabled rows hidden
- *  unless includeDisabled. Falls back to a LIKE scan when the query isn't valid FTS (e.g. bare punctuation). */
-export function searchDataSource(store: NodeStore, query: string, opts: { source?: string; limit?: number; includeDisabled?: boolean } = {}): DataSourceEntry[] {
+ *  unless includeDisabled. Falls back to a LIKE scan when the query isn't valid FTS (e.g. bare punctuation).
+ *
+ *  THREE THINGS THIS GETS RIGHT that the first version did not, each of which made a real search look empty:
+ *
+ *  1. WORDS ARE OR-ED WHEN AND FINDS NOTHING. Tokens were joined with FTS5's implicit AND, so "vehicle number"
+ *     demanded both words in ONE field and returned nothing at all — against an index holding 1,570 vehicle
+ *     fields. A two-word search is the most natural thing to type and it could not work. AND is still tried
+ *     first, because when it hits it is the better answer; OR is the fallback rather than the default.
+ *
+ *  2. SOURCES GET A FAIR SHARE. One cap across every source, ordered by bm25, let a source with shorter names
+ *     take the whole budget: "customer" returned 54 NetSuite fields and 6 TotalGroup ones, though TotalGroup
+ *     had 324 matches to NetSuite's 179 — bm25 favours short documents, and `invoice` is shorter than
+ *     `vw_rpt_invoice_register`. Each source now gets its own slice of the limit, and unused slices are given
+ *     back, so a wide source cannot be crowded out by a terse one.
+ *
+ *  3. IT SAYS WHAT IT DID NOT SHOW. See DataSourceSearchResult. */
+export function searchDataSource(store: NodeStore, query: string, opts: { source?: string; limit?: number; includeDisabled?: boolean } = {}): DataSourceSearchResult {
   ensureDataSourceIndex(store)
   const limit = Math.min(opts.limit ?? 50, 500)
   const where: string[] = []
@@ -154,20 +182,65 @@ export function searchDataSource(store: NodeStore, query: string, opts: { source
   if (!opts.includeDisabled) where.push('d.enabled = 1')
   const filter = where.length ? 'AND ' + where.join(' AND ') : ''
   const q = String(query || '').trim()
+  const empty = (): DataSourceSearchResult => ({ entries: [], shown: 0, matched: 0, bySource: {} })
+  if (!q) return empty()
+
+  const words = q.split(/\s+/).filter(Boolean).map((w) => `"${w.replace(/"/g, '')}"*`)
+  const counts = (m: string): Record<string, number> => {
+    const rows = store.db.prepare(
+      `SELECT d.source AS source, COUNT(*) AS n FROM datasource_index_fts f
+       JOIN datasource_index d ON d.rowid = f.rowid
+       WHERE datasource_index_fts MATCH ? ${filter} GROUP BY d.source`
+    ).all(m, ...bind) as any[]
+    return Object.fromEntries(rows.map((r) => [r.source, r.n]))
+  }
+
   try {
-    const ftsQuery = q.split(/\s+/).filter(Boolean).map((w) => `"${w.replace(/"/g, '')}"*`).join(' ')
-    if (ftsQuery) {
-      const rows = store.db.prepare(
-        `SELECT d.* FROM datasource_index_fts f JOIN datasource_index d ON d.rowid = f.rowid
-         WHERE datasource_index_fts MATCH ? ${filter} ORDER BY rank LIMIT ?`
-      ).all(ftsQuery, ...bind, limit) as any[]
-      if (rows.length || !q) return rows.map(rowToEntry)
+    // AND first (precise), then OR (recall). A single word makes both identical, so nothing is paid twice.
+    let match = words.join(' ')
+    let bySource = counts(match)
+    if (!Object.keys(bySource).length && words.length > 1) {
+      match = words.join(' OR ')
+      bySource = counts(match)
     }
-  } catch { /* fall through to LIKE */ }
+    const matched = Object.values(bySource).reduce((a, b) => a + b, 0)
+    if (matched) {
+      // FAIR SHARES. Every source with a hit gets limit/N, then whatever the small ones leave over is handed
+      // back to the sources that still have more to give — so the budget is spent without any source being
+      // silently squeezed out.
+      const names = Object.keys(bySource)
+      const take: Record<string, number> = {}
+      let spare = limit
+      let per = Math.max(1, Math.floor(limit / names.length))
+      for (const n of names) { take[n] = Math.min(bySource[n], per); spare -= take[n] }
+      for (const n of names) {
+        if (spare <= 0) break
+        const more = Math.min(spare, bySource[n] - take[n])
+        take[n] += more; spare -= more
+      }
+      const entries: DataSourceEntry[] = []
+      for (const n of names) {
+        if (!take[n]) continue
+        const rows = store.db.prepare(
+          `SELECT d.* FROM datasource_index_fts f JOIN datasource_index d ON d.rowid = f.rowid
+           WHERE datasource_index_fts MATCH ? AND d.source = ? ${filter} ORDER BY rank LIMIT ?`
+        ).all(match, n, ...bind, take[n]) as any[]
+        entries.push(...rows.map(rowToEntry))
+      }
+      return { entries, shown: entries.length, matched, bySource }
+    }
+  } catch { /* not valid FTS (bare punctuation, say) — fall through to LIKE */ }
+
   const like = `%${q}%`
-  return (store.db.prepare(
+  const rows = (store.db.prepare(
     `SELECT * FROM datasource_index d WHERE (key LIKE ? OR container LIKE ? OR field LIKE ?) ${filter} LIMIT ?`
   ).all(like, like, like, ...bind, limit) as any[]).map(rowToEntry)
+  const total = (store.db.prepare(
+    `SELECT COUNT(*) AS n FROM datasource_index d WHERE (key LIKE ? OR container LIKE ? OR field LIKE ?) ${filter}`
+  ).get(like, like, like, ...bind) as any)?.n ?? rows.length
+  const bySource: Record<string, number> = {}
+  for (const e of rows) bySource[e.source] = (bySource[e.source] ?? 0) + 1
+  return { entries: rows, shown: rows.length, matched: total, bySource }
 }
 
 /** Enable/disable by exact key, or a whole container/source via a LIKE pattern on the key (e.g. 'fusion5.employee.%'). */

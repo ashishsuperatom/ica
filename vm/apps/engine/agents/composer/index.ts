@@ -17,6 +17,7 @@ import { explainPrompt, explainAnswer } from '../../verbs/explain.js'
 import type { ProgramTarget } from '../../verbs/index.js'
 import { execProgram } from '../../exec-program.js'
 import { PROGRAM_AUTHORING } from '../shared-prompts/program-authoring.js'   // SHARED single source (analyst + composer)
+import { lintAnswer, repairInstruction, MAX_REPAIR_ROUNDS } from '../../answer-review.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const sysFile = () => loadPrompt(join(__dirname, 'SYSTEM.md'), 'composer/SYSTEM')
@@ -49,7 +50,7 @@ export type ModifyTarget = ProgramTarget
  *  Retrieval found it; the composer still decides — it is a strong lead, not a verdict. */
 export interface CanonicalMatch { programDir: string; params: Record<string, unknown>; canonical: string }
 export interface Composer {
-  ask(question: string, handlers?: RunHandlers, opts?: { qid?: string; candidates?: ProgramCandidate[]; modify?: ModifyTarget; conceptNames?: string[]; canonicalMatch?: CanonicalMatch; resolvedQuestion?: string; explain?: ProgramTarget; raw?: string; sid?: string; build?: string }): Promise<ComposerResult>
+  ask(question: string, handlers?: RunHandlers, opts?: { qid?: string; candidates?: ProgramCandidate[]; modify?: ModifyTarget; canonicalMatch?: CanonicalMatch; resolvedQuestion?: string; explain?: ProgramTarget; raw?: string; sid?: string; build?: string }): Promise<ComposerResult>
   session: Session
   cwd: string
 }
@@ -124,16 +125,35 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
         ? 'Existing programs the engine matched to this question (score = similarity, higher = closer):\n' +
           cands.slice(0, 6).map(c => `- ${c.program} — "${c.question}" (${c.score.toFixed(2)})`).join('\n')
         : 'No existing program matched this question.'
-      // Concept NAMES the engine surfaced for this question (names only — no method, so it can't bias you toward
-      // a formula you might not use). Read the ones that look right with `./get-concept "<name>"`. This is
-      // a head-start, NOT the whole set — find-concept is still live for anything else you need.
-      const conceptBlock = (o.conceptNames ?? []).length
-        ? '\nCandidate concepts for this question, most-relevant first — SOME MAY NOT FIT. Open the ones that look' +
-          ' right with `./get-concept "<name>"`, use those, ignore the rest (find-concept stays available):\n' +
-          (o.conceptNames ?? []).map(n => `- ${n}`).join('\n') + '\n'
-        // No concept fits this question → nothing to compose from. That is fresh analysis, which is the analyst's
-        // job — escalate immediately rather than attempt discovery yourself.
-        : `\nNo concept fits this question — there is nothing to compose from. ESCALATE now: write ${escalateRel} = {"reason":"no relevant concept — needs fresh analysis"} and STOP. Do not do the discovery yourself.\n`
+      // SEARCH FOR THEM YOURSELF. The engine used to pre-search and hand over six concept names; it no longer
+      // does, because the phrase YOU pick is a better cue than n-grams of the user's wording — it is your
+      // current hypothesis, chosen after seeing the problem — and you can search again when the first phrase
+      // misses, which a single pre-fire never could.
+      //
+      // ESCALATE NEEDS BOTH TO BE EMPTY. The first version of this said "no concept fits → escalate", which was
+      // inherited from when the engine handed over the list: an empty list then meant the engine had searched
+      // and found nothing. Now the composer does the searching, and a real search returns nothing far more
+      // often — so that wording threw away perfectly good program matches. Observed immediately: a question
+      // with an existing program at 0.87 similarity, which the agent had already recognised in its own words
+      // ("an existing program already answers this exact question"), escalated to the analyst because no
+      // CONCEPT matched. Reuse never needed a concept; the two are separate paths to an answer.
+      const conceptBlock = '\nStart with what exists: `./find-concept "<phrase>"` (full-text, fast — search in your' +
+        ' own words, and again with different words if the first misses), and open the ones that look right with' +
+        // The flag is OMITTED when there is no qid, never emitted empty: `--qid ` with nothing after it makes
+        // the tool swallow the next argument. builtRel above already treats qid as optional, so that path is
+        // real, not hypothetical.
+        ` \`./get-concept "<name>"${o.qid ? ` --qid ${o.qid}` : ''}\`. A fitting concept is the fastest correct route, and a` +
+        ' program above may answer this already.\n' +
+        // ESCALATE ON FINISHABILITY, not on the absence of a concept. This used to read "no program AND no concept
+        // → escalate", which contradicted the system prompt the moment the composer stopped being forbidden to
+        // discover: it has every tool the analyst has, so "nothing matched" is the start of the work, not the end
+        // of it. What it cannot do is spend an analyst's worth of time — so the test is whether the question is
+        // finishable from here, and escalating early is a good outcome, not a failure.
+        `Where nothing fits, work it out yourself — every tool is available. ESCALATE when the question is not` +
+        ` finishable from here: the data is not where you expected, the approach needs establishing from scratch,` +
+        ` or you have tried and it is not coming out right. Then write ${escalateRel} = {"reason":"<what is` +
+        ` missing or what you tried>"} and STOP. Escalating at ninety seconds beats a wrong answer at four` +
+        ` minutes.\n`
       const m = o.modify
       // MODIFY: edit the SAME program in place (the engine supplies the current program — it may be from a
       // reuse, so it is NOT in your context). No new program, no escalate — just apply the edit and rerun.
@@ -183,7 +203,7 @@ RUN it (\`tsx run.mjs ${o.canonicalMatch.programDir}/program.ts '${JSON.stringif
    don't fully cover it, do the work yourself — \`./query\`/\`./introspect\` the data, analyse, write the units +
    program. Run it (\`tsx run.mjs programs/<slug>/program.ts '<json>'\`), verify against the review checks, write
    Then COMMIT, as your final action — once everything else is finished and verified: write
-   ${builtRel} = {"programDir":"programs/<slug>","params":{…},"canonicalQuestions":["…"]}. \`canonicalQuestions\` — the question this program answers, phrased so its parameters are
+   ${builtRel} = {"programDir":"programs/<slug>","params":{…},"canonicalQuestions":["…"],"usedConcepts":["<the concepts this program is actually built on>"]}. \`canonicalQuestions\` — the question this program answers, phrased so its parameters are
    visible ("… for customer <customer> in <period>"); add another only when it genuinely answers a differently-
    phrased question.
 3. Escalate to the analyst when it's a hard problem or you can't figure it out. Write ${escalateRel} =
@@ -216,6 +236,36 @@ RUN it (\`tsx run.mjs ${o.canonicalMatch.programDir}/program.ts '${JSON.stringif
           handlers?.onNarration?.('Running the numbers…')   // shown as a business beat (composer self-narrates)
           const rr = await execProgram(cwd, built.programDir, built.params ?? {}, { qid: o.qid, sid: o.sid })
           answer = answerView(rr.output)   // out of the unit envelope — see answerView
+          // ── REPAIR, HERE, BECAUSE THE SESSION IS STILL OPEN ──────────────────────────────────────────
+          // The agent that wrote this view unit is one turn away and still holds the whole trajectory. Handing
+          // the defect back now costs a short turn; noticing it downstream would mean re-establishing all of
+          // that context to fix a column tag. ERRORS only, at most MAX_REPAIR_ROUNDS attempts, and the answer
+          // ships either way — a table with one unclickable column is a far better outcome than a turn that
+          // loops until the user gives up. Delete this block to switch repair off; the lint still logs.
+          for (let round = 1; round <= MAX_REPAIR_ROUNDS; round++) {
+            // GUARDED, because this sits inside the try that turns a throw into "the program failed to run".
+            // A bug in a lint rule must not convert a good answer into cannot_answer — the whole point of the
+            // check is to make faults visible, not to invent one.
+            let before: ReturnType<typeof lintAnswer> = []
+            let fix: string | null = null
+            try { before = lintAnswer(answer); fix = repairInstruction(before) }
+            catch (e: any) { console.warn(`[answer] repair check FAILED (${String(e?.message ?? e).slice(0, 160)}) — shipping the answer as it is`); break }
+            if (!fix) break
+            const nBefore = before.filter((f) => f.severity === 'error').length
+            try {
+              await session.run(fix, handlers)
+              answer = answerView((await execProgram(cwd, built.programDir, built.params ?? {}, { qid: o.qid, sid: o.sid })).output)
+              // WAS THE ROUND WORTH IT — the only line that can answer "is the cap right?". A round that
+              // fixes nothing is a round that should not exist; a round 2 that regularly finishes what round 1
+              // started is the argument for keeping two. Without this the cap is a number someone picked.
+              const after = lintAnswer(answer).filter((f) => f.severity === 'error').length
+              console.log(`[answer] repair round ${round}/${MAX_REPAIR_ROUNDS}: ${nBefore} error(s) → ${after}` +
+                (after === 0 ? ' — fixed' : after < nBefore ? ' — partly fixed' : ' — no change'))
+            } catch (e: any) {
+              console.warn(`[answer] repair round ${round} failed (${String(e?.message ?? e).slice(0, 120)}) — keeping the previous answer`)
+              break
+            }
+          }
           await writeFile(answerPath, JSON.stringify(answer, null, 2)).catch(() => {})
         } catch (e: any) {
           answer = { status: 'cannot_answer', answer: `The composed program failed to run: ${String(e?.message ?? e).slice(0, 240)}` }

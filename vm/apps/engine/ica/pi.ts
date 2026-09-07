@@ -8,9 +8,10 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { createAgentSession, DefaultResourceLoader, getAgentDir, SessionManager } from '@earendil-works/pi-coding-agent'
-import { registerBuiltInApiProviders, getModel } from '@earendil-works/pi-ai'
+import { createAgentSession, DefaultResourceLoader, getAgentDir, SessionManager, SettingsManager, ModelRuntime } from '@earendil-works/pi-coding-agent'
 import type { Session, RunHandlers, RunResult, AgentEvent } from './session.js'   // the shared session interface
+import { resolveProvider, describeResolution } from './providers.js'
+import { providersOn } from '../../../packages/agent-contract/contract.mjs'
 
 /** The ChatGPT credential `codex login` already wrote. pi-ai ships an `openai-codex-responses` provider that
  *  wants a Bearer token, and codex keeps a live one — so the two only need introducing, not a second login.
@@ -117,13 +118,41 @@ function normPiEvent(e: any, cmds: Map<string, string>): AgentEvent | null {
   return null
 }
 
+// ONE shared model runtime, reading the SAME ~/.pi/agent that the `pi` CLI writes.
+//
+// This replaces the static getModel() catalog, and the difference is the whole point: the built-in catalog is
+// frozen at the version of pi-ai we happen to have installed, so a model released since then simply does not
+// exist to us — gpt-5.6-luna was selectable in the terminal and invisible here for exactly that reason. The
+// runtime reads the live catalog instead, so authorising a model once with `pi` → /login → /model is enough
+// and a newer model is adopted by upgrading pi rather than by editing this file.
+let runtimeP: Promise<any> | null = null
+function modelRuntime(): Promise<any> {
+  const agentDir = getAgentDir()
+  runtimeP ??= (ModelRuntime as any).create({
+    authPath: `${agentDir}/auth.json`,
+    modelsStorePath: `${agentDir}/models-store.json`,
+    allowModelNetwork: true,
+  })
+  return runtimeP!
+}
+
 export function createPiSession(opts: PiSessionOpts): Session {
-  // Prefer the ChatGPT subscription when it is there — one login for pi and codex both — and fall back to
-  // OpenRouter otherwise. Explicit opts/env always win, so this is a default and never a surprise.
+  // WHICH ACCOUNT PAYS — decided from the MODEL, not pinned globally. The chain per model lives in
+  // providers.ts; here we just take the first account we actually hold a credential for. This used to be
+  // "codex if a codex login exists, else OpenRouter", which quietly put every model on one account —
+  // including models that account does not carry, and including models we would rather bill elsewhere.
+  //
+  // An explicit opts.provider / ICA_PI_PROVIDER still wins outright: routing is the default, never a veto.
+  const modelId = opts.model ?? process.env.ICA_PI_MODEL ?? 'gpt-5.6-luna'
+  const pinned = opts.provider ?? process.env.ICA_PI_PROVIDER
+  const routed = pinned ? null : resolveProvider(modelId)
+  if (routed) console.log(`[ica:pi] ${describeResolution(modelId, routed)}`)
+  // No credential for anything in the chain is still a real attempt: the SDK's own error names the missing
+  // key far better than a guess here would, and failing at selection time would hide which model was asked
+  // for. So fall through to the end of the chain and let the request say what is wrong.
+  const provider = pinned ?? routed?.provider ?? 'openrouter'
   const cred = codexCredential()
-  const provider = opts.provider ?? process.env.ICA_PI_PROVIDER ?? (cred ? 'openai-codex-responses' : 'openrouter')
-  const usingCodex = provider === 'openai-codex-responses'
-  const modelId = opts.model ?? process.env.ICA_PI_MODEL ?? (usingCodex ? 'gpt-5.6-luna' : 'deepseek/deepseek-v4-flash')
+  const usingCodex = provider === 'openai-codex'
 
   // THE AGENT'S INSTRUCTIONS. pi's DefaultResourceLoader reads AGENTS.md / CLAUDE.md / SYSTEM.md from cwd and
   // folds them into the system prompt, so the reference goes in the same way codex takes it — as a file the
@@ -155,10 +184,41 @@ export function createPiSession(opts: PiSessionOpts): Session {
 
   async function ensure() {
     if (session) return session
-    registerBuiltInApiProviders()
     const rl = new DefaultResourceLoader({ cwd: opts.cwd, agentDir: getAgentDir() } as any)
     await rl.reload()
-    const model = getModel(provider as any, modelId)
+
+    // The model comes from the LIVE catalog, not a compiled-in list. Falling back to whatever that provider
+    // does have means a missing model degrades to a working agent rather than a crash, and says so once.
+    const runtime = await modelRuntime()
+    const available: any[] = await runtime.getAvailable(provider)
+    const model: any = available.find((m) => m?.id === modelId) ?? available[0]
+    if (!model) throw new Error(`pi: no model available from "${provider}" — authorise one with \`pi\` → /login`)
+    if (model.id !== modelId) console.warn(`[ica:pi] ${modelId} not available from ${provider}; using ${model.id}`)
+
+    // ── ROUTE THROUGH OUR PROXY, when there is one and it can carry this provider ──────────────────────────
+    // SUPERATOM_PLATFORM makes model calls leave the box through one host we control: one domain to whitelist,
+    // no provider key on the machine, and usage counted where it can be trusted.
+    //
+    // BUT NOT FOR EVERY PROVIDER. The ChatGPT backend refuses any relayed request, so it is served by the
+    // CONNECT tunnel instead — and a tunnel works at the TRANSPORT layer, not this one. Rewriting the URL for
+    // it points the request at a proxy that will (correctly) refuse to relay it, which is exactly what
+    // happened: the composer got a 421 rather than a model, produced nothing, and escalated three seconds
+    // later. So these providers keep their real URL and ica/proxy-dispatcher.ts tunnels the connection
+    // underneath.
+    const TUNNELLED = new Set(providersOn('tunnel'))
+    const platform = process.env.SUPERATOM_PLATFORM
+    const proxyBase = platform && process.env.ICA_PROJECT && !TUNNELLED.has(provider)
+      ? `https://proxy.${platform}/p/${process.env.ICA_PROJECT}` : undefined
+    if (proxyBase) {
+      model.baseUrl = `${proxyBase}/${provider}`
+      // The project's own API key travels as the provider credential, because that is the only slot an agent
+      // will populate — the proxy recognises `sk-proj-…`, proves it, and substitutes the real key.
+      if (process.env.ICA_KEY && !model.apiKey) model.apiKey = process.env.ICA_KEY
+      console.log(`[ica:pi] via proxy → ${model.baseUrl}`)
+    } else if (platform && TUNNELLED.has(provider)) {
+      console.log(`[ica:pi] ${provider} keeps its own URL — carried by the tunnel, not relayed`)
+    }
+
     // TELL IT WHERE TO WORK. Without `cwd` the SDK defaults to process.cwd() — the ENGINE's directory, not the
     // agent's workspace — so every tool ran in the wrong place. The model worked around it by prefixing
     // `cd <absolute workspace> &&` onto every command, which costs tokens on each call, makes the step log
@@ -173,7 +233,9 @@ export function createPiSession(opts: PiSessionOpts): Session {
     const sm = opts.noTools ? SessionManager.inMemory()
              : (opts.resumeId ? tryOpenSession(opts.resumeId, opts.cwd) : null) ?? SessionManager.create(opts.cwd)
     ;({ session } = await createAgentSession({
-      cwd: opts.cwd, resourceLoader: rl, sessionManager: sm, model,
+      cwd: opts.cwd, agentDir: getAgentDir(), modelRuntime: runtime,
+      settingsManager: SettingsManager.create(opts.cwd, getAgentDir()),
+      resourceLoader: rl, sessionManager: sm, model,
       // A pure-text agent gets NO tools. Until now `noTools` was not even passed to pi, so the narrator — which
       // is meant to write one sentence — ran with bash, read, edit and write available to it.
       ...(opts.noTools ? { noTools: 'all' as const } : {}),

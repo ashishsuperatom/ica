@@ -1,0 +1,12 @@
+{
+  "name": "superatom-agent-proxy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "One host every coding agent's model traffic leaves through — a reverse proxy for the API providers and a CONNECT tunnel for the ones that refuse to be relayed.",
+  "main": "proxy.mjs",
+  "scripts": {
+    "start": "node proxy.mjs",
+    "check": "node --check proxy.mjs && node --check contract.mjs"
+  }
+}

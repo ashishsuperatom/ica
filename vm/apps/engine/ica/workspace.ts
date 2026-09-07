@@ -16,6 +16,12 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
+
+// The guide is generated from the engine's OWN shared prompts, so the tool and the system prompt can never
+// describe different contracts — one module, two readers.
+const guideImport = new URL('../agents/shared-prompts/authoring-reference.js', import.meta.url).href
+const reviewImport = new URL('../answer-review.js', import.meta.url).href
+
 // The display helpers describe themselves — see FORMAT_HELPERS. Adding one there teaches the agent about it,
 // with no line here to remember to update.
 import { formatHelpText } from '@superatom/scaffold'
@@ -45,6 +51,9 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
   const projectHome = join(s.root, s.projectId)
   const dir = join(projectHome, 'workspace')
   const dbDir = join(projectHome, 'db')
+  // WHAT EACH TURN OPENED. Engine-private, beside the databases rather than in the workspace: it is a record
+  // ABOUT the agent's work, not part of it, and nothing in the workspace should be tempted to read it.
+  const conceptOpensLog = join(projectHome, 'concept-opens.jsonl')
   // Organized by CONCERN, not dumped flat: each concern (data / model / grounding / analyst / connector) holds its
   // own seam + role doc together. CONTEXT.md + run.mjs stay at the workspace root as the entry point + runner.
   for (const sub of ['', 'data', 'model', 'grounding', 'analyst', 'connector', 'composer', 'concepts', 'units', 'programs', 'out', '.tools'])
@@ -109,7 +118,7 @@ however you see fit — there is no setup to do.
 
 ## Tools — just RUN these (they work from ANY directory, first try; each prints JSON to stdout)
 Search the project's knowledge:
-- \`./find-concept "<phrase or name>" [--full]\` → matching concept NAMES (the engine already surfaced the likely ones); add \`--full\` for a matched concept's method. A query is required.
+- \`./find-concept "<phrase or name>" [--full]\` → the NAMES of matching concepts — search whenever you need one; nothing is surfaced for you. Add \`--full\` for a matched concept's method. A query is required.
 Query the data:
 - \`./sources\`                        → the data sources + their kind/dialect.
 - \`./find-schema "<term>" [--source <S>] [--full]\` → search ALL sources for where a field/table lives (SOURCE.TABLE.COLUMN : type); the fastest way to find where data is before querying.
@@ -119,7 +128,7 @@ Query the data:
 Each prints JSON to stdout; run any of them with \`--help\` for its exact arguments. NEVER \`node\`/\`require\`/\`cat\` a \`.mjs\` to do these — just run the tool.
 
 ## Write/run seams (import these in your program/unit/model CODE — they take rich args, not a CLI)
-- Concepts: ./model/model.mjs      — WRITE concepts: \`concept(name, props, meta)\`, \`getConcept(name, asOf?)\`, \`conceptHistory(name)\`. (To SEARCH, use \`./find-concept\`.)
+- Concepts: ./model/model.mjs      — WRITE concepts: \`concept(name, props, meta)\`, \`getConcept(name, asOf?)\`, \`indexHistory(name)\`. (To SEARCH, use \`./find-concept\`.)
 - Ground: ./grounding/grounding.mjs — \`build(config)\` the grounding indexes (grounding agent).
 - Data:   ./data/query.mjs         — \`query()\`/\`sources()\` inside program/unit code.
 ${formatHelpText().split('\n').map((l: string) => l ? `  ${l}` : l).join('\n')}
@@ -183,16 +192,21 @@ export async function sources() {   // list data sources + their kind/dialect
 //          find?, compute?, present?,           ← general facets; compute is a runnable query
 //          source?, grain?, keying?, time?, measures?, dimensions?, parameters?, provenance? }  ← optional
 //   getConcept(name, asOf?)  — the live concept, or (asOf = unix ms) the version live at that instant
-//   conceptHistory(name)     — the full timeline (each version + who/when/why)
+//   indexHistory(name)       — what this NAME has pointed at over time, and who moved it
+//   namesFor(conceptId)      — every name that currently reaches one concept body
 //   concepts() · intents() · units() · put(node) · edge({from,to,type,props}) · node(id) · search(q)
 //
-import { NodeStore, upsertConcept as _c, getConcept as _g, conceptHistory as _ch } from '@superatom/node-store'
+import { NodeStore, upsertConcept as _c, getConcept as _g, indexHistory as _ih, namesFor as _nf } from '@superatom/node-store'
 import { fileURLToPath } from 'node:url'
 const store = new NodeStore(fileURLToPath(new URL('../../db/project.sqlite', import.meta.url)))
 export const concept = (name, props, meta) => _c(store, name, props, meta)
 export const getConcept = (name, asOf) => _g(store, name, asOf)
-export const conceptHistory = (name) => _ch(store, name)
-export const concepts = () => store.listKind('concept')
+export const indexHistory = (name) => _ih(store, name)
+export const namesFor = (conceptId) => _nf(store, conceptId)
+// The concepts a NAME can reach. listKind('concept') would include bodies nothing points at any more —
+// they still exist, deliberately, but they are history, not the model.
+export const concepts = () => store.db.prepare(
+  "SELECT c.* FROM nodes c JOIN nodes i ON json_extract(i.props,'$.target') = c.id WHERE i.kind='index' AND i.valid_to IS NULL GROUP BY c.id").all()
 export const intents  = () => store.listKind('intent')
 export const units    = () => store.listKind('unit')
 export const put  = (n) => store.putNode(n)
@@ -215,9 +229,20 @@ export default store
   await writeFile(join(dir, 'run.mjs'),
 `// The RUN seam. Execute a program through the kernel and see what it produces:
 //   tsx run.mjs programs/<slug>/program.ts '{"someParam":"value"}'
-// The rendered output goes to stdout; the provenance (DAG + per-unit shape + output) is written to
-// that program's program.json. ctx.use resolves unit names from <program>/units then <program>.
+// stdout says it RAN, where the full result is, and the shape of what came back. The result itself — output,
+// DAG, per-unit shapes — goes to that program's program.json, which is also what the engine reads.
+//
+// IT USED TO PRINT THE WHOLE OUTPUT. That is how an agent came to ship a twenty-row ranking of identical
+// zeros: it received the entire table, said "Built and verified", and committed. It had the data and skimmed
+// it. So stdout now carries the SHAPE — "1 distinct (0)" cannot be skimmed the way twenty zeros can — plus
+// the path, so anything larger is fetched deliberately with whatever tool suits it, at any size.
+//
+// And the review line lives HERE, not in the system prompt, because it belongs beside the thing being
+// reviewed: it arrives every time a program runs, at the moment there is something to read, rather than six
+// kilobytes earlier in an instruction competing with finishing the turn.
+// ctx.use resolves unit names from <program>/units then <program>.
 import { runProgram } from '@superatom/scaffold'
+import { describeShape } from ${JSON.stringify(reviewImport)}
 import { writeFile, appendFile, mkdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 // WHAT THE PROGRAM IS DOING, WHILE IT DOES IT. Two destinations, because there are two readers.
@@ -261,7 +286,20 @@ async function main() {
     await writeFile(join(dirname(entry), 'program.json'), JSON.stringify(manifest, null, 2))
     process.stderr.write(\`\\n  graph: \${r.nodes.length} nodes, \${r.edges.length} edges, \${r.branches.length} branches · shape \${r.finalShapeHash} · \${r.ms}ms\\n\`)
     await note({ t: 'program:end', ms: r.ms, nodes: r.nodes.length })
-    console.log(JSON.stringify(r.output, null, 2))
+    // THE SUMMARY CANNOT FAIL THE RUN. It sits inside the same try as the program itself, so without this
+    // guard a bug in describeShape would emit program:failed and rethrow \u2014 reporting a program that ran
+    // perfectly, and whose output is already written to program.json, as a crash. The check exists to make
+    // failures visible; it must not manufacture one.
+    const rel = join(dirname(entry), 'program.json')
+    console.log('\u2713 ran \u00b7 full output \u2192 ' + rel)
+    try {
+      for (const line of describeShape(r.output)) console.log('  ' + line)
+    } catch (se) {
+      process.stderr.write('  [answer] shape summary FAILED (' + String(se?.message ?? se).slice(0, 160) + ') \u2014 the run itself is fine; read ' + rel + '\n')
+    }
+    console.log('')
+    console.log('Read the output as the person who asked would. Empty, sidesteps the question, or figures that')
+    console.log('plainly do not fit \u2014 fix it or escalate.')
   } catch (e) {
     // A crash is the most useful event of all — it is the one the watcher is waiting to hear about, and
     // without it a failed program is indistinguishable from a slow one right up until the turn gives up.
@@ -312,18 +350,30 @@ const C_STOP = new Set(('a an the of on in for by per to and or is are was be wi
   'which who how me my we our you your can do get give show tell find value from over under across').split(' '))
 const stemw = (w) => { for (const suf of ['ing','ed','es','s','ly']) { if (w.endsWith(suf) && w.length - suf.length >= 3) { w = w.slice(0, -suf.length); break } } if (w.length > 3 && w.endsWith('e')) w = w.slice(0, -1); return w }
 const cWords = (s) => new Set(String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !C_STOP.has(w)).map(stemw))
+// SEARCH RUNS OVER NAMES, NOT BODIES. A name is an \`index\` row pointing at a content-addressed concept, and
+// several names can point at one body — the primary phrase and every alias are the same kind of thing. Bodies
+// a name no longer points at still EXIST (a program built last month refers to one) but nothing indexes them,
+// so they cannot surface in a search. That is what the old \`valid_to\` was doing, moved to where it belongs.
+const bodyOf = (idx) => { const t = (propsOf(idx) || {}).target; return t ? store.getNode(t) : undefined }
 export function findConcept(query, limit = 8) {
   const qw = cWords(query)
   if (!qw.size) return []
-  const rows = store.db.prepare("SELECT * FROM nodes WHERE kind = 'concept' AND valid_to IS NULL").all()
+  const rows = store.db.prepare("SELECT * FROM nodes WHERE kind = 'index' AND valid_to IS NULL").all()
   const scored = rows
     .map((n) => { const cw = cWords(n.label); if (!cw.size) return { n, matched: 0, cover: 0 }; let m = 0; for (const w of cw) if (qw.has(w)) m++; return { n, matched: m, cover: m / cw.size } })
     .filter((x) => x.matched > 0)
     .sort((a, b) => (b.matched - a.matched) || (b.cover - a.cover))
-  return scored.slice(0, limit).map((x) => guide(x.n))   // generous: top matches by specificity (best first), no tight tier — the agent filters
+  // Several names can reach one body — return each body once, under the name that matched best.
+  const out = []; const seen = new Set()
+  for (const x of scored) {
+    const body = bodyOf(x.n); if (!body || seen.has(body.id)) continue
+    seen.add(body.id); out.push({ ...guide(body), name: x.n.label })
+    if (out.length >= limit) break
+  }
+  return out
 }
 export function listConcepts() {
-  return store.db.prepare("SELECT label FROM nodes WHERE kind = 'concept' AND valid_to IS NULL ORDER BY label").all()
+  return store.db.prepare("SELECT label FROM nodes WHERE kind = 'index' AND valid_to IS NULL ORDER BY label").all()
     .map((r) => r.label).filter(Boolean)
 }
 `)
@@ -391,10 +441,16 @@ console.log(JSON.stringify({ matched, of: total, note: total === 0 ? 'the concep
 `,
     'get-concept': `// ONE concept, in full guide form: "<exact name>" (as listed by ./find-concept). Returns the guide only — what it is, its rules, where the data lives, how to compute it, how to present it.
 import { findConcept, listConcepts } from ${JSON.stringify(join(dir, 'concepts', 'find.mjs'))}
-const name = process.argv.slice(2).join(' ').trim()
+// WHICH TURN OPENED THIS. One workspace serves every question on a project, and two people asking at once
+// share it — so a timestamp cannot say who opened what, and an append keyed only by time would attribute
+// concepts to the wrong program the first time two turns overlap. The qid travels with the call.
+const argv = process.argv.slice(2)
+const qi = argv.indexOf('--qid')
+const qid = qi >= 0 ? argv[qi + 1] : null
+const name = argv.filter((a, i) => a !== '--qid' && !(qi >= 0 && i === qi + 1)).join(' ').trim()   // qi is -1 when absent; qi+1 would then drop the NAME
 if (!name) { console.log(JSON.stringify({ error: 'a concept name is required — list them with ./find-concept "<phrase>"' })); process.exit(0) }
 const norm = (x) => String(x || '').toLowerCase().replace(/\\s+/g, ' ').trim()
-const hit = findConcept(name, 50).find(c => norm(c.name) === norm(name))
+const hit = findConcept(name, 200).find(c => norm(c.name) === norm(name))
 if (!hit) {
   const near = findConcept(name, 5).map(c => c.name)
   console.log(JSON.stringify({ error: 'no concept by that exact name', didYouMean: near, note: 'names come from ./find-concept' }, null, 2))
@@ -407,6 +463,17 @@ const KEEP = ['name', 'value', 'status', 'rules', 'requires', 'supersedes', 'dat
 const out = {}
 for (const k of KEEP) if (hit[k] !== undefined) out[k] = hit[k]
 console.log(JSON.stringify(out, null, 2))
+
+// RECORD THE OPEN, and never let recording cost the read. This is the mechanical half of "what was this
+// program built from": certain, needing no cooperation, and a superset — opened is not used. The agent's
+// declaration in built.json is the other half, and the difference is a signal of its own: a concept opened
+// and then not used was considered and rejected.
+try {
+  const { appendFileSync, statSync, writeFileSync } = await import('node:fs')
+  const LOG = ${JSON.stringify(conceptOpensLog)}
+  try { if (statSync(LOG).size > 4_000_000) writeFileSync(LOG, '') } catch { /* no file yet */ }
+  appendFileSync(LOG, JSON.stringify({ at: Date.now(), qid, name: hit.name }) + String.fromCharCode(10))
+} catch { /* a log that cannot be written must not cost the concept that was asked for */ }
 `,
     'get-program': `// ONE program, in full: every question form it answers, its saved params, its category.
 // The shortlist (./find-program) says which one to open; this opens it. Read its code from programs/<name>/.
@@ -441,9 +508,30 @@ const source = si >= 0 ? args[si + 1] : undefined
 const skip = si >= 0 ? si + 1 : -1   // index of the source VALUE to drop (only when --source is present)
 const q = args.filter((a, i) => a !== '--full' && a !== '--source' && i !== skip).join(' ').trim()
 if (!q) { console.log(JSON.stringify({ hint: 'find-schema "<term>" [--source <SOURCE>] [--full] — search every datasource for a field/table by name, type, or description' })); process.exit(0) }
-const rows = searchDataSource(store, q, { source, limit: full ? 40 : 60 })
+const r = searchDataSource(store, q, { source, limit: full ? 40 : 60 })
 const view = (e) => full ? e : (e.key + ' : ' + (e.type || '?') + (e.isKey ? ' [PK]' : '') + (e.references ? (' → ' + e.references) : ''))
-console.log(JSON.stringify(rows.map(view), null, 2))
+// SAY WHAT WAS NOT SHOWN. This returns a bounded slice, and a bare array of six fields reads as "there are
+// six". That is not hypothetical: a search for "customer" showed 6 TotalGroup fields out of 324, and the
+// agent concluded TotalGroup held almost no customer data. The count and the per-source split make a slice
+// recognisable as one, and point at the flag that narrows it.
+const spread = Object.entries(r.bySource).map(([s, n]) => s + ':' + n).join(' · ')
+console.log(JSON.stringify({
+  fields: r.entries.map(view),
+  shown: r.shown,
+  matched: r.matched,
+  bySource: r.bySource,
+  note: r.shown < r.matched
+    ? 'showing ' + r.shown + ' of ' + r.matched + ' matching fields (' + spread + ') — narrow the term, or scope with --source <SOURCE>'
+    : 'all ' + r.matched + ' matching fields',
+}, null, 2))
+`,
+    'authoring-guide': `// The authoring guide — how to WRITE a program: the contract types, the mechanics, the canonical example.
+// Pulled rather than preloaded. It is only needed once the agent is about to write a unit, and most turns reuse
+// an existing program instead — so it lives here rather than in every question's system prompt. Read it when
+// you are ready to write, or again if a long turn has pushed it out of context.
+import { authoringGuide } from ${JSON.stringify(guideImport)}
+const type = process.argv.slice(2).filter((a) => !a.startsWith('-'))[0] || 'default'
+console.log(authoringGuide(type))
 `,
     'find-program': `// Programs that answered a similar question — the SHORTLIST: what each answers, and its name.
 // Deliberately no params and no source: a list is for choosing which one to look at. ./get-program <name> opens one.
@@ -502,8 +590,9 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
   // never needs to read the .mjs to learn what to pass, and never sees the implementation.
   const usages: Record<string, string> = {
     'find-concept': 'find-concept "<phrase>"   → the NAMES of matching concepts. A query is required. Read one with get-concept.',
-    'get-concept':  'get-concept "<exact name>"   → ONE concept\'s guide: what it is, its rules, where the data lives, how to compute and present it',
+    'get-concept':  'get-concept "<exact name>" [--qid <qid>]   → ONE concept\'s guide: what it is, its rules, where the data lives, how to compute and present it. Pass --qid so the program records what it was built from.',
     'find-schema':  'find-schema "<term>" [--source <SOURCE>] [--full]   → search ALL datasources for a field/table by name, type, or description (SOURCE.TABLE.COLUMN : type); --source filters to one; --full adds PK/nullable/references',
+    'authoring-guide': 'authoring-guide [type]   → how to WRITE a program: the contract, the mechanics, the canonical example. Read it when you are about to write.',
     'find-program': 'find-program "<question>"   → the shortlist: programs that answered a similar question (what it answers · name · category)',
     'get-program': 'get-program <program>   → ONE program in full: every question form it answers, its saved params, its category',
     'sources':      'sources   → every data source with its kind + dialect (JSON)',

@@ -13,11 +13,15 @@
 //   ICA_OC_URL=http://127.0.0.1:4096   (opencode: share ONE standalone server, no per-engine spawn)
 //   pnpm exec tsx engine.ts
 
+// FIRST IMPORT, deliberately: it installs the fetch dispatcher, and anything that fetches before it runs
+// would bypass the proxy. Does nothing unless HTTPS_PROXY is set.
+import './ica/proxy-dispatcher.js'
+import { fetchBoxCredentials, isFleetBox } from './ica/box-credentials.js'
 import WebSocket from 'ws'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { existsSync, mkdirSync, rmSync, readFileSync } from 'node:fs'
-import { writeFile, rm } from 'node:fs/promises'
+import { writeFile, rm, readdir, stat } from 'node:fs/promises'
 import { execSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { execProgram, answerView } from './exec-program.js'
@@ -35,7 +39,6 @@ import { log, readJsonSafe } from './log.js'
 import { createInspector } from './inspect.js'
 import { NodeStore, ROOT, ensureRoot, intentId, SqliteVecIndex, indexText, backfillMissing, hybridSearch } from '@superatom/node-store'
 import { bgeEmbedder } from './embed.js'
-import { createSpanFirer } from './retrieval/span-firing.js'
 // TYPE-ONLY, and it must stay that way: the deploy bundles package vm/ alone, so this path does not exist in a
 // built image. tsx erases a type-only import, which is why the container runs without it. Making it a value
 // import would break every deploy while working perfectly here.
@@ -213,51 +216,15 @@ const graph = new NodeStore(join(DB_DIR, 'project.sqlite'))
 // (most-specific match), falling back to fewer-word / more-general concepts when the specific combination isn't
 // present. Pure lexical over the node-store (no vectors). Returns NAMES only — the agent opens the winner via
 // find-concept. Dynamic count: the top specificity tier (within 1 of the best), capped.
-const CONCEPT_STOP = new Set(('a an the of on in for by per to and or is are was be with as at this that it id ' +
-  'what which who how me my we our you your can do get give show tell find value from over under across').split(' '))
-// Light stem so word-FORMS match (rate/rates/rating -> rat, charge/charged -> charg, bill/billing -> bill).
-// Morphology only — deliberately NOT synonyms (bill != charge). If a question uses a different word than the
-// concept name, it simply won't match; we keep it simple rather than maintain a synonym layer.
-const stem = (w: string): string => {
-  for (const suf of ['ing', 'ed', 'es', 's', 'ly']) { if (w.endsWith(suf) && w.length - suf.length >= 3) { w = w.slice(0, -suf.length); break } }
-  if (w.length > 3 && w.endsWith('e')) w = w.slice(0, -1)
-  return w
-}
-const conceptWords = (s: string): Set<string> =>
-  new Set(String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 1 && !CONCEPT_STOP.has(w)).map(stem))
-// Favour RECALL, not precision: surface anything plausibly relevant and let the AGENT reject/pick. Two cheap
-// recall sources unioned — LEXICAL (name-word overlap) and SEMANTIC (the vector index, which catches paraphrase/
-// synonyms for free, no synonym map to maintain). We ORDER by specificity (most name-words covered first) so the
-// best is on top, but we do NOT cut the tail — better the agent sees an extra it can ignore than miss the right one.
-async function rankConceptsBySpecificity(question: string, cap: number): Promise<string[]> {
-  const qw = conceptWords(question)
-  if (!qw.size) return []   // boundary: empty / all-stopword question -> surface nothing
-  const byId = new Map<string, { name: string; matched: number; cover: number; sem: number }>()
-  for (const c of graph.listKind('concept', 1000) as any[]) {
-    // Surface ALL live concepts, ordered by specificity — the agent filters (recall over precision).
-    const cw = conceptWords(c.label)
-    let m = 0; for (const w of cw) if (qw.has(w)) m++
-    byId.set(c.id, { name: c.label, matched: m, cover: cw.size ? m / cw.size : 0, sem: 0 })
-  }
-  if (vectors) {   // semantic recall: rank the vector hits so paraphrase-only matches still surface
-    try {
-      const hits = await hybridSearch(graph, vectors, bgeEmbedder, question, { kind: 'concept', limit: cap })
-      let r = hits.length; for (const h of hits) { const e = byId.get(h.id); if (e) e.sem = r; r-- }
-    } catch { /* semantic is optional; lexical still works */ }
-  }
-  return [...byId.values()]
-    .filter(c => c.matched > 0 || c.sem > 0)                                            // lexical OR semantic relevance
-    .sort((a, b) => (b.matched - a.matched) || (b.cover - a.cover) || (b.sem - a.sem))  // specificity first, semantic as recall/tiebreak
-    .slice(0, cap)
-    .map(c => c.name)
-}
+// The engine-side concept ranker lived here — lexical specificity unioned with vector recall — and went with
+// span firing: the agent searches for its own concepts now. Deleted rather than kept, because it read
+// listKind('concept'), which after the index change returns BODIES including ones no name points at any more.
+// Dead code that would be subtly wrong if revived is worse than no code.
 // Semantic index (sqlite-vec) over the SAME db — GUARDED: if the native extension or model isn't present on
 // this host yet, semantic search is simply disabled (FTS keeps working), never a crash. See embed.ts.
 let vectors: SqliteVecIndex | null = null
 try { vectors = new SqliteVecIndex(graph.db, bgeEmbedder.id, bgeEmbedder.dim) }
 catch (e: any) { console.warn('[semantic] sqlite-vec unavailable — semantic index disabled:', e?.message ?? e) }
-// §3 span-firing retriever — an A/B alternative to rankConceptsBySpecificity, logged side-by-side for comparison.
-const spanFirer = createSpanFirer(graph, bgeEmbedder, vectors)   // the ONE vector store — forms are indexed there like everything else
 // Backfill pre-existing intents on boot so semantic reuse can search history, not just newly-built ones.
 // Best-effort + non-blocking (never delays boot); degrades silently if the model/native deps aren't present.
 if (vectors) void backfillMissing(graph, vectors, bgeEmbedder, { kind: 'intent' })
@@ -832,7 +799,6 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   // `sim` = cosine similarity to the asked question (0..1) — the number that says HOW CLOSE this candidate is.
   // `score` is only the RRF rank-fusion value used for ordering; it is a position, not a measure of fit.
   let programCandidates: { question: string; program?: string; score: number; sim: number | null }[] = []   // engine-searched matches handed to the composer
-  let conceptNames: string[] = []   // engine-searched CONCEPT names (names only) surfaced to composer + analyst
   let modifyTarget: ProgramTarget | null = null
   // ── WHAT THIS VERB ACTS ON ────────────────────────────────────────────────────────────────────────────
   // Resolved ONCE, from the session's record of what is on screen, for every verb that needs it. Each used to
@@ -887,32 +853,18 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     } catch (e: any) {
       console.log(`[ica] candidate search failed (${e?.message ?? e}) — composer builds from concepts`)
     }
-    // Surface relevant CONCEPT NAMES by SPECIFICITY (CSS-like: most-question-words-covered wins), names only —
-    // the agent opens the winner via find-concept for the method, so we never bias it with a formula.
-    // TIMED SEPARATELY. Both retrievers run on every question and only one is used, so when this stretch is slow
-    // the only useful question is WHICH — a single number across the pair says nothing about what to fix.
-    const specT0 = Date.now()
-    try {
-      const specificity = await rankConceptsBySpecificity(question, 8)   // current retriever (name-word specificity + semantic recall)
-      const specMs = Date.now() - specT0
-      let fired: { concepts: string[]; scored: { name: string; activation: number }[]; unexplained: string[] } = { concepts: [], scored: [], unexplained: [] }
-      const fireT0 = Date.now()
-      try { fired = await spanFirer.fire(question) } catch (e: any) { log.warn('span-firing', 'fire failed', e) }
-      const fireMs = Date.now() - fireT0
-      // Log BOTH retrievers side-by-side so we can compare which surfaces the right concepts.
-      console.log(`[retrieval] specificity (${specMs}ms) → [${specificity.join(', ')}]`)
-      console.log(`[retrieval] span-firing (${fireMs}ms) → fires [${fired.concepts.join(', ')}]  ·  ranked [${fired.scored.slice(0, 6).map(s => `${s.name} ${s.activation.toFixed(2)}`).join(', ')}]${fired.unexplained.length ? `  ·  unexplained [${fired.unexplained.slice(0, 8).join(' | ')}]` : ''}`)
-      // CLEAN A/B — surface EXACTLY ONE retriever, no mixing/fallback. Default = span-firing (B); USE_SPECIFICITY=1 = specificity (A).
-      // Span-firing surfaces the concepts that FIRED plus the rest of its own ranking (still one retriever — it just
-      // stops discarding what it already scored). Only NAMES travel, and reading one is now a deliberate
-      // ./get-concept call, so an extra candidate costs a line and never lands unread in the agent's context.
-      // Firing alone was too tight: "which projects are at risk" fired only 'project name, customer, manager and
-      // type' (6.23) and dropped 'at-risk project' (5.75) — the concept that defines the question.
-      const TOP_CONCEPTS = 6
-      const spanNames = Array.from(new Set([...fired.concepts, ...fired.scored.map(s => s.name)])).slice(0, TOP_CONCEPTS)
-      conceptNames = process.env.USE_SPECIFICITY ? specificity : spanNames
-      if (conceptNames.length) console.log(`[ica] concepts surfaced: ${conceptNames.join(', ')}`)
-    } catch (e: any) { console.log(`[ica] concept search failed (${e?.message ?? e})`) }
+    // NO ENGINE-SIDE CONCEPT RETRIEVAL. The engine used to pre-search concepts and hand the agent a shortlist of
+    // six names. Two retrievers ran on every question — specificity (lexical, ~250ms) and span firing (a model
+    // forward pass per 2-4-gram of the question, MEASURED at 8.4s, 8.6s and 16.5s on three consecutive real
+    // questions) — and only one was used. Span firing was 93-96% of everything that happened before the composer
+    // was even asked, and on all three it surfaced what the 250ms lexical pass had already ranked first; on one
+    // of them every span came back unexplained, because most 2-grams of a sentence are function words that
+    // cannot match a concept name by construction.
+    //
+    // The agent searches for itself now. `./find-concept` is full-text over the concept store, it answers in
+    // milliseconds, and the phrase the AGENT chooses is a better cue than n-grams of the user's wording — it is
+    // the agent's current hypothesis, formed after seeing the problem. It can also search more than once, which
+    // a single pre-fire never could.
   }
 
   // Liveness keepalive: the UI arms a 25s watchdog and re-arms on every message. Claude-code's PTY streams
@@ -1316,7 +1268,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       // CAPPED, like the analyst below. This await was unbounded: a composer that never returned held the
       // session's busy flag for good, and every later question in that chat was refused with "already
       // answering". The cap is generous — it exists so a turn always ends, not to hurry one along.
-      const cAsk = composer.ask(question, handlers, { qid, sid, candidates: programCandidates, conceptNames, modify: modifyTarget ?? undefined, resolvedQuestion })
+      const cAsk = composer.ask(question, handlers, { qid, sid, candidates: programCandidates, modify: modifyTarget ?? undefined, resolvedQuestion })
       cAsk.catch(() => {})   // if we abandon it, don't leak an unhandled rejection
       let cCap: ReturnType<typeof setTimeout> | undefined
       const cRaced: any = await Promise.race([cAsk, new Promise((res) => { cCap = setTimeout(() => res(TIMED_OUT), MAX_TURN_MS) })])
@@ -1337,7 +1289,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       currentAgent = 'analyst'
       emit(reply, A('status', 'analyst', { progress: 'Handing off to the analyst for deeper analysis…', sid }))
       workingAgent = 'analyst'; stopSession = () => { try { (analyst as any).session?.reset?.() } catch { /* best-effort */ } }
-      const askP = analyst.ask(question, handlers, { qid, conceptNames, reason: escalateReason, modify: modifyTarget ?? undefined, resolvedQuestion })
+      const askP = analyst.ask(question, handlers, { qid, reason: escalateReason, modify: modifyTarget ?? undefined, resolvedQuestion })
       askP.catch(() => {})   // if we abandon it on timeout, don't leak an unhandled rejection
       let capT: ReturnType<typeof setTimeout> | undefined
       const raced: any = await Promise.race([askP, new Promise((res) => { capT = setTimeout(() => res(TIMED_OUT), MAX_TURN_MS) })])
@@ -1465,6 +1417,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         props: { dir: authoredProgramDir, authoredBy: authoredMeta, category: r.category, canonicalQuestions: canonical } })
       graph.putEdge({ from: builtIntentId, to: `prog:${slug}`, type: 'program' })
       console.log(`[ica] program ${slug} answers ${canonical.length} question form(s)${programCanonical.length ? '' : ' (writer declared none — user question only)'}`)
+      recordConceptsUsed(slug, qid, b?.usedConcepts)
     }
     // No explicit wake needed — the always-running consolidation timer picks this up on its next tick. That
     // is deliberate: the timer, not this signal, is the guarantee (it survives restarts and missed signals).
@@ -1807,7 +1760,11 @@ async function selfCheck(): Promise<{ ok: boolean; detail: string }> {
 let reconnectDelay = 1000
 function connect() {
   const url = `${HUB}/_ws/${encodeURIComponent(PROJECT)}?key=${encodeURIComponent(KEY)}`
-  console.log(`[ica] connecting to hub ${url} as code-engine (no ports opened)`)
+  // THE KEY NEVER GOES IN THE LOG. It is in the query string because that is the only channel a WebSocket
+  // handshake gives us, but `docker logs` is read by anyone who can reach the host, and this key is what
+  // authenticates the vault handout for this project — printing it puts every pooled provider credential one
+  // `docker logs` away. Log the destination, never the credential.
+  console.log(`[ica] connecting to hub ${HUB}/_ws/${PROJECT} as code-engine (no ports opened)`)
   const ws = new WebSocket(url)
   hub = ws
   // KEEPALIVE. An idle WebSocket is closed at the edge, and this one is idle most of the time — the engine
@@ -1877,8 +1834,147 @@ setInterval(() => { conceptConsolidateTick().catch((e) => console.log('[concept-
 // analyst (answers), connector (data sources), modeler (consolidation), reflex (front door). Other
 // agents stay on-demand. Fire-and-forget + per-agent logs so they're visible in the boot log; failures are
 // non-fatal (the agent just falls back to lazy spawn on first use).
+// One turn on a disposable claude session, purely to prove the box's credential authenticates. Throws on
+// failure so the readiness banner shows it, and names the specific "not logged in" case: that string is what
+// a stripped or expired credential looks like from the outside, and reading it as a broken agent has cost
+// real hours before.
+async function verifyBoxCredential(): Promise<void> {
+  const probe = createSession('claude-code', { cwd: WORKSPACE, model: 'claude-haiku-4-5-20251001' })
+  try {
+    const r = await probe.run('Reply with exactly: OK')
+    const text = (r?.lastLines ?? '').trim()
+    if (/not logged in|please run \/login|login expired|invalid api key/i.test(text)) {
+      throw new Error('credential rejected — the agent reports it is not logged in')
+    }
+    if (!text) throw new Error('no reply — could not confirm the credential works')
+  } finally { try { probe.stop() } catch { /* nothing to clean up if it never started */ } }
+}
+
+// ── WHAT A PROGRAM WAS BUILT FROM ───────────────────────────────────────────────────────────────────────
+// Nothing recorded this, so "have the concepts this program rests on changed since it was written" — the one
+// question that decides whether reusing it is safe — could not be asked. The agent judged it instead, from a
+// similarity score about the QUESTION, which says nothing about whether the program's foundations moved.
+//
+// TWO RECORDS, deliberately not merged:
+//   opened    ./get-concept wrote a line when it was read. Mechanical, certain, and a SUPERSET — opening is
+//             not using.
+//   declared  the writer named it in built.json. Meaningful, and only as reliable as the writer.
+// Opened-but-not-declared is a signal of its own: considered, and rejected. Collapsing the two early would
+// turn a mechanical fact into an assumption, so both are kept and each edge says which it is.
+//
+// STALENESS NEEDS NO VERSION PINNING. A concept's live node carries `valid_from` — when THIS version became
+// current — and a program node carries its own. A used concept whose valid_from is later than the program's
+// has moved since; that comparison is the whole check, and it works on edges written today.
+function recordConceptsUsed(slug: string, qid: string, declared: unknown): void {
+  try {
+    const names = new Map<string, 'declared' | 'opened' | 'both'>()
+    for (const n of Array.isArray(declared) ? declared : []) {
+      if (typeof n === 'string' && n.trim()) names.set(n.trim(), 'declared')
+    }
+    // Opens are keyed by QID, never by time: one workspace serves every question on a project, and two people
+    // asking at once would otherwise have their concepts attributed to each other's programs.
+    const log = join(WORKSPACE, '..', 'concept-opens.jsonl')   // engine-private, beside the DBs — see prepareWorkspace
+    if (existsSync(log)) {
+      for (const line of readFileSync(log, 'utf8').split('\n')) {
+        if (!line.trim()) continue
+        try {
+          const e = JSON.parse(line)
+          if (e?.qid !== qid || typeof e?.name !== 'string') continue
+          names.set(e.name, names.get(e.name) === 'declared' ? 'both' : 'opened')
+        } catch { /* a torn line at the end of an append-only log */ }
+      }
+    }
+    if (!names.size) return
+    let written = 0
+    for (const [name, how] of names) {
+      // THE EDGE POINTS AT THE BODY, NOT THE NAME. A concept is content-addressed, so this reference stays
+      // true when the name is later re-pointed at a different body — which is the whole reason the pointer
+      // exists. The NAME rides along in the edge's props, so nothing readable is lost: a human reading
+      // provenance sees "customer invoice total", and the graph still holds the exact body that was used.
+      const idx = graph.getNode(`index:${name.trim().toLowerCase().replace(/[^a-z0-9.]+/g, '-').replace(/(^-|-$)/g, '')}`)
+      const target = (idx?.props as any)?.target
+      const node = target ? graph.getNode(target) : undefined
+      if (!node) continue   // a name that resolves to nothing is not an edge, it is a typo
+      graph.putEdge({ from: `prog:${slug}`, to: node.id, type: 'built_from', props: { how, name, at: Date.now() } })
+      written++
+    }
+    const by = [...names.values()]
+    console.log(`[ica] program ${slug} built_from ${written} concept(s) · ${by.filter(h => h !== 'opened').length} declared · ${by.filter(h => h !== 'declared').length} opened`)
+  } catch (e: any) {
+    // Provenance is worth having and never worth an answer.
+    console.warn(`[ica] could not record concepts for ${slug} (${e?.message ?? e})`)
+  }
+}
+
+// ── IS THIS PROJECT'S CONCEPT STORE MIGRATED? ───────────────────────────────────────────────────────────
+// Concepts are content-addressed and reached through `index` nodes. A database written before that change has
+// concepts and no index — and every seam that finds one searches the index, so the project answers "no
+// concepts" to everything. That is indistinguishable from a project that genuinely has none: no error, no
+// empty result to notice, just an agent rebuilding from scratch on every question, for ever.
+//
+// One line at boot, because this is the only moment anyone would see it. It does not migrate on its own: a
+// rewrite of every concept in a project is not something a process should decide to do while starting up.
+function checkConceptIndex(): void {
+  try {
+    const concepts = graph.nodesByKind('concept').length
+    const indexes = graph.nodesByKind('index').length
+    if (concepts > 0 && indexes === 0) {
+      console.error(`[ica] ✗ ${concepts} concepts and NO index — this project predates content-addressed concepts.`)
+      console.error('[ica]   Every concept is invisible to ./find-concept until it is migrated. Nothing will say so again.')
+      console.error(`[ica]   Fix: pnpm exec tsx apps/engine/tools/migrate-concept-index.mts ${PROJECT}          (dry run)`)
+      console.error(`[ica]        pnpm exec tsx apps/engine/tools/migrate-concept-index.mts ${PROJECT} --apply`)
+    }
+  } catch { /* a boot check must never be the reason a boot fails */ }
+}
+
+// ── ABANDONED PROGRAM DIRECTORIES ───────────────────────────────────────────────────────────────────────
+// A program becomes findable when its turn COMPLETES: built.json is read and a `prog:<slug>` node is written.
+// Kill the engine mid-turn and the directory is already on disk with no node — invisible to ./find-program and
+// to the engine's own search, but plainly visible to `ls`. So the agent sees a directory that looks like an
+// answer to the question it is being asked, and nothing can tell it that program never ran.
+//
+// TWO CONDITIONS, BOTH REQUIRED, because either alone deletes working code:
+//   not registered   — but view.* programs are found by FILE EXISTENCE (verbs/view.ts findView), never by a
+//                      node, so they are legitimately absent from the graph. Excluded by name.
+//   never ran        — run.mjs writes program.json on a successful run. Six directories here are unregistered
+//                      yet ran fine, left behind by graph rebuilds; they are somebody's work and are kept.
+// Only a directory that is both was abandoned before it ever produced anything.
+//
+// And nothing recent: a turn in flight during a restart is exactly the case that creates these, so anything
+// touched in the last ten minutes is left alone rather than raced.
+async function sweepAbandonedPrograms(): Promise<void> {
+  const dir = join(WORKSPACE, 'programs')
+  if (!existsSync(dir)) return
+  const registered = new Set(graph.nodesByKind('program').map((n) => n.id.replace(/^prog:/, '')))
+  const cutoff = Date.now() - 10 * 60_000
+  const gone: string[] = []
+  try {
+    for (const name of await readdir(dir)) {
+      if (name.startsWith('.') || name.startsWith('example.') || name.startsWith('view.')) continue
+      if (registered.has(name)) continue
+      const p = join(dir, name)
+      try {
+        const st = await stat(p)
+        if (!st.isDirectory() || st.mtimeMs > cutoff) continue
+        if (existsSync(join(p, 'program.json'))) continue   // it ran once — not abandoned, just unregistered
+        await rm(p, { recursive: true, force: true })
+        gone.push(name)
+      } catch { /* a directory that vanished under us needs no sweeping */ }
+    }
+  } catch { /* unreadable programs/ is the workspace's problem, not the sweep's */ }
+  if (gone.length) console.log(`[ica] removed ${gone.length} abandoned program director${gone.length === 1 ? 'y' : 'ies'} (never ran, not registered): ${gone.join(', ')}`)
+}
+
 let warmed = false
 async function warmEssentialAgents() {
+  // BEFORE any agent is spawned. A credential that arrives after the agent has started is a credential the
+  // agent never sees — it inherits this process's environment once, at spawn.
+  checkConceptIndex()
+  await sweepAbandonedPrograms()
+  let credGap: string[] = []
+  try { const c = await fetchBoxCredentials(); if (c.fleet) credGap = c.missing }
+  catch (e: any) { console.warn(`[ica] box credentials: ${e?.message ?? e} — continuing with whatever this box has`) }
+
   if (warmed) return; warmed = true
   console.log('[ica] warming essential agents (analyst · connector) and the concept index…')
   const warm = async (name: string, p: Promise<unknown>): Promise<{ name: string; ok: boolean; ms: number }> => {
@@ -1888,22 +1984,37 @@ async function warmEssentialAgents() {
   }
   const results = await Promise.all([
     warm('analyst',   analystSlot.get().then(a => a.session.warmup?.())),
+    // DOES THE CREDENTIAL ACTUALLY WORK? warm-up above only proves a process started and its prompt appeared,
+    // which stays true with no credential at all — that is exactly how a box that could not answer anything
+    // reported every agent healthy. One real round trip is the difference between "the TUI is up" and "this
+    // box can answer", and boot is the cheapest possible moment to find out: the alternative is finding out
+    // from a user's question, hours later, where it reads as an expired token rather than a bad boot.
+    //
+    // On a THROWAWAY session, never the analyst's — a probe turn on the analyst would sit in its transcript
+    // and in the context of every question that followed. And only on a fleet box: a laptop has its own login
+    // and gets restarted constantly, so this would be a pointless tax on the inner loop.
+    ...(credGap.length === 0 && isFleetBox() ? [warm('credential', verifyBoxCredential())] : []),
     warm('connector', connectorSlot.get().then(a => a.session.warmup?.())),
     // The concept index is an agent-shaped cost even though it is not an agent: every concept's surface forms
     // have to be embedded before the first question can be retrieved for, it is cached in memory only, and so
     // it was rebuilt on the first question after every restart — in the foreground, 27s, while the user waited.
     // Warming it here moves that onto the boot where it belongs and off the question that happened to be first.
-    warm('concepts',  spanFirer.warm()),
+
   ])
   // ONE unmistakable line the user can look for: the engine has finished booting and every essential agent
   // is up (or which one failed). "Fully ready" vs "ready with warnings" — never ambiguous.
-  const allOk = results.every(r => r.ok)
+  // A MISSING CREDENTIAL IS NOT READY. Warm-up proves a process started and its prompt appeared, which on a
+  // box with no credential is still true — that is how a machine that could not answer a single question
+  // printed FULLY READY. The banner is the one line people trust, so anything it cannot back up must not
+  // appear in it.
+  const allOk = results.every(r => r.ok) && credGap.length === 0
   const roster = results.map(r => `${r.name} ${r.ok ? '✓' : '✗'} ${(r.ms / 1000).toFixed(1)}s`).join(' · ')
   const sources = await listSources().then(s => s.length).catch(() => 0)
   const bar = '═'.repeat(64)
   console.log(`\n${bar}`)
   console.log(`  ${allOk ? '✅ ENGINE FULLY READY' : '⚠️  ENGINE READY (with warnings)'} — project ${PROJECT}`)
   console.log(`     agents: ${roster}`)
+  if (credGap.length > 0) console.log(`     ✗ NO CREDENTIAL: ${credGap.join(', ')} — those agents cannot answer (retrying the vault)`)
   console.log(`     datasources=${sources} · idle, waiting for questions`)
   console.log(`${bar}\n`)
 }

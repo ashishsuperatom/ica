@@ -106,13 +106,16 @@ YOU decide how each figure reads — you are the only thing holding both the raw
 MOST CELLS ARE PLAIN: a number is a number, a name is a string. That is what sorts, right-aligns and totals,
 and it is the default. Wrap one only to carry what the value itself cannot:
 - `{"value": <the name>, "id": <its id>}` — this cell NAMES something the reader can open on its own. If you
-  have the id, send it; it is the only handle on that thing.
+  have the id, send it; it is the only handle on that thing. The KIND is said ONCE, on the column
+  (`entity`) — opening a cell means asking for that kind by that id, so an id with no kind opens nothing,
+  and a kind with no id opens nothing either. Put `entity` on a CELL only when one column mixes kinds;
+  repeating the column's own kind on every row is bulk that says nothing new.
 - `{"value": <the number>, "display": "<how it reads>"}` — only when the wording varies ROW BY ROW, such as a
   column holding several currencies. A whole column's formatting belongs on the column.
 
 HOW A NUMBER READS is said once on the COLUMN, never per row. Money, hours and percentages are the same thing —
 a number with a unit and a precision — so there is one set of keys and money is simply `unit: "AUD"`:
-`{"label": "<heading>", "entity": "<what kind of thing this column names — defaults to the table name>", "unit": "<AUD | h | % | kg …>",
+`{"label": "<heading>", "entity": "<what kind of thing this column names — required for its cells to be openable>", "unit": "<AUD | h | % | kg …>",
 "decimals": <how precise the figure really is>, "scale": "compact" (4.16 M rather than 4,160,000),
 "good": "high"|"low" (which direction is favourable, so the figure can be toned — omit it and nothing is
 coloured), "mid": <the line good turns on, default 0>, "bar": true (shade the cell by magnitude)}`.

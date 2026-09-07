@@ -19,6 +19,8 @@ import { channelAdapter } from '../../../clients/messaging/index.js'
 // Speech-to-text for voice clients (mobile). A SELF-CONTAINED module in src/transcription/ —
 // this import and the /api/transcribe route below are its ONLY touchpoints in the worker.
 import { handleTranscribe } from './transcription/index.js'
+// proxy.superatom.site — self-contained. Delete src/proxy/ and these two lines and nothing else changes.
+import { handleProxyHost, PROXY_SUBDOMAIN } from './proxy/index.js'
 import { createMachine, stopMachine, FLY_APP } from './fly.js'
 // Auth: token primitives + Clerk→platform-token mint (./auth/tokens.ts) and the mobile browser-redirect
 // device flow (./auth/mobile.ts). worker.ts only routes to these; the rules live in the module.
@@ -135,6 +137,19 @@ export default {
     const url  = new URL(request.url)
     const path = url.pathname
     const isWs = request.headers.get('upgrade') === 'websocket'
+
+    // ── proxy.superatom.site — model traffic ──────────────────────────────────
+    // BEFORE the site routing below, which would otherwise resolve `proxy` as a project subdomain and hand
+    // back an app. Everything behind this line lives in src/proxy/ and is reachable only from here.
+    // The HOST HEADER, not url.hostname: `wrangler dev` rewrites the request URL to localhost, so a hostname
+    // check cannot be exercised locally at all. Reading the header is also simply what a worker behind any
+    // proxy should do, and in production Cloudflare sets both to the same thing.
+    // x-forwarded-host first: `wrangler dev` rewrites BOTH url.hostname and the Host header to localhost, so
+    // without it this route cannot be exercised outside production at all. Cloudflare sets it in front of the
+    // worker, and it is the conventional header for "the host the client actually asked for".
+    const reqHost = (request.headers.get('x-forwarded-host') ?? request.headers.get('host') ?? url.hostname)
+      .split(':')[0].toLowerCase()
+    if (reqHost === `${PROXY_SUBDOMAIN}${SITE_SUFFIX}`) return handleProxyHost(request, env, ctx)
 
     // ── *.superatom.site — subdomain-addressed apps ───────────────────────────
     // Only document/SPA requests are host-routed here; /_ws/*, /api/*, and /mobile/* (the device-login page)
@@ -345,6 +360,39 @@ export default {
       return handleTranscribe(request, env, (token, secret) => verifyJwt(token, secret))
     }
 
+    // ── Credentials: what keys exist, who may use them ──────────────────────
+    // Superadmin only, and POLICY only. It reports whether each named secret is PRESENT, never its value —
+    // an admin screen that can display a key is an admin screen that leaks one. Putting a value in stays a
+    // deliberate `wrangler secret put`, because a worker able to write its own secrets is a worker able to
+    // hand them out.
+    if (path.startsWith('/api/credentials')) {
+      if (!(await requireSuperadmin(request, env))) return new Response('unauthorized', { status: 401 })
+      return handleCredentialsAdmin(request, env, path)
+    }
+
+    // ── Rotating a project's API key ────────────────────────────────────────
+    // Superadmin only. The key sits in every engine's .env and on the proxy box, and it unlocks that
+    // project's pooled provider credentials — so it must be rotatable, and rotating it must not require an
+    // outage. Two steps, deliberately separate: /rotate issues a SECOND key (both work), then /prune drops
+    // everything except the one now in use. A rotation that costs downtime is one nobody performs, which is
+    // how an exposed key stays live.
+    if (path.startsWith('/api/project-key/')) {
+      if (!(await requireSuperadmin(request, env))) return new Response('unauthorized', { status: 401 })
+      const rest = path.slice('/api/project-key/'.length)
+      const [projectId, action] = rest.split('/')
+      if (!projectId || !action) return Response.json({ error: 'use /api/project-key/<projectId>/rotate|prune' }, { status: 400 })
+      const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
+      if (request.method === 'POST' && action === 'rotate') {
+        return stub.fetch(new Request('http://do/keys/add', { method: 'POST' }))
+      }
+      if (request.method === 'POST' && action === 'prune') {
+        return stub.fetch(new Request('http://do/keys/prune', {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: await request.text(),
+        }))
+      }
+      return Response.json({ error: 'unknown action' }, { status: 404 })
+    }
+
     // ── Project creation (with Fly Machine provisioning) ────────────────────
     if (request.method === 'POST' && path === '/api/projects') {
       // An organisation runs its own projects — its admin creates them. Superadmin may act anywhere.
@@ -372,6 +420,18 @@ export default {
 
     // ── Domains API (subdomain → projectId registry; forwarded to GlobalDO) ──
     if (path.startsWith('/api/domains')) {
+      // RESERVED NAMES. Some subdomains are answered by this worker itself, so letting a project claim one
+      // would take an address the platform is already using — the claim would appear to succeed and then
+      // quietly never route, which is the worst way for it to fail. Checked here, at the only place a name is
+      // taken, rather than trusted to nobody trying.
+      if (request.method === 'POST' && path === '/api/domains/claim') {
+        const b = await request.clone().json().catch(() => ({})) as any
+        const want = String(b?.subdomain ?? '').toLowerCase().trim()
+        if (want && RESERVED_SUBDOMAINS.has(want)) {
+          return new Response(JSON.stringify({ ok: false, error: `"${want}" is reserved by the platform` }),
+            { status: 409, headers: { 'content-type': 'application/json' } })
+        }
+      }
       // A subdomain decides which project a visitor's browser is handed, so claiming one is an act ON that
       // project and needs the same standing as provisioning it. Releasing one takes a customer's address away.
       // This forwarded to the DO with no auth at all.
@@ -576,6 +636,19 @@ async function handleProjectMutate(request: Request, env: Env, ctx: ExecutionCon
 // ── *.superatom.site host routing ────────────────────────────────────────────
 
 const SITE_SUFFIX = '.superatom.site'
+// Names the platform answers on, or intends to. A project claiming one would shadow a service, so they are
+// refused at claim time. Add to this list BEFORE shipping anything that answers on a new subdomain — the
+// alternative is discovering a customer already owns the name.
+const RESERVED_SUBDOMAINS = new Set([
+  PROXY_SUBDOMAIN,
+  'tunnel',                                            // the EC2 CONNECT proxy — DNS-only, so it never reaches
+                                                       // this worker, but a project claiming the name would
+                                                       // still take an address the platform depends on
+  'www', 'api', 'app', 'admin', 'auth', 'login', 'account', 'accounts',
+  'hub', 'ws', 'gateway', 'gw', 'cdn', 'static', 'assets', 'docs', 'status',
+  'mail', 'smtp', 'ftp', 'ns1', 'ns2', 'mx',          // infrastructure names mail/DNS tooling assumes
+  'superatom', 'system', 'internal', 'test', 'staging', 'dev',
+])
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 // Resolve a named subdomain → projectId. Hot path: Workers KV (edge-cached,
@@ -869,6 +942,113 @@ async function handleDomainsApi(request: Request, env: Env, url: URL): Promise<R
     } catch {}
   }
   return res
+}
+
+// ── Credentials admin ────────────────────────────────────────────────────────
+// The superadmin's view of the credential pool. Everything here is about WHICH key is used and by WHOM; the
+// values live in Worker secrets and are only ever reported as present or missing.
+async function handleCredentialsAdmin(request: Request, env: Env, path: string): Promise<Response> {
+  const kv: any = (env as any).CREDENTIALS
+  if (!kv) return Response.json({ error: 'no CREDENTIALS KV bound' }, { status: 503 })
+  const master = (env as any).CREDENTIALS_MASTER_KEY
+  const { readVault, writeVault, redact, tidy, expiryOf, expiring } = await import('./proxy/vault.js')
+  const { readUsage, askUsage, writeUsage, canAsk } = await import('./proxy/usage.js')
+  const { UPSTREAMS } = await import('../../../vm/packages/agent-contract/contract.mjs')
+
+  // GET /api/credentials — the whole picture, values removed. One read, one decrypt.
+  if (request.method === 'GET' && path === '/api/credentials') {
+    const v = await readVault(kv, master)
+    const r = redact(v)
+    // One read per entry, in parallel — usage lives in its OWN key per credential so nothing can clobber
+    // anything else, which is the whole reason it is not in the vault document.
+    const usage = await Promise.all(r.entries.map((e: any) => readUsage(kv, e.id)))
+    r.entries.forEach((e: any, i: number) => { e.usage = usage[i]; e.canAskUsage = canAsk(e.provider) })
+    // Warnings first, because the thing an operator needs to see is what is about to stop working.
+    return Response.json({ ...r, providers: Object.keys(UPSTREAMS), sealed: !!master, expiring: expiring(v, 3) })
+  }
+
+  // Everything below is read-modify-write on the one document, so each change is atomic and there is never a
+  // moment where a credential exists without the policy that governs it.
+  if (request.method === 'POST' && path === '/api/credentials/entry') {
+    const b = await request.json().catch(() => ({})) as any
+    if (!b?.id || !b?.provider || !b?.value) return Response.json({ error: 'body: { id, provider, value, groups?, note? }' }, { status: 400 })
+    if (!Object.keys(UPSTREAMS).includes(b.provider)) return Response.json({ error: `no provider named ${b.provider}` }, { status: 400 })
+    const v = tidy(await readVault(kv, master))
+    // Expiry is READ from the credential, not asked for: a JWT says when it dies, and a field someone types
+    // is a field someone forgets to update. `expiresAt` in the body is honoured only for credentials that
+    // cannot tell us themselves.
+    const entry = { id: String(b.id), provider: String(b.provider), value: String(b.value),
+                    groups: Array.isArray(b.groups) ? b.groups : undefined, note: b.note,
+                    disabled: b.disabled === true || undefined,
+                    addedAt: new Date().toISOString(),
+                    expiresAt: expiryOf(String(b.value)) ?? (typeof b.expiresAt === 'number' ? b.expiresAt : undefined) }
+    const next = { ...v, entries: [...v.entries.filter((e) => e.id !== entry.id), entry] }
+    await writeVault(kv, next, master)
+    return Response.json(redact(next))
+  }
+
+  const mEntry = /^\/api\/credentials\/entry\/(.+)$/.exec(path)
+  if (request.method === 'DELETE' && mEntry) {
+    const v = await readVault(kv, master)
+    const next = { ...v, entries: v.entries.filter((e) => e.id !== mEntry[1]) }
+    await writeVault(kv, next, master)
+    return Response.json(redact(next))
+  }
+
+  if (request.method === 'POST' && path === '/api/credentials/group') {
+    const b = await request.json().catch(() => ({})) as any
+    if (!b?.projectId || !b?.group) return Response.json({ error: 'body: { projectId, group }' }, { status: 400 })
+    const v = await readVault(kv, master)
+    const next = { ...v, groups: { ...v.groups, [b.projectId]: String(b.group) } }
+    await writeVault(kv, next, master)
+    return Response.json(redact(next))
+  }
+
+  // POST /api/credentials/refresh — ask every provider that can tell us how much is left, and store the
+  // ABSOLUTE answer per credential. Nothing is accumulated here, so two of these running at once cannot lose
+  // each other's work: they write the same observed truth, and the later one is the better one.
+  if (request.method === 'POST' && path === '/api/credentials/refresh') {
+    const v = await readVault(kv, master)
+    const asked = await Promise.all(v.entries.map(async (e) => {
+      if (!canAsk(e.provider)) return { id: e.id, skipped: 'provider cannot tell us' }
+      const snap = await askUsage(e.provider, e.value)
+      if (snap) await writeUsage(kv, e.id, snap)
+      return { id: e.id, provider: e.provider, ...(snap?.error ? { error: snap.error } : { percentUsed: snap?.percentUsed, remaining: snap?.remaining }) }
+    }))
+    return Response.json({ refreshed: asked })
+  }
+
+  // GET /api/credentials/audit?project=… — who was handed what. Read from one key per event, so nothing was
+  // lost to a concurrent write and the trail can be trusted.
+  if (request.method === 'GET' && path === '/api/credentials/audit') {
+    const project = new URL(request.url).searchParams.get('project') ?? ''
+    const prefix = project ? `audit:${project}:` : 'audit:'
+    const keys = (await kv.list({ prefix })).keys.slice(-200)
+    const events = await Promise.all(keys.map((k: any) => kv.get(k.name, 'json')))
+    return Response.json({ events: events.filter(Boolean).sort((a: any, b: any) => b.at - a.at) })
+  }
+
+  // POST /api/credentials/enable/<id> — { enabled: boolean }. Park a credential without losing it.
+  const mEnable = /^\/api\/credentials\/enable\/(.+)$/.exec(path)
+  if (request.method === 'POST' && mEnable) {
+    const b = await request.json().catch(() => ({})) as any
+    const v = await readVault(kv, master)
+    const next = { ...v, entries: v.entries.map((e) => e.id === mEnable[1] ? { ...e, disabled: b?.enabled === false } : e) }
+    await writeVault(kv, next, master)
+    return Response.json(redact(next))
+  }
+
+  // Put a key back in service by hand, when you know it reset before its cooldown expired.
+  const mRevive = /^\/api\/credentials\/revive\/(.+)$/.exec(path)
+  if (request.method === 'POST' && mRevive) {
+    const v = await readVault(kv, master)
+    const spent = { ...(v.spent ?? {}) }; delete spent[mRevive[1]]
+    const next = { ...v, spent }
+    await writeVault(kv, next, master)
+    return Response.json(redact(next))
+  }
+
+  return new Response('not found', { status: 404 })
 }
 
 // ── Machine details: proxy from Fly API ──────────────────────────────────────

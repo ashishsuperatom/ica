@@ -8,7 +8,8 @@
     "build": "vite build",
     "deploy": "pnpm -C ../user-ui exec tsc --noEmit -p tsconfig.json && pnpm -C ../user-ui build && pnpm typecheck && vite build && wrangler deploy",
     "typecheck": "tsc --noEmit -p tsconfig.worker.json && tsc --noEmit -p tsconfig.json",
-    "//deploy": "Builds the USER UI first, BY PATH. It is served from this package's dist/client/u but is a separate package with its own build, so a stale bundle used to ship whenever it was not rebuilt. `pnpm --filter user-ui` was tried and is worse than nothing: control-plane is not a pnpm workspace, so it matches no project, prints 'No projects matched', and EXITS 0 \u2014 a build step that silently does nothing and reports success. `-C` takes a path and fails loudly."
+    "//deploy": "Builds the USER UI first, BY PATH. It is served from this package's dist/client/u but is a separate package with its own build, so a stale bundle used to ship whenever it was not rebuilt. `pnpm --filter user-ui` was tried and is worse than nothing: control-plane is not a pnpm workspace, so it matches no project, prints 'No projects matched', and EXITS 0 \u2014 a build step that silently does nothing and reports success. `-C` takes a path and fails loudly.",
+    "test": "vitest run"
   },
   "dependencies": {
     "@clerk/react": "^6.7.3",

@@ -60,6 +60,16 @@ TRANSCRIBE_MODEL = "google/gemini-2.5-flash-lite"
 binding = "DOMAINS"
 id = "2f6f21f80d0a4526a9b1b4826c7a9614"
 
+# CREDENTIALS — everything about WHICH credential is used and WHO may use it: provider key pools, the group a
+# project belongs to, which keys are currently exhausted, and whatever other kinds of key we add later. Named
+# for the subject, not for the proxy, because the proxy is only its first consumer.
+#
+# It never holds a secret VALUE. Values live in Worker secrets and are resolved by name at the moment of use,
+# so this store can be read and edited by anyone who should see routing without handling a credential.
+[[kv_namespaces]]
+binding = "CREDENTIALS"
+id = "c574f1b1a8494d64b143535f08163239"
+
 [assets]
 directory = "./dist/client"
 binding = "ASSETS"          # expose env.ASSETS so the worker can serve SPA index fallbacks
