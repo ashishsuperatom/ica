@@ -52,9 +52,6 @@ const TOOLS = `# Your tools
 
 Run them from the workspace root. Each takes \`--help\`.
 
-**About to write?**
-- \`./authoring-guide [type]\` → how to write a program: the contract, the mechanics, the canonical example
-
 **Is it already answered?**
 - \`./find-program "<question>"\` → the shortlist: programs that answered a similar question (what it answers · name · category)
 - \`./get-program <name>\` → ONE program in full: every question form it answers, its saved params, its category
@@ -70,7 +67,10 @@ Run them from the workspace root. Each takes \`--help\`.
 
 **What does the data say?**
 - \`./query "<source>" "<query>"\` → run a query against a source → JSON rows
-- \`./resolve "<text>"\` → a fuzzy name or value → concrete ids`
+- \`./resolve "<text>"\` → a fuzzy name or value → concrete ids
+
+**About to write?**
+- \`./authoring-guide [type]\` → the contract, the mechanics, the canonical example`
 
 // The CONTRACT — the exact, whole surface. Mirrors @superatom/scaffold (packages/scaffold/src/unit.ts). If this
 // drifts from the real types, the canonical example below stops compiling under `pnpm authoring:check`.
