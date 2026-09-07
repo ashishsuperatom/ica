@@ -232,15 +232,20 @@ RUN it (\`tsx run.mjs ${o.canonicalMatch.programDir}/program.ts '${JSON.stringif
           // ships either way — a table with one unclickable column is a far better outcome than a turn that
           // loops until the user gives up. Delete this block to switch repair off; the lint still logs.
           for (let round = 1; round <= MAX_REPAIR_ROUNDS; round++) {
-            const fix = repairInstruction(lintAnswer(answer))
+            const before = lintAnswer(answer)
+            const fix = repairInstruction(before)
             if (!fix) break
-            console.log(`[answer] repair round ${round}/${MAX_REPAIR_ROUNDS} — handing the findings back to the composer`)
+            const nBefore = before.filter((f) => f.severity === 'error').length
             try {
               await session.run(fix, handlers)
-              const again = await execProgram(cwd, built.programDir, built.params ?? {}, { qid: o.qid, sid: o.sid })
-              answer = answerView(again.output)
+              answer = answerView((await execProgram(cwd, built.programDir, built.params ?? {}, { qid: o.qid, sid: o.sid })).output)
+              // WAS THE ROUND WORTH IT — the only line that can answer "is the cap right?". A round that
+              // fixes nothing is a round that should not exist; a round 2 that regularly finishes what round 1
+              // started is the argument for keeping two. Without this the cap is a number someone picked.
+              const after = lintAnswer(answer).filter((f) => f.severity === 'error').length
+              console.log(`[answer] repair round ${round}/${MAX_REPAIR_ROUNDS}: ${nBefore} error(s) → ${after}` +
+                (after === 0 ? ' — fixed' : after < nBefore ? ' — partly fixed' : ' — no change'))
             } catch (e: any) {
-              // A failed repair must never cost the answer we already have.
               console.warn(`[answer] repair round ${round} failed (${String(e?.message ?? e).slice(0, 120)}) — keeping the previous answer`)
               break
             }

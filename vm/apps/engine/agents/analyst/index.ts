@@ -216,12 +216,19 @@ Your task is in ${taskRel} — read it and follow it exactly. ${m ? 'Modify the 
           // turn away and still holds the trajectory. Errors only, capped, and the answer ships regardless.
           // Delete this block to switch repair off; the lint still logs.
           for (let round = 1; round <= MAX_REPAIR_ROUNDS; round++) {
-            const fix = repairInstruction(lintAnswer(answer))
+            const before = lintAnswer(answer)
+            const fix = repairInstruction(before)
             if (!fix) break
-            console.log(`[answer] repair round ${round}/${MAX_REPAIR_ROUNDS} — handing the findings back to the analyst`)
+            const nBefore = before.filter((f) => f.severity === 'error').length
             try {
               await session.run(fix, handlers)
               answer = answerView((await execProgram(cwd, ptr.programDir, ptr.params ?? {})).output)
+              // WAS THE ROUND WORTH IT — the only line that can answer "is the cap right?". A round that
+              // fixes nothing is a round that should not exist; a round 2 that regularly finishes what round 1
+              // started is the argument for keeping two. Without this the cap is a number someone picked.
+              const after = lintAnswer(answer).filter((f) => f.severity === 'error').length
+              console.log(`[answer] repair round ${round}/${MAX_REPAIR_ROUNDS}: ${nBefore} error(s) → ${after}` +
+                (after === 0 ? ' — fixed' : after < nBefore ? ' — partly fixed' : ' — no change'))
             } catch (e: any) {
               console.warn(`[answer] repair round ${round} failed (${String(e?.message ?? e).slice(0, 120)}) — keeping the previous answer`)
               break
