@@ -9,6 +9,7 @@ import { readFile, writeFile, mkdir, rm } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import { AUTHORING_REFERENCE } from '../shared-prompts/authoring-reference.js'
 import { loadPrompt } from '../../prompts.js'
+import { agentConfig } from '../../config/index.js'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
@@ -56,12 +57,15 @@ export interface Composer {
 }
 
 export async function createComposer(opts: ComposerOpts): Promise<Composer> {
-  // pi on the ChatGPT subscription, which is what this agent is tuned against: the fastest to start (no CLI
-  // process between us and the model) and the richest event stream, which is what puts real per-step timings
-  // in the log. Overridable per project by ICA_COMPOSER_*.
-  const harness: Harness = opts.ica?.harness ?? (process.env.ICA_COMPOSER_HARNESS as Harness) ?? 'pi'
-  const model = opts.ica?.model ?? process.env.ICA_COMPOSER_MODEL ?? 'gpt-5.6-luna'
-  const provider = opts.ica?.provider ?? process.env.ICA_COMPOSER_PROVIDER ?? undefined   // pi picks: codex when logged in
+  // FROM THE PROFILE (apps/engine/config), not from literals here. A caller may still pass opts.ica to run one
+  // composer differently — an A/B in a single process — but the DEFAULT is the project's, in one place. These
+  // three lines used to hold the second copy of the composer's identity: the provenance written for the
+  // program it authored read the same ICA_COMPOSER_* variables with different fallbacks, so on any box that
+  // set none of them the record named a harness and model the composer had never run.
+  const cfg = agentConfig('composer')
+  const harness: Harness = opts.ica?.harness ?? cfg.harness
+  const model = opts.ica?.model ?? cfg.model
+  const provider = opts.ica?.provider ?? cfg.provider
   const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl })
   // The composer's WHOLE instruction — its role + the authoritative authoring reference (contract + example +
   // mechanics) + the per-project data CONTEXT — installed into the agent's system prompt via systemReference.

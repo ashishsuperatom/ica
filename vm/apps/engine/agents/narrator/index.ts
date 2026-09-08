@@ -9,6 +9,7 @@
 // (deepseek-v4-flash) — the terse one-line output keeps deliberation minimal.
 import { createSession, type Harness, type Session } from '../../ica/index.js'
 import { agentProse, hasToolMarkup } from '../../ica/prose.js'
+import { agentConfig } from '../../config/index.js'
 
 const NARRATE = `You narrate a data analysis AS IT HAPPENS, for the person who asked. A short, live, plain-English
 update on what is happening right now — so they follow along and never feel like they are just waiting.
@@ -153,9 +154,12 @@ export function createNarrator(opts: NarratorOpts): Narrator {
   // configured through a variable named after an agent that no longer exists. ICA_REFLEX_* is still honoured so
   // an existing deployment does not silently change model on the next restart.
   // pi against the opencode-go subscription: the same cheap model as before, one fewer harness running.
-  const harness: Harness = opts.ica?.harness ?? (process.env.ICA_NARRATOR_HARNESS ?? process.env.ICA_REFLEX_HARNESS) as Harness ?? 'pi'
-  const model = opts.ica?.model ?? process.env.ICA_NARRATOR_MODEL ?? process.env.ICA_REFLEX_MODEL ?? 'deepseek-v4-flash'
-  const provider = opts.ica?.provider ?? process.env.ICA_NARRATOR_PROVIDER ?? process.env.ICA_REFLEX_PROVIDER ?? 'opencode-go'
+  // FROM THE PROFILE. ICA_REFLEX_* is still honoured — the resolver reads it as a fallback for this agent, so
+  // a deployment that predates the rename does not silently change model on its next restart.
+  const cfg = agentConfig('narrator')
+  const harness: Harness = opts.ica?.harness ?? cfg.harness
+  const model = opts.ica?.model ?? cfg.model
+  const provider = opts.ica?.provider ?? cfg.provider
   // Which context strategy this narrator runs. Default stateless; ICA_NARRATOR_CONTEXT=stateful switches it,
   // and opts wins over both so a caller can run the two against each other in one process.
   const context: NarratorContext =

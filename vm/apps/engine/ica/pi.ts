@@ -12,6 +12,7 @@ import { createAgentSession, DefaultResourceLoader, getAgentDir, SessionManager,
 import type { Session, RunHandlers, RunResult, AgentEvent } from './session.js'   // the shared session interface
 import { resolveProvider, describeResolution } from './providers.js'
 import { providersOn } from '../../../packages/agent-contract/contract.mjs'
+import { profile } from '../config/index.js'
 
 /** The ChatGPT credential `codex login` already wrote. pi-ai ships an `openai-codex-responses` provider that
  *  wants a Bearer token, and codex keeps a live one — so the two only need introducing, not a second login.
@@ -143,7 +144,7 @@ export function createPiSession(opts: PiSessionOpts): Session {
   // including models that account does not carry, and including models we would rather bill elsewhere.
   //
   // An explicit opts.provider / ICA_PI_PROVIDER still wins outright: routing is the default, never a veto.
-  const modelId = opts.model ?? process.env.ICA_PI_MODEL ?? 'gpt-5.6-luna'
+  const modelId = opts.model ?? process.env.ICA_PI_MODEL ?? profile().harnessModel.pi!
   const pinned = opts.provider ?? process.env.ICA_PI_PROVIDER
   const routed = pinned ? null : resolveProvider(modelId)
   if (routed) console.log(`[ica:pi] ${describeResolution(modelId, routed)}`)

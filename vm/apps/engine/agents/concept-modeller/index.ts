@@ -10,6 +10,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { createSession, prepareWorkspace, type Harness, type Session, type RunHandlers } from '../../ica/index.js'
+import { agentConfig } from '../../config/index.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -43,7 +44,7 @@ export interface ConceptModeller {
 
 export async function createConceptModeller(opts: ConceptModellerOpts): Promise<ConceptModeller> {
   const harness = opts.ica?.harness ?? 'claude-code'
-  const model = opts.ica?.model ?? 'claude-sonnet-5'
+  const model = opts.ica?.model ?? agentConfig('modeller').model
   const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl })
   // Distinct filename (model/MODEL.md): the analyst SHARES this workspace and writes its own analyst/ANALYST.md.
   await cp(join(__dirname, 'SYSTEM.md'), join(cwd, 'model/MODEL.md')).catch(() => {})

@@ -20,6 +20,7 @@ import { createSession, prepareWorkspace, type Harness, type Session, type RunHa
 import { execProgram } from '../../exec-program.js'
 import { CATEGORIES, type Category } from './classify.js'
 import { lintAnswer, repairInstruction, MAX_REPAIR_ROUNDS } from '../../answer-review.js'
+import { agentConfig } from '../../config/index.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 // Analyst prompt files via the override layer (volume override for the current image → baked fallback).
@@ -101,7 +102,7 @@ async function fullSystem(): Promise<string> {
 
 export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
   const harness = opts.ica?.harness ?? 'claude-code'
-  const model = opts.ica?.model ?? 'claude-sonnet-5'
+  const model = opts.ica?.model ?? agentConfig('analyst').model
 
   const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl })
   // The analyst's whole instruction into its system prompt (claude --append-system-prompt-file, so it APPENDS to

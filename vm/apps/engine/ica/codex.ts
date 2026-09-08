@@ -12,10 +12,11 @@ import { Codex, type Thread } from '@openai/codex-sdk'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Session, RunHandlers, RunResult, AgentEvent } from './session.js'
+import { profile } from '../config/index.js'
 
 export interface CodexSessionOpts {
   cwd: string
-  model?: string                                                     // default 'gpt-5.6-terra'
+  model?: string                                                     // default: profile harnessModel.codex
   reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'  // default 'medium'
   resumeId?: string                                                  // resume a prior thread (persisted in ~/.codex/sessions)
   systemReference?: string    // authoritative authoring reference → written to AGENTS.md (codex auto-loads it from cwd)
@@ -68,7 +69,7 @@ function normEvent(ev: any): AgentEvent | null {
 }
 
 export function createCodexSession(opts: CodexSessionOpts): Session {
-  const model = opts.model ?? process.env.ICA_CODEX_MODEL ?? 'gpt-5.6-terra'
+  const model = opts.model ?? process.env.ICA_CODEX_MODEL ?? profile().harnessModel.codex!
   const effort = (opts.reasoningEffort ?? process.env.ICA_CODEX_EFFORT ?? 'medium') as CodexSessionOpts['reasoningEffort']
   // Authoritative authoring reference → AGENTS.md, which codex auto-loads from the working directory (its
   // equivalent of CLAUDE.md). So the reference is always in-context with no read-instruction. Written once here.

@@ -26,6 +26,7 @@ import { execSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { execProgram, answerView } from './exec-program.js'
 import { createSession, prepareWorkspace, type Session, type Harness, type RunHandlers } from './ica/index.js'
+import { agentConfig, describeConfig } from './config/index.js'
 import { createNarrator, capResultData, stripCode, type Narrator } from './agents/narrator/index.js'
 import { createAnalyst, promptVersion as analystPromptVersion } from './agents/analyst/index.js'
 import { promptVersion as composerPromptVersion, createComposer, type Composer } from './agents/composer/index.js'
@@ -83,22 +84,16 @@ const HARNESS = (process.env.ICA_HARNESS as Harness) || 'opencode'   // read AFT
 // claude-code | codex | opencode picks the brain for ALL of them, and each agent's MODEL is INHERITED from
 // that harness (claude-code→claude-sonnet-5, codex→gpt-5.6-terra) — you don't set a model. Any single agent
 // can still be pinned with ICA_<AGENT>_HARNESS / _MODEL, which wins. Reflex is independent (own opencode-go).
-const HARNESS_MODEL: Partial<Record<Harness, string>> = { 'claude-code': 'claude-sonnet-5', codex: 'gpt-5.6-terra' }
-const FLEET_HARNESS = (process.env.ICA_AGENT_HARNESS as Harness) || 'claude-code'
-const FLEET_MODEL   = process.env.ICA_AGENT_MODEL     // optional: force a model for the fleet harness (rarely needed)
-// Resolve one agent: its own harness override → the fleet harness; its model override → the fleet model (only
-// when it shares the fleet's harness) → the harness's own default model.
-const agentCfg = (name: string): { harness: Harness; model: string | undefined } => {
-  const harness = (process.env[`ICA_${name}_HARNESS`] as Harness) || FLEET_HARNESS
-  const model = process.env[`ICA_${name}_MODEL`]
-    || (harness === FLEET_HARNESS ? FLEET_MODEL : undefined)
-    || HARNESS_MODEL[harness]
-  return { harness, model }
-}
-const { harness: ANALYST_HARNESS,   model: ANALYST_MODEL }   = agentCfg('ANALYST')
-const { harness: CONNECTOR_HARNESS, model: CONNECTOR_MODEL } = agentCfg('CONNECTOR')
-const { harness: GROUNDING_HARNESS, model: GROUNDING_MODEL } = agentCfg('GROUNDING')
-const { harness: MODELLER_HARNESS,  model: MODELLER_MODEL }  = agentCfg('MODELLER')   // the concept modeller (System 4)
+// Resolved by the PROFILE (apps/engine/config) — default.json, overridden by the project's profile,
+// overridden by ICA_*. One resolver, and every value can say which layer produced it.
+const ANALYST   = agentConfig('analyst')
+const CONNECTOR = agentConfig('connector')
+const GROUNDING = agentConfig('grounding')
+const MODELLER  = agentConfig('modeller')            // the concept modeller (System 4)
+const { harness: ANALYST_HARNESS,   model: ANALYST_MODEL }   = ANALYST
+const { harness: CONNECTOR_HARNESS, model: CONNECTOR_MODEL } = CONNECTOR
+const { harness: GROUNDING_HARNESS, model: GROUNDING_MODEL } = GROUNDING
+const { harness: MODELLER_HARNESS,  model: MODELLER_MODEL }  = MODELLER
 // Where the connector agent writes bridges (shared with the datasource-manager, which loads them by absolute
 // path). Defaults to the project's COMMITTED inputs folder so connector-written bridges land beside any
 // hand-authored ones (one place, no duplicate); on Fly override via env to the mounted volume.
@@ -375,7 +370,7 @@ const groundingSlot = makeAgentSlot('grounding', groundingPromptVersion, (resume
 // The CONCEPT MODELLER (System 4 — "sleep"): LAZY, never warmed at boot — spun up only when the offline
 // consolidation tick has a batch to study, then it distils verified concepts from finished analyses.
 const modellerSlot = makeAgentSlot('modeller', modellerPromptVersion, (resumeId) => listSources().then(sources => createConceptModeller({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { harness: MODELLER_HARNESS, model: MODELLER_MODEL, resumeId } })))
-console.log(`[ica] analyst=${ANALYST_HARNESS ?? 'claude-code'}:${ANALYST_MODEL ?? 'claude-sonnet-5'} · connector=${CONNECTOR_HARNESS}:${CONNECTOR_MODEL} · grounding=${GROUNDING_HARNESS}:${GROUNDING_MODEL} (cold)`)
+console.log(`[ica] analyst=${ANALYST_HARNESS}:${ANALYST_MODEL} · connector=${CONNECTOR_HARNESS}:${CONNECTOR_MODEL} · grounding=${GROUNDING_HARNESS}:${GROUNDING_MODEL} (cold)`)
 // Live analyst state, kept so a (re)connecting client can RE-SYNC after a reload (the engine stores
 // no history — this is just the current run + last result, replayed on demand).
 let curQuestion = '', curCategory = '', curSid = ''
@@ -1400,8 +1395,8 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       // `by` = which SYSTEM/agent authored it (analyst=System 3 discovery; composer=System 2 concept-composition).
       // Deterministic + engine-known (never the LLM), so a later quality diff between authors is debuggable.
       const authoredMeta = authoredBy === 'composer'
-        ? { by: 'composer', harness: process.env.ICA_COMPOSER_HARNESS || 'opencode', provider: process.env.ICA_COMPOSER_PROVIDER || 'opencode-go', model: process.env.ICA_COMPOSER_MODEL || 'deepseek-v4-flash', at: Date.now() }
-        : { by: 'analyst', harness: ANALYST_HARNESS, provider: process.env.ICA_ANALYST_PROVIDER || null, model: ANALYST_MODEL ?? null, at: Date.now() }
+        ? { by: 'composer', ...(({ harness, provider, model }) => ({ harness, provider: provider ?? null, model: model ?? null }))(agentConfig('composer')), at: Date.now() }
+        : { by: 'analyst', harness: ANALYST_HARNESS, provider: ANALYST.provider ?? null, model: ANALYST_MODEL ?? null, at: Date.now() }
       // canonicalQuestions accumulate on the PROGRAM (not the intent): they describe what this program answers,
       // and a program can be reached by several phrasings. Union with what's already there, so a rebuild/modify
       // ADDS a phrasing rather than dropping the ones already known. The user's real question is kept too — the
@@ -2014,6 +2009,10 @@ async function warmEssentialAgents() {
   console.log(`\n${bar}`)
   console.log(`  ${allOk ? '✅ ENGINE FULLY READY' : '⚠️  ENGINE READY (with warnings)'} — project ${PROJECT}`)
   console.log(`     agents: ${roster}`)
+  // WHICH BRAIN EACH AGENT IS ON, and which layer decided it. A box running a downloaded profile is otherwise
+  // indistinguishable from one running the git default, and "which of the three layers set this" is the first
+  // question every configuration bug asks.
+  for (const line of describeConfig()) console.log(`     ${line}`)
   if (credGap.length > 0) console.log(`     ✗ NO CREDENTIAL: ${credGap.join(', ')} — those agents cannot answer (retrying the vault)`)
   console.log(`     datasources=${sources} · idle, waiting for questions`)
   console.log(`${bar}\n`)

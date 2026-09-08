@@ -13,6 +13,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { createSession, prepareWorkspace, type Harness, type Session, type RunHandlers } from '../../ica/index.js'
+import { agentConfig } from '../../config/index.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -37,7 +38,7 @@ export interface GroundingAgent {
 
 export async function createGroundingAgent(opts: GroundingAgentOpts): Promise<GroundingAgent> {
   const harness = opts.ica?.harness ?? 'claude-code'
-  const model = opts.ica?.model ?? 'claude-sonnet-5'
+  const model = opts.ica?.model ?? agentConfig('grounding').model
   const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl })
   // Distinct filename so it never clobbers the analyst/modeler/connector role files in the shared workspace.
   await cp(join(__dirname, 'SYSTEM.md'), join(cwd, 'grounding/GROUNDING.md'))

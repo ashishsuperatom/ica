@@ -12,11 +12,12 @@ import { createOpencode, createOpencodeClient, createOpencodeServer } from '@ope
 import type { AgentEvent } from './session.js'
 import type { Session, RunHandlers, RunResult } from './session.js'   // the shared session interface
 import { providersOn, isDisabled } from '../../../packages/agent-contract/contract.mjs'
+import { profile } from '../config/index.js'
 
 export interface OpencodeSessionOpts {
   cwd: string
   provider?: string   // default 'opencode-go'
-  model?: string      // default 'glm-5.2'
+  model?: string      // default: the profile's harnessModel.opencode
   // Connect to a STANDALONE `opencode serve` (recommended): one ~370MB server for the whole box,
   // shared by every engine — this harness then spawns nothing (client-only, ~0 extra RAM).
   // Set via opts.baseUrl or ICA_OC_URL (e.g. http://127.0.0.1:4096). If unset, spawns a private
@@ -103,7 +104,7 @@ function normPart(part: any): AgentEvent | null {
 
 export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
   const providerID = opts.provider ?? process.env.ICA_OC_PROVIDER ?? 'opencode-go'
-  const modelID = opts.model ?? process.env.ICA_OC_MODEL ?? 'glm-5.2'
+  const modelID = opts.model ?? process.env.ICA_OC_MODEL ?? profile().harnessModel.opencode!
   // The system prompt sent per turn: an explicit `system` (pure-LLM agents) plus the authoritative authoring
   // reference (coding agents). Both fold into opencode's `system` field (which REPLACES its default coding prompt).
   const effSystem = [opts.system, opts.systemReference].filter(Boolean).join('\n\n') || undefined
