@@ -697,7 +697,9 @@ export class ProjectDO extends DurableObject<Env> {
       this.engineWaiters.clear()
     }
 
-    // Welcome
+    // Welcome. The engine's copy carries this project's profile; every other connection gets the same message
+    // without it.
+    const engineProfile = type === 'code-engine' ? this.profileForEngine() : null
     ws.send(JSON.stringify({
       from: { id: 'hub', type: 'hub' },
       to: { id: wsId, type },
@@ -705,7 +707,7 @@ export class ProjectDO extends DurableObject<Env> {
                  // THE PROFILE, at the moment the engine registers — so a box adopts its project's configuration
                  // before it builds a single agent, and a restarted box needs no second round trip. Absent means
                  // "nothing configured for this project"; the engine then keeps its baked default.
-                 ...(type === 'code-engine' ? { profile: this.readProfile()?.profile ?? null } : {}) },
+                 ...(type === 'code-engine' ? { profile: engineProfile } : {}) },
     }))
 
     // Log
@@ -1184,6 +1186,18 @@ export class ProjectDO extends DurableObject<Env> {
     } catch { return null }   // unparseable is the same as absent: the engine falls back to its baked default
   }
 
+  /** WHAT AN ENGINE RECEIVES: this project's picks, and nothing else. Composed in ONE place so the welcome
+   *  and a pushed change can never disagree — two call sites building the same document separately is how
+   *  they drift.
+   *
+   *  NO CATALOGUE TRAVELS. Which models are permitted is a platform question answered in superadmin, where
+   *  the choice is made; by the time a profile reaches a box the choosing is over, and shipping the options
+   *  alongside the decision would only invite a second opinion about it further down.
+   */
+  private profileForEngine(): any | null {
+    return this.readProfile()?.profile ?? null
+  }
+
   private async getProfile(): Promise<Response> {
     const p = this.readProfile()
     // `running` is what the ENGINE last reported it had adopted — NOT what was last saved. A UI must be able to
@@ -1205,7 +1219,7 @@ export class ProjectDO extends DurableObject<Env> {
     this.log('profile:saved', { version, by: body?.by ?? null })
     // PUSHED, not polled. The engine adopts it for the next session each agent builds; a running turn is never
     // interrupted. Delivered best-effort — a box that is asleep picks it up in its welcome when it wakes.
-    const delivered = this.sendToRole('code-engine', { t: 'config:update', profile: stored, version })
+    const delivered = this.sendToRole('code-engine', { t: 'config:update', profile: this.profileForEngine(), version })
     return Response.json({ ok: true, version, delivered })
   }
 

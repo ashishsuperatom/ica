@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "The engine's DEFAULT profile \u2014 used when a project's Durable Object has none. Every agent names all three parts: harness (how we drive it), provider (whose account pays), model (what runs). Nothing is inferred, and no environment variable overrides this. Credentials never live here; they come from the vault, per provider.",
+  "note": "The engine's DEFAULT profile \u2014 used when a project's Durable Object has none, and when the control plane cannot be reached. Every agent names all three parts: harness (how we drive it), provider (whose account pays), model (what runs). Credentials never live here; they come from the vault, per provider.",
   "agents": {
     "analyst": {
       "harness": "claude-code-pty",

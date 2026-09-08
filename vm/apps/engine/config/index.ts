@@ -122,18 +122,23 @@ function writeCache(p: Partial<Profile>): void {
   } catch (e: any) { console.warn(`[config] could not cache the profile (${e?.message ?? e})`) }
 }
 
-// ── VALIDATION — refuse a profile that would break the box ────────────────────────────────────────────────
-// A profile is edited by a person and applied without a deploy, so a typo reaches a running machine directly.
-// Adopting `harness: "openocde"` would leave an agent unable to start, and the cache would make it persist
-// across restarts. Checked BEFORE adopting: a bad profile is reported and ignored, and the box keeps running
-// what it has.
+// ── VALIDATION — SHAPE, not choice ────────────────────────────────────────────────────────────────────────
+// WHICH models are permitted is decided in superadmin, against the catalogue held there; by the time a profile
+// reaches a box that choosing is over, and the box is given the decision rather than the options.
+//
+// What a box still owes itself is that the document is USABLE. A profile is edited by a person and applied
+// without a deploy, so a typo reaches a running machine directly: adopting `harness: "openocde"` would leave
+// an agent unable to start, and the cache would make it persist across restarts. Checked BEFORE adopting — a
+// bad profile is reported and ignored, and the box keeps running what it has.
 const HARNESSES = new Set<string>(['opencode', 'pi', 'claude-code-pty', 'codex', 'mock'])
 
 export function validate(p: any): string[] {
   const bad: string[] = []
   if (!p || typeof p !== 'object') return ['profile is not an object']
-  if (!p.agents || typeof p.agents !== 'object') return ['profile has no agents']
-  for (const [name, a] of Object.entries(p.agents as Record<string, any>)) {
+  // A profile OVERRIDES the default, so naming no agents is legitimate: a project that has made no per-agent
+  // choice is a project running the engine's own defaults.
+  if (p.agents !== undefined && (typeof p.agents !== 'object' || Array.isArray(p.agents))) return ['profile.agents is not an object']
+  for (const [name, a] of Object.entries((p.agents ?? {}) as Record<string, any>)) {
     if (!AGENTS.includes(name as AgentName)) { bad.push(`"${name}" is not an agent`); continue }
     // All three, on every agent — the shape IS the contract, and a half-specified agent is the ambiguity this
     // whole module exists to remove.

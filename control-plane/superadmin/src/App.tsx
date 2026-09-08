@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Credentials } from './Credentials'
+import { ModelCatalogue } from './Models'
 import { DashboardsPanel } from './Dashboards'
 import { useProjectHub } from './hub'
 import { Inspector, SECTIONS, SECTION_LABEL, type Section } from './Inspector'
@@ -251,6 +252,7 @@ function Shell({ children, crumbs, nav }: { children: React.ReactNode; crumbs?: 
               credentials — but an org admin should not be shown a door they may not open, and a menu item is
               itself a statement about what exists. */}
           {HOST_SCOPE === 'superadmin' && <Link to="/credentials" className="nav">{I.key}Credentials</Link>}
+          {HOST_SCOPE === 'superadmin' && <Link to="/models" className="nav">{I.key}Models</Link>}
           {nav}
         </nav>
         <div className="foot"><UserButton /></div>
@@ -281,6 +283,7 @@ export function App() {
         <Route path="/" element={HOST_SCOPE === 'admin' ? <MyOrgLanding /> : <OrgListPage />} />
         <Route path="/org/:orgId" element={<OrgDetailPage />} />
         {HOST_SCOPE === 'superadmin' && <Route path="/credentials" element={<CredentialsPage />} />}
+        {HOST_SCOPE === 'superadmin' && <Route path="/models" element={<ModelsPage />} />}
         {/* /pro/<projectId> — a project on its own, no org in the path. */}
         <Route path="/pro/:projectId/*" element={<ProjectDetailPage />} />
         {/* The older nested form still resolves, so existing links keep working. */}
@@ -406,6 +409,23 @@ function OrgListPage() {
 }
 
 // ── Org detail ─────────────────────────────────────────────────────────────
+// Platform-wide, like Credentials: which models exist on an account is one fact for the whole platform, and
+// this is the list a project's profile chooses from. It is never sent to a project or an engine — they are
+// given the decision, not the options.
+function ModelsPage() {
+  const token = useAuth(); const api = useApi(token)
+  return (
+    <Shell crumbs={<><Link to="/">Organizations</Link><span>/</span>Models</>}>
+      <h2 style={{ margin: '0 0 4px' }}>Models</h2>
+      <div className="muted" style={{ marginBottom: 18 }}>
+        Which models each provider may be asked for. A project’s agent profile picks from this list — adding one
+        here makes it selectable everywhere, with no engine rebuild.
+      </div>
+      <ModelCatalogue api={api} />
+    </Shell>
+  )
+}
+
 // Platform-wide, not per-org: one pool of provider keys serves every project, and which project may use which
 // is exactly what the screen is for.
 function CredentialsPage() {
@@ -863,6 +883,17 @@ function ProjectDetailPage() {
   const [prof, setProf] = useState<{ profile: any; version: number; running: any } | null>(null)
   const [draft, setDraft] = useState<any>(null)
   const [profMsg, setProfMsg] = useState<string>('')
+  // The OPTIONS come from the platform catalogue, never from a list this file carries — so the editor can only
+  // offer what superadmin has approved, and adding a model there makes it selectable here immediately.
+  const [cat, setCat] = useState<{ models: Record<string, string[]>; providers: string[] } | null>(null)
+  useEffect(() => {
+    if (view !== 'settings' || role !== 'superadmin') return
+    api('/catalogue').then(async r => {
+      if (!r.ok) return
+      const d = await r.json() as any
+      setCat({ models: d.models ?? {}, providers: d.providers ?? [] })
+    }).catch(() => {})
+  }, [view, role, api])
   const loadProfile = useCallback(async () => {
     const r = await api(`/projects/${projectId}/profile`)
     if (!r.ok) return
@@ -1168,6 +1199,7 @@ function ProjectDetailPage() {
                 <div className="muted" style={{ fontSize: 12.5, margin: '4px 0 12px' }}>
                   Which harness, provider and model each agent runs on. Applied to the next session each agent
                   builds — a question already in flight keeps the session it started on.
+                  {' '}Models come from the platform <Link to="/models">catalogue</Link>.
                 </div>
 
                 {/* WHAT IS ACTUALLY RUNNING — reported by the engine, not inferred from the last write. */}
@@ -1194,10 +1226,20 @@ function ProjectDetailPage() {
                                 style={{ padding: 6, borderRadius: 6 }}>
                           {HARNESSES.map(h => <option key={h} value={h}>{h}</option>)}
                         </select>
-                        <input value={cur.provider ?? ''} placeholder={live?.provider ?? ''}
-                               onChange={e => setAgent(a, 'provider', e.target.value)} style={{ padding: 6, borderRadius: 6 }} />
-                        <input value={cur.model ?? ''} placeholder={live?.model ?? ''}
-                               onChange={e => setAgent(a, 'model', e.target.value)} style={{ padding: 6, borderRadius: 6 }} />
+                        <select value={cur.provider ?? ''} onChange={e => setAgent(a, 'provider', e.target.value)}
+                                style={{ padding: 6, borderRadius: 6 }}>
+                          {(cat?.providers ?? []).map(p => <option key={p} value={p}>{p}</option>)}
+                          {/* Keep a value the catalogue no longer offers visible rather than silently
+                              rewriting this agent to something nobody chose. */}
+                          {cur.provider && !(cat?.providers ?? []).includes(cur.provider) &&
+                            <option value={cur.provider}>{cur.provider} (not routable)</option>}
+                        </select>
+                        <select value={cur.model ?? ''} onChange={e => setAgent(a, 'model', e.target.value)}
+                                style={{ padding: 6, borderRadius: 6 }}>
+                          {(cat?.models?.[cur.provider] ?? []).map(m => <option key={m} value={m}>{m}</option>)}
+                          {cur.model && !(cat?.models?.[cur.provider] ?? []).includes(cur.model) &&
+                            <option value={cur.model}>{cur.model} (not in the catalogue)</option>}
+                        </select>
                       </div>
                     )
                   })}

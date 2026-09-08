@@ -370,6 +370,33 @@ export default {
       return handleCredentialsAdmin(request, env, path)
     }
 
+    // ── The MODEL CATALOGUE: which models each provider may be asked for ────
+    // Superadmin only, and platform-wide — "opencode-go carries kimi-k3" is true for every project, so it is
+    // held once in GlobalDO rather than copied into each one. It is the list the profile editor CHOOSES from;
+    // it never travels to a project or to an engine, which are given decisions rather than options.
+    //
+    // Here rather than in the engine image so that adding or removing a model is an edit, not a rebuild and a
+    // roll of every box.
+    if (path === '/api/catalogue') {
+      if (!(await requireSuperadmin(request, env))) return new Response('unauthorized', { status: 401 })
+      const g = env.GLOBAL.get(env.GLOBAL.idFromName('global'))
+      if (request.method === 'GET') {
+        // The PROVIDERS come from the routing contract, not from a list the editor carries: a provider the
+        // proxy cannot route is one no project should be offered, and the contract is the only thing that
+        // knows. Same reason the credentials screen reads them from there.
+        const { UPSTREAMS } = await import('../../../vm/packages/agent-contract/contract.mjs')
+        const r = await g.fetch(new Request('http://do/catalogue'))
+        const body = await r.json() as any
+        return Response.json({ ...body, providers: Object.keys(UPSTREAMS) })
+      }
+      if (request.method === 'PUT') {
+        return g.fetch(new Request('http://do/catalogue', {
+          method: 'PUT', headers: { 'content-type': 'application/json' }, body: await request.text(),
+        }))
+      }
+      return Response.json({ error: 'use GET or PUT' }, { status: 405 })
+    }
+
     // ── Rotating a project's API key ────────────────────────────────────────
     // Superadmin only. The key sits in every engine's .env and on the proxy box, and it unlocks that
     // project's pooled provider credentials — so it must be rotatable, and rotating it must not require an

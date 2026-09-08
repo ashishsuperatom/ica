@@ -48,10 +48,59 @@ export class GlobalDO extends DurableObject<Env> {
         created_at INTEGER NOT NULL DEFAULT (unixepoch())
       );
       CREATE INDEX IF NOT EXISTS idx_domains_project ON domains(project_id);
+
+      -- WHICH MODELS EACH PROVIDER MAY BE ASKED FOR. Platform-wide and held ONCE: "opencode-go carries
+      -- kimi-k3" is true for every project, so storing it per project would mean editing it N times and
+      -- letting the copies drift. Merged into each project's profile when that profile is delivered, so an
+      -- engine still receives one document over one path.
+      --
+      -- Here rather than in the engine image because adding or removing a model must not require a rebuild
+      -- and a roll of every box — the whole point of configuration living in the control plane.
+      CREATE TABLE IF NOT EXISTS model_catalogue (
+        json       TEXT NOT NULL,
+        updated_by TEXT,
+        updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+      );
     `)
     // Migration: add column if missing (existing DOs from before this change)
     try { this.ctx.storage.sql.exec('ALTER TABLE organizations ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0') } catch {}
     LoginCodeStore.migrate(this.ctx.storage.sql)
+  }
+
+  /** The live catalogue, or null when none has been set — in which case every engine uses the fallback copy
+   *  baked into its own default.json, and nothing has to be seeded here for a fresh platform to work. */
+  private catalogueRow(): { models: Record<string, string[]>; updatedBy: string | null; updatedAt: number } | null {
+    const [row] = this.ctx.storage.sql.exec('SELECT json, updated_by, updated_at FROM model_catalogue LIMIT 1')
+    if (!row) return null
+    try {
+      return { models: JSON.parse((row as any).json), updatedBy: (row as any).updated_by ?? null, updatedAt: (row as any).updated_at }
+    } catch { return null }
+  }
+
+  /** Read by ProjectDO on its own hot path, so it stays a plain lookup with no validation or work. */
+  catalogue(): Record<string, string[]> | null { return this.catalogueRow()?.models ?? null }
+
+  private async getCatalogue(): Promise<Response> {
+    return Response.json(this.catalogueRow() ?? { models: null, updatedBy: null, updatedAt: 0 })
+  }
+
+  private async putCatalogue(req: Request): Promise<Response> {
+    const body = await req.json() as any
+    const models = body?.models
+    // SHAPE CHECKED HERE, because this reaches every project: a catalogue that is not
+    // provider → list-of-names would make each engine refuse every profile it validates against it.
+    if (!models || typeof models !== 'object' || Array.isArray(models)) {
+      return Response.json({ error: 'body must be { models: { provider: [model, …] } }' }, { status: 400 })
+    }
+    for (const [provider, list] of Object.entries(models)) {
+      if (!Array.isArray(list) || list.some(m => typeof m !== 'string' || !m)) {
+        return Response.json({ error: `models.${provider} must be a list of model names` }, { status: 400 })
+      }
+    }
+    this.ctx.storage.sql.exec('DELETE FROM model_catalogue')
+    this.ctx.storage.sql.exec('INSERT INTO model_catalogue (json, updated_by, updated_at) VALUES (?, ?, ?)',
+      JSON.stringify(models), body?.by ?? null, Date.now())
+    return Response.json({ ok: true, providers: Object.keys(models).length })
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -85,6 +134,10 @@ export class GlobalDO extends DurableObject<Env> {
     if (request.method === 'POST' && path === '/users') return this.createUser(request)
 
     // Domains (*.superatom.site subdomain → projectId)
+    // The model catalogue: read by ProjectDO when it composes a profile, written from superadmin.
+    if (request.method === 'GET' && path === '/catalogue') return this.getCatalogue()
+    if (request.method === 'PUT' && path === '/catalogue') return this.putCatalogue(request)
+
     if (request.method === 'GET'    && path === '/domains/check')   return this.checkDomain(url)
     if (request.method === 'GET'    && path === '/domains/resolve') return this.resolveDomain(url)
     if (request.method === 'GET'    && path === '/domains/by-project') return this.domainByProject(url)
