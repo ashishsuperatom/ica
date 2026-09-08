@@ -26,7 +26,7 @@ import { execSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { execProgram, answerView } from './exec-program.js'
 import { createSession, prepareWorkspace, type Session, type Harness, type RunHandlers } from './ica/index.js'
-import { agentConfig, describeConfig } from './config/index.js'
+import { agentConfig, describeConfig, useCache, receive, applied } from './config/index.js'
 import { createNarrator, capResultData, stripCode, type Narrator } from './agents/narrator/index.js'
 import { createAnalyst, promptVersion as analystPromptVersion } from './agents/analyst/index.js'
 import { promptVersion as composerPromptVersion, createComposer, type Composer } from './agents/composer/index.js'
@@ -72,6 +72,11 @@ const VM_ROOT = join(__dirname, '..', '..')                              // apps
 const STATE_ROOT = process.env.ENGINE_STATE_DIR ?? join(VM_ROOT, '.state')
 const WORKSPACE_ROOT = process.env.ENGINE_WORKSPACE_DIR ?? STATE_ROOT
 const DATA_ROOT = process.env.ENGINE_DATA_DIR ?? STATE_ROOT              // answers.sqlite co-locates with the workspace
+
+// THE PROFILE THIS MACHINE LAST ADOPTED, read before any agent config is resolved. Without it a box whose
+// control plane is briefly unreachable would boot on the git default — quietly running different agents than
+// it was configured with, and working well enough that nobody looks.
+useCache(join(STATE_ROOT, PROJECT))
 // SEGREGATION (see ica/workspace.ts): the agent's write-root and the engine's DBs are SIBLING folders under the
 // project home, so the agent's cwd never contains our SQLite files.
 const WORKSPACE = join(WORKSPACE_ROOT, PROJECT, 'workspace')   // the AGENT's cwd: seams + programs/ + out/
@@ -84,16 +89,9 @@ const HARNESS = (process.env.ICA_HARNESS as Harness) || 'opencode'   // read AFT
 // claude-code | codex | opencode picks the brain for ALL of them, and each agent's MODEL is INHERITED from
 // that harness (claude-code→claude-sonnet-5, codex→gpt-5.6-terra) — you don't set a model. Any single agent
 // can still be pinned with ICA_<AGENT>_HARNESS / _MODEL, which wins. Reflex is independent (own opencode-go).
-// Resolved by the PROFILE (apps/engine/config) — default.json, overridden by the project's profile,
-// overridden by ICA_*. One resolver, and every value can say which layer produced it.
-const ANALYST   = agentConfig('analyst')
-const CONNECTOR = agentConfig('connector')
-const GROUNDING = agentConfig('grounding')
-const MODELLER  = agentConfig('modeller')            // the concept modeller (System 4)
-const { harness: ANALYST_HARNESS,   model: ANALYST_MODEL }   = ANALYST
-const { harness: CONNECTOR_HARNESS, model: CONNECTOR_MODEL } = CONNECTOR
-const { harness: GROUNDING_HARNESS, model: GROUNDING_MODEL } = GROUNDING
-const { harness: MODELLER_HARNESS,  model: MODELLER_MODEL }  = MODELLER
+// The PROFILE decides (apps/engine/config): default.json, replaced per agent by the project's own profile.
+// Read here only for REPORTING — each agent asks the resolver for its own configuration when it is built, so
+// nothing hands an agent half of its identity.
 // Where the connector agent writes bridges (shared with the datasource-manager, which loads them by absolute
 // path). Defaults to the project's COMMITTED inputs folder so connector-written bridges land beside any
 // hand-authored ones (one place, no duplicate); on Fly override via env to the mounted volume.
@@ -236,9 +234,9 @@ const inspector = createInspector({
   runtime: () => ({
     harness: HARNESS,
     agents: {
-      analyst:   { harness: ANALYST_HARNESS,   model: ANALYST_MODEL,   busy: busySessions.size > 0 },
-      connector: { harness: CONNECTOR_HARNESS, model: CONNECTOR_MODEL, busy: connectorBusy },
-      grounding: { harness: GROUNDING_HARNESS, model: GROUNDING_MODEL, busy: groundingBusy },
+      analyst:   { ...agentConfig('analyst'),   busy: busySessions.size > 0 },
+      connector: { ...agentConfig('connector'), busy: connectorBusy },
+      grounding: { ...agentConfig('grounding'), busy: groundingBusy },
     },
     consolidating: conceptConsolidating,
     consolidateIntervalMs: CONCEPT_CONSOLIDATE_INTERVAL_MS,
@@ -336,7 +334,7 @@ function makeAgentSlot<A extends Agent>(role: string, promptVersion: () => Promi
     dispose() { try { agent?.session.stop() } catch {}; agent = null; building = null },
   }
 }
-const analystSlot  = makeAgentSlot('analyst',  analystPromptVersion,  (resumeId) => listSources().then(sources => createAnalyst({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { harness: ANALYST_HARNESS, model: ANALYST_MODEL, resumeId } })))
+const analystSlot  = makeAgentSlot('analyst',  analystPromptVersion,  (resumeId) => listSources().then(sources => createAnalyst({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { resumeId } })))
 // The COMPOSER (System 2), ONE PER SESSION: each chat session gets its own composer (a cheap opencode CLIENT
 // session on the shared server, so N sessions ≈ free). Created on the session's first question, reused for the
 // session; only the in-flight question needs memory. Idle sessions are disposed by the sweep below.
@@ -364,13 +362,13 @@ setInterval(() => {
     console.log(`[ica] composer: disposed idle session ${sid.slice(0, 8)} (live composers: ${composersBySession.size})`)
   }
 }, 5 * 60 * 1000).unref?.()
-const connectorSlot = makeAgentSlot('connector', connectorPromptVersion, (resumeId) => createConnector({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, datasourcesDir: DATASOURCES_DIR, ica: { harness: CONNECTOR_HARNESS, model: CONNECTOR_MODEL, resumeId } }))
+const connectorSlot = makeAgentSlot('connector', connectorPromptVersion, (resumeId) => createConnector({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, datasourcesDir: DATASOURCES_DIR, ica: { resumeId } }))
 // COLD by design: never warmed at boot (below); spun up only when the admin triggers a grounding build.
-const groundingSlot = makeAgentSlot('grounding', groundingPromptVersion, (resumeId) => listSources().then(sources => createGroundingAgent({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { harness: GROUNDING_HARNESS, model: GROUNDING_MODEL, resumeId } })))
+const groundingSlot = makeAgentSlot('grounding', groundingPromptVersion, (resumeId) => listSources().then(sources => createGroundingAgent({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { resumeId } })))
 // The CONCEPT MODELLER (System 4 — "sleep"): LAZY, never warmed at boot — spun up only when the offline
 // consolidation tick has a batch to study, then it distils verified concepts from finished analyses.
-const modellerSlot = makeAgentSlot('modeller', modellerPromptVersion, (resumeId) => listSources().then(sources => createConceptModeller({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { harness: MODELLER_HARNESS, model: MODELLER_MODEL, resumeId } })))
-console.log(`[ica] analyst=${ANALYST_HARNESS}:${ANALYST_MODEL} · connector=${CONNECTOR_HARNESS}:${CONNECTOR_MODEL} · grounding=${GROUNDING_HARNESS}:${GROUNDING_MODEL} (cold)`)
+const modellerSlot = makeAgentSlot('modeller', modellerPromptVersion, (resumeId) => listSources().then(sources => createConceptModeller({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { resumeId } })))
+for (const line of describeConfig()) console.log(`[config] ${line}`)
 // Live analyst state, kept so a (re)connecting client can RE-SYNC after a reload (the engine stores
 // no history — this is just the current run + last result, replayed on demand).
 let curQuestion = '', curCategory = '', curSid = ''
@@ -1394,9 +1392,10 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       const slug = authoredProgramDir.replace(/^programs\//, '')
       // `by` = which SYSTEM/agent authored it (analyst=System 3 discovery; composer=System 2 concept-composition).
       // Deterministic + engine-known (never the LLM), so a later quality diff between authors is debuggable.
-      const authoredMeta = authoredBy === 'composer'
-        ? { by: 'composer', ...(({ harness, provider, model }) => ({ harness, provider: provider ?? null, model: model ?? null }))(agentConfig('composer')), at: Date.now() }
-        : { by: 'analyst', harness: ANALYST_HARNESS, provider: ANALYST.provider ?? null, model: ANALYST_MODEL ?? null, at: Date.now() }
+      // WHAT ACTUALLY RAN, from the one resolver, in one shape for either author. This used to read the
+      // ICA_COMPOSER_* variables with a second set of fallbacks, so on a box that set none of them the record
+      // named a harness and model the composer had never run.
+      const authoredMeta = { by: authoredBy, ...agentConfig(authoredBy === 'composer' ? 'composer' : 'analyst'), at: Date.now() }
       // canonicalQuestions accumulate on the PROGRAM (not the intent): they describe what this program answers,
       // and a program can be reached by several phrasings. Union with what's already there, so a rebuild/modify
       // ADDS a phrasing rather than dropping the ones already known. The user's real question is kept too — the
@@ -1787,6 +1786,11 @@ function connect() {
     if (t === 'welcome') {
       console.log(`[ica] registered (${m.payload.wsId}) — running self-check…`)
       flushOutbox()   // re-registered → deliver anything queued while the socket was flapping (answers, logs)
+      // THE PROJECT'S PROFILE, delivered with the welcome. Adopted before warm-up builds any agent, so a box
+      // starts on its own configuration rather than adopting it a few seconds late and rebuilding.
+      if (m.payload.profile) receive(m.payload.profile, 'project profile')
+      reportConfig(ws)
+      settleProfile()
       // Only claim READY after the self-check passes. The hub/DO can trust this signal to mean the engine
       // can actually answer, not merely that a socket is open.
       selfCheck().then((res) => {
@@ -1794,6 +1798,15 @@ function connect() {
         if (res.ok) { console.log(`[ica] READY — ${res.detail}`); ws.send(JSON.stringify({ type: 'ready', instanceId: INSTANCE_ID, epoch: EPOCH, detail: res.detail })) }
         else { console.error(`[ica] NOT READY — self-check failed: ${res.detail}`); ws.send(JSON.stringify({ type: 'not_ready', instanceId: INSTANCE_ID, detail: res.detail })) }
       })
+      return
+    }
+    // A CHANGE PUSHED WHILE WE RUN. Adopted for the next session each agent builds — a turn already in flight
+    // keeps the session it started on, because interrupting a running question to change a model is a worse
+    // failure than applying the change a minute later.
+    if (t === 'config:update') {
+      const r = receive(m.payload.profile, `project profile v${m.payload.version}`)
+      if (r.ok) console.log(`[config] adopted v${m.payload.version} — agents rebuild on their next session`)
+      reportConfig(ws)
       return
     }
     if (t === 'fenced')     { console.log('[ica] fenced — a newer engine holds this role (obsolete instance)'); return }
@@ -1834,7 +1847,7 @@ setInterval(() => { conceptConsolidateTick().catch((e) => console.log('[concept-
 // a stripped or expired credential looks like from the outside, and reading it as a broken agent has cost
 // real hours before.
 async function verifyBoxCredential(): Promise<void> {
-  const probe = createSession('claude-code', { cwd: WORKSPACE, model: 'claude-haiku-4-5-20251001' })
+  const probe = createSession('claude-code-pty', { cwd: WORKSPACE, model: 'claude-haiku-4-5-20251001' })
   try {
     const r = await probe.run('Reply with exactly: OK')
     const text = (r?.lastLines ?? '').trim()
@@ -2017,8 +2030,29 @@ async function warmEssentialAgents() {
   console.log(`     datasources=${sources} · idle, waiting for questions`)
   console.log(`${bar}\n`)
 }
+// ── PROFILE ↔ HUB ────────────────────────────────────────────────────────────────────────────────────────
+// Tell the hub what we are RUNNING, every time that changes. A UI must be able to distinguish "this profile
+// was saved" from "this box is running it" — they differ whenever a machine is asleep, unreachable, or still
+// finishing the question it was on, and only the box can answer the second one.
+function reportConfig(ws: WebSocket) {
+  try { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'config:applied', ...applied() })) }
+  catch { /* the socket is closing; the next welcome reports again */ }
+}
+
+// Warm-up must not start before the profile is known, or the first agents get built from the cached (or baked)
+// configuration and then need rebuilding a second later. Resolves when the profile arrives, or when the wait
+// cap expires — a hub that is slow must delay the box, never strand it, and the cache means what we fall back
+// to is this machine's last known configuration rather than the git default.
+let profileSettled: (() => void) | null = null
+const profileReady = new Promise<void>((res) => { profileSettled = res })
+function settleProfile() { profileSettled?.(); profileSettled = null }
+
 // Give the datasource manager a moment to come up (analyst/modeler read its /sources at create), then warm.
-setTimeout(() => { warmEssentialAgents().catch((e) => console.warn('[ica] warm-up error:', e?.message ?? e)) }, 4000)
+setTimeout(() => {
+  Promise.race([profileReady, new Promise<void>((r) => setTimeout(r, 5_000).unref?.())])
+    .then(() => warmEssentialAgents())
+    .catch((e) => console.warn('[ica] warm-up error:', e?.message ?? e))
+}, 4000)
 
 // On shutdown: stop our session — the harness reaps whatever binary/server it started (opencode
 // reaps its server only if it owns it). Delay exit so any close() SIGTERM reaches the binary.

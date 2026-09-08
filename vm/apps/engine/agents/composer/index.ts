@@ -9,7 +9,7 @@ import { readFile, writeFile, mkdir, rm } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import { AUTHORING_REFERENCE } from '../shared-prompts/authoring-reference.js'
 import { loadPrompt } from '../../prompts.js'
-import { agentConfig } from '../../config/index.js'
+import { agentConfig, type AgentOverride } from '../../config/index.js'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
@@ -29,7 +29,7 @@ export interface ComposerOpts {
   root: string
   projectId: string
   managerUrl?: string
-  ica?: { harness?: Harness; model?: string; provider?: string; baseUrl?: string }
+  ica?: AgentOverride            // override this agent's profile for ONE construction (an A/B, a local script)
 }
 // canonicalQuestions — what this program ANSWERS, in question form, written by whoever built it. This is the
 // retrieval substrate: a new question is matched against these (question ↔ question), never against program

@@ -8,6 +8,7 @@ export interface MachineConfig {
   projectId: string
   apiKey: string             // per-project key for WS auth
   workerWsHost: string       // e.g. "superatom.example.com"
+  platform?: string          // the vault/proxy domain; defaults to workerWsHost
   claudeOAuthToken?: string  // Claude subscription token
   flyAppName?: string        // defaults to FLY_APP
   flyOrgSlug?: string        // org slug
@@ -132,6 +133,12 @@ export async function createMachine(token: string, config: MachineConfig): Promi
           ENGINE_STATE_DIR: '/app/data/state',
           DATASOURCE_DATA_DIR: '/app/data/datasources',
           DATASOURCES_DIR: '/app/data/datasources',
+          // THE PLATFORM THIS BOX BELONGS TO. Without it the engine does not consider itself part of a fleet:
+          // it fetches no credential from the vault, routes nothing through the proxy, and tunnels nothing —
+          // so a freshly created machine would come up with none of that, and the failure reads as "claude is
+          // not logged in" rather than "this variable is missing". Derived from the Worker's own host, so a
+          // machine always points at the control plane that made it.
+          SUPERATOM_PLATFORM: config.platform ?? config.workerWsHost,
           // claude-code auth: prefer the per-machine token if given, else inherit the Fly app secret
           // CLAUDE_CODE_OAUTH_TOKEN (set once via `fly secrets set` — available to every machine).
           ...(config.claudeOAuthToken ? { CLAUDE_CODE_OAUTH_TOKEN: config.claudeOAuthToken } : {}),

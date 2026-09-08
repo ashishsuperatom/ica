@@ -15,7 +15,7 @@ const root = process.env.ENGINE_STATE_DIR ?? join(dirname(fileURLToPath(import.m
 console.log(`[grounding-local] project=${projectId} · manager=${managerUrl} · root=${root}\n`)
 const agent = await createGroundingAgent({
   root, projectId, sources: [projectId], managerUrl,
-  ica: { harness: 'claude-code', model: 'claude-sonnet-5' },
+  ica: { harness: 'claude-code-pty', provider: 'claude-code', model: 'claude-sonnet-5' },
 })
 console.log(`[grounding-local] cwd=${agent.cwd}\n`)
 const r = await agent.build({ onOutput: (c) => process.stdout.write(c) })

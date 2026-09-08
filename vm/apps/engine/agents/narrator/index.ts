@@ -9,7 +9,7 @@
 // (deepseek-v4-flash) — the terse one-line output keeps deliberation minimal.
 import { createSession, type Harness, type Session } from '../../ica/index.js'
 import { agentProse, hasToolMarkup } from '../../ica/prose.js'
-import { agentConfig } from '../../config/index.js'
+import { agentConfig, type AgentOverride } from '../../config/index.js'
 
 const NARRATE = `You narrate a data analysis AS IT HAPPENS, for the person who asked. A short, live, plain-English
 update on what is happening right now — so they follow along and never feel like they are just waiting.
@@ -95,7 +95,7 @@ export function isCleanBeat(s: string): boolean { return !beatRejection(s) }
 
 export interface NarratorOpts {
   cwd: string
-  ica?: { harness?: Harness; model?: string; provider?: string; baseUrl?: string }
+  ica?: AgentOverride            // override this agent's profile for ONE construction (an A/B, a local script)
   /** Which context strategy to run. Omitted ⇒ ICA_NARRATOR_CONTEXT, else 'stateless'. */
   context?: NarratorContext
 }

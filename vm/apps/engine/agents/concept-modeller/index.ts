@@ -10,7 +10,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { createSession, prepareWorkspace, type Harness, type Session, type RunHandlers } from '../../ica/index.js'
-import { agentConfig } from '../../config/index.js'
+import { agentConfig, type AgentOverride } from '../../config/index.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -23,7 +23,7 @@ export interface ConceptModellerOpts {
   root: string
   projectId: string
   sources: string[]
-  ica?: { harness?: Harness; model?: string; resumeId?: string }
+  ica?: AgentOverride            // override this agent's profile for ONE construction (an A/B, a local script)
   managerUrl?: string
 }
 
@@ -43,12 +43,16 @@ export interface ConceptModeller {
 }
 
 export async function createConceptModeller(opts: ConceptModellerOpts): Promise<ConceptModeller> {
-  const harness = opts.ica?.harness ?? 'claude-code'
-  const model = opts.ica?.model ?? agentConfig('modeller').model
+  // All three from the profile — the agent asks for its own configuration rather than being handed
+  // pieces of it by whoever constructs it.
+  const cfg = agentConfig('modeller')
+  const harness = opts.ica?.harness ?? cfg.harness
+  const model = opts.ica?.model ?? cfg.model
+  const provider = opts.ica?.provider ?? cfg.provider
   const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl })
   // Distinct filename (model/MODEL.md): the analyst SHARES this workspace and writes its own analyst/ANALYST.md.
   await cp(join(__dirname, 'SYSTEM.md'), join(cwd, 'model/MODEL.md')).catch(() => {})
-  const session = createSession(harness, { cwd, model, resumeId: opts.ica?.resumeId })
+  const session = createSession(harness, { cwd, model, provider, resumeId: opts.ica?.resumeId })
 
   const preamble = 'Read ./CONTEXT.md FIRST (the tools + seams), then ./model/MODEL.md (your instructions) and ' +
     'follow it exactly. Read data with `./sources` / `./introspect` / `./query`, search concepts with ' +

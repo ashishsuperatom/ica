@@ -20,7 +20,11 @@ export { prepareWorkspace } from './workspace.js'
 export { opencodeAuthStatus, login as opencodeLogin, ensureOpencodeServer } from './opencode.js'
 export { codexAuthStatus, login as codexLogin } from './codex.js'
 
-export type Harness = 'opencode' | 'pi' | 'claude-code' | 'codex' | 'mock'
+// NAMED FOR HOW IT IS DRIVEN, not for the vendor. 'claude-code-pty' runs the CLI through a pseudo-terminal
+// and scrapes it; a JSON/SDK driver for the same product is a DIFFERENT harness with different cost and
+// failure modes, and would sit here beside it. The old name 'claude-code' also collided with the PROVIDER of
+// the same name in the agent contract, so a config line could not say which of the two it meant.
+export type Harness = 'opencode' | 'pi' | 'claude-code-pty' | 'codex' | 'mock'
 
 export interface SessionOpts {
   cwd: string           // working directory the agent operates in — REQUIRED (see workspace.ts)
@@ -45,7 +49,7 @@ export function createSession(harness: Harness, opts: SessionOpts): Session {
   switch (harness) {
     case 'opencode':    return createOpencodeSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model, baseUrl: opts.baseUrl, noTools: opts.noTools, system: opts.system, systemReference: opts.systemReference, resumeId: opts.resumeId })
     case 'pi':          return createPiSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model, systemReference: opts.systemReference, noTools: opts.noTools, system: opts.system, resumeId: opts.resumeId })
-    case 'claude-code': return createClaudeSession({ cwd: opts.cwd, model: opts.model, bin: opts.bin, resumeId: opts.resumeId, systemReference: opts.systemReference })
+    case 'claude-code-pty': return createClaudeSession({ cwd: opts.cwd, model: opts.model, bin: opts.bin, resumeId: opts.resumeId, systemReference: opts.systemReference })
     case 'codex':       return createCodexSession({ cwd: opts.cwd, model: opts.model, resumeId: opts.resumeId, systemReference: opts.systemReference })
     case 'mock':        return createMockSession(opts)
     default:            throw new Error(`unknown harness: ${harness}`)

@@ -20,7 +20,7 @@ import { createSession, prepareWorkspace, type Harness, type Session, type RunHa
 import { execProgram } from '../../exec-program.js'
 import { CATEGORIES, type Category } from './classify.js'
 import { lintAnswer, repairInstruction, MAX_REPAIR_ROUNDS } from '../../answer-review.js'
-import { agentConfig } from '../../config/index.js'
+import { agentConfig, type AgentOverride } from '../../config/index.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 // Analyst prompt files via the override layer (volume override for the current image → baked fallback).
@@ -39,7 +39,7 @@ export interface AnalystOpts {
   root: string                                   // workspace root — MUST be the same the modeller used
   projectId: string                              // same projectId → same db/project.sqlite + units/
   sources: string[]
-  ica?: { harness?: Harness; model?: string; resumeId?: string }   // default claude-code:sonnet5; resumeId to resume a prior session
+  ica?: AgentOverride            // override this agent's profile for ONE construction (an A/B, a local script)
   managerUrl?: string
 }
 
@@ -101,8 +101,13 @@ async function fullSystem(): Promise<string> {
 }
 
 export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
-  const harness = opts.ica?.harness ?? 'claude-code'
-  const model = opts.ica?.model ?? agentConfig('analyst').model
+  // All three from the profile — the agent asks for its own configuration rather than being handed
+  // pieces of it by whoever constructs it. opts.ica still wins, so one agent can be run differently
+  // inside a single process (an A/B, a local script) without changing what the project runs.
+  const cfg = agentConfig('analyst')
+  const harness = opts.ica?.harness ?? cfg.harness
+  const model = opts.ica?.model ?? cfg.model
+  const provider = opts.ica?.provider ?? cfg.provider
 
   const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl })
   // The analyst's whole instruction into its system prompt (claude --append-system-prompt-file, so it APPENDS to
@@ -110,7 +115,7 @@ export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
   // was missing (contract + example + rule) + the per-project data CONTEXT. Then it reads no instruction files.
   const context = (() => { try { return readFileSync(join(cwd, 'CONTEXT.md'), 'utf8') } catch { return '' } })()
   const systemReference = [await fullSystem(), AUTHORING_SURFACE, context].filter(Boolean).join('\n\n---\n\n')
-  const session = createSession(harness, { cwd, model, resumeId: opts.ica?.resumeId, systemReference })
+  const session = createSession(harness, { cwd, model, provider, resumeId: opts.ica?.resumeId, systemReference })
   // ONE linear path: claude appends the reference to its system prompt, so the analyst never reads an instruction
   // file. If a harness can't inject (pi/mock), fail LOUD rather than branch — a misconfiguration is easier to
   // debug than a silent second code path.

@@ -10,9 +10,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createAgentSession, DefaultResourceLoader, getAgentDir, SessionManager, SettingsManager, ModelRuntime } from '@earendil-works/pi-coding-agent'
 import type { Session, RunHandlers, RunResult, AgentEvent } from './session.js'   // the shared session interface
-import { resolveProvider, describeResolution } from './providers.js'
 import { providersOn } from '../../../packages/agent-contract/contract.mjs'
-import { profile } from '../config/index.js'
 
 /** The ChatGPT credential `codex login` already wrote. pi-ai ships an `openai-codex-responses` provider that
  *  wants a Bearer token, and codex keeps a live one — so the two only need introducing, not a second login.
@@ -141,17 +139,16 @@ export function createPiSession(opts: PiSessionOpts): Session {
   // WHICH ACCOUNT PAYS — decided from the MODEL, not pinned globally. The chain per model lives in
   // providers.ts; here we just take the first account we actually hold a credential for. This used to be
   // "codex if a codex login exists, else OpenRouter", which quietly put every model on one account —
-  // including models that account does not carry, and including models we would rather bill elsewhere.
-  //
-  // An explicit opts.provider / ICA_PI_PROVIDER still wins outright: routing is the default, never a veto.
-  const modelId = opts.model ?? process.env.ICA_PI_MODEL ?? profile().harnessModel.pi!
-  const pinned = opts.provider ?? process.env.ICA_PI_PROVIDER
-  const routed = pinned ? null : resolveProvider(modelId)
-  if (routed) console.log(`[ica:pi] ${describeResolution(modelId, routed)}`)
-  // No credential for anything in the chain is still a real attempt: the SDK's own error names the missing
-  // key far better than a guess here would, and failing at selection time would hide which model was asked
-  // for. So fall through to the end of the chain and let the request say what is wrong.
-  const provider = pinned ?? routed?.provider ?? 'openrouter'
+  // BOTH NAMED BY THE PROFILE, never inferred. This block used to pick the paying account by matching the
+  // MODEL NAME against regexes (ica/providers.ts): `luna` meant "try openai-codex, else opencode-go". Asking
+  // for a model whose account had no credential therefore moved silently to a different account — which is
+  // how the composer spent weeks on a provider nobody had chosen, reported in a log line nobody read as a
+  // decision. A profile that names the provider makes a missing credential an error about the thing that is
+  // actually missing.
+  if (!opts.model) throw new Error('pi: no model given — the agent profile must name one')
+  if (!opts.provider) throw new Error(`pi: no provider given for ${opts.model} — the agent profile must name one`)
+  const modelId = opts.model
+  const provider = opts.provider
   const cred = codexCredential()
   const usingCodex = provider === 'openai-codex'
 

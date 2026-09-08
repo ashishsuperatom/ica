@@ -828,6 +828,7 @@ function IndexPanel({ hub }: { hub: ReturnType<typeof useProjectHub> }) {
 
 function ProjectDetailPage() {
   const token = useAuth(); const params = useParams<{ orgId: string; projectId: string; '*': string }>()
+  const role = useRole(token)   // superadmin-only sections are not rendered without it (the API refuses regardless)
   const { orgId, projectId } = params
   const navigate = useNavigate()
   const api = useApi(token, orgId)
@@ -855,6 +856,42 @@ function ProjectDetailPage() {
   // in practice everyone navigated straight past it and reported the button missing. A control nobody can
   // find is a control that does not exist.
   const [rot, setRot] = useState<{ apiKey: string; done?: boolean } | null>(null)
+  // ── THE AGENT PROFILE ──────────────────────────────────────────────────────────────────────────────────
+  // Two facts, never conflated: what is SAVED for this project, and what the engine reports it is RUNNING.
+  // They differ whenever a box is asleep, unreachable, or still finishing a question — so the UI shows both
+  // and says which is which, rather than turning a successful write into a claim about a machine.
+  const [prof, setProf] = useState<{ profile: any; version: number; running: any } | null>(null)
+  const [draft, setDraft] = useState<any>(null)
+  const [profMsg, setProfMsg] = useState<string>('')
+  const loadProfile = useCallback(async () => {
+    const r = await api(`/projects/${projectId}/profile`)
+    if (!r.ok) return
+    const d = await r.json() as any
+    setProf(d)
+    // SEEDED FROM WHAT IS RUNNING when nothing is saved yet. The editor never invents a document — an
+    // unconfigured project starts from the engine's own baked default, which is what it is actually using.
+    setDraft((cur: any) => cur ?? d.profile ?? d.running?.profile ?? null)
+  }, [api, projectId])
+  useEffect(() => { if (view === 'settings') loadProfile() }, [view, loadProfile])
+  const saveProfile = async () => {
+    setProfMsg('saving…')
+    const r = await api(`/projects/${projectId}/profile`, { method: 'PUT', body: JSON.stringify({ profile: draft }) })
+    if (!r.ok) { setProfMsg(`could not save: ${r.status} ${await r.text()}`); return }
+    const { version, delivered } = await r.json() as any
+    // The write succeeded. Whether a MACHINE took it is a different question, and we wait for the engine's own
+    // report rather than claiming it — an offline box must read as offline, not as applied.
+    setProfMsg(delivered ? `saved v${version} — waiting for the engine to confirm…`
+                         : `saved v${version} — the engine is not connected; it will pick this up when it starts`)
+    for (let i = 0; i < 12 && delivered; i++) {
+      await new Promise(r => setTimeout(r, 1000))
+      const g = await api(`/projects/${projectId}/profile`)
+      if (!g.ok) continue
+      const d = await g.json() as any
+      setProf(d)
+      if (d.running?.version === version) { setProfMsg(`running v${version} — confirmed by the engine`); return }
+    }
+    if (delivered) setProfMsg(`saved v${version} — the engine has not confirmed it yet`)
+  }
   const rotateKey = async () => {
     const r = await api(`/project-key/${projectId}/rotate`, { method: 'POST' })
     if (!r.ok) { alert(`Could not rotate: ${r.status} ${await r.text()}`); return }
@@ -1119,6 +1156,87 @@ function ProjectDetailPage() {
                   </div>
                 </>}
           </div>
+          {role === 'superadmin' && draft && (() => {
+            const AGENTS = ['analyst', 'connector', 'grounding', 'modeller', 'composer', 'narrator']
+            const HARNESSES = ['claude-code-pty', 'opencode', 'pi', 'codex']
+            const running = prof?.running
+            const setAgent = (a: string, k: string, v: string) =>
+              setDraft((d: any) => ({ ...d, agents: { ...d.agents, [a]: { ...(d.agents?.[a] ?? {}), [k]: v || undefined } } }))
+            return (
+              <div className="card" style={{ padding: 18 }}>
+                <strong>Agent profile</strong>
+                <div className="muted" style={{ fontSize: 12.5, margin: '4px 0 12px' }}>
+                  Which harness, provider and model each agent runs on. Applied to the next session each agent
+                  builds — a question already in flight keeps the session it started on.
+                </div>
+
+                {/* WHAT IS ACTUALLY RUNNING — reported by the engine, not inferred from the last write. */}
+                <div className="row" style={{ gap: 10, alignItems: 'center', marginBottom: 12, fontSize: 12.5 }}>
+                  <span className="muted">saved</span><code className="mono">v{prof?.version ?? 0}</code>
+                  <span className="muted">engine running</span>
+                  {running
+                    ? <code className="mono" style={{ color: running.version === prof?.version ? 'var(--ok)' : 'var(--bad)' }}>v{running.version}</code>
+                    : <span style={{ color: 'var(--muted)' }}>not connected — nothing is running this profile right now</span>}
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr 1fr', gap: 8, alignItems: 'center' }}>
+                  <span className="muted" style={{ fontSize: 12 }}>agent</span>
+                  <span className="muted" style={{ fontSize: 12 }}>harness</span>
+                  <span className="muted" style={{ fontSize: 12 }}>provider</span>
+                  <span className="muted" style={{ fontSize: 12 }}>model</span>
+                  {AGENTS.map(a => {
+                    const cur = draft.agents?.[a] ?? {}
+                    const live = running?.agents?.[a]
+                    return (
+                      <div key={a} style={{ display: 'contents' }}>
+                        <span style={{ fontSize: 13 }}>{a}</span>
+                        <select value={cur.harness ?? ''} onChange={e => setAgent(a, 'harness', e.target.value)}
+                                style={{ padding: 6, borderRadius: 6 }}>
+                          {HARNESSES.map(h => <option key={h} value={h}>{h}</option>)}
+                        </select>
+                        <input value={cur.provider ?? ''} placeholder={live?.provider ?? ''}
+                               onChange={e => setAgent(a, 'provider', e.target.value)} style={{ padding: 6, borderRadius: 6 }} />
+                        <input value={cur.model ?? ''} placeholder={live?.model ?? ''}
+                               onChange={e => setAgent(a, 'model', e.target.value)} style={{ padding: 6, borderRadius: 6 }} />
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* CAUTIONS COME FROM THE PROFILE, not from this file — adding one later is a data change. */}
+                {AGENTS.flatMap(a => {
+                  const h = draft.agents?.[a]?.harness
+                  const note = draft.harnessNotes?.[a]?.[h]
+                  return note ? [<div key={`${a}-${h}`} style={{ marginTop: 10, padding: '8px 11px', borderRadius: 8, fontSize: 12.5,
+                                       border: '1px solid var(--line)', color: note.level === 'warn' ? 'var(--bad)' : 'var(--muted)' }}>
+                                   <strong>{a} → {h}</strong> · {note.text}
+                                 </div>] : []
+                })}
+
+                <div className="row" style={{ gap: 10, marginTop: 12, alignItems: 'center' }}>
+                  <button className="btn" onClick={saveProfile}>Apply</button>
+                  <button className="btn ghost" onClick={() => { setDraft(prof?.profile ?? prof?.running?.profile ?? null); setProfMsg('') }}>Reset</button>
+                  <span className="muted" style={{ fontSize: 12.5 }}>{profMsg}</span>
+                </div>
+
+                {/* The engine's own view, per agent, including which layer decided each value — an ICA_* on the
+                    box overrides this profile, and that must be visible here rather than a silent surprise. */}
+                {running?.agents && (
+                  <details style={{ marginTop: 12 }}>
+                    <summary className="muted" style={{ fontSize: 12.5, cursor: 'pointer' }}>What the engine reports it is running</summary>
+                    <div style={{ marginTop: 8, fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap' }}>
+                      {AGENTS.map(a => {
+                        const r = running.agents[a]
+                        if (!r) return null
+                        return `${a.padEnd(10)} ${r.harness} · ${r.provider} · ${r.model}\n`
+                      })}
+                    </div>
+                  </details>
+                )}
+              </div>
+            )
+          })()}
+
           <div className="card" style={{ padding: 18, borderColor: 'var(--bad)' }}>
             <h3 style={{ margin: '0 0 4px', color: 'var(--bad)' }}>Danger zone</h3>
             <div className="between">

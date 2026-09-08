@@ -14,7 +14,7 @@ const root = process.env.ENGINE_STATE_DIR ?? join(dirname(fileURLToPath(import.m
 console.log(`[analyst-local] project=${projectId}\n[analyst-local] Q: ${question}\n`)
 const analyst = await createAnalyst({
   root, projectId, sources: [projectId], managerUrl,
-  ica: { harness: 'claude-code', model: 'claude-sonnet-5' },
+  ica: { harness: 'claude-code-pty', provider: 'claude-code', model: 'claude-sonnet-5' },
 })
 const qid = 'local_' + projectId
 const r = await analyst.ask(question, {

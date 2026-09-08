@@ -51,7 +51,7 @@ console.log('')
 // is the thing you actually want to see with your own eyes.
 const ASK = process.argv.slice(2).join(' ').trim()
 const MARKER = 'FLEET-AUTH-OK'
-const session = createSession('claude-code', { cwd, model: 'claude-haiku-4-5-20251001' })
+const session = createSession('claude-code-pty', { cwd, model: 'claude-haiku-4-5-20251001' })
 
 const t0 = Date.now()
 let out = ''

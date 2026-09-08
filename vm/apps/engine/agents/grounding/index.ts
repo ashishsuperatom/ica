@@ -13,7 +13,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { createSession, prepareWorkspace, type Harness, type Session, type RunHandlers } from '../../ica/index.js'
-import { agentConfig } from '../../config/index.js'
+import { agentConfig, type AgentOverride } from '../../config/index.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -26,7 +26,7 @@ export interface GroundingAgentOpts {
   root: string                                   // workspace root (a dir per project is created under here)
   projectId: string
   sources: string[]                              // the data source ids to ground (whatever this project has)
-  ica?: { harness?: Harness; model?: string; resumeId?: string }   // default claude-code:sonnet-5
+  ica?: AgentOverride            // override this agent's profile for ONE construction (an A/B, a local script)
   managerUrl?: string                            // the data seam; default http://localhost:4000
 }
 
@@ -37,13 +37,17 @@ export interface GroundingAgent {
 }
 
 export async function createGroundingAgent(opts: GroundingAgentOpts): Promise<GroundingAgent> {
-  const harness = opts.ica?.harness ?? 'claude-code'
-  const model = opts.ica?.model ?? agentConfig('grounding').model
+  // All three from the profile — the agent asks for its own configuration rather than being handed
+  // pieces of it by whoever constructs it.
+  const cfg = agentConfig('grounding')
+  const harness = opts.ica?.harness ?? cfg.harness
+  const model = opts.ica?.model ?? cfg.model
+  const provider = opts.ica?.provider ?? cfg.provider
   const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl })
   // Distinct filename so it never clobbers the analyst/modeler/connector role files in the shared workspace.
   await cp(join(__dirname, 'SYSTEM.md'), join(cwd, 'grounding/GROUNDING.md'))
 
-  const session = createSession(harness, { cwd, model, resumeId: opts.ica?.resumeId })
+  const session = createSession(harness, { cwd, model, provider, resumeId: opts.ica?.resumeId })
   const preamble = 'Read ./CONTEXT.md FIRST (the tools + seams), then ./grounding/GROUNDING.md (your instructions) and follow it exactly. Explore data with `./sources` / `./introspect` / `./query`. You PERSIST what you discover by calling build(config) on ./grounding/grounding.mjs.'
 
   return {

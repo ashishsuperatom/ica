@@ -11,7 +11,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { createSession, prepareWorkspace, type Harness, type Session, type RunHandlers } from '../../ica/index.js'
-import { agentConfig } from '../../config/index.js'
+import { agentConfig, type AgentOverride } from '../../config/index.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -23,7 +23,7 @@ export async function promptVersion(): Promise<string> {
 export interface ConnectorOpts {
   root: string                                   // workspace root (a dir per project is created under here)
   projectId: string
-  ica?: { harness?: Harness; model?: string; resumeId?: string }   // default claude-code:sonnet-5
+  ica?: AgentOverride            // override this agent's profile for ONE construction (an A/B, a local script)
   managerUrl?: string                            // the datasource-manager (to register + test bridges)
   datasourcesDir: string                         // where bridges are written (persisted, shared with the manager)
 }
@@ -35,8 +35,12 @@ export interface Connector {
 }
 
 export async function createConnector(opts: ConnectorOpts): Promise<Connector> {
-  const harness = opts.ica?.harness ?? 'claude-code'
-  const model = opts.ica?.model ?? agentConfig('connector').model
+  // All three from the profile — the agent asks for its own configuration rather than being handed
+  // pieces of it by whoever constructs it.
+  const cfg = agentConfig('connector')
+  const harness = opts.ica?.harness ?? cfg.harness
+  const model = opts.ica?.model ?? cfg.model
+  const provider = opts.ica?.provider ?? cfg.provider
   const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl })
   await cp(join(__dirname, 'SYSTEM.md'), join(cwd, 'connector/CONNECTOR.md'))
   // Connection TEMPLATES — how-to-connect + common issues + checks per source kind. They accumulate/improve
@@ -44,7 +48,7 @@ export async function createConnector(opts: ConnectorOpts): Promise<Connector> {
   // we've already figured out. Copied in so the agent can read ./templates/<kind>.md.
   await cp(join(__dirname, 'templates'), join(cwd, 'templates'), { recursive: true }).catch(() => {})
 
-  const session = createSession(harness, { cwd, model, resumeId: opts.ica?.resumeId })
+  const session = createSession(harness, { cwd, model, provider, resumeId: opts.ica?.resumeId })
   const manager = opts.managerUrl ?? 'http://localhost:4000'
   const preamble =
     `You are the infrastructure connector agent. Read ./connector/CONNECTOR.md for your role + the bridge protocol, then help ` +

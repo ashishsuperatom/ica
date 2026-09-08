@@ -12,7 +12,6 @@ import { Codex, type Thread } from '@openai/codex-sdk'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Session, RunHandlers, RunResult, AgentEvent } from './session.js'
-import { profile } from '../config/index.js'
 
 export interface CodexSessionOpts {
   cwd: string
@@ -69,7 +68,8 @@ function normEvent(ev: any): AgentEvent | null {
 }
 
 export function createCodexSession(opts: CodexSessionOpts): Session {
-  const model = opts.model ?? process.env.ICA_CODEX_MODEL ?? profile().harnessModel.codex!
+  if (!opts.model) throw new Error('codex: no model given — the agent profile must name one')
+  const model = opts.model
   const effort = (opts.reasoningEffort ?? process.env.ICA_CODEX_EFFORT ?? 'medium') as CodexSessionOpts['reasoningEffort']
   // Authoritative authoring reference → AGENTS.md, which codex auto-loads from the working directory (its
   // equivalent of CLAUDE.md). So the reference is always in-context with no read-instruction. Written once here.

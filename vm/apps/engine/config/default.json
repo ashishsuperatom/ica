@@ -1,22 +1,44 @@
 {
   "version": 1,
-  "note": "The engine's DEFAULT profile. A project's downloaded profile is merged over this; ICA_* environment variables override both. Credentials are never here — they come from the vault, per provider.",
-
-  "fleetHarness": "claude-code",
-
-  "harnessModel": {
-    "claude-code": "claude-sonnet-5",
-    "codex": "gpt-5.6-terra",
-    "pi": "gpt-5.6-luna",
-    "opencode": "glm-5.2"
-  },
-
+  "note": "The engine's DEFAULT profile \u2014 used when a project's Durable Object has none. Every agent names all three parts: harness (how we drive it), provider (whose account pays), model (what runs). Nothing is inferred, and no environment variable overrides this. Credentials never live here; they come from the vault, per provider.",
   "agents": {
-    "analyst":   {},
-    "connector": {},
-    "grounding": {},
-    "modeller":  {},
-    "composer":  { "harness": "pi", "model": "gpt-5.6-luna" },
-    "narrator":  { "harness": "pi", "provider": "opencode-go", "model": "deepseek-v4-flash" }
+    "analyst": {
+      "harness": "claude-code-pty",
+      "provider": "claude-code",
+      "model": "claude-sonnet-5"
+    },
+    "connector": {
+      "harness": "claude-code-pty",
+      "provider": "claude-code",
+      "model": "claude-sonnet-5"
+    },
+    "grounding": {
+      "harness": "claude-code-pty",
+      "provider": "claude-code",
+      "model": "claude-sonnet-5"
+    },
+    "modeller": {
+      "harness": "claude-code-pty",
+      "provider": "claude-code",
+      "model": "claude-sonnet-5"
+    },
+    "composer": {
+      "harness": "pi",
+      "provider": "opencode-go",
+      "model": "gpt-5.6-luna"
+    },
+    "narrator": {
+      "harness": "pi",
+      "provider": "opencode-go",
+      "model": "deepseek-v4-flash"
+    }
+  },
+  "harnessNotes": {
+    "composer": {
+      "claude-code-pty": {
+        "level": "warn",
+        "text": "claude-code-pty drives the CLI through a pseudo-terminal: every turn runs a terminal session, which costs far more per question than an API harness. Fine for the analyst, which runs rarely and builds from scratch; expensive for the composer, which runs on every question."
+      }
+    }
   }
 }

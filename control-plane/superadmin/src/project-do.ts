@@ -161,7 +161,7 @@ export class ProjectDO extends DurableObject<Env> {
   // at the latest version in one shot (CREATE IF NOT EXISTS) then jump to the
   // current version number. Existing DOs only run migrations they haven't seen.
 
-  private static CURRENT_SCHEMA = 8
+  private static CURRENT_SCHEMA = 10
 
   private async migrate() {
     // Ensure version tracking table exists
@@ -285,6 +285,32 @@ export class ProjectDO extends DurableObject<Env> {
       `)
     }
 
+    // V9 — the ENGINE PROFILE. Which harness/provider/model each agent runs on, written from superadmin and
+    // read by this project's engine at boot. ONE ROW: a profile is the project's current answer, not a history,
+    // and `version` is what the engine reports back so a UI can show what is genuinely RUNNING rather than what
+    // was last saved. NO CREDENTIALS EVER LIVE HERE — a profile is logged, cached to disk and rendered in a UI;
+    // keys come from the vault, per provider, already audited.
+    if (v < 9) {
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS profile (
+          json       TEXT NOT NULL,
+          version    INTEGER NOT NULL DEFAULT 1,
+          updated_by TEXT,
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+      `)
+    }
+
+    // V10 — REMOVE the seeded profiles. A previous version wrote the engine's own default into this table the
+    // first time a box reported in, so that the editor had something to show. That was backwards: an empty
+    // table already means "this project uses the engine's default", and a stored copy of it is a second source
+    // that goes stale the moment the default changes — which it did, one commit later, leaving projects
+    // holding a profile the engine then refused. Only rows the seeder wrote are dropped; a real choice made by
+    // a person is never touched.
+    if (v < 10) {
+      try { this.ctx.storage.sql.exec("DELETE FROM profile WHERE updated_by = 'engine (baked default)'") } catch {}
+    }
+
     // Advance to current version
     this.ctx.storage.sql.exec('DELETE FROM _schema_version')
     this.ctx.storage.sql.exec('INSERT INTO _schema_version (version) VALUES (?)', ProjectDO.CURRENT_SCHEMA)
@@ -364,6 +390,8 @@ export class ProjectDO extends DurableObject<Env> {
     if (request.method === 'GET'  && path === '/logs')         return this.getLogs(url)
     if (request.method === 'POST' && path === '/log')          return this.addLog(request)
     if (request.method === 'PUT'  && path === '/machine')      return this.updateMachine(request)
+    if (request.method === 'GET'  && path === '/profile')      return this.getProfile()
+    if (request.method === 'PUT'  && path === '/profile')      return this.putProfile(request)
     if (request.method === 'POST' && path === '/verify-conn')  return this.verifyConn(request)
 
     return new Response('not found', { status: 404 })
@@ -503,6 +531,21 @@ export class ProjectDO extends DurableObject<Env> {
         try { this.ctx.storage.sql.exec('UPDATE fly_machine SET status = ?', ready ? 'ready' : 'not_ready') } catch {}
         this.log('engine:ready', { ready, detail: msg.detail })
         this.broadcastToAll(ws, { from: { id: sender.wsId, type: 'code-engine' }, payload: { t: ready ? 'engine:ready' : 'engine:not_ready', detail: msg.detail } })
+      }
+      return
+    }
+
+    // ── What the engine is ACTUALLY running ───────────────────────────────────────────────────────
+    // Sent by the engine after it resolves its profile — at boot, and again after adopting a pushed change.
+    // This, not the last write, is what a UI should show: saving a profile and a box running it are two
+    // different facts, and they differ whenever a machine is asleep, unreachable, or mid-question.
+    if (msg.type === 'config:applied') {
+      if (sender.type === 'code-engine') {
+        this._runningProfile = { version: Number(msg.version) || 0, agents: msg.agents ?? null,
+                                 profile: msg.profile ?? null, at: Date.now() }
+        this.log('config:applied', { version: this._runningProfile.version })
+        this.broadcastToAll(ws, { from: { id: sender.wsId, type: 'code-engine' },
+                                  payload: { t: 'config:applied', version: this._runningProfile.version, agents: msg.agents ?? null } })
       }
       return
     }
@@ -658,7 +701,11 @@ export class ProjectDO extends DurableObject<Env> {
     ws.send(JSON.stringify({
       from: { id: 'hub', type: 'hub' },
       to: { id: wsId, type },
-      payload: { t: 'welcome', wsId, type, project: { id: this._pid, name: await this.projectName() } },
+      payload: { t: 'welcome', wsId, type, project: { id: this._pid, name: await this.projectName() },
+                 // THE PROFILE, at the moment the engine registers — so a box adopts its project's configuration
+                 // before it builds a single agent, and a restarted box needs no second round trip. Absent means
+                 // "nothing configured for this project"; the engine then keeps its baked default.
+                 ...(type === 'code-engine' ? { profile: this.readProfile()?.profile ?? null } : {}) },
     }))
 
     // Log
@@ -697,6 +744,10 @@ export class ProjectDO extends DurableObject<Env> {
     if (this.roleRegistry.get(conn.type) === conn.wsId) {
       this.roleRegistry.delete(conn.type)
     }
+    // The engine that told us what it was running is gone, so the claim goes with it. Reporting a profile as
+    // "running" on a box that is no longer connected is the kind of confident-but-wrong answer this whole
+    // reporting path exists to avoid.
+    if (conn.type === 'code-engine') this._runningProfile = null
 
     // Log
     this.log('ws:disconnected', { wsId: conn.wsId, type: conn.type, userId: conn.userId ?? null })
@@ -1118,6 +1169,60 @@ export class ProjectDO extends DurableObject<Env> {
     } catch (err: any) {
       this.log('machine:reconcile_failed', { claimedId, error: err?.message ?? String(err) })
     }
+  }
+
+  // ── THE ENGINE PROFILE ───────────────────────────────────────────────────
+  // Read by this project's engine (it arrives in the welcome, and again on every change); written only from
+  // superadmin. Stored as the JSON the engine consumes, so nothing translates between what is edited and what
+  // is applied — a translation layer is one more place the two can disagree.
+  private readProfile(): { profile: any; version: number; updatedBy: string | null; updatedAt: number } | null {
+    const [row] = this.ctx.storage.sql.exec('SELECT json, version, updated_by, updated_at FROM profile LIMIT 1')
+    if (!row) return null
+    try {
+      return { profile: JSON.parse((row as any).json), version: (row as any).version,
+               updatedBy: (row as any).updated_by ?? null, updatedAt: (row as any).updated_at }
+    } catch { return null }   // unparseable is the same as absent: the engine falls back to its baked default
+  }
+
+  private async getProfile(): Promise<Response> {
+    const p = this.readProfile()
+    // `running` is what the ENGINE last reported it had adopted — NOT what was last saved. A UI must be able to
+    // show that a change has actually taken effect, and those are different facts whenever a box is asleep,
+    // unreachable, or still finishing the question it was on.
+    return Response.json({ ...(p ?? { profile: null, version: 0, updatedBy: null, updatedAt: 0 }), running: this._runningProfile })
+  }
+
+  private async putProfile(req: Request): Promise<Response> {
+    const body = await req.json() as any
+    const profile = body?.profile
+    if (!profile || typeof profile !== 'object') return Response.json({ error: 'body must be { profile, by? }' }, { status: 400 })
+    const prev = this.readProfile()
+    const version = (prev?.version ?? 0) + 1
+    const stored = { ...profile, version }
+    this.ctx.storage.sql.exec('DELETE FROM profile')
+    this.ctx.storage.sql.exec('INSERT INTO profile (json, version, updated_by, updated_at) VALUES (?, ?, ?, ?)',
+      JSON.stringify(stored), version, body?.by ?? null, Date.now())
+    this.log('profile:saved', { version, by: body?.by ?? null })
+    // PUSHED, not polled. The engine adopts it for the next session each agent builds; a running turn is never
+    // interrupted. Delivered best-effort — a box that is asleep picks it up in its welcome when it wakes.
+    const delivered = this.sendToRole('code-engine', { t: 'config:update', profile: stored, version })
+    return Response.json({ ok: true, version, delivered })
+  }
+
+  /** What the engine says it is RUNNING. Set from its `config:applied` message, cleared when it disconnects, so
+   *  a stale claim can never outlive the process that made it. */
+  private _runningProfile: { version: number; agents?: any; profile?: any; at: number } | null = null
+
+  /** Send one payload to the single connection holding a role. Returns whether anything received it — the
+   *  caller reports that honestly rather than implying delivery to a box that is asleep. */
+  private sendToRole(role: string, payload: any): boolean {
+    const wsId = this.roleRegistry.get(role)
+    const ws = wsId ? this.wsById.get(wsId) : undefined
+    if (!ws || !wsId) return false
+    try {
+      ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, to: { id: wsId, type: role }, payload }))
+      return true
+    } catch { return false }
   }
 
   private async updateMachine(req: Request): Promise<Response> {

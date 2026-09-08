@@ -13,7 +13,6 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { makeClaudeEventLog, transcriptPath } from './claude-events.js'
 import { boxCredentialsReady } from './box-credentials.js'
-import { profile } from '../config/index.js'
 
 // ── FIRST-RUN GATES ──────────────────────────────────────────────────────────────────────────────────────
 // A freshly provisioned box has a credential but no history, and claude-code asks three questions before it
@@ -70,7 +69,7 @@ function seedFirstRunGates(cwd: string): void {
 
 export interface ClaudeSessionOpts {
   cwd: string                 // working directory the agent runs in
-  model?: string              // default: the profile's harnessModel['claude-code']
+  model?: string              // required: named by the agent's profile
   bin?: string                // default $CLAUDE_BIN || 'claude'
   idleMs?: number             // silence that means "done" (default 6000; measured max working gap ≈ 3.7s)
   firstGraceMs?: number       // long grace for the FIRST output after submit (default 60000)
@@ -84,7 +83,8 @@ const lastLines = (buf: string, n = 8) => { const ls = stripAnsi(buf).split('\n'
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 export function createClaudeSession(opts: ClaudeSessionOpts): Session {
-  const model = opts.model ?? profile().harnessModel['claude-code']!
+  if (!opts.model) throw new Error('claude-code: no model given — the agent profile must name one')
+  const model = opts.model
   const bin = opts.bin ?? process.env.CLAUDE_BIN ?? 'claude'
   // Authoritative authoring reference → the REAL system prompt via --append-system-prompt-file (a spawn arg, so
   // no fragile PTY typing; it survives compaction, unlike a file the agent must remember to re-read). Written

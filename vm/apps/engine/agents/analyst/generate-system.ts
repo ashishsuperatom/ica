@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url'
 import { writeMd } from '../render-md.js'
 import { PROGRAM_AUTHORING } from '../shared-prompts/program-authoring.js'   // SHARED single source (analyst + composer)
 import { ANSWER_TABLE } from '../shared-prompts/answer-contract.js'
+import { agentConfig } from '../../config/index.js'
 
 const sys = (name: string) => join(fileURLToPath(new URL('.', import.meta.url)), 'system', name)
 
@@ -177,7 +178,7 @@ const outroBase = `Put each piece where it belongs and the split takes care of i
 plain text so it streams live.`
 
 // claude-code only: it can background a command / sub-agent and then wait on it forever, hanging the turn.
-const analystHarness = process.env.ICA_ANALYST_HARNESS || process.env.ICA_AGENT_HARNESS || 'claude-code'
+const analystHarness = agentConfig('analyst').harness
 const claudeNoBackground = `Run every command in the foreground and wait for it — never background a command or spawn a sub-agent/watcher; if a step fails, say so and move on.`
 
 export const BASE = [baseIntro, usingModel, usingData, writingQueries, grounding, method, unknowable,

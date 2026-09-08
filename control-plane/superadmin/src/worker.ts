@@ -393,6 +393,29 @@ export default {
       return Response.json({ error: 'unknown action' }, { status: 404 })
     }
 
+    // ── A project's ENGINE PROFILE: which harness/provider/model each agent runs on ──────────────────────
+    // Superadmin only, for the same reason the key above is: this decides which model answers the project's
+    // questions and what that costs — a platform decision, not a tenant one. Stored in the project's own DO,
+    // delivered to its engine in the welcome and pushed on change.
+    //
+    // GET returns two different facts and keeps them apart: the profile SAVED for the project, and what the
+    // engine last reported it is actually RUNNING. They differ whenever a box is asleep, unreachable, or still
+    // finishing a question, and an editor that conflated them would report success for a change nothing had
+    // applied.
+    if (path.startsWith('/api/projects/') && path.endsWith('/profile')) {
+      if (!(await requireSuperadmin(request, env))) return new Response('unauthorized', { status: 401 })
+      const projectId = path.slice('/api/projects/'.length, -'/profile'.length)
+      if (!projectId || projectId.includes('/')) return Response.json({ error: 'bad project id' }, { status: 400 })
+      const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
+      if (request.method === 'GET') return stub.fetch(new Request('http://do/profile'))
+      if (request.method === 'PUT') {
+        return stub.fetch(new Request('http://do/profile', {
+          method: 'PUT', headers: { 'content-type': 'application/json' }, body: await request.text(),
+        }))
+      }
+      return Response.json({ error: 'use GET or PUT' }, { status: 405 })
+    }
+
     // ── Project creation (with Fly Machine provisioning) ────────────────────
     if (request.method === 'POST' && path === '/api/projects') {
       // An organisation runs its own projects — its admin creates them. Superadmin may act anywhere.

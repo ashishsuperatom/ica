@@ -116,7 +116,7 @@ for (const name of providersOn('tunnel')) {
 if (LIVE) {
   const { createSession } = await import('../ica/index.js')
   const t = Date.now()
-  const s = createSession('claude-code', { cwd: process.cwd(), model: 'claude-haiku-4-5-20251001' })
+  const s = createSession('claude-code-pty', { cwd: process.cwd(), model: 'claude-haiku-4-5-20251001' })
   try {
     const r = await s.run('Reply with exactly: OK')
     const text = (r?.lastLines ?? '').trim()
