@@ -36,6 +36,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Harness } from '../ica/index.js'
+import { harnessCanUse, providersForHarness } from '../../../packages/agent-contract/contract.mjs'
 
 export type AgentName = 'analyst' | 'connector' | 'grounding' | 'modeller' | 'composer' | 'narrator'
 
@@ -146,6 +147,14 @@ export function validate(p: any): string[] {
       if (typeof a?.[field] !== 'string' || !a[field]) bad.push(`agents.${name}.${field} is missing`)
     }
     if (a?.harness && !HARNESSES.has(a.harness)) bad.push(`agents.${name}.harness "${a.harness}" is not a harness`)
+    // THE PAIR. A harness reaches only the accounts it can authenticate against — claude-code-pty drives a CLI
+    // with its own subscription and nothing else. Refused here as well as narrowed in the editor, because a
+    // profile can also arrive from a script or a restored backup, and an impossible pair leaves an agent
+    // unable to start with an error about a model rather than about the combination.
+    else if (a?.harness && a?.provider && !harnessCanUse(a.harness, a.provider)) {
+      const can = providersForHarness(a.harness)
+      bad.push(`agents.${name}: ${a.harness} cannot use ${a.provider}${can.length ? ` (it reaches ${can.join(', ')})` : ''}`)
+    }
   }
   return bad
 }

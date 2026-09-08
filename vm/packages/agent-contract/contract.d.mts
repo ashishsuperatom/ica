@@ -45,3 +45,7 @@ export declare function decide(a: { projectId: string | null; sentCredential: st
 
 export declare function usageFrom(obj: any): { in: number; out: number } | null
 export declare function usageFromSseTail(tail: string): { in: number; out: number } | null
+
+export declare const HARNESSES: Record<string, { providers: string[] }>
+export declare function providersForHarness(harness: string): string[]
+export declare function harnessCanUse(harness: string, provider: string): boolean

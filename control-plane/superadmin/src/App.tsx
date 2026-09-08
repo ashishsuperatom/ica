@@ -887,13 +887,14 @@ function ProjectDetailPage() {
   const [profMsg, setProfMsg] = useState<string>('')
   // The OPTIONS come from the platform catalogue, never from a list this file carries — so the editor can only
   // offer what superadmin has approved, and adding a model there makes it selectable here immediately.
-  const [cat, setCat] = useState<{ models: Record<string, string[]>; providers: { name: string; disabled: string | null }[] } | null>(null)
+  const [cat, setCat] = useState<{ models: Record<string, string[]>; providers: { name: string; disabled: string | null }[]
+                                   harnesses: Record<string, { providers: string[] }> } | null>(null)
   useEffect(() => {
     if (view !== 'settings' || role !== 'superadmin') return
     api('/catalogue').then(async r => {
       if (!r.ok) return
       const d = await r.json() as any
-      setCat({ models: d.models ?? {}, providers: d.providers ?? [] })
+      setCat({ models: d.models ?? {}, providers: d.providers ?? [], harnesses: d.harnesses ?? {} })
     }).catch(() => {})
   }, [view, role, api])
   const loadProfile = useCallback(async () => {
@@ -1206,9 +1207,24 @@ function ProjectDetailPage() {
             const AGENTS = ['analyst', 'connector', 'grounding', 'modeller', 'composer', 'narrator']
             const HARNESSES = ['claude-code-pty', 'opencode', 'pi', 'codex']
             const running = prof?.running
+            // A harness reaches only certain accounts, and an account carries only certain models — so changing
+            // one clears what it invalidates instead of leaving a pair that cannot exist. With exactly one
+            // possible account (claude-code-pty, codex) it is chosen outright: presenting a single option as a
+            // decision is busywork.
             const setAgent = (a: string, k: string, v: string) =>
-              setDraft(d => { const cur = d ?? { agents: {} }
-                              return { ...cur, agents: { ...cur.agents, [a]: { ...(cur.agents?.[a] ?? {}), [k]: v || undefined } } } })
+              setDraft(d => {
+                const cur = d ?? { agents: {} }
+                const row: any = { ...(cur.agents?.[a] ?? {}), [k]: v || undefined }
+                if (k === 'harness') {
+                  const can = cat?.harnesses?.[v]?.providers ?? []
+                  if (!row.provider || !can.includes(row.provider)) {
+                    row.provider = can.length === 1 ? can[0] : undefined
+                    row.model = undefined
+                  }
+                }
+                if (k === 'provider' && row.model && !(cat?.models?.[v] ?? []).includes(row.model)) row.model = undefined
+                return { ...cur, agents: { ...cur.agents, [a]: row } }
+              })
             return (
               <div className="card" style={{ padding: 18 }}>
                 <strong>Agent profile</strong>
@@ -1223,7 +1239,11 @@ function ProjectDetailPage() {
                   <span className="muted">saved</span><code className="mono">v{prof?.version ?? 0}</code>
                   <span className="muted">engine running</span>
                   {running
-                    ? <code className="mono" style={{ color: running.version === prof?.version ? 'var(--ok)' : 'var(--bad)' }}>v{running.version}</code>
+                    ? <>
+                        <code className="mono" style={{ color: running.version === prof?.version ? 'var(--ok)' : 'var(--bad)' }}>v{running.version}</code>
+                        {/* WHEN it said so. A report with no time on it cannot be told from a stale one. */}
+                        {running.at ? <span className="muted">as of {new Date(running.at).toLocaleString()}</span> : null}
+                      </>
                     : <span style={{ color: 'var(--muted)' }}>engine has not reported — start it to see what it is running</span>}
                 </div>
 
@@ -1250,10 +1270,12 @@ function ProjectDetailPage() {
                         <select value={cur.provider ?? ''} onChange={e => setAgent(a, 'provider', e.target.value)}
                                 style={{ padding: 6, borderRadius: 6 }}>
                           <option value="">— engine default —</option>
-                          {(cat?.providers ?? []).map(p =>
-                            <option key={p.name} value={p.name} disabled={!!p.disabled}>
-                              {p.name}{p.disabled ? ' — turned off' : ''}
-                            </option>)}
+                          {(cat?.providers ?? [])
+                            .filter(p => !cur.harness || (cat?.harnesses?.[cur.harness]?.providers ?? []).includes(p.name))
+                            .map(p =>
+                              <option key={p.name} value={p.name} disabled={!!p.disabled}>
+                                {p.name}{p.disabled ? ' — turned off' : ''}
+                              </option>)}
                           {/* Keep a value the contract no longer offers visible rather than silently
                               rewriting this agent to something nobody chose. */}
                           {cur.provider && !(cat?.providers ?? []).some(p => p.name === cur.provider) &&
@@ -1294,7 +1316,9 @@ function ProjectDetailPage() {
                     box overrides this profile, and that must be visible here rather than a silent surprise. */}
                 {running?.agents && (
                   <details style={{ marginTop: 12 }}>
-                    <summary className="muted" style={{ fontSize: 12.5, cursor: 'pointer' }}>What the engine reports it is running</summary>
+                    <summary className="muted" style={{ fontSize: 12.5, cursor: 'pointer' }}>
+                      What the engine reports it is running{running.at ? ` — reported ${new Date(running.at).toLocaleString()}` : ''}
+                    </summary>
                     <div style={{ marginTop: 8, fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap' }}>
                       {AGENTS.map(a => {
                         const r = running.agents[a]

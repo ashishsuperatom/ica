@@ -415,7 +415,7 @@ export default {
         // The PROVIDERS come from the routing contract, not from a list the editor carries: a provider the
         // proxy cannot route is one no project should be offered, and the contract is the only thing that
         // knows. Same reason the credentials screen reads them from there.
-        const { UPSTREAMS, isDisabled, disabledReason } = await import('../../../vm/packages/agent-contract/contract.mjs')
+        const { UPSTREAMS, isDisabled, disabledReason, HARNESSES } = await import('../../../vm/packages/agent-contract/contract.mjs')
         const r = await g.fetch(new Request('http://do/catalogue'))
         const body = await r.json() as any
         // WITH THEIR ROUTE AND WHETHER THEY ARE TURNED OFF. A disabled provider still belongs in the catalogue
@@ -427,7 +427,9 @@ export default {
           route: (UPSTREAMS as any)[name].route,
           disabled: isDisabled(name) ? disabledReason(name) : null,
         }))
-        return Response.json({ ...body, providers })
+        // WHICH ACCOUNTS EACH HARNESS CAN REACH, so the editor narrows its dropdowns from the same table the
+        // engine validates against rather than a second opinion written in a React file.
+        return Response.json({ ...body, providers, harnesses: HARNESSES })
       }
       if (request.method === 'PUT') {
         return g.fetch(new Request('http://do/catalogue', {

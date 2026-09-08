@@ -98,6 +98,30 @@ export const PROVIDERS = {
   },
 }
 
+// ── WHICH ACCOUNTS EACH HARNESS CAN REACH ────────────────────────────────────────────────────────────────
+//
+// A harness is HOW we drive a model; a provider is WHOSE ACCOUNT PAYS. They are independent axes but not a
+// free grid: claude-code-pty drives a CLI that authenticates with its own subscription and can reach nothing
+// else, and codex is the same story against ChatGPT. Only pi can be pointed at several accounts, because only
+// pi takes a base URL and a key per model.
+//
+// Declared HERE with the routing it belongs to, so the superadmin editor can narrow its dropdowns and the
+// engine can refuse an impossible pair, from one table rather than two opinions. Without it the editor
+// cheerfully offered `claude-code-pty · opencode-go` — a combination that cannot exist, presented as a choice.
+export const HARNESSES = {
+  'claude-code-pty': { providers: ['claude-code'] },
+  codex:             { providers: ['openai-codex'] },
+  opencode:          { providers: ['opencode-go'] },
+  pi:                { providers: ['opencode-go', 'openai-codex', 'anthropic', 'openrouter'] },
+  mock:              { providers: [] },
+}
+
+/** Accounts this harness can be pointed at. Unknown harness ⇒ nothing, so a typo narrows rather than widens. */
+export const providersForHarness = (harness) => HARNESSES[harness]?.providers ?? []
+
+/** Can this harness use this account at all? The pair check both the editor and the engine apply. */
+export const harnessCanUse = (harness, provider) => providersForHarness(harness).includes(provider)
+
 /** Back-compat name for the relay table. The Worker reads `.base`/`.header` off these. */
 export const UPSTREAMS = PROVIDERS
 
