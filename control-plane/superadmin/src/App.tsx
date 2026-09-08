@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Credentials } from './Credentials'
-import { ModelCatalogue } from './Models'
+import { ModelCatalogue, AppliedProfiles } from './Models'
 import { DashboardsPanel } from './Dashboards'
 import { useProjectHub } from './hub'
 import { Inspector, SECTIONS, SECTION_LABEL, type Section } from './Inspector'
@@ -252,7 +252,7 @@ function Shell({ children, crumbs, nav }: { children: React.ReactNode; crumbs?: 
               credentials — but an org admin should not be shown a door they may not open, and a menu item is
               itself a statement about what exists. */}
           {HOST_SCOPE === 'superadmin' && <Link to="/credentials" className="nav">{I.key}Credentials</Link>}
-          {HOST_SCOPE === 'superadmin' && <Link to="/models" className="nav">{I.key}Models</Link>}
+          {HOST_SCOPE === 'superadmin' && <Link to="/agents" className="nav">{I.key}Agents</Link>}
           {nav}
         </nav>
         <div className="foot"><UserButton /></div>
@@ -283,7 +283,7 @@ export function App() {
         <Route path="/" element={HOST_SCOPE === 'admin' ? <MyOrgLanding /> : <OrgListPage />} />
         <Route path="/org/:orgId" element={<OrgDetailPage />} />
         {HOST_SCOPE === 'superadmin' && <Route path="/credentials" element={<CredentialsPage />} />}
-        {HOST_SCOPE === 'superadmin' && <Route path="/models" element={<ModelsPage />} />}
+        {HOST_SCOPE === 'superadmin' && <Route path="/agents" element={<ModelsPage />} />}
         {/* /pro/<projectId> — a project on its own, no org in the path. */}
         <Route path="/pro/:projectId/*" element={<ProjectDetailPage />} />
         {/* The older nested form still resolves, so existing links keep working. */}
@@ -415,11 +415,23 @@ function OrgListPage() {
 function ModelsPage() {
   const token = useAuth(); const api = useApi(token)
   return (
-    <Shell crumbs={<><Link to="/">Organizations</Link><span>/</span>Models</>}>
-      <h2 style={{ margin: '0 0 4px' }}>Models</h2>
+    <Shell crumbs={<><Link to="/">Organizations</Link><span>/</span>Agents</>}>
+      <h2 style={{ margin: '0 0 4px' }}>Agents</h2>
       <div className="muted" style={{ marginBottom: 18 }}>
-        Which models each provider may be asked for. A project’s agent profile picks from this list — adding one
-        here makes it selectable everywhere, with no engine rebuild.
+        The options, and what every project is actually running.
+      </div>
+
+      <h3 style={{ margin: '0 0 4px' }}>What each project is running</h3>
+      <div className="muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
+        Assigned in each project’s settings; reported by its own engine. A row where the two versions differ has
+        not been picked up yet.
+      </div>
+      <AppliedProfiles api={api} />
+
+      <h3 style={{ margin: '26px 0 4px' }}>Model catalogue</h3>
+      <div className="muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
+        Which models each provider may be asked for. A project’s profile picks from this list — adding one here
+        makes it selectable everywhere, with no engine rebuild.
       </div>
       <ModelCatalogue api={api} />
     </Shell>

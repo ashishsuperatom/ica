@@ -370,6 +370,37 @@ export default {
       return handleCredentialsAdmin(request, env, path)
     }
 
+    // ── WHAT EVERY PROJECT IS ACTUALLY RUNNING ──────────────────────────────
+    // Superadmin ASSIGNS a profile; whether a box took it is a fact only that box can report, and it reports
+    // to its own project's DO. So there was nowhere to see the fleet at once — you could push a change to
+    // twelve projects and have no way to tell which of them had applied it.
+    //
+    // This fans out: every org's projects, then each project's own DO for the profile it has stored and the
+    // one its engine last said it was running. Settled, not raced — a project whose DO is slow or whose engine
+    // is asleep must appear in the list as exactly that, rather than removing the whole answer.
+    if (path === '/api/profiles') {
+      if (!(await requireSuperadmin(request, env))) return new Response('unauthorized', { status: 401 })
+      const g = env.GLOBAL.get(env.GLOBAL.idFromName('global'))
+      const orgs = await (await g.fetch(new Request('http://do/organizations'))).json() as any[]
+      const perOrg = await Promise.allSettled(orgs.map(async (o: any) => {
+        const orgStub = env.ORG.get(env.ORG.idFromName(o.do_name))
+        const projects = await (await orgStub.fetch(new Request('http://do/projects'))).json() as any[]
+        return Promise.all(projects.map(async (pr: any) => {
+          const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${pr.id}`))
+          try {
+            const d = await (await stub.fetch(new Request('http://do/profile'))).json() as any
+            return { org: o.name, orgId: o.id, projectId: pr.id, project: pr.name,
+                     savedVersion: d.version ?? 0, updatedAt: d.updatedAt ?? 0, running: d.running ?? null }
+          } catch (e: any) {
+            return { org: o.name, orgId: o.id, projectId: pr.id, project: pr.name,
+                     savedVersion: null, running: null, error: String(e?.message ?? e).slice(0, 120) }
+          }
+        }))
+      }))
+      const rows = perOrg.flatMap(r => r.status === 'fulfilled' ? r.value : [])
+      return Response.json({ projects: rows })
+    }
+
     // ── The MODEL CATALOGUE: which models each provider may be asked for ────
     // Superadmin only, and platform-wide — "opencode-go carries kimi-k3" is true for every project, so it is
     // held once in GlobalDO rather than copied into each one. It is the list the profile editor CHOOSES from;

@@ -1847,7 +1847,7 @@ setInterval(() => { conceptConsolidateTick().catch((e) => console.log('[concept-
 // a stripped or expired credential looks like from the outside, and reading it as a broken agent has cost
 // real hours before.
 async function verifyBoxCredential(): Promise<void> {
-  const probe = createSession('claude-code-pty', { cwd: WORKSPACE, model: 'claude-haiku-4-5-20251001' })
+  const probe = createSession('claude-code-pty', { cwd: WORKSPACE, model: 'claude-haiku-4-5' })
   try {
     const r = await probe.run('Reply with exactly: OK')
     const text = (r?.lastLines ?? '').trim()
