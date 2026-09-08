@@ -9,7 +9,6 @@
 //   ICA_HUB=ws://localhost:5174   (local sa-worker DO; prod: wss://superatom.site)
 //   ICA_PROJECT=<projectId>       (the DO project id)
 //   ICA_KEY=<per-project key>     (sk-proj-…; the code-engine credential)
-//   ICA_HARNESS=opencode          (opencode | pi | claude-code; default opencode)
 //   ICA_OC_URL=http://127.0.0.1:4096   (opencode: share ONE standalone server, no per-engine spawn)
 //   pnpm exec tsx engine.ts
 
@@ -84,7 +83,6 @@ const DB_DIR    = join(WORKSPACE_ROOT, PROJECT, 'db')          // ENGINE-private
 // Committed per-project CONFIG (index seeds, datasource notes) — distinct from generated state above.
 const PROJECT_DIR = process.env.ENGINE_PROJECT_DIR ?? join(__dirname, '..', '..', 'projects', PROJECT)
 const KEY = process.env.ICA_KEY || ''
-const HARNESS = (process.env.ICA_HARNESS as Harness) || 'opencode'   // read AFTER .env is loaded
 // ONE fleet switch for the WORK agents (analyst/connector/grounding): ICA_AGENT_HARNESS =
 // claude-code | codex | opencode picks the brain for ALL of them, and each agent's MODEL is INHERITED from
 // that harness (claude-code→claude-sonnet-5, codex→gpt-5.6-terra) — you don't set a model. Any single agent
@@ -96,7 +94,6 @@ const HARNESS = (process.env.ICA_HARNESS as Harness) || 'opencode'   // read AFT
 // path). Defaults to the project's COMMITTED inputs folder so connector-written bridges land beside any
 // hand-authored ones (one place, no duplicate); on Fly override via env to the mounted volume.
 const DATASOURCES_DIR  = process.env.DATASOURCES_DIR || join(VM_ROOT, 'projects', PROJECT, 'datasources')
-const MODEL = process.env.ICA_MODEL                  // undefined → the harness's own default (e.g. opencode glm-5.2)
 const OC_URL = process.env.ICA_OC_URL                // opencode: connect to a shared standalone server
 const DATASOURCE = process.env.DATASOURCE_URL || 'http://localhost:4000'   // the one data seam
 
@@ -232,7 +229,6 @@ const inspector = createInspector({
   graph, answers, workspace: WORKSPACE, dataRoot: join(DATA_ROOT, PROJECT), projectId: PROJECT,
   datasourceUrl: DATASOURCE,
   runtime: () => ({
-    harness: HARNESS,
     agents: {
       analyst:   { ...agentConfig('analyst'),   busy: busySessions.size > 0 },
       connector: { ...agentConfig('connector'), busy: connectorBusy },
@@ -1845,7 +1841,12 @@ function connect() {
     // failure than applying the change a minute later.
     if (t === 'config:update') {
       const r = receive(m.payload.profile, `project profile v${m.payload.version}`)
-      if (r.ok) console.log(`[config] adopted v${m.payload.version} — agents rebuild on their next session`)
+      if (r.ok) {
+        // The TABLE, not just a version number. A change arriving while the box runs is exactly when someone
+        // needs to see what it changed to, and the version alone sends them to a database to find out.
+        console.log(`[config] adopted v${m.payload.version} — agents rebuild on their next session`)
+        for (const line of describeConfig()) console.log(`[config] ${line}`)
+      }
       reportConfig(ws)
       return
     }

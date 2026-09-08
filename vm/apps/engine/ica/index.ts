@@ -42,8 +42,6 @@ export interface SessionOpts {
   systemReference?: string
 }
 
-// The DEFAULT harness — override with ICA_HARNESS.
-export const DEFAULT_HARNESS: Harness = (process.env.ICA_HARNESS as Harness) || 'opencode'
 
 export function createSession(harness: Harness, opts: SessionOpts): Session {
   switch (harness) {

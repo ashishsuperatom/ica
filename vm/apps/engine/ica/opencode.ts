@@ -6,7 +6,7 @@
 // selects what to forward over the WS. Prompt-agnostic; knows nothing about the hub.
 //
 //   Subscription: providerID default 'opencode-go' (the logged-in OpenCode Go sub).
-//   Override via opts / ICA_OC_PROVIDER + ICA_OC_MODEL.
+//   Provider and model are named by the agent's profile — see apps/engine/config.
 
 import { createOpencode, createOpencodeClient, createOpencodeServer } from '@opencode-ai/sdk'
 import type { AgentEvent } from './session.js'
@@ -102,7 +102,8 @@ function normPart(part: any): AgentEvent | null {
 }
 
 export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
-  const providerID = opts.provider ?? process.env.ICA_OC_PROVIDER ?? 'opencode-go'
+  if (!opts.provider) throw new Error('opencode: no provider given — the agent profile must name one')
+  const providerID = opts.provider
   if (!opts.model) throw new Error('opencode: no model given — the agent profile must name one')
   const modelID = opts.model
   // The system prompt sent per turn: an explicit `system` (pure-LLM agents) plus the authoritative authoring
@@ -312,7 +313,7 @@ function proxyConfig(provider: string): Record<string, any> | undefined {
   const key = process.env.ICA_KEY
   if (!platform || !project || !key || isDisabled(provider) || providersOn('tunnel').includes(provider)) return undefined
   const baseURL = `https://proxy.${platform}/p/${project}/${provider}`
-  console.log(`[ica:oc] via proxy → ${baseURL}`)
+  console.log(`[ica:oc] via proxy → ${baseURL}`)   // the model is named per turn, in the oc-usage line
   return { provider: { [provider]: { options: { baseURL, apiKey: key } } } }
 }
 

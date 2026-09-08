@@ -239,7 +239,10 @@ export function createPiSession(opts: PiSessionOpts): Session {
         if (!model.apiKey) model.apiKey = process.env.ICA_KEY
         await runtime.setRuntimeApiKey(provider, process.env.ICA_KEY)
       }
-      console.log(`[ica:pi] via proxy → ${model.baseUrl}`)
+      // THE MODEL, not only the account. This printed just the base URL, so a log could show a composer going
+      // to opencode-go and still not answer "is it running the model I just set" — the one question a change
+      // to the profile raises.
+      console.log(`[ica:pi] ${model.id} via proxy → ${model.baseUrl}`)
     } else if (platform && TUNNELLED.has(provider)) {
       console.log(`[ica:pi] ${provider} keeps its own URL — carried by the tunnel, not relayed`)
     }
