@@ -1251,12 +1251,18 @@ function ProjectDetailPage() {
                     return (
                       <div key={a} style={{ display: 'contents' }}>
                         <span style={{ fontSize: 13 }}>{a}</span>
+                        {/* AN EXPLICIT EMPTY OPTION on every select. A <select> whose value matches no option
+                            renders the FIRST one instead — so an untouched row displayed "claude-code-pty /
+                            opencode-go" and read as a choice nobody had made. Unset must look unset, and here
+                            it means precisely one thing: this agent keeps whatever the engine defaults to. */}
                         <select value={cur.harness ?? ''} onChange={e => setAgent(a, 'harness', e.target.value)}
                                 style={{ padding: 6, borderRadius: 6 }}>
+                          <option value="">— engine default —</option>
                           {HARNESSES.map(h => <option key={h} value={h}>{h}</option>)}
                         </select>
                         <select value={cur.provider ?? ''} onChange={e => setAgent(a, 'provider', e.target.value)}
                                 style={{ padding: 6, borderRadius: 6 }}>
+                          <option value="">— engine default —</option>
                           {(cat?.providers ?? []).map(p =>
                             <option key={p.name} value={p.name} disabled={!!p.disabled}>
                               {p.name}{p.disabled ? ' — turned off' : ''}
@@ -1268,6 +1274,7 @@ function ProjectDetailPage() {
                         </select>
                         <select value={cur.model ?? ''} onChange={e => setAgent(a, 'model', e.target.value)}
                                 style={{ padding: 6, borderRadius: 6 }}>
+                          <option value="">— engine default —</option>
                           {/* No provider chosen yet means no models to offer — the catalogue is keyed by
                               account, so the question "which models" has no answer until one is picked. */}
                           {(cur.provider ? cat?.models?.[cur.provider] ?? [] : []).map((m: string) =>
