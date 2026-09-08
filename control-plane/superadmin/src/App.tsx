@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { loadToken, mintToken, dropToken, claimReauthOnce, tokenValid } from '../../shared/session-token'
 import { Credentials } from './Credentials'
 import { AgentsScreen } from './Models'
 import { DashboardsPanel } from './Dashboards'
@@ -162,20 +163,6 @@ function ago(ms: number) {
 
 // ── auth / api ───────────────────────────────────────────────────────────────
 // Read a JWT's exp (unix seconds); 0 if unparseable → treated as expired.
-function jwtExp(t: string | null): number {
-  if (!t) return 0
-  try {
-    let b = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
-    b += '='.repeat((4 - (b.length % 4)) % 4)
-    const p = JSON.parse(atob(b))
-    return typeof p.exp === 'number' ? p.exp : 0
-  } catch { return 0 }
-}
-// A token is usable only if it's present AND more than 60s from expiry (clock-skew margin).
-function tokenValid(t: string | null): boolean {
-  return jwtExp(t) * 1000 - Date.now() > 60_000
-}
-
 // ── Where are we, and who is looking? ───────────────────────────────────────
 // superadmin.superatom.site — the platform console (org creation, every org).
 // admin.superatom.site      — the customer console: /org/<orgId> and /pro/<projectId>. The path says which,
@@ -197,25 +184,11 @@ export function useRole(token: string | null): 'superadmin' | 'user' | null {
 
 function useAuth() {
   const { session } = useSession()
-  const [token, setToken] = useState<string | null>(() => {
-    const t = localStorage.getItem('sa-token')
-    if (tokenValid(t)) return t
-    localStorage.removeItem('sa-token')   // discard a stale/expired cached token instead of reusing it
-    return null
-  })
+  const [token, setToken] = useState<string | null>(loadToken)
   useEffect(() => {
     // Re-exchange whenever we lack a VALID token (missing OR expired) and a Clerk session is available.
     if (tokenValid(token) || !session) return
-    session.getToken().then(async (ct) => {
-      try {
-        const r = await fetch('/api/auth/token', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ clerkToken: ct }) })
-        if (!r.ok) return
-        const { token: t } = await r.json()
-        localStorage.setItem('sa-token', t)
-        sessionStorage.removeItem('sa-reauth')   // a fresh token clears the 401 self-heal guard
-        setToken(t)
-      } catch {}
-    })
+    session.getToken().then((ct) => mintToken(ct).then((t) => { if (t) setToken(t) }))
   }, [session, token])
   return token
 }
@@ -227,9 +200,8 @@ function useApi(token: string | null, orgId?: string | null) {
     })
     // Self-heal: a 401 means the token was rejected (expired mid-session). Drop it and re-exchange on
     // reload. The sessionStorage guard prevents a reload loop if re-exchange also fails (dead Clerk session).
-    if (res.status === 401 && !sessionStorage.getItem('sa-reauth')) {
-      sessionStorage.setItem('sa-reauth', '1')
-      localStorage.removeItem('sa-token')
+    if (res.status === 401 && claimReauthOnce()) {
+      dropToken()
       location.reload()
     }
     return res

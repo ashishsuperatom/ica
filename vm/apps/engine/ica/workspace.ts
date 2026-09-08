@@ -295,7 +295,7 @@ async function main() {
     try {
       for (const line of describeShape(r.output)) console.log('  ' + line)
     } catch (se) {
-      process.stderr.write('  [answer] shape summary FAILED (' + String(se?.message ?? se).slice(0, 160) + ') \u2014 the run itself is fine; read ' + rel + '\n')
+      process.stderr.write('  [answer] shape summary FAILED (' + String(se?.message ?? se).slice(0, 160) + ') \u2014 the run itself is fine; read ' + rel + '\\n')
     }
     console.log('')
     console.log('Read the output as the person who asked would. Empty, sidesteps the question, or figures that')

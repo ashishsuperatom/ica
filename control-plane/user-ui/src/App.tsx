@@ -10,6 +10,7 @@ import { useClaudeTerminal } from './useClaudeTerminal'
 import { useQuestionNav } from './questionNav'
 import { useLogNav } from './logNav'
 import { ANSI, COLS, ROWS } from './termColors'
+import { loadToken, mintToken, dropToken, claimReauthOnce, tokenValid } from '../../shared/session-token'
 
 // Cloud mode: VITE_HUB_URL set (e.g. wss://superatom.site). The page is served at
 // /u behind the worker; it logs in via Clerk, exchanges for our JWT, and connects to
@@ -26,49 +27,13 @@ const VM_HTTP = VM_WS.replace('ws://', 'http://').replace('wss://', 'https://')
 
 // Cloud auth gate — only rendered inside <ClerkProvider> (main.tsx). Logs in, exchanges
 // the Clerk session for our JWT, reads the project from ?project=, then renders <App>.
-// ── IS THE STORED TOKEN STILL ANY USE? ─────────────────────────────────────────────────────────────────────
-// This app trusted whatever was in localStorage forever. A token that had expired was therefore used on every
-// connect, the hub closed the socket with 4001, and the reconnect loop re-sent the SAME dead token every three
-// seconds — never re-minting, because the "do we need a token" check was `if (token) return` and an expired
-// string is still a string.
-//
-// It is per-ORIGIN, so it struck one project's subdomain while every other project the same person had open
-// kept working: localStorage is not shared across subdomains, so each one carries its own token with its own
-// expiry. That is what made it look like one project was broken rather than one token.
-//
-// The admin console has had this guard from the start; the user app never got it.
-function jwtExp(t: string | null): number {
-  if (!t) return 0
-  try {
-    let b = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
-    b += '='.repeat((4 - (b.length % 4)) % 4)
-    const p = JSON.parse(atob(b))
-    return typeof p.exp === 'number' ? p.exp : 0
-  } catch { return 0 }
-}
-/** A minute of headroom, so a token cannot expire between this check and the socket opening. */
-const tokenValid = (t: string | null): boolean => jwtExp(t) * 1000 - Date.now() > 60_000
-
 export function CloudGate() {
   const { isSignedIn, session } = useSession()
-  const [token, setToken] = useState<string | null>(() => {
-    const t = localStorage.getItem('sa-token')
-    if (tokenValid(t)) return t
-    localStorage.removeItem('sa-token')   // an expired token is worse than none: none re-mints, expired retries
-    return null
-  })
+  const [token, setToken] = useState<string | null>(loadToken)
   const projectId = (globalThis as any).__PROJECT_ID__ ?? new URLSearchParams(location.search).get('project') ?? ''
   useEffect(() => {
     if (tokenValid(token) || !session) return
-    session.getToken().then(async (ct: string | null) => {
-      try {
-        const r = await fetch('/api/auth/token', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ clerkToken: ct }) })
-        if (!r.ok) return
-        const { token: t } = await r.json(); localStorage.setItem('sa-token', t)
-        sessionStorage.removeItem('sa-reauth')   // a fresh token re-arms the one-shot reload guard
-        setToken(t)
-      } catch {}
-    })
+    session.getToken().then((ct: string | null) => mintToken(ct).then((t) => { if (t) setToken(t) }))
   }, [session, token])
 
   // ── The session cookie ──────────────────────────────────────────────────────
@@ -401,9 +366,9 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           // The token is dead. Drop it and reload so the gate re-mints from the Clerk session — retrying with
           // the same one is exactly the loop this used to sit in. Same recovery the admin console performs on
           // a 401, including the guard: if re-minting ALSO fails we must not reload forever.
-          localStorage.removeItem('sa-token')
+          dropToken()
           setStatus('Session expired — signing in again…')
-          if (!sessionStorage.getItem('sa-reauth')) { sessionStorage.setItem('sa-reauth', '1'); location.reload() }
+          if (claimReauthOnce()) location.reload()
           return
         }
         if (e.code === 4003) {

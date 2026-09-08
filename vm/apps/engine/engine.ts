@@ -1805,18 +1805,49 @@ function connect() {
   // A literal `ping`, because the Durable Object registers it as an AUTO-RESPONSE pair — Cloudflare answers
   // `pong` at the edge and never wakes the DO, so staying connected costs no compute. The reply is not JSON
   // and the message handler already drops anything that will not parse.
+  // ── IS THIS SOCKET STILL ALIVE, or only still OPEN? ────────────────────────────────────────────────────
+  // readyState is not liveness. A machine that is SUSPENDED and resumed comes back with a socket object that
+  // still reads OPEN while its TCP connection died during the freeze — so the keepalive writes `ping` into a
+  // dead pipe, which buffers rather than throwing, and TCP can take many minutes to admit it. The engine sits
+  // there mute: the hub has already dropped it, a user's question is queued against an engine that will never
+  // collect it, and nothing in the log says anything is wrong.
+  //
+  // That is not hypothetical — it is exactly what an idle-suspend does to this process, which is the normal
+  // lifecycle of a Fly box. The datasource bridge noticed its own socket within 40s and reconnected; the hub
+  // connection did not, because it had nothing that could tell OPEN from alive.
+  //
+  // So we require an ANSWER. The hub registers ping→pong as an edge auto-response, so a live connection always
+  // replies without waking the Durable Object. Nothing inbound for three missed beats means the socket is
+  // gone whatever it claims, and we drop it ourselves rather than wait for TCP.
+  const DEAD_AFTER_MS = 45_000
+  let lastInbound = Date.now()
   let beat: ReturnType<typeof setInterval> | null = null
   const stopBeat = () => { if (beat) { clearInterval(beat); beat = null } }
   ws.on('open', () => {
     reconnectDelay = 1000   // stable connection → reset backoff
     stopBeat()
-    beat = setInterval(() => { if (ws.readyState === WebSocket.OPEN) { try { ws.send('ping') } catch { /* the close handler reconnects */ } } }, 12_000)
+    lastInbound = Date.now()
+    beat = setInterval(() => {
+      if (ws.readyState !== WebSocket.OPEN) return
+      if (Date.now() - lastInbound > DEAD_AFTER_MS) {
+        console.log(`[ica] hub silent for ${Math.round((Date.now() - lastInbound) / 1000)}s — treating the socket as dead and reconnecting`)
+        stopBeat()
+        // terminate(), not close(): a close handshake needs the peer to answer, and the whole point is that it
+        // cannot. terminate() drops it locally and fires 'close', which reconnects.
+        try { (ws as any).terminate?.() ?? ws.close() } catch { /* already gone */ }
+        return
+      }
+      try { ws.send('ping') } catch { /* the close handler reconnects */ }
+    }, 12_000)
     beat.unref?.()
     // machineId lets the hub self-heal which Fly machine it tracks (survives recreate/resize). Fly injects
     // FLY_MACHINE_ID automatically; undefined off-Fly (EC2/Docker) so it's simply omitted there.
     ws.send(JSON.stringify({ type: 'hello', key: KEY, role: 'code-engine', instanceId: INSTANCE_ID, epoch: EPOCH, machineId: process.env.FLY_MACHINE_ID }))
   })
   ws.on('message', async (raw) => {
+    // ANY inbound byte proves the connection is alive — including the bare `pong` the edge sends back, which
+    // is not JSON and is dropped below.
+    lastInbound = Date.now()
     let m: any; try { m = JSON.parse(raw.toString()) } catch { return }
     const t = m.payload?.t
     if (t === 'welcome') {
