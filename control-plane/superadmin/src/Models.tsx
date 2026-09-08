@@ -187,6 +187,11 @@ function Catalogue({ providers, models, usedBy, source, dirty, busy, msg, onChan
 }) {
   const [addTo, setAddTo] = useState<string>('')
   const [paste, setPaste] = useState('')
+  const [q, setQ] = useState('')
+  // TWO STEPS TO REMOVE, inline rather than a modal: the list is long, the rows are one click apart, and the
+  // damage is silent — a model that vanishes from the catalogue leaves a project's saved choice pointing at
+  // something the editor no longer offers. Asking costs one click; not asking costs a puzzled hour later.
+  const [confirming, setConfirming] = useState<string | null>(null)
 
   // BULK, because that is the operation this screen actually has: the first time an account is set up, its
   // whole list arrives at once. One-at-a-time entry made the common case 24 separate actions.
@@ -199,7 +204,11 @@ function Catalogue({ providers, models, usedBy, source, dirty, busy, msg, onChan
   const remove = (provider: string, model: string) =>
     onChange({ ...models, [provider]: (models[provider] ?? []).filter(m => m !== model) })
 
-  const flat = providers.flatMap(p => (models[p.name] ?? []).map(m => ({ p, m })))
+  // Matched on the ACCOUNT as well as the model, so "opencode" narrows to one account and "glm" to a family.
+  const needle = q.trim().toLowerCase()
+  const hit = (p: Provider, m: string) => !needle || m.toLowerCase().includes(needle) || p.name.toLowerCase().includes(needle)
+  const flat = providers.flatMap(p => (models[p.name] ?? []).filter(m => hit(p, m)).map(m => ({ p, m })))
+  const total = providers.reduce((n, p) => n + (models[p.name] ?? []).length, 0)
   return (
     <section>
       <div className="between" style={{ alignItems: 'baseline' }}>
@@ -211,6 +220,14 @@ function Catalogue({ providers, models, usedBy, source, dirty, busy, msg, onChan
       <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
         What a project’s profile may choose from, per account. Adding one makes it selectable everywhere, with no
         engine rebuild.
+      </div>
+      <div className="row" style={{ gap: 10, alignItems: 'center', marginBottom: 8 }}>
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="search models or accounts…"
+               style={{ padding: '6px 10px', borderRadius: 8, fontSize: 13, width: 260 }} />
+        <span className="muted" style={{ fontSize: 12.5 }}>
+          {needle ? `${flat.length} of ${total}` : `${total} model${total === 1 ? '' : 's'}`}
+        </span>
+        {needle && <button className="btn ghost" onClick={() => setQ('')}>Clear</button>}
       </div>
 
       <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
@@ -232,16 +249,28 @@ function Catalogue({ providers, models, usedBy, source, dirty, busy, msg, onChan
                   <td style={{ ...cell, fontSize: 12, color: users.length ? 'var(--ok)' : 'var(--muted)' }}>
                     {users.length ? users.join(', ') : '—'}
                   </td>
-                  <td style={{ ...cell, textAlign: 'right' }}>
-                    <span onClick={() => remove(p.name, m)} title={users.length ? 'in use — removing it strands a project' : 'remove'}
-                          style={{ cursor: 'pointer', color: users.length ? 'var(--bad)' : 'var(--muted)' }}>×</span>
+                  <td style={{ ...cell, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    {confirming === `${p.name}/${m}`
+                      ? <span className="row" style={{ gap: 8, justifyContent: 'flex-end', fontSize: 12 }}>
+                          <span style={{ color: users.length ? 'var(--bad)' : 'var(--muted)' }}>
+                            {users.length ? `used by ${users.join(', ')} — remove anyway?` : 'remove?'}
+                          </span>
+                          <span onClick={() => { remove(p.name, m); setConfirming(null) }}
+                                style={{ cursor: 'pointer', color: 'var(--bad)', fontWeight: 600 }}>remove</span>
+                          <span onClick={() => setConfirming(null)} style={{ cursor: 'pointer', color: 'var(--muted)' }}>cancel</span>
+                        </span>
+                      : <span onClick={() => setConfirming(`${p.name}/${m}`)} title="remove"
+                              style={{ cursor: 'pointer', color: users.length ? 'var(--bad)' : 'var(--muted)' }}>×</span>}
                   </td>
                 </tr>
               )
             })}
+            {needle && flat.length === 0 && (
+              <tr><td style={{ ...cell, color: 'var(--muted)' }} colSpan={5}>nothing matches “{q}”.</td></tr>
+            )}
             {/* An account with nothing catalogued still gets a row: knowing it EXISTS and cannot be chosen yet
-                is the thing you came to find out. */}
-            {providers.filter(p => (models[p.name] ?? []).length === 0).map(p => (
+                is the thing you came to find out. Hidden while searching — it is not a match. */}
+            {!needle && providers.filter(p => (models[p.name] ?? []).length === 0).map(p => (
               <tr key={p.name} style={{ opacity: .6 }}>
                 <td style={{ ...cell, fontFamily: 'monospace', fontSize: 12 }}>{p.name}</td>
                 <td style={{ ...cell, color: 'var(--muted)', fontSize: 12 }}>{p.route}{p.disabled ? ' · off' : ''}</td>
