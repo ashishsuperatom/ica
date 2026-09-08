@@ -1,39 +1,49 @@
-// ── THE AGENTS SCREEN — what every project runs, and what it may choose from ────────────────────────────────
+// ── THE AGENTS SCREEN ───────────────────────────────────────────────────────────────────────────────────────
 //
-// One screen with a direction of travel: read the fleet at a glance, spot the row that disagrees with itself,
-// click through to the project that owns the decision. The catalogue underneath is the supply side — what the
-// dropdowns on that project page will offer.
+// Two jobs, two tables, and they are genuinely different work:
 //
-// TWO FACTS, NEVER BLENDED. `assigned` is what superadmin saved for a project; `running` is what that
-// project's own engine reported. They differ whenever a box is asleep, unreachable, or still finishing a
-// question, and a screen that showed one number would be lying half the time.
+//   PROJECTS   which brain each project runs, and whether the assignment has been picked up. The job is to
+//              spot the row that disagrees with itself and get to the project that owns it.
+//   CATALOGUE  what those projects may choose from. The job is bulk entry the first time, one addition when an
+//              account gains a model, and a removal that can tell you whether anything is using it.
 //
-// The catalogue is PLATFORM-WIDE and never leaves the control plane: a box is given its decision — one
+// Both are tables because both are scanned, not read. An earlier version made the catalogue a chip per model:
+// tidy, and hostile to the only bulk operation it has — so entry is a paste box, as it was when this was a
+// textarea, and the table is what you scan afterwards.
+//
+// TWO FACTS, NEVER BLENDED. `assigned` is what superadmin saved; `running` is what that project's own engine
+// reported, with the time it said so. They differ whenever a box is asleep, unreachable, or mid-question.
+//
+// The catalogue is platform-wide and never leaves the control plane: a box is given its decision — one
 // harness, one provider, one model per agent — not the options behind it.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 type Api = (path: string, init?: RequestInit) => Promise<Response>
 type Provider = { name: string; route: string; disabled: string | null }
+type AgentRow = { harness: string; provider: string; model: string }
 type Row = {
   org: string; orgId: string; projectId: string; project: string
-  savedVersion: number | null; updatedAt?: number
-  running: { version: number; agents?: Record<string, { harness: string; provider: string; model: string }> } | null
+  savedVersion: number | null
+  running: { version: number; at?: number; agents?: Record<string, AgentRow> } | null
   error?: string
 }
 
 const AGENTS = ['analyst', 'connector', 'grounding', 'modeller', 'composer', 'narrator']
-
-const chip = (bg: string, fg: string): React.CSSProperties => ({
-  padding: '2px 8px', borderRadius: 999, fontSize: 11.5, background: bg, color: fg, whiteSpace: 'nowrap',
-})
+const cell: React.CSSProperties = { padding: '7px 10px', borderBottom: '1px solid var(--line)', textAlign: 'left', verticalAlign: 'top' }
+const head: React.CSSProperties = { ...cell, fontSize: 11.5, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: .3 }
+const ago = (t?: number) => {
+  if (!t) return ''
+  const m = Math.round((Date.now() - t) / 60000)
+  return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`
+}
 
 export function AgentsScreen({ api }: { api: Api }) {
   const [rows, setRows] = useState<Row[] | null>(null)
   const [models, setModels] = useState<Record<string, string[]> | null>(null)
+  const [saved, setSaved] = useState<Record<string, string[]> | null>(null)   // to know what is unsaved
   const [providers, setProviders] = useState<Provider[]>([])
   const [source, setSource] = useState<'stored' | 'default' | null>(null)
-  const [updated, setUpdated] = useState<{ by: string | null; at: number } | null>(null)
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -43,173 +53,227 @@ export function AgentsScreen({ api }: { api: Api }) {
     if (cat.ok) {
       const d = await cat.json() as any
       setProviders(d.providers ?? [])
-      setModels(d.models ?? {})
+      setModels(d.models ?? {}); setSaved(d.models ?? {})
       setSource(d.source ?? null)
-      setUpdated(d.updatedAt ? { by: d.updatedBy, at: d.updatedAt } : null)
     }
   }, [api])
   useEffect(() => { load() }, [load])
 
-  // WHICH MODELS ARE ACTUALLY IN USE, from what the engines report — so removing one from the catalogue can
-  // show that it would strand a project rather than finding out later.
-  const inUse = useMemo(() => {
-    const m = new Map<string, Set<string>>()
-    for (const r of rows ?? []) {
+  // WHO IS USING WHAT, from what the engines report — so removing a model can say that it would strand a
+  // project, rather than that turning up later as an agent which will not start.
+  const usedBy = useMemo(() => {
+    const m = new Map<string, string[]>()
+    for (const r of rows ?? [])
       for (const a of Object.values(r.running?.agents ?? {})) {
-        if (!m.has(a.provider)) m.set(a.provider, new Set())
-        m.get(a.provider)!.add(a.model)
+        const k = `${a.provider}/${a.model}`
+        m.set(k, [...(m.get(k) ?? []), r.project])
       }
-    }
     return m
   }, [rows])
 
+  const dirty = models && saved && JSON.stringify(models) !== JSON.stringify(saved)
   const save = async () => {
     setBusy(true); setMsg('saving…')
     const r = await api('/catalogue', { method: 'PUT', body: JSON.stringify({ models }) })
     setBusy(false)
     if (!r.ok) { setMsg(`could not save: ${r.status} ${await r.text()}`); return }
-    await load()          // re-read: what the project dropdowns offer is whatever is STORED
+    await load()          // re-read: the project dropdowns offer whatever is STORED
     setMsg('saved')
   }
 
   if (!rows || !models) return <div className="muted">loading…</div>
-
-  const live = rows.filter(r => r.running)
-  const drift = rows.filter(r => r.running && r.savedVersion != null && r.running.version !== r.savedVersion)
-  const dark = rows.filter(r => !r.running)
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>
-
-      {/* WHERE TO LOOK FIRST. Three counts, and only the middle one is ever a problem. */}
-      <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <span style={chip('var(--line)', 'inherit')}>{rows.length} project{rows.length === 1 ? '' : 's'}</span>
-        <span style={chip('rgba(34,160,90,.14)', 'var(--ok)')}>{live.length} running</span>
-        {drift.length > 0 && <span style={chip('rgba(200,60,60,.14)', 'var(--bad)')}>{drift.length} not picked up</span>}
-        {dark.length > 0 && <span style={chip('var(--line)', 'var(--muted)')}>{dark.length} engine offline</span>}
-        <button className="btn ghost" onClick={load} style={{ marginLeft: 'auto' }}>Refresh</button>
-      </div>
-
-      <section>
-        <h3 style={{ margin: '0 0 2px' }}>Running now</h3>
-        <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
-          Assigned on each project’s own settings page; reported by that project’s engine. Open a project to change it.
-        </div>
-        {rows.length === 0 && <div className="empty">No projects yet.</div>}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {rows.map(r => {
-            const agreed = r.running && r.running.version === r.savedVersion
-            return (
-              <div key={r.projectId} className="card" style={{ padding: 14 }}>
-                <div className="between" style={{ alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-                  <div>
-                    <Link to={`/org/${r.orgId}/projects/${r.projectId}/settings`} style={{ fontWeight: 600, color: 'inherit' }}>
-                      {r.project}
-                    </Link>
-                    <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>{r.org}</span>
-                  </div>
-                  <div className="row" style={{ gap: 8, alignItems: 'center', fontSize: 12.5 }}>
-                    <span className="muted">assigned v{r.savedVersion ?? '—'}</span>
-                    {r.running
-                      ? <span style={agreed ? chip('rgba(34,160,90,.14)', 'var(--ok)') : chip('rgba(200,60,60,.14)', 'var(--bad)')}>
-                          {agreed ? `running v${r.running.version}` : `running v${r.running.version} — not picked up`}
-                        </span>
-                      : <span style={chip('var(--line)', 'var(--muted)')}>engine offline</span>}
-                    <Link to={`/org/${r.orgId}/projects/${r.projectId}/settings`} className="muted" style={{ fontSize: 12.5 }}>Configure →</Link>
-                  </div>
-                </div>
-                {/* Only what the ENGINE reports. An assignment nothing has picked up is deliberately not drawn
-                    as a table of agents — rendering intentions as facts is what this screen replaces. */}
-                {r.running?.agents && (
-                  <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 6 }}>
-                    {AGENTS.map(a => {
-                      const x = r.running!.agents![a]
-                      return x ? (
-                        <div key={a} style={{ fontSize: 12 }}>
-                          <span className="muted">{a}</span><br />
-                          <code className="mono" style={{ fontSize: 11.5 }}>{x.harness} · {x.provider} · {x.model}</code>
-                        </div>
-                      ) : null
-                    })}
-                  </div>
-                )}
-                {r.error && <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--bad)' }}>could not read: {r.error}</div>}
-              </div>
-            )
-          })}
-        </div>
-      </section>
-
-      <section>
-        <div className="between" style={{ alignItems: 'baseline' }}>
-          <h3 style={{ margin: '0 0 2px' }}>Catalogue</h3>
-          <span className="muted" style={{ fontSize: 12 }}>
-            {source === 'default' ? 'showing the shipped default — nothing saved yet'
-              : updated ? `saved ${new Date(updated.at).toLocaleString()}${updated.by ? ` by ${updated.by}` : ''}` : ''}
-          </span>
-        </div>
-        <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
-          What a project’s profile may choose from, per account. Adding one here makes it selectable everywhere —
-          no engine rebuild. A model marked <span style={{ color: 'var(--ok)' }}>●</span> is in use by a project right now.
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {providers.map(p => (
-            <ProviderCard key={p.name} provider={p} models={models[p.name] ?? []} inUse={inUse.get(p.name) ?? new Set()}
-                          onChange={list => setModels(m => ({ ...m!, [p.name]: list }))} />
-          ))}
-        </div>
-        <div className="row" style={{ gap: 10, marginTop: 12, alignItems: 'center' }}>
-          <button className="btn" onClick={save} disabled={busy}>Save catalogue</button>
-          <button className="btn ghost" onClick={() => { setMsg(''); load() }} disabled={busy}>Discard changes</button>
-          <span className="muted" style={{ fontSize: 12.5 }}>{msg}</span>
-        </div>
-      </section>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 30 }}>
+      <Projects rows={rows} onRefresh={load} />
+      <Catalogue providers={providers} models={models} usedBy={usedBy} source={source} dirty={!!dirty} busy={busy} msg={msg}
+                 onChange={setModels} onSave={save} onDiscard={() => { setMsg(''); load() }} />
     </div>
   )
 }
 
-// One account's models, as removable chips plus a box to add one. A textarea of names was quicker to build and
-// told you nothing: not which are in use, not which account this is, not whether it can be routed at all.
-function ProviderCard({ provider, models, inUse, onChange }:
-  { provider: Provider; models: string[]; inUse: Set<string>; onChange: (list: string[]) => void }) {
-  const [adding, setAdding] = useState('')
-  const add = () => {
-    const v = adding.trim()
-    if (!v || models.includes(v)) { setAdding(''); return }
-    onChange([...models, v].sort())
-    setAdding('')
-  }
+// ── PROJECTS ────────────────────────────────────────────────────────────────────────────────────────────────
+function Projects({ rows, onRefresh }: { rows: Row[]; onRefresh: () => void }) {
+  const [open, setOpen] = useState<string | null>(null)
+  const drift = rows.filter(r => r.running && r.savedVersion != null && r.running.version !== r.savedVersion).length
+  const dark = rows.filter(r => !r.running).length
   return (
-    <div className="card" style={{ padding: 14, opacity: provider.disabled ? .75 : 1 }}>
-      <div className="between" style={{ alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-        <div className="row" style={{ gap: 8, alignItems: 'baseline' }}>
-          <strong className="mono">{provider.name}</strong>
-          <span style={chip('var(--line)', 'var(--muted)')}>{provider.route}</span>
-          {provider.disabled && <span style={chip('rgba(200,60,60,.14)', 'var(--bad)')}>turned off at the proxy</span>}
+    <section>
+      <div className="between" style={{ alignItems: 'baseline' }}>
+        <h3 style={{ margin: '0 0 2px' }}>Projects</h3>
+        <div className="row" style={{ gap: 12, alignItems: 'center', fontSize: 12.5 }}>
+          <span className="muted">
+            {rows.length - dark} running{drift ? ` · ${drift} not picked up` : ''}{dark ? ` · ${dark} offline` : ''}
+          </span>
+          <button className="btn ghost" onClick={onRefresh}>Refresh</button>
         </div>
-        <span className="muted" style={{ fontSize: 12 }}>{models.length} model{models.length === 1 ? '' : 's'}</span>
       </div>
-      {provider.disabled &&
-        <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-          {provider.disabled} — kept here so switching it back on needs no re-entry.
-        </div>}
-      <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
-        {models.map(m => {
-          const used = inUse.has(m)
-          return (
-            <span key={m} className="row" style={{ gap: 6, padding: '3px 9px', border: '1px solid var(--line)', borderRadius: 999, fontSize: 12.5 }}>
-              {used && <span style={{ color: 'var(--ok)' }} title="in use by a project right now">●</span>}
-              <code className="mono" style={{ fontSize: 12 }}>{m}</code>
-              <span onClick={() => onChange(models.filter(x => x !== m))} title={used ? 'in use — removing it strands a project' : 'remove'}
-                    style={{ cursor: 'pointer', color: used ? 'var(--bad)' : 'var(--muted)' }}>×</span>
-            </span>
-          )
-        })}
-        {models.length === 0 && <span className="muted" style={{ fontSize: 12.5 }}>nothing catalogued — no project can pick this account yet</span>}
+      <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
+        Assigned on each project’s own settings page; reported by that project’s engine.
       </div>
-      <input value={adding} onChange={e => setAdding(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') add() }}
-             onBlur={add} placeholder="add a model, then Enter"
-             style={{ marginTop: 10, padding: '6px 10px', borderRadius: 8, fontSize: 13, width: 260 }} />
-    </div>
+      {rows.length === 0 ? <div className="empty">No projects yet.</div> : (
+        <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead><tr>
+              <th style={head}>project</th><th style={head}>org</th><th style={head}>assigned</th>
+              <th style={head}>running</th><th style={head}>composer</th><th style={head}></th>
+            </tr></thead>
+            <tbody>
+              {rows.map(r => {
+                const live = r.running
+                const agreed = live && live.version === r.savedVersion
+                const comp = live?.agents?.composer
+                const isOpen = open === r.projectId
+                return [
+                  <tr key={r.projectId}>
+                    <td style={cell}>
+                      <span onClick={() => setOpen(isOpen ? null : r.projectId)} style={{ cursor: 'pointer', fontWeight: 600 }}>
+                        {isOpen ? '▾' : '▸'} {r.project}
+                      </span>
+                    </td>
+                    <td style={{ ...cell, color: 'var(--muted)' }}>{r.org}</td>
+                    <td style={cell}><code className="mono">v{r.savedVersion ?? '—'}</code></td>
+                    <td style={cell}>
+                      {live
+                        ? <span style={{ color: agreed ? 'var(--ok)' : 'var(--bad)' }}>
+                            v{live.version}{agreed ? '' : ' — not picked up'}
+                            <span className="muted" style={{ marginLeft: 6, fontSize: 11.5 }}>{ago(live.at)}</span>
+                          </span>
+                        : <span className="muted">engine offline</span>}
+                    </td>
+                    <td style={{ ...cell, fontFamily: 'monospace', fontSize: 11.5 }}>
+                      {comp ? `${comp.harness} · ${comp.provider} · ${comp.model}` : <span className="muted">—</span>}
+                    </td>
+                    <td style={{ ...cell, textAlign: 'right' }}>
+                      <Link to={`/org/${r.orgId}/projects/${r.projectId}/settings`} style={{ fontSize: 12.5 }}>Configure →</Link>
+                    </td>
+                  </tr>,
+                  // Expanded: every agent, and ONLY what the engine reports — an assignment nothing has picked
+                  // up is deliberately not drawn as a table of agents.
+                  isOpen && live?.agents ? (
+                    <tr key={r.projectId + ':open'}>
+                      <td style={{ ...cell, background: 'var(--line)' }} colSpan={6}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 6 }}>
+                          {AGENTS.map(a => {
+                            const x = live.agents![a]
+                            return x ? (
+                              <div key={a} style={{ fontSize: 12 }}>
+                                <span className="muted">{a}</span><br />
+                                <code className="mono" style={{ fontSize: 11.5 }}>{x.harness} · {x.provider} · {x.model}</code>
+                              </div>
+                            ) : null
+                          })}
+                        </div>
+                      </td>
+                    </tr>
+                  ) : null,
+                  r.error ? (
+                    <tr key={r.projectId + ':err'}><td style={{ ...cell, color: 'var(--bad)' }} colSpan={6}>could not read: {r.error}</td></tr>
+                  ) : null,
+                ]
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ── CATALOGUE ───────────────────────────────────────────────────────────────────────────────────────────────
+function Catalogue({ providers, models, usedBy, source, dirty, busy, msg, onChange, onSave, onDiscard }: {
+  providers: Provider[]; models: Record<string, string[]>; usedBy: Map<string, string[]>
+  source: string | null; dirty: boolean; busy: boolean; msg: string
+  onChange: (m: Record<string, string[]>) => void; onSave: () => void; onDiscard: () => void
+}) {
+  const [addTo, setAddTo] = useState<string>('')
+  const [paste, setPaste] = useState('')
+
+  // BULK, because that is the operation this screen actually has: the first time an account is set up, its
+  // whole list arrives at once. One-at-a-time entry made the common case 24 separate actions.
+  const addMany = () => {
+    const names = paste.split(/[\n,]/).map(s => s.trim()).filter(Boolean)
+    if (!addTo || names.length === 0) return
+    onChange({ ...models, [addTo]: [...new Set([...(models[addTo] ?? []), ...names])].sort() })
+    setPaste('')
+  }
+  const remove = (provider: string, model: string) =>
+    onChange({ ...models, [provider]: (models[provider] ?? []).filter(m => m !== model) })
+
+  const flat = providers.flatMap(p => (models[p.name] ?? []).map(m => ({ p, m })))
+  return (
+    <section>
+      <div className="between" style={{ alignItems: 'baseline' }}>
+        <h3 style={{ margin: '0 0 2px' }}>Catalogue</h3>
+        <span className="muted" style={{ fontSize: 12 }}>
+          {source === 'default' ? 'showing the shipped default — nothing saved yet' : ''}
+        </span>
+      </div>
+      <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
+        What a project’s profile may choose from, per account. Adding one makes it selectable everywhere, with no
+        engine rebuild.
+      </div>
+
+      <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead><tr>
+            <th style={head}>account</th><th style={head}>route</th><th style={head}>model</th>
+            <th style={head}>used by</th><th style={head}></th>
+          </tr></thead>
+          <tbody>
+            {flat.map(({ p, m }) => {
+              const users = usedBy.get(`${p.name}/${m}`) ?? []
+              return (
+                <tr key={`${p.name}/${m}`} style={{ opacity: p.disabled ? .6 : 1 }}>
+                  <td style={{ ...cell, fontFamily: 'monospace', fontSize: 12 }}>{p.name}</td>
+                  <td style={{ ...cell, color: 'var(--muted)', fontSize: 12 }}>
+                    {p.route}{p.disabled ? ' · off' : ''}
+                  </td>
+                  <td style={{ ...cell, fontFamily: 'monospace', fontSize: 12 }}>{m}</td>
+                  <td style={{ ...cell, fontSize: 12, color: users.length ? 'var(--ok)' : 'var(--muted)' }}>
+                    {users.length ? users.join(', ') : '—'}
+                  </td>
+                  <td style={{ ...cell, textAlign: 'right' }}>
+                    <span onClick={() => remove(p.name, m)} title={users.length ? 'in use — removing it strands a project' : 'remove'}
+                          style={{ cursor: 'pointer', color: users.length ? 'var(--bad)' : 'var(--muted)' }}>×</span>
+                  </td>
+                </tr>
+              )
+            })}
+            {/* An account with nothing catalogued still gets a row: knowing it EXISTS and cannot be chosen yet
+                is the thing you came to find out. */}
+            {providers.filter(p => (models[p.name] ?? []).length === 0).map(p => (
+              <tr key={p.name} style={{ opacity: .6 }}>
+                <td style={{ ...cell, fontFamily: 'monospace', fontSize: 12 }}>{p.name}</td>
+                <td style={{ ...cell, color: 'var(--muted)', fontSize: 12 }}>{p.route}{p.disabled ? ' · off' : ''}</td>
+                <td style={{ ...cell, color: 'var(--muted)', fontSize: 12 }} colSpan={3}>
+                  nothing catalogued — no project can choose this account
+                  {p.disabled ? ` · ${p.disabled}` : ''}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="card" style={{ padding: 14, marginTop: 12 }}>
+        <strong style={{ fontSize: 13 }}>Add models</strong>
+        <div className="muted" style={{ fontSize: 12.5, margin: '4px 0 8px' }}>One per line, or comma separated. Duplicates are ignored.</div>
+        <div className="row" style={{ gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <select value={addTo} onChange={e => setAddTo(e.target.value)} style={{ padding: 7, borderRadius: 8 }}>
+            <option value="">choose an account…</option>
+            {providers.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+          </select>
+          <textarea value={paste} onChange={e => setPaste(e.target.value)} rows={3} placeholder={'deepseek-v4-flash\nglm-5.3'}
+                    style={{ flex: 1, minWidth: 260, fontFamily: 'monospace', fontSize: 13, padding: 10, borderRadius: 8, resize: 'vertical' }} />
+          <button className="btn ghost" onClick={addMany} disabled={!addTo || !paste.trim()}>Add</button>
+        </div>
+      </div>
+
+      <div className="row" style={{ gap: 10, marginTop: 12, alignItems: 'center' }}>
+        <button className="btn" onClick={onSave} disabled={busy || !dirty}>Save catalogue</button>
+        <button className="btn ghost" onClick={onDiscard} disabled={busy || !dirty}>Discard changes</button>
+        <span className="muted" style={{ fontSize: 12.5 }}>{dirty ? 'unsaved changes' : msg}</span>
+      </div>
+    </section>
   )
 }

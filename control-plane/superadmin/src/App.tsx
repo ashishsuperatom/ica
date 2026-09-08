@@ -1319,13 +1319,36 @@ function ProjectDetailPage() {
                     <summary className="muted" style={{ fontSize: 12.5, cursor: 'pointer' }}>
                       What the engine reports it is running{running.at ? ` — reported ${new Date(running.at).toLocaleString()}` : ''}
                     </summary>
-                    <div style={{ marginTop: 8, fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap' }}>
-                      {AGENTS.map(a => {
-                        const r = running.agents[a]
-                        if (!r) return null
-                        return `${a.padEnd(10)} ${r.harness} · ${r.provider} · ${r.model}\n`
-                      })}
-                    </div>
+                    {/* A TABLE, not aligned text. Monospace with a separator between fields does not make
+                        columns — the values differ in length, so every row starts its provider somewhere else
+                        and the thing you scan for is the thing that moves. */}
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, marginTop: 8 }}>
+                      <thead>
+                        <tr>{['agent', 'harness', 'provider', 'model'].map(h =>
+                          <th key={h} style={{ textAlign: 'left', padding: '5px 8px', borderBottom: '1px solid var(--line)',
+                                               fontSize: 11, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>{h}</th>)}</tr>
+                      </thead>
+                      <tbody>
+                        {AGENTS.map(a => {
+                          const r = running.agents[a]
+                          if (!r) return null
+                          const mine = doc.agents?.[a]
+                          // A row the profile pins is worth distinguishing from one running the engine's own
+                          // default — otherwise this table cannot say which of your choices took effect.
+                          const pinned = !!(mine?.harness && mine?.provider && mine?.model)
+                          return (
+                            <tr key={a}>
+                              <td style={{ padding: '5px 8px', borderBottom: '1px solid var(--line)' }}>
+                                {a}{pinned ? '' : <span className="muted" style={{ fontSize: 11 }}> · default</span>}
+                              </td>
+                              {[r.harness, r.provider, r.model].map((v, i) =>
+                                <td key={i} style={{ padding: '5px 8px', borderBottom: '1px solid var(--line)',
+                                                     fontFamily: 'monospace', fontSize: 12 }}>{v}</td>)}
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
                   </details>
                 )}
               </div>
