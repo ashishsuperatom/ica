@@ -29,9 +29,14 @@ const DEFAULT_CATALOGUE: Record<string, string[]> = {
     'gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-6-astra',
   ],
   'claude-code': ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'],
-  // Turned off at the proxy, but catalogued so switching it back on needs no re-entry. Left empty because we
-  // have never verified an id here — OpenRouter names are `vendor/model` and guessing one would put a model
-  // in front of an operator that may not exist.
+  // The RELAY to Anthropic's API, which is a different account from the claude-code subscription above even
+  // though the model names coincide — one is billed per token against a key in the vault, the other against a
+  // seat. Same names, and deliberately so: the choice being made is which account pays.
+  anthropic: ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'],
+  // Turned off at the proxy AND not in use, so it is catalogued empty rather than guessed at: OpenRouter ids
+  // are `vendor/model`, and an unverified one would put a model that may not exist in front of an operator.
+  // (Transcription reaches openrouter.ai directly from the Worker — a different path from an agent's provider,
+  // and not a reason to list a model here.) The entry stays so switching it on needs no new provider.
   openrouter: [],
 }
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Credentials } from './Credentials'
-import { ModelCatalogue, AppliedProfiles } from './Models'
+import { AgentsScreen } from './Models'
 import { DashboardsPanel } from './Dashboards'
 import { useProjectHub } from './hub'
 import { Inspector, SECTIONS, SECTION_LABEL, type Section } from './Inspector'
@@ -418,22 +418,9 @@ function ModelsPage() {
     <Shell crumbs={<><Link to="/">Organizations</Link><span>/</span>Agents</>}>
       <h2 style={{ margin: '0 0 4px' }}>Agents</h2>
       <div className="muted" style={{ marginBottom: 18 }}>
-        The options, and what every project is actually running.
+        Which brain each project’s agents run on, and what they may choose from.
       </div>
-
-      <h3 style={{ margin: '0 0 4px' }}>What each project is running</h3>
-      <div className="muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
-        Assigned in each project’s settings; reported by its own engine. A row where the two versions differ has
-        not been picked up yet.
-      </div>
-      <AppliedProfiles api={api} />
-
-      <h3 style={{ margin: '26px 0 4px' }}>Model catalogue</h3>
-      <div className="muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
-        Which models each provider may be asked for. A project’s profile picks from this list — adding one here
-        makes it selectable everywhere, with no engine rebuild.
-      </div>
-      <ModelCatalogue api={api} />
+      <AgentsScreen api={api} />
     </Shell>
   )
 }
