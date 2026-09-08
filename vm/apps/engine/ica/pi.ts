@@ -187,14 +187,6 @@ export function createPiSession(opts: PiSessionOpts): Session {
     const rl = new DefaultResourceLoader({ cwd: opts.cwd, agentDir: getAgentDir() } as any)
     await rl.reload()
 
-    // The model comes from the LIVE catalog, not a compiled-in list. Falling back to whatever that provider
-    // does have means a missing model degrades to a working agent rather than a crash, and says so once.
-    const runtime = await modelRuntime()
-    const available: any[] = await runtime.getAvailable(provider)
-    const model: any = available.find((m) => m?.id === modelId) ?? available[0]
-    if (!model) throw new Error(`pi: no model available from "${provider}" — authorise one with \`pi\` → /login`)
-    if (model.id !== modelId) console.warn(`[ica:pi] ${modelId} not available from ${provider}; using ${model.id}`)
-
     // ── ROUTE THROUGH OUR PROXY, when there is one and it can carry this provider ──────────────────────────
     // SUPERATOM_PLATFORM makes model calls leave the box through one host we control: one domain to whitelist,
     // no provider key on the machine, and usage counted where it can be trusted.
@@ -209,11 +201,46 @@ export function createPiSession(opts: PiSessionOpts): Session {
     const platform = process.env.SUPERATOM_PLATFORM
     const proxyBase = platform && process.env.ICA_PROJECT && !TUNNELLED.has(provider)
       ? `https://proxy.${platform}/p/${process.env.ICA_PROJECT}` : undefined
+
+    // ── WHICH LIST TO PICK THE MODEL FROM ─────────────────────────────────────────────────────────────────
+    // Two different questions, and asking the wrong one cost us every proxied box.
+    //
+    //   getAvailable  "which models can THIS MACHINE pay for" — the catalog filtered by a local login.
+    //   getModels     "which models exist" — the catalog itself, no credential involved.
+    //
+    // A proxied box pays for nothing: the proxy holds the key and decides. So its machine-local answer is
+    // legitimately EMPTY, and asking getAvailable there throws "authorise one with `pi` → /login" before the
+    // proxy is ever consulted — a login demanded by the one design that exists so no login is needed. On a
+    // fresh fleet machine that killed every question: pi selected no model, the narrator died, and the box
+    // sat healthy and mute.
+    //
+    // The descriptor is free either way (id, api shape, baseUrl), so take it from the catalog when proxied
+    // and keep the authorised list where it means something — a laptop, where a local login IS the payer.
+    const runtime = await modelRuntime()
+    const listed: any[] = proxyBase ? [...runtime.getModels(provider)] : [...await runtime.getAvailable(provider)]
+    const model: any = listed.find((m) => m?.id === modelId) ?? listed[0]
+    if (!model) {
+      throw new Error(proxyBase
+        ? `pi: provider "${provider}" has no models in the catalog — the model list could not be fetched`
+        : `pi: no model available from "${provider}" — authorise one with \`pi\` → /login`)
+    }
+    if (model.id !== modelId) console.warn(`[ica:pi] ${modelId} not in ${provider}'s list; using ${model.id}`)
+
     if (proxyBase) {
       model.baseUrl = `${proxyBase}/${provider}`
       // The project's own API key travels as the provider credential, because that is the only slot an agent
-      // will populate — the proxy recognises `sk-proj-…`, proves it, and substitutes the real key.
-      if (process.env.ICA_KEY && !model.apiKey) model.apiKey = process.env.ICA_KEY
+      // will populate — the proxy recognises `sk-proj-…`, proves it, and substitutes the real key. This is an
+      // identifier, not a provider secret: it grants this project the pooled credential and nothing else.
+      //
+      // TOLD TO THE RUNTIME, not only stamped on the model. Setting model.apiKey alone is not enough: the
+      // request path asks the credential store, finds nothing, and refuses with "No API key found — use
+      // /login" while holding a perfectly good key one field away. setRuntimeApiKey is an in-memory override
+      // (a Map consulted ahead of the store), so nothing is written to disk and the box keeps nothing when it
+      // stops — the same terms the vault credential runs on.
+      if (process.env.ICA_KEY) {
+        if (!model.apiKey) model.apiKey = process.env.ICA_KEY
+        await runtime.setRuntimeApiKey(provider, process.env.ICA_KEY)
+      }
       console.log(`[ica:pi] via proxy → ${model.baseUrl}`)
     } else if (platform && TUNNELLED.has(provider)) {
       console.log(`[ica:pi] ${provider} keeps its own URL — carried by the tunnel, not relayed`)

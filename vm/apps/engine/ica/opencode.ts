@@ -11,6 +11,7 @@
 import { createOpencode, createOpencodeClient, createOpencodeServer } from '@opencode-ai/sdk'
 import type { AgentEvent } from './session.js'
 import type { Session, RunHandlers, RunResult } from './session.js'   // the shared session interface
+import { providersOn, isDisabled } from '../../../packages/agent-contract/contract.mjs'
 
 export interface OpencodeSessionOpts {
   cwd: string
@@ -125,7 +126,7 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
     // The MODULE owns the opencode-server lifecycle — the caller just picks harness=opencode.
     // Ensure ONE standalone `opencode serve` is up (probe a fixed port → start it if down → own it),
     // then connect client-only. Own only what we started; a server already running is left alone.
-    const oc = await ensureOpencodeServer(opts.baseUrl ?? process.env.ICA_OC_URL)
+    const oc = await ensureOpencodeServer(opts.baseUrl ?? process.env.ICA_OC_URL, providerID)
     ownsServer = oc.owned
     managed = oc.owned ? oc : null
     // NO BODY TIMEOUT. `session.prompt()` is one POST that returns only when the whole turn is finished, and
@@ -293,11 +294,34 @@ async function isOpencodeUp(url: string): Promise<boolean> {
   catch { return false }                                                          // ECONNREFUSED / timeout = down
 }
 
-export async function ensureOpencodeServer(url?: string): Promise<{ url: string; owned: boolean; stop: () => void }> {
+// ── POINTING THE SERVER AT OUR PROXY ─────────────────────────────────────────
+// opencode resolves a provider from its OWN config and login, inside a process we spawn — so unlike pi there
+// is no model object to rewrite from here. A box with no `opencode auth login` therefore had no credential
+// for opencode-go, and the composer started, said nothing, and returned an empty answer.
+//
+// The lever is the config the server is launched with: a provider's baseURL and apiKey. Pointed at the proxy,
+// the key we hand over is the PROJECT key — an identifier the proxy proves and swaps for the real one — so no
+// provider secret exists on the machine to leak or to rotate.
+//
+// The SDK passes this config to the child in OPENCODE_CONFIG_CONTENT, an environment variable, so it is never
+// written to disk: the same terms as pi's in-memory override and the vault's claude token.
+function proxyConfig(provider: string): Record<string, any> | undefined {
+  const platform = process.env.SUPERATOM_PLATFORM
+  const project = process.env.ICA_PROJECT
+  const key = process.env.ICA_KEY
+  if (!platform || !project || !key || isDisabled(provider) || providersOn('tunnel').includes(provider)) return undefined
+  const baseURL = `https://proxy.${platform}/p/${project}/${provider}`
+  console.log(`[ica:oc] via proxy → ${baseURL}`)
+  return { provider: { [provider]: { options: { baseURL, apiKey: key } } } }
+}
+
+export async function ensureOpencodeServer(url?: string, provider?: string): Promise<{ url: string; owned: boolean; stop: () => void }> {
   const target = url || 'http://127.0.0.1:4096'
   if (await isOpencodeUp(target)) return { url: target, owned: false, stop: () => {} }
   const u = new URL(target)
-  const server = await createOpencodeServer({ hostname: u.hostname, port: Number(u.port) || 4096 })   // waits until "listening"
+  const config = provider ? proxyConfig(provider) : undefined
+  // waits until "listening"
+  const server = await createOpencodeServer({ hostname: u.hostname, port: Number(u.port) || 4096, ...(config ? { config: config as any } : {}) })
   return { url: server.url, owned: true, stop: () => { try { server.close() } catch {} } }
 }
 
