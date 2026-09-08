@@ -897,7 +897,7 @@ function ProjectDetailPage() {
   const [profMsg, setProfMsg] = useState<string>('')
   // The OPTIONS come from the platform catalogue, never from a list this file carries — so the editor can only
   // offer what superadmin has approved, and adding a model there makes it selectable here immediately.
-  const [cat, setCat] = useState<{ models: Record<string, string[]>; providers: string[] } | null>(null)
+  const [cat, setCat] = useState<{ models: Record<string, string[]>; providers: { name: string; disabled: string | null }[] } | null>(null)
   useEffect(() => {
     if (view !== 'settings' || role !== 'superadmin') return
     api('/catalogue').then(async r => {
@@ -1240,11 +1240,14 @@ function ProjectDetailPage() {
                         </select>
                         <select value={cur.provider ?? ''} onChange={e => setAgent(a, 'provider', e.target.value)}
                                 style={{ padding: 6, borderRadius: 6 }}>
-                          {(cat?.providers ?? []).map(p => <option key={p} value={p}>{p}</option>)}
-                          {/* Keep a value the catalogue no longer offers visible rather than silently
+                          {(cat?.providers ?? []).map(p =>
+                            <option key={p.name} value={p.name} disabled={!!p.disabled}>
+                              {p.name}{p.disabled ? ' — turned off' : ''}
+                            </option>)}
+                          {/* Keep a value the contract no longer offers visible rather than silently
                               rewriting this agent to something nobody chose. */}
-                          {cur.provider && !(cat?.providers ?? []).includes(cur.provider) &&
-                            <option value={cur.provider}>{cur.provider} (not routable)</option>}
+                          {cur.provider && !(cat?.providers ?? []).some(p => p.name === cur.provider) &&
+                            <option value={cur.provider}>{cur.provider} (unknown to the proxy)</option>}
                         </select>
                         <select value={cur.model ?? ''} onChange={e => setAgent(a, 'model', e.target.value)}
                                 style={{ padding: 6, borderRadius: 6 }}>

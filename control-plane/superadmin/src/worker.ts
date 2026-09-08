@@ -415,10 +415,19 @@ export default {
         // The PROVIDERS come from the routing contract, not from a list the editor carries: a provider the
         // proxy cannot route is one no project should be offered, and the contract is the only thing that
         // knows. Same reason the credentials screen reads them from there.
-        const { UPSTREAMS } = await import('../../../vm/packages/agent-contract/contract.mjs')
+        const { UPSTREAMS, isDisabled, disabledReason } = await import('../../../vm/packages/agent-contract/contract.mjs')
         const r = await g.fetch(new Request('http://do/catalogue'))
         const body = await r.json() as any
-        return Response.json({ ...body, providers: Object.keys(UPSTREAMS) })
+        // WITH THEIR ROUTE AND WHETHER THEY ARE TURNED OFF. A disabled provider still belongs in the catalogue
+        // — it is a real account whose models we know, and switching it back on should not mean re-entering
+        // them — but assigning a project to one is a choice that cannot work, and a plain list of names cannot
+        // say so. openrouter is the live example: present, catalogued, and refused by both proxies.
+        const providers = Object.keys(UPSTREAMS).map(name => ({
+          name,
+          route: (UPSTREAMS as any)[name].route,
+          disabled: isDisabled(name) ? disabledReason(name) : null,
+        }))
+        return Response.json({ ...body, providers })
       }
       if (request.method === 'PUT') {
         return g.fetch(new Request('http://do/catalogue', {

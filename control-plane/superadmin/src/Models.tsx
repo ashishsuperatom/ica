@@ -16,7 +16,7 @@ type Api = (path: string, init?: RequestInit) => Promise<Response>
 
 export function ModelCatalogue({ api }: { api: Api }) {
   const [models, setModels] = useState<Record<string, string[]> | null>(null)
-  const [providers, setProviders] = useState<string[]>([])
+  const [providers, setProviders] = useState<{ name: string; route: string; disabled: string | null }[]>([])
   const [updated, setUpdated] = useState<{ by: string | null; at: number } | null>(null)
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
@@ -27,7 +27,7 @@ export function ModelCatalogue({ api }: { api: Api }) {
     const d = await r.json() as any
     setProviders(d.providers ?? [])
     // No catalogue set yet is a real state, not an error: every provider simply starts with an empty list.
-    setModels(d.models ?? Object.fromEntries((d.providers ?? []).map((p: string) => [p, []])))
+    setModels(d.models ?? Object.fromEntries((d.providers ?? []).map((p: any) => [p.name, []])))
     setUpdated(d.updatedAt ? { by: d.updatedBy, at: d.updatedAt } : null)
   }, [api])
   useEffect(() => { load() }, [load])
@@ -51,13 +51,20 @@ export function ModelCatalogue({ api }: { api: Api }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 720 }}>
       {providers.map(p => (
-        <div key={p} className="card" style={{ padding: 16 }}>
+        <div key={p.name} className="card" style={{ padding: 16, opacity: p.disabled ? .7 : 1 }}>
           <div className="between" style={{ alignItems: 'baseline' }}>
-            <strong className="mono">{p}</strong>
-            <span className="muted" style={{ fontSize: 12 }}>{(models[p] ?? []).length} model{(models[p] ?? []).length === 1 ? '' : 's'}</span>
+            <div className="row" style={{ gap: 8, alignItems: 'baseline' }}>
+              <strong className="mono">{p.name}</strong>
+              <span className="muted" style={{ fontSize: 12 }}>{p.route}</span>
+            </div>
+            <span className="muted" style={{ fontSize: 12 }}>{(models[p.name] ?? []).length} model{(models[p.name] ?? []).length === 1 ? '' : 's'}</span>
           </div>
-          <div className="muted" style={{ fontSize: 12.5, margin: '4px 0 8px' }}>One per line. These are what a project may choose from for this account.</div>
-          <textarea value={(models[p] ?? []).join('\n')} onChange={e => setList(p, e.target.value)} rows={Math.max(3, (models[p] ?? []).length + 1)}
+          {/* A disabled provider is CATALOGUED but not assignable — switching it back on should not mean
+              re-entering its models, and a plain list could not say why assigning it would fail. */}
+          {p.disabled
+            ? <div style={{ fontSize: 12.5, margin: '4px 0 8px', color: 'var(--bad)' }}>Turned off — {p.disabled}. Kept here so it can be switched back on without re-entering its models.</div>
+            : <div className="muted" style={{ fontSize: 12.5, margin: '4px 0 8px' }}>One per line. These are what a project may choose from for this account.</div>}
+          <textarea value={(models[p.name] ?? []).join('\n')} onChange={e => setList(p.name, e.target.value)} rows={Math.max(3, (models[p.name] ?? []).length + 1)}
                     style={{ width: '100%', fontFamily: 'monospace', fontSize: 13, padding: 10, borderRadius: 8, resize: 'vertical' }} />
         </div>
       ))}
