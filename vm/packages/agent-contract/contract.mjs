@@ -98,30 +98,6 @@ export const PROVIDERS = {
   },
 }
 
-// ── WHICH ACCOUNTS EACH HARNESS CAN REACH ────────────────────────────────────────────────────────────────
-//
-// A harness is HOW we drive a model; a provider is WHOSE ACCOUNT PAYS. They are independent axes but not a
-// free grid: claude-code-pty drives a CLI that authenticates with its own subscription and can reach nothing
-// else, and codex is the same story against ChatGPT. Only pi can be pointed at several accounts, because only
-// pi takes a base URL and a key per model.
-//
-// Declared HERE with the routing it belongs to, so the superadmin editor can narrow its dropdowns and the
-// engine can refuse an impossible pair, from one table rather than two opinions. Without it the editor
-// cheerfully offered `claude-code-pty · opencode-go` — a combination that cannot exist, presented as a choice.
-export const HARNESSES = {
-  'claude-code-pty': { providers: ['claude-code'] },
-  codex:             { providers: ['openai-codex'] },
-  opencode:          { providers: ['opencode-go'] },
-  pi:                { providers: ['opencode-go', 'openai-codex', 'anthropic', 'openrouter'] },
-  mock:              { providers: [] },
-}
-
-/** Accounts this harness can be pointed at. Unknown harness ⇒ nothing, so a typo narrows rather than widens. */
-export const providersForHarness = (harness) => HARNESSES[harness]?.providers ?? []
-
-/** Can this harness use this account at all? The pair check both the editor and the engine apply. */
-export const harnessCanUse = (harness, provider) => providersForHarness(harness).includes(provider)
-
 /** Back-compat name for the relay table. The Worker reads `.base`/`.header` off these. */
 export const UPSTREAMS = PROVIDERS
 
@@ -143,6 +119,37 @@ export const hostsOn = (route) =>
 /** Every host any known provider talks to — the CONNECT destination allowlist. */
 export const allHosts = () =>
   [...new Set(Object.values(PROVIDERS).flatMap((p) => p.hosts ?? []))]
+
+// ── WHICH ACCOUNTS EACH HARNESS CAN REACH ────────────────────────────────────────────────────────────────
+//
+// A harness is HOW we drive a model; a provider is WHOSE ACCOUNT PAYS. Independent axes, but not a free grid,
+// and the constraint is a consequence of the ROUTE rather than a fact about the harness:
+//
+//   relayed   we substitute the key in flight, so any harness that accepts a base URL and an API key can be
+//             pointed at it — pi through its model runtime, opencode through the config its server launches
+//             with. Neither is tied to one account, and listing one here by hand is how that gets forgotten.
+//   tunnelled the credential must be on the box and the client must know how to use it. Only pi speaks the
+//             ChatGPT backend's protocol, so only pi reaches openai-codex.
+//   box       the client authenticates entirely by itself. claude-code-pty drives a CLI holding its own
+//             subscription and can reach nothing else; codex is the same story.
+//
+// DERIVED, so adding a relayed provider makes it available to the harnesses that can use it without a second
+// edit — the failure this file exists to prevent.
+const BOX_HARNESS = { 'claude-code-pty': 'claude-code', codex: 'openai-codex' }
+
+export const providersForHarness = (harness) => {
+  if (harness in BOX_HARNESS) return [BOX_HARNESS[harness]]
+  if (harness === 'pi') return [...providersOn('relay'), ...providersOn('tunnel')]
+  if (harness === 'opencode') return providersOn('relay')
+  return []
+}
+
+/** The table, for anything that wants to render or ship it whole (the superadmin editor does). */
+export const HARNESSES = Object.fromEntries(
+  ['claude-code-pty', 'codex', 'pi', 'opencode', 'mock'].map((h) => [h, { providers: providersForHarness(h) }]))
+
+/** Can this harness use this account at all? The pair check both the editor and the engine apply. */
+export const harnessCanUse = (harness, provider) => providersForHarness(harness).includes(provider)
 
 /** Providers whose credential must sit ON the machine, with the variable each client reads. */
 export const boxSide = () =>
