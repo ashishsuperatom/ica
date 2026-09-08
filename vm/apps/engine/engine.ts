@@ -26,7 +26,7 @@ import { execSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { execProgram, answerView } from './exec-program.js'
 import { createSession, prepareWorkspace, type Session, type Harness, type RunHandlers } from './ica/index.js'
-import { agentConfig, describeConfig, useCache, receive, applied } from './config/index.js'
+import { agentConfig, describeConfig, useCache, receive, applied, type AgentName } from './config/index.js'
 import { createNarrator, capResultData, stripCode, type Narrator } from './agents/narrator/index.js'
 import { createAnalyst, promptVersion as analystPromptVersion } from './agents/analyst/index.js'
 import { promptVersion as composerPromptVersion, createComposer, type Composer } from './agents/composer/index.js'
@@ -300,20 +300,46 @@ const setOnScreen = (sid: string, v: OnScreen) => {
 // engine, not by the agent); persist the live id; and expose newSession() (reset) + compact(). The rest
 // of the engine just calls slot.get() / newSession() / compact() — no scattered lifecycle code.
 type Agent = { session: Session }
-function makeAgentSlot<A extends Agent>(role: string, promptVersion: () => Promise<string>, create: (resumeId?: string) => Promise<A>) {
+function makeAgentSlot<A extends Agent>(role: string, promptVersion: () => Promise<string>, create: (resumeId?: string) => Promise<A>,
+                                        agentName?: AgentName) {
   let agent: A | null = null, building: Promise<A> | null = null, ver = ''
+  // WHAT THIS AGENT WAS BUILT WITH. A session is bound to its harness, provider and model at the moment it is
+  // created — a process is already running by the time a profile changes, and no message can turn a pi session
+  // into an opencode one. So the change is applied the only way it can be: the NEXT session is built from the
+  // new profile, and this string is how we notice we need one.
+  //
+  // Not merged into the prompt hash, though the two are close cousins. A changed PROMPT means the session's
+  // instructions are stale, and not resuming it is enough. A changed MODEL means the running process is the
+  // wrong process, and it has to go. Same signal, different remedy — so they stay separate.
+  const configStamp = () => {
+    if (!agentName) return ''
+    const c = agentConfig(agentName)
+    return `${c.harness}/${c.provider}/${c.model}`
+  }
+  let builtWith = ''
   // Persist the live session id so a restart can --resume it. IMPORTANT: only call this AFTER a real turn.
   // Claude writes a session's transcript to disk only once the session has conversed; persisting at mere
   // CREATION (e.g. at warm-up) stores an id with no transcript → the next boot's --resume fails with
   // "No conversation found". So creation does NOT persist — the callers persist after an actual run.
   const persist = () => { if (agent) answers.setAgentSession(PROJECT, role, 'claude-code', agent.session.sessionId?.(), ver, Date.now()) }
   async function get(): Promise<A> {
+    // A profile change since this agent was built means the process itself is wrong — stop it and fall through
+    // to a fresh one. Checked HERE rather than pushed from the config handler because this is the only moment
+    // that is safe: whatever was mid-turn has finished with the old session, and nothing is interrupted.
+    const want = configStamp()
+    if (agent && builtWith && want !== builtWith) {
+      console.log(`[ica] ${role}: profile changed (${builtWith} → ${want}) → rebuilding`)
+      try { agent.session.stop() } catch { /* it may already be gone */ }
+      agent = null; building = null
+      answers.clearAgentSession(PROJECT, role)   // a transcript from another model is not ours to resume
+    }
     if (agent) return agent
     if (!building) building = (async () => {
       ver = await promptVersion()                                            // deterministic hash of the instruction files
       const prev = answers.getAgentSession(PROJECT, role)
       const resumeId = prev?.promptVersion === ver ? prev.sessionId : undefined   // resume ONLY if instructions unchanged
       if (prev && prev.promptVersion !== ver) console.log(`[ica] ${role}: instructions changed → fresh session`)
+      builtWith = configStamp()
       agent = await create(resumeId); return agent   // NOT persisted here — see persist() note above
     })()
     return building
@@ -334,15 +360,29 @@ function makeAgentSlot<A extends Agent>(role: string, promptVersion: () => Promi
     dispose() { try { agent?.session.stop() } catch {}; agent = null; building = null },
   }
 }
-const analystSlot  = makeAgentSlot('analyst',  analystPromptVersion,  (resumeId) => listSources().then(sources => createAnalyst({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { resumeId } })))
+const analystSlot  = makeAgentSlot('analyst',  analystPromptVersion,  (resumeId) => listSources().then(sources => createAnalyst({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { resumeId } })), 'analyst')
 // The COMPOSER (System 2), ONE PER SESSION: each chat session gets its own composer (a cheap opencode CLIENT
 // session on the shared server, so N sessions ≈ free). Created on the session's first question, reused for the
 // session; only the in-flight question needs memory. Idle sessions are disposed by the sweep below.
-const composersBySession = new Map<string, { composer: Promise<Composer>; lastUsed: number }>()
+const composersBySession = new Map<string, { composer: Promise<Composer>; lastUsed: number; builtWith: string }>()
+const composerStamp = () => { const c = agentConfig('composer'); return `${c.harness}/${c.provider}/${c.model}` }
 function getComposer(sid: string): Promise<Composer> {
   let e = composersBySession.get(sid)
+  // A composer built before a profile change is running the old harness and model. It is dropped at the next
+  // question rather than the moment the change arrives, because the change can land mid-answer and killing a
+  // composer that is halfway through a question loses the answer to make a setting current a minute sooner.
+  // The chat keeps its history; only the agent behind it is new — which is what changing a model means anyway.
+  const want = composerStamp()
+  if (e && e.builtWith !== want) {
+    console.log(`[ica] composer: profile changed (${e.builtWith} → ${want}) → fresh session for ${sid.slice(0, 8)}`)
+    const old = e.composer
+    composersBySession.delete(sid)
+    old.then(c => { try { c.session.stop() } catch {} }).catch(() => {})
+    e = undefined
+  }
   if (!e) {
-    e = { composer: createComposer({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, ica: { baseUrl: OC_URL } }), lastUsed: Date.now() }
+    e = { composer: createComposer({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, ica: { baseUrl: OC_URL } }),
+          lastUsed: Date.now(), builtWith: want }
     composersBySession.set(sid, e)
     console.log(`[ica] composer: new session ${sid.slice(0, 8)} (live composers: ${composersBySession.size})`)
   }
@@ -362,12 +402,12 @@ setInterval(() => {
     console.log(`[ica] composer: disposed idle session ${sid.slice(0, 8)} (live composers: ${composersBySession.size})`)
   }
 }, 5 * 60 * 1000).unref?.()
-const connectorSlot = makeAgentSlot('connector', connectorPromptVersion, (resumeId) => createConnector({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, datasourcesDir: DATASOURCES_DIR, ica: { resumeId } }))
+const connectorSlot = makeAgentSlot('connector', connectorPromptVersion, (resumeId) => createConnector({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, datasourcesDir: DATASOURCES_DIR, ica: { resumeId } }), 'connector')
 // COLD by design: never warmed at boot (below); spun up only when the admin triggers a grounding build.
-const groundingSlot = makeAgentSlot('grounding', groundingPromptVersion, (resumeId) => listSources().then(sources => createGroundingAgent({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { resumeId } })))
+const groundingSlot = makeAgentSlot('grounding', groundingPromptVersion, (resumeId) => listSources().then(sources => createGroundingAgent({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { resumeId } })), 'grounding')
 // The CONCEPT MODELLER (System 4 — "sleep"): LAZY, never warmed at boot — spun up only when the offline
 // consolidation tick has a batch to study, then it distils verified concepts from finished analyses.
-const modellerSlot = makeAgentSlot('modeller', modellerPromptVersion, (resumeId) => listSources().then(sources => createConceptModeller({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { resumeId } })))
+const modellerSlot = makeAgentSlot('modeller', modellerPromptVersion, (resumeId) => listSources().then(sources => createConceptModeller({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { resumeId } })), 'modeller')
 for (const line of describeConfig()) console.log(`[config] ${line}`)
 // Live analyst state, kept so a (re)connecting client can RE-SYNC after a reload (the engine stores
 // no history — this is just the current run + last result, replayed on demand).

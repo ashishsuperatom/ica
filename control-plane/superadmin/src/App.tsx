@@ -893,7 +893,10 @@ function ProjectDetailPage() {
   // They differ whenever a box is asleep, unreachable, or still finishing a question — so the UI shows both
   // and says which is which, rather than turning a successful write into a claim about a machine.
   const [prof, setProf] = useState<{ profile: any; version: number; running: any } | null>(null)
-  const [draft, setDraft] = useState<any>(null)
+  // TYPED, and never null while rendering. This was `any` and initialised to null: the card dereferenced
+  // draft.agents on the first paint, before the fetch resolved, and `any` meant the typecheck could not see it.
+  type Draft = { agents: Record<string, { harness?: string; provider?: string; model?: string }>; harnessNotes?: any }
+  const [draft, setDraft] = useState<Draft | null>(null)
   const [profMsg, setProfMsg] = useState<string>('')
   // The OPTIONS come from the platform catalogue, never from a list this file carries — so the editor can only
   // offer what superadmin has approved, and adding a model there makes it selectable here immediately.
@@ -911,20 +914,31 @@ function ProjectDetailPage() {
     if (!r.ok) return
     const d = await r.json() as any
     setProf(d)
-    // SEEDED FROM WHAT IS RUNNING when nothing is saved yet. The editor never invents a document — an
-    // unconfigured project starts from the engine's own baked default, which is what it is actually using.
-    setDraft((cur: any) => cur ?? d.profile ?? d.running?.profile ?? null)
+    // SEEDED FROM WHAT IS RUNNING when nothing is saved yet, so the editor starts from what the box is
+    // genuinely using. With neither — an unconfigured project whose engine has never reported — it starts
+    // EMPTY rather than absent: the six agents are known, so every row can still be chosen deliberately, and
+    // a screen that renders nothing at all is the failure this card exists to prevent.
+    setDraft(cur => cur ?? d.profile ?? d.running?.profile ?? { agents: {} })
   }, [api, projectId])
   useEffect(() => { if (view === 'settings') loadProfile() }, [view, loadProfile])
   const saveProfile = async () => {
+    // ONLY COMPLETE ROWS TRAVEL. An agent needs all three parts; a half-filled row would be refused by the
+    // engine as malformed, and an agent left untouched should simply keep the engine's default rather than be
+    // sent a fragment. So partly-filled rows are dropped, and the message says how many, rather than silently
+    // shipping something that will bounce.
+    const rows = Object.entries((draft?.agents ?? {}) as Record<string, any>)
+    const complete = rows.filter(([, a]) => a?.harness && a?.provider && a?.model)
+    const dropped = rows.length - complete.length
+    const profile = { ...draft, agents: Object.fromEntries(complete) }
     setProfMsg('saving…')
-    const r = await api(`/projects/${projectId}/profile`, { method: 'PUT', body: JSON.stringify({ profile: draft }) })
+    const r = await api(`/projects/${projectId}/profile`, { method: 'PUT', body: JSON.stringify({ profile }) })
     if (!r.ok) { setProfMsg(`could not save: ${r.status} ${await r.text()}`); return }
     const { version, delivered } = await r.json() as any
     // The write succeeded. Whether a MACHINE took it is a different question, and we wait for the engine's own
     // report rather than claiming it — an offline box must read as offline, not as applied.
-    setProfMsg(delivered ? `saved v${version} — waiting for the engine to confirm…`
-                         : `saved v${version} — the engine is not connected; it will pick this up when it starts`)
+    const note = dropped ? ` (${dropped} incomplete row${dropped === 1 ? '' : 's'} left on the engine's default)` : ''
+    setProfMsg(delivered ? `saved v${version}${note} — waiting for the engine to confirm…`
+                         : `saved v${version}${note} — the engine is not connected; it will pick this up when it starts`)
     for (let i = 0; i < 12 && delivered; i++) {
       await new Promise(r => setTimeout(r, 1000))
       const g = await api(`/projects/${projectId}/profile`)
@@ -1199,12 +1213,15 @@ function ProjectDetailPage() {
                   </div>
                 </>}
           </div>
-          {role === 'superadmin' && draft && (() => {
+          {role === 'superadmin' && (() => {
+            // The document being edited, never null: an unconfigured project is an empty one, not an absent one.
+            const doc: Draft = draft ?? { agents: {} }
             const AGENTS = ['analyst', 'connector', 'grounding', 'modeller', 'composer', 'narrator']
             const HARNESSES = ['claude-code-pty', 'opencode', 'pi', 'codex']
             const running = prof?.running
             const setAgent = (a: string, k: string, v: string) =>
-              setDraft((d: any) => ({ ...d, agents: { ...d.agents, [a]: { ...(d.agents?.[a] ?? {}), [k]: v || undefined } } }))
+              setDraft(d => { const cur = d ?? { agents: {} }
+                              return { ...cur, agents: { ...cur.agents, [a]: { ...(cur.agents?.[a] ?? {}), [k]: v || undefined } } } })
             return (
               <div className="card" style={{ padding: 18 }}>
                 <strong>Agent profile</strong>
@@ -1220,7 +1237,7 @@ function ProjectDetailPage() {
                   <span className="muted">engine running</span>
                   {running
                     ? <code className="mono" style={{ color: running.version === prof?.version ? 'var(--ok)' : 'var(--bad)' }}>v{running.version}</code>
-                    : <span style={{ color: 'var(--muted)' }}>not connected — nothing is running this profile right now</span>}
+                    : <span style={{ color: 'var(--muted)' }}>engine has not reported — start it to see what it is running</span>}
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr 1fr', gap: 8, alignItems: 'center' }}>
@@ -1229,7 +1246,7 @@ function ProjectDetailPage() {
                   <span className="muted" style={{ fontSize: 12 }}>provider</span>
                   <span className="muted" style={{ fontSize: 12 }}>model</span>
                   {AGENTS.map(a => {
-                    const cur = draft.agents?.[a] ?? {}
+                    const cur = doc.agents?.[a] ?? {}
                     const live = running?.agents?.[a]
                     return (
                       <div key={a} style={{ display: 'contents' }}>
@@ -1251,8 +1268,11 @@ function ProjectDetailPage() {
                         </select>
                         <select value={cur.model ?? ''} onChange={e => setAgent(a, 'model', e.target.value)}
                                 style={{ padding: 6, borderRadius: 6 }}>
-                          {(cat?.models?.[cur.provider] ?? []).map(m => <option key={m} value={m}>{m}</option>)}
-                          {cur.model && !(cat?.models?.[cur.provider] ?? []).includes(cur.model) &&
+                          {/* No provider chosen yet means no models to offer — the catalogue is keyed by
+                              account, so the question "which models" has no answer until one is picked. */}
+                          {(cur.provider ? cat?.models?.[cur.provider] ?? [] : []).map((m: string) =>
+                            <option key={m} value={m}>{m}</option>)}
+                          {cur.model && !(cur.provider ? cat?.models?.[cur.provider] ?? [] : []).includes(cur.model) &&
                             <option value={cur.model}>{cur.model} (not in the catalogue)</option>}
                         </select>
                       </div>
@@ -1262,8 +1282,8 @@ function ProjectDetailPage() {
 
                 {/* CAUTIONS COME FROM THE PROFILE, not from this file — adding one later is a data change. */}
                 {AGENTS.flatMap(a => {
-                  const h = draft.agents?.[a]?.harness
-                  const note = draft.harnessNotes?.[a]?.[h]
+                  const h = doc.agents?.[a]?.harness
+                  const note = h ? doc.harnessNotes?.[a]?.[h] : null
                   return note ? [<div key={`${a}-${h}`} style={{ marginTop: 10, padding: '8px 11px', borderRadius: 8, fontSize: 12.5,
                                        border: '1px solid var(--line)', color: note.level === 'warn' ? 'var(--bad)' : 'var(--muted)' }}>
                                    <strong>{a} → {h}</strong> · {note.text}

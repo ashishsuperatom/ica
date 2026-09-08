@@ -10,6 +10,31 @@
 import { DurableObject } from 'cloudflare:workers'
 import { LoginCodeStore } from './auth/login-code-store.js'
 
+// ── THE CATALOGUE WE SHIP WITH ─────────────────────────────────────────────────────────────────────────────
+// A platform whose catalogue starts empty is a platform where nothing can be assigned until someone types a
+// list from memory — so this is what is offered until a real one is saved, and saving replaces it wholesale.
+//
+// These are OBSERVED, not invented: read from pi's live model catalogue on a running box (which needs no
+// credential to enumerate) and from the codex CLI's own models cache. Dateless ids, so an entry keeps meaning
+// "the current one" rather than aging into a pinned build.
+const DEFAULT_CATALOGUE: Record<string, string[]> = {
+  'opencode-go': [
+    'deepseek-v4-flash', 'deepseek-v4-pro', 'glm-5.1', 'glm-5.2', 'glm-5.3', 'glm-5.3-flash',
+    'gpt-5.6-luna', 'grok-4.6', 'hy3', 'hy4-preview', 'kimi-k2.6', 'kimi-k2.7-code', 'kimi-k3',
+    'longcat-2.0', 'mimo-v2.5', 'mimo-v2.5-pro', 'minimax-m2.7', 'minimax-m3', 'omen-alpha',
+    'qwen3.6-plus', 'qwen3.7-max', 'qwen3.7-plus', 'qwen3.8-flash', 'qwen3.8-max',
+  ],
+  'openai-codex': [
+    'gpt-5.3-codex-spark', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.5',
+    'gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-6-astra',
+  ],
+  'claude-code': ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'],
+  // Turned off at the proxy, but catalogued so switching it back on needs no re-entry. Left empty because we
+  // have never verified an id here — OpenRouter names are `vendor/model` and guessing one would put a model
+  // in front of an operator that may not exist.
+  openrouter: [],
+}
+
 export class GlobalDO extends DurableObject<Env> {
   // One-time mobile login codes — strongly-consistent store lives here (see auth/login-code-store.ts).
   private loginCodes: LoginCodeStore
@@ -78,10 +103,15 @@ export class GlobalDO extends DurableObject<Env> {
   }
 
   /** Read by ProjectDO on its own hot path, so it stays a plain lookup with no validation or work. */
-  catalogue(): Record<string, string[]> | null { return this.catalogueRow()?.models ?? null }
+  catalogue(): Record<string, string[]> | null { return this.catalogueRow()?.models ?? DEFAULT_CATALOGUE }
 
   private async getCatalogue(): Promise<Response> {
-    return Response.json(this.catalogueRow() ?? { models: null, updatedBy: null, updatedAt: 0 })
+    const row = this.catalogueRow()
+    // `source` so a screen can say whether it is showing a saved decision or the list we ship with — the two
+    // look identical and mean different things.
+    return row
+      ? Response.json({ ...row, source: 'stored' })
+      : Response.json({ models: DEFAULT_CATALOGUE, updatedBy: null, updatedAt: 0, source: 'default' })
   }
 
   private async putCatalogue(req: Request): Promise<Response> {

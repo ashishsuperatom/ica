@@ -161,7 +161,7 @@ export class ProjectDO extends DurableObject<Env> {
   // at the latest version in one shot (CREATE IF NOT EXISTS) then jump to the
   // current version number. Existing DOs only run migrations they haven't seen.
 
-  private static CURRENT_SCHEMA = 10
+  private static CURRENT_SCHEMA = 11
 
   private async migrate() {
     // Ensure version tracking table exists
@@ -309,6 +309,20 @@ export class ProjectDO extends DurableObject<Env> {
     // a person is never touched.
     if (v < 10) {
       try { this.ctx.storage.sql.exec("DELETE FROM profile WHERE updated_by = 'engine (baked default)'") } catch {}
+    }
+
+    // V11 — WHAT THE ENGINE REPORTED, on disk. This was an in-memory field, which a Durable Object loses every
+    // time it hibernates. The engine reports only when it connects, and a hibernating DO does not drop its
+    // sockets — so after the first idle period the answer to "what is this project running" became null
+    // forever, and the admin screen that depends on it rendered nothing at all.
+    if (v < 11) {
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS engine_running (
+          json       TEXT NOT NULL,
+          version    INTEGER NOT NULL DEFAULT 0,
+          at         INTEGER NOT NULL DEFAULT 0
+        );
+      `)
     }
 
     // Advance to current version
@@ -541,11 +555,11 @@ export class ProjectDO extends DurableObject<Env> {
     // different facts, and they differ whenever a machine is asleep, unreachable, or mid-question.
     if (msg.type === 'config:applied') {
       if (sender.type === 'code-engine') {
-        this._runningProfile = { version: Number(msg.version) || 0, agents: msg.agents ?? null,
-                                 profile: msg.profile ?? null, at: Date.now() }
-        this.log('config:applied', { version: this._runningProfile.version })
+        const version = Number(msg.version) || 0
+        this.setRunningProfile({ version, agents: msg.agents ?? null, profile: msg.profile ?? null, at: Date.now() })
+        this.log('config:applied', { version })
         this.broadcastToAll(ws, { from: { id: sender.wsId, type: 'code-engine' },
-                                  payload: { t: 'config:applied', version: this._runningProfile.version, agents: msg.agents ?? null } })
+                                  payload: { t: 'config:applied', version, agents: msg.agents ?? null } })
       }
       return
     }
@@ -749,7 +763,7 @@ export class ProjectDO extends DurableObject<Env> {
     // The engine that told us what it was running is gone, so the claim goes with it. Reporting a profile as
     // "running" on a box that is no longer connected is the kind of confident-but-wrong answer this whole
     // reporting path exists to avoid.
-    if (conn.type === 'code-engine') this._runningProfile = null
+    if (conn.type === 'code-engine') this.setRunningProfile(null)
 
     // Log
     this.log('ws:disconnected', { wsId: conn.wsId, type: conn.type, userId: conn.userId ?? null })
@@ -1203,7 +1217,7 @@ export class ProjectDO extends DurableObject<Env> {
     // `running` is what the ENGINE last reported it had adopted — NOT what was last saved. A UI must be able to
     // show that a change has actually taken effect, and those are different facts whenever a box is asleep,
     // unreachable, or still finishing the question it was on.
-    return Response.json({ ...(p ?? { profile: null, version: 0, updatedBy: null, updatedAt: 0 }), running: this._runningProfile })
+    return Response.json({ ...(p ?? { profile: null, version: 0, updatedBy: null, updatedAt: 0 }), running: this.runningProfile })
   }
 
   private async putProfile(req: Request): Promise<Response> {
@@ -1223,9 +1237,20 @@ export class ProjectDO extends DurableObject<Env> {
     return Response.json({ ok: true, version, delivered })
   }
 
-  /** What the engine says it is RUNNING. Set from its `config:applied` message, cleared when it disconnects, so
-   *  a stale claim can never outlive the process that made it. */
-  private _runningProfile: { version: number; agents?: any; profile?: any; at: number } | null = null
+  /** What the engine says it is RUNNING. Written from its `config:applied` message and cleared when it
+   *  disconnects, so a stale claim never outlives the process that made it — and held on DISK, because this
+   *  object hibernates while the engine stays connected, and an in-memory copy simply vanished. */
+  private get runningProfile(): { version: number; agents?: any; profile?: any; at: number } | null {
+    const [row] = this.ctx.storage.sql.exec('SELECT json, version, at FROM engine_running LIMIT 1')
+    if (!row) return null
+    try { return { ...JSON.parse((row as any).json), version: (row as any).version, at: (row as any).at } }
+    catch { return null }
+  }
+  private setRunningProfile(v: { version: number; agents?: any; profile?: any; at: number } | null) {
+    this.ctx.storage.sql.exec('DELETE FROM engine_running')
+    if (v) this.ctx.storage.sql.exec('INSERT INTO engine_running (json, version, at) VALUES (?, ?, ?)',
+      JSON.stringify({ agents: v.agents ?? null, profile: v.profile ?? null }), v.version, v.at)
+  }
 
   /** Send one payload to the single connection holding a role. Returns whether anything received it — the
    *  caller reports that honestly rather than implying delivery to a box that is asleep. */
