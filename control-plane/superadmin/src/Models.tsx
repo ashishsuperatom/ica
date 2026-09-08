@@ -222,8 +222,8 @@ function Catalogue({ providers, models, usedBy, source, dirty, busy, msg, onChan
         engine rebuild.
       </div>
       <div className="row" style={{ gap: 10, alignItems: 'center', marginBottom: 8 }}>
-        <input value={q} onChange={e => setQ(e.target.value)} placeholder="search models or accounts…"
-               style={{ padding: '6px 10px', borderRadius: 8, fontSize: 13, width: 260 }} />
+        <input className="input" value={q} onChange={e => setQ(e.target.value)} placeholder="search models or accounts…"
+               style={{ fontSize: 13, width: 260 }} />
         <span className="muted" style={{ fontSize: 12.5 }}>
           {needle ? `${flat.length} of ${total}` : `${total} model${total === 1 ? '' : 's'}`}
         </span>
@@ -288,12 +288,12 @@ function Catalogue({ providers, models, usedBy, source, dirty, busy, msg, onChan
         <strong style={{ fontSize: 13 }}>Add models</strong>
         <div className="muted" style={{ fontSize: 12.5, margin: '4px 0 8px' }}>One per line, or comma separated. Duplicates are ignored.</div>
         <div className="row" style={{ gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-          <select value={addTo} onChange={e => setAddTo(e.target.value)} style={{ padding: 7, borderRadius: 8 }}>
+          <select className="input" value={addTo} onChange={e => setAddTo(e.target.value)} style={{ fontSize: 13 }}>
             <option value="">choose an account…</option>
             {providers.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
           </select>
-          <textarea value={paste} onChange={e => setPaste(e.target.value)} rows={3} placeholder={'deepseek-v4-flash\nglm-5.3'}
-                    style={{ flex: 1, minWidth: 260, fontFamily: 'monospace', fontSize: 13, padding: 10, borderRadius: 8, resize: 'vertical' }} />
+          <textarea className="input" value={paste} onChange={e => setPaste(e.target.value)} rows={3} placeholder={'deepseek-v4-flash\nglm-5.3'}
+                    style={{ flex: 1, minWidth: 260, fontFamily: 'monospace', fontSize: 13, resize: 'vertical' }} />
           <button className="btn ghost" onClick={addMany} disabled={!addTo || !paste.trim()}>Add</button>
         </div>
       </div>

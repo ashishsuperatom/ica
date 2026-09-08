@@ -1262,13 +1262,13 @@ function ProjectDetailPage() {
                             renders the FIRST one instead — so an untouched row displayed "claude-code-pty /
                             opencode-go" and read as a choice nobody had made. Unset must look unset, and here
                             it means precisely one thing: this agent keeps whatever the engine defaults to. */}
-                        <select value={cur.harness ?? ''} onChange={e => setAgent(a, 'harness', e.target.value)}
-                                style={{ padding: 6, borderRadius: 6 }}>
+                        <select className="input" value={cur.harness ?? ''} onChange={e => setAgent(a, 'harness', e.target.value)}
+                                style={{ fontSize: 13, padding: '6px 9px' }}>
                           <option value="">— engine default —</option>
                           {HARNESSES.map(h => <option key={h} value={h}>{h}</option>)}
                         </select>
-                        <select value={cur.provider ?? ''} onChange={e => setAgent(a, 'provider', e.target.value)}
-                                style={{ padding: 6, borderRadius: 6 }}>
+                        <select className="input" value={cur.provider ?? ''} onChange={e => setAgent(a, 'provider', e.target.value)}
+                                style={{ fontSize: 13, padding: '6px 9px' }}>
                           <option value="">— engine default —</option>
                           {(cat?.providers ?? [])
                             .filter(p => !cur.harness || (cat?.harnesses?.[cur.harness]?.providers ?? []).includes(p.name))
@@ -1281,8 +1281,8 @@ function ProjectDetailPage() {
                           {cur.provider && !(cat?.providers ?? []).some(p => p.name === cur.provider) &&
                             <option value={cur.provider}>{cur.provider} (unknown to the proxy)</option>}
                         </select>
-                        <select value={cur.model ?? ''} onChange={e => setAgent(a, 'model', e.target.value)}
-                                style={{ padding: 6, borderRadius: 6 }}>
+                        <select className="input" value={cur.model ?? ''} onChange={e => setAgent(a, 'model', e.target.value)}
+                                style={{ fontSize: 13, padding: '6px 9px' }}>
                           <option value="">— engine default —</option>
                           {/* No provider chosen yet means no models to offer — the catalogue is keyed by
                               account, so the question "which models" has no answer until one is picked. */}

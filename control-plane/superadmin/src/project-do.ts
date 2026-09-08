@@ -22,6 +22,11 @@ import { suspendMachine, stopMachine as flyStopMachine, startMachine as flyStart
 import { AnswerBuffer } from './answer-buffer.js'
 
 
+// How long a question queued for a sleeping machine is still worth waking up for. Past this the person has
+// gone, and delivering it produces an answer nobody is waiting for — which arrives looking like the system
+// answering a question at random. Dropped, and said so in the log rather than silently.
+const QUEUE_MAX_AGE_MS = 60 * 60 * 1000        // 60 min
+
 const SUSPEND_AFTER_MS = 60 * 60 * 1000        // 60 min idle (no real activity) → suspend (RAM snapshot kept → ~1-2s WARM wake, no agent re-warm)
 const STOP_AFTER_MS    = 24 * 60 * 60 * 1000   // 24 h idle → stop (release the RAM snapshot; next wake is a COLD boot + agent warm-up)
 
@@ -1209,7 +1214,8 @@ export class ProjectDO extends DurableObject<Env> {
    *  alongside the decision would only invite a second opinion about it further down.
    */
   private profileForEngine(): any | null {
-    return this.readProfile()?.profile ?? null
+    try { return this.readProfile()?.profile ?? null }
+    catch { return null }   // a box that cannot be told its profile still runs its default; a dead hub does not
   }
 
   private async getProfile(): Promise<Response> {
@@ -1240,16 +1246,27 @@ export class ProjectDO extends DurableObject<Env> {
   /** What the engine says it is RUNNING. Written from its `config:applied` message and cleared when it
    *  disconnects, so a stale claim never outlives the process that made it — and held on DISK, because this
    *  object hibernates while the engine stays connected, and an in-memory copy simply vanished. */
+  //
+  // BOOKKEEPING MUST NOT KILL A SOCKET. Both of these run inside the engine's WebSocket handlers — one when it
+  // reports what it is running, one when it disconnects. An exception there (a table that a migration has not
+  // reached yet, say) does not fail politely: it resets the Durable Object and takes every connection with it,
+  // including the browser's. Knowing which profile is running is worth strictly less than the hub staying up,
+  // so a failure here is reported and swallowed.
   private get runningProfile(): { version: number; agents?: any; profile?: any; at: number } | null {
-    const [row] = this.ctx.storage.sql.exec('SELECT json, version, at FROM engine_running LIMIT 1')
-    if (!row) return null
-    try { return { ...JSON.parse((row as any).json), version: (row as any).version, at: (row as any).at } }
-    catch { return null }
+    try {
+      const [row] = this.ctx.storage.sql.exec('SELECT json, version, at FROM engine_running LIMIT 1')
+      if (!row) return null
+      return { ...JSON.parse((row as any).json), version: (row as any).version, at: (row as any).at }
+    } catch { return null }
   }
   private setRunningProfile(v: { version: number; agents?: any; profile?: any; at: number } | null) {
-    this.ctx.storage.sql.exec('DELETE FROM engine_running')
-    if (v) this.ctx.storage.sql.exec('INSERT INTO engine_running (json, version, at) VALUES (?, ?, ?)',
-      JSON.stringify({ agents: v.agents ?? null, profile: v.profile ?? null }), v.version, v.at)
+    try {
+      this.ctx.storage.sql.exec('DELETE FROM engine_running')
+      if (v) this.ctx.storage.sql.exec('INSERT INTO engine_running (json, version, at) VALUES (?, ?, ?)',
+        JSON.stringify({ agents: v.agents ?? null, profile: v.profile ?? null }), v.version, v.at)
+    } catch (err: any) {
+      this.log('config:running_write_failed', { error: String(err?.message ?? err).slice(0, 160) })
+    }
   }
 
   /** Send one payload to the single connection holding a role. Returns whether anything received it — the
@@ -1328,15 +1345,36 @@ export class ProjectDO extends DurableObject<Env> {
 
   // Deliver messages queued while machine was asleep. Called on code-engine
   // connect AND on every heartbeat (belt-and-suspenders for wake scenarios).
+  //
+  // EVERY ROW LEAVES THE QUEUE, delivered or not. This used to parse and send the whole batch and only then
+  // DELETE, with no error handling anywhere: one unparseable row — or one send onto a socket that closed while
+  // we were iterating — threw, the delete never ran, and the identical failure replayed on EVERY subsequent
+  // engine registration. A single bad message could therefore keep a project's hub in a permanent crash loop,
+  // taking the browser's socket down with it, with nothing in the queue ever being delivered again.
+  //
+  // So each row is removed BEFORE it is attempted, and each attempt is isolated. A message we cannot deliver
+  // is lost — which is the right trade against one poisoning the project forever — and it is logged with its
+  // id rather than disappearing.
   private flushQueued(ws: WebSocket) {
-    const queued = [...this.ctx.storage.sql.exec('SELECT id, msg_json FROM message_queue ORDER BY id')]
+    const queued = [...this.ctx.storage.sql.exec('SELECT id, msg_json, created_at FROM message_queue ORDER BY id')]
     if (queued.length === 0) return
+    const nowSec = Math.floor(Date.now() / 1000)
+    let sent = 0, stale = 0, failed = 0
     for (const q of queued) {
-      const msg = JSON.parse((q as any).msg_json)
-      ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: msg.payload }))
+      const id = (q as any).id
+      // First, so nothing can be replayed. A row that fails here is one we would otherwise retry forever.
+      try { this.ctx.storage.sql.exec('DELETE FROM message_queue WHERE id = ?', id) } catch { /* gone already */ }
+      if (nowSec - (Number((q as any).created_at) || 0) > QUEUE_MAX_AGE_MS / 1000) { stale++; continue }
+      try {
+        const msg = JSON.parse((q as any).msg_json)
+        ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: msg.payload }))
+        sent++
+      } catch (err: any) {
+        failed++
+        this.log('machine:queue_undeliverable', { id, error: String(err?.message ?? err).slice(0, 160) })
+      }
     }
-    this.ctx.storage.sql.exec('DELETE FROM message_queue')
-    this.log('machine:delivered', { count: queued.length })
+    this.log('machine:delivered', { sent, stale, failed })
   }
 
   // The idle state machine. Runs whenever the alarm fires. Anchored to last_active
