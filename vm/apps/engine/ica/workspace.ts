@@ -316,17 +316,20 @@ console.log(meta ? 'Save with:  tsx concept-save.mjs ' + r.runId + ' "<why>"'
 // the parameters, so this re-derives it and refuses a mismatch. Saving a body nobody executed is the one
 // mistake that would make "verified" meaningless, so it is made impossible rather than discouraged.
 //
-// It refuses: an unknown run, a run that errored, and a run whose invariants did not hold.
+// It refuses: an unknown run, a run that errored, a run whose invariants did not hold, and a name that already
+// belongs to a different concept. Pass --replace when you mean that name to point at this concept from now on.
 import { saveConcept, managerSignSql } from ${JSON.stringify(conceptSaveImport)}
 import { NodeStore } from '@superatom/node-store'
 import { fileURLToPath } from 'node:url'
 
-const [runId, reason] = process.argv.slice(2)
-if (!runId) { console.error('usage: tsx concept-save.mjs <runId> "<why>"'); process.exit(1) }
+const args = process.argv.slice(2)
+const replace = args.includes('--replace')
+const [runId, reason] = args.filter((a) => a !== '--replace')
+if (!runId) { console.error('usage: tsx concept-save.mjs <runId> "<why>" [--replace]'); process.exit(1) }
 
 const store = new NodeStore(fileURLToPath(new URL('../db/project.sqlite', import.meta.url)))
 const r = await saveConcept(store, runId, { changedBy: 'consolidator', reason: reason || undefined },
-                            managerSignSql(process.env.DATASOURCE_URL || 'http://localhost:4000'))
+                            managerSignSql(process.env.DATASOURCE_URL || 'http://localhost:4000'), { replace })
 if (!r.ok) { console.error('✗ not saved — ' + r.reason); process.exit(1) }
 console.log('✓ saved ' + r.name + ' (' + r.conceptId + ')')
 console.log('  exercised with ' + JSON.stringify(r.observed))

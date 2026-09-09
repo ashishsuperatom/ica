@@ -14,7 +14,7 @@
 //   • a run that errored       — it does not execute
 //   • a run whose invariants failed — it executes and its number is wrong, which is worse
 
-import { NodeStore, getRun, upsertConcept, pruneRuns, runId as deriveRunId, runsBySource, putSignature, putSample,
+import { NodeStore, getRun, upsertConcept, resolveConcept, conceptHash, pruneRuns, runId as deriveRunId, runsBySource, putSignature, putSample,
          type ChangeMeta, type ConceptProps } from '@superatom/node-store'
 import { conceptSignature, type SqlSignature } from './signature.js'
 
@@ -41,7 +41,8 @@ export const managerSignSql = (managerUrl: string): SignSql => async (sql) => {
   return ((await r.json()) as any).signature ?? null
 }
 
-export async function saveConcept(store: NodeStore, runIdToSave: string, meta: ChangeMeta, signSql?: SignSql): Promise<SaveResult> {
+export async function saveConcept(store: NodeStore, runIdToSave: string, meta: ChangeMeta, signSql?: SignSql,
+                                  opts: { replace?: boolean } = {}): Promise<SaveResult> {
   const run = getRun(store.db, runIdToSave)
   if (!run) return { ok: false, reason: `no such run ${runIdToSave} — run the concept first` }
   if (run.error) return { ok: false, reason: `that run failed, so there is nothing verified to save:\n${run.error.split('\n')[0]}` }
@@ -103,6 +104,38 @@ export async function saveConcept(store: NodeStore, runIdToSave: string, meta: C
   // concept on average and fourteen on one, including a database view and a column name, neither of which is
   // a thing anyone would ask for. A name earns its place by a question actually arriving under it, and adding
   // one then is a pointer, not a guess. Any list supplied here is ignored rather than obeyed.
+  // WHO ALREADY ANSWERS TO THIS NAME. A name is the key an agent opens a concept by, and pointing it at a new
+  // body moves what that name MEANS — which is right when a concept is being revised and wrong when two
+  // concepts have simply been given the same name. Nothing in the write can tell those apart, and it used to
+  // do the first silently, so a collision quietly took a name off the concept that held it.
+  //
+  // Same body under the same name is not a collision: that is a re-save, and it changes nothing.
+  const holder = resolveConcept(store, m.name)
+  // VERIFIED MEANS A PERSON SAID SO, and an agent may not undo that. The other rungs are agent-earned: a
+  // concept that ran, or that two analyses agreed on, can be superseded by better work of the same kind. This
+  // one cannot, because whatever replaced it would carry no such confirmation and nothing downstream would
+  // show that the guarantee had been withdrawn.
+  if (holder && holder.id !== conceptHash(props) &&
+      (holder.props as any)?.status === 'verified' && !/^human:/.test(meta.changedBy)) {
+    return { ok: false, reason:
+      `"${m.name}" names a concept a person has verified (${holder.id}), so it is not an agent's to replace. ` +
+      `Save this under a name of its own; if the verified one is wrong, that is for a person to change.` }
+  }
+  if (holder && holder.id !== conceptHash(props) && !opts.replace) {
+    // THE EXACT MATCH IS NOT ENOUGH TO DECIDE WITH. Being told a name is taken tells you to pick another one;
+    // being shown what is already nearby tells you whether this concept should exist at all, or belongs under
+    // a name shaped like its neighbours'. The choice is between merging, renaming and replacing, and only the
+    // last of those is about the collision.
+    const near = neighbours(store, m.name).filter((n) => n.name !== m.name)
+    const held = String((holder.props as any)?.value ?? '').slice(0, 160)
+    return { ok: false, reason:
+      `"${m.name}" already names a different concept (${holder.id}): ${held}\n` +
+      (near.length
+        ? `Nearby concepts:\n${near.map((n) => `  ${n.name} — ${n.value.slice(0, 110)}`).join('\n')}\n`
+        : '') +
+      `If yours is one of these, save under that name with --replace, or extend it instead. ` +
+      `If it is genuinely different, name it so that it is.` }
+  }
   const node = upsertConcept(store, m.name, props, meta)
 
   // WHAT IT LAST PRODUCED — derived, and never in props: a value moves with the data, so holding it there
@@ -204,4 +237,39 @@ function validate(m: any): string | null {
   if (m.additive !== undefined && typeof m.additive !== 'boolean') return 'additive must be true or false'
   if (m.unit !== undefined && !String(m.unit).trim()) return 'unit is present but empty — say what the value is counted in'
   return null
+}
+
+
+/** Concepts whose names share a word with this one, for showing an author what already exists near what they
+ *  are about to write. The same two passes the agent's own search uses: SQLite finds candidates by prefix,
+ *  and the closest are taken by how much of each name is covered. */
+function neighbours(store: NodeStore, name: string, limit = 6): Array<{ name: string; value: string }> {
+  const words = (s: string) => new Set(String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1))
+  const qw = [...words(name)]
+  if (!qw.length) return []
+  const match = 'label : (' + qw.map((w) => '"' + w + '" * ').join(' OR ') + ')'
+  let rows: any[] = []
+  try {
+    rows = store.db.prepare(
+      `SELECT n.label, n.props FROM nodes_fts f JOIN nodes n ON n.rowid = f.rowid
+        WHERE nodes_fts MATCH ? AND n.kind = 'index' AND n.valid_to IS NULL LIMIT 200`).all(match) as any[]
+  } catch { return [] }
+  const scored = rows.map((r) => {
+    const cw = words(r.label); let m = 0
+    for (const w of cw) if (qw.includes(w)) m++
+    return { r, matched: m, cover: cw.size ? m / cw.size : 0 }
+  }).filter((x) => x.matched > 0).sort((a, b) => (b.matched - a.matched) || (b.cover - a.cover))
+
+  const out: Array<{ name: string; value: string }> = []
+  const seen = new Set<string>()
+  for (const x of scored) {
+    const target = (JSON.parse(x.r.props || '{}') || {}).target
+    if (!target || seen.has(target)) continue
+    seen.add(target)
+    const body: any = store.getNode(target)
+    if (!body) continue
+    out.push({ name: x.r.label, value: String((body.props as any)?.value ?? '') })
+    if (out.length >= limit) break
+  }
+  return out
 }
