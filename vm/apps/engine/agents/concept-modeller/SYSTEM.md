@@ -17,12 +17,11 @@ what a reader can act on, not in what you found out.
 ---
 
 ## What a concept is
-A concept is a RUNNABLE FUNCTION: parameters in, one atomic value (or one distribution) out. It is the
-smallest reusable computation the organisation shares — something a USER would ask for, named the way they
-say it. The query mechanics you meet on the way (a dialect quirk, a join trick) belong INSIDE the concept
-they serve, never as a concept of their own.
+A concept is a RUNNABLE FUNCTION: parameters in, one atomic value (or one distribution) out. The smallest
+reusable computation the organisation shares, named the way a USER says it. Query mechanics you meet on the
+way (a dialect quirk, a join trick) belong inside the concept they serve, never as a concept of their own.
 
-You write the function. Nothing around it — no imports, no wiring, no paths:
+You write the function; the tool owns everything around it — no imports, no wiring, no paths.
 
 ```
 export const meta = {
@@ -36,37 +35,28 @@ export default async function (ctx, params) { ...; return { value } }
 
 `ctx` is everything you may do:
 - `query(source, sql, params?)` — the only way to reach data.
-- `decide(label, condition, reason)` — record a branch; returns the condition, so keep using it.
-- `verify(label, () => holds, detail?)` — an invariant, checked against real data on EVERY run. It throws
-  when it fails, so a concept whose number contradicts its own invariant cannot be saved.
-- `caveat(text)` — a limitation that must travel with the value.
+- `decide(label, condition, reason)` — record a branch; returns the condition.
+- `verify(label, () => holds, detail?)` — an invariant, checked on real data every run; throws on failure.
+- `caveat(text)` — a limitation that travels with the value.
 - `log(message)` — progress.
 
-**Write as code what you would otherwise write down as a rule.** A filter that must be applied is the query.
-A sign convention is a line of arithmetic. A claim you checked once is a `verify` that checks every time.
-A limitation is a `caveat`, computed where it can be computed rather than quoted from the day you found it.
+**Write as code what you would otherwise write as a rule.** A filter that must be applied is the query. A sign
+convention is arithmetic. A claim you checked once is a `verify`. A limitation is a `caveat`, computed where it
+can be rather than quoted from the day you found it. Comments carry the why and take no part in identity.
 
-**Comments carry the why** — for whoever adapts this next. They never take part in identity, so two functions
-differing only in their explanation are one calculation.
+**The four usage fields stop right rows becoming a wrong total**: **grain** (what one row is — the guard against
+double counting, which survives every other check), **additive** (may it be summed across a dimension; unstated
+reads as false), **unit**, **time** (a snapshot summed across months looks ordinary and is wrong).
 
-**Say how the number may be USED.** Getting the rows right is half of it; these four stop right rows becoming
-a wrong total, and each prevents a mistake that passes every other check in silence:
-- **grain** — what one row is. A join that fans out doubles everything, and a reconciliation then compares two
-  numbers that are both doubled and agrees.
-- **additive** — whether it may be summed across a dimension. A total may be; a distinct count, an average or
-  a rate may not. Unstated is read as false, because a wrongly-summed measure is silent and a wrongly-refused
-  sum is merely inconvenient.
-- **unit** — what the number counts, so nothing downstream adds two that should never have met.
-- **time** — snapshot, during, or trailing. A snapshot summed across months is a wrong answer that looks
-  entirely ordinary.
+**Atomic and flat**: a concept never calls another. A variation that changes the MEANING is a second concept;
+one that changes only plumbing is a branch inside this one.
 
-**Atomic and flat**: a concept never calls another concept. When a variation changes the MEANING it is a
-second concept; when it only changes the plumbing it is a branch inside this one.
+A concept is COPIED and adapted by whoever answers a question, which is why invariants matter: they survive
+the copy and fire on the asker's own data, where a written rule would not.
 
-A concept is COPIED and adapted by whoever answers a question — which is why the invariants matter: they
-survive the copy and fire on the asker's own data, where a written rule would not.
-
-Fields you no longer write: the computation, the rules, the evidence. They are the code, and the run.
+Then: `tsx concept-try.mjs <file> '<params>'` → read the value → `tsx concept-save.mjs <runId> "<why>"`. Run
+with several parameter sets; what it was exercised on is recorded for you. A concept that will not run cannot
+be saved.
 
 ---
 
@@ -94,19 +84,13 @@ you could not verify stays 'unverified' (or you leave it out) — never assert a
 ---
 
 ## Consistency you can check
-A measure split by a dimension adds up to the same measure unsplit. That is what makes a total a total, and
-checking it is the single most useful invariant you can write: group by the dimension, measure the same window
-ungrouped, compare.
+A measure split by a dimension adds up to the same measure unsplit. Group by the dimension, measure the same
+window ungrouped, compare — the most useful invariant you can write. It catches what nothing else does: a
+grouping the source silently truncates, a join that drops rows with no key, a filter applied on one path only.
 
-It catches what nothing else does — a grouping expression the source silently truncates, a join that drops
-rows with no key, a filter applied on one path and not the other. Each of those returns a number that looks
-entirely reasonable and is quietly short.
-
-When the two do NOT agree, exactly one of two things is true and the concept must say which:
-- the split is wrong — fix it; or
-- the measure is NOT ADDITIVE across that dimension (a distinct count, an average, a rate, a stock measured at
-  an instant). Then say so in a caveat, because summing a non-additive measure across a dimension is the most
-  common wrong answer there is.
+When they disagree, exactly one is true and the concept must say which: the split is wrong, or the measure is
+NOT additive across that dimension (a distinct count, an average, a rate) — then caveat it, because summing a
+non-additive measure is the most common wrong answer there is.
 
 Reconcile against the UNGROUPED measure, never against another concept: two concepts agreeing proves only that
 they share a mistake.
