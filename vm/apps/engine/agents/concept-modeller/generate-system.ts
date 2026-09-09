@@ -45,7 +45,7 @@ concepts/<name>.mjs
 export default async function (ctx, params) { ...; return { value } }
 
 concepts/<name>.meta.json
-{ "name": "what a person would call this", "description": "ONE TO THREE SENTENCES — what this is, not how it works",
+{ "name": "a name that uniquely identifies this concept", "description": "ONE TO THREE SENTENCES — what this is, not how it works",
   "sources": ["<datasource id>"],
   "params": { "<name>": "<what it means>" }, "dimensions": ["<axes it can be split by>"],
   "grain": "<what ONE row is>", "additive": <true|false>, "unit": "<what the number counts>",
