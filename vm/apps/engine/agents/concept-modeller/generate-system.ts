@@ -41,7 +41,9 @@ You write the function. Nothing around it — no imports, no wiring, no paths:
 \`\`\`
 export const meta = {
   name, description, aliases: [...], sources: ['<datasource id>'],
-  params: { '<name>': '<what it means>' }, returns: '<what the value means: its unit and grain>',
+  params: { '<name>': '<what it means>' }, returns: '<what the value means>',
+  grain: '<what ONE row is>', additive: <true|false>, unit: '<what the number counts>',
+  time: '<snapshot|during|trailing>',
 }
 export default async function (ctx, params) { ...; return { value } }
 \`\`\`
@@ -60,6 +62,17 @@ A limitation is a \`caveat\`, computed where it can be computed rather than quot
 
 **Comments carry the why** — for whoever adapts this next. They never take part in identity, so two functions
 differing only in their explanation are one calculation.
+
+**Say how the number may be USED.** Getting the rows right is half of it; these four stop right rows becoming
+a wrong total, and each prevents a mistake that passes every other check in silence:
+- **grain** — what one row is. A join that fans out doubles everything, and a reconciliation then compares two
+  numbers that are both doubled and agrees.
+- **additive** — whether it may be summed across a dimension. A total may be; a distinct count, an average or
+  a rate may not. Unstated is read as false, because a wrongly-summed measure is silent and a wrongly-refused
+  sum is merely inconvenient.
+- **unit** — what the number counts, so nothing downstream adds two that should never have met.
+- **time** — snapshot, during, or trailing. A snapshot summed across months is a wrong answer that looks
+  entirely ordinary.
 
 **Atomic and flat**: a concept never calls another concept. When a variation changes the MEANING it is a
 second concept; when it only changes the plumbing it is a branch inside this one.
@@ -98,6 +111,25 @@ matters more. Fold each into the smallest set of clean, general concepts (merge 
 data doesn't support). Re-writing an existing concept with changed content automatically versions it (the old
 version is kept for time-travel) — so improving a concept is running the better function and saving it.`
 
+// WHY: the one consistency law that catches the failures which do not announce themselves.
+const additivity = `## Consistency you can check
+A measure split by a dimension adds up to the same measure unsplit. That is what makes a total a total, and
+checking it is the single most useful invariant you can write: group by the dimension, measure the same window
+ungrouped, compare.
+
+It catches what nothing else does — a grouping expression the source silently truncates, a join that drops
+rows with no key, a filter applied on one path and not the other. Each of those returns a number that looks
+entirely reasonable and is quietly short.
+
+When the two do NOT agree, exactly one of two things is true and the concept must say which:
+- the split is wrong — fix it; or
+- the measure is NOT ADDITIVE across that dimension (a distinct count, an average, a rate, a stock measured at
+  an instant). Then say so in a caveat, because summing a non-additive measure across a dimension is the most
+  common wrong answer there is.
+
+Reconcile against the UNGROUPED measure, never against another concept: two concepts agreeing proves only that
+they share a mistake.`
+
 // WHY: the completion contract — a machine-readable result the engine advances the watermark on.
 const output = `## Finish
 As your FINAL action write \`./out/consolidation/<batchId>/result.json\` exactly:
@@ -105,6 +137,6 @@ As your FINAL action write \`./out/consolidation/<batchId>/result.json\` exactly
 learned, any analyst computation you found wrong and corrected — or why nothing needed changing>" }\`
 and print that same note. You may change nothing if these analyses revealed nothing new that survived verification.`
 
-export const SECTIONS = [intro, HR, whatIsAConcept, HR, readingData, HR, verify, HR, strategy, HR, output]
+export const SECTIONS = [intro, HR, whatIsAConcept, HR, readingData, HR, verify, HR, additivity, HR, strategy, HR, output]
 
 writeMd(join(fileURLToPath(new URL('.', import.meta.url)), 'SYSTEM.md'), SECTIONS)

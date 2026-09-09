@@ -73,6 +73,14 @@ export async function saveConcept(store: NodeStore, runIdToSave: string, meta: C
     source: Array.isArray(m.sources) ? m.sources[0] : undefined,
     compute: run.source,                      // runnable, not a recipe
     parameters: paramsFacet(m.params),
+    // Carried onto the stored concept because they are what a READER needs in order to use the number safely,
+    // and because the existing schema already had places for them — a runnable concept that dropped them
+    // would have been a step backwards from the prose it replaced.
+    grain: m.grain || undefined,
+    time: m.time || undefined,
+    measures: m.unit || m.additive !== undefined
+      ? [{ name: m.name, additive: m.additive === true, note: m.unit ? `unit: ${m.unit}` : undefined }]
+      : undefined,
     verifiedAt: new Date(run.at).toISOString(),
     evidence: `ran ${run.runId} in ${run.ms}ms; ${run.verifications.length} invariant(s) held`,
   }

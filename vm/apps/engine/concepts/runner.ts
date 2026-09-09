@@ -95,6 +95,18 @@ export async function tryConcept(opts: TryOpts): Promise<TryResult> {
     if (typeof mod.default !== 'function') throw new Error('no default export — a concept is a function (ctx, params)')
     if (!meta?.name) throw new Error('meta.name is missing — a concept must say what a user would call it')
     if (!Array.isArray(meta.sources)) throw new Error('meta.sources is missing — declare which datasources this reads')
+    // NOT FATAL, but said every time. A measure that does not state its grain can be double-counted by a
+    // fan-out join with every invariant still passing; one that does not state additivity gets summed across
+    // a dimension where that is meaningless. Both are silent failures downstream, so the omission is made
+    // noisy here — the only place anyone is looking at this concept.
+    for (const [field, why] of [
+      ['grain', 'what one row is — the guard against double counting'],
+      ['additive', 'whether this may be summed across a dimension'],
+      ['unit', 'what the number counts'],
+      ['time', "'snapshot' | 'during' | 'trailing' — how it relates to time"],
+    ] as const) {
+      if ((meta as any)[field] === undefined) emit({ t: 'log', text: `meta.${field} is not declared — ${why}` })
+    }
     // Declared parameters that arrived, and arrivals nobody declared. Neither is fatal — a default may
     // legitimately cover a missing one — but both are reported, because a parameter silently ignored is a
     // concept that looks like it responded to an input it never read.

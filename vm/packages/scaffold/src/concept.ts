@@ -53,9 +53,42 @@ export interface ConceptMeta {
   sources: string[]
   /** name → what it means. e.g. `{ period: 'the window to measure over' }` */
   params?: Record<string, string>
-  /** What the value MEANS — its unit, its grain, what one of it represents. A number with no stated unit is
-   *  the most reliable way to be wrong in a spreadsheet later. */
+  /** What the value MEANS in a sentence. The machine-checkable parts are below; this is for the reader. */
   returns: string
+
+  // ── THE THREE THINGS THAT MAKE RIGHT ROWS INTO A WRONG NUMBER ───────────────────────────────────────────
+  // Getting the rows right is only half of it. These are what stop correct rows becoming an incorrect total,
+  // and each corresponds to a mistake that passes every other check silently.
+
+  /** WHAT ONE ROW IS — "one row per invoice", "one row per employee per month".
+   *
+   *  The guard against double counting, which is the failure that survives everything else: a join that fans
+   *  out doubles the rows, so a reconciliation against the ungrouped measure compares two numbers that are
+   *  BOTH doubled and agrees. Stating the grain is what makes `COUNT(*) = COUNT(DISTINCT key)` a question
+   *  somebody can ask. */
+  grain?: string
+
+  /** May this be SUMMED across its dimensions?
+   *
+   *  A total and a distinct count look identical in a result set and behave completely differently: revenue
+   *  by month adds up to revenue for the year; distinct customers by month does not add up to distinct
+   *  customers for the year. Summing a non-additive measure is the most common wrong answer in analytics,
+   *  and it is only avoidable if the concept says which kind it is.
+   *
+   *  Default when unstated is `false` — the safe reading, because a wrongly-summed measure is silent while a
+   *  wrongly-refused sum is merely inconvenient. */
+  additive?: boolean
+
+  /** The unit of `value` — 'AUD', 'hours', 'employees', 'invoices'. A bare number carries no unit, so nothing
+   *  downstream can notice two of them being added that should never have met. */
+  unit?: string
+
+  /** How the measure relates to TIME:
+   *    'snapshot' — true at an instant (a headcount). Summing it across periods is meaningless.
+   *    'during'   — accumulated over the window (revenue in a month).
+   *    'trailing' — a window ending at the asOf (rolling twelve months).
+   *  A snapshot summed over months is a wrong answer that looks perfectly ordinary. */
+  time?: 'snapshot' | 'during' | 'trailing'
 }
 
 /** What a concept returns.

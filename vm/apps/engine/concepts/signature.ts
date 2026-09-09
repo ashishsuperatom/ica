@@ -57,8 +57,12 @@ const normalizeSqlText = (s: string): string => s.replace(/\s+/g, ' ').trim().to
 const looksLikeSql = (s: string): boolean =>
   /\bselect\b[\s\S]*\bfrom\b/i.test(s) || /^\s*with\b/i.test(s)
 
-export function extractSql(source: string): string[] {
-  const file = ts.createSourceFile('concept.mjs', source, ts.ScriptTarget.ES2022, true)
+/** Parsed once and shared. Three separate walks over one source used to mean three parses — under a
+ *  millisecond each and therefore not a performance problem, but a reader has to work out why a file is read
+ *  three times to answer three questions about it. */
+const parse = (source: string) => ts.createSourceFile('concept.mjs', source, ts.ScriptTarget.ES2022, true)
+
+export function extractSql(source: string, file = parse(source)): string[] {
   const out: string[] = []
   const visit = (n: ts.Node): void => {
     if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) {
@@ -76,8 +80,7 @@ export function extractSql(source: string): string[] {
 }
 
 /** Which ctx capabilities the body uses, in order of appearance. */
-export function extractCalls(source: string): string[] {
-  const file = ts.createSourceFile('concept.mjs', source, ts.ScriptTarget.ES2022, true)
+export function extractCalls(source: string, file = parse(source)): string[] {
   const calls: string[] = []
   const visit = (n: ts.Node): void => {
     if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression)) {
@@ -95,8 +98,7 @@ export function extractCalls(source: string): string[] {
  *  Two functions that differ solely in what they named their variables — or in the value of a constant —
  *  collapse to the same string, which is exactly the case a text hash cannot see. Comments never reach here:
  *  the parser has already discarded them. */
-export function shapeOf(source: string): string {
-  const file = ts.createSourceFile('concept.mjs', source, ts.ScriptTarget.ES2022, true)
+export function shapeOf(source: string, file = parse(source)): string {
   const parts: string[] = []
   const visit = (n: ts.Node, depth: number): void => {
     // Identifiers and literals are the two things that carry names and values; everything else is structure.
@@ -118,7 +120,8 @@ export interface SignatureDeps {
 }
 
 export async function conceptSignature(source: string, deps: SignatureDeps): Promise<ConceptSignature> {
-  const statements = extractSql(source)
+  const file = parse(source)
+  const statements = extractSql(source, file)
   const sql: SqlSignature[] = []
   const unsignable: string[] = []
   for (const s of statements) {
@@ -126,8 +129,8 @@ export async function conceptSignature(source: string, deps: SignatureDeps): Pro
     if (sig) sql.push(sig); else unsignable.push(s)
   }
   const unparsed = unsignable.length
-  const calls = extractCalls(source)
-  const shape = shapeOf(source)
+  const calls = extractCalls(source, file)
+  const shape = shapeOf(source, file)
   // The SQL cores dominate — that is where a measure lives. The code shape then distinguishes two concepts
   // that run the same query and do different arithmetic to it.
   //
