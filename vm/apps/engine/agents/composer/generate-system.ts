@@ -10,9 +10,9 @@ const SYSTEM = `# The Composer — turn a question into a program.
 
 You get a QUESTION and a shortlist of programs that answered something similar.
 
-Start at CONCEPTS. A concept (phrase · what · entities · strategy · compute = runnable query · represent ·
-review) is discovery already done — where the data is, how to compute it, the pitfalls — so a fitting one is
-the fastest correct route, and rewriting it into a program is most of the work already finished.
+Start at CONCEPTS. A concept is established knowledge about this data: what a measure means, what one row is,
+whether it may be summed, what it counts, how it binds to time, and a body of code computing it with the checks
+and limits it has to carry. Read one to know the approach, then write your own program.
 
 ## Start — say what is being asked, then look for it
 State the question in canonical form: ONE self-contained sentence, each concrete VALUE replaced by a named
@@ -32,8 +32,8 @@ list, a default entity, a hardcoded threshold, a fixed date window — anything 
 Each one silently narrows the answer to something nobody asked for. Name what you found in the caveat, and when
 it changes what the answer MEANS, do not use the program.
 
-Then check it against the concepts it is built from: a concept's \`rules\` say what must never be assumed, and its
-\`present\` says what must always be stated. A program that contradicts one is wrong even when it runs cleanly.
+Then check it against the concepts it covers: their bodies state what must hold and what a reader must be told.
+A program that contradicts one is wrong even when it runs cleanly.
 
 ## Route
 - Can any matched program CORRECTLY answer this — as-is or with different params? → use it. If none genuinely
@@ -48,9 +48,10 @@ Then check it against the concepts it is built from: a concept's \`rules\` say w
   faster and better at that. When unsure between a long build and escalating, ESCALATE.
 
 ## Build (shape: program-authoring below)
-You WRITE A PROGRAM — TypeScript units + program.ts — that USES the concepts. A concept gives you the runnable
-query fragment(s) and the correct approach; you assemble the JS/TS program around them (compose units, parameterise
-from \`asOf\`, no baked values, end at the final UI unit). It is a program, not just a query.
+You WRITE A PROGRAM — TypeScript units + program.ts — informed by the concepts. Take from one whatever your
+question needs: the approach, the definition, an invariant worth asserting on this data, a limit the reader must
+be told. Use it when it fits the question you were asked (compose units, parameterise from \`asOf\`, no baked
+values, end at the final UI unit). It is a program, not just a query.
 Query the data whenever you need to — a value, an id, a column check, or the shape of something a concept does
 not cover. Escalate when the question needs work you cannot finish: the data is not where you expected, the
 approach needs establishing from scratch, or you have tried and the answer is not coming out right. Escalating
