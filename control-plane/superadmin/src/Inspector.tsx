@@ -858,10 +858,23 @@ function NodeDetail({ node, open, close }: { node: any; open: (f: Focus) => void
           </tbody></table>
         </>}
 
+        {/* THE BODY GETS THE FULL WIDTH. It was rendered as a property, which puts a 2,800-character module
+            with long SQL lines into one cell of a two-column grid inside a side panel — technically correct
+            and impossible to read. Source belongs in a source block, the same one a file gets. */}
+        {typeof node.props?.compute === 'string' && node.props.compute.includes(String.fromCharCode(10)) && <>
+          <div className="sect">
+            {/export\s+default/.test(node.props.compute) ? 'Body' : 'Compute'}
+            <span className="muted" style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
+              {' '}— {node.props.compute.split(String.fromCharCode(10)).length} lines, {bytes(node.props.compute.length)}
+            </span>
+          </div>
+          <Code text={node.props.compute} full />
+        </>}
+
         {propEntries.length > 0 && <>
           <div className="sect">Properties</div>
           <dl className="kv">
-            {propEntries.filter(([k]) => k !== 'rawAnalysis').map(([k, v]) => (
+            {propEntries.filter(([k]) => k !== 'rawAnalysis' && k !== 'compute').map(([k, v]) => (
               <div key={k} style={{ display: 'contents' }}>
                 <dt>{k}</dt>
                 {/* A MULTI-LINE STRING IS SOURCE, not a sentence. A runnable concept's body arrives here as a
