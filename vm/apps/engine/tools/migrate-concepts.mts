@@ -48,9 +48,20 @@ async function dialects(): Promise<Record<string, string>> {
   } catch { return {} }
 }
 
-/** Does this parse as a COMPLETE query? The manager decides, because it owns the parser — and the answer is
- *  also the classifier: what parses is a computation, what does not is one of the other kinds. */
+/** A statement that could actually be sent to a source. TWO THINGS THE PARSER ALONE WILL NOT REJECT:
+ *
+ *  A BARE EXPRESSION. `nativeTotal * rate = audEquivalent` is a formula written for a human, and it parses
+ *  perfectly well as an expression — so a note explaining an arithmetic relationship was classified as a
+ *  query. A runnable statement begins as a read: SELECT, or WITH.
+ *
+ *  A PLACEHOLDER STANDING IN FOR A TABLE. `JOIN :transaction_table t` is a template to be filled in, not a
+ *  query — but the signature substitutes a literal for every placeholder, which makes it parse. A bind
+ *  parameter can be a value; it can never be the thing being selected from, so a hole in that position means
+ *  what is stored is a pattern rather than a computation. */
+const READS = /^\s*(select|with)\b/i
+const HOLE_AS_TABLE = /\b(from|join)\s+(:\w+|<[^<>]+>)/i
 async function parses(sql: string, dialect?: string): Promise<boolean> {
+  if (!READS.test(sql) || HOLE_AS_TABLE.test(sql)) return false
   try {
     const r = await fetch(`${MANAGER}/signature`, {
       method: 'POST', headers: { 'content-type': 'application/json' },

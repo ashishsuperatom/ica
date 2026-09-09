@@ -37,7 +37,12 @@ for (const f of files) {
   }
   ok++
   const v = r.result?.value
-  const shown = typeof v === 'number' ? v.toLocaleString(undefined, { maximumFractionDigits: 0 }) : JSON.stringify(v)
+  // A RATIO IS NOT A COUNT. Rounding to whole numbers turned a measured fan-out of 1.87 into '2' in this log —
+  // which is the prose figure the concept was written to replace, so the one run that disproved it displayed
+  // as agreeing with it. Integers stay grouped and readable; anything else keeps enough digits to be itself.
+  const shown = typeof v === 'number'
+    ? v.toLocaleString(undefined, { maximumFractionDigits: Number.isInteger(v) ? 0 : 4 })
+    : JSON.stringify(v)
   console.log(`✓ ${name}  value=${shown}  rows=${r.result?.distribution?.length ?? 0}  ${r.verifications.length} invariant(s)  ${r.ms}ms`)
   for (const c of r.caveats) console.log(`      ⚠ ${c}`)
   if (APPLY) {
