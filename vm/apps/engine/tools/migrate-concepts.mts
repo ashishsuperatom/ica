@@ -145,7 +145,13 @@ const live = store.db.prepare(`
 
 const drafts: string[] = []
 const notes: Array<{ name: string; why: string }> = []
-const skipped: string[] = []
+const done: string[] = []
+
+/** Already migrated: `compute` holds the concept's own body rather than a query. Recognised BEFORE anything
+ *  else, because handing JavaScript to a SQL parser produces "not a complete query" — so a re-run of this
+ *  tool would report every concept it had already converted as prose, and reads as the migration having gone
+ *  backwards. A migration must be safe to run twice and honest about it the second time. */
+const RUNNABLE = (compute: string) => /export\s+default/.test(compute) && /export\s+const\s+meta/.test(compute)
 
 for (const row of live) {
   if (!row.names) continue                                  // superseded body: the index has moved off it
@@ -153,6 +159,7 @@ for (const row of live) {
   const props = typeof row.props === 'string' ? JSON.parse(row.props) : row.props
   const sql = String(props.compute ?? '').trim()
   if (!sql) { notes.push({ name, why: 'no compute — prose knowledge, nothing to run' }); continue }
+  if (RUNNABLE(sql)) { done.push(name); continue }
   // THE SOURCE FIELD IS PROSE IN PRACTICE. The schema calls it a datasource id, and real stored concepts
   // hold things like "SOURCEID (dialect) — schema.table". So the id is RECOGNISED against what the manager
   // actually has, rather than trusted — otherwise the dialect lookup misses and the concept is read with the
@@ -172,9 +179,9 @@ for (const row of live) {
 }
 
 console.log(`${live.filter((r) => r.names).length} live concepts`)
+console.log(`  ${done.length} already runnable`)
 console.log(`  ${drafts.length} convertible → drafts${APPLY ? ` written to ${outDir}` : ' (dry run — pass --apply to write)'}`)
 console.log(`  ${notes.length} stay as notes:`)
 for (const n of notes) console.log(`     ${n.name.padEnd(46)} ${n.why}`)
-if (skipped.length) console.log(`  ${skipped.length} skipped`)
 console.log(`\nNothing was saved. Each draft must be run before it can become a concept.`)
 store.close()
