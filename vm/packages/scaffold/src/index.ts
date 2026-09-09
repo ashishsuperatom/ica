@@ -5,6 +5,8 @@ export type { RunResult, GraphNode, GraphEdge, Branch, Verification, Caveat } fr
 export { shapeHash, shapeOf } from './shape.js'
 export { query }         from './datasource.js'
 export type { UnitCtx, Unit, UnitMeta, UnitModule, UnitUI, RunLog, UnitEffect } from './unit.js'
-export type { ConceptCtx, Concept, ConceptMeta, ConceptModule, ConceptResult, ConceptRun } from './concept.js'
+export type { ConceptCtx, Concept, ConceptMeta, ConceptMetaField, ConceptModule, ConceptResult, ConceptRun,
+              TimeSemantics } from './concept.js'
+export { CONCEPT_META, TIME_VALUES, MAX_DESCRIPTION, validateConceptMeta, conceptMetaTemplate } from './concept.js'
 export { money, abbrev, pct, num, FORMAT_HELPERS, formatHelpText } from './fmt.js'
 export type { Locale, HelperDoc } from './fmt.js'

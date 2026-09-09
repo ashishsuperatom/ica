@@ -33,62 +33,171 @@ import type { UnitCtx } from './unit.js'
 /** Everything a concept may do. `use` is deliberately absent — see FLAT above. */
 export type ConceptCtx = Omit<UnitCtx, 'use'>
 
-/** What a concept declares about itself.
- *
- *  `params` is a description per parameter, not a type — the same shape `UnitMeta.inputs` already uses, and
- *  for the same reason: the reader is an agent deciding whether this concept fits its question, and a prose
- *  description tells it more than `string` does. The VALUES a concept has actually been run with are
- *  observed and recorded by the tool that runs it; they are not declared here, because a claim about which
- *  parameters matter is a prediction and the record of which ones were used is a fact. */
-export interface ConceptMeta {
-  /** What a user would call this, in their words. */
+// ── WHAT A CONCEPT DECLARES ABOUT ITSELF ──────────────────────────────────────────────────────────────────
+//
+// ONE DECLARATION, three uses: the type below, the check the save runs, and the shape the authoring prompt
+// shows. They were three separate descriptions and they had already drifted apart — the type still named
+// fields nobody stored, the check enforced a different set, and the prompt showed a third. Whichever one you
+// read, two of them were lying.
+//
+// Each field says what it is FOR, because the reader is an agent deciding whether this concept answers its
+// question, and because the same words are what the prompt shows.
+
+export interface ConceptMetaField {
+  /** Required at save time. An optional field may be absent; it may not be wrong. */
+  required: boolean
+  /** What to write here — this is the text the authoring prompt shows. */
+  hint: string
+  /** Rejects a bad value, returning why. Absent means any value of the right kind will do. */
+  check?: (value: unknown, meta: any) => string | null
+  /** The values this field accepts, when it accepts a fixed few. Shown instead of the hint, so a closed set
+   *  is never described in prose the author then has to guess the spelling of. */
+  values?: readonly string[]
+}
+
+/** How long a description may be before it stops being a description. The field exists so a reader can tell
+ *  whether this is the concept they want, and a model asked for prose will write four paragraphs of reasoning
+ *  that belongs in comments beside the code it explains. Three short sentences fit. */
+export const MAX_DESCRIPTION = 300
+
+/** A value is either true AS AT an instant, or accumulated OVER a span. `trailing` used to be a third: it is
+ *  a window whose start is computed, not a third kind of time, and having it as a peer invited free text. */
+export const TIME_VALUES = ['point', 'window'] as const
+export type TimeSemantics = (typeof TIME_VALUES)[number]
+
+/** A parameter that bounds a window. ONE is enough — a year is a window, and so is a week start. */
+const BOUNDING = /from|to\b|start|end|year|month|period|cutoff|week|as[_]?of|date/i
+const nonEmpty = (v: unknown) => (typeof v === 'string' && v.trim() ? null : 'must be a non-empty string')
+
+export const CONCEPT_META: Record<string, ConceptMetaField> = {
+  name: { required: true, hint: 'a name that uniquely identifies this concept', check: nonEmpty },
+
+  description: {
+    required: true,
+    hint: 'ONE TO THREE SENTENCES — what this is, not how it works',
+    check: (v) => {
+      const s = String(v ?? '').trim()
+      if (!s) return 'is empty — say in one to three sentences what this concept is'
+      if (s.length > MAX_DESCRIPTION) {
+        return `is ${s.length} characters and the limit is ${MAX_DESCRIPTION}. Say what this concept IS in ` +
+          `one to three sentences; the reasoning, the traps and the why belong in comments inside the body, ` +
+          `where they sit beside the code they explain`
+      }
+      return null
+    },
+  },
+
+  // Declared so nothing has to parse the body to know, and so identical code against different sources is
+  // never mistaken for one concept.
+  sources: {
+    required: true,
+    hint: 'every datasource this reads',
+    check: (v) => (Array.isArray(v) && v.length && v.every((x) => typeof x === 'string' && x.trim())
+      ? null : 'must name every datasource this reads'),
+  },
+
+  params: {
+    required: false,
+    hint: 'name → what it means',
+    check: (v) => (v == null || (typeof v === 'object' && !Array.isArray(v)) ? null : 'must be name → description'),
+  },
+
+  // ── THE FOUR THINGS THAT TURN RIGHT ROWS INTO A WRONG NUMBER ─────────────────────────────────────────────
+  // Getting the rows right is half of it. Each of these corresponds to a mistake that passes every other
+  // check in silence.
+
+  /** The guard against double counting, the failure that survives everything else: a join that fans out
+   *  doubles the rows, so reconciling against the ungrouped measure compares two numbers that are BOTH
+   *  doubled, and agrees. */
+  grain: { required: true, hint: 'what ONE row is', check: nonEmpty },
+
+  /** A total and a distinct count look identical in a result set and behave completely differently: revenue
+   *  by month adds up to revenue for the year, distinct customers by month does not. */
+  additive: {
+    required: true,
+    hint: 'may this be summed across a dimension',
+    check: (v) => (typeof v === 'boolean' ? null : 'must be true or false'),
+  },
+
+  /** A bare number carries no unit, so nothing downstream notices two of them being added that should never
+   *  have met. */
+  unit: { required: true, hint: 'what the number counts', check: nonEmpty },
+
+  time: {
+    required: true,
+    hint: 'true AS AT an instant, or accumulated OVER a span',
+    values: TIME_VALUES,
+    check: (v, meta) => {
+      if (!TIME_VALUES.includes(v as TimeSemantics)) {
+        return `is "${v}" but the only values are ${TIME_VALUES.join(' and ')}. A value is either true AS AT ` +
+          `an instant (point) or accumulated OVER a span (window)`
+      }
+      if (v === 'window') {
+        const params = Object.keys(meta?.params ?? {})
+        if (!params.some((p) => BOUNDING.test(p))) {
+          return `is "window" but no parameter bounds the window` +
+            `${params.length ? ` (has: ${params.join(', ')})` : ' (it takes none)'} — a total over an ` +
+            `unstated span is not an answer, it is a number`
+        }
+      }
+      return null
+    },
+  },
+
+  /** The axes the RESULT can be split by, which is not what a parameter is: a parameter changes the
+   *  computation, a dimension breaks down what comes out. */
+  dimensions: {
+    required: false,
+    hint: 'the axes it can be split by',
+    check: (v) => (v == null || Array.isArray(v) ? null : 'must be a list of axis names'),
+  },
+
+  render: { required: false, hint: 'a short note on how to show it to a person' },
+}
+
+export type ConceptMeta = {
   name: string
-  /** What it IS, and what distinguishes it from the concept it is most easily confused with. */
   description: string
-  /** Other surface forms real questions use. These are RETRIEVAL triggers, so each must be specific enough
-   *  that it cannot fire on an unrelated question — the distinctive phrase, never its most generic word. */
-  aliases?: string[]
-  /** Datasource ids this reads. Declared so the analysis need not parse the body to know, and so identical
-   *  code against different sources is never mistaken for one concept. */
   sources: string[]
-  /** name → what it means. e.g. `{ period: 'the window to measure over' }` */
+  grain: string
+  additive: boolean
+  unit: string
+  time: TimeSemantics
   params?: Record<string, string>
-  /** What the value MEANS in a sentence. The machine-checkable parts are below; this is for the reader. */
-  returns: string
+  dimensions?: string[]
+  render?: string
+}
 
-  // ── THE THREE THINGS THAT MAKE RIGHT ROWS INTO A WRONG NUMBER ───────────────────────────────────────────
-  // Getting the rows right is only half of it. These are what stop correct rows becoming an incorrect total,
-  // and each corresponds to a mistake that passes every other check silently.
+/** Everything that must be true of a concept's metadata. Returns the first reason it is not, or null.
+ *
+ *  It REFUSES rather than repairs. A description silently truncated, or a time value quietly mapped to the
+ *  nearest legal one, is a concept saying something its author did not write — and the author is right there,
+ *  able to fix it, which is the only moment anyone will. */
+export function validateConceptMeta(meta: any): string | null {
+  for (const [field, spec] of Object.entries(CONCEPT_META)) {
+    const value = meta?.[field]
+    if (value === undefined || value === null) {
+      if (spec.required) return `${field} is missing — ${spec.hint}`
+      continue
+    }
+    const bad = spec.check?.(value, meta)
+    if (bad) return `${field} ${bad}`
+  }
+  return null
+}
 
-  /** WHAT ONE ROW IS — "one row per invoice", "one row per employee per month".
-   *
-   *  The guard against double counting, which is the failure that survives everything else: a join that fans
-   *  out doubles the rows, so a reconciliation against the ungrouped measure compares two numbers that are
-   *  BOTH doubled and agrees. Stating the grain is what makes `COUNT(*) = COUNT(DISTINCT key)` a question
-   *  somebody can ask. */
-  grain?: string
-
-  /** May this be SUMMED across its dimensions?
-   *
-   *  A total and a distinct count look identical in a result set and behave completely differently: revenue
-   *  by month adds up to revenue for the year; distinct customers by month does not add up to distinct
-   *  customers for the year. Summing a non-additive measure is the most common wrong answer in analytics,
-   *  and it is only avoidable if the concept says which kind it is.
-   *
-   *  Default when unstated is `false` — the safe reading, because a wrongly-summed measure is silent while a
-   *  wrongly-refused sum is merely inconvenient. */
-  additive?: boolean
-
-  /** The unit of `value` — 'AUD', 'hours', 'employees', 'invoices'. A bare number carries no unit, so nothing
-   *  downstream can notice two of them being added that should never have met. */
-  unit?: string
-
-  /** How the measure relates to TIME:
-   *    'snapshot' — true at an instant (a headcount). Summing it across periods is meaningless.
-   *    'during'   — accumulated over the window (revenue in a month).
-   *    'trailing' — a window ending at the asOf (rolling twelve months).
-   *  A snapshot summed over months is a wrong answer that looks perfectly ordinary. */
-  time?: 'snapshot' | 'during' | 'trailing'
+/** The metadata skeleton, written out from the same declaration the save checks against — so what an author
+ *  is shown and what is required of them cannot be two different things. */
+export function conceptMetaTemplate(): string {
+  const lines = Object.entries(CONCEPT_META).map(([field, spec]) => {
+    const v = field === 'sources' || field === 'dimensions' ? `["${spec.hint}"]`
+      : field === 'params' ? '{ "<name>": "<what it means>" }'
+      : field === 'additive' ? '<true|false>'
+      : spec.values ? spec.values.map((x) => `"${x}"`).join(' | ')
+      : `"${spec.hint}"`
+    return `  "${field}": ${v}`
+  })
+  return `{\n${lines.join(',\n')}\n}`
 }
 
 /** What a concept returns.

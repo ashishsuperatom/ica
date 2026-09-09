@@ -31,11 +31,18 @@ concepts/<name>.mjs
 export default async function (ctx, params) { ...; return { value } }
 
 concepts/<name>.meta.json
-{ "name": "a name that uniquely identifies this concept", "description": "ONE TO THREE SENTENCES — what this is, not how it works",
-  "sources": ["<datasource id>"],
-  "params": { "<name>": "<what it means>" }, "dimensions": ["<axes it can be split by>"],
-  "grain": "<what ONE row is>", "additive": <true|false>, "unit": "<what the number counts>",
-  "time": "point" | "window", "render": "<a short note on how to show it>" }
+{
+  "name": "a name that uniquely identifies this concept",
+  "description": "ONE TO THREE SENTENCES — what this is, not how it works",
+  "sources": ["every datasource this reads"],
+  "params": { "<name>": "<what it means>" },
+  "grain": "what ONE row is",
+  "additive": <true|false>,
+  "unit": "what the number counts",
+  "time": "point" | "window",
+  "dimensions": ["the axes it can be split by"],
+  "render": "a short note on how to show it to a person"
+}
 ```
 
 **The description is one to three sentences**, so a reader can tell this is the concept they want. The

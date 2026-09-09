@@ -6,6 +6,7 @@
 //   3. POSITIVE (what to do, not "never X"), and WHAT + OUTPUT, not HOW (let the agent choose mechanics).
 // Each section is a const with a WHY comment. SECTIONS = exactly what ships (HR = the `---` between blocks).
 // Never hand-edit SYSTEM.md; edit here.
+import { conceptMetaTemplate } from '@superatom/scaffold'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { writeMd } from '../render-md.js'
@@ -45,11 +46,7 @@ concepts/<name>.mjs
 export default async function (ctx, params) { ...; return { value } }
 
 concepts/<name>.meta.json
-{ "name": "a name that uniquely identifies this concept", "description": "ONE TO THREE SENTENCES — what this is, not how it works",
-  "sources": ["<datasource id>"],
-  "params": { "<name>": "<what it means>" }, "dimensions": ["<axes it can be split by>"],
-  "grain": "<what ONE row is>", "additive": <true|false>, "unit": "<what the number counts>",
-  "time": "point" | "window", "render": "<a short note on how to show it>" }
+${conceptMetaTemplate()}
 \`\`\`
 
 **The description is one to three sentences**, so a reader can tell this is the concept they want. The

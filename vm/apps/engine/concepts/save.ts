@@ -17,6 +17,7 @@
 import { NodeStore, getRun, upsertConcept, resolveConcept, conceptHash, pruneRuns, runId as deriveRunId, runsBySource, putSignature, putSample,
          type ChangeMeta, type ConceptProps } from '@superatom/node-store'
 import { conceptSignature, type SqlSignature } from './signature.js'
+import { validateConceptMeta } from '@superatom/scaffold'
 
 export interface SaveResult {
   ok: boolean
@@ -65,7 +66,7 @@ export async function saveConcept(store: NodeStore, runIdToSave: string, meta: C
   // These are typed fields, and the type is no protection: the value crosses a JSON boundary on its way into
   // the store, so nothing checks it after this line. Seven concepts had already drifted to free text where a
   // three-value union was declared, and nobody noticed until the store was counted.
-  const bad = validate(m)
+  const bad = validateConceptMeta(m)
   if (bad) return { ok: false, reason: bad }
 
   // THE BODY IS THE CONCEPT. `value` remains prose because a reader still needs to know what this IS and how
@@ -195,50 +196,6 @@ const dimensionsFacet = (dims: unknown) =>
   Array.isArray(dims) && dims.length
     ? dims.map((d) => (typeof d === 'string' ? { name: d } : d)).filter((d: any) => d?.name)
     : undefined
-
-/** How long a description may be before it stops being a description. Not a style rule: the field exists so a
- *  reader can tell whether this is the concept they want, and a model asked for prose will happily write four
- *  paragraphs of reasoning that belongs in comments beside the code it explains. Three short sentences fit. */
-const MAX_DESCRIPTION = 300
-
-const TIME_VALUES = ['point', 'window']
-/** A parameter that bounds a window. One is enough — a year IS a window, and so is a week start. Requiring a
- *  from AND a to was the obvious rule and it was wrong: six perfectly well-formed concepts take a single
- *  bounding value. */
-const BOUNDING = /from|to\b|start|end|year|month|period|cutoff|week|as[_]?of|date/i
-
-/** Everything that must be true of the metadata before a concept exists. Returns a reason, or null.
- *
- *  It refuses rather than repairs. A description silently truncated, or a time value quietly mapped to the
- *  nearest legal one, is a concept that says something its author did not write — and the author is right
- *  here, able to fix it, which is the only moment anyone will. */
-function validate(m: any): string | null {
-  const desc = String(m.description ?? '').trim()
-  if (!desc) return 'the metadata has no description — say in one to three sentences what this concept is'
-  if (desc.length > MAX_DESCRIPTION) {
-    return `the description is ${desc.length} characters and the limit is ${MAX_DESCRIPTION}. Say what this ` +
-      `concept IS in one to three sentences; the reasoning, the traps and the why belong in comments inside ` +
-      `the body, where they sit beside the code they explain`
-  }
-  if (!Array.isArray(m.sources) || !m.sources.length) {
-    return 'the metadata declares no sources — name every datasource this reads'
-  }
-  if (m.time !== undefined && !TIME_VALUES.includes(m.time)) {
-    return `time is "${m.time}" but the only values are ${TIME_VALUES.join(' and ')}. A value is either true ` +
-      `AS AT an instant (point) or accumulated OVER a span (window)`
-  }
-  if (m.time === 'window') {
-    const params = Object.keys(m.params ?? {})
-    if (!params.some((p) => BOUNDING.test(p))) {
-      return `time is "window" but no parameter bounds the window${params.length ? ` (has: ${params.join(', ')})` : ' (it takes none)'}` +
-        ` — a total over an unstated span is not an answer, it is a number`
-    }
-  }
-  if (m.additive !== undefined && typeof m.additive !== 'boolean') return 'additive must be true or false'
-  if (m.unit !== undefined && !String(m.unit).trim()) return 'unit is present but empty — say what the value is counted in'
-  return null
-}
-
 
 /** Concepts whose names share a word with this one, for showing an author what already exists near what they
  *  are about to write. The same two passes the agent's own search uses: SQLite finds candidates by prefix,
