@@ -795,7 +795,17 @@ function NodeDetail({ node, open, close }: { node: any; open: (f: Focus) => void
     <>
       <div className="ph">
         <div style={{ minWidth: 0 }}>
-          <div className="row" style={{ gap: 8 }}><span className="chip">{node.kind}</span><strong style={{ fontSize: 15 }}>{node.label}</strong><Tag t={node.status} /></div>
+          <div className="row" style={{ gap: 8 }}>
+            <span className="chip">{node.kind}</span>
+            {/* A CONCEPT IS ONE OF TWO THINGS and the header said neither, so a prose note and a runnable
+                concept looked identical once opened — which makes their statuses look inconsistent when they
+                are measuring different things. `corroborated` on a note means two analyses agreed;
+                `self-checked` on a runnable one means it ran and its own invariants held. */}
+            {node.kind === 'concept' && (typeof node.props?.compute === 'string' && /export\s+default/.test(node.props.compute)
+              ? <span className="chip" title="a function that runs against live data">runnable</span>
+              : <span className="chip" title="knowledge the agent reads — a convention, a caveat, an anti-pattern">note</span>)}
+            <strong style={{ fontSize: 15 }}>{node.label}</strong><Tag t={node.status} />
+          </div>
           <code className="mono" style={{ display: 'block', marginTop: 3 }}>{node.id}</code>
         </div>
         <span className="x" onClick={close}>×</span>
