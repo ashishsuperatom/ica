@@ -61,22 +61,31 @@ async function main() {
   ok((cp.measures?.length ?? 0) === 2 && cp.verifiedAt === '2026-06-03', 'concept stores measures + freshness')
   ok((cp.requires ?? []).includes('branch'), 'Receivables requires branch')
 
-  // TIME TRAVEL NOW ASKS THE NAME, not the body. Control when the first pointing took effect so the as-of
-  // window is deterministic (no same-ms race).
+  // BOOKKEEPING DOES NOT FORK A CONCEPT. Promoting a status, or re-verifying it today, is a change to what
+  // we KNOW about a concept, not to what it means — so it stays one body, updated in place. Before this,
+  // thirteen groups of byte-identical bodies in a real store had become separate concepts exactly this way.
+  const beforeBookkeeping = getConcept(s, 'Receivables')!.id
+  upsertConcept(s, 'Receivables', { ...recv, status: 'self-checked' }, { changedBy: 'consolidator', reason: 'ran it' })
+  const afterBookkeeping = getConcept(s, 'Receivables')!
+  ok(afterBookkeeping.id === beforeBookkeeping, 'changing only the status leaves the same concept')
+  ok((afterBookkeeping.props as ConceptProps).status === 'self-checked', 'and the status actually changed')
+  ok(indexHistory(s, 'Receivables').length === 1, 'the name never moved, because nothing about the concept did')
+
+  // A CHANGE OF MEANING IS A DIFFERENT CONCEPT, and time travel asks the NAME, not the body. Control when the
+  // first pointing took effect so the as-of window is deterministic (no same-ms race).
   const T0 = 1_700_000_000_000
   s.db.prepare(`UPDATE nodes SET valid_from=? WHERE id=?`).run(T0, indexId('Receivables'))
   const before = getConcept(s, 'Receivables')!.id
-  upsertConcept(s, 'Receivables', { ...recv, status: 'corroborated' }, { changedBy: 'consolidator', reason: 're-corroborated' })
+  upsertConcept(s, 'Receivables', { ...recv, status: 'self-checked', value: 'Open receivables, excluding advances.' },
+                { changedBy: 'consolidator', reason: 'narrowed the definition' })
   const nowNode = getConcept(s, 'Receivables')!
-  const now = nowNode.props as ConceptProps
   const past = getConcept(s, 'Receivables', T0)!.props as ConceptProps         // what the NAME meant then
-  ok(now.status === 'corroborated', 'the name now points at the corroborated body')
-  ok(past.status === 'verified', 'rewinding the name reaches the body it pointed at then')
-  ok(nowNode.id !== before, 'a changed concept is a NEW body, not an edited one')
+  ok(nowNode.id !== before, 'a changed MEANING is a new body, not an edited one')
+  ok((past as any).value === 'Open receivables — one row per open bill.', 'rewinding the name reaches the body it pointed at then')
   ok(s.getNode(before) !== undefined, 'the old body still exists — anything built on it is still true')
   const hist = indexHistory(s, 'Receivables')
   ok(hist.length === 2, 'the name has two pointings')
-  ok(hist[1].changedBy === 'consolidator' && hist[1].reason === 're-corroborated', 'who moved it, and why, is recorded')
+  ok(hist[1].changedBy === 'consolidator' && hist[1].reason === 'narrowed the definition', 'who moved it, and why, is recorded')
 
   console.log(`intent+concept smoke: OK`)
   console.log(`  built=${built} ran=${ran}  path: ${path.map(n => n.label).join(' → ')}`)

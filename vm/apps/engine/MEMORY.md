@@ -38,7 +38,7 @@ with no rule saying so.
   (`packages/node-store/src/semantic.ts:102`).
 - **Bitemporal concepts** — a rewrite archives `concept:<name>@v<n>`; only the live row is indexed, so a
   superseded belief never surfaces, and history is never destroyed.
-- **Status ladder** — `unverified → corroborated (≥2 independent analyses) → verified (human only)`.
+- **Status ladder** — `unverified → self-checked (ran; its own invariants held) → corroborated (≥2 independent analyses) → verified (human only)`. A concept agreeing with itself is not a second witness.
 - **System 4 consolidation** — the concept modeller, watermark-driven, drains finished analyses on a timer.
 - **Retrieval A/B** — `USE_SPECIFICITY=1` selects lexical name-word specificity; default is span firing.
   Exactly one retriever is surfaced, never mixed.

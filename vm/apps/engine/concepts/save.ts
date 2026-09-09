@@ -73,10 +73,10 @@ export async function saveConcept(store: NodeStore, runIdToSave: string, meta: C
   const sources: string[] = Array.isArray(m.sources) ? m.sources.filter(Boolean).map(String) : []
   const props: ConceptProps = {
     value: String(m.description ?? '').trim() || `Computes ${m.name}.`,
-    // CORROBORATED, not verified. It ran and its invariants held, which is stronger than an analyst having
-    // seen it once — but the existing scale reserves 'verified' for a person confirming, and quietly
-    // redefining a status is how a scale stops meaning anything. Execution earns the middle rung.
-    status: 'corroborated',
+    // SELF-CHECKED. It ran and its own invariants held, which is real evidence that it works and none at all
+    // that it measures the right thing. Not `corroborated`: that rung means a second, independent analysis
+    // agreed, and a concept agreeing with itself is not a second witness.
+    status: 'self-checked',
     source: sources[0],
     // PLURAL WHEN PLURAL. The singular field truncated silently, so a concept reading two datasources stored
     // one and looked single-source to everything downstream.

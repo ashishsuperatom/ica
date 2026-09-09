@@ -15,7 +15,20 @@
 
 import type { NodeStore, Node } from './store.js'
 
-export type ConceptStatus = 'unverified' | 'corroborated' | 'verified'
+/** How much this concept has been put to the test, and BY WHAT. Each rung is a different witness.
+ *
+ *  `unverified`   nobody has run it or checked it.
+ *  `self-checked` it executed on live data and its OWN invariants held. Strong evidence that it works, and no
+ *                 evidence at all that it computes the right thing: a concept can be internally consistent
+ *                 and measure the wrong quantity.
+ *  `corroborated` an INDEPENDENT analysis reached the same answer. A second witness, which is what the word
+ *                 means and why it cannot also mean the rung above it.
+ *  `verified`     a person confirmed it.
+ *
+ *  `self-checked` exists because the runnable save had been writing `corroborated` for a concept that had
+ *  merely run — which is not corroboration, there being nothing to corroborate it with. Reusing the word
+ *  quietly demoted the rung that a second independent analysis had earned. */
+export type ConceptStatus = 'unverified' | 'self-checked' | 'corroborated' | 'verified'
 /** How a value binds to time, and there are only two ways.
  *
  *  `point`  is true AS AT an instant: a headcount, an open order value, a name lookup. Re-run it tomorrow and
@@ -234,7 +247,18 @@ export function upsertConcept(store: NodeStore, name: string, props: ConceptProp
   const stamped: ConceptProps = { ...props, scope: props.scope ?? 'global',
     _v: { version, changedBy: meta.changedBy, reason: meta.reason } }
 
-  const node = existing ?? store.putNode({ id, kind: 'concept', label: name, summary: props.value, props: stamped })
+  // BOOKKEEPING IS MUTABLE STATE ABOUT AN IMMUTABLE BODY. Since these fields are outside the hash, a concept
+  // being promoted from self-checked to verified, or re-verified today, hashes to the body that already
+  // exists — and without this the write would be a no-op and the promotion would silently never happen. The
+  // body itself is untouched; only what we KNOW about it is refreshed.
+  const node = existing
+    ? (() => {
+        const merged = { ...(existing.props as any), ...stamped }
+        store.db.prepare('UPDATE nodes SET props=?, summary=? WHERE id=?')
+          .run(JSON.stringify(merged), props.value ?? null, id)
+        return { ...existing, props: merged, summary: props.value }
+      })()
+    : store.putNode({ id, kind: 'concept', label: name, summary: props.value, props: stamped })
   if (!existing) store.db.prepare('UPDATE nodes SET valid_from=?, valid_to=NULL WHERE id=?').run(at, id)
 
   // The primary name, and every alias, point at this body. An alias is not a lesser kind of name — it is the
@@ -242,7 +266,7 @@ export function upsertConcept(store: NodeStore, name: string, props: ConceptProp
   putIndex(store, name, id, meta)
   for (const a of names) putIndex(store, a, id, meta)
 
-  return existing ?? { ...node, valid_from: at, valid_to: null }
+  return existing ? (node as Node) : { ...node, valid_from: at, valid_to: null }
 }
 
 /** "now" = the live row (stable id); `asOf` (unix ms) → the version whose validity window contained that instant. */
