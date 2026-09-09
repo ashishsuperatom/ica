@@ -72,7 +72,40 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
   // The agent then never reads a file to learn how to write a program or what the data is. CONTEXT.md is written
   // into the workspace by prepareWorkspace; we fold its text in here.
   const context = (() => { try { return readFileSync(join(cwd, 'CONTEXT.md'), 'utf8') } catch { return '' } })()
-  const systemReference = [sysFile(), AUTHORING_REFERENCE, context].filter(Boolean).join('\n\n')
+  // THE METHOD IS SAID ONCE, HERE. It used to be re-sent whole with every question — some 3,800 characters of
+  // numbered steps — which is not merely repetition: a complete brief arriving with each question makes each
+  // question read as a fresh assignment. The session is per conversation and the model has the earlier turns,
+  // and it still answered "no projection can be computed from this question alone", because that is how the
+  // turn was framed. Standing instructions belong in the instructions; a turn is the question.
+  const METHOD = [
+    'Compose a PROGRAM the engine runs to answer the question. Your role, the program contract + example, and the',
+    'data context are already in your instructions. Search concepts with `./find-concept "<phrase>"`; explore the',
+    'data with `./query`/`./introspect`; escalate to the analyst on a hard problem (many composers share one analyst).',
+    '',
+    'Each question arrives with the path to write your result to, as `RESULT →`. Everything below is how you work,',
+    'every time, and is not repeated with the question.',
+    '',
+    '1. Can a candidate program answer THAT question EXACTLY — the SAME measure, scope and grain, differing at most',
+    '   by a parameter (a date, a top-N)? Only then reuse it: pick it, run it, and COMMIT — write the RESULT path =',
+    '   {"programDir":"<that program>","params":{…},"canonicalQuestions":["<the canonical form>"]} as your final',
+    '   action. Reusing ADDS this question\'s form to the ones that program answers — that is how it becomes findable',
+    '   for the next person who phrases it your way.',
+    '   A program built for a RELATED-but-different question is NOT a fit — "amount billed" is not "net spend", a',
+    '   header total is not a line-level breakdown, gross is not net. Do NOT adapt or force-fit a program; when it is',
+    '   not an EXACT match, build from the CONCEPTS — never from a not-quite program. Accuracy over reuse.',
+    '2. Otherwise COMPOSE from the concepts (`./find-concept "<phrase>"` for names, `./get-concept "<name>"` for one).',
+    '   If they don\'t fully cover it, do the work yourself — `./query`/`./introspect` the data, analyse, write the',
+    '   units + program. Run it (`tsx run.mjs programs/<slug>/program.ts \'<json>\'`), verify against the review checks.',
+    '   Then COMMIT, as your final action — once everything else is finished and verified: write the RESULT path =',
+    '   {"programDir":"programs/<slug>","params":{…},"canonicalQuestions":["…"],"usedConcepts":["<the concepts this',
+    '   program is actually built on>"]}. `canonicalQuestions` — the question this program answers, phrased so its',
+    '   parameters are visible ("… for customer <customer> in <period>"); add another only when it genuinely answers',
+    '   a differently-phrased question.',
+    '3. Escalate to the analyst when it is a hard problem or you cannot work it out: write the ESCALATE path =',
+    '   {"reason":"<what is blocking you>"} and STOP. Many composers share one analyst, so do the rest yourself.',
+  ].join('\n')
+
+  const systemReference = [sysFile(), METHOD, AUTHORING_REFERENCE, context].filter(Boolean).join('\n\n')
   const session = createSession(harness, { cwd, model, provider, baseUrl: opts.ica?.baseUrl, systemReference })
   // ONE linear path: the composer's harnesses (opencode/claude/codex) all carry the reference in the system
   // prompt, so the agent never reads an instruction file. If a harness can't inject (pi/mock), fail LOUD here
@@ -80,10 +113,6 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
   if (session.referencePlacement !== 'in-context')
     console.warn(`[composer] harness "${harness}" cannot put the reference in the system prompt — instructions will be missing; use opencode/claude/codex`)
 
-  const preamble =
-    'Compose a PROGRAM the engine runs to answer the question. Your role, the program contract + example, and the ' +
-    'data context are already in your instructions. Search concepts with `./find-concept "<phrase>"`; explore the ' +
-    'data with `./query`/`./introspect`; escalate to the analyst on a hard problem (many composers share one analyst).'
 
   return {
     cwd,
@@ -161,8 +190,7 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       const m = o.modify
       // MODIFY: edit the SAME program in place (the engine supplies the current program — it may be from a
       // reuse, so it is NOT in your context). No new program, no escalate — just apply the edit and rerun.
-      const modifyPrompt = m ? `${preamble}
-
+      const modifyPrompt = m ? `
 The user wants to EDIT the CURRENT program — the SAME program, changed as they ask (a different calculation,
 columns/outputs, a filter, or a top-N). Make the edit from what you ALREADY have: the program's own code plus the
 concepts (\`./find-concept "<phrase>"\`). Do NOT discover raw data, and do NOT build a new program.
@@ -187,31 +215,20 @@ is wrong with it — as well as fixing the program.` : ''}` : ''
 
       // What the person typed, and — when their words pointed at the conversation — the same question with that
       // written in. Both, so nothing is hidden: they asked the first, they meant the second.
-      const asked = `Question: ${question}` + (o.resolvedQuestion ? `\nIn full, with what it refers to written in: ${o.resolvedQuestion}` : '')
-      const composePrompt = `${preamble}
+      // THE QUESTION AS ASKED, unlabelled and unrewritten. A turn that says "Question:" and then restates the
+      // method is a brief; a turn that is the question is a conversation, and this session has the earlier
+      // turns in it.
+      const asked = question + (o.resolvedQuestion ? `\n(in full: ${o.resolvedQuestion})` : '')
+      // THE TURN IS THE QUESTION. Not the question inside a brief: the method is in the instructions, said
+      // once. What stays is what changes per question — where to write the result, and what the engine found.
+      const composePrompt = `${asked}
 
-${asked}
-
-${candBlock}
-${conceptBlock}
-${o.canonicalMatch ? `ASKED BEFORE — this exact question was answered by \`${o.canonicalMatch.programDir}\` with ${JSON.stringify(o.canonicalMatch.params)}.
-That is a starting point, not a verdict: it was written for the earlier asking and the data has moved since.
-RUN it (\`tsx run.mjs ${o.canonicalMatch.programDir}/program.ts '${JSON.stringify(o.canonicalMatch.params)}'\`) and read the output as the person who asked would — nothing after you checks this. If it genuinely answers, COMMIT as your final action: write ${builtRel} = {"programDir":"${o.canonicalMatch.programDir}","params":${JSON.stringify(o.canonicalMatch.params)},"canonicalQuestions":["<the canonical form>"]} and stop. If it is empty, sidesteps the question, or the figures do not fit, carry on below.
-` : ''}
-1. Can a program above answer THIS question EXACTLY — the SAME measure, scope and grain, differing at most by a
-   parameter (a date, a top-N)? Only then reuse it: pick it, run it, and COMMIT — write ${builtRel} = {"programDir":"<that program>","params":{…},"canonicalQuestions":["<the canonical form of THIS question>"]} as your final action. Reusing ADDS this question's form to the ones that program already answers — that is how it becomes findable for the next person who phrases it your way.
-   A program built for a RELATED-but-different question is NOT a fit — "amount billed" is not "net spend", a header
-   total is not a line-level breakdown, gross is not net. Do NOT adapt or force-fit a program; when it is not an
-   EXACT match, go to step 2 and build from the CONCEPTS — never from a not-quite program. Accuracy over reuse.
-2. Otherwise COMPOSE from the concepts (\`./find-concept "<phrase>"\` for names, \`./get-concept "<name>"\` for one concept's runnable query). If they
-   don't fully cover it, do the work yourself — \`./query\`/\`./introspect\` the data, analyse, write the units +
-   program. Run it (\`tsx run.mjs programs/<slug>/program.ts '<json>'\`), verify against the review checks, write
-   Then COMMIT, as your final action — once everything else is finished and verified: write
-   ${builtRel} = {"programDir":"programs/<slug>","params":{…},"canonicalQuestions":["…"],"usedConcepts":["<the concepts this program is actually built on>"]}. \`canonicalQuestions\` — the question this program answers, phrased so its parameters are
-   visible ("… for customer <customer> in <period>"); add another only when it genuinely answers a differently-
-   phrased question.
-3. Escalate to the analyst when it's a hard problem or you can't figure it out. Write ${escalateRel} =
-   {"reason":"<what's blocking you>"} and STOP. Many composers share one analyst, so do the rest yourself.`
+RESULT → ${builtRel}   ·   ESCALATE → ${escalateRel}
+${candBlock}${conceptBlock}${o.canonicalMatch ? `
+ASKED BEFORE — this exact question was answered by \`${o.canonicalMatch.programDir}\` with ${JSON.stringify(o.canonicalMatch.params)}.
+That is a starting point, not a verdict: it was written for the earlier asking and the data has moved since. Run it
+(\`tsx run.mjs ${o.canonicalMatch.programDir}/program.ts '${JSON.stringify(o.canonicalMatch.params)}'\`) and read the output as the person who asked would.
+` : ''}`
       // `build` is a COMPLETE instruction, handed over whole — a view, and anything later that knows exactly
       // what it wants written. It bypasses the compose preamble and the concept block on purpose: that block
       // says "no concept fits this question, ESCALATE now" whenever no concepts were passed, so wrapping a
