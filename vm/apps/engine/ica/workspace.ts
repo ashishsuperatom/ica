@@ -524,8 +524,19 @@ if (!q) { console.log(JSON.stringify(total ? { total, note: total + ' concepts i
 const matched = findConcept(q).map(c => c.name)
 console.log(JSON.stringify({ matched, of: total, note: total === 0 ? 'the concept library is empty (0 of 0)' : (matched.length + ' matched of ' + total + ' concepts') + (matched.length ? ' — read one with ./get-concept "<name>"' : '') }, null, 2))
 `,
-    'get-concept': `// ONE concept, in full guide form: "<exact name>" (as listed by ./find-concept). Returns the guide only — what it is, its rules, where the data lives, how to compute it, how to present it.
+    'get-concept': `// ONE concept, in full: "<exact name>" (as listed by ./find-concept).
+//
+// A RUNNABLE concept comes back as its FUNCTION, plus what it last produced and the invariants it carries.
+// You do not call it — you COPY it and adapt it to the question in front of you. The \`ctx.verify\` lines are
+// the reason that is safe: restructure everything around them and they still fire, on this asker's data.
+// Adapt them too when the meaning changes; delete them and you have inherited a number nobody is checking.
+//
+// A PROSE concept — one not yet migrated — comes back as the old guide: what it is, its rules, where the
+// data lives, how to compute it. Both shapes exist while the store is being converted, and \`runnable\` says
+// which one you are looking at.
 import { findConcept, listConcepts } from ${JSON.stringify(join(dir, 'concepts', 'find.mjs'))}
+import { NodeStore, getSample } from '@superatom/node-store'
+import { fileURLToPath as _fu } from 'node:url'
 // WHICH TURN OPENED THIS. One workspace serves every question on a project, and two people asking at once
 // share it — so a timestamp cannot say who opened what, and an append keyed only by time would attribute
 // concepts to the wrong program the first time two turns overlap. The qid travels with the call.
@@ -547,6 +558,34 @@ if (!hit) {
 const KEEP = ['name', 'value', 'status', 'rules', 'requires', 'supersedes', 'dataSource', 'find', 'compute', 'present', 'review', 'source', 'grain', 'keying', 'time', 'measures', 'dimensions', 'parameters']
 const out = {}
 for (const k of KEEP) if (hit[k] !== undefined) out[k] = hit[k]
+
+// RUNNABLE OR PROSE. A migrated concept's \`compute\` is a module — it declares \`meta\` and exports a default
+// function — where a prose one holds a query or a recipe. Detected from the body rather than from a flag, so
+// a concept converted by any route is recognised and nothing has to be kept in step.
+const isRunnable = typeof out.compute === 'string' && /export\\s+default/.test(out.compute) && /export\\s+const\\s+meta/.test(out.compute)
+out.runnable = isRunnable
+
+if (isRunnable) {
+  // WHAT IT LAST PRODUCED, so you can judge fit before copying anything: the value, the parameters that
+  // produced it, when, and the invariants it carries. A concept whose last run was months ago against
+  // parameters unlike yours is a different proposition from one that ran this morning.
+  try {
+    const store = new NodeStore(_fu(new URL('../db/project.sqlite', import.meta.url)))
+    const sample = getSample(store.db, hit.id || '')
+    if (sample) {
+      out.lastRun = {
+        value: sample.value, rows: sample.rows, params: sample.params,
+        at: new Date(sample.at).toISOString(), ms: sample.ms,
+        invariants: sample.verifications.map((v) => v.label),
+        caveats: sample.caveats,
+      }
+    }
+    store.close()
+  } catch { /* the sample is a convenience; never let it cost the read */ }
+  // The prose facets of a runnable concept are empty by construction — the computation IS the code, so
+  // shipping the fields it replaced would only invite them to be filled back in.
+  delete out.rules; delete out.find; delete out.present
+}
 console.log(JSON.stringify(out, null, 2))
 
 // RECORD THE OPEN, and never let recording cost the read. This is the mechanical half of "what was this
@@ -675,7 +714,7 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
   // never needs to read the .mjs to learn what to pass, and never sees the implementation.
   const usages: Record<string, string> = {
     'find-concept': 'find-concept "<phrase>"   → the NAMES of matching concepts. A query is required. Read one with get-concept.',
-    'get-concept':  'get-concept "<exact name>" [--qid <qid>]   → ONE concept\'s guide: what it is, its rules, where the data lives, how to compute and present it. Pass --qid so the program records what it was built from.',
+    'get-concept':  'get-concept "<exact name>" [--qid <qid>]   → ONE concept. A runnable one returns its FUNCTION to copy and adapt, plus what it last produced and the invariants it carries; a not-yet-migrated one returns its prose guide. Pass --qid so the program records what it was built from.',
     'find-schema':  'find-schema "<term>" [--source <SOURCE>] [--full]   → search ALL datasources for a field/table by name, type, or description (SOURCE.TABLE.COLUMN : type); --source filters to one; --full adds PK/nullable/references',
     'authoring-guide': 'authoring-guide [type]   → how to WRITE a program: the contract, the mechanics, the canonical example. Read it when you are about to write.',
     'find-program': 'find-program "<question>"   → the shortlist: programs that answered a similar question (what it answers · name · category)',

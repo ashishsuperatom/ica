@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3'
-import { CONCEPT_RUN_SCHEMA, CONCEPT_SIGNATURE_SCHEMA } from './concept-run.js'
+import { CONCEPT_RUN_SCHEMA, CONCEPT_SIGNATURE_SCHEMA, CONCEPT_SAMPLE_SCHEMA } from './concept-run.js'
 import { DATASOURCE_INDEX_SCHEMA } from './datasource-index.js'
 import { RETRIEVAL_STATE_SCHEMA } from './retrieval-state.js'
 import { mkdirSync } from 'node:fs'
@@ -73,6 +73,7 @@ export class NodeStore {
     // from its first read and no caller has to remember to make it.
     this.db.exec(CONCEPT_RUN_SCHEMA)
     this.db.exec(CONCEPT_SIGNATURE_SCHEMA)
+    this.db.exec(CONCEPT_SAMPLE_SCHEMA)
   }
 
   close() { this.db.close() }

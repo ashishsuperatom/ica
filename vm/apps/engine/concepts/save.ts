@@ -14,7 +14,7 @@
 //   • a run that errored       — it does not execute
 //   • a run whose invariants failed — it executes and its number is wrong, which is worse
 
-import { NodeStore, getRun, upsertConcept, pruneRuns, runId as deriveRunId, runsBySource, putSignature,
+import { NodeStore, getRun, upsertConcept, pruneRuns, runId as deriveRunId, runsBySource, putSignature, putSample,
          type ChangeMeta, type ConceptProps } from '@superatom/node-store'
 import { conceptSignature, type SqlSignature } from './signature.js'
 
@@ -78,6 +78,15 @@ export async function saveConcept(store: NodeStore, runIdToSave: string, meta: C
   }
 
   const node = upsertConcept(store, m.name, props, meta)
+
+  // WHAT IT LAST PRODUCED — derived, and never in props: a value moves with the data, so holding it there
+  // would remint the concept on every re-run. Enough for a reader to judge fit without running it, and for a
+  // structural match between two concepts to be confirmed by execution rather than assumed.
+  putSample(store.db, {
+    conceptId: node.id, name: m.name, params: run.params, value: run.result?.value,
+    rows: Array.isArray(run.result?.distribution) ? run.result!.distribution!.length : undefined,
+    caveats: run.caveats, verifications: run.verifications, ms: run.ms, at: run.at,
+  })
 
   // THE SIGNATURE IS DERIVED, AND ITS FAILURE IS NOT THE SAVE'S FAILURE. It is an observation used to notice
   // duplication later; a concept that is correct and verified must not be rejected because a parser was

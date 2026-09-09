@@ -22,5 +22,6 @@ export * from './retrieval-state.js'
 
 // Concept RUN records — the scratch trail that makes "saved == verified" checkable (see concept-run.ts).
 export { CONCEPT_RUN_SCHEMA, runId, sourceHash, putRun, getRun, runsBySource, pruneRuns,
-         CONCEPT_SIGNATURE_SCHEMA, putSignature, signatureClusters } from './concept-run.js'
-export type { ConceptRunRecord, ConceptSignatureRow } from './concept-run.js'
+         CONCEPT_SIGNATURE_SCHEMA, putSignature, signatureClusters,
+         CONCEPT_SAMPLE_SCHEMA, putSample, getSample } from './concept-run.js'
+export type { ConceptRunRecord, ConceptSignatureRow, ConceptSample } from './concept-run.js'
