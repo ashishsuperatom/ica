@@ -20,7 +20,7 @@ import WebSocket from 'ws'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { existsSync, mkdirSync, rmSync, readFileSync } from 'node:fs'
-import { writeFile, rm, readdir, stat } from 'node:fs/promises'
+import { writeFile, rm, readdir, stat, mkdir, cp } from 'node:fs/promises'
 import { execSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { execProgram, answerView } from './exec-program.js'
@@ -79,6 +79,18 @@ useCache(join(STATE_ROOT, PROJECT))
 // SEGREGATION (see ica/workspace.ts): the agent's write-root and the engine's DBs are SIBLING folders under the
 // project home, so the agent's cwd never contains our SQLite files.
 const WORKSPACE = join(WORKSPACE_ROOT, PROJECT, 'workspace')   // the AGENT's cwd: seams + programs/ + out/
+// ── WHERE A CONVERSATION'S WORK LIVES ──────────────────────────────────────────────────────────────────────
+// One folder per conversation, holding the programs written for it and each turn's output. A program encodes
+// the scope and filters of the question that produced it, so one conversation's work is not another's to read
+// or to re-run.
+//
+// The composer works here directly — its session is the conversation's. The analyst cannot: it is ONE shared
+// session serving everyone, and a destination that moved under it every turn would be a target it can neither
+// see nor check. So it always writes to the same place, and the engine files what it built into the
+// conversation that asked for it. Filing is the engine's job precisely because the analyst must not have to
+// know which conversation it is serving.
+const SESSIONS = join(WORKSPACE_ROOT, PROJECT, 'sessions')
+const sessionHome = (sid: string) => join(SESSIONS, sid)
 const DB_DIR    = join(WORKSPACE_ROOT, PROJECT, 'db')          // ENGINE-private DBs — a sibling, NOT under WORKSPACE
 // Committed per-project CONFIG (index seeds, datasource notes) — distinct from generated state above.
 const PROJECT_DIR = process.env.ENGINE_PROJECT_DIR ?? join(__dirname, '..', '..', 'projects', PROJECT)
@@ -602,7 +614,7 @@ async function reuseProgram(programDir: string, params: any, category: string,
   try {
     // Fresh subprocess (see exec-program.ts): a program edited by a prior modify is cached stale in this
     // long-lived tsx process, so an in-process reuse would re-run yesterday's code. Spawn it clean.
-    const rr = await execProgram(WORKSPACE, programDir, params ?? {}, { qid, sid })
+    const rr = await execProgram(sessionHome(sid), programDir, params ?? {}, { qid, sid })
     const answer = answerView(rr.output)   // out of the unit envelope — see answerView
     const out = answer                      // downstream shape checks read the VIEW, not the envelope
     const timing = { ms: Date.now() - t0, reused: true }
@@ -837,7 +849,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   // A program whose file is gone is the same as no program: it cannot be explained, checked, edited or shown.
   const screen = getOnScreen(sid)
   const target: ProgramTarget | null =
-    screen?.programDir && existsSync(join(WORKSPACE, screen.programDir, 'program.ts'))
+    screen?.programDir && existsSync(join(sessionHome(sid), screen.programDir, 'program.ts'))
       ? { programDir: screen.programDir, question: screen.question, params: screen.params, qid: screen.qid,
           concepts: conceptsFromProgram(screen.programDir) }
       : null
@@ -850,7 +862,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     onScreen: target,
     answerFor: (q: string) => { const r = answers.get(q); return r ? { programDir: r.programDir, params: r.params, question: r.question, answer: r.answer, createdAt: r.createdAt } : null },
     latestForProgram: (d: string) => { const r = answers.latestForProgram(d); return r ? { qid: r.qid, params: r.params, question: r.question, answer: r.answer, createdAt: r.createdAt } : null },
-    programExists: (d: string) => existsSync(join(WORKSPACE, d, 'program.ts')),
+    programExists: (d: string) => existsSync(join(sessionHome(sid), d, 'program.ts')),
   }
 
   let explainTarget: ProgramTarget | null = null
@@ -1120,7 +1132,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       let answer: any
       const runT0 = Date.now()
       try {
-        const rr = await execProgram(WORKSPACE, dir, params, { qid, sid })
+        const rr = await execProgram(sessionHome(sid), dir, params, { qid, sid })
         answer = answerView(rr.output)
         answers.recordRun({ programDir: dir, qid, question: subjectQ ?? question, params, status: answer.status, shapeHash: (rr as any).finalShapeHash, ms: Date.now() - runT0 })
         // The answer as the program returned it, with one line saying where it came from — a re-run should
@@ -1167,7 +1179,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       let answer: any
       const runT0 = Date.now()
       try {
-        const rr = await execProgram(WORKSPACE, dir, params, { qid, sid })
+        const rr = await execProgram(sessionHome(sid), dir, params, { qid, sid })
         const now = answerView(rr.output)
         let diff: CheckDiff | undefined
         if (baseline) { beat('Comparing what came back against the saved answer.'); diff = diffAnswers(baseline.answer, now) }
@@ -1222,7 +1234,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
           // a well-formed program.ts calling three units, having written one. findView only asks whether
           // program.ts exists, so the next click would have found that and run it. A directory that exists is
           // taken as a built view, so a build that did not finish must not leave one.
-          await rm(join(WORKSPACE, dir), { recursive: true, force: true }).catch(() => {})
+          await rm(join(sessionHome(sid), dir), { recursive: true, force: true }).catch(() => {})
           const why = built.escalate?.reason ?? 'the program was not written where it was asked for'
           console.log(`[ica] view → could not build ${dir} · ${why}`)
           emit(reply, { t: 'analyst:answer', category: VERBS.view.category, sid, qid, timing: { ms: Date.now() - t0 },
@@ -1235,7 +1247,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       let answer: any
       const runT0 = Date.now()
       try {
-        const rr = await execProgram(WORKSPACE, dir, params, { qid, sid })
+        const rr = await execProgram(sessionHome(sid), dir, params, { qid, sid })
         answer = answerView(rr.output)
         answers.recordRun({ programDir: dir, qid, question: viewLabel(v), params, status: answer.status, shapeHash: (rr as any).finalShapeHash, ms: Date.now() - runT0 })
         console.log(`[ica] view · ${dir} · ${existing ? 'reused' : 'built'} · ${((Date.now() - runT0) / 1000).toFixed(1)}s`)
@@ -1358,7 +1370,11 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // that program (fresh query) instead of re-invoking the LLM.
     let programDir: string | undefined, programParams: any, programTerms: any[] = [], programFollowups: string[] = []
     let programCanonical: string[] = []   // what the program ANSWERS, in question form — the retrieval substrate
-    const b = await readJsonSafe<any>(join(WORKSPACE, 'out', qid, 'built.json'), null, 'analyst')   // absent = unknowable/gap (no program)
+    // WHERE THIS TURN'S AGENT WROTE. The composer writes in the conversation's own folder; the analyst writes
+    // in the shared one, always, and what it built is filed from there.
+    const wroteIn = authoredBy === 'composer' ? sessionHome(sid) : WORKSPACE
+    const b = await readJsonSafe<any>(join(wroteIn, 'out', qid, 'built.json'), null, 'analyst')   // absent = unknowable/gap (no program)
+    if (b?.programDir && wroteIn === WORKSPACE) await fileProgram(String(b.programDir), sid)
     if (b) { programDir = b.programDir; programParams = b.params; programTerms = Array.isArray(b.terms) ? b.terms : []; programFollowups = Array.isArray(b.followups) ? b.followups.filter((x: any) => typeof x === 'string' && x.trim()).slice(0, 3) : []
              programCanonical = Array.isArray(b.canonicalQuestions) ? b.canonicalQuestions.filter((x: any) => typeof x === 'string' && x.trim()).map((x: string) => x.trim()).slice(0, 3) : [] }
     // NB: r.lastLines (the raw claude PTY tail — a garbled, cursor-addressed terminal snapshot) is deliberately NOT
@@ -2022,6 +2038,25 @@ function checkConceptIndex(): void {
 //
 // And nothing recent: a turn in flight during a restart is exactly the case that creates these, so anything
 // touched in the last ten minutes is left alone rather than raced.
+/** Move a program the analyst built into the conversation it was built for.
+ *
+ *  COPY, CHECK, THEN CLEAR — in that order, and the check is not optional. A half-filed program that is
+ *  reported as answered is a turn that succeeded on paper and cannot be re-run; and leaving the original
+ *  behind would turn the shared folder into exactly the cross-conversation pile that reading one another's
+ *  programs was supposed to stop being possible.
+ */
+async function fileProgram(programDir: string, sid: string): Promise<void> {
+  const from = join(WORKSPACE, programDir)
+  const to   = join(sessionHome(sid), programDir)
+  if (!existsSync(join(from, 'program.ts'))) return          // nothing was written here; a reuse, or already filed
+  await mkdir(dirname(to), { recursive: true })
+  await cp(from, to, { recursive: true, force: true })
+  if (!existsSync(join(to, 'program.ts'))) {
+    throw new Error(`could not file ${programDir} into ${sid} — it is not at ${to} after copying`)
+  }
+  await rm(from, { recursive: true, force: true })
+}
+
 async function sweepAbandonedPrograms(): Promise<void> {
   const dir = join(WORKSPACE, 'programs')
   if (!existsSync(dir)) return
