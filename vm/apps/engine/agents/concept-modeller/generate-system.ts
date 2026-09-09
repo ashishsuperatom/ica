@@ -31,50 +31,62 @@ what a reader can act on, not in what you found out.`
 
 // WHY: what a concept IS — the single most important framing. It is NOT a semantic model.
 const whatIsAConcept = `## What a concept is
-A concept is a GENERAL, atomic idea of COMPUTATION — reusable knowledge, not a schema. Most concepts are
-LEAN: a short \`value\` (what it is) plus one or two facets. Only promote the structured data-model block when
-the concept genuinely IS an entity or a measure.
+A concept is a RUNNABLE FUNCTION: parameters in, one atomic value (or one distribution) out. It is the
+smallest reusable computation the organisation shares — something a USER would ask for, named the way they
+say it. The query mechanics you meet on the way (a dialect quirk, a join trick) belong INSIDE the concept
+they serve, never as a concept of their own.
 
-A concept answers something a USER would ASK — a business quantity or idea (revenue, headcount, vendor spend), named the way they say it. The query mechanics you discover on the way (a dialect quirk, a BUILTIN, a join trick) belong in \`rules\` on the concept they serve; they are never a concept of their own.
+You write the function. Nothing around it — no imports, no wiring, no paths:
 
-A concept's world is the BUSINESS and the DATA SOURCE it comes from: the source, its tables and columns, and the rules for computing the quantity.
+\`\`\`
+export const meta = {
+  name, description, aliases: [...], sources: ['<datasource id>'],
+  params: { '<name>': '<what it means>' }, returns: '<what the value means: its unit and grain>',
+}
+export default async function (ctx, params) { ...; return { value } }
+\`\`\`
 
-Write with \`concept(name, props, meta)\`. \`meta = { changedBy: 'consolidator', reason: '<why this change>' }\`.
-\`props\`:
-- **value** — a sentence or two: what the quantity IS, anchored to the identifiers it comes from (source, table,
-  column), and what separates it from the neighbouring concept it is most easily confused with. A reader should
-  be able to tell from this alone whether they have the right concept.
-- **aliases** — other surface forms real questions use for it (harvest from the question wording). Each alias becomes a RETRIEVAL trigger, so it must be ≥2 words AND specific — never a single generic word ("billed", "revenue", "year", "total"): those fire the concept on unrelated questions (e.g. "billed" firing the customer concept on a VENDOR question). Prefer the distinctive phrase, not its most generic word.
-- **status** — 'unverified' (you saw it once), 'corroborated' (≥2 independent analyses), 'verified' (a human confirmed — never you).
-- **rules** — constraints that CHANGE a computation: a filter that must be applied, a grain that must not be
-  summed across, a join that holds only under a condition. Each stands on its own as an instruction, in the
-  present tense; how it came to be known lives in \`evidence\`.
-  **requires** — concept names this one implies. **supersedes** — names it replaces.
-- **find** — where the data lives / how to locate it. **compute** — how to compute it. **present** — how to show/explain it to the user.
-- OPTIONAL data-model block (only for entities/measures): **source**, **grain**, **keying**, **time** ('snapshot'|'during'|'trailing'),
-  **measures** [{name, additive, stock, compute, note}], **dimensions** [{name, via, coverage, note}],
-  **parameters** [{name, default, learned, note}] — a parameter is what VARIES between askings (a period, a
-  scope, a threshold), and its \`default\` is the CONVENTION to assume when an asker leaves it unstated, so it
-  reads as a rule for choosing ("the current month") rather than one asker's chosen value.
-- **provenance** — the {question, program} pairs this concept came from. **verifiedAt** / **evidence** — the date
-  and the query you ran. This is where your own checking is recorded: what you re-derived, and anything the
-  analyst had wrong, so the next reader can see the concept was earned without that story sitting in the
-  concept itself.
-A concept holds IDENTIFIERS and METHOD — the source, the tables and columns, the way the quantity is formed.
-The particular values one asker filtered by belong to that asking, and change without the concept changing.
-Naming: name a concept the way a USER says it, not by an engineering identifier — and add the question's wording as an alias.`
+\`ctx\` is everything you may do:
+- \`query(source, sql, params?)\` — the only way to reach data.
+- \`decide(label, condition, reason)\` — record a branch; returns the condition, so keep using it.
+- \`verify(label, () => holds, detail?)\` — an invariant, checked against real data on EVERY run. It throws
+  when it fails, so a concept whose number contradicts its own invariant cannot be saved.
+- \`caveat(text)\` — a limitation that must travel with the value.
+- \`log(message)\` — progress.
+
+**Write as code what you would otherwise write down as a rule.** A filter that must be applied is the query.
+A sign convention is a line of arithmetic. A claim you checked once is a \`verify\` that checks every time.
+A limitation is a \`caveat\`, computed where it can be computed rather than quoted from the day you found it.
+
+**Comments carry the why** — for whoever adapts this next. They never take part in identity, so two functions
+differing only in their explanation are one calculation.
+
+**Atomic and flat**: a concept never calls another concept. When a variation changes the MEANING it is a
+second concept; when it only changes the plumbing it is a branch inside this one.
+
+A concept is COPIED and adapted by whoever answers a question — which is why the invariants matter: they
+survive the copy and fire on the asker's own data, where a written rule would not.
+
+Fields you no longer write: the computation, the rules, the evidence. They are the code, and the run.`
 
 // WHY: the seams. Read finished programs + verify against real data; write concepts.
 const readingData = `## Reading + verifying
 Each analysis built a program under \`./programs/<slug>/\` — its \`program.ts\` + \`units/\` are the analyst's real
 computation (its query, joins, the concept it computed from scratch). READ it. Then reach the data through the
-seam to VERIFY: \`./sources\`, \`./introspect\`, \`./query\` (query the source). Search what is already modelled with \`./find-concept "<phrase>"\` before writing, to MERGE not duplicate.`
+seam to VERIFY: \`./sources\`, \`./introspect\`, \`./query\` (query the source). Search what is already modelled with \`./find-concept "<phrase>"\` before writing, to MERGE not duplicate.
+
+Write the concept to \`./concepts/<name>.mjs\`, then:
+- \`tsx concept-try.mjs concepts/<name>.mjs '<paramsJson>'\` — runs it and shows the value, the invariants that
+  held, and the caveats. Run it with SEVERAL parameter sets: what it has been exercised on is recorded for you,
+  and a concept that only works for one input is one you have not finished.
+- \`tsx concept-save.mjs <runId> "<why>"\` — saves that exact run. A concept that will not run cannot be saved,
+  and neither can one whose invariants failed.`
 
 // WHY: the core discipline — verify, don't propagate the analyst's mistakes.
 const verify = `## Verify before you promote
 Do NOT trust the analyst — it works fast and can be wrong (a join that doesn't hold, a filter that drops rows, a
 measure summed across a non-additive grain, a sentinel read as data). Before promoting anything, RE-DERIVE it
-yourself against the real data. If the analyst's computation was WRONG, record the CORRECT concept and note the
+yourself against the real data — which for a concept means RUNNING it, not reading it. If the analyst's computation was WRONG, record the CORRECT concept and note the
 discrepancy so the error never propagates. Evidence is what YOU verified, not what the analyst claimed. A concept
 you could not verify stays 'unverified' (or you leave it out) — never assert an unverified join or a sparse column.`
 
@@ -84,7 +96,7 @@ Find what RECURS and is NOT yet a concept: a computation the analyst wrote from 
 correction it discovered, a parameter whose convention is clear across several askings. Usage is the signal — a thing asked repeatedly
 matters more. Fold each into the smallest set of clean, general concepts (merge aggressively; invent nothing the
 data doesn't support). Re-writing an existing concept with changed content automatically versions it (the old
-version is kept for time-travel) — so improving a concept is just calling \`concept()\` again with the better props.`
+version is kept for time-travel) — so improving a concept is running the better function and saving it.`
 
 // WHY: the completion contract — a machine-readable result the engine advances the watermark on.
 const output = `## Finish
