@@ -165,10 +165,34 @@ def rewrite(req):
 def signature(req):
     import hashlib, json as _json, re as _re
     sql = req.get("sql") or ""
-    dialect = req.get("dialect")
-    # The modeller's placeholder convention, made parseable. A hole is a hole either way.
-    prepared = _re.sub(r"<(\w+)>", r":\1", sql)
-    tree = sqlglot.parse_one(prepared, read=dialect)
+    # THROUGH THE SAME MAP THE REWRITE USES. Our dialect labels are ours, not SQLGlot's — 'suiteql' is Oracle
+    # grammar, 'mssql' is tsql — and passing a label straight to the parser makes every query fail to parse,
+    # which reads as "this concept is not a computation". A signature computed with a different dialect than
+    # the query runs under could disagree with reality, so there is exactly one mapping and this is it.
+    dialect = _dialect(req.get("dialect") or req.get("source_dialect"))
+    # A HOLE IS A HOLE, and some holes cannot be bind parameters. `SELECT TOP <n>` takes a number, not a
+    # placeholder, so a query perfectly valid in its own convention fails to parse once substituted — and the
+    # caller reads that as "this is not a computation" and files a measure as a note.
+    #
+    # Since the signature replaces every literal with a placeholder anyway, a literal stand-in is not a
+    # compromise: it produces exactly the same signature and parses in positions a parameter cannot. So try
+    # the parameter form, then a number, then a string, and take the first that parses.
+    holes = _re.compile(r"<[^<>]+>|:\w+")
+    attempts = [
+        _re.sub(r"<([^<>]+)>", lambda m: ":" + _re.sub(r"[^A-Za-z0-9_]", "_", m.group(1)), sql),
+        holes.sub("1", sql),
+        holes.sub("'x'", sql),
+    ]
+    tree = None
+    last = None
+    for candidate in attempts:
+        try:
+            tree = sqlglot.parse_one(candidate, read=dialect)
+            break
+        except Exception as e:  # noqa: BLE001 — any parse failure moves to the next stand-in
+            last = e
+    if tree is None:
+        raise last if last else ValueError("could not parse")
 
     for node in tree.walk():
         node.comments = None
