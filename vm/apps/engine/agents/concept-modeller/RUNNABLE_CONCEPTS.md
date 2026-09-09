@@ -1,7 +1,8 @@
 # Runnable concepts — what we are building, and why
 
-Status: steps 1–5 built and verified on branch `concepts/runnable`. Step 6 (acting on clusters) deliberately
-not started. The 30 convertible concepts have drafts; completing them is authoring work, not tooling.
+Status: steps 1–5 built and verified on branch `concepts/runnable`; one project fully migrated — 33 runnable
+concepts, nothing left convertible, 11 kept as notes. Step 6 (acting on clusters) deliberately not started:
+the report exists and has found a real duplicate, and what to do about it is still a person's call.
 
 ## The problem
 
@@ -153,3 +154,44 @@ what the manager actually has and the signature went through the same dialect ma
 **The prose was already stale.** The first migrated concept's description claimed 1,143 active employees; the
 data says 1,158. Nothing would ever have noticed, which is the argument for computing rather than quoting,
 found inside the store it was written about.
+
+## What the full migration then taught
+
+The watch item was whether concepts written as code come out *more* wrong than the prose they replace. On this
+store they did not, and the reason is that the invariants fail loudly where prose simply reads plausibly. Every
+item below is a defect the conversion surfaced, and none of them were visible in the description.
+
+**A stated window and the window actually measured were different.** A rule recorded "34 projects going live in
+Q3", meaning 34 *remaining between the day it was written and quarter end*. The whole quarter is 132. Both
+numbers are right and the sentence joining them is not, and a concept taking an explicit window cannot restate
+the ambiguity.
+
+**A filter that looks sufficient is not.** Selecting the Actual charge per time record still left records with
+two of them, so a forecast built that way overstated. The invariant caught it on first run; the fix is ranking
+to one row, not filtering harder.
+
+**A field was borrowed from the wrong record.** The employee pillar was written as the custom pillar column
+that lives on a PROJECT. It does not exist on an employee, so the query failed outright — where prose naming
+the same field would have been read straight past.
+
+**A description asserted structure the source does not have.** Utilisation targets were documented as
+pillar-specific; the record has no pillar column at all. The concept can only be written against what is there.
+
+**An invariant that cannot fail is not an invariant.** One check counted duplicate rows inside a query that had
+already removed them, and answered zero for ever. It read as a passing check for as long as nobody looked.
+
+**A migration must be safe to run twice, and say so honestly the second time.** The classifier handed already
+converted JavaScript to a SQL parser, which reported it as prose that still needed migrating.
+
+**A formula parses.** `nativeTotal * rate = audEquivalent` is an explanation written for a person and a valid
+expression to a parser, so a note was classified as a query. A runnable statement starts as a read, and never
+selects from a placeholder — a hole in table position means a template rather than a computation.
+
+**Retirement is a repoint, not a delete.** A superseded concept still owns every name people search by, so
+deleting it takes those names down with it. Moving them to the replacement leaves the old body unnamed and
+unreachable, which is what "retired" already means for a superseded version.
+
+**Two independent signals, working as intended.** The cluster report reads three invoice concepts as one
+measure along three axes — identical totals, different `GROUP BY` — and two headcount concepts as a genuine
+duplicate: same core, same axis, same 1,158. The first needs nothing; the second is a merge, and it is being
+proposed rather than performed.
