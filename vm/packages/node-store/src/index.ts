@@ -21,5 +21,6 @@ export type { Embedder, VectorIndex, Hit } from './semantic.js'
 export * from './retrieval-state.js'
 
 // Concept RUN records — the scratch trail that makes "saved == verified" checkable (see concept-run.ts).
-export { CONCEPT_RUN_SCHEMA, runId, sourceHash, putRun, getRun, runsBySource, pruneRuns } from './concept-run.js'
-export type { ConceptRunRecord } from './concept-run.js'
+export { CONCEPT_RUN_SCHEMA, runId, sourceHash, putRun, getRun, runsBySource, pruneRuns,
+         CONCEPT_SIGNATURE_SCHEMA, putSignature, signatureClusters } from './concept-run.js'
+export type { ConceptRunRecord, ConceptSignatureRow } from './concept-run.js'

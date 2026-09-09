@@ -14,8 +14,9 @@
 //   • a run that errored       — it does not execute
 //   • a run whose invariants failed — it executes and its number is wrong, which is worse
 
-import { NodeStore, getRun, upsertConcept, pruneRuns, runId as deriveRunId, runsBySource,
+import { NodeStore, getRun, upsertConcept, pruneRuns, runId as deriveRunId, runsBySource, putSignature,
          type ChangeMeta, type ConceptProps } from '@superatom/node-store'
+import { conceptSignature, type SqlSignature } from './signature.js'
 
 export interface SaveResult {
   ok: boolean
@@ -26,7 +27,21 @@ export interface SaveResult {
   observed?: unknown[]
 }
 
-export function saveConcept(store: NodeStore, runIdToSave: string, meta: ChangeMeta): SaveResult {
+/** Where the SQL half of a signature is computed. The manager owns the parser, so a signature computed
+ *  anywhere else could disagree with what actually runs. Injected so this is testable, and so an unreachable
+ *  manager degrades rather than fails. */
+export type SignSql = (sql: string) => Promise<SqlSignature | null>
+
+export const managerSignSql = (managerUrl: string): SignSql => async (sql) => {
+  const r = await fetch(`${managerUrl}/signature`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sql }), signal: AbortSignal.timeout(10_000),
+  })
+  if (!r.ok) return null
+  return ((await r.json()) as any).signature ?? null
+}
+
+export async function saveConcept(store: NodeStore, runIdToSave: string, meta: ChangeMeta, signSql?: SignSql): Promise<SaveResult> {
   const run = getRun(store.db, runIdToSave)
   if (!run) return { ok: false, reason: `no such run ${runIdToSave} — run the concept first` }
   if (run.error) return { ok: false, reason: `that run failed, so there is nothing verified to save:\n${run.error.split('\n')[0]}` }
@@ -63,6 +78,22 @@ export function saveConcept(store: NodeStore, runIdToSave: string, meta: ChangeM
   }
 
   const node = upsertConcept(store, m.name, props, meta)
+
+  // THE SIGNATURE IS DERIVED, AND ITS FAILURE IS NOT THE SAVE'S FAILURE. It is an observation used to notice
+  // duplication later; a concept that is correct and verified must not be rejected because a parser was
+  // unreachable. Recorded when it can be, skipped with a warning when it cannot.
+  if (signSql) {
+    try {
+      const sig = await conceptSignature(run.source, { signSql })
+      putSignature(store.db, {
+        conceptId: node.id, name: m.name, hash: sig.hash, coreHash: sig.sql[0]?.coreHash,
+        dimension: sig.sql[0]?.dimension ?? [], calls: sig.calls, degraded: sig.degraded, sig, at: Date.now(),
+      })
+    } catch (e: any) {
+      console.warn(`[concept] signature not computed for ${m.name}: ${e?.message ?? e}`)
+    }
+  }
+
   pruneRuns(store.db)                          // scratch: nothing depends on a run once its concept exists
   return { ok: true, conceptId: node.id, name: m.name, observed: observedParams(store, run.sourceHash) }
 }

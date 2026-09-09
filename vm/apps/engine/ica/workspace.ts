@@ -296,7 +296,7 @@ console.log('Save with:  tsx concept-save.mjs ' + r.runId + ' "<why>"')
 // mistake that would make "verified" meaningless, so it is made impossible rather than discouraged.
 //
 // It refuses: an unknown run, a run that errored, and a run whose invariants did not hold.
-import { saveConcept } from ${JSON.stringify(conceptSaveImport)}
+import { saveConcept, managerSignSql } from ${JSON.stringify(conceptSaveImport)}
 import { NodeStore } from '@superatom/node-store'
 import { fileURLToPath } from 'node:url'
 
@@ -304,7 +304,8 @@ const [runId, reason] = process.argv.slice(2)
 if (!runId) { console.error('usage: tsx concept-save.mjs <runId> "<why>"'); process.exit(1) }
 
 const store = new NodeStore(fileURLToPath(new URL('../db/project.sqlite', import.meta.url)))
-const r = saveConcept(store, runId, { changedBy: 'consolidator', reason: reason || undefined })
+const r = await saveConcept(store, runId, { changedBy: 'consolidator', reason: reason || undefined },
+                            managerSignSql(process.env.DATASOURCE_URL || 'http://localhost:4000'))
 if (!r.ok) { console.error('✗ not saved — ' + r.reason); process.exit(1) }
 console.log('✓ saved ' + r.name + ' (' + r.conceptId + ')')
 console.log('  exercised with ' + JSON.stringify(r.observed))
