@@ -453,6 +453,37 @@ function flushOutbox() {
  *
  *  Deliberately narrow: it flags shapes that CANNOT render, not answers it dislikes. A quiet answer is fine;
  *  an unrenderable one is a bug, and it should say so rather than reach the screen. */
+/** Make an answer renderable where that can be done without inventing anything, and say what was changed.
+ *
+ *  REPAIR, NOT REJECT, AND NEVER IN SILENCE. The check below already ran on every answer and every route, and
+ *  it only logged: two answers shipped a headline with no `display`, which is the one field the card prints,
+ *  so a correct figure arrived and rendered as nothing. Refusing the answer would be worse — the figure is
+ *  right and the reader would get an error instead — and leaving it is what we have been doing.
+ *
+ *  Only the unambiguous cases. A headline written as a string is a display with no label. A headline holding a
+ *  value but no display is a number nobody formatted, and the raw number is a truthful, if plain, rendering of
+ *  itself. Anything requiring a guess about MEANING is left alone and reported, because a card that renders
+ *  the wrong thing is worse than one that renders nothing. */
+function repairAnswerShape(a: any): string[] {
+  const done: string[] = []
+  if (!a || typeof a !== 'object') return done
+  if (typeof a.headline === 'string') {
+    a.headline = { label: '', display: a.headline }
+    done.push('headline was a string — read as its display')
+  }
+  const h = a.headline
+  if (h && typeof h === 'object' && !h.display && h.value != null && typeof h.value !== 'object') {
+    h.display = typeof h.value === 'number' ? h.value.toLocaleString() : String(h.value)
+    done.push(`headline had no display — showing its value (${h.display})`)
+  }
+  if (Array.isArray(a.caveat)) {
+    // The contract allows both; the renderer prints a string. Joining is lossless.
+    a.caveat = a.caveat.filter((c: any) => typeof c === 'string' && c.trim()).join(' ')
+    done.push('caveat was a list — joined')
+  }
+  return done
+}
+
 export function answerShapeProblem(a: any): string {
   if (!a || typeof a !== 'object') return 'answer is not an object'
   if (a.status && a.status !== 'answered') return ''            // cannot_answer / uncertain carry prose, not a card
@@ -1354,6 +1385,9 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // Checked here because EVERY route lands on this line — composer, analyst, recovered-after-timeout. The
     // first version of this check only ran on the analyst's answer, and the bug that reached the user came
     // back through the composer.
+    // Repair what can be repaired BEFORE judging, so the check reports only what is genuinely unrenderable.
+    const repairs = repairAnswerShape(r.answer)
+    for (const fix of repairs) console.warn(`[answer] repaired for qid=${qid} (${authoredBy ?? 'unknown'}): ${fix}`)
     const shapeProblem = answerShapeProblem(r.answer)
     if (shapeProblem) console.error(`[answer] SHAPE PROBLEM for qid=${qid} (${authoredBy ?? 'unknown'}): ${shapeProblem}`)
     emit(reply, { t: 'analyst:answer', category: r.category, answer: r.answer, timing, sid, qid, shapeProblem: shapeProblem || undefined })
