@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3'
+import { CONCEPT_RUN_SCHEMA } from './concept-run.js'
 import { DATASOURCE_INDEX_SCHEMA } from './datasource-index.js'
 import { RETRIEVAL_STATE_SCHEMA } from './retrieval-state.js'
 import { mkdirSync } from 'node:fs'
@@ -68,6 +69,9 @@ export class NodeStore {
     // The retrieval system's frozen parameters (see RETRIEVAL_STATE_SCHEMA). Created here with the rest so a
     // fresh database has it from the first read, and no caller has to remember to.
     this.db.exec(RETRIEVAL_STATE_SCHEMA)
+    // Concept RUN records — scratch, but created here with everything else so a fresh database has the table
+    // from its first read and no caller has to remember to make it.
+    this.db.exec(CONCEPT_RUN_SCHEMA)
   }
 
   close() { this.db.close() }

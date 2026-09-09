@@ -1,0 +1,102 @@
+// ── RUNNING A CONCEPT ─────────────────────────────────────────────────────────────────────────────────────
+//
+// The author writes a function. Everything else — the context, the execution, the recording — happens here,
+// deterministically, the same way every time. That division exists because boilerplate is what an agent gets
+// wrong: an import path, an escape, a forgotten await. Written once by a tool, it cannot drift the way
+// boilerplate rewritten on each occasion does.
+//
+// NO WRAPPER FILE IS GENERATED. The original plan was to emit a module with the right imports around the
+// author's function, run it, and delete it. That turned out to be unnecessary: `ctx` is an ARGUMENT, so a
+// concept file has nothing to import, and the runner can simply load it and call it. Which also removes an
+// entire class of bug — this repository has shipped a broken generated file three times, always an escape
+// that looked right in the template and was wrong once written out.
+//
+// A CONCEPT THAT WILL NOT RUN CANNOT BE SAVED. The failure is recorded with the run so the author can read
+// it, and the record is marked with the error so nothing downstream can persist it by mistake.
+
+import { pathToFileURL } from 'node:url'
+import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
+import { query as dsQuery } from '@superatom/scaffold'
+import type { ConceptCtx, ConceptMeta, ConceptResult } from '@superatom/scaffold'
+import { NodeStore, putRun, runId as makeRunId, sourceHash, type ConceptRunRecord } from '@superatom/node-store'
+
+export interface TryOpts {
+  /** Path to the author's file: `meta` + a default function, no imports. */
+  file: string
+  params?: unknown
+  store: NodeStore
+  /** Where a query goes. Defaults to the datasource seam every unit already uses. */
+  query?: ConceptCtx['query']
+  /** Live progress, so a long concept is distinguishable from a stuck one. */
+  onEvent?: (e: Record<string, unknown>) => void
+}
+
+export interface TryResult extends ConceptRunRecord {
+  /** True when the concept ran AND every invariant held — the only state from which a save is allowed. */
+  ok: boolean
+}
+
+/** Load a concept file, run it once with `params`, and record what happened. */
+export async function tryConcept(opts: TryOpts): Promise<TryResult> {
+  const path = resolve(opts.file)
+  const source = await readFile(path, 'utf8')
+  const params = opts.params ?? {}
+  const id = makeRunId(source, params)
+  const started = Date.now()
+
+  const caveats: string[] = []
+  const verifications: TryResult['verifications'] = []
+  const emit = (e: Record<string, unknown>) => { try { opts.onEvent?.(e) } catch { /* a watcher cannot break a run */ } }
+
+  // The SAME primitives a unit gets, minus `use` — so this body is already valid inside a program, which is
+  // where it will end up when an agent copies and adapts it.
+  const ctx: ConceptCtx = {
+    query: opts.query ?? ((sourceId, sql, p) => dsQuery(sourceId, sql, p)),
+    decide: (label, condition, reason) => { emit({ t: 'decide', label, took: !!condition, reason }); return condition },
+    verify: async (label, holds, detail) => {
+      const t0 = Date.now()
+      let ok = false
+      try { ok = !!(await holds()) }
+      catch (e: any) {
+        // A check that could not run has not passed. Kept distinguishable from a check that ran and failed,
+        // without ever letting a broken check read as a satisfied one.
+        verifications.push({ label, ok: false, detail: `check threw: ${e?.message ?? e}`, ms: Date.now() - t0 })
+        emit({ t: 'verify', label, ok: false })
+        throw new Error(`verification "${label}" could not run: ${e?.message ?? e}`)
+      }
+      verifications.push({ label, ok, detail, ms: Date.now() - t0 })
+      emit({ t: 'verify', label, ok })
+      if (!ok) throw new Error(`verification failed: ${label}${detail ? ` — ${detail}` : ''}`)
+    },
+    caveat: (text) => { const t = String(text).slice(0, 500); caveats.push(t); emit({ t: 'caveat', text: t }) },
+    log: (message) => emit({ t: 'log', text: String(message).slice(0, 1000) }),
+  }
+
+  let result: ConceptResult | undefined
+  let meta: ConceptMeta | undefined
+  let error: string | undefined
+  try {
+    // Cache-busted: an author iterates on one file, and a stale module would silently run the previous
+    // attempt — the most confusing failure available in a loop like this one.
+    const mod: any = await import(`${pathToFileURL(path).href}?v=${Date.now()}`)
+    meta = mod.meta
+    if (typeof mod.default !== 'function') throw new Error('no default export — a concept is a function (ctx, params)')
+    if (!meta?.name) throw new Error('meta.name is missing — a concept must say what a user would call it')
+    if (!Array.isArray(meta.sources)) throw new Error('meta.sources is missing — declare which datasources this reads')
+    result = await mod.default(ctx, params)
+    if (!result || (result.value === undefined && result.distribution === undefined)) {
+      // Neither is not a concept: something must be computed, or there is nothing to be atomic ABOUT.
+      throw new Error('returned neither `value` nor `distribution` — a concept computes something')
+    }
+  } catch (e: any) {
+    error = String(e?.stack ?? e?.message ?? e).slice(0, 4000)
+  }
+
+  const record: ConceptRunRecord = {
+    runId: id, sourceHash: sourceHash(source), name: meta?.name, params,
+    result, caveats, verifications, source, meta, ms: Date.now() - started, error, at: Date.now(),
+  }
+  putRun(opts.store.db, record)
+  return { ...record, ok: !error }
+}

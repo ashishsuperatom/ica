@@ -1,0 +1,82 @@
+// ── SAVING A CONCEPT ──────────────────────────────────────────────────────────────────────────────────────
+//
+// Saving takes a runId, never a body. If an author could hand over source at save time, "verified" would
+// describe something nobody executed — and the failure mode is the quiet one: try B, save the id of A from
+// three messages ago, and store a concept that has never run.
+//
+// The id is derived from the source and the parameters, so this does not merely look the record up: it
+// RE-DERIVES the id from the stored source and refuses a mismatch. What is written is what ran, structurally
+// rather than by convention.
+//
+// Three refusals, all of them the same principle — a concept nobody can trust must not become knowledge
+// everybody reuses:
+//   • an unknown run           — nothing was verified
+//   • a run that errored       — it does not execute
+//   • a run whose invariants failed — it executes and its number is wrong, which is worse
+
+import { NodeStore, getRun, upsertConcept, pruneRuns, runId as deriveRunId, runsBySource,
+         type ChangeMeta, type ConceptProps } from '@superatom/node-store'
+
+export interface SaveResult {
+  ok: boolean
+  reason?: string
+  conceptId?: string
+  name?: string
+  /** Every parameter set this exact body has been exercised on — see `observedParams`. */
+  observed?: unknown[]
+}
+
+export function saveConcept(store: NodeStore, runIdToSave: string, meta: ChangeMeta): SaveResult {
+  const run = getRun(store.db, runIdToSave)
+  if (!run) return { ok: false, reason: `no such run ${runIdToSave} — run the concept first` }
+  if (run.error) return { ok: false, reason: `that run failed, so there is nothing verified to save:\n${run.error.split('\n')[0]}` }
+
+  const failed = run.verifications.filter((v) => !v.ok)
+  if (failed.length) {
+    return { ok: false, reason: `invariants did not hold: ${failed.map((f) => f.label).join('; ')}` }
+  }
+
+  // The id is a function of the source; re-deriving it proves the record was not tampered with between the
+  // run and the save. Cheap, and it turns a convention into a property.
+  if (deriveRunId(run.source, run.params) !== run.runId) {
+    return { ok: false, reason: 'the stored source does not hash to its run id — refusing to save' }
+  }
+
+  const m: any = run.meta ?? {}
+  if (!m.name) return { ok: false, reason: 'that run has no meta.name' }
+
+  // THE BODY IS THE CONCEPT. `value`/`description` remain prose because a reader still needs to know what
+  // this IS and how it differs from its nearest neighbour — but the computation, the rules and the
+  // verification are no longer described here, they are the code.
+  const props: ConceptProps = {
+    value: String(m.description ?? '').trim() || `Computes ${m.name}.`,
+    status: 'verified',                       // it ran, and every invariant it declared held
+    source: Array.isArray(m.sources) ? m.sources[0] : undefined,
+    compute: run.source,                      // runnable, not a recipe
+    parameters: paramsFacet(m.params),
+    verifiedAt: new Date(run.at).toISOString(),
+    evidence: `ran ${run.runId} in ${run.ms}ms; ${run.verifications.length} invariant(s) held`,
+  }
+
+  const node = upsertConcept(store, m.name, props, meta)
+  pruneRuns(store.db)                          // scratch: nothing depends on a run once its concept exists
+  return { ok: true, conceptId: node.id, name: m.name, observed: observedParams(store, run.sourceHash) }
+}
+
+/** The parameter sets this exact body has been run with — a RECORD of what was exercised, never a claim
+ *  about what matters. An author checking behaviour across several inputs produces this for free. */
+export function observedParams(store: NodeStore, hash: string): unknown[] {
+  const seen = new Set<string>()
+  const out: unknown[] = []
+  for (const r of runsBySource(store.db, hash)) {
+    if (r.error) continue                       // a failed attempt says nothing about which inputs are valid
+    const k = JSON.stringify(r.params)
+    if (!seen.has(k)) { seen.add(k); out.push(r.params) }
+  }
+  return out
+}
+
+/** meta.params is `name → what it means`; the concept schema wants a list. Descriptions only — the VALUES
+ *  live in the run records, because which values matter is discovered by running, not declared. */
+const paramsFacet = (params: Record<string, string> | undefined) =>
+  params ? Object.entries(params).map(([name, note]) => ({ name, note })) : undefined
