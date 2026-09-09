@@ -82,8 +82,16 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
     'data context are already in your instructions. Search concepts with `./find-concept "<phrase>"`; explore the',
     'data with `./query`/`./introspect`; escalate to the analyst on a hard problem (many composers share one analyst).',
     '',
-    'Each question arrives with the path to write your result to, as `RESULT →`. Everything below is how you work,',
-    'every time, and is not repeated with the question.',
+    'Each question is followed by `meta:` — the mechanical facts for that question, not part of what was asked:',
+    '  qid              this turn',
+    '  result           write your result here as your final action',
+    '  escalate         write here instead when you are handing it to the analyst',
+    '  matchedPrograms  what the engine\'s search turned up, with a similarity score. A LEAD, not an answer: the',
+    '                   search runs on wording, so a high score can be the wrong measure and an empty list can sit',
+    '                   beside a program that fits. Judge it yourself, and search again with your own phrase.',
+    '  askedBefore      this exact question has been answered by that program before, with those parameters.',
+    '',
+    'Everything below is how you work, every time, and is not repeated with the question.',
     '',
     '1. Can a candidate program answer THAT question EXACTLY — the SAME measure, scope and grain, differing at most',
     '   by a parameter (a date, a top-N)? Only then reuse it: pick it, run it, and COMMIT — write the RESULT path =',
@@ -93,7 +101,9 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
     '   A program built for a RELATED-but-different question is NOT a fit — "amount billed" is not "net spend", a',
     '   header total is not a line-level breakdown, gross is not net. Do NOT adapt or force-fit a program; when it is',
     '   not an EXACT match, build from the CONCEPTS — never from a not-quite program. Accuracy over reuse.',
-    '2. Otherwise COMPOSE from the concepts (`./find-concept "<phrase>"` for names, `./get-concept "<name>"` for one).',
+    '2. Otherwise COMPOSE from the concepts. Search them YOURSELF — `./find-concept "<phrase>"` in your own words,',
+    '   and again with different words when the first misses; the phrase you pick after seeing the problem beats',
+    '   anything pre-fired from the asker\'s wording. Open what looks right with `./get-concept "<name>"`.',
     '   If they don\'t fully cover it, do the work yourself — `./query`/`./introspect` the data, analyse, write the',
     '   units + program. Run it (`tsx run.mjs programs/<slug>/program.ts \'<json>\'`), verify against the review checks.',
     '   Then COMMIT, as your final action — once everything else is finished and verified: write the RESULT path =',
@@ -101,8 +111,12 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
     '   program is actually built on>"]}. `canonicalQuestions` — the question this program answers, phrased so its',
     '   parameters are visible ("… for customer <customer> in <period>"); add another only when it genuinely answers',
     '   a differently-phrased question.',
-    '3. Escalate to the analyst when it is a hard problem or you cannot work it out: write the ESCALATE path =',
-    '   {"reason":"<what is blocking you>"} and STOP. Many composers share one analyst, so do the rest yourself.',
+    '3. Escalate on FINISHABILITY, never on nothing having matched. You have every tool the analyst has, so',
+    '   "nothing matched" is where the work starts. What you cannot spend is an analyst\'s worth of time — so',
+    '   escalate when the data is not where you expected, the approach needs establishing from scratch, or you',
+    '   have tried and it is not coming out right. Write the escalate path = {"reason":"<what is blocking you>"}',
+    '   and STOP. Escalating at ninety seconds beats a wrong answer at four minutes; many composers share one',
+    '   analyst, so do the rest yourself.',
   ].join('\n')
 
   const systemReference = [sysFile(), METHOD, AUTHORING_REFERENCE, context].filter(Boolean).join('\n\n')
@@ -154,39 +168,7 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       }
 
       const cands = (o.candidates ?? []).filter(c => c.program)
-      const candBlock = cands.length
-        ? 'Existing programs the engine matched to this question (score = similarity, higher = closer):\n' +
-          cands.slice(0, 6).map(c => `- ${c.program} — "${c.question}" (${c.score.toFixed(2)})`).join('\n')
-        : 'No existing program matched this question.'
-      // SEARCH FOR THEM YOURSELF. The engine used to pre-search and hand over six concept names; it no longer
-      // does, because the phrase YOU pick is a better cue than n-grams of the user's wording — it is your
-      // current hypothesis, chosen after seeing the problem — and you can search again when the first phrase
-      // misses, which a single pre-fire never could.
-      //
-      // ESCALATE NEEDS BOTH TO BE EMPTY. The first version of this said "no concept fits → escalate", which was
-      // inherited from when the engine handed over the list: an empty list then meant the engine had searched
-      // and found nothing. Now the composer does the searching, and a real search returns nothing far more
-      // often — so that wording threw away perfectly good program matches. Observed immediately: a question
-      // with an existing program at 0.87 similarity, which the agent had already recognised in its own words
-      // ("an existing program already answers this exact question"), escalated to the analyst because no
-      // CONCEPT matched. Reuse never needed a concept; the two are separate paths to an answer.
-      const conceptBlock = '\nStart with what exists: `./find-concept "<phrase>"` (full-text, fast — search in your' +
-        ' own words, and again with different words if the first misses), and open the ones that look right with' +
-        // The flag is OMITTED when there is no qid, never emitted empty: `--qid ` with nothing after it makes
-        // the tool swallow the next argument. builtRel above already treats qid as optional, so that path is
-        // real, not hypothetical.
-        ` \`./get-concept "<name>"${o.qid ? ` --qid ${o.qid}` : ''}\`. A fitting concept is the fastest correct route, and a` +
-        ' program above may answer this already.\n' +
-        // ESCALATE ON FINISHABILITY, not on the absence of a concept. This used to read "no program AND no concept
-        // → escalate", which contradicted the system prompt the moment the composer stopped being forbidden to
-        // discover: it has every tool the analyst has, so "nothing matched" is the start of the work, not the end
-        // of it. What it cannot do is spend an analyst's worth of time — so the test is whether the question is
-        // finishable from here, and escalating early is a good outcome, not a failure.
-        `Where nothing fits, work it out yourself — every tool is available. ESCALATE when the question is not` +
-        ` finishable from here: the data is not where you expected, the approach needs establishing from scratch,` +
-        ` or you have tried and it is not coming out right. Then write ${escalateRel} = {"reason":"<what is` +
-        ` missing or what you tried>"} and STOP. Escalating at ninety seconds beats a wrong answer at four` +
-        ` minutes.\n`
+
       const m = o.modify
       // MODIFY: edit the SAME program in place (the engine supplies the current program — it may be from a
       // reuse, so it is NOT in your context). No new program, no escalate — just apply the edit and rerun.
@@ -219,16 +201,26 @@ is wrong with it — as well as fixing the program.` : ''}` : ''
       // method is a brief; a turn that is the question is a conversation, and this session has the earlier
       // turns in it.
       const asked = question + (o.resolvedQuestion ? `\n(in full: ${o.resolvedQuestion})` : '')
-      // THE TURN IS THE QUESTION. Not the question inside a brief: the method is in the instructions, said
-      // once. What stays is what changes per question — where to write the result, and what the engine found.
+      // THE TURN IS THE QUESTION, THEN META. A model answers a follow-up the way anything does — by reading
+      // what came before — and it had the earlier turns all along. What stopped it was that every question
+      // arrived rephrased and wrapped in a full brief, which reads as a new assignment rather than the next
+      // thing said. So the question goes as asked, and the mechanical facts go after it, marked as what they
+      // are: where to put the result, and what the engine's search turned up.
+      const meta = [
+        `qid ${o.qid ?? '-'}`,
+        `result ${builtRel}`,
+        `escalate ${escalateRel}`,
+        ...(cands.length
+          ? [`matched ${cands.slice(0, 6).map((c) => `${c.program} "${c.question}" (${c.score.toFixed(2)})`).join('; ')}`]
+          : ['matched nothing']),
+        ...(o.canonicalMatch
+          ? [`asked before ${o.canonicalMatch.programDir} with ${JSON.stringify(o.canonicalMatch.params)}`]
+          : []),
+      ].join('\n')
       const composePrompt = `${asked}
 
-RESULT → ${builtRel}   ·   ESCALATE → ${escalateRel}
-${candBlock}${conceptBlock}${o.canonicalMatch ? `
-ASKED BEFORE — this exact question was answered by \`${o.canonicalMatch.programDir}\` with ${JSON.stringify(o.canonicalMatch.params)}.
-That is a starting point, not a verdict: it was written for the earlier asking and the data has moved since. Run it
-(\`tsx run.mjs ${o.canonicalMatch.programDir}/program.ts '${JSON.stringify(o.canonicalMatch.params)}'\`) and read the output as the person who asked would.
-` : ''}`
+meta:
+${meta}`
       // `build` is a COMPLETE instruction, handed over whole — a view, and anything later that knows exactly
       // what it wants written. It bypasses the compose preamble and the concept block on purpose: that block
       // says "no concept fits this question, ESCALATE now" whenever no concepts were passed, so wrapping a
