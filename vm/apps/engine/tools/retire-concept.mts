@@ -50,7 +50,9 @@ for (const [oldName, newName] of pairs) {
   const names = namesFor(store, from.id)
   console.log(`${APPLY ? '→' : '·'} ${oldName} → ${newName}  (${names.length} name${names.length === 1 ? '' : 's'}: ${names.join(', ')})`)
   if (APPLY) {
-    for (const n of names) putIndex(store, n, to.id, { changedBy: 'retire-concept', reason: `superseded by ${newName}` })
+    // A PERSON RUNS THIS, from a shell, naming both concepts. That is what `human:` means here, and it is why
+    // retiring may move a name the write path would refuse to move on an agent's say-so.
+    for (const n of names) putIndex(store, n, to.id, { changedBy: 'human:retire-concept', reason: `superseded by ${newName}` })
     moved += names.length
   }
 }

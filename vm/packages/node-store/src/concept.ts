@@ -141,6 +141,19 @@ export function putIndex(store: NodeStore, name: string, target: string, meta: C
   const cur = store.getNode(id)
   const curTarget = (cur?.props as any)?.target
   if (curTarget === target) return
+  // A VERIFIED CONCEPT DOES NOT LOSE ITS NAME TO AN AGENT. Nothing is ever deleted here, so moving a name
+  // destroys no body — but the name is how anyone reaches one, and a concept nobody can find is gone in
+  // every way that matters. `verified` is the one rung a person grants, so only a person may move it. This
+  // sits at the pointing itself rather than in one caller, because a guard that lives above the choke point
+  // is a guard with a way around it.
+  if (curTarget && !/^human:/.test(meta.changedBy)) {
+    const held: any = store.getNode(curTarget)
+    if ((held?.props as any)?.status === 'verified') {
+      throw new Error(
+        `"${name}" names a concept a person has verified (${curTarget}); an agent cannot move that name. ` +
+        `Use a name of its own, or have a person make the change.`)
+    }
+  }
   // STRICTLY AFTER the pointing it replaces. Two writes inside one millisecond — which consolidation can
   // easily do — would otherwise close the old window at the instant it opened, giving a pointing that was
   // never true for any `at`, and leaving two rows with the same valid_from for history to order arbitrarily.
