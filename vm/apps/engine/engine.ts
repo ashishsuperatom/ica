@@ -377,7 +377,7 @@ function getComposer(sid: string): Promise<Composer> {
     e = undefined
   }
   if (!e) {
-    e = { composer: createComposer({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, ica: { baseUrl: OC_URL } }),
+    e = { composer: createComposer({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, sessionId: sid, ica: { baseUrl: OC_URL } }),
           lastUsed: Date.now(), builtWith: want }
     composersBySession.set(sid, e)
     console.log(`[ica] composer: new session ${sid.slice(0, 8)} (live composers: ${composersBySession.size})`)

@@ -35,6 +35,18 @@ export interface WorkspaceSpec {
   projectId: string
   managerUrl?: string          // the datasource-manager (the ONE data seam), default http://localhost:4000
   context?: string             // freeform project description to drop into CONTEXT.md
+  /** ONE CONVERSATION, ONE WORKING DIRECTORY. When given, the agent's cwd is a folder of its own holding its
+   *  own `programs/` and `out/`, with the shared seams symlinked in.
+   *
+   *  Everything the agent writes then belongs to the conversation that asked for it, which is what makes a
+   *  fixed path safe: turns within one session are serialised, so a tool writing to a known filename cannot
+   *  collide with another conversation. In one shared directory it could — which is why every turn had to be
+   *  told a per-question path, and why that path had to be repeated with every question.
+   *
+   *  It also stops one asker's program being visible to another. A program encodes the scope and filters of
+   *  the question that produced it, so borrowing one across conversations is a correctness problem before it
+   *  is a privacy one. */
+  sessionId?: string
 }
 
 export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
@@ -50,10 +62,14 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
   //
   // WHY: an agent poking or corrupting the engine's own store would be a mess to debug. Keeping db/ out of the
   // agent's cwd means its normal `ls`/`find` never even surfaces our databases. This is HYGIENE, not a hard wall
-  // (a determined shell can still reach `../db`) — the seams themselves reach the db by a relative path
-  // (`../../db/…`), which is exactly how the engine reads/writes the same files from its side.
+  // (a determined shell can still reach `../db`) — the seams themselves are generated holding the ABSOLUTE
+  // path to it. They used to walk up relative to their own file, at two different depths depending on which
+  // folder a seam landed in, and one of them was wrong by a level: it did not fail, it created a second,
+  // empty database at the wrong path and read from that, so every concept reported no last run. A generated
+  // file knows where it is being written; there is nothing to walk.
   const projectHome = join(s.root, s.projectId)
-  const dir = join(projectHome, 'workspace')
+  const shared = join(projectHome, 'workspace')
+  const dir = s.sessionId ? join(projectHome, 'sessions', s.sessionId) : shared
   const dbDir = join(projectHome, 'db')
   // WHAT EACH TURN OPENED. Engine-private, beside the databases rather than in the workspace: it is a record
   // ABOUT the agent's work, not part of it, and nothing in the workspace should be tempted to read it.
@@ -202,7 +218,7 @@ export async function sources() {   // list data sources + their kind/dialect
 //
 import { NodeStore, upsertConcept as _c, getConcept as _g, indexHistory as _ih, namesFor as _nf } from '@superatom/node-store'
 import { fileURLToPath } from 'node:url'
-const store = new NodeStore(fileURLToPath(new URL('../../db/project.sqlite', import.meta.url)))
+const store = new NodeStore(${JSON.stringify(join(dbDir, 'project.sqlite'))})
 export const concept = (name, props, meta) => _c(store, name, props, meta)
 export const getConcept = (name, asOf) => _g(store, name, asOf)
 export const indexHistory = (name) => _ih(store, name)
@@ -287,7 +303,7 @@ if (metaFile) {
   catch (e) { console.error('could not read ' + metaFile + ': ' + e.message); process.exit(1) }
 }
 
-const store = new NodeStore(fileURLToPath(new URL('../db/project.sqlite', import.meta.url)))
+const store = new NodeStore(${JSON.stringify(join(dbDir, 'project.sqlite'))})
 const r = await tryConcept({ file, params, meta, store, onEvent: (e) => process.stderr.write('  ' + JSON.stringify(e) + '\\n') })
 
 if (!r.ok) {
@@ -327,7 +343,7 @@ const replace = args.includes('--replace')
 const [runId, reason] = args.filter((a) => a !== '--replace')
 if (!runId) { console.error('usage: tsx concept-save.mjs <runId> "<why>" [--replace]'); process.exit(1) }
 
-const store = new NodeStore(fileURLToPath(new URL('../db/project.sqlite', import.meta.url)))
+const store = new NodeStore(${JSON.stringify(join(dbDir, 'project.sqlite'))})
 const r = await saveConcept(store, runId, { changedBy: 'consolidator', reason: reason || undefined },
                             managerSignSql(process.env.DATASOURCE_URL || 'http://localhost:4000'), { replace })
 if (!r.ok) { console.error('✗ not saved — ' + r.reason); process.exit(1) }
@@ -449,7 +465,7 @@ export async function forSource(id) {
 //   listConcepts()                    → every concept's phrase (the menu) — see what exists before you search
 import { NodeStore } from '@superatom/node-store'
 import { fileURLToPath } from 'node:url'
-const store = new NodeStore(fileURLToPath(new URL('../../db/project.sqlite', import.meta.url)))
+const store = new NodeStore(${JSON.stringify(join(dbDir, 'project.sqlite'))})
 const propsOf = (n) => (typeof n.props === 'string' ? JSON.parse(n.props || '{}') : (n.props || {}))
 const guide = (n) => { const { _v, ...g } = propsOf(n); return { name: n.label, version: _v?.version, ...g } }   // name = the label; hide raw version metadata
 // SPECIFICITY ranking (same idea the engine uses to surface concept names): a concept's NAME is its set of
@@ -551,7 +567,7 @@ async function defaultSource() { if (!_default) _default = (await _sources())[0]
 // Hierarchies of the live kinds (column/derived-query/cross-source) resolve THROUGH this at query time — the
 // source's own tree is the single source of truth, so results are always fresh and nothing is copied/synced.
 const source = async (sql, src, params) => _query(src ?? await defaultSource(), sql, params ?? {})
-const store = new GroundingStore(fileURLToPath(new URL('../../db/grounding.sqlite', import.meta.url)), { source })
+const store = new GroundingStore(${JSON.stringify(join(dbDir, 'grounding.sqlite'))}, { source })
 // Grounding holds the CURRENT state only (not versioned). NOT DONE YET: re-running build() is not a clean
 // refresh — it upserts on top, so values gone from the source linger and a differently-shaped re-run leaves
 // both shapes. (Flagging the consequence; not a decision on how to fix it.)
@@ -570,6 +586,43 @@ export const raw = store
   // path and runs its driver with tsx (node can't resolve node-store's .ts imports; tsx can), so `./find-*`
   // returns clean JSON on the FIRST try from ANY directory. The agent never reads the .mjs source.
   const drivers: Record<string, string> = {
+    // ── HANDING BACK A RESULT ────────────────────────────────────────────────────────────────────────────
+    // The agent says WHAT it built; where that is recorded is not its business. Every turn used to carry the
+    // path to write to, which meant every turn carried a per-question value, which is one of the things that
+    // made a question read as a fresh assignment rather than the next thing said.
+    //
+    // A tool can find the turn on its own. Each agent runs one session with queued turns, so only one turn in
+    // a directory is ever live, and the engine leaves its id here before asking. Nothing races, and the agent
+    // never handles a path.
+    commit: `// Record the program that answers the current question.
+import { readFile, mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+const HOME = ${JSON.stringify(dir)}
+const raw = process.argv.slice(2).join(' ').trim()
+if (!raw) { console.error('usage: ./commit \\'{"programDir":"programs/<slug>","params":{…}}\\''); process.exit(1) }
+let payload
+try { payload = JSON.parse(raw) } catch (e) { console.error('that is not JSON: ' + e.message); process.exit(1) }
+if (!payload || !payload.programDir) { console.error('a commit needs a programDir — the program that answers this'); process.exit(1) }
+const qid = (await readFile(join(HOME, '.turn'), 'utf8').catch(() => '')).trim()
+if (!qid) { console.error('there is no turn in progress here'); process.exit(1) }
+await mkdir(join(HOME, 'out', qid), { recursive: true })
+await writeFile(join(HOME, 'out', qid, 'built.json'), JSON.stringify(payload, null, 2))
+console.log('committed ' + payload.programDir)
+`,
+
+    escalate: `// Hand this question to the analyst and stop.
+import { readFile, mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+const HOME = ${JSON.stringify(dir)}
+const reason = process.argv.slice(2).join(' ').trim()
+if (!reason) { console.error('usage: ./escalate "<what is blocking you>"'); process.exit(1) }
+const qid = (await readFile(join(HOME, '.turn'), 'utf8').catch(() => '')).trim()
+if (!qid) { console.error('there is no turn in progress here'); process.exit(1) }
+await mkdir(join(HOME, 'out', qid), { recursive: true })
+await writeFile(join(HOME, 'out', qid, 'escalate.json'), JSON.stringify({ reason }, null, 2))
+console.log('escalated')
+`,
+
     'find-concept': `// Concepts. "<phrase>" → the NAMES of matching concepts (+ how many exist in total, so an empty library is distinguishable from no match). Read one with \`./get-concept "<exact name>"\`. A query is required.
 import { findConcept, listConcepts } from ${JSON.stringify(join(dir, 'concepts', 'find.mjs'))}
 const q = process.argv.slice(2).join(' ').trim()
@@ -760,6 +813,8 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
   // Each tool is SELF-DOCUMENTING: `<tool> --help` prints how to use it (args/subcommands) — so the agent
   // never needs to read the .mjs to learn what to pass, and never sees the implementation.
   const usages: Record<string, string> = {
+    commit: 'commit \'{"programDir":"programs/<slug>","params":{…}}\'   → record the program that answers this question.',
+    escalate: 'escalate "<what is blocking you>"   → hand this question to the analyst and stop.',
     'find-concept': 'find-concept "<phrase>"   → the NAMES of matching concepts. A query is required. Read one with get-concept.',
     'get-concept':  'get-concept "<exact name>" [--qid <qid>]   → ONE concept. A runnable one returns its FUNCTION to copy and adapt, plus what it last produced and the invariants it carries; a not-yet-migrated one returns its prose guide. Pass --qid so the program records what it was built from.',
     'find-schema':  'find-schema "<term>" [--source <SOURCE>] [--full]   → search ALL datasources for a field/table by name, type, or description (SOURCE.TABLE.COLUMN : type); --source filters to one; --full adds PK/nullable/references',

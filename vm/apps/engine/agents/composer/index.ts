@@ -29,6 +29,9 @@ export interface ComposerOpts {
   root: string
   projectId: string
   managerUrl?: string
+  /** The conversation this composer belongs to. Its working directory is its own, so what it writes belongs
+   *  to the conversation that asked for it and a tool can use a fixed filename without racing another. */
+  sessionId?: string
   ica?: AgentOverride            // override this agent's profile for ONE construction (an A/B, a local script)
 }
 // canonicalQuestions — what this program ANSWERS, in question form, written by whoever built it. This is the
@@ -66,7 +69,7 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
   const harness: Harness = opts.ica?.harness ?? cfg.harness
   const model = opts.ica?.model ?? cfg.model
   const provider = opts.ica?.provider ?? cfg.provider
-  const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl })
+  const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl, sessionId: opts.sessionId })
   // The composer's WHOLE instruction — its role + the authoritative authoring reference (contract + example +
   // mechanics) + the per-project data CONTEXT — installed into the agent's system prompt via systemReference.
   // The agent then never reads a file to learn how to write a program or what the data is. CONTEXT.md is written
@@ -82,10 +85,12 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
     'data context are already in your instructions. Search concepts with `./find-concept "<phrase>"`; explore the',
     'data with `./query`/`./introspect`; escalate to the analyst on a hard problem (many composers share one analyst).',
     '',
+    'Finish with `./commit \'{"programDir":"programs/<slug>","params":{…},"usedConcepts":[…]}\'` — the program that',
+    'answers the question. `./escalate "<what is blocking you>"` hands it to the analyst instead. Neither takes a',
+    'path: they know which question you are on.',
+    '',
     'Each question is followed by `meta:` — the mechanical facts for that question, not part of what was asked:',
     '  qid              this turn',
-    '  result           write your result here as your final action',
-    '  escalate         write here instead when you are handing it to the analyst',
     '  matchedPrograms  what the engine\'s search turned up, with a similarity score. A LEAD, not an answer: the',
     '                   search runs on wording, so a high score can be the wrong measure and an empty list can sit',
     '                   beside a program that fits. Judge it yourself, and search again with your own phrase.',
@@ -94,10 +99,7 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
     'Everything below is how you work, every time, and is not repeated with the question.',
     '',
     '1. Can a candidate program answer THAT question EXACTLY — the SAME measure, scope and grain, differing at most',
-    '   by a parameter (a date, a top-N)? Only then reuse it: pick it, run it, and COMMIT — write the RESULT path =',
-    '   {"programDir":"<that program>","params":{…},"canonicalQuestions":["<the canonical form>"]} as your final',
-    '   action. Reusing ADDS this question\'s form to the ones that program answers — that is how it becomes findable',
-    '   for the next person who phrases it your way.',
+    '   by a parameter (a date, a top-N)? Only then reuse it: pick it, run it, and `./commit` it.',
     '   A program built for a RELATED-but-different question is NOT a fit — "amount billed" is not "net spend", a',
     '   header total is not a line-level breakdown, gross is not net. Do NOT adapt or force-fit a program; when it is',
     '   not an EXACT match, build from the CONCEPTS — never from a not-quite program. Accuracy over reuse.',
@@ -106,17 +108,12 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
     '   anything pre-fired from the asker\'s wording. Open what looks right with `./get-concept "<name>"`.',
     '   If they don\'t fully cover it, do the work yourself — `./query`/`./introspect` the data, analyse, write the',
     '   units + program. Run it (`tsx run.mjs programs/<slug>/program.ts \'<json>\'`), verify against the review checks.',
-    '   Then COMMIT, as your final action — once everything else is finished and verified: write the RESULT path =',
-    '   {"programDir":"programs/<slug>","params":{…},"canonicalQuestions":["…"],"usedConcepts":["<the concepts this',
-    '   program is actually built on>"]}. `canonicalQuestions` — the question this program answers, phrased so its',
-    '   parameters are visible ("… for customer <customer> in <period>"); add another only when it genuinely answers',
-    '   a differently-phrased question.',
+    '   Then `./commit` it, as your final action, once everything else is finished and verified.',
     '3. Escalate on FINISHABILITY, never on nothing having matched. You have every tool the analyst has, so',
     '   "nothing matched" is where the work starts. What you cannot spend is an analyst\'s worth of time — so',
     '   escalate when the data is not where you expected, the approach needs establishing from scratch, or you',
-    '   have tried and it is not coming out right. Write the escalate path = {"reason":"<what is blocking you>"}',
-    '   and STOP. Escalating at ninety seconds beats a wrong answer at four minutes; many composers share one',
-    '   analyst, so do the rest yourself.',
+    '   have tried and it is not coming out right. `./escalate "<why>"` and STOP. Escalating at ninety seconds',
+    '   beats a wrong answer at four minutes; many composers share one analyst, so do the rest yourself.',
   ].join('\n')
 
   const systemReference = [sysFile(), METHOD, AUTHORING_REFERENCE, context].filter(Boolean).join('\n\n')
@@ -135,6 +132,10 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       const t0 = Date.now()
       const dir = o.qid ? join(cwd, 'out', o.qid) : join(cwd, 'out')
       await mkdir(dir, { recursive: true })
+      // WHICH TURN IS LIVE HERE. `./commit` and `./escalate` read this instead of being handed a path with
+      // every question. One session, queued turns, one directory — so there is exactly one answer to that at
+      // any moment, and writing it here is what lets a turn be the question and nothing else.
+      await writeFile(join(cwd, '.turn'), o.qid ?? '', 'utf8').catch(() => {})
       const builtRel    = o.qid ? `./out/${o.qid}/built.json`    : `./out/built.json`
       const escalateRel = o.qid ? `./out/${o.qid}/escalate.json` : `./out/escalate.json`
       const builtPath    = join(dir, 'built.json')

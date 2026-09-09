@@ -141,6 +141,10 @@ export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
       // A fresh qid folder each time → never a stale read; nothing deleted (full provenance).
       const dir = opts.qid ? join(cwd, 'out', opts.qid) : join(cwd, 'out')
       await mkdir(dir, { recursive: true })
+      // WHICH TURN IS LIVE HERE, for `./commit`. This session is SHARED across conversations, which is why its
+      // questions keep their own framing — several people's work in one thread would otherwise run together —
+      // but its turns are still queued, so one directory has one live turn and a fixed filename is safe.
+      await writeFile(join(cwd, '.turn'), opts.qid ?? '', 'utf8').catch(() => {})
       const answerRel = opts.qid ? `./out/${opts.qid}/answer.json` : `./out/answer.json`
       const builtRel  = opts.qid ? `./out/${opts.qid}/built.json`  : `./out/built.json`
       const answerPath = join(dir, 'answer.json')
