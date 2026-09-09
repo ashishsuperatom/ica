@@ -67,8 +67,10 @@ export type ConceptProps = {
   present?: string              // DEPRECATED, superseded by `render`; still read for un-migrated prose
 
   // — data-model block (OPTIONAL — ONLY when the concept genuinely is an entity/measure) —
-  source?: string               // datasource id (e.g. 'netsuite')
-  sources?: string[]            // every datasource it reads, when more than one; `source` stays the first
+  sources?: string[]            // every datasource it reads. ONE field for one idea: a singular `source`
+                                // alongside it meant the same fact under two names, one of which appeared
+                                // and disappeared depending on how many there were.
+  source?: string               // DEPRECATED, superseded by `sources`; still read for un-migrated prose
   grain?: string                // "one row per ISO currency code" — anti-double-count guard
   keying?: string               // "id = internal id; name = ISO code" — feeds name→id resolution
   time?: TimeSemantics          // how it binds to time

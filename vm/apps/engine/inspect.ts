@@ -210,15 +210,24 @@ export function createInspector(deps: InspectorDeps) {
    *  Every name that reaches a body travels with it, because a concept has no single name: the primary
    *  phrase and its aliases are the same kind of thing, and which one the admin searched for is arbitrary. */
   function conceptList() {
-    const rows = graph.db.prepare(`
-      SELECT c.id, c.label, c.summary, c.props,
-             (SELECT group_concat(i.label, char(10)) FROM nodes i
-               WHERE i.kind='index' AND i.valid_to IS NULL AND i.id NOT LIKE '%@%'
-                 AND json_extract(i.props,'$.target') = c.id) AS names
-      FROM nodes c WHERE c.kind='concept'
-        AND EXISTS (SELECT 1 FROM nodes i WHERE i.kind='index' AND i.valid_to IS NULL
-                      AND json_extract(i.props,'$.target') = c.id)
-      LIMIT 2000`).all() as any[]
+    // TWO SCANS, JOINED IN MEMORY — not a correlated subquery per concept.
+    //
+    // A name is an `index` row whose target sits inside its JSON, so "which concepts are reachable" is the one
+    // question this store asks OF props rather than fetching props whole. Asked per concept it is a scan
+    // inside a scan, growing with concepts AND names together: 9.2ms to list 44 of them, against 0.004ms to
+    // open one. Read each side once and match them here instead — 0.5ms, and it grows with the sum rather
+    // than the product. (An expression index on the target was tried first; the planner would not take it for
+    // a correlated equality, and not correlating is the better fix anyway.)
+    const names = new Map<string, string[]>()
+    for (const r of graph.db.prepare(
+      `SELECT label, json_extract(props,'$.target') AS target FROM nodes
+        WHERE kind='index' AND valid_to IS NULL AND id NOT LIKE '%@%'`).all() as any[]) {
+      if (!r.target) continue
+      const list = names.get(r.target); list ? list.push(r.label) : names.set(r.target, [r.label])
+    }
+    const rows = (graph.db.prepare(
+      `SELECT id, label, summary, props FROM nodes WHERE kind='concept' LIMIT 5000`).all() as any[])
+      .filter((r) => names.has(r.id))
 
     // WHAT IT LAST PRODUCED. A runnable concept that has never been run is a different thing from one that
     // ran this morning, and the table is where that difference should be visible without opening anything.
@@ -229,7 +238,7 @@ export function createInspector(deps: InspectorDeps) {
 
     const list = rows.map((n: any) => {
       const p = (typeof n.props === 'string' ? JSON.parse(n.props) : n.props ?? {}) as any
-      const names: string[] = String(n.names ?? '').split(String.fromCharCode(10)).filter(Boolean)
+      const nameList: string[] = names.get(n.id) ?? []
       const s = sample.get(n.id)
       const compute = String(p.compute ?? '')
       // WHAT THE CONCEPT CALLS ITSELF LEADS. Index rows come back in insertion order, so taking the first
@@ -238,11 +247,12 @@ export function createInspector(deps: InspectorDeps) {
       // The node's LABEL is the name it was saved under — its own, current name. props.name is not set on a
       // concept body, so reaching for that fell through to whichever index row happened to come back first,
       // which for a migrated concept is the prose name it replaced.
-      const self = names.includes(n.label) ? n.label : (n.label ?? names[0] ?? n.id)
+      const self = nameList.includes(n.label) ? n.label : (n.label ?? nameList[0] ?? n.id)
       return {
-        id: n.id, name: self, aliases: names.filter((x) => x !== self), summary: n.summary ?? null,
+        id: n.id, name: self, aliases: nameList.filter((x) => x !== self), summary: n.summary ?? null,
         status: p.status ?? null, version: p._v?.version ?? 1, changedBy: p._v?.changedBy ?? null,
-        source: p.source ?? null, grain: p.grain ?? null, verifiedAt: p.verifiedAt ?? null,
+        source: (p.sources ?? [])[0] ?? p.source ?? null, sources: p.sources ?? (p.source ? [p.source] : []),
+        grain: p.grain ?? null, verifiedAt: p.verifiedAt ?? null,
         measures: (p.measures ?? []).length, dimensions: (p.dimensions ?? []).length,
         requires: p.requires ?? [], rules: p.rules ?? [],
         // ONE TEST, everywhere: a body that default-exports a function. It says nothing about a `meta` block,

@@ -582,7 +582,7 @@ if (!hit) {
 // A RUNNABLE concept and a PROSE note need different things, and serving the union served neither well: six
 // of these were populated on none of the runnable concepts and arrived as absent keys, while the fields that
 // decide whether a number may be summed or how it should be shown were buried among them.
-const KEEP_RUNNABLE = ['name', 'value', 'status', 'compute', 'source', 'sources', 'grain', 'additive', 'unit',
+const KEEP_RUNNABLE = ['name', 'value', 'status', 'compute', 'sources', 'grain', 'additive', 'unit',
                        'time', 'parameters', 'dimensions', 'render', 'supersedes']
 const KEEP_PROSE    = ['name', 'value', 'status', 'rules', 'requires', 'supersedes', 'find', 'compute',
                        'present', 'render', 'source', 'grain', 'keying', 'time', 'measures', 'dimensions', 'parameters']

@@ -71,27 +71,30 @@ export async function saveConcept(store: NodeStore, runIdToSave: string, meta: C
   // it differs from its nearest neighbour, but the computation, the rules and the verification are no longer
   // described here: they are the code.
   const sources: string[] = Array.isArray(m.sources) ? m.sources.filter(Boolean).map(String) : []
+  // EVERY RUNNABLE CONCEPT CARRIES THE SAME KEYS. A field that appears only when it has a value makes two
+  // concepts look like two shapes, and a reader cannot tell "this concept has no dimensions" from "this
+  // concept is from before dimensions existed". An empty array says the first; a missing key says neither.
   const props: ConceptProps = {
     value: String(m.description ?? '').trim() || `Computes ${m.name}.`,
     // SELF-CHECKED. It ran and its own invariants held, which is real evidence that it works and none at all
     // that it measures the right thing. Not `corroborated`: that rung means a second, independent analysis
     // agreed, and a concept agreeing with itself is not a second witness.
     status: 'self-checked',
-    source: sources[0],
-    // PLURAL WHEN PLURAL. The singular field truncated silently, so a concept reading two datasources stored
-    // one and looked single-source to everything downstream.
-    sources: sources.length > 1 ? sources : undefined,
+    // ONE FIELD FOR ONE IDEA. `source` was the first datasource and `sources` appeared only when there were
+    // several, so the same fact lived under two names and one of them came and went with the data.
+    sources,
     compute: run.source,                      // runnable, not a recipe
-    parameters: paramsFacet(m.params),
+    parameters: paramsFacet(m.params) ?? [],
     // What a READER needs to use the number safely. `additive` and `unit` are first-class rather than folded
     // into a measures entry: they describe this concept's own atomic value, and `unit` spent its previous
     // life inside a prose note where nothing could check it.
-    grain: m.grain || undefined,
-    time: m.time || undefined,
-    additive: typeof m.additive === 'boolean' ? m.additive : undefined,
-    unit: m.unit ? String(m.unit).trim() : undefined,
-    dimensions: dimensionsFacet(m.dimensions),
-    render: m.render ? String(m.render).trim() : undefined,
+    grain: m.grain || '',
+    time: m.time,
+    additive: m.additive === true,
+    unit: m.unit ? String(m.unit).trim() : '',
+    dimensions: dimensionsFacet(m.dimensions) ?? [],
+    render: m.render ? String(m.render).trim() : '',
+    scope: 'global',
     verifiedAt: new Date(run.at).toISOString(),
     evidence: `ran ${run.runId} in ${run.ms}ms; ${run.verifications.length} invariant(s) held`,
   }

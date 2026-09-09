@@ -71,26 +71,32 @@ await mkdir(workDir, { recursive: true })
 let reshaped = 0, unchanged = 0, failed = 0, reused = 0
 
 for (const c of todo) {
-  const { body, had } = split(c.p.compute)
-  if (!had) { unchanged++; continue }
+  // NO `had` GATE. The first pass split the metadata out of the body; later passes change what is STORED —
+  // a field made uniform, a value re-derived — and those concepts have no meta block left to notice. Every
+  // runnable concept is rebuilt and re-saved, and one already in its final shape simply saves to the same id.
+  const { body } = split(c.p.compute)
 
   // Names come from the index, which is where names live. The primary is the label it was saved under; the
   // rest are aliases, and they are passed to the save rather than stored on the concept.
   const names = namesFor(store, c.id)
   const aliases = names.filter((n) => n !== c.label)
   const sample = getSample(store.db, c.id)
+  // Fields have moved between passes: unit and additive lived inside a measures entry before they were
+  // first-class, so read the field if it is there and fall back to where it used to live.
   const measure = (c.p.measures ?? [])[0] ?? {}
-  const unit = typeof measure.note === 'string' && measure.note.startsWith('unit: ')
-    ? measure.note.slice(6).trim() : undefined
+  const unit = c.p.unit ?? (typeof measure.note === 'string' && measure.note.startsWith('unit: ')
+    ? measure.note.slice(6).trim() : undefined)
 
   const derived: any = {
     name: c.label,
     description: String(c.p.value ?? '').trim(),
     aliases,
     sources: Array.isArray(c.p.sources) && c.p.sources.length ? c.p.sources : [c.p.source].filter(Boolean),
+    dimensions: Array.isArray(c.p.dimensions) ? c.p.dimensions.map((d: any) => d?.name ?? d).filter(Boolean) : [],
+    render: c.p.render ?? '',
     params: Object.fromEntries((c.p.parameters ?? []).map((x: any) => [x.name, x.note ?? ''])),
     grain: c.p.grain,
-    additive: typeof measure.additive === 'boolean' ? measure.additive : undefined,
+    additive: typeof c.p.additive === 'boolean' ? c.p.additive : (typeof measure.additive === 'boolean' ? measure.additive : undefined),
     unit,
     time: timeOf(c.p.time),
   }
