@@ -23,15 +23,24 @@ way (a dialect quirk, a join trick) belong inside the concept they serve, never 
 
 You write the function; the tool owns everything around it — no imports, no wiring, no paths.
 
+Two files. The body is only the function; what the concept IS goes beside it, because those are its stored
+fields and writing them in the source too is the same facts twice.
+
 ```
-export const meta = {
-  name, description, aliases: [...], sources: ['<datasource id>'],
-  params: { '<name>': '<what it means>' }, returns: '<what the value means>',
-  grain: '<what ONE row is>', additive: <true|false>, unit: '<what the number counts>',
-  time: '<snapshot|during|trailing>',
-}
+concepts/<name>.mjs
 export default async function (ctx, params) { ...; return { value } }
+
+concepts/<name>.meta.json
+{ "name": "...", "description": "ONE TO THREE SENTENCES — what this is, not how it works",
+  "aliases": ["other phrasings a question arrives in"], "sources": ["<datasource id>"],
+  "params": { "<name>": "<what it means>" }, "dimensions": ["<axes it can be split by>"],
+  "grain": "<what ONE row is>", "additive": <true|false>, "unit": "<what the number counts>",
+  "time": "point" | "window", "render": "<a short note on how to show it>" }
 ```
+
+**The description is one to three sentences.** It exists so a reader can tell this is the concept they want.
+The reasoning, the traps and the why go in COMMENTS INSIDE THE BODY, beside the code they explain, where they
+travel with it when it is copied. A description over 300 characters is refused.
 
 `ctx` is everything you may do:
 - `query(source, sql, params?)` — the only way to reach data.
@@ -46,7 +55,12 @@ can be rather than quoted from the day you found it. Comments carry the why and 
 
 **The four usage fields stop right rows becoming a wrong total**: **grain** (what one row is — the guard against
 double counting, which survives every other check), **additive** (may it be summed across a dimension; unstated
-reads as false), **unit**, **time** (a snapshot summed across months looks ordinary and is wrong).
+reads as false), **unit** (what the number counts), **time** — `point` if it is true AS AT an instant,
+`window` if it accumulates OVER a span. A window must take a parameter that bounds it; a point summed across
+months looks ordinary and is wrong.
+
+**dimensions** are the axes the result can be split by, which is not the same as parameters: a parameter is an
+input that changes the computation, a dimension is a way of breaking down what comes out.
 
 **Atomic and flat**: a concept never calls another. A variation that changes the MEANING is a second concept;
 one that changes only plumbing is a branch inside this one.
@@ -54,7 +68,7 @@ one that changes only plumbing is a branch inside this one.
 A concept is COPIED and adapted by whoever answers a question, which is why invariants matter: they survive
 the copy and fire on the asker's own data, where a written rule would not.
 
-Then: `tsx concept-try.mjs <file> '<params>'` → read the value → `tsx concept-save.mjs <runId> "<why>"`. Run
+Then: `tsx concept-try.mjs <file> '<params>' <file>.meta.json` → read the value → `tsx concept-save.mjs <runId> "<why>"`. Run
 with several parameter sets; what it was exercised on is recorded for you. A concept that will not run cannot
 be saved.
 
@@ -66,7 +80,7 @@ computation (its query, joins, the concept it computed from scratch). READ it. T
 seam to VERIFY: `./sources`, `./introspect`, `./query` (query the source). Search what is already modelled with `./find-concept "<phrase>"` before writing, to MERGE not duplicate.
 
 Write the concept to `./concepts/<name>.mjs`, then:
-- `tsx concept-try.mjs concepts/<name>.mjs '<paramsJson>'` — runs it and shows the value, the invariants that
+- `tsx concept-try.mjs concepts/<name>.mjs '<paramsJson>' concepts/<name>.meta.json` — runs it and shows the value, the invariants that
   held, and the caveats. Run it with SEVERAL parameter sets: what it has been exercised on is recorded for you,
   and a concept that only works for one input is one you have not finished.
 - `tsx concept-save.mjs <runId> "<why>"` — saves that exact run. A concept that will not run cannot be saved,
