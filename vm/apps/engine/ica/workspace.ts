@@ -579,14 +579,20 @@ if (!hit) {
 // The GUIDE fields only. Retrieval metadata (aliases), audit trail (evidence, provenance, verifiedAt) and
 // versioning are what got this concept FOUND and TRUSTED — they are not instructions for writing a program,
 // so they stay out of the caller's context.
-const KEEP = ['name', 'value', 'status', 'rules', 'requires', 'supersedes', 'dataSource', 'find', 'compute', 'present', 'review', 'source', 'grain', 'keying', 'time', 'measures', 'dimensions', 'parameters']
+// A RUNNABLE concept and a PROSE note need different things, and serving the union served neither well: six
+// of these were populated on none of the runnable concepts and arrived as absent keys, while the fields that
+// decide whether a number may be summed or how it should be shown were buried among them.
+const KEEP_RUNNABLE = ['name', 'value', 'status', 'compute', 'source', 'sources', 'grain', 'additive', 'unit',
+                       'time', 'parameters', 'dimensions', 'render', 'supersedes']
+const KEEP_PROSE    = ['name', 'value', 'status', 'rules', 'requires', 'supersedes', 'find', 'compute',
+                       'present', 'render', 'source', 'grain', 'keying', 'time', 'measures', 'dimensions', 'parameters']
+// RUNNABLE OR PROSE, decided by ONE test: a body that default-exports a function. Read from the body rather
+// than from a flag, so a concept converted by any route is recognised and nothing has to be kept in step.
+// It deliberately says nothing about \`meta\`, which a body no longer carries — its metadata is stored as the
+// concept's own fields, and a body written the old way still answers this the same way.
+const isRunnable = typeof hit.compute === 'string' && /export\\s+default/.test(hit.compute)
 const out = {}
-for (const k of KEEP) if (hit[k] !== undefined) out[k] = hit[k]
-
-// RUNNABLE OR PROSE. A migrated concept's \`compute\` is a module — it declares \`meta\` and exports a default
-// function — where a prose one holds a query or a recipe. Detected from the body rather than from a flag, so
-// a concept converted by any route is recognised and nothing has to be kept in step.
-const isRunnable = typeof out.compute === 'string' && /export\\s+default/.test(out.compute) && /export\\s+const\\s+meta/.test(out.compute)
+for (const k of (isRunnable ? KEEP_RUNNABLE : KEEP_PROSE)) if (hit[k] !== undefined) out[k] = hit[k]
 out.runnable = isRunnable
 
 if (isRunnable) {
@@ -609,9 +615,6 @@ if (isRunnable) {
     }
     store.close()
   } catch { /* the sample is a convenience; never let it cost the read */ }
-  // The prose facets of a runnable concept are empty by construction — the computation IS the code, so
-  // shipping the fields it replaced would only invite them to be filled back in.
-  delete out.rules; delete out.find; delete out.present
 }
 console.log(JSON.stringify(out, null, 2))
 

@@ -245,8 +245,9 @@ export function createInspector(deps: InspectorDeps) {
         source: p.source ?? null, grain: p.grain ?? null, verifiedAt: p.verifiedAt ?? null,
         measures: (p.measures ?? []).length, dimensions: (p.dimensions ?? []).length,
         requires: p.requires ?? [], rules: p.rules ?? [],
-        // Detected from the body, not from a flag, so a concept converted by any route is recognised.
-        runnable: /export\s+default/.test(compute) && /export\s+const\s+meta/.test(compute),
+        // ONE TEST, everywhere: a body that default-exports a function. It says nothing about a `meta` block,
+        // which a body no longer carries — the metadata is the concept's own fields.
+        runnable: /export\s+default/.test(compute),
         lastRun: s ? {
           value: s.value == null ? null : JSON.parse(s.value),
           rows: s.rows ?? null, at: s.at,

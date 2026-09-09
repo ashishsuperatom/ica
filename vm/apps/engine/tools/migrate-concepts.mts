@@ -96,7 +96,12 @@ const ident = (raw: string) => raw.trim().replace(/[^A-Za-z0-9_]/g, '_').replace
 const paramsIn = (sql: string) =>
   [...new Map([...sql.matchAll(PLACEHOLDER)].map((m) => [ident(m[1]), m[1]])).entries()]
 
-function draft(name: string, props: any, sql: string, source: string): string {
+/** A draft is TWO artefacts now, because a concept is: the function, and what it is.
+ *
+ *  They are separate files for the same reason they are separate in the store. The metadata is data, so it
+ *  belongs in a format that can be validated rather than parsed back out of source, and keeping it out of the
+ *  body means the body is only ever the thing that runs. */
+function draft(name: string, props: any, sql: string, source: string): { body: string; meta: string } {
   const params = paramsIn(sql)
   const bind = params.map(([id]) => id).join(', ')
   // Placeholders become real bind parameters; the query is otherwise untouched, because rewriting someone
@@ -104,10 +109,10 @@ function draft(name: string, props: any, sql: string, source: string): string {
   const bound = sql.replace(PLACEHOLDER, (_m, raw) => `:${ident(raw)}`)
   const rules: string[] = Array.isArray(props.rules) ? props.rules : []
 
-  return `// ${name}
+  const body = `// ${name}
 //
 // MIGRATED DRAFT — not yet a concept. Run it, decide the value, then save it:
-//   tsx concept-try.mjs concepts/${slug(name)}.mjs '{${params.map(([id]) => `"${id}": …`).join(', ')}}'
+//   tsx concept-try.mjs concepts/${slug(name)}.mjs '{${params.map(([id]) => `"${id}": …`).join(', ')}}' concepts/${slug(name)}.meta.json
 //
 ${props.value ? comment(props.value) + '\n//\n' : ''}${
   rules.length
@@ -116,16 +121,6 @@ ${props.value ? comment(props.value) + '\n//\n' : ''}${
       '// which case make it a ctx.verify so it is checked on every run instead of remembered.\n' +
       rules.map((r, i) => comment(`(${i + 1}) ${r}`)).join('\n') + '\n'
     : ''}
-export const meta = {
-  name: ${JSON.stringify(name)},
-  description: ${JSON.stringify(firstSentences(String(props.value ?? '')))},
-  aliases: ${JSON.stringify(Array.isArray(props.aliases) ? props.aliases : [])},
-  sources: ${JSON.stringify([source])},
-  params: {${params.map(([id, raw]) => `\n    ${JSON.stringify(id)}: ${JSON.stringify(`TODO: what this means (was <${raw}>)`)},`).join('')}
-  },
-  returns: 'TODO: what the value means — its unit and its grain',
-}
-
 export default async function (ctx, { ${bind} }) {
   const rows = await ctx.query(${JSON.stringify(source)}, \`
 ${bound.trim()}
@@ -143,6 +138,22 @@ ${bound.trim()}
   return { value, distribution: rows }
 }
 `
+
+  const meta = JSON.stringify({
+    name,
+    description: firstSentences(String(props.value ?? ''), 300),
+    aliases: Array.isArray(props.aliases) ? props.aliases : [],
+    sources: [source],
+    params: Object.fromEntries(params.map(([id, raw]) => [id, `TODO: what this means (was <${raw}>)`])),
+    dimensions: [],
+    grain: props.grain ?? 'TODO: what one row is',
+    additive: null,
+    unit: 'TODO: what the value is counted in',
+    time: 'TODO: point (true as at an instant) or window (accumulated over a span)',
+    render: 'TODO: a short note on how to show this to a person',
+  }, null, 2) + '\n'
+
+  return { body, meta }
 }
 
 const DIALECT = await dialects()
@@ -162,7 +173,7 @@ const done: string[] = []
  *  else, because handing JavaScript to a SQL parser produces "not a complete query" — so a re-run of this
  *  tool would report every concept it had already converted as prose, and reads as the migration having gone
  *  backwards. A migration must be safe to run twice and honest about it the second time. */
-const RUNNABLE = (compute: string) => /export\s+default/.test(compute) && /export\s+const\s+meta/.test(compute)
+const RUNNABLE = (compute: string) => /export\s+default/.test(compute)
 
 for (const row of live) {
   if (!row.names) continue                                  // superseded body: the index has moved off it
@@ -185,7 +196,9 @@ for (const row of live) {
   drafts.push(name)
   if (APPLY) {
     await mkdir(outDir, { recursive: true })
-    await writeFile(join(outDir, `${slug(name)}.mjs`), draft(name, props, sql, source))
+    const d = draft(name, props, sql, source)
+    await writeFile(join(outDir, `${slug(name)}.mjs`), d.body)
+    await writeFile(join(outDir, `${slug(name)}.meta.json`), d.meta)
   }
 }
 

@@ -9,7 +9,7 @@ import { NodeStore } from '@superatom/node-store'
 import { tryConcept } from '../concepts/runner.js'
 import { saveConcept, managerSignSql } from '../concepts/save.js'
 import { query } from '@superatom/scaffold'
-import { readdir } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 const [dir, dbPath, paramsJson, ...flags] = process.argv.slice(2)
@@ -26,9 +26,13 @@ for (const f of files) {
   const name = f.replace(/\.mjs$/, '')
   // Per-concept parameters, falling back to a shared set — most concepts in a batch want the same window.
   const params = PARAMS[name] ?? PARAMS._ ?? {}
+  // The metadata sits beside the body, so it is picked up by name. Missing is not fatal here: the run still
+  // tells you whether the code works, and the save is where a concept without documentation is refused.
+  let meta: any
+  try { meta = JSON.parse(await readFile(join(dir, `${name}.meta.json`), 'utf8')) } catch { meta = undefined }
   // A migration runs queries nobody has tuned, against whatever the source is doing today. The authoring
   // default is right for someone iterating; a bulk pass needs longer before it calls a slow query a hang.
-  const r = await tryConcept({ file: join(dir, f), params, store, timeoutMs: 10 * 60_000,
+  const r = await tryConcept({ file: join(dir, f), params, meta, store, timeoutMs: 10 * 60_000,
                                query: (s, sql, p) => query(s, sql, p) })
   if (!r.ok) {
     failed++
