@@ -63,8 +63,23 @@ export function createInspector(deps: InspectorDeps) {
   const roots = [workspace, dataRoot]
 
   // ── graph reads ────────────────────────────────────────────────────────────
-  const countsByKind = () =>
-    graph.db.prepare(`SELECT kind, COUNT(*) AS n FROM nodes WHERE valid_to IS NULL GROUP BY kind ORDER BY n DESC`).all() as any[]
+  /** Node counts per kind. `n` is what EXISTS to a reader; `total` is how many rows carry that kind.
+   *
+   *  They differ for content-addressed kinds. A concept body is immutable, so editing one mints a new body
+   *  and repoints the name — the old body keeps its row and its label for ever. Counting rows therefore
+   *  reported 113 concepts where 44 are reachable, on the same screen as a list showing 44, and the store
+   *  looked broken while working exactly as designed. Superseded bodies are still counted, and reported
+   *  separately, because they are real: a program built last month still refers to one. */
+  const countsByKind = () => {
+    const rows = graph.db.prepare(
+      `SELECT kind, COUNT(*) AS n FROM nodes WHERE valid_to IS NULL GROUP BY kind ORDER BY n DESC`).all() as any[]
+    const reachable = graph.db.prepare(
+      `SELECT COUNT(DISTINCT json_extract(props,'$.target')) AS n FROM nodes
+        WHERE kind='index' AND valid_to IS NULL AND id NOT LIKE '%@%'`).get() as any
+    return rows.map((r) => r.kind === 'concept'
+      ? { kind: r.kind, n: reachable?.n ?? r.n, total: r.n, superseded: Math.max(0, r.n - (reachable?.n ?? r.n)) }
+      : { kind: r.kind, n: r.n, total: r.n })
+  }
   const countsByEdge = () =>
     graph.db.prepare(`SELECT type, COUNT(*) AS n FROM edges GROUP BY type ORDER BY n DESC`).all() as any[]
 
@@ -127,6 +142,24 @@ export function createInspector(deps: InspectorDeps) {
       out: edgeRows('out'), in: edgeRows('in'),
     }
     if (row.file_path) detail.source = await file({ path: row.file_path })
+
+    // A CONCEPT IS ALSO WHAT IT LAST DID. The props say what it computes; the sample says what that came to,
+    // on which parameters, and whether its own assertions held — which is the difference between a concept
+    // that reads well and one that still works. The names come along because a concept has several and the
+    // node's own label is only whichever one it was saved under.
+    if (row.kind === 'concept') {
+      try {
+        const s = graph.db.prepare('SELECT * FROM concept_sample WHERE concept_id = ?').get(String(a.id)) as any
+        if (s) detail.lastRun = {
+          value: s.value == null ? null : JSON.parse(s.value), rows: s.rows ?? null,
+          params: JSON.parse(s.params || '{}'), at: s.at, ms: s.ms,
+          verifications: JSON.parse(s.verifications || '[]'), caveats: JSON.parse(s.caveats || '[]'),
+        }
+      } catch { /* an older store has no samples; the node still renders */ }
+      detail.names = (graph.db.prepare(
+        `SELECT label FROM nodes WHERE kind='index' AND valid_to IS NULL AND id NOT LIKE '%@%'
+           AND json_extract(props,'$.target') = ?`).all(String(a.id)) as any[]).map((r) => r.label)
+    }
     return { node: detail }
   }
 
@@ -167,16 +200,59 @@ export function createInspector(deps: InspectorDeps) {
 
   // ── composed views ─────────────────────────────────────────────────────────
 
-  /** Live concepts, flat (concepts are a flat set now — no tree). Current versions only (valid_to IS NULL). */
+  /** Live concepts — the ones a NAME currently reaches, which is not the same as every concept row.
+   *
+   *  A concept is content-addressed, so editing one mints a NEW body and repoints the name; the old body
+   *  stays, keeping the label it had. Listing concept rows therefore showed 113 entries for 44 concepts,
+   *  several of them sharing a name with nothing to say which was current — the store looking corrupt when
+   *  it was working exactly as designed. Reachability by a live name is what "exists" means here.
+   *
+   *  Every name that reaches a body travels with it, because a concept has no single name: the primary
+   *  phrase and its aliases are the same kind of thing, and which one the admin searched for is arbitrary. */
   function conceptList() {
-    const list = graph.listKind('concept', 2000).map((n: any) => {
-      const p = (n.props ?? {}) as any
+    const rows = graph.db.prepare(`
+      SELECT c.id, c.label, c.summary, c.props,
+             (SELECT group_concat(i.label, char(10)) FROM nodes i
+               WHERE i.kind='index' AND i.valid_to IS NULL AND i.id NOT LIKE '%@%'
+                 AND json_extract(i.props,'$.target') = c.id) AS names
+      FROM nodes c WHERE c.kind='concept'
+        AND EXISTS (SELECT 1 FROM nodes i WHERE i.kind='index' AND i.valid_to IS NULL
+                      AND json_extract(i.props,'$.target') = c.id)
+      LIMIT 2000`).all() as any[]
+
+    // WHAT IT LAST PRODUCED. A runnable concept that has never been run is a different thing from one that
+    // ran this morning, and the table is where that difference should be visible without opening anything.
+    const sample = new Map<string, any>()
+    try {
+      for (const r of graph.db.prepare('SELECT * FROM concept_sample').all() as any[]) sample.set(r.concept_id, r)
+    } catch { /* the sample table predates nothing; an older store simply has no samples */ }
+
+    const list = rows.map((n: any) => {
+      const p = (typeof n.props === 'string' ? JSON.parse(n.props) : n.props ?? {}) as any
+      const names: string[] = String(n.names ?? '').split(String.fromCharCode(10)).filter(Boolean)
+      const s = sample.get(n.id)
+      const compute = String(p.compute ?? '')
+      // WHAT THE CONCEPT CALLS ITSELF LEADS. Index rows come back in insertion order, so taking the first
+      // one showed a migrated concept under the name of the prose it replaced — the one thing about it that
+      // is now out of date. Its own name is the honest label; every other name is an alias that reaches it.
+      // The node's LABEL is the name it was saved under — its own, current name. props.name is not set on a
+      // concept body, so reaching for that fell through to whichever index row happened to come back first,
+      // which for a migrated concept is the prose name it replaced.
+      const self = names.includes(n.label) ? n.label : (n.label ?? names[0] ?? n.id)
       return {
-        id: n.id, name: n.label, summary: n.summary ?? null,
+        id: n.id, name: self, aliases: names.filter((x) => x !== self), summary: n.summary ?? null,
         status: p.status ?? null, version: p._v?.version ?? 1, changedBy: p._v?.changedBy ?? null,
         source: p.source ?? null, grain: p.grain ?? null, verifiedAt: p.verifiedAt ?? null,
         measures: (p.measures ?? []).length, dimensions: (p.dimensions ?? []).length,
         requires: p.requires ?? [], rules: p.rules ?? [],
+        // Detected from the body, not from a flag, so a concept converted by any route is recognised.
+        runnable: /export\s+default/.test(compute) && /export\s+const\s+meta/.test(compute),
+        lastRun: s ? {
+          value: s.value == null ? null : JSON.parse(s.value),
+          rows: s.rows ?? null, at: s.at,
+          invariants: JSON.parse(s.verifications || '[]').length,
+          caveats: JSON.parse(s.caveats || '[]').length,
+        } : null,
       }
     })
     return { total: list.length, concepts: list }

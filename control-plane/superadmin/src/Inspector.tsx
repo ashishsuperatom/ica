@@ -198,7 +198,12 @@ function SummaryView({ hub }: ViewProps) {
 
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(132px,1fr))' }}>
         {data.kinds.map((k: any) => (
-          <div className="tile" key={k.kind}><div className="k">{k.kind}s</div><div className="v">{k.n}</div></div>
+          // A count that hides something is worse than one that explains itself: a concept body superseded by
+          // an edit keeps its row, and programs built earlier still point at it.
+          <div className="tile" key={k.kind} title={k.superseded ? `${k.total} rows — ${k.superseded} superseded bodies that no name reaches` : undefined}>
+            <div className="k">{k.kind}s</div>
+            <div className="v">{k.n}{!!k.superseded && <span className="muted" style={{ fontSize: 13, fontWeight: 400 }}> +{k.superseded}</span>}</div>
+          </div>
         ))}
         <div className="tile"><div className="k">Questions</div><div className="v">{data.questions.answered}<span className="muted" style={{ fontSize: 13, fontWeight: 400 }}> / {data.questions.total}</span></div></div>
         <div className="tile"><div className="k">To consolidate</div><div className="v">{data.consolidation.pending}</div></div>
@@ -248,7 +253,27 @@ function SummaryView({ hub }: ViewProps) {
   )
 }
 
-// ── Concepts (flat, time-versioned) ──────────────────────────────────────────
+// ── Concepts (flat, content-addressed) ───────────────────────────────────────
+
+/** The atomic value a concept last produced, rendered so a ratio stays a ratio. Rounding everything to
+ *  whole numbers turns a measured 1.87 into 2 — which is exactly the kind of quietly-wrong figure these
+ *  concepts exist to replace. */
+function conceptValue(c: any) {
+  const v = c?.lastRun?.value
+  if (v === undefined || v === null) return <span className="muted">—</span>
+  if (typeof v === 'number') return v.toLocaleString(undefined, { maximumFractionDigits: Number.isInteger(v) ? 0 : 4 })
+  return <span className="clamp" style={{ fontSize: 12 }}>{JSON.stringify(v)}</span>
+}
+
+/** How long ago, in the coarsest unit that is still true. */
+function ago(at: number): string {
+  const s = Math.max(0, Math.round((Date.now() - at) / 1000))
+  if (s < 90) return 'just now'
+  const m = Math.round(s / 60); if (m < 90) return `${m}m ago`
+  const h = Math.round(m / 60); if (h < 36) return `${h}h ago`
+  return `${Math.round(h / 24)}d ago`
+}
+
 function ConceptsView({ hub, open }: ViewProps) {
   const { data, err, loading, reload } = useInspect(hub, 'concepts', {}, 'concepts')
   if (err) return <Err msg={err} retry={reload} />
@@ -258,26 +283,39 @@ function ConceptsView({ hub, open }: ViewProps) {
     <div className="card" style={{ padding: '14px 16px' }}>
       <div className="bar" style={{ marginBottom: 10 }}>
         <strong>Concepts</strong>
-        <span className="muted" style={{ fontSize: 12.5 }}>{data.total ?? list.length} concepts · the concept modeller writes them from finished analyses</span>
+        <span className="muted" style={{ fontSize: 12.5 }}>
+          {list.filter((c: any) => c.runnable).length} runnable · {list.filter((c: any) => !c.runnable).length} notes
+          {' · '}a runnable concept is a function with its own assertions; a note is knowledge the agent reads
+        </span>
         <button className="btn sm ghost" style={{ marginLeft: 'auto' }} onClick={reload}>Refresh</button>
       </div>
       {!list.length && <div className="empty">No concepts yet — the concept modeller builds them from finished analyses.</div>}
       {!!list.length && <table>
-        <thead><tr><th>Concept</th><th>Status</th><th className="num">v</th><th>Source</th><th>Grain</th><th className="num">M</th><th className="num">D</th><th className="num">Rules</th></tr></thead>
+        <thead><tr><th>Concept</th><th>Kind</th><th>Status</th><th>Source</th><th>Grain</th><th className="num">Last value</th><th className="num">Checks</th><th>Last run</th></tr></thead>
         <tbody>
           {list.map(c => (
             <tr key={c.id} onClick={() => open({ kind: 'node', id: c.id })}>
               <td style={{ minWidth: 200 }}>
                 <strong>{c.name}</strong>
                 {c.summary && <span className="clamp" style={{ fontSize: 12.5, marginTop: 2 }}>{c.summary}</span>}
+                {/* Every name that reaches this body. A concept has no single name — the phrase the admin
+                    searched for is arbitrary, and seeing the rest is how you tell two similar rows apart. */}
+                {!!c.aliases?.length && <span className="muted clamp" style={{ fontSize: 11.5, marginTop: 2 }}>also: {c.aliases.join(', ')}</span>}
               </td>
+              <td>{c.runnable
+                ? <span className="chip" title="a function that runs against live data">runnable</span>
+                : <span className="muted" title="knowledge the agent reads — a convention, a caveat, an anti-pattern">note</span>}</td>
               <td><Tag t={c.status} /></td>
-              <td className="num">{c.version ?? 1}</td>
               <td>{c.source ?? <span className="muted">—</span>}</td>
-              <td style={{ maxWidth: 260 }}><span className="clamp" style={{ fontSize: 12.5 }}>{c.grain ?? '—'}</span></td>
-              <td className="num">{c.measures ?? 0}</td>
-              <td className="num">{c.dimensions ?? 0}</td>
-              <td className="num">{c.rules?.length ?? 0}</td>
+              <td style={{ maxWidth: 220 }}><span className="clamp" style={{ fontSize: 12.5 }}>{c.grain ?? '—'}</span></td>
+              {/* WHAT IT LAST PRODUCED, not how much prose it carries. The old Rules count is meaningless for
+                  a runnable concept: its rules became assertions in the body, so the column read 0 for every
+                  migrated concept and said nothing about whether any of them still worked. */}
+              <td className="num">{conceptValue(c)}</td>
+              <td className="num" title={c.lastRun ? `${c.lastRun.invariants} invariant(s), ${c.lastRun.caveats} caveat(s)` : ''}>
+                {c.lastRun ? `${c.lastRun.invariants}/${c.lastRun.caveats}` : <span className="muted">—</span>}
+              </td>
+              <td className="muted" style={{ fontSize: 12 }}>{c.lastRun ? ago(c.lastRun.at) : (c.runnable ? 'never run' : '—')}</td>
             </tr>
           ))}
         </tbody>
@@ -765,6 +803,42 @@ function NodeDetail({ node, open, close }: { node: any; open: (f: Focus) => void
       <div className="pb">
         {node.summary && <p style={{ margin: '0 0 14px', fontSize: 13.5, lineHeight: 1.55, color: 'var(--sub)' }}>{node.summary}</p>}
 
+        {/* EVERY NAME THAT REACHES THIS BODY. A concept is content-addressed and named by pointers, so the
+            label above is only whichever name it happened to be saved under. */}
+        {!!node.names?.length && node.names.length > 1 && <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
+          {node.names.map((n: string) => <span key={n} className="chip">{n}</span>)}
+        </div>}
+
+        {/* WHAT IT LAST PRODUCED — shown BEFORE the body, because it answers the first question anyone has
+            about a concept: does this still work, and on what. An assertion that failed is the loudest thing
+            on the page; one that held is quiet evidence the number is current. */}
+        {node.lastRun && <>
+          <div className="sect">Last run <span className="muted" style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>— {when(node.lastRun.at)} · {node.lastRun.ms}ms</span></div>
+          <dl className="kv">
+            <div style={{ display: 'contents' }}>
+              <dt>value</dt>
+              <dd><strong>{typeof node.lastRun.value === 'number'
+                ? node.lastRun.value.toLocaleString(undefined, { maximumFractionDigits: Number.isInteger(node.lastRun.value) ? 0 : 4 })
+                : JSON.stringify(node.lastRun.value)}</strong>
+                {node.lastRun.rows != null && <span className="muted"> · {node.lastRun.rows} row(s) in the distribution</span>}</dd>
+            </div>
+            <div style={{ display: 'contents' }}>
+              <dt>params</dt>
+              <dd><pre className="json">{JSON.stringify(node.lastRun.params, null, 2)}</pre></dd>
+            </div>
+          </dl>
+          {!!node.lastRun.verifications?.length && <ul style={{ margin: '4px 0 12px', paddingLeft: 18, fontSize: 13, lineHeight: 1.6 }}>
+            {node.lastRun.verifications.map((v: any, i: number) => (
+              <li key={i} style={{ color: v.ok ? 'var(--sub)' : '#b02a37' }}>
+                {v.ok ? '✓' : '✗'} {v.label}{v.detail ? <span className="muted"> — {v.detail}</span> : null}
+              </li>
+            ))}
+          </ul>}
+          {!!node.lastRun.caveats?.length && <ul style={{ margin: '4px 0 12px', paddingLeft: 18, fontSize: 13, lineHeight: 1.6, color: '#8a5a00' }}>
+            {node.lastRun.caveats.map((c: string, i: number) => <li key={i}>{c}</li>)}
+          </ul>}
+        </>}
+
         {(node.out.length > 0 || node.in.length > 0) && <>
           <div className="sect">Edges</div>
           <table><tbody>
@@ -790,7 +864,10 @@ function NodeDetail({ node, open, close }: { node: any; open: (f: Focus) => void
             {propEntries.filter(([k]) => k !== 'rawAnalysis').map(([k, v]) => (
               <div key={k} style={{ display: 'contents' }}>
                 <dt>{k}</dt>
-                <dd>{typeof v === 'string' ? v
+                {/* A MULTI-LINE STRING IS SOURCE, not a sentence. A runnable concept's body arrives here as a
+                    property like any other, and rendering it as inline text collapsed a whole module into one
+                    unreadable run of prose. Anything with newlines gets line numbers and a monospace column. */}
+                <dd>{typeof v === 'string' ? (v.includes(String.fromCharCode(10)) ? <Code text={v} /> : v)
                   : Array.isArray(v) || typeof v === 'object' ? <pre className="json">{JSON.stringify(v, null, 2)}</pre>
                   : String(v)}</dd>
               </div>
