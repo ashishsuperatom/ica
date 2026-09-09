@@ -99,7 +99,11 @@ export async function saveConcept(store: NodeStore, runIdToSave: string, meta: C
     evidence: `ran ${run.runId} in ${run.ms}ms; ${run.verifications.length} invariant(s) held`,
   }
 
-  const node = upsertConcept(store, m.name, props, meta, Array.isArray(m.aliases) ? m.aliases : [])
+  // ONE NAME AT CREATION. Alternative names were being invented at authoring time, unbounded — six per
+  // concept on average and fourteen on one, including a database view and a column name, neither of which is
+  // a thing anyone would ask for. A name earns its place by a question actually arriving under it, and adding
+  // one then is a pointer, not a guess. Any list supplied here is ignored rather than obeyed.
+  const node = upsertConcept(store, m.name, props, meta)
 
   // WHAT IT LAST PRODUCED — derived, and never in props: a value moves with the data, so holding it there
   // would remint the concept on every re-run. Enough for a reader to judge fit without running it, and for a

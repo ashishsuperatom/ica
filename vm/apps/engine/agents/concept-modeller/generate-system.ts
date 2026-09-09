@@ -46,11 +46,15 @@ export default async function (ctx, params) { ...; return { value } }
 
 concepts/<name>.meta.json
 { "name": "...", "description": "ONE TO THREE SENTENCES — what this is, not how it works",
-  "aliases": ["other phrasings a question arrives in"], "sources": ["<datasource id>"],
+  "sources": ["<datasource id>"],
   "params": { "<name>": "<what it means>" }, "dimensions": ["<axes it can be split by>"],
   "grain": "<what ONE row is>", "additive": <true|false>, "unit": "<what the number counts>",
   "time": "point" | "window", "render": "<a short note on how to show it>" }
 \`\`\`
+
+**ONE NAME.** Name it the way the question was asked and stop there. A second phrasing is not written in
+advance: when a question arrives under a different name, that name is pointed at this concept, which is what
+makes it a name rather than a guess about how someone might one day ask.
 
 **The description is one to three sentences.** It exists so a reader can tell this is the concept they want.
 The reasoning, the traps and the why go in COMMENTS INSIDE THE BODY, beside the code they explain, where they
