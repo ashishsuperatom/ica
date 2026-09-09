@@ -88,9 +88,7 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
     'answers the question. `./escalate "<what is blocking you>"` hands it to the analyst instead. Neither takes a',
     'path: they know which question you are on.',
     '',
-    'Each question is followed by `meta:` — the mechanical facts for that question, not part of what was asked:',
-    '  qid              this turn',
-    '  askedBefore      this exact question has been answered by that program before, with those parameters.',
+    'A question is followed by `qid:` — this turn, which is the only thing about it that is not what was asked.',
     '',
     'Everything below is how you work, every time, and is not repeated with the question.',
     '',
@@ -201,18 +199,9 @@ is wrong with it — as well as fixing the program.` : ''}` : ''
       // arrived rephrased and wrapped in a full brief, which reads as a new assignment rather than the next
       // thing said. So the question goes as asked, and the mechanical facts go after it, marked as what they
       // are: where to put the result, and what the engine's search turned up.
-      const meta = [
-        `qid ${o.qid ?? '-'}`,
-        `result ${builtRel}`,
-        `escalate ${escalateRel}`,
-        ...(o.canonicalMatch
-          ? [`asked before ${o.canonicalMatch.programDir} with ${JSON.stringify(o.canonicalMatch.params)}`]
-          : []),
-      ].join('\n')
       const composePrompt = `${asked}
 
-meta:
-${meta}`
+qid: ${o.qid ?? '-'}`
       // `build` is a COMPLETE instruction, handed over whole — a view, and anything later that knows exactly
       // what it wants written. It bypasses the compose preamble and the concept block on purpose: that block
       // says "no concept fits this question, ESCALATE now" whenever no concepts were passed, so wrapping a
