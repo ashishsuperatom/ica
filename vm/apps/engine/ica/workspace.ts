@@ -452,7 +452,10 @@ export function findConcept(query, limit = 8) {
   const out = []; const seen = new Set()
   for (const x of scored) {
     const body = bodyOf(x.n); if (!body || seen.has(body.id)) continue
-    seen.add(body.id); out.push({ ...guide(body), name: x.n.label })
+    // THE BODY'S ID TRAVELS WITH THE RESULT. A guide is built from the concept's PROPS, which do not contain
+    // the node id — so anything downstream wanting to look up what this concept last produced had nothing to
+    // look it up BY, and silently found nothing for every concept in the store.
+    seen.add(body.id); out.push({ ...guide(body), name: x.n.label, conceptId: body.id })
     if (out.length >= limit) break
   }
   return out
@@ -570,8 +573,11 @@ if (isRunnable) {
   // produced it, when, and the invariants it carries. A concept whose last run was months ago against
   // parameters unlike yours is a different proposition from one that ran this morning.
   try {
-    const store = new NodeStore(_fu(new URL('../db/project.sqlite', import.meta.url)))
-    const sample = getSample(store.db, hit.id || '')
+    // ../../ — this file sits in .tools/, one level deeper than the concept seam that resolves the same
+    // store. Getting it wrong did not fail: NodeStore CREATED an empty database at the wrong path and read
+    // from it, so every concept reported no last run and a stray db/ appeared inside the workspace.
+    const store = new NodeStore(_fu(new URL('../../db/project.sqlite', import.meta.url)))
+    const sample = getSample(store.db, hit.conceptId || '')
     if (sample) {
       out.lastRun = {
         value: sample.value, rows: sample.rows, params: sample.params,
