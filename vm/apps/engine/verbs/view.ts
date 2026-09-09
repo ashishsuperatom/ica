@@ -57,7 +57,7 @@ Two things make it a view rather than an answer to one question:
   than a different report each time. Where there is no data for one of them, say so rather than dropping it.
 
 Build it at \`${o.dir}\`, run it with \`{"id": "${v.id}"}\` to check it, and commit as usual:
-${o.builtRel} = {"programDir":"${o.dir}","params":{"id":"${v.id}"},"canonicalQuestions":["${viewLabel(v)}"]}`
+${o.builtRel} = {"programDir":"${o.dir}","params":{"id":"${v.id}"}}`
 }
 
 /** What the engine hands the other verbs after a view has been shown. */

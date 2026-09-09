@@ -53,8 +53,6 @@ const TOOLS = `# Your tools
 Run them from the workspace root. Each takes \`--help\`.
 
 **Is it already answered?**
-- \`./find-program "<question>"\` → the shortlist: programs that answered a similar question (what it answers · name · category)
-- \`./get-program <name>\` → ONE program in full: every question form it answers, its saved params, its category
 
 **What logic already exists?**
 - \`./find-concept "<phrase>"\` → the NAMES of matching concepts
@@ -155,11 +153,11 @@ const NARROW_THEN_OPEN = `# Finding what already exists
 
 Search, then open one — never the other way round.
 
-\`./find-program\` and \`./find-concept\` return SHORTLISTS: names and what each answers. Judge on that, pick the
-one or two that could be yours, and open only those with \`./get-program\` / \`./get-concept\`. Read a program's
+\`./find-concept\` returns a SHORTLIST: names and what each answers. Judge on that, pick the
+one or two that could be yours, and open only those with \`./get-concept\`. Read a concept's
 code only once you have chosen it.
 
-Judge on the QUESTION, never the slug: two programs can be a rename apart and answer different things, and a
+Judge on what a concept SAYS, never on its name: two names a rename apart can mean different things, and a
 name that matches your words can be built on a different source, grain or window.
 
 Then reuse, adapt, or build — in that order. An exact match runs as it is; a near match is usually the same

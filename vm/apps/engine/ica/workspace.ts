@@ -699,29 +699,6 @@ try {
   appendFileSync(LOG, JSON.stringify({ at: Date.now(), qid, name: hit.name }) + String.fromCharCode(10))
 } catch { /* a log that cannot be written must not cost the concept that was asked for */ }
 `,
-    'get-program': `// ONE program, in full: every question form it answers, its saved params, its category.
-// The shortlist (./find-program) says which one to open; this opens it. Read its code from programs/<name>/.
-import { NodeStore } from '@superatom/node-store'
-const store = new NodeStore(${JSON.stringify(join(dbDir, 'project.sqlite'))})
-const name = process.argv.slice(2).filter(a => !a.startsWith('--')).join(' ').trim()
-if (!name) { console.log(JSON.stringify({ hint: 'get-program <program>   — one program, with every question form it answers and its saved params' })); process.exit(0) }
-const P = (n) => (typeof n.props === 'string' ? JSON.parse(n.props || '{}') : (n.props || {}))
-const strip = (d) => String(d || '').replace('programs/', '')
-const want = strip(name)
-const questions = []
-const params = {}
-let found = null
-for (const h of store.search(want, { limit: 40 })) {
-  const p = P(h)
-  const dir = h.kind === 'program' ? p.dir : p.program
-  if (!dir || strip(dir) !== want) continue
-  if (!found) found = { program: dir, category: p.category }
-  const qs = h.kind === 'program' ? h.label : (p.question || h.label)
-  if (qs && !questions.includes(qs)) questions.push(qs)
-  if (p.params && typeof p.params === 'object') Object.assign(params, p.params)
-}
-console.log(JSON.stringify(found ? { program: found.program, category: found.category, answers: questions, params } : { error: 'no such program: ' + name }, null, 2))
-`,
     'find-schema': `// Datasource index. "<term>" = matching fields across ALL sources (SOURCE.CONTAINER.FIELD : type). Search by field/table name, by type (date/number), or by what a column MEANS. --source <S> filters to one source; --full adds PK/nullable/references.
 import { NodeStore, searchDataSource } from '@superatom/node-store'
 const store = new NodeStore(${JSON.stringify(join(dbDir, 'project.sqlite'))})
@@ -756,23 +733,6 @@ console.log(JSON.stringify({
 import { authoringGuide } from ${JSON.stringify(guideImport)}
 const type = process.argv.slice(2).filter((a) => !a.startsWith('-'))[0] || 'default'
 console.log(authoringGuide(type))
-`,
-    'find-program': `// Programs that answered a similar question — the SHORTLIST: what each answers, and its name.
-// Deliberately no params and no source: a list is for choosing which one to look at. ./get-program <name> opens one.
-import { NodeStore } from '@superatom/node-store'
-const store = new NodeStore(${JSON.stringify(join(dbDir, 'project.sqlite'))})
-const q = process.argv.slice(2).filter(a => !a.startsWith('--')).join(' ').trim()
-const P = (n) => (typeof n.props === 'string' ? JSON.parse(n.props || '{}') : (n.props || {}))
-const out = []
-for (const h of store.search(q, { limit: 20 })) {
-  const p = P(h)
-  const row = h.kind === 'intent' && p.program ? { question: p.question ?? h.label, program: p.program, category: p.category }
-            : h.kind === 'program' ? { question: h.label, program: p.dir, category: p.category }
-            : null
-  if (row) out.push(row)
-}
-const seen = new Set()
-console.log(JSON.stringify(out.filter(o => o.program && !seen.has(o.program) && seen.add(o.program)).slice(0, 8), null, 2))
 `,
     'sources': `// List data sources + their kind/dialect. Run: ./sources. Prints JSON.
 import { sources } from ${JSON.stringify(join(dir, 'data', 'query.mjs'))}
@@ -819,8 +779,6 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
     'get-concept':  'get-concept "<exact name>" [--qid <qid>]   → ONE concept. A runnable one returns its FUNCTION to copy and adapt, plus what it last produced and the invariants it carries; a not-yet-migrated one returns its prose guide. Pass --qid so the program records what it was built from.',
     'find-schema':  'find-schema "<term>" [--source <SOURCE>] [--full]   → search ALL datasources for a field/table by name, type, or description (SOURCE.TABLE.COLUMN : type); --source filters to one; --full adds PK/nullable/references',
     'authoring-guide': 'authoring-guide [type]   → how to WRITE a program: the contract, the mechanics, the canonical example. Read it when you are about to write.',
-    'find-program': 'find-program "<question>"   → the shortlist: programs that answered a similar question (what it answers · name · category)',
-    'get-program': 'get-program <program>   → ONE program in full: every question form it answers, its saved params, its category',
     'sources':      'sources   → every data source with its kind + dialect (JSON)',
     'query':        'query "<source>" "<query>"   → run a query against a source → JSON rows   (list sources: ./sources)',
     'introspect':   'introspect "<source>" <cmd>   where <cmd> = tables | columns "<table>" | sample "<table>" [n] | profile "<table>" "<column>" | verify-join "<fromT>" "<fromCol>" "<toT>" "<toCol>"',

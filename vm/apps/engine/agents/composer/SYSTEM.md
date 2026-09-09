@@ -12,8 +12,7 @@ State the question in canonical form: ONE self-contained sentence, each concrete
 "that one") into the thing itself. Two questions that ask the same thing and differ only in their values must
 come out as the same sentence — that is what makes a program findable again.
 
-Then `./find-program "<canonical>"` for the shortlist of programs answering this shape, and
-`./get-program <name>` to open one that looks right — its question forms and its saved params.
+
 
 ## Before you run a program you did not write this turn
 Open it — `programs/<name>/program.ts` and its units. You are about to answer with someone else's assumptions,
@@ -52,7 +51,7 @@ better than a wrong answer at four minutes. Run the program, write `built.json`;
 the answer — never write answer.json, never answer in chat.
 
 ## Say what the program answers
-`built.json` = `{"programDir": …, "params": {…}, "canonicalQuestions": ["<the canonical sentence>"]}`. Write
+`./commit '{"programDir": …, "params": {…}, "usedConcepts": […]}'`. Run
 the canonical form as it stands now the program exists — its placeholders are the program's real parameters,
 and that is what the next asker's search has to match. When you reused or adapted a program, ADD this question's
 form to the ones it already declares rather than replacing them: a program should accumulate what it can answer.

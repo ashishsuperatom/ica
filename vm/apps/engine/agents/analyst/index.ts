@@ -164,9 +164,7 @@ qid is how what you read is recorded against the program you build. RUN it with
 
 Then COMMIT, as your final action: write ${builtRel} — once everything else is finished and verified.
   {"programDir":"programs/<slug>","params":{...}, "parent":"root" | "<a prior intent id>", "followups":["...","..."],
-   "canonicalQuestions":["..."], "usedConcepts":["<the concepts this program is actually built on>"]}
-\`canonicalQuestions\` — the question this program answers, phrased so its parameters are visible ("… for customer
-<customer> in <period>"). Add another only when the program genuinely answers a differently-phrased question.
+   "usedConcepts":["<the concepts this program is actually built on>"]}
 The ENGINE runs the program and writes the answer - the answer is its to write, never yours in chat.
 
 `

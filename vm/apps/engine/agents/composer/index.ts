@@ -34,9 +34,8 @@ export interface ComposerOpts {
   sessionId?: string
   ica?: AgentOverride            // override this agent's profile for ONE construction (an A/B, a local script)
 }
-// canonicalQuestions — what this program ANSWERS, in question form, written by whoever built it. This is the
-// retrieval substrate: a new question is matched against these (question ↔ question), never against program
-// source, so a near-miss can't pull program code into the matching agent's context.
+// usedConcepts — the concepts a program was actually built on. Provenance, and the signal the modeller reads
+// when it consolidates: it says which knowledge this answer rests on.
 export interface BuiltPtr { programDir: string; params?: any; terms?: any[]; followups?: string[]; canonicalQuestions?: string[] }
 export interface ComposerResult {
   escalate?: { reason: string }        // set when concepts didn't cover it → engine hands off to the analyst
@@ -54,7 +53,7 @@ export type ModifyTarget = ProgramTarget
  *  Retrieval found it; the composer still decides — it is a strong lead, not a verdict. */
 export interface CanonicalMatch { programDir: string; params: Record<string, unknown>; canonical: string }
 export interface Composer {
-  ask(question: string, handlers?: RunHandlers, opts?: { qid?: string; candidates?: ProgramCandidate[]; modify?: ModifyTarget; canonicalMatch?: CanonicalMatch; resolvedQuestion?: string; explain?: ProgramTarget; raw?: string; sid?: string; build?: string }): Promise<ComposerResult>
+  ask(question: string, handlers?: RunHandlers, opts?: { qid?: string; modify?: ModifyTarget; canonicalMatch?: CanonicalMatch; resolvedQuestion?: string; explain?: ProgramTarget; raw?: string; sid?: string; build?: string }): Promise<ComposerResult>
   session: Session
   cwd: string
 }
@@ -91,9 +90,6 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
     '',
     'Each question is followed by `meta:` — the mechanical facts for that question, not part of what was asked:',
     '  qid              this turn',
-    '  matchedPrograms  what the engine\'s search turned up, with a similarity score. A LEAD, not an answer: the',
-    '                   search runs on wording, so a high score can be the wrong measure and an empty list can sit',
-    '                   beside a program that fits. Judge it yourself, and search again with your own phrase.',
     '  askedBefore      this exact question has been answered by that program before, with those parameters.',
     '',
     'Everything below is how you work, every time, and is not repeated with the question.',
@@ -168,8 +164,6 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
         return { answer: explainAnswer(body, o.explain.programDir), category: 'analysis', lastLines: r.lastLines, ms: Date.now() - t0 }
       }
 
-      const cands = (o.candidates ?? []).filter(c => c.program)
-
       const m = o.modify
       // MODIFY: edit the SAME program in place (the engine supplies the current program — it may be from a
       // reuse, so it is NOT in your context). No new program, no escalate — just apply the edit and rerun.
@@ -183,9 +177,9 @@ THE EDIT: ${question}
 
 OPEN and READ ./${m.programDir} (program.ts + its units). If the edit can be made from its code + the concepts you
 can pull, EDIT it, RUN it (\`tsx run.mjs ${m.programDir}/program.ts '<json>'\`) until correct, then write
-${builtRel} = {"programDir":"${m.programDir}","params":{…},"canonicalQuestions":["<the canonical form of THIS question>"]} as your final action, pointing at the SAME program (do NOT change
-programDir). But if the edit needs something in NEITHER the program NOR any concept — you'd have to discover it —
-write ${escalateRel} = {"reason":"<what's missing>"} and STOP; the analyst will handle it. Never explore raw
+\`./commit '{"programDir":"${m.programDir}","params":{…}}'\` as your final action, pointing at the SAME program
+(do NOT change programDir). But if the edit needs something in NEITHER the program NOR any concept — you'd have to discover it —
+\`./escalate "<what's missing>"\` and STOP; the analyst will handle it. Never explore raw
 data. Do NOT write answer.json.${m.concepts?.length ? `
 
 THIS PROGRAM WAS BUILT FROM: ${m.concepts.join(', ')}.
@@ -211,9 +205,6 @@ is wrong with it — as well as fixing the program.` : ''}` : ''
         `qid ${o.qid ?? '-'}`,
         `result ${builtRel}`,
         `escalate ${escalateRel}`,
-        ...(cands.length
-          ? [`matched ${cands.slice(0, 6).map((c) => `${c.program} "${c.question}" (${c.score.toFixed(2)})`).join('; ')}`]
-          : ['matched nothing']),
         ...(o.canonicalMatch
           ? [`asked before ${o.canonicalMatch.programDir} with ${JSON.stringify(o.canonicalMatch.params)}`]
           : []),
