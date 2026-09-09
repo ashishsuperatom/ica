@@ -622,27 +622,14 @@ const out = {}
 for (const k of (isRunnable ? KEEP_RUNNABLE : KEEP_PROSE)) if (hit[k] !== undefined) out[k] = hit[k]
 out.runnable = isRunnable
 
-if (isRunnable) {
-  // WHAT IT LAST PRODUCED, so you can judge fit before copying anything: the value, the parameters that
-  // produced it, when, and the invariants it carries. A concept whose last run was months ago against
-  // parameters unlike yours is a different proposition from one that ran this morning.
-  try {
-    // ../../ — this file sits in .tools/, one level deeper than the concept seam that resolves the same
-    // store. Getting it wrong did not fail: NodeStore CREATED an empty database at the wrong path and read
-    // from it, so every concept reported no last run and a stray db/ appeared inside the workspace.
-    const store = new NodeStore(_fu(new URL('../../db/project.sqlite', import.meta.url)))
-    const sample = getSample(store.db, hit.conceptId || '')
-    if (sample) {
-      out.lastRun = {
-        value: sample.value, rows: sample.rows, params: sample.params,
-        at: new Date(sample.at).toISOString(), ms: sample.ms,
-        invariants: sample.verifications.map((v) => v.label),
-        caveats: sample.caveats,
-      }
-    }
-    store.close()
-  } catch { /* the sample is a convenience; never let it cost the read */ }
-}
+// WHAT IT LAST PRODUCED IS NOT SENT. A concept is reference material for a program you are about to write,
+// and that program runs its own code — so what this returned on one particular day, for one particular set of
+// parameters, tells you nothing you will not compute yourself. Worse, it is a number sitting in your context
+// that was true once: the failure is not the wasted tokens, it is quoting it.
+//
+// The run is still recorded. The status field says it ran and its invariants held, the store keeps the full
+// record as evidence, and a person can see it in the inspector. None of it belongs in a program's context.
+
 console.log(JSON.stringify(out, null, 2))
 
 // RECORD THE OPEN, and never let recording cost the read. This is the mechanical half of "what was this
