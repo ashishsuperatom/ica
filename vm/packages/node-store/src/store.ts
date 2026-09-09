@@ -63,6 +63,7 @@ export class NodeStore {
     // SQLITE_BUSY when both write at once.
     this.db.pragma('busy_timeout = 5000')
     this.db.exec(SCHEMA)
+    this.#migrateFts()
     // The datasource index belongs to every project's database, so it is created HERE with everything else
     // rather than by whichever caller happens to reach it first. See DATASOURCE_INDEX_SCHEMA.
     this.db.exec(DATASOURCE_INDEX_SCHEMA)
@@ -74,6 +75,25 @@ export class NodeStore {
     this.db.exec(CONCEPT_RUN_SCHEMA)
     this.db.exec(CONCEPT_SIGNATURE_SCHEMA)
     this.db.exec(CONCEPT_SAMPLE_SCHEMA)
+  }
+
+  /** The full-text index is DERIVED, so it can simply be rebuilt when its definition changes.
+   *
+   *  `CREATE VIRTUAL TABLE IF NOT EXISTS` does not alter a table that already exists, so a database made
+   *  before the tokenizer changed would keep searching without stemming for ever, and nothing would say so.
+   *  Dropping and rebuilding costs one pass over the nodes table and loses nothing: every row is still in
+   *  `nodes`, which is the content this index points at. */
+  #migrateFts(): void {
+    const row = this.db.prepare(
+      `SELECT sql FROM sqlite_master WHERE type='table' AND name='nodes_fts'`).get() as any
+    if (!row?.sql) return
+    // COMPARE THE TOKENIZER, not one particular value of it. Checking for a specific one only detects the
+    // change in the direction you happened to be going, and this definition has already moved both ways.
+    const tok = (sql: string) => (/tokenize\s*=\s*'([^']*)'/i.exec(sql)?.[1] ?? '').trim()
+    if (tok(row.sql) === tok(SCHEMA)) return
+    this.db.exec(`DROP TABLE nodes_fts;`)
+    this.db.exec(SCHEMA)                                    // recreates it with the current definition
+    this.db.exec(`INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild');`)
   }
 
   close() { this.db.close() }

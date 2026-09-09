@@ -464,7 +464,34 @@ const bodyOf = (idx) => { const t = (propsOf(idx) || {}).target; return t ? stor
 export function findConcept(query, limit = 8) {
   const qw = cWords(query)
   if (!qw.size) return []
-  const rows = store.db.prepare("SELECT * FROM nodes WHERE kind = 'index' AND valid_to IS NULL").all()
+  // TWO PASSES: SQLite finds the candidates, this ranks them.
+  //
+  // A name can only score at all if it shares a word with the query, so full-text search over the label
+  // column returns a SUPERSET of everything that could rank — the ordering below is unchanged, it just runs
+  // over dozens of rows instead of every name in the store. Scanning all of them cost 0.6ms at 665 names and
+  // 102ms at 50,000, which is linear and eventually a wall.
+  //
+  // The index stems (porter) and so does the scorer, so both agree that "projects" and "project" are one
+  // word. Terms are quoted individually because a question contains punctuation that is FTS5 syntax.
+  //
+  // NO MATCH FALLS BACK TO THE FULL SCAN. If the query is all stop-words, or the index is somehow behind,
+  // a search returning nothing would look exactly like "we have no such concept" — the one failure that
+  // must not be silent.
+  const terms = [...qw].filter((w) => /^[a-z0-9]+$/.test(w))
+  let rows = []
+  if (terms.length) {
+    // PREFIX MATCHING, so the prefilter is a SUPERSET of what the ranking below could match. The terms are
+    // already stemmed by the scorer's own rules ("deliveries" -> "deliveri", "monthly" -> "month"), and a
+    // prefix on that stem reaches every surface form the scorer would have accepted. Exact matching here
+    // silently dropped results the full scan returned, which is the one way a prefilter may not fail.
+    const match = 'label : (' + terms.map((w) => '"' + w + '" * ').join(' OR ') + ')'
+    try {
+      rows = store.db.prepare(
+        "SELECT n.* FROM nodes_fts f JOIN nodes n ON n.rowid = f.rowid " +
+        "WHERE nodes_fts MATCH ? AND n.kind = 'index' AND n.valid_to IS NULL LIMIT 2000").all(match)
+    } catch { rows = [] }
+  }
+  if (!rows.length) rows = store.db.prepare("SELECT * FROM nodes WHERE kind = 'index' AND valid_to IS NULL").all()
   const scored = rows
     .map((n) => { const cw = cWords(n.label); if (!cw.size) return { n, matched: 0, cover: 0 }; let m = 0; for (const w of cw) if (qw.has(w)) m++; return { n, matched: m, cover: m / cw.size } })
     .filter((x) => x.matched > 0)

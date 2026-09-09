@@ -38,6 +38,11 @@ CREATE INDEX IF NOT EXISTS edges_to   ON edges(to_id, type);
 CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
   label, summary, props,
   content='nodes', content_rowid='rowid'
+  -- NO STEMMING HERE, deliberately. A second stemmer sounds like an improvement and is a disagreement: the
+  -- ranking that runs afterwards has its own rules, and porter does not share them — it turns "monthly" into
+  -- "monthli" where the scorer turns it into "month", so a name the scorer would have matched never reaches
+  -- it. The prefilter searches raw words with a PREFIX instead, which is looser than either stemmer and so
+  -- cannot drop anything the ranking would have kept.
 );
 
 CREATE TRIGGER IF NOT EXISTS nodes_ai AFTER INSERT ON nodes BEGIN
