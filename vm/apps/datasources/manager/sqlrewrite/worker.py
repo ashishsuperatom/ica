@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "ven
 
 import sqlglot  # noqa: E402  (vendor path must be set first)
 from sqlglot import exp  # noqa: E402
+from sqlglot.optimizer.normalize_identifiers import normalize_identifiers  # noqa: E402
 from sqlglot.errors import ParseError  # noqa: E402
 import hooks  # noqa: E402  (sibling module)
 
@@ -143,10 +144,66 @@ def rewrite(req):
     return {"sql": out, "lineage": None, "cappedTo": cappedTo}
 
 
+# ── STRUCTURAL SIGNATURE ──────────────────────────────────────────────────────────────────────────────────
+# What a query MEASURES, from WHERE, under WHICH conditions — and, separately, the axis it groups by.
+#
+# The split is the whole point. Grouping one measure a different way is not a different measure, so the
+# dimension is kept OUT of the core: three concepts that differ only in GROUP BY share a core and are one
+# measure with three axes. A dimension also drags in its own JOIN and its own label column, and those are
+# excluded for the same reason — they belong to the axis, not to what is being counted.
+#
+# NORMALISED, never SIMPLIFIED. Identifiers are case-folded and literals are holed out (a literal that varies
+# between runs is a parameter, not a different program). Nothing that changes the ANSWER is touched: join
+# type, operators and predicates survive exactly, because LEFT and INNER decide whether unmatched rows exist
+# and folding them together would merge concepts that genuinely disagree.
+#
+# Comments are stripped: they are for whoever reads the code and take no part in what it computes.
+#
+# This is a SIMILARITY key, not an identity. Two queries can compute the same thing with different shapes —
+# a join versus a subquery — and no structural hash will catch that. High precision, low recall: what it
+# matches is genuinely related, what it misses is simply left alone.
+def signature(req):
+    import hashlib, json as _json, re as _re
+    sql = req.get("sql") or ""
+    dialect = req.get("dialect")
+    # The modeller's placeholder convention, made parseable. A hole is a hole either way.
+    prepared = _re.sub(r"<(\w+)>", r":\1", sql)
+    tree = sqlglot.parse_one(prepared, read=dialect)
+
+    for node in tree.walk():
+        node.comments = None
+    tree = normalize_identifiers(tree)
+    for lit in list(tree.find_all(exp.Literal)):
+        lit.replace(exp.Placeholder())
+
+    where = tree.find(exp.Where)
+    frm = tree.find(exp.From)
+    group = tree.find(exp.Group)
+    preds = sorted({c.sql() for c in (where.find_all(
+        exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE, exp.In, exp.Is, exp.Like) if where else [])})
+    # A time restriction is a PARAMETER of a measure, not part of what it measures — one concept written with
+    # a year equality and another with a date range are the same measure asked over different windows.
+    time_like = _re.compile(r":|date|time|year|month|day|period|trandate", _re.I)
+    core = {
+        "measures": sorted({f.sql() for f in tree.find_all(exp.AggFunc)}),
+        "base": frm.this.name if frm and hasattr(frm.this, "name") else None,
+        "filters": [p for p in preds if not time_like.search(p)],
+    }
+    return {
+        "core": core,
+        "coreHash": hashlib.sha256(_json.dumps(core, sort_keys=True).encode()).hexdigest()[:12],
+        "dimension": sorted({g.sql() for g in group.expressions}) if group else [],
+        "timeFilters": [p for p in preds if time_like.search(p)],
+        "joins": sorted({(j.side or "INNER") for j in tree.find_all(exp.Join)}),
+    }
+
+
 def handle(req):
     op = req.get("op", "rewrite")
     if op == "ping":
         return {"ok": True, "pong": True}
+    if op == "signature":
+        return {"ok": True, **signature(req)}
     result = rewrite(req)
     return {"ok": True, **result}
 

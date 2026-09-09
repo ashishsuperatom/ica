@@ -13,7 +13,7 @@ import http from 'node:http'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { dirname, join, isAbsolute } from 'node:path'
-import { rewriteSqlDetailed } from './sqlglot-pool.js'
+import { sqlSignature, rewriteSqlDetailed } from './sqlglot-pool.js'
 
 // Result caps for AGENT queries — a runaway/unbounded query must not dump a whole table (192K rows would
 // overwhelm the bridge WS AND the UI, which shows hundreds at most). MAX_ROWS is enforced AT THE SOURCE — the
@@ -184,6 +184,17 @@ const server = http.createServer(async (req, res) => {
     let b: any; try { b = await readBody(req) } catch (e: any) { return send(res, 400, { error: e.message }) }
     if (!b.id) return send(res, 400, { error: 'body must have { id }' })
     return send(res, 200, await unregisterSource(String(b.id)))
+  }
+
+  // ── STRUCTURAL SIGNATURE ───────────────────────────────────────────────────────────────────────────────
+  // Deliberately NOT on the query path. This is computed when a concept is saved — a background moment — so
+  // it costs a question nothing. It lives here because this process already owns the SQL parser and its
+  // dialect handling, and a signature computed by a second parser could disagree with what actually runs.
+  if (req.method === 'POST' && url.pathname === '/signature') {
+    let b: any; try { b = await readBody(req) } catch (e: any) { return send(res, 400, { error: e.message }) }
+    if (!b?.sql) return send(res, 400, { error: 'body must have { sql, dialect? }' })
+    const sig = await sqlSignature(String(b.sql), { dialect: b.dialect })
+    return send(res, 200, { signature: sig })   // null when it will not parse: no signature, not an error
   }
 
   if (req.method !== 'POST') return send(res, 405, { error: 'POST only' })

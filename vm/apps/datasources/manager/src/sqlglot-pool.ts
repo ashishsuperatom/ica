@@ -154,6 +154,34 @@ export async function rewriteSqlDetailed(sql: string, opts: RewriteOpts = {}): P
   }
 }
 
+/** The STRUCTURAL signature of a query: what it measures, from where, under which conditions, and — kept
+ *  separate — the axis it groups by. A similarity key for spotting one measure written several times, never
+ *  an identity: two queries can compute the same thing with different shapes and no structural hash catches
+ *  that. Runs on the same warm pool as the rewrite, but off the question path — signatures are computed when
+ *  a concept is SAVED, not when anyone asks something. */
+export interface SqlSignature {
+  core: { measures: string[]; base: string | null; filters: string[] }
+  coreHash: string
+  dimension: string[]
+  timeFilters: string[]
+  joins: string[]
+}
+
+export async function sqlSignature(sql: string, opts: { dialect?: string } = {}): Promise<SqlSignature | null> {
+  const w = await acquire()
+  try {
+    const msg = await once(w, { op: 'signature', sql, dialect: opts.dialect })
+    release(w)
+    // A body whose SQL will not parse is not a failure worth propagating — a concept can be perfectly good
+    // and still hold a fragment, or a dialect this cannot read. No signature simply means no cluster.
+    if (!msg.ok) return null
+    return { core: msg.core, coreHash: msg.coreHash, dimension: msg.dimension, timeFilters: msg.timeFilters, joins: msg.joins }
+  } catch {
+    if (w.alive) release(w)
+    return null
+  }
+}
+
 /** Kill the whole pool now (idempotent). Wired to manager shutdown so children never outlive the parent. */
 export function shutdownPool(): void {
   if (reapTimer) { clearTimeout(reapTimer); reapTimer = null }
