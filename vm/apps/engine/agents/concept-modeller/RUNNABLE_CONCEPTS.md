@@ -1,6 +1,7 @@
 # Runnable concepts — what we are building, and why
 
-Status: design agreed, not yet built. Branch `concepts/runnable`.
+Status: steps 1–5 built and verified on branch `concepts/runnable`. Step 6 (acting on clusters) deliberately
+not started. The 30 convertible concepts have drafts; completing them is authoring work, not tooling.
 
 ## The problem
 
@@ -125,7 +126,30 @@ Each step is independently useful — stopping after any of them leaves the syst
 - Whether cluster count grows over time. If it does, the modeller is duplicating rather than parameterising,
   and the instrumentation is telling you so.
 
-## Two calls needed before step 1
+## What running it taught us
 
-- The exact `ctx` surface a concept gets.
-- Confirmation that non-runnable knowledge becomes notes rather than being dropped.
+Every one of these was found by building the thing rather than reasoning about it.
+
+**A concept body must be a valid unit body.** `ConceptCtx` is `Omit<UnitCtx, 'use'>` and `UnitCtx` gained
+`verify`/`caveat` — not by preference but by force: a concept is COPIED into a unit, so a capability a
+concept has and a unit lacks would break the assertions first, which are the whole reason the copy is safe.
+
+**No wrapper file is generated.** The plan was to emit a module with the right imports, run it, delete it.
+Unnecessary: `ctx` is an argument, so a concept has nothing to import and the runner just loads it. That also
+removed a class of bug this repository has shipped four times — an escape correct in the template and wrong
+once written out. (The smoke test's `node --check` guard caught the fourth before it left the machine.)
+
+**Degradation must not look like agreement.** With the SQL half unavailable every concept hashed identically,
+so the clustering would have reported that everything duplicates everything. An unsignable statement now
+contributes its own normalised text, and `degraded` says the hash rests partly on it.
+
+**A hang must be able to hold the process open.** The timeout was `unref`'d, so a hanging concept exited
+before it could fire and reported nothing — worse than failing slowly.
+
+**Stored `source` is prose, not an id**, despite the schema's claim; and our dialect labels are ours, not
+SQLGlot's. Both silently misfiled good measures as "not a computation" until the id was recognised against
+what the manager actually has and the signature went through the same dialect map the rewrite uses.
+
+**The prose was already stale.** The first migrated concept's description claimed 1,143 active employees; the
+data says 1,158. Nothing would ever have noticed, which is the argument for computing rather than quoting,
+found inside the store it was written about.
