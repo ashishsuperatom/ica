@@ -26,6 +26,11 @@ export interface GraphNode {
 }
 export interface GraphEdge { from: string; to: string }
 export interface Branch { node: string; label: string; took: boolean; reason: string }
+/** An invariant that was actually checked, with the answer. `ok:false` is only ever seen by a caller that
+ *  caught the throw — the run itself stops, because the number it would return does not mean what it says. */
+export interface Verification { node: string; label: string; ok: boolean; detail?: string; ms: number }
+/** A limitation of the result, attached to the node that knew about it. */
+export interface Caveat { node: string; text: string }
 
 export interface RunResult {
   output: unknown
@@ -33,6 +38,8 @@ export interface RunResult {
   root: string
   finalShapeHash: string
   nodes: GraphNode[]
+  verifications: Verification[]
+  caveats: Caveat[]
   edges: GraphEdge[]
   branches: Branch[]
   ms: number
@@ -63,6 +70,11 @@ export type ProgramEvent =
   | { t: 'unit:start'; id: string; unit: string }
   | { t: 'unit:end'; id: string; unit: string; ms: number; rows?: number }
   | { t: 'decide'; label: string; took: boolean; reason: string }
+  // An invariant checked against real data, and a limitation attached to the result. Both are LIVE events as
+  // well as records, because the interesting moment for a reader is when a check fails — waiting for the run
+  // to end to learn that would be learning it too late.
+  | { t: 'verify'; label: string; ok: boolean }
+  | { t: 'caveat'; text: string }
   | { t: 'log'; text: string }
   | { t: 'query:start'; id: string; source: string; sql: string }
   | { t: 'query:end'; id: string; source: string; ms: number; rows?: number; error?: string }
@@ -88,6 +100,10 @@ export async function runProgram(opts: {
   const nodes: GraphNode[] = []
   const edges: GraphEdge[] = []
   const branches: Branch[] = []
+  // Both travel with the RESULT rather than with the code that produced it: an assertion nobody can see the
+  // outcome of is a comment, and a caveat left in the source is one the reader never gets.
+  const verifications: Verification[] = []
+  const caveats: Caveat[] = []
   const cache = new Map<string, UnitModule>()
   let counter = 0
 
@@ -136,6 +152,29 @@ export async function runProgram(opts: {
       ev({ t: 'decide', label, took: !!condition, reason })
       return condition
     },
+    verify: async (label, holds, detail) => {
+      const started = Date.now()
+      let ok = false
+      try { ok = !!(await holds()) }
+      catch (e: any) {
+        // A check that could not run has not passed. Reporting it as a failure with its own error keeps the
+        // two cases distinguishable without letting a broken check read as a satisfied one.
+        verifications.push({ node: selfId, label, ok: false, detail: `check threw: ${e?.message ?? e}`, ms: Date.now() - started })
+        emit(`✗ ${label} — check could not run: ${e?.message ?? e}`)
+        ev({ t: 'verify', label, ok: false })
+        throw new Error(`verification "${label}" could not run: ${e?.message ?? e}`)
+      }
+      verifications.push({ node: selfId, label, ok, detail, ms: Date.now() - started })
+      emit(`${ok ? '✓' : '✗'} ${label}${detail ? ` — ${detail}` : ''}`)
+      ev({ t: 'verify', label, ok })
+      if (!ok) throw new Error(`verification failed: ${label}${detail ? ` — ${detail}` : ''}`)
+    },
+    caveat: (text) => {
+      const t = String(text).slice(0, 500)
+      caveats.push({ node: selfId, text: t })
+      emit(`⚠ ${t}`)
+      ev({ t: 'caveat', text: t })
+    },
     log: (msg) => { emit(msg); ev({ t: 'log', text: String(msg).slice(0, 1000) }) },
   })
 
@@ -169,7 +208,7 @@ export async function runProgram(opts: {
     ui: program.ui,
     root: `${rootName}#1`,
     finalShapeHash: shapeHash(output),
-    nodes, edges, branches,
+    nodes, edges, branches, verifications, caveats,
     ms: Date.now() - t0,
   }
 }
