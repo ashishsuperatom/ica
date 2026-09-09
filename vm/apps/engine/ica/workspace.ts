@@ -21,6 +21,10 @@ import { createRequire } from 'node:module'
 // describe different contracts — one module, two readers.
 const guideImport = new URL('../agents/shared-prompts/authoring-reference.js', import.meta.url).href
 const reviewImport = new URL('../answer-review.js', import.meta.url).href
+// The concept runner and its save path. Absolute at generation time, for the same reason the review import
+// is: a workspace file is relocatable and must not depend on where it sits relative to the engine.
+const conceptRunImport = new URL('../concepts/runner.js', import.meta.url).href
+const conceptSaveImport = new URL('../concepts/save.js', import.meta.url).href
 
 // The display helpers describe themselves — see FORMAT_HELPERS. Adding one there teaches the agent about it,
 // with no line here to remember to update.
@@ -224,6 +228,86 @@ export const find = (...terms) => {
 }
 export const raw = store
 export default store
+`)
+
+  // ── THE CONCEPT SEAM: try, then save ──────────────────────────────────────────────────────────────────
+  // Run as its OWN process, exactly like a program — `tsx concept-try.mjs …`. A concept is agent-written code
+  // and gets the same isolation everything else agent-written gets: it cannot hang, crash or leak into the
+  // engine, and there is one way to run authored code rather than two.
+  await writeFile(join(dir, 'concept-try.mjs'),
+`// TRY a concept — run it and see what it produces, without saving anything:
+//   tsx concept-try.mjs concepts/<name>.mjs '{"someParam":"value"}'
+//
+// You write a FUNCTION. Nothing else. No imports, no context wiring, no file paths — ctx arrives as an
+// argument, and this tool owns everything around it. That division is deliberate: boilerplate is what gets
+// written wrong, and boilerplate written once by a tool cannot drift.
+//
+// A concept file is two exports:
+//   export const meta = { name, description, sources: ['<datasource id>'], params?: {…}, returns }
+//   export default async function (ctx, params) { … return { value } | { distribution } }
+//
+// ctx gives you exactly what a unit gets, minus composition — a concept is ATOMIC and never calls another:
+//   query(source, sql, params?)          the only way to reach data
+//   decide(label, condition, reason)     record a branch; returns the condition so you can keep using it
+//   verify(label, () => holds, detail?)  an invariant. IT THROWS when it fails, because a number that
+//                                        violates its own invariant is wrong, and a wrong number shown is
+//                                        worse than none. Write the checks you would otherwise have written
+//                                        down as a rule — they run every time, on real data, forever.
+//   caveat(text)                         a limitation that must travel WITH the value
+//   log(message)                         a progress note
+//
+// Prints the run id. Save with that id and nothing else — see concept-save.mjs.
+import { tryConcept } from ${JSON.stringify(conceptRunImport)}
+import { NodeStore } from '@superatom/node-store'
+import { fileURLToPath } from 'node:url'
+
+const [file, paramsJson] = process.argv.slice(2)
+if (!file) { console.error('usage: tsx concept-try.mjs <file.mjs> [paramsJson]'); process.exit(1) }
+let params = {}
+try { params = paramsJson ? JSON.parse(paramsJson) : {} }
+catch (e) { console.error('params must be JSON: ' + e.message); process.exit(1) }
+
+const store = new NodeStore(fileURLToPath(new URL('../db/project.sqlite', import.meta.url)))
+const r = await tryConcept({ file, params, store, onEvent: (e) => process.stderr.write('  ' + JSON.stringify(e) + '\\n') })
+
+if (!r.ok) {
+  // The file stays exactly where you wrote it, so the error points at something you can open and fix.
+  console.error('\\n✗ did not run — nothing was saved')
+  console.error(r.error)
+  process.exit(1)
+}
+console.log('✓ ran · run ' + r.runId)
+console.log('  value        ' + JSON.stringify(r.result?.value))
+if (r.result?.distribution) console.log('  distribution ' + r.result.distribution.length + ' row(s)')
+for (const v of r.verifications) console.log('  ' + (v.ok ? '✓' : '✗') + ' ' + v.label)
+for (const c of r.caveats) console.log('  ⚠ ' + c)
+console.log('')
+console.log('Read the value as the person who asked would. If it is empty, implausible, or not what this')
+console.log('concept claims to compute, fix the function — do not save it.')
+console.log('Save with:  tsx concept-save.mjs ' + r.runId + ' "<why>"')
+`)
+
+  await writeFile(join(dir, 'concept-save.mjs'),
+`// SAVE a concept you have already run:
+//   tsx concept-save.mjs <runId> "<why this change>"
+//
+// Takes a run id, never a file. What gets stored is exactly what ran — the id is derived from the source and
+// the parameters, so this re-derives it and refuses a mismatch. Saving a body nobody executed is the one
+// mistake that would make "verified" meaningless, so it is made impossible rather than discouraged.
+//
+// It refuses: an unknown run, a run that errored, and a run whose invariants did not hold.
+import { saveConcept } from ${JSON.stringify(conceptSaveImport)}
+import { NodeStore } from '@superatom/node-store'
+import { fileURLToPath } from 'node:url'
+
+const [runId, reason] = process.argv.slice(2)
+if (!runId) { console.error('usage: tsx concept-save.mjs <runId> "<why>"'); process.exit(1) }
+
+const store = new NodeStore(fileURLToPath(new URL('../db/project.sqlite', import.meta.url)))
+const r = saveConcept(store, runId, { changedBy: 'consolidator', reason: reason || undefined })
+if (!r.ok) { console.error('✗ not saved — ' + r.reason); process.exit(1) }
+console.log('✓ saved ' + r.name + ' (' + r.conceptId + ')')
+console.log('  exercised with ' + JSON.stringify(r.observed))
 `)
 
   await writeFile(join(dir, 'run.mjs'),
