@@ -50,7 +50,11 @@ export function saveConcept(store: NodeStore, runIdToSave: string, meta: ChangeM
   // verification are no longer described here, they are the code.
   const props: ConceptProps = {
     value: String(m.description ?? '').trim() || `Computes ${m.name}.`,
-    status: 'verified',                       // it ran, and every invariant it declared held
+    aliases: Array.isArray(m.aliases) && m.aliases.length ? m.aliases : undefined,
+    // CORROBORATED, not verified. It ran and its invariants held, which is stronger than an analyst having
+    // seen it once — but the existing scale reserves 'verified' for a person confirming, and quietly
+    // redefining a status is how a scale stops meaning anything. Execution earns the middle rung.
+    status: 'corroborated',
     source: Array.isArray(m.sources) ? m.sources[0] : undefined,
     compute: run.source,                      // runnable, not a recipe
     parameters: paramsFacet(m.params),

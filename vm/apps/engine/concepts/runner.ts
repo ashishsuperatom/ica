@@ -30,7 +30,17 @@ export interface TryOpts {
   query?: ConceptCtx['query']
   /** Live progress, so a long concept is distinguishable from a stuck one. */
   onEvent?: (e: Record<string, unknown>) => void
+  /** Wall clock before the run is abandoned. Catches the ordinary hang — a query that never returns, an
+   *  await that never settles. A synchronous infinite loop cannot be interrupted from inside JavaScript at
+   *  all, which is the other reason this runs as its own process: that case is survivable by killing it, and
+   *  the engine is untouched either way. */
+  timeoutMs?: number
 }
+
+/** How much of a distribution is kept ON THE RECORD. The value is the point; the distribution is evidence,
+ *  and a hundred thousand rows in a scratch table helps nobody. Truncation is stated rather than silent —
+ *  a shortened list that does not say it was shortened is a wrong answer about the data. */
+const DISTRIBUTION_KEPT = 200
 
 export interface TryResult extends ConceptRunRecord {
   /** True when the concept ran AND every invariant held — the only state from which a save is allowed. */
@@ -76,6 +86,7 @@ export async function tryConcept(opts: TryOpts): Promise<TryResult> {
   let result: ConceptResult | undefined
   let meta: ConceptMeta | undefined
   let error: string | undefined
+  const timeoutMs = opts.timeoutMs ?? 120_000
   try {
     // Cache-busted: an author iterates on one file, and a stale module would silently run the previous
     // attempt — the most confusing failure available in a loop like this one.
@@ -84,18 +95,48 @@ export async function tryConcept(opts: TryOpts): Promise<TryResult> {
     if (typeof mod.default !== 'function') throw new Error('no default export — a concept is a function (ctx, params)')
     if (!meta?.name) throw new Error('meta.name is missing — a concept must say what a user would call it')
     if (!Array.isArray(meta.sources)) throw new Error('meta.sources is missing — declare which datasources this reads')
-    result = await mod.default(ctx, params)
+    // Declared parameters that arrived, and arrivals nobody declared. Neither is fatal — a default may
+    // legitimately cover a missing one — but both are reported, because a parameter silently ignored is a
+    // concept that looks like it responded to an input it never read.
+    for (const k of Object.keys(meta.params ?? {})) {
+      if (!(k in (params as any))) emit({ t: 'log', text: `parameter "${k}" is declared but was not supplied` })
+    }
+    for (const k of Object.keys((params as any) ?? {})) {
+      if (meta.params && !(k in meta.params)) emit({ t: 'log', text: `parameter "${k}" was supplied but is not declared in meta.params` })
+    }
+
+    let timer: NodeJS.Timeout | undefined
+    result = await Promise.race([
+      Promise.resolve(mod.default(ctx, params)),
+      new Promise<never>((_, reject) => {
+        // NOT unref'd, deliberately. An unref'd timer does not hold the process open, so a concept that
+        // hangs would let the process EXIT before the timeout could fire — the hang would be reported as
+        // nothing at all, which is the one outcome worse than a slow failure. `finally` clears it, so a run
+        // that finishes never waits on it.
+        timer = setTimeout(() => reject(new Error(
+          `still running after ${Math.round(timeoutMs / 1000)}s — abandoned. A query that never returns is the usual cause; ` +
+          `check what this concept asks the datasource for.`)), timeoutMs)
+      }),
+    ]).finally(() => { if (timer) clearTimeout(timer) }) as ConceptResult
     if (!result || (result.value === undefined && result.distribution === undefined)) {
       // Neither is not a concept: something must be computed, or there is nothing to be atomic ABOUT.
       throw new Error('returned neither `value` nor `distribution` — a concept computes something')
     }
   } catch (e: any) {
-    error = String(e?.stack ?? e?.message ?? e).slice(0, 4000)
+    // The author's own message first: a stack whose first frame is inside the module loader tells them
+    // nothing about the line they wrote.
+    error = [e?.message, e?.stack].filter(Boolean).join('\n').slice(0, 4000)
   }
+
+  // Truncate for STORAGE only — what the author was shown is what the concept returned.
+  const stored: ConceptResult | undefined = result && Array.isArray(result.distribution) && result.distribution.length > DISTRIBUTION_KEPT
+    ? { ...result, distribution: result.distribution.slice(0, DISTRIBUTION_KEPT) }
+    : result
+  if (stored !== result) caveats.push(`distribution truncated to ${DISTRIBUTION_KEPT} of ${result!.distribution!.length} rows in the stored record`)
 
   const record: ConceptRunRecord = {
     runId: id, sourceHash: sourceHash(source), name: meta?.name, params,
-    result, caveats, verifications, source, meta, ms: Date.now() - started, error, at: Date.now(),
+    result: stored, caveats, verifications, source, meta, ms: Date.now() - started, error, at: Date.now(),
   }
   putRun(opts.store.db, record)
   return { ...record, ok: !error }

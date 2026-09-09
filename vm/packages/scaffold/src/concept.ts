@@ -45,6 +45,9 @@ export interface ConceptMeta {
   name: string
   /** What it IS, and what distinguishes it from the concept it is most easily confused with. */
   description: string
+  /** Other surface forms real questions use. These are RETRIEVAL triggers, so each must be specific enough
+   *  that it cannot fire on an unrelated question — the distinctive phrase, never its most generic word. */
+  aliases?: string[]
   /** Datasource ids this reads. Declared so the analysis need not parse the body to know, and so identical
    *  code against different sources is never mistaken for one concept. */
   sources: string[]
