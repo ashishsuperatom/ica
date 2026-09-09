@@ -16,7 +16,18 @@
 import type { NodeStore, Node } from './store.js'
 
 export type ConceptStatus = 'unverified' | 'corroborated' | 'verified'
-export type TimeSemantics  = 'snapshot' | 'during' | 'trailing'
+/** How a value binds to time, and there are only two ways.
+ *
+ *  `point`  is true AS AT an instant: a headcount, an open order value, a name lookup. Re-run it tomorrow and
+ *           the number differs, and yesterday's is unrecoverable unless the source itself keeps history.
+ *  `window` accumulates over a span: revenue in a month, invoices in a year. It is meaningless without bounds,
+ *           so a window concept must take at least one parameter that bounds it.
+ *
+ *  The old vocabulary had a third value, `trailing`, for a window whose start is relative to now. That is a
+ *  window with a computed bound, not a third kind of time, and having it as a peer invited free text: seven
+ *  concepts had already drifted to things like 'point-in-time (as at a month-end)' because the union crosses a
+ *  JSON boundary on the way into the store, where nothing checks it. Two values, checked on save. */
+export type TimeSemantics  = 'point' | 'window'
 // The optional data-model block — kept from the old semantic model because it earns its keep, but rare.
 export type Measure    = { name: string; additive?: boolean; stock?: boolean; compute?: string; note?: string }
 // A drill-down axis. `name` is ideally itself a concept name (so drill-down recurses); `via` = concise join
@@ -27,8 +38,9 @@ export type Provenance = { question: string; program?: string }
 
 export type ConceptProps = {
   // — identity & lifecycle (always present) —
-  value: string                 // what this concept IS — the general idea, in prose
-  aliases?: string[]            // other surface forms, harvested from use
+  value: string                 // what this concept IS — the general idea, in prose. SHORT: it exists so a
+                                // reader can tell whether this is the concept they want, not to teach them.
+                                // The reasoning belongs in comments inside the body.
   status: ConceptStatus
   scope?: string                // 'global' (group:/user: is a later seam); defaults to 'global'
   requires?: string[]           // learned implication → concept names (spec §6)
@@ -39,13 +51,21 @@ export type ConceptProps = {
   // — the general facets (all optional; a concept uses whichever apply) —
   find?: string                 // where the data lives / how to locate it
   compute?: string              // how to compute it (a recipe)
-  present?: string              // how to represent + explain it to the user (UI guidance)
+  present?: string              // DEPRECATED, superseded by `render`; still read for un-migrated prose
 
   // — data-model block (OPTIONAL — ONLY when the concept genuinely is an entity/measure) —
   source?: string               // datasource id (e.g. 'netsuite')
+  sources?: string[]            // every datasource it reads, when more than one; `source` stays the first
   grain?: string                // "one row per ISO currency code" — anti-double-count guard
   keying?: string               // "id = internal id; name = ISO code" — feeds name→id resolution
   time?: TimeSemantics          // how it binds to time
+  // WHAT THE NUMBER IS AND WHETHER IT MAY BE ADDED UP. Neither is visible from reading the code, and both
+  // decide whether an answer is right: additive says a split may be summed back to the whole, unit stops a
+  // figure reaching a person naked. They sit here rather than inside measures[] because they describe the
+  // concept's own atomic value, not one of several computable views of it.
+  additive?: boolean
+  unit?: string                 // 'projects', 'AUD', 'days', 'FTE', 'ratio'
+  render?: string               // a SHORT note on how to show this to a person — replaces the old `present`
   measures?: Measure[]          // computable views (compute recipe + additive/stock + note)
   dimensions?: Dimension[]      // drill-down axes
   parameters?: Parameter[]      // free / learned values (defaults drift → the timeline records it)
@@ -135,7 +155,23 @@ export function namesFor(store: NodeStore, conceptId: string): string[] {
   ).all(conceptId) as any[]).map((r) => r.label).filter(Boolean)
 }
 
-const contentOf = (p: any) => { const { _v, ...rest } = p ?? {}; return JSON.stringify(rest) }
+/** BOOKKEEPING IS NOT CONTENT. Identity is what a concept MEANS and how it computes it — never who verified
+ *  it, when, what it is also called, or how sure we are.
+ *
+ *  This was learned from the store rather than reasoned out. Thirteen groups of byte-identical bodies had
+ *  become separate concepts because a field beside the body changed: `department headcount` forked in two
+ *  purely from an alias being added, and `vendor bill total` exists three times over edits to `rules` and
+ *  `evidence`. Every one of those is the same computation, saying the same thing, split by a change that was
+ *  never about the concept at all.
+ *
+ *  So these keys are excluded from the hash. Re-verifying a concept, renaming it, or recording where it came
+ *  from now leaves it the same concept, and only a change to what it computes or what it claims mints a new
+ *  body. `aliases` is not listed because it is no longer stored: names are index rows, and a pointer has no
+ *  business being inside the thing it points at. */
+const BOOKKEEPING = new Set(['_v', 'status', 'verifiedAt', 'evidence', 'provenance', 'origin', 'aliases'])
+const contentOf = (p: any) =>
+  JSON.stringify(Object.fromEntries(
+    Object.entries(p ?? {}).filter(([k]) => !BOOKKEEPING.has(k)).sort(([a], [b]) => a < b ? -1 : 1)))
 
 function nodeFromRow(r: any): Node {
   return { id: r.id, kind: r.kind, label: r.label, summary: r.summary ?? undefined,
@@ -172,8 +208,17 @@ export function sanitizeAliases(aliases?: string[]): string[] {
   return out
 }
 
-export function upsertConcept(store: NodeStore, name: string, props: ConceptProps, meta: ChangeMeta): Node {
-  props = { ...props, aliases: sanitizeAliases(props.aliases) }   // §9 alias guard — applied before anything is stored
+/** Write a concept and point its names at it.
+ *
+ *  ALIASES ARE AN ARGUMENT, NOT A PROPERTY. They are pointers to this body, and a pointer stored inside the
+ *  thing it points at is both redundant and harmful: the index rows are what search actually reads, and while
+ *  the list also sat in the props it was part of the content hash, so adding one alias minted a whole new
+ *  concept. Passing them in keeps the naming where naming belongs. */
+export function upsertConcept(store: NodeStore, name: string, props: ConceptProps, meta: ChangeMeta,
+                              aliases: string[] = []): Node {
+  const names = sanitizeAliases(aliases)                          // §9 alias guard — before anything is stored
+  const { aliases: _dropped, ...rest } = props as any             // an aliases key on props is ignored, never stored
+  props = rest as ConceptProps
 
   // NOTHING IS OVERWRITTEN. The body is written under its own hash, and the NAME is moved to point at it. Same
   // content → same hash → the write is a no-op and the name already points there. Different content → a new
@@ -195,7 +240,7 @@ export function upsertConcept(store: NodeStore, name: string, props: ConceptProp
   // The primary name, and every alias, point at this body. An alias is not a lesser kind of name — it is the
   // same pointer with a different phrase, which is what lets two wordings mean one thing.
   putIndex(store, name, id, meta)
-  for (const a of props.aliases ?? []) putIndex(store, a, id, meta)
+  for (const a of names) putIndex(store, a, id, meta)
 
   return existing ?? { ...node, valid_from: at, valid_to: null }
 }

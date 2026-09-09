@@ -236,15 +236,26 @@ export default store
   // engine, and there is one way to run authored code rather than two.
   await writeFile(join(dir, 'concept-try.mjs'),
 `// TRY a concept — run it and see what it produces, without saving anything:
-//   tsx concept-try.mjs concepts/<name>.mjs '{"someParam":"value"}'
+//   tsx concept-try.mjs concepts/<name>.mjs '{"someParam":"value"}' concepts/<name>.meta.json
 //
 // You write a FUNCTION. Nothing else. No imports, no context wiring, no file paths — ctx arrives as an
 // argument, and this tool owns everything around it. That division is deliberate: boilerplate is what gets
 // written wrong, and boilerplate written once by a tool cannot drift.
 //
-// A concept file is two exports:
-//   export const meta = { name, description, sources: ['<datasource id>'], params?: {…}, returns }
+// The file is ONE export, and it starts at the function:
 //   export default async function (ctx, params) { … return { value } | { distribution } }
+//
+// What the concept IS lives in a JSON file beside it, because those facts are stored as fields on the
+// concept and writing them in the source too made them the same facts twice:
+//   { "name": "…", "description": "one to three sentences — what this is, not how it works",
+//     "aliases": ["other phrasings a question arrives in"], "sources": ["<datasource id>"],
+//     "params": { "name": "what it means" }, "dimensions": ["axes it can be split by"],
+//     "grain": "what one row is", "additive": true, "unit": "projects",
+//     "time": "point" | "window", "render": "a short note on how to show it" }
+//
+// The description is short ON PURPOSE. It exists so a reader can tell this is the concept they want. The
+// reasoning, the traps and the why belong in COMMENTS INSIDE THE BODY, beside the code they explain, where
+// they travel with it when it is copied.
 //
 // ctx gives you exactly what a unit gets, minus composition — a concept is ATOMIC and never calls another:
 //   query(source, sql, params?)          the only way to reach data
@@ -261,14 +272,23 @@ import { tryConcept } from ${JSON.stringify(conceptRunImport)}
 import { NodeStore } from '@superatom/node-store'
 import { fileURLToPath } from 'node:url'
 
-const [file, paramsJson] = process.argv.slice(2)
-if (!file) { console.error('usage: tsx concept-try.mjs <file.mjs> [paramsJson]'); process.exit(1) }
+const [file, paramsJson, metaFile] = process.argv.slice(2)
+if (!file) { console.error('usage: tsx concept-try.mjs <file.mjs> [paramsJson] [meta.json]'); process.exit(1) }
 let params = {}
 try { params = paramsJson ? JSON.parse(paramsJson) : {} }
 catch (e) { console.error('params must be JSON: ' + e.message); process.exit(1) }
 
+// THE METADATA RIDES WITH THE RUN so that saving needs a run id and nothing else. It is optional here: a
+// function that does not run yet is not a documentation problem, and being made to write a description
+// before you know the number is how descriptions become fiction.
+let meta
+if (metaFile) {
+  try { meta = JSON.parse(await (await import('node:fs/promises')).readFile(metaFile, 'utf8')) }
+  catch (e) { console.error('could not read ' + metaFile + ': ' + e.message); process.exit(1) }
+}
+
 const store = new NodeStore(fileURLToPath(new URL('../db/project.sqlite', import.meta.url)))
-const r = await tryConcept({ file, params, store, onEvent: (e) => process.stderr.write('  ' + JSON.stringify(e) + '\\n') })
+const r = await tryConcept({ file, params, meta, store, onEvent: (e) => process.stderr.write('  ' + JSON.stringify(e) + '\\n') })
 
 if (!r.ok) {
   // The file stays exactly where you wrote it, so the error points at something you can open and fix.
@@ -284,7 +304,8 @@ for (const c of r.caveats) console.log('  ⚠ ' + c)
 console.log('')
 console.log('Read the value as the person who asked would. If it is empty, implausible, or not what this')
 console.log('concept claims to compute, fix the function — do not save it.')
-console.log('Save with:  tsx concept-save.mjs ' + r.runId + ' "<why>"')
+console.log(meta ? 'Save with:  tsx concept-save.mjs ' + r.runId + ' "<why>"'
+                 : 'Then write its meta.json and re-run with it, so the run carries what will be stored.')
 `)
 
   await writeFile(join(dir, 'concept-save.mjs'),

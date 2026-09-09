@@ -43,7 +43,7 @@ async function main() {
   // Compute recipes are runnable queries against the source.
   const recv: ConceptProps = {
     value: 'Open receivables — one row per open bill.', status: 'verified',
-    grain: 'one open bill', time: 'snapshot', keying: 'id = SubLedger', source: 'totalgroup',
+    grain: 'one open bill', time: 'point', keying: 'id = SubLedger', source: 'totalgroup',
     find: 'the outstanding-debtor report table',
     measures: [{ name: 'outstanding', additive: true, stock: true, compute: 'aggregate {outstanding = sum balance}', note: 'floors advances' },
                { name: 'overdue', additive: true, stock: true }],

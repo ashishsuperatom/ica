@@ -22,9 +22,12 @@ import type { ConceptCtx, ConceptMeta, ConceptResult } from '@superatom/scaffold
 import { NodeStore, putRun, runId as makeRunId, sourceHash, type ConceptRunRecord } from '@superatom/node-store'
 
 export interface TryOpts {
-  /** Path to the author's file: `meta` + a default function, no imports. */
+  /** Path to the author's file: a single default-exported function, no imports and no metadata. */
   file: string
   params?: unknown
+  /** The concept's metadata, read from beside the body rather than declared inside it. Optional here because
+   *  running does not need it; the save refuses without it. */
+  meta?: ConceptMeta
   store: NodeStore
   /** Where a query goes. Defaults to the datasource seam every unit already uses. */
   query?: ConceptCtx['query']
@@ -91,30 +94,37 @@ export async function tryConcept(opts: TryOpts): Promise<TryResult> {
     // Cache-busted: an author iterates on one file, and a stale module would silently run the previous
     // attempt — the most confusing failure available in a loop like this one.
     const mod: any = await import(`${pathToFileURL(path).href}?v=${Date.now()}`)
-    meta = mod.meta
+    // METADATA COMES FROM BESIDE THE BODY, not from inside it. A concept's description, grain, unit and the
+    // rest are stored as keys on the concept, so declaring them in the source too was the same facts written
+    // twice — and because identity hashes the stored record, the copy inside the body was in the hash as
+    // well. The body is now just the function. `mod.meta` is still read so a body written the old way runs
+    // unchanged while the store is converted.
+    meta = opts.meta ?? mod.meta
     if (typeof mod.default !== 'function') throw new Error('no default export — a concept is a function (ctx, params)')
-    if (!meta?.name) throw new Error('meta.name is missing — a concept must say what a user would call it')
-    if (!Array.isArray(meta.sources)) throw new Error('meta.sources is missing — declare which datasources this reads')
+    // RUNNING DOES NOT NEED THE METADATA, and pretending otherwise made a documentation problem look like an
+    // execution failure. Whether it runs and whether it is documented are different questions, asked at
+    // different moments: this one is answered here, the other when it is saved.
     // NOT FATAL, but said every time. A measure that does not state its grain can be double-counted by a
     // fan-out join with every invariant still passing; one that does not state additivity gets summed across
     // a dimension where that is meaningless. Both are silent failures downstream, so the omission is made
     // noisy here — the only place anyone is looking at this concept.
-    for (const [field, why] of [
+    if (!meta) emit({ t: 'log', text: 'no metadata supplied — it runs, but it cannot be saved without one' })
+    for (const [field, why] of meta ? [
       ['grain', 'what one row is — the guard against double counting'],
       ['additive', 'whether this may be summed across a dimension'],
       ['unit', 'what the number counts'],
-      ['time', "'snapshot' | 'during' | 'trailing' — how it relates to time"],
-    ] as const) {
-      if ((meta as any)[field] === undefined) emit({ t: 'log', text: `meta.${field} is not declared — ${why}` })
+      ['time', "'point' (true as at an instant) or 'window' (accumulated over a span)"],
+    ] as const : []) {
+      if ((meta as any)[field] === undefined) emit({ t: 'log', text: `${field} is not declared — ${why}` })
     }
     // Declared parameters that arrived, and arrivals nobody declared. Neither is fatal — a default may
     // legitimately cover a missing one — but both are reported, because a parameter silently ignored is a
     // concept that looks like it responded to an input it never read.
-    for (const k of Object.keys(meta.params ?? {})) {
+    for (const k of Object.keys(meta?.params ?? {})) {
       if (!(k in (params as any))) emit({ t: 'log', text: `parameter "${k}" is declared but was not supplied` })
     }
     for (const k of Object.keys((params as any) ?? {})) {
-      if (meta.params && !(k in meta.params)) emit({ t: 'log', text: `parameter "${k}" was supplied but is not declared in meta.params` })
+      if (meta?.params && !(k in meta.params)) emit({ t: 'log', text: `parameter "${k}" was supplied but is not declared` })
     }
 
     let timer: NodeJS.Timeout | undefined

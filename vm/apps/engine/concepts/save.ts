@@ -58,34 +58,45 @@ export async function saveConcept(store: NodeStore, runIdToSave: string, meta: C
   }
 
   const m: any = run.meta ?? {}
-  if (!m.name) return { ok: false, reason: 'that run has no meta.name' }
+  if (!m.name) return { ok: false, reason: 'the metadata has no name — a concept must say what a person would call it' }
 
-  // THE BODY IS THE CONCEPT. `value`/`description` remain prose because a reader still needs to know what
-  // this IS and how it differs from its nearest neighbour — but the computation, the rules and the
-  // verification are no longer described here, they are the code.
+  // ── VALIDATED HERE, BECAUSE HERE IS THE LAST PLACE ANYONE CAN ──────────────────────────────────────────
+  // These are typed fields, and the type is no protection: the value crosses a JSON boundary on its way into
+  // the store, so nothing checks it after this line. Seven concepts had already drifted to free text where a
+  // three-value union was declared, and nobody noticed until the store was counted.
+  const bad = validate(m)
+  if (bad) return { ok: false, reason: bad }
+
+  // THE BODY IS THE CONCEPT. `value` remains prose because a reader still needs to know what this IS and how
+  // it differs from its nearest neighbour, but the computation, the rules and the verification are no longer
+  // described here: they are the code.
+  const sources: string[] = Array.isArray(m.sources) ? m.sources.filter(Boolean).map(String) : []
   const props: ConceptProps = {
     value: String(m.description ?? '').trim() || `Computes ${m.name}.`,
-    aliases: Array.isArray(m.aliases) && m.aliases.length ? m.aliases : undefined,
     // CORROBORATED, not verified. It ran and its invariants held, which is stronger than an analyst having
     // seen it once — but the existing scale reserves 'verified' for a person confirming, and quietly
     // redefining a status is how a scale stops meaning anything. Execution earns the middle rung.
     status: 'corroborated',
-    source: Array.isArray(m.sources) ? m.sources[0] : undefined,
+    source: sources[0],
+    // PLURAL WHEN PLURAL. The singular field truncated silently, so a concept reading two datasources stored
+    // one and looked single-source to everything downstream.
+    sources: sources.length > 1 ? sources : undefined,
     compute: run.source,                      // runnable, not a recipe
     parameters: paramsFacet(m.params),
-    // Carried onto the stored concept because they are what a READER needs in order to use the number safely,
-    // and because the existing schema already had places for them — a runnable concept that dropped them
-    // would have been a step backwards from the prose it replaced.
+    // What a READER needs to use the number safely. `additive` and `unit` are first-class rather than folded
+    // into a measures entry: they describe this concept's own atomic value, and `unit` spent its previous
+    // life inside a prose note where nothing could check it.
     grain: m.grain || undefined,
     time: m.time || undefined,
-    measures: m.unit || m.additive !== undefined
-      ? [{ name: m.name, additive: m.additive === true, note: m.unit ? `unit: ${m.unit}` : undefined }]
-      : undefined,
+    additive: typeof m.additive === 'boolean' ? m.additive : undefined,
+    unit: m.unit ? String(m.unit).trim() : undefined,
+    dimensions: dimensionsFacet(m.dimensions),
+    render: m.render ? String(m.render).trim() : undefined,
     verifiedAt: new Date(run.at).toISOString(),
     evidence: `ran ${run.runId} in ${run.ms}ms; ${run.verifications.length} invariant(s) held`,
   }
 
-  const node = upsertConcept(store, m.name, props, meta)
+  const node = upsertConcept(store, m.name, props, meta, Array.isArray(m.aliases) ? m.aliases : [])
 
   // WHAT IT LAST PRODUCED — derived, and never in props: a value moves with the data, so holding it there
   // would remint the concept on every re-run. Enough for a reader to judge fit without running it, and for a
@@ -132,3 +143,58 @@ export function observedParams(store: NodeStore, hash: string): unknown[] {
  *  live in the run records, because which values matter is discovered by running, not declared. */
 const paramsFacet = (params: Record<string, string> | undefined) =>
   params ? Object.entries(params).map(([name, note]) => ({ name, note })) : undefined
+
+/** meta.dimensions is a short list of axis names: the ways this measure can be split.
+ *
+ *  NOT the same thing as a parameter, which is an input that changes the computation. A dimension is an axis
+ *  the RESULT can be broken down by, and the two are independent — a concept can take no parameters and still
+ *  split three ways. It is declared rather than derived because the derivation is noisy: pulling the GROUP BY
+ *  out of the SQL also collects the columns a join drags along, and nothing in the syntax distinguishes an
+ *  analysis axis from a join artefact. */
+const dimensionsFacet = (dims: unknown) =>
+  Array.isArray(dims) && dims.length
+    ? dims.map((d) => (typeof d === 'string' ? { name: d } : d)).filter((d: any) => d?.name)
+    : undefined
+
+/** How long a description may be before it stops being a description. Not a style rule: the field exists so a
+ *  reader can tell whether this is the concept they want, and a model asked for prose will happily write four
+ *  paragraphs of reasoning that belongs in comments beside the code it explains. Three short sentences fit. */
+const MAX_DESCRIPTION = 300
+
+const TIME_VALUES = ['point', 'window']
+/** A parameter that bounds a window. One is enough — a year IS a window, and so is a week start. Requiring a
+ *  from AND a to was the obvious rule and it was wrong: six perfectly well-formed concepts take a single
+ *  bounding value. */
+const BOUNDING = /from|to\b|start|end|year|month|period|cutoff|week|as[_]?of|date/i
+
+/** Everything that must be true of the metadata before a concept exists. Returns a reason, or null.
+ *
+ *  It refuses rather than repairs. A description silently truncated, or a time value quietly mapped to the
+ *  nearest legal one, is a concept that says something its author did not write — and the author is right
+ *  here, able to fix it, which is the only moment anyone will. */
+function validate(m: any): string | null {
+  const desc = String(m.description ?? '').trim()
+  if (!desc) return 'the metadata has no description — say in one to three sentences what this concept is'
+  if (desc.length > MAX_DESCRIPTION) {
+    return `the description is ${desc.length} characters and the limit is ${MAX_DESCRIPTION}. Say what this ` +
+      `concept IS in one to three sentences; the reasoning, the traps and the why belong in comments inside ` +
+      `the body, where they sit beside the code they explain`
+  }
+  if (!Array.isArray(m.sources) || !m.sources.length) {
+    return 'the metadata declares no sources — name every datasource this reads'
+  }
+  if (m.time !== undefined && !TIME_VALUES.includes(m.time)) {
+    return `time is "${m.time}" but the only values are ${TIME_VALUES.join(' and ')}. A value is either true ` +
+      `AS AT an instant (point) or accumulated OVER a span (window)`
+  }
+  if (m.time === 'window') {
+    const params = Object.keys(m.params ?? {})
+    if (!params.some((p) => BOUNDING.test(p))) {
+      return `time is "window" but no parameter bounds the window${params.length ? ` (has: ${params.join(', ')})` : ' (it takes none)'}` +
+        ` — a total over an unstated span is not an answer, it is a number`
+    }
+  }
+  if (m.additive !== undefined && typeof m.additive !== 'boolean') return 'additive must be true or false'
+  if (m.unit !== undefined && !String(m.unit).trim()) return 'unit is present but empty — say what the value is counted in'
+  return null
+}
