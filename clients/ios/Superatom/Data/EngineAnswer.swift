@@ -40,9 +40,9 @@ struct EngineAnswer: Hashable {
         enum Kind: String { case table, kpis, text }
         var kind: Kind
         var title: String?
-        var columns: [String] = []
-        var rows: [[JSONValue]] = []
-        var total: [JSONValue] = []
+        var columns: [ColumnSpec] = []
+        var rows: [[Cell]] = []
+        var total: [Cell] = []
         var note: String?
         var items: [Figure] = []
         var body: String?
@@ -75,7 +75,7 @@ struct EngineAnswer: Hashable {
             case .kpis:
                 out.append(section.items.map(Self.line).joined(separator: "\n"))
             case .table:
-                var rows = [section.columns.joined(separator: "\t")]
+                var rows = [section.columns.map(\.label).joined(separator: "\t")]
                 rows.append(contentsOf: section.rows.map { $0.map(\.copyText).joined(separator: "\t") })
                 if !section.total.isEmpty { rows.append(section.total.map(\.copyText).joined(separator: "\t")) }
                 out.append(rows.joined(separator: "\n"))
@@ -151,7 +151,7 @@ struct EngineAnswer: Hashable {
         // Older shape: a bare top-level table. Promote it so there is ONE render path.
         if let table = object["table"] as? [String: Any], sections.isEmpty {
             var promoted = Section(kind: .table)
-            promoted.columns = (table["columns"] as? [Any] ?? []).map { Coerce.string($0) ?? "" }
+            promoted.columns = (table["columns"] as? [Any] ?? []).map(ColumnSpec.init(any:))
             promoted.rows = Self.rows(table["rows"])
             promoted.total = Self.row(table["total"])
             promoted.totalRows = (table["totalRows"] as? NSNumber)?.intValue
@@ -188,7 +188,7 @@ struct EngineAnswer: Hashable {
 
     private static func section(_ raw: Any) -> Section? {
         guard let item = raw as? [String: Any] else { return nil }
-        let columns = (item["columns"] as? [Any] ?? []).map { Coerce.string($0) ?? "" }
+        let columns = (item["columns"] as? [Any] ?? []).map(ColumnSpec.init(any:))
         let rows = Self.rows(item["rows"])
         let items = figures(item["items"])
         let body = Coerce.string(item["body"])
@@ -218,76 +218,119 @@ struct EngineAnswer: Hashable {
         return section
     }
 
-    private static func rows(_ raw: Any?) -> [[JSONValue]] {
+    private static func rows(_ raw: Any?) -> [[Cell]] {
         (raw as? [Any] ?? []).map { row($0) }.filter { !$0.isEmpty }
     }
 
-    private static func row(_ raw: Any?) -> [JSONValue] {
-        (raw as? [Any] ?? []).map(JSONValue.init(any:))
+    private static func row(_ raw: Any?) -> [Cell] {
+        (raw as? [Any] ?? []).map(Cell.init(any:))
     }
 }
 
-/// One cell. Table rows are heterogeneous by design — numbers, strings, nulls — and
-/// occasionally something nested, which becomes text rather than an error.
-enum JSONValue: Hashable {
-    case string(String), number(Double), bool(Bool), null
+/// A column, as the table declares itself.
+///
+/// It used to be a bare string. The engine now says what a column HOLDS — what an id in it
+/// names, how to read its numbers, which direction is good — so the client can present it
+/// without guessing. Anything absent simply is not applied.
+struct ColumnSpec: Hashable {
+    var label: String
+    /// What an id in this column names ("customer", "job"), and therefore what tapping it
+    /// could open. Nil means the ids here, if any, name nothing openable.
+    var entity: String?
+    var unit: String?
+    var decimals: Int?
+    var scale: String?          // "compact" → 4.16 M
+    /// Which direction is favourable, if the program says. No declaration, no colour:
+    /// a number confidently shaded the wrong way is worse than one left alone.
+    var good: String?
+    var mid: Double = 0
+    /// Draw each value as a share of the column's largest magnitude.
+    var bar: Bool = false
+
+    init(any: Any) {
+        if let text = Coerce.string(any) {
+            label = text
+            return
+        }
+        let spec = any as? [String: Any] ?? [:]
+        label = Coerce.string(spec["label"]) ?? ""
+        entity = Coerce.string(spec["entity"])
+        unit = Coerce.string(spec["unit"])
+        decimals = (spec["decimals"] as? NSNumber)?.intValue
+        scale = Coerce.string(spec["scale"])
+        good = Coerce.string(spec["good"])
+        mid = (spec["mid"] as? NSNumber)?.doubleValue ?? 0
+        bar = Coerce.bool(spec["bar"])
+    }
+
+    init(label: String) { self.label = label }
+}
+
+/// One cell: what to draw, and what it means.
+///
+/// A cell used to be a bare scalar, then briefly a scalar-or-dictionary, which pushed
+/// presentation into a value type. It carries three things now because the engine sends
+/// three: the text to show, the number behind it (for bars, tone and alignment), and an id
+/// when the cell NAMES something that can be opened.
+struct Cell: Hashable {
+    var text: String
+    var number: Double?
+    var id: String?
+
+    var isNumeric: Bool { number != nil }
+    /// For copying: a blank rather than an em dash, so a pasted table has empty cells.
+    var copyText: String { text == "—" ? "" : text }
 
     init(any: Any) {
         switch any {
-        case is NSNull:            self = .null
-        // NSNumber covers BOTH numbers and booleans, and only its CFTypeID can tell them
-        // apart. There used to be a `case let value as Bool` above this, which turned the
-        // number 1 into "yes" and 0 into "no" — so the first row of every rank column read
-        // "yes". Two mistakes compounded: Swift bridges an NSNumber to Bool for exactly 0
-        // and 1, and the guard meant to catch that (`value as CFTypeRef`) re-bridged the
-        // already-converted Swift Bool back to a CFBoolean, so it was always true.
+        case is NSNull:
+            text = "—"
         case let value as NSNumber:
-            self = CFGetTypeID(value) == CFBooleanGetTypeID() ? .bool(value.boolValue) : .number(value.doubleValue)
-        case let value as String:  self = .string(value)
-        // A cell may carry more than its value — {"value": …, "id": …} to name something the reader can open,
-        // or {"value": …, "display": …} where the form cannot be derived. Here the readable form is wanted, and
-        // the raw value otherwise. Without this it falls to String(describing:) and the reader sees a printed
-        // dictionary where a name should be.
-        case let cell as [String: Any] where cell["value"] != nil:
-            if let shown = cell["display"] as? String { self = .string(shown) }
-            else { self = JSONValue(any: cell["value"]!) }
-        default:                   self = .string(String(describing: any))
-        }
-    }
-
-    var display: String {
-        switch self {
-        case .string(let v): return v
-        case .bool(let v):   return v ? "yes" : "no"
-        case .null:          return "—"
-        case .number(let v):
-            if v == v.rounded(), abs(v) < 1e15 {
-                return Self.integer.string(from: NSNumber(value: Int64(v))) ?? String(Int64(v))
+            if CFGetTypeID(value) == CFBooleanGetTypeID() {
+                text = value.boolValue ? "yes" : "no"
+            } else {
+                number = value.doubleValue
+                text = Cell.format(value.doubleValue)
             }
-            return Self.decimal.string(from: NSNumber(value: v)) ?? String(v)
+        case let value as String:
+            text = value
+        case let object as [String: Any] where object["value"] != nil:
+            // {"value": …, "display": …} — a form that cannot be derived from the number.
+            // {"value": …, "id": …}      — a cell that names something openable.
+            let inner = Cell(any: object["value"]!)
+            number = inner.number
+            text = Coerce.string(object["display"]) ?? inner.text
+            id = Coerce.string(object["id"])
+        default:
+            text = String(describing: any)
         }
     }
 
-    var isNumeric: Bool { if case .number = self { return true }; return false }
+    init(text: String, number: Double? = nil) {
+        self.text = text
+        self.number = number
+    }
 
-    /// For copying: a blank rather than an em dash, so a pasted table has empty cells
-    /// where there was no value instead of a character a spreadsheet reads as text.
-    var copyText: String { if case .null = self { return "" }; return display }
+    /// Grouping is pinned rather than taken from the device locale: the engine formats its
+    /// own figures in western grouping, and a table rendering "4,12,000" beneath "$412k"
+    /// makes one answer look like two.
+    static func format(_ value: Double, decimals: Int? = nil) -> String {
+        let formatter = decimals.map { digits -> NumberFormatter in
+            let f = Cell.base(); f.maximumFractionDigits = digits; f.minimumFractionDigits = digits; return f
+        } ?? (value == value.rounded() && abs(value) < 1e15 ? Cell.integer : Cell.decimal)
+        return formatter.string(from: NSNumber(value: value)) ?? String(value)
+    }
 
-    // Grouping is pinned rather than taken from the device locale: the engine formats its
-    // own figures in western grouping, and a table rendering "4,12,000" beneath "$412k"
-    // makes one answer look like two.
-    private static func formatter(_ digits: Int) -> NumberFormatter {
+    private static func base() -> NumberFormatter {
         let f = NumberFormatter()
         f.numberStyle = .decimal
         f.locale = Locale(identifier: "en_US_POSIX")
         f.groupingSeparator = ","
         f.decimalSeparator = "."
-        f.maximumFractionDigits = digits
         return f
     }
-    private static let integer = formatter(0)
-    private static let decimal = formatter(2)
+    private static let integer: NumberFormatter = { let f = base(); f.maximumFractionDigits = 0; return f }()
+    private static let decimal: NumberFormatter = { let f = base(); f.maximumFractionDigits = 2; return f }()
 }
 
 enum Coerce {
@@ -296,7 +339,7 @@ enum Coerce {
     static func string(_ any: Any?) -> String? {
         switch any {
         case let value as String: return value.isEmpty ? nil : value
-        case let value as NSNumber: return JSONValue(any: value).display
+        case let value as NSNumber: return Cell(any: value).text
         // A column may be declared rather than named — {"label": …, "entity": …, "format": …} — so that a
         // richer client can present it. Its label is the name. Without this the header renders empty.
         case let spec as [String: Any]: return spec["label"].flatMap { string($0) }

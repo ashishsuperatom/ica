@@ -9,6 +9,13 @@ primary_region = "ord"
   cpus = 2
   memory = "4gb"
 
+# DEPLOY WITH:  flyctl deploy --build-only --push --app superatom-code-engine-vm
+#
+# NOT plain `flyctl deploy`. This app holds no machines of its own, and flyctl treats that as "your app has no
+# Launch machines, so we'll create one now" — it made two (an app machine and a standby) which immediately try
+# to run an engine with no ICA_PROJECT. --build-only --push does the one thing this app is for: build the image
+# and record the release, which is what createMachine (fly.ts) then resolves per project.
+#
 # NOTE: no [[mounts]] here on purpose. This app is an IMAGE TEMPLATE — `flyctl deploy` only builds + pushes
 # the image and records the release. The real machines are created per-project by the worker's createMachine
 # (fly.ts), which attaches each machine's own /app/data volume via the Machines API. A [[mounts]] here would

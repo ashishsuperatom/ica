@@ -33,11 +33,40 @@ final class Preferences {
         didSet { store.set(transcribeOnDevice, forKey: Key.transcribeOnDevice) }
     }
 
+    /// Subscribe to the program's own log channel.
+    ///
+    /// This is not a display toggle. When it is off the app does not ATTACH to the channel,
+    /// so the engine never sends those events at all — they do not cross the wire, are not
+    /// parsed, and are not stored. Filtering them on arrival would still pay for every
+    /// line of a chatty program over a mobile connection.
+    var showProgramLogs: Bool {
+        didSet {
+            store.set(showProgramLogs, forKey: Key.showProgramLogs)
+            onProgramLogsChanged?(showProgramLogs)
+        }
+    }
+
+    /// Set by Services so a change attaches or detaches immediately, without a reconnect.
+    var onProgramLogsChanged: ((Bool) -> Void)?
+
+    /// Show how long each step took, and how long the turn has been running.
+    ///
+    /// OFF by default, and the reasoning is not that the number is uninteresting — it is
+    /// that a visible clock turns waiting into watching a clock. Someone who asked a
+    /// business question reads "94s" as the system being slow; someone building the system
+    /// reads it as where to look next. Same number, opposite effect, so it belongs to
+    /// whoever wants it rather than being shown to everyone.
+    var showTimings: Bool {
+        didSet { store.set(showTimings, forKey: Key.showTimings) }
+    }
+
     private let store: UserDefaults
 
     private enum Key {
         static let showFollowUps = "sa.pref.showFollowUps"
         static let transcribeOnDevice = "sa.pref.transcribeOnDevice"
+        static let showProgramLogs = "sa.pref.showProgramLogs"
+        static let showTimings = "sa.pref.showTimings"
     }
 
     init(store: UserDefaults = .standard) {
@@ -46,5 +75,7 @@ final class Preferences {
         // key, which would silently make the default OFF instead of ON.
         showFollowUps = (store.object(forKey: Key.showFollowUps) as? Bool) ?? true
         transcribeOnDevice = (store.object(forKey: Key.transcribeOnDevice) as? Bool) ?? true
+        showProgramLogs = (store.object(forKey: Key.showProgramLogs) as? Bool) ?? true
+        showTimings = (store.object(forKey: Key.showTimings) as? Bool) ?? false
     }
 }

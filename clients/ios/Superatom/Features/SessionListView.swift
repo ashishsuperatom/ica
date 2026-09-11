@@ -8,12 +8,18 @@ struct SessionListView: View {
     @State private var openSession: Session?
     @State private var showSwitcher = false
     @State private var showSettings = false
+    /// Drives the running dot. A slow pulse reads as alive; a spinner in a list row reads
+    /// as the list itself loading.
+    @State private var pulse = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
             Theme.paper.ignoresSafeArea()
 
-            if store.home.sessions.isEmpty { emptyState } else { list }
+            VStack(spacing: 0) {
+                if let waiting = services.answeredWhileAway { answerReady(waiting) }
+                if store.home.sessions.isEmpty { emptyState } else { list }
+            }
 
             newConversationButton
         }
@@ -41,6 +47,16 @@ struct SessionListView: View {
         }
         .sheet(isPresented: $showSwitcher) { ContextSwitcherView() }
         .sheet(isPresented: $showSettings) { SettingsView() }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1).repeatForever(autoreverses: true)) { pulse = true }
+        }
+        // Someone asked for a specific conversation — a tapped notification, or the
+        // "answer is ready" prompt. Honour it and clear it, so it acts once.
+        .onChange(of: services.navigation.target) { _, target in
+            guard let target,
+                  let session = try? services.db.session(id: target.sessionId) else { return }
+            openSession = session
+        }
     }
 
     /// The title doubles as the context switcher: project name over org name, tappable.
@@ -85,6 +101,46 @@ struct SessionListView: View {
         }
     }
 
+    /// An answer arrived while you were elsewhere. Shown once, dismissable, and it takes
+    /// you straight to the answer rather than to the conversation for you to find it.
+    private func answerReady(_ question: Question) -> some View {
+        Button {
+            Haptics.medium()
+            services.navigation.open(sessionId: question.sessionId, questionId: question.id)
+            services.dismissAnsweredWhileAway()
+        } label: {
+            HStack(spacing: 10) {
+                Circle().fill(Theme.accent).frame(width: 7, height: 7)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Your answer is ready")
+                        .font(Theme.sans(13, .semibold))
+                        .foregroundStyle(Theme.ink)
+                    Text(question.text)
+                        .font(Theme.sans(12))
+                        .foregroundStyle(Theme.inkFaint)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "arrow.right").font(Theme.sans(12, .semibold))
+                    .foregroundStyle(Theme.accent)
+                Button {
+                    services.dismissAnsweredWhileAway()
+                } label: {
+                    Image(systemName: "xmark").font(Theme.sans(11, .semibold))
+                        .foregroundStyle(Theme.inkFaint)
+                        .frame(width: 30, height: 30)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.leading, Theme.gutter)
+            .padding(.vertical, 10)
+            .background(Theme.accent.opacity(0.08))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     private func row(_ session: Session) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(session.displayTitle)
@@ -92,9 +148,23 @@ struct SessionListView: View {
                 .foregroundStyle(Theme.ink)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
-            Text(session.updatedAt.conversationalLabel)
-                .font(Theme.sans(12))
-                .foregroundStyle(Theme.inkFaint)
+            HStack(spacing: 6) {
+                // A conversation that is working says so. Without it the only way to know
+                // was to open each one and look.
+                if store.home.running.contains(session.id) {
+                    Circle()
+                        .fill(Theme.accent)
+                        .frame(width: 6, height: 6)
+                        .opacity(pulse ? 1 : 0.3)
+                    Text("Working…")
+                        .font(Theme.sans(12))
+                        .foregroundStyle(Theme.accent)
+                } else {
+                    Text(session.updatedAt.conversationalLabel)
+                        .font(Theme.sans(12))
+                        .foregroundStyle(Theme.inkFaint)
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Theme.gutter)

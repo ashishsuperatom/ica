@@ -25,15 +25,85 @@ final class AppDatabase: Sendable {
         try Self.migrator.migrate(writer)
     }
 
-    /// The on-disk database, in Application Support. WAL via DatabasePool so reads
-    /// never block the writer (the audio outbox writes while the feed is rendering).
-    static func onDisk() throws -> AppDatabase {
+    /// ONE DATABASE PER ACCOUNT.
+    ///
+    /// Several people can use one phone, and their conversations must not mix. Separate
+    /// files rather than an accountId column on every query: nothing to filter, nothing to
+    /// forget to filter, and signing out is closing a file rather than trusting a WHERE
+    /// clause. The file is KEPT on sign-out, so returning to an account finds its history.
+    ///
+    /// WAL via DatabasePool so reads never block the writer — the audio outbox writes while
+    /// the feed is rendering.
+    static func onDisk(accountId: String) throws -> AppDatabase {
+        let dir = try directory(for: accountId)
+        let file = dir.appendingPathComponent("superatom.sqlite")
+        try adoptLegacyDatabase(into: file, for: accountId)
+        return try AppDatabase(try DatabasePool(path: file.path))
+    }
+
+    /// Before databases were per account there was ONE, at Superatom/superatom.sqlite.
+    /// Moving it under the account it belonged to keeps that history instead of stranding
+    /// it beside the new file.
+    ///
+    /// It is claimed only by the account that actually owned it — the old file records who
+    /// was signed in — so on a shared phone the first person to sign in cannot inherit
+    /// someone else's conversations. WAL and shared-memory siblings move with it, or the
+    /// pool reopens with a truncated tail.
+    private static func adoptLegacyDatabase(into file: URL, for accountId: String) throws {
+        let fm = FileManager.default
+
+        // Adopt when the account's database is ABSENT *or* EMPTY — not merely absent.
+        // A launch between the two schemes creates an empty file at the new path, and
+        // testing only for existence let that placeholder permanently shadow the real data.
+        // Empty means no conversations at all, so nothing can be lost by replacing it.
+        if fm.fileExists(atPath: file.path) {
+            let existingIsEmpty = (try? DatabaseQueue(path: file.path).read { db in
+                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM session") ?? 0
+            }) ?? 1
+            guard existingIsEmpty == 0 else { return }
+        }
+
+        let legacy = try fm.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                appropriateFor: nil, create: true)
+            .appendingPathComponent("Superatom/superatom.sqlite")
+        guard fm.fileExists(atPath: legacy.path) else { return }
+
+        // Whose was it? If we cannot tell, leave it alone rather than guess.
+        let owner = try? DatabaseQueue(path: legacy.path).read { db in
+            try String.fetchOne(db, sql: "SELECT value FROM appState WHERE key = 'currentAccountId'")
+        }
+        guard owner == accountId else { return }
+
+        for suffix in ["", "-wal", "-shm"] {
+            let from = URL(fileURLWithPath: legacy.path + suffix)
+            let to = URL(fileURLWithPath: file.path + suffix)
+            try? fm.removeItem(at: to)                      // the empty placeholder, if any
+            if fm.fileExists(atPath: from.path) { try? fm.moveItem(at: from, to: to) }
+        }
+        // The audio that went with it.
+        let legacyAudio = legacy.deletingLastPathComponent().appendingPathComponent("Audio")
+        if fm.fileExists(atPath: legacyAudio.path) {
+            try? fm.moveItem(at: legacyAudio, to: file.deletingLastPathComponent().appendingPathComponent("Audio"))
+        }
+    }
+
+    /// The path is COMPUTED from the account id, never searched for. An account id is
+    /// stable (it is the platform's own), so the same person always resolves to the same
+    /// file — no listing a folder and guessing which database is whose.
+    ///
+    /// Sanitised only against path separators: everything else is kept so two ids can never
+    /// collapse onto one file.
+    private static func folderName(for accountId: String) -> String {
+        accountId.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ".", with: "_")
+    }
+
+    static func directory(for accountId: String) throws -> URL {
         let fm = FileManager.default
         let dir = try fm.url(for: .applicationSupportDirectory, in: .userDomainMask,
                              appropriateFor: nil, create: true)
-            .appendingPathComponent("Superatom", isDirectory: true)
+            .appendingPathComponent("Superatom/accounts/\(folderName(for: accountId))", isDirectory: true)
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        return try AppDatabase(try DatabasePool(path: dir.appendingPathComponent("superatom.sqlite").path))
+        return dir
     }
 
     /// In-memory, for previews and tests.
@@ -44,11 +114,12 @@ final class AppDatabase: Sendable {
     /// Where recorded WAV chunks live. Audio is a file; the row that tracks it is in
     /// SQLite. Keeping blobs out keeps the database small — and small is what makes
     /// the cold open instant, which is the whole point.
-    static var audioDirectory: URL {
-        // swiftlint:disable:next force_try
-        let dir = try! FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
-                                               appropriateFor: nil, create: true)
-            .appendingPathComponent("Superatom/Audio", isDirectory: true)
+    /// Recorded audio, beside the database it belongs to — same reasoning: one account's
+    /// recordings are not another's.
+    static func audioDirectory(for accountId: String) -> URL {
+        let base = (try? directory(for: accountId))
+            ?? FileManager.default.temporaryDirectory
+        let dir = base.appendingPathComponent("Audio", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
@@ -56,9 +127,12 @@ final class AppDatabase: Sendable {
     // ── Schema ───────────────────────────────────────────────────────────────
     static var migrator: DatabaseMigrator {
         var m = DatabaseMigrator()
-        #if DEBUG
-        m.eraseDatabaseOnSchemaChange = true
-        #endif
+        // NO eraseDatabaseOnSchemaChange, not even in DEBUG.
+        //
+        // It wipes the whole database whenever the schema changes, which is fine for a
+        // scratch app and completely wrong for this one: every build with a new migration
+        // would silently destroy real conversations on a real phone. Schema changes are
+        // handled by adding a migration below, which is what a migrator is for.
 
         m.registerMigration("v1.identity") { db in
             // The signed-in person on this device. The platform JWT is NOT stored here —
@@ -177,6 +251,14 @@ final class AppDatabase: Sendable {
             }
             try db.create(indexOn: "audioChunk", columns: ["questionId", "chunkIndex"], options: .unique)
             try db.create(indexOn: "audioChunk", columns: ["state"])
+        }
+
+        m.registerMigration("v5.beatSource") { db in
+            // Where a line came from. The narrator describes the work; the program reports
+            // itself running. They read differently and are worth telling apart.
+            try db.alter(table: "narrationBeat") { t in
+                t.add(column: "source", .text).notNull().defaults(to: "narrator")
+            }
         }
 
         m.registerMigration("v4.search") { db in

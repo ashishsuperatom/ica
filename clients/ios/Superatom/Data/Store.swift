@@ -19,11 +19,18 @@ final class AppStore {
         // Read synchronously so the FIRST frame already has the last conversation on it.
         // This is the whole "never shows a connecting screen" promise, and it is just
         // a local SQLite read — sub-millisecond, and correct offline.
+        let t0 = CFAbsoluteTimeGetCurrent()
         self.home = (try? db.writer.read { try db.fetchHome($0) }) ?? .empty
+        NSLog("[home] first read: %d sessions, project=%@, account=%@, %.1fms",
+              home.sessions.count, home.project?.id ?? "nil", home.account?.id ?? "nil",
+              (CFAbsoluteTimeGetCurrent() - t0) * 1000)
         task = Task { [weak self, db] in
             do {
                 for try await value in db.observeHome().values(in: db.writer) {
                     guard let self else { return }
+                    if value.sessions.count != self.home.sessions.count {
+                        NSLog("[home] update: %d sessions (was %d)", value.sessions.count, self.home.sessions.count)
+                    }
                     self.home = value
                 }
             } catch { }
@@ -33,6 +40,8 @@ final class AppStore {
     // ── Actions ──────────────────────────────────────────────────────────────
 
     func switchTo(project: Project) {
+        // Only the org and lastOpenedAt are written here; the project id itself is set via
+        // Connection, which owns it — see Connection.projectId for why there is one writer.
         try? db.switchTo(project: project)
         onProjectChange?(project)
     }
@@ -41,11 +50,11 @@ final class AppStore {
     /// carries the project id.
     var onProjectChange: ((Project) -> Void)?
 
-    /// Switching org clears the remembered project so the observation selects one that
-    /// actually belongs to the org you moved to.
+    /// Moving to another organisation means moving to one of its projects — the org is
+    /// not a place you can be on its own.
     func switchTo(org: Organization) {
-        try? db.setSetting(.currentOrgId, org.id)
-        try? db.setSetting(.currentProjectId, "")
+        guard let first = home.projects(in: org).first else { return }
+        switchTo(project: first)
     }
 
     /// A conversation that does not exist yet — it is written only when a question is
@@ -150,11 +159,52 @@ final class ConversationStore {
 
     func clearVoiceError() { voiceError = nil }
 
-    /// Re-run a question. Staged as a draft rather than sent straight off: "ask again"
-    /// usually means "nearly the same question", and the edit step costs one tap while
-    /// saving a wasted run.
+    /// Is a question in flight, and therefore stoppable?
+    var isRunning: Bool {
+        state.questions.contains { $0.state == .asking }
+    }
+
+    func stopTurn() {
+        services.hub.stopTurn(sessionId: sessionId)
+    }
+
+    /// Ask the question again, as a question.
+    ///
+    /// This is the LLM path: the words are classified and may build or adapt a program, so
+    /// the answer can legitimately differ from last time. Staged as a draft rather than
+    /// sent outright, because "ask again" usually means "nearly the same question" — the
+    /// edit step costs one tap and saves a wasted run.
     func askAgain(_ text: String) {
         proposeFollowUp(text)
+    }
+
+    /// Run the saved program behind an answer again.
+    ///
+    /// DETERMINISTIC, and a different operation entirely: `run:` is a verb the engine
+    /// parses itself, so no model is involved, nothing is re-classified, and no program is
+    /// written. Same computation, current data.
+    ///
+    /// Sent immediately, with no review step — there is nothing to edit. The subject is an
+    /// id, not a sentence.
+    /// Open one thing by its canonical lens.
+    ///
+    /// `view:` is a verb the engine parses itself — no model, no classification. The table
+    /// already knows what a cell names and its id, so the whole instruction is those two
+    /// words. Sent directly, like `run:`: there is nothing to edit in an id.
+    func openEntity(_ entity: String, id: String) {
+        try? db.persist(session: session)
+        guard let question = try? db.appendQuestion(sessionId: sessionId,
+                                                    text: "view: \(entity) \(id)", source: .text)
+        else { return }
+        services.hub.ask(question: question)
+    }
+
+    func runAgain(questionId: String) {
+        try? db.persist(session: session)
+        guard let question = try? db.appendQuestion(sessionId: sessionId,
+                                                    text: "run: \(questionId)", source: .text)
+        else { return }
+        services.hub.ask(question: question)
     }
 
     /// A suggested question, staged for review rather than asked outright — the same

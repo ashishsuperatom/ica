@@ -100,8 +100,12 @@ final class AuthController: NSObject {
             guard (response as? HTTPURLResponse)?.statusCode == 200,
                   let reply = try? JSONDecoder().decode(Reply.self, from: data)
             else { phase = .failed("Sign-in was rejected."); return }
-            connection.signedIn(token: reply.token, userId: reply.userId)
-            await loadProjects()
+            // Signing in NAMES the account, and the account names its database. So the
+            // credential is stored against that account and the app is told to open it —
+            // this controller does not switch databases itself.
+            Accounts.setToken(reply.token, for: reply.userId)
+            Accounts.current = reply.userId
+            onSignedIn?(reply.userId)
         } catch {
             phase = .failed(error.localizedDescription)
         }
@@ -145,6 +149,10 @@ final class AuthController: NSObject {
             phase = connection.isReady ? .ready : .failed(error.localizedDescription)
         }
     }
+
+    /// Set by the app root: a successful sign-in hands over the account id, and the root
+    /// opens that account's database.
+    var onSignedIn: ((String) -> Void)?
 
     func signOut() {
         connection.signOut()

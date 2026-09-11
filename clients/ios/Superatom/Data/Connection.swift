@@ -21,33 +21,47 @@ final class Connection {
 
     /// Platform JWT. Keychain-backed; this property is a cache of it.
     private(set) var token: String
+    /// Who is signed in. In the DATABASE for the same reason as `projectId`: the queries
+    /// that render the app key off it, and a second copy in UserDefaults could disagree —
+    /// which shows as an app with a valid token and an empty screen.
     private(set) var userId: String
     /// Which project's engine answers. Chosen from what the signed-in user can reach.
+    ///
+    /// Stored in the DATABASE, not UserDefaults. It used to live in both: here for the
+    /// socket URL, and in `appState` for the queries that drive the session list. They were
+    /// written at different moments and drifted, so the list showed whatever project came
+    /// first alphabetically while the socket talked to another one.
+    ///
+    /// One value, one place. The database is the right place because the observations that
+    /// render the app already watch it — writing it here updates the list for free.
     var projectId: String {
-        didSet { UserDefaults.standard.set(projectId, forKey: "sa.projectId") }
+        didSet { try? db.setSetting(.currentProjectId, projectId) }
     }
 
-    init() {
-        token = Keychain.get("sa.token") ?? ""
-        userId = UserDefaults.standard.string(forKey: "sa.userId") ?? ""
-        projectId = UserDefaults.standard.string(forKey: "sa.projectId") ?? ""
+    private let db: AppDatabase
+
+    init(db: AppDatabase, accountId: String) {
+        self.db = db
+        // The account is FIXED for the life of this object: it is whose database this is.
+        // It used to be a stored value that could drift from the data around it; now it is
+        // simply which file is open.
+        self.userId = accountId
+        token = Accounts.token(for: accountId)
+        let storedProject = (try? db.writer.read { try db.setting(.currentProjectId, $0) }) as? String ?? ""
+        projectId = storedProject
+        try? db.setSetting(.currentAccountId, accountId)
     }
 
     var isSignedIn: Bool { !token.isEmpty }
     var isReady: Bool { isSignedIn && !projectId.isEmpty }
 
-    func signedIn(token: String, userId: String) {
-        Keychain.set(token, for: "sa.token")
-        UserDefaults.standard.set(userId, forKey: "sa.userId")
-        self.token = token
-        self.userId = userId
-    }
 
+
+    /// Signing out forgets the credential and who is here — see Accounts. The database
+    /// stays: these conversations are this account's, and they may sign back in.
     func signOut() {
-        Keychain.set("", for: "sa.token")
+        Accounts.signOut()
         token = ""
-        userId = ""
-        projectId = ""
     }
 
     /// wss://<host>/_ws/<projectId>?token=… — the handshake in clients/protocol.ts.

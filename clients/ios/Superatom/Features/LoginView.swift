@@ -3,7 +3,9 @@ import SwiftUI
 // The cold start when nobody is signed in. One button — identity comes from the platform,
 // not from anything typed here.
 struct LoginView: View {
-    @Environment(Services.self) private var services
+    /// Sign-in happens BEFORE a database exists — the account decides which one to open —
+    /// so this screen depends on nothing but the flow itself.
+    let signIn: SignIn
 
     var body: some View {
         VStack(spacing: 0) {
@@ -23,7 +25,7 @@ struct LoginView: View {
 
             Spacer()
 
-            if case .failed(let why) = services.auth.phase {
+            if case .failed(let why) = signIn.phase {
                 Text(why)
                     .font(Theme.sans(12))
                     .foregroundStyle(Theme.warning)
@@ -34,10 +36,10 @@ struct LoginView: View {
 
             Button {
                 Haptics.medium()
-                services.auth.signIn()
+                signIn.start()
             } label: {
                 Group {
-                    if services.auth.phase == .signingIn || services.auth.phase == .loadingProjects {
+                    if signIn.phase == .working {
                         ProgressView().tint(Theme.paper)
                     } else {
                         Text("Sign in").font(Theme.serif(16, .medium))
@@ -49,7 +51,7 @@ struct LoginView: View {
                 .background(Theme.ink, in: Capsule())
             }
             .buttonStyle(.plain)
-            .disabled(services.auth.phase == .signingIn || services.auth.phase == .loadingProjects)
+            .disabled(signIn.phase == .working)
             .padding(.horizontal, Theme.gutter)
             .padding(.bottom, 34)
         }

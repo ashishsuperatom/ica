@@ -131,10 +131,16 @@ struct FeedItem: Codable, Identifiable, Hashable, FetchableRecord, PersistableRe
 
 struct NarrationBeat: Codable, Hashable, FetchableRecord, PersistableRecord {
     static let databaseTableName = "narrationBeat"
+
+    /// Who said it. The narrator is the engine explaining itself; the program is the
+    /// computation reporting that it started, finished or failed.
+    enum Source: String, Codable { case narrator, program }
+
     var questionId: String
     var seq: Int
     var text: String
     var atMs: Int64
+    var source: Source = .narrator
 }
 
 struct AudioChunk: Codable, Identifiable, Hashable, FetchableRecord, PersistableRecord {
@@ -162,8 +168,10 @@ struct AppState: Codable, FetchableRecord, PersistableRecord {
     var key: String
     var value: String
 
+    /// No `currentOrgId`: the organisation is whichever one the current project belongs
+    /// to. Two stored values that must agree is one value too many.
     enum Key: String {
-        case currentAccountId, currentOrgId, currentProjectId
+        case currentAccountId, currentProjectId
     }
 }
 

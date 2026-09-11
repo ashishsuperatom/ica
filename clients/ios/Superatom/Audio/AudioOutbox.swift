@@ -22,9 +22,13 @@ actor AudioOutbox {
     /// Keep the most recent chunks recoverable; prune only what has succeeded.
     private let keepTranscribed = 20
 
-    init(db: AppDatabase, client: TranscriptionClient) {
+    /// Whose recordings these are — audio is stored beside that account's database.
+    private let accountId: String
+
+    init(db: AppDatabase, client: TranscriptionClient, accountId: String) {
         self.db = db
         self.client = client
+        self.accountId = accountId
     }
 
     /// Persist and upload one chunk. Returns once this chunk has a transcript or has
@@ -99,7 +103,8 @@ actor AudioOutbox {
 
     private func persist(wav: Data, questionId: String, chunkIndex: Int) -> String? {
         guard !wav.isEmpty else { return nil }
-        let url = AppDatabase.audioDirectory.appendingPathComponent("\(questionId)-\(chunkIndex).wav")
+        let url = AppDatabase.audioDirectory(for: accountId)
+            .appendingPathComponent("\(questionId)-\(chunkIndex).wav")
         do {
             try wav.write(to: url, options: .atomic)
             return url.path

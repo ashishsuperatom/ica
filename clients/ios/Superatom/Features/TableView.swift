@@ -9,9 +9,11 @@ import SwiftUI
 // bounds. The page itself never scrolls horizontally.
 
 struct TableView: View {
-    let columns: [String]
-    let rows: [[JSONValue]]
-    var total: [JSONValue]?
+    let columns: [ColumnSpec]
+    let rows: [[Cell]]
+    var total: [Cell]?
+    /// Tapping a cell that names something asks to open it. Nil = nothing is openable.
+    var onEntity: ((_ entity: String, _ id: String, _ label: String) -> Void)?
     /// Rows that MATCHED upstream, when the engine sent a sample.
     var totalRows: Int?
     var title: String?
@@ -32,7 +34,17 @@ struct TableView: View {
     private static let exportVisible: Duration = .seconds(10)
     private let columnGap: CGFloat = 20
 
-    private var visible: [[JSONValue]] { Array(rows.prefix(shown)) }
+    private var visible: [[Cell]] { Array(rows.prefix(shown)) }
+
+    /// The largest magnitude per column, for the in-cell bar. Taken from the data because a
+    /// bar is only meaningful against the column it sits in — nothing to declare and
+    /// nothing to keep in step.
+    private var peaks: [Double] {
+        columns.indices.map { index in
+            guard columns[index].bar else { return 0 }
+            return rows.compactMap { $0.indices.contains(index) ? $0[index].number.map(abs) : nil }.max() ?? 0
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -114,7 +126,7 @@ struct TableView: View {
     /// CSV of EVERY row, not just the visible page — exporting a sample would be a trap.
     private var csvURL: URL? {
         guard !rows.isEmpty else { return nil }
-        var lines = [columns.map(Self.escape).joined(separator: ",")]
+        var lines = [columns.map { Self.escape($0.label) }.joined(separator: ",")]
         lines.append(contentsOf: rows.map { $0.map { Self.escape($0.copyText) }.joined(separator: ",") })
         if let total, !total.isEmpty {
             lines.append(total.map { Self.escape($0.copyText) }.joined(separator: ","))
@@ -146,8 +158,8 @@ struct TableView: View {
                 Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: columnGap, verticalSpacing: 0) {
                     if !columns.isEmpty {
                         GridRow {
-                            ForEach(Array(columns.enumerated()), id: \.offset) { index, name in
-                                Text(name.uppercased())
+                            ForEach(Array(columns.enumerated()), id: \.offset) { index, column in
+                                Text(column.label.uppercased())
                                     .font(Theme.sans(9.5, .semibold))
                                     .tracking(0.9)
                                     .foregroundStyle(Theme.inkFaint)
@@ -183,14 +195,58 @@ struct TableView: View {
     }
 
     @ViewBuilder
-    private func cells(_ row: [JSONValue], weight: Font.Weight, color: Color) -> some View {
-        ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
-            Text(cell.display)
-                .font(Theme.sans(13.5, weight))
-                .monospacedDigit()
-                .foregroundStyle(cell.isNumeric ? Theme.ink : color)
-                .lineLimit(1)
-                .padding(.vertical, 8)
+    private func cells(_ row: [Cell], weight: Font.Weight, color: Color) -> some View {
+        ForEach(Array(row.enumerated()), id: \.offset) { index, cell in
+            let column = index < columns.count ? columns[index] : ColumnSpec(label: "")
+            let peak = index < peaks.count ? peaks[index] : 0
+            cellView(cell, column: column, peak: peak, weight: weight, color: color)
+        }
+    }
+
+    @ViewBuilder
+    private func cellView(_ cell: Cell, column: ColumnSpec, peak: Double,
+                          weight: Font.Weight, color: Color) -> some View {
+        // GOOD OR BAD is the program's call, never ours. `good` says which direction is
+        // favourable and `mid` is the line it turns on. No declaration, no colour.
+        let tone: Color? = {
+            guard let good = column.good, let n = cell.number, n != column.mid else { return nil }
+            return (n > column.mid) == (good == "high") ? Theme.positive : Theme.warning
+        }()
+
+        let text = Text(cell.text)
+            .font(cell.isNumeric ? Theme.mono(13.5, weight) : Theme.sans(13.5, weight))
+            .monospacedDigit()
+            .lineLimit(1)
+            .padding(.vertical, 8)
+            .padding(.horizontal, 4)
+
+        Group {
+            if let entity = column.entity, let id = cell.id, let onEntity {
+                // A cell that NAMES something is the only tappable thing in a table, and it
+                // says so by being coloured. Everything else stays ink.
+                Button {
+                    Haptics.light()
+                    onEntity(entity, id, cell.text)
+                } label: {
+                    text.foregroundStyle(Theme.link)
+                }
+                .buttonStyle(.plain)
+            } else {
+                text.foregroundStyle(tone ?? (cell.isNumeric ? Theme.ink : color))
+            }
+        }
+        .background(alignment: .trailing) {
+            // THE BAR IS THE CELL'S OWN GROUND, filling from the right behind a
+            // right-aligned figure. A rule under the number read as an underline belonging
+            // to nothing and pushed every row taller; a shaded ground costs no space at all.
+            if column.bar, let n = cell.number, peak > 0 {
+                GeometryReader { geo in
+                    Rectangle()
+                        .fill((tone ?? Theme.accent).opacity(0.13))
+                        .frame(width: geo.size.width * min(1, abs(n) / peak))
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+            }
         }
     }
 

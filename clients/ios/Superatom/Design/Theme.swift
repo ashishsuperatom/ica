@@ -20,6 +20,11 @@ enum Theme {
     /// active microphone. If it starts appearing on ordinary controls it stops meaning
     /// anything.
     static let accent     = dynamic(light: UIColor(red: 0.051, green: 0.580, blue: 0.533, alpha: 1), dark: UIColor(red: 0.176, green: 0.722, blue: 0.667, alpha: 1))
+    /// A number moving the way the program says is favourable. Only ever applied when the
+    /// program declares a direction — an unshaded number is better than a wrongly shaded one.
+    static let positive   = dynamic(light: UIColor(red: 0.122, green: 0.478, blue: 0.302, alpha: 1), dark: UIColor(red: 0.353, green: 0.729, blue: 0.518, alpha: 1))
+    /// A cell that names something openable. Distinct from the accent, which means "live".
+    static let link       = dynamic(light: UIColor(red: 0.239, green: 0.353, blue: 0.424, alpha: 1), dark: UIColor(red: 0.541, green: 0.678, blue: 0.769, alpha: 1))
     static let warning    = dynamic(light: UIColor(red: 0.706, green: 0.216, blue: 0.145, alpha: 1), dark: UIColor(red: 0.925, green: 0.451, blue: 0.353, alpha: 1))
 
     // Type — serif for anything read as prose, sans for labels, mono for figures so
@@ -65,5 +70,22 @@ struct Rule: View {
             .fill(Theme.rule.opacity(0.55))
             .frame(height: 0.5)
             .padding(.horizontal, inset)
+    }
+}
+
+/// Durations, written the way a person would say them.
+///
+/// One place, because the same seconds appear in a step rule, an elapsed counter and a run
+/// total — and "195s" is a number you have to do arithmetic on before it means anything.
+enum Elapsed {
+    static func short(_ seconds: Int) -> String {
+        let s = max(0, seconds)
+        if s < 60 { return "\(s)s" }
+        if s < 3600 {
+            let m = s / 60, rem = s % 60
+            return rem == 0 ? "\(m)m" : "\(m)m \(rem)s"
+        }
+        let h = s / 3600, m = (s % 3600) / 60
+        return m == 0 ? "\(h)h" : "\(h)h \(m)m"
     }
 }

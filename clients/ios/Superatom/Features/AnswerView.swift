@@ -13,6 +13,8 @@ import SwiftUI
 
 struct AnswerView: View {
     let answer: EngineAnswer
+    /// A cell that names something was tapped. Nil leaves the table read-only.
+    var onEntity: ((_ entity: String, _ id: String, _ label: String) -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -40,7 +42,7 @@ struct AnswerView: View {
             }
 
             ForEach(answer.sections) { section in
-                SectionView(section: section).padding(.bottom, 26)
+                SectionView(section: section, onEntity: onEntity).padding(.bottom, 26)
             }
 
             if let caveat = answer.caveat, !caveat.isEmpty {
@@ -193,6 +195,7 @@ struct FigureBand: View {
 /// One block of a multi-block report: a table, a row of numbers, or prose.
 struct SectionView: View {
     let section: EngineAnswer.Section
+    var onEntity: ((_ entity: String, _ id: String, _ label: String) -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
@@ -210,6 +213,7 @@ struct SectionView: View {
             case .table:
                 TableView(columns: section.columns, rows: section.rows,
                           total: section.total.isEmpty ? nil : section.total,
+                          onEntity: onEntity,
                           totalRows: section.totalRows, title: section.title)
             case .text:
                 if let body = section.body, !body.isEmpty {

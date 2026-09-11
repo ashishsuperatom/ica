@@ -16,12 +16,25 @@ struct ConversationView: View {
     /// which reads as a blank screen that "wakes up" when you touch it. The conversation
     /// is already on disk; it should be on screen in the first frame.
     @State private var conversation: ConversationStore
-    @State private var typing = false
+    /// Which input you last used, remembered across conversations and launches. Switching
+    /// to the keyboard means you want the keyboard next time too.
+    /// Typing is the default, and the choice is remembered on this device: switching to
+    /// the keyboard means you want the keyboard next time too, and switching back to voice
+    /// means the opposite. Neither is imposed after the first time you say which you want.
+    @AppStorage("sa.pref.composeByTyping") private var typing = true
     @State private var editingPending = false
     @State private var pendingText = ""
     @State private var draft = ""
     @State private var now = Date.now
     @State private var copiedItem: String?
+    @State private var confirmingStop = false
+    @State private var notifyDenied = false
+    @State private var pendingView: EntityTap?
+
+    /// A tapped cell, waiting to be confirmed.
+    struct EntityTap: Identifiable {
+        let entity: String, id: String, label: String
+    }
     @FocusState private var composerFocused: Bool
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -44,6 +57,18 @@ struct ConversationView: View {
         .navigationTitle(session.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
         .onDisappear { if services.recorder.state.isRecording { conversation.stopVoice() } }
+        .confirmationDialog("Look at \(pendingView?.label ?? "this")?",
+                            isPresented: .init(get: { pendingView != nil },
+                                               set: { if !$0 { pendingView = nil } }),
+                            titleVisibility: .visible) {
+            Button("Open") {
+                if let tap = pendingView { conversation.openEntity(tap.entity, id: tap.id) }
+                pendingView = nil
+            }
+            Button("Cancel", role: .cancel) { pendingView = nil }
+        } message: {
+            Text("Asks the engine for everything it knows about this \(pendingView?.entity ?? "item").")
+        }
         // One heartbeat drives BOTH the recording clock and the narration timers. Without
         // it the elapsed seconds only moved when a new beat arrived, which made a long
         // step look frozen exactly when you most want to see it counting.
@@ -108,7 +133,19 @@ struct ConversationView: View {
                 .onChange(of: conversation.state.questions.count) { _, _ in
                     pinLastQuestion(proxy, in: conversation)
                 }
-                .onAppear { pinLastQuestion(proxy, in: conversation) }
+                .onAppear {
+                    // A request to show a particular answer wins over the usual "newest at
+                    // the top" — you tapped a notification about THAT one.
+                    if let target = services.navigation.target,
+                       target.sessionId == session.id, let qid = target.questionId {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            proxy.scrollTo(qid, anchor: .top)
+                        }
+                        services.navigation.consume()
+                    } else {
+                        pinLastQuestion(proxy, in: conversation)
+                    }
+                }
             }
         }
     }
@@ -141,6 +178,15 @@ struct ConversationView: View {
                         conversation.askAgain(question.text)
                     } label: {
                         Label("Ask again", systemImage: "arrow.clockwise")
+                    }
+                    // Only offered where there IS a saved program to re-run — an answer.
+                    if hasAnswer(question, in: conversation) {
+                        Button {
+                            Haptics.medium()
+                            conversation.runAgain(questionId: question.id)
+                        } label: {
+                            Label("Run again", systemImage: "play.circle")
+                        }
                     }
                     if question.state == .asking || question.state == .failed {
                         Button {
@@ -183,7 +229,10 @@ struct ConversationView: View {
                 // The analyst's live commentary, and its record once finished. Persisted
                 // beat by beat, so this survives the app being killed mid-question.
                 if let beats = conversation.state.beatsByQuestion[question.id], !beats.isEmpty {
-                    NarrationView(beats: beats, live: question.state == .asking, now: now)
+                    NarrationView(beats: services.preferences.showProgramLogs
+                                         ? beats : beats.filter { $0.source == .narrator },
+                                  live: question.state == .asking, now: now,
+                                  showTimings: services.preferences.showTimings)
                 }
 
                 ForEach(conversation.state.itemsByQuestion[question.id] ?? []) { item in
@@ -192,7 +241,20 @@ struct ConversationView: View {
 
                 if question.state == .asking,
                           (conversation.state.beatsByQuestion[question.id] ?? []).isEmpty {
-                    workingLine(services.hub.status.label ?? "Thinking…", since: question.askedAt)
+                    workingLine(services.hub.status.label ?? "Thinking…",
+                                since: services.preferences.showTimings ? question.askedAt : nil)
+                }
+                if question.state == .asking {
+                    // Actions ON the turn, in the same place the answer's Copy/Share sit —
+                    // they belong to this question and scroll with it, rather than being
+                    // pinned to the bottom of the screen where they read as app chrome.
+                    // Stop left, notify right: destructive on the side you reach past.
+                    HStack(spacing: 10) {
+                        stopControl
+                        Spacer()
+                        if isSlow(question) { notifyControl(question) }
+                    }
+                    .padding(.top, 4)
                 }
             }
             .padding(.horizontal, Theme.gutter)
@@ -210,7 +272,12 @@ struct ConversationView: View {
                     // testing, selection rects and the edit menu on the most-instantiated
                     // view in the app — real cost in a long feed, for something the Copy
                     // button below does better anyway.
-                    AnswerView(answer: answer)
+                    AnswerView(answer: answer) { entity, id, label in
+                        // Confirmed, never sent outright. Opening an entity costs a turn,
+                        // and a table is something you scroll — a stray tap must not spend
+                        // a run.
+                        pendingView = EntityTap(entity: entity, id: id, label: label)
+                    }
                 } else {
                     // The payload didn't decode into the shape we expect. Show it raw
                     // rather than rendering nothing — a visible oddity beats a silent
@@ -339,15 +406,16 @@ struct ConversationView: View {
     }
 
     private func elapsedLabel(_ since: Date) -> String {
-        let seconds = max(0, Int(now.timeIntervalSince(since)))
-        return seconds < 60 ? "\(seconds)s" : "\(seconds / 60)m \(seconds % 60)s"
+        Elapsed.short(Int(now.timeIntervalSince(since)))
     }
 
     private var emptyState: some View {
         VStack(spacing: 8) {
             Spacer()
             Text("Ask a question.").font(Theme.serif(19)).foregroundStyle(Theme.inkFaint)
-            Text("Tap the button and just talk.")
+            // Says what THIS composer does. It always read "just talk", which was wrong
+            // the moment someone chose the keyboard — and reads as the app ignoring them.
+            Text(typing ? "Type it below, or switch to voice." : "Tap the button and just talk.")
                 .font(Theme.sans(13)).foregroundStyle(Theme.inkFaint.opacity(0.85))
             Spacer()
         }
@@ -356,13 +424,16 @@ struct ConversationView: View {
         .onTapGesture { dismissKeyboard() }
     }
 
-    /// Give the page back. Dismissing with nothing typed also returns the composer to
-    /// its voice state — the keyboard was a detour, and leaving a dead text field behind
-    /// would keep the primary control hidden.
+    /// Give the page back — the keyboard goes away, the composer does NOT change.
+    ///
+    /// It used to snap back to voice whenever you dismissed with nothing typed, which quietly
+    /// wrote the preference too. So choosing the keyboard and then tapping the page put you
+    /// back on voice and REMEMBERED voice — the setting could never stick. Which input you
+    /// want is something you say by tapping the mic or the keyboard, not something inferred
+    /// from an empty field.
     private func dismissKeyboard() {
-        guard composerFocused || typing else { return }
+        guard composerFocused else { return }
         composerFocused = false
-        if trimmedDraft.isEmpty { typing = false }
     }
 
     // ── Composer — voice first ───────────────────────────────────────────────
@@ -370,6 +441,14 @@ struct ConversationView: View {
     @ViewBuilder
     private var composer: some View {
         VStack(spacing: 10) {
+            if let notice = services.hub.notice {
+                Text(notice)
+                    .font(Theme.sans(12))
+                    .foregroundStyle(Theme.inkFaint)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Theme.gutter)
+                    .transition(.opacity)
+            }
             if let failure = conversation.voiceError ?? services.recorder.state.failure {
                 Text(failure).font(Theme.sans(12)).foregroundStyle(Theme.warning)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -405,6 +484,87 @@ struct ConversationView: View {
         .animation(.easeInOut(duration: 0.22), value: services.recorder.state.isRecording)
         .animation(.easeInOut(duration: 0.22), value: conversation.state.pending?.id)
         .animation(.easeOut(duration: 0.15), value: conversation.liveTranscript.isEmpty)
+    }
+
+    /// After a question has genuinely been slow, offer to fetch you rather than make you
+    /// wait. Not shown before then: most answers arrive quickly, and an always-present
+    /// "notify me" would be an admission that waiting is expected.
+    private func isSlow(_ question: Question) -> Bool {
+        guard let asked = question.askedAt else { return false }
+        // A minute. Long enough that waiting has genuinely become the situation, rather
+        // than offering an escape hatch from a normal pause.
+        return now.timeIntervalSince(asked) >= 60
+    }
+
+    @ViewBuilder
+    private func notifyControl(_ question: Question) -> some View {
+        let armed = services.notifier.isArmed(question.id)
+        Button {
+            Haptics.light()
+            if armed {
+                services.notifier.disarm(questionId: question.id)
+            } else {
+                Task {
+                    // Permission is requested HERE, at the moment it is wanted — far more
+                    // likely to be granted than asked for at launch for a reason nobody
+                    // can see yet.
+                    let granted = await services.notifier.arm(questionId: question.id)
+                    if !granted { notifyDenied = true }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: armed ? "bell.fill" : "bell")
+                    .font(Theme.sans(11, .semibold))
+                Text(armed ? "We'll tell you when it's ready" : "Notify me when ready")
+                    .font(Theme.sans(12, .medium))
+            }
+            .foregroundStyle(armed ? Theme.accent : Theme.inkSoft)
+            .padding(.horizontal, 12)
+            .frame(height: 32)
+            .background(Capsule().fill(armed ? Theme.accent.opacity(0.12) : Theme.paperInset))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .alert("Notifications are off", isPresented: $notifyDenied) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Turn them on for Superatom in Settings to be told when an answer is ready.")
+        }
+    }
+
+    /// Stop the turn in progress.
+    ///
+    /// Confirmed, deliberately. On a phone this sits inches from where a thumb rests while
+    /// reading, and stopping is not free — it abandons work that may be nearly done and
+    /// cannot be resumed. A dialog is the difference between a decision and a brush.
+    private var stopControl: some View {
+        Button(role: .destructive) {
+            Haptics.medium()
+            confirmingStop = true
+        } label: {
+            // Small and quiet. It sits beside a log people scroll and read, so a large
+            // tinted button is both a distraction and something a thumb finds by accident.
+            HStack(spacing: 5) {
+                Image(systemName: "stop.fill").font(Theme.sans(9))
+                Text("Stop").font(Theme.sans(11, .medium))
+            }
+            .foregroundStyle(Theme.inkFaint)
+            .padding(.horizontal, 9)
+            .frame(height: 26)
+            .background(Capsule().stroke(Theme.rule, lineWidth: 0.5))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .confirmationDialog("Stop this question?", isPresented: $confirmingStop, titleVisibility: .visible) {
+            Button("Stop", role: .destructive) {
+                Haptics.heavy()
+                conversation.stopTurn()
+            }
+            Button("Keep going", role: .cancel) { }
+        } message: {
+            Text("The engine will abandon the work it has done so far. You can ask again afterwards.")
+        }
     }
 
     /// A spoken question, transcribed and awaiting your say-so. Transcription is not
@@ -666,11 +826,17 @@ struct NarrationView: View {
 
     @State private var expanded: Bool
     @State private var userChose = false
+    /// Program runs the reader has opened, keyed by the first line of the run.
+    @State private var openRuns: Set<Int> = []
 
-    init(beats: [NarrationBeat], live: Bool, now: Date) {
+    /// Timings are opt-in — see Preferences.showTimings for why.
+    let showTimings: Bool
+
+    init(beats: [NarrationBeat], live: Bool, now: Date, showTimings: Bool) {
         self.beats = beats
         self.live = live
         self.now = now
+        self.showTimings = showTimings
         _expanded = State(initialValue: live)      // open while it runs; that is when it is worth watching
     }
 
@@ -690,11 +856,20 @@ struct NarrationView: View {
                 header
                 if expanded {
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(timed.enumerated()), id: \.element.beat.seq) { index, entry in
-                            if index > 0 {
-                                Rectangle().fill(Theme.rule.opacity(0.5)).frame(height: 0.5)
-                            }
-                            row(entry.beat, seconds: entry.seconds, isCurrent: live && index == timed.count - 1)
+                        ForEach(Array(rows.enumerated()), id: \.element.id) { index, group in
+                            // The collapsed count rides the rule too, so the log line
+                            // itself runs the full width with nothing set into it.
+                            let collapsible = group.isProgram && group.beats.count > 1
+                            stepRule(seconds: group.seconds, isProgram: group.isProgram,
+                                     isFirst: index == 0,
+                                     hidden: collapsible && !openRuns.contains(group.id)
+                                             ? group.beats.count - 1 : 0,
+                                     open: collapsible && openRuns.contains(group.id),
+                                     onToggle: collapsible ? {
+                                         if openRuns.contains(group.id) { openRuns.remove(group.id) }
+                                         else { openRuns.insert(group.id) }
+                                     } : nil)
+                            beatRow(group, isLast: index == rows.count - 1)
                         }
                     }
                     .padding(.top, 4)
@@ -723,7 +898,7 @@ struct NarrationView: View {
                 if live, !userChose, beats.count > liveTail {
                     Text("· showing latest \(liveTail)").font(Theme.sans(10))
                 }
-                if let total = totalDuration {
+                if showTimings, let total = totalDuration {
                     Text("·")
                     Text(total).font(Theme.mono(11)).monospacedDigit()
                 }
@@ -738,44 +913,165 @@ struct NarrationView: View {
 
     /// Each beat paired with how long it took — walked once, in order, instead of
     /// searching the array again for every row.
-    private var timed: [(beat: NarrationBeat, seconds: Int)] {
+    /// Beats grouped for display: consecutive PROGRAM lines become one row.
+    ///
+    /// A program emits a line per unit, per decision and per query, so a real one buries
+    /// the narrator's few sentences under thirty of its own. A run collapses to its LATEST
+    /// line — which is what a progress line is for, each replacing the last — with a count
+    /// to open the rest.
+    private var rows: [BeatRow] {
         let end = Int64(now.timeIntervalSince1970 * 1000)
-        let all = beats.indices.map { index -> (beat: NarrationBeat, seconds: Int) in
+        func seconds(_ index: Int) -> Int {
             let next = index < beats.count - 1 ? beats[index + 1].atMs : end
-            return (beats[index], max(0, Int((next - beats[index].atMs) / 1000)))
+            return max(0, Int((next - beats[index].atMs) / 1000))
         }
-        // A long run can produce twenty-plus steps — a verification loop against a flaky
-        // source will do it easily. While it is RUNNING, what matters is what it is doing
-        // now, so only the recent steps are shown; tapping the header reveals the lot.
-        guard live, !userChose, all.count > liveTail else { return all }
-        return Array(all.suffix(liveTail))
+
+        var out: [BeatRow] = []
+        var index = 0
+        while index < beats.count {
+            if beats[index].source == .program {
+                let first = index
+                while index < beats.count, beats[index].source == .program { index += 1 }
+                let run = Array(beats[first..<index])
+                // The run's own duration: from its first line to whatever follows it.
+                let span = max(0, Int(((index < beats.count ? beats[index].atMs : end) - run[0].atMs) / 1000))
+                out.append(BeatRow(id: run[0].seq, beats: run, seconds: span, isProgram: true))
+            } else {
+                out.append(BeatRow(id: beats[index].seq, beats: [beats[index]],
+                                   seconds: seconds(index), isProgram: false))
+                index += 1
+            }
+        }
+        return out
     }
 
+    struct BeatRow: Identifiable {
+        let id: Int
+        let beats: [NarrationBeat]
+        let seconds: Int
+        let isProgram: Bool
+    }
+
+    /// While a run is live, only the most recent steps are shown — a verification loop
+    /// against a flaky source produces twenty-plus, and your question should not be pushed
+    /// off the screen by them. Opening the block shows the lot.
     private let liveTail = 5
 
-    private func row(_ beat: NarrationBeat, seconds: Int, isCurrent: Bool) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            MarkdownText(raw: beat.text, font: Theme.sans(13),
-                         color: isCurrent ? Theme.ink : Theme.inkSoft, lineSpacing: 3)
-            // A FIXED column for the elapsed time, wide enough for "999s".
-            //
-            // Without it the text column is whatever is left over, so "2s" and "92s" give
-            // the content different widths and every line re-wraps as the timer ticks past
-            // 9 and 99. The space is reserved even while the label is hidden for the first
-            // second, so nothing shifts when it appears.
-            Text(seconds >= 1 ? "\(seconds)s" : "")
-                .font(Theme.mono(11))
-                .foregroundStyle(isCurrent ? Theme.accent : Theme.inkFaint)
-                .monospacedDigit()
-                .frame(width: 34, alignment: .trailing)
+    /// One display row: a narrator line, or a run of program lines collapsed to its latest.
+    @ViewBuilder
+    private func beatRow(_ group: BeatRow, isLast: Bool) -> some View {
+        let open = openRuns.contains(group.id)
+        if group.isProgram && group.beats.count > 1 && !open {
+            // THE WHOLE ROW toggles, not a small chevron: on a phone a 10pt glyph is a
+            // miss waiting to happen, and there is nothing else in this row to hit.
+            Button {
+                Haptics.light()
+                openRuns.insert(group.id)
+            } label: {
+                // The LATEST line only — a progress line replaces the one before it — and
+                // it runs the full width, because the count and the time both live in the
+                // rule above.
+                MarkdownText(raw: group.beats.last!.text, font: Theme.mono(11),
+                             color: Theme.accent, lineSpacing: 3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.vertical, 7)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(group.beats.enumerated()), id: \.element.seq) { index, beat in
+                    // Tapping the FIRST line closes the run — the same row that opened it.
+                    // A separate "Hide" at the bottom meant scrolling past everything you
+                    // just opened to get rid of it, and two controls for one state.
+                    if index == 0, group.isProgram, group.beats.count > 1 {
+                        Button {
+                            Haptics.light()
+                            openRuns.remove(group.id)
+                        } label: {
+                            row(beat, isCurrent: false)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        row(beat, isCurrent: live && isLast && index == group.beats.count - 1)
+                    }
+                }
+            }
         }
-        .padding(.vertical, 7)
+    }
+
+    private func row(_ beat: NarrationBeat, isCurrent: Bool) -> some View {
+        // No timer column: the duration rides the RULE above each step instead, so a line
+        // of log runs the full width from one edge to the other.
+        //
+        // Two voices, told apart by colour AND typeface, needing no glyph:
+        //   narrator — the engine describing its work, in the reading face
+        //   program  — the computation reporting itself, in mono and the accent
+        let isProgram = beat.source == .program
+        return MarkdownText(raw: beat.text,
+                            font: isProgram ? Theme.mono(11) : Theme.sans(13),
+                            color: isProgram ? Theme.accent : (isCurrent ? Theme.ink : Theme.inkSoft),
+                            lineSpacing: 3)
+            .padding(.vertical, 7)
+    }
+
+    /// The rule above a step, with that step's duration set into it.
+    ///
+    /// The duration used to be a fixed column on the right, which cost width on every line
+    /// and left a ragged channel down the page. Here it rides a rule that was already being
+    /// drawn as a separator: the number costs no width, and the text runs edge to edge.
+    ///
+    /// ABOVE rather than below, because a step's block grows downward when it expands — an
+    /// anchor above it stays put while everything else moves.
+    ///
+    /// With timings off it is simply the separator. Same element, one fewer piece of
+    /// information, rather than a different layout.
+    @ViewBuilder
+    private func stepRule(seconds: Int, isProgram: Bool, isFirst: Bool,
+                          hidden: Int = 0, open: Bool = false,
+                          onToggle: (() -> Void)? = nil) -> some View {
+        let showsTime = showTimings && seconds >= 1
+        let showsCount = hidden > 0 || open
+        if !isFirst || showsTime || showsCount {
+            HStack(spacing: 8) {
+                Rectangle().fill(Theme.rule.opacity(0.5)).frame(height: 0.5)
+                if showsTime || showsCount {
+                    HStack(spacing: 6) {
+                        if showsTime {
+                            Text(Elapsed.short(seconds))
+                                .font(Theme.mono(10)).monospacedDigit()
+                                .foregroundStyle(isProgram ? Theme.accent.opacity(0.7) : Theme.inkFaint)
+                        }
+                        if showsCount {
+                            HStack(spacing: 2) {
+                                if hidden > 0 { Text("+\(hidden)").font(Theme.mono(10)) }
+                                Image(systemName: open ? "chevron.up" : "chevron.down")
+                                    .font(Theme.sans(7, .semibold))
+                            }
+                            .foregroundStyle(Theme.accent.opacity(0.8))
+                        }
+                    }
+                    Rectangle().fill(Theme.rule.opacity(0.5)).frame(height: 0.5)
+                }
+            }
+            .padding(.vertical, 2)
+            // The chevron sits in this rule, so the rule has to answer to it. An arrow that
+            // looks like it opens something and does nothing is worse than no arrow.
+            .contentShape(Rectangle())
+            .onTapGesture {
+                guard let onToggle else { return }
+                Haptics.light()
+                onToggle()
+            }
+        }
     }
 
     private var totalDuration: String? {
         guard let first = beats.first else { return nil }
         let end = live ? Int64(now.timeIntervalSince1970 * 1000) : (beats.last?.atMs ?? first.atMs)
         let secs = max(0, Int((end - first.atMs) / 1000))
-        return secs >= 1 ? "\(secs)s" : nil
+        return secs >= 1 ? Elapsed.short(secs) : nil
     }
 }

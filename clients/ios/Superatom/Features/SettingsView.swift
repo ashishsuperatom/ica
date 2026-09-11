@@ -25,6 +25,24 @@ struct SettingsView: View {
                         }
                     }
                     .tint(Theme.accent)
+                    Toggle(isOn: $preferences.showTimings) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Show timings")
+                            Text("How long each step takes, and how long a question has been running.")
+                                .font(Theme.sans(11))
+                                .foregroundStyle(Theme.inkFaint)
+                        }
+                    }
+                    .tint(Theme.accent)
+                    Toggle(isOn: $preferences.showProgramLogs) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Program logs")
+                            Text("What the program is doing while it runs. Off means the engine doesn't send them at all.")
+                                .font(Theme.sans(11))
+                                .foregroundStyle(Theme.inkFaint)
+                        }
+                    }
+                    .tint(Theme.accent)
                 } header: {
                     Text("Answers")
                 }

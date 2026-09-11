@@ -73,7 +73,7 @@ enum MarkdownBlock {
 
     case paragraph(String)
     case bullets([String])
-    case table(columns: [String], rows: [[JSONValue]])
+    case table(columns: [ColumnSpec], rows: [[Cell]])
 
     /// Group lines into blocks. Deliberately small: the engine is told to emit simple
     /// markdown, and a full parser here would be a liability, not an asset.
@@ -99,10 +99,10 @@ enum MarkdownBlock {
                 paragraph.append(contentsOf: table)
                 return
             }
-            let columns = cells(table[0])
+            let columns = cells(table[0]).map(ColumnSpec.init(label:))
             // Row 1 of a markdown table is the |---|---| separator.
             let body = table.dropFirst(isSeparator(table[1]) ? 2 : 1)
-            let rows = body.map { line in cells(line).map { JSONValue.parse($0) } }
+            let rows = body.map { line in cells(line).map(Cell.parseMarkdown) }
             blocks.append(.table(columns: columns, rows: Array(rows)))
         }
 
@@ -137,13 +137,14 @@ enum MarkdownBlock {
     }
 }
 
-extension JSONValue {
-    /// A markdown cell is text; recover numbers so they right-align and group like the
-    /// engine's own numeric columns.
-    static func parse(_ text: String) -> JSONValue {
-        if text.isEmpty || text == "—" || text == "-" { return .null }
-        let cleaned = text.replacingOccurrences(of: ",", with: "")
-        if let number = Double(cleaned) { return .number(number) }
-        return .string(text)
+extension Cell {
+    /// A markdown table cell is text; recover numbers so they right-align and group the
+    /// same way the engine's own numeric columns do.
+    static func parseMarkdown(_ text: String) -> Cell {
+        if text.isEmpty || text == "—" || text == "-" { return Cell(text: "—") }
+        if let number = Double(text.replacingOccurrences(of: ",", with: "")) {
+            return Cell(text: Cell.format(number), number: number)
+        }
+        return Cell(text: text)
     }
 }

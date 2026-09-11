@@ -15,6 +15,8 @@ struct HomeState: Equatable, Sendable {
     var orgs: [Organization] = []
     var projects: [Project] = []
     var sessions: [Session] = []
+    /// Sessions with a question in flight right now.
+    var running: Set<String> = []
 
     static let empty = HomeState()
     var isReady: Bool { account != nil && project != nil }
@@ -55,10 +57,10 @@ extension AppDatabase {
 
     /// Point the app at a project. Also remembers its org, so reopening lands exactly
     /// where you left off even after switching away and back.
+    /// Note the project was opened. The current project id itself is written by
+    /// Connection, which owns it — see Connection.projectId.
     func switchTo(project: Project) throws {
         try writer.write { db in
-            try AppState(key: AppState.Key.currentProjectId.rawValue, value: project.id).upsert(db)
-            try AppState(key: AppState.Key.currentOrgId.rawValue, value: project.orgId).upsert(db)
             var p = project
             p.lastOpenedAt = .now
             try p.update(db)
@@ -71,7 +73,7 @@ extension AppDatabase {
     /// synchronous first read at launch, so the first frame and every later frame come
     /// from identical code.
     func fetchHome(_ db: Database) throws -> HomeState {
-            guard let accountId = try self.setting(.currentAccountId, db),
+            guard let accountId = try self.setting(.currentAccountId, db), !accountId.isEmpty,
                   let account = try Account.fetchOne(db, key: accountId)
             else { return .empty }
 
@@ -80,8 +82,10 @@ extension AppDatabase {
                 .order(Column("name"))
                 .fetchAll(db)
 
-            let orgId = try self.setting(.currentOrgId, db) ?? orgs.first?.id
-            let org = orgs.first { $0.id == orgId }
+            // The org is DERIVED from the project you are on, not stored beside it.
+            // Storing both meant two values that could disagree — and the org is never
+            // independently chosen: you pick a project, and its org comes with it.
+            let projectId = try self.setting(.currentProjectId, db)
 
             // Every project this account can reach, across ALL orgs — the switcher shows
             // the whole hierarchy, not just the org currently selected.
@@ -90,11 +94,9 @@ extension AppDatabase {
                 .order(Column("name"))
                 .fetchAll(db)
 
-            let projectId = try self.setting(.currentProjectId, db)
-            // A remembered project that belongs to another org must not leak across a
-            // switch — fall back to the first project of the org actually selected.
-            let inOrg = projects.filter { $0.orgId == (org?.id ?? "") }
-            let project = projects.first { $0.id == projectId } ?? inOrg.first ?? projects.first
+            // The project you were last on, if you can still reach it.
+            let project = projects.first { $0.id == projectId } ?? projects.first
+            let org = orgs.first { $0.id == project?.orgId }
 
             let sessions = try project.map {
                 try Session
@@ -103,8 +105,15 @@ extension AppDatabase {
                     .fetchAll(db)
             } ?? []
 
+            // Which conversations are working. Read here so the list can say so without
+            // each row asking, and so it updates through the same observation as everything
+            // else rather than needing its own.
+            let running = Set(try String.fetchAll(db, sql: """
+                SELECT DISTINCT sessionId FROM question WHERE state IN ('asking','transcribing')
+                """))
+
             return HomeState(account: account, org: org, project: project,
-                             orgs: orgs, projects: projects, sessions: sessions)
+                             orgs: orgs, projects: projects, sessions: sessions, running: running)
     }
 
     func observeHome() -> ValueObservation<ValueReducers.RemoveDuplicates<ValueReducers.Fetch<HomeState>>> {
@@ -243,6 +252,10 @@ extension AppDatabase {
 
     // ── Writes driven by the engine ──────────────────────────────────────────
 
+    func session(id: String) throws -> Session? {
+        try writer.read { db in try Session.fetchOne(db, key: id) }
+    }
+
     func question(id: String) throws -> Question? {
         try writer.read { db in try Question.fetchOne(db, key: id) }
     }
@@ -270,7 +283,7 @@ extension AppDatabase {
     /// Append one line of the analyst's live commentary. Persisted as it arrives — not
     /// buffered in memory — so killing the app mid-question and reopening restores the
     /// run in progress rather than losing it.
-    func appendBeat(questionId: String, text: String) throws {
+    func appendBeat(questionId: String, text: String, source: NarrationBeat.Source = .narrator) throws {
         try writer.write { db in
             let next = try Int.fetchOne(db, sql: "SELECT COALESCE(MAX(seq), -1) + 1 FROM narrationBeat WHERE questionId = ?",
                                         arguments: [questionId]) ?? 0
@@ -279,7 +292,8 @@ extension AppDatabase {
                                            arguments: [questionId])
             guard last != text else { return }
             try NarrationBeat(questionId: questionId, seq: next, text: text,
-                              atMs: Int64(Date.now.timeIntervalSince1970 * 1000)).insert(db)
+                              atMs: Int64(Date.now.timeIntervalSince1970 * 1000),
+                              source: source).insert(db)
         }
     }
 
@@ -332,6 +346,56 @@ extension AppDatabase {
         try writer.write { db in
             try db.execute(sql: "UPDATE question SET text = ? WHERE id = ?", arguments: [text, id])
         }
+    }
+
+    /// Questions answered since a moment — what landed while the app was away.
+    ///
+    /// Newest first, and only ones that actually produced an answer: a turn that failed
+    /// while you were gone is not news worth being pulled back for.
+    func answered(since: Date) throws -> [Question] {
+        try writer.read { db in
+            try Question.filter(sql: """
+                state = 'answered' AND answeredAt > ?
+                AND id IN (SELECT questionId FROM feedItem WHERE kind = 'answer' AND questionId IS NOT NULL)
+                """, arguments: [since])
+                .order(Column("answeredAt").desc)
+                .limit(5)
+                .fetchAll(db)
+        }
+    }
+
+    /// Close out turns left running by a previous launch.
+    ///
+    /// There is deliberately no timeout on a question — the analyst can think for many
+    /// minutes. But a turn asked by a PREVIOUS process is different in kind: the socket that
+    /// asked is gone, so the engine has nowhere to deliver and nothing will ever arrive.
+    /// Left alone it spins "Working…" forever.
+    ///
+    /// Marked failed rather than deleted, and RECOVERABLE. The answer itself is not tied
+    /// to the socket: the hub stores it against the qid, so it is asked for by id on the
+    /// next connect. If it is there, it clears this notice and takes its place.
+    @discardableResult
+    func reconcileInterruptedTurns() throws -> [Question] {
+        let stale = try writer.read { db in
+            try Question.filter(sql: """
+                state = 'asking'
+                AND id NOT IN (SELECT questionId FROM feedItem WHERE kind = 'answer' AND questionId IS NOT NULL)
+                """).fetchAll(db)
+        }
+        guard !stale.isEmpty else { return [] }
+        try writer.write { db in
+            for question in stale {
+                try db.execute(sql: "UPDATE question SET state = 'failed', answeredAt = ? WHERE id = ?",
+                               arguments: [Date.now, question.id])
+                let seq = try Int.fetchOne(db, sql: "SELECT COALESCE(MAX(seq), -1) + 1 FROM feedItem WHERE sessionId = ?",
+                                           arguments: [question.sessionId]) ?? 0
+                try FeedItem(sessionId: question.sessionId, questionId: question.id, seq: seq,
+                             kind: .error,
+                             payload: "This question was interrupted. Tap it to ask again, or check for an answer.")
+                    .insert(db)
+            }
+        }
+        return stale
     }
 
     /// Remove error blocks from a question — used when an answer arrives after we had
@@ -401,11 +465,18 @@ extension AppDatabase {
         var stored: [String] = []
 
         try writer.write { db in
+            // Session snapshots are NAMES, not conversations. The hub keeps a title for
+            // every recent session but only buffers the newest handful of answers — so
+            // creating a row for each snapshot filled the list with conversations that open
+            // to nothing. A session is created below, when there is an answer to put in it.
+            //
+            // An EXISTING session still gets its title refreshed: that part is genuinely
+            // new information, and it is how a conversation renamed on the web catches up.
             for snapshot in sessions {
-                guard try Session.fetchOne(db, key: snapshot.id) == nil else { continue }
-                try Session(id: snapshot.id, projectId: projectId, accountId: accountId,
-                            title: snapshot.title, createdAt: snapshot.lastAt,
-                            updatedAt: snapshot.lastAt).insert(db)
+                guard let title = snapshot.title, !title.isEmpty else { continue }
+                try db.execute(sql: """
+                    UPDATE session SET title = ? WHERE id = ? AND (title IS NULL OR title = '')
+                    """, arguments: [title, snapshot.id])
             }
 
             for item in answers {
