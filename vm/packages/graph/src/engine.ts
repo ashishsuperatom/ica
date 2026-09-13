@@ -15,7 +15,7 @@ import { pathToFileURL } from 'node:url'
 import { contractProblem, type Contract } from './contract.js'
 import { conditionSql, plan, sqlFor, type Condition, type Coordinates, type Dialect, type ReadBody, type ResolvedStatement, type When } from './coordinates.js'
 import { runPlan } from './execute.js'
-import { comparisonCoordinates, mergeComparison, type Comparison } from './compare.js'
+import { comparisonCoordinates, difference, mergeComparison, type Comparison } from './compare.js'
 import { programHash } from './hash.js'
 import type { Calendar } from './calendar.js'
 import { isDerived, kindOf, type Shape, type Statement } from './shape.js'
@@ -510,7 +510,40 @@ export function createEngine(o: EngineOptions) {
     return null
   }
 
-  return { define, call, replay, store: o.store }
+  // ── COUNTERFACTUALS: WHAT A PAST ANSWER WOULD HAVE BEEN ──────────────────────────────────────────────────────
+  //
+  // A past question is asked again as of its own day, under its own assumptions and interventions, twice: once as
+  // it was, once with the change. The difference is the change's effect and nothing else. Comparing the change
+  // with the RECORDED answer instead would mix in every correction made since — a fixed concept would look like
+  // an effect of the hires.
+  //
+  // What the change does not touch is held as it was. For a definitional graph — capacity is FTE times a week —
+  // that is exact. Where the world would have responded (more people, more hours booked), nothing here models it,
+  // and the answer says so.
+  async function counterfactual<T = unknown>(callId: string, change: { assume?: Record<string, unknown>; intervene?: Record<string, Intervention> },
+                                             options: { access?: Record<string, unknown[]> } = {}) {
+    const c = o.store.getCall(callId)
+    if (!c) throw new Error(`no call ${callId}`)
+    if (!change.assume && !change.intervene) throw new Error('a counterfactual needs a change: assume, intervene, or both')
+    const as: CallOptions = { today: c.today, assume: c.context ?? {}, intervene: (c.interventions as Record<string, Intervention>) ?? {},
+                              who: c.who ?? undefined, access: options.access }
+    const factual = await call<T>(c.name, c.request as Record<string, unknown>, as)
+    const counter = await call<T>(c.name, c.request as Record<string, unknown>,
+      { ...as, assume: { ...as.assume, ...change.assume }, intervene: { ...as.intervene, ...change.intervene } })
+    const drifted = JSON.stringify(c.output) !== JSON.stringify(o.store.getCall(factual.callId)!.output)
+    return {
+      question: { name: c.name, request: c.request, asOf: c.today },
+      change,
+      factual, counterfactual: counter,
+      difference: difference(factual.value, counter.value),
+      caveats: [
+        `held as it was: everything the change does not alter — ${[...Object.keys(change.intervene ?? {}), ...Object.keys(change.assume ?? {})].map((k) => `"${k}"`).join(', ')} changed, and nothing responds to it`,
+        ...(drifted ? ['the answer as it was differs from the one recorded: the programs or data it reads have changed since, so both sides are recomputed now'] : []),
+      ],
+    }
+  }
+
+  return { define, call, replay, counterfactual, store: o.store }
 }
 
 /** Why a new program cannot take an old one's name without breaking what calls it, or null if it can. */

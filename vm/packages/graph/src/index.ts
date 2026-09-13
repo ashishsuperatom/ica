@@ -8,4 +8,4 @@ export { plan, sqlFor, CoordinateError, type Coordinates, type Condition, type G
 export { runPlan, runLocal, arrange, CappedError, type Result, type Column } from './execute.js'
 export { facts, applies, mostSpecific, allThatApply, isRuled, AmbiguousRules, type When as RuleWhen, type Facts, type RuledValue } from './rules.js'
 export { Grains, periods, BUILT_IN, type Calendar, type CalendarGrain, type Period } from './calendar.js'
-export { shift, comparisonCoordinates, mergeComparison, type Comparison, type Offset } from './compare.js'
+export { shift, comparisonCoordinates, mergeComparison, difference, type Comparison, type Offset } from './compare.js'

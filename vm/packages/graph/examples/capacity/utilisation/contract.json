@@ -25,6 +25,11 @@
     "pillars outside capacity": {
       "description": "pillars whose people are not counted as delivery capacity, by id",
       "default": []
+    },
+    "utilisation target": {
+      "description": "the share of available hours expected to be utilised; when given, each row shows its gap to it",
+      "unit": "ratio",
+      "default": null
     }
   }
 }

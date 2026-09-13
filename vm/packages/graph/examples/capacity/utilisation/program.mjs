@@ -12,6 +12,7 @@ const weeks = (from, to) => (Date.parse(to) - Date.parse(from)) / DAY / 7
 export default async function (ctx, { during, by = [], pillar }) {
   // ── stage 1: what was typed becomes an id, before any number is asked for ────────────────────────────────
   const weekHours = ctx.assume('working week')
+  const target = ctx.assume('utilisation target')
   const outside = ctx.assume('pillars outside capacity').map(String)
   const where = {}
   if (pillar) {
@@ -61,7 +62,10 @@ export default async function (ctx, { during, by = [], pillar }) {
     if (!rows.has(k)) rows.set(k, { ...pick(r, hours.columns), hours: 0, available: 0 })
     rows.get(k).hours += r.hours
   }
-  const out = [...rows.values()].map((r) => ({ ...r, utilisation: r.available > 0 ? r.hours / r.available : null }))
+  const ratio = (r) => (r.available > 0 ? r.hours / r.available : null)
+  // The gap to a target is in points: 0.62 against 0.70 is −0.08, not a percentage of anything.
+  const gap = (u) => (target == null || u == null ? {} : { gap: u - target })
+  const out = [...rows.values()].map((r) => ({ ...r, utilisation: ratio(r), ...gap(ratio(r)) }))
 
   const unmatched = out.filter((r) => r.available === 0 && r.hours > 0)
   if (unmatched.length) {
@@ -80,9 +84,10 @@ export default async function (ctx, { during, by = [], pillar }) {
       { name: 'hours', role: 'measure', unit: 'h', kind: 'flow' },
       { name: 'available', role: 'measure', unit: 'h', kind: 'flow' },
       { name: 'utilisation', role: 'measure', unit: 'ratio', kind: 'ratio' },
+      ...(target == null ? [] : [{ name: 'gap', role: 'measure', unit: 'points', kind: 'ratio' }]),
     ],
     rows: out,
-    total: { ...total, utilisation: total.available > 0 ? total.hours / total.available : null },
+    total: { ...total, utilisation: ratio(total), ...gap(ratio(total)) },
     caveats: [],
   }
 }

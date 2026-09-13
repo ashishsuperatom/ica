@@ -985,6 +985,75 @@ What S5 exposed:
   so nothing new can close a loop; but names are mutable, and a replacement can. That is refused when the loop
   runs, not when the replacement is made.
 
+### Decided — the foundation, extended
+
+The test for what belongs in the engine: a capability every analysis needs, whose parts go wrong the same way
+every time it is written by hand. Those are built once, checked, and composed from; everything that is a
+particular organisation's way of looking is a program on top.
+
+- **Rules chosen by specificity.** An assumption may be given as rules on who is asking (`who.department`) and
+  what is read (`pillar`). The most specific rule that applies wins, as in CSS; two equally specific rules that
+  disagree are refused. A layer whose rules do not apply passes to the next.
+- **Access comes with the request.** Authorization is decided outside this system, per person, and arrives with
+  the request as policies by source. The engine passes them to every query; the SQL rewrite applies them by
+  replacing each read of a restricted table with that table filtered — correct under outer joins, aliases and
+  repeated reads — and refuses a denied table. Replay takes the access of whoever replays, never the recorded one.
+- **Calendars are data.** The assumption named `calendar` defines grains: fiscal (a start month; FY2027,
+  FY2027-Q1, FY2027-P01) or listed periods (4-4-5, anything). Chosen by rules when it differs by who is asking.
+  Labels are computed once, for SQL as a CASE over the span's periods and for JavaScript; checked live.
+- **Comparison is in the vocabulary.** `compare` by offset, span or instant; rows aligned by split and by each
+  period's place; a running span compared like for like; month ends clamp; one-sided members are zero for an
+  amount and unknown otherwise; change and change ratio are columns that can be ordered and limited.
+- **Parameters may name programs,** with what the named program must return and have — so one ranking or
+  comparing program serves every relation. A loop made this way is refused when it runs.
+- **Loops are refused at definition** when a replacement would let a name reach itself.
+
+### Decided — counterfactuals
+
+`engine.counterfactual(callId, change)` asks a recorded question again as of its own day, under its own
+assumptions and interventions, twice — as it was and with the change — and returns both and the difference, row
+by row. Both sides are recomputed, so a correction made since is not counted as the change's effect. What the
+change does not touch is held as it was, and the answer says so.
+
+**S6 — counterfactual** (`examples/s6-counterfactual.mts`, 3 tests). On the recorded Q2 answer (38.4%, 11 of 16
+pillars below a 50% target):
+
+- With three more people in NetSuite: NetSuite 29.8% → 28.9%, the company 38.4% → 38.2%; every other pillar
+  unchanged.
+- On a 37.5-hour week: 38.4% → 40.9%, Retail +4.4 points.
+- Against 60% instead of 50%: 11 → 14 pillars below target.
+- On an answer given before `utilised hours` was corrected (75.9%): the hires' effect is −0.1 points. Comparing
+  the counterfactual with the recorded answer would have claimed −37.7.
+
+What S6 exposed:
+
+- **Nothing responds to a change.** Three more people add capacity and no hours. Whether hours would have risen
+  is a mechanism — demand, pipeline, bench time — not a definition, and the graph has no mechanism programs yet.
+  This is where the definitional/mechanism distinction of section 12 becomes necessary, and S7 begins it.
+- **A counterfactual is only as honest as its held-fixed list,** which today is "everything else". A mechanism
+  program would say what responds and by how much.
+
+### Reasoning — layers, and abstraction learned from use
+
+A question is answered at the lowest layer that can say it: coordinates on a relation; a relation built on
+relations; a program composing relations; a program naming other programs as parameters. There is no separate
+"analytics layer" above the engine: comparison and counterfactual are part of the engine because every analysis
+needs them the same way, and a question that combines many filters, measures and comparisons is still one
+program calling relations with coordinates.
+
+What should be created as questions recur is not more capability but more **named programs**: the combinations
+an organisation keeps asking for — "utilisation against target by pillar, this quarter against last" — become
+programs with names from how people ask, so the next agent calls them instead of recomposing them. That is
+library learning (DreamCoder's wake–sleep: solve with what exists, then compress recurring solutions into new
+library entries) and it is System 4's job: offline, over memory, it finds call trees that recur with the same
+shape, proposes the program that captures them, verifies it gives the same answers on the recorded calls, and
+names it. *How recurrence is detected and how a proposed abstraction is verified is open — section 18.*
+
+**A user asking for more on an answer** ("also show each person's manager") is a change to the question, not to
+the answer's rendering: the agent finds the lowest layer where the addition belongs — a coordinate, a concept
+exposing a new column, a relation joining another, the top program — makes that change, and re-asks. The
+rendering follows the result's columns. Which layer, and checking the change was right, is open question 11.
+
 ---
 
 ## 18. Open questions

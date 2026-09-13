@@ -119,3 +119,46 @@ export function mergeComparison(shape: Shape, now: Result, then: Result, by: str
   if (after.limit != null && !after.order?.length) refuse('a limit needs an order')
   return { columns, rows: arrange(rows, after, by), caveats: [...new Set([...now.caveats, ...then.caveats])] }
 }
+
+// ── COUNTERFACTUAL DIFFERENCE ─────────────────────────────────────────────────────────────────────────────
+
+/** How an answer changed under a counterfactual: row by row for a dimensioned result, key by key for totals,
+ *  and plainly for a number. Rows are matched on every column that is not a measure. */
+export function difference(factual: any, counterfactual: any): any {
+  if (typeof factual === 'number' && typeof counterfactual === 'number') {
+    return { factual, counterfactual, change: counterfactual - factual }
+  }
+  if (factual?.columns && counterfactual?.columns) {
+    const measures = factual.columns.filter((c: Column) => c.role === 'measure').map((c: Column) => c.name)
+    const keys = factual.columns.filter((c: Column) => c.role !== 'measure').map((c: Column) => c.name)
+    const key = (r: any) => JSON.stringify(keys.map((k: string) => r[k] ?? null))
+    const after = new Map(counterfactual.rows.map((r: any) => [key(r), r]))
+    const seen = new Set<string>()
+    const rows: any[] = []
+    const merge = (a: any, b: any) => {
+      const row: any = Object.fromEntries(keys.map((k: string) => [k, (a ?? b)[k]]))
+      for (const m of measures) {
+        const x = a ? a[m] : null, y = b ? b[m] : null
+        row[m] = x
+        row[`${m}_counterfactual`] = y
+        row[`${m}_change`] = typeof x === 'number' && typeof y === 'number' ? y - x : null
+      }
+      rows.push(row)
+    }
+    for (const r of factual.rows) { const k = key(r); seen.add(k); merge(r, after.get(k)) }
+    for (const r of counterfactual.rows) if (!seen.has(key(r))) merge(undefined, r)
+    const out: any = { columns: factual.columns, rows }
+    if (factual.total && counterfactual.total) out.total = difference(factual.total, counterfactual.total)
+    return out
+  }
+  if (factual && counterfactual && typeof factual === 'object' && typeof counterfactual === 'object') {
+    const out: any = {}
+    for (const k of new Set([...Object.keys(factual), ...Object.keys(counterfactual)])) {
+      const a = factual[k], b = counterfactual[k]
+      out[k] = typeof a === 'number' && typeof b === 'number' ? { factual: a, counterfactual: b, change: b - a }
+        : JSON.stringify(a) === JSON.stringify(b) ? a : { factual: a, counterfactual: b }
+    }
+    return out
+  }
+  return JSON.stringify(factual) === JSON.stringify(counterfactual) ? factual : { factual, counterfactual }
+}

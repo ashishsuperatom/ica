@@ -145,3 +145,32 @@ test('rules: a layer whose rules do not apply passes to the next', async () => {
   assert.equal((await engine.call('target', {}, { who: { department: 'sales' } })).value, 0.9)
   assert.equal((await engine.call('target', {}, { who: { department: 'finance', groups: ['a'] } })).value, 0.75)
 })
+
+// ── counterfactuals ───────────────────────────────────────────────────────────────────────────────────────
+
+test('counterfactual: a past answer with one more person, as of its own day, row by row', async () => {
+  const { engine } = await setup()
+  const past = await engine.call<any>('people', { measures: ['headcount', 'weekly_hours'], by: ['team'], at: '2026-03-31' })
+  const cf = await engine.counterfactual(past.callId, { intervene: { people: { add: [{ row: { person_id: 'x', team: 'b', hours: 40 } }] } } })
+  const b = (cf.difference as any).rows.find((r: any) => r.team === 'b')
+  assert.deepEqual([b.headcount, b.headcount_counterfactual, b.headcount_change], [1, 2, 1])
+  assert.equal(b.weekly_hours_change, 40)
+  assert.equal((cf.difference as any).rows.find((r: any) => r.team === 'a').headcount_change, 0)
+})
+
+test('counterfactual: an assumption changed, on a program returning a number', async () => {
+  const { engine } = await setup()
+  const past = await engine.call<number>('capacity')
+  const cf = await engine.counterfactual(past.callId, { assume: { 'working week': 30 } })
+  assert.deepEqual(cf.difference, { factual: 120, counterfactual: 90, change: -30 })
+})
+
+test('counterfactual: a correction since the answer is not counted as the effect of the change', async () => {
+  const { engine } = await setup()
+  const past = await engine.call<number>('capacity')
+  // people is corrected afterwards: p2 is not counted.
+  await engine.define({ body: PEOPLE_BODY.replace('rows: P.filter((p) =>', "rows: P.filter((p) => p.person_id !== 'p2' &&"), contract: people }, { by: 'test', replace: true })
+  const cf = await engine.counterfactual(past.callId, { assume: { 'working week': 30 } })
+  assert.deepEqual(cf.difference, { factual: 80, counterfactual: 60, change: -20 })
+  assert.ok(cf.caveats.some((c) => /differs from the one recorded/.test(c)))
+})
