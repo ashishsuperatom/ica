@@ -1,6 +1,6 @@
 # Program Graph
 
-Status: first draft, 2026-09-14. Written to be edited. Where this document says **Open**, the reasoning is
+Status: draft, 2026-09-14, revised the same day. Written to be edited. Where this document says **Open**, the reasoning is
 not settled, or it is not yet clear the author has understood the intent.
 
 Each section separates three things: what has been **decided**, the **reasoning** behind it, and what is
@@ -376,45 +376,116 @@ Remaining risks, stated honestly:
 
 ### Decided
 
-Programs have memory: what was passed in, what ran, and what came out — plus a compressed summary of the
-distribution of what has passed through.
+Programs have memory. The purpose, in the user's example: a program deciding whether to expand a branch beyond
+three production units computes at time t1 that demand is at or below capacity. Without memory, the program is
+stuck with that decision. With memory, it can later see that demand has grown past capacity. We build programs
+for a future we have not seen, which is impossible to do in advance; durable memory of past data is how new
+decisions get made as the distribution changes.
 
-The purpose, in the user's example: a program deciding whether to expand a branch beyond three production
-units computes at time t1 that demand is at or below capacity. Without memory, the program is stuck with that
-decision. With memory, it can later see that demand has grown past capacity. We build programs for a future
-we have not seen, which is impossible to do in advance; durable memory of past data is how new decisions get
-made as the distribution changes.
+For now, memory is:
 
-### Reasoning: three tiers
+- **Input and output.** Every run keeps what was passed in and what came out.
+- **Compression after every run.** A compression step runs after each run. It groups similar results within a
+  time window and keeps a statistical distribution of them.
 
-1. **Calls.** Each execution: coordinates, assumptions, interventions, resolved hashes, the data's
-   freshness, and the result. Provenance in the W3C PROV sense.
-2. **Summaries.** Per program, per coordinate, over time windows, in bounded space: quantiles (t-digest),
-   distinct counts (HyperLogLog), frequencies (Count-Min), rolling mean and variance.
-3. **Behaviour.** Trend, seasonality, and change detection — CUSUM (Page, 1954), ADWIN (Bifet and Gavaldà,
-   2007). The field is concept drift (Gama et al., 2014).
+The rest of memory — retention, what it may hold, richer tiers — is decided later.
 
-In the production example, a decision program records its choice **and the boundary the choice depended
-on**. Memory watches demand's distribution; when it crosses that boundary, the decision is reopened. Decision
-theory names the two ideas involved: value of information (Howard, 1966) and real options (Dixit and Pindyck,
-1994).
+### Reasoning
 
-Other uses of memory:
+What counts as **similar** needs a precise definition, or the distribution mixes things that should never be
+compared. A reasonable first rule: the same program, the same coordinates apart from time, and the same
+assumptions.
 
-- flag an unusual result before it is shown
-- learn assumption defaults from how they are used
-- find two programs that behave identically — same inputs, same outputs across history — which no comparison
-  of their code would reveal
-- caching and planning
+The program's **hash** belongs in that rule too. When a program is corrected it gets a new hash, and its results
+may legitimately change. If the distribution does not separate the old hash from the new one, a correction
+looks exactly like the world changing. The same applies to the data's freshness when a source is restated.
+
+Compressed summaries have a well-developed science and can be kept in bounded space: quantiles (t-digest),
+distinct counts (HyperLogLog), frequencies (Count-Min), and rolling mean and variance.
+
+In the production example, a decision program also records **the boundary its choice depended on**, so that
+memory can say when the evidence has crossed it. Decision theory names the two ideas involved: value of
+information (Howard, 1966) and real options (Dixit and Pindyck, 1994).
 
 ### Open
 
-- How long memory is kept, and what it may hold.
-- Whether summaries are computed on every call or in a background pass.
+- Retention, and what memory may hold.
+- The exact rule for "similar", and the size of the time window.
+- Whether the distribution is kept per coordinate, and how finely.
 
 ---
 
-## 11. Counterfactuals, causal analysis and decisions
+## 11. Expectations
+
+### Decided
+
+**Every program has an expectation of its output.**
+
+When a result falls outside that expectation, more analysis is done to tell two things apart:
+
+- a **genuine value** that belongs within the distribution, or
+- **the world has changed.**
+
+From that, the system can:
+
+- **highlight it to the user**, or
+- **enrich the programs downstream** — add more branches to the DAG so the graph becomes richer and can
+  account for what it just saw.
+
+### Reasoning
+
+**Where an expectation comes from.** Three sources, used together:
+
+- **Declared** by whoever writes the program — a prior. Utilisation lies between 0 and 1 and usually between 0.5
+  and 0.9.
+- **Learned** from memory — the empirical distribution of this program's past results.
+- **Derived** from the programs it calls. If both inputs of a ratio are within their expectations, the ratio's
+  range follows from theirs. This is uncertainty propagation.
+
+A declared expectation is what a new program starts with; a learned one replaces it as memory accumulates.
+
+**An expectation must be conditioned on the coordinates.** Utilisation in one pillar is not utilisation in
+another; December is not March. An expectation that ignores the pillar, or the season, makes everything look
+unusual.
+
+**One result cannot tell a rare value from a changed world. A window can.** A single point outside the
+expectation is most often a tail value or an error. A sustained shift across several runs is a change. This is
+the distinction statistical process control has made for a century: a single point beyond the control limits
+against run rules that detect a sustained shift (Shewhart control charts, the Western Electric rules), and in
+modern terms, anomaly detection against changepoint detection (CUSUM, ADWIN).
+
+**Triage, in order.**
+
+1. **Is it an error?** Check the program's contract and invariants, and the freshness and completeness of its
+   data. A duplicated join or a partial load looks exactly like a surprise.
+2. **Where did it start?** Walk down the graph to the deepest program whose result is also outside its own
+   expectation. That is where the surprise originates; everything above it merely inherited it. This is one of
+   the strongest things a graph of programs with expectations can do, and a single monolithic program cannot.
+3. **Rare or changed?** Look at the window: an isolated point, or a shift.
+
+**What follows.**
+
+- **An error** is fixed at the program where it started, once (section 7).
+- **A rare value** is shown with context: how unusual, and against what.
+- **A changed world** is highlighted, the learned expectation is updated, and decisions whose boundaries it
+  crosses are reopened (section 10).
+- **Something the graph cannot explain** becomes a proposal to enrich it: a new branch — a dimension that
+  separates the unusual cases, or a mechanism program that explains them.
+
+That last point needs care. Programs are immutable, so the graph is never changed in place by an alarm. Adding a
+branch goes through the same path as any new program: a typed hole, a program written to fill it, checked, run
+and certified. The alarm proposes; it does not rewrite.
+
+### Open
+
+- How an expectation is written when a program is authored.
+- How wide an expectation is before a result counts as outside it, and how many results make a shift.
+- Who sees a highlight, and when.
+- Whether enrichment is proposed to a person or authored automatically for review.
+
+---
+
+## 12. Counterfactuals, causal analysis and decisions
 
 ### Reasoning
 
@@ -440,7 +511,7 @@ option, the expected outcome, and the boundary at which the choice would flip.
 
 ---
 
-## 12. Analyses and strategies
+## 13. Analyses and strategies
 
 ### Decided
 
@@ -472,7 +543,7 @@ memory can detect that the world changed but cannot learn which strategy is bett
 
 ---
 
-## 13. Naming and discovery
+## 14. Naming and discovery
 
 ### Decided
 
@@ -503,7 +574,7 @@ the agent (R3).
 
 ---
 
-## 14. Limits
+## 15. Limits
 
 - Bodies cannot be proven correct.
 - A graph of calculations is not a causal graph without marked, tested mechanisms.
@@ -512,10 +583,11 @@ the agent (R3).
 - Memory costs storage and raises retention and privacy questions.
 - Shared dimensions and ownership of definitions are organisational work.
 - Learning strategies requires recorded outcomes.
+- Expectations raise false alarms until they are conditioned well enough, and learned from enough history.
 
 ---
 
-## 15. What exists already
+## 16. What exists already
 
 Built on branch `concepts/runnable`:
 
@@ -533,12 +605,13 @@ Missing:
 - dimensions as objects, grain as keys, stock / flow / value per unit, unit algebra
 - the definition-time checker and typed holes
 - returning relations, and staged execution
-- the three tiers of memory and change detection
+- input and output memory, compression after each run, and the distributions
+- expectations, triage of results outside them, and change detection
 - decision programs, mechanism marking, outcome records
 
 ---
 
-## 16. First slice: a simulation
+## 17. First slice: a simulation
 
 ### Decided
 
@@ -576,9 +649,10 @@ Steps, each with what it proves:
   request only. *Proves assumptions and interventions.*
 - **S6 Counterfactual.** "What would last quarter's utilisation have been with those three hires, or with a
   different target?" *Proves the do-operator over definitional programs.*
-- **S7 Causal analysis.** "Why did utilisation fall in this pillar?" as a program that branches — headcount,
-  leave, fewer billable projects, rate — with its path and result held in memory. *Proves analyses as
-  programs.*
+- **S7 Expectation and causal analysis.** Replay history so utilisation has a learned expectation; a later
+  result falls outside it; triage walks the graph to the program where the surprise starts. "Why did
+  utilisation fall in this pillar?" then runs as a program that branches — headcount, leave, fewer billable
+  projects, rate — with its path and result held in memory. *Proves expectations and analyses as programs.*
 - **S8 Decision.** "Should this pillar hire next quarter?" as a decision program with a recorded boundary;
   replay a later period that crosses it and show the decision reopening. *Proves R7's purpose.*
 
@@ -592,7 +666,7 @@ user interface, deployment, and access control.
 
 ---
 
-## 17. Open questions
+## 18. Open questions
 
 1. Is "only concepts read data sources" the right rule?
 2. How are programs that do not return dimensioned data called?
@@ -601,6 +675,9 @@ user interface, deployment, and access control.
 5. Where are outcomes recorded, and by whom?
 6. Who owns the shared dimensions?
 7. How are mechanism programs told apart from definitional ones?
+8. What counts as similar when results are compressed, and over what window?
+9. How is an expectation declared, and when is a result outside it?
+10. When a result is outside its expectation, who is told, and is enrichment proposed or authored?
 
 ---
 
@@ -632,6 +709,8 @@ user interface, deployment, and access control.
 - Page, E. S. *Continuous Inspection Schemes.* Biometrika, 1954.
 - Pearl, J. *Causality.* Cambridge University Press, 2000.
 - Plotkin, G. and Pretnar, M. *Handlers of Algebraic Effects.* ESOP, 2009.
+- Shewhart, W. A. *Economic Control of Quality of Manufactured Product.* 1931.
 - Rice, H. G. *Classes of Recursively Enumerable Sets and Their Decision Problems.* 1953.
 - W3C. *PROV-O: The PROV Ontology.* 2013.
+- Western Electric. *Statistical Quality Control Handbook.* 1956.
 - The Unison programming language — content-addressed code.
