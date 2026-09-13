@@ -17,9 +17,11 @@ import { conditionSql, plan, sqlFor, type Condition, type Coordinates, type Dial
 import { runPlan } from './execute.js'
 import { programHash } from './hash.js'
 import { isDerived, kindOf, type Shape, type Statement } from './shape.js'
+import { AmbiguousRules, facts, isRuled, mostSpecific } from './rules.js'
 import type { CallRecord, GraphStore } from './store.js'
 
-export type Query = (source: string, sql: string, params?: Record<string, unknown>) => Promise<any[]>
+/** Runs a statement on a source. `who` travels with it, so the source's access policies apply to the person asking. */
+export type Query = (source: string, sql: string, params?: Record<string, unknown>, options?: { who?: Record<string, unknown> }) => Promise<any[]>
 
 export interface EngineOptions {
   store: GraphStore
@@ -51,10 +53,12 @@ export interface CallOptions {
   assume?: Record<string, unknown>
   /** Changes for this request only, by program name. The answer is hypothetical. */
   intervene?: Record<string, Intervention>
+  /** Who is asking — their id, groups, department. Rules and access policies are chosen by it. */
+  who?: Record<string, unknown>
 }
 
 /** What flows down a request: the day, the assumptions callers have set, and the interventions. */
-interface Scope { today: string; context: Record<string, unknown>; interventions: Record<string, Intervention> }
+interface Scope { today: string; context: Record<string, unknown>; interventions: Record<string, Intervention>; who?: Record<string, unknown> }
 
 /** What a program body receives. The same surface for every program; what it may USE is its contract's. */
 export interface ProgramContext {
@@ -66,8 +70,11 @@ export interface ProgramContext {
   caveat(text: string): void
   /** The day this call is answered as of. Read this, never the clock, so a replay gives the same answer. */
   today: string
-  /** The value of an assumption this program declares. */
-  assume<T = unknown>(name: string): T
+  /** The value of an assumption this program declares. `about` names what is being read — a pillar, a
+   *  subsidiary — for an assumption given as rules that differ by it. */
+  assume<T = unknown>(name: string, about?: Record<string, unknown>): T
+  /** Who is asking, as the request said. */
+  who: Record<string, unknown> | undefined
 }
 
 /** Rows from a non-SQL source are queried locally with SQLite, under this source name. */
@@ -103,13 +110,14 @@ export function createEngine(o: EngineOptions) {
         if (contract.kind !== 'concept') throw new Error(`"${contract.name}" is a program and queried ${source} — only a concept may read a data source`)
         if (!contract.reads.sources.includes(source)) throw new Error(`"${contract.name}" queried ${source}, which its contract does not declare`)
         const t = Date.now()
-        const rows = await o.query(source, sql, params)
+        const rows = await o.query(source, sql, params, { who: scope.who })
         queries.push({ source, sql, params: params ?? {}, rows: rows.length, ms: Date.now() - t,
                        capped: Array.isArray((rows as any).notes) && (rows as any).notes.length > 0 })
         return rows
       },
       decide: (_l, took) => took, verify: async () => {}, caveat: () => {}, today: scope.today,
-      assume: <T>(name: string) => assume<T>(contract, scope, name, assumed),
+      assume: <T>(name: string, about?: Record<string, unknown>) => assume<T>(contract, scope, name, assumed, about),
+      who: scope.who,
     }
   }
 
@@ -118,16 +126,37 @@ export function createEngine(o: EngineOptions) {
   // A program declares the assumptions it reads. The value comes from the nearest caller that set it, else the
   // organisation, else the program's own default. A program that needs a new assumption declares it; every
   // caller keeps passing the same context, and programs that do not read it never see it.
-  function assume<T>(contract: Contract, scope: Scope, name: string, assumed: AssumedLog): T {
+  //
+  // A value may be given as rules — `{ rules: [{ when: { "who.department": "finance" }, value: 0.7 }, ...] }` —
+  // and then the most specific rule that applies to who is asking and what is being read gives it. A layer whose
+  // rules do not apply passes to the next layer.
+  function assume<T>(contract: Contract, scope: Scope, name: string, assumed: AssumedLog, about?: Record<string, unknown>): T {
     const declared = contract.assumes?.[name]
     if (!declared) throw new Error(`"${contract.name}" read the assumption "${name}", which its contract does not declare`)
-    const [value, from] = name in scope.context ? [scope.context[name], 'caller' as const]
-      : o.assumptions && name in o.assumptions ? [o.assumptions[name], 'organisation' as const]
-      : 'default' in declared ? [declared.default, 'default' as const]
-      : [undefined, null]
-    if (from === null) throw new Error(`"${contract.name}" needs the assumption "${name}" (${declared.description}) and nobody gave it`)
-    if (!assumed.some((a) => a.name === name)) assumed.push({ name, value, from })
-    return value as T
+    const known = facts(scope.who, about)
+    const layers: Array<[CallRecord['assumptions'][number]['from'], boolean, unknown]> = [
+      ['caller', name in scope.context, scope.context[name]],
+      ['organisation', !!o.assumptions && name in o.assumptions, o.assumptions?.[name]],
+      ['default', 'default' in declared, declared.default],
+    ]
+    for (const [from, present, given] of layers) {
+      if (!present) continue
+      if (!isRuled(given)) return record(given, from)
+      try {
+        const rule = mostSpecific(given.rules, known, (a, b) => JSON.stringify(a.value) === JSON.stringify(b.value))
+        if (rule) return record(rule.value, from, rule.when ?? {})
+      } catch (e) {
+        if (e instanceof AmbiguousRules) throw new Error(`"${name}" for ${JSON.stringify(known)}: ${e.message}`)
+        throw e
+      }
+    }
+    throw new Error(`"${contract.name}" needs the assumption "${name}" (${declared.description}) and nobody gave it${about ? ` for ${JSON.stringify(about)}` : ''}`)
+
+    function record(value: unknown, from: CallRecord['assumptions'][number]['from'], rule?: Record<string, unknown>): T {
+      const entry = { name, value, from, ...(about ? { about } : {}), ...(rule ? { rule } : {}) }
+      if (!assumed.some((a) => JSON.stringify(a) === JSON.stringify(entry))) assumed.push(entry)
+      return value as T
+    }
   }
 
   /** A relation's rows under an intervention: some left out, some added — as SQL around its own SQL, so every
@@ -359,7 +388,7 @@ export function createEngine(o: EngineOptions) {
         const read: ReadBody = (when) => statementFor(name, contract, hash, program.body, when, scope, used, queries, assumed, path)
         const shape = contract.shape!
         const p = await plan(shape, read, request as Coordinates, dialects, today)
-        value = await runPlan(shape, p, (src, sql, params) => o.query(src, sql, params),
+        value = await runPlan(shape, p, (src, sql, params) => o.query(src, sql, params, { who: scope.who }),
           (q) => queries.push(q),
           (label, held, detail) => { verifications.push({ label, held, detail }); if (!held) throw new Error(`invariant failed: ${label} — ${detail}`) },
           (text) => caveats.push(text))
@@ -380,13 +409,13 @@ export function createEngine(o: EngineOptions) {
     if (interventions && !parentId) caveats.push(`hypothetical: this answer changes ${Object.keys(interventions).map((k) => `"${k}"`).join(', ')} for this request only`)
     o.store.recordCall({ id, parentId, name, hash, request, output: error ? null : value, error,
                          decisions, verifications, caveats: [...new Set(caveats)], queries, ms: Date.now() - started, at: started, today,
-                         assumptions: assumed, interventions, context: parentId ? null : scope.context })
+                         assumptions: assumed, interventions, context: parentId ? null : scope.context, who: scope.who ?? null })
     // Relations inlined into this one ran inside its SQL. They are remembered as calls with no queries of their
     // own, so lineage still finds every answer that went through them.
     for (const [usedHash, usedName] of used) {
       o.store.recordCall({ id: randomUUID(), parentId: id, name: usedName, hash: usedHash, request: { inlinedInto: name },
                            output: null, error: null, decisions: [], verifications: [], caveats: [], queries: [], ms: 0, at: started, today,
-                           assumptions: [], interventions, context: null })
+                           assumptions: [], interventions, context: null, who: scope.who ?? null })
     }
     if (error) throw Object.assign(new Error(error), { callId: id })
     return { value: value as T, callId: id, hash }
@@ -394,7 +423,7 @@ export function createEngine(o: EngineOptions) {
 
   /** Ask a program, by name. `today` fixes the day it is answered as of; by default, the engine's clock. */
   function call<T = unknown>(name: string, request: Record<string, unknown> = {}, options: CallOptions = {}): Promise<CallResult<T>> {
-    return run<T>(name, request, null, { today: options.today ?? clock(), context: options.assume ?? {}, interventions: options.intervene ?? {} }, [])
+    return run<T>(name, request, null, { today: options.today ?? clock(), context: options.assume ?? {}, interventions: options.intervene ?? {}, who: options.who }, [])
   }
 
   /** Ask a past call's question again, as of the same day, through whatever its names point at now. */
@@ -402,7 +431,7 @@ export function createEngine(o: EngineOptions) {
     const c = o.store.getCall(callId)
     if (!c) throw new Error(`no call ${callId}`)
     return call<T>(c.name, c.request as Record<string, unknown>,
-      { today: c.today ?? undefined, assume: c.context ?? undefined, intervene: (c.interventions as Record<string, Intervention>) ?? undefined })
+      { today: c.today ?? undefined, assume: c.context ?? undefined, intervene: (c.interventions as Record<string, Intervention>) ?? undefined, who: c.who ?? undefined })
   }
 
   return { define, call, replay, store: o.store }

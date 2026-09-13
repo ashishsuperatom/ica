@@ -110,3 +110,38 @@ test('replay asks again with the same day, assumptions and interventions', async
   assert.equal(first.value, 4 * 32)
   assert.equal(again.value, first.value)
 })
+
+test('rules: the most specific rule for who is asking and what is read gives the value', async () => {
+  const { engine, store } = await setup({
+    target: { rules: [
+      { value: 0.75 },
+      { when: { 'who.department': 'finance' }, value: 0.7 },
+      { when: { 'who.department': 'finance', team: 'b' }, value: 0.6 },
+      { when: { team: 'b' }, value: 0.8 },
+    ] },
+  })
+  await engine.define(program('targets', [], `export default async (ctx) => ({ a: ctx.assume('target', { team: 'a' }), b: ctx.assume('target', { team: 'b' }) })`,
+    { target: { description: 'utilisation target' } }), { by: 'test' })
+  assert.deepEqual((await engine.call<any>('targets')).value, { a: 0.75, b: 0.8 }, 'nobody in particular')
+  const finance = await engine.call<any>('targets', {}, { who: { id: 'u1', department: 'finance' } })
+  assert.deepEqual(finance.value, { a: 0.7, b: 0.6 }, 'finance, and finance on team b')
+  const b = store.getCall(finance.callId)!.assumptions.find((x) => (x.about as any)?.team === 'b')!
+  assert.deepEqual(b.rule, { 'who.department': 'finance', team: 'b' })
+})
+
+test('rules: two equally specific rules that disagree are refused, not picked between', async () => {
+  const { engine } = await setup({
+    target: { rules: [{ when: { 'who.department': 'finance' }, value: 0.7 }, { when: { team: 'b' }, value: 0.8 }] },
+  })
+  await engine.define(program('target b', [], `export default async (ctx) => ctx.assume('target', { team: 'b' })`,
+    { target: { description: 'utilisation target', default: 0.75 } }), { by: 'test' })
+  await assert.rejects(engine.call('target b', {}, { who: { department: 'finance' } }), /apply equally/)
+})
+
+test('rules: a layer whose rules do not apply passes to the next', async () => {
+  const { engine } = await setup({ target: { rules: [{ when: { 'who.department': 'sales' }, value: 0.9 }] } })
+  await engine.define(program('target', [], `export default async (ctx) => ctx.assume('target')`,
+    { target: { description: 'utilisation target', default: 0.75 } }), { by: 'test' })
+  assert.equal((await engine.call('target', {}, { who: { department: 'sales' } })).value, 0.9)
+  assert.equal((await engine.call('target', {}, { who: { department: 'finance', groups: ['a'] } })).value, 0.75)
+})

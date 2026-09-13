@@ -16,11 +16,13 @@ export async function query(
   dataSourceId: string,
   sql: string,
   params: Record<string, unknown> = {},
+  options: { who?: Record<string, unknown> } = {},
 ): Promise<any[]> {
   const res = await fetch(`${MANAGER}/query`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ id: dataSourceId, sql, params }),
+    // `who` is the person the query is run for: the manager chooses that person's access policies by it.
+    body: JSON.stringify({ id: dataSourceId, sql, params, ...(options.who ? { who: options.who } : {}) }),
   })
   if (!res.ok) throw new Error(`Query failed [${dataSourceId}]: ${res.status} ${await res.text()}`)
 
