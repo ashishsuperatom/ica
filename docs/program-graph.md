@@ -1047,7 +1047,7 @@ programs with names from how people ask, so the next agent calls them instead of
 library learning (DreamCoder's wake–sleep: solve with what exists, then compress recurring solutions into new
 library entries) and it is System 4's job: offline, over memory, it finds call trees that recur with the same
 shape, proposes the program that captures them, verifies it gives the same answers on the recorded calls, and
-names it. *How recurrence is detected and how a proposed abstraction is verified is open — section 18.*
+names it. *How recurrence is detected and how a proposed abstraction is verified is open — section 21.*
 
 **A user asking for more on an answer** ("also show each person's manager") is a change to the question, not to
 the answer's rendering: the agent finds the lowest layer where the addition belongs — a coordinate, a concept
