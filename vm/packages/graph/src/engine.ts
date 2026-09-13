@@ -316,6 +316,10 @@ export function createEngine(o: EngineOptions) {
     // a correction that drops a column, changes a unit or turns a stock into a flow would fix one thing and
     // break every program above it — at their next run, in front of someone else's question.
     const current = o.store.resolve(contract.name)
+    // A NAME MAY NOT BE MADE TO REACH ITSELF. A new program only reads names that already exist, so it cannot close
+    // a loop; a replacement can, because every caller of the old name now reaches the new program's reads.
+    const loop = reachesName(contract.reads.programs, contract.name)
+    if (loop) throw new Error(`not defined — "${contract.name}" would reach itself: ${[contract.name, ...loop].join(' → ')}`)
     if (current && current !== hash && meta.replace) {
       const misfit = interfaceMisfit(o.store.getProgram(current)!.contract, contract)
       if (misfit) throw new Error(`not defined — "${contract.name}" cannot replace ${current}: ${misfit}`)
@@ -357,8 +361,10 @@ export function createEngine(o: EngineOptions) {
     const ctx: ProgramContext = {
       ...readingContext(contract, scope, queries, assumed),
       async call<U>(child: string, childRequest: Record<string, unknown> = {}, options: { assume?: Record<string, unknown> } = {}) {
-        if (!contract.reads.programs.includes(child)) {
-          throw new Error(`"${name}" called "${child}", which its contract does not declare it reads`)
+        // A program may call what its contract names, or a program its caller named in a program parameter.
+        const passed = Object.entries(contract.params).some(([p, spec]) => typeof spec !== 'string' && request[p] === child)
+        if (!contract.reads.programs.includes(child) && !passed) {
+          throw new Error(`"${name}" called "${child}", which its contract does not declare it reads and no parameter names`)
         }
         const childScope = options.assume ? { ...scope, context: { ...scope.context, ...options.assume } } : scope
         return (await run<U>(child, childRequest, id, childScope, [...path, hash])).value
@@ -375,6 +381,11 @@ export function createEngine(o: EngineOptions) {
     let value: unknown
     let error: string | null = null
     try {
+      for (const [p, spec] of Object.entries(contract.params)) {
+        if (typeof spec === 'string' || request[p] === undefined) continue
+        const misfit = programParamMisfit(String(request[p]), spec)
+        if (misfit) throw new Error(`"${name}": parameter "${p}" — ${misfit}`)
+      }
       // A program that reaches itself again through its calls would never finish.
       if (path.includes(hash)) throw new Error(`"${name}" calls itself: ${[...path, hash].map((h) => o.store.getProgram(h)?.contract.name ?? h).join(' → ')}`)
       const iv = scope.interventions[name]
@@ -432,6 +443,32 @@ export function createEngine(o: EngineOptions) {
     if (!c) throw new Error(`no call ${callId}`)
     return call<T>(c.name, c.request as Record<string, unknown>,
       { today: c.today ?? undefined, assume: c.context ?? undefined, intervene: (c.interventions as Record<string, Intervention>) ?? undefined, who: c.who ?? undefined })
+  }
+
+  /** The path from these names to `target` through what each program reads, or null if there is none. */
+  function reachesName(reads: string[], target: string, seen = new Set<string>()): string[] | null {
+    for (const read of reads) {
+      if (read === target) return [read]
+      if (seen.has(read)) continue
+      seen.add(read)
+      const hash = o.store.resolve(read)
+      const next = hash ? o.store.getProgram(hash)?.contract.reads.programs ?? [] : []
+      const path = reachesName(next, target, seen)
+      if (path) return [read, ...path]
+    }
+    return null
+  }
+
+  /** Why a named program cannot fill a program parameter, or null if it can. */
+  function programParamMisfit(named: string, spec: Exclude<Contract['params'][string], string>): string | null {
+    const hash = o.store.resolve(named)
+    if (!hash) return `no program named "${named}"`
+    const c = o.store.getProgram(hash)!.contract
+    const want = spec.program
+    if (want.returns && c.returns !== want.returns) return `"${named}" returns ${c.returns}, and a ${want.returns} is needed`
+    for (const m of want.measures ?? []) if (!c.shape?.measures[m]) return `"${named}" has no measure "${m}"`
+    for (const d of want.dimensions ?? []) if (!c.shape?.dimensions[d]) return `"${named}" has no dimension "${d}"`
+    return null
   }
 
   return { define, call, replay, store: o.store }

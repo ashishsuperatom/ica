@@ -194,14 +194,38 @@ test('today is fixed per call, and a replay answers as of the same day', async (
   assert.deepEqual(again.value.now.rows, first.value.now.rows)
 })
 
-test('refused: a program that reaches itself through its calls', async () => {
+test('refused at definition: a replacement that would make a program reach itself', async () => {
   const { engine } = await setup()
   const prog = (name: string, calls: string) => ({ body: `export default (ctx) => ctx.call(${JSON.stringify(calls)})`,
     contract: { name, kind: 'program', description: 'loops', reads: { sources: [], programs: [calls] }, params: {}, returns: 'value' } as Contract })
-  await engine.define({ body: 'export default () => 1', contract: { name: 'b', kind: 'program', description: 'placeholder', reads: { sources: [], programs: [] }, params: {}, returns: 'value' } }, { by: 'test' })
+  await engine.define({ body: 'export default () => 1', contract: { name: 'c', kind: 'program', description: 'placeholder', reads: { sources: [], programs: [] }, params: {}, returns: 'value' } }, { by: 'test' })
+  await engine.define(prog('b', 'c'), { by: 'test' })
   await engine.define(prog('a', 'b'), { by: 'test' })
-  await engine.define(prog('b', 'a'), { by: 'test', replace: true })
-  await assert.rejects(engine.call('a'), /calls itself/)
+  await assert.rejects(engine.define(prog('c', 'a'), { by: 'test', replace: true }), /would reach itself: c → a → b → c/)
+})
+
+test('refused when run: a loop made through a program named in a parameter', async () => {
+  const { engine } = await setup()
+  await engine.define({ body: `export default (ctx, { next }) => ctx.call(next, { next })`,
+    contract: { name: 'relay', kind: 'program', description: 'calls what it is given', reads: { sources: [], programs: [] },
+                params: { next: { description: 'the program to call', program: {} } }, returns: 'value' } }, { by: 'test' })
+  await assert.rejects(engine.call('relay', { next: 'relay' }), /calls itself/)
+})
+
+test('a program parameter: one ranking program for any relation that has the measure', async () => {
+  const { engine, ask } = await setup()
+  await engine.define({ body: `export default async (ctx, { of, measure, by, during }) => {
+      const r = await ctx.call(of, { measures: [measure], by: [by], during, order: [{ by: measure, desc: true }], limit: 1 })
+      return r.rows[0]
+    }`,
+    contract: { name: 'top', kind: 'program', description: 'The largest member by a measure.', reads: { sources: [], programs: [] },
+      params: { of: { description: 'the relation', program: { returns: 'relation' } }, measure: 'the measure', by: 'the dimension', during: 'the span' }, returns: 'value' } }, { by: 'test' })
+  assert.equal((await engine.call<any>('top', { of: 'orders', measure: 'revenue', by: 'customer', during: H1 })).value.customer, 'c4')
+  assert.equal((await engine.call<any>('top', { of: 'people', measure: 'headcount', by: 'team', during: H1 }).catch((e) => e)).message.includes('stock'), true)
+  await assert.rejects(engine.call('top', { of: 'nothing', measure: 'x', by: 'y', during: H1 }), /no program named "nothing"/)
+  await engine.define({ body: 'export default () => 1', contract: { name: 'one', kind: 'program', description: 'one', reads: { sources: [], programs: [] }, params: {}, returns: 'value' } }, { by: 'test' })
+  await assert.rejects(engine.call('top', { of: 'one', measure: 'x', by: 'y', during: H1 }), /returns value, and a relation is needed/)
+  void ask
 })
 
 test('refused at definition: rows that lack a column the shape names', async () => {

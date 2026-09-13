@@ -1,4 +1,4 @@
-export { contractProblem, type Contract, type ProgramKind, type Assumption } from './contract.js'
+export { contractProblem, type Contract, type ProgramKind, type Assumption, type ProgramParam } from './contract.js'
 export { programHash } from './hash.js'
 export { GraphStore, type CallRecord, type StoredProgram } from './store.js'
 export { createEngine, type Engine, type EngineOptions, type ProgramContext, type Query, type CallOptions, type Intervention } from './engine.js'

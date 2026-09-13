@@ -24,8 +24,8 @@ export interface Contract {
     /** Programs it calls, by name. Calling one not listed here is refused. */
     programs: string[]
   }
-  /** name → what it means. */
-  params: Record<string, string>
+  /** name → what it means. A parameter may name a program for this one to call — see ProgramParam. */
+  params: Record<string, string | ProgramParam>
   /** What it hands back: a single value, rows, or a relation — a query asked with coordinates. */
   returns: 'value' | 'rows' | 'relation'
   /** For a relation: which of its columns are dimensions, measures and time. See shape.ts. */
@@ -33,6 +33,20 @@ export interface Contract {
   /** Named beliefs it reads — a working week, a target — looked up by name from the context its caller passes
    *  down, then the organisation's, then the default here. A program reads only what it declares. */
   assumes?: Record<string, Assumption>
+}
+
+/** A parameter whose value is the name of a program, which this program may then call — so one program can
+ *  compare, rank or explain any measure instead of one per measure. What the named program must be is stated,
+ *  and checked when the call is made. */
+export interface ProgramParam {
+  description: string
+  program: {
+    returns?: 'value' | 'rows' | 'relation'
+    /** For a relation: measures it must have. */
+    measures?: string[]
+    /** For a relation: dimensions it must have. */
+    dimensions?: string[]
+  }
 }
 
 export interface Assumption {
@@ -59,6 +73,12 @@ export function contractProblem(c: any): string | null {
     return `"${c.name}" is a concept but reads no data source — a concept is what reads data`
   }
   if (!c.params || typeof c.params !== 'object' || Array.isArray(c.params)) return 'params must be name → meaning'
+  for (const [n, p] of Object.entries<any>(c.params)) {
+    if (typeof p === 'string') continue
+    if (!p || typeof p.description !== 'string' || !p.program || typeof p.program !== 'object') {
+      return `parameter "${n}" must be a description, or { description, program: { returns?, measures?, dimensions? } }`
+    }
+  }
   if (!['value', 'rows', 'relation'].includes(c.returns)) return `returns is "${c.returns}" but must be value, rows or relation`
   if (c.assumes !== undefined) {
     if (!c.assumes || typeof c.assumes !== 'object' || Array.isArray(c.assumes)) return 'assumes must be name → { description, unit?, default? }'
