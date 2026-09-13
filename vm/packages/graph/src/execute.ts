@@ -15,7 +15,7 @@
 //   silently truncates, is caught here and nowhere else.
 
 import { DatabaseSync } from 'node:sqlite'
-import { periodOf, periodStart, type Condition, type Plan, type ResolvedStatement } from './coordinates.js'
+import type { Condition, Plan, ResolvedStatement } from './coordinates.js'
 import { additivity, evaluate, isDerived, type MeasureKind, type Shape } from './shape.js'
 
 export interface Column { name: string; role: 'dimension' | 'label' | 'measure'; unit?: string; kind?: MeasureKind }
@@ -115,15 +115,15 @@ export async function runPlan(shape: Shape, p: Plan, query: RunQuery,
     rows.sort((a, b) => JSON.stringify(splits.map((d) => a[d])).localeCompare(JSON.stringify(splits.map((d) => b[d]))) || String(a[grain]).localeCompare(String(b[grain])))
     const running = new Map<string, Record<string, number>>()
     for (const r of rows) {
-      const start = periodStart(grain, labelDate(grain, String(r[grain])))
-      const k = JSON.stringify([...splits.map((d) => r[d]), reset === 'never' ? '' : periodOf(reset, start)])
+      const start = p.grains.startOfLabel(grain, String(r[grain]), keep)
+      const k = JSON.stringify([...splits.map((d) => r[d]), reset === 'never' ? '' : p.grains.labelOf(reset, start)])
       const acc = running.get(k) ?? {}
       for (const m of p.fetched) if (!isDerived(shape.measures[m])) { acc[m] = (acc[m] ?? 0) + Number(r[m] ?? 0); r[m] = acc[m] }
       running.set(k, acc)
       recompute(r)
     }
-    const first = periodOf(grain, keep.from)
-    rows = rows.filter((r) => String(r[grain]) >= first && labelDate(grain, String(r[grain])) < keep.to)
+    const kept = new Set(p.grains.periods(grain, keep.from, keep.to).map((x) => x.label))
+    rows = rows.filter((r) => kept.has(String(r[grain])))
   }
 
   if (p.after.having) rows = rows.filter((r) => Object.entries(p.after.having!).every(([m, c]) => holds(r[m], c)))
@@ -172,14 +172,6 @@ function checkParts(shape: Shape, p: Plan, rows: Record<string, any>[], whole: R
       verify(`${m}: the ${kind} of the parts is the whole${at}`, edge == null ? whole[m] == null : close(edge, all), `parts ${edge} · whole ${whole[m]}`)
     }
   }
-}
-
-/** The first day of a period, from its label. */
-function labelDate(grain: string, label: string): string {
-  if (grain === 'day' || grain === 'week') return label
-  if (grain === 'month') return `${label}-01`
-  if (grain === 'quarter') return `${label.slice(0, 4)}-${String((Number(label.slice(-1)) - 1) * 3 + 1).padStart(2, '0')}-01`
-  return `${label}-01-01`
 }
 
 function holds(v: any, c: Condition): boolean {

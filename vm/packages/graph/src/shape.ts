@@ -14,6 +14,8 @@
 //
 // — so slicing, drilling and filtering never depend on the body having done them.
 
+import { BUILT_IN } from './calendar.js'
+
 /** How a measure behaves over time (Lenz and Shoshani, 1997; Kimball's additive and semi-additive facts).
  *  flow   accumulates over time — hours worked. Additive over every dimension, time included.
  *  stock  true at an instant — headcount. Additive across things, never across time.
@@ -163,7 +165,6 @@ export function evaluate(shape: Shape, name: string, row: Record<string, unknown
 // ── checks ────────────────────────────────────────────────────────────────────────────────────────────────
 
 const ident = /^[a-z][a-z0-9_]*$/
-export const GRAINS = ['day', 'week', 'month', 'quarter', 'year'] as const
 
 /** Everything that must be true of a shape before the concept can answer anything. */
 export function shapeProblem(s: any): string | null {
@@ -203,7 +204,7 @@ export function shapeProblem(s: any): string | null {
   if (kinds.has('flow') && !s.time) return 'a flow accumulates over a span, so the shape must name its time column'
   for (const name of [...Object.keys(dimensions), ...Object.keys(measures)]) {
     if (!ident.test(name)) return `"${name}" must be a lower-case identifier (letters, digits, underscores)`
-    if ((GRAINS as readonly string[]).includes(name)) return `"${name}" is a time grain and cannot also be declared`
+    if ((BUILT_IN as readonly string[]).includes(name)) return `"${name}" is a time grain and cannot also be declared`
   }
   for (const [name, d] of Object.entries<any>(dimensions)) {
     if (!d.column) return `dimension "${name}" has no column`

@@ -79,3 +79,15 @@ test('NetSuite: period labels match JavaScript for dates across every edge', liv
     }
   }
 })
+
+test('NetSuite: an April fiscal calendar splits the same hours as the calendar months', live, async () => {
+  const { engine } = await netsuite()
+  const calendar = { fiscal_quarter: { fiscal: 'quarter', startMonth: 4 } }
+  const span = { from: '2026-01-01', to: '2026-07-01' }
+  const months = (await engine.call<any>('utilised hours', { measures: ['hours'], by: ['month'], during: span })).value.rows
+  const fq = (await engine.call<any>('utilised hours', { measures: ['hours'], by: ['fiscal_quarter'], during: span }, { assume: { calendar } })).value.rows
+  const byMonth = (m: string[]) => months.filter((r: any) => m.includes(r.month)).reduce((a: number, r: any) => a + r.hours, 0)
+  const got = new Map(fq.map((r: any) => [r.fiscal_quarter, r.hours]))
+  assert.ok(Math.abs((got.get('FY2026-Q4') as number) - byMonth(['2026-01', '2026-02', '2026-03'])) < 1e-6)
+  assert.ok(Math.abs((got.get('FY2027-Q1') as number) - byMonth(['2026-04', '2026-05', '2026-06'])) < 1e-6)
+})

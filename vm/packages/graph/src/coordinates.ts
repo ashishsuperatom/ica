@@ -15,12 +15,14 @@
 // answer needs several statements (a stock read at several instants) or work across periods (running totals,
 // filling empty periods), the statements return every group and the rest happens after, in the engine.
 
+import { addDays, Grains, type BuiltInGrain, type Calendar } from './calendar.js'
 import {
-  additivity, componentsOf, GRAINS, isDerived, kindOf, tokens,
+  additivity, componentsOf, isDerived, kindOf, tokens,
   type BaseMeasure, type Shape,
 } from './shape.js'
 
-export type Grain = typeof GRAINS[number]
+/** A built-in grain, or one the calendar defines. */
+export type Grain = string
 export type Scalar = string | number
 export type Condition = Scalar | null | Scalar[] | {
   in?: Scalar[]; notIn?: Scalar[]; eq?: Scalar; ne?: Scalar
@@ -29,7 +31,7 @@ export type Condition = Scalar | null | Scalar[] | {
 
 export interface Coordinates {
   measures?: string[]
-  /** Dimensions to split by, and at most one time grain: day, week, month, quarter, year. */
+  /** Dimensions to split by, and at most one time grain: day, week, month, quarter, year, or a calendar's. */
   by?: string[]
   /** Conditions on dimensions. A value means equal, a list means any of, null means missing. */
   where?: Record<string, Condition>
@@ -47,7 +49,7 @@ export interface Coordinates {
   /** Include periods with no rows, as zero for a flow. */
   fill?: boolean
   /** Running totals along the time grain, starting again at each `reset` boundary — to-date and since-start. */
-  cumulative?: { reset?: 'year' | 'quarter' | 'month' | 'never' }
+  cumulative?: { reset?: Grain | 'never' }
 }
 
 export type Dialect = 'oracle' | 'mssql' | 'sqlite'
@@ -79,7 +81,9 @@ export interface Plan {
   combine: 'single' | 'label-period' | 'average-over-periods'
   /** Work left for after the statements run. */
   after: { having?: Coordinates['having']; order?: Coordinates['order']; limit?: number; fill?: { periods: string[] }
-           cumulative?: { reset: 'year' | 'quarter' | 'month' | 'never'; keep: { from: string; to: string } } }
+           cumulative?: { reset: Grain | 'never'; keep: { from: string; to: string } } }
+  /** The grains this plan was made with: built in, and the calendar's. */
+  grains: Grains
   /** A limit or having was pushed into the statement, so parts cannot be checked against the whole. */
   partial: boolean
   caveats: string[]
@@ -99,7 +103,9 @@ const P = 'c_'
 export interface SqlDialect {
   date(param: string): string
   /** The label of the period a date falls in. Labels are the same strings in every dialect and in `periods`. */
-  period(grain: Grain, column: string): string
+  period(grain: BuiltInGrain, column: string): string
+  /** A date written into the statement, for a calendar's period boundaries. */
+  dateLiteral(date: string): string
   limit(sql: string, n: number): string
   /** An expression as text. */
   text(expr: string): string
@@ -110,6 +116,7 @@ export interface SqlDialect {
 export function sqlFor(dialect: Dialect): SqlDialect {
   if (dialect === 'mssql') return {
     date: (p) => `CAST(@${p} AS date)`,
+    dateLiteral: (d) => `CAST('${d}' AS date)`,
     period: (g, c) => ({
       day: `CONVERT(char(10), ${c}, 23)`,
       // 1900-01-01 was a Monday, so days since then modulo 7 is days since Monday — independent of DATEFIRST.
@@ -123,6 +130,7 @@ export function sqlFor(dialect: Dialect): SqlDialect {
   }
   if (dialect === 'sqlite') return {
     date: (p) => `@${p}`,
+    dateLiteral: (d) => `'${d}'`,
     period: (g, c) => ({
       day: `date(${c})`,
       week: `date(${c}, '-' || ((CAST(strftime('%w', ${c}) AS INTEGER) + 6) % 7) || ' days')`,
@@ -135,6 +143,7 @@ export function sqlFor(dialect: Dialect): SqlDialect {
   }
   return {
     date: (p) => `TO_DATE(@${p}, 'YYYY-MM-DD')`,
+    dateLiteral: (d) => `TO_DATE('${d}', 'YYYY-MM-DD')`,
     period: (g, c) => ({
       day: `TO_CHAR(${c}, 'YYYY-MM-DD')`,
       week: `TO_CHAR(TRUNC(${c}, 'IW'), 'YYYY-MM-DD')`,
@@ -146,51 +155,6 @@ export function sqlFor(dialect: Dialect): SqlDialect {
     median: (e) => `MEDIAN(${e})`,
     text: (e) => `TO_CHAR(${e})`,
   }
-}
-
-// ── periods, computed the same way the SQL labels them ─────────────────────────────────────────────────────
-
-const iso = (d: Date) => d.toISOString().slice(0, 10)
-const utc = (s: string) => new Date(`${s}T00:00:00Z`)
-const addDays = (s: string, n: number) => { const d = utc(s); d.setUTCDate(d.getUTCDate() + n); return iso(d) }
-
-export function periodOf(grain: Grain, date: string): string {
-  const d = utc(date)
-  const y = d.getUTCFullYear(), m = d.getUTCMonth() + 1
-  if (grain === 'day') return date
-  if (grain === 'week') return addDays(date, -((d.getUTCDay() + 6) % 7))
-  if (grain === 'month') return `${y}-${String(m).padStart(2, '0')}`
-  if (grain === 'quarter') return `${y}-Q${Math.floor((m + 2) / 3)}`
-  return String(y)
-}
-
-/** The first day of the period a date falls in. */
-export function periodStart(grain: Grain, date: string): string {
-  const label = periodOf(grain, date)
-  if (grain === 'day' || grain === 'week') return label
-  if (grain === 'month') return `${label}-01`
-  if (grain === 'quarter') return `${label.slice(0, 4)}-${String((Number(label.slice(-1)) - 1) * 3 + 1).padStart(2, '0')}-01`
-  return `${label}-01-01`
-}
-
-/** The first day of the next period. */
-function nextStart(grain: Grain, date: string): string {
-  const start = periodStart(grain, date)
-  if (grain === 'day') return addDays(start, 1)
-  if (grain === 'week') return addDays(start, 7)
-  const d = utc(start)
-  d.setUTCMonth(d.getUTCMonth() + (grain === 'month' ? 1 : grain === 'quarter' ? 3 : 12))
-  return iso(d)
-}
-
-/** Every period that begins before `to` and ends after `from`, each with its last day inside the span. */
-export function periods(grain: Grain, from: string, to: string): Array<{ label: string; start: string; end: string }> {
-  const out: Array<{ label: string; start: string; end: string }> = []
-  for (let s = periodStart(grain, from); s < to; s = nextStart(grain, s)) {
-    const last = addDays(nextStart(grain, s), -1)
-    out.push({ label: periodOf(grain, s), start: s, end: last < to ? last : addDays(to, -1) })
-  }
-  return out
 }
 
 /** A condition as SQL, binding each value through `bind`, which returns the placeholder to write. */
@@ -216,7 +180,10 @@ export function conditionSql(expr: string, cond: Condition, what: string, bind: 
 // ── the plan ──────────────────────────────────────────────────────────────────────────────────────────────
 
 export async function plan(shape: Shape, read: ReadBody, c: Coordinates, dialects: Record<string, Dialect>,
-                           today: string): Promise<Plan> {
+                           today: string, calendar: Calendar = {}): Promise<Plan> {
+  const grainSet = new Grains(calendar)
+  const calendarProblem = grainSet.problem()
+  if (calendarProblem) refuse(calendarProblem)
   const { dimensions, measures: defined, time } = shape
   const kind = kindOf(shape)
   const measures = c.measures?.length ? c.measures : Object.keys(defined)
@@ -227,11 +194,12 @@ export async function plan(shape: Shape, read: ReadBody, c: Coordinates, dialect
   for (const m of measures) if (!defined[m]) refuse(`there is no measure "${m}" — available: ${Object.keys(defined).join(', ')}`)
   const fetched = [...new Set([...measures, ...measures.flatMap((m) => componentsOf(shape, m))])]
 
-  const grains = by.filter((d) => (GRAINS as readonly string[]).includes(d)) as Grain[]
+  for (const name of Object.keys(calendar)) if (dimensions[name]) refuse(`"${name}" is both a dimension and a calendar grain`)
+  const grains = by.filter((d) => grainSet.has(d))
   if (grains.length > 1) refuse(`split by one time grain at a time, not ${grains.join(' and ')}`)
   const grain = grains[0] ?? null
   const splits = by.filter((d) => d !== grain)
-  const known = [...Object.keys(dimensions), ...GRAINS]
+  const known = [...Object.keys(dimensions), ...grainSet.names()]
   for (const d of splits) if (!dimensions[d]) refuse(`"${d}" is not a dimension of this relation — available: ${known.join(', ')}`)
   for (const d of Object.keys(where)) {
     if (!dimensions[d]) refuse(`cannot filter on "${d}" — filterable dimensions: ${Object.keys(dimensions).join(', ')}`)
@@ -249,6 +217,7 @@ export async function plan(shape: Shape, read: ReadBody, c: Coordinates, dialect
   if (c.at && !dateOk(c.at)) refuse('at must be a date, YYYY-MM-DD')
   if (c.at && c.during) refuse('ask either at an instant or during a span, not both')
   if (c.fill && !grain) refuse('fill adds the empty periods of a time grain, so it needs one in by')
+  if (c.cumulative?.reset && c.cumulative.reset !== 'never' && !grainSet.has(c.cumulative.reset)) refuse(`cumulative reset "${c.cumulative.reset}" is not a grain`)
   if (c.cumulative) {
     if (kind !== 'flow') refuse('a running total adds a flow up over time; a stock is already a running total')
     if (!grain) refuse('a running total runs along a time grain, so it needs one in by')
@@ -309,7 +278,7 @@ export async function plan(shape: Shape, read: ReadBody, c: Coordinates, dialect
   // One statement: pushdown of having, order and limit is possible — unless work across periods follows.
   const acrossPeriods = Boolean(c.fill || c.cumulative)
   const wrap = async (when: When, dims: string[], bounds: (s: SqlDialect) => string[], extra: Record<string, unknown>,
-                      opts: { period?: string; pushdown: boolean }): Promise<Statement> => {
+                      opts: { period?: string; pushdown: boolean; span?: { from: string; to: string } }): Promise<Statement> => {
     const body = await read(when)
     for (const k of Object.keys(body.params)) if (k.startsWith(P)) refuse(`the relation's parameter "${k}" uses the engine's prefix ${P}`)
     const s = sqlFor(dialects[body.source] ?? refuse(`no dialect is known for ${body.source}`))
@@ -317,8 +286,8 @@ export async function plan(shape: Shape, read: ReadBody, c: Coordinates, dialect
       const cols: string[] = []
       const group: string[] = []
       for (const d of dimsHere) {
-        if ((GRAINS as readonly string[]).includes(d)) {
-          const e = s.period(d as Grain, `t.${time}`)
+        if (grainSet.has(d)) {
+          const e = grainSet.sql(d, `t.${time}`, s, opts.span!)
           cols.push(`${e} AS ${d}`); group.push(e); continue
         }
         const dim = dimensions[d]
@@ -358,20 +327,23 @@ export async function plan(shape: Shape, read: ReadBody, c: Coordinates, dialect
     if (!c.during) refuse(`${measures.join(', ')} is a flow: say which span it accumulates over (during)`)
     let { from, to } = c.during!
     const keep = { from, to }
-    if (c.cumulative) {
+    if (c.cumulative?.reset && c.cumulative.reset !== 'never' && !grainSet.has(c.cumulative.reset)) refuse(`cumulative reset "${c.cumulative.reset}" is not a grain`)
+  if (c.cumulative) {
       const reset = c.cumulative.reset ?? 'never'
       // A to-date total needs every period since the boundary, even the ones before the span asked about.
-      if (reset !== 'never') from = periodStart(reset, from)
+      if (reset !== 'never') from = grainSet.startOf(reset, from)
       if (from < keep.from) caveats.push(`running totals start at ${from}, the start of the ${reset}`)
     }
     const bounds = (s: SqlDialect) => [`t.${time} >= ${s.date(`${P}from`)}`, `t.${time} < ${s.date(`${P}to`)}`]
     const pushed = pushable(1)
-    const statement = await wrap({ from, to, where }, by, bounds, { [`${P}from`]: from, [`${P}to`]: to }, { pushdown: pushed })
+    if (grain && !grainSet.covers(grain, from)) refuse(`the span starts before calendar grain "${grain}" has periods`)
+    if (grain && !grainSet.covers(grain, addDays(to, -1))) refuse(`the span ends after calendar grain "${grain}" has periods`)
+    const statement = await wrap({ from, to, where }, by, bounds, { [`${P}from`]: from, [`${P}to`]: to }, { pushdown: pushed, span: { from, to } })
     return {
-      statements: [statement], kind, measures, fetched, by, grain, combine: 'single', partial: partialIf(pushed), caveats,
+      statements: [statement], kind, measures, fetched, by, grain, combine: 'single', partial: partialIf(pushed), caveats, grains: grainSet,
       after: {
         ...(pushed ? {} : { having: c.having, order: c.order, limit: c.limit }),
-        fill: c.fill && grain ? { periods: periods(grain, keep.from, keep.to).map((p) => p.label) } : undefined,
+        fill: c.fill && grain ? { periods: grainSet.periods(grain, keep.from, keep.to).map((p) => p.label) } : undefined,
         cumulative: c.cumulative ? { reset: c.cumulative.reset ?? 'never', keep } : undefined,
       },
     }
@@ -381,7 +353,7 @@ export async function plan(shape: Shape, read: ReadBody, c: Coordinates, dialect
   const at = (date: string, pushdown: boolean, period?: string) =>
     wrap({ asAt: date, where }, splits, () => [], {}, { period, pushdown })
   const finish = (statements: Statement[], combine: Plan['combine'], pushed: boolean): Plan => ({
-    statements, kind, measures, fetched, by, grain, combine, partial: partialIf(pushed), caveats,
+    statements, kind, measures, fetched, by, grain, combine, partial: partialIf(pushed), caveats, grains: grainSet,
     after: pushed ? {} : { having: c.having, order: c.order, limit: c.limit },
   })
 
@@ -393,7 +365,7 @@ export async function plan(shape: Shape, read: ReadBody, c: Coordinates, dialect
 
   // A stock over a span is read at the end of each period, and never at a date that has not happened.
   const readingGrain: Grain = grain ?? 'month'
-  const ends = periods(readingGrain, c.during!.from, c.during!.to)
+  const ends = grainSet.periods(readingGrain, c.during!.from, c.during!.to)
     .filter((p) => p.start <= today)
     .map((p) => ({ label: p.label, date: p.end > today ? today : p.end }))
   if (!ends.length) refuse('that span contains no period that has begun')

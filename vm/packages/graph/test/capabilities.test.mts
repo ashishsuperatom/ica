@@ -243,3 +243,46 @@ test('a relation built on rows composes the same way as one built on SQL', async
   const r = await ask('south orders', { measures: ['revenue'], during: H1 })
   assert.equal(r.rows[0].revenue, sum(ORDERS.filter((o) => inSpan(o) && o.region === 'south'), (o) => o.amount))
 })
+
+// ── calendars ─────────────────────────────────────────────────────────────────────────────────────────────
+const NZ_FISCAL = { fiscal_year: { fiscal: 'year', startMonth: 4 }, fiscal_quarter: { fiscal: 'quarter', startMonth: 4 }, fiscal_month: { fiscal: 'month', startMonth: 4 } }
+
+test('calendar: a fiscal year starting in April labels and splits the same in SQL and JavaScript', async () => {
+  const { engine } = await setup()
+  const all = { from: '2025-04-01', to: '2026-10-01' }
+  const r = (await engine.call<any>('orders', { measures: ['revenue'], by: ['fiscal_quarter'], during: all }, { assume: { calendar: NZ_FISCAL } })).value
+  const quarter = (d: string) => { const m = Number(d.slice(5, 7)); const fy = m >= 4 ? Number(d.slice(0, 4)) + 1 : Number(d.slice(0, 4)); return `FY${fy}-Q${Math.floor(((m - 4 + 12) % 12) / 3) + 1}` }
+  const want = new Map<string, number>()
+  for (const o of ORDERS) want.set(quarter(o.ordered_on), (want.get(quarter(o.ordered_on)) ?? 0) + o.amount)
+  assert.deepEqual(new Map(r.rows.map((x: any) => [x.fiscal_quarter, x.revenue])), want)
+  assert.ok(want.has('FY2026-Q3') && want.has('FY2026-Q4'), 'November 2025 and January 2026 fall in FY2026')
+})
+
+test('calendar: fiscal year to date resets in April, not January', async () => {
+  const { engine } = await setup()
+  const r = (await engine.call<any>('orders', { measures: ['revenue'], by: ['month'], during: { from: '2026-01-01', to: '2026-07-01' },
+    cumulative: { reset: 'fiscal_year' }, fill: true }, { assume: { calendar: NZ_FISCAL } })).value
+  const ytd = (month: string) => sum(ORDERS.filter((o) => (o.ordered_on.slice(0, 7) <= month) && (o.ordered_on >= (month >= '2026-04' ? '2026-04-01' : '2025-04-01'))), (o) => o.amount)
+  assert.deepEqual(r.rows.map((x: any) => [x.month, x.revenue]), ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06'].map((m) => [m, ytd(m)]))
+})
+
+test('calendar: listed periods — a 4-4-5 quarter — and a span outside them refused', async () => {
+  const { engine } = await setup()
+  const retail = { retail_month: { periods: [
+    { label: 'R1', from: '2026-01-04', to: '2026-02-01' }, { label: 'R2', from: '2026-02-01', to: '2026-03-01' },
+    { label: 'R3', from: '2026-03-01', to: '2026-04-05' }, { label: 'R4', from: '2026-04-05', to: '2026-05-03' } ] } }
+  const r = (await engine.call<any>('orders', { measures: ['revenue'], by: ['retail_month'], during: { from: '2026-01-04', to: '2026-05-03' } }, { assume: { calendar: retail } })).value
+  assert.deepEqual(new Map(r.rows.map((x: any) => [x.retail_month, x.revenue])), new Map([['R1', 350], ['R2', 250], ['R3', 80], ['R4', 20]]))
+  await assert.rejects(engine.call('orders', { measures: ['revenue'], by: ['retail_month'], during: H1 }, { assume: { calendar: retail } }), /before calendar grain/)
+})
+
+test('calendar: chosen by who is asking, and a stock read at each fiscal quarter end', async () => {
+  const { engine, store } = await setup('2026-09-14')
+  const calendar = { rules: [{ value: {} }, { when: { 'who.country': 'NZ' }, value: NZ_FISCAL }] }
+  const q = { measures: ['headcount'], by: ['fiscal_quarter'], during: { from: '2026-01-01', to: '2026-07-01' } }
+  await assert.rejects(engine.call('people', q, { assume: { calendar } }), /not a dimension/)
+  const r = await engine.call<any>('people', q, { assume: { calendar }, who: { country: 'NZ' } })
+  const at = (d: string) => PEOPLE.filter((p) => p.hired <= d && (!p.released || p.released > d)).length
+  assert.deepEqual(r.value.rows.map((x: any) => [x.fiscal_quarter, x.headcount]), [['FY2026-Q4', at('2026-03-31')], ['FY2027-Q1', at('2026-06-30')]])
+  assert.equal(store.getCall(r.callId)!.assumptions.find((a) => a.name === 'calendar')!.from, 'caller')
+})

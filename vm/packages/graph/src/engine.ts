@@ -16,6 +16,7 @@ import { contractProblem, type Contract } from './contract.js'
 import { conditionSql, plan, sqlFor, type Condition, type Coordinates, type Dialect, type ReadBody, type ResolvedStatement, type When } from './coordinates.js'
 import { runPlan } from './execute.js'
 import { programHash } from './hash.js'
+import type { Calendar } from './calendar.js'
 import { isDerived, kindOf, type Shape, type Statement } from './shape.js'
 import { AmbiguousRules, facts, isRuled, mostSpecific } from './rules.js'
 import type { CallRecord, GraphStore } from './store.js'
@@ -157,6 +158,22 @@ export function createEngine(o: EngineOptions) {
       if (!assumed.some((a) => JSON.stringify(a) === JSON.stringify(entry))) assumed.push(entry)
       return value as T
     }
+  }
+
+  /** The calendar a request uses: the assumption named `calendar`, from the caller or the organisation, chosen by
+   *  rules when it differs by who is asking. No calendar means the built-in grains only. */
+  function calendarFor(scope: Scope, assumed: AssumedLog): Calendar {
+    const [given, from] = 'calendar' in scope.context ? [scope.context.calendar, 'caller' as const]
+      : o.assumptions && 'calendar' in o.assumptions ? [o.assumptions.calendar, 'organisation' as const] : [undefined, null]
+    if (from === null) return {}
+    let value = given
+    if (isRuled(given)) {
+      const rule = mostSpecific(given.rules, facts(scope.who), (a, b) => JSON.stringify(a.value) === JSON.stringify(b.value))
+      if (!rule) return {}
+      value = rule.value
+    }
+    if (!assumed.some((a) => a.name === 'calendar')) assumed.push({ name: 'calendar', value, from })
+    return (value ?? {}) as Calendar
   }
 
   /** A relation's rows under an intervention: some left out, some added — as SQL around its own SQL, so every
@@ -398,7 +415,7 @@ export function createEngine(o: EngineOptions) {
         // says which part of it is wanted. Nothing in the body changes when someone drills down.
         const read: ReadBody = (when) => statementFor(name, contract, hash, program.body, when, scope, used, queries, assumed, path)
         const shape = contract.shape!
-        const p = await plan(shape, read, request as Coordinates, dialects, today)
+        const p = await plan(shape, read, request as Coordinates, dialects, today, calendarFor(scope, assumed))
         value = await runPlan(shape, p, (src, sql, params) => o.query(src, sql, params, { who: scope.who }),
           (q) => queries.push(q),
           (label, held, detail) => { verifications.push({ label, held, detail }); if (!held) throw new Error(`invariant failed: ${label} — ${detail}`) },
