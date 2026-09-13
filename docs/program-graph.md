@@ -1099,6 +1099,41 @@ So an addition is never a change to the answer's program. It is a change to *the
 This depends on two capabilities not yet built: **entities with joins by key**, and **dimension attributes**.
 It is the strongest argument for putting both in the foundation.
 
+### Proposal — a session is a state, and a follow-up is a transition
+
+The first question in a session creates a **state**: which program answers it, and the whole request — coordinates,
+attributes, assumptions, interventions, who is asking, and the day it is answered as of. Every follow-up changes
+that state, and the engine runs the program on the new state. Starting over is a new session, or clearing the state.
+
+It is the architecture of Elm and Redux — a state, messages, and an update — and of event sourcing: the session
+keeps the sequence of transitions, and the state is what they add up to. Nothing new is needed underneath: a
+state is exactly what memory already records for a call, and `call`, `replay` and `counterfactual` already run
+one.
+
+What follows from it:
+
+- **Transitions are typed, and checked before anything runs.** Set a span; add a measure, a split or an
+  attribute; set an assumption (a weight, a target); add or remove an intervention; change the program while
+  keeping what still applies; reset. A transition the program's contract cannot accept is refused as a
+  transition, the way coordinates are refused today.
+- **The agent's usual job becomes translating a message into a transition** — small, inspectable and checkable
+  — rather than writing a program. A program is written only when a transition needs one that does not exist.
+  This is the most direct answer yet to verifying what the agent built (open question 11).
+- **A session is a tree, not a line.** "What if the environmental weight were higher?" forks the state; two
+  branches can be shown side by side, and their difference is a counterfactual between two states.
+- **The day is part of the state.** Answers do not shift under the person mid-session; refreshing is itself a
+  transition.
+- **Rerunning is cheap where the state did not change.** The cache already skips repeated statements; later,
+  only the calls whose inputs changed need recomputing (self-adjusting computation, Acar 2005).
+- **The display follows the state and the result.** The UI engine renders the result's columns and knows what
+  the last transition changed; narration is written from the result and that change.
+- **Decisions use the same shape.** In procurement, the weights on price, delivery and environmental impact are
+  assumptions in the state; an optimisation engine is a source like any other, with its own inputs and outputs;
+  changing a weight is a transition and the recommendation is re-run.
+
+*Open: how a message is classified as a transition of the current state or the start of a new one; how much of
+a changed program's state carries over; how branches are named and shown.*
+
 ---
 
 ## 19. What is missing, compared with systems that exist
