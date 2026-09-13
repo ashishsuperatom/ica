@@ -898,6 +898,21 @@ What S4 exposed:
 8. What counts as similar when results are compressed, and over what window?
 9. How is an expectation declared, and when is a result outside it?
 10. When a result is outside its expectation, who is told, and is enrichment proposed or authored?
+11. **The agent builds the graph, so how is a build verified?** Programs and concepts are not handed to the
+    system; the authoring agent writes them. Something must establish that what it built is right — not only
+    that it runs — before others build on it. *Remembered for later; not being designed now.*
+12. **How is the right program found, and how is it known that none exists and one must be written?** Finding
+    an existing program and recognising a genuine gap are the same decision seen from two sides.
+13. **Sources that are not SQL.** A relation is SQL wrapped by the engine. An API returns rows, not a query to
+    wrap. The likely form: the concept fetches rows bounded by `when`, the engine loads them into a local SQL
+    engine, and the same wrapping runs there — same shape, same checks, no pushdown to the source. Composition
+    with a SQL source then happens after aggregation, as across any two sources. *Not built.*
+14. **Measures computed from other measures.** The builder let a measure be any aggregate expression, so
+    `SUM(a) / SUM(b)` could be written; it had no ratio kind, so a split would have failed the parts-sum check
+    and an average rollup would have averaged ratios. Moving to plain SQL dropped the expression without this
+    being noticed — `fte` survived only because dividing by 40 is linear and moved into the row. A shape needs
+    derived measures, computed from aggregated measures, of kind ratio, checked through their numerator and
+    denominator.
 
 ---
 
