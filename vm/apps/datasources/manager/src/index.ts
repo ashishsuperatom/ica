@@ -14,6 +14,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { dirname, join, isAbsolute } from 'node:path'
 import { sqlSignature, rewriteSqlDetailed } from './sqlglot-pool.js'
+import { QueryCache, cacheKey } from './query-cache.js'
 
 // Result caps for AGENT queries — a runaway/unbounded query must not dump a whole table (192K rows would
 // overwhelm the bridge WS AND the UI, which shows hundreds at most). MAX_ROWS is enforced AT THE SOURCE — the
@@ -77,6 +78,7 @@ const PORT = Number(process.env.DATASOURCE_PORT ?? process.env.MANAGER_PORT ?? 4
 // survive a restart. On Fly, point DATASOURCE_DATA_DIR at the mounted volume.
 const DATA_DIR = process.env.DATASOURCE_DATA_DIR ?? join(dirname(fileURLToPath(import.meta.url)), '..', '.data')
 const REGISTRY_FILE = join(DATA_DIR, 'registry.json')
+const cache = new QueryCache(process.env.QUERY_CACHE_FILE ?? join(DATA_DIR, 'query-results.sqlite'))
 
 // A Bridge knows WHAT it is (kind/dialect) so the agent can write the right query, and HOW to run
 // it. The bridge is the source of truth for kind/dialect; the manager just surfaces it.
@@ -168,6 +170,7 @@ const send = (res: http.ServerResponse, status: number, body: unknown) => {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url!, 'http://localhost')
   if (req.method === 'GET' && url.pathname === '/health') return send(res, 200, { ok: true })
+  if (req.method === 'GET' && url.pathname === '/cache') return send(res, 200, cache.stats())
   if (req.method === 'GET' && url.pathname === '/sources')   // the agent reads kind/dialect here before writing queries
     // id is the REGISTRY KEY (what the manager routes by), NOT the bridge's own id — one authoritative name so
     // /sources, /query, the index and grounding always agree (a source is renamed by its registry key alone).
@@ -218,9 +221,17 @@ const server = http.createServer(async (req, res) => {
       // tell those apart, and guessing wrong in either direction is a lie about the data.
       const passthrough = body.raw || bridge.kind !== 'sql'
       const rw = passthrough
-        ? { sql: String(body.sql), cappedTo: null as number | null }
+        ? { sql: String(body.sql), cappedTo: null as number | null, readsClock: false }
         : await rewriteSqlDetailed(String(body.sql), { sourceDialect: bridge.dialect, maxRows: MAX_ROWS + 1 })
       const sql = rw.sql
+      const cacheable = !passthrough && !rw.readsClock
+      const key = cacheKey(String(body.id), sql, body.params)
+      if (cacheable && !body.fresh) {
+        const hit = cache.get(key)
+        if (hit) return send(res, 200, { rows: hit.rows, sql, ...(hit.cappedTo != null ? { cappedTo: hit.cappedTo } : {}),
+                                         ...(hit.notes ? { notes: hit.notes } : {}), cache: { hit: true, fetchedAt: new Date(hit.fetchedAt).toISOString() } })
+      }
+      const fetchedAt = Date.now()
       // RETRIED HERE, not by the agent. A flaky source used to surface as a failed query, which the agent
       // noticed, reasoned about, and re-issued — a whole LLM turn, fifteen seconds and a pile of tokens, to
       // repeat a statement that would have worked a second later. One observed question spent a third of four
@@ -244,7 +255,9 @@ const server = http.createServer(async (req, res) => {
       const notes = truncated
         ? [`Row limit ${MAX_ROWS} was applied and there is more data beyond it: these are the FIRST ${MAX_ROWS} rows, not the full result. Aggregate in the query (COUNT/SUM/GROUP BY) for totals, or narrow it with a filter.`]
         : undefined
-      return send(res, 200, { rows: out, sql, ...(truncated ? { cappedTo: MAX_ROWS } : {}), ...(notes ? { notes } : {}) })
+      if (cacheable) cache.put(key, String(body.id), sql, body.params, { rows: out, cappedTo: truncated ? MAX_ROWS : null, notes: notes ?? null, fetchedAt })
+      return send(res, 200, { rows: out, sql, ...(truncated ? { cappedTo: MAX_ROWS } : {}), ...(notes ? { notes } : {}),
+                              cache: { hit: false, fetchedAt: new Date(fetchedAt).toISOString(), stored: cacheable } })
     }
     if (url.pathname === '/introspect') return send(res, 200, await bridge.introspect())
     return send(res, 404, { error: 'not found — use POST /query, POST /introspect, GET /sources' })

@@ -127,7 +127,7 @@ async function once(w: Worker, req: any): Promise<any> {
 // Returns the rewritten SQL AND what we changed that the caller must know about: `cappedTo` is the row limit we
 // injected (null when the caller's own limit already fit). An unreported cap is indistinguishable from "that is
 // all the data", which turns a truncated read into a confidently wrong total — so it always travels back.
-export async function rewriteSqlDetailed(sql: string, opts: RewriteOpts = {}): Promise<{ sql: string; cappedTo: number | null }> {
+export async function rewriteSqlDetailed(sql: string, opts: RewriteOpts = {}): Promise<{ sql: string; cappedTo: number | null; readsClock: boolean }> {
   const req = {
     op: 'rewrite',
     sql,
@@ -145,7 +145,7 @@ export async function rewriteSqlDetailed(sql: string, opts: RewriteOpts = {}): P
       const msg = await once(w, req)
       release(w)
       if (!msg.ok) throw new Error(String(msg.error || 'sql rewrite failed'))
-      return { sql: String(msg.sql), cappedTo: msg.cappedTo == null ? null : Number(msg.cappedTo) }
+      return { sql: String(msg.sql), cappedTo: msg.cappedTo == null ? null : Number(msg.cappedTo), readsClock: msg.readsClock === true }
     } catch (e: any) {
       // A dead worker (crash/exit) is retried ONCE on a fresh one; a real rewrite error (msg.ok=false) is rethrown.
       if (w.alive) { release(w); throw e }

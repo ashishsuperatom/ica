@@ -112,6 +112,25 @@ def inject_policies(root, policies):
     return root
 
 
+# ── A QUERY THAT READS THE CLOCK ─────────────────────────────────────────────────────────────────────────────
+# SYSDATE, GETDATE(), CURRENT_DATE: the text is the same every day and the answer is not, so the manager does
+# not cache it.
+_CLOCK_NODES = tuple(c for c in (getattr(exp, n, None) for n in (
+    "CurrentDate", "CurrentTime", "CurrentTimestamp", "CurrentDatetime",
+    "Systimestamp", "Localtimestamp", "Localtime", "UnixTimestamp")) if c)
+_CLOCK_NAMES = {"SYSDATE", "SYSTIMESTAMP", "GETDATE", "GETUTCDATE", "SYSDATETIME", "SYSUTCDATETIME",
+                "NOW", "CURRENT_DATE", "CURRENT_TIMESTAMP", "LOCALTIMESTAMP", "TODAY"}
+
+
+def _reads_clock(root):
+    for node in root.walk():
+        if _CLOCK_NODES and isinstance(node, _CLOCK_NODES):
+            return True
+        if isinstance(node, (exp.Anonymous, exp.Column)) and (node.name or "").upper() in _CLOCK_NAMES:
+            return True
+    return False
+
+
 def rewrite(req):
     sql = req.get("sql")
     if not sql or not str(sql).strip():
@@ -141,7 +160,7 @@ def rewrite(req):
     out = hooks.apply_post_text(out, ctx)
     # cappedTo travels back so the CALLER can tell the agent a limit was applied — an invisible cap
     # reads as "that is all the data".
-    return {"sql": out, "lineage": None, "cappedTo": cappedTo}
+    return {"sql": out, "lineage": None, "cappedTo": cappedTo, "readsClock": _reads_clock(root)}
 
 
 # ── STRUCTURAL SIGNATURE ──────────────────────────────────────────────────────────────────────────────────
