@@ -5,6 +5,7 @@ export { createEngine, type Engine, type EngineOptions, type ProgramContext, typ
 export { trace } from './trace.js'
 export { shapeProblem, additivity, type Shape, type Statement, type Dimension, type Measure, type BaseMeasure, type DerivedMeasure, type MeasureKind, type Aggregate, type Additivity } from './shape.js'
 export { plan, sqlFor, CoordinateError, type Coordinates, type Condition, type Grain, type Dialect, type Plan } from './coordinates.js'
-export { runPlan, runLocal, CappedError, type Result, type Column } from './execute.js'
+export { runPlan, runLocal, arrange, CappedError, type Result, type Column } from './execute.js'
 export { facts, applies, mostSpecific, allThatApply, isRuled, AmbiguousRules, type When as RuleWhen, type Facts, type RuledValue } from './rules.js'
 export { Grains, periods, BUILT_IN, type Calendar, type CalendarGrain, type Period } from './calendar.js'
+export { shift, comparisonCoordinates, mergeComparison, type Comparison, type Offset } from './compare.js'

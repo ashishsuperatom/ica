@@ -126,16 +126,7 @@ export async function runPlan(shape: Shape, p: Plan, query: RunQuery,
     rows = rows.filter((r) => kept.has(String(r[grain])))
   }
 
-  if (p.after.having) rows = rows.filter((r) => Object.entries(p.after.having!).every(([m, c]) => holds(r[m], c)))
-  if (p.after.order?.length) {
-    const order = p.after.order
-    rows.sort((a, b) => {
-      for (const o of order) { const d = compare(a[o.by], b[o.by]); if (d) return o.desc ? -d : d }
-      for (const d of p.by) { const x = compare(a[d], b[d]); if (x) return x }
-      return 0
-    })
-  }
-  if (p.after.limit != null) rows = rows.slice(0, p.after.limit)
+  if (!p.orderedAtSource) rows = arrange(rows, p.after, p.by)
   if (p.fetched.length > p.measures.length) {
     const hidden = p.fetched.filter((m) => !p.measures.includes(m))
     rows = rows.map((r) => Object.fromEntries(Object.entries(r).filter(([c]) => !hidden.includes(c))))
@@ -172,6 +163,25 @@ function checkParts(shape: Shape, p: Plan, rows: Record<string, any>[], whole: R
       verify(`${m}: the ${kind} of the parts is the whole${at}`, edge == null ? whole[m] == null : close(edge, all), `parts ${edge} · whole ${whole[m]}`)
     }
   }
+}
+
+/** Having, then order, then limit — on rows already in hand. Ties are broken by the split, so the order is stable,
+ *  and rows with no order asked for come in the order of the split. */
+export function arrange(rows: Record<string, any>[], after: { having?: Record<string, Condition>; order?: Array<{ by: string; desc?: boolean }>; limit?: number },
+                        by: string[]): Record<string, any>[] {
+  let out = rows
+  if (after.having) out = out.filter((r) => Object.entries(after.having!).every(([m, c]) => holds(r[m], c)))
+  // With no order asked for, rows come in the order of the split — never in whatever order they were assembled.
+  {
+    const order = after.order ?? []
+    out = [...out].sort((a, b) => {
+      for (const o of order) { const d = compare(a[o.by], b[o.by]); if (d) return o.desc ? -d : d }
+      for (const d of by) { const x = compare(a[d], b[d]); if (x) return x }
+      return 0
+    })
+  }
+  if (after.limit != null) out = out.slice(0, after.limit)
+  return out
 }
 
 function holds(v: any, c: Condition): boolean {

@@ -48,6 +48,8 @@ export interface Coordinates {
   rollup?: { time?: 'last' | 'average' }
   /** Include periods with no rows, as zero for a flow. */
   fill?: boolean
+  /** The same question at another time, aligned row by row with the change beside each. See compare.ts. */
+  compare?: import('./compare.js').Comparison
   /** Running totals along the time grain, starting again at each `reset` boundary — to-date and since-start. */
   cumulative?: { reset?: Grain | 'never' }
 }
@@ -86,6 +88,8 @@ export interface Plan {
   grains: Grains
   /** A limit or having was pushed into the statement, so parts cannot be checked against the whole. */
   partial: boolean
+  /** The statement already returns rows in the order asked for. */
+  orderedAtSource: boolean
   caveats: string[]
 }
 
@@ -340,7 +344,7 @@ export async function plan(shape: Shape, read: ReadBody, c: Coordinates, dialect
     if (grain && !grainSet.covers(grain, addDays(to, -1))) refuse(`the span ends after calendar grain "${grain}" has periods`)
     const statement = await wrap({ from, to, where }, by, bounds, { [`${P}from`]: from, [`${P}to`]: to }, { pushdown: pushed, span: { from, to } })
     return {
-      statements: [statement], kind, measures, fetched, by, grain, combine: 'single', partial: partialIf(pushed), caveats, grains: grainSet,
+      statements: [statement], kind, measures, fetched, by, grain, combine: 'single', partial: partialIf(pushed), orderedAtSource: pushed && !!c.order?.length, caveats, grains: grainSet,
       after: {
         ...(pushed ? {} : { having: c.having, order: c.order, limit: c.limit }),
         fill: c.fill && grain ? { periods: grainSet.periods(grain, keep.from, keep.to).map((p) => p.label) } : undefined,
@@ -353,7 +357,7 @@ export async function plan(shape: Shape, read: ReadBody, c: Coordinates, dialect
   const at = (date: string, pushdown: boolean, period?: string) =>
     wrap({ asAt: date, where }, splits, () => [], {}, { period, pushdown })
   const finish = (statements: Statement[], combine: Plan['combine'], pushed: boolean): Plan => ({
-    statements, kind, measures, fetched, by, grain, combine, partial: partialIf(pushed), caveats, grains: grainSet,
+    statements, kind, measures, fetched, by, grain, combine, partial: partialIf(pushed), orderedAtSource: pushed && !!c.order?.length, caveats, grains: grainSet,
     after: pushed ? {} : { having: c.having, order: c.order, limit: c.limit },
   })
 

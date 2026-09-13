@@ -286,3 +286,61 @@ test('calendar: chosen by who is asking, and a stock read at each fiscal quarter
   assert.deepEqual(r.value.rows.map((x: any) => [x.fiscal_quarter, x.headcount]), [['FY2026-Q4', at('2026-03-31')], ['FY2027-Q1', at('2026-06-30')]])
   assert.equal(store.getCall(r.callId)!.assumptions.find((a) => a.name === 'calendar')!.from, 'caller')
 })
+
+// ── comparison ────────────────────────────────────────────────────────────────────────────────────────────
+import { shift } from '../src/index.ts'
+
+test('comparison: month ends and offsets move time the way people mean', () => {
+  assert.equal(shift('2026-08-31', { months: 6 }), '2026-02-28')
+  assert.equal(shift('2024-02-29', { years: 1 }), '2023-02-28')
+  assert.equal(shift('2026-03-15', { quarters: 1 }), '2025-12-15')
+  assert.equal(shift('2026-07-01', { weeks: 1, days: 1 }), '2026-06-23')
+})
+
+test('comparison: each region against the same half a year earlier, with the change', async () => {
+  const { engine } = await setup()
+  const r = (await engine.call<any>('orders', { measures: ['revenue', 'price'], by: ['region'], during: H1, compare: { offset: { months: 6 } } })).value
+  const span = (s: { from: string; to: string }, region: string | null) => ORDERS.filter((o) => inSpan(o, s) && o.region === region)
+  const earlier = { from: '2025-07-01', to: '2026-01-01' }
+  const north = r.rows.find((x: any) => x.region === 'north')
+  assert.equal(north.revenue, sum(span(H1, 'north'), (o) => o.amount))
+  assert.equal(north.revenue_compare, sum(span(earlier, 'north'), (o) => o.amount))
+  assert.equal(north.revenue_change, north.revenue - north.revenue_compare)
+  assert.equal(north.revenue_change_ratio, (north.revenue - north.revenue_compare) / north.revenue_compare)
+  assert.equal(north.price_change_ratio, null, 'a ratio changes by points, not by a percentage of itself')
+  const south = r.rows.find((x: any) => x.region === 'south')
+  assert.equal(south.revenue_compare, 0, 'a member with nothing then is zero for an amount')
+  assert.equal(south.price_compare, null, 'and unknown for a ratio')
+})
+
+test('comparison: periods aligned by place — each month of a quarter against the quarter before', async () => {
+  const { engine } = await setup()
+  const r = (await engine.call<any>('orders', { measures: ['revenue'], by: ['month'], during: { from: '2026-04-01', to: '2026-07-01' },
+    compare: { offset: { quarters: 1 } }, fill: true })).value
+  assert.deepEqual(r.rows.map((x: any) => [x.month, x.month_compare]), [['2026-04', '2026-01'], ['2026-05', '2026-02'], ['2026-06', '2026-03']])
+  assert.deepEqual(r.rows.map((x: any) => x.revenue_compare), [350, 250, 0])
+})
+
+test('comparison: a span still running is compared like for like', async () => {
+  const { engine, store } = await setup('2026-04-15')
+  const c = await engine.call<any>('orders', { measures: ['revenue'], during: { from: '2026-04-01', to: '2026-05-01' }, compare: { offset: { years: 1 } } })
+  assert.ok(store.getCall(c.callId)!.caveats.some((x) => /like for like: 2026-04-01 to 2026-04-15 against 2025-04-01 to 2025-04-15/.test(x)))
+  assert.equal(c.value.rows[0].revenue, sum(ORDERS.filter((o) => o.ordered_on >= '2026-04-01' && o.ordered_on <= '2026-04-15'), (o) => o.amount))
+})
+
+test('comparison: the biggest falls first — order and limit on the change', async () => {
+  const { engine } = await setup()
+  const r = (await engine.call<any>('orders', { measures: ['revenue'], by: ['customer'], during: { from: '2026-04-01', to: '2026-07-01' },
+    compare: { offset: { quarters: 1 } }, order: [{ by: 'revenue_change' }], limit: 2 })).value
+  assert.deepEqual(r.rows.map((x: any) => [x.customer, x.revenue_change]), [['c1', -280], ['c2', -300]].sort((a: any, b: any) => a[1] - b[1]))
+})
+
+test('comparison: a stock at an instant against a year before', async () => {
+  const { engine } = await setup()
+  const r = (await engine.call<any>('people', { measures: ['headcount'], by: ['team'], at: '2026-06-30', compare: { at: '2025-12-31' } })).value
+  const at = (d: string, team: string) => PEOPLE.filter((p) => p.team === team && p.hired <= d && (!p.released || p.released > d)).length
+  for (const team of ['a', 'b']) {
+    const row = r.rows.find((x: any) => x.team === team)
+    assert.deepEqual([row.headcount, row.headcount_compare], [at('2026-06-30', team), at('2025-12-31', team)])
+  }
+})

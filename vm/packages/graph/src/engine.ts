@@ -15,6 +15,7 @@ import { pathToFileURL } from 'node:url'
 import { contractProblem, type Contract } from './contract.js'
 import { conditionSql, plan, sqlFor, type Condition, type Coordinates, type Dialect, type ReadBody, type ResolvedStatement, type When } from './coordinates.js'
 import { runPlan } from './execute.js'
+import { comparisonCoordinates, mergeComparison, type Comparison } from './compare.js'
 import { programHash } from './hash.js'
 import type { Calendar } from './calendar.js'
 import { isDerived, kindOf, type Shape, type Statement } from './shape.js'
@@ -415,11 +416,28 @@ export function createEngine(o: EngineOptions) {
         // says which part of it is wanted. Nothing in the body changes when someone drills down.
         const read: ReadBody = (when) => statementFor(name, contract, hash, program.body, when, scope, used, queries, assumed, path)
         const shape = contract.shape!
-        const p = await plan(shape, read, request as Coordinates, dialects, today, calendarFor(scope, assumed))
-        value = await runPlan(shape, p, (src, sql, params) => o.query(src, sql, params, { who: scope.who }),
-          (q) => queries.push(q),
-          (label, held, detail) => { verifications.push({ label, held, detail }); if (!held) throw new Error(`invariant failed: ${label} — ${detail}`) },
-          (text) => caveats.push(text))
+        const calendar = calendarFor(scope, assumed)
+        const ask = async (coordinates: Coordinates, side?: string) => {
+          const p = await plan(shape, read, coordinates, dialects, today, calendar)
+          const result = await runPlan(shape, p, (src, sql, params) => o.query(src, sql, params, { who: scope.who }),
+            (q) => queries.push(q),
+            (label, held, detail) => {
+              const tagged = side ? `${side}: ${label}` : label
+              verifications.push({ label: tagged, held, detail })
+              if (!held) throw new Error(`invariant failed: ${tagged} — ${detail}`)
+            },
+            (text) => caveats.push(text))
+          return { p, result }
+        }
+        const coordinates = request as Coordinates
+        if (coordinates.compare) {
+          const both = comparisonCoordinates(coordinates as Coordinates & { compare: Comparison }, today, kindOf(shape) === 'flow')
+          const [now, then] = await Promise.all([ask(both.current, 'now'), ask(both.previous, 'compared with')])
+          caveats.push(...both.caveats)
+          value = mergeComparison(shape, now.result, then.result, now.p.by, now.p.grain, both.after)
+        } else {
+          value = (await ask(coordinates)).result
+        }
         caveats.push(...(value as any).caveats)
       } else {
         const fn = await load(hash, program.body)
