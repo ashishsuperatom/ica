@@ -13,7 +13,10 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { contractProblem, type Contract } from './contract.js'
+import { plan, type Coordinates, type Dialect } from './coordinates.js'
+import { runPlan } from './execute.js'
 import { programHash } from './hash.js'
+import { Relation, isRelation, relationProblem } from './relation.js'
 import type { CallRecord, GraphStore } from './store.js'
 
 export type Query = (source: string, sql: string, params?: Record<string, unknown>) => Promise<any[]>
@@ -23,6 +26,8 @@ export interface EngineOptions {
   /** Where program bodies are written as modules, one file per hash. */
   modulesDir: string
   query: Query
+  /** Which SQL dialect each source speaks, for the few things coordinates compile to: dates and months. */
+  dialects: Record<string, Dialect>
 }
 
 export interface DefineResult { hash: string; name: string; created: boolean }
@@ -30,6 +35,8 @@ export interface CallResult<T = unknown> { value: T; callId: string; hash: strin
 
 /** What a program body receives. The same surface for every program; what it may USE is its contract's. */
 export interface ProgramContext {
+  /** Start a relation over a source's table. Only a concept may. */
+  from(source: string, table: string): Relation
   call<T = unknown>(name: string, request?: Record<string, unknown>): Promise<T>
   query(source: string, sql: string, params?: Record<string, unknown>): Promise<any[]>
   decide(label: string, took: boolean, reason: string): boolean
@@ -51,8 +58,31 @@ export function createEngine(o: EngineOptions) {
     return mod.default
   }
 
-  function define(input: { body: string; contract: Contract },
-                  meta: { by: string; reason?: string; replace?: boolean }): DefineResult {
+  /** A relation is a definition, so it can be checked when it is defined rather than when it is first asked.
+   *  The body is evaluated with a context that can build a relation and do nothing else — no data, no calls. */
+  async function checkRelation(hash: string, body: string, contract: Contract): Promise<void> {
+    const fn = await load(hash, body)
+    const dry: ProgramContext = {
+      from: (source, table) => fromSource(contract, source, table),
+      call: async () => { throw new Error('a relation is a definition; it cannot call programs while being defined') },
+      query: async () => { throw new Error('a relation is a definition; it cannot run queries while being defined') },
+      decide: (_l, took) => took, verify: async () => {}, caveat: () => {},
+    }
+    const r = await fn(dry, {})
+    if (!isRelation(r)) throw new Error(`not defined — "${contract.name}" declares it returns a relation but returned ${typeof r}`)
+    const bad = relationProblem(r)
+    if (bad) throw new Error(`not defined — "${contract.name}": ${bad}`)
+  }
+
+  function fromSource(contract: Contract, source: string, table: string): Relation {
+    if (contract.kind !== 'concept') throw new Error(`"${contract.name}" is a program and read ${source} — only a concept may read a data source`)
+    if (!contract.reads.sources.includes(source)) throw new Error(`"${contract.name}" read ${source}, which its contract does not declare`)
+    if (!o.dialects[source]) throw new Error(`no dialect is known for ${source}`)
+    return Relation.from(source, table)
+  }
+
+  async function define(input: { body: string; contract: Contract },
+                        meta: { by: string; reason?: string; replace?: boolean }): Promise<DefineResult> {
     const bad = contractProblem(input.contract)
     if (bad) throw new Error(`not defined — ${bad}`)
     const { contract, body } = input
@@ -65,6 +95,7 @@ export function createEngine(o: EngineOptions) {
 
     const hash = programHash(body, contract)
     const created = !o.store.getProgram(hash)
+    if (contract.returns === 'relation') await checkRelation(hash, body, contract)
     o.store.putProgram({ hash, contract, body, createdAt: Date.now(), createdBy: meta.by })
 
     // A NAME IS CHECKED BEFORE IT IS TAKEN. Pointing an existing name somewhere new changes what every caller
@@ -91,8 +122,10 @@ export function createEngine(o: EngineOptions) {
     const decisions: CallRecord['decisions'] = []
     const verifications: CallRecord['verifications'] = []
     const caveats: string[] = []
+    const queries: CallRecord['queries'] = []
 
     const ctx: ProgramContext = {
+      from: (source, table) => fromSource(contract, source, table),
       async call<U>(child: string, childRequest: Record<string, unknown> = {}) {
         if (!contract.reads.programs.includes(child)) {
           throw new Error(`"${name}" called "${child}", which its contract does not declare it reads`)
@@ -107,7 +140,11 @@ export function createEngine(o: EngineOptions) {
         if (!contract.reads.sources.includes(source)) {
           throw new Error(`"${name}" queried ${source}, which its contract does not declare it reads`)
         }
-        return o.query(source, sql, params)
+        const t = Date.now()
+        const rows = await o.query(source, sql, params)
+        queries.push({ source, sql, params: params ?? {}, rows: rows.length, ms: Date.now() - t,
+                       capped: Array.isArray((rows as any).notes) && (rows as any).notes.length > 0 })
+        return rows
       },
       decide(label, took, reason) { decisions.push({ label, took, reason }); return took },
       async verify(label, holds, detail) {
@@ -122,7 +159,19 @@ export function createEngine(o: EngineOptions) {
     let error: string | null = null
     try {
       const fn = await load(hash, program.body)
-      value = await fn(ctx, request)
+      if (contract.returns === 'relation') {
+        // THE DEFINITION AND THE QUESTION ARRIVE SEPARATELY. The body says what the relation is; the request
+        // says which part of it is wanted. Nothing in the body changes when someone drills down.
+        const relation = await fn(ctx, {})
+        if (!isRelation(relation)) throw new Error(`"${name}" declares it returns a relation but returned ${typeof relation}`)
+        const p = plan(relation, request as Coordinates, o.dialects[relation.source])
+        value = await runPlan(relation, p, (src, sql, params) => o.query(src, sql, params),
+          (q) => queries.push(q),
+          (label, held, detail) => { verifications.push({ label, held, detail }); if (!held) throw new Error(`invariant failed: ${label} — ${detail}`) })
+        caveats.push(...(value as any).caveats)
+      } else {
+        value = await fn(ctx, request)
+      }
       if (contract.returns === 'rows' && !Array.isArray(value)) {
         throw new Error(`"${name}" declares it returns rows but returned ${value === null ? 'null' : typeof value}`)
       }
@@ -132,7 +181,7 @@ export function createEngine(o: EngineOptions) {
     }
 
     o.store.recordCall({ id, parentId, name, hash, request, output: error ? null : value, error,
-                         decisions, verifications, caveats, ms: Date.now() - started, at: started })
+                         decisions, verifications, caveats, queries, ms: Date.now() - started, at: started })
     if (error) throw Object.assign(new Error(error), { callId: id })
     return { value: value as T, callId: id, hash }
   }

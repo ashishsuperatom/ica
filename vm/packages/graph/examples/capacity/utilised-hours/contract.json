@@ -1,0 +1,8 @@
+{
+  "name": "utilised hours",
+  "kind": "concept",
+  "description": "Hours people recorded against utilised work, over a span.",
+  "reads": { "sources": ["F5NETSUITE"], "programs": [] },
+  "params": {},
+  "returns": "relation"
+}

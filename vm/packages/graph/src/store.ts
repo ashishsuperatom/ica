@@ -28,6 +28,8 @@ export interface CallRecord {
   decisions: Array<{ label: string; took: boolean; reason: string }>
   verifications: Array<{ label: string; held: boolean; detail?: string }>
   caveats: string[]
+  /** Every statement run against a source, so an answer can show the SQL that produced it. */
+  queries: Array<{ source: string; sql: string; params: Record<string, unknown>; rows: number; ms: number; capped: boolean }>
   ms: number
   at: number
 }
@@ -61,6 +63,7 @@ CREATE TABLE IF NOT EXISTS call (
   decisions     TEXT NOT NULL,
   verifications TEXT NOT NULL,
   caveats       TEXT NOT NULL,
+  queries       TEXT NOT NULL,
   ms            INTEGER NOT NULL,
   at            INTEGER NOT NULL
 );
@@ -122,10 +125,11 @@ export class GraphStore {
   // ── memory ────────────────────────────────────────────────────────────────────────────────────────────
 
   recordCall(c: CallRecord): void {
-    this.db.prepare(`INSERT INTO call (id, parent_id, name, hash, request, output, error, decisions, verifications, caveats, ms, at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    this.db.prepare(`INSERT INTO call (id, parent_id, name, hash, request, output, error, decisions, verifications, caveats, queries, ms, at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(c.id, c.parentId, c.name, c.hash, JSON.stringify(c.request), JSON.stringify(keep(c.output)),
-           c.error, JSON.stringify(c.decisions), JSON.stringify(c.verifications), JSON.stringify(c.caveats), c.ms, c.at)
+           c.error, JSON.stringify(c.decisions), JSON.stringify(c.verifications), JSON.stringify(c.caveats),
+           JSON.stringify(c.queries), c.ms, c.at)
   }
 
   getCall(id: string): CallRecord | null {
@@ -148,6 +152,10 @@ export class GraphStore {
 /** Outputs kept verbatim up to a limit, and the rest COUNTED — a shortened list that does not say so is a
  *  wrong answer about what the program returned. */
 function keep(output: unknown): unknown {
+  if (output && typeof output === 'object' && Array.isArray((output as any).rows) && (output as any).rows.length > KEPT_ROWS) {
+    const o = output as any
+    return { ...o, rows: o.rows.slice(0, KEPT_ROWS), truncated: true, totalRows: o.rows.length }
+  }
   if (Array.isArray(output) && output.length > KEPT_ROWS) {
     return { rows: output.slice(0, KEPT_ROWS), truncated: true, totalRows: output.length }
   }
@@ -159,6 +167,6 @@ function row(r: any): CallRecord {
     id: r.id, parentId: r.parent_id, name: r.name, hash: r.hash,
     request: JSON.parse(r.request), output: r.output == null ? null : JSON.parse(r.output), error: r.error,
     decisions: JSON.parse(r.decisions), verifications: JSON.parse(r.verifications), caveats: JSON.parse(r.caveats),
-    ms: r.ms, at: r.at,
+    queries: JSON.parse(r.queries), ms: r.ms, at: r.at,
   }
 }

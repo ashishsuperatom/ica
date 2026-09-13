@@ -761,6 +761,35 @@ What S1 exposed:
 - **Resolution fetched all 31 pillars and matched in JavaScript.** Right for a short list; a customer list
   needs the search pushed into SQL.
 
+**S2 — slice and drill** (`examples/s2-drill.mts`). Works on real data. Two concepts, `fte` and `utilised
+hours`, return relations; every question is coordinates asked of the same two programs, and none needed a new
+program.
+
+- FTE by pillar as at 31 August: 1,159 people, 1,102 FTE, with the split checked against the whole.
+- The same stock by month across Q3, read as at each month-end.
+- FTE for Q3 with no rollup **refused**; with `last` and with `average` answered.
+- Utilised hours by pillar for Q3 (387,914 h), drilled into CEC by employee, then by employee and month — the
+  parts summing to the whole at every level.
+- Refused: a flow with no time and a measure with no unit at definition; a flow asked at an instant; an unknown
+  dimension or filter; and a result the source capped at 5,000 rows, instead of showing it short.
+
+The data itself disagreed about who is employed: 1,155 by the active flag, 1,166 by hire and release date,
+1,173 by record creation, with 18 people marked inactive and no release date. The active flag cannot answer a
+past date, so the stock uses hire to release date, and says so.
+
+What S2 exposed:
+
+- **Caveats are static text.** "People marked inactive with no release date still count" should say *how
+  many*; a relation has no way to compute a caveat.
+- **`pillar` is read as it is today** for every past month, so CEC shows the same 150 people across the whole
+  quarter. Correct as-at history needs the effective-dated pillar changes.
+- **The average rollup is not checked** against a whole the way a single statement is.
+- **Queries are slow** — up to 13 seconds for hours by pillar over a quarter — and the same statement is often
+  asked twice.
+- **"Today" is taken in UTC**, so a reading on the 14th local time was labelled the 13th.
+- **Mixing a flow and a stock** could not be exercised: each concept holds one kind. That meeting happens in
+  composition, S3.
+
 Programs in the slice can both run and return values, and return relations for others to extend.
 
 ---

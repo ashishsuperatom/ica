@@ -24,8 +24,8 @@ export interface Contract {
   }
   /** name → what it means. */
   params: Record<string, string>
-  /** What it hands back: a single value, or rows. */
-  returns: 'value' | 'rows'
+  /** What it hands back: a single value, rows, or a relation — a query asked with coordinates. */
+  returns: 'value' | 'rows' | 'relation'
 }
 
 /** Everything that must be true of a contract before a program exists. Returns the first reason it is not. */
@@ -45,6 +45,6 @@ export function contractProblem(c: any): string | null {
     return `"${c.name}" is a concept but reads no data source — a concept is what reads data`
   }
   if (!c.params || typeof c.params !== 'object' || Array.isArray(c.params)) return 'params must be name → meaning'
-  if (c.returns !== 'value' && c.returns !== 'rows') return `returns is "${c.returns}" but must be value or rows`
+  if (!['value', 'rows', 'relation'].includes(c.returns)) return `returns is "${c.returns}" but must be value, rows or relation`
   return null
 }

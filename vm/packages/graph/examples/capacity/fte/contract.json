@@ -1,0 +1,8 @@
+{
+  "name": "fte",
+  "kind": "concept",
+  "description": "People employed, and their full-time equivalent, as at an instant.",
+  "reads": { "sources": ["F5NETSUITE"], "programs": [] },
+  "params": {},
+  "returns": "relation"
+}

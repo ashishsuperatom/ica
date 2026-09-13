@@ -21,7 +21,7 @@ const state = join(here, '..', '..', '..', '.state', 'graph-slice')
 rmSync(state, { recursive: true, force: true })
 
 const store = new GraphStore(join(state, 'graph.sqlite'))
-const engine = createEngine({ store, modulesDir: join(state, 'modules'), query })
+const engine = createEngine({ store, modulesDir: join(state, 'modules'), query, dialects: { F5NETSUITE: 'oracle' } })
 
 const load = (dir: string) => ({
   body: readFileSync(join(here, 'capacity', dir, 'program.mjs'), 'utf8'),
@@ -35,7 +35,7 @@ const attempt = async (label: string, fn: () => unknown) => {
 
 heading('1 · define programs')
 for (const dir of ['pillars', 'resolve-pillar', 'active-headcount', 'pillar-headcount']) {
-  const r = engine.define(load(dir), { by: 'human:slice' })
+  const r = await engine.define(load(dir), { by: 'human:slice' })
   console.log(`  ${r.name.padEnd(20)} ${r.hash}`)
 }
 
@@ -60,7 +60,7 @@ await attempt('a program cannot read a program that does not exist', () => engin
   contract: { name: 'dangling', kind: 'program', description: 'Reads something missing.',
               reads: { sources: [], programs: ['revenue'] }, params: {}, returns: 'value' },
 }, { by: 'human:slice' }))
-engine.define({
+await engine.define({
   body: `export default async (ctx) => ctx.call('active headcount')`,
   contract: { name: 'undeclared', kind: 'program', description: 'Calls something it did not declare.',
               reads: { sources: [], programs: ['pillars'] }, params: {}, returns: 'value' },
@@ -74,7 +74,7 @@ heading('5 · correction: fix once, every caller gets it')
 const wrong = store.resolve('active headcount')!
 const beforeOH  = await engine.call('pillar headcount', { pillar: 'OH' })
 const beforeAll = await engine.call('active headcount')
-const fixed = engine.define(load('active-headcount-corrected'),
+const fixed = await engine.define(load('active-headcount-corrected'),
   { by: 'human:slice', replace: true, reason: 'system accounts and placeholders are not people' })
 console.log(`  "active headcount"  ${wrong}  →  ${fixed.hash}`)
 const afterOH  = await engine.call('pillar headcount', { pillar: 'OH' })
