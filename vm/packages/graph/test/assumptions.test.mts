@@ -174,3 +174,19 @@ test('counterfactual: a correction since the answer is not counted as the effect
   assert.deepEqual(cf.difference, { factual: 80, counterfactual: 60, change: -20 })
   assert.ok(cf.caveats.some((c) => /differs from the one recorded/.test(c)))
 })
+
+test('rules: a person beats their group, a group beats the data, the data beats the global rule', async () => {
+  const { engine } = await setup({
+    target: { rules: [
+      { value: 0.75 },
+      { when: { team: 'b' }, value: 0.8 },
+      { when: { 'who.groups': 'finance' }, value: 0.7 },
+      { when: { 'who.id': 'u1' }, value: 0.65 },
+    ] },
+  })
+  await engine.define(program('target b', [], `export default async (ctx) => ctx.assume('target', { team: 'b' })`,
+    { target: { description: 'utilisation target' } }), { by: 'test' })
+  assert.equal((await engine.call('target b')).value, 0.8, 'the data')
+  assert.equal((await engine.call('target b', {}, { who: { id: 'u2', groups: ['finance'] } })).value, 0.7, 'the group over the data')
+  assert.equal((await engine.call('target b', {}, { who: { id: 'u1', groups: ['finance'] } })).value, 0.65, 'the person over the group')
+})
