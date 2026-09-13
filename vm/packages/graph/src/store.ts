@@ -146,6 +146,20 @@ export class GraphStore {
     return (this.db.prepare('SELECT * FROM call WHERE hash = ? ORDER BY at').all(hash) as any[]).map(row)
   }
 
+  /** The answer a call was part of: its outermost caller. */
+  root(id: string): CallRecord | null {
+    let c = this.getCall(id)
+    while (c?.parentId) c = this.getCall(c.parentId)
+    return c
+  }
+
+  /** Every answer that went through one exact program, however deep — what a correction to it changes. */
+  answersThrough(hash: string): CallRecord[] {
+    const roots = new Map<string, CallRecord>()
+    for (const c of this.callsThrough(hash)) { const r = this.root(c.id); if (r) roots.set(r.id, r) }
+    return [...roots.values()].sort((a, b) => a.at - b.at)
+  }
+
   close(): void { this.db.close() }
 }
 

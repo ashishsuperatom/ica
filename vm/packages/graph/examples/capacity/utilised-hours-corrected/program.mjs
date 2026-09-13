@@ -1,5 +1,8 @@
 // A FLOW: one row per utilised time entry between @from and @to.
 //
+// Actual time only. A timebill row is Actual (A), Allocated (B) or Planned (P) time. Allocated and planned
+// hours are intentions recorded against the same people and days; counting them adds a second and third copy.
+//
 // The same population as fte — people, not system accounts — so the two can be compared.
 export default (ctx, { from, to }) => ({
   source: 'F5NETSUITE',
@@ -18,6 +21,7 @@ export default (ctx, { from, to }) => ({
       LEFT JOIN department d ON d.id = e.department
       LEFT JOIN subsidiary s ON s.id = e.subsidiary
      WHERE tb.isutilized = 'T'
+       AND tb.timetype = 'A'
        AND e.firstname IS NOT NULL
        AND tb.trandate >= TO_DATE(@from, 'YYYY-MM-DD')
        AND tb.trandate <  TO_DATE(@to, 'YYYY-MM-DD')`,

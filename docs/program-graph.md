@@ -835,6 +835,55 @@ What S3 exposed:
 - **Hours booked where a person had no capacity** (moved pillar, left) appear as rows with no ratio; that is
   the current-pillar problem from S2 surfacing in a number.
 
+### Decided
+
+**A relation can be built on relations, still in SQL.** A program that returns a relation names the relations
+it builds on in braces — `SELECT h.* FROM {{utilised hours}} h WHERE h.billable = 'T'` — and the engine puts
+each one's SQL in its place, resolved by name at run time. SQL is closed under nesting, so any relation can be
+filtered, joined to another relation on the same source, or extended with columns, and the result is again a
+relation the engine can slice. The builder gave no composition this does not: a builder relation could only be
+extended by adding joins and conditions to the same flat query, which a subquery does too.
+
+What was actually given up, and how each is held:
+
+- **Structure written by the author** (which expression is a key, which is a condition) — now recovered by
+  parsing the SQL with the parser the datasource manager already runs, rather than required of whoever writes it.
+- **Reaching inside a concept** for a column it does not output. A caller now sees only output columns, so a
+  concept exposes what callers need (`billable`). That is the interface doing its job.
+- **Flat SQL.** Composition nests. SuiteQL ran the nested form without trouble; if an engine does not, the parser
+  can merge subqueries before the statement is sent.
+- **Only a concept names a table** is enforced for a relation program by what it may reference in braces, not
+  yet by parsing its SQL for base tables. *Not yet built.*
+
+Across sources a single statement is impossible; relations from two sources are combined by a program after each
+is aggregated to the shared split.
+
+**A replacement must fit its callers.** Repointing a name is refused when the new program returns something
+else, drops a parameter, or — for a relation — drops or moves a dimension or measure, changes a unit or kind, or
+moves its time column.
+
+**S4 — correction** (`examples/s4-correction.mts`). `utilised hours` counted Actual, Allocated and Planned time.
+Two things were built on it: `utilisation`, a program that calls it, and `billable hours`, a relation whose SQL
+contains its SQL. A correction renaming the measure was refused as breaking its callers. The real correction —
+actual time only — moved the name; neither caller's hash changed. Memory found the three answers that went
+through the wrong version, however deep, and re-ran them:
+
+- utilisation by pillar, Q2: total 75.9% → 38.4%; Retail 135.5% → 66.7%.
+- NetSuite by employee: Brenda Meyer 173.6% → 91.1%.
+- billable hours by pillar: 202,590 h → 186,003 h.
+
+What S4 exposed:
+
+- **38% company utilisation is now the suspicious number.** Available hours are FTE × 40 × weeks for every
+  pillar, overhead pillars and leave included. Whether OH counts toward capacity, and how long a working week is,
+  are assumptions — S5.
+- **Replay re-runs a request; it does not diff answers.** The comparison was done by the demo, because an
+  answer's output has no identity per row that memory could compare.
+- **Nothing ran the replay automatically.** Whether a correction should re-run past answers, notify whoever
+  asked, or only mark them, is undecided.
+- **Inlined relations are recorded as calls with no queries** so lineage finds them. Their SQL is visible only
+  inside the parent's statement.
+
 ---
 
 ## 18. Open questions

@@ -51,7 +51,9 @@ export function contractProblem(c: any): string | null {
   if (!c.params || typeof c.params !== 'object' || Array.isArray(c.params)) return 'params must be name → meaning'
   if (!['value', 'rows', 'relation'].includes(c.returns)) return `returns is "${c.returns}" but must be value, rows or relation`
   if (c.returns === 'relation') {
-    if (c.kind !== 'concept') return `"${c.name}" returns a relation, and only a concept writes the SQL a relation is`
+    if (c.kind === 'program' && !c.reads.programs.length) {
+      return `"${c.name}" is a program that returns a relation, so it must read the relations it is built from`
+    }
     const bad = shapeProblem(c.shape)
     if (bad) return bad
   } else if (c.shape) return `"${c.name}" declares a shape but returns ${c.returns}; a shape describes a relation`
