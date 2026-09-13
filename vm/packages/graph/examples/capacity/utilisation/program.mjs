@@ -1,21 +1,29 @@
 // UTILISATION = utilised hours ÷ available hours.
 //
-// Available hours are FTE × a 40-hour week × the weeks in the span, with FTE averaged over the span's
-// month-ends — so people who joined or left part-way count for part of it.
+// Available hours are FTE × the working week × the weeks in the span, with FTE averaged over the span's
+// month-ends — so people who joined or left part-way count for part of it. The working week, and which pillars
+// are not delivery capacity at all, are assumptions: the organisation's, or the caller's.
 //
 // A ratio is a value per unit, so it is never added up. Every row's ratio is computed from that row's own
 // hours and available hours, and the total is the ratio of the totals.
-const WEEK_HOURS = 40
 const DAY = 864e5
 const weeks = (from, to) => (Date.parse(to) - Date.parse(from)) / DAY / 7
 
 export default async function (ctx, { during, by = [], pillar }) {
   // ── stage 1: what was typed becomes an id, before any number is asked for ────────────────────────────────
+  const weekHours = ctx.assume('working week')
+  const outside = ctx.assume('pillars outside capacity').map(String)
   const where = {}
   if (pillar) {
     const resolved = await ctx.call('resolve pillar', { name: pillar })
     if (resolved.status !== 'resolved') return resolved
+    if (!ctx.decide('the pillar is delivery capacity', !outside.includes(String(resolved.id)), `${resolved.name} is ${outside.includes(String(resolved.id)) ? '' : 'not '}among the pillars outside capacity`)) {
+      return { status: 'outside capacity', pillar: resolved.name }
+    }
     where.pillar = resolved.id
+  } else if (outside.length) {
+    where.pillar = { notIn: outside }
+    ctx.caveat(`${outside.length} pillar(s) are not counted as delivery capacity`)
   }
 
   // ── stage 2: a span that runs past today would divide part of a period's hours by all of its capacity ─────
@@ -45,7 +53,7 @@ export default async function (ctx, { during, by = [], pillar }) {
   const key = (row) => JSON.stringify(by.map((d) => row[d] ?? null))
   const rows = new Map()
   for (const r of fte.rows) {
-    rows.set(key(r), { ...pick(r, fte.columns), hours: 0, available: r.fte * WEEK_HOURS * weeksFor(r) })
+    rows.set(key(r), { ...pick(r, fte.columns), hours: 0, available: r.fte * weekHours * weeksFor(r) })
   }
   for (const r of hours.rows) {
     const k = key(r)

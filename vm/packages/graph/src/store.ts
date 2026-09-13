@@ -34,6 +34,12 @@ export interface CallRecord {
   at: number
   /** The date the call took as today. Anything that reads the clock reads this, so a replay can use the same day. */
   today: string
+  /** Every assumption this call read, its value, and where the value came from. */
+  assumptions: Array<{ name: string; value: unknown; from: 'caller' | 'organisation' | 'default' }>
+  /** The interventions in force for this call — on every call they reached. An answer with any is hypothetical, not a fact. */
+  interventions: Record<string, unknown> | null
+  /** The assumptions the caller passed down, on its outermost call, so a replay can pass the same. */
+  context: Record<string, unknown> | null
 }
 
 const SCHEMA = `
@@ -86,7 +92,9 @@ export class GraphStore {
     this.db.exec('PRAGMA journal_mode = WAL')
     this.db.exec(SCHEMA)
     const columns = (this.db.prepare('PRAGMA table_info(call)').all() as any[]).map((c) => c.name)
-    if (!columns.includes('today')) this.db.exec('ALTER TABLE call ADD COLUMN today TEXT')
+    for (const c of ['today', 'assumptions', 'interventions', 'context']) {
+      if (!columns.includes(c)) this.db.exec(`ALTER TABLE call ADD COLUMN ${c} TEXT`)
+    }
   }
 
   // ── programs ──────────────────────────────────────────────────────────────────────────────────────────
@@ -130,11 +138,12 @@ export class GraphStore {
   // ── memory ────────────────────────────────────────────────────────────────────────────────────────────
 
   recordCall(c: CallRecord): void {
-    this.db.prepare(`INSERT INTO call (id, parent_id, name, hash, request, output, error, decisions, verifications, caveats, queries, ms, at, today)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    this.db.prepare(`INSERT INTO call (id, parent_id, name, hash, request, output, error, decisions, verifications, caveats, queries, ms, at, today, assumptions, interventions, context)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(c.id, c.parentId, c.name, c.hash, JSON.stringify(c.request), JSON.stringify(keep(c.output)),
            c.error, JSON.stringify(c.decisions), JSON.stringify(c.verifications), JSON.stringify(c.caveats),
-           JSON.stringify(c.queries), c.ms, c.at, c.today)
+           JSON.stringify(c.queries), c.ms, c.at, c.today, JSON.stringify(c.assumptions ?? []),
+           c.interventions ? JSON.stringify(c.interventions) : null, c.context ? JSON.stringify(c.context) : null)
   }
 
   getCall(id: string): CallRecord | null {
@@ -187,5 +196,7 @@ function row(r: any): CallRecord {
     request: JSON.parse(r.request), output: r.output == null ? null : JSON.parse(r.output), error: r.error,
     decisions: JSON.parse(r.decisions), verifications: JSON.parse(r.verifications), caveats: JSON.parse(r.caveats),
     queries: JSON.parse(r.queries), ms: r.ms, at: r.at, today: r.today,
+    assumptions: r.assumptions ? JSON.parse(r.assumptions) : [], interventions: r.interventions ? JSON.parse(r.interventions) : null,
+    context: r.context ? JSON.parse(r.context) : null,
   }
 }

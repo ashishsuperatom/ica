@@ -10,6 +10,8 @@ export function trace(store: GraphStore, callId: string, indent = '', showSql = 
   if (!c) return `${indent}(no call ${callId})`
   const status = c.error ? `FAILED — ${c.error}` : summarise(c.output)
   const lines = [`${indent}${c.name}  ${c.hash}  ${JSON.stringify(c.request)}  → ${status}  ${c.ms}ms`]
+  if (c.interventions && !c.parentId) lines.push(`${indent}   hypothetical  ${JSON.stringify(c.interventions)}`)
+  for (const a of c.assumptions ?? []) lines.push(`${indent}   assumed  ${a.name} = ${JSON.stringify(a.value)} (${a.from})`)
   for (const d of c.decisions) lines.push(`${indent}   decided  ${d.label}: ${d.took ? 'yes' : 'no'} — ${d.reason}`)
   for (const v of c.verifications) lines.push(`${indent}   ${v.held ? 'held' : 'FAILED'}     ${v.label}${v.detail ? ` — ${v.detail}` : ''}`)
   for (const cv of c.caveats) lines.push(`${indent}   caveat   ${cv}`)

@@ -939,6 +939,52 @@ Each can be done today as a program, so none is a refusal; each is still a gap i
 - **Rows from a non-SQL source are all fetched**; bounding them by `when` and `where` is left to the body.
 - **Base tables in a relation program's SQL** are not yet parsed for.
 
+### Decided — assumptions and interventions
+
+**An assumption is declared by the program that reads it** (`assumes` in the contract: description, unit,
+default) and read by name with `ctx.assume`. Its value comes from the nearest caller that set it, else the
+organisation's settings, else the declared default; with none, the call is refused rather than guessed. A
+program sets assumptions for everything below it with `ctx.call(name, request, { assume })`. Programs that do not
+read an assumption never see it, so a new one never changes a caller's signature. Every call records each
+assumption it read, its value, and which of the three it came from.
+
+**An intervention is a change for one request only** — Pearl's do-operator. By program name, anywhere in the
+request however deep: `value` replaces what a program returns; `where` leaves rows of a relation out; `add`
+adds rows, and for a stock each added member counts from `from` until `to`. A relation's intervention is SQL
+around its SQL, so every relation built on it and every coordinate asked of it sees the change. Nothing enters
+the graph. The answer carries a `hypothetical` caveat, every call under it records the interventions, and
+`replay` repeats the same day, assumptions and interventions.
+
+**S5 — assumptions and interventions** (`examples/s5-assumptions.mts`, 7 tests). On Q2:
+
+- Defaults (40-hour week, every pillar is capacity): 38.4%.
+- Illustrative organisation settings (37.5-hour week; OH, Microsoft and Jade not capacity): 48.2%. A caller's
+  35-hour week on top: 51.6%. Asked about OH under those settings, the program says it is outside capacity.
+- Three hires in NetSuite from 1 April: available hours 53,821 → 55,381 — exactly 3 × 40 × 13 — and
+  utilisation 29.8% → 28.9%. Asked again without the intervention: 29.8%.
+- A rule for one request, leaving Fusion5 Ltd out of both concepts: 40.5%.
+
+What S5 exposed:
+
+- **SuiteQL refuses a union whose columns differ in type**, so an added person with a text id beside numeric
+  ids failed. Dimension columns are now text inside an intervention, matching how the engine compares members.
+- **A stock is never read after today**, so "three hires from next month" cannot yet be seen. Forward-looking
+  capacity needs a projection, not an as-at reading — S8.
+- **Which pillars are capacity is a real organisational fact** that only Fusion5 can supply; the settings used
+  here are illustrative. Where organisation settings live, and who may change them, is open.
+- **Calendars are built into the engine.** Grains are calendar grains; a fiscal year starting in April, a
+  4-4-5 retail calendar, or a country's own quarters cannot be defined. The likely foundation is Kimball's date
+  dimension — a calendar as a relation, chosen by an assumption — rather than more grain arithmetic.
+- **Comparison is not in the vocabulary.** This period against a past one (Rill's comparison, MetricFlow's
+  offset window) is written by hand as two calls and a join. Aligning periods, partial current periods and
+  stocks read as at matching dates are universal and easy to get wrong, which argues it belongs in coordinates.
+- **A program cannot take a program as a parameter.** A general "compare any measure" program would have to
+  declare every relation it might read. Whether contracts allow a parameter that names a program — typed by the
+  shape it must have — is a foundational question.
+- **The graph is acyclic at creation, not by construction.** A program may only read names that already exist,
+  so nothing new can close a loop; but names are mutable, and a replacement can. That is refused when the loop
+  runs, not when the replacement is made.
+
 ---
 
 ## 18. Open questions

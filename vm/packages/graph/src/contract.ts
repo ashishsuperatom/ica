@@ -30,6 +30,16 @@ export interface Contract {
   returns: 'value' | 'rows' | 'relation'
   /** For a relation: which of its columns are dimensions, measures and time. See shape.ts. */
   shape?: Shape
+  /** Named beliefs it reads — a working week, a target — looked up by name from the context its caller passes
+   *  down, then the organisation's, then the default here. A program reads only what it declares. */
+  assumes?: Record<string, Assumption>
+}
+
+export interface Assumption {
+  description: string
+  unit?: string
+  /** Used when neither the caller nor the organisation says otherwise. Absent means one must be given. */
+  default?: unknown
 }
 
 /** Everything that must be true of a contract before a program exists. Returns the first reason it is not. */
@@ -50,6 +60,12 @@ export function contractProblem(c: any): string | null {
   }
   if (!c.params || typeof c.params !== 'object' || Array.isArray(c.params)) return 'params must be name → meaning'
   if (!['value', 'rows', 'relation'].includes(c.returns)) return `returns is "${c.returns}" but must be value, rows or relation`
+  if (c.assumes !== undefined) {
+    if (!c.assumes || typeof c.assumes !== 'object' || Array.isArray(c.assumes)) return 'assumes must be name → { description, unit?, default? }'
+    for (const [n, a] of Object.entries<any>(c.assumes)) {
+      if (!a || typeof a.description !== 'string' || !a.description.trim()) return `assumption "${n}" needs a description`
+    }
+  }
   if (c.returns === 'relation') {
     if (c.kind === 'program' && !c.reads.programs.length) {
       return `"${c.name}" is a program that returns a relation, so it must read the relations it is built from`

@@ -101,6 +101,8 @@ export interface SqlDialect {
   /** The label of the period a date falls in. Labels are the same strings in every dialect and in `periods`. */
   period(grain: Grain, column: string): string
   limit(sql: string, n: number): string
+  /** An expression as text. */
+  text(expr: string): string
   /** The median, where the dialect has one. */
   median?: (expr: string) => string
 }
@@ -117,6 +119,7 @@ export function sqlFor(dialect: Dialect): SqlDialect {
       year: `CAST(DATEPART(year, ${c}) AS varchar(4))`,
     })[g],
     limit: (sql, n) => sql.replace(/^SELECT /, `SELECT TOP ${n} `),
+    text: (e) => `CAST(${e} AS nvarchar(4000))`,
   }
   if (dialect === 'sqlite') return {
     date: (p) => `@${p}`,
@@ -128,6 +131,7 @@ export function sqlFor(dialect: Dialect): SqlDialect {
       year: `strftime('%Y', ${c})`,
     })[g],
     limit: (sql, n) => `${sql}\nLIMIT ${n}`,
+    text: (e) => `CAST(${e} AS TEXT)`,
   }
   return {
     date: (p) => `TO_DATE(@${p}, 'YYYY-MM-DD')`,
@@ -140,6 +144,7 @@ export function sqlFor(dialect: Dialect): SqlDialect {
     })[g],
     limit: (sql, n) => `${sql}\nFETCH FIRST ${n} ROWS ONLY`,
     median: (e) => `MEDIAN(${e})`,
+    text: (e) => `TO_CHAR(${e})`,
   }
 }
 
@@ -184,6 +189,26 @@ export function periods(grain: Grain, from: string, to: string): Array<{ label: 
   for (let s = periodStart(grain, from); s < to; s = nextStart(grain, s)) {
     const last = addDays(nextStart(grain, s), -1)
     out.push({ label: periodOf(grain, s), start: s, end: last < to ? last : addDays(to, -1) })
+  }
+  return out
+}
+
+/** A condition as SQL, binding each value through `bind`, which returns the placeholder to write. */
+export function conditionSql(expr: string, cond: Condition, what: string, bind: (v: unknown) => string): string[] {
+  if (cond === null) return [`${expr} IS NULL`]
+  if (Array.isArray(cond)) return [cond.length ? `${expr} IN (${cond.map(bind).join(', ')})` : '1 = 0']
+  if (typeof cond !== 'object') return [`${expr} = ${bind(cond)}`]
+  const out: string[] = []
+  for (const [op, v] of Object.entries(cond)) {
+    if (op === 'isNull') out.push(v ? `${expr} IS NULL` : `${expr} IS NOT NULL`)
+    else if (op === 'in' || op === 'notIn') {
+      const list = v as Scalar[]
+      out.push(list.length ? `${expr} ${op === 'in' ? 'IN' : 'NOT IN'} (${list.map(bind).join(', ')})` : op === 'in' ? '1 = 0' : '1 = 1')
+    } else {
+      const sqlOp = ({ eq: '=', ne: '<>', gt: '>', gte: '>=', lt: '<', lte: '<=' } as Record<string, string>)[op]
+      if (!sqlOp) refuse(`unknown condition "${op}" on ${what} — use in, notIn, eq, ne, gt, gte, lt, lte or isNull`)
+      out.push(`${expr} ${sqlOp} ${bind(v)}`)
+    }
   }
   return out
 }
@@ -237,24 +262,7 @@ export async function plan(shape: Shape, read: ReadBody, c: Coordinates, dialect
   const filterParams: Record<string, unknown> = {}
   let n = 0
   const bind = (v: unknown) => { const name = `${P}${n++}`; filterParams[name] = v; return `@${name}` }
-  const condition = (expr: string, cond: Condition, what: string): string[] => {
-    if (cond === null) return [`${expr} IS NULL`]
-    if (Array.isArray(cond)) return [cond.length ? `${expr} IN (${cond.map(bind).join(', ')})` : '1 = 0']
-    if (typeof cond !== 'object') return [`${expr} = ${bind(cond)}`]
-    const out: string[] = []
-    for (const [op, v] of Object.entries(cond)) {
-      if (op === 'isNull') out.push(v ? `${expr} IS NULL` : `${expr} IS NOT NULL`)
-      else if (op === 'in' || op === 'notIn') {
-        const list = v as Scalar[]
-        out.push(list.length ? `${expr} ${op === 'in' ? 'IN' : 'NOT IN'} (${list.map(bind).join(', ')})` : op === 'in' ? '1 = 0' : '1 = 1')
-      } else {
-        const sqlOp = ({ eq: '=', ne: '<>', gt: '>', gte: '>=', lt: '<', lte: '<=' } as Record<string, string>)[op]
-        if (!sqlOp) refuse(`unknown condition "${op}" on ${what} — use in, notIn, eq, ne, gt, gte, lt, lte or isNull`)
-        out.push(`${expr} ${sqlOp} ${bind(v)}`)
-      }
-    }
-    return out
-  }
+  const condition = (expr: string, cond: Condition, what: string) => conditionSql(expr, cond, what, bind)
   const filters = Object.entries(where).flatMap(([d, cond]) => condition(`t.${dimensions[d].column}`, cond, d))
 
   const aggregateSql = (m: string, s: SqlDialect): string => {
