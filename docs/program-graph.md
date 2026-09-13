@@ -1056,7 +1056,186 @@ rendering follows the result's columns. Which layer, and checking the change was
 
 ---
 
-## 18. Open questions
+## 18. What the question does not say, and answers that differ by person
+
+### Proposal — the parts of a question nobody gave
+
+A person gives only part of a question. Only what they give is a parameter of *this* question; everything else
+is filled in, and there is more than one place it can come from. In order:
+
+1. **The conversation.** A follow-up keeps what the earlier question settled unless it says otherwise — "and for
+   CEC?" keeps the span and the measure.
+2. **The person, their groups, the organisation.** A default span, a default target, a preferred calendar —
+   rules ranked person over group over global (section 17).
+3. **The program's declared default.**
+4. **Asking.** A value that matters and has none of the above is a question back, not a guess.
+
+Not every omission is a gap. An omitted split means "not split"; an omitted filter means "all". What must be
+filled is what the answer cannot exist without — the span for a flow, the instant for a stock — and what the
+program declares as an assumption.
+
+**Every filled value is shown with the answer and where it came from** — "Q2 2026, from your previous
+question"; "37.5-hour week, Finance's setting". That is what makes a default safe: the person sees it and can
+say otherwise, and memory already records it per call.
+
+### Proposal — a question that asks for more must not grow the program
+
+"Also show each person's manager" is asked once, then "their location", then "their start date". If each is
+added to the program or the concept, the concept becomes the union of every question ever asked of it, and the
+person who wanted the plain answer gets all of it.
+
+So an addition is never a change to the answer's program. It is a change to *the question*:
+
+- **The manager is a fact about an employee,** not about hours. It lives in its own concept on the employee
+  entity — `employee manager`, keyed by employee — however many tables it takes to find.
+- **The engine reaches it by the key**, because hours are declared to be *about* employees: entities and joins
+  (section 19, missing). A request adds `attributes: ['employee.manager']`; nothing that existed changes.
+- **Two people, one program, different columns.** One asks with the manager, one without. The columns someone
+  sees by default are a preference — a rule on the person, their group, or everyone — not a version of the
+  program.
+- **A combination people keep asking for** becomes a named program later, through consolidation (section 17,
+  reasoning), and even then the plain question still exists.
+
+This depends on two capabilities not yet built: **entities with joins by key**, and **dimension attributes**.
+It is the strongest argument for putting both in the foundation.
+
+---
+
+## 19. What is missing, compared with systems that exist
+
+A catalogue, to be taken one item at a time: kept, deferred, or rejected. **Us** is ✗ missing or ◐ partial.
+Named systems are examples of where the capability exists: Rill, Cube, dbt and MetricFlow, Snowflake, Metabase,
+Looker. Section 20 covers what is beyond analysis.
+
+### 19.1 Query vocabulary
+
+| Capability | Us | Where it exists |
+|---|---|---|
+| Pivot — rows by columns | ✗ long rows only | Rill, Metabase, Looker |
+| Subtotals and grand totals, correct per measure kind (a ratio or distinct count is not summed) | ✗ | Rill, Looker, Metabase, Cube |
+| Percent of total, share of parent | ✗ | Rill, Looker, Metabase, Cube |
+| Top N within each group; rank; row number | ✗ global top N only | Looker, Metabase, Cube |
+| An "other" row after a top N | ✗ | Rill, Looker |
+| Rolling windows — 7-day average, trailing 12 months | ✗ running totals only | Cube, MetricFlow, Rill |
+| Relative dates — last 30 days, quarter to date, previous complete month | ✗ | Cube, Metabase, Rill, Looker |
+| Time zones | ✗ | Cube, Rill, Looker, Snowflake |
+| Several time columns in one relation — ordered, shipped | ✗ one only | Cube, LookML, MetricFlow |
+| Text conditions — contains, starts with, pattern | ✗ | all |
+| Segments — named, reusable filters | ✗ | Cube, Metabase, LookML |
+| Filtered measures — hours where billable, as a measure | ◐ via a relation program | Cube, LookML, MetricFlow |
+| Binning a number into bands | ✗ | Metabase, Looker, Rill |
+| Percentiles beyond the median; approximate distinct counts | ◐ median only | Snowflake, Cube, Rill |
+| Funnels — conversion between events | ✗ | MetricFlow |
+| Cohorts and retention | ✗ | Metabase, Looker, Rill |
+| Last value per key over time — a balance per account | ◐ stocks as at | MetricFlow, LookML |
+| Comparison inside a rolling window | ◐ | Rill, MetricFlow |
+
+### 19.2 Modelling
+
+| Capability | Us | Where it exists |
+|---|---|---|
+| Entities and joins by key; join paths found by the engine | ✗ | Cube, MetricFlow, LookML |
+| Fan-out protection — a join that repeats rows cannot inflate a sum | ✗ and the parts-sum check cannot see it | Looker, Cube, MetricFlow |
+| Declared grain and primary key | ✗ | Cube, dbt, MetricFlow |
+| Dimension attributes — an employee's manager, without splitting by it | ✗ | Cube, LookML, Kimball |
+| Hierarchies and drill paths — department tree, country to city | ✗ | Cube, Looker, Rill |
+| Values as they were at the time — slowly changing dimensions | ✗ declared, not honoured | dbt snapshots, Kimball |
+| The same dimension meaning the same key everywhere | ✗ | MetricFlow, Kimball |
+| Display formats | ◐ units only | all |
+| Currencies — amounts in their currency, converted at a declared rate and date | ✗ | Looker, Snowflake, custom everywhere |
+| Units — hours to days, FTE to hours, by a declared rule | ✗ | custom everywhere |
+| Language and locale of labels and numbers | ✗ | Looker, Metabase |
+| Curated views — which measures a person or agent sees | ✗ | Cube, LookML, Snowflake semantic views |
+| Synonyms and descriptions per measure and dimension | ◐ per program only | Snowflake, Cube, dbt |
+| Certified definitions | ✗ | dbt, Metabase, Looker |
+
+### 19.3 Performance
+
+| Capability | Us | Where it exists |
+|---|---|---|
+| Pre-aggregations — materialised rollups that answer many questions | ✗ | Cube, Snowflake, Rill |
+| Freshness-aware refresh; incremental rebuild | ✗ cache never checks the source | Cube, dbt, Snowflake |
+| Cost-based planning from recorded timings | ✗ timings recorded, unused | Snowflake, Cube |
+| Queues, cancellation, long-running queries | ✗ | Cube, Snowflake, Metabase |
+| Results beyond the row cap — paging, streaming | ✗ refused | all |
+
+### 19.4 Correctness and operations
+
+| Capability | Us | Where it exists |
+|---|---|---|
+| Data tests — unique, not null, relationships, accepted values | ✗ column existence only | dbt |
+| Source freshness | ✗ | dbt, Rill |
+| Data contracts on columns and types | ◐ interface check on replacement | dbt |
+| Column-level lineage | ✗ program level | dbt, Snowflake, Looker |
+| Impact of a change before it is made | ◐ past answers listed | dbt, Looker |
+| Environments and branches for definitions | ◐ name history | dbt, Cube, LookML |
+| A browsable catalogue | ✗ | dbt, Cube, Metabase |
+
+### 19.5 Governance
+
+| Capability | Us | Where it exists |
+|---|---|---|
+| Row-level security | ◐ policies from the request, applied in the SQL rewrite | Snowflake, Cube, Metabase |
+| Column masking | ✗ whole-table denial only | Snowflake, Metabase |
+| Measure and dimension visibility per role | ✗ | Cube |
+| Multi-tenancy | ✗ | Cube |
+| Access audit — who saw which rows | ◐ memory records who asked | Snowflake, Looker |
+
+### 19.6 Using results
+
+| Capability | Us | Where it exists |
+|---|---|---|
+| Drill-through to the rows behind a number | ✗ | Metabase, Looker, Rill, Cube |
+| Tables, charts, pivots rendered | ✗ in the graph | all |
+| Dashboards with shared filters | ✗ | Metabase, Rill, Looker |
+| Saved questions and reports | ◐ memory, uncurated | Metabase, MetricFlow |
+| Schedules and subscriptions | ✗ | Metabase, Looker, Rill |
+| Threshold alerts | ✗ — S7 | Rill, Metabase, Looker |
+| Export to CSV and spreadsheets | ✗ | all |
+| SQL, JDBC, REST or GraphQL access for other tools | ✗ | Cube, dbt Semantic Layer |
+| Embedding | ✗ | Cube, Metabase, Looker |
+
+### 19.7 What their agents rely on
+
+| Capability | Us | Where it exists |
+|---|---|---|
+| Listing measures and dimensions with descriptions, for the agent | ✗ | dbt Semantic Layer MCP, Cube, Snowflake Cortex Analyst |
+| Searching any dimension's values — "Acme" to customer 123 | ◐ one hand-written resolver | Cortex Analyst, Metabot, Cube |
+| A verified-query library, reused and used as examples | ◐ memory, uncurated | Cortex Analyst |
+| Synonyms matched to the question | ✗ | Snowflake, Cube |
+| Clarifying an ambiguous question | ◐ the resolver refuses ambiguity | Cortex Analyst, Metabot |
+| A plain-language account of how the answer was reached | ◐ trace, no narrative | Cortex Analyst, Looker |
+| Feedback turning an answer into a verified example | ✗ | Cortex Analyst, Metabot |
+| Evaluation — questions with known answers, re-run on every change | ✗ | agent platforms generally |
+
+### 19.8 Candidates for the foundation
+
+Judged by the rule in section 17 — needed by every analysis, and wrong the same way whenever it is hand-written:
+subtotals per measure kind; percent of total and top N per group; rolling windows and relative dates; time zones;
+currencies and units; entities with joins by key and fan-out protection; declared grain and dimension attributes;
+drill-through to detail rows; searching any dimension's values; listing the graph for agents and a verified-query
+library; column masking. *Each to be decided.*
+
+---
+
+## 20. Beyond analysis
+
+The decision layer is a further layer on top of everything above, not yet built. What it and the rest of R8
+need, for the same one-by-one treatment:
+
+- **Mechanism programs** — how the organisation responds: hours booked as headcount rises, pipeline to revenue.
+  Without them a counterfactual holds everything else fixed.
+- **Expectations and anomaly detection** — S7.
+- **Causal analysis** — why a number moved, as a branching program with memory — S7.
+- **Forecasting and projection** — a stock after today, from plans and trends — S8.
+- **Decisions** — options, the criteria between them, a recorded boundary, reopening when data crosses it — S8.
+- **Optimisation** — the best allocation under constraints: who staffs which project.
+- **Simulation** — many counterfactuals over uncertain inputs, with a distribution, not a point.
+- **Strategies** — sequences of actions, remembered with their outcomes, learned from.
+- **Outcomes** — what happened after a decision, recorded against it.
+- **Notification and workflow** — telling the right person, and acting.
+
+## 21. Open questions
 
 1. Is "only concepts read data sources" the right rule?
 2. How are programs that do not return dimensioned data called?
