@@ -32,6 +32,8 @@ export interface CallRecord {
   queries: Array<{ source: string; sql: string; params: Record<string, unknown>; rows: number; ms: number; capped: boolean }>
   ms: number
   at: number
+  /** The date the call took as today. Anything that reads the clock reads this, so a replay can use the same day. */
+  today: string
 }
 
 const SCHEMA = `
@@ -65,7 +67,8 @@ CREATE TABLE IF NOT EXISTS call (
   caveats       TEXT NOT NULL,
   queries       TEXT NOT NULL,
   ms            INTEGER NOT NULL,
-  at            INTEGER NOT NULL
+  at            INTEGER NOT NULL,
+  today         TEXT
 );
 CREATE INDEX IF NOT EXISTS call_parent ON call(parent_id);
 CREATE INDEX IF NOT EXISTS call_hash   ON call(hash);
@@ -82,6 +85,8 @@ export class GraphStore {
     this.db = new DatabaseSync(path)
     this.db.exec('PRAGMA journal_mode = WAL')
     this.db.exec(SCHEMA)
+    const columns = (this.db.prepare('PRAGMA table_info(call)').all() as any[]).map((c) => c.name)
+    if (!columns.includes('today')) this.db.exec('ALTER TABLE call ADD COLUMN today TEXT')
   }
 
   // ── programs ──────────────────────────────────────────────────────────────────────────────────────────
@@ -125,11 +130,11 @@ export class GraphStore {
   // ── memory ────────────────────────────────────────────────────────────────────────────────────────────
 
   recordCall(c: CallRecord): void {
-    this.db.prepare(`INSERT INTO call (id, parent_id, name, hash, request, output, error, decisions, verifications, caveats, queries, ms, at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    this.db.prepare(`INSERT INTO call (id, parent_id, name, hash, request, output, error, decisions, verifications, caveats, queries, ms, at, today)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(c.id, c.parentId, c.name, c.hash, JSON.stringify(c.request), JSON.stringify(keep(c.output)),
            c.error, JSON.stringify(c.decisions), JSON.stringify(c.verifications), JSON.stringify(c.caveats),
-           JSON.stringify(c.queries), c.ms, c.at)
+           JSON.stringify(c.queries), c.ms, c.at, c.today)
   }
 
   getCall(id: string): CallRecord | null {
@@ -181,6 +186,6 @@ function row(r: any): CallRecord {
     id: r.id, parentId: r.parent_id, name: r.name, hash: r.hash,
     request: JSON.parse(r.request), output: r.output == null ? null : JSON.parse(r.output), error: r.error,
     decisions: JSON.parse(r.decisions), verifications: JSON.parse(r.verifications), caveats: JSON.parse(r.caveats),
-    queries: JSON.parse(r.queries), ms: r.ms, at: r.at,
+    queries: JSON.parse(r.queries), ms: r.ms, at: r.at, today: r.today,
   }
 }

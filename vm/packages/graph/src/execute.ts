@@ -1,19 +1,22 @@
 // ── RUNNING A PLAN ────────────────────────────────────────────────────────────────────────────────────────
 //
 // Statements run against the source; their rows become one result that carries its own schema, so whatever
-// receives it knows which columns are dimensions, which are measures, and in what unit — the difference between
-// a table that can be pivoted and summed correctly and a list of numbers.
+// receives it knows which columns are dimensions, which are measures, and in what unit and kind — the difference
+// between a table that can be pivoted and summed correctly and a list of numbers.
 //
-// Two checks happen here because only here are the rows visible.
+// Checks happen here because only here are the rows visible.
 //
 //   A CAPPED RESULT IS REFUSED. The source stops at a row limit; a result cut short and shown as complete is a
-//   wrong answer that looks right. Asking for fewer rows is the fix, and the refusal says how.
+//   wrong answer that looks right.
 //
-//   THE PARTS MUST SUM TO THE WHOLE. For a split, the same measure is taken unsplit and compared. A join that
-//   drops rows, or a grouping the source silently truncates, is caught here and nowhere else.
+//   THE PARTS MUST ACCOUNT FOR THE WHOLE. Each split statement is also asked unsplit, and every measure is held
+//   to what its aggregation allows: a sum's parts add to the whole, a distinct count's lie between its largest
+//   part and their sum, a minimum is its smallest part. A join that drops rows, or a grouping the source
+//   silently truncates, is caught here and nowhere else.
 
-import type { Plan } from './coordinates.js'
-import type { MeasureKind, Shape } from './shape.js'
+import { DatabaseSync } from 'node:sqlite'
+import { periodOf, periodStart, type Condition, type Plan, type ResolvedStatement } from './coordinates.js'
+import { additivity, evaluate, isDerived, type MeasureKind, type Shape } from './shape.js'
 
 export interface Column { name: string; role: 'dimension' | 'label' | 'measure'; unit?: string; kind?: MeasureKind }
 export interface Result { columns: Column[]; rows: Record<string, unknown>[]; caveats: string[] }
@@ -23,52 +26,119 @@ export type RunQuery = (source: string, sql: string, params: Record<string, unkn
 
 export class CappedError extends Error {}
 
+/** Rows from a source that is not SQL, queried with the same SQL the engine would send a database. */
+export function runLocal(st: ResolvedStatement): any[] {
+  const db = new DatabaseSync(':memory:')
+  try {
+    for (const [table, rows] of Object.entries(st.tables ?? {})) {
+      const columns = [...new Set(rows.flatMap((r) => Object.keys(r)))]
+      if (!columns.length) { db.exec(`CREATE TABLE "${table}" (_empty INTEGER)`); continue }
+      db.exec(`CREATE TABLE "${table}" (${columns.map((c) => `"${c}"`).join(', ')})`)
+      const insert = db.prepare(`INSERT INTO "${table}" VALUES (${columns.map(() => '?').join(', ')})`)
+      db.exec('BEGIN')
+      for (const r of rows) insert.run(...columns.map((c) => local(r[c])))
+      db.exec('COMMIT')
+    }
+    const params = Object.fromEntries(Object.entries(st.params).map(([k, v]) => [k, local(v)]))
+    return db.prepare(st.sql).all(params as any) as any[]
+  } finally { db.close() }
+}
+const local = (v: unknown): any => v == null ? null : v instanceof Date ? v.toISOString().slice(0, 10)
+  : typeof v === 'boolean' ? (v ? 1 : 0) : typeof v === 'object' ? JSON.stringify(v) : v
+
 export async function runPlan(shape: Shape, p: Plan, query: RunQuery,
                               log: (q: QueryRecord) => void,
-                              verify: (label: string, holds: boolean, detail: string) => void): Promise<Result> {
-  const exec = async (source: string, sql: string, params: Record<string, unknown>) => {
+                              verify: (label: string, holds: boolean, detail: string) => void,
+                              note: (caveat: string) => void): Promise<Result> {
+  const exec = async (st: ResolvedStatement) => {
     const t = Date.now()
-    const rows = await query(source, sql, params)
+    const rows = st.tables ? runLocal(st) : await query(st.source, st.sql, st.params)
     const capped = Array.isArray((rows as any).notes) && (rows as any).notes.length > 0
-    log({ source, sql, params, rows: rows.length, ms: Date.now() - t, capped })
+    log({ source: st.tables ? `${st.source} (local)` : st.source, sql: st.sql, params: st.params, rows: rows.length, ms: Date.now() - t, capped })
     if (capped) {
       throw new CappedError(`the source stopped at ${rows.length} rows, so this result would be incomplete. ` +
-        `Ask for fewer rows: a coarser split, a narrower span, or a filter`)
+        `Ask for fewer rows: a coarser split, a narrower span, a filter, or a limit`)
     }
     return rows
   }
 
-  const numeric = (row: any) => { for (const m of p.measures) row[m] = row[m] == null ? null : Number(row[m]); return row }
-  const results = await Promise.all(p.statements.map(async (s) =>
-    (await exec(s.source, s.sql, s.params)).map((row) => numeric(s.month ? { month: s.month, ...row } : row))))
-
-  let rows: Record<string, unknown>[]
-  if (p.combine === 'average-over-months') {
-    const keys = p.by
-    const groups = new Map<string, { row: Record<string, unknown>; sums: Record<string, number>; n: number }>()
-    for (const row of results.flat()) {
-      const k = JSON.stringify(keys.map((d) => row[d]))
-      const g = groups.get(k) ?? { row: Object.fromEntries(Object.entries(row).filter(([c]) => !p.measures.includes(c) && c !== 'month')), sums: {}, n: 0 }
-      for (const m of p.measures) g.sums[m] = (g.sums[m] ?? 0) + Number(row[m] ?? 0)
-      g.n++
-      groups.set(k, g)
-    }
-    // A member absent from some months counts as zero in those months, since a stock that is not there is zero.
-    rows = [...groups.values()].map((g) => ({ ...g.row, ...Object.fromEntries(p.measures.map((m) => [m, g.sums[m] / p.statements.length])) }))
-  } else {
-    rows = results.flat()
+  const splits = p.by.filter((d) => d !== p.grain)
+  // A member's identity is compared as text, so 15 and '15' from two sources are the same member.
+  const normal = (row: any) => {
+    for (const d of p.by) if (row[d] != null) row[d] = String(row[d])
+    for (const m of p.fetched) row[m] = row[m] == null ? null : Number(row[m])
+    return row
   }
 
-  // The parts sum to the whole — the same question asked unsplit, compared.
-  if (p.unsplit) {
-    const [total] = (await exec(p.unsplit.source, p.unsplit.sql, p.unsplit.params)).map(numeric)
-    const splitBy = p.by.join(', ')
-    for (const m of p.measures) {
-      const parts = rows.reduce((a, row) => a + Number(row[m] ?? 0), 0)
-      const all = Number(total?.[m] ?? 0)
-      const holds = Math.abs(parts - all) <= Math.max(1e-6, Math.abs(all) * 1e-9)
-      verify(`${m}: the split by ${splitBy} sums to the whole`, holds, `parts ${round(parts)} · whole ${round(all)}`)
+  if (p.partial) note('the result is filtered or limited, so its rows are not checked against the whole')
+  const results = await Promise.all(p.statements.map(async (st) => {
+    const rows = (await exec(st)).map(normal)
+    if (st.unsplit && !p.partial) {
+      const [whole] = (await exec(st.unsplit)).map(normal)
+      checkParts(shape, p, rows, whole ?? {}, st.period, verify)
     }
+    return p.grain && st.period ? rows.map((r) => ({ ...r, [p.grain!]: st.period })) : rows
+  }))
+
+  let rows: Record<string, any>[] = results.flat()
+  const recompute = (r: Record<string, any>) => { for (const m of p.fetched) if (isDerived(shape.measures[m])) r[m] = evaluate(shape, m, r); return r }
+
+  if (p.combine === 'average-over-periods') {
+    const groups = new Map<string, { row: Record<string, any>; sums: Record<string, number> }>()
+    for (const r of rows) {
+      const k = JSON.stringify(splits.map((d) => r[d]))
+      const g = groups.get(k) ?? { row: Object.fromEntries(Object.entries(r).filter(([c]) => !p.fetched.includes(c))), sums: {} }
+      for (const m of p.fetched) if (!isDerived(shape.measures[m])) g.sums[m] = (g.sums[m] ?? 0) + Number(r[m] ?? 0)
+      groups.set(k, g)
+    }
+    // A member absent from some readings counts as zero in those readings: a stock that is not there is zero.
+    rows = [...groups.values()].map((g) => recompute({ ...g.row, ...Object.fromEntries(Object.entries(g.sums).map(([m, v]) => [m, v / p.statements.length])) }))
+  }
+
+  if (p.after.fill && p.grain) {
+    const combos = new Map<string, Record<string, any>>()
+    for (const r of rows) combos.set(JSON.stringify(splits.map((d) => r[d])),
+      Object.fromEntries(Object.entries(r).filter(([c]) => c !== p.grain && !p.fetched.includes(c))))
+    if (!combos.size) combos.set('[]', {})
+    const present = new Set(rows.map((r) => JSON.stringify([...splits.map((d) => r[d]), r[p.grain!]])))
+    for (const [k, base] of combos) for (const period of p.after.fill.periods) {
+      if (present.has(JSON.stringify([...JSON.parse(k), period]))) continue
+      const empty: Record<string, any> = { ...base, [p.grain]: period }
+      for (const m of p.fetched) empty[m] = additivity(shape, m) === 'additive' && !isDerived(shape.measures[m]) ? 0 : null
+      rows.push(recompute(empty))
+    }
+  }
+
+  if (p.after.cumulative && p.grain) {
+    const { reset, keep } = p.after.cumulative
+    const grain = p.grain
+    rows.sort((a, b) => JSON.stringify(splits.map((d) => a[d])).localeCompare(JSON.stringify(splits.map((d) => b[d]))) || String(a[grain]).localeCompare(String(b[grain])))
+    const running = new Map<string, Record<string, number>>()
+    for (const r of rows) {
+      const start = periodStart(grain, labelDate(grain, String(r[grain])))
+      const k = JSON.stringify([...splits.map((d) => r[d]), reset === 'never' ? '' : periodOf(reset, start)])
+      const acc = running.get(k) ?? {}
+      for (const m of p.fetched) if (!isDerived(shape.measures[m])) { acc[m] = (acc[m] ?? 0) + Number(r[m] ?? 0); r[m] = acc[m] }
+      running.set(k, acc)
+      recompute(r)
+    }
+    const first = periodOf(grain, keep.from)
+    rows = rows.filter((r) => String(r[grain]) >= first && labelDate(grain, String(r[grain])) < keep.to)
+  }
+
+  if (p.after.having) rows = rows.filter((r) => Object.entries(p.after.having!).every(([m, c]) => holds(r[m], c)))
+  if (p.after.order?.length) {
+    const order = p.after.order
+    rows.sort((a, b) => {
+      for (const o of order) { const d = compare(a[o.by], b[o.by]); if (d) return o.desc ? -d : d }
+      for (const d of p.by) { const x = compare(a[d], b[d]); if (x) return x }
+      return 0
+    })
+  }
+  if (p.after.limit != null) rows = rows.slice(0, p.after.limit)
+  if (p.fetched.length > p.measures.length) {
+    const hidden = p.fetched.filter((m) => !p.measures.includes(m))
+    rows = rows.map((r) => Object.fromEntries(Object.entries(r).filter(([c]) => !hidden.includes(c))))
   }
 
   const columns: Column[] = []
@@ -78,6 +148,62 @@ export async function runPlan(shape: Shape, p: Plan, query: RunQuery,
   }
   for (const m of p.measures) columns.push({ name: m, role: 'measure', unit: shape.measures[m].unit, kind: shape.measures[m].kind })
   return { columns, rows, caveats: p.caveats }
+}
+
+function checkParts(shape: Shape, p: Plan, rows: Record<string, any>[], whole: Record<string, any>, period: string | undefined,
+                    verify: (label: string, holds: boolean, detail: string) => void) {
+  const splitBy = p.by.filter((d) => d !== p.grain || !period).join(', ')
+  const at = period ? ` (${period})` : ''
+  for (const m of p.fetched) {
+    const kind = additivity(shape, m)
+    if (kind === 'none') continue
+    const values = rows.map((r) => r[m]).filter((v) => v != null) as number[]
+    const all = whole[m] == null ? 0 : Number(whole[m])
+    const sum = values.reduce((a, v) => a + v, 0)
+    const close = (a: number, b: number) => Math.abs(a - b) <= Math.max(1e-6, Math.abs(b) * 1e-9)
+    if (kind === 'additive') verify(`${m}: the split by ${splitBy} sums to the whole${at}`, close(sum, all), `parts ${round(sum)} · whole ${round(all)}`)
+    if (kind === 'bounded') {
+      const max = values.length ? Math.max(...values) : 0
+      verify(`${m}: the whole lies between the largest part and the sum of the parts${at}`, max <= all + 1e-9 && all <= sum + 1e-9,
+             `largest ${round(max)} · whole ${round(all)} · sum ${round(sum)}`)
+    }
+    if (kind === 'minimum' || kind === 'maximum') {
+      const edge = values.length ? (kind === 'minimum' ? Math.min(...values) : Math.max(...values)) : null
+      verify(`${m}: the ${kind} of the parts is the whole${at}`, edge == null ? whole[m] == null : close(edge, all), `parts ${edge} · whole ${whole[m]}`)
+    }
+  }
+}
+
+/** The first day of a period, from its label. */
+function labelDate(grain: string, label: string): string {
+  if (grain === 'day' || grain === 'week') return label
+  if (grain === 'month') return `${label}-01`
+  if (grain === 'quarter') return `${label.slice(0, 4)}-${String((Number(label.slice(-1)) - 1) * 3 + 1).padStart(2, '0')}-01`
+  return `${label}-01-01`
+}
+
+function holds(v: any, c: Condition): boolean {
+  if (c === null) return v == null
+  if (Array.isArray(c)) return c.some((x) => compare(v, x) === 0)
+  if (typeof c !== 'object') return compare(v, c) === 0
+  return Object.entries(c).every(([op, x]: [string, any]) => {
+    if (op === 'isNull') return (v == null) === Boolean(x)
+    if (v == null) return false
+    const d = compare(v, x)
+    return ({ eq: d === 0, ne: d !== 0, gt: d > 0, gte: d >= 0, lt: d < 0, lte: d <= 0,
+              in: (x as any[]).some((y) => compare(v, y) === 0), notIn: !(x as any[]).some((y) => compare(v, y) === 0) } as Record<string, boolean>)[op]
+  })
+}
+
+function compare(a: any, b: any): number {
+  if (a == null && b == null) return 0
+  if (a == null) return 1
+  if (b == null) return -1
+  if (typeof a === 'number' || typeof b === 'number') {
+    const x = Number(a), y = Number(b)
+    if (!Number.isNaN(x) && !Number.isNaN(y)) return x - y
+  }
+  return String(a).localeCompare(String(b))
 }
 
 const round = (n: number) => Math.round(n * 1000) / 1000

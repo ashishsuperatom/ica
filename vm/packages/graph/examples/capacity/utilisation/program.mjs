@@ -19,7 +19,7 @@ export default async function (ctx, { during, by = [], pillar }) {
   }
 
   // ── stage 2: a span that runs past today would divide part of a period's hours by all of its capacity ─────
-  const today = new Date().toISOString().slice(0, 10)
+  const today = ctx.today
   let { from, to } = during
   if (!ctx.decide('the span has ended', to <= today, `span ends ${to}, today is ${today}`)) {
     to = today

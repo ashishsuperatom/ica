@@ -884,6 +884,61 @@ What S4 exposed:
 - **Inlined relations are recorded as calls with no queries** so lineage finds them. Their SQL is visible only
   inside the parent's statement.
 
+### Decided — what a relation can be asked
+
+The engine must not be weaker than the agent it replaces, which can already write any program. Two things keep
+that true. **The escape hatch is always there:** a concept may return rows from any SQL or API call, and a
+program may do anything in JavaScript with them; the relation machinery adds checked slicing on top and never
+stands in the way. **And the relation vocabulary is audited against the systems that have done this for
+years** — Cube, LookML and dbt MetricFlow, and the summarizability work under them — so that a question those
+systems answer is not one we refuse for want of thinking of it.
+
+Added, each with a test that runs the generated SQL (`vm/packages/graph/test`, 25 tests on local rows and 4 live
+on NetSuite and TotalGroup):
+
+- **Derived measures** — MetricFlow's ratio and derived metrics. `expression` over measure names, e.g.
+  `billable / hours`. A ratio is computed per row from its parts and never summed; its parts are checked
+  instead. A product or quotient declared additive is refused.
+- **Aggregations** — sum, count, count distinct, min, max, average, median. Each is checked against the whole by
+  what it allows: a sum's parts add up; a distinct count lies between its largest part and the sum of its parts
+  (the old check would have refused a correct distinct count by month); a minimum is its smallest part; an
+  average, a median or a ratio is not checked directly. Averaging readings of an average is refused. Median
+  where the dialect has one.
+- **Time grains** — day, week (Monday), month, quarter, year, labelled identically in Oracle, SQL Server,
+  SQLite and JavaScript; checked on leap days, year ends and week boundaries against both live sources. A stock
+  is read at each period's end, never after today.
+- **Conditions** — equal, any of, none of, ranges, missing values; **having** on measures; **order**, and
+  **limit** only with an order, so which rows are kept is the question's choice. Pushed into the statement when
+  one statement answers; the result then says it is not checked against the whole.
+- **Fill** — periods with no rows appear, zero for an additive measure, unknown for a ratio.
+- **Cumulative** — running totals along a grain, reset by year, quarter or month, reading back to the boundary
+  so a year-to-date that starts mid-span is right.
+- **Sources that are not SQL** — a concept returns rows; the engine queries them in SQLite with the same
+  wrapping, the same checks and the same composition.
+- **Today is an input** — every call records the day it was answered as of; programs read `ctx.today`, never
+  the clock; `replay` asks a past question again as of its own day through what the names point at now.
+- **Cycles** — a program that reaches itself through calls, or a relation built on itself, is refused.
+- **Identity as text** — dimension members compare as text, so `15` and `'15'` are one member.
+
+Found by the tests: a `having` value was bound after the statement's parameters were gathered, so it reached
+the source empty. It would have failed on every database.
+
+### Open — capabilities not yet built
+
+Each can be done today as a program, so none is a refusal; each is still a gap in what the engine checks.
+
+- **Automatic joins between relations** (MetricFlow's entities). Joins are written by hand in a relation
+  program. Nothing checks that `pillar` means the same key in two relations — conformed dimensions.
+- **Period over period** (MetricFlow's offset window): this quarter against the same quarter last year.
+- **Fiscal calendars.** NZ's April–March year, retail 4-4-5 calendars. Grains are calendar grains only.
+- **Dimension history as at the time.** `history: 'as-at'` is declared and not yet honoured differently.
+- **Conversion and funnel measures**, percentiles other than the median.
+- **Time zones.** Dates are calendar dates; a local source's timestamps compare as text.
+- **A result from a program cannot be drilled** as a relation can; its contract cannot describe its columns.
+- **Combining a local relation with a SQL one** in one statement is refused; a program aggregates each first.
+- **Rows from a non-SQL source are all fetched**; bounding them by `when` and `where` is left to the body.
+- **Base tables in a relation program's SQL** are not yet parsed for.
+
 ---
 
 ## 18. Open questions
