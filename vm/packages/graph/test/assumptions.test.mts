@@ -131,11 +131,11 @@ test('rules: the most specific rule for who is asking and what is read gives the
 
 test('rules: two equally specific rules that disagree are refused, not picked between', async () => {
   const { engine } = await setup({
-    target: { rules: [{ when: { 'who.department': 'finance' }, value: 0.7 }, { when: { team: 'b' }, value: 0.8 }] },
+    target: { rules: [{ when: { 'who.department': 'finance' }, value: 0.7 }, { when: { 'who.groups': 'nz' }, value: 0.8 }] },
   })
   await engine.define(program('target b', [], `export default async (ctx) => ctx.assume('target', { team: 'b' })`,
     { target: { description: 'utilisation target', default: 0.75 } }), { by: 'test' })
-  await assert.rejects(engine.call('target b', {}, { who: { department: 'finance' } }), /apply equally/)
+  await assert.rejects(engine.call('target b', {}, { who: { department: 'finance', groups: ['nz'] } }), /apply equally/)
 })
 
 test('rules: a layer whose rules do not apply passes to the next', async () => {
