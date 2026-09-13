@@ -858,6 +858,51 @@ What was actually given up, and how each is held:
 Across sources a single statement is impossible; relations from two sources are combined by a program after each
 is aggregated to the shared split.
 
+### Reasoning — deferred execution and query as data
+
+A relation is not an answer; it is a description of a computation that has not run — **deferred execution** —
+and the description is itself data the engine can inspect, combine, rewrite and check before running it —
+**query as data**. The same idea is behind LINQ, Spark and Polars lazy frames, Ibis and dbplyr. What makes it
+compose is closure (Codd): a relation combined with a relation is a relation, so work can be pushed into one
+statement until a decision needs a value, or a result must cross from one source to another.
+
+Deferred execution alone is not what makes the design work. It combines with four other things: the definition is
+kept apart from the question; the description carries types (shape: dimensions, measures, units, kinds), so a
+wrong number is refused before anything runs; names point at immutable hashes, so a correction lands once; and
+every call is remembered.
+
+### Proposal — build or borrow
+
+**Keep building the graph; build the query-as-data layer on SQLGlot's syntax trees, not on strings.**
+
+What no library provides, and is the point of this work: programs as named, hashed, remembered nodes; contracts;
+assumptions and rules; interventions and counterfactuals; the session as a state; NetSuite's dialect and its
+quirks. None of the tools below has these, and adopting one would mean building all of them on top of it anyway.
+
+What is young in our own code, and where maturity matters most, is SQL generation and rewriting: a few hundred
+lines, with bugs already found by tests. That is the part to hand to something mature. The candidates:
+
+- **SQLGlot** — already used for rewriting, policies and the cache. It parses and renders over thirty dialects,
+  and has an optimizer (qualifying columns, merging subqueries, pushing predicates down) and column lineage.
+  Ibis itself generates SQL through it. Composing relations as syntax trees instead of text would make
+  checkable what is not checkable today: base tables named in a relation program, the columns a relation really
+  outputs, where a join multiplies rows, and flattening nested composition for sources that run it badly.
+- **DuckDB** — a local analytical engine, in place of SQLite for rows from non-SQL sources, and for combining
+  aggregated results across sources in SQL rather than JavaScript. Later, a home for pre-aggregations.
+- **Ibis** — deferred expressions compiled to SQL for many engines. Python, where the programs are JavaScript;
+  no SuiteQL; no semantics of measures. Its ideas, not its code.
+- **Polars lazy frames, Spark** — they execute the plan themselves, over data brought to them. They cannot push
+  a question down into NetSuite. Not a fit.
+- **Cube** — a mature semantic layer in Node, with joins by key, fan-out protection and pre-aggregations. It is a
+  server with static model files and its own cache; it has no NetSuite driver, and interventions, rules and
+  memory would sit awkwardly outside it. A reference for semantics, and possibly a source behind a concept for
+  a warehouse that already has a Cube model.
+- **Malloy** — a semantic language with joins and symmetric aggregates done well; a language, where the design
+  chose JavaScript and SQL, and without the dialects in use here. Its semantics are worth reading.
+
+So: our own engine and graph; SQLGlot trees underneath the relations; DuckDB as the local engine; the semantics
+of Cube, Malloy and MetricFlow borrowed deliberately, one capability at a time, from section 19.
+
 **A replacement must fit its callers.** Repointing a name is refused when the new program returns something
 else, drops a parameter, or — for a relation — drops or moves a dimension or measure, changes a unit or kind, or
 moves its time column.
