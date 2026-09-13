@@ -244,11 +244,85 @@ An example — capacity gap by pillar next quarter, all on one source:
 A soft-prompt convention follows too: a program returns a relation when it can, and rows only when it has
 to.
 
+### Decided
+
+- **Most questions span several databases**, and many must **resolve something before the next query can
+  run** — a customer named with a spelling mistake goes through a resolver that searches and returns an id, and
+  only then can the real query run. So a question is not a chain of queries passed along until one final SQL
+  call. It is staged.
+- **Composition still needs programs to be able to return a query**, so a later program can extend it.
+
+### A worked example
+
+A program does one of two things: it **runs** something and returns a value, or it **returns a relation** —
+a query not yet run — that another program can extend. Resolution and decisions are the first kind;
+definitions and slices are the second.
+
+A concept returns a relation. It is the definition, written once:
+
+    // concept · invoiced revenue            (returns a relation; nothing runs)
+    export default (ctx) =>
+      ctx.from('F5NETSUITE', 'transaction t')
+         .where(`t.type = 'CustInvc' AND t.voided = 'F'`)
+         .dimension('customer', 't.entity')
+         .dimension('month',    `TO_CHAR(t.trandate, 'YYYY-MM')`, { time: 'month' })
+         .measure('revenue',    'SUM(TO_NUMBER(t.total))', { unit: 'AUD', kind: 'flow' })
+
+A resolver runs, because it is a decision point, and returns a value:
+
+    // program · resolve customer            (runs now; returns an id)
+    export default async (ctx, { name }) => {
+      const hits = await ctx.run(
+        ctx.from('F5NETSUITE', 'customer c')
+           .select({ id: 'c.id', name: 'c.companyname' })
+           .whereSimilar('c.companyname', name)
+           .limit(5))
+      ctx.decide('one customer matches', hits.length === 1, `${hits.length} candidates for "${name}"`)
+      return hits[0].id
+    }
+
+A composite stages them. The first stage runs; the second is still a relation:
+
+    // program · revenue for a customer
+    export default async (ctx, { customerName, period }) => {
+      const id = await ctx.call('resolve customer', { name: customerName })   // stage 1 — runs
+      return ctx.relation('invoiced revenue')                                  // stage 2 — still lazy
+                .where({ customer: id })
+                .by(['month'])
+                .during(period)
+    }
+
+When that relation runs, the concept's definition and the composite's additions compile into one statement:
+
+    SELECT TO_CHAR(t.trandate, 'YYYY-MM') AS month, SUM(TO_NUMBER(t.total)) AS revenue
+    FROM transaction t
+    WHERE t.type = 'CustInvc' AND t.voided = 'F'        -- from the concept, never retyped
+      AND t.entity = :customer                          -- from stage 1
+      AND t.trandate >= :from AND t.trandate < :to      -- from the period
+    GROUP BY TO_CHAR(t.trandate, 'YYYY-MM')
+
+The composite extends the concept's query instead of rewriting it, and the database still does the work.
+
+Across two databases it cannot be one statement:
+
+    // program · customer health — revenue from NetSuite, late deliveries from TotalGroup
+    export default async (ctx, { customerName, period }) => {
+      const nsId = await ctx.call('resolve customer', { name: customerName })   // NetSuite's key
+      const tgId = await ctx.call('resolve party',    { name: customerName })   // TotalGroup's key
+      const revenue = ctx.relation('invoiced revenue').where({ customer: nsId }).by(['month']).during(period)
+      const late    = ctx.relation('late deliveries').where({ party: tgId }).by(['month']).during(period)
+      const [a, b] = await Promise.all([ctx.run(revenue), ctx.run(late)])       // each side pushed down fully
+      return ctx.join(['month'], a, b)                                          // twelve rows each, joined here
+    }
+
+Each side is still pushed down completely and aggregated to the shared dimension before reaching JavaScript.
+When one side is small, its ids can be pushed into the other database as an `IN (…)` filter — what federated
+query engines call a bind join.
+
 ### Open
 
-- Whether the first slice should support returning relations, or only rows, with relations added once
-  composition is proven.
 - How a composed relation is explained, since its trace is one query built from several programs.
+- How identity is matched across databases, as in the two resolvers above.
 
 ---
 
@@ -387,6 +461,9 @@ For now, memory is:
 - **Input and output.** Every run keeps what was passed in and what came out.
 - **Compression after every run.** A compression step runs after each run. It groups similar results within a
   time window and keeps a statistical distribution of them.
+- **Recent memory in full, the far past compressed.** Both are needed to learn what affects what. Without the
+  long history, a conclusion is drawn from too little; without recent detail, the cause of a change cannot be
+  seen.
 
 The rest of memory — retention, what it may hold, richer tiers — is decided later.
 
@@ -627,7 +704,7 @@ concepts:
 
 Then refine.
 
-### Proposal
+### Decided
 
 **Domain: capacity and utilisation, on the local `F5NETSUITE` data.** It is the one domain where every
 step above arises naturally, and it is the user's own production-capacity example in another form. Most of
@@ -659,10 +736,7 @@ Steps, each with what it proves:
 Out of scope for the slice: the authoring agent (programs are written by us, with an agent's help), the
 user interface, deployment, and access control.
 
-### Open
-
-- Confirm the domain.
-- Whether programs in the slice return relations, or rows only.
+Programs in the slice can both run and return values, and return relations for others to extend.
 
 ---
 
