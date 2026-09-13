@@ -1,0 +1,8 @@
+{
+  "name": "pillars",
+  "kind": "concept",
+  "description": "Every delivery pillar: the departments employees and projects belong to.",
+  "reads": { "sources": ["F5NETSUITE"], "programs": [] },
+  "params": {},
+  "returns": "rows"
+}

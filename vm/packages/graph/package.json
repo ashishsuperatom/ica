@@ -1,0 +1,10 @@
+{
+  "name": "@superatom/graph",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "The program graph: immutable, named, composable programs with memory. See docs/program-graph.md.",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

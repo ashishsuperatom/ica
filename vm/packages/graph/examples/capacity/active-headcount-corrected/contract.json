@@ -1,0 +1,8 @@
+{
+  "name": "active headcount",
+  "kind": "concept",
+  "description": "How many people are currently employed, optionally within one pillar.",
+  "reads": { "sources": ["F5NETSUITE"], "programs": [] },
+  "params": { "pillarId": "the pillar to count within; every pillar when absent" },
+  "returns": "value"
+}

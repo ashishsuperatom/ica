@@ -733,8 +733,33 @@ Steps, each with what it proves:
 - **S8 Decision.** "Should this pillar hire next quarter?" as a decision program with a recorded boundary;
   replay a later period that crosses it and show the decision reopening. *Proves R7's purpose.*
 
-Out of scope for the slice: the authoring agent (programs are written by us, with an agent's help), the
-user interface, deployment, and access control.
+The slice is built and run by hand, without the authoring agent or ICA, so that what works and what is
+missing shows up fast. Integration with ICA comes afterwards. Also out of scope: the user interface,
+deployment, and access control.
+
+### Findings
+
+**S1 — programs** (`vm/packages/graph`, `examples/s1-programs.mts`). Works on real data: programs defined
+from files and identified by hash; a question staged through a resolver that tolerates a spelling mistake
+and refuses to guess between two pillars both named `MWP`; every call remembered and traced from memory;
+the contract enforced at definition and at call; and a correction to `active headcount` — system accounts
+and placeholders are not people — reaching `pillar headcount` without that program changing at all
+(OH 130 → 128, the company 1,159 → 1,155), with the calls that went through the wrong version listed.
+
+What S1 exposed:
+
+- **A program's hash no longer determines its answer.** `pillar headcount` kept its hash and its answer
+  changed, because a program it calls was corrected. Reproducing an answer therefore needs every hash in
+  its call tree, not only the top one. Memory records them; nothing yet replays from them.
+- **Outputs are bespoke objects.** `{ pillar, headcount }` cannot be drilled or combined. This is what S2
+  must replace with dimensioned results.
+- **`pillarId` is a positional parameter** — the q6 problem in miniature. S2 replaces it with coordinates.
+- **`returns: value` says nothing about shape.** The contract needs the output's shape to be checkable.
+- **Repointing does not check that the new program still fits its callers.** A replacement that returned
+  rows instead of a value would break every caller at run time.
+- **Past calls are listed, not re-run.** Replay after a correction is not built.
+- **Resolution fetched all 31 pillars and matched in JavaScript.** Right for a short list; a customer list
+  needs the search pushed into SQL.
 
 Programs in the slice can both run and return values, and return relations for others to extend.
 

@@ -1,0 +1,8 @@
+{
+  "name": "resolve pillar",
+  "kind": "program",
+  "description": "Finds the pillar a person meant from what they typed, allowing for spelling mistakes, and says when more than one fits.",
+  "reads": { "sources": [], "programs": ["pillars"] },
+  "params": { "name": "the pillar as the person typed it" },
+  "returns": "value"
+}

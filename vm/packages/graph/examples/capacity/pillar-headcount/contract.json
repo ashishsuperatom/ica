@@ -1,0 +1,8 @@
+{
+  "name": "pillar headcount",
+  "kind": "program",
+  "description": "How many people currently work in the pillar a person named.",
+  "reads": { "sources": [], "programs": ["resolve pillar", "active headcount"] },
+  "params": { "pillar": "the pillar as the person typed it" },
+  "returns": "value"
+}
