@@ -22,8 +22,8 @@ import { isDerived, kindOf, type Shape, type Statement } from './shape.js'
 import { AmbiguousRules, facts, isRuled, mostSpecific } from './rules.js'
 import type { CallRecord, GraphStore } from './store.js'
 
-/** Runs a statement on a source. `who` travels with it, so the source's access policies apply to the person asking. */
-export type Query = (source: string, sql: string, params?: Record<string, unknown>, options?: { who?: Record<string, unknown> }) => Promise<any[]>
+/** Runs a statement on a source. `policies` are the access restrictions of the person asking, applied at the source. */
+export type Query = (source: string, sql: string, params?: Record<string, unknown>, options?: { policies?: unknown[] }) => Promise<any[]>
 
 export interface EngineOptions {
   store: GraphStore
@@ -55,12 +55,15 @@ export interface CallOptions {
   assume?: Record<string, unknown>
   /** Changes for this request only, by program name. The answer is hypothetical. */
   intervene?: Record<string, Intervention>
-  /** Who is asking — their id, groups, department. Rules and access policies are chosen by it. */
+  /** Who is asking — their id, groups, department. Rules for assumptions are chosen by it. */
   who?: Record<string, unknown>
+  /** What the person asking may read, by source, as decided by the system that authorises them. Every query this
+   *  request makes carries its source's policies; the engine only passes them on. */
+  access?: Record<string, unknown[]>
 }
 
 /** What flows down a request: the day, the assumptions callers have set, and the interventions. */
-interface Scope { today: string; context: Record<string, unknown>; interventions: Record<string, Intervention>; who?: Record<string, unknown> }
+interface Scope { today: string; context: Record<string, unknown>; interventions: Record<string, Intervention>; who?: Record<string, unknown>; access?: Record<string, unknown[]> }
 
 /** What a program body receives. The same surface for every program; what it may USE is its contract's. */
 export interface ProgramContext {
@@ -112,7 +115,7 @@ export function createEngine(o: EngineOptions) {
         if (contract.kind !== 'concept') throw new Error(`"${contract.name}" is a program and queried ${source} — only a concept may read a data source`)
         if (!contract.reads.sources.includes(source)) throw new Error(`"${contract.name}" queried ${source}, which its contract does not declare`)
         const t = Date.now()
-        const rows = await o.query(source, sql, params, { who: scope.who })
+        const rows = await o.query(source, sql, params, { policies: scope.access?.[source] })
         queries.push({ source, sql, params: params ?? {}, rows: rows.length, ms: Date.now() - t,
                        capped: Array.isArray((rows as any).notes) && (rows as any).notes.length > 0 })
         return rows
@@ -419,7 +422,7 @@ export function createEngine(o: EngineOptions) {
         const calendar = calendarFor(scope, assumed)
         const ask = async (coordinates: Coordinates, side?: string) => {
           const p = await plan(shape, read, coordinates, dialects, today, calendar)
-          const result = await runPlan(shape, p, (src, sql, params) => o.query(src, sql, params, { who: scope.who }),
+          const result = await runPlan(shape, p, (src, sql, params) => o.query(src, sql, params, { policies: scope.access?.[src] }),
             (q) => queries.push(q),
             (label, held, detail) => {
               const tagged = side ? `${side}: ${label}` : label
@@ -469,15 +472,16 @@ export function createEngine(o: EngineOptions) {
 
   /** Ask a program, by name. `today` fixes the day it is answered as of; by default, the engine's clock. */
   function call<T = unknown>(name: string, request: Record<string, unknown> = {}, options: CallOptions = {}): Promise<CallResult<T>> {
-    return run<T>(name, request, null, { today: options.today ?? clock(), context: options.assume ?? {}, interventions: options.intervene ?? {}, who: options.who }, [])
+    return run<T>(name, request, null, { today: options.today ?? clock(), context: options.assume ?? {}, interventions: options.intervene ?? {}, who: options.who, access: options.access }, [])
   }
 
-  /** Ask a past call's question again, as of the same day, through whatever its names point at now. */
-  function replay<T = unknown>(callId: string): Promise<CallResult<T>> {
+  /** Ask a past call's question again, as of the same day, through whatever its names point at now. Access is
+   *  not replayed: it is whatever the person replaying may read now, given here. */
+  function replay<T = unknown>(callId: string, options: { access?: Record<string, unknown[]> } = {}): Promise<CallResult<T>> {
     const c = o.store.getCall(callId)
     if (!c) throw new Error(`no call ${callId}`)
     return call<T>(c.name, c.request as Record<string, unknown>,
-      { today: c.today ?? undefined, assume: c.context ?? undefined, intervene: (c.interventions as Record<string, Intervention>) ?? undefined, who: c.who ?? undefined })
+      { today: c.today ?? undefined, assume: c.context ?? undefined, intervene: (c.interventions as Record<string, Intervention>) ?? undefined, who: c.who ?? undefined, access: options.access })
   }
 
   /** The path from these names to `target` through what each program reads, or null if there is none. */

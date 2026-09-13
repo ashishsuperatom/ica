@@ -91,8 +91,8 @@ class Denied(Exception):
 
 
 def inject_policies(root, policies, dialect=None):
-    """Authorization seam, applied to the parsed query before it is rendered. The manager chooses the policies
-    for the person asking; every one given here applies. Each is one of:
+    """Authorization seam, applied to the parsed query before it is rendered. The policies arrive with the
+    request, decided by the system that authorises the person asking; every one given here applies. Each is one of:
 
         {"table": "<name>", "deny": true, "reason": "..."}     reading that table at all is refused
         {"table": "<name>", "predicate": "<sql over {t}>"}     only that table's rows where the predicate holds

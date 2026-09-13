@@ -15,7 +15,6 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { dirname, join, isAbsolute } from 'node:path'
 import { sqlSignature, rewriteSqlDetailed } from './sqlglot-pool.js'
 import { QueryCache, cacheKey } from './query-cache.js'
-import { policiesFor } from './policies.js'
 
 // Result caps for AGENT queries — a runaway/unbounded query must not dump a whole table (192K rows would
 // overwhelm the bridge WS AND the UI, which shows hundreds at most). MAX_ROWS is enforced AT THE SOURCE — the
@@ -224,7 +223,9 @@ const server = http.createServer(async (req, res) => {
       const rw = passthrough
         ? { sql: String(body.sql), cappedTo: null as number | null, readsClock: false }
         : await rewriteSqlDetailed(String(body.sql), { sourceDialect: bridge.dialect, maxRows: MAX_ROWS + 1,
-                                                        policies: await policiesFor(String(body.id), body.who) })
+                                                        // ACCESS COMES WITH THE REQUEST. Which rows a person may read is decided by the
+                                                        // system that knows who they are; this only applies it, to every table read.
+                                                        policies: Array.isArray(body.policies) ? body.policies : [] })
       const sql = rw.sql
       const cacheable = !passthrough && !rw.readsClock
       const key = cacheKey(String(body.id), sql, body.params)
