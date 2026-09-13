@@ -792,6 +792,49 @@ What S2 exposed:
 
 Programs in the slice can both run and return values, and return relations for others to extend.
 
+### Decided
+
+**A concept is plain SQL; its shape is its interface.** The relation builder from S2 was a small query
+language, and it would have stood between a concept and the SQL a source runs best — a NetSuite-specific form,
+or a workaround for a bug in one engine. It is gone. A concept's body returns the SQL for one reading, at its
+finest grain (one row per employee; one row per time entry), called with `{ asAt }` for a stock or
+`{ from, to }` for a flow. The contract's `shape` names which output columns are dimensions, which are
+measures and how each aggregates, and which is time. The engine wraps the SQL:
+
+    SELECT <dimensions>, <aggregates> FROM ( <the concept's SQL> ) t WHERE <filters> GROUP BY <dimensions>
+
+so slicing, filtering and bounding the span never depend on the body having done them. The body also receives
+the filters, and may use them to read less. At definition the SQL is run once, counting every column the shape
+names: a declared column the SQL does not produce is refused then. (NetSuite does not check the columns of a
+query it can see returns nothing, so the probe is an aggregate, not `WHERE 1 = 0`.) S2 re-ran with the same
+numbers.
+
+**Resolution happens mostly at the start of a program**, where typed text becomes ids and everything after is
+calculation. It stays callable anywhere, because strategy programs will refer to other program nodes by
+unstructured reference.
+
+**S3 — composition** (`examples/s3-composition.mts`). `utilisation` is a program: it reads no data. In
+stages it resolves a typed pillar, decides whether the span has ended (and cuts it at today if not), asks
+`utilised hours` and `fte` the same coordinates, and divides row by row — a ratio is never added up, and the
+total is the ratio of the totals. By pillar, a misspelt pillar, drilled by month and by employee, and a span
+still running: one program, parameters only. The ambiguous `MWP` stops at stage one with no query run.
+
+What S3 exposed:
+
+- **`utilised hours` is wrong.** Retail at 135%, people at 180%. `timebill` holds actual (`A`), budgeted
+  (`B`) and planned (`P`) time, and the concept sums all three: Brenda Meyer's 903 hours are 473.5 actual. It is
+  kept wrong deliberately as the S4 correction — a real mistake, already used by more than one caller.
+- **Capacity is sampled, not measured.** FTE averaged over month-ends and FTE per month give 53,821 and 53,828
+  available hours for the same quarter. Capacity is a stock integrated over time — person-time — and can be
+  computed exactly from hire and release dates. It should be its own concept.
+- **The ratio kind exists only in the composite's output.** `kind: 'ratio'` is the third summarizability class
+  (value per unit); it should be one declared idea, not a string one program happens to use.
+- **Returns `value` hides a dimensioned result.** The contract cannot say the output is a result with columns,
+  so nothing can drill into `utilisation` the way it drills into a concept.
+- **Joining two results on their split is hand-written** in the program. Every ratio will repeat it.
+- **Hours booked where a person had no capacity** (moved pillar, left) appear as rows with no ratio; that is
+  the current-pillar problem from S2 surfacing in a number.
+
 ---
 
 ## 18. Open questions

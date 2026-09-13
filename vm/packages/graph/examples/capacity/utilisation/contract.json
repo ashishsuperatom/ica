@@ -1,0 +1,12 @@
+{
+  "name": "utilisation",
+  "kind": "program",
+  "description": "Utilised hours as a share of the hours people were available to work, over a span, split however the question asks.",
+  "reads": { "sources": [], "programs": ["resolve pillar", "utilised hours", "fte"] },
+  "params": {
+    "during": "the span, { from, to } as YYYY-MM-DD",
+    "by": "dimensions to split by: employee, pillar, subsidiary, month",
+    "pillar": "optional — a pillar as the person typed it"
+  },
+  "returns": "value"
+}

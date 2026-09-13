@@ -8,6 +8,8 @@
 // hoped for: a program that needs revenue has no data access, so it cannot retype a revenue query — it can
 // only call the program that defines revenue.
 
+import { shapeProblem, type Shape } from './shape.js'
+
 export type ProgramKind = 'concept' | 'program'
 
 export interface Contract {
@@ -26,6 +28,8 @@ export interface Contract {
   params: Record<string, string>
   /** What it hands back: a single value, rows, or a relation — a query asked with coordinates. */
   returns: 'value' | 'rows' | 'relation'
+  /** For a relation: which of its columns are dimensions, measures and time. See shape.ts. */
+  shape?: Shape
 }
 
 /** Everything that must be true of a contract before a program exists. Returns the first reason it is not. */
@@ -46,5 +50,10 @@ export function contractProblem(c: any): string | null {
   }
   if (!c.params || typeof c.params !== 'object' || Array.isArray(c.params)) return 'params must be name → meaning'
   if (!['value', 'rows', 'relation'].includes(c.returns)) return `returns is "${c.returns}" but must be value, rows or relation`
+  if (c.returns === 'relation') {
+    if (c.kind !== 'concept') return `"${c.name}" returns a relation, and only a concept writes the SQL a relation is`
+    const bad = shapeProblem(c.shape)
+    if (bad) return bad
+  } else if (c.shape) return `"${c.name}" declares a shape but returns ${c.returns}; a shape describes a relation`
   return null
 }

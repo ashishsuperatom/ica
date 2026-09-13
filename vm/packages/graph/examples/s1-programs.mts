@@ -1,6 +1,6 @@
 // ── SLICE 1 · STEP S1 — PROGRAMS ──────────────────────────────────────────────────────────────────────────
 //
-//   DATASOURCE_URL=http://127.0.0.1:4020 pnpm exec tsx packages/graph/examples/s1-programs.mts
+//   DATASOURCE_URL=http://127.0.0.1:4021 pnpm exec tsx packages/graph/examples/s1-programs.mts
 //
 // What it shows, on real NetSuite data:
 //   1. programs are defined from files, identified by hash, and reached by name

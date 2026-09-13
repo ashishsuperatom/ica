@@ -1,14 +1,24 @@
-// A FLOW: hours accumulate over a span, and sum across people, pillars and months alike.
-export default (ctx) =>
-  ctx.from('F5NETSUITE', 'timebill tb')
-    .join('JOIN employee e ON e.id = tb.employee')
-    .join('LEFT JOIN department d ON d.id = e.department')
-    .join('LEFT JOIN subsidiary s ON s.id = e.subsidiary')
-    .where("tb.isutilized = 'T'")
-    // The same population as fte, so the two can later be compared: people, not system accounts.
-    .where('e.firstname IS NOT NULL')
-    .dimension('employee',   { key: 'e.id', label: 'e.entityid', history: 'stable' })
-    .dimension('pillar',     { key: 'd.id', label: 'd.name',     history: 'current' })
-    .dimension('subsidiary', { key: 's.id', label: 's.name',     history: 'current' })
-    .measure('hours', { sql: 'SUM(TO_NUMBER(tb.hours))', unit: 'h', kind: 'flow' })
-    .time('tb.trandate')
+// A FLOW: one row per utilised time entry between @from and @to.
+//
+// The same population as fte — people, not system accounts — so the two can be compared.
+export default (ctx, { from, to }) => ({
+  source: 'F5NETSUITE',
+  sql: `
+    SELECT tb.trandate             AS worked_on,
+           e.id                    AS employee_id,
+           e.entityid              AS employee_name,
+           e.department            AS pillar_id,
+           d.name                  AS pillar_name,
+           e.subsidiary            AS subsidiary_id,
+           s.name                  AS subsidiary_name,
+           TO_NUMBER(tb.hours)     AS hours
+      FROM timebill tb
+      JOIN employee e ON e.id = tb.employee
+      LEFT JOIN department d ON d.id = e.department
+      LEFT JOIN subsidiary s ON s.id = e.subsidiary
+     WHERE tb.isutilized = 'T'
+       AND e.firstname IS NOT NULL
+       AND tb.trandate >= TO_DATE(@from, 'YYYY-MM-DD')
+       AND tb.trandate <  TO_DATE(@to, 'YYYY-MM-DD')`,
+  params: { from, to },
+})

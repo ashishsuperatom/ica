@@ -13,7 +13,7 @@
 //   drops rows, or a grouping the source silently truncates, is caught here and nowhere else.
 
 import type { Plan } from './coordinates.js'
-import type { MeasureKind, Relation } from './relation.js'
+import type { MeasureKind, Shape } from './shape.js'
 
 export interface Column { name: string; role: 'dimension' | 'label' | 'measure'; unit?: string; kind?: MeasureKind }
 export interface Result { columns: Column[]; rows: Record<string, unknown>[]; caveats: string[] }
@@ -23,14 +23,14 @@ export type RunQuery = (source: string, sql: string, params: Record<string, unkn
 
 export class CappedError extends Error {}
 
-export async function runPlan(r: Relation, p: Plan, query: RunQuery,
+export async function runPlan(shape: Shape, p: Plan, query: RunQuery,
                               log: (q: QueryRecord) => void,
                               verify: (label: string, holds: boolean, detail: string) => void): Promise<Result> {
-  const exec = async (sql: string, params: Record<string, unknown>) => {
+  const exec = async (source: string, sql: string, params: Record<string, unknown>) => {
     const t = Date.now()
-    const rows = await query(r.source, sql, params)
+    const rows = await query(source, sql, params)
     const capped = Array.isArray((rows as any).notes) && (rows as any).notes.length > 0
-    log({ source: r.source, sql, params, rows: rows.length, ms: Date.now() - t, capped })
+    log({ source, sql, params, rows: rows.length, ms: Date.now() - t, capped })
     if (capped) {
       throw new CappedError(`the source stopped at ${rows.length} rows, so this result would be incomplete. ` +
         `Ask for fewer rows: a coarser split, a narrower span, or a filter`)
@@ -40,7 +40,7 @@ export async function runPlan(r: Relation, p: Plan, query: RunQuery,
 
   const numeric = (row: any) => { for (const m of p.measures) row[m] = row[m] == null ? null : Number(row[m]); return row }
   const results = await Promise.all(p.statements.map(async (s) =>
-    (await exec(s.sql, s.params)).map((row) => numeric(s.month ? { month: s.month, ...row } : row))))
+    (await exec(s.source, s.sql, s.params)).map((row) => numeric(s.month ? { month: s.month, ...row } : row))))
 
   let rows: Record<string, unknown>[]
   if (p.combine === 'average-over-months') {
@@ -61,7 +61,7 @@ export async function runPlan(r: Relation, p: Plan, query: RunQuery,
 
   // The parts sum to the whole — the same question asked unsplit, compared.
   if (p.unsplit) {
-    const [total] = (await exec(p.unsplit.sql, p.unsplit.params)).map(numeric)
+    const [total] = (await exec(p.unsplit.source, p.unsplit.sql, p.unsplit.params)).map(numeric)
     const splitBy = p.by.join(', ')
     for (const m of p.measures) {
       const parts = rows.reduce((a, row) => a + Number(row[m] ?? 0), 0)
@@ -74,10 +74,9 @@ export async function runPlan(r: Relation, p: Plan, query: RunQuery,
   const columns: Column[] = []
   for (const d of p.by) {
     columns.push({ name: d, role: 'dimension' })
-    const dim = r.shape.dimensions[d]
-    if (dim?.label && dim.label !== dim.key) columns.push({ name: `${d}_label`, role: 'label' })
+    if (shape.dimensions[d]?.label) columns.push({ name: `${d}_label`, role: 'label' })
   }
-  for (const m of p.measures) columns.push({ name: m, role: 'measure', unit: r.shape.measures[m].unit, kind: r.shape.measures[m].kind })
+  for (const m of p.measures) columns.push({ name: m, role: 'measure', unit: shape.measures[m].unit, kind: shape.measures[m].kind })
   return { columns, rows, caveats: p.caveats }
 }
 

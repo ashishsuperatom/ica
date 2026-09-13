@@ -1,6 +1,6 @@
 // ── SLICE 1 · STEP S2 — SLICE AND DRILL ───────────────────────────────────────────────────────────────────
 //
-//   DATASOURCE_URL=http://127.0.0.1:4020 pnpm exec tsx packages/graph/examples/s2-drill.mts
+//   DATASOURCE_URL=http://127.0.0.1:4021 pnpm exec tsx packages/graph/examples/s2-drill.mts
 //
 // Two concepts return relations — definitions, not answers. Every question below is coordinates asked of the
 // same two programs; none of them needed a new program. And the requests that would produce a wrong number
@@ -32,7 +32,7 @@ function table(result: any, limit = 8) {
     const m = result.columns.find((c: any) => c.role === 'measure').name
     return String(a.month ?? '').localeCompare(String(b.month ?? '')) || Number(b[m]) - Number(a[m])
   })
-  const fmt = (c: any, v: any) => c.role === 'measure' ? (v == null ? '—' : Number(v).toLocaleString(undefined, { maximumFractionDigits: 1 })) : String(v ?? '(none)')
+  const fmt = (c: any, v: any) => c.role === 'measure' ? (v == null ? '—' : Number(v).toLocaleString('en-NZ', { maximumFractionDigits: 1 })) : String(v ?? '(none)')
   const head = cols.map((c: any) => c.role === 'measure' ? `${c.name} (${c.unit})` : c.name.replace(/_label$/, ''))
   const body = rows.slice(0, limit).map((r: any) => cols.map((c: any) => fmt(c, r[c.name])))
   const widths = head.map((h: string, i: number) => Math.max(h.length, ...body.map((b: string[]) => b[i].length)))
@@ -62,15 +62,22 @@ for (const dir of ['fte', 'utilised-hours']) {
   const r = await engine.define(load(dir), { by: 'human:slice' })
   console.log(`  ${r.name.padEnd(16)} ${r.hash}`)
 }
-for (const [label, body] of [
-  ['a flow with no time', `export default (ctx) => ctx.from('F5NETSUITE', 'timebill tb').measure('hours', { sql: 'SUM(tb.hours)', unit: 'h', kind: 'flow' })`],
-  ['a measure with no unit', `export default (ctx) => ctx.from('F5NETSUITE', 'employee e').measure('headcount', { sql: 'COUNT(*)', unit: '', kind: 'stock' }).stockAt('1=1')`],
-]) {
+const fteContract = load('fte').contract
+for (const [label, contract, body] of [
+  ['a column the shape names but the SQL does not produce',
+   { ...fteContract, name: 'bad fte', shape: { ...fteContract.shape!, measures: { fte: { aggregate: 'sum', column: 'fte_hours', unit: 'FTE', kind: 'stock' } } } },
+   load('fte').body],
+  ['a flow with no time column',
+   { ...load('utilised-hours').contract, name: 'bad hours', shape: { ...load('utilised-hours').contract.shape!, time: undefined } },
+   load('utilised-hours').body],
+  ['a measure with no unit',
+   { ...fteContract, name: 'bad unit', shape: { ...fteContract.shape!, measures: { headcount: { aggregate: 'count', unit: '', kind: 'stock' } } } },
+   load('fte').body],
+] as const) {
   try {
-    await engine.define({ body, contract: { name: `bad ${label}`, kind: 'concept', description: 'A deliberately broken definition.',
-      reads: { sources: ['F5NETSUITE'], programs: [] }, params: {}, returns: 'relation' } }, { by: 'human:slice' })
+    await engine.define({ body, contract: contract as Contract }, { by: 'human:slice' })
     console.log(`  ✗ ${label} — accepted, which is wrong`)
-  } catch (e: any) { console.log(`  ⊘ ${label}: ${e.message}`) }
+  } catch (e: any) { console.log(`  ⊘ ${label}: ${e.message.slice(0, 220)}`) }
 }
 
 heading('a stock, at an instant, then split and drilled')
