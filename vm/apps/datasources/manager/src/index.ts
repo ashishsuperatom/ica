@@ -15,6 +15,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { dirname, join, isAbsolute } from 'node:path'
 import { sqlSignature, rewriteSqlDetailed } from './sqlglot-pool.js'
 import { QueryCache, cacheKey } from './query-cache.js'
+import { policiesFor } from './policies.js'
 
 // Result caps for AGENT queries — a runaway/unbounded query must not dump a whole table (192K rows would
 // overwhelm the bridge WS AND the UI, which shows hundreds at most). MAX_ROWS is enforced AT THE SOURCE — the
@@ -222,7 +223,8 @@ const server = http.createServer(async (req, res) => {
       const passthrough = body.raw || bridge.kind !== 'sql'
       const rw = passthrough
         ? { sql: String(body.sql), cappedTo: null as number | null, readsClock: false }
-        : await rewriteSqlDetailed(String(body.sql), { sourceDialect: bridge.dialect, maxRows: MAX_ROWS + 1 })
+        : await rewriteSqlDetailed(String(body.sql), { sourceDialect: bridge.dialect, maxRows: MAX_ROWS + 1,
+                                                        policies: await policiesFor(String(body.id), body.who) })
       const sql = rw.sql
       const cacheable = !passthrough && !rw.readsClock
       const key = cacheKey(String(body.id), sql, body.params)
@@ -262,7 +264,9 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/introspect') return send(res, 200, await bridge.introspect())
     return send(res, 404, { error: 'not found — use POST /query, POST /introspect, GET /sources' })
   } catch (e: any) {
-    return send(res, 500, { error: e?.message ?? String(e) })
+    const message = e?.message ?? String(e)
+    // A policy refusal is an answer about access, not a failure of the source.
+    return send(res, /not allowed to read/.test(message) ? 403 : 500, { error: message })
   }
 })
 

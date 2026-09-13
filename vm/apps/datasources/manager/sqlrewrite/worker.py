@@ -86,29 +86,53 @@ def enforce_cap(root, max_rows):
     return root, max_rows
 
 
-def inject_policies(root, policies):
-    """Authorization seam. policies is a list; each item is either:
-        {"predicate": "<sql bool expr>"}                 → AND-ed into the outermost WHERE, or
-        {"table": "<name>", "predicate": "<sql expr>"}   → AND-ed wherever that table is queried.
-    Empty/None → no-op. (Row-level security is injected HERE, server-side; the agent never sees it.)"""
+class Denied(Exception):
+    """A policy forbids this read. Reported as refused, never retried and never cached."""
+
+
+def inject_policies(root, policies, dialect=None):
+    """Authorization seam, applied to the parsed query before it is rendered. The manager chooses the policies
+    for the person asking; every one given here applies. Each is one of:
+
+        {"table": "<name>", "deny": true, "reason": "..."}     reading that table at all is refused
+        {"table": "<name>", "predicate": "<sql over {t}>"}     only that table's rows where the predicate holds
+        {"predicate": "<sql>"}                                  AND-ed into the outermost WHERE
+
+    A table predicate names the table's columns through `{t}` — `{t}.subsidiary IN (3, 5)` — because the query
+    may alias the table anything, or read it twice.
+
+    EVERY OCCURRENCE of the table is replaced by the table filtered — `(SELECT * FROM t WHERE ...) alias` — in a
+    FROM, a join of any side, or a subquery. Adding the predicate to a WHERE instead would be wrong under an
+    outer join: on the preserved side it would still let the rows through; on the other it would silently turn
+    the join inner. A filtered table is the same restriction whatever surrounds it."""
     if not policies:
         return root
     for pol in policies:
-        pred = pol.get("predicate")
-        if not pred:
-            continue
         table = pol.get("table")
-        if table:
+        if table and pol.get("deny"):
             for tbl in root.find_all(exp.Table):
                 if (tbl.name or "").lower() == str(table).lower():
-                    sel = tbl.find_ancestor(exp.Select)
-                    if sel is not None:
-                        sel.where(pred, copy=False)
-                    break
-        else:
+                    raise Denied(f"not allowed to read {table}" + (f": {pol['reason']}" if pol.get("reason") else ""))
+    for pol in policies:
+        pred = pol.get("predicate")
+        table = pol.get("table")
+        if not pred or pol.get("deny"):
+            continue
+        if not table:
             target = root if isinstance(root, exp.Select) else root.find(exp.Select)
             if target is not None:
-                target.where(pred, copy=False)
+                target.where(exp.condition(pred, dialect=dialect), copy=False)
+            continue
+        # A snapshot: the filtered tables this creates are not visited again by this policy, while a second policy
+        # on the same table wraps them once more — so both hold.
+        for tbl in list(root.find_all(exp.Table)):
+            if (tbl.name or "").lower() != str(table).lower():
+                continue
+            alias = tbl.alias_or_name
+            inner = exp.Table(this=exp.to_identifier(tbl.name), db=tbl.args.get("db"), catalog=tbl.args.get("catalog"))
+            condition = exp.condition(pred.replace("{t}", str(tbl.name)), dialect=dialect)
+            filtered = exp.select("*").from_(inner).where(condition).subquery(alias)
+            tbl.replace(filtered)
     return root
 
 
@@ -154,7 +178,7 @@ def rewrite(req):
             )
 
     root = hooks.apply_pre_ast(root, ctx)
-    root = inject_policies(root, req.get("policies"))
+    root = inject_policies(root, req.get("policies"), read)
     root, cappedTo = enforce_cap(root, int(req.get("maxRows") or 0))
     out = root.sql(dialect=write)
     out = hooks.apply_post_text(out, ctx)
