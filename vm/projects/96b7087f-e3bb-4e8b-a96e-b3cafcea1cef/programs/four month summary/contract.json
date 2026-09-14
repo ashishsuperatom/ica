@@ -1,0 +1,14 @@
+{
+  "name": "four month summary",
+  "kind": "program",
+  "description": "The 4 Month Summary: for a subsidiary (and a pillar when named), projected revenue from hard and soft allocation against the base budget month by month, and the projects with the most soft allocation still to convert in each month.",
+  "reads": { "sources": [], "programs": ["revenue against budget", "allocation revenue"] },
+  "params": {
+    "during": "the months to cover; this month and the three after it by default",
+    "subsidiary": "the revenue subsidiary's id; 2 is Fusion5 Pty Ltd (AU), 3 is Fusion5 Ltd (NZ)",
+    "pillar": "a pillar's name (CEC, BC, FO, …), or none for every pillar",
+    "top": "how many projects to list per month by remaining soft revenue; 7 by default",
+    "currency": "the currency to report in; the organisation's by default"
+  },
+  "returns": "answer"
+}

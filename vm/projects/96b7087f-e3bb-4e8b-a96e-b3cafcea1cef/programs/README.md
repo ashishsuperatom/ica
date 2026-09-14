@@ -35,4 +35,4 @@ defined into the project graph with `./define programs/<name>` or `graph/cli.ts 
 - **Go-live date** in the PMO report matches neither `calculatedenddate` nor `custentity_f5_project_end_date`; not yet
   found.
 - **Leave** is `customrecord_f5_leave_request` (for exempt hours).
-- The NetSuite bridge returns at most 5,000 rows a query without saying so; `allocations` pages by id.
+- The datasource manager returns at most 5,000 rows a query (and says so in `notes`); `allocations` pages by id to read them all.

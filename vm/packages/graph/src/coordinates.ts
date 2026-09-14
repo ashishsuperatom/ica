@@ -24,7 +24,7 @@ import type { RelativeInstant, RelativeSpan } from './relative.js'
 export { conditionSql, sqlFor, type Dialect, type SqlDialect } from './dialects.js'
 export { CoordinateError } from './errors.js'
 import {
-  additivity, componentsOf, isDerived, kindOf, tokens,
+  additivity, componentsOf, declaredColumns, isDerived, kindOf, tokens,
   type BaseMeasure, type Shape,
 } from './shape.js'
 
@@ -164,11 +164,13 @@ export interface PlanEnvironment {
   attributes?: AttributeSource
   rates?: RatesSource
   zone?: string
+  /** Reads a relation held in a SQL source into local rows, so a relation computed here can join it. */
+  materialise?: (statement: ResolvedStatement, columns: string[], name: string) => Promise<ResolvedStatement>
 }
 
 export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates, dialects: Record<string, Dialect>,
                            today: string, env: PlanEnvironment = {}): Promise<Plan> {
-  const { calendar = {}, attributes, rates, zone } = env
+  const { calendar = {}, attributes, rates, zone, materialise } = env
   const caveats: string[] = []
   const grainSet = new Grains(calendar)
   const calendarProblem = grainSet.problem()
@@ -376,9 +378,15 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
     const guards: Statement['guards'] = []
     let convertedColumn = ''
     const asAt = 'asAt' in when ? when.asAt : (addDays(when.to, -1) < today ? addDays(when.to, -1) : today)
+    // A relation computed here (its rows in a local table) joins a relation held in a SQL source by reading that one's
+    // rows here too. The other way — local rows sent into a source's SQL — is not possible.
+    const joinable = async (st: ResolvedStatement, of: { name: string; shape: Shape }): Promise<ResolvedStatement> => {
+      if (st.source === body.source) return st
+      if (body.tables && !st.tables && materialise) return materialise(st, [...declaredColumns(of.shape)], of.name)
+      return refuse(`"${of.name}" is read from ${st.source}, and this relation from ${body.source}; one statement cannot join them`)
+    }
     for (const [via, p] of providers) {
-      const st = await p.read({ asAt, where: {} })
-      if (st.source !== body.source) refuse(`"${p.name}" is read from ${st.source}, and this relation from ${body.source}; one statement cannot join them`)
+      const st = await joinable(await p.read({ asAt, where: {} }), p)
       for (const [k, v] of Object.entries(st.params)) {
         if (k in joinParams && joinParams[k] !== v) refuse(`parameter @${k} means different things in this relation and in "${p.name}"`)
         joinParams[k] = v
@@ -391,8 +399,7 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
       if ('from' in when) caveats.push(`attributes of ${p.entity} are as at ${asAt}`)
     }
     if (converting) {
-      const st = await rateSource!.read({ asAt, where: {} })
-      if (st.source !== body.source) refuse(`"${rateSource!.name}" is read from ${st.source}, and this relation from ${body.source}; one statement cannot join them`)
+      const st = await joinable(await rateSource!.read({ asAt, where: {} }), rateSource!)
       for (const [k, v] of Object.entries(st.params)) {
         if (k in joinParams && joinParams[k] !== v) refuse(`parameter @${k} means different things in this relation and in "${rateSource!.name}"`)
         joinParams[k] = v

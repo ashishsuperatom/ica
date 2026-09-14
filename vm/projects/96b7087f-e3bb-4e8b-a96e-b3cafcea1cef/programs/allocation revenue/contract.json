@@ -1,0 +1,34 @@
+{
+  "name": "allocation revenue",
+  "kind": "program",
+  "description": "Revenue projected from resource allocation: each allocated hour times the allocation's charge-out rate, in the project's currency. Hard allocation is committed revenue, soft is revenue at risk of not converting. Hours with no charge-out rate project no revenue and are counted as unpriced hours.",
+  "reads": { "sources": [], "programs": ["allocations"] },
+  "params": {},
+  "returns": "relation",
+  "shape": {
+    "dimensions": {
+      "allocation": { "column": "allocation_id", "history": "stable" },
+      "commitment": { "column": "commitment", "history": "current", "description": "Hard or Soft." },
+      "resource": { "column": "resource_id", "label": "resource_name", "history": "stable", "entity": "employee" },
+      "resource_subsidiary": { "column": "resource_subsidiary_id", "label": "resource_subsidiary_name", "history": "current" },
+      "resource_pillar": { "column": "resource_department_id", "label": "resource_department_name", "history": "current" },
+      "resource_role": { "column": "resource_title", "history": "current" },
+      "project": { "column": "project_id", "label": "project_name", "history": "stable", "entity": "project" },
+      "project_subsidiary": { "column": "project_subsidiary_id", "label": "project_subsidiary_name", "history": "current", "description": "The revenue subsidiary." },
+      "project_pillar": { "column": "project_pillar_id", "label": "project_pillar_name", "history": "current", "description": "The revenue pillar." },
+      "project_status": { "column": "project_status_id", "label": "project_status_name", "history": "current" },
+      "project_type": { "column": "project_type_id", "label": "project_type_name", "history": "current" },
+      "customer": { "column": "customer_id", "label": "customer_name", "history": "current", "entity": "customer" },
+      "billable": { "column": "billable", "history": "current" },
+      "currency": { "column": "currency_code", "history": "current" }
+    },
+    "measures": {
+      "revenue": { "aggregate": "sum", "column": "revenue", "unit": "money", "kind": "flow", "currency": "currency", "description": "Allocated hours times charge-out rate." },
+      "hours": { "aggregate": "sum", "column": "hours", "unit": "h", "kind": "flow" },
+      "unpriced_hours": { "aggregate": "sum", "column": "unpriced_hours", "unit": "h", "kind": "flow", "description": "Allocated hours with no charge-out rate, which project no revenue." },
+      "allocations": { "aggregate": "count distinct", "column": "allocation_id", "unit": "allocations", "kind": "flow" },
+      "people": { "aggregate": "count distinct", "column": "resource_id", "unit": "people", "kind": "flow" }
+    },
+    "time": "work_date"
+  }
+}

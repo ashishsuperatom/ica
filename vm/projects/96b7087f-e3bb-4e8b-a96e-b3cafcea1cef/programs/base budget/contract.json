@@ -1,0 +1,20 @@
+{
+  "name": "base budget",
+  "kind": "program",
+  "description": "The Base Budget the Fusion5 revenue reports measure projected revenue against: budget category Local $ currency, on the consulting income accounts 5005 Consulting, 5102 PartnerPlus CST PrePaid Hours and 5010 Consulting – Intercompany, by accounting period. Budget departments are the pillars.",
+  "reads": { "sources": [], "programs": ["budget"] },
+  "params": {},
+  "returns": "relation",
+  "shape": {
+    "dimensions": {
+      "subsidiary": { "column": "subsidiary_id", "label": "subsidiary_name", "history": "stable" },
+      "pillar": { "column": "department_id", "label": "department_name", "history": "stable", "description": "The budget's department, named as the pillar it is." },
+      "account": { "column": "account_number", "label": "account_name", "history": "stable" },
+      "currency": { "column": "currency_code", "history": "stable" }
+    },
+    "measures": {
+      "budget": { "aggregate": "sum", "column": "amount", "unit": "money", "kind": "flow", "currency": "currency" }
+    },
+    "time": "period_start"
+  }
+}

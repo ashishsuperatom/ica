@@ -12,9 +12,10 @@ import { calendarFor, settingFor } from './assumptions.js'
 import { comparisonCoordinates, mergeComparison, type ResolvedComparison } from './compare.js'
 import { attributesFor, ratesFor, statementFor } from './composition.js'
 import type { Contract } from './contract.js'
-import { plan, type Coordinates, type ReadBody, type ResolvedCoordinates } from './coordinates.js'
+import { plan, type Coordinates, type ReadBody, type ResolvedCoordinates, type ResolvedStatement } from './coordinates.js'
 import { runPlan, type Result } from './execute.js'
-import type { Runtime, Scope, Trail } from './runtime.js'
+import { createHash } from 'node:crypto'
+import { LOCAL, type Runtime, type Scope, type Trail } from './runtime.js'
 import { kindOf } from './shape.js'
 import { Grains } from './calendar.js'
 import { resolveRelative } from './relative.js'
@@ -35,8 +36,19 @@ export async function answerRelation(rt: Runtime, program: { name: string; hash:
   const { coordinates, caveats: resolved } = resolveRelative(currency ? { ...asked, currency } : asked, scope.today, new Grains(calendar))
   trail.caveats.push(...resolved)
 
+  // A relation joined to this one from another place is read in whole; a source that holds back rows cannot be joined.
+  const materialise = async (st: ResolvedStatement, columns: string[], of: string): Promise<ResolvedStatement> => {
+    const t = Date.now()
+    const rows = await rt.o.query(st.source, st.sql, st.params, { policies: scope.access?.[st.source] })
+    const capped = Array.isArray((rows as any).notes) && (rows as any).notes.length > 0
+    trail.queries.push({ source: st.source, sql: st.sql, params: st.params, rows: rows.length, ms: Date.now() - t, capped })
+    if (capped) throw new Error(`"${of}" has more rows than ${st.source} returns at once, so it cannot be read here to join to "${name}"`)
+    const table = `m_${createHash('sha256').update(st.source + st.sql + JSON.stringify(st.params)).digest('hex').slice(0, 12)}`
+    return { source: LOCAL, sql: `SELECT * FROM ${table}`, params: {}, tables: { [table]: { columns, rows } } }
+  }
+
   const ask = async (c: ResolvedCoordinates, side?: string) => {
-    const p = await plan(shape, read, c, rt.dialects, scope.today, { calendar, attributes, rates, zone: scope.zone?.zone })
+    const p = await plan(shape, read, c, rt.dialects, scope.today, { calendar, attributes, rates, zone: scope.zone?.zone, materialise })
     const result = await runPlan(shape, p, (src, sql, params) => rt.o.query(src, sql, params, { policies: scope.access?.[src] }),
       (q) => trail.queries.push(q),
       (label, held, detail) => {
