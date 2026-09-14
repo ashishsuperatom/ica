@@ -42,8 +42,9 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
   for (const sub of ['', 'data', 'grounding', 'programs', 'out', '.tools']) await mkdir(join(dir, sub), { recursive: true })
   await mkdir(dbDir, { recursive: true })
 
-  // @superatom/* must resolve from the project home for the data seams below. See the note in the repository history
-  // for why this is checked rather than assumed: a state directory outside the workspace root breaks resolution.
+  // @superatom/* must resolve from the project home for the data seams below. State lives outside the repository
+  // (~/.superatom/state), where Node finds no node_modules by walking up, so the project home links to the engine's
+  // by absolute path. A relative link breaks when the state directory moves, so it is replaced.
   const resolvesAlready = (() => {
     try { createRequire(join(projectHome, 'noop.js')).resolve('@superatom/introspect'); return true }
     catch { return false }
@@ -58,7 +59,7 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
         if (current !== null) await rm(link, { force: true })
         if (existsSync(target)) await symlink(target, link, 'dir')
       }
-      console.warn(`[workspace] ${projectHome} is not under the workspace root, so @superatom/* did not resolve; linked node_modules into it. Putting ENGINE_STATE_DIR under the root avoids this.`)
+      console.log(`[workspace] linked ${join(projectHome, 'node_modules')} → ${target}`)
     } catch (e: any) {
       // Not fatal on its own — but every seam and every generated unit will fail, so say it rather than swallow it.
       console.warn(`[workspace] @superatom/* does not resolve from ${projectHome} and the fallback link failed — the data seams will not import: ${e?.message ?? e}`)
