@@ -10,7 +10,8 @@
 // A share is a measure divided by its total within a group — each customer's part of its pillar's revenue. Only
 // a measure that adds up has one: a ratio's "share" of a total ratio means nothing.
 
-import { CoordinateError, type Coordinates } from './coordinates.js'
+import type { Coordinates } from './coordinates.js'
+import { CoordinateError } from './errors.js'
 import type { Column, Result } from './execute.js'
 import { additivity, type Shape } from './shape.js'
 

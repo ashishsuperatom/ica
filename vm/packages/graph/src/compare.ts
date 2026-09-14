@@ -15,7 +15,7 @@
 
 import { addDays } from './calendar.js'
 import type { Coordinates, Grain } from './coordinates.js'
-import { CoordinateError } from './coordinates.js'
+import { CoordinateError } from './errors.js'
 import { arrange, type Column, type Result } from './execute.js'
 import { additivity, type Shape } from './shape.js'
 
