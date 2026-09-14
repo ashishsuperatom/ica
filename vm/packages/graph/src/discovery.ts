@@ -31,7 +31,7 @@ export interface CatalogEntry {
     grain?: string
     time?: string
     measures: Record<string, { unit: string; kind: string; how: string; description?: string }>
-    dimensions: Record<string, { entity?: string; history: string; labelled: boolean; description?: string }>
+    dimensions: Record<string, { entity?: string; history: string; labelled: boolean; description?: string; names?: Record<string, string | number> }>
   }
 }
 
@@ -48,7 +48,7 @@ export function catalog(programs: Registry): CatalogEntry[] {
         measures: Object.fromEntries(Object.entries(s.measures).map(([m, d]) =>
           [m, { unit: d.unit, kind: d.kind, how: isDerived(d) ? d.expression : `${d.aggregate}${d.column ? ` of ${d.column}` : ''}`, ...(d.description ? { description: d.description } : {}) }])),
         dimensions: Object.fromEntries(Object.entries(s.dimensions).map(([n, d]) =>
-          [n, { ...(d.entity ? { entity: d.entity } : {}), history: d.history, labelled: !!d.label, ...(d.description ? { description: d.description } : {}) }])),
+          [n, { ...(d.entity ? { entity: d.entity } : {}), history: d.history, labelled: !!d.label, ...(d.description ? { description: d.description } : {}), ...(d.names ? { names: d.names } : {}) }])),
       }
     }
     return entry

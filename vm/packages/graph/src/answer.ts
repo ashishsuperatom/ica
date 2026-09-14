@@ -16,7 +16,8 @@ import { plan, type Coordinates, type ReadBody, type ResolvedCoordinates, type R
 import { runPlan, type Result } from './execute.js'
 import { createHash } from 'node:crypto'
 import { LOCAL, type Runtime, type Scope, type Trail } from './runtime.js'
-import { kindOf } from './shape.js'
+import { isDerived, kindOf } from './shape.js'
+import { CoordinateError } from './errors.js'
 import { Grains } from './calendar.js'
 import { resolveRelative } from './relative.js'
 import { atLevel, summaryProblem, withShares } from './summaries.js'
@@ -33,8 +34,9 @@ export async function answerRelation(rt: Runtime, program: { name: string; hash:
   // "Last 30 days" becomes dates first, against the day this call is answered as of and the request's calendar.
   // A reporting currency set for the organisation or the person applies when the question does not name one.
   const currency = asked.currency ?? (Object.values(shape.measures).some((m) => (m as any).currency) ? settingFor(rt.o.assumptions, scope, 'currency', trail) as string | undefined : undefined)
-  const { coordinates, caveats: resolved } = resolveRelative(currency ? { ...asked, currency } : asked, scope.today, new Grains(calendar))
+  const { coordinates: relative, caveats: resolved } = resolveRelative(currency ? { ...asked, currency } : asked, scope.today, new Grains(calendar))
   trail.caveats.push(...resolved)
+  const coordinates = withNames(shape, relative, trail)
 
   // A relation joined to this one from another place is read in whole; a source that holds back rows cannot be joined.
   const materialise = async (st: ResolvedStatement, columns: string[], of: string): Promise<ResolvedStatement> => {
@@ -71,6 +73,8 @@ export async function answerRelation(rt: Runtime, program: { name: string; hash:
 
   summaryProblem(shape, coordinates)
   let value = await answer(coordinates.totals || coordinates.share ? { ...coordinates, totals: undefined, share: undefined } : coordinates)
+  const measuresAsked = coordinates.measures?.length ? coordinates.measures : Object.keys(shape.measures)
+  if (value.rows.every((r) => measuresAsked.every((m) => r[m] == null))) await noSuchMember(coordinates)
   if (coordinates.share) {
     const { measures, within } = coordinates.share
     value = withShares(value, await answer(atLevel(coordinates, within, measures), `share within ${within.join(', ') || 'the whole'}`), measures, within)
@@ -83,4 +87,50 @@ export async function answerRelation(rt: Runtime, program: { name: string; hash:
   }
   trail.caveats.push(...value.caveats)
   return value
+
+  // AN EMPTY ANSWER BECAUSE A FILTER NAMES NOTHING THAT EXISTS is not an answer: "no rows" reads as "none happened".
+  // When a question comes back empty, each member it filters on is looked for among the members the same span holds.
+  // If the span holds members and the one asked for is not among them, the question is refused, with those members.
+  // A span that holds none is simply empty.
+  async function noSuchMember(c: ResolvedCoordinates) {
+    const base = Object.entries(shape.measures).filter(([, m]) => !isDerived(m))
+    const measure = (base.find(([, m]) => !(m as any).currency) ?? base[0])[0]
+    for (const [key, condition] of Object.entries(c.where ?? {})) {
+      const values = Array.isArray(condition) ? condition : (typeof condition === 'string' || typeof condition === 'number') ? [condition] : null
+      const dim = shape.dimensions[key] ? key : key.endsWith('_label') && shape.dimensions[key.slice(0, -6)] ? key.slice(0, -6) : null
+      if (!values?.length || !dim) continue
+      const d = shape.dimensions[dim]
+      const { result } = await ask({ measures: [measure], by: [dim], ...(c.during ? { during: c.during } : {}), ...(c.at ? { at: c.at } : {}), ...(c.currency ? { currency: c.currency } : {}) })
+      // A filter on the dimension matches ids; a filter on its label matches names.
+      const has = (v: unknown) => result.rows.some((r) => key === dim ? same(r[dim], v) : same(r[`${dim}_label`], v))
+      const missing = values.filter((v) => !has(v))
+      if (!missing.length || !result.rows.length) continue
+      const members = result.rows.slice(0, 20).map((r) => d.label ? `${r[`${dim}_label`]} (${r[dim]})` : String(r[dim]))
+      const names = d.names ? ` — names people use: ${Object.entries(d.names).map(([n, v]) => `${n} = ${v}`).join(', ')}` : ''
+      throw new CoordinateError(`no ${dim} ${key === dim ? 'is' : 'is named'} ${missing.map((v) => JSON.stringify(v)).join(' or ')} in the span asked — its members there are ${members.join(', ')}${result.rows.length > 20 ? `, and ${result.rows.length - 20} more` : ''}${names}${d.label && key === dim ? ` — to filter by name, use ${dim}_label` : ''}`)
+    }
+  }
+}
+
+const same = (a: unknown, b: unknown) => a != null && String(a).trim().toLowerCase() === String(b).trim().toLowerCase()
+
+/** A filter on a name people use for a member — a dimension's names — is read as that member, and says so. */
+function withNames(shape: Contract['shape'] & object, c: ResolvedCoordinates, trail: Trail): ResolvedCoordinates {
+  if (!c.where) return c
+  const where: Record<string, any> = { ...c.where }
+  for (const [dim, d] of Object.entries(shape.dimensions)) {
+    if (!d.names) continue
+    const names = Object.entries(d.names)
+    const meant = (v: unknown) => names.find(([n]) => same(n, v))
+    for (const key of [dim, `${dim}_label`]) {
+      const condition = where[key]
+      const values = Array.isArray(condition) ? condition : (typeof condition === 'string' || typeof condition === 'number') ? [condition] : null
+      if (!values?.length || !values.every(meant)) continue
+      const members = values.map((v) => meant(v)![1])
+      delete where[key]
+      where[dim] = Array.isArray(condition) ? members : members[0]
+      trail.caveats.push(`${values.map((v, i) => `"${v}" is read as ${dim} ${members[i]}`).join('; ')}`)
+    }
+  }
+  return { ...c, where }
 }

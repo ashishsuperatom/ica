@@ -46,7 +46,13 @@ function section(t: Table, title?: string, chosen?: string[]) {
   }
 }
 
-export function surfaceAnswer(a: Delivered | null | undefined, caveats: string[] = []): Answer {
+export function surfaceAnswer(a: Delivered | Table | null | undefined, caveats: string[] = []): Answer {
+  // A relation asked directly answers with its table: no narration, no views — the table is the answer.
+  if (a && Array.isArray((a as Table).columns) && Array.isArray((a as Table).rows)) {
+    const t = a as Table
+    return { status: 'answered', answer: t.rows.length ? '' : 'No rows match this question.', sections: [section(t)], ...(caveats.length ? { caveat: caveats.join('\n') } : {}) }
+  }
+  a = a as Delivered | null | undefined
   const prose = (a?.narration ?? []).map((s) => s.text).join(' ')
   const data = { ...(a?.data ?? {}) }
   const sections: NonNullable<Answer['sections']> = []

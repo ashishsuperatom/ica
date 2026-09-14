@@ -38,6 +38,9 @@ export interface Dimension {
   /** The entity this column identifies — `employee`, `customer`. Declaring it lets a question reach that entity's
    *  attributes through this dimension: `employee.manager`. (MetricFlow: an entity; Cube: a join key.) */
   entity?: string
+  /** What people call members, when it is not what the data holds: a name → the member it means — { "AU": "2" }.
+   *  A question filtering on one of these names is read as that member. */
+  names?: Record<string, string | number>
 }
 
 /** A measure aggregated from a column of the rows. */
@@ -229,6 +232,12 @@ export function shapeProblem(s: any): string | null {
       return `measure "${name}" is computed from itself`
     }
     try { evaluate(shape, name, {}) } catch { return `measure "${name}": the expression is not well formed` }
+  }
+  for (const [name, d] of Object.entries<any>(dimensions)) {
+    if (d?.names === undefined) continue
+    if (!d.names || typeof d.names !== 'object' || Array.isArray(d.names) || Object.values(d.names).some((v) => typeof v !== 'string' && typeof v !== 'number')) {
+      return `dimension "${name}": names maps what people call a member to the member it means — { "AU": "2" }`
+    }
   }
   if (kinds.has('flow') && !s.time) return 'a flow accumulates over a span, so the shape must name its time column'
   if (s.timeZone !== undefined) {

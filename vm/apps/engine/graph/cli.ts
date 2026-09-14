@@ -4,6 +4,7 @@
 //   ./program <name>                       one program in full: measures, dimensions, parameters, assumptions
 //   ./define <dir> [--replace "<why>"]     define the program in <dir> (contract.json + program.mjs), or correct one
 //   ./try <program> ['<request>']          ask a program directly, to check it while writing
+//   ./interpret '<reading>'                check a reading of the question against a program: terms resolved to members
 //   ./ask '<message>'                      apply a message to this conversation's data session and answer it
 //   ./find '<query>'                       find something the person was shown: {"row":3} · {"text":"acme"} · {"column":…,"equals":…}
 //   ./members <relation> <dimension> [text]   which members of a dimension match what was typed
@@ -65,7 +66,7 @@ if (command === 'program') {
     `${e.name} — ${e.kind}, returns ${e.returns}`, `  ${e.description}`,
     ...(r ? [`holds ${r.holds}${r.time ? `, over time (by day, week, month, quarter, year)` : ''}${r.grain ? `, one row per ${r.grain}` : ''}`,
              'measures:', ...Object.entries(r.measures).map(([m, d]: [string, any]) => `  ${m} — ${d.unit}, ${d.how}${d.description ? ` — ${d.description}` : ''}`),
-             'dimensions:', ...Object.entries(r.dimensions).map(([n, d]: [string, any]) => `  ${n}${d.labelled ? ` (filter by name with ${n}_label)` : ''}${d.entity ? ` → ${d.entity}` : ''}${d.description ? ` — ${d.description}` : ''}`)] : []),
+             'dimensions:', ...Object.entries(r.dimensions).map(([n, d]: [string, any]) => `  ${n}${d.labelled ? ` (filter by name with ${n}_label)` : ''}${d.entity ? ` → ${d.entity}` : ''}${d.description ? ` — ${d.description}` : ''}${d.names ? ` — names people use: ${Object.entries(d.names).map(([k, v]: [string, any]) => `${k} = ${v}`).join(', ')}` : ''}`)] : []),
     ...(params.length ? ['parameters:', ...params] : []),
     ...(assumes.length ? ['assumes:', ...assumes] : []),
   ].join('\n'))
@@ -106,11 +107,70 @@ if (command === 'define') {
   const qid = await readTurn('.turn') || fail('there is no turn in progress here')
   if (!engine.sessions.exists(sessionId)) fail(`the data session ${sessionId} does not exist`)
   const r = await engine.sessions.apply(sessionId, message)
-  await mkdir(join(env.home, 'out', qid), { recursive: true })
-  await writeFile(join(env.home, 'out', qid, 'step.json'), JSON.stringify({ sessionId, step: r.step, refused: (r as any).refused, error: (r as any).error }, null, 2))
+  // The turn ends on a step that answered. A refused or failed message leaves it open, for the request to be corrected.
+  if (!(r as any).refused && !(r as any).error) {
+    await mkdir(join(env.home, 'out', qid), { recursive: true })
+    await writeFile(join(env.home, 'out', qid, 'step.json'), JSON.stringify({ sessionId, step: r.step }, null, 2))
+  }
   if ((r as any).refused) out({ step: r.step, refused: (r as any).refused })
   else if ((r as any).error) out({ step: r.step, error: (r as any).error })
   else out({ step: r.step, state: r.state, answer: summary((r as any).value), caveats: engine.store.getCall((r as any).callId)?.caveats })
+} else if (command === 'interpret') {
+  // THE QUESTION, READ AS A REQUEST. The composer says what each part of the question means for one program — its
+  // measures, the words it filters on, the period as dates, the splits — and this checks each against that program:
+  // measures and dimensions it has, and every word a person typed resolved to the member it means, through the
+  // dimension's names or its members in the period. What the program cannot take, or a word that matches no member
+  // or several, is reported rather than guessed. The request comes back ready for ./ask, and the reading is kept.
+  const reading = json(args.join(' '), 'the reading')
+  const found = engine.catalog().find((e) => e.name === reading.program)
+  if (!found) fail(`there is no program "${reading.program}" — ./catalog lists them`)
+  const shape: any = found!.relation
+  const problems: string[] = []
+  const readAs: string[] = []
+  const request: Record<string, any> = {}
+  const period = reading.period?.during ?? reading.period?.at
+  if (shape) {
+    const measures = (reading.measures ?? []).map((m: any) => {
+      if (!shape.measures[m.measure]) problems.push(`"${m.term}": "${reading.program}" has no measure "${m.measure}" — it has ${Object.keys(shape.measures).join(', ')}`)
+      else readAs.push(`"${m.term}" → measure ${m.measure}`)
+      return m.measure
+    })
+    if (measures.length) request.measures = measures
+    if (reading.period?.during) request.during = reading.period.during
+    if (reading.period?.at) request.at = reading.period.at
+    if (reading.period) readAs.push(`"${reading.period.term}" → ${JSON.stringify(period)}`)
+    else if (shape.holds === 'flow') problems.push(`"${reading.program}" holds amounts over time: say the period (period.during, as dates)`)
+    const by: string[] = []
+    for (const s of reading.splits ?? []) {
+      const name = s.dimension ?? s.grain
+      if (s.dimension && !shape.dimensions[s.dimension]) problems.push(`"${s.term}": "${reading.program}" has no dimension "${s.dimension}" — it has ${Object.keys(shape.dimensions).join(', ')}`)
+      else { by.push(name); readAs.push(`"${s.term}" → split by ${name}`) }
+    }
+    if (by.length) request.by = by
+    const where: Record<string, unknown> = {}
+    for (const f of reading.filters ?? []) {
+      const d = shape.dimensions[f.dimension]
+      if (!d) { problems.push(`"${f.term}": "${reading.program}" has no dimension "${f.dimension}" — it has ${Object.keys(shape.dimensions).join(', ')}`); continue }
+      const typed = String(f.term)
+      const named = Object.entries(d.names ?? {}).find(([n]) => n.toLowerCase() === typed.trim().toLowerCase())
+      if (named) { where[f.dimension] = named[1]; readAs.push(`"${typed}" → ${f.dimension} ${named[1]}`); continue }
+      try {
+        const m = await engine.members(reading.program, { dimension: f.dimension, search: typed, ...(reading.period?.during ? { during: reading.period.during } : { at: reading.period?.at ?? 'today' }) })
+        const exact = m.matches.filter((x) => x.match === 'exact')
+        const pick = exact.length === 1 ? exact[0] : m.matches.length === 1 ? m.matches[0] : null
+        if (pick) { where[f.dimension] = pick.member; readAs.push(`"${typed}" → ${f.dimension} ${pick.member}${pick.label ? ` (${pick.label})` : ''}`) }
+        else if (!m.matches.length) problems.push(`"${typed}" matches no ${f.dimension} in the period${d.names ? ` — names people use: ${Object.keys(d.names).join(', ')}` : ''}`)
+        else problems.push(`"${typed}" matches several ${f.dimension}: ${m.matches.slice(0, 8).map((x) => `${x.label ?? x.member} (${x.member})`).join(', ')} — say which`)
+      } catch (e: any) { problems.push(`"${typed}": ${e.message}`) }
+    }
+    if (Object.keys(where).length) request.where = where
+  }
+  const qid = await readTurn('.turn')
+  if (qid) {
+    await mkdir(join(env.home, 'out', qid), { recursive: true })
+    await writeFile(join(env.home, 'out', qid, 'interpretation.json'), JSON.stringify({ question: reading.question, program: reading.program, readAs, problems, request }, null, 2))
+  }
+  out({ readAs, ...(problems.length ? { problems } : { ask: { ask: reading.program, request } }) })
 } else if (command === 'find') {
   const sessionId = await readTurn('.session') || fail('there is no data session for this conversation')
   out(engine.sessions.find(sessionId, json(args.join(' '), 'the query')))
@@ -119,6 +179,6 @@ if (command === 'define') {
   if (!relation || !dimension) fail('usage: ./members <relation> <dimension> [text]')
   out(await engine.members(relation, { dimension, search: text.join(' ') || undefined }))
 } else {
-  fail(`unknown command "${command}" — catalog, program, define, try, ask, find, members`)
+  fail(`unknown command "${command}" — catalog, program, interpret, define, try, ask, find, members`)
 }
 process.exit(0)

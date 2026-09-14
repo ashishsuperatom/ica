@@ -31,7 +31,13 @@
       "resource_subsidiary": {
         "column": "resource_subsidiary_id",
         "label": "resource_subsidiary_name",
-        "history": "current"
+        "history": "current",
+        "names": {
+          "AU": "2",
+          "Australia": "2",
+          "NZ": "3",
+          "New Zealand": "3"
+        }
       },
       "resource_pillar": {
         "column": "resource_department_id",
@@ -53,7 +59,13 @@
         "column": "project_subsidiary_id",
         "label": "project_subsidiary_name",
         "history": "current",
-        "description": "The project's subsidiary, which is the revenue subsidiary."
+        "description": "The project's subsidiary, which is the revenue subsidiary.",
+        "names": {
+          "AU": "2",
+          "Australia": "2",
+          "NZ": "3",
+          "New Zealand": "3"
+        }
       },
       "project_pillar": {
         "column": "project_pillar_id",

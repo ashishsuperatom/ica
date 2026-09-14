@@ -490,14 +490,17 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // THE STEP AS THE DATA SESSION HOLDS IT — never as the agent described it.
     const step = graph.sessions.history(sid).steps.find((s) => s.id === done.step)
     const call = step?.callId ? graph.store.getCall(step.callId) : null
+    // How the question was read, when it was read with ./interpret: the words, and what each was taken to mean.
+    const interpretation = readJsonSafe(join(workingAgent === 'analyst' ? analyst.cwd : composer.cwd, 'out', qid, 'interpretation.json')) as any
     const delivered = {
       t: 'session:step' as const, sid, qid, step: step?.id, parent: step?.parent ?? null, message: step?.message, state: step?.state,
-      answer: call?.output ?? null, caveats: call?.caveats ?? [], ...(step?.error ? { error: step.error } : {}), timing, by: workingAgent,
+      answer: call?.output ?? null, caveats: call?.caveats ?? [], ...(interpretation ? { interpretation } : {}),
+      ...(step?.error ? { error: step.error } : {}), timing, by: workingAgent,
     }
     emit(reply, delivered)
-    tellSurfaces(reply, channel, sid, qid, timing, step?.error
-      ? { status: 'error', answer: step.error }
-      : surfaceAnswer(call?.output as any, call?.caveats ?? []), followupsOf(call?.output as any))
+    const surfaced = step?.error ? { status: 'error' as const, answer: step.error } : surfaceAnswer(call?.output as any, call?.caveats ?? [])
+    if (interpretation?.readAs?.length) surfaced.scope = `Read as: ${interpretation.readAs.join('; ')}`
+    tellSurfaces(reply, channel, sid, qid, timing, surfaced, followupsOf(call?.output as any))
     console.log(`[ica] ${workingAgent} · step ${step?.id} · ${(timing.ms / 1000).toFixed(1)}s${step?.error ? ` · ${step.error.slice(0, 120)}` : ''}`)
   } catch (e: any) {
     emit(reply, { t: 'session:step', sid, qid, error: `Failed: ${e?.message ?? e}`, timing: { ms: Date.now() - t0 } })

@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto'
 import { agentConfig, type AgentOverride } from '../../config/index.js'
 import { createSession, prepareWorkspace, type Harness, type Session, type RunHandlers } from '../../ica/index.js'
 import { GRAPH_REFERENCE } from '../shared-prompts/graph-reference.js'
-import { turnOutcome, type TurnResult } from '../composer/index.js'
+import { todayIn, turnOutcome, type TurnResult } from '../composer/index.js'
 
 export interface AnalystOpts {
   root: string
@@ -40,7 +40,7 @@ computes, not for the question that asked for it, so the next question finds it.
 an answer: its views, its narration, and the next steps a person could take.
 
 Finish by answering the person: apply a message to their data session with ./ask. Work in the foreground; every tool
-explains itself with --help. A question is followed by \`qid:\` and, when the composer handed it over, why.`
+explains itself with --help. A question is followed by \`today:\` (the date it is asked on), \`qid:\` and, when the composer handed it over, why.`
 
 export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
   const cfg = agentConfig('analyst')
@@ -60,7 +60,7 @@ export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
       await writeFile(join(cwd, '.turn'), o.qid)
       await writeFile(join(cwd, '.session'), o.sessionId)
       await writeFile(join(cwd, '.agent'), 'analyst')
-      const turn = `${question}\n\nqid: ${o.qid}${o.reason ? `\nhanded over because: ${o.reason}` : ''}`
+      const turn = `${question}\n\ntoday: ${todayIn(opts.projectDir)}\nqid: ${o.qid}${o.reason ? `\nhanded over because: ${o.reason}` : ''}`
       await session.run(turn, { ...handlers, doneWhen: async () => (await turnOutcome(dir)) !== null })
       const outcome = await turnOutcome(dir)
       return { ...(outcome ?? { escalate: { reason: 'the analyst applied no step' } }), ms: Date.now() - t0 }

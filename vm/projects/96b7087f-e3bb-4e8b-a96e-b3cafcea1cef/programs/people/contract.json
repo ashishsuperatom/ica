@@ -22,7 +22,13 @@
       "subsidiary": {
         "column": "subsidiary_id",
         "label": "subsidiary_name",
-        "history": "current"
+        "history": "current",
+        "names": {
+          "AU": "2",
+          "Australia": "2",
+          "NZ": "3",
+          "New Zealand": "3"
+        }
       },
       "pillar": {
         "column": "department_id",

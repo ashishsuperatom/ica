@@ -2,27 +2,103 @@
   "name": "projects",
   "kind": "concept",
   "description": "Client projects (NetSuite jobs) as they are recorded now, one row each: customer, subsidiary, pillar, status, project type, RAG, project manager, senior supplier, currency and total project budget. NetSuite keeps no history of these fields.",
-  "reads": { "sources": ["F5NETSUITE"], "programs": [] },
+  "reads": {
+    "sources": [
+      "F5NETSUITE"
+    ],
+    "programs": []
+  },
   "params": {},
   "returns": "relation",
   "shape": {
     "grain": "project",
     "dimensions": {
-      "project": { "column": "project_id", "label": "project_name", "history": "stable", "entity": "project", "description": "The project; its label is the project number and name, as the reports show it." },
-      "customer": { "column": "customer_id", "label": "customer_name", "history": "current", "entity": "customer" },
-      "subsidiary": { "column": "subsidiary_id", "label": "subsidiary_name", "history": "current", "description": "The project's subsidiary (the revenue subsidiary): Fusion5 Pty Ltd is AU, Fusion5 Ltd is NZ." },
-      "pillar": { "column": "pillar_id", "label": "pillar_name", "history": "current", "description": "The practice pillar the project belongs to (BC, CEC, FO, …)." },
-      "status": { "column": "status_id", "label": "status_name", "history": "current", "description": "Project status; In Progress is the live work." },
-      "project_type": { "column": "type_id", "label": "type_name", "history": "current", "description": "Contract type: Implementation, Work Order, Milestone Fixed Price, Milestone T&E, Prepayment, PartnerPlus and its variants, …" },
-      "rag": { "column": "rag_id", "label": "rag_name", "history": "current", "description": "Current RAG status as recorded on the project: Red, Amber or Green." },
-      "project_manager": { "column": "manager_id", "label": "manager_name", "history": "current", "entity": "employee" },
-      "senior_supplier": { "column": "senior_supplier_id", "label": "senior_supplier_name", "history": "current", "entity": "employee" },
-      "currency": { "column": "currency_code", "history": "current", "description": "The currency the project's budget and rates are in." },
-      "prepaid_milestone": { "column": "prepaid_milestone", "history": "current", "description": "T when the project is flagged as prepaid milestone." }
+      "project": {
+        "column": "project_id",
+        "label": "project_name",
+        "history": "stable",
+        "entity": "project",
+        "description": "The project; its label is the project number and name, as the reports show it."
+      },
+      "customer": {
+        "column": "customer_id",
+        "label": "customer_name",
+        "history": "current",
+        "entity": "customer"
+      },
+      "subsidiary": {
+        "column": "subsidiary_id",
+        "label": "subsidiary_name",
+        "history": "current",
+        "description": "The project's subsidiary (the revenue subsidiary): Fusion5 Pty Ltd is AU, Fusion5 Ltd is NZ.",
+        "names": {
+          "AU": "2",
+          "Australia": "2",
+          "NZ": "3",
+          "New Zealand": "3"
+        }
+      },
+      "pillar": {
+        "column": "pillar_id",
+        "label": "pillar_name",
+        "history": "current",
+        "description": "The practice pillar the project belongs to (BC, CEC, FO, …)."
+      },
+      "status": {
+        "column": "status_id",
+        "label": "status_name",
+        "history": "current",
+        "description": "Project status; In Progress is the live work."
+      },
+      "project_type": {
+        "column": "type_id",
+        "label": "type_name",
+        "history": "current",
+        "description": "Contract type: Implementation, Work Order, Milestone Fixed Price, Milestone T&E, Prepayment, PartnerPlus and its variants, …"
+      },
+      "rag": {
+        "column": "rag_id",
+        "label": "rag_name",
+        "history": "current",
+        "description": "Current RAG status as recorded on the project: Red, Amber or Green."
+      },
+      "project_manager": {
+        "column": "manager_id",
+        "label": "manager_name",
+        "history": "current",
+        "entity": "employee"
+      },
+      "senior_supplier": {
+        "column": "senior_supplier_id",
+        "label": "senior_supplier_name",
+        "history": "current",
+        "entity": "employee"
+      },
+      "currency": {
+        "column": "currency_code",
+        "history": "current",
+        "description": "The currency the project's budget and rates are in."
+      },
+      "prepaid_milestone": {
+        "column": "prepaid_milestone",
+        "history": "current",
+        "description": "T when the project is flagged as prepaid milestone."
+      }
     },
     "measures": {
-      "projects": { "aggregate": "count", "unit": "projects", "kind": "stock" },
-      "total_budget": { "aggregate": "sum", "column": "total_budget", "unit": "money", "kind": "stock", "currency": "currency", "description": "The total project budget recorded on the project; empty when none is recorded." }
+      "projects": {
+        "aggregate": "count",
+        "unit": "projects",
+        "kind": "stock"
+      },
+      "total_budget": {
+        "aggregate": "sum",
+        "column": "total_budget",
+        "unit": "money",
+        "kind": "stock",
+        "currency": "currency",
+        "description": "The total project budget recorded on the project; empty when none is recorded."
+      }
     }
   }
 }
