@@ -379,3 +379,33 @@ test('top N per group: the largest customer in each region', async () => {
   assert.deepEqual(r.rows.map((x: any) => [x.region, x.customer, x.revenue]).sort(), [['north', 'c1', 320], ['south', 'c4', 400], [null, 'c3', 80]].sort())
   assert.equal(r.totals[0].rows.find((x: any) => x.region === 'south').revenue, 700, 'the total counts the customers the limit leaves out')
 })
+
+// ── relative dates ────────────────────────────────────────────────────────────────────────────────────────
+import { Grains, resolveSpan, resolveInstant } from '../src/index.ts'
+
+test('relative spans resolve against today and the calendar', () => {
+  const g = new Grains()
+  const fiscal = new Grains({ fiscal_quarter: { fiscal: 'quarter', startMonth: 4 } })
+  const today = '2026-09-14'
+  assert.deepEqual(resolveSpan({ this: 'quarter' }, today, g), { from: '2026-07-01', to: '2026-10-01', said: 'this quarter' })
+  assert.deepEqual(resolveSpan({ this: 'month', toDate: true }, today, g), { from: '2026-09-01', to: '2026-09-15', said: 'this month to date' })
+  assert.deepEqual(resolveSpan({ previous: 'month', count: 3 }, today, g), { from: '2026-06-01', to: '2026-09-01', said: 'the previous 3 months' })
+  assert.deepEqual(resolveSpan({ last: 30, unit: 'day' }, today, g), { from: '2026-08-16', to: '2026-09-15', said: 'the last 30 days' })
+  assert.deepEqual(resolveSpan({ last: 1, unit: 'year' }, '2024-02-29', g), { from: '2023-03-01', to: '2024-03-01', said: 'the last 1 year' })
+  assert.deepEqual(resolveSpan({ previous: 'fiscal_quarter' }, today, fiscal), { from: '2026-04-01', to: '2026-07-01', said: 'the previous fiscal_quarter' })
+  assert.deepEqual(resolveInstant({ endOf: 'month' }, today, g), { at: '2026-08-31', said: 'the end of the previous month' })
+  assert.deepEqual(resolveInstant({ endOf: 'quarter', count: 2 }, today, g), { at: '2026-03-31', said: 'the end of the previous 2 quarters' })
+})
+
+test('a question asked in relative dates is answered in dates, says which, and a replay means the same days', async () => {
+  let day = '2026-06-15'
+  const store = new GraphStore(join(mkdtempSync(join(tmpdir(), 'graph-rel-')), 'g.sqlite'))
+  const engine = createEngine({ store, modulesDir: mkdtempSync(join(tmpdir(), 'graph-mod-')), dialects: {}, query: async () => [], today: () => day })
+  await engine.define({ body: ORDERS_BODY, contract: ordersConcept }, { by: 'test' })
+  const r = await engine.call<any>('orders', { measures: ['revenue'], during: { previous: 'quarter' }, compare: { offset: { quarters: 1 } } })
+  assert.equal(r.value.rows[0].revenue, sum(ORDERS.filter((o) => o.ordered_on >= '2026-01-01' && o.ordered_on < '2026-04-01'), (o) => o.amount))
+  assert.ok(store.getCall(r.callId)!.caveats.includes('the previous quarter: 2026-01-01 to 2026-03-31'))
+  day = '2026-12-01'
+  const again = await engine.replay<any>(r.callId)
+  assert.deepEqual(again.value.rows, r.value.rows)
+})

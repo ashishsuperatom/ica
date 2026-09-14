@@ -14,14 +14,17 @@
 //                  row with the other side empty: zero for an amount that adds up, unknown for anything else.
 
 import { addDays } from './calendar.js'
-import type { Coordinates, Grain } from './coordinates.js'
+import type { Coordinates, Grain, ResolvedCoordinates, Span } from './coordinates.js'
+import type { RelativeInstant, RelativeSpan } from './relative.js'
 import { CoordinateError } from './errors.js'
 import { arrange, type Column, type Result } from './execute.js'
 import { additivity, type Shape } from './shape.js'
 
 export type Offset = { years?: number; quarters?: number; months?: number; weeks?: number; days?: number }
 /** What to compare against: the same question shifted back by an offset, or a span or instant given outright. */
-export type Comparison = { offset: Offset } | { during: { from: string; to: string } } | { at: string }
+export type Comparison = { offset: Offset } | { during: Span | RelativeSpan } | { at: string | RelativeInstant }
+/** A comparison with its dates made explicit. */
+export type ResolvedComparison = { offset: Offset } | { during: Span } | { at: string }
 
 const refuse = (msg: string): never => { throw new CoordinateError(msg) }
 
@@ -42,11 +45,11 @@ export function shift(date: string, by: Offset, sign = -1): string {
 }
 
 /** The two questions a comparison asks, and what the reader must be told about how they were matched. */
-export function comparisonCoordinates(c: Coordinates & { compare: Comparison }, today: string, isFlow: boolean) {
+export function comparisonCoordinates(c: ResolvedCoordinates & { compare: ResolvedComparison }, today: string, isFlow: boolean) {
   const { compare, having, order, limit, limitPer, ...rest } = c
   const caveats: string[] = []
-  const current: Coordinates = { ...rest }
-  const previous: Coordinates = { ...rest }
+  const current: ResolvedCoordinates = { ...rest }
+  const previous: ResolvedCoordinates = { ...rest }
   if ('offset' in compare) {
     const o = compare.offset
     if (!Object.values(o).some((v) => v)) refuse('a comparison offset must move time by something')

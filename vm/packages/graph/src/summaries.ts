@@ -34,9 +34,9 @@ export function summaryProblem(shape: Shape, c: Coordinates): void {
 }
 
 /** The same question at a coarser split, with nothing that picks rows out of the full set. */
-export function atLevel(c: Coordinates, level: string[], measures?: string[]): Coordinates {
-  const { totals: _t, share: _s, having: _h, order: _o, limit: _l, limitPer: _p, ...rest } = c
-  return { ...rest, by: level, ...(measures ? { measures } : {}) }
+export function atLevel<C extends Pick<Coordinates, 'by' | 'measures'>>(c: C, level: string[], measures?: string[]): C {
+  const { totals: _t, share: _s, having: _h, order: _o, limit: _l, limitPer: _p, ...rest } = c as C & Coordinates
+  return { ...rest, by: level, ...(measures ? { measures } : {}) } as unknown as C
 }
 
 /** Each row's share of its group's total. */

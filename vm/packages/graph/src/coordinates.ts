@@ -18,6 +18,8 @@
 import { addDays, Grains, type Calendar } from './calendar.js'
 import { conditionSql, sqlFor, type Dialect, type SqlDialect } from './dialects.js'
 import { CoordinateError } from './errors.js'
+import type { Comparison, ResolvedComparison } from './compare.js'
+import type { RelativeInstant, RelativeSpan } from './relative.js'
 export { conditionSql, sqlFor, type Dialect, type SqlDialect } from './dialects.js'
 export { CoordinateError } from './errors.js'
 import {
@@ -32,6 +34,12 @@ export type Condition = Scalar | null | Scalar[] | {
   in?: Scalar[]; notIn?: Scalar[]; eq?: Scalar; ne?: Scalar
   gt?: Scalar; gte?: Scalar; lt?: Scalar; lte?: Scalar; isNull?: boolean
 }
+
+/** A span of days: from inclusive, to exclusive, as YYYY-MM-DD. */
+export type Span = { from: string; to: string }
+
+/** A question with every relative date made explicit — what planning and comparison work on. */
+export type ResolvedCoordinates = Omit<Coordinates, 'during' | 'at' | 'compare'> & { during?: Span; at?: string; compare?: ResolvedComparison }
 
 export interface Coordinates {
   measures?: string[]
@@ -53,15 +61,15 @@ export interface Coordinates {
   /** Each measure as a share of its total within these splits — `[]` for the whole. Additive measures only. */
   share?: { measures: string[]; within: string[] }
   /** A span: from inclusive, to exclusive, as YYYY-MM-DD. */
-  during?: { from: string; to: string }
+  during?: Span | RelativeSpan
   /** An instant, as YYYY-MM-DD. Only a stock has a value at an instant. */
-  at?: string
+  at?: string | RelativeInstant
   /** How a stock is rolled over a span, when it is not asked by a grain. */
   rollup?: { time?: 'last' | 'average' }
   /** Include periods with no rows, as zero for a flow. */
   fill?: boolean
   /** The same question at another time, aligned row by row with the change beside each. See compare.ts. */
-  compare?: import('./compare.js').Comparison
+  compare?: Comparison
   /** Running totals along the time grain, starting again at each `reset` boundary — to-date and since-start. */
   cumulative?: { reset?: Grain | 'never' }
 }
@@ -122,7 +130,7 @@ const P = 'c_'
  *  attribute through a key without the relation it is asking naming that relation. */
 export type AttributeSource = (entity: string) => Promise<{ name: string; shape: Shape; read: ReadBody }>
 
-export async function plan(shape: Shape, read: ReadBody, c: Coordinates, dialects: Record<string, Dialect>,
+export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates, dialects: Record<string, Dialect>,
                            today: string, calendar: Calendar = {}, attributes?: AttributeSource): Promise<Plan> {
   const caveats: string[] = []
   const grainSet = new Grains(calendar)

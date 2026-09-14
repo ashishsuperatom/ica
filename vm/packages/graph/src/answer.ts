@@ -9,24 +9,29 @@
 //   totals    summaries.ts — the same question at coarser splits; shares of a total
 
 import { calendarFor } from './assumptions.js'
-import { comparisonCoordinates, mergeComparison, type Comparison } from './compare.js'
+import { comparisonCoordinates, mergeComparison, type ResolvedComparison } from './compare.js'
 import { attributesFor, statementFor } from './composition.js'
 import type { Contract } from './contract.js'
-import { plan, type Coordinates, type ReadBody } from './coordinates.js'
+import { plan, type Coordinates, type ReadBody, type ResolvedCoordinates } from './coordinates.js'
 import { runPlan, type Result } from './execute.js'
 import type { Runtime, Scope, Trail } from './runtime.js'
 import { kindOf } from './shape.js'
+import { Grains } from './calendar.js'
+import { resolveRelative } from './relative.js'
 import { atLevel, summaryProblem, withShares } from './summaries.js'
 
 export async function answerRelation(rt: Runtime, program: { name: string; hash: string; contract: Contract; body: string },
-                                     coordinates: Coordinates, scope: Scope, trail: Trail, path: string[]): Promise<Result> {
+                                     asked: Coordinates, scope: Scope, trail: Trail, path: string[]): Promise<Result> {
   const { name, hash, contract, body } = program
   const shape = contract.shape!
   const read: ReadBody = (when) => statementFor(rt, name, contract, hash, body, when, scope, trail, path)
   const calendar = calendarFor(rt.o.assumptions, scope, trail)
   const attributes = attributesFor(rt, scope, trail, path)
+  // "Last 30 days" becomes dates first, against the day this call is answered as of and the request's calendar.
+  const { coordinates, caveats: resolved } = resolveRelative(asked, scope.today, new Grains(calendar))
+  trail.caveats.push(...resolved)
 
-  const ask = async (c: Coordinates, side?: string) => {
+  const ask = async (c: ResolvedCoordinates, side?: string) => {
     const p = await plan(shape, read, c, rt.dialects, scope.today, calendar, attributes)
     const result = await runPlan(shape, p, (src, sql, params) => rt.o.query(src, sql, params, { policies: scope.access?.[src] }),
       (q) => trail.queries.push(q),
@@ -39,9 +44,9 @@ export async function answerRelation(rt: Runtime, program: { name: string; hash:
     return { p, result }
   }
 
-  const answer = async (c: Coordinates, side?: string): Promise<Result> => {
+  const answer = async (c: ResolvedCoordinates, side?: string): Promise<Result> => {
     if (!c.compare) return (await ask(c, side)).result
-    const both = comparisonCoordinates(c as Coordinates & { compare: Comparison }, scope.today, kindOf(shape) === 'flow')
+    const both = comparisonCoordinates(c as ResolvedCoordinates & { compare: ResolvedComparison }, scope.today, kindOf(shape) === 'flow')
     const [now, then] = await Promise.all([ask(both.current, side ? `${side}, now` : 'now'), ask(both.previous, side ? `${side}, compared with` : 'compared with')])
     trail.caveats.push(...both.caveats)
     return mergeComparison(shape, now.result, then.result, now.p.by, now.p.grain, both.after)
