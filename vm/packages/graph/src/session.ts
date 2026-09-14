@@ -10,7 +10,7 @@
 // the next one: S1 → S2 → S3. Each state is answered by calling its program, and the answer is kept with the step, so
 // "the third customer" refers to a row the person was actually shown.
 //
-// Programs are global; states are the person's. A state is plain data — it can be put in a link, pinned to a
+// Programs are global; a state belongs to its session, and a session to the person. A state is plain data — it can be put in a link, pinned to a
 // dashboard, or re-answered on another day — and it names no access: that always comes from whoever asks.
 //
 // Messages are typed and checked against the program's contract before anything runs, so a follow-up that cannot

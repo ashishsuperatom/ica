@@ -1233,9 +1233,9 @@ reopens on Q3. The NetSuite demonstration (`examples/s7-s8-memory-and-decisions.
 ### Decided — sessions, libraries, and where this is going
 
 **Two sessions run side by side.** The *agent session* is the conversation with the model, kept by whichever harness runs
-it; the engine only sees its id. The *data session* is what a person has asked of the data: a tree of steps, each a
+it; the engine only sees its id. It is what the ICA already has — each conversation in its own session directory. The *data session* is what a person has asked of the data: a tree of steps, each a
 state and the answer to it. A first question becomes a state S1, answered D1; a follow-up is a message applied to the
-current state, S2, answered D2. Programs are global; states are the person's. Everything goes through the agent: it
+current state, S2, answered D2. Programs are global; a state belongs to its session, and the session to the person. Everything goes through the agent: it
 turns what the person says into a message, applies it, and — when "the third customer" or "that supplier" points at
 something already shown — finds it in the session's answers (`sessions.find`). Messages are typed and checked against
 the contract before anything runs; a refused message leaves the session where it was; going back branches. The
