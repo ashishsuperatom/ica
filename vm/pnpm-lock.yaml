@@ -54,6 +54,9 @@ importers:
       '@opencode-ai/sdk':
         specifier: ^1.18.0
         version: 1.18.0
+      '@superatom/graph':
+        specifier: workspace:*
+        version: link:../../packages/graph
       '@superatom/grounding':
         specifier: workspace:*
         version: link:../../packages/grounding
@@ -97,6 +100,10 @@ importers:
       typescript:
         specifier: ^5.6.0
         version: 5.9.3
+
+  packages/agent-contract: {}
+
+  packages/graph: {}
 
   packages/grounding:
     dependencies:

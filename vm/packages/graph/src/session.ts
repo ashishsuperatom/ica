@@ -175,12 +175,16 @@ type Call = <T>(name: string, request: Record<string, unknown>, options?: CallOp
 export function sessions(store: GraphStore, programs: Registry, grains: () => Grains, call: Call) {
   const need = (id: string) => store.getSession(id) ?? refuse(`there is no session "${id}"`)
 
-  /** A data session for one person. `who` is recorded so the session's answers are asked as them. */
-  function open(options: { who?: Record<string, unknown>; title?: string } = {}): string {
-    const id = randomUUID()
-    store.openSession(id, options.who ?? null, options.title ?? null)
+  /** A data session for one person — with the id given, or a new one; opening one that exists returns it. `who` is
+   *  recorded so the session's answers are asked as them. */
+  function open(options: { id?: string; who?: Record<string, unknown>; title?: string } = {}): string {
+    const id = options.id ?? randomUUID()
+    if (!store.getSession(id)) store.openSession(id, options.who ?? null, options.title ?? null)
     return id
   }
+
+  /** Whether a session exists. */
+  const exists = (id: string) => !!store.getSession(id)
 
   /** Apply a message to the current step — or to `from`, which branches — answer the new state, and record both. A
    *  message that cannot apply, or a state that cannot be asked, is refused before anything runs and recorded as such;
@@ -271,5 +275,5 @@ export function sessions(store: GraphStore, programs: Registry, grains: () => Gr
     return out
   }
 
-  return { open, apply, goTo, history, find }
+  return { open, exists, apply, goTo, history, find }
 }

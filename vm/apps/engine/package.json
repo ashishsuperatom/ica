@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Enterprise engine — ICA (intelligent coding agent) + concept layer + superatom layer. See PLAN.md.",
+  "description": "Enterprise engine \u2014 ICA (intelligent coding agent) + concept layer + superatom layer. See PLAN.md.",
   "scripts": {
     "dev": "tsx engine.ts",
     "smoke": "tsx smoke.ts"
@@ -15,6 +15,7 @@
     "@openai/codex": "^0.144.0",
     "@openai/codex-sdk": "^0.144.4",
     "@opencode-ai/sdk": "^1.18.0",
+    "@superatom/graph": "workspace:*",
     "@superatom/grounding": "workspace:*",
     "@superatom/introspect": "workspace:*",
     "@superatom/node-store": "workspace:*",
