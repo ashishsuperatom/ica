@@ -30,7 +30,6 @@ import { sessions } from './session.js'
 import { createRuntime, newTrail, type CallOptions, type EngineOptions, type Intervention, type ProgramContext, type Scope } from './runtime.js'
 
 export type { CallOptions, EngineOptions, Intervention, ProgramContext, Query, SqlAnalysis } from './runtime.js'
-export { managerInspect } from './definition.js'
 
 export interface DefineResult { hash: string; name: string; created: boolean }
 export interface CallResult<T = unknown> { value: T; callId: string; hash: string }

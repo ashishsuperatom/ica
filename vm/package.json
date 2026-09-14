@@ -6,8 +6,7 @@
   "dependencies": {
     "@superatom/grounding": "workspace:*",
     "@superatom/introspect": "workspace:*",
-    "@superatom/node-store": "workspace:*",
-    "@superatom/scaffold": "workspace:*"
+    "@superatom/node-store": "workspace:*"
   },
   "scripts": {
     "start": "pm2 start ../ecosystem.config.cjs",

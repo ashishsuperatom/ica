@@ -15,7 +15,7 @@ const Q2 = { from: '2026-04-01', to: '2026-07-01' }
 const GRAINS: Grain[] = ['day', 'week', 'month', 'quarter', 'year']
 
 async function netsuite() {
-  const { query } = await import('@superatom/scaffold')
+  const { managerQuery } = await import('../src/index.ts'); const query = managerQuery()
   const store = new GraphStore(join(mkdtempSync(join(tmpdir(), 'graph-live-')), 'g.sqlite'))
   const engine = createEngine({ store, modulesDir: mkdtempSync(join(tmpdir(), 'graph-mod-')), query, dialects: { F5NETSUITE: 'oracle' } })
   const dir = new URL('../examples/capacity/utilised-hours-corrected/', import.meta.url)
@@ -53,7 +53,7 @@ test('NetSuite: top employees by hours, with having, a ratio and a median', live
 })
 
 test('SQL Server: period labels match JavaScript for dates across every edge', live, async () => {
-  const { query } = await import('@superatom/scaffold')
+  const { managerQuery } = await import('../src/index.ts'); const query = managerQuery()
   const s = sqlFor('mssql')
   // Year ends, a leap day, a Sunday and a Monday: where week and quarter arithmetic goes wrong.
   const dates = ['2024-02-29', '2025-12-28', '2025-12-29', '2025-12-31', '2026-01-01', '2026-03-31', '2026-04-01', '2026-09-13', '2026-09-14']
@@ -68,7 +68,7 @@ test('SQL Server: period labels match JavaScript for dates across every edge', l
 })
 
 test('NetSuite: period labels match JavaScript for dates across every edge', live, async () => {
-  const { query } = await import('@superatom/scaffold')
+  const { managerQuery } = await import('../src/index.ts'); const query = managerQuery()
   const s = sqlFor('oracle')
   const dates = ['2024-02-29', '2025-12-28', '2025-12-29', '2025-12-31', '2026-01-01', '2026-03-31', '2026-04-01', '2026-09-13', '2026-09-14']
   for (const d of dates) {
@@ -131,7 +131,7 @@ test('NetSuite: a pivot of hours by pillar and month with totals, shares and the
 // TODO: fails on NetSuite — 15,727 changes counted for 3 April in Auckland where a direct count gives 87 for
 // 3 April UTC. The same conversion is exact on local rows (capabilities.test.mts). Not yet explained.
 test('NetSuite: timestamps moved into another zone across a daylight-saving change match JavaScript', { ...live, todo: 'unexplained count on NetSuite' }, async () => {
-  const { query } = await import('@superatom/scaffold')
+  const { managerQuery } = await import('../src/index.ts'); const query = managerQuery()
   const { offsetMinutes } = await import('../src/index.ts')
   const store = new GraphStore(join(mkdtempSync(join(tmpdir(), 'graph-live-')), 'g.sqlite'))
   const engine = createEngine({ store, modulesDir: mkdtempSync(join(tmpdir(), 'graph-mod-')), query, dialects: { F5NETSUITE: 'oracle' } })

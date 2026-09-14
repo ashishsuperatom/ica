@@ -1,7 +1,7 @@
 // @superatom/graph — immutable, named, composable programs with memory. See docs/program-graph.md.
 
 // The engine and its memory
-export { createEngine, managerInspect, type Engine, type DefineResult, type CallResult } from './engine.js'
+export { createEngine, type Engine, type DefineResult, type CallResult } from './engine.js'
 export type { EngineOptions, CallOptions, Checks, Intervention, ProgramContext, Query, SqlAnalysis } from './runtime.js'
 export { GraphStore, type CallRecord, type StoredProgram, type Boundary, type Observation } from './store.js'
 export { trace } from './trace.js'
@@ -27,3 +27,4 @@ export { expect, seriesKey, lineageOf, observationsOf, withinLimit, surprisesAmo
 export { Registry, namespaceOf, type Library } from './registry.js'
 export { applyMessage, stateProblem, stateHash, MessageError, type State, type Message, type Step, type Found } from './session.js'
 export { answerProblem, renderAnswer, type Answer, type DeliveredAnswer, type View, type Sentence, type Cell, type NextStep, type Rendered } from './answer-contract.js'
+export { managerQuery, managerInspect, managerDialects, engineDialect } from './manager.js'

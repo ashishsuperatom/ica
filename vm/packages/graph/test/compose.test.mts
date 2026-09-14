@@ -123,7 +123,7 @@ test('a correction reaches the composed relation, and lineage finds its answers'
 })
 
 test('live: the composed SQL gives the numbers the hand-written SQL gives', { skip: !process.env.DATASOURCE_URL }, async () => {
-  const { query } = await import('@superatom/scaffold')
+  const { managerQuery } = await import('../src/index.ts'); const query = managerQuery()
   const { readFileSync } = await import('node:fs')
   const dir = new URL('../examples/capacity/', import.meta.url)
   const load = (d: string) => ({ body: readFileSync(new URL(`${d}/program.mjs`, dir), 'utf8'), contract: JSON.parse(readFileSync(new URL(`${d}/contract.json`, dir), 'utf8')) })

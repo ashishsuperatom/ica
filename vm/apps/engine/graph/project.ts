@@ -11,7 +11,7 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { GraphStore, createEngine, managerInspect, type Dialect, type Engine } from '@superatom/graph'
+import { GraphStore, createEngine, managerDialects, managerInspect, managerQuery, type Engine } from '@superatom/graph'
 
 export interface ProjectGraphPaths {
   /** Engine-private state for the project: the graph file and the program modules live here. */
@@ -22,42 +22,6 @@ export interface ProjectGraphPaths {
 }
 
 export const graphFile = (dbDir: string) => join(dbDir, 'graph.sqlite')
-
-/** How the manager names a dialect, as the graph names it. A source whose dialect the graph cannot write is left out. */
-function graphDialect(dialect: string | undefined): Dialect | null {
-  const d = String(dialect ?? '').toLowerCase()
-  if (['suiteql', 'oracle', 'netsuite'].includes(d)) return 'oracle'
-  if (['mssql', 'tsql', 'sqlserver'].includes(d)) return 'mssql'
-  if (d === 'sqlite') return 'sqlite'
-  return null
-}
-
-export async function sourceDialects(managerUrl: string): Promise<Record<string, Dialect>> {
-  const res = await fetch(`${managerUrl}/sources`)
-  if (!res.ok) throw new Error(`the datasource manager at ${managerUrl} did not list its sources (${res.status})`)
-  const { sources } = (await res.json()) as { sources: Array<{ id: string; kind: string; dialect?: string }> }
-  const out: Record<string, Dialect> = {}
-  for (const s of sources) {
-    const d = s.kind === 'sql' ? graphDialect(s.dialect) : null
-    if (d) out[s.id] = d
-  }
-  return out
-}
-
-/** A statement run through the manager, with the person's policies. A result the manager cut short says so on the rows. */
-export function managerQuery(managerUrl: string) {
-  return async (source: string, sql: string, params: Record<string, unknown> = {}, options: { policies?: unknown[] } = {}) => {
-    const res = await fetch(`${managerUrl}/query`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: source, sql, params, ...(options.policies?.length ? { policies: options.policies } : {}) }),
-    })
-    const body: any = await res.json().catch(() => ({}))
-    if (!res.ok || body.error) throw new Error(`${source}: ${body.error ?? `the manager answered ${res.status}`}`)
-    const rows: any[] = body.rows ?? []
-    if (Array.isArray(body.notes) && body.notes.length) Object.defineProperty(rows, 'notes', { value: body.notes, enumerable: false })
-    return rows
-  }
-}
 
 export function projectSettings(projectDir: string): Record<string, unknown> {
   const file = join(projectDir, 'settings.json')
@@ -70,7 +34,7 @@ export async function openProjectGraph(p: ProjectGraphPaths): Promise<Engine> {
     store: new GraphStore(graphFile(p.dbDir)),
     modulesDir: join(p.dbDir, 'graph-modules'),
     query: managerQuery(p.managerUrl),
-    dialects: await sourceDialects(p.managerUrl),
+    dialects: await managerDialects(p.managerUrl),
     inspect: managerInspect(p.managerUrl),
     assumptions: projectSettings(p.projectDir),
   })

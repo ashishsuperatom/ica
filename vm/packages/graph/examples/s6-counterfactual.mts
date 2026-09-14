@@ -12,14 +12,13 @@
 import { readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { query } from '@superatom/scaffold'
-import { GraphStore, createEngine, managerInspect, type Contract } from '../src/index.ts'
+import { GraphStore, createEngine, managerInspect, managerQuery, type Contract } from '../src/index.ts'
 
 const here = fileURLToPath(new URL('.', import.meta.url))
 const state = join(here, '..', '..', '..', '.state', 'graph-slice-s6')
 rmSync(state, { recursive: true, force: true })
 const store = new GraphStore(join(state, 'graph.sqlite'))
-const engine = createEngine({ store, modulesDir: join(state, 'modules'), query, dialects: { F5NETSUITE: 'oracle' }, inspect: managerInspect() })
+const engine = createEngine({ store, modulesDir: join(state, 'modules'), query: managerQuery(), dialects: { F5NETSUITE: 'oracle' }, inspect: managerInspect() })
 const load = (dir: string) => ({
   body: readFileSync(join(here, 'capacity', dir, 'program.mjs'), 'utf8'),
   contract: JSON.parse(readFileSync(join(here, 'capacity', dir, 'contract.json'), 'utf8')) as Contract,
@@ -66,7 +65,7 @@ show(target, 3, 'gap')
 heading('a counterfactual on an answer given before a correction')
 const wrongState = join(state, 'before-correction')
 const before = new GraphStore(join(wrongState, 'graph.sqlite'))
-const old = createEngine({ store: before, modulesDir: join(wrongState, 'modules'), query, dialects: { F5NETSUITE: 'oracle' }, inspect: managerInspect() })
+const old = createEngine({ store: before, modulesDir: join(wrongState, 'modules'), query: managerQuery(), dialects: { F5NETSUITE: 'oracle' }, inspect: managerInspect() })
 for (const dir of ['pillars', 'resolve-pillar', 'fte', 'utilised-hours', 'utilisation']) await old.define(load(dir), { by: 'human:slice' })
 const early = await old.call<any>('utilisation', { during: Q2, by: ['pillar'] })
 console.log(`  answered with the wrong concept: ${pct(early.value.total.utilisation)}`)

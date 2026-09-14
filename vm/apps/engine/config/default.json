@@ -17,11 +17,6 @@
       "provider": "claude-code",
       "model": "claude-sonnet-5"
     },
-    "modeller": {
-      "harness": "claude-code-pty",
-      "provider": "claude-code",
-      "model": "claude-sonnet-5"
-    },
     "composer": {
       "harness": "pi",
       "provider": "opencode-go",

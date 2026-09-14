@@ -8,18 +8,8 @@ import type { Contract } from './contract.js'
 import { sqlFor, type Dialect, type When } from './coordinates.js'
 import { namespaceOf } from './registry.js'
 import { runLocal } from './execute.js'
-import { newTrail, type Runtime, type SqlAnalysis } from './runtime.js'
+import { newTrail, type Runtime } from './runtime.js'
 import { isDerived, kindOf, type Shape, type Statement } from './shape.js'
-
-/** An inspect function that asks the datasource manager, which parses with the same SQLGlot that rewrites queries. */
-export function managerInspect(url = process.env.DATASOURCE_URL ?? 'http://localhost:4000') {
-  return async (sql: string, dialect: Dialect): Promise<SqlAnalysis> => {
-    const res = await fetch(`${url}/analyze`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sql, dialect }) })
-    const body: any = await res.json()
-    if (!res.ok) throw new Error(`the SQL does not parse: ${body.error ?? res.status}`)
-    return body
-  }
-}
 
 const declaredColumns = (shape: Shape) => {
   const columns = new Set<string>()

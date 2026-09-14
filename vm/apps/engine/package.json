@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Enterprise engine \u2014 ICA (intelligent coding agent) + concept layer + superatom layer. See PLAN.md.",
+  "description": "Enterprise engine \u2014 the ICA agents answering over the program graph (packages/graph). See docs/program-graph.md.",
   "scripts": {
     "dev": "tsx engine.ts",
     "smoke": "tsx smoke.ts"
@@ -19,10 +19,8 @@
     "@superatom/grounding": "workspace:*",
     "@superatom/introspect": "workspace:*",
     "@superatom/node-store": "workspace:*",
-    "@superatom/scaffold": "workspace:*",
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/headless": "^6.0.0",
-    "fastembed": "^2.1.0",
     "node-pty": "^1.0.0",
     "opencode-ai": "^1.18.0",
     "undici": "^7.29.0",
