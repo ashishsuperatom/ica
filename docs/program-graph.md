@@ -1192,6 +1192,32 @@ What follows from it:
 *Open: how a message is classified as a transition of the current state or the start of a new one; how much of
 a changed program's state carries over; how branches are named and shown.*
 
+### Decided — memory, expectations and decisions (S7, S8)
+
+**Memory is intrinsic to every program.** Every real answer with a time grain leaves its values in the store's
+SQLite memory as series: one measure, of one member, period by period, for the question apart from its time — its
+filters, splits and assumptions. Hypothetical answers leave nothing. Memory is not a cache: a cache can be
+removed without losing anything; memory is what the program has seen.
+
+**Memory is bounded.** One answer adds at most 10,000 values; a larger one is not remembered as series, and says
+so, because a partial series would teach an expectation from whichever rows fitted. A period answered again replaces
+the old value. Each series keeps its latest 120 periods whole, and memory as a whole a million values; beyond that
+the oldest are folded into the series' summary distribution — count, mean, spread, least, greatest, the periods
+spanned — so the far past remains as its shape.
+
+**An expectation is conditioned on the question** and robust: the median of the twelve periods before, and the
+median absolute deviation scaled to a standard deviation (Hampel; Leys et al., 2013). A value beyond three spreads is
+a surprise. **Triage** walks a surprise down the answer's call tree: each part is judged against its own memory, and
+the deepest surprising parts are where to look. This is the start of an explanation, not the explanation.
+
+**A decision records the number it turned on** — `ctx.decideAt(label, value, op, threshold)` — with its margin.
+**Review** asks each deciding question again as of a later day, its relative dates now meaning later periods, and
+reports every decision that would now go the other way.
+
+**S7, S8 on local rows** (`test/expectations.test.mts`): team b's hours halve in June with headcount unchanged; the
+June utilisation is the one surprise, triage leads to hours and not headcount; "should team b hire" is yes on Q1 and
+reopens on Q3. The NetSuite demonstration (`examples/s7-s8-memory-and-decisions.mts`) awaits the sanity pass.
+
 ### Decided — the engine, and the semantic model built on it
 
 Two things are being built here, and in production only one of them can change.

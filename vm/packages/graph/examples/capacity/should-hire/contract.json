@@ -1,0 +1,11 @@
+{
+  "name": "should hire",
+  "kind": "program",
+  "description": "Whether a pillar should hire: its utilisation last quarter against a threshold, as a decision that is reviewed as the data changes.",
+  "reads": { "sources": [], "programs": ["utilisation"] },
+  "params": { "pillar": "the pillar as the person typed it" },
+  "assumes": {
+    "hiring threshold": { "description": "utilisation last quarter above which a pillar should hire", "unit": "ratio", "default": 0.6 }
+  },
+  "returns": "value"
+}
