@@ -15,10 +15,12 @@ import type { Contract } from './contract.js'
 import type { Coordinates } from './coordinates.js'
 import type { CallOptions } from './runtime.js'
 import { isDerived, kindOf } from './shape.js'
-import type { GraphStore } from './store.js'
+import type { Registry } from './registry.js'
 
 export interface CatalogEntry {
   name: string
+  /** The library it comes from, when it is not this organisation's own. */
+  library?: string
   kind: Contract['kind']
   returns: Contract['returns']
   description: string
@@ -33,10 +35,10 @@ export interface CatalogEntry {
   }
 }
 
-export function catalog(store: GraphStore): CatalogEntry[] {
-  return store.current().map(({ name, hash }) => {
-    const c = store.getProgram(hash)!.contract
-    const entry: CatalogEntry = { name, kind: c.kind, returns: c.returns, description: c.description, params: c.params, ...(c.assumes ? { assumes: c.assumes } : {}) }
+export function catalog(programs: Registry): CatalogEntry[] {
+  return programs.names().map(({ name, hash, library }) => {
+    const c = programs.program(hash)!.contract
+    const entry: CatalogEntry = { name, ...(library ? { library } : {}), kind: c.kind, returns: c.returns, description: c.description, params: c.params, ...(c.assumes ? { assumes: c.assumes } : {}) }
     if (c.returns === 'relation' && c.shape) {
       const s = c.shape
       entry.relation = {
@@ -68,11 +70,11 @@ function distance(a: string, b: string): number {
 
 type Call = <T>(name: string, request: Record<string, unknown>, options?: CallOptions) => Promise<{ value: T; callId: string }>
 
-export async function members(store: GraphStore, call: Call, relation: string,
+export async function members(programs: Registry, call: Call, relation: string,
                               ask: { dimension: string; search?: string; at?: Coordinates['at']; during?: Coordinates['during']; limit?: number },
                               options: CallOptions = {}): Promise<Members> {
-  const hash = store.resolve(relation)
-  const c = hash ? store.getProgram(hash)!.contract : null
+  const hash = programs.resolve(relation)?.hash
+  const c = hash ? programs.program(hash)!.contract : null
   if (!c || c.returns !== 'relation' || !c.shape) throw new Error(`"${relation}" is not a relation`)
   const dim = c.shape.dimensions[ask.dimension] ?? (() => { throw new Error(`"${relation}" has no dimension "${ask.dimension}"`) })()
   const measure = Object.entries(c.shape.measures).find(([, m]) => !isDerived(m))![0]

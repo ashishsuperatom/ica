@@ -24,6 +24,7 @@ import { expect, lineageOf, observationsOf, surprisesAmong, surprisesIn, triage,
 import { MAX_OBSERVATIONS_PER_CALL, type CallRecord } from './store.js'
 import { checkRelation, interfaceMisfit, programParamMisfit, reachesName } from './definition.js'
 import { programHash } from './hash.js'
+import { namespaceOf } from './registry.js'
 import { createRuntime, newTrail, type CallOptions, type EngineOptions, type Intervention, type ProgramContext, type Scope } from './runtime.js'
 
 export type { CallOptions, EngineOptions, Intervention, ProgramContext, Query, SqlAnalysis } from './runtime.js'
@@ -47,8 +48,12 @@ export function createEngine(o: EngineOptions) {
 
     // EVERY PROGRAM IT READS MUST ALREADY EXIST. A missing one is a hole in the graph, and the moment of
     // definition is where it is cheapest to say so — not at the first call, in front of someone's question.
+    // A LIBRARY IS NOT CHANGED FROM HERE. Its programs are someone else's; they are used, not redefined.
+    const library = rt.programs.libraryOf(contract.name)
+    if (library) throw new Error(`not defined — "${contract.name}" is in the library "${library.namespace}", which is read-only here`)
+    const ns = namespaceOf(contract.name)
     for (const read of contract.reads.programs) {
-      if (!o.store.resolve(read)) throw new Error(`not defined — "${contract.name}" reads "${read}", which does not exist`)
+      if (!rt.programs.resolve(read, ns)) throw new Error(`not defined — "${contract.name}" reads "${read}", which does not exist`)
     }
 
     const hash = programHash(body, contract)
@@ -57,7 +62,7 @@ export function createEngine(o: EngineOptions) {
 
     // A NAME MAY NOT BE MADE TO REACH ITSELF. A new program only reads names that already exist, so it cannot close
     // a loop; a replacement can, because every caller of the old name now reaches the new program's reads.
-    const loop = reachesName(rt, contract.reads.programs, contract.name)
+    const loop = reachesName(rt, contract.reads.programs, contract.name, ns)
     if (loop) throw new Error(`not defined — "${contract.name}" would reach itself: ${[contract.name, ...loop].join(' → ')}`)
 
     // A REPLACEMENT MUST STILL FIT ITS CALLERS. Every caller was written against the old program's interface; a
@@ -83,11 +88,12 @@ export function createEngine(o: EngineOptions) {
     return { hash, name: contract.name, created }
   }
 
-  async function run<T>(name: string, request: Record<string, unknown>, parentId: string | null,
-                        scope: Scope, path: string[]): Promise<CallResult<T>> {
-    const hash = o.store.resolve(name)
-    if (!hash) throw new Error(`no program named "${name}"`)
-    const program = o.store.getProgram(hash)!
+  async function run<T>(asked: string, request: Record<string, unknown>, parentId: string | null,
+                        scope: Scope, path: string[], from = ''): Promise<CallResult<T>> {
+    const found = rt.programs.resolve(asked, from)
+    if (!found) throw new Error(`no program named "${asked}"`)
+    const { name, hash } = found
+    const program = rt.programs.program(hash)!
     const { contract } = program
 
     const id = randomUUID()
@@ -105,7 +111,7 @@ export function createEngine(o: EngineOptions) {
           throw new Error(`"${name}" called "${child}", which its contract does not declare it reads and no parameter names`)
         }
         const childScope = options.assume ? { ...scope, context: { ...scope.context, ...options.assume } } : scope
-        return (await run<U>(child, childRequest, id, childScope, [...path, hash])).value
+        return (await run<U>(child, childRequest, id, childScope, [...path, hash], namespaceOf(name))).value
       },
       decide(label, took, reason) { trail.decisions.push({ label, took, reason }); return took },
       decideAt(label, value, op, threshold, reason) {
@@ -137,7 +143,7 @@ export function createEngine(o: EngineOptions) {
         if (misfit) throw new Error(`"${name}": parameter "${p}" — ${misfit}`)
       }
       // A program that reaches itself again through its calls would never finish.
-      if (path.includes(hash)) throw new Error(`"${name}" calls itself: ${[...path, hash].map((h) => o.store.getProgram(h)?.contract.name ?? h).join(' → ')}`)
+      if (path.includes(hash)) throw new Error(`"${name}" calls itself: ${[...path, hash].map((h) => rt.programs.program(h)?.contract.name ?? h).join(' → ')}`)
       const iv = scope.interventions[name]
       if (iv && 'value' in iv) {
         if (contract.returns === 'relation') throw new Error(`"${name}" is a relation; intervene on its rows with where or add, not value`)
@@ -298,9 +304,9 @@ export function createEngine(o: EngineOptions) {
   return {
     define, call, replay, counterfactual, surprises, explain, review,
     /** What programs exist, with each relation's measures, dimensions and entities. */
-    catalog: () => catalog(o.store),
+    catalog: () => catalog(rt.programs),
     /** Which members of a relation's dimension match what someone typed. */
-    members: (relation: string, ask: Parameters<typeof members>[3], options: CallOptions = {}) => members(o.store, call, relation, ask, options),
+    members: (relation: string, ask: Parameters<typeof members>[3], options: CallOptions = {}) => members(rt.programs, call, relation, ask, options),
     store: o.store,
   }
 }

@@ -6,6 +6,7 @@
 import { expand, readingContext } from './composition.js'
 import type { Contract } from './contract.js'
 import { sqlFor, type Dialect, type When } from './coordinates.js'
+import { namespaceOf } from './registry.js'
 import { runLocal } from './execute.js'
 import { newTrail, type Runtime, type SqlAnalysis } from './runtime.js'
 import { isDerived, kindOf, type Shape, type Statement } from './shape.js'
@@ -74,8 +75,8 @@ async function inspectRelation(rt: Runtime, hash: string, body: string, contract
     // table in its SQL is a data read that bypasses the one definition of that data.
     const names: string[] = []
     const marked = out.sql.replace(/\{\{([^}]+)\}\}/g, (_m, n) => { names.push(n); return `__relation_${names.length - 1}` })
-    const first = names.length ? rt.o.store.resolve(names[0]) : null
-    const dialect = dialectOf(rt, first ? rt.o.store.getProgram(first)!.contract : null) ?? 'oracle'
+    const first = names.length ? rt.programs.resolve(names[0], namespaceOf(contract.name))?.hash : null
+    const dialect = dialectOf(rt, first ? rt.programs.program(first)!.contract : null) ?? 'oracle'
     const { tables } = await rt.o.inspect!(marked, dialect)
     const direct = tables.filter((t) => !/^__relation_\d+$/.test(t))
     if (direct.length) throw new Error(`it reads ${direct.join(', ')} directly — a program reads data only through the relations named in {{braces}}`)
@@ -98,32 +99,33 @@ function dialectOf(rt: Runtime, c: Contract | null, seen = new Set<string>()): D
   for (const n of c.reads.programs) {
     if (seen.has(n)) continue
     seen.add(n)
-    const h = rt.o.store.resolve(n)
-    const d = h ? dialectOf(rt, rt.o.store.getProgram(h)!.contract, seen) : null
+    const h = rt.programs.resolve(n, namespaceOf(c.name))?.hash
+    const d = h ? dialectOf(rt, rt.programs.program(h)!.contract, seen) : null
     if (d) return d
   }
   return null
 }
 
 /** The path from these names to `target` through what each program reads, or null if there is none. */
-export function reachesName(rt: Runtime, reads: string[], target: string, seen = new Set<string>()): string[] | null {
+export function reachesName(rt: Runtime, reads: string[], target: string, from = '', seen = new Set<string>()): string[] | null {
   for (const read of reads) {
-    if (read === target) return [read]
-    if (seen.has(read)) continue
-    seen.add(read)
-    const hash = rt.o.store.resolve(read)
-    const next = hash ? rt.o.store.getProgram(hash)?.contract.reads.programs ?? [] : []
-    const path = reachesName(rt, next, target, seen)
-    if (path) return [read, ...path]
+    const found = rt.programs.resolve(read, from)
+    const full = found?.name ?? read
+    if (full === target || read === target) return [full]
+    if (seen.has(full)) continue
+    seen.add(full)
+    const next = found ? rt.programs.program(found.hash)?.contract.reads.programs ?? [] : []
+    const path = reachesName(rt, next, target, namespaceOf(full), seen)
+    if (path) return [full, ...path]
   }
   return null
 }
 
 /** Why a named program cannot fill a program parameter, or null if it can. */
 export function programParamMisfit(rt: Runtime, named: string, spec: Exclude<Contract['params'][string], string>): string | null {
-  const hash = rt.o.store.resolve(named)
+  const hash = rt.programs.resolve(named)?.hash
   if (!hash) return `no program named "${named}"`
-  const c = rt.o.store.getProgram(hash)!.contract
+  const c = rt.programs.program(hash)!.contract
   const want = spec.program
   if (want.returns && c.returns !== want.returns) return `"${named}" returns ${c.returns}, and a ${want.returns} is needed`
   for (const m of want.measures ?? []) if (!c.shape?.measures[m]) return `"${named}" has no measure "${m}"`

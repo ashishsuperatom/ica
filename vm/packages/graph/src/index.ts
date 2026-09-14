@@ -24,3 +24,4 @@ export { resolveRelative, resolveSpan, resolveInstant, type RelativeSpan, type R
 export { dayIn, offsetMinutes, stretches, validZone, type Stretch } from './timezones.js'
 export { catalog, members, type CatalogEntry, type Members, type MemberMatch } from './discovery.js'
 export { expect, seriesKey, lineageOf, observationsOf, withinLimit, surprisesAmong, type Expectation, type Surprise, type TriageNode } from './expectations.js'
+export { Registry, namespaceOf, type Library } from './registry.js'

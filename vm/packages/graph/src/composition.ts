@@ -12,6 +12,7 @@
 import { assume, calendarFor } from './assumptions.js'
 import { Grains } from './calendar.js'
 import { resolveSpan } from './relative.js'
+import { namespaceOf } from './registry.js'
 import type { Contract } from './contract.js'
 import type { AttributeSource, RatesSource, ResolvedStatement, When } from './coordinates.js'
 import { intervened } from './interventions.js'
@@ -80,13 +81,14 @@ export async function expand(rt: Runtime, self: string, contract: Contract, hash
   for (const [, name] of out.sql.matchAll(/\{\{([^}]+)\}\}/g)) {
     if (parts.has(name)) continue
     if (!contract.reads.programs.includes(name)) throw new Error(`"${contract.name}" builds on "${name}", which its contract does not declare it reads`)
-    const childHash = rt.o.store.resolve(name)
-    const child = childHash && rt.o.store.getProgram(childHash)
+    const found = rt.programs.resolve(name, namespaceOf(self))
+    const childHash = found?.hash
+    const child = childHash && rt.programs.program(childHash)
     if (!child) throw new Error(`"${contract.name}" builds on "${name}", which does not exist`)
     if (child.contract.returns !== 'relation') throw new Error(`"${contract.name}" builds on "${name}", which is not a relation`)
     const childKind = kindOf(child.contract.shape!)
     if (childKind !== kind) throw new Error(`"${contract.name}" holds ${kind}s and builds on "${name}", which holds ${childKind}s — they are read at different times`)
-    const st = await statementFor(rt, name, child.contract, childHash, child.body, when, scope, trail, [...path, hash])
+    const st = await statementFor(rt, found!.name, child.contract, childHash, child.body, when, scope, trail, [...path, hash])
     // One statement runs in one place. Relations from two sources are combined by a program, after each is aggregated.
     if (source && st.source !== source) throw new Error(`"${contract.name}" builds on relations from ${source} and ${st.source}; one SQL statement cannot read both`)
     source = st.source
@@ -96,7 +98,7 @@ export async function expand(rt: Runtime, self: string, contract: Contract, hash
     }
     Object.assign(tables, st.tables ?? {})
     parts.set(name, st.sql.trim())
-    trail.used.set(childHash, name)
+    trail.used.set(childHash, found!.name)
   }
   if (!source) throw new Error(`"${contract.name}" is a program returning a relation but names no relation in {{braces}}`)
   const sql = out.sql.replace(/\{\{([^}]+)\}\}/g, (_m, name) => `(\n${parts.get(name)}\n)`)
@@ -111,8 +113,8 @@ export function ratesFor(rt: Runtime, scope: Scope, trail: Trail, path: string[]
     if (typeof name !== 'string' || (at !== 'end' && at !== 'row')) {
       throw new Error('the setting "exchange rates" must say which relation holds the rates and how they apply: { relation, at: "end" | "row" }')
     }
-    const hash = rt.o.store.resolve(name)
-    const program = hash ? rt.o.store.getProgram(hash) : null
+    const hash = rt.programs.resolve(name)?.hash
+    const program = hash ? rt.programs.program(hash) : null
     if (!program || program.contract.returns !== 'relation') throw new Error(`the exchange rates "${name}" are not a relation`)
     trail.used.set(hash!, name)
     return { name, at, shape: program.contract.shape!, read: (when) => statementFor(rt, name, program.contract, hash!, program.body, when, scope, trail, path) }
@@ -124,7 +126,7 @@ export function ratesFor(rt: Runtime, scope: Scope, trail: Trail, path: string[]
  *  own, so a relation may reach attributes through its own grain. */
 export function attributesFor(rt: Runtime, scope: Scope, trail: Trail, path: string[]): AttributeSource {
   return async (entity) => {
-    const found = rt.o.store.current().map(({ name, hash }) => ({ name, hash, program: rt.o.store.getProgram(hash)! }))
+    const found = rt.programs.names().map(({ name, hash }) => ({ name, hash, program: rt.programs.program(hash)! }))
       .filter(({ program: { contract: c } }) => c.returns === 'relation' && c.shape?.grain && c.shape.dimensions[c.shape.grain].entity === entity)
     if (!found.length) throw new Error(`no relation has ${entity} as its grain, so attributes of ${entity} cannot be reached`)
     if (found.length > 1) throw new Error(`${found.map((f) => `"${f.name}"`).join(' and ')} all have ${entity} as their grain — which holds its attributes is a decision, not a lookup`)

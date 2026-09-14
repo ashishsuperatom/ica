@@ -11,6 +11,7 @@ import type { Condition, Dialect } from './coordinates.js'
 import type { CallRecord, GraphStore } from './store.js'
 import type { Expectation } from './expectations.js'
 import { dayIn } from './timezones.js'
+import { Registry, type Library } from './registry.js'
 
 /** Runs a statement on a source. `policies` are the access restrictions of the person asking, applied at the source. */
 export type Query = (source: string, sql: string, params?: Record<string, unknown>, options?: { policies?: unknown[] }) => Promise<any[]>
@@ -34,6 +35,8 @@ export interface EngineOptions {
   inspect?: (sql: string, dialect: Dialect) => Promise<SqlAnalysis>
   /** How much extra reading a check may cost, by default. See Checks. */
   checks?: Checks
+  /** Other models this organisation uses, each mounted read-only under a namespace. See registry.ts. */
+  libraries?: Library[]
 }
 
 /** Checks that need extra reads of the source.
@@ -124,6 +127,8 @@ export const LOCAL = 'local'
 
 export interface Runtime {
   o: EngineOptions
+  /** Where names are looked up: this organisation's programs and its libraries. */
+  programs: Registry
   /** The engine's dialects, with the local engine's added. */
   dialects: Record<string, Dialect>
   /** Today's date in a zone — UTC when none is given, never the server's own — unless the engine was given a clock. */
@@ -135,6 +140,7 @@ export function createRuntime(o: EngineOptions): Runtime {
   mkdirSync(o.modulesDir, { recursive: true })
   return {
     o,
+    programs: new Registry(o.store, o.libraries),
     dialects: { ...o.dialects, [LOCAL]: 'sqlite' },
     clock: o.today ? () => o.today!() : (zone) => dayIn(zone ?? 'UTC'),
     /** A body becomes a module file named by its hash. Because a hash is immutable, the file is written once and a
