@@ -1,270 +1,70 @@
-// ── Analyst Agent ─────────────────────────────────────────────────────────────
-// ONE agent whose only job is to ANSWER a question (it never builds the model). It drives an ICA
-// (default claude-code:sonnet5, swappable) using a per-CATEGORY system prompt — the classifier's
-// label selects which instruction the agent gets, but it is always the same harness/model.
+// THE ANALYST — builds what the graph is missing.
 //
-// It shares the SEMANTIC MODEL's workspace (same projectId dir): the model lives in ./db/project.sqlite
-// and units accumulate in ./units/ — so a calculation is defined once and reused across questions.
+// One analyst for the project, in the shared workspace. A question reaches it when the composer escalated: the program
+// it needs does not exist, and building it takes discovery — reading the data sources, understanding what their
+// tables mean, writing concepts and the programs on them. It defines what it builds, then answers the person's
+// question by applying a message to their data session with ./ask, like the composer does.
 
-import './generate-system.js'   // FIRST: (re)writes system/*.md from generate-system.ts before they're read below
-import { answerView } from '../../exec-program.js'
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { writeFile, mkdir, rm } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
-import { loadPrompt } from '../../prompts.js'
-import { AUTHORING_SURFACE } from '../shared-prompts/authoring-reference.js'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import { createHash } from 'node:crypto'
-import type { ProgramTarget } from '../../verbs/index.js'
-import { createSession, prepareWorkspace, type Harness, type Session, type RunHandlers } from '../../ica/index.js'
-import { execProgram } from '../../exec-program.js'
-import { CATEGORIES, type Category } from './classify.js'
-import { lintAnswer, repairInstruction, MAX_REPAIR_ROUNDS } from '../../answer-review.js'
 import { agentConfig, type AgentOverride } from '../../config/index.js'
-
-const __dirname = dirname(fileURLToPath(import.meta.url))
-// Analyst prompt files via the override layer (volume override for the current image → baked fallback).
-const sysFile = (f: string) => loadPrompt(join(__dirname, 'system', f), 'analyst/system/' + f)
-
-// Deterministic hash of the analyst's instruction files. When it changes, the engine starts a fresh
-// session instead of resuming one whose in-context behaviour predates the new instructions.
-export async function promptVersion(): Promise<string> {
-  const files = ['base.md', 'program_authoring.md', 'simple_lookup.md', 'complex_lookup.md', 'comparison.md', 'causal.md', 'counterfactual.md', 'analysis.md']
-  const h = createHash('sha1')
-  for (const f of files) h.update(sysFile(f))
-  return h.digest('hex').slice(0, 12)
-}
+import { createSession, prepareWorkspace, type Harness, type Session, type RunHandlers } from '../../ica/index.js'
+import { GRAPH_REFERENCE } from '../shared-prompts/graph-reference.js'
+import { turnOutcome, type TurnResult } from '../composer/index.js'
 
 export interface AnalystOpts {
-  root: string                                   // workspace root — MUST be the same the modeller used
-  projectId: string                              // same projectId → same db/project.sqlite + units/
+  root: string
+  projectId: string
   sources: string[]
-  ica?: AgentOverride            // override this agent's profile for ONE construction (an A/B, a local script)
   managerUrl?: string
-}
-
-export interface Answer {
-  status: 'answered' | 'gap' | 'unknowable' | 'cannot_answer'   // cannot_answer kept for back-compat
-  category?: Category                       // the agent's own read of the question's answer-shape (for the UI chip)
-  answer: string
-  period?: string                           // the time window in plain words (single-period answers)
-  periods?: Array<{ label: string; detail: string }>   // the compared scopes (comparison answers)
-  scope?: string                            // non-time filters only
-  headline?: { label: string; display: string; value?: number }   // the one key number, labelled + human-formatted
-  figures?: Array<{ label: string; display: string; sub?: string; value?: number; neg?: boolean }>   // a KPI strip (several key numbers) — rendered across the top of the card
-  source?: string                           // one-line provenance ("AR ledger, snapshot 3 Jun 2026")
-  value?: number                            // raw number (back-compat / programmatic)
-  table?: { columns: string[]; rows: any[][]; total?: any[]; totalRows?: number }   // total = agent footer row; totalRows = true match count before the display cap
-  caveat?: string                           // short "how to read this" warning
-  usedNodes?: string[]
-  gap?: { need: string; basis?: string }   // status 'gap' → hand to the model-builder, then re-ask
-  missing?: string                          // status 'unknowable' → no source in the data
-}
-
-export interface AskResult {
-  category: Category
-  classifyMs: number
-  answer: Answer | null                          // parsed from out/answer.json (null if the agent wrote none)
-  lastLines: string                              // the agent's tail (fallback if no JSON)
-  ms: number
-}
-
-export interface AskOpts {
-  qid?: string             // question id → the agent writes into its folder ./out/<qid>/
-  category?: Category      // skip re-classification (same question) — pass the known category
-  // MODIFY: the user wants the CURRENT answer changed, not a new one. The engine passes only the QUESTION it
-  // answers + the program's location (the id) — the analyst OPENS and READS the program itself (that is the
-  // source of truth), so we never pass a stale answer string around.
-  modify?: ProgramTarget
-  resolvedQuestion?: string   // the question with what it refers to written in (a follow-up made self-contained)
-  reason?: string         // the composer's escalation note — a NON-authoritative hint of what was hard (the analyst re-derives from scratch)
+  projectDir?: string
+  ica?: AgentOverride
 }
 
 export interface Analyst {
-  ask(question: string, handlers?: RunHandlers & { onCategory?: (c: Category) => void }, opts?: AskOpts): Promise<AskResult>
+  ask(question: string, handlers: RunHandlers | undefined, opts: { qid: string; sessionId: string; reason?: string }): Promise<TurnResult>
   session: Session
   cwd: string
 }
 
-// The analyst's full instructions: the base + EVERY answer-shape. We no longer pre-classify — the agent
-// decides which category fits THIS question and follows that shape, then reports it. (classify.ts is kept
-// for future pre-agent guardrails; it just isn't used to route here.)
-async function fullSystem(): Promise<string> {
-  const base = sysFile('base.md')
-  const authoring = sysFile('program_authoring.md')
-  let shapes = ''
-  for (const c of CATEGORIES) {
-    const s = sysFile(`${c}.md`)
-    if (s.trim()) shapes += '\n\n' + s.trim()
-  }
-  return `${base}\n\n---\n\n${authoring.trim()}\n\n---\n\n# Answer shapes — decide which fits THIS question, follow its shape, and report it as \`category\`\n${shapes}`
-}
+const ROLE = `You build what the organisation's graph is missing, and answer the question that needed it.
+
+A question reaches you when the program it needs does not exist. Find what exists with ./catalog and use it. Explore
+the data with ./sources, ./find-schema, ./introspect and ./query until you know what the tables mean — then write the
+concepts that read them and the programs on those concepts, and ./define each, checking each with ./try. Name a program
+for the idea it computes, not for the question that asked for it, so the next question finds it.
+
+Finish by answering the person: apply a message to their data session with ./ask. Work in the foreground; every tool
+explains itself with --help. A question is followed by \`qid:\` and, when the composer handed it over, why.`
 
 export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
-  // All three from the profile — the agent asks for its own configuration rather than being handed
-  // pieces of it by whoever constructs it. opts.ica still wins, so one agent can be run differently
-  // inside a single process (an A/B, a local script) without changing what the project runs.
   const cfg = agentConfig('analyst')
-  const harness = opts.ica?.harness ?? cfg.harness
-  const model = opts.ica?.model ?? cfg.model
-  const provider = opts.ica?.provider ?? cfg.provider
-
-  const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl })
-  // The analyst's whole instruction into its system prompt (claude --append-system-prompt-file, so it APPENDS to
-  // claude's own coding prompt): its generated system (already carries the mechanics) + the authoring SURFACE it
-  // was missing (contract + example + rule) + the per-project data CONTEXT. Then it reads no instruction files.
+  const harness: Harness = opts.ica?.harness ?? cfg.harness
+  const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl, projectDir: opts.projectDir })
   const context = (() => { try { return readFileSync(join(cwd, 'CONTEXT.md'), 'utf8') } catch { return '' } })()
-  const systemReference = [await fullSystem(), AUTHORING_SURFACE, context].filter(Boolean).join('\n\n---\n\n')
-  const session = createSession(harness, { cwd, model, provider, resumeId: opts.ica?.resumeId, systemReference })
-  // ONE linear path: claude appends the reference to its system prompt, so the analyst never reads an instruction
-  // file. If a harness can't inject (pi/mock), fail LOUD rather than branch — a misconfiguration is easier to
-  // debug than a silent second code path.
-  if (session.referencePlacement !== 'in-context')
-    console.warn(`[analyst] harness "${harness}" cannot put the reference in the system prompt — instructions will be missing; use claude-code/opencode/codex`)
-
-  const preamble =
-    'Your instructions, the program contract + example, and the data context are already in your system prompt. ' +
-    'Search concepts with `./find-concept`, find where data lives with `./find-schema`, query with `./query` / `./sources` / ' +
-    '`./introspect`, resolve names with `./resolve`. Your deliverable is a PROGRAM — the engine runs it and writes the answer.'
+  const session = createSession(harness, { cwd, model: opts.ica?.model ?? cfg.model, provider: opts.ica?.provider ?? cfg.provider, baseUrl: opts.ica?.baseUrl,
+                                           resumeId: opts.ica?.resumeId, systemReference: [ROLE, GRAPH_REFERENCE, context].join('\n\n') })
 
   return {
-    cwd,
-    session,
-
-    async ask(question, handlers, opts = {}) {
+    cwd, session,
+    async ask(question, handlers, o) {
       const t0 = Date.now()
-      // The agent self-decides the category (no separate classifier); its instructions are in the system prompt,
-      // so it reads no instruction file here.
-      // Each question gets its OWN FOLDER (./out/<qid>/), with files named by MEANING:
-      //   built.json   — a pointer to the program the analyst built (the engine runs it → answer.json)
-      //   answer.json  — the FINAL answer (engine-written from the program output, or an unknowable direct)
-      // A fresh qid folder each time → never a stale read; nothing deleted (full provenance).
-      const dir = opts.qid ? join(cwd, 'out', opts.qid) : join(cwd, 'out')
+      const dir = join(cwd, 'out', o.qid)
+      await rm(dir, { recursive: true, force: true }).catch(() => {})
       await mkdir(dir, { recursive: true })
-      // WHICH TURN IS LIVE HERE, for `./commit`. This session is SHARED across conversations, which is why its
-      // questions keep their own framing — several people's work in one thread would otherwise run together —
-      // but its turns are still queued, so one directory has one live turn and a fixed filename is safe.
-      await writeFile(join(cwd, '.turn'), opts.qid ?? '', 'utf8').catch(() => {})
-      const answerRel = opts.qid ? `./out/${opts.qid}/answer.json` : `./out/answer.json`
-      const builtRel  = opts.qid ? `./out/${opts.qid}/built.json`  : `./out/built.json`
-      const answerPath = join(dir, 'answer.json')
-      const builtPath  = join(dir, 'built.json')
-
-      // Answer the question fresh (self-contained — never "continue the last one"; the queue means the
-      // session may have moved on). The analyst is self-sufficient: it ALWAYS produces an answer — it never
-      // defers to the model-builder (that is now an offline consolidation pass, not something in this path).
-      const reason = opts.reason
-      const buildBody = `# Your task — a fresh, standalone question. A lighter agent tried it and could not finish; start from the beginning.
-${reason ? `\nThe composer's note on why it couldn't — a HINT about what was hard, and it may be WRONG. Do NOT follow it as a direction; re-investigate independently and derive the answer yourself: "${reason}"\n` : ''}
-Question: ${question}${opts.resolvedQuestion ? `\nIn full, with what it refers to written in: ${opts.resolvedQuestion}` : ''}
-Build a program that answers it - follow your instructions (recon concepts first, then the data; every
-question becomes a program). Open a concept with \`./get-concept "<name>"${opts.qid ? ` --qid ${opts.qid}` : ''}\` — the
-qid is how what you read is recorded against the program you build. RUN it with
-\`tsx run.mjs programs/<slug>/program.ts '<jsonParams>'\` until correct.
-
-Then COMMIT, as your final action: write ${builtRel} — once everything else is finished and verified.
-  {"programDir":"programs/<slug>","params":{...}, "parent":"root" | "<a prior intent id>", "followups":["...","..."],
-   "usedConcepts":["<the concepts this program is actually built on>"]}
-The ENGINE runs the program and writes the answer - the answer is its to write, never yours in chat.
-
-`
-
-      // MODIFY: edit the EXISTING program in place. The engine supplies the target (it may have been built long
-      // ago / by a reuse, so it is NOT in your context) — everything you need is below; don't guess.
-      const m = opts.modify
-      const modifyBody = m ? `# Your task — MODIFY the current answer
-
-The user wants to MODIFY the CURRENT answer — the SAME program, changed as they ask (a different calculation,
-different columns/outputs, extra context, a different filter or top-N). Do NOT build a new program.
-
-CURRENT PROGRAM: ./${m.programDir}  (it answers: "${m.question ?? '(the current question)'}")
-
-THE USER'S CHANGE REQUEST: ${question}
-
-First OPEN and READ ./${m.programDir} (program.ts + its units) to see exactly what it currently computes and
-shows — that program IS the source of truth. Then EDIT its units/code to satisfy the request — change the
-calculation, the output shape, or add the context they asked for. RUN it with \`tsx run.mjs ${m.programDir}/program.ts '<jsonParams>'\`
-until correct. Then write ${builtRel} = {"programDir":"${m.programDir}","params":{...}, "followups":["…","…"]}
-pointing at the SAME program (do NOT change programDir, do NOT set parent). \`followups\` = up to 3 FRESH
-next questions for the CORRECTED answer (optional; vary them). The ENGINE runs it and writes the answer — do NOT write
-${answerRel} yourself, and do NOT answer in chat.` : ''
-      const taskRel = opts.qid ? `./out/${opts.qid}/task.md` : `./out/task.md`
-      await writeFile(join(dir, 'task.md'), m ? modifyBody : buildBody)   // the long content lives in a FILE the analyst READS
-      // The TYPED message stays SHORT so it is delivered reliably: a long line typed into the TUI can truncate
-      // under load, which once sent the analyst a stray prompt fragment instead of the actual question.
-      const prompt = `${preamble}
-
-Your task is in ${taskRel} — read it and follow it exactly. ${m ? 'Modify the current program as it describes.' : 'It is a FRESH, standalone question — answer it from scratch; assume no earlier conversation.'}`
-
-      // Completion: the analyst either points at a built program (built.json) or writes an unknowable answer.json.
-      const hasBuilt  = async () => { try { return !!JSON.parse(await readFile(builtPath, 'utf8'))?.programDir } catch { return false } }
-      // A directly-written answer.json ends the turn ONLY when it is a NON-answered terminal (unknowable/gap —
-      // those have no program). We never complete on an "answered" file: a real answer comes solely from the
-      // ENGINE running the program, so an agent-left "answered" answer.json is stale scaffolding to ignore, not
-      // a completion signal — else it would end the turn before built.json and short-circuit the run.
-      const unknowableWritten = async () => { try { const s = JSON.parse(await readFile(answerPath, 'utf8'))?.status; return typeof s === 'string' && s !== 'answered' } catch { return false } }
-      const doneWhen = async () => (await hasBuilt()) || (await unknowableWritten())
-      const r = await session.run(prompt, { ...handlers, doneWhen })
-
-      // THE ENGINE RUNS THE PROGRAM whenever the agent built one (wrote built.json) — ALWAYS, overwriting any
-      // answer.json. A program IS the answer: re-running it is the point (the data may have changed, the params
-      // may differ, this may be a modify of an existing program), so we NEVER trust a pre-existing answer.json
-      // when a program exists — the agent must not be able to short-circuit the run by leaving a stale answer.
-      // Only when there is NO program (the GAP / unknowable path wrote answer.json directly) do we leave it as-is.
-      if (await hasBuilt()) {
-        try {
-          const ptr = JSON.parse(await readFile(builtPath, 'utf8'))
-          handlers?.onNarration?.(`Running program ${ptr.programDir}`)
-          // FRESH SUBPROCESS (not in-process): the long-lived engine runs under tsx, which caches modules by
-          // path and ignores the kernel's `?t=` cache-bust — so an in-process re-run after an edit would execute
-          // the STALE cached program. execProgram spawns run.mjs anew, guaranteeing the CURRENT code runs.
-          const rr = await execProgram(cwd, ptr.programDir, ptr.params ?? {})
-          // Keep the program's OWN status (an unknowable program outputs status:"unknowable"); default to
-          // "answered" only when the program didn't declare one.
-          let answer = answerView(rr.output)   // out of the unit envelope
-          // Same repair round as the composer, for the same reason: the agent that wrote the view unit is one
-          // turn away and still holds the trajectory. Errors only, capped, and the answer ships regardless.
-          // Delete this block to switch repair off; the lint still logs.
-          for (let round = 1; round <= MAX_REPAIR_ROUNDS; round++) {
-            // GUARDED, because this sits inside the try that turns a throw into "the program failed to run".
-            // A bug in a lint rule must not convert a good answer into cannot_answer — the whole point of the
-            // check is to make faults visible, not to invent one.
-            let before: ReturnType<typeof lintAnswer> = []
-            let fix: string | null = null
-            try { before = lintAnswer(answer); fix = repairInstruction(before) }
-            catch (e: any) { console.warn(`[answer] repair check FAILED (${String(e?.message ?? e).slice(0, 160)}) — shipping the answer as it is`); break }
-            if (!fix) break
-            const nBefore = before.filter((f) => f.severity === 'error').length
-            try {
-              await session.run(fix, handlers)
-              answer = answerView((await execProgram(cwd, ptr.programDir, ptr.params ?? {})).output)
-              // WAS THE ROUND WORTH IT — the only line that can answer "is the cap right?". A round that
-              // fixes nothing is a round that should not exist; a round 2 that regularly finishes what round 1
-              // started is the argument for keeping two. Without this the cap is a number someone picked.
-              const after = lintAnswer(answer).filter((f) => f.severity === 'error').length
-              console.log(`[answer] repair round ${round}/${MAX_REPAIR_ROUNDS}: ${nBefore} error(s) → ${after}` +
-                (after === 0 ? ' — fixed' : after < nBefore ? ' — partly fixed' : ' — no change'))
-            } catch (e: any) {
-              console.warn(`[answer] repair round ${round} failed (${String(e?.message ?? e).slice(0, 120)}) — keeping the previous answer`)
-              break
-            }
-          }
-          await writeFile(answerPath, JSON.stringify(answer, null, 2))
-        } catch (e: any) {
-          await writeFile(answerPath, JSON.stringify({ status: 'cannot_answer',
-            answer: `The program was built but failed to run: ${String(e?.message ?? e).slice(0, 240)}` }, null, 2)).catch(() => {})
-        }
-      }
-
-      // Read the analyst's final answer.json (the ENGINE fills it from the program output, or the agent
-      // wrote an unknowable directly).
-      let answer: Answer | null = null
-      try { const raw = await readFile(answerPath, 'utf8'); if (raw.trim()) answer = JSON.parse(raw) } catch { /* none */ }
-
-      // The agent decides + reports the category. Surface it (for the UI chip) when present.
-      const category = (answer?.category as Category) ?? opts.category ?? 'analysis'
-      handlers?.onCategory?.(category)
-      return { category, classifyMs: 0, answer, lastLines: r.lastLines, ms: Date.now() - t0 }
+      await writeFile(join(cwd, '.turn'), o.qid)
+      await writeFile(join(cwd, '.session'), o.sessionId)
+      await writeFile(join(cwd, '.agent'), 'analyst')
+      const turn = `${question}\n\nqid: ${o.qid}${o.reason ? `\nhanded over because: ${o.reason}` : ''}`
+      await session.run(turn, { ...handlers, doneWhen: async () => (await turnOutcome(dir)) !== null })
+      const outcome = await turnOutcome(dir)
+      return { ...(outcome ?? { escalate: { reason: 'the analyst applied no step' } }), ms: Date.now() - t0 }
     },
   }
+}
+
+export async function promptVersion(): Promise<string> {
+  return createHash('sha256').update(ROLE + GRAPH_REFERENCE).digest('hex').slice(0, 12)
 }

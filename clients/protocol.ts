@@ -58,7 +58,7 @@ export type Verb = 'edit' | 'explain' | 'run' | 'check' | 'program' | 'view'
 export type EngineMsgType =
   | 'tick' | 'welcome' | 'machine:waking' | 'error' | 'done'
   // THE ANSWER and its story — what every surface renders, however differently.
-  | 'analyst:answer' | 'narration' | 'followups'
+  | 'session:step' | 'analyst:answer' | 'narration' | 'followups'
   // VERB TURNS (explain:, check:, …) — their events, sent straight to the ASKER as they happen. NOT an agent
   // lane and NOT gated on anyone attaching to one: the user asked for this turn by name, so its progress is
   // theirs by right. Everything is sent; the client decides what to render — today just `kind: 'message'`,
