@@ -9,7 +9,9 @@
 // The trail's `used` collects what was inlined, so memory can say which programs an answer went through. `path`
 // holds the relations being expanded, so one that is built on itself is refused instead of expanding for ever.
 
-import { assume } from './assumptions.js'
+import { assume, calendarFor } from './assumptions.js'
+import { Grains } from './calendar.js'
+import { resolveSpan } from './relative.js'
 import type { Contract } from './contract.js'
 import type { AttributeSource, RatesSource, ResolvedStatement, When } from './coordinates.js'
 import { intervened } from './interventions.js'
@@ -35,6 +37,7 @@ export function readingContext(rt: Runtime, contract: Contract, scope: Scope, tr
     },
     decide: (_l, took) => took, verify: async () => {}, caveat: () => {}, today: scope.today,
     decideAt: (_l, value, op, threshold) => compareAt(value, op, threshold),
+    span: (span) => { const r = resolveSpan(span as any, scope.today, new Grains(calendarFor(rt.o.assumptions, scope, trail))); return { from: r.from, to: r.to } },
     expectation: () => { throw new Error(`"${contract.name}" is producing a relation; it reads memory only as a program`) },
     assume: <T>(name: string, about?: Record<string, unknown>) => assume<T>(rt.o.assumptions, contract, scope, name, trail, about),
     who: scope.who,

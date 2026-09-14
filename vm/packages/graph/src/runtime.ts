@@ -101,6 +101,9 @@ export interface ProgramContext {
   /** A decision on a number: `value op threshold`. Recorded with how far the value was from going the other way, so
    *  a later review can say when the same question would now be decided differently. */
   decideAt(label: string, value: number, op: '<' | '<=' | '>' | '>=', threshold: number, reason?: string): boolean
+  /** A span made explicit — `{ previous: 'quarter' }` to its dates — against this call's day and calendar. A relation
+   *  does this itself; a program that works with dates of its own uses this. */
+  span(span: import('./coordinates.js').Span | import('./relative.js').RelativeSpan): import('./coordinates.js').Span
   /** What memory expects of one period of a program's measure, for a member, from the periods before it. */
   expectation(program: string, ask: { request: Record<string, unknown>; measure: string; member?: Record<string, unknown>; period: string; window?: number }): Expectation
   verify(label: string, holds: () => boolean | Promise<boolean>, detail?: string): Promise<void>

@@ -29,12 +29,14 @@ const span = { from: '2025-03-01', to: '2026-09-01' }
 const history = await engine.call<any>('utilisation', { during: span, by: ['pillar', 'month'] })
 const surprises = engine.surprises(history.callId)
 for (const s of surprises.slice(0, 8)) {
-  console.log(`  ${String(s.member.pillar_label ?? s.member.pillar).padEnd(12)} ${s.period}  ${s.measure.padEnd(12)} ${pct(s.expectation.value)} against ${pct(s.expectation.median)} (z ${s.expectation.z!.toFixed(1)})`)
+  const show = (x: number | null | undefined) => (s.measure === 'utilisation' ? pct(x) : x == null ? '—' : `${Math.round(x).toLocaleString('en-NZ')} h`)
+  const label = history.value.rows.find((r: any) => r.pillar === s.member.pillar)?.pillar_label ?? s.member.pillar
+  console.log(`  ${String(label).padEnd(12)} ${s.period}  ${s.measure.padEnd(12)} ${show(s.expectation.value)} against ${show(s.expectation.median)} (z ${s.expectation.z!.toFixed(1)})`)
 }
 if (surprises.length) {
   const first = surprises.find((s) => s.measure === 'utilisation') ?? surprises[0]
   const { leads } = engine.explain(history.callId, { member: first.member, period: first.period, measure: first.measure })
-  console.log(`\n  where ${first.member.pillar_label ?? first.member.pillar} ${first.period} comes from:`)
+  console.log(`\n  where ${history.value.rows.find((r: any) => r.pillar === first.member.pillar)?.pillar_label ?? first.member.pillar} ${first.period} comes from:`)
   for (const l of leads) console.log(`    ${l.name}.${l.measure}  z ${l.expectation.z?.toFixed(1)}`)
 }
 
