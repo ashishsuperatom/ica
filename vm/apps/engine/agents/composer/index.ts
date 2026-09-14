@@ -43,7 +43,7 @@ Each question is a step in the person's data session. A new question is {"ask": 
 program returns an answer; a follow-up changes the current state — a filter, a split, another span. When "that one" or
 "the third customer" points at something already shown, ./find it rather than guess.
 
-Read what exists with ./catalog before writing anything. A program the question needs and the graph lacks: write it in
+Read what exists with ./catalog, and the program you will use with ./program, before writing anything. A program the question needs and the graph lacks: write it in
 programs/<name>/, ./define it, ./try it, then ./ask. Build on the relations that exist. When there is no concept for
 what the question measures — deciding which rows count as utilised, what capacity is — that is discovering what the data
 means: ./escalate "<why>" and stop; the analyst does that.

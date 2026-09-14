@@ -9,7 +9,7 @@
 //
 // In either directory the agent finds its tools, generated here with the absolute paths they need:
 //
-//   the graph       ./catalog ./define ./try ./ask ./find ./members
+//   the graph       ./catalog ./program ./define ./try ./ask ./find ./members
 //   the data        ./sources ./query ./introspect ./find-schema ./resolve
 //   hand-off        ./escalate
 //
@@ -70,7 +70,7 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
   await writeFile(join(dir, 'CONTEXT.md'),
 `# Project ${s.projectId}
 
-Programs live in the graph. Find what exists with ./catalog; write a program in programs/<name>/ as contract.json and
+Programs live in the graph. Find what exists with ./catalog and read one with ./program; write a program in programs/<name>/ as contract.json and
 program.mjs and define it with ./define; check it with ./try; answer the person by applying a message to their data
 session with ./ask. Every tool explains itself with --help.
 `)
@@ -181,6 +181,7 @@ process.exit(r.status ?? 1)
 `
   const drivers: Record<string, string> = {
     catalog: graphTool('catalog'),
+    program: graphTool('program'),
     define: graphTool('define'),
     try: graphTool('try'),
     ask: graphTool('ask'),
@@ -263,7 +264,8 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
 `,
   }
   const usages: Record<string, string> = {
-    catalog: 'catalog [words | name]   → one line per program that exists (or matches the words); ./catalog <name> shows that program\'s measures, dimensions, entities, time and parameters',
+    catalog: 'catalog [words]   → one line per program that exists, or per program matching the words',
+    program: 'program <name>   → one program in full: its measures, dimensions (and how to filter each by name), parameters and assumptions',
     define: 'define programs/<name> [--replace "<why>"]   → define the program in that directory (contract.json + program.mjs), or correct the one with its name',
     try: 'try <program> [\'<request json>\']   → ask a program directly, to check it while you write it',
     ask: 'ask \'<message json>\'   → apply a message to this conversation\'s data session and answer it: {"ask":"<program>","request":{…}} starts a question; {"filter":{…}}, {"split":{"add":[…]}}, {"measures":{"add":[…]}}, {"set":{…}}, {"assume":{…}}, {"intervene":{…}}, {"asOf":"YYYY-MM-DD"} follow up — several parts in one message apply together',

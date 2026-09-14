@@ -31,7 +31,7 @@ export interface Analyst {
 
 const ROLE = `You build what the organisation's graph is missing, and answer the question that needed it.
 
-A question reaches you when the program it needs does not exist. Find what exists with ./catalog and use it. Explore
+A question reaches you when the program it needs does not exist. Find what exists with ./catalog, read a program with ./program, and use it. Explore
 the data with ./sources, ./find-schema, ./introspect and ./query until you know what the tables mean and which rows
 count — profile every column that classifies a row (its types, statuses and flags) before deciding — then write the concepts that read them (relations, at their finest grain, with shapes that say what each column
 is) and the programs on those concepts, and ./define each, checking each with ./try — at the finest split a question

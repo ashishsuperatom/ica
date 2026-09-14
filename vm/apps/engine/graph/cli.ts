@@ -1,6 +1,7 @@
 // ── THE AGENTS' TOOLS FOR THE GRAPH ───────────────────────────────────────────────────────────────────────────
 //
-//   ./catalog [words | name]               one line per program (matching the words); a name shows that program in full
+//   ./catalog [words]                      one line per program, or per program matching the words
+//   ./program <name>                       one program in full: measures, dimensions, parameters, assumptions
 //   ./define <dir> [--replace "<why>"]     define the program in <dir> (contract.json + program.mjs), or correct one
 //   ./try <program> ['<request>']          ask a program directly, to check it while writing
 //   ./ask '<message>'                      apply a message to this conversation's data session and answer it
@@ -48,26 +49,33 @@ const readTurn = async (name: string) => (await readFile(join(env.home, name), '
 
 const engine = await openProjectGraph(env)
 
-if (command === 'catalog') {
-  // A list first, one line a program; the whole shape only of the program asked for by name. Every program's full
-  // shape at once ran to hundreds of lines, most of it about programs the question had nothing to do with.
+if (command === 'program') {
   const all = engine.catalog()
   const text = args.join(' ').trim()
   const exact = all.find((e) => e.name.toLowerCase() === text.toLowerCase())
-  if (exact) {
-    const e: any = exact, r = e.relation
-    const params = Object.entries(e.params ?? {}).map(([k, v]: [string, any]) => `  ${k} — ${typeof v === 'string' ? v : v.description}`)
-    const assumes = Object.entries(e.assumes ?? {}).map(([k, v]: [string, any]) => `  ${k} — ${v.description}${v.default !== undefined ? ` (default ${JSON.stringify(v.default)})` : ''}`)
-    out([
-      `${e.name} — ${e.kind}, returns ${e.returns}`, `  ${e.description}`,
-      ...(r ? [`holds ${r.holds}${r.time ? `, over time (by day, week, month, quarter, year)` : ''}${r.grain ? `, one row per ${r.grain}` : ''}`,
-               'measures:', ...Object.entries(r.measures).map(([m, d]: [string, any]) => `  ${m} — ${d.unit}, ${d.how}${d.description ? ` — ${d.description}` : ''}`),
-               'dimensions:', ...Object.entries(r.dimensions).map(([n, d]: [string, any]) => `  ${n}${d.labelled ? ` (filter by name with ${n}_label)` : ''}${d.entity ? ` → ${d.entity}` : ''}${d.description ? ` — ${d.description}` : ''}`)] : []),
-      ...(params.length ? ['parameters:', ...params] : []),
-      ...(assumes.length ? ['assumes:', ...assumes] : []),
-    ].join('\n'))
-    process.exit(0)
+  if (!exact) {
+    const words = text.toLowerCase().split(/\s+/).filter(Boolean)
+    const near = all.filter((e) => words.some((w) => e.name.toLowerCase().includes(w))).map((e) => e.name)
+    fail(`there is no program "${text}"${near.length ? ` — did you mean ${near.map((n) => `"${n}"`).join(', ')}?` : ''} — ./catalog lists them`)
   }
+  const e: any = exact, r = e.relation
+  const params = Object.entries(e.params ?? {}).map(([k, v]: [string, any]) => `  ${k} — ${typeof v === 'string' ? v : v.description}`)
+  const assumes = Object.entries(e.assumes ?? {}).map(([k, v]: [string, any]) => `  ${k} — ${v.description}${v.default !== undefined ? ` (default ${JSON.stringify(v.default)})` : ''}`)
+  out([
+    `${e.name} — ${e.kind}, returns ${e.returns}`, `  ${e.description}`,
+    ...(r ? [`holds ${r.holds}${r.time ? `, over time (by day, week, month, quarter, year)` : ''}${r.grain ? `, one row per ${r.grain}` : ''}`,
+             'measures:', ...Object.entries(r.measures).map(([m, d]: [string, any]) => `  ${m} — ${d.unit}, ${d.how}${d.description ? ` — ${d.description}` : ''}`),
+             'dimensions:', ...Object.entries(r.dimensions).map(([n, d]: [string, any]) => `  ${n}${d.labelled ? ` (filter by name with ${n}_label)` : ''}${d.entity ? ` → ${d.entity}` : ''}${d.description ? ` — ${d.description}` : ''}`)] : []),
+    ...(params.length ? ['parameters:', ...params] : []),
+    ...(assumes.length ? ['assumes:', ...assumes] : []),
+  ].join('\n'))
+  process.exit(0)
+}
+if (command === 'catalog') {
+  // A list, one line a program; ./program shows one in full. Every program's whole shape at once ran to hundreds of
+  // lines, most of it about programs the question had nothing to do with.
+  const all = engine.catalog()
+  const text = args.join(' ').trim()
   const words = text.toLowerCase().split(/\s+/).filter(Boolean)
   const haystack = (e: any) => [e.name, e.description, ...Object.keys(e.relation?.measures ?? {}), ...Object.keys(e.relation?.dimensions ?? {})].join(' ').toLowerCase()
   const matching = all.filter((e) => words.every((w) => haystack(e).includes(w)))
@@ -77,7 +85,7 @@ if (command === 'catalog') {
     const hits = words.length && r ? [...Object.keys(r.measures), ...Object.keys(r.dimensions)].filter((n) => words.some((w) => n.toLowerCase().includes(w))) : []
     return `${e.name} — ${e.kind}, returns ${e.returns}${shape}${hits.length ? ` · matches ${hits.join(', ')}` : ''}\n    ${e.description}`
   }
-  out([...matching.map(line), '', `${matching.length} of ${all.length} programs${words.length ? ` matching "${text}"` : ''} — ./catalog <name> shows one program's measures, dimensions and parameters`].join('\n'))
+  out([...matching.map(line), '', `${matching.length} of ${all.length} programs${words.length ? ` matching "${text}"` : ''} — ./program <name> shows one program's measures, dimensions and parameters`].join('\n'))
   process.exit(0)
 }
 if (command === 'define') {
@@ -111,6 +119,6 @@ if (command === 'define') {
   if (!relation || !dimension) fail('usage: ./members <relation> <dimension> [text]')
   out(await engine.members(relation, { dimension, search: text.join(' ') || undefined }))
 } else {
-  fail(`unknown command "${command}" — catalog, define, try, ask, find, members`)
+  fail(`unknown command "${command}" — catalog, program, define, try, ask, find, members`)
 }
 process.exit(0)
