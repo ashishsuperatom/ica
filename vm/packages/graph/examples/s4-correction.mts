@@ -9,11 +9,12 @@
 
 import { readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { GraphStore, createEngine, managerInspect, managerQuery, type Contract } from '../src/index.ts'
 
 const here = fileURLToPath(new URL('.', import.meta.url))
-const state = join(here, '..', '..', '..', '.state', 'graph-slice-s4')
+const state = join(process.env.ENGINE_STATE_DIR ?? join(homedir(), '.superatom', 'state'), 'graph-slice-s4')
 rmSync(state, { recursive: true, force: true })
 const store = new GraphStore(join(state, 'graph.sqlite'))
 const engine = createEngine({ store, modulesDir: join(state, 'modules'), query: managerQuery(), dialects: { F5NETSUITE: 'oracle' }, inspect: managerInspect() })

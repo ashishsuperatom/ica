@@ -20,11 +20,11 @@
 #
 #   count by category:  jq -r .category vm/AUTHORING_OBSERVATIONS.jsonl | sort | uniq -c | sort -rn
 #
-#   usage: vm/tools/authoring-scan.sh [workspace]     (default: the first project under vm/.state)
+#   usage: vm/tools/authoring-scan.sh [workspace]     (default: the first project under ~/.superatom/state)
 set -u
 # The first workspace that actually HAS programs — a project can exist with none, and defaulting
 # to an empty one just looks like a clean scan.
-WS="${1:-$(for d in "$(dirname "$0")/../.state"/*/workspace; do [ -d "$d/programs" ] && ls "$d/programs" >/dev/null 2>&1 && [ -n "$(ls -A "$d/programs" 2>/dev/null)" ] && echo "$d" && break; done)}"
+WS="${1:-$(for d in "${ENGINE_STATE_DIR:-$HOME/.superatom/state}"/*/workspace; do [ -d "$d/programs" ] && ls "$d/programs" >/dev/null 2>&1 && [ -n "$(ls -A "$d/programs" 2>/dev/null)" ] && echo "$d" && break; done)}"
 cd "$WS/programs" 2>/dev/null || { echo "no programs under $WS"; exit 1; }
 echo "scanning $WS/programs — $(ls -d */ 2>/dev/null | wc -l | tr -d ' ') programs"
 echo

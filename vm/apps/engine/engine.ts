@@ -19,6 +19,7 @@ import { fetchBoxCredentials, isFleetBox } from './ica/box-credentials.js'
 import WebSocket from 'ws'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { homedir } from 'node:os'
 import { existsSync, mkdirSync, rmSync, readFileSync } from 'node:fs'
 import { writeFile, rm, readdir, stat, mkdir, cp } from 'node:fs/promises'
 import { execSync } from 'node:child_process'
@@ -60,7 +61,8 @@ const PROJECT = process.env.ICA_PROJECT || ''
 //   mounted VOLUME (else state would sit on the ephemeral container layer and be wiped on every restart);
 //   the existing per-root env vars still win, so Fly's layout is unchanged.
 const VM_ROOT = join(__dirname, '..', '..')                              // apps/engine → the vm monorepo root
-const STATE_ROOT = process.env.ENGINE_STATE_DIR ?? join(VM_ROOT, '.state')
+// Outside the repository, so an agent working in its workspace is not one directory away from the engine's source.
+const STATE_ROOT = process.env.ENGINE_STATE_DIR ?? join(homedir(), '.superatom', 'state')
 const WORKSPACE_ROOT = process.env.ENGINE_WORKSPACE_DIR ?? STATE_ROOT
 const DATA_ROOT = process.env.ENGINE_DATA_DIR ?? STATE_ROOT              // answers.sqlite co-locates with the workspace
 

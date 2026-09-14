@@ -4,13 +4,13 @@
 // and grounding.sqlite lands where the engine would put it.
 //   pnpm exec tsx apps/engine/agents/grounding/run-local.ts <projectId>
 import { createGroundingAgent } from './index.js'
-import { fileURLToPath } from 'node:url'
-import { join, dirname } from 'node:path'
+import { join } from 'node:path'
+import { homedir } from 'node:os'
 
 const projectId = process.argv[2]
 if (!projectId) { console.error('usage: run-local.ts <projectId>'); process.exit(1) }
 const managerUrl = process.env.DATASOURCE_URL || 'http://localhost:4000'
-const root = process.env.ENGINE_STATE_DIR ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', '.state')
+const root = process.env.ENGINE_STATE_DIR ?? join(homedir(), '.superatom', 'state')
 
 console.log(`[grounding-local] project=${projectId} · manager=${managerUrl} · root=${root}\n`)
 const agent = await createGroundingAgent({

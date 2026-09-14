@@ -3,10 +3,11 @@
 //
 //   DATASOURCE_URL=http://127.0.0.1:4021 pnpm exec tsx apps/engine/test/turn.mts <project-id> "<question>" ["<follow-up>" …]
 //
-// STATE (default .state/graph-trial) keeps the graph between runs, so a second run finds what the first built.
+// STATE (default ~/.superatom/state/graph-trial, outside the repository) keeps the graph between runs, so a second run finds what the first built.
 
 import { copyFileSync, existsSync, mkdirSync, appendFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
+import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { createComposer } from '../agents/composer/index.js'
 import { createAnalyst } from '../agents/analyst/index.js'
@@ -18,12 +19,13 @@ const vm = join(here, '..', '..', '..')
 const [project, ...questions] = process.argv.slice(2)
 if (!project || !questions.length) { console.error('usage: turn.mts <project-id> "<question>" ["<follow-up>" …]'); process.exit(1) }
 const managerUrl = process.env.DATASOURCE_URL ?? 'http://127.0.0.1:4021'
-const root = process.env.STATE ?? join(vm, '.state', 'graph-trial')
+const stateRoot = process.env.ENGINE_STATE_DIR ?? join(homedir(), '.superatom', 'state')
+const root = process.env.STATE ?? join(stateRoot, 'graph-trial')
 const projectDir = join(vm, 'projects', project)
 const dbDir = join(root, project, 'db')
 mkdirSync(dbDir, { recursive: true })
 // The datasource index is the engine's, built from the sources; a trial borrows the project's rather than rebuild it.
-const index = join(vm, '.state', project, 'db', 'project.sqlite')
+const index = join(stateRoot, project, 'db', 'project.sqlite')
 if (!existsSync(join(dbDir, 'project.sqlite')) && existsSync(index)) copyFileSync(index, join(dbDir, 'project.sqlite'))
 
 const graph = await openProjectGraph({ dbDir, projectDir, managerUrl })
