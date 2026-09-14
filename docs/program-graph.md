@@ -1205,6 +1205,18 @@ the old value. Each series keeps its latest 120 periods whole, and memory as a w
 the oldest are folded into the series' summary distribution — count, mean, spread, least, greatest, the periods
 spanned — so the far past remains as its shape.
 
+**Every answer feeds memory.** A result with a time grain leaves its rows' values in their periods; a result without
+one, in the period it was answered for; any other value, its numbers by name, in the day it was answered as of — so
+a number asked every day has a series as surely as one asked by month. **Memory follows lineage**: the series belong
+to the exact programs an answer came from, its own hash and every hash beneath, so a correction anywhere below starts
+that memory again instead of mixing versions. **Every answer is checked against memory as it is given** — up to 500
+values — and unusual ones are recorded on the call and said in its caveats. **Call history is bounded too**: the
+latest 20,000 calls are whole; older ones keep their question, lineage and decisions and let go of rows and SQL;
+past 200,000 the oldest answers go, except those that made a decision.
+
+**Seasonality** is not a separate mechanism: it is choosing which history an expectation is conditioned on — the same
+month in earlier years rather than the months before. Deferred.
+
 **An expectation is conditioned on the question** and robust: the median of the twelve periods before, and the
 median absolute deviation scaled to a standard deviation (Hampel; Leys et al., 2013). A value beyond three spreads is
 a surprise. **Triage** walks a surprise down the answer's call tree: each part is judged against its own memory, and

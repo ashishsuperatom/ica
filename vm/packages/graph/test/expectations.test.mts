@@ -127,3 +127,52 @@ test('memory lets go of old periods into the series\' summary distribution', asy
   assert.deepEqual([cut.series, cut.keptSeries, cut.kept.length], [3, 2, 10_000])
   assert.deepEqual([...new Set(cut.kept.map((o) => o.member))], ['{"k":2}', '{"k":1}'], 'whole series, largest first')
 })
+
+// ── memory is intrinsic to every program ──────────────────────────────────────────────────────────────────
+
+test('every answer feeds memory — a number asked day by day has a series, and a surprising day says so as it is answered', async () => {
+  const { engine, store } = await setup()
+  let headcount = 7
+  await engine.define({ body: `export default async (ctx) => ({ headcount: globalThis.__headcount, note: 'from HR' })`,
+    contract: { name: 'staff today', kind: 'program', description: 'Staff today.', reads: { sources: [], programs: [] }, params: {}, returns: 'value' } }, { by: 'test' })
+  ;(globalThis as any).__headcount = headcount
+  for (const day of ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05', '2026-09-06']) {
+    ;(globalThis as any).__headcount = headcount + (day.endsWith('3') ? 1 : 0)
+    const r = await engine.call('staff today', {}, { today: day })
+    assert.equal(store.getCall(r.callId)!.surprises, undefined, `${day} is ordinary`)
+  }
+  ;(globalThis as any).__headcount = 70
+  const odd = await engine.call('staff today', {}, { today: '2026-09-07' })
+  const c = store.getCall(odd.callId)!
+  assert.deepEqual(c.surprises!.map((s) => [s.measure, s.period, s.value]), [['headcount', '2026-09-07', 70]])
+  assert.ok(c.caveats.some((x) => /unusual: headcount in 2026-09-07 is 70, where 7 was expected/.test(x)))
+})
+
+test('a correction beneath a program starts its memory again, instead of mixing versions', async () => {
+  const { engine, store } = await setup()
+  const first = await engine.call<any>('utilisation', { during: SPAN })
+  const before = store.getCall(first.callId)!.lineage
+  assert.equal(engine.surprises(first.callId).length, 1)
+  // hours is corrected: nothing to do with utilisation's own hash, which does not change.
+  await engine.define({ body: `export default async () => ({ source: 'T', rows: ${JSON.stringify(HOURS.map((h) => ({ ...h, hours: h.hours * 2 })))} })`, contract: hours }, { by: 'test', replace: true })
+  const after = await engine.call<any>('utilisation', { during: SPAN })
+  assert.equal(after.hash, first.hash)
+  assert.notEqual(store.getCall(after.callId)!.lineage, before, 'the lineage moved with the correction')
+  assert.equal(engine.surprises(after.callId).length, 1, 'the corrected series is judged on its own history, and still finds June')
+})
+
+test('call history keeps recent calls whole and lets go of older rows and SQL, keeping decisions', async () => {
+  const store = new GraphStore(join(mkdtempSync(join(tmpdir(), 'graph-cmp-')), 'memory.sqlite'), { fullCalls: 2, calls: 3 })
+  const base = { parentId: null, name: 'x', hash: 'h', request: {}, error: null, verifications: [], caveats: [], ms: 0, today: '2026-01-01',
+                 assumptions: [], interventions: null, context: null, who: null }
+  store.recordCall({ ...base, id: 'decided', output: [1], decisions: [{ label: 'd', took: true, reason: '', boundary: { value: 1, op: '>', threshold: 0, margin: 1 } }], queries: [], at: 1 })
+  store.recordCall({ ...base, id: 'old', output: [1, 2, 3], decisions: [], queries: [{ source: 's', sql: 'SELECT 1', params: {}, rows: 1, ms: 1, capped: false }], at: 2 })
+  assert.deepEqual(store.compact(), { stripped: 0, removed: 0 }, 'under the limits nothing is let go of')
+  for (const [i, id] of ['n1', 'n2', 'n3'].entries()) store.recordCall({ ...base, id, output: [i], decisions: [], queries: [], at: 10 + i })
+  const done = store.compact()
+  assert.equal(store.getCall('decided')!.decisions.length, 1, 'a deciding answer is kept')
+  assert.equal(store.getCall('old'), null, 'the oldest undecided answers are let go of')
+  assert.deepEqual(store.getCall('n3')!.output, [2], 'the newest is whole')
+  assert.equal(store.getCall('decided')!.output, null, 'an old kept answer lets go of its rows')
+  assert.deepEqual([done.removed, done.stripped], [2, 1])
+})

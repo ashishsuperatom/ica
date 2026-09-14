@@ -20,7 +20,7 @@ import { contractProblem, type Contract } from './contract.js'
 import type { Coordinates } from './coordinates.js'
 import { calendarFor, zoneFor } from './assumptions.js'
 import { Grains } from './calendar.js'
-import { expect, observationsOf, surprisesIn, triage, withinLimit } from './expectations.js'
+import { expect, lineageOf, observationsOf, surprisesAmong, surprisesIn, triage, withinLimit } from './expectations.js'
 import { MAX_OBSERVATIONS_PER_CALL, type CallRecord } from './store.js'
 import { checkRelation, interfaceMisfit, programParamMisfit, reachesName } from './definition.js'
 import { programHash } from './hash.js'
@@ -31,6 +31,10 @@ export { managerInspect } from './definition.js'
 
 export interface DefineResult { hash: string; name: string; created: boolean }
 export interface CallResult<T = unknown> { value: T; callId: string; hash: string }
+
+/** Values checked against memory in one answer. Beyond this, an answer is remembered but not checked value by value. */
+const MAX_CHECKED_PER_CALL = 500
+const round = (x: number | null) => (x == null ? '—' : Math.abs(x) >= 100 ? Math.round(x).toLocaleString('en') : Number(x.toPrecision(3)).toString())
 
 export function createEngine(o: EngineOptions) {
   const rt = createRuntime(o)
@@ -114,7 +118,7 @@ export function createEngine(o: EngineOptions) {
         const passed = Object.entries(contract.params).some(([p, spec]) => typeof spec !== 'string' && request[p] === program)
         if (!contract.reads.programs.includes(program) && !passed) throw new Error(`"${name}" read the memory of "${program}", which its contract does not declare it reads`)
         const grain = grainOf(ask.period)
-        return expect(o.store, { name: program, request: ask.request, context: scope.context, measure: ask.measure, member: ask.member, period: ask.period, grain, window: ask.window })
+        return expect(o.store, { name: program, request: ask.request, context: scope.context, lineage: o.store.latestLineage(program), measure: ask.measure, member: ask.member, period: ask.period, grain, window: ask.window })
       },
       async verify(label, holds, detail) {
         const held = Boolean(await holds())
@@ -153,11 +157,23 @@ export function createEngine(o: EngineOptions) {
     }
 
     const interventions = Object.keys(scope.interventions).length ? scope.interventions : null
-    // MEMORY OF SERIES. A real answer with a time grain leaves each value in memory; a hypothetical one does not, or
-    // what was imagined would become what is expected.
+    // LINEAGE: the exact programs this answer came from, so memory never mixes versions across a correction.
+    const lineage = lineageOf(hash, [...o.store.children(id).map((k) => k.lineage), ...trail.used.keys()])
+    // MEMORY, AND WHAT IT EXPECTED. Every real answer leaves its values in memory, and each is first compared with what
+    // memory expected of it; a hypothetical answer leaves nothing, or what was imagined would become what is expected.
+    let surprises: CallRecord['surprises'] = []
     if (!error && !interventions) {
       const grains = new Grains(calendarFor(o.assumptions, scope, newTrail()))
-      const { kept, series, keptSeries } = withinLimit(observationsOf({ id, name, hash, request, at: started }, scope.context, value, (g) => grains.has(g)), MAX_OBSERVATIONS_PER_CALL)
+      const { kept, series, keptSeries } = withinLimit(observationsOf({ id, name, hash, request, at: started, today: scope.today, lineage }, scope.context, value, (g) => grains.has(g)), MAX_OBSERVATIONS_PER_CALL)
+      if (kept.length <= MAX_CHECKED_PER_CALL) {
+        surprises = surprisesAmong(o.store, kept, request, scope.context, lineage).map((s) =>
+          ({ member: s.member, period: s.period, measure: s.measure, value: s.expectation.value ?? null, median: s.expectation.median!, z: s.expectation.z! }))
+        for (const s of surprises.slice(0, 5)) {
+          const who = Object.values(s.member).filter((v) => v != null).join(', ')
+          trail.caveats.push(`unusual: ${s.measure}${who ? ` for ${who}` : ''} in ${s.period} is ${round(s.value)}, where ${round(s.median)} was expected`)
+        }
+        if (surprises.length > 5) trail.caveats.push(`and ${surprises.length - 5} more unusual values`)
+      }
       o.store.recordObservations(kept)
       if (keptSeries < series) trail.caveats.push(`memory keeps ${keptSeries} of this answer's ${series} series, the largest — one answer adds at most ${MAX_OBSERVATIONS_PER_CALL} values`)
     }
@@ -165,12 +181,12 @@ export function createEngine(o: EngineOptions) {
     const shared = { at: started, today: scope.today, interventions, who: scope.who ?? null }
     o.store.recordCall({ id, parentId, name, hash, request, output: error ? null : value, error, decisions: trail.decisions,
                          verifications: trail.verifications, caveats: [...new Set(trail.caveats)], queries: trail.queries,
-                         ms: Date.now() - started, assumptions: trail.assumed, context: parentId ? null : scope.context, ...shared })
+                         ms: Date.now() - started, assumptions: trail.assumed, context: parentId ? null : scope.context, lineage, surprises, ...shared })
     // Relations inlined into this one, and entities joined, ran inside its SQL. They are remembered as calls with no
     // queries of their own, so lineage still finds every answer that went through them.
     for (const [usedHash, usedName] of trail.used) {
       o.store.recordCall({ id: randomUUID(), parentId: id, name: usedName, hash: usedHash, request: { inlinedInto: name }, output: null,
-                           error: null, decisions: [], verifications: [], caveats: [], queries: [], ms: 0, assumptions: [], context: null, ...shared })
+                           error: null, decisions: [], verifications: [], caveats: [], queries: [], ms: 0, assumptions: [], context: null, lineage: usedHash, ...shared })
     }
     if (error) throw Object.assign(new Error(error), { callId: id })
     return { value: value as T, callId: id, hash }

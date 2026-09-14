@@ -52,27 +52,55 @@ const canonical = (v: unknown): string => {
 const PRESENTATION = ['during', 'at', 'order', 'limit', 'limitPer', 'totals', 'share', 'detail', 'fill', 'compare']
 
 /** The question apart from its time: the key of every series it contributes to. */
-export function seriesKey(request: unknown, context: Record<string, unknown> | null): string {
+export function seriesKey(request: unknown, context: Record<string, unknown> | null, lineage: string | null): string {
   const r = Object.fromEntries(Object.entries((request ?? {}) as Record<string, unknown>).filter(([k]) => !PRESENTATION.includes(k)))
-  return createHash('sha256').update(canonical({ request: r, context: context ?? {} })).digest('hex').slice(0, 24)
+  // The lineage is part of the series: after a correction anywhere beneath, the program's memory starts again rather
+  // than mixing values from the wrong version with values from the right one.
+  return createHash('sha256').update(canonical({ request: r, context: context ?? {}, lineage: lineage ?? '' })).digest('hex').slice(0, 24)
 }
 
-/** The observations an answer leaves in memory, when it has a time grain. */
-export function observationsOf(call: { id: string; name: string; hash: string; request: unknown; at: number }, context: Record<string, unknown> | null,
-                               value: unknown, isGrain: (name: string) => boolean): Observation[] {
+/** The exact programs an answer came from, as one hash: its own, and every lineage beneath it. */
+export function lineageOf(hash: string, beneath: Array<string | undefined | null>): string {
+  return createHash('sha256').update([hash, ...[...new Set(beneath.filter(Boolean))].sort()].join('|')).digest('hex').slice(0, 16)
+}
+
+/** The observations an answer leaves in memory. Every answer leaves some:
+ *    a result with a time grain   each row's measures, in the row's period
+ *    a result without one         each row's measures, in the period it was answered for — its instant, or its day
+ *    any other value              its numbers, by name, in the day it was answered as of
+ *  so a number asked every day has a series as surely as one asked by month. */
+export function observationsOf(call: { id: string; name: string; hash: string; request: unknown; at: number; today: string; lineage: string | null },
+                               context: Record<string, unknown> | null, value: unknown, isGrain: (name: string) => boolean): Observation[] {
+  const series = seriesKey(call.request, context, call.lineage)
+  const base = { name: call.name, hash: call.hash, callId: call.id, series, at: call.at }
+  const asked = (call.request as any)?.at
+  const instant = typeof asked === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(asked) ? asked : call.today
+  const num = (v: unknown) => (typeof v === 'number' ? v : v == null || typeof v === 'boolean' ? null : Number.isFinite(Number(v)) ? Number(v) : null)
   const result = value as Result
-  if (!result || !Array.isArray(result.columns) || !Array.isArray(result.rows)) return []
-  const grain = result.columns.find((c) => c.role === 'dimension' && isGrain(c.name))?.name
-  if (!grain) return []
-  const members = result.columns.filter((c) => c.role === 'dimension' && c.name !== grain).map((c) => c.name)
-  const measures = result.columns.filter((c) => c.role === 'measure' && !/_(compare|change|change_ratio|share)$/.test(c.name)).map((c) => c.name)
-  const series = seriesKey(call.request, context)
-  return result.rows.flatMap((row) => measures.map((measure) => ({
-    name: call.name, hash: call.hash, callId: call.id, series, grain, measure, at: call.at,
-    member: canonical(Object.fromEntries(members.map((m) => [m, row[m] ?? null]))),
-    period: String(row[grain]),
-    value: typeof row[measure] === 'number' ? (row[measure] as number) : row[measure] == null ? null : Number(row[measure]),
-  })))
+  if (result && Array.isArray(result.columns) && Array.isArray(result.rows)) {
+    const grain = result.columns.find((c) => c.role === 'dimension' && isGrain(c.name))?.name
+    const members = result.columns.filter((c) => c.role === 'dimension' && c.name !== grain).map((c) => c.name)
+    const measures = result.columns.filter((c) => c.role === 'measure' && !/_(compare|change|change_ratio|share|counterfactual)$/.test(c.name)).map((c) => c.name)
+    return result.rows.flatMap((row) => measures.map((measure) => ({
+      ...base, grain: grain ?? 'day', measure, value: num(row[measure]),
+      member: canonical(Object.fromEntries(members.map((m) => [m, row[m] ?? null]))),
+      period: grain ? String(row[grain]) : instant,
+    })))
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const leaves: Array<[string, number]> = []
+    const walk = (v: any, path: string, depth: number) => {
+      for (const [k, x] of Object.entries(v)) {
+        const key = path ? `${path}.${k}` : k
+        if (typeof x === 'number' && Number.isFinite(x)) leaves.push([key, x])
+        else if (x && typeof x === 'object' && !Array.isArray(x) && depth < 2) walk(x, key, depth + 1)
+      }
+    }
+    walk(value, '', 0)
+    return leaves.map(([measure, v]) => ({ ...base, grain: 'day', measure, value: v, member: '{}', period: call.today }))
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) return [{ ...base, grain: 'day', measure: 'value', value, member: '{}', period: call.today }]
+  return []
 }
 
 /** An answer's observations cut to what memory keeps from one answer. Whole series are kept — every period of one
@@ -96,9 +124,9 @@ export function withinLimit(observations: Observation[], limit: number): { kept:
   return { kept, series: groups.size, keptSeries }
 }
 
-export function expect(store: GraphStore, q: { name: string; request: unknown; context?: Record<string, unknown> | null; measure: string; grain: string
+export function expect(store: GraphStore, q: { name: string; request: unknown; context?: Record<string, unknown> | null; lineage?: string | null; measure: string; grain: string
                                                  member?: Record<string, unknown>; period: string; window?: number; value?: number | null; threshold?: number }): Expectation {
-  const key = { name: q.name, series: seriesKey(q.request, q.context ?? null), member: canonical(q.member ?? {}), measure: q.measure, grain: q.grain }
+  const key = { name: q.name, series: seriesKey(q.request, q.context ?? null, q.lineage ?? null), member: canonical(q.member ?? {}), measure: q.measure, grain: q.grain }
   const longRun = store.summary(key) ?? undefined
   const history = store.series({ ...key, before: q.period })
     .slice(-(q.window ?? DEFAULT_WINDOW))
@@ -126,18 +154,25 @@ function middle(xs: number[]): number {
 
 export interface Surprise { member: Record<string, unknown>; period: string; measure: string; expectation: Expectation }
 
-/** Every value in an answer outside what its series led memory to expect. */
-export function surprisesIn(store: GraphStore, call: CallRecord, context: Record<string, unknown> | null, isGrain: (name: string) => boolean,
-                            options: { threshold?: number; window?: number } = {}): Surprise[] {
-  const obs = observationsOf({ id: call.id, name: call.name, hash: call.hash, request: call.request, at: call.at }, context, call.output, isGrain)
+/** Values outside what memory expected of them, among observations not yet recorded. */
+export function surprisesAmong(store: GraphStore, observations: Observation[], request: unknown, context: Record<string, unknown> | null, lineage: string | null,
+                               options: { threshold?: number; window?: number } = {}): Surprise[] {
   const out: Surprise[] = []
-  for (const o of obs) {
+  for (const o of observations) {
     const member = JSON.parse(o.member)
-    const e = expect(store, { name: o.name, request: call.request, context, measure: o.measure, grain: o.grain, member, period: o.period,
+    const e = expect(store, { name: o.name, request, context, lineage, measure: o.measure, grain: o.grain, member, period: o.period,
                               value: o.value, window: options.window, threshold: options.threshold })
     if (e.surprising) out.push({ member, period: o.period, measure: o.measure, expectation: e })
   }
   return out
+}
+
+/** Every value in a recorded answer outside what memory expected of it. */
+export function surprisesIn(store: GraphStore, call: CallRecord, context: Record<string, unknown> | null, isGrain: (name: string) => boolean,
+                            options: { threshold?: number; window?: number } = {}): Surprise[] {
+  const obs = observationsOf({ id: call.id, name: call.name, hash: call.hash, request: call.request, at: call.at, today: call.today, lineage: call.lineage ?? null },
+                             context, call.output, isGrain)
+  return surprisesAmong(store, obs, call.request, context, call.lineage ?? null, options)
 }
 
 export interface TriageNode {
@@ -168,7 +203,7 @@ export function triage(store: GraphStore, call: CallRecord, context: Record<stri
   const node = (c: CallRecord, measure: string, depth: number): TriageNode | null => {
     const found = valueIn(c, measure, at.member)
     if (!found) return null
-    const expectation = expect(store, { name: c.name, request: c.request, context, measure, grain: found.grain, member: found.own, period: at.period,
+    const expectation = expect(store, { name: c.name, request: c.request, context, lineage: c.lineage ?? null, measure, grain: found.grain, member: found.own, period: at.period,
                                         value: found.value, window: options.window, threshold: options.threshold })
     const parts: TriageNode[] = []
     if (depth < 8) {

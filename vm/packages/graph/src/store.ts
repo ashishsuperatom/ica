@@ -45,6 +45,11 @@ export interface CallRecord {
   who: Record<string, unknown> | null
   /** The interventions in force for this call — on every call they reached. An answer with any is hypothetical, not a fact. */
   interventions: Record<string, unknown> | null
+  /** The exact programs this answer came from: its own hash and every hash beneath it. It changes when any program in the
+   *  tree is corrected, even when this program's own hash does not. */
+  lineage?: string
+  /** Values in this answer outside what memory expected of them. */
+  surprises?: Array<{ member: Record<string, unknown>; period: string; measure: string; value: number | null; median: number; z: number }>
   /** The assumptions the caller passed down, on its outermost call, so a replay can pass the same. */
   context: Record<string, unknown> | null
 }
@@ -115,6 +120,11 @@ const KEPT_ROWS = 500
 /** Values one answer may add to the series in memory. An answer with more — every employee by every day — keeps its
  *  largest whole series up to this (expectations.ts, withinLimit). */
 export const MAX_OBSERVATIONS_PER_CALL = 10_000
+/** Calls kept whole; older ones keep their question and let go of rows and SQL. */
+export const MAX_FULL_CALLS = 20_000
+/** Calls kept at all; past this the oldest answers without a decision are let go of. */
+export const MAX_CALLS = 200_000
+const COMPACT_EVERY = 500
 /** Periods each series keeps whole. Older ones are folded into the series' summary as newer arrive. */
 export const MAX_PERIODS_PER_SERIES = 120
 /** Values memory keeps whole across every series. Past this, the oldest are folded into their summaries. */
@@ -123,13 +133,17 @@ export const MAX_OBSERVATIONS = 1_000_000
 export class GraphStore {
   readonly db: DatabaseSync
 
-  constructor(path: string) {
+  private readonly limits: { fullCalls: number; calls: number }
+
+  /** `limits` overrides how many calls are kept whole and at all — for a test, or a small deployment. */
+  constructor(path: string, limits: { fullCalls?: number; calls?: number } = {}) {
+    this.limits = { fullCalls: limits.fullCalls ?? MAX_FULL_CALLS, calls: limits.calls ?? MAX_CALLS }
     mkdirSync(dirname(path), { recursive: true })
     this.db = new DatabaseSync(path)
     this.db.exec('PRAGMA journal_mode = WAL')
     this.db.exec(SCHEMA)
     const columns = (this.db.prepare('PRAGMA table_info(call)').all() as any[]).map((c) => c.name)
-    for (const c of ['today', 'assumptions', 'interventions', 'context', 'who']) {
+    for (const c of ['today', 'assumptions', 'interventions', 'context', 'who', 'lineage', 'surprises']) {
       if (!columns.includes(c)) this.db.exec(`ALTER TABLE call ADD COLUMN ${c} TEXT`)
     }
   }
@@ -180,12 +194,52 @@ export class GraphStore {
   // ── memory ────────────────────────────────────────────────────────────────────────────────────────────
 
   recordCall(c: CallRecord): void {
-    this.db.prepare(`INSERT INTO call (id, parent_id, name, hash, request, output, error, decisions, verifications, caveats, queries, ms, at, today, assumptions, interventions, context, who)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    this.db.prepare(`INSERT INTO call (id, parent_id, name, hash, request, output, error, decisions, verifications, caveats, queries, ms, at, today, assumptions, interventions, context, who, lineage, surprises)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(c.id, c.parentId, c.name, c.hash, JSON.stringify(c.request), JSON.stringify(keep(c.output)),
            c.error, JSON.stringify(c.decisions), JSON.stringify(c.verifications), JSON.stringify(c.caveats),
            JSON.stringify(c.queries), c.ms, c.at, c.today, JSON.stringify(c.assumptions ?? []),
-           c.interventions ? JSON.stringify(c.interventions) : null, c.context ? JSON.stringify(c.context) : null, c.who ? JSON.stringify(c.who) : null)
+           c.interventions ? JSON.stringify(c.interventions) : null, c.context ? JSON.stringify(c.context) : null, c.who ? JSON.stringify(c.who) : null,
+           c.lineage ?? null, c.surprises?.length ? JSON.stringify(c.surprises) : null)
+    if (++this.written % COMPACT_EVERY === 0) this.compact()
+  }
+
+  private written = 0
+
+  // ── HOW MUCH OF THE PAST IS KEPT ──────────────────────────────────────────────────────────────────────────────
+  // The latest MAX_FULL_CALLS calls are kept whole. Older ones keep what they asked, which programs answered, their
+  // decisions and checks — everything replay, lineage and review need — and let go of their rows and SQL. Past
+  // MAX_CALLS, the oldest answers are let go of altogether, with their parts; an answer that made a decision is kept,
+  // because review still needs it.
+  compact(): { stripped: number; removed: number } {
+    const count = () => Number((this.db.prepare('SELECT COUNT(*) AS n FROM call').get() as any).n)
+    let stripped = 0, removed = 0
+    this.db.exec('BEGIN')
+    try {
+      // Let go of whole answers first — oldest first, never one that made a decision — until under the limit.
+      const doomed = this.db.prepare(`WITH RECURSIVE doomed(id) AS (
+            SELECT id FROM (SELECT id FROM call WHERE parent_id IS NULL AND decisions NOT LIKE '%"boundary"%' ORDER BY at LIMIT 1)
+            UNION ALL SELECT c.id FROM call c JOIN doomed d ON c.parent_id = d.id)
+          DELETE FROM call WHERE id IN (SELECT id FROM doomed)`)
+      while (count() > this.limits.calls) {
+        const gone = Number(doomed.run().changes)
+        if (!gone) break
+        removed += gone
+      }
+      const total = count()
+      if (total > this.limits.fullCalls) {
+        stripped = Number(this.db.prepare(`UPDATE call SET output = NULL, queries = '[]' WHERE id IN
+            (SELECT id FROM call ORDER BY at LIMIT ?) AND (output IS NOT NULL OR queries <> '[]')`).run(total - this.limits.fullCalls).changes)
+      }
+      this.db.exec('COMMIT')
+    } catch (e) { this.db.exec('ROLLBACK'); throw e }
+    return { stripped, removed }
+  }
+
+  /** The lineage of a program's most recent answer — which exact programs its memory is currently of. */
+  latestLineage(name: string): string | null {
+    const r: any = this.db.prepare('SELECT lineage FROM call WHERE name = ? AND lineage IS NOT NULL ORDER BY at DESC LIMIT 1').get(name)
+    return r?.lineage ?? null
   }
 
   getCall(id: string): CallRecord | null {
@@ -308,5 +362,6 @@ function row(r: any): CallRecord {
     queries: JSON.parse(r.queries), ms: r.ms, at: r.at, today: r.today,
     assumptions: r.assumptions ? JSON.parse(r.assumptions) : [], interventions: r.interventions ? JSON.parse(r.interventions) : null,
     context: r.context ? JSON.parse(r.context) : null, who: r.who ? JSON.parse(r.who) : null,
+    lineage: r.lineage ?? undefined, surprises: r.surprises ? JSON.parse(r.surprises) : undefined,
   }
 }
