@@ -104,13 +104,14 @@ A question the engine cannot answer correctly as asked is refused, with the reas
 ## An answer — \`"returns": "answer"\`
 
 The program a question asks. Its params are the question — so a follow-up is a message that changes them, and the
-program never has to change for one. Take the coordinates the relation understands and pass them on:
+program never has to change for one. Declare every coordinate a person might change and pass them all on, so "by
+month", "only CEC", "the top five", "compared with last year" are each a message:
 
 \`\`\`js
-// params: { "during": "the span", "by": "splits and a time grain", "where": "filters" }
-export default async (ctx, { during = { previous: 'quarter' }, by = ['pillar'], where }) => {
-  const result = await ctx.call('utilisation', { measures: ['utilisation', 'hours'], by, where, during: ctx.span(during),
-                                                 order: [{ by: 'utilisation', desc: true }], totals: [[]] })
+// params: { "during": "the span", "by": "splits and a time grain", "where": "filters", "order": "row order",
+//           "limit": "how many rows", "compare": "a time to compare with", "having": "conditions on measures" }
+export default async (ctx, { during = { previous: 'quarter' }, by = ['pillar'], order = [{ by: 'utilisation', desc: true }], ...rest }) => {
+  const result = await ctx.call('utilisation', { measures: ['utilisation', 'hours'], ...rest, by, order, during: ctx.span(during), totals: [[]] })
   const top = result.rows[0]
   const x = by.find((d) => d !== 'pillar') ?? 'pillar'
   const label = result.columns.some((c) => c.name === x + '_label') ? x + '_label' : x
@@ -139,5 +140,7 @@ Every answer is a step of the person's data session: a state (a program and what
 - \`{"ask":"<program>","request":{…}}\` — a new question; \`"keep": true\` carries the span and filters over
 - \`{"set":{…}}\`, \`{"filter":{…}}\`, \`{"unfilter":[…]}\`, \`{"split":{"add":[…],"remove":[…]}}\`, \`{"measures":{"add":[…]}}\`
 - \`{"assume":{…}}\`, \`{"intervene":{…}}\`, \`{"asOf":"YYYY-MM-DD"}\`
+- several at once, as a person says them: \`{"filter":{"pillar_label":"CEC"},"split":{"add":["employee"]},"set":{"during":{"from":"2026-05-01","to":"2026-06-01"},"limit":5}}\`
+A period is chosen with \`during\`, never with a filter on a time grain.
 \`./find '{"row":3}'\` finds what the person was shown — "the third one" — and \`./find '{"text":"acme"}'\` anything named.
 `

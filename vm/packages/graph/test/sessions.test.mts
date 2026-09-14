@@ -96,3 +96,14 @@ test('the answers a session showed are kept when history is compacted', async ()
   store.compact()
   assert.equal(engine.sessions.find(id, { row: 1 })[0].row!.customer_label !== undefined, true)
 })
+
+test('one message may say several things: filter, split and a top five at once', async () => {
+  const { engine } = await setup()
+  const s = engine.sessions
+  const id = s.open()
+  await s.apply(id, { ask: 'orders', request: { measures: ['revenue'], by: ['region'], during: Q2 } })
+  const r = await s.apply(id, { filter: { region: 'north' }, split: { add: ['customer'], remove: ['region'] }, set: { order: [{ by: 'revenue', desc: true }], limit: 1 } } as any)
+  assert.deepEqual(r.state!.request, { measures: ['revenue'], by: ['customer'], during: Q2, where: { region: 'north' }, order: [{ by: 'revenue', desc: true }], limit: 1 })
+  assert.deepEqual((r.value as any).rows.map((x: any) => x.customer_label), ['Ash'])
+  assert.match((await s.apply(id, { filtre: { region: 'south' } } as any)).refused!, /has no part "filtre"/)
+})

@@ -66,8 +66,26 @@ export const stateHash = (s: State) => 'state:' + createHash('sha256').update(ca
 
 const without = <T extends Record<string, unknown>>(o: T, keys: string[]) => Object.fromEntries(Object.entries(o).filter(([k]) => !keys.includes(k))) as T
 
-/** The state a message makes of the current one. No state yet: only a new question applies. */
+/** The order the parts of one message apply in, when a message says several things at once — "CEC, by month, top five"
+ *  is one thing a person says. A new question comes first, then what is taken away, then what is added. */
+const PARTS = ['ask', 'unfilter', 'unassume', 'unintervene', 'set', 'measures', 'split', 'filter', 'assume', 'intervene', 'asOf'] as const
+const ASK_OWN = ['ask', 'request', 'assume', 'keep']
+
+/** The state a message makes of the current one. A message may carry several parts — `{ filter, split, set }` — applied
+ *  in a fixed order. No state yet: only a new question applies. */
 export function applyMessage(current: State | null, m: Message, programs: Registry): State {
+  const keys = Object.keys(m)
+  const unknown = keys.filter((k) => !(PARTS as readonly string[]).includes(k) && !('ask' in m && ASK_OWN.includes(k)))
+  if (unknown.length) refuse(`a message has no part "${unknown[0]}" — its parts are ${PARTS.join(', ')}`)
+  if ('ask' in m) {
+    const rest = keys.filter((k) => !ASK_OWN.includes(k))
+    const asked = applyOne(current, { ask: m.ask, request: m.request, assume: m.assume, keep: m.keep } as Message, programs)
+    return rest.reduce((s, k) => applyOne(s, { [k]: (m as any)[k] } as Message, programs), asked)
+  }
+  return PARTS.filter((k) => k in m).reduce<State | null>((s, k) => applyOne(s, { [k]: (m as any)[k] } as Message, programs), current)!
+}
+
+function applyOne(current: State | null, m: Message, programs: Registry): State {
   if ('ask' in m) {
     const found = programs.resolve(m.ask) ?? refuse(`there is no program "${m.ask}"`)
     let request = m.request ?? {}

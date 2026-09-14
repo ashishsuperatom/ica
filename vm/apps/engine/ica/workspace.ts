@@ -265,7 +265,7 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
     catalog: 'catalog [words]   → the programs that exist, with each relation\'s measures, dimensions, entities and time',
     define: 'define programs/<name> [--replace "<why>"]   → define the program in that directory (contract.json + program.mjs), or correct the one with its name',
     try: 'try <program> [\'<request json>\']   → ask a program directly, to check it while you write it',
-    ask: 'ask \'<message json>\'   → apply a message to this conversation\'s data session and answer it: {"ask":"<program>","request":{…}} starts a question; {"filter":{…}}, {"split":{"add":[…]}}, {"measures":{"add":[…]}}, {"set":{…}}, {"assume":{…}}, {"intervene":{…}}, {"asOf":"YYYY-MM-DD"} follow up',
+    ask: 'ask \'<message json>\'   → apply a message to this conversation\'s data session and answer it: {"ask":"<program>","request":{…}} starts a question; {"filter":{…}}, {"split":{"add":[…]}}, {"measures":{"add":[…]}}, {"set":{…}}, {"assume":{…}}, {"intervene":{…}}, {"asOf":"YYYY-MM-DD"} follow up — several parts in one message apply together',
     find: 'find \'<query json>\'   → something the person was shown: {"row":3} in the current answer · {"text":"acme"} · {"column":"region","equals":"north"}',
     members: 'members <relation> <dimension> [text]   → which members of a dimension match what was typed',
     escalate: 'escalate "<what is blocking you>"   → hand this question to the analyst and stop.',
