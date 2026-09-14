@@ -21,3 +21,4 @@ export { summaryProblem, atLevel, withShares } from './summaries.js'
 // Values that depend on who asks or what is read
 export { facts, applies, mostSpecific, allThatApply, isRuled, AmbiguousRules, type When as RuleWhen, type Facts, type RuledValue } from './rules.js'
 export { resolveRelative, resolveSpan, resolveInstant, type RelativeSpan, type RelativeInstant } from './relative.js'
+export { dayIn, offsetMinutes, stretches, validZone, type Stretch } from './timezones.js'

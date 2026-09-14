@@ -20,6 +20,10 @@ export interface SqlDialect {
   limit(sql: string, n: number): string
   /** An expression as text. */
   text(expr: string): string
+  /** A moment moved by whole minutes. */
+  addMinutes(expr: string, minutes: number): string
+  /** A moment written into the statement, `YYYY-MM-DD HH:MM:SS`. */
+  timestampLiteral(time: string): string
   /** The median, where the dialect has one. */
   median?: (expr: string) => string
 }
@@ -38,6 +42,8 @@ export function sqlFor(dialect: Dialect): SqlDialect {
     })[g],
     limit: (sql, n) => sql.replace(/^SELECT /, `SELECT TOP ${n} `),
     text: (e) => `CAST(${e} AS nvarchar(4000))`,
+    addMinutes: (e, n) => `DATEADD(minute, ${n}, ${e})`,
+    timestampLiteral: (t) => `CAST('${t}' AS datetime2)`,
   }
   if (dialect === 'sqlite') return {
     date: (p) => `@${p}`,
@@ -51,6 +57,8 @@ export function sqlFor(dialect: Dialect): SqlDialect {
     })[g],
     limit: (sql, n) => `${sql}\nLIMIT ${n}`,
     text: (e) => `CAST(${e} AS TEXT)`,
+    addMinutes: (e, n) => `datetime(${e}, '${n >= 0 ? '+' : ''}${n} minutes')`,
+    timestampLiteral: (t) => `'${t}'`,
   }
   return {
     date: (p) => `TO_DATE(@${p}, 'YYYY-MM-DD')`,
@@ -65,6 +73,8 @@ export function sqlFor(dialect: Dialect): SqlDialect {
     limit: (sql, n) => `${sql}\nFETCH FIRST ${n} ROWS ONLY`,
     median: (e) => `MEDIAN(${e})`,
     text: (e) => `TO_CHAR(${e})`,
+    addMinutes: (e, n) => `(${e} + ${n} / 1440)`,
+    timestampLiteral: (t) => `TO_DATE('${t}', 'YYYY-MM-DD HH24:MI:SS')`,
   }
 }
 

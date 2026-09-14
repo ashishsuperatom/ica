@@ -12,6 +12,7 @@ import type { Calendar } from './calendar.js'
 import type { Contract } from './contract.js'
 import { AmbiguousRules, facts, isRuled, mostSpecific } from './rules.js'
 import type { Scope, Trail } from './runtime.js'
+import { validZone } from './timezones.js'
 
 type From = Trail['assumed'][number]['from']
 const sameValue = (a: { value: unknown }, b: { value: unknown }) => JSON.stringify(a.value) === JSON.stringify(b.value)
@@ -44,6 +45,19 @@ export function assume<T>(organisation: Record<string, unknown> | undefined, con
     if (!trail.assumed.some((a) => JSON.stringify(a) === JSON.stringify(entry))) trail.assumed.push(entry)
     return value as T
   }
+}
+
+/** The zone a request is asked from: the assumption named `timezone`, from the caller or the organisation, chosen
+ *  by rules when it differs by person or group. Null when nobody said. */
+export function zoneFor(organisation: Record<string, unknown> | undefined, context: Record<string, unknown>,
+                        who: Record<string, unknown> | undefined): { zone: string; from: 'caller' | 'organisation' } | null {
+  const [given, from]: [unknown, 'caller' | 'organisation' | null] = 'timezone' in context ? [context.timezone, 'caller']
+    : organisation && 'timezone' in organisation ? [organisation.timezone, 'organisation'] : [undefined, null]
+  if (from === null) return null
+  const value = isRuled(given) ? mostSpecific(given.rules, facts(who), sameValue)?.value : given
+  if (value == null) return null
+  if (typeof value !== 'string' || !validZone(value)) throw new Error(`timezone "${String(value)}" is not a time zone — use a name like UTC or Pacific/Auckland`)
+  return { zone: value, from }
 }
 
 /** The calendar a request uses: the assumption named `calendar`, from the caller or the organisation, chosen by

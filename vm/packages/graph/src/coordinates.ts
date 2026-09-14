@@ -18,6 +18,7 @@
 import { addDays, Grains, type Calendar } from './calendar.js'
 import { conditionSql, sqlFor, type Dialect, type SqlDialect } from './dialects.js'
 import { CoordinateError } from './errors.js'
+import { stretches } from './timezones.js'
 import type { Comparison, ResolvedComparison } from './compare.js'
 import type { RelativeInstant, RelativeSpan } from './relative.js'
 export { conditionSql, sqlFor, type Dialect, type SqlDialect } from './dialects.js'
@@ -131,7 +132,7 @@ const P = 'c_'
 export type AttributeSource = (entity: string) => Promise<{ name: string; shape: Shape; read: ReadBody }>
 
 export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates, dialects: Record<string, Dialect>,
-                           today: string, calendar: Calendar = {}, attributes?: AttributeSource): Promise<Plan> {
+                           today: string, calendar: Calendar = {}, attributes?: AttributeSource, zone?: string): Promise<Plan> {
   const caveats: string[] = []
   const grainSet = new Grains(calendar)
   const calendarProblem = grainSet.problem()
@@ -262,6 +263,17 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
     return sum()
   }
 
+  // The time column as the question sees it: moved into the question's zone when it holds moments written in another.
+  const moves = !!(shape.timeZone && zone && zone !== shape.timeZone)
+  if (moves) caveats.push(`times are moved from ${shape.timeZone} to ${zone} before they are counted by day`)
+  const moment = (s: SqlDialect, span: Span) => {
+    const column = `t.${time}`
+    if (!moves) return column
+    const parts = stretches(shape.timeZone!, zone!, span)
+    if (parts.length === 1) return s.addMinutes(column, parts[0].minutes)
+    return `CASE ${parts.map((p) => p.until ? `WHEN ${column} < ${s.timestampLiteral(p.until)} THEN ${s.addMinutes(column, p.minutes)}` : `ELSE ${s.addMinutes(column, p.minutes)}`).join(' ')} END`
+  }
+
   // One statement: pushdown of having, order and limit is possible — unless work across periods follows.
   const acrossPeriods = Boolean(c.fill || c.cumulative)
   const wrap = async (when: When, dims: string[], bounds: (s: SqlDialect) => string[], extra: Record<string, unknown>,
@@ -295,7 +307,7 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
       const group: string[] = []
       for (const d of dimsHere) {
         if (grainSet.has(d)) {
-          const e = grainSet.sql(d, `t.${time}`, s, opts.span!)
+          const e = grainSet.sql(d, moment(s, opts.span!), s, opts.span!)
           cols.push(`${e} AS ${d}`); group.push(e); continue
         }
         const path = paths.get(d)
@@ -344,7 +356,7 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
       if (reset !== 'never') from = grainSet.startOf(reset, from)
       if (from < keep.from) caveats.push(`running totals start at ${from}, the start of the ${reset}`)
     }
-    const bounds = (s: SqlDialect) => [`t.${time} >= ${s.date(`${P}from`)}`, `t.${time} < ${s.date(`${P}to`)}`]
+    const bounds = (s: SqlDialect) => [`${moment(s, { from, to })} >= ${s.date(`${P}from`)}`, `${moment(s, { from, to })} < ${s.date(`${P}to`)}`]
     const pushed = pushable(1)
     if (grain && !grainSet.covers(grain, from)) refuse(`the span starts before calendar grain "${grain}" has periods`)
     if (grain && !grainSet.covers(grain, addDays(to, -1))) refuse(`the span ends after calendar grain "${grain}" has periods`)

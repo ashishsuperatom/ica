@@ -15,6 +15,7 @@
 // — so slicing, drilling and filtering never depend on the body having done them.
 
 import { BUILT_IN } from './calendar.js'
+import { validZone } from './timezones.js'
 
 /** How a measure behaves over time (Lenz and Shoshani, 1997; Kimball's additive and semi-additive facts).
  *  flow   accumulates over time — hours worked. Additive over every dimension, time included.
@@ -61,6 +62,9 @@ export interface Shape {
   measures: Record<string, Measure>
   /** The output date column a flow is bounded and bucketed by. */
   time?: string
+  /** When the time column holds moments rather than calendar dates: the zone they are written in, e.g. 'UTC'. A
+   *  question in another zone sees them moved into its own. Absent means calendar dates, never moved. */
+  timeZone?: string
   /** The dimension each row is one member of, when a row is one member of an entity — one row per employee. It is
    *  what makes this relation the one that holds that entity's attributes, and it is checked to be unique.
    *  (MetricFlow: the primary entity; Cube and Malloy: the primary key.) */
@@ -209,6 +213,10 @@ export function shapeProblem(s: any): string | null {
     try { evaluate(shape, name, {}) } catch { return `measure "${name}": the expression is not well formed` }
   }
   if (kinds.has('flow') && !s.time) return 'a flow accumulates over a span, so the shape must name its time column'
+  if (s.timeZone !== undefined) {
+    if (!s.time) return 'timeZone describes the time column, and the shape has none'
+    if (!validZone(s.timeZone)) return `timeZone "${s.timeZone}" is not a time zone — use a name like UTC or Pacific/Auckland`
+  }
   for (const name of [...Object.keys(dimensions), ...Object.keys(measures)]) {
     if (!ident.test(name)) return `"${name}" must be a lower-case identifier (letters, digits, underscores)`
     if ((BUILT_IN as readonly string[]).includes(name)) return `"${name}" is a time grain and cannot also be declared`

@@ -409,3 +409,50 @@ test('a question asked in relative dates is answered in dates, says which, and a
   const again = await engine.replay<any>(r.callId)
   assert.deepEqual(again.value.rows, r.value.rows)
 })
+
+// ── time zones ────────────────────────────────────────────────────────────────────────────────────────────
+import { dayIn, offsetMinutes, stretches } from '../src/index.ts'
+
+// Moments written in UTC around New Zealand's return to standard time: 03:00 NZDT on 5 April 2026 is 14:00 UTC on
+// the 4th, when Auckland moves from 13 hours ahead to 12.
+const CLICKS = [
+  { at: '2026-03-31 11:30:00', n: 1 },   // 1 April 00:30 in Auckland — April there, March in UTC
+  { at: '2026-04-04 10:30:00', n: 1 },   // 4 April 23:30 NZDT
+  { at: '2026-04-04 11:30:00', n: 1 },   // 5 April 00:30 NZDT
+  { at: '2026-04-04 14:30:00', n: 1 },   // 5 April 02:30 NZST, after the change
+  { at: '2026-04-05 11:30:00', n: 1 },   // 5 April 23:30 NZST
+  { at: '2026-04-05 12:30:00', n: 1 },   // 6 April 00:30 NZST
+]
+const clicks: Contract = { name: 'clicks', kind: 'concept', description: 'Clicks.', reads: { sources: ['WEB'], programs: [] }, params: {}, returns: 'relation',
+  shape: { dimensions: {}, measures: { clicks: { aggregate: 'sum', column: 'n', unit: 'clicks', kind: 'flow' } }, time: 'at', timeZone: 'UTC' } }
+
+test('time zones: offsets and the stretches between daylight-saving changes', () => {
+  assert.equal(offsetMinutes('Pacific/Auckland', new Date('2026-04-04T13:59:00Z')), 780)
+  assert.equal(offsetMinutes('Pacific/Auckland', new Date('2026-04-04T14:00:00Z')), 720)
+  assert.deepEqual(stretches('UTC', 'Pacific/Auckland', { from: '2026-04-01', to: '2026-04-10' }),
+    [{ until: '2026-04-04 14:00:00', minutes: 780 }, { until: null, minutes: 720 }])
+  assert.equal(dayIn('Pacific/Auckland', new Date('2026-09-13T20:00:00Z')), '2026-09-14')
+})
+
+test('time zones: moments counted on the day they happened where the question is asked', async () => {
+  const store = new GraphStore(join(mkdtempSync(join(tmpdir(), 'graph-tz-')), 'g.sqlite'))
+  const engine = createEngine({ store, modulesDir: mkdtempSync(join(tmpdir(), 'graph-mod-')), dialects: {}, query: async () => [], today: () => '2026-09-14' })
+  await engine.define({ body: `export default async () => ({ source: 'WEB', rows: ${JSON.stringify(CLICKS)} })`, contract: clicks }, { by: 'test' })
+  const byDay = async (timezone?: string) => new Map((await engine.call<any>('clicks', { by: ['day'], during: { from: '2026-03-31', to: '2026-04-07' } },
+    timezone ? { assume: { timezone } } : {})).value.rows.map((r: any) => [r.day, r.clicks]))
+  assert.deepEqual(await byDay(), new Map([['2026-03-31', 1], ['2026-04-04', 3], ['2026-04-05', 2]]), 'as written, in UTC')
+  assert.deepEqual(await byDay('Pacific/Auckland'), new Map([['2026-04-01', 1], ['2026-04-04', 1], ['2026-04-05', 3], ['2026-04-06', 1]]), 'in Auckland, across the change')
+  const march = await engine.call<any>('clicks', { during: { from: '2026-03-01', to: '2026-04-01' } }, { assume: { timezone: 'Pacific/Auckland' } })
+  assert.equal(march.value.rows[0]?.clicks ?? 0, 0, 'the 31 March UTC click is April in Auckland, so outside March')
+  assert.ok(store.getCall(march.callId)!.assumptions.some((a) => a.name === 'timezone' && a.value === 'Pacific/Auckland'))
+})
+
+test('time zones: today is the date where the asker is', async () => {
+  const store = new GraphStore(join(mkdtempSync(join(tmpdir(), 'graph-tz-')), 'g.sqlite'))
+  const engine = createEngine({ store, modulesDir: mkdtempSync(join(tmpdir(), 'graph-mod-')), dialects: {}, query: async () => [],
+    assumptions: { timezone: { rules: [{ value: 'UTC' }, { when: { 'who.country': 'NZ' }, value: 'Pacific/Kiritimati' }] } } })
+  await engine.define({ body: `export default (ctx) => ctx.today`, contract: { name: 'today', kind: 'program', description: 'Today.', reads: { sources: [], programs: [] }, params: {}, returns: 'value' } }, { by: 'test' })
+  assert.equal((await engine.call('today')).value, dayIn('UTC'))
+  assert.equal((await engine.call('today', {}, { who: { country: 'NZ' } })).value, dayIn('Pacific/Kiritimati'))
+  await assert.rejects(engine.call('today', {}, { assume: { timezone: 'Mars/Olympus' } }), /not a time zone/)
+})

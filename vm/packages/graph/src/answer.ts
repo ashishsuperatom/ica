@@ -32,7 +32,7 @@ export async function answerRelation(rt: Runtime, program: { name: string; hash:
   trail.caveats.push(...resolved)
 
   const ask = async (c: ResolvedCoordinates, side?: string) => {
-    const p = await plan(shape, read, c, rt.dialects, scope.today, calendar, attributes)
+    const p = await plan(shape, read, c, rt.dialects, scope.today, calendar, attributes, scope.zone?.zone)
     const result = await runPlan(shape, p, (src, sql, params) => rt.o.query(src, sql, params, { policies: scope.access?.[src] }),
       (q) => trail.queries.push(q),
       (label, held, detail) => {

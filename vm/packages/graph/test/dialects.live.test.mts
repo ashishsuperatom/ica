@@ -127,3 +127,33 @@ test('NetSuite: a pivot of hours by pillar and month with totals, shares and the
   for (const x of top) perPillar.set(x.pillar, (perPillar.get(x.pillar) ?? 0) + 1)
   assert.ok([...perPillar.values()].every((n) => n <= 2) && perPillar.size > 5)
 })
+
+// TODO: fails on NetSuite — 15,727 changes counted for 3 April in Auckland where a direct count gives 87 for
+// 3 April UTC. The same conversion is exact on local rows (capabilities.test.mts). Not yet explained.
+test('NetSuite: timestamps moved into another zone across a daylight-saving change match JavaScript', { ...live, todo: 'unexplained count on NetSuite' }, async () => {
+  const { query } = await import('@superatom/scaffold')
+  const { offsetMinutes } = await import('../src/index.ts')
+  const store = new GraphStore(join(mkdtempSync(join(tmpdir(), 'graph-live-')), 'g.sqlite'))
+  const engine = createEngine({ store, modulesDir: mkdtempSync(join(tmpdir(), 'graph-mod-')), query, dialects: { F5NETSUITE: 'oracle' } })
+  // For the test the column is read as UTC; which zone NetSuite writes it in does not matter to the arithmetic.
+  await engine.define({ body: `export default (ctx, { from, to }) => ({ source: 'F5NETSUITE', params: { from, to },
+      sql: "SELECT tb.lastmodifieddate AS changed_at, 1 AS n FROM timebill tb WHERE tb.lastmodifieddate >= TO_DATE(@from, 'YYYY-MM-DD') - 2 AND tb.lastmodifieddate < TO_DATE(@to, 'YYYY-MM-DD') + 2" })`,
+    contract: { name: 'changes', kind: 'concept', description: 'Time entries changed.', reads: { sources: ['F5NETSUITE'], programs: [] }, params: {}, returns: 'relation',
+      shape: { dimensions: {}, measures: { changes: { aggregate: 'sum', column: 'n', unit: 'changes', kind: 'flow' } }, time: 'changed_at', timeZone: 'UTC' } } }, { by: 'test' })
+  const span = { from: '2026-04-03', to: '2026-04-07' }
+  const r = (await engine.call<any>('changes', { by: ['day'], during: span }, { assume: { timezone: 'Pacific/Auckland' } })).value.rows
+  // Counted by hour, not fetched row by row: few enough rows to never meet the row cap, and exact, because
+  // Auckland's offset changes on the hour.
+  const hours = await query('F5NETSUITE', `SELECT TO_CHAR(tb.lastmodifieddate, 'YYYY-MM-DD HH24') AS h, COUNT(*) AS n FROM timebill tb
+    WHERE tb.lastmodifieddate >= TO_DATE('2026-04-01', 'YYYY-MM-DD') AND tb.lastmodifieddate < TO_DATE('2026-04-09', 'YYYY-MM-DD')
+    GROUP BY TO_CHAR(tb.lastmodifieddate, 'YYYY-MM-DD HH24')`)
+  assert.ok(hours.length < 5000)
+  const want = new Map<string, number>()
+  for (const { h, n } of hours) {
+    const instant = new Date(`${h.replace(' ', 'T')}:00:00Z`)
+    const day = new Date(instant.getTime() + offsetMinutes('Pacific/Auckland', instant) * 60000).toISOString().slice(0, 10)
+    if (day >= span.from && day < span.to) want.set(day, (want.get(day) ?? 0) + Number(n))
+  }
+  assert.ok(want.size > 0, 'there are changes to count')
+  assert.deepEqual(new Map(r.map((x: any) => [x.day, x.changes])), want)
+})

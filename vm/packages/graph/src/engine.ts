@@ -17,6 +17,7 @@ import { difference } from './compare.js'
 import { readingContext } from './composition.js'
 import { contractProblem, type Contract } from './contract.js'
 import type { Coordinates } from './coordinates.js'
+import { zoneFor } from './assumptions.js'
 import { checkRelation, interfaceMisfit, programParamMisfit, reachesName } from './definition.js'
 import { programHash } from './hash.js'
 import { createRuntime, newTrail, type CallOptions, type EngineOptions, type Intervention, type ProgramContext, type Scope } from './runtime.js'
@@ -84,6 +85,7 @@ export function createEngine(o: EngineOptions) {
     const id = randomUUID()
     const started = Date.now()
     const trail = newTrail()
+    if (scope.zone && !parentId) trail.assumed.push({ name: 'timezone', value: scope.zone.zone, from: scope.zone.from })
 
     const ctx: ProgramContext = {
       ...readingContext(rt, contract, scope, trail),
@@ -150,8 +152,10 @@ export function createEngine(o: EngineOptions) {
   }
 
   /** Ask a program, by name. `today` fixes the day it is answered as of; by default, the engine's clock. */
-  function call<T = unknown>(name: string, request: Record<string, unknown> = {}, options: CallOptions = {}): Promise<CallResult<T>> {
-    return run<T>(name, request, null, { today: options.today ?? rt.clock(), context: options.assume ?? {},
+  async function call<T = unknown>(name: string, request: Record<string, unknown> = {}, options: CallOptions = {}): Promise<CallResult<T>> {
+    const context = options.assume ?? {}
+    const zone = zoneFor(o.assumptions, context, options.who) ?? undefined
+    return run<T>(name, request, null, { today: options.today ?? rt.clock(zone?.zone), context, zone,
                                          interventions: options.intervene ?? {}, who: options.who, access: options.access }, [])
   }
 
@@ -166,7 +170,7 @@ export function createEngine(o: EngineOptions) {
 
   /** Ask a past call's question again, as of the same day, through whatever its names point at now. Access is
    *  not replayed: it is whatever the person replaying may read now, given here. */
-  function replay<T = unknown>(callId: string, options: { access?: Record<string, unknown[]> } = {}): Promise<CallResult<T>> {
+  async function replay<T = unknown>(callId: string, options: { access?: Record<string, unknown[]> } = {}): Promise<CallResult<T>> {
     const { c, options: as } = recorded(callId, options.access)
     return call<T>(c.name, c.request as Record<string, unknown>, as)
   }

@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { Condition, Dialect } from './coordinates.js'
 import type { CallRecord, GraphStore } from './store.js'
+import { dayIn } from './timezones.js'
 
 /** Runs a statement on a source. `policies` are the access restrictions of the person asking, applied at the source. */
 export type Query = (source: string, sql: string, params?: Record<string, unknown>, options?: { policies?: unknown[] }) => Promise<any[]>
@@ -62,6 +63,8 @@ export interface Scope {
   interventions: Record<string, Intervention>
   who?: Record<string, unknown>
   access?: Record<string, unknown[]>
+  /** The zone the request is asked from, and who said so. */
+  zone?: { zone: string; from: 'caller' | 'organisation' }
 }
 
 /** What one call records while it runs — everything memory keeps about how the answer was reached. */
@@ -102,7 +105,8 @@ export interface Runtime {
   o: EngineOptions
   /** The engine's dialects, with the local engine's added. */
   dialects: Record<string, Dialect>
-  clock: () => string
+  /** Today's date — in a zone when one is given, else where the engine runs — unless the engine was given a clock. */
+  clock: (zone?: string) => string
   load(hash: string, body: string): Promise<Body>
 }
 
@@ -111,7 +115,7 @@ export function createRuntime(o: EngineOptions): Runtime {
   return {
     o,
     dialects: { ...o.dialects, [LOCAL]: 'sqlite' },
-    clock: o.today ?? (() => new Date().toLocaleDateString('en-CA')),
+    clock: o.today ? () => o.today!() : (zone) => (zone ? dayIn(zone) : new Date().toLocaleDateString('en-CA')),
     /** A body becomes a module file named by its hash. Because a hash is immutable, the file is written once and a
      *  cached import is always the right one — no cache-busting, which the mutable version needed to avoid
      *  silently running the previous edit. */
