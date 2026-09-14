@@ -55,7 +55,7 @@ const local = (v: unknown): any => v == null ? null : v instanceof Date ? v.toIS
 export async function runPlan(shape: Shape, p: Plan, query: RunQuery,
                               log: (q: QueryRecord) => void,
                               verify: (label: string, holds: boolean, detail: string) => void,
-                              note: (caveat: string) => void): Promise<Result> {
+                              note: (caveat: string) => void, checks: 'thorough' | 'light' = 'thorough'): Promise<Result> {
   const exec = async (st: ResolvedStatement) => {
     const t = Date.now()
     const rows = st.tables ? runLocal(st) : await query(st.source, st.sql, st.params)
@@ -84,20 +84,22 @@ export async function runPlan(shape: Shape, p: Plan, query: RunQuery,
     return row
   }
 
-  if (p.partial) note('the result is filtered or limited, so its rows are not checked against the whole')
+  const thorough = checks === 'thorough'
+  if (!thorough) note('checks were light: the rows were not reconciled with the whole, and joins to entities were not checked for repeated members')
+  else if (p.partial) note('the result is filtered or limited, so its rows are not checked against the whole')
   // Statements run together; their checks are recorded in statement order, so memory is the same every run.
   type Check = [label: string, holds: boolean, detail: string]
   const answered = await Promise.all(p.statements.map(async (st) => {
     const checks: Check[] = []
     const record = (label: string, holds: boolean, detail: string) => { checks.push([label, holds, detail]) }
     // A join to an entity that repeats a member would repeat every row joined to it, and every sum with them.
-    for (const g of st.guards ?? []) {
+    for (const g of thorough ? st.guards ?? [] : []) {
       const [c] = await exec(g.statement)
       record(g.label, Number(c?.n ?? 0) === Number(c?.d ?? 0), `${c?.n} rows, ${c?.d} distinct`)
       if (!checks.at(-1)![1]) return { rows: [], checks }
     }
     const rows = (await exec(st)).map(normal)
-    if (st.unsplit && !p.partial) {
+    if (thorough && st.unsplit && !p.partial) {
       const [whole] = (await exec(st.unsplit)).map(normal)
       checkParts(shape, p, rows, whole ?? {}, st.period, record)
     }
@@ -153,6 +155,27 @@ export async function runPlan(shape: Shape, p: Plan, query: RunQuery,
       running.set(k, acc)
       recompute(r)
     }
+    const kept = new Set(p.grains.periods(grain, keep.from, keep.to).map((x) => x.label))
+    rows = rows.filter((r) => kept.has(String(r[grain])))
+  }
+
+  if (p.after.rolling && p.grain) {
+    const { window, average, keep } = p.after.rolling
+    const grain = p.grain
+    const combo = (r: Record<string, any>) => JSON.stringify(splits.map((d) => r[d]))
+    rows.sort((a, b) => combo(a).localeCompare(combo(b)) || String(a[grain]).localeCompare(String(b[grain])))
+    const recent = new Map<string, Record<string, any>[]>()
+    const bases = p.fetched.filter((m) => !isDerived(shape.measures[m]))
+    rows = rows.map((r) => {
+      const seen = [...(recent.get(combo(r)) ?? []), r].slice(-window)
+      recent.set(combo(r), seen)
+      const out: Record<string, any> = { ...r }
+      for (const m of bases) {
+        const total = seen.reduce((a, x) => a + Number(x[m] ?? 0), 0)
+        out[m] = average ? total / window : total
+      }
+      return recompute(out)
+    })
     const kept = new Set(p.grains.periods(grain, keep.from, keep.to).map((x) => x.label))
     rows = rows.filter((r) => kept.has(String(r[grain])))
   }

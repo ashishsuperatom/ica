@@ -31,7 +31,16 @@ export interface EngineOptions {
    *  checked against their SQL — a relation program that names a table, a shape column no statement outputs.
    *  `managerInspect` gives one backed by the datasource manager's SQL parser. */
   inspect?: (sql: string, dialect: Dialect) => Promise<SqlAnalysis>
+  /** How much extra reading a check may cost, by default. See Checks. */
+  checks?: Checks
 }
+
+/** Checks that need extra reads of the source.
+ *    thorough  every split is reconciled with its whole (a second statement), every entity joined is checked for
+ *              repeated members, and a relation's grain is checked when it is defined
+ *    light     none of those: answers cost one statement each, and say that they were not reconciled
+ *  Checks that cost nothing — refusals, units, kinds, the parser's — always run. */
+export type Checks = 'thorough' | 'light'
 
 /** For one request only, a change to what a program gives — Pearl's do-operator. Applied wherever that name is
  *  reached in the request, however deep, and never saved into the graph.
@@ -53,6 +62,8 @@ export interface CallOptions {
   /** What the person asking may read, by source, as decided by the system that authorises them. Every query this
    *  request makes carries its source's policies; the engine only passes them on. */
   access?: Record<string, unknown[]>
+  /** How much extra reading checks may cost for this request; the engine's setting otherwise. */
+  checks?: Checks
 }
 
 /** What flows down a request: the day, the assumptions callers have set, the interventions, who asks and what
@@ -65,6 +76,7 @@ export interface Scope {
   access?: Record<string, unknown[]>
   /** The zone the request is asked from, and who said so. */
   zone?: { zone: string; from: 'caller' | 'organisation' }
+  checks: Checks
 }
 
 /** What one call records while it runs — everything memory keeps about how the answer was reached. */

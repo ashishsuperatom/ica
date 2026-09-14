@@ -40,7 +40,8 @@ export async function answerRelation(rt: Runtime, program: { name: string; hash:
         trail.verifications.push({ label: tagged, held, detail })
         if (!held) throw new Error(`invariant failed: ${tagged} — ${detail}`)
       },
-      (text) => trail.caveats.push(text))
+      (text) => trail.caveats.push(text),
+      scope.checks)
     return { p, result }
   }
 

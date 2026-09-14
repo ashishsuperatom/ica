@@ -5,7 +5,7 @@
 
 import { expand, readingContext } from './composition.js'
 import type { Contract } from './contract.js'
-import type { Dialect, When } from './coordinates.js'
+import { sqlFor, type Dialect, type When } from './coordinates.js'
 import { runLocal } from './execute.js'
 import { newTrail, type Runtime, type SqlAnalysis } from './runtime.js'
 import { isDerived, kindOf, type Shape, type Statement } from './shape.js'
@@ -34,15 +34,15 @@ export async function checkRelation(rt: Runtime, hash: string, body: string, con
   const shape = contract.shape!
   const today = rt.clock()
   const when: When = kindOf(shape) === 'flow' ? { from: today, to: today, where: {} } : { asAt: today, where: {} }
-  const scope = { today, context: {}, interventions: {} }
-  if (rt.o.inspect) await inspectRelation(rt, hash, body, contract, when, scope)
+  const scope = { today, context: {}, interventions: {}, checks: rt.o.checks ?? 'thorough' } as const
+  const confirmed = rt.o.inspect ? await inspectRelation(rt, hash, body, contract, when, scope) : false
   const st = await expand(rt, contract.name, contract, hash, body, when, scope, newTrail(), [])
   const columns = declaredColumns(shape)
   const run = async (sql: string) => (st.tables ? runLocal({ ...st, sql }) : rt.o.query(st.source, sql, st.params))
 
   // A GRAIN IS A PROMISE THAT NO MEMBER REPEATS. Every join to this relation relies on it; checked now, and again
-  // whenever it is joined.
-  if (shape.grain) {
+  // whenever it is joined. It reads the whole relation, so light checks skip it.
+  if (shape.grain && scope.checks === 'thorough') {
     const key = shape.dimensions[shape.grain].column
     const [c] = await run(`SELECT COUNT(*) AS n, COUNT(DISTINCT g.${key}) AS d FROM (\n${st.sql.trim()}\n) g`)
     if (Number(c?.n) !== Number(c?.d)) throw new Error(`its grain is ${shape.grain}, but ${c?.n} rows hold only ${c?.d} distinct ${shape.grain} values as at ${today}`)
@@ -54,16 +54,21 @@ export async function checkRelation(rt: Runtime, hash: string, body: string, con
     const missing = rowsAreTheRelation && have.size ? [...columns].filter((c) => !have.has(c)) : []
     if (missing.length) throw new Error(`the rows have no ${missing.map((c) => `"${c}"`).join(', ')}`)
   }
-  // Aggregated, with no outer filter: NetSuite does not check the columns of a query it can see returns nothing.
-  await run(`SELECT ${[...columns].map((c, i) => `COUNT(t.${c}) AS c${i}`).join(', ')}\nFROM (\n${st.sql.trim()}\n) t`)
+  // The parser has already seen every declared column in the SQL's output: nothing more to read.
+  if (confirmed) return
+  // Otherwise the source is asked — over one row, so a large relation costs nothing. Aggregated, because NetSuite does
+  // not check the columns of a query it can see returns nothing.
+  const one = st.tables ? `SELECT x.* FROM (\n${st.sql.trim()}\n) x LIMIT 1` : sqlFor(rt.o.dialects[st.source]).limit(`SELECT x.* FROM (\n${st.sql.trim()}\n) x`, 1)
+  await run(`SELECT ${[...columns].map((c, i) => `COUNT(t.${c}) AS c${i}`).join(', ')}\nFROM (\n${one}\n) t`)
 }
 
 /** The checks only a parser can make, before anything runs. */
+/** Returns true when the parser confirmed every declared column is in the SQL's output. */
 async function inspectRelation(rt: Runtime, hash: string, body: string, contract: Contract, when: When,
-                               scope: { today: string; context: {}; interventions: {} }): Promise<void> {
+                               scope: { today: string; context: {}; interventions: {}; checks: 'thorough' | 'light' }): Promise<boolean> {
   const fn = await rt.load(hash, body)
   const out = (await fn(readingContext(rt, contract, scope, newTrail()), when)) as Statement
-  if (typeof out?.sql !== 'string') return
+  if (typeof out?.sql !== 'string') return false
   if (contract.kind === 'program') {
     // ONLY A CONCEPT NAMES A TABLE. A relation program reads data through the relations in its braces; any other
     // table in its SQL is a data read that bypasses the one definition of that data.
@@ -74,15 +79,16 @@ async function inspectRelation(rt: Runtime, hash: string, body: string, contract
     const { tables } = await rt.o.inspect!(marked, dialect)
     const direct = tables.filter((t) => !/^__relation_\d+$/.test(t))
     if (direct.length) throw new Error(`it reads ${direct.join(', ')} directly — a program reads data only through the relations named in {{braces}}`)
-    return
+    return false
   }
   const dialect = rt.o.dialects[out.source]
-  if (!dialect) return
+  if (!dialect) return false
   const { outputs, star } = await rt.o.inspect!(out.sql, dialect)
-  if (star) return
+  if (star) return false
   const have = new Set(outputs.map((c) => c.toLowerCase()))
   const missing = [...declaredColumns(contract.shape!)].filter((c) => !have.has(c.toLowerCase()))
   if (missing.length) throw new Error(`the shape names ${missing.map((c) => `"${c}"`).join(', ')}, which its SQL does not output (it outputs ${outputs.join(', ')})`)
+  return true
 }
 
 /** The dialect a relation's SQL is written in: its concept's source, or, for a program, that of what it builds on. */

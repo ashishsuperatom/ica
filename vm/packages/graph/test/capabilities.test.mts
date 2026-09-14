@@ -456,3 +456,34 @@ test('time zones: today is the date where the asker is', async () => {
   assert.equal((await engine.call('today', {}, { who: { country: 'NZ' } })).value, dayIn('Pacific/Kiritimati'))
   await assert.rejects(engine.call('today', {}, { assume: { timezone: 'Mars/Olympus' } }), /not a time zone/)
 })
+
+// ── rolling windows ───────────────────────────────────────────────────────────────────────────────────────
+test('rolling: a three-month window reaches back before the span, and a ratio is made from its parts\' windows', async () => {
+  const { engine } = await setup()
+  const r = (await engine.call<any>('orders', { measures: ['revenue', 'price'], by: ['month'], during: { from: '2026-03-01', to: '2026-07-01' }, rolling: { window: 3 } })).value
+  const inMonths = (months: string[]) => ORDERS.filter((o) => months.includes(o.ordered_on.slice(0, 7)))
+  const win = (m: string) => { const d = new Date(`${m}-01T00:00:00Z`); return [2, 1, 0].map((k) => { const x = new Date(d); x.setUTCMonth(d.getUTCMonth() - k); return x.toISOString().slice(0, 7) }) }
+  assert.deepEqual(r.rows.map((x: any) => x.month), ['2026-03', '2026-04', '2026-05', '2026-06'])
+  for (const row of r.rows) {
+    const os = inMonths(win(row.month))
+    assert.equal(row.revenue, sum(os, (o) => o.amount), row.month)
+    assert.equal(row.price, sum(os, (o) => o.units) ? sum(os, (o) => o.amount) / sum(os, (o) => o.units) : null, `${row.month} price`)
+  }
+})
+
+test('rolling: an average over the window, and refused for a measure that does not add up', async () => {
+  const { engine } = await setup()
+  const r = (await engine.call<any>('orders', { measures: ['revenue'], by: ['month'], during: { from: '2026-03-01', to: '2026-04-01' }, rolling: { window: 3, average: true } })).value
+  assert.equal(r.rows[0].revenue, sum(ORDERS.filter((o) => o.ordered_on >= '2026-01-01' && o.ordered_on < '2026-04-01'), (o) => o.amount) / 3)
+  await assert.rejects(engine.call('orders', { measures: ['customers'], by: ['month'], during: H1, rolling: { window: 3 } }), /does not add up across periods/)
+})
+
+test('checks: light answers in one statement and says it was not reconciled', async () => {
+  const { engine, store } = await setup()
+  const thorough = await engine.call<any>('orders', { measures: ['revenue'], by: ['region'], during: H1 })
+  const light = await engine.call<any>('orders', { measures: ['revenue'], by: ['region'], during: H1 }, { checks: 'light' })
+  assert.deepEqual(light.value.rows, thorough.value.rows)
+  assert.equal(store.getCall(thorough.callId)!.queries.length, 2)
+  assert.equal(store.getCall(light.callId)!.queries.length, 1)
+  assert.ok(store.getCall(light.callId)!.caveats.some((c) => /checks were light/.test(c)))
+})

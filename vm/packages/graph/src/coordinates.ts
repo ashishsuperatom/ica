@@ -73,6 +73,10 @@ export interface Coordinates {
   compare?: Comparison
   /** Running totals along the time grain, starting again at each `reset` boundary — to-date and since-start. */
   cumulative?: { reset?: Grain | 'never' }
+  /** A moving window along the time grain: each period's value over it and the `window - 1` periods before it —
+   *  trailing twelve months, a seven-day average. A ratio is recomputed from its parts' windows. Every period in
+   *  the span appears, empty ones included, because a window has a value even where a period has none. */
+  rolling?: { window: number; average?: boolean }
 }
 
 
@@ -105,7 +109,8 @@ export interface Plan {
   combine: 'single' | 'label-period' | 'average-over-periods'
   /** Work left for after the statements run. */
   after: { having?: Coordinates['having']; order?: Coordinates['order']; limit?: number; limitPer?: string[]; fill?: { periods: string[] }
-           cumulative?: { reset: Grain | 'never'; keep: { from: string; to: string } } }
+           cumulative?: { reset: Grain | 'never'; keep: { from: string; to: string } }
+           rolling?: { window: number; average: boolean; keep: { from: string; to: string } } }
   /** The grains this plan was made with: built in, and the calendar's. */
   grains: Grains
   /** Names in `by` reached through an entity, with the SQL alias their values come back under. */
@@ -200,6 +205,15 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
   if (c.at && c.during) refuse('ask either at an instant or during a span, not both')
   if (c.fill && !grain) refuse('fill adds the empty periods of a time grain, so it needs one in by')
   if (c.cumulative?.reset && c.cumulative.reset !== 'never' && !grainSet.has(c.cumulative.reset)) refuse(`cumulative reset "${c.cumulative.reset}" is not a grain`)
+  if (c.rolling) {
+    if (kind !== 'flow') refuse('a moving window adds a flow up over periods; read a stock at each period instead')
+    if (!grain) refuse('a moving window moves along a time grain, so it needs one in by')
+    if (!Number.isInteger(c.rolling.window) || c.rolling.window < 1) refuse('rolling window is a whole number of periods, from 1')
+    if (c.cumulative) refuse('ask for a running total or a moving window, not both')
+    for (const m of fetched) if (!isDerived(defined[m]) && additivity(shape, m) !== 'additive') {
+      refuse(`"${m}" does not add up across periods, so its value over a window cannot be made from each period's`)
+    }
+  }
   if (c.cumulative) {
     if (kind !== 'flow') refuse('a running total adds a flow up over time; a stock is already a running total')
     if (!grain) refuse('a running total runs along a time grain, so it needs one in by')
@@ -275,7 +289,7 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
   }
 
   // One statement: pushdown of having, order and limit is possible — unless work across periods follows.
-  const acrossPeriods = Boolean(c.fill || c.cumulative)
+  const acrossPeriods = Boolean(c.fill || c.cumulative || c.rolling)
   const wrap = async (when: When, dims: string[], bounds: (s: SqlDialect) => string[], extra: Record<string, unknown>,
                       opts: { period?: string; pushdown: boolean; span?: { from: string; to: string } }): Promise<Statement> => {
     const body = await read(when)
@@ -356,6 +370,12 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
       if (reset !== 'never') from = grainSet.startOf(reset, from)
       if (from < keep.from) caveats.push(`running totals start at ${from}, the start of the ${reset}`)
     }
+    if (c.rolling && grain) {
+      // The first period's window reaches back before the span.
+      for (let i = 1; i < c.rolling.window; i++) from = grainSet.startOf(grain, addDays(grainSet.startOf(grain, from), -1))
+      from = grainSet.startOf(grain, from)
+      caveats.push(`each ${grain} is ${c.rolling.average ? 'the average' : 'the total'} of it and the ${c.rolling.window - 1} before it`)
+    }
     const bounds = (s: SqlDialect) => [`${moment(s, { from, to })} >= ${s.date(`${P}from`)}`, `${moment(s, { from, to })} < ${s.date(`${P}to`)}`]
     const pushed = pushable(1)
     if (grain && !grainSet.covers(grain, from)) refuse(`the span starts before calendar grain "${grain}" has periods`)
@@ -365,7 +385,9 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
       statements: [statement], kind, measures, fetched, by, grain, combine: 'single', partial: partialIf(pushed), orderedAtSource: pushed && !!c.order?.length, caveats, grains: grainSet, paths: Object.fromEntries([...paths].map(([k, v]) => [k, v.alias])), labelled: by.filter((d) => !grainSet.has(d) && hasLabel(d)),
       after: {
         ...(pushed ? {} : { having: c.having, order: c.order, limit: c.limit, limitPer: c.limitPer }),
-        fill: c.fill && grain ? { periods: grainSet.periods(grain, keep.from, keep.to).map((p) => p.label) } : undefined,
+        fill: c.rolling && grain ? { periods: grainSet.periods(grain, from, keep.to).map((p) => p.label) }
+          : c.fill && grain ? { periods: grainSet.periods(grain, keep.from, keep.to).map((p) => p.label) } : undefined,
+        rolling: c.rolling ? { window: c.rolling.window, average: !!c.rolling.average, keep } : undefined,
         cumulative: c.cumulative ? { reset: c.cumulative.reset ?? 'never', keep } : undefined,
       },
     }

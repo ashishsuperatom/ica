@@ -2,7 +2,7 @@
 
 // The engine and its memory
 export { createEngine, managerInspect, type Engine, type DefineResult, type CallResult } from './engine.js'
-export type { EngineOptions, CallOptions, Intervention, ProgramContext, Query, SqlAnalysis } from './runtime.js'
+export type { EngineOptions, CallOptions, Checks, Intervention, ProgramContext, Query, SqlAnalysis } from './runtime.js'
 export { GraphStore, type CallRecord, type StoredProgram } from './store.js'
 export { trace } from './trace.js'
 

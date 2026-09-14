@@ -155,7 +155,7 @@ export function createEngine(o: EngineOptions) {
   async function call<T = unknown>(name: string, request: Record<string, unknown> = {}, options: CallOptions = {}): Promise<CallResult<T>> {
     const context = options.assume ?? {}
     const zone = zoneFor(o.assumptions, context, options.who) ?? undefined
-    return run<T>(name, request, null, { today: options.today ?? rt.clock(zone?.zone), context, zone,
+    return run<T>(name, request, null, { today: options.today ?? rt.clock(zone?.zone), context, zone, checks: options.checks ?? o.checks ?? 'thorough',
                                          interventions: options.intervene ?? {}, who: options.who, access: options.access }, [])
   }
 
