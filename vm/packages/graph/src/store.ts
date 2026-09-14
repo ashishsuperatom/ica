@@ -17,6 +17,11 @@ import type { Contract } from './contract.js'
 
 export interface StoredProgram { hash: string; contract: Contract; body: string; createdAt: number; createdBy: string }
 
+/** The number a decision turned on, and where it would have gone the other way. */
+export interface Boundary { value: number; op: '<' | '<=' | '>' | '>='; threshold: number; margin: number }
+
+export interface Observation { name: string; hash: string; callId: string; series: string; member: string; grain: string; period: string; measure: string; value: number | null; at: number }
+
 export interface CallRecord {
   id: string
   parentId: string | null
@@ -25,7 +30,7 @@ export interface CallRecord {
   request: unknown
   output: unknown
   error: string | null
-  decisions: Array<{ label: string; took: boolean; reason: string }>
+  decisions: Array<{ label: string; took: boolean; reason: string; boundary?: Boundary }>
   verifications: Array<{ label: string; held: boolean; detail?: string }>
   caveats: string[]
   /** Every statement run against a source, so an answer can show the SQL that produced it. */
@@ -79,11 +84,31 @@ CREATE TABLE IF NOT EXISTS call (
   today         TEXT
 );
 CREATE INDEX IF NOT EXISTS call_parent ON call(parent_id);
+-- A series in memory: one measure of one member, period by period, from every answer that had a time grain.
+CREATE TABLE IF NOT EXISTS observation (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  name      TEXT NOT NULL,
+  hash      TEXT NOT NULL,
+  call_id   TEXT NOT NULL,
+  series    TEXT NOT NULL,                              -- the question apart from time: filters, splits, assumptions
+  member    TEXT NOT NULL,                              -- the row's dimension values, apart from the period
+  grain     TEXT NOT NULL,
+  period    TEXT NOT NULL,
+  measure   TEXT NOT NULL,
+  value     REAL,
+  at        INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS observation_series ON observation(name, series, member, measure, grain, period);
 CREATE INDEX IF NOT EXISTS call_hash   ON call(hash);
 `
 
 /** How much of an output memory keeps verbatim. The rest is counted, never silently dropped. */
 const KEPT_ROWS = 500
+/** Values one answer may add to the series in memory. An answer with more — every employee by every day — is not
+ *  remembered as series at all: a partial series would teach an expectation from whichever rows happened to fit. */
+export const MAX_OBSERVATIONS_PER_CALL = 10_000
+/** Periods each series keeps. Older ones are dropped as newer arrive. */
+export const MAX_PERIODS_PER_SERIES = 120
 
 export class GraphStore {
   readonly db: DatabaseSync
@@ -165,6 +190,46 @@ export class GraphStore {
   /** Every call that went through one exact program — what a correction to it would have affected. */
   callsThrough(hash: string): CallRecord[] {
     return (this.db.prepare('SELECT * FROM call WHERE hash = ? ORDER BY at').all(hash) as any[]).map(row)
+  }
+
+  /** Adds an answer's values to memory, bounded: a period answered again replaces what was held for it, and each
+   *  series keeps only its latest MAX_PERIODS_PER_SERIES periods. Returns false, recording nothing, when there are
+   *  more than MAX_OBSERVATIONS_PER_CALL values. */
+  recordObservations(rows: Observation[]): boolean {
+    if (!rows.length) return true
+    if (rows.length > MAX_OBSERVATIONS_PER_CALL) return false
+    const replace = this.db.prepare(`DELETE FROM observation WHERE name = ? AND series = ? AND member = ? AND measure = ? AND grain = ? AND period = ?`)
+    const insert = this.db.prepare(`INSERT INTO observation (name, hash, call_id, series, member, grain, period, measure, value, at)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    const trim = this.db.prepare(`DELETE FROM observation WHERE name = ? AND series = ? AND member = ? AND measure = ? AND grain = ? AND period NOT IN
+                                    (SELECT period FROM observation WHERE name = ? AND series = ? AND member = ? AND measure = ? AND grain = ?
+                                      ORDER BY period DESC LIMIT ${MAX_PERIODS_PER_SERIES})`)
+    this.db.exec('BEGIN')
+    try {
+      const touched = new Map<string, Observation>()
+      for (const r of rows) {
+        replace.run(r.name, r.series, r.member, r.measure, r.grain, r.period)
+        insert.run(r.name, r.hash, r.callId, r.series, r.member, r.grain, r.period, r.measure, r.value, r.at)
+        touched.set(JSON.stringify([r.name, r.series, r.member, r.measure, r.grain]), r)
+      }
+      for (const r of touched.values()) trim.run(r.name, r.series, r.member, r.measure, r.grain, r.name, r.series, r.member, r.measure, r.grain)
+      this.db.exec('COMMIT')
+      return true
+    } catch (e) { this.db.exec('ROLLBACK'); throw e }
+  }
+
+  /** One series, a value per period — a period answered again, after a correction, has replaced what memory held. */
+  series(q: { name: string; series: string; member: string; measure: string; grain: string; before?: string }): Array<{ period: string; value: number | null; at: number }> {
+    return (this.db.prepare(`SELECT o.period, o.value, o.at FROM observation o
+        WHERE o.name = ? AND o.series = ? AND o.member = ? AND o.measure = ? AND o.grain = ? ${q.before ? 'AND o.period < ?' : ''}
+        ORDER BY o.period`)
+      .all(...[q.name, q.series, q.member, q.measure, q.grain, ...(q.before ? [q.before] : [])]) as any[])
+      .map((r) => ({ period: r.period, value: r.value == null ? null : Number(r.value), at: Number(r.at) }))
+  }
+
+  /** Outermost calls that made a decision on a boundary. */
+  decidingCalls(): CallRecord[] {
+    return (this.db.prepare(`SELECT * FROM call WHERE parent_id IS NULL AND error IS NULL AND decisions LIKE '%"boundary"%' ORDER BY at`).all() as any[]).map(row)
   }
 
   /** The answer a call was part of: its outermost caller. */

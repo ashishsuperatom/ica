@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { Condition, Dialect } from './coordinates.js'
 import type { CallRecord, GraphStore } from './store.js'
+import type { Expectation } from './expectations.js'
 import { dayIn } from './timezones.js'
 
 /** Runs a statement on a source. `policies` are the access restrictions of the person asking, applied at the source. */
@@ -97,6 +98,11 @@ export interface ProgramContext {
   call<T = unknown>(name: string, request?: Record<string, unknown>, options?: { assume?: Record<string, unknown> }): Promise<T>
   query(source: string, sql: string, params?: Record<string, unknown>): Promise<any[]>
   decide(label: string, took: boolean, reason: string): boolean
+  /** A decision on a number: `value op threshold`. Recorded with how far the value was from going the other way, so
+   *  a later review can say when the same question would now be decided differently. */
+  decideAt(label: string, value: number, op: '<' | '<=' | '>' | '>=', threshold: number, reason?: string): boolean
+  /** What memory expects of one period of a program's measure, for a member, from the periods before it. */
+  expectation(program: string, ask: { request: Record<string, unknown>; measure: string; member?: Record<string, unknown>; period: string; window?: number }): Expectation
   verify(label: string, holds: () => boolean | Promise<boolean>, detail?: string): Promise<void>
   caveat(text: string): void
   /** The day this call is answered as of. Read this, never the clock, so a replay gives the same answer. */

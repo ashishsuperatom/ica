@@ -15,10 +15,13 @@ import { randomUUID } from 'node:crypto'
 import { answerRelation } from './answer.js'
 import { difference } from './compare.js'
 import { catalog, members } from './discovery.js'
-import { readingContext } from './composition.js'
+import { compareAt, readingContext } from './composition.js'
 import { contractProblem, type Contract } from './contract.js'
 import type { Coordinates } from './coordinates.js'
-import { zoneFor } from './assumptions.js'
+import { calendarFor, zoneFor } from './assumptions.js'
+import { Grains } from './calendar.js'
+import { expect, observationsOf, surprisesIn, triage } from './expectations.js'
+import { MAX_OBSERVATIONS_PER_CALL, type CallRecord } from './store.js'
 import { checkRelation, interfaceMisfit, programParamMisfit, reachesName } from './definition.js'
 import { programHash } from './hash.js'
 import { createRuntime, newTrail, type CallOptions, type EngineOptions, type Intervention, type ProgramContext, type Scope } from './runtime.js'
@@ -101,6 +104,18 @@ export function createEngine(o: EngineOptions) {
         return (await run<U>(child, childRequest, id, childScope, [...path, hash])).value
       },
       decide(label, took, reason) { trail.decisions.push({ label, took, reason }); return took },
+      decideAt(label, value, op, threshold, reason) {
+        if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`"${label}" was decided on ${value}, which is not a number`)
+        const took = compareAt(value, op, threshold)
+        trail.decisions.push({ label, took, reason: reason ?? `${value} ${op} ${threshold}`, boundary: { value, op, threshold, margin: value - threshold } })
+        return took
+      },
+      expectation(program, ask) {
+        const passed = Object.entries(contract.params).some(([p, spec]) => typeof spec !== 'string' && request[p] === program)
+        if (!contract.reads.programs.includes(program) && !passed) throw new Error(`"${name}" read the memory of "${program}", which its contract does not declare it reads`)
+        const grain = grainOf(ask.period)
+        return expect(o.store, { name: program, request: ask.request, context: scope.context, measure: ask.measure, member: ask.member, period: ask.period, grain, window: ask.window })
+      },
       async verify(label, holds, detail) {
         const held = Boolean(await holds())
         trail.verifications.push({ label, held, detail })
@@ -138,6 +153,15 @@ export function createEngine(o: EngineOptions) {
     }
 
     const interventions = Object.keys(scope.interventions).length ? scope.interventions : null
+    // MEMORY OF SERIES. A real answer with a time grain leaves each value in memory; a hypothetical one does not, or
+    // what was imagined would become what is expected.
+    if (!error && !interventions) {
+      const grains = new Grains(calendarFor(o.assumptions, scope, newTrail()))
+      const observations = observationsOf({ id, name, hash, request, at: started }, scope.context, value, (g) => grains.has(g))
+      if (!o.store.recordObservations(observations)) {
+        trail.caveats.push(`not remembered as series: ${observations.length} values is more than memory keeps from one answer (${MAX_OBSERVATIONS_PER_CALL})`)
+      }
+    }
     if (interventions && !parentId) trail.caveats.push(`hypothetical: this answer changes ${Object.keys(interventions).map((k) => `"${k}"`).join(', ')} for this request only`)
     const shared = { at: started, today: scope.today, interventions, who: scope.who ?? null }
     o.store.recordCall({ id, parentId, name, hash, request, output: error ? null : value, error, decisions: trail.decisions,
@@ -207,8 +231,57 @@ export function createEngine(o: EngineOptions) {
     }
   }
 
+  /** The grain a period label belongs to, by its form: 2026-05-03 day, 2026-05 month, 2026-Q2 quarter, 2026 year,
+   *  FY2027-Q1 a fiscal quarter. A week is labelled by its Monday, like a day, so a weekly series is asked by grain. */
+  function grainOf(period: string): string {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(period)) return 'day'
+    if (/^\d{4}-\d{2}$/.test(period)) return 'month'
+    if (/^\d{4}-Q\d$/.test(period)) return 'quarter'
+    if (/^\d{4}$/.test(period)) return 'year'
+    const custom = Object.entries(calendarFor(o.assumptions, { today: '', context: {}, interventions: {}, checks: 'light' }, newTrail()))
+      .find(([g]) => new Grains(calendarFor(o.assumptions, { today: '', context: {}, interventions: {}, checks: 'light' }, newTrail())).periods(g, '1990-01-01', '2060-01-01').some((p) => p.label === period))
+    if (custom) return custom[0]
+    throw new Error(`cannot tell which grain the period "${period}" belongs to`)
+  }
+
+  const contextOf = (c: CallRecord) => o.store.root(c.id)?.context ?? null
+  const isGrainFor = () => { const g = new Grains(calendarFor(o.assumptions, { today: '', context: {}, interventions: {}, checks: 'light' }, newTrail())); return (n: string) => g.has(n) }
+
+  /** Every value in a recorded answer outside what memory expected of it. */
+  function surprises(callId: string, options: { threshold?: number; window?: number } = {}) {
+    const c = o.store.getCall(callId) ?? (() => { throw new Error(`no call ${callId}`) })()
+    return surprisesIn(o.store, c, contextOf(c), isGrainFor(), options)
+  }
+
+  /** Where a surprise in a recorded answer comes from: its parts, against their own memory. */
+  function explain(callId: string, at: { member: Record<string, unknown>; period: string; measure: string }, options: { threshold?: number; window?: number } = {}) {
+    const c = o.store.getCall(callId) ?? (() => { throw new Error(`no call ${callId}`) })()
+    return triage(o.store, c, contextOf(c), isGrainFor(), at, options)
+  }
+
+  // ── DECISIONS, REVIEWED ─────────────────────────────────────────────────────────────────────────────────────
+  // A decision made on a number records how far that number was from the threshold. Reviewing asks each deciding
+  // question again as of a later day — its relative dates now meaning later periods — and reports every decision
+  // that would now go the other way, with the numbers either side. A decision is never silently kept once the
+  // data has crossed its boundary.
+  async function review(options: { today: string; access?: Record<string, unknown[]> }) {
+    const latest = new Map<string, CallRecord>()
+    for (const c of o.store.decidingCalls()) latest.set(JSON.stringify([c.name, c.request, c.context, c.who]), c)
+    const out = []
+    for (const c of latest.values()) {
+      const again = await call(c.name, c.request as Record<string, unknown>, { today: options.today, assume: c.context ?? {}, who: c.who ?? undefined, access: options.access })
+      const now = o.store.getCall(again.callId)!.decisions
+      const flipped = c.decisions.filter((d) => d.boundary).flatMap((d) => {
+        const n = now.find((x) => x.label === d.label)
+        return n && n.took !== d.took ? [{ label: d.label, was: { took: d.took, ...d.boundary! }, now: { took: n.took, ...(n.boundary ?? {}) } }] : []
+      })
+      out.push({ name: c.name, request: c.request, decidedOn: c.today, reviewedOn: options.today, callId: c.id, reviewCallId: again.callId, flipped, reopened: flipped.length > 0 })
+    }
+    return out
+  }
+
   return {
-    define, call, replay, counterfactual,
+    define, call, replay, counterfactual, surprises, explain, review,
     /** What programs exist, with each relation's measures, dimensions and entities. */
     catalog: () => catalog(o.store),
     /** Which members of a relation's dimension match what someone typed. */

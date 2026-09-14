@@ -16,6 +16,9 @@ import { intervened } from './interventions.js'
 import { LOCAL, type ProgramContext, type Runtime, type Scope, type Trail } from './runtime.js'
 import { kindOf, type Statement } from './shape.js'
 
+export const compareAt = (value: number, op: '<' | '<=' | '>' | '>=', threshold: number) =>
+  op === '<' ? value < threshold : op === '<=' ? value <= threshold : op === '>' ? value > threshold : value >= threshold
+
 /** A context that may only read the sources its contract declares — what a concept's body gets while it produces a
  *  relation, and the base of every program's context. A program that returns a relation can read nothing. */
 export function readingContext(rt: Runtime, contract: Contract, scope: Scope, trail: Trail): ProgramContext {
@@ -31,6 +34,8 @@ export function readingContext(rt: Runtime, contract: Contract, scope: Scope, tr
       return rows
     },
     decide: (_l, took) => took, verify: async () => {}, caveat: () => {}, today: scope.today,
+    decideAt: (_l, value, op, threshold) => compareAt(value, op, threshold),
+    expectation: () => { throw new Error(`"${contract.name}" is producing a relation; it reads memory only as a program`) },
     assume: <T>(name: string, about?: Record<string, unknown>) => assume<T>(rt.o.assumptions, contract, scope, name, trail, about),
     who: scope.who,
   }

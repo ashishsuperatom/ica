@@ -3,7 +3,7 @@
 // The engine and its memory
 export { createEngine, managerInspect, type Engine, type DefineResult, type CallResult } from './engine.js'
 export type { EngineOptions, CallOptions, Checks, Intervention, ProgramContext, Query, SqlAnalysis } from './runtime.js'
-export { GraphStore, type CallRecord, type StoredProgram } from './store.js'
+export { GraphStore, type CallRecord, type StoredProgram, type Boundary, type Observation } from './store.js'
 export { trace } from './trace.js'
 
 // What a program declares
@@ -23,3 +23,4 @@ export { facts, applies, mostSpecific, allThatApply, isRuled, AmbiguousRules, ty
 export { resolveRelative, resolveSpan, resolveInstant, type RelativeSpan, type RelativeInstant } from './relative.js'
 export { dayIn, offsetMinutes, stretches, validZone, type Stretch } from './timezones.js'
 export { catalog, members, type CatalogEntry, type Members, type MemberMatch } from './discovery.js'
+export { expect, seriesKey, observationsOf, type Expectation, type Surprise, type TriageNode } from './expectations.js'

@@ -1,0 +1,171 @@
+// ── EXPECTATIONS: WHAT A NUMBER USUALLY IS, AND WHEN IT IS NOT ────────────────────────────────────────────
+//
+// Every answer that has a time grain leaves its values in memory as series: one measure, of one member, period by
+// period, for one question — the same filters, splits and assumptions. What a period is expected to be is read from
+// the periods before it in the same series, so an expectation is always conditioned on the question: utilisation
+// for NetSuite by month is not expected to look like utilisation for the company.
+//
+// The expectation is robust: the median of the recent periods and their median absolute deviation, scaled to be
+// comparable with a standard deviation (Hampel's filter; Leys et al., 2013). One unusual month does not move it, as
+// it would move a mean. A value more than `threshold` of those deviations from the median is a surprise.
+//
+// A surprise is then TRIAGED: the answer's call tree is walked, and each program it called is asked the same
+// question of its own memory — was its part of this period surprising too? The deepest surprising parts are where
+// to look first. That is the start of an explanation, not the explanation: whether the world changed or the data
+// did is for whoever reads it, or for an analysis program to test.
+
+import { createHash } from 'node:crypto'
+import type { Result } from './execute.js'
+import type { CallRecord, GraphStore, Observation } from './store.js'
+
+export interface Expectation {
+  /** How many earlier periods it is based on. Fewer than MIN_HISTORY: nothing is expected yet. */
+  n: number
+  known: boolean
+  median?: number
+  /** The robust spread: 1.4826 × the median absolute deviation, never less than a small share of the median. */
+  spread?: number
+  low?: number
+  high?: number
+  /** For a value: how many spreads from the median it lies, and whether that is outside the band. */
+  value?: number | null
+  z?: number | null
+  surprising?: boolean
+}
+
+const MIN_HISTORY = 4
+const DEFAULT_WINDOW = 12
+const DEFAULT_THRESHOLD = 3
+/** Where every recent period is the same, any difference would be infinitely surprising. A spread of at least 5% of
+ *  the median says a change smaller than that is not news. */
+const SPREAD_FLOOR = 0.05
+
+const canonical = (v: unknown): string => {
+  if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`
+  if (v && typeof v === 'object') return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canonical((v as any)[k])}`).join(',')}}`
+  return JSON.stringify(v ?? null)
+}
+
+/** Parts of a request that choose which periods or rows are shown, not what is measured. */
+const PRESENTATION = ['during', 'at', 'order', 'limit', 'limitPer', 'totals', 'share', 'detail', 'fill', 'compare']
+
+/** The question apart from its time: the key of every series it contributes to. */
+export function seriesKey(request: unknown, context: Record<string, unknown> | null): string {
+  const r = Object.fromEntries(Object.entries((request ?? {}) as Record<string, unknown>).filter(([k]) => !PRESENTATION.includes(k)))
+  return createHash('sha256').update(canonical({ request: r, context: context ?? {} })).digest('hex').slice(0, 24)
+}
+
+/** The observations an answer leaves in memory, when it has a time grain. */
+export function observationsOf(call: { id: string; name: string; hash: string; request: unknown; at: number }, context: Record<string, unknown> | null,
+                               value: unknown, isGrain: (name: string) => boolean): Observation[] {
+  const result = value as Result
+  if (!result || !Array.isArray(result.columns) || !Array.isArray(result.rows)) return []
+  const grain = result.columns.find((c) => c.role === 'dimension' && isGrain(c.name))?.name
+  if (!grain) return []
+  const members = result.columns.filter((c) => c.role === 'dimension' && c.name !== grain).map((c) => c.name)
+  const measures = result.columns.filter((c) => c.role === 'measure' && !/_(compare|change|change_ratio|share)$/.test(c.name)).map((c) => c.name)
+  const series = seriesKey(call.request, context)
+  return result.rows.flatMap((row) => measures.map((measure) => ({
+    name: call.name, hash: call.hash, callId: call.id, series, grain, measure, at: call.at,
+    member: canonical(Object.fromEntries(members.map((m) => [m, row[m] ?? null]))),
+    period: String(row[grain]),
+    value: typeof row[measure] === 'number' ? (row[measure] as number) : row[measure] == null ? null : Number(row[measure]),
+  })))
+}
+
+export function expect(store: GraphStore, q: { name: string; request: unknown; context?: Record<string, unknown> | null; measure: string; grain: string
+                                                 member?: Record<string, unknown>; period: string; window?: number; value?: number | null; threshold?: number }): Expectation {
+  const history = store.series({ name: q.name, series: seriesKey(q.request, q.context ?? null), member: canonical(q.member ?? {}),
+                                 measure: q.measure, grain: q.grain, before: q.period })
+    .slice(-(q.window ?? DEFAULT_WINDOW))
+    .map((h) => h.value)
+    .filter((v): v is number => v != null && Number.isFinite(v))
+  if (history.length < MIN_HISTORY) return { n: history.length, known: false }
+  const median = middle(history)
+  const mad = middle(history.map((v) => Math.abs(v - median)))
+  const spread = Math.max(1.4826 * mad, Math.abs(median) * SPREAD_FLOOR, 1e-9)
+  const k = q.threshold ?? DEFAULT_THRESHOLD
+  const out: Expectation = { n: history.length, known: true, median, spread, low: median - k * spread, high: median + k * spread }
+  if (q.value !== undefined) {
+    out.value = q.value
+    out.z = q.value == null ? null : (q.value - median) / spread
+    out.surprising = out.z != null && Math.abs(out.z) > k
+  }
+  return out
+}
+
+function middle(xs: number[]): number {
+  const s = [...xs].sort((a, b) => a - b)
+  const m = Math.floor(s.length / 2)
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
+}
+
+export interface Surprise { member: Record<string, unknown>; period: string; measure: string; expectation: Expectation }
+
+/** Every value in an answer outside what its series led memory to expect. */
+export function surprisesIn(store: GraphStore, call: CallRecord, context: Record<string, unknown> | null, isGrain: (name: string) => boolean,
+                            options: { threshold?: number; window?: number } = {}): Surprise[] {
+  const obs = observationsOf({ id: call.id, name: call.name, hash: call.hash, request: call.request, at: call.at }, context, call.output, isGrain)
+  const out: Surprise[] = []
+  for (const o of obs) {
+    const member = JSON.parse(o.member)
+    const e = expect(store, { name: o.name, request: call.request, context, measure: o.measure, grain: o.grain, member, period: o.period,
+                              value: o.value, window: options.window, threshold: options.threshold })
+    if (e.surprising) out.push({ member, period: o.period, measure: o.measure, expectation: e })
+  }
+  return out
+}
+
+export interface TriageNode {
+  name: string
+  callId: string
+  measure: string
+  member: Record<string, unknown>
+  expectation: Expectation
+  parts: TriageNode[]
+}
+
+/** Walk a surprise down the call tree: for each program the answer called, its own measures for the same member and
+ *  period, against its own memory. `leads` are the deepest surprising parts. */
+export function triage(store: GraphStore, call: CallRecord, context: Record<string, unknown> | null, isGrain: (name: string) => boolean,
+                       at: { member: Record<string, unknown>; period: string; measure: string }, options: { threshold?: number; window?: number } = {}) {
+  const valueIn = (c: CallRecord, measure: string, member: Record<string, unknown>) => {
+    const result = c.output as Result
+    if (!result?.columns) return undefined
+    const grain = result.columns.find((col) => col.role === 'dimension' && isGrain(col.name))?.name
+    if (!grain || !result.columns.some((col) => col.name === measure)) return undefined
+    // A part is about the same member when every dimension it splits by agrees; a part filtered to the member
+    // rather than split by it has fewer dimensions, and agrees on the ones it has.
+    const row = result.rows.find((r) => String(r[grain]) === at.period && Object.entries(member).every(([k, v]) => !(k in r) || String(r[k]) === String(v)))
+    if (!row) return undefined
+    const own = Object.fromEntries(result.columns.filter((col) => col.role === 'dimension' && col.name !== grain).map((col) => [col.name, row[col.name] ?? null]))
+    return { grain, value: row[measure] as number | null, own }
+  }
+  const node = (c: CallRecord, measure: string, depth: number): TriageNode | null => {
+    const found = valueIn(c, measure, at.member)
+    if (!found) return null
+    const expectation = expect(store, { name: c.name, request: c.request, context, measure, grain: found.grain, member: found.own, period: at.period,
+                                        value: found.value, window: options.window, threshold: options.threshold })
+    const parts: TriageNode[] = []
+    if (depth < 8) {
+      for (const child of store.children(c.id)) {
+        const childResult = child.output as Result
+        if (!childResult?.columns) continue
+        for (const col of childResult.columns.filter((x) => x.role === 'measure')) {
+          const n = node(child, col.name, depth + 1)
+          if (n) parts.push(n)
+        }
+      }
+    }
+    return { name: c.name, callId: c.id, measure, member: found.own, expectation, parts }
+  }
+  const root = node(call, at.measure, 0)
+  const leads: TriageNode[] = []
+  const walk = (n: TriageNode) => {
+    const surprisingParts = n.parts.filter((p) => p.expectation.surprising)
+    if (n.expectation.surprising && !surprisingParts.length) leads.push(n)
+    for (const p of n.parts) walk(p)
+  }
+  if (root) walk(root)
+  return { root, leads }
+}
