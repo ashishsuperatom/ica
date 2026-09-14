@@ -16,7 +16,7 @@
 // and writes the programs it defines under programs/<name>/ (contract.json + program.mjs). Which turn is live is in
 // .turn, which data session this conversation is in .session — both written by the engine before it asks.
 
-import { mkdir, writeFile, chmod, symlink, readlink, rm } from 'node:fs/promises'
+import { mkdir, writeFile, chmod, symlink, readlink, rm, readdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -293,5 +293,37 @@ if command -v tsx >/dev/null 2>&1; then exec tsx "$D" "$@"; else exec npx --yes 
     await chmod(join(dir, name), 0o755)
   }
 
+  await removeWhatIsNotOurs(dir, Object.keys(drivers))
   return dir
+}
+
+// ── THE WORKSPACE HOLDS WHAT THIS ENGINE WRITES, AND NOTHING ELSE ─────────────────────────────────────────────
+// A workspace outlives engine versions, and an agent reads whatever it finds: an earlier engine's tools, question
+// programs and turn files were read as current, and used. So preparing a workspace also removes what the current
+// engine does not put there. Each entry below names who writes it.
+const OWNED = new Set([
+  'CONTEXT.md', 'data', 'grounding', 'programs', 'out', '.tools',   // this file
+  '.turn', '.session', '.agent',                                    // agents/composer, agents/analyst: the turn in progress
+  'AGENTS.md', 'SYSTEM_REFERENCE.md', '.claude',                    // the harnesses (ica/pi.ts, ica/codex.ts, ica/claude.ts)
+  'connector', 'templates',                                         // agents/connector
+])
+const OWNED_IN: Record<string, Set<string>> = {
+  data: new Set(['query.mjs', 'introspect.mjs']),
+  grounding: new Set(['grounding.mjs', 'GROUNDING.md']),            // GROUNDING.md: agents/grounding
+}
+
+async function removeWhatIsNotOurs(dir: string, tools: string[]) {
+  const owned = new Set([...OWNED, ...tools])
+  const gone = (p: string) => rm(p, { recursive: true, force: true })
+  for (const e of await readdir(dir)) if (!owned.has(e)) await gone(join(dir, e))
+  for (const [sub, keep] of Object.entries(OWNED_IN))
+    for (const e of await readdir(join(dir, sub)).catch(() => [] as string[])) if (!keep.has(e)) await gone(join(dir, sub, e))
+  for (const e of await readdir(join(dir, '.tools'))) if (!tools.includes(e.replace(/\.mjs$/, ''))) await gone(join(dir, '.tools', e))
+  // A program is a directory with a contract.json; anything else in programs/ was written for an earlier engine.
+  for (const e of await readdir(join(dir, 'programs'))) if (!existsSync(join(dir, 'programs', e, 'contract.json'))) await gone(join(dir, 'programs', e))
+  // A turn leaves step.json or escalate.json, or nothing yet while it runs.
+  for (const e of await readdir(join(dir, 'out'))) {
+    const files = await readdir(join(dir, 'out', e)).catch(() => null)
+    if (files === null || files.some((f) => f !== 'step.json' && f !== 'escalate.json')) await gone(join(dir, 'out', e))
+  }
 }
