@@ -8,9 +8,9 @@
 //   compare   compare.ts — the same question at another time, aligned
 //   totals    summaries.ts — the same question at coarser splits; shares of a total
 
-import { calendarFor } from './assumptions.js'
+import { calendarFor, settingFor } from './assumptions.js'
 import { comparisonCoordinates, mergeComparison, type ResolvedComparison } from './compare.js'
-import { attributesFor, statementFor } from './composition.js'
+import { attributesFor, ratesFor, statementFor } from './composition.js'
 import type { Contract } from './contract.js'
 import { plan, type Coordinates, type ReadBody, type ResolvedCoordinates } from './coordinates.js'
 import { runPlan, type Result } from './execute.js'
@@ -27,12 +27,16 @@ export async function answerRelation(rt: Runtime, program: { name: string; hash:
   const read: ReadBody = (when) => statementFor(rt, name, contract, hash, body, when, scope, trail, path)
   const calendar = calendarFor(rt.o.assumptions, scope, trail)
   const attributes = attributesFor(rt, scope, trail, path)
+  const ratesName = settingFor(rt.o.assumptions, scope, 'exchange rates', trail)
+  const rates = typeof ratesName === 'string' ? ratesFor(rt, scope, trail, path, ratesName) : undefined
   // "Last 30 days" becomes dates first, against the day this call is answered as of and the request's calendar.
-  const { coordinates, caveats: resolved } = resolveRelative(asked, scope.today, new Grains(calendar))
+  // A reporting currency set for the organisation or the person applies when the question does not name one.
+  const currency = asked.currency ?? (Object.values(shape.measures).some((m) => (m as any).currency) ? settingFor(rt.o.assumptions, scope, 'currency', trail) as string | undefined : undefined)
+  const { coordinates, caveats: resolved } = resolveRelative(currency ? { ...asked, currency } : asked, scope.today, new Grains(calendar))
   trail.caveats.push(...resolved)
 
   const ask = async (c: ResolvedCoordinates, side?: string) => {
-    const p = await plan(shape, read, c, rt.dialects, scope.today, calendar, attributes, scope.zone?.zone)
+    const p = await plan(shape, read, c, rt.dialects, scope.today, { calendar, attributes, rates, zone: scope.zone?.zone })
     const result = await runPlan(shape, p, (src, sql, params) => rt.o.query(src, sql, params, { policies: scope.access?.[src] }),
       (q) => trail.queries.push(q),
       (label, held, detail) => {

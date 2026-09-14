@@ -116,6 +116,12 @@ export async function runPlan(shape: Shape, p: Plan, query: RunQuery,
       if (!checks.at(-1)![1]) return { rows: [], checks }
     }
     const rows = (await exec(st)).map(normal)
+    if (Object.keys(p.units).length) {
+      const unconverted = rows.reduce((a, r) => a + Number(r.c_unconverted ?? 0), 0)
+      record('every amount has a rate to convert it with', unconverted === 0, `${unconverted} row(s) have no rate`)
+      for (const r of rows) delete r.c_unconverted
+      if (unconverted) return { rows: [], checks }
+    }
     if (thorough && st.unsplit && !p.partial) {
       const [whole] = (await exec(st.unsplit)).map(normal)
       checkParts(shape, p, rows, whole ?? {}, st.period, record)
@@ -208,7 +214,7 @@ export async function runPlan(shape: Shape, p: Plan, query: RunQuery,
     columns.push({ name: d, role: 'dimension' })
     if (p.labelled.includes(d)) columns.push({ name: `${d}_label`, role: 'label' })
   }
-  for (const m of p.measures) columns.push({ name: m, role: 'measure', unit: shape.measures[m].unit, kind: shape.measures[m].kind })
+  for (const m of p.measures) columns.push({ name: m, role: 'measure', unit: p.units[m] ?? shape.measures[m].unit, kind: shape.measures[m].kind })
   return { columns, rows, caveats: p.caveats }
 }
 

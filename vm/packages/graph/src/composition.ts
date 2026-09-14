@@ -11,7 +11,7 @@
 
 import { assume } from './assumptions.js'
 import type { Contract } from './contract.js'
-import type { AttributeSource, ResolvedStatement, When } from './coordinates.js'
+import type { AttributeSource, RatesSource, ResolvedStatement, When } from './coordinates.js'
 import { intervened } from './interventions.js'
 import { LOCAL, type ProgramContext, type Runtime, type Scope, type Trail } from './runtime.js'
 import { kindOf, type Statement } from './shape.js'
@@ -93,6 +93,17 @@ export async function expand(rt: Runtime, self: string, contract: Contract, hash
   if (!source) throw new Error(`"${contract.name}" is a program returning a relation but names no relation in {{braces}}`)
   const sql = out.sql.replace(/\{\{([^}]+)\}\}/g, (_m, name) => `(\n${parts.get(name)}\n)`)
   return { source, sql, params, ...(Object.keys(tables).length ? { tables } : {}) }
+}
+
+/** The relation of exchange rates a request converts with, named by the setting `exchange rates`. */
+export function ratesFor(rt: Runtime, scope: Scope, trail: Trail, path: string[], name: string): RatesSource {
+  return async () => {
+    const hash = rt.o.store.resolve(name)
+    const program = hash ? rt.o.store.getProgram(hash) : null
+    if (!program || program.contract.returns !== 'relation') throw new Error(`the exchange rates "${name}" are not a relation`)
+    trail.used.set(hash!, name)
+    return { name, shape: program.contract.shape!, read: (when) => statementFor(rt, name, program.contract, hash!, program.body, when, scope, trail, path) }
+  }
 }
 
 /** The relation whose grain is an entity — exactly one, or the question is refused rather than a guess made.

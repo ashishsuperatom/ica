@@ -57,6 +57,8 @@ export interface Coordinates {
   limit?: number
   /** With a limit: keep that many rows within each group of these splits — the top three customers per pillar. */
   limitPer?: string[]
+  /** The currency amounts are reported in, converted at rates as at the span's end or the instant asked. */
+  currency?: string
   /** Instead of aggregating: the rows themselves — every dimension, label, measure column and the time, one row per
    *  row of the relation, filtered as asked. The records behind a number. Needs an order and a limit. */
   detail?: { limit: number }
@@ -122,6 +124,8 @@ export interface Plan {
   paths: Record<string, string>
   /** Names in `by` that come with a label. */
   labelled: string[]
+  /** Measures whose unit is the reporting currency rather than their declared unit. */
+  units: Record<string, string>
   /** For detail: the columns of the rows, in order. */
   detail?: Array<{ name: string; role: 'dimension' | 'label' | 'measure' | 'time'; unit?: string }>
   /** A limit or having was pushed into the statement, so parts cannot be checked against the whole. */
@@ -144,8 +148,21 @@ const P = 'c_'
  *  attribute through a key without the relation it is asking naming that relation. */
 export type AttributeSource = (entity: string) => Promise<{ name: string; shape: Shape; read: ReadBody }>
 
+/** The relation of exchange rates the request converts with: dimensions `from` and `to`, currency codes, and the
+ *  stock `rate` — how many of `to` one `from` buys, as at an instant. */
+export type RatesSource = () => Promise<{ name: string; shape: Shape; read: ReadBody }>
+
+/** What a plan is made in: the calendar, how to reach entities and rates, and the zone the question is asked from. */
+export interface PlanEnvironment {
+  calendar?: Calendar
+  attributes?: AttributeSource
+  rates?: RatesSource
+  zone?: string
+}
+
 export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates, dialects: Record<string, Dialect>,
-                           today: string, calendar: Calendar = {}, attributes?: AttributeSource, zone?: string): Promise<Plan> {
+                           today: string, env: PlanEnvironment = {}): Promise<Plan> {
+  const { calendar = {}, attributes, rates, zone } = env
   const caveats: string[] = []
   const grainSet = new Grains(calendar)
   const calendarProblem = grainSet.problem()
@@ -198,6 +215,31 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
     if (!isPath(d) && !dimensions[d]) refuse(`cannot filter on "${d}" — filterable dimensions: ${Object.keys(dimensions).join(', ')}`)
   }
   const hasLabel = (d: string) => (isPath(d) ? !!paths.get(d)!.label : !!dimensions[d]?.label)
+
+  // ── MONEY IN MORE THAN ONE CURRENCY ───────────────────────────────────────────────────────────────────────
+  // An amount declares the dimension holding its currency. Added across currencies it means nothing, so a question
+  // either converts — every amount to one currency, at rates as at the end of what is asked — or keeps currencies
+  // apart, by splitting on the currency or filtering to one.
+  const moneyMeasures = fetched.filter((m) => !isDerived(defined[m]) && (defined[m] as BaseMeasure).currency)
+  const converting = !!c.currency && moneyMeasures.length > 0
+  let rateSource: Awaited<ReturnType<RatesSource>> | null = null
+  if (c.currency && !/^[A-Z]{3}$/.test(c.currency)) refuse(`currency "${c.currency}" must be a three-letter code, like NZD`)
+  for (const m of moneyMeasures) {
+    const d = (defined[m] as BaseMeasure).currency!
+    const single = where[d] != null && (typeof where[d] !== 'object' || (!Array.isArray(where[d]) && (where[d] as any).eq != null && Object.keys(where[d] as object).length === 1))
+    if (!converting && !by.includes(d) && !single) {
+      refuse(`"${m}" is money in the currency of each row's "${d}": say the currency to report in, split by "${d}", or filter to one "${d}"`)
+    }
+  }
+  if (converting) {
+    if (!rates) refuse('no exchange rates are named for this request, so amounts cannot be converted — set the assumption "exchange rates" to a relation of rates')
+    rateSource = await rates!()
+    const rs = rateSource.shape
+    if (!rs.dimensions.from || !rs.dimensions.to || !rs.measures.rate || isDerived(rs.measures.rate) || rs.measures.rate.kind !== 'stock') {
+      refuse(`"${rateSource.name}" is not a relation of exchange rates: it needs dimensions "from" and "to" and a stock measure "rate"`)
+    }
+  }
+  const units: Record<string, string> = converting ? Object.fromEntries(moneyMeasures.map((m) => [m, c.currency!])) : {}
   for (const m of Object.keys(having)) if (!measures.includes(m)) refuse(`having on "${m}" needs it among the measures asked for`)
   const orderable = [...by, ...splits.filter(hasLabel).map((d) => `${d}_label`), ...measures]
   if (!c.detail) for (const o of c.order ?? []) if (!orderable.includes(o.by)) refuse(`cannot order by "${o.by}" — it is not in the result: ${orderable.join(', ')}`)
@@ -257,7 +299,10 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
 
   const aggregateSql = (m: string, s: SqlDialect): string => {
     const base = defined[m] as BaseMeasure
-    const col = `t.${base.column}`
+    // A converted amount is multiplied by its row's rate; one already in the reporting currency by one.
+    const col = converting && base.currency
+      ? `(t.${base.column} * CASE WHEN t.${dimensions[base.currency].column} = @${P}currency THEN 1 ELSE fx.${(rateSource!.shape.measures.rate as BaseMeasure).column} END)`
+      : `t.${base.column}`
     switch (base.aggregate) {
       case 'count': return 'COUNT(*)'
       case 'count distinct': return `COUNT(DISTINCT ${col})`
@@ -320,6 +365,7 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
     const tables = { ...(body.tables ?? {}) }
     const joins: string[] = []
     const guards: Statement['guards'] = []
+    let convertedColumn = ''
     const asAt = 'asAt' in when ? when.asAt : (addDays(when.to, -1) < today ? addDays(when.to, -1) : today)
     for (const [via, p] of providers) {
       const st = await p.read({ asAt, where: {} })
@@ -334,6 +380,25 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
       guards.push({ label: `"${p.name}" has one row per ${p.entity} as at ${asAt}`,
                     statement: { source: st.source, tables: st.tables, params: st.params, sql: `SELECT COUNT(*) AS n, COUNT(DISTINCT g.${key}) AS d FROM (\n${st.sql.trim()}\n) g` } })
       if ('from' in when) caveats.push(`attributes of ${p.entity} are as at ${asAt}`)
+    }
+    if (converting) {
+      const st = await rateSource!.read({ asAt, where: {} })
+      if (st.source !== body.source) refuse(`"${rateSource!.name}" is read from ${st.source}, and this relation from ${body.source}; one statement cannot join them`)
+      for (const [k, v] of Object.entries(st.params)) {
+        if (k in joinParams && joinParams[k] !== v) refuse(`parameter @${k} means different things in this relation and in "${rateSource!.name}"`)
+        joinParams[k] = v
+      }
+      Object.assign(tables, st.tables ?? {})
+      const rd = rateSource!.shape.dimensions
+      const from = rd.from.column, to = rd.to.column
+      const currencyColumns = [...new Set(moneyMeasures.map((m) => dimensions[(defined[m] as BaseMeasure).currency!].column))]
+      if (currencyColumns.length > 1) refuse('the money measures asked for keep their currency in different columns; ask for them separately')
+      joins.push(`LEFT JOIN (\n${st.sql.trim()}\n) fx ON fx.${from} = t.${currencyColumns[0]} AND fx.${to} = @${P}currency`)
+      guards.push({ label: `"${rateSource!.name}" has one rate per pair of currencies as at ${asAt}`,
+                    statement: { source: st.source, tables: st.tables, params: st.params,
+                                 sql: `SELECT COUNT(*) AS n, 0 AS d FROM (SELECT g.${from}, g.${to} FROM (\n${st.sql.trim()}\n) g GROUP BY g.${from}, g.${to} HAVING COUNT(*) > 1) x` } })
+      caveats.push(`amounts are converted to ${c.currency} at rates as at ${asAt}`)
+      convertedColumn = currencyColumns[0]
     }
     const render = (dimsHere: string[], pushdown: boolean) => {
       if (opts.detail) return renderDetail()
@@ -351,6 +416,8 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
         if (label) { cols.push(`${label} AS ${aliasOf(d)}_label`); group.push(label) }
       }
       for (const m of fetched) cols.push(`${measureSql(m, s)} AS ${m}`)
+      // Rows that could not be converted are counted in the same statement, so none is silently left out of a sum.
+      if (converting) cols.push(`SUM(CASE WHEN t.${convertedColumn} IS NOT NULL AND t.${convertedColumn} <> @${P}currency AND fx.${(rateSource!.shape.measures.rate as BaseMeasure).column} IS NULL THEN 1 ELSE 0 END) AS ${P}unconverted`)
       const conds = [...filters, ...bounds(s)]
       const havingSql = pushdown ? Object.entries(having).flatMap(([m, cond]) => condition(measureSql(m, s), cond, m)) : []
       let sql = [`SELECT ${cols.join(', ')}`, `FROM (\n${body.sql.trim()}\n) t`, ...joins,
@@ -386,13 +453,17 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
     // Rendered before the parameters are gathered: rendering is what binds the having conditions' values.
     const sql = render(dims, opts.pushdown)
     const unsplitSql = dims.length && !opts.detail ? render([], false) : null
-    const params = { ...joinParams, ...filterParams, ...extra }
+    const params = { ...joinParams, ...filterParams, ...extra, ...(converting ? { [`${P}currency`]: c.currency } : {}) }
     const t = Object.keys(tables).length ? tables : undefined
     return {
       source: body.source, tables: t, params, period: opts.period, sql, guards,
       unsplit: unsplitSql ? { source: body.source, tables: t, params, sql: unsplitSql } : undefined,
     }
   }
+  /** What every plan carries, whichever way it was made. */
+  const common = () => ({ caveats, grains: grainSet, units, paths: Object.fromEntries([...paths].map(([k, v]) => [k, v.alias])),
+                          labelled: by.filter((d) => !grainSet.has(d) && hasLabel(d)) })
+
   // ── the rows themselves ───────────────────────────────────────────────────────────────────────────────
   if (c.detail) {
     if (!Number.isInteger(c.detail.limit) || c.detail.limit < 1 || c.detail.limit > MAX_DETAIL) refuse(`detail needs a limit from 1 to ${MAX_DETAIL}`)
@@ -416,7 +487,7 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
       statement = await wrap({ asAt: c.at!, where }, [], () => [], {}, { pushdown: false, detail: true })
     }
     return { statements: [statement], kind, measures: [], fetched: [], by: splits.filter(isPath), grain: null, combine: 'single', partial: true,
-             orderedAtSource: true, caveats, grains: grainSet, paths: Object.fromEntries([...paths].map(([k, v]) => [k, v.alias])), labelled: [], after: {},
+             orderedAtSource: true, ...common(), labelled: [], after: {},
              detail: detailColumns }
   }
 
@@ -447,7 +518,7 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
     if (grain && !grainSet.covers(grain, addDays(to, -1))) refuse(`the span ends after calendar grain "${grain}" has periods`)
     const statement = await wrap({ from, to, where }, by, bounds, { [`${P}from`]: from, [`${P}to`]: to }, { pushdown: pushed, span: { from, to } })
     return {
-      statements: [statement], kind, measures, fetched, by, grain, combine: 'single', partial: partialIf(pushed), orderedAtSource: pushed && !!c.order?.length, caveats, grains: grainSet, paths: Object.fromEntries([...paths].map(([k, v]) => [k, v.alias])), labelled: by.filter((d) => !grainSet.has(d) && hasLabel(d)),
+      statements: [statement], kind, measures, fetched, by, grain, combine: 'single', partial: partialIf(pushed), orderedAtSource: pushed && !!c.order?.length, ...common(),
       after: {
         ...(pushed ? {} : { having: c.having, order: c.order, limit: c.limit, limitPer: c.limitPer }),
         fill: c.rolling && grain ? { periods: grainSet.periods(grain, from, keep.to).map((p) => p.label) }
@@ -462,7 +533,7 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
   const at = (date: string, pushdown: boolean, period?: string) =>
     wrap({ asAt: date, where }, splits, () => [], {}, { period, pushdown })
   const finish = (statements: Statement[], combine: Plan['combine'], pushed: boolean): Plan => ({
-    statements, kind, measures, fetched, by, grain, combine, partial: partialIf(pushed), orderedAtSource: pushed && !!c.order?.length, caveats, grains: grainSet, paths: Object.fromEntries([...paths].map(([k, v]) => [k, v.alias])), labelled: by.filter((d) => !grainSet.has(d) && hasLabel(d)),
+    statements, kind, measures, fetched, by, grain, combine, partial: partialIf(pushed), orderedAtSource: pushed && !!c.order?.length, ...common(),
     after: pushed ? {} : { having: c.having, order: c.order, limit: c.limit, limitPer: c.limitPer },
   })
 

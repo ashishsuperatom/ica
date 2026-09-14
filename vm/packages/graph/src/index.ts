@@ -12,7 +12,7 @@ export { programHash } from './hash.js'
 export { shapeProblem, additivity, type Shape, type Statement, type Dimension, type Measure, type BaseMeasure, type DerivedMeasure, type MeasureKind, type Aggregate, type Additivity } from './shape.js'
 
 // What a relation can be asked, and how it is answered
-export { plan, sqlFor, CoordinateError, type Coordinates, type ResolvedCoordinates, type Span, type Condition, type Grain, type Dialect, type Plan } from './coordinates.js'
+export { plan, sqlFor, CoordinateError, type Coordinates, type PlanEnvironment, type ResolvedCoordinates, type Span, type Condition, type Grain, type Dialect, type Plan } from './coordinates.js'
 export { runPlan, runLocal, arrange, CappedError, type Result, type Column } from './execute.js'
 export { Grains, periods, BUILT_IN, type Calendar, type CalendarGrain, type Period } from './calendar.js'
 export { shift, comparisonCoordinates, mergeComparison, difference, type Comparison, type ResolvedComparison, type Offset } from './compare.js'

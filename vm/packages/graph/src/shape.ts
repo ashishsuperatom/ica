@@ -45,6 +45,9 @@ export interface BaseMeasure {
   column?: string
   unit: string
   kind: 'flow' | 'stock'
+  /** For an amount of money: the dimension holding each row's currency code. Amounts in different currencies are
+   *  never added together — a question converts them to one currency, or keeps them apart by currency. */
+  currency?: string
 }
 
 /** A measure computed from other measures after they are aggregated — MetricFlow's ratio and derived metrics.
@@ -190,6 +193,10 @@ export function shapeProblem(s: any): string | null {
     if (m.kind !== 'flow' && m.kind !== 'stock') return `measure "${name}" aggregates a column, so it is a flow or a stock`
     if (!AGGREGATES.includes(m.aggregate)) return `measure "${name}" aggregate must be one of ${AGGREGATES.join(', ')}`
     if (m.aggregate !== 'count' && !m.column) return `measure "${name}" says ${m.aggregate} but not of which column`
+    if (m.currency !== undefined) {
+      if (!dimensions[m.currency]) return `measure "${name}": currency "${m.currency}" must name the dimension holding its currency code`
+      if (m.aggregate === 'count' || m.aggregate === 'count distinct') return `measure "${name}" counts, and a count has no currency`
+    }
     kinds.add(m.kind)
   }
   // One relation is read at instants or over spans, not both: its body is called one way or the other.

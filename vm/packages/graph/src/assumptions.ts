@@ -47,6 +47,18 @@ export function assume<T>(organisation: Record<string, unknown> | undefined, con
   }
 }
 
+/** An engine-wide setting read by name — `calendar`, `exchange rates`, `currency` — from the caller, else the
+ *  organisation, as rules when it differs by person or group. Recorded like an assumption when found. */
+export function settingFor(organisation: Record<string, unknown> | undefined, scope: Scope, name: string, trail: Trail): unknown {
+  const [given, from]: [unknown, From | null] = name in scope.context ? [scope.context[name], 'caller']
+    : organisation && name in organisation ? [organisation[name], 'organisation'] : [undefined, null]
+  if (from === null) return undefined
+  const value = isRuled(given) ? mostSpecific(given.rules, facts(scope.who), sameValue)?.value : given
+  if (value === undefined) return undefined
+  if (!trail.assumed.some((a) => a.name === name)) trail.assumed.push({ name, value, from })
+  return value
+}
+
 /** The zone a request is asked from: the assumption named `timezone`, from the caller or the organisation, chosen
  *  by rules when it differs by person or group. Null when nobody said. */
 export function zoneFor(organisation: Record<string, unknown> | undefined, context: Record<string, unknown>,
@@ -60,18 +72,7 @@ export function zoneFor(organisation: Record<string, unknown> | undefined, conte
   return { zone: value, from }
 }
 
-/** The calendar a request uses: the assumption named `calendar`, from the caller or the organisation, chosen by
- *  rules when it differs by who is asking. No calendar means the built-in grains only. */
+/** The calendar a request uses: the setting named `calendar`. No calendar means the built-in grains only. */
 export function calendarFor(organisation: Record<string, unknown> | undefined, scope: Scope, trail: Trail): Calendar {
-  const [given, from]: [unknown, From | null] = 'calendar' in scope.context ? [scope.context.calendar, 'caller']
-    : organisation && 'calendar' in organisation ? [organisation.calendar, 'organisation'] : [undefined, null]
-  if (from === null) return {}
-  let value = given
-  if (isRuled(given)) {
-    const rule = mostSpecific(given.rules, facts(scope.who), sameValue)
-    if (!rule) return {}
-    value = rule.value
-  }
-  if (!trail.assumed.some((a) => a.name === 'calendar')) trail.assumed.push({ name: 'calendar', value, from })
-  return (value ?? {}) as Calendar
+  return (settingFor(organisation, scope, 'calendar', trail) ?? {}) as Calendar
 }
