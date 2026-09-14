@@ -19,7 +19,13 @@ import type { Condition, Plan, ResolvedStatement } from './coordinates.js'
 import { additivity, evaluate, isDerived, type MeasureKind, type Shape } from './shape.js'
 
 export interface Column { name: string; role: 'dimension' | 'label' | 'measure'; unit?: string; kind?: MeasureKind }
-export interface Result { columns: Column[]; rows: Record<string, unknown>[]; caveats: string[] }
+export interface Result {
+  columns: Column[]
+  rows: Record<string, unknown>[]
+  caveats: string[]
+  /** The same question at coarser splits, when totals were asked for. */
+  totals?: Array<{ by: string[]; columns: Column[]; rows: Record<string, unknown>[] }>
+}
 export interface QueryRecord { source: string; sql: string; params: Record<string, unknown>; rows: number; ms: number; capped: boolean }
 
 export type RunQuery = (source: string, sql: string, params: Record<string, unknown>) => Promise<any[]>
@@ -79,19 +85,26 @@ export async function runPlan(shape: Shape, p: Plan, query: RunQuery,
   }
 
   if (p.partial) note('the result is filtered or limited, so its rows are not checked against the whole')
-  const results = await Promise.all(p.statements.map(async (st) => {
+  // Statements run together; their checks are recorded in statement order, so memory is the same every run.
+  type Check = [label: string, holds: boolean, detail: string]
+  const answered = await Promise.all(p.statements.map(async (st) => {
+    const checks: Check[] = []
+    const record = (label: string, holds: boolean, detail: string) => { checks.push([label, holds, detail]) }
     // A join to an entity that repeats a member would repeat every row joined to it, and every sum with them.
     for (const g of st.guards ?? []) {
       const [c] = await exec(g.statement)
-      verify(g.label, Number(c?.n ?? 0) === Number(c?.d ?? 0), `${c?.n} rows, ${c?.d} distinct`)
+      record(g.label, Number(c?.n ?? 0) === Number(c?.d ?? 0), `${c?.n} rows, ${c?.d} distinct`)
+      if (!checks.at(-1)![1]) return { rows: [], checks }
     }
     const rows = (await exec(st)).map(normal)
     if (st.unsplit && !p.partial) {
       const [whole] = (await exec(st.unsplit)).map(normal)
-      checkParts(shape, p, rows, whole ?? {}, st.period, verify)
+      checkParts(shape, p, rows, whole ?? {}, st.period, record)
     }
-    return p.grain && st.period ? rows.map((r) => ({ ...r, [p.grain!]: st.period })) : rows
+    return { rows: p.grain && st.period ? rows.map((r) => ({ ...r, [p.grain!]: st.period })) : rows, checks }
   }))
+  for (const { checks } of answered) for (const [label, holds, detail] of checks) verify(label, holds, detail)
+  const results = answered.map((a) => a.rows)
 
   let rows: Record<string, any>[] = results.flat()
   for (const name of Object.keys(p.paths)) {

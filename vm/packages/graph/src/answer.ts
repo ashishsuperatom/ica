@@ -1,0 +1,64 @@
+// ── ANSWERING A QUESTION ASKED OF A RELATION ──────────────────────────────────────────────────────────────
+//
+// The definition and the question arrive separately. The relation's body says what it is; the coordinates say
+// which part of it is wanted. Nothing in the body changes when someone drills down, compares, or asks for totals.
+//
+//   plan      coordinates.ts — the statements, and the refusals
+//   run       execute.ts — the rows, and the checks only rows allow
+//   compare   compare.ts — the same question at another time, aligned
+//   totals    summaries.ts — the same question at coarser splits; shares of a total
+
+import { calendarFor } from './assumptions.js'
+import { comparisonCoordinates, mergeComparison, type Comparison } from './compare.js'
+import { attributesFor, statementFor } from './composition.js'
+import type { Contract } from './contract.js'
+import { plan, type Coordinates, type ReadBody } from './coordinates.js'
+import { runPlan, type Result } from './execute.js'
+import type { Runtime, Scope, Trail } from './runtime.js'
+import { kindOf } from './shape.js'
+import { atLevel, summaryProblem, withShares } from './summaries.js'
+
+export async function answerRelation(rt: Runtime, program: { name: string; hash: string; contract: Contract; body: string },
+                                     coordinates: Coordinates, scope: Scope, trail: Trail, path: string[]): Promise<Result> {
+  const { name, hash, contract, body } = program
+  const shape = contract.shape!
+  const read: ReadBody = (when) => statementFor(rt, name, contract, hash, body, when, scope, trail, path)
+  const calendar = calendarFor(rt.o.assumptions, scope, trail)
+  const attributes = attributesFor(rt, scope, trail, path)
+
+  const ask = async (c: Coordinates, side?: string) => {
+    const p = await plan(shape, read, c, rt.dialects, scope.today, calendar, attributes)
+    const result = await runPlan(shape, p, (src, sql, params) => rt.o.query(src, sql, params, { policies: scope.access?.[src] }),
+      (q) => trail.queries.push(q),
+      (label, held, detail) => {
+        const tagged = side ? `${side}: ${label}` : label
+        trail.verifications.push({ label: tagged, held, detail })
+        if (!held) throw new Error(`invariant failed: ${tagged} — ${detail}`)
+      },
+      (text) => trail.caveats.push(text))
+    return { p, result }
+  }
+
+  const answer = async (c: Coordinates, side?: string): Promise<Result> => {
+    if (!c.compare) return (await ask(c, side)).result
+    const both = comparisonCoordinates(c as Coordinates & { compare: Comparison }, scope.today, kindOf(shape) === 'flow')
+    const [now, then] = await Promise.all([ask(both.current, side ? `${side}, now` : 'now'), ask(both.previous, side ? `${side}, compared with` : 'compared with')])
+    trail.caveats.push(...both.caveats)
+    return mergeComparison(shape, now.result, then.result, now.p.by, now.p.grain, both.after)
+  }
+
+  summaryProblem(shape, coordinates)
+  let value = await answer(coordinates.totals || coordinates.share ? { ...coordinates, totals: undefined, share: undefined } : coordinates)
+  if (coordinates.share) {
+    const { measures, within } = coordinates.share
+    value = withShares(value, await answer(atLevel(coordinates, within, measures), `share within ${within.join(', ') || 'the whole'}`), measures, within)
+  }
+  if (coordinates.totals?.length) {
+    const levels = await Promise.all(coordinates.totals.map(async (level) =>
+      ({ by: level, ...(await answer(atLevel(coordinates, level), `total by ${level.join(', ') || 'everything'}`)) })))
+    value = { ...value, totals: levels.map(({ by, columns, rows }) => ({ by, columns, rows })) }
+    if (coordinates.limit != null || coordinates.having) trail.caveats.push('totals count every row, including rows the limit or having leaves out')
+  }
+  trail.caveats.push(...value.caveats)
+  return value
+}

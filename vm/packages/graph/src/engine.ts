@@ -7,403 +7,28 @@
 //   a correction lands once       a caller names an idea, so repointing the name fixes every caller
 //   every answer is traceable     each call records the precise program that produced it
 //   the contract is enforced      a program reads only what it declared it reads
+//
+// This file is the four things done to programs — define, call, replay, counterfactual. The work they rely on is
+// in its own modules: answer.ts, composition.ts, assumptions.ts, interventions.ts, definition.ts.
 
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { answerRelation } from './answer.js'
+import { difference } from './compare.js'
+import { readingContext } from './composition.js'
 import { contractProblem, type Contract } from './contract.js'
-import { conditionSql, plan, sqlFor, type AttributeSource, type Condition, type Coordinates, type Dialect, type ReadBody, type ResolvedStatement, type When } from './coordinates.js'
-import { runPlan } from './execute.js'
-import { comparisonCoordinates, difference, mergeComparison, type Comparison } from './compare.js'
-import { atLevel, summaryProblem, withShares } from './summaries.js'
+import type { Coordinates } from './coordinates.js'
+import { checkRelation, interfaceMisfit, programParamMisfit, reachesName } from './definition.js'
 import { programHash } from './hash.js'
-import type { Calendar } from './calendar.js'
-import { isDerived, kindOf, type Shape, type Statement } from './shape.js'
-import { AmbiguousRules, facts, isRuled, mostSpecific } from './rules.js'
-import type { CallRecord, GraphStore } from './store.js'
+import { createRuntime, newTrail, type CallOptions, type EngineOptions, type Intervention, type ProgramContext, type Scope } from './runtime.js'
 
-/** Runs a statement on a source. `policies` are the access restrictions of the person asking, applied at the source. */
-export type Query = (source: string, sql: string, params?: Record<string, unknown>, options?: { policies?: unknown[] }) => Promise<any[]>
-
-export interface EngineOptions {
-  store: GraphStore
-  /** Where program bodies are written as modules, one file per hash. */
-  modulesDir: string
-  query: Query
-  /** Which SQL dialect each SQL source speaks. A source not listed here is not SQL: its relations return rows. */
-  dialects: Record<string, Dialect>
-  /** What day it is, YYYY-MM-DD. Defaults to the local date. A replay or a test passes the day it means. */
-  today?: () => string
-  /** The organisation's own values for assumptions — its working week, its targets. A caller's value wins. */
-  assumptions?: Record<string, unknown>
-  /** Reads SQL without running it: the base tables it reads and the columns it outputs. With it, definitions are
-   *  checked against their SQL — a relation program that names a table, a shape column no statement outputs.
-   *  `managerInspect` gives one backed by the datasource manager's SQL parser. */
-  inspect?: (sql: string, dialect: Dialect) => Promise<SqlAnalysis>
-}
-
-export interface SqlAnalysis { tables: string[]; outputs: string[]; star: boolean }
-
-/** An inspect function that asks the datasource manager, which parses with the same SQLGlot that rewrites queries. */
-export function managerInspect(url = process.env.DATASOURCE_URL ?? 'http://localhost:4000') {
-  return async (sql: string, dialect: Dialect): Promise<SqlAnalysis> => {
-    const res = await fetch(`${url}/analyze`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sql, dialect }) })
-    const body: any = await res.json()
-    if (!res.ok) throw new Error(`the SQL does not parse: ${body.error ?? res.status}`)
-    return body
-  }
-}
-
-/** For one request only, a change to what a program gives — Pearl's do-operator. Applied wherever that name is
- *  reached in the request, however deep, and never saved into the graph.
- *    value   what a program returns, instead of running it
- *    where   rows of a relation left out
- *    add     rows added to a relation; for a stock, members from `from` (inclusive) until `to` (exclusive) */
-export type Intervention =
-  | { value: unknown }
-  | { where?: Record<string, Condition>; add?: Array<{ row: Record<string, unknown>; from?: string; to?: string }> }
+export type { CallOptions, EngineOptions, Intervention, ProgramContext, Query, SqlAnalysis } from './runtime.js'
+export { managerInspect } from './definition.js'
 
 export interface DefineResult { hash: string; name: string; created: boolean }
 export interface CallResult<T = unknown> { value: T; callId: string; hash: string }
-export interface CallOptions {
-  today?: string
-  /** Assumptions for this request, passed down to everything it calls. */
-  assume?: Record<string, unknown>
-  /** Changes for this request only, by program name. The answer is hypothetical. */
-  intervene?: Record<string, Intervention>
-  /** Who is asking — their id, groups, department. Rules for assumptions are chosen by it. */
-  who?: Record<string, unknown>
-  /** What the person asking may read, by source, as decided by the system that authorises them. Every query this
-   *  request makes carries its source's policies; the engine only passes them on. */
-  access?: Record<string, unknown[]>
-}
-
-/** What flows down a request: the day, the assumptions callers have set, and the interventions. */
-interface Scope { today: string; context: Record<string, unknown>; interventions: Record<string, Intervention>; who?: Record<string, unknown>; access?: Record<string, unknown[]> }
-
-/** What a program body receives. The same surface for every program; what it may USE is its contract's. */
-export interface ProgramContext {
-  /** Call a program by name. `assume` sets assumptions for it and everything it calls. */
-  call<T = unknown>(name: string, request?: Record<string, unknown>, options?: { assume?: Record<string, unknown> }): Promise<T>
-  query(source: string, sql: string, params?: Record<string, unknown>): Promise<any[]>
-  decide(label: string, took: boolean, reason: string): boolean
-  verify(label: string, holds: () => boolean | Promise<boolean>, detail?: string): Promise<void>
-  caveat(text: string): void
-  /** The day this call is answered as of. Read this, never the clock, so a replay gives the same answer. */
-  today: string
-  /** The value of an assumption this program declares. `about` names what is being read — a pillar, a
-   *  subsidiary — for an assumption given as rules that differ by it. */
-  assume<T = unknown>(name: string, about?: Record<string, unknown>): T
-  /** Who is asking, as the request said. */
-  who: Record<string, unknown> | undefined
-}
-
-/** Rows from a non-SQL source are queried locally with SQLite, under this source name. */
-const LOCAL = 'local'
-const localDate = () => new Date().toLocaleDateString('en-CA')
 
 export function createEngine(o: EngineOptions) {
-  mkdirSync(o.modulesDir, { recursive: true })
-  const dialects: Record<string, Dialect> = { ...o.dialects, [LOCAL]: 'sqlite' }
-  const clock = o.today ?? localDate
-
-  /** A body becomes a module file named by its hash. Because a hash is immutable, the file is written once
-   *  and a cached import is always the right one — no cache-busting, which the mutable version needed to
-   *  avoid silently running the previous edit. */
-  async function load(hash: string, body: string): Promise<(ctx: ProgramContext, request: any) => unknown> {
-    const file = join(o.modulesDir, `${hash.replace(':', '-')}.mjs`)
-    if (!existsSync(file)) writeFileSync(file, body)
-    const mod: any = await import(pathToFileURL(file).href)
-    if (typeof mod.default !== 'function') throw new Error(`${hash} does not export a default function`)
-    return mod.default
-  }
-
-  type QueryLog = CallRecord['queries']
-
-  /** A context that may only read the sources its contract declares — what a concept's body gets while it
-   *  produces a relation. A program that returns a relation gets one that cannot read anything. */
-  type AssumedLog = CallRecord['assumptions']
-
-  function readingContext(contract: Contract, scope: Scope, queries: QueryLog, assumed: AssumedLog): ProgramContext {
-    return {
-      call: async () => { throw new Error(`"${contract.name}" is producing a relation; it cannot call programs while doing so`) },
-      query: async (source, sql, params) => {
-        if (contract.kind !== 'concept') throw new Error(`"${contract.name}" is a program and queried ${source} — only a concept may read a data source`)
-        if (!contract.reads.sources.includes(source)) throw new Error(`"${contract.name}" queried ${source}, which its contract does not declare`)
-        const t = Date.now()
-        const rows = await o.query(source, sql, params, { policies: scope.access?.[source] })
-        queries.push({ source, sql, params: params ?? {}, rows: rows.length, ms: Date.now() - t,
-                       capped: Array.isArray((rows as any).notes) && (rows as any).notes.length > 0 })
-        return rows
-      },
-      decide: (_l, took) => took, verify: async () => {}, caveat: () => {}, today: scope.today,
-      assume: <T>(name: string, about?: Record<string, unknown>) => assume<T>(contract, scope, name, assumed, about),
-      who: scope.who,
-    }
-  }
-
-  // ── ASSUMPTIONS: LOOKED UP BY NAME, NEVER PASSED POSITION BY POSITION ─────────────────────────────────────
-  //
-  // A program declares the assumptions it reads. The value comes from the nearest caller that set it, else the
-  // organisation, else the program's own default. A program that needs a new assumption declares it; every
-  // caller keeps passing the same context, and programs that do not read it never see it.
-  //
-  // A value may be given as rules — `{ rules: [{ when: { "who.department": "finance" }, value: 0.7 }, ...] }` —
-  // and then the most specific rule that applies to who is asking and what is being read gives it. A layer whose
-  // rules do not apply passes to the next layer.
-  function assume<T>(contract: Contract, scope: Scope, name: string, assumed: AssumedLog, about?: Record<string, unknown>): T {
-    const declared = contract.assumes?.[name]
-    if (!declared) throw new Error(`"${contract.name}" read the assumption "${name}", which its contract does not declare`)
-    const known = facts(scope.who, about)
-    const layers: Array<[CallRecord['assumptions'][number]['from'], boolean, unknown]> = [
-      ['caller', name in scope.context, scope.context[name]],
-      ['organisation', !!o.assumptions && name in o.assumptions, o.assumptions?.[name]],
-      ['default', 'default' in declared, declared.default],
-    ]
-    for (const [from, present, given] of layers) {
-      if (!present) continue
-      if (!isRuled(given)) return record(given, from)
-      try {
-        const rule = mostSpecific(given.rules, known, (a, b) => JSON.stringify(a.value) === JSON.stringify(b.value))
-        if (rule) return record(rule.value, from, rule.when ?? {})
-      } catch (e) {
-        if (e instanceof AmbiguousRules) throw new Error(`"${name}" for ${JSON.stringify(known)}: ${e.message}`)
-        throw e
-      }
-    }
-    throw new Error(`"${contract.name}" needs the assumption "${name}" (${declared.description}) and nobody gave it${about ? ` for ${JSON.stringify(about)}` : ''}`)
-
-    function record(value: unknown, from: CallRecord['assumptions'][number]['from'], rule?: Record<string, unknown>): T {
-      const entry = { name, value, from, ...(about ? { about } : {}), ...(rule ? { rule } : {}) }
-      if (!assumed.some((a) => JSON.stringify(a) === JSON.stringify(entry))) assumed.push(entry)
-      return value as T
-    }
-  }
-
-  /** The relation whose grain is an entity — exactly one, or the question is refused rather than a guess made.
-   *  Reading it is not a step deeper into the graph: it is read only by instant, never through attributes of its
-   *  own, so a relation may reach attributes through its own grain. */
-  function attributesFor(scope: Scope, used: Map<string, string>, queries: QueryLog, assumed: AssumedLog, path: string[]): AttributeSource {
-    return async (entity) => {
-      const found = o.store.current().map(({ name, hash }) => ({ name, hash, program: o.store.getProgram(hash)! }))
-        .filter(({ program: { contract: c } }) => c.returns === 'relation' && c.shape?.grain && c.shape.dimensions[c.shape.grain].entity === entity)
-      if (!found.length) throw new Error(`no relation has ${entity} as its grain, so attributes of ${entity} cannot be reached`)
-      if (found.length > 1) throw new Error(`${found.map((f) => `"${f.name}"`).join(' and ')} all have ${entity} as their grain — which holds its attributes is a decision, not a lookup`)
-      const { name, hash, program } = found[0]
-      used.set(hash, name)
-      return { name, shape: program.contract.shape!, read: (when) => statementFor(name, program.contract, hash, program.body, when, scope, used, queries, assumed, path) }
-    }
-  }
-
-  /** The calendar a request uses: the assumption named `calendar`, from the caller or the organisation, chosen by
-   *  rules when it differs by who is asking. No calendar means the built-in grains only. */
-  function calendarFor(scope: Scope, assumed: AssumedLog): Calendar {
-    const [given, from] = 'calendar' in scope.context ? [scope.context.calendar, 'caller' as const]
-      : o.assumptions && 'calendar' in o.assumptions ? [o.assumptions.calendar, 'organisation' as const] : [undefined, null]
-    if (from === null) return {}
-    let value = given
-    if (isRuled(given)) {
-      const rule = mostSpecific(given.rules, facts(scope.who), (a, b) => JSON.stringify(a.value) === JSON.stringify(b.value))
-      if (!rule) return {}
-      value = rule.value
-    }
-    if (!assumed.some((a) => a.name === 'calendar')) assumed.push({ name: 'calendar', value, from })
-    return (value ?? {}) as Calendar
-  }
-
-  /** A relation's rows under an intervention: some left out, some added — as SQL around its own SQL, so every
-   *  relation built on it and every coordinate asked of it sees the changed rows. */
-  function intervened(st: ResolvedStatement, shape: Shape, name: string, iv: Intervention, when: When): ResolvedStatement {
-    if ('value' in iv) throw new Error(`"${name}" is a relation; intervene on its rows with where or add, not value`)
-    const s = sqlFor(o.dialects[st.source] ?? (st.source === LOCAL ? 'sqlite' : 'oracle'))
-    const params = { ...st.params }
-    let n = 0
-    const bindName = (v: unknown) => {
-      const p = `i_${n++}`
-      if (p in st.params) throw new Error(`the relation's parameter "${p}" uses the prefix interventions use`)
-      params[p] = v
-      return p
-    }
-    const bind = (v: unknown) => `@${bindName(v)}`
-    // A member of a dimension is compared as text everywhere in the engine, so identities and labels are text
-    // here too — an added person's id need not be the same type as the source's ids, which SQL would refuse.
-    const textual = new Set(Object.values(shape.dimensions).flatMap((d) => [d.column, ...(d.label ? [d.label] : [])]))
-    const numeric = new Set(Object.values(shape.measures).flatMap((m) => (!isDerived(m) && m.column ? [m.column] : [])))
-    const columns = [...new Set([...textual, ...numeric, ...(shape.time ? [shape.time] : [])])]
-    const select = columns.map((c) => textual.has(c) && !numeric.has(c) ? `${s.text(`i.${c}`)} AS ${c}` : `i.${c}`)
-    let sql = `SELECT ${select.join(', ')}\nFROM (\n${st.sql.trim()}\n) i`
-    if (iv.where) {
-      const conds = Object.entries(iv.where).flatMap(([d, cond]) => {
-        const dim = shape.dimensions[d]
-        if (!dim) throw new Error(`cannot intervene on "${d}" in "${name}" — it is not one of its dimensions`)
-        return conditionSql(`i.${dim.column}`, cond, d, bind)
-      })
-      sql += `\nWHERE ${conds.map((c) => `NOT (${c})`).join('\n  AND ')}`
-    }
-    const asAt = 'asAt' in when ? when.asAt : null
-    const added = (iv.add ?? []).filter((a) => asAt == null || ((a.from ?? '') <= asAt && (!a.to || asAt < a.to)))
-    for (const a of added) {
-      for (const k of Object.keys(a.row)) if (!columns.includes(k)) throw new Error(`an added row of "${name}" has "${k}", which is not a column its shape names`)
-      const literal = columns.map((c) => {
-        const v = a.row[c]
-        if (v == null) return `NULL AS ${c}`
-        if (c === shape.time) return `${s.date(bindName(v))} AS ${c}`
-        if (numeric.has(c)) return `${bind(Number(v))} AS ${c}`
-        return `${s.text(bind(String(v)))} AS ${c}`
-      })
-      sql += `\nUNION ALL\nSELECT ${literal.join(', ')}${o.dialects[st.source] === 'oracle' ? ' FROM dual' : ''}`
-    }
-    return { ...st, sql, params }
-  }
-
-  // ── THE SQL OF A RELATION, WITH EVERY RELATION IT IS BUILT FROM IN PLACE ───────────────────────────────────
-  //
-  // A concept's body returns SQL over a source's tables — or, for a source that is not SQL, the rows themselves,
-  // which become a local table. A program that returns a relation returns SQL over other relations, named in
-  // braces — `SELECT h.* FROM {{utilised hours}} h WHERE h.billable = 'T'` — and each is replaced by that
-  // relation's own SQL, resolved by name now. So composition is still SQL, a correction to a relation reaches
-  // every relation built on it, and only a concept names a table.
-  //
-  // `used` collects what was inlined, so memory can say which programs an answer went through. `path` holds
-  // the relations being expanded, so one that is built on itself is refused instead of expanding for ever.
-  async function statementFor(name: string, contract: Contract, hash: string, body: string, when: When, scope: Scope,
-                              used: Map<string, string>, queries: QueryLog, assumed: AssumedLog, path: string[] = []): Promise<ResolvedStatement> {
-    const st = await expand(name, contract, hash, body, when, scope, used, queries, assumed, path)
-    const iv = scope.interventions[name]
-    return iv ? intervened(st, contract.shape!, name, iv, when) : st
-  }
-
-  async function expand(self: string, contract: Contract, hash: string, body: string, when: When, scope: Scope,
-                        used: Map<string, string>, queries: QueryLog, assumed: AssumedLog, path: string[]): Promise<ResolvedStatement> {
-    if (path.includes(hash)) throw new Error(`"${self}" is built on itself: ${[...path, hash].join(' → ')}`)
-    const fn = await load(hash, body)
-    const out = (await fn(readingContext(contract, scope, queries, assumed), when)) as Statement
-    if (!out || (typeof out.sql !== 'string' && !Array.isArray(out.rows))) {
-      throw new Error(`"${contract.name}" returns a relation, so its body must return { ${contract.kind === 'concept' ? 'source, ' : ''}sql or rows, params? }`)
-    }
-    if (contract.kind === 'concept') {
-      if (!contract.reads.sources.includes(out.source)) throw new Error(`"${contract.name}" read ${out.source}, which its contract does not declare`)
-      if (Array.isArray(out.rows)) {
-        const table = `r_${hash.slice(5, 17)}`
-        return { source: LOCAL, sql: `SELECT * FROM ${table}`, params: out.params ?? {}, tables: { [table]: out.rows } }
-      }
-      if (!o.dialects[out.source]) throw new Error(`"${contract.name}" returned SQL for ${out.source}, which is not a SQL source — return its rows instead`)
-      return { source: out.source, sql: out.sql!, params: out.params ?? {} }
-    }
-    if (typeof out.sql !== 'string') throw new Error(`"${contract.name}" is a program; it returns SQL over the relations it builds on, not rows`)
-
-    const kind = kindOf(contract.shape!)
-    let source: string | null = null
-    const params: Record<string, unknown> = { ...(out.params ?? {}) }
-    const tables: Record<string, Record<string, unknown>[]> = {}
-    const parts = new Map<string, string>()
-    for (const [, name] of out.sql.matchAll(/\{\{([^}]+)\}\}/g)) {
-      if (parts.has(name)) continue
-      if (!contract.reads.programs.includes(name)) throw new Error(`"${contract.name}" builds on "${name}", which its contract does not declare it reads`)
-      const childHash = o.store.resolve(name)
-      const child = childHash && o.store.getProgram(childHash)
-      if (!child) throw new Error(`"${contract.name}" builds on "${name}", which does not exist`)
-      if (child.contract.returns !== 'relation') throw new Error(`"${contract.name}" builds on "${name}", which is not a relation`)
-      const childKind = kindOf(child.contract.shape!)
-      if (childKind !== kind) throw new Error(`"${contract.name}" holds ${kind}s and builds on "${name}", which holds ${childKind}s — they are read at different times`)
-      const st = await statementFor(name, child.contract, childHash, child.body, when, scope, used, queries, assumed, [...path, hash])
-      // One statement runs in one place. Relations from two sources are combined by a program, after each is aggregated.
-      if (source && st.source !== source) throw new Error(`"${contract.name}" builds on relations from ${source} and ${st.source}; one SQL statement cannot read both`)
-      source = st.source
-      for (const [k, v] of Object.entries(st.params)) {
-        if (k in params && params[k] !== v) throw new Error(`"${contract.name}": parameter @${k} means different things in the relations it builds on`)
-        params[k] = v
-      }
-      Object.assign(tables, st.tables ?? {})
-      parts.set(name, st.sql.trim())
-      used.set(childHash, name)
-    }
-    if (!source) throw new Error(`"${contract.name}" is a program returning a relation but names no relation in {{braces}}`)
-    const sql = out.sql.replace(/\{\{([^}]+)\}\}/g, (_m, name) => `(\n${parts.get(name)}\n)`)
-    return { source, sql, params, ...(Object.keys(tables).length ? { tables } : {}) }
-  }
-
-  /** A relation's SQL is run once when it is defined, counting every column its shape names. A
-   *  column the shape declares but the SQL does not produce is found now, not when someone first asks. */
-  async function probeRelation(hash: string, body: string, contract: Contract): Promise<void> {
-    const shape = contract.shape!
-    const today = clock()
-    const when: When = kindOf(shape) === 'flow' ? { from: today, to: today, where: {} } : { asAt: today, where: {} }
-    if (o.inspect) await inspectRelation(hash, body, contract, when, today)
-    const st = await expand(contract.name, contract, hash, body, when, { today, context: {}, interventions: {} }, new Map(), [], [], [])
-    const columns = new Set<string>()
-    for (const d of Object.values(shape.dimensions)) { columns.add(d.column); if (d.label) columns.add(d.label) }
-    for (const m of Object.values(shape.measures)) if (!isDerived(m) && m.column) columns.add(m.column)
-    if (shape.time) columns.add(shape.time)
-    // Aggregated, with no outer filter: NetSuite does not check the columns of a query it can see returns nothing.
-    const probe = { ...st, sql: `SELECT ${[...columns].map((c, i) => `COUNT(t.${c}) AS c${i}`).join(', ')}\nFROM (\n${st.sql.trim()}\n) t` }
-    // A GRAIN IS A PROMISE THAT NO MEMBER REPEATS. Every join to this relation relies on it; checked now, and again
-    // whenever it is joined.
-    if (shape.grain) {
-      const key = shape.dimensions[shape.grain].column
-      const unique = { ...st, sql: `SELECT COUNT(*) AS n, COUNT(DISTINCT g.${key}) AS d FROM (\n${st.sql.trim()}\n) g` }
-      const { runLocal } = await import('./execute.js')
-      const [c] = st.tables ? runLocal(unique) : await o.query(st.source, unique.sql, st.params)
-      if (Number(c?.n) !== Number(c?.d)) throw new Error(`its grain is ${shape.grain}, but ${c?.n} rows hold only ${c?.d} distinct ${shape.grain} values as at ${today}`)
-    }
-    if (st.tables) {
-      // A local table has exactly the columns its rows have; a missing one is named rather than left to SQLite.
-      const have = new Set(Object.values(st.tables).flatMap((rows) => rows.flatMap((r) => Object.keys(r))))
-      const rowsAreTheRelation = Object.keys(st.tables).length === 1 && /^SELECT \* FROM r_/.test(st.sql)
-      const missing = rowsAreTheRelation && have.size ? [...columns].filter((c) => !have.has(c)) : []
-      if (missing.length) throw new Error(`the rows have no ${missing.map((c) => `"${c}"`).join(', ')}`)
-      const { runLocal } = await import('./execute.js')
-      runLocal(probe)
-    } else {
-      await o.query(st.source, probe.sql, st.params)
-    }
-  }
-
-  /** The checks only a parser can make, before anything runs. */
-  async function inspectRelation(hash: string, body: string, contract: Contract, when: When, today: string): Promise<void> {
-    const fn = await load(hash, body)
-    const out = (await fn(readingContext(contract, { today, context: {}, interventions: {} }, [], []), when)) as Statement
-    if (typeof out?.sql !== 'string') return
-    if (contract.kind === 'program') {
-      // ONLY A CONCEPT NAMES A TABLE. A relation program reads data through the relations in its braces; any other
-      // table in its SQL is a data read that bypasses the one definition of that data.
-      const names: string[] = []
-      const marked = out.sql.replace(/\{\{([^}]+)\}\}/g, (_m, n) => { names.push(n); return `__relation_${names.length - 1}` })
-      const first = names.length ? o.store.resolve(names[0]) : null
-      const childSource = first ? o.store.getProgram(first)!.contract : null
-      const dialect = dialectOfContract(childSource) ?? 'oracle'
-      const { tables } = await o.inspect!(marked, dialect)
-      const direct = tables.filter((t) => !/^__relation_\d+$/.test(t))
-      if (direct.length) throw new Error(`it reads ${direct.join(', ')} directly — a program reads data only through the relations named in {{braces}}`)
-      return
-    }
-    const dialect = o.dialects[out.source]
-    if (!dialect) return
-    const { outputs, star } = await o.inspect!(out.sql, dialect)
-    if (star) return
-    const declared = new Set<string>()
-    for (const d of Object.values(contract.shape!.dimensions)) { declared.add(d.column); if (d.label) declared.add(d.label) }
-    for (const m of Object.values(contract.shape!.measures)) if (!isDerived(m) && m.column) declared.add(m.column)
-    if (contract.shape!.time) declared.add(contract.shape!.time)
-    const have = new Set(outputs.map((c) => c.toLowerCase()))
-    const missing = [...declared].filter((c) => !have.has(c.toLowerCase()))
-    if (missing.length) throw new Error(`the shape names ${missing.map((c) => `"${c}"`).join(', ')}, which its SQL does not output (it outputs ${outputs.join(', ')})`)
-  }
-
-  /** The dialect a relation's SQL is written in: its concept's source, or, for a program, that of what it builds on. */
-  function dialectOfContract(c: Contract | null, seen = new Set<string>()): Dialect | null {
-    if (!c) return null
-    if (c.kind === 'concept') return o.dialects[c.reads.sources[0]] ?? null
-    for (const n of c.reads.programs) {
-      if (seen.has(n)) continue
-      seen.add(n)
-      const h = o.store.resolve(n)
-      const d = h ? dialectOfContract(o.store.getProgram(h)!.contract, seen) : null
-      if (d) return d
-    }
-    return null
-  }
+  const rt = createRuntime(o)
 
   async function define(input: { body: string; contract: Contract },
                         meta: { by: string; reason?: string; replace?: boolean }): Promise<DefineResult> {
@@ -419,28 +44,28 @@ export function createEngine(o: EngineOptions) {
 
     const hash = programHash(body, contract)
     const created = !o.store.getProgram(hash)
-
-    // A REPLACEMENT MUST STILL FIT ITS CALLERS. Every caller was written against the old program's interface;
-    // a correction that drops a column, changes a unit or turns a stock into a flow would fix one thing and
-    // break every program above it — at their next run, in front of someone else's question.
     const current = o.store.resolve(contract.name)
+
     // A NAME MAY NOT BE MADE TO REACH ITSELF. A new program only reads names that already exist, so it cannot close
     // a loop; a replacement can, because every caller of the old name now reaches the new program's reads.
-    const loop = reachesName(contract.reads.programs, contract.name)
+    const loop = reachesName(rt, contract.reads.programs, contract.name)
     if (loop) throw new Error(`not defined — "${contract.name}" would reach itself: ${[contract.name, ...loop].join(' → ')}`)
+
+    // A REPLACEMENT MUST STILL FIT ITS CALLERS. Every caller was written against the old program's interface; a
+    // correction that drops a column, changes a unit or turns a stock into a flow would fix one thing and break
+    // every program above it — at their next run, in front of someone else's question.
     if (current && current !== hash && meta.replace) {
       const misfit = interfaceMisfit(o.store.getProgram(current)!.contract, contract)
       if (misfit) throw new Error(`not defined — "${contract.name}" cannot replace ${current}: ${misfit}`)
     }
     if (contract.returns === 'relation') {
-      try { await probeRelation(hash, body, contract) }
+      try { await checkRelation(rt, hash, body, contract) }
       catch (e: any) { throw new Error(`not defined — "${contract.name}": ${e?.message ?? e}`) }
     }
     o.store.putProgram({ hash, contract, body, createdAt: Date.now(), createdBy: meta.by })
 
-    // A NAME IS CHECKED BEFORE IT IS TAKEN. Pointing an existing name somewhere new changes what every caller
-    // of that name gets — right for a correction, wrong for an accidental collision. Only an explicit replace
-    // may do it.
+    // A NAME IS CHECKED BEFORE IT IS TAKEN. Pointing an existing name somewhere new changes what every caller of
+    // that name gets — right for a correction, wrong for an accidental collision. Only an explicit replace may.
     if (current && current !== hash && !meta.replace) {
       throw new Error(`not defined — "${contract.name}" already names ${current}. Give this program a name of ` +
         `its own, or replace that one deliberately.`)
@@ -451,7 +76,6 @@ export function createEngine(o: EngineOptions) {
 
   async function run<T>(name: string, request: Record<string, unknown>, parentId: string | null,
                         scope: Scope, path: string[]): Promise<CallResult<T>> {
-    const today = scope.today
     const hash = o.store.resolve(name)
     if (!hash) throw new Error(`no program named "${name}"`)
     const program = o.store.getProgram(hash)!
@@ -459,15 +83,10 @@ export function createEngine(o: EngineOptions) {
 
     const id = randomUUID()
     const started = Date.now()
-    const decisions: CallRecord['decisions'] = []
-    const verifications: CallRecord['verifications'] = []
-    const caveats: string[] = []
-    const queries: QueryLog = []
-    const used = new Map<string, string>()
-    const assumed: AssumedLog = []
+    const trail = newTrail()
 
     const ctx: ProgramContext = {
-      ...readingContext(contract, scope, queries, assumed),
+      ...readingContext(rt, contract, scope, trail),
       async call<U>(child: string, childRequest: Record<string, unknown> = {}, options: { assume?: Record<string, unknown> } = {}) {
         // A program may call what its contract names, or a program its caller named in a program parameter.
         const passed = Object.entries(contract.params).some(([p, spec]) => typeof spec !== 'string' && request[p] === child)
@@ -477,13 +96,13 @@ export function createEngine(o: EngineOptions) {
         const childScope = options.assume ? { ...scope, context: { ...scope.context, ...options.assume } } : scope
         return (await run<U>(child, childRequest, id, childScope, [...path, hash])).value
       },
-      decide(label, took, reason) { decisions.push({ label, took, reason }); return took },
+      decide(label, took, reason) { trail.decisions.push({ label, took, reason }); return took },
       async verify(label, holds, detail) {
         const held = Boolean(await holds())
-        verifications.push({ label, held, detail })
+        trail.verifications.push({ label, held, detail })
         if (!held) throw new Error(`invariant failed: ${label}${detail ? ` — ${detail}` : ''}`)
       },
-      caveat(text) { caveats.push(text) },
+      caveat(text) { trail.caveats.push(text) },
     }
 
     let value: unknown
@@ -491,7 +110,7 @@ export function createEngine(o: EngineOptions) {
     try {
       for (const [p, spec] of Object.entries(contract.params)) {
         if (typeof spec === 'string' || request[p] === undefined) continue
-        const misfit = programParamMisfit(String(request[p]), spec)
+        const misfit = programParamMisfit(rt, String(request[p]), spec)
         if (misfit) throw new Error(`"${name}": parameter "${p}" — ${misfit}`)
       }
       // A program that reaches itself again through its calls would never finish.
@@ -499,51 +118,12 @@ export function createEngine(o: EngineOptions) {
       const iv = scope.interventions[name]
       if (iv && 'value' in iv) {
         if (contract.returns === 'relation') throw new Error(`"${name}" is a relation; intervene on its rows with where or add, not value`)
-        decisions.push({ label: 'intervened', took: true, reason: 'this request gives the program\'s value instead of running it' })
+        trail.decisions.push({ label: 'intervened', took: true, reason: 'this request gives the program\'s value instead of running it' })
         value = iv.value
       } else if (contract.returns === 'relation') {
-        // THE DEFINITION AND THE QUESTION ARRIVE SEPARATELY. The body says what the relation is; the request
-        // says which part of it is wanted. Nothing in the body changes when someone drills down.
-        const read: ReadBody = (when) => statementFor(name, contract, hash, program.body, when, scope, used, queries, assumed, path)
-        const shape = contract.shape!
-        const calendar = calendarFor(scope, assumed)
-        const ask = async (coordinates: Coordinates, side?: string) => {
-          const p = await plan(shape, read, coordinates, dialects, today, calendar, attributesFor(scope, used, queries, assumed, path))
-          const result = await runPlan(shape, p, (src, sql, params) => o.query(src, sql, params, { policies: scope.access?.[src] }),
-            (q) => queries.push(q),
-            (label, held, detail) => {
-              const tagged = side ? `${side}: ${label}` : label
-              verifications.push({ label: tagged, held, detail })
-              if (!held) throw new Error(`invariant failed: ${tagged} — ${detail}`)
-            },
-            (text) => caveats.push(text))
-          return { p, result }
-        }
-        const coordinates = request as Coordinates
-        summaryProblem(shape, coordinates)
-        const answer = async (c: Coordinates, side?: string): Promise<any> => {
-          if (!c.compare) return (await ask(c, side)).result
-          const both = comparisonCoordinates(c as Coordinates & { compare: Comparison }, today, kindOf(shape) === 'flow')
-          const [now, then] = await Promise.all([ask(both.current, side ? `${side}, now` : 'now'), ask(both.previous, side ? `${side}, compared with` : 'compared with')])
-          caveats.push(...both.caveats)
-          return mergeComparison(shape, now.result, then.result, now.p.by, now.p.grain, both.after)
-        }
-        const main = coordinates.totals || coordinates.share ? { ...coordinates, totals: undefined, share: undefined } : coordinates
-        value = await answer(main)
-        if (coordinates.share) {
-          const whole = await answer(atLevel(coordinates, coordinates.share.within, coordinates.share.measures), `share within ${coordinates.share.within.join(', ') || 'the whole'}`)
-          value = withShares(value as any, whole, coordinates.share.measures, coordinates.share.within)
-        }
-        if (coordinates.totals?.length) {
-          const levels = await Promise.all(coordinates.totals.map(async (level) =>
-            ({ by: level, ...(await answer(atLevel(coordinates, level), `total by ${level.join(', ') || 'everything'}`)) })))
-          ;(value as any).totals = levels.map(({ by, columns, rows }) => ({ by, columns, rows }))
-          if (coordinates.limit != null || coordinates.having) caveats.push('totals count every row, including rows the limit or having leaves out')
-        }
-        caveats.push(...(value as any).caveats)
+        value = await answerRelation(rt, { name, hash, contract, body: program.body }, request as Coordinates, scope, trail, path)
       } else {
-        const fn = await load(hash, program.body)
-        value = await fn(ctx, request)
+        value = await (await rt.load(hash, program.body))(ctx, request)
       }
       if (contract.returns === 'rows' && !Array.isArray(value)) {
         throw new Error(`"${name}" declares it returns rows but returned ${value === null ? 'null' : typeof value}`)
@@ -554,16 +134,16 @@ export function createEngine(o: EngineOptions) {
     }
 
     const interventions = Object.keys(scope.interventions).length ? scope.interventions : null
-    if (interventions && !parentId) caveats.push(`hypothetical: this answer changes ${Object.keys(interventions).map((k) => `"${k}"`).join(', ')} for this request only`)
-    o.store.recordCall({ id, parentId, name, hash, request, output: error ? null : value, error,
-                         decisions, verifications, caveats: [...new Set(caveats)], queries, ms: Date.now() - started, at: started, today,
-                         assumptions: assumed, interventions, context: parentId ? null : scope.context, who: scope.who ?? null })
-    // Relations inlined into this one ran inside its SQL. They are remembered as calls with no queries of their
-    // own, so lineage still finds every answer that went through them.
-    for (const [usedHash, usedName] of used) {
-      o.store.recordCall({ id: randomUUID(), parentId: id, name: usedName, hash: usedHash, request: { inlinedInto: name },
-                           output: null, error: null, decisions: [], verifications: [], caveats: [], queries: [], ms: 0, at: started, today,
-                           assumptions: [], interventions, context: null, who: scope.who ?? null })
+    if (interventions && !parentId) trail.caveats.push(`hypothetical: this answer changes ${Object.keys(interventions).map((k) => `"${k}"`).join(', ')} for this request only`)
+    const shared = { at: started, today: scope.today, interventions, who: scope.who ?? null }
+    o.store.recordCall({ id, parentId, name, hash, request, output: error ? null : value, error, decisions: trail.decisions,
+                         verifications: trail.verifications, caveats: [...new Set(trail.caveats)], queries: trail.queries,
+                         ms: Date.now() - started, assumptions: trail.assumed, context: parentId ? null : scope.context, ...shared })
+    // Relations inlined into this one, and entities joined, ran inside its SQL. They are remembered as calls with no
+    // queries of their own, so lineage still finds every answer that went through them.
+    for (const [usedHash, usedName] of trail.used) {
+      o.store.recordCall({ id: randomUUID(), parentId: id, name: usedName, hash: usedHash, request: { inlinedInto: name }, output: null,
+                           error: null, decisions: [], verifications: [], caveats: [], queries: [], ms: 0, assumptions: [], context: null, ...shared })
     }
     if (error) throw Object.assign(new Error(error), { callId: id })
     return { value: value as T, callId: id, hash }
@@ -571,61 +151,40 @@ export function createEngine(o: EngineOptions) {
 
   /** Ask a program, by name. `today` fixes the day it is answered as of; by default, the engine's clock. */
   function call<T = unknown>(name: string, request: Record<string, unknown> = {}, options: CallOptions = {}): Promise<CallResult<T>> {
-    return run<T>(name, request, null, { today: options.today ?? clock(), context: options.assume ?? {}, interventions: options.intervene ?? {}, who: options.who, access: options.access }, [])
+    return run<T>(name, request, null, { today: options.today ?? rt.clock(), context: options.assume ?? {},
+                                         interventions: options.intervene ?? {}, who: options.who, access: options.access }, [])
+  }
+
+  /** The options a recorded call was asked with — except access, which is always that of whoever asks again. */
+  function recorded(callId: string, access?: Record<string, unknown[]>) {
+    const c = o.store.getCall(callId)
+    if (!c) throw new Error(`no call ${callId}`)
+    const options: CallOptions = { today: c.today ?? undefined, assume: c.context ?? {}, intervene: (c.interventions as Record<string, Intervention>) ?? {},
+                                   who: c.who ?? undefined, access }
+    return { c, options }
   }
 
   /** Ask a past call's question again, as of the same day, through whatever its names point at now. Access is
    *  not replayed: it is whatever the person replaying may read now, given here. */
   function replay<T = unknown>(callId: string, options: { access?: Record<string, unknown[]> } = {}): Promise<CallResult<T>> {
-    const c = o.store.getCall(callId)
-    if (!c) throw new Error(`no call ${callId}`)
-    return call<T>(c.name, c.request as Record<string, unknown>,
-      { today: c.today ?? undefined, assume: c.context ?? undefined, intervene: (c.interventions as Record<string, Intervention>) ?? undefined, who: c.who ?? undefined, access: options.access })
-  }
-
-  /** The path from these names to `target` through what each program reads, or null if there is none. */
-  function reachesName(reads: string[], target: string, seen = new Set<string>()): string[] | null {
-    for (const read of reads) {
-      if (read === target) return [read]
-      if (seen.has(read)) continue
-      seen.add(read)
-      const hash = o.store.resolve(read)
-      const next = hash ? o.store.getProgram(hash)?.contract.reads.programs ?? [] : []
-      const path = reachesName(next, target, seen)
-      if (path) return [read, ...path]
-    }
-    return null
-  }
-
-  /** Why a named program cannot fill a program parameter, or null if it can. */
-  function programParamMisfit(named: string, spec: Exclude<Contract['params'][string], string>): string | null {
-    const hash = o.store.resolve(named)
-    if (!hash) return `no program named "${named}"`
-    const c = o.store.getProgram(hash)!.contract
-    const want = spec.program
-    if (want.returns && c.returns !== want.returns) return `"${named}" returns ${c.returns}, and a ${want.returns} is needed`
-    for (const m of want.measures ?? []) if (!c.shape?.measures[m]) return `"${named}" has no measure "${m}"`
-    for (const d of want.dimensions ?? []) if (!c.shape?.dimensions[d]) return `"${named}" has no dimension "${d}"`
-    return null
+    const { c, options: as } = recorded(callId, options.access)
+    return call<T>(c.name, c.request as Record<string, unknown>, as)
   }
 
   // ── COUNTERFACTUALS: WHAT A PAST ANSWER WOULD HAVE BEEN ──────────────────────────────────────────────────────
   //
   // A past question is asked again as of its own day, under its own assumptions and interventions, twice: once as
-  // it was, once with the change. The difference is the change's effect and nothing else. Comparing the change
-  // with the RECORDED answer instead would mix in every correction made since — a fixed concept would look like
-  // an effect of the hires.
+  // it was, once with the change. The difference is the change's effect and nothing else. Comparing the change with
+  // the RECORDED answer instead would mix in every correction made since — a fixed concept would look like an
+  // effect of the hires.
   //
   // What the change does not touch is held as it was. For a definitional graph — capacity is FTE times a week —
   // that is exact. Where the world would have responded (more people, more hours booked), nothing here models it,
   // and the answer says so.
   async function counterfactual<T = unknown>(callId: string, change: { assume?: Record<string, unknown>; intervene?: Record<string, Intervention> },
                                              options: { access?: Record<string, unknown[]> } = {}) {
-    const c = o.store.getCall(callId)
-    if (!c) throw new Error(`no call ${callId}`)
     if (!change.assume && !change.intervene) throw new Error('a counterfactual needs a change: assume, intervene, or both')
-    const as: CallOptions = { today: c.today, assume: c.context ?? {}, intervene: (c.interventions as Record<string, Intervention>) ?? {},
-                              who: c.who ?? undefined, access: options.access }
+    const { c, options: as } = recorded(callId, options.access)
     const factual = await call<T>(c.name, c.request as Record<string, unknown>, as)
     const counter = await call<T>(c.name, c.request as Record<string, unknown>,
       { ...as, assume: { ...as.assume, ...change.assume }, intervene: { ...as.intervene, ...change.intervene } })
@@ -643,31 +202,6 @@ export function createEngine(o: EngineOptions) {
   }
 
   return { define, call, replay, counterfactual, store: o.store }
-}
-
-/** Why a new program cannot take an old one's name without breaking what calls it, or null if it can. */
-function interfaceMisfit(old: Contract, next: Contract): string | null {
-  if (old.returns !== next.returns) return `it returns ${next.returns}, and callers expect ${old.returns}`
-  for (const p of Object.keys(old.params)) if (!(p in next.params)) return `it drops the parameter "${p}"`
-  if (old.returns !== 'relation') return null
-  const a = old.shape!, b = next.shape!
-  for (const [n, d] of Object.entries(a.dimensions)) {
-    const e = b.dimensions[n]
-    if (!e) return `it drops the dimension "${n}"`
-    if (e.column !== d.column || e.label !== d.label) return `dimension "${n}" moves to other columns`
-  }
-  for (const [n, m] of Object.entries(a.measures)) {
-    const e = b.measures[n]
-    if (!e) return `it drops the measure "${n}"`
-    if (e.unit !== m.unit) return `measure "${n}" changes unit from ${m.unit} to ${e.unit}`
-    if (e.kind !== m.kind) return `measure "${n}" changes from a ${m.kind} to a ${e.kind}`
-    if (!isDerived(m) && !isDerived(e) && (e.column !== m.column || e.aggregate !== m.aggregate)) return `measure "${n}" is aggregated differently`
-    if (isDerived(m) !== isDerived(e)) return `measure "${n}" changes between computed and aggregated`
-  }
-  if (a.time !== b.time) return `its time column changes from ${a.time} to ${b.time}`
-  if (a.grain !== b.grain) return `its grain changes from ${a.grain ?? 'none'} to ${b.grain ?? 'none'}`
-  for (const [n, d] of Object.entries(a.dimensions)) if (d.entity && b.dimensions[n]?.entity !== d.entity) return `dimension "${n}" no longer identifies ${d.entity}`
-  return null
 }
 
 export type Engine = ReturnType<typeof createEngine>
