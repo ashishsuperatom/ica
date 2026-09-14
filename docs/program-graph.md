@@ -1230,6 +1230,22 @@ reports every decision that would now go the other way.
 June utilisation is the one surprise, triage leads to hours and not headcount; "should team b hire" is yes on Q1 and
 reopens on Q3. The NetSuite demonstration (`examples/s7-s8-memory-and-decisions.mts`) awaits the sanity pass.
 
+### Decided — what a question's program gives back
+
+A program a person's question starts declares `returns: 'answer'` and gives back:
+
+- **data** — the datasets the answer rests on, each `{ columns, rows }` with columns saying what they are
+- **views** — a component (table, line, bar, kpi, pivot, or the organisation's own), the dataset it shows, and which
+  column plays which part; every bound column is checked to exist
+- **narration** — sentences, each with the reasoning a person can open. **Numbers are never typed into a sentence**:
+  a sentence names slots, each citing a cell (dataset, row by position or by its values, column), and the engine
+  writes the number from the cell. A typed number, a slot that cites nothing, or a cell that is not there refuses the
+  answer — so no narration, whoever or whatever wrote it, states a number the data does not hold
+- **nextSteps** — what the person could ask next, each a data-session message; in a session only the steps that
+  apply to the current state are offered, and the rest are listed as dropped
+
+An answer is remembered through its datasets like any other result.
+
 ### Decided — sessions, libraries, and where this is going
 
 **Two sessions run side by side.** The *agent session* is the conversation with the model, kept by whichever harness runs

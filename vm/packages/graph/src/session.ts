@@ -202,6 +202,21 @@ export function sessions(store: GraphStore, programs: Registry, grains: () => Gr
     const asked: CallOptions = { assume: state.assume, intervene: state.intervene, today: state.asOf, who: session.who ?? undefined, access: options.access }
     try {
       const r = await call<unknown>(state.program, state.request, asked)
+      // A next step is offered only if it could be applied to this state: one that could not is dropped, and said.
+      const answer = r.value as { nextSteps?: Array<{ label: string; message: Message }>; dropped?: string[] }
+      if (answer && Array.isArray(answer.nextSteps)) {
+        const kept: typeof answer.nextSteps = []
+        const dropped: string[] = []
+        for (const step of answer.nextSteps) {
+          try {
+            const problem = stateProblem(applyMessage(state, step.message, programs), programs, grains())
+            if (problem) throw new Error(problem)
+            kept.push(step)
+          } catch (e: any) { dropped.push(`${step.label}: ${e.message}`) }
+        }
+        answer.nextSteps = kept
+        if (dropped.length) answer.dropped = dropped
+      }
       const id = store.addStep({ sessionId, parent: base?.id ?? null, message, state, stateHash: stateHash(state), callId: r.callId, error: null }, true)
       return { step: id, state, callId: r.callId, value: r.value }
     } catch (e: any) {

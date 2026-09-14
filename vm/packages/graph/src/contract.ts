@@ -27,7 +27,8 @@ export interface Contract {
   /** name → what it means. A parameter may name a program for this one to call — see ProgramParam. */
   params: Record<string, string | ProgramParam>
   /** What it hands back: a single value, rows, or a relation — a query asked with coordinates. */
-  returns: 'value' | 'rows' | 'relation'
+  /** value, rows, a relation, or an answer — what a person's question gets: data, views, narration and next steps. */
+  returns: 'value' | 'rows' | 'relation' | 'answer'
   /** For a relation: which of its columns are dimensions, measures and time. See shape.ts. */
   shape?: Shape
   /** Named beliefs it reads — a working week, a target — looked up by name from the context its caller passes
@@ -79,7 +80,7 @@ export function contractProblem(c: any): string | null {
       return `parameter "${n}" must be a description, or { description, program: { returns?, measures?, dimensions? } }`
     }
   }
-  if (!['value', 'rows', 'relation'].includes(c.returns)) return `returns is "${c.returns}" but must be value, rows or relation`
+  if (!['value', 'rows', 'relation', 'answer'].includes(c.returns)) return `returns is "${c.returns}" but must be value, rows, relation or answer`
   if (c.assumes !== undefined) {
     if (!c.assumes || typeof c.assumes !== 'object' || Array.isArray(c.assumes)) return 'assumes must be name → { description, unit?, default? }'
     for (const [n, a] of Object.entries<any>(c.assumes)) {

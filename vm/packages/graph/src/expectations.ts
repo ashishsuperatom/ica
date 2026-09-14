@@ -76,6 +76,12 @@ export function observationsOf(call: { id: string; name: string; hash: string; r
   const asked = (call.request as any)?.at
   const instant = typeof asked === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(asked) ? asked : call.today
   const num = (v: unknown) => (typeof v === 'number' ? v : v == null || typeof v === 'boolean' ? null : Number.isFinite(Number(v)) ? Number(v) : null)
+  // An answer is remembered through its datasets, each measure named with its dataset.
+  const answer = value as { data?: Record<string, Result>; views?: unknown }
+  if (answer && answer.data && Array.isArray(answer.views)) {
+    return Object.entries(answer.data).flatMap(([dataset, d]) =>
+      observationsOf(call, context, d, isGrain).map((o) => ({ ...o, measure: `${dataset}.${o.measure}` })))
+  }
   const result = value as Result
   if (result && Array.isArray(result.columns) && Array.isArray(result.rows)) {
     const grain = result.columns.find((c) => c.role === 'dimension' && isGrain(c.name))?.name

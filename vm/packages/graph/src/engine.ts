@@ -25,6 +25,7 @@ import { MAX_OBSERVATIONS_PER_CALL, type CallRecord } from './store.js'
 import { checkRelation, interfaceMisfit, programParamMisfit, reachesName } from './definition.js'
 import { programHash } from './hash.js'
 import { namespaceOf } from './registry.js'
+import { answerProblem, renderAnswer, type Answer } from './answer-contract.js'
 import { sessions } from './session.js'
 import { createRuntime, newTrail, type CallOptions, type EngineOptions, type Intervention, type ProgramContext, type Scope } from './runtime.js'
 
@@ -154,6 +155,11 @@ export function createEngine(o: EngineOptions) {
         value = await answerRelation(rt, { name, hash, contract, body: program.body }, request as Coordinates, scope, trail, path)
       } else {
         value = await (await rt.load(hash, program.body))(ctx, request)
+      }
+      if (contract.returns === 'answer') {
+        const problem = answerProblem(value)
+        if (problem) throw new Error(`"${name}" returns an answer, and ${problem}`)
+        value = renderAnswer(value as Answer)
       }
       if (contract.returns === 'rows' && !Array.isArray(value)) {
         throw new Error(`"${name}" declares it returns rows but returned ${value === null ? 'null' : typeof value}`)
