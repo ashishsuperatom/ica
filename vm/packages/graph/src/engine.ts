@@ -20,7 +20,7 @@ import { contractProblem, type Contract } from './contract.js'
 import type { Coordinates } from './coordinates.js'
 import { calendarFor, zoneFor } from './assumptions.js'
 import { Grains } from './calendar.js'
-import { expect, observationsOf, surprisesIn, triage } from './expectations.js'
+import { expect, observationsOf, surprisesIn, triage, withinLimit } from './expectations.js'
 import { MAX_OBSERVATIONS_PER_CALL, type CallRecord } from './store.js'
 import { checkRelation, interfaceMisfit, programParamMisfit, reachesName } from './definition.js'
 import { programHash } from './hash.js'
@@ -157,10 +157,9 @@ export function createEngine(o: EngineOptions) {
     // what was imagined would become what is expected.
     if (!error && !interventions) {
       const grains = new Grains(calendarFor(o.assumptions, scope, newTrail()))
-      const observations = observationsOf({ id, name, hash, request, at: started }, scope.context, value, (g) => grains.has(g))
-      if (!o.store.recordObservations(observations)) {
-        trail.caveats.push(`not remembered as series: ${observations.length} values is more than memory keeps from one answer (${MAX_OBSERVATIONS_PER_CALL})`)
-      }
+      const { kept, series, keptSeries } = withinLimit(observationsOf({ id, name, hash, request, at: started }, scope.context, value, (g) => grains.has(g)), MAX_OBSERVATIONS_PER_CALL)
+      o.store.recordObservations(kept)
+      if (keptSeries < series) trail.caveats.push(`memory keeps ${keptSeries} of this answer's ${series} series, the largest — one answer adds at most ${MAX_OBSERVATIONS_PER_CALL} values`)
     }
     if (interventions && !parentId) trail.caveats.push(`hypothetical: this answer changes ${Object.keys(interventions).map((k) => `"${k}"`).join(', ')} for this request only`)
     const shared = { at: started, today: scope.today, interventions, who: scope.who ?? null }

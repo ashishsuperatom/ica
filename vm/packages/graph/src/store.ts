@@ -112,8 +112,8 @@ CREATE INDEX IF NOT EXISTS call_hash   ON call(hash);
 
 /** How much of an output memory keeps verbatim. The rest is counted, never silently dropped. */
 const KEPT_ROWS = 500
-/** Values one answer may add to the series in memory. An answer with more — every employee by every day — is not
- *  remembered as series at all: a partial series would teach an expectation from whichever rows happened to fit. */
+/** Values one answer may add to the series in memory. An answer with more — every employee by every day — keeps its
+ *  largest whole series up to this (expectations.ts, withinLimit). */
 export const MAX_OBSERVATIONS_PER_CALL = 10_000
 /** Periods each series keeps whole. Older ones are folded into the series' summary as newer arrive. */
 export const MAX_PERIODS_PER_SERIES = 120
@@ -202,9 +202,9 @@ export class GraphStore {
     return (this.db.prepare('SELECT * FROM call WHERE hash = ? ORDER BY at').all(hash) as any[]).map(row)
   }
 
-  /** Adds an answer's values to memory, bounded: a period answered again replaces what was held for it, and each
-   *  series keeps only its latest MAX_PERIODS_PER_SERIES periods. Returns false, recording nothing, when there are
-   *  more than MAX_OBSERVATIONS_PER_CALL values. */
+  /** Adds values to memory, bounded: a period answered again replaces what was held for it, each series keeps its latest
+   *  MAX_PERIODS_PER_SERIES periods, and memory as a whole MAX_OBSERVATIONS. Refuses, returning false, more than
+   *  MAX_OBSERVATIONS_PER_CALL at once — callers cut an answer to size first. */
   recordObservations(rows: Observation[]): boolean {
     if (!rows.length) return true
     if (rows.length > MAX_OBSERVATIONS_PER_CALL) return false

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { GraphStore, createEngine, type Contract } from '../src/index.ts'
+import { GraphStore, createEngine, withinLimit, type Contract } from '../src/index.ts'
 
 // Two teams, eighteen months. Team b's people keep booking about 130 hours a month each — until June 2026, when
 // their hours fall to about half. Their headcount does not change. In Q3 the hours stay low.
@@ -121,5 +121,9 @@ test('memory lets go of old periods into the series\' summary distribution', asy
   assert.equal(kept[0].value, 10, 'the ten oldest were let go')
   const s = store.summary({ name: 'n', series: 's', member: '{}', measure: 'm', grain: 'day' })!
   assert.deepEqual([s.n, s.mean, s.min, s.max, s.from], [10, 4.5, 0, 9, '2026-01-01'])
-  assert.equal(store.recordObservations(Array.from({ length: 10_001 }, () => rows[0])), false, 'one answer too large is refused whole')
+  assert.equal(store.recordObservations(Array.from({ length: 10_001 }, () => rows[0])), false, 'the store never takes more than one answer\'s worth')
+  const big = [0, 1, 2].flatMap((m) => Array.from({ length: 5000 }, (_, i) => ({ ...rows[0], member: `{"k":${m}}`, period: String(i), value: (m + 1) * 10 })))
+  const cut = withinLimit(big, 10_000)
+  assert.deepEqual([cut.series, cut.keptSeries, cut.kept.length], [3, 2, 10_000])
+  assert.deepEqual([...new Set(cut.kept.map((o) => o.member))], ['{"k":2}', '{"k":1}'], 'whole series, largest first')
 })

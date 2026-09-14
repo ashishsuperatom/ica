@@ -1199,8 +1199,8 @@ SQLite memory as series: one measure, of one member, period by period, for the q
 filters, splits and assumptions. Hypothetical answers leave nothing. Memory is not a cache: a cache can be
 removed without losing anything; memory is what the program has seen.
 
-**Memory is bounded.** One answer adds at most 10,000 values; a larger one is not remembered as series, and says
-so, because a partial series would teach an expectation from whichever rows fitted. A period answered again replaces
+**Memory is bounded.** One answer adds at most 10,000 values; a larger one keeps its largest whole series up to that
+and says how many — never a series cut short, which would teach an expectation from whichever periods fitted. A period answered again replaces
 the old value. Each series keeps its latest 120 periods whole, and memory as a whole a million values; beyond that
 the oldest are folded into the series' summary distribution — count, mean, spread, least, greatest, the periods
 spanned — so the far past remains as its shape.

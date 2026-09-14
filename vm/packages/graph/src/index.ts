@@ -23,4 +23,4 @@ export { facts, applies, mostSpecific, allThatApply, isRuled, AmbiguousRules, ty
 export { resolveRelative, resolveSpan, resolveInstant, type RelativeSpan, type RelativeInstant } from './relative.js'
 export { dayIn, offsetMinutes, stretches, validZone, type Stretch } from './timezones.js'
 export { catalog, members, type CatalogEntry, type Members, type MemberMatch } from './discovery.js'
-export { expect, seriesKey, observationsOf, type Expectation, type Surprise, type TriageNode } from './expectations.js'
+export { expect, seriesKey, observationsOf, withinLimit, type Expectation, type Surprise, type TriageNode } from './expectations.js'

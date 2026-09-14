@@ -75,6 +75,27 @@ export function observationsOf(call: { id: string; name: string; hash: string; r
   })))
 }
 
+/** An answer's observations cut to what memory keeps from one answer. Whole series are kept — every period of one
+ *  member's measure — never a series cut short, which would teach an expectation from whichever periods fitted. The
+ *  largest members go first: they are what most questions are about. */
+export function withinLimit(observations: Observation[], limit: number): { kept: Observation[]; series: number; keptSeries: number } {
+  const groups = new Map<string, Observation[]>()
+  for (const o of observations) {
+    const k = JSON.stringify([o.member, o.measure])
+    groups.set(k, [...(groups.get(k) ?? []), o])
+  }
+  if (observations.length <= limit) return { kept: observations, series: groups.size, keptSeries: groups.size }
+  const size = (g: Observation[]) => g.reduce((a, o) => a + Math.abs(o.value ?? 0), 0)
+  const kept: Observation[] = []
+  let keptSeries = 0
+  for (const g of [...groups.values()].sort((a, b) => size(b) - size(a))) {
+    if (kept.length + g.length > limit) continue
+    kept.push(...g)
+    keptSeries++
+  }
+  return { kept, series: groups.size, keptSeries }
+}
+
 export function expect(store: GraphStore, q: { name: string; request: unknown; context?: Record<string, unknown> | null; measure: string; grain: string
                                                  member?: Record<string, unknown>; period: string; window?: number; value?: number | null; threshold?: number }): Expectation {
   const key = { name: q.name, series: seriesKey(q.request, q.context ?? null), member: canonical(q.member ?? {}), measure: q.measure, grain: q.grain }
