@@ -6,8 +6,13 @@ export const GRAPH_REFERENCE = `# Programs
 
 Everything that answers a question is a PROGRAM in the graph: a directory programs/<name>/ holding contract.json and
 program.mjs, defined with \`./define programs/<name>\`. A program is identified by the hash of its body and contract;
-its name points at it. Correcting a program is defining a new body under the same name with \`--replace "<why>"\` —
-every caller gets the correction, and a replacement that would break its callers is refused.
+its name points at it, and every question in the organisation shares it. \`--replace "<why>"\` corrects a program that is
+wrong — every caller gets the correction, and a replacement that would break its callers is refused. It is never how a
+follow-up is answered: a follow-up is a message.
+
+Name a program for the idea it computes — \`utilised hours\`, \`capacity\`, \`utilisation\` — never for the question that
+first asked for it. A concept's definition is a decision about the data: which rows count, which flag or type means what.
+Establish it with ./query before writing it, and say it in the description.
 
 ## Two kinds
 
@@ -91,22 +96,41 @@ share, detail, currency }\`
   \`{ last: 30, unit: 'day' }\`. A stock takes \`at\` (a date, 'today', or \`{ endOf: 'month' }\`), or \`during\` with a time grain or a
   \`rollup: { time: 'last' | 'average' }\`.
 - \`compare\`: \`{ offset: { years: 1 } }\`, \`{ during }\` or \`{ at }\` — adds \`<measure>_compare\`, \`_change\`, \`_change_ratio\`.
-- \`order\` is required for \`limit\`. \`totals: [['pillar'], []]\` adds totals at coarser splits. \`share: { measures, within }\`.
+- \`order: [{ "by": "hours", "desc": true }]\` — required for \`limit\`. \`limitPer: ['pillar']\` keeps \`limit\` rows per group.
+- \`totals: [['pillar'], []]\` adds totals at coarser splits. \`share: { measures, within }\`.
 - \`detail: { limit }\` with an order returns the rows themselves.
 A question the engine cannot answer correctly as asked is refused, with the reason — change the question, not the check.
 
 ## An answer — \`"returns": "answer"\`
 
+The program a question asks. Its params are the question — so a follow-up is a message that changes them, and the
+program never has to change for one. Take the coordinates the relation understands and pass them on:
+
 \`\`\`js
-return {
-  data: { byPillar: result },                           // each { columns, rows } — a relation's result as it came back
-  views: [{ id: 'bars', component: 'bar', data: 'byPillar', title: 'Utilisation by pillar', encode: { x: 'pillar_label', y: 'utilisation' } }],
-  narration: [{ text: 'CEC leads at {top}.', cites: { top: { data: 'byPillar', row: { pillar: '15' }, column: 'utilisation' } }, why: '…' }],
-  nextSteps: [{ label: 'By month', message: { set: { by: ['month'] } } }],
+// params: { "during": "the span", "by": "splits and a time grain", "where": "filters" }
+export default async (ctx, { during = { previous: 'quarter' }, by = ['pillar'], where }) => {
+  const result = await ctx.call('utilisation', { measures: ['utilisation', 'hours'], by, where, during: ctx.span(during),
+                                                 order: [{ by: 'utilisation', desc: true }], totals: [[]] })
+  const top = result.rows[0]
+  const x = by.find((d) => d !== 'pillar') ?? 'pillar'
+  const label = result.columns.some((c) => c.name === x + '_label') ? x + '_label' : x
+  return {
+    data: { result, total: { columns: result.totals[0].columns, rows: result.totals[0].rows } },
+    views: [{ id: 'main', component: 'bar', data: 'result', title: 'Utilisation', encode: { x: label, y: 'utilisation' } }],
+    narration: [
+      { text: 'Overall utilisation was {all}; ' + top.pillar_label + ' was highest at {top}.',
+        cites: { all: { data: 'total', column: 'utilisation' }, top: { data: 'result', row: 1, column: 'utilisation' } },
+        why: 'utilised hours over available hours, for the span asked' },
+    ],
+    nextSteps: [{ label: 'By month', message: { set: { by: [...by, 'month'] } } },
+                { label: 'Look into ' + top.pillar_label, message: { filter: { pillar: top.pillar } } }],
+  }
 }
 \`\`\`
-**A narration never types a number.** Each number is a {slot} citing a cell; the engine writes it from the data. A typed
-number is refused. Next steps are messages the person's data session can apply to this question's state.
+**A narration never types a number.** Each number is a {slot} citing a cell; the engine writes it from the data, and a
+typed number is refused. Say what matters in the numbers — the total, the largest, the change, what stands out — not
+that numbers are shown. Next steps are messages the person's data session can apply to this question's state; views
+read the columns the result actually has, so they follow the splits.
 
 ## The person's data session — ./ask
 
