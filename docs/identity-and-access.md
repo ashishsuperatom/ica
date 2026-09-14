@@ -94,7 +94,7 @@ ProjectGrant         # project-level access (subject may be a principal OR a who
   projectId  → Project
   role               # builder | analyst | viewer
   scopes             # OPTIONAL fine-grain (start null = whole project):
-                     #   datasourceIds[]? personaId? intentTags[]?
+                     #   datasourceIds[]? personaId? programs[]?  (was intentTags; intents are superseded by the program graph)
   grantedBy, createdAt, expiresAt?
 
 Session              # optional server-side record for revocation (token is otherwise stateless)
@@ -117,7 +117,7 @@ BUILDER plane   (build/maintain computation)   connect_source, edit_semantic_mod
                                                run_consolidation, view_agent_terminal,
                                                manage_project
 RUNTIME plane   (ask + consume)                ask, view_answer, modify_answer,
-                                               download, view_intent_graph
+                                               download, view_program_graph
 
 owner/admin  → builder plane + runtime plane + manage members/grants
 builder      → builder plane + runtime plane

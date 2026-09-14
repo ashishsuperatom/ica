@@ -25,8 +25,8 @@ const projectDir = join(vm, 'projects', project)
 const dbDir = join(root, project, 'db')
 mkdirSync(dbDir, { recursive: true })
 // The datasource index is the engine's, built from the sources; a trial borrows the project's rather than rebuild it.
-const index = join(stateRoot, project, 'db', 'project.sqlite')
-if (!existsSync(join(dbDir, 'project.sqlite')) && existsSync(index)) copyFileSync(index, join(dbDir, 'project.sqlite'))
+const index = join(stateRoot, project, 'db', 'datasource-index.sqlite')
+if (!existsSync(join(dbDir, 'datasource-index.sqlite')) && existsSync(index)) copyFileSync(index, join(dbDir, 'datasource-index.sqlite'))
 
 const graph = await openProjectGraph({ dbDir, projectDir, managerUrl })
 const sid = process.env.SESSION ?? `trial-${Date.now().toString(36)}`

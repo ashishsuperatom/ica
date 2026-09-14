@@ -233,7 +233,7 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
       // waiting for a keypress. Auto-answer it and keep the FULL context — pick "Resume full session as-is"
       // (the option below the default "Resume from summary"): down-arrow + Enter. Anchored on the stable
       // "Resume from summary" line; if the "full session" wording drifts we accept the default to unblock and
-      // WARN with the version so we can re-calibrate. Fires for EVERY claude agent (analyst/modeler/connector).
+      // WARN with the version so we can re-calibrate. Fires for EVERY claude agent (analyst/connector/grounding).
       if (!resumeChoiceSent && /Resume from summary/i.test(stripAnsi(buf.slice(-3000)))) {
         resumeChoiceSent = true
         if (/Resume full session/i.test(stripAnsi(buf.slice(-3000)))) {

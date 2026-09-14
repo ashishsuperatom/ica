@@ -34,13 +34,6 @@
     "skipLibCheck": true
   },
   "include": ["apps/**/*.ts", "apps/**/*.mts", "packages/**/*.ts"],
-  // Tests are excluded for the same reason as the examples, and because one of them imports an example: they
-  // are exercised by running them, and holding them to the same contract would mean annotating the example
-  // programs, which is the one thing we must not do.
-  //
-  // EXAMPLES ARE NOT ENGINE CODE. apps/engine/examples/* are reference programs the agent reads to learn the
-  // shape of a unit, written in the loose style an agent writes in — untyped ctx and params, exactly as a
-  // generated program looks. Typechecking them would mean annotating them, which would teach the agent to
-  // write something we do not actually want back.
-  "exclude": ["node_modules", "**/node_modules", "**/dist", ".state", "**/*.test.ts", "**/*.test.mts", "apps/engine/examples/**"]
+  // Tests are exercised by running them.
+  "exclude": ["node_modules", "**/node_modules", "**/dist", ".state", "**/*.test.ts", "**/*.test.mts"]
 }

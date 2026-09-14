@@ -47,8 +47,8 @@ node-store `kind`.
 - `vm/apps/engine/agents/grounding/` — the grounding agent (mirrors `connector`: claude-code, admin-triggered
   `grounding:run`/`grounding:ask` + `term:attach which:'grounding'`; a `groundingSlot` NOT added to
   `warmEssentialAgents`).
-- Semantic atoms — a new `kind` in `@superatom/node-store` (lives in `project.sqlite` with the model);
-  modeler writes, analyst reads.
+- Semantic atoms — *superseded:* planned as a `@superatom/node-store` kind written by the modeler; the modeler is
+  gone, and what the analyst defines now lives in the program graph as concepts (`docs/program-graph.md`).
 
 ## Build order (grounding first, one piece at a time)
 

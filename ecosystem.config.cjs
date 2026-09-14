@@ -12,7 +12,7 @@
 //   pm2 delete ecosystem.config.cjs
 //
 // Ports:  4000  sa-datasources (the ONE data seam: query(id,sql,params) → routes by id to a bridge;
-//               the TotalGroup bridge owns the WS to the remote DB. units/agents hit :4000 only)
+//               the TotalGroup bridge owns the WS to the remote DB. The engine's data seams and agent tools hit :4000 only)
 //         4096  opencode serve (auto-started by sa-engine when ICA_HARNESS=opencode)
 // sa-engine has no inbound port — it's a WS client of the deployed DO.
 

@@ -1,16 +1,16 @@
 // Bootstrap populator for the DATASOURCE INDEX — a thin CLI over datasource-index/build.ts, which the admin
 // console also calls. One implementation, so a run from a terminal and a run from the console cannot differ.
-//   DB=<project.sqlite> SEEDS_FILE=<project>/datasources/index-seeds.json [WIPE=1] [ONLY=<sourceId>] tsx scripts/build-datasource-index.ts
-import { NodeStore, dataSourceStats } from '@superatom/node-store'
+//   DB=<db/datasource-index.sqlite> SEEDS_FILE=<project>/datasources/index-seeds.json [WIPE=1] [ONLY=<sourceId>] tsx scripts/build-datasource-index.ts
+import { DataSourceIndex, dataSourceStats } from '@superatom/datasource-index'
 import { buildDatasourceIndex } from '../datasource-index/build.js'
 import { readFileSync } from 'node:fs'
 
 const DB = process.env.DB || ''
 const MANAGER = process.env.MANAGER || 'http://localhost:4020'
 const SEEDS_FILE = process.env.SEEDS_FILE || ''
-if (!DB) { console.error('set DB=<project.sqlite>'); process.exit(1) }
+if (!DB) { console.error('set DB=<db/datasource-index.sqlite>'); process.exit(1) }
 
-const store = new NodeStore(DB)
+const store = new DataSourceIndex(DB)
 buildDatasourceIndex({
   store,
   managerUrl: MANAGER,

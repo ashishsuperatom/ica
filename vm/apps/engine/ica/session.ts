@@ -21,7 +21,7 @@ export interface AgentEvent {
 }
 
 // ── Usage / cost — ABSTRACT INTERFACE every ICA harness SHOULD provide ────────────────────────────────
-// Uniform token + $cost accounting for a turn, so cost is observable no matter which agent (reflex/narrator/
+// Uniform token + $cost accounting for a turn, so cost is observable no matter which agent (narrator/
 // analyst) or which backend (opencode/claude/codex) produced it. NOT fully wired yet — opencode surfaces this
 // today (see ica/opencode.ts `[oc-usage]`); claude-code + codex still need to map their native usage into this
 // shape. Delivered two ways (below): streamed via onUsage as it becomes known, AND as a total on RunResult.usage.

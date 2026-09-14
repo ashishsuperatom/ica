@@ -251,7 +251,7 @@ export function createPiSession(opts: PiSessionOpts): Session {
     // agent's workspace — so every tool ran in the wrong place. The model worked around it by prefixing
     // `cd <absolute workspace> &&` onto every command, which costs tokens on each call, makes the step log
     // unreadable, and puts the machine's filesystem layout in the transcript. Every other harness is given its
-    // directory and uses plain relative paths (`./get-concept "…"`); this one simply was not.
+    // directory and uses plain relative paths (`./catalog`); this one simply was not.
     // ON DISK, NOT IN MEMORY. inMemory() threw the conversation away when the process ended, so pi could
     // neither report a session nor resume one — every engine restart started the composer from nothing, while
     // claude and codex both carried on. A pure-text agent (the narrator) keeps no conversation worth resuming,

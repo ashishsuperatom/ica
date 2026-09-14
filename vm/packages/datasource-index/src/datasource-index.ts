@@ -1,4 +1,4 @@
-// DATASOURCE INDEX — a FLAT, full-text-searchable map of every field in every datasource, on the same store.
+// DATASOURCE INDEX — a FLAT, full-text-searchable map of every field in every datasource.
 // One row per field. The key is a flat, NAME-based string `SOURCE.CONTAINER.FIELD` (CONTAINER = table or API
 // collection; FIELD = column / attribute). Because a container/field name may itself contain dots, the source,
 // container and field are ALSO stored split-out (the RHS) so they're always recoverable unambiguously.
@@ -8,7 +8,7 @@
 // it doesn't. A separate process (the connector agent) keeps it fresh; readers only search. Enable/disable and
 // (later) authorization live here too. No statistics — pure structure.
 
-import type { NodeStore } from './store.js'
+import type { DataSourceIndex } from './store.js'
 
 export interface DataSourceEntry {
   key: string                 // 'SOURCE.CONTAINER.FIELD' — flat, name-based, stable; the FTS key
@@ -31,7 +31,7 @@ export function describeEntry(e: Pick<DataSourceEntry, 'descHuman' | 'descAi' | 
   return (e.descHuman?.trim() || e.descAi?.trim() || e.descDefault?.trim() || '')
 }
 
-/** The index's SCHEMA. Exported so the STORE creates it when a database is opened, next to nodes and edges.
+/** The index's SCHEMA. Exported so the store creates it when its database is opened.
  *
  *  This is not an optional extra: every project has datasources, and this table is how an agent finds where a
  *  field lives. Creating it lazily meant it existed only once something had already touched it — so on a
@@ -79,7 +79,7 @@ export const DATASOURCE_INDEX_SCHEMA = `
 
 /** Still here because callers use it, and it costs nothing to call: every statement is IF NOT EXISTS and the
  *  store has already run the same DDL at open. The ALTER is the one migration this table has ever needed. */
-export function ensureDataSourceIndex(store: NodeStore): void {
+export function ensureDataSourceIndex(store: DataSourceIndex): void {
   store.db.exec(DATASOURCE_INDEX_SCHEMA)
   try { store.db.exec(`ALTER TABLE datasource_index ADD COLUMN rows INTEGER`) } catch { /* column already present */ }
 }
@@ -90,7 +90,7 @@ export function ensureDataSourceIndex(store: NodeStore): void {
  * 0 = empty). A timeout/error means "unknown, possibly huge" — do NOT include it here, so it stays enabled.
  * Never re-enables a manually-disabled non-empty table (only flips enabled for the containers passed in).
  */
-export function applyRowCounts(store: NodeStore, source: string, counts: Record<string, number>): { disabled: number; enabled: number } {
+export function applyRowCounts(store: DataSourceIndex, source: string, counts: Record<string, number>): { disabled: number; enabled: number } {
   ensureDataSourceIndex(store)
   let disabled = 0, enabled = 0
   const upd = store.db.prepare('UPDATE datasource_index SET rows=?, enabled=? WHERE source=? AND container=?')
@@ -110,7 +110,7 @@ export function dsiKey(source: string, container: string, field: string): string
 }
 
 /** Upsert one entry (idempotent on key). The updater process calls this; readers never write. */
-export function putEntry(store: NodeStore, e: DataSourceEntry): void {
+export function putEntry(store: DataSourceIndex, e: DataSourceEntry): void {
   ensureDataSourceIndex(store)
   store.db.prepare(`
     INSERT INTO datasource_index (key, source, container, field, type, desc_default, desc_ai, desc_human, is_optional, is_key, references_, rows, enabled)
@@ -128,7 +128,7 @@ export function putEntry(store: NodeStore, e: DataSourceEntry): void {
   })
 }
 
-export function putEntries(store: NodeStore, entries: DataSourceEntry[]): number {
+export function putEntries(store: DataSourceIndex, entries: DataSourceEntry[]): number {
   ensureDataSourceIndex(store)
   const tx = store.db.transaction((es: DataSourceEntry[]) => { for (const e of es) putEntry(store, e) })
   tx(entries)
@@ -173,7 +173,7 @@ export interface DataSourceSearchResult {
  *     back, so a wide source cannot be crowded out by a terse one.
  *
  *  3. IT SAYS WHAT IT DID NOT SHOW. See DataSourceSearchResult. */
-export function searchDataSource(store: NodeStore, query: string, opts: { source?: string; limit?: number; includeDisabled?: boolean } = {}): DataSourceSearchResult {
+export function searchDataSource(store: DataSourceIndex, query: string, opts: { source?: string; limit?: number; includeDisabled?: boolean } = {}): DataSourceSearchResult {
   ensureDataSourceIndex(store)
   const limit = Math.min(opts.limit ?? 50, 500)
   const where: string[] = []
@@ -244,13 +244,13 @@ export function searchDataSource(store: NodeStore, query: string, opts: { source
 }
 
 /** Enable/disable by exact key, or a whole container/source via a LIKE pattern on the key (e.g. 'fusion5.employee.%'). */
-export function setEnabled(store: NodeStore, keyOrPattern: string, enabled: boolean): number {
+export function setEnabled(store: DataSourceIndex, keyOrPattern: string, enabled: boolean): number {
   ensureDataSourceIndex(store)
   const op = keyOrPattern.includes('%') ? 'LIKE' : '='
   return store.db.prepare(`UPDATE datasource_index SET enabled=? WHERE key ${op} ?`).run(enabled ? 1 : 0, keyOrPattern).changes
 }
 
-export function dataSourceStats(store: NodeStore): { source: string; containers: number; fields: number; disabled: number }[] {
+export function dataSourceStats(store: DataSourceIndex): { source: string; containers: number; fields: number; disabled: number }[] {
   ensureDataSourceIndex(store)
   return store.db.prepare(
     `SELECT source, COUNT(DISTINCT container) AS containers, COUNT(*) AS fields,

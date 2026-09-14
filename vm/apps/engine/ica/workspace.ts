@@ -4,8 +4,8 @@
 //
 //   sessions/<id>/  one conversation's directory — the composer's cwd for that conversation
 //   workspace/      the shared directory — the analyst, grounding and connector agents work here
-//   db/             the ENGINE's private state: graph.sqlite (programs, memory, data sessions), grounding.sqlite,
-//                   answers.sqlite (agent session ids). Outside every agent's cwd, so an `ls` never surfaces it.
+//   db/             the ENGINE's private state: graph.sqlite (programs, memory, data sessions), datasource-index.sqlite
+//                   (./find-schema), grounding.sqlite, agent-sessions.sqlite. Outside every agent's cwd, so an `ls` never surfaces it.
 //
 // In either directory the agent finds its tools, generated here with the absolute paths they need:
 //
@@ -61,7 +61,7 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
       }
       console.log(`[workspace] linked ${join(projectHome, 'node_modules')} → ${target}`)
     } catch (e: any) {
-      // Not fatal on its own — but every seam and every generated unit will fail, so say it rather than swallow it.
+      // Not fatal on its own — but every data seam will fail, so say it rather than swallow it.
       console.warn(`[workspace] @superatom/* does not resolve from ${projectHome} and the fallback link failed — the data seams will not import: ${e?.message ?? e}`)
     }
   }
@@ -200,8 +200,8 @@ console.log('escalated')
 `,
 
     'find-schema': `// Datasource index. "<term>" = matching fields across ALL sources (SOURCE.CONTAINER.FIELD : type). Search by field/table name, by type (date/number), or by what a column MEANS. --source <S> filters to one source; --full adds PK/nullable/references.
-import { NodeStore, searchDataSource } from '@superatom/node-store'
-const store = new NodeStore(${JSON.stringify(join(dbDir, 'project.sqlite'))})
+import { DataSourceIndex, searchDataSource } from '@superatom/datasource-index'
+const store = new DataSourceIndex(${JSON.stringify(join(dbDir, 'datasource-index.sqlite'))})
 const args = process.argv.slice(2)
 const full = args.includes('--full')
 const si = args.indexOf('--source')

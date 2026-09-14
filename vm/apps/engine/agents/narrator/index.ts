@@ -1,4 +1,4 @@
-// The NARRATOR — a separate, throwaway agent (NOT the reflex router; kept apart so neither pollutes the other).
+// The NARRATOR — a separate, throwaway agent, kept apart from the agents doing the work so neither pollutes the other.
 // Its ONLY job: while the analyst works behind the scenes, tell the user — in ONE short present-tense BUSINESS
 // sentence — what the system is doing RIGHT NOW to answer THEIR question. It reads the system's raw, technical
 // activity and TRANSLATES it; it never repeats the machinery.

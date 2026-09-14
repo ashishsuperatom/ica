@@ -21,8 +21,6 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { existsSync, mkdirSync, rmSync, readFileSync } from 'node:fs'
-import { writeFile, rm, readdir, stat, mkdir, cp } from 'node:fs/promises'
-import { execSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { createSession, prepareWorkspace, type Session, type Harness, type RunHandlers } from './ica/index.js'
 import { agentConfig, describeConfig, useCache, receive, applied, type AgentName } from './config/index.js'
@@ -31,10 +29,10 @@ import { createAnalyst, promptVersion as analystPromptVersion } from './agents/a
 import { promptVersion as composerPromptVersion, createComposer, type Composer } from './agents/composer/index.js'
 import { createConnector, promptVersion as connectorPromptVersion } from './agents/connector/index.js'
 import { createGroundingAgent, promptVersion as groundingPromptVersion } from './agents/grounding/index.js'
-import { openAnswers } from './answers.js'
+import { openAgentSessions } from './agent-sessions.js'
 import { log, readJsonSafe } from './log.js'
 import { createInspector } from './inspect.js'
-import { NodeStore } from '@superatom/node-store'
+import { DataSourceIndex, dataSourceStats } from '@superatom/datasource-index'
 import { openProjectGraph } from './graph/project.js'
 import type { Engine as GraphEngine } from '@superatom/graph'
 // TYPE-ONLY, and it must stay that way: the deploy bundles package vm/ alone, so this path does not exist in a
@@ -56,8 +54,8 @@ process.on('uncaughtException',  (e: any) => log.error('engine', 'uncaughtExcept
 const HUB = process.env.ICA_HUB || 'ws://localhost:5174'
 const PROJECT = process.env.ICA_PROJECT || ''
 // Persistence roots. All GENERATED per-project state lives under ONE root, OUTSIDE the engine code app:
-//   <STATE_ROOT>/<projectId>/ — the workspace (seams, programs/, out/) AND the project's DBs together
-//   (project.sqlite · grounding.sqlite · answers.sqlite). Committed per-project INPUTS (the datasource
+//   <STATE_ROOT>/<projectId>/ — the agents' directories (workspace/, sessions/<id>/) AND the project's DBs together
+//   (graph.sqlite · datasource-index.sqlite · grounding.sqlite · agent-sessions.sqlite). Committed per-project INPUTS (the datasource
 //   bridges) live separately in <repo>/projects/<projectId>/. Env-overridable so Fly points them at the
 //   mounted VOLUME (else state would sit on the ephemeral container layer and be wiped on every restart);
 //   the existing per-root env vars still win, so Fly's layout is unchanged.
@@ -65,7 +63,6 @@ const VM_ROOT = join(__dirname, '..', '..')                              // apps
 // Outside the repository, so an agent working in its workspace is not one directory away from the engine's source.
 const STATE_ROOT = process.env.ENGINE_STATE_DIR ?? join(homedir(), '.superatom', 'state')
 const WORKSPACE_ROOT = process.env.ENGINE_WORKSPACE_DIR ?? STATE_ROOT
-const DATA_ROOT = process.env.ENGINE_DATA_DIR ?? STATE_ROOT              // answers.sqlite co-locates with the workspace
 
 // THE PROFILE THIS MACHINE LAST ADOPTED, read before any agent config is resolved. Without it a box whose
 // control plane is briefly unreachable would boot on the git default — quietly running different agents than
@@ -73,19 +70,9 @@ const DATA_ROOT = process.env.ENGINE_DATA_DIR ?? STATE_ROOT              // answ
 useCache(join(STATE_ROOT, PROJECT))
 // SEGREGATION (see ica/workspace.ts): the agent's write-root and the engine's DBs are SIBLING folders under the
 // project home, so the agent's cwd never contains our SQLite files.
-const WORKSPACE = join(WORKSPACE_ROOT, PROJECT, 'workspace')   // the AGENT's cwd: seams + programs/ + out/
-// ── WHERE A CONVERSATION'S WORK LIVES ──────────────────────────────────────────────────────────────────────
-// One folder per conversation, holding the programs written for it and each turn's output. A program encodes
-// the scope and filters of the question that produced it, so one conversation's work is not another's to read
-// or to re-run.
-//
-// The composer works here directly — its session is the conversation's. The analyst cannot: it is ONE shared
-// session serving everyone, and a destination that moved under it every turn would be a target it can neither
-// see nor check. So it always writes to the same place, and the engine files what it built into the
-// conversation that asked for it. Filing is the engine's job precisely because the analyst must not have to
-// know which conversation it is serving.
+const WORKSPACE = join(WORKSPACE_ROOT, PROJECT, 'workspace')   // the shared agents' cwd: the analyst, connector and grounding agents
+// A conversation's composer works in sessions/<id>/ (ica/workspace.ts); what any agent defines goes into the graph.
 const SESSIONS = join(WORKSPACE_ROOT, PROJECT, 'sessions')
-const sessionHome = (sid: string) => join(SESSIONS, sid)
 const DB_DIR    = join(WORKSPACE_ROOT, PROJECT, 'db')          // ENGINE-private DBs — a sibling, NOT under WORKSPACE
 // Committed per-project CONFIG (index seeds, datasource notes) — distinct from generated state above.
 const PROJECT_DIR = process.env.ENGINE_PROJECT_DIR ?? join(__dirname, '..', '..', 'projects', PROJECT)
@@ -140,10 +127,6 @@ let connectorBusy = false
 let groundingBusy = false
 let indexBusy = false   // the datasource-index build — one at a time per project
 
-// Every question + answer for this project, in one sqlite the ENGINE owns (the LLM never writes it).
-// Enables deterministic reuse ("already answered?") + full history + agent session ids. See answers.ts.
-// SCOPED BY PROJECT so a shared-box multi-project dev setup never commingles answers, agent sessions, or the
-// consolidation watermark across projects (on Fly each Machine is one project, so this is naturally isolated too).
 // ── BOOTSTRAP: guarantee the engine's environment BEFORE opening any store or connecting. On a fresh
 // machine the per-project dirs don't exist yet; opening a sqlite in a missing dir throws. We create them
 // here, explicitly, and fail LOUD + clean (not a cryptic driver stack) if the volume isn't writable.
@@ -153,7 +136,8 @@ for (const d of [WORKSPACE, DB_DIR]) {
   catch (e: any) { console.error(`[ica] FATAL bootstrap: cannot create ${d}: ${e?.message ?? e}`); process.exit(1) }
 }
 
-const answers = openAnswers(join(DB_DIR, 'answers.sqlite'))
+// Which harness session each agent resumes after a restart. See agent-sessions.ts.
+const agentSessions = openAgentSessions(join(DB_DIR, 'agent-sessions.sqlite'))
 const genId = () => 'q_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
 
 // ── THE PROJECT'S GRAPH ───────────────────────────────────────────────────────────────────────────────────
@@ -165,20 +149,18 @@ const getGraph = () => (graphEngine ??= openProjectGraph({ dbDir: DB_DIR, projec
   .catch((e) => { graphEngine = null; throw e }))
 
 // The datasource index: every source's tables and columns, searchable by the agents' ./find-schema.
-const indexStore = new NodeStore(join(DB_DIR, 'project.sqlite'))
+const indexStore = new DataSourceIndex(join(DB_DIR, 'datasource-index.sqlite'))
 
 // READ-ONLY window into the engine for the admin console, answered over the hub (inspect:req). See inspect.ts.
 const inspector = createInspector({
-  graph: indexStore, answers, workspace: WORKSPACE, dataRoot: join(DATA_ROOT, PROJECT), projectId: PROJECT,
-  datasourceUrl: DATASOURCE,
+  graph: getGraph, index: indexStore, agentSessions, projectId: PROJECT, datasourceUrl: DATASOURCE,
+  roots: { workspace: WORKSPACE, sessions: SESSIONS, db: DB_DIR },
   runtime: () => ({
     agents: {
       analyst:   { ...agentConfig('analyst'),   busy: busySessions.size > 0 },
       connector: { ...agentConfig('connector'), busy: connectorBusy },
       grounding: { ...agentConfig('grounding'), busy: groundingBusy },
     },
-    consolidating: false,
-    consolidateIntervalMs: 0,
     uptimeMs: Date.now() - EPOCH,
   }),
 })
@@ -210,7 +192,7 @@ function makeAgentSlot<A extends Agent>(role: string, promptVersion: () => Promi
   // Claude writes a session's transcript to disk only once the session has conversed; persisting at mere
   // CREATION (e.g. at warm-up) stores an id with no transcript → the next boot's --resume fails with
   // "No conversation found". So creation does NOT persist — the callers persist after an actual run.
-  const persist = () => { if (agent) answers.setAgentSession(PROJECT, role, 'claude-code', agent.session.sessionId?.(), ver, Date.now()) }
+  const persist = () => { if (agent) agentSessions.set(PROJECT, role, 'claude-code', agent.session.sessionId?.(), ver, Date.now()) }
   async function get(): Promise<A> {
     // A profile change since this agent was built means the process itself is wrong — stop it and fall through
     // to a fresh one. Checked HERE rather than pushed from the config handler because this is the only moment
@@ -220,12 +202,12 @@ function makeAgentSlot<A extends Agent>(role: string, promptVersion: () => Promi
       console.log(`[ica] ${role}: profile changed (${builtWith} → ${want}) → rebuilding`)
       try { agent.session.stop() } catch { /* it may already be gone */ }
       agent = null; building = null
-      answers.clearAgentSession(PROJECT, role)   // a transcript from another model is not ours to resume
+      agentSessions.clear(PROJECT, role)   // a transcript from another model is not ours to resume
     }
     if (agent) return agent
     if (!building) building = (async () => {
       ver = await promptVersion()                                            // deterministic hash of the instruction files
-      const prev = answers.getAgentSession(PROJECT, role)
+      const prev = agentSessions.get(PROJECT, role)
       const resumeId = prev?.promptVersion === ver ? prev.sessionId : undefined   // resume ONLY if instructions unchanged
       if (prev && prev.promptVersion !== ver) console.log(`[ica] ${role}: instructions changed → fresh session`)
       builtWith = configStamp()
@@ -239,7 +221,7 @@ function makeAgentSlot<A extends Agent>(role: string, promptVersion: () => Promi
     newSession() {   // a fresh session on demand (the UI button), even if instructions are unchanged
       const s = agent?.session
       if (s?.reset) { s.reset(); persist() }                                 // harness resets in place — keep the warm agent
-      else { try { s?.stop() } catch {}; agent = null; building = null; answers.clearAgentSession(PROJECT, role) }
+      else { try { s?.stop() } catch {}; agent = null; building = null; agentSessions.clear(PROJECT, role) }
       console.log(`[ica] ${role}: new session`)
     },
     async compact(h?: RunHandlers) { return (await get()).session.compact(h) },
@@ -320,16 +302,6 @@ function flushOutbox() {
   const pending = outbox; outbox = []
   for (const frame of pending) { try { hub!.send(frame) } catch { /* socket died mid-flush; the rest waits for the next reconnect */ } }
 }
-
-/** Does this answer match the shape the UI actually renders? Returns what is wrong, or '' if it is fine.
- *
- *  The renderer reads `headline.display`, `figures[]`, `table.columns/rows`, `sections[]`, `caveat`. An agent
- *  that writes `headline` as a STRING gets none of that: the card draws nothing, or stringifies an object and
- *  shows "[object Object]". That is not hypothetical — it reached a user, because nothing between the agent
- *  and the screen ever checked, and the answer was stored in the database in that state too.
- *
- *  Deliberately narrow: it flags shapes that CANNOT render, not answers it dislikes. A quiet answer is fine;
- *  an unrenderable one is a bug, and it should say so rather than reach the screen. */
 
 // A NARRATION BEAT, SENT SO A RECONNECT CANNOT LOSE IT.
 //
@@ -549,8 +521,8 @@ async function listSources(): Promise<string[]> {
 
 // The admin's GROUNDING agent — a COLD claude-code session (spun up on demand, never warmed) that builds
 // this project's value→id resolution indexes. Streamed RAW (PTY) to the admin's xterm, same machinery as the
-// modeler/connector. It reads data via the seam and persists via build(config) on grounding.mjs; it never
-// answers user questions and never touches the semantic model.
+// connector. It reads data via the seam and persists via build(config) on grounding.mjs; it never answers user
+// questions and never touches the graph.
 // ── DATASOURCE INDEX — admin-triggered ──────────────────────────────────────
 // The index (what tables and fields each source has) used to be a manual CLI run on the box, which meant a new
 // project could not be made useful without someone with shell access. Same builder, driven from the console,
@@ -608,7 +580,7 @@ async function handleGrounding(from: any, rebuild = false) {
 }
 
 // The admin's CONNECTOR agent — a claude-code session streamed RAW (PTY) to the admin's xterm (no
-// narration; the admin just watches it work). Same ICA machinery as analyst/modeler. The session persists,
+// narration; the admin just watches it work). Same ICA machinery as the analyst. The session persists,
 // so the admin's follow-up replies continue the same conversation.
 async function handleConnector(text: string, from: any) {
   if (!text.trim()) return
@@ -626,7 +598,7 @@ async function handleConnector(text: string, from: any) {
 }
 
 // ── Interactive terminal passthrough (raw PTY <-> UI xterm) ───────────────────
-// Any UI can open a LIVE, TYPEABLE terminal into a claude agent's PTY (analyst + modeler in the user UI,
+// Any UI can open a LIVE, TYPEABLE terminal into a claude agent's PTY (the analyst in the user UI,
 // connector in the admin). This is how a user runs `/login` straight from the browser xterm — no SSH, and
 // copy/paste just works. attach = replay the current screen + stream every byte; input = raw keystrokes/paste
 // back to the PTY. claude auth is SHARED across all three agents (one $HOME on the volume), so a login in any
@@ -756,8 +728,9 @@ async function handle(payload: any, from: any) {
 // a socket being open is not the same as the engine being able to actually answer.
 async function selfCheck(): Promise<{ ok: boolean; detail: string }> {
   try {
-    indexStore.putNode({ id: 'meta:self-check', kind: 'meta', label: 'self-check', props: { at: Date.now() } })
-    if (!indexStore.getNode('meta:self-check')) return { ok: false, detail: 'store read-back failed' }
+    // The stores open and answer: the datasource index, and the graph once the manager has said which dialects exist.
+    dataSourceStats(indexStore)
+    agentSessions.get(PROJECT, 'self-check')
     if (!existsSync(WORKSPACE)) return { ok: false, detail: `workspace missing: ${WORKSPACE}` }
     let sources: number | string = 'starting'
     try { const r = await fetch(`${DATASOURCE}/sources`, { signal: AbortSignal.timeout(4000) }); sources = (((await r.json()) as { sources?: unknown[] })?.sources ?? []).length } catch { /* manager may still be warming — not fatal */ }
@@ -883,9 +856,9 @@ setInterval(() => { if (hub?.readyState === WebSocket.OPEN) hub.send(JSON.string
 // The ESSENTIAL agents are pre-spawned at boot, not lazily on the first question. On a Fly VM that
 // suspends/resumes to save money, a lazily-spawned claude costs ~10-15s on the FIRST question after a
 // cold resume; warming here pays that once, at boot, so questions are always fast. (With Fly *suspend* =
-// memory snapshot, warm agents even survive the suspend/resume — no re-spawn.) Only these four are warmed:
-// analyst (answers), connector (data sources), modeler (consolidation), reflex (front door). Other
-// agents stay on-demand. Fire-and-forget + per-agent logs so they're visible in the boot log; failures are
+// memory snapshot, warm agents even survive the suspend/resume — no re-spawn.) Only the analyst (builds what the
+// graph lacks) and the connector (data sources) are warmed; composers start with their conversation, and the
+// grounding agent on demand. Fire-and-forget + per-agent logs so they're visible in the boot log; failures are
 // non-fatal (the agent just falls back to lazy spawn on first use).
 // One turn on a disposable claude session, purely to prove the box's credential authenticates. Throws on
 // failure so the readiness banner shows it, and names the specific "not logged in" case: that string is what
@@ -931,11 +904,6 @@ async function warmEssentialAgents() {
     // and gets restarted constantly, so this would be a pointless tax on the inner loop.
     ...(credGap.length === 0 && isFleetBox() ? [warm('credential', verifyBoxCredential())] : []),
     warm('connector', connectorSlot.get().then(a => a.session.warmup?.())),
-    // The concept index is an agent-shaped cost even though it is not an agent: every concept's surface forms
-    // have to be embedded before the first question can be retrieved for, it is cached in memory only, and so
-    // it was rebuilt on the first question after every restart — in the foreground, 27s, while the user waited.
-    // Warming it here moves that onto the boot where it belongs and off the question that happened to be first.
-
   ])
   // ONE unmistakable line the user can look for: the engine has finished booting and every essential agent
   // is up (or which one failed). "Fully ready" vs "ready with warnings" — never ambiguous.
@@ -975,7 +943,7 @@ let profileSettled: (() => void) | null = null
 const profileReady = new Promise<void>((res) => { profileSettled = res })
 function settleProfile() { profileSettled?.(); profileSettled = null }
 
-// Give the datasource manager a moment to come up (analyst/modeler read its /sources at create), then warm.
+// Give the datasource manager a moment to come up (the analyst reads its /sources at create), then warm.
 setTimeout(() => {
   Promise.race([profileReady, new Promise<void>((r) => setTimeout(r, 5_000).unref?.())])
     .then(() => warmEssentialAgents())

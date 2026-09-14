@@ -36,7 +36,7 @@ ENV PNPM_HOME=/usr/local/share/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 # claude-code refuses --dangerously-skip-permissions when running as root UNLESS it's told it's in a
 # sandbox. A Fly Machine is a Firecracker microVM (a real sandbox), and the harness always spawns claude
-# with that flag — so set this so the analyst/connector/modeller can run as the container's root user.
+# with that flag — so set this so the analyst/connector/grounding agents can run as the container's root user.
 ENV IS_SANDBOX=1
 RUN printf 'onlyBuiltDependencies[]=@anthropic-ai/claude-code\n' >> /root/.npmrc \
     && pnpm add -g @anthropic-ai/claude-code tsx \
@@ -57,14 +57,6 @@ COPY vm/apps/ ./apps/
 # honors it and compiles better-sqlite3/node-pty/esbuild from source (build tools above).
 RUN pnpm install --frozen-lockfile
 
-# ── Bake the embedding model into the image ─────────────────────────────────
-# bge-small-en-v1.5 (~130MB, via fastembed) drives the reflex's semantic reuse. Baked here so the engine NEVER
-# downloads it at runtime — instant, immutable, and present even on a source-only fast-roll. sqlite-vec + the
-# onnxruntime-node binary already installed above (onnxruntime-node is allow-listed for its postinstall).
-ENV FASTEMBED_CACHE_DIR=/opt/fastembed
-RUN cd /app/apps/engine \
-    && node --input-type=module -e "const {FlagEmbedding,EmbeddingModel}=await import('fastembed'); const m=await FlagEmbedding.init({model:EmbeddingModel.BGESmallENV15,cacheDir:'/opt/fastembed'}); for await (const _ of m.passageEmbed(['warm'])){}; console.log('embedding model baked')"
-
 # An interactive shell (`fly ssh console`, `docker exec -it`) does NOT inherit the image's ENV PATH, so the
 # agent CLIs are not found when someone comes in to run a login by hand:
 #   - global pnpm bins  → claude, tsx           (/usr/local/share/pnpm)
@@ -82,10 +74,11 @@ RUN printf 'export PATH="/usr/local/share/pnpm:/app/apps/engine/node_modules/.bi
 
 # ── Volume mount point (persisted across stop/start) ────────────────────────
 # Everything stateful lives here so it survives machine restarts: per project, ONE state home under
-# state/<project>/ (the workspace incl. programs + the DBs project.sqlite/grounding.sqlite/answers.sqlite),
-# plus the datasource registry + connector-written bridges (datasources/). A fresh machine starts with these
-# empty — sources are added at runtime via the connector agent. Paths are set by fly.ts (ENGINE_STATE_DIR /
-# DATASOURCE_DATA_DIR / DATASOURCES_DIR).
+# state/<project>/ — db/ (graph.sqlite: programs, memory, data sessions; datasource-index.sqlite: the datasource
+# schema index; grounding.sqlite; agent-sessions.sqlite: which harness session each agent resumes), workspace/ and
+# sessions/<id>/ (the agents' working directories) — plus the datasource registry + connector-written bridges
+# (datasources/). A fresh machine starts with these empty — sources are added at runtime via the connector agent.
+# Paths are set by fly.ts (ENGINE_STATE_DIR / DATASOURCE_DATA_DIR / DATASOURCES_DIR).
 RUN mkdir -p /app/data/state /app/data/datasources
 VOLUME ["/app/data"]
 

@@ -226,7 +226,7 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
       answer = partsText(res?.data?.parts ?? res?.parts ?? [])
       await pollMessages(h)                                            // final scan (part-id dedupe) — catch an event that landed after the last poll
       // Cost visibility: log this turn's token usage + $cost. The prompt prefix identifies the caller
-      // (reflex vs narrator, etc.). opencode's message info carries tokens{input,output,reasoning,cache} + cost.
+      // (one agent vs another). opencode's message info carries tokens{input,output,reasoning,cache} + cost.
       try {
         const info: any = (res as any)?.data?.info ?? (res as any)?.info
         if (info) { const tk = info.tokens ?? {}

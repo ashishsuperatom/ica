@@ -1,89 +1,62 @@
-# Enterprise Engine — build plan (reference)
+# Engine — plan (reference)
 
-An abstract engine that **understands an enterprise and can simulate it** — accurately and fast.
-Nothing hardcoded for any dataset. This doc is the reference for *what is built* vs *what is not*.
-We do NOT build it all at once. We build in order, starting with the **ICA**.
-
----
-
-## The core loop
-
-A question comes in. The **ICA** (Intelligent Coding Agent) answers it, given four inputs:
-- **(a) data sources** — the *world state* (never touched directly; only via `query(dataSourceId, query|call, params)` over the hub or a localhost http wrapper).
-- **(b) knowledge graph** — business rules + tribal knowledge + user preferences.
-- **(c) the concept layer** — a partial model of the data sources; *always* used with the data sources; improved after every question.
-- **(d) the partial UNIT library** — small computations, each a self-sufficient `situation → next-step` (associative memory).
-
-The ICA: **analyse → build the UI → validate it's what's expected → commit the answer.** Then it **improves**:
-- the **concepts** (general ideas of computation — code + metadata, time-versioned),
-- any **UNIT** (change / merge / replace / split).
-
-When a new question **exactly matches** existing work → the fast **SYS-1** agent answers directly (no ICA).
-
-## One invariant: everything is three things
-
-Every node — a concept, a unit, a program — always has:
-- **(a) meaning** — for organization / search / human comprehension.
-- **(b) computation** — JS code that fetches data or computes.
-- **(c) UI** — how the computed data is represented. *This is really part (b.2) of the computation*, not a separate thing.
-
-Everything is **code + metadata**. The metadata is the concept "meaning" as normally understood; we *also* keep the code implementation.
-
-## Layers
-
-1. **Data fetching & transformation** — queries / REST / small transforms. **No abstraction that hides anything.** Raw and inspectable.
-2. **Concept layer** — flat, time-versioned concepts: general ideas of computation (find/compute/present + optional data-model facets).
-3. **Superatom model** — UNITs and PROGRAMs (as designed). Later: a **simulation engine**.
-
-## Storage (SQLite)
-
-- **users.sqlite** — users of the system: roles, permissions, everything user-related. Kept **separate** from project data.
-- **project.sqlite** — everything about one project: UNITs, concepts, programs, knowledge, runs. (We already have a start: `engine.db` = messages/programs/sessions — evolve it.)
-- **DAG + data live in SQLite.** When a node needs code to run, store the **code path/id** in a column (code on disk = truth, SQLite = the findable index).
-- **Data sources** may be SQLite files in a `datasources/` folder — but we **never see or connect to them directly**. Same as if hosted elsewhere. Access is *only* `query(dataSourceId, …)` over the websocket hub or a localhost http wrapper. This is the *world-model* database.
+The engine turns a person's question into an answer over their organisation's data. It runs one project, connects
+out to the hub over WebSocket, and drives coding agents (ICAs) that write and call **programs** in the program graph.
+The design — programs, concepts, shapes, memory, expectations, sessions — is **`docs/program-graph.md`**. This file
+is what is built and what is next.
 
 ---
 
-## The ICA module (start here — most important, most complex)
+## The graph (`vm/packages/graph`)
 
-A module that runs an agent, with **harness and model passed separately**:
+- A **program** is JavaScript, identified by the hash of its content; a **name** points at a hash.
+- A **concept** is a program that reads a data source. A program reads other programs.
+- Every program returns a `value`, `rows`, a `relation` or an `answer`. A relation has a **shape**: its dimensions,
+  measures and time.
+- Every call is recorded: **memory**, **expectations**, **decisions**.
+- Each conversation has a **data session**. Its steps are states and the answers on them.
 
-| variant | harness | model | auth default | override |
-|---|---|---|---|---|
-| `cc-sonnet-5` | Claude Code | sonnet-5 | **subscription** | apiKey → OpenRouter |
-| `opencode-sonnet-5` | opencode (server module, no TUI) | sonnet-5 | **go/zen subscription** | apiKey → OpenRouter |
-| `pi-sonnet-5` / `pi-deepseek-v4-flash` | pi agent (headless SDK) | any | OpenRouter | — |
+## Agents (`agents/`)
 
-- **Claude Code** has no JSON mode → we **drive it through a terminal/PTY** and emulate everything: feed the prompt, parse the stream, detect when it **asks a question** (answer it), detect **completion**. Subscription by default; an apiKey routes via OpenRouter (`ANTHROPIC_BASE_URL`). *This is the hard part.* (Note: CC's `-p --output-format stream-json` headless mode exists as a possible simpler path — evaluate, but the user's call is terminal-emulation first.)
-- **opencode** & **pi** have proper headless SDKs → use them directly. For opencode, discard the terminal UI and use the **server module**.
+| agent | job |
+|---|---|
+| composer | one per conversation. Turns a question into a message on the person's data session (`./ask`), defines programs on existing ones, or `./escalate`s |
+| analyst | builds the concepts and programs the graph lacks, then answers with `./ask` |
+| narrator | one line of live narration while work runs |
+| connector | the admin's agent for connecting a data source (writes, tests and registers a bridge) |
+| grounding | builds value → id resolution for a source |
 
-Uniform interface (all adapters implement it): `createICA({harness, model, apiKey?}).run(prompt, {cwd, onEvent, answer})`.
+Harness, provider and model per agent: `config/default.json`, overridable per project.
+
+## Tools
+
+Generated into each working directory by `ica/workspace.ts`; each explains itself with `--help`.
+
+- the graph — `./catalog ./define ./try ./ask ./find ./members`
+- the data — `./sources ./query ./introspect ./find-schema ./resolve`
+- hand-off — `./escalate`
+
+## State
+
+Under `~/.superatom/state/<projectId>/` (`ENGINE_STATE_DIR`):
+
+- `db/` — `graph.sqlite` (programs, memory, sessions), `datasource-index.sqlite` (the datasource schema index read
+  by `./find-schema`, `vm/packages/datasource-index`), `grounding.sqlite`, `agent-sessions.sqlite` (which harness
+  session each agent resumes). Outside every agent's cwd.
+- `workspace/` — the analyst, connector and grounding agents' directory.
+- `sessions/<sessionId>/` — one conversation's directory, the composer's.
+
+Committed per project: `vm/projects/<projectId>/datasources/`.
+
+## Surfaces
+
+The engine emits `session:step` to surfaces, and `analyst:answer` (converted from the step) beside it. Surfaces
+talk only to the project's Durable Object.
 
 ---
 
-## Build status
+## Next
 
-**Reusable from the current repo (port, don't rewrite):**
-- `query(dataSourceId, sql, params)` datasource seam (`@superatom/scaffold` datasource.ts) — the ONLY data access.
-- The websocket hub (Cloudflare DO) + localhost http datasource-manager.
-- SQLite project store (`engine.db`) — evolve schema to hold concepts + units.
-- The pi harness pattern (`unit-author.mjs` / `pi-engine.ts` via `@earendil-works/pi-coding-agent`).
-- fast-router (SYS-1 search/match) — the exact-match fast path.
-
-**To build (in order):**
-1. **ICA module** — harness×model abstraction. **Claude Code adapter first** (PTY), then pi, then opencode. ← *starting now*
-2. Semantic-model layer — the DAG (meaning/rules/deps/actions/effects) in SQLite, code+metadata+UI per node.
-3. Superatom layer — UNITs + PROGRAMs on the new store; associative `situation → step` memory.
-4. SYS-1 fast path — exact-match → run without ICA (wire fast-router).
-5. UI layer — each compute node carries its UI element; programs compose them.
-6. users.sqlite — roles/permissions.
-7. (later) simulation engine.
-
-**Disposition of current code:** keep the seams above; everything dataset-specific or superseded is deleted as it's replaced (git holds it). We delete *as we port*, not up front, so the branch always builds.
-
----
-
-## Working agreement
-- Nothing hardcoded per dataset — the engine is generic; TotalGroup is just one connected world.
-- Build one layer at a time, starting with the ICA (Claude Code first).
-- Every node: meaning + computation + UI. Everything is code + metadata, indexed in SQLite.
+5. **Surfaces render `session:step`** — web and iOS draw the step's state and answer directly.
+6. **End to end on local NetSuite** — a question through composer → escalate → analyst → graph → surface.
+7. **The Fusion5 scenarios** — the questions in `docs/program-graph.md` §17, answered and checked.

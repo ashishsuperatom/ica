@@ -294,6 +294,37 @@ export class GraphStore {
     return r?.lineage ?? null
   }
 
+  // ── reading it back, for an admin looking in ──────────────────────────────────────────────────────────
+
+  /** How much the graph holds. */
+  counts(): { programs: number; names: number; calls: number; failedCalls: number; observations: number; sessions: number; steps: number } {
+    const n = (sql: string) => Number((this.db.prepare(sql).get() as any).n)
+    return {
+      programs: n('SELECT COUNT(*) AS n FROM program'), names: n('SELECT COUNT(*) AS n FROM name WHERE valid_to IS NULL'),
+      calls: n('SELECT COUNT(*) AS n FROM call'), failedCalls: n('SELECT COUNT(*) AS n FROM call WHERE error IS NOT NULL'),
+      observations: n('SELECT COUNT(*) AS n FROM observation'),
+      sessions: n('SELECT COUNT(*) AS n FROM session'), steps: n('SELECT COUNT(*) AS n FROM session_step'),
+    }
+  }
+
+  /** Calls newest first — those a person or an agent made (not the calls programs made inside them) unless asked. */
+  recentCalls(q: { name?: string; failed?: boolean; nested?: boolean; limit?: number; offset?: number } = {}): { total: number; calls: CallRecord[] } {
+    const where = [...(q.nested ? [] : ['parent_id IS NULL']), ...(q.name ? ['name = ?'] : []), ...(q.failed ? ['error IS NOT NULL'] : [])]
+    const sql = where.length ? `WHERE ${where.join(' AND ')}` : ''
+    const bind = q.name ? [q.name] : []
+    const total = Number((this.db.prepare(`SELECT COUNT(*) AS n FROM call ${sql}`).get(...bind) as any).n)
+    const calls = (this.db.prepare(`SELECT * FROM call ${sql} ORDER BY at DESC LIMIT ? OFFSET ?`).all(...bind, q.limit ?? 100, q.offset ?? 0) as any[]).map(row)
+    return { total, calls }
+  }
+
+  /** Data sessions, most recently active first. */
+  listSessions(limit = 200): Array<{ id: string; who: Record<string, unknown> | null; title: string | null; currentStep: number | null; steps: number; createdAt: number; updatedAt: number }> {
+    return (this.db.prepare(`SELECT s.*, (SELECT COUNT(*) FROM session_step t WHERE t.session_id = s.id) AS steps
+                             FROM session s ORDER BY s.updated_at DESC LIMIT ?`).all(limit) as any[])
+      .map((r) => ({ id: r.id, who: r.who ? JSON.parse(r.who) : null, title: r.title, currentStep: r.current_step == null ? null : Number(r.current_step),
+                     steps: Number(r.steps), createdAt: Number(r.created_at), updatedAt: Number(r.updated_at) }))
+  }
+
   getCall(id: string): CallRecord | null {
     const r: any = this.db.prepare('SELECT * FROM call WHERE id = ?').get(id)
     return r ? row(r) : null

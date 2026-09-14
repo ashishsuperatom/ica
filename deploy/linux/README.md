@@ -15,13 +15,15 @@ Watch it connect: `pm2 logs sa-engine` — look for `ENGINE FULLY READY`.
 To have it come back after a machine reboot: run the command `pm2 startup` prints, once.
 
 ## What runs (all under pm2)
-- `sa-opencode` — the reflex model server (`:4096`, localhost only)
+- `sa-opencode` — the opencode model server for agents on the opencode harness (`:4096`, localhost only)
 - `sa-manager`  — the datasource manager (`:4000`, localhost only)
 - `sa-engine`   — the engine; connects **out** to the hub over WebSocket (no inbound ports)
 
 ## State & data sources
-- Everything the engine generates lives in `./state/<project>/` (workspace + `project.sqlite` /
-  `grounding.sqlite` / `answers.sqlite`) — the same unified layout as Fly.
+- Everything the engine generates lives in `./state/<project>/` — `run.sh` sets `ENGINE_STATE_DIR` there; the
+  engine's own default is `~/.superatom/state`. Per project: `db/` (`graph.sqlite` programs, memory, sessions ·
+  `datasource-index.sqlite` datasource schema index · `grounding.sqlite` · `agent-sessions.sqlite` which harness
+  session each agent resumes), `workspace/` and `sessions/<id>/` — the same layout as Fly.
 - Data sources are connected at runtime via the admin's **connector agent**, or by dropping a bridge
   into `./datasources/` and registering it. This zip carries **no secrets and no specific project**.
 

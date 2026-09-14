@@ -34,8 +34,8 @@ export interface SessionOpts {
   bin?: string          // claude-code only: the claude binary
   resumeId?: string     // resume a prior harness session (per project/agent) — harness-specific
   noTools?: boolean     // opencode: disable ALL tools — a pure text completion, no coding-agent tool schemas
-  system?: string       // opencode: REPLACE the harness's default coding system prompt with this one (well-cached; keeps the per-turn prompt small). For pure-LLM agents (narrator/reflex) that don't need the agent scaffolding.
-  // The AUTHORITATIVE authoring reference (program contract + unit interface + one canonical example) to install
+  system?: string       // opencode: REPLACE the harness's default coding system prompt with this one (well-cached; keeps the per-turn prompt small). For pure-text agents (the narrator) that don't need the agent scaffolding.
+  // The AUTHORITATIVE reference (the agent's role + how programs are written, agents/shared-prompts) to install
   // into the system prompt of a CODING agent (composer/analyst), so it never reads engine source or other
   // programs to learn the shape. Harness-agnostic: each harness delivers it its own way and reports how via
   // Session.referencePlacement; if a harness can't, it degrades to 'file' and the caller writes it to the workspace.

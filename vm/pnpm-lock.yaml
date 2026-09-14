@@ -8,15 +8,15 @@ importers:
 
   .:
     dependencies:
+      '@superatom/datasource-index':
+        specifier: workspace:*
+        version: link:packages/datasource-index
       '@superatom/grounding':
         specifier: workspace:*
         version: link:packages/grounding
       '@superatom/introspect':
         specifier: workspace:*
         version: link:packages/introspect
-      '@superatom/node-store':
-        specifier: workspace:*
-        version: link:packages/node-store
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
@@ -51,6 +51,9 @@ importers:
       '@opencode-ai/sdk':
         specifier: ^1.18.0
         version: 1.18.0
+      '@superatom/datasource-index':
+        specifier: workspace:*
+        version: link:../../packages/datasource-index
       '@superatom/graph':
         specifier: workspace:*
         version: link:../../packages/graph
@@ -60,9 +63,6 @@ importers:
       '@superatom/introspect':
         specifier: workspace:*
         version: link:../../packages/introspect
-      '@superatom/node-store':
-        specifier: workspace:*
-        version: link:../../packages/node-store
       '@xterm/addon-serialize':
         specifier: ^0.14.0
         version: 0.14.0
@@ -94,6 +94,16 @@ importers:
 
   packages/agent-contract: {}
 
+  packages/datasource-index:
+    dependencies:
+      better-sqlite3:
+        specifier: ^11.10.0
+        version: 11.10.0
+    devDependencies:
+      '@types/better-sqlite3':
+        specifier: ^7.6.0
+        version: 7.6.13
+
   packages/graph: {}
 
   packages/grounding:
@@ -107,19 +117,6 @@ importers:
         version: 7.6.13
 
   packages/introspect: {}
-
-  packages/node-store:
-    dependencies:
-      better-sqlite3:
-        specifier: ^11.10.0
-        version: 11.10.0
-      sqlite-vec:
-        specifier: ^0.1.9
-        version: 0.1.9
-    devDependencies:
-      '@types/better-sqlite3':
-        specifier: ^7.6.0
-        version: 7.6.13
 
 packages:
 
@@ -1208,34 +1205,6 @@ packages:
 
   simple-get@4.0.1:
     resolution: {integrity: sha512-brv7p5WgH0jmQJr1ZDDfKDOSeWWg+OVypG99A/5vYGPqJ6pxiaHLy8nxtFjBA7oMa01ebA9gfh1uMCFqOuXxvA==}
-
-  sqlite-vec-darwin-arm64@0.1.9:
-    resolution: {integrity: sha512-jSsZpE42OfBkGL/ItyJTVCUwl6o6Ka3U5rc4j+UBDIQzC1ulSSKMEhQLthsOnF/MdAf1MuAkYhkdKmmcjaIZQg==}
-    cpu: [arm64]
-    os: [darwin]
-
-  sqlite-vec-darwin-x64@0.1.9:
-    resolution: {integrity: sha512-KDlVyqQT7pnOhU1ymB9gs7dMbSoVmKHitT+k1/xkjarcX8bBqPxWrGlK/R+C5WmWkfvWwyq5FfXfiBYCBs6PlA==}
-    cpu: [x64]
-    os: [darwin]
-
-  sqlite-vec-linux-arm64@0.1.9:
-    resolution: {integrity: sha512-5wXVJ9c9kR4CHm/wVqXb/R+XUHTdpZ4nWbPHlS+gc9qQFVHs92Km4bPnCKX4rtcPMzvNis+SIzMJR1SCEwpuUw==}
-    cpu: [arm64]
-    os: [linux]
-
-  sqlite-vec-linux-x64@0.1.9:
-    resolution: {integrity: sha512-w3tCH8xK2finW8fQJ/m8uqKodXUZ9KAuAar2UIhz4BHILfpE0WM/MTGCRfa7RjYbrYim5Luk3guvMOGI7T7JQA==}
-    cpu: [x64]
-    os: [linux]
-
-  sqlite-vec-windows-x64@0.1.9:
-    resolution: {integrity: sha512-y3gEIyy/17bq2QFPQOWLE68TYWcRZkBQVA2XLrTPHNTOp55xJi/BBBmOm40tVMDMjtP+Elpk6UBUXdaq+46b0Q==}
-    cpu: [x64]
-    os: [win32]
-
-  sqlite-vec@0.1.9:
-    resolution: {integrity: sha512-L7XJWRIBNvR9O5+vh1FQ+IGkh/3D2AzVksW5gdtk28m78Hy8skFD0pqReKH1Yp0/BUKRGcffgKvyO/EON5JXpA==}
 
   standardwebhooks@1.1.1:
     resolution: {integrity: sha512-bCbX9ZEyFkWPsRz7Bl3NuQUJohmwGSev/yhr7vhaGPlc4AfIrspIRa6cPTBuI1ItmrTDJ4d/S2hCsfe4+vQGnQ==}
@@ -2434,29 +2403,6 @@ snapshots:
       decompress-response: 6.0.0
       once: 1.4.0
       simple-concat: 1.0.1
-
-  sqlite-vec-darwin-arm64@0.1.9:
-    optional: true
-
-  sqlite-vec-darwin-x64@0.1.9:
-    optional: true
-
-  sqlite-vec-linux-arm64@0.1.9:
-    optional: true
-
-  sqlite-vec-linux-x64@0.1.9:
-    optional: true
-
-  sqlite-vec-windows-x64@0.1.9:
-    optional: true
-
-  sqlite-vec@0.1.9:
-    optionalDependencies:
-      sqlite-vec-darwin-arm64: 0.1.9
-      sqlite-vec-darwin-x64: 0.1.9
-      sqlite-vec-linux-arm64: 0.1.9
-      sqlite-vec-linux-x64: 0.1.9
-      sqlite-vec-windows-x64: 0.1.9
 
   standardwebhooks@1.1.1:
     dependencies:

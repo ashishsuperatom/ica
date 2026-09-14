@@ -7,11 +7,11 @@
 //
 // Progress is reported through `log` rather than printed, so the same run can go to a terminal or to an admin's
 // screen without the builder knowing which.
-import { NodeStore, putEntries, applyRowCounts, dataSourceStats, ensureDataSourceIndex} from '@superatom/node-store'
+import { DataSourceIndex, putEntries, applyRowCounts, dataSourceStats, ensureDataSourceIndex } from '@superatom/datasource-index'
 import { getIndexer } from './indexer.js'
 
 export interface BuildOpts {
-  store: NodeStore
+  store: DataSourceIndex
   managerUrl: string
   seedTables?: Record<string, string[]>   // per-source table hints (a source with no catalog to enumerate)
   only?: string                           // one source id, else every source the manager knows
@@ -41,7 +41,7 @@ export async function buildDatasourceIndex(opts: BuildOpts): Promise<BuildResult
     return j.rows || []
   }
 
-  // THE SCHEMA MUST EXIST BEFORE ANYTHING TOUCHES IT. Every read and write helper in node-store calls this
+  // THE SCHEMA MUST EXIST BEFORE ANYTHING TOUCHES IT. Every read and write helper in @superatom/datasource-index calls this
   // first, but the two statements below go at the table directly — the resume read and the wipe — so on a
   // database that has never held an index, the build died on its first act with "no such table:
   // datasource_index". Invisible for as long as every box happened to have an old table already; the first

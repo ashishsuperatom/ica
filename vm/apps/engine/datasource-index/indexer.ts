@@ -6,7 +6,7 @@
 //
 // `source` is the datasource name — BOTH the query id and the SOURCE segment of every index key. Container/
 // field names are preserved EXACTLY as the source spells them.
-import { dsiKey, type DataSourceEntry } from '@superatom/node-store'
+import { dsiKey, type DataSourceEntry } from '@superatom/datasource-index'
 
 // ── The indexing / enrichment pipeline ──────────────────────────────────────────────────────────────────────
 // IMPLEMENTED now (this file + the runner) — Steps 1–3. The system is fully usable on these alone:

@@ -5,7 +5,7 @@
 // system prompt in ./SYSTEM.md, reaches data ONLY through the data seam (data/query.mjs → the datasource-manager),
 // and persists what it discovers by calling build(config) on the grounding seam (grounding/grounding.mjs). It is COLD:
 // spun up only when the admin triggers it, never warmed at boot. Its role file is copied in as ./grounding/GROUNDING.md
-// so it never clobbers the analyst/modeler/connector role files that share the workspace.
+// so it never clobbers the other agents' files that share the workspace.
 
 import './generate-system.js'   // FIRST: (re)writes ./SYSTEM.md from generate-system.ts before it's read below
 import { readFile, cp, mkdir } from 'node:fs/promises'
@@ -44,7 +44,7 @@ export async function createGroundingAgent(opts: GroundingAgentOpts): Promise<Gr
   const model = opts.ica?.model ?? cfg.model
   const provider = opts.ica?.provider ?? cfg.provider
   const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl })
-  // Distinct filename so it never clobbers the analyst/modeler/connector role files in the shared workspace.
+  // Distinct filename so it never clobbers the other agents' files in the shared workspace.
   await cp(join(__dirname, 'SYSTEM.md'), join(cwd, 'grounding/GROUNDING.md'))
 
   const session = createSession(harness, { cwd, model, provider, resumeId: opts.ica?.resumeId })

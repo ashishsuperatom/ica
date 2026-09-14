@@ -2,11 +2,11 @@
   "name": "superatom-vm",
   "private": true,
   "packageManager": "pnpm@9.0.0",
-  "//dependencies": "The root imports none of these. They are declared so pnpm links them into the ROOT node_modules, which is an ancestor of every project home under ENGINE_STATE_DIR \u2014 that is how agent-written units resolve `@superatom/*`. Agents write those import lines themselves, so the path cannot be baked in the way the seams bake theirs. Delete these and every generated unit stops resolving.",
+  "//dependencies": "The root imports none of these. The data seams the engine writes into each project home import them; they resolve through the node_modules link ica/workspace.ts creates there, and from this root when the state directory sits inside the repository.",
   "dependencies": {
     "@superatom/grounding": "workspace:*",
     "@superatom/introspect": "workspace:*",
-    "@superatom/node-store": "workspace:*"
+    "@superatom/datasource-index": "workspace:*"
   },
   "scripts": {
     "start": "pm2 start ../ecosystem.config.cjs",
@@ -26,8 +26,7 @@
       "protobufjs",
       "@google/genai",
       "opencode-ai",
-      "@openai/codex",
-      "onnxruntime-node"
+      "@openai/codex"
     ]
   },
   "//devDependencies": "The typecheck belongs to the workspace, not to one app inside it: tsconfig.json at this root covers apps/ and packages/, so the compiler and the Node types have to resolve from here.",
