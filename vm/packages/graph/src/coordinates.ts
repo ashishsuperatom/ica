@@ -59,8 +59,6 @@ export interface Coordinates {
   limitPer?: string[]
   /** The currency amounts are reported in, converted at rates as at the span's end or the instant asked. */
   currency?: string
-  /** Measures shown in another unit: `{ hours: 'day' }`. See units.ts. */
-  units?: Record<string, string>
   /** Instead of aggregating: the rows themselves — every dimension, label, measure column and the time, one row per
    *  row of the relation, filtered as asked. The records behind a number. Needs an order and a limit. */
   detail?: { limit: number }
@@ -126,8 +124,8 @@ export interface Plan {
   paths: Record<string, string>
   /** Names in `by` that come with a label. */
   labelled: string[]
-  /** Measures whose unit is the reporting currency rather than their declared unit. */
-  units: Record<string, string>
+  /** Money measures converted to a reporting currency, and that currency — their unit in the result. */
+  converted: Record<string, string>
   /** For detail: the columns of the rows, in order. */
   detail?: Array<{ name: string; role: 'dimension' | 'label' | 'measure' | 'time'; unit?: string }>
   /** A limit or having was pushed into the statement, so parts cannot be checked against the whole. */
@@ -248,7 +246,7 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
       refuse(`"${rateSource.name}" is applied per row, so it needs dimensions "effective_from" and "effective_to"`)
     }
   }
-  const units: Record<string, string> = converting ? Object.fromEntries(moneyMeasures.map((m) => [m, c.currency!])) : {}
+  const converted: Record<string, string> = converting ? Object.fromEntries(moneyMeasures.map((m) => [m, c.currency!])) : {}
   for (const m of Object.keys(having)) if (!measures.includes(m)) refuse(`having on "${m}" needs it among the measures asked for`)
   const orderable = [...by, ...splits.filter(hasLabel).map((d) => `${d}_label`), ...measures]
   if (!c.detail) for (const o of c.order ?? []) if (!orderable.includes(o.by)) refuse(`cannot order by "${o.by}" — it is not in the result: ${orderable.join(', ')}`)
@@ -482,7 +480,7 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
     }
   }
   /** What every plan carries, whichever way it was made. */
-  const common = () => ({ caveats, grains: grainSet, units, paths: Object.fromEntries([...paths].map(([k, v]) => [k, v.alias])),
+  const common = () => ({ caveats, grains: grainSet, converted, paths: Object.fromEntries([...paths].map(([k, v]) => [k, v.alias])),
                           labelled: by.filter((d) => !grainSet.has(d) && hasLabel(d)) })
 
   // ── the rows themselves ───────────────────────────────────────────────────────────────────────────────

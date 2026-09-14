@@ -76,6 +76,19 @@ through — is.
 - **We design our own model**, shaped so that LLM agents write it well and our cases are well represented.
   We are not adopting Apache Ossie or another standard at this stage.
 
+### Decided — why programs, and not only a semantic model
+
+The people asking are not data analysts or data engineers. They make decisions. They need the analyst's correctness
+and power, and more than a table: an explanation of what they are looking at, what it means, and what they could
+do next.
+
+A semantic model answers the analytical part — the right number, sliced and compared. It is one part of the
+decision engine. The program a person's question starts is richer: it uses the semantic model's relations and
+programs for its numbers, and it also produces the view the person sees, the narration of that view and its
+explanation, and the next steps they can take from it. And much of what an organisation needs does not fit a
+semantic model at all — resolution, staged decisions, strategies, mechanisms — so the model is extended with
+programs rather than bounded by what a model can express.
+
 ### Reasoning
 
 The intent-program design had the right *unit* — a JavaScript program — and the wrong *shape*: programs
@@ -1188,7 +1201,7 @@ Two things are being built here, and in production only one of them can change.
   memory. It knows nothing about any organisation. It changes only by its own development.
 - **The semantic model** is each organisation's: its concepts and programs, the shapes and descriptions of its
   relations, and its settings — which calendar, which time zone, which exchange rates and how they apply, which
-  reporting currency, which unit conversions. The agent builds it, by discovering how that organisation's data and
+  reporting currency. The agent builds it, by discovering how that organisation's data and
   practice work, and changes it through the engine's own interface: `define`, and settings.
 
 So a convention is never written into the engine. How an organisation converts currency — at the end of a period,
@@ -1236,9 +1249,8 @@ each corresponds to elsewhere and what it must not be confused with.
 | **detail** | the rows behind a number, not aggregated | drill members | — | — | *members* |
 | **members** | which members of a dimension match what was typed | — | dimension values | — | *detail* |
 | **catalog** | what programs exist and what each relation can be asked | meta endpoint | `list_metrics`, `list_dimensions` | — | memory of calls |
-| **currency** (on a measure) | the dimension holding each row's currency code | — | — | — | *units* |
-| **units** (in a question) | a measure shown in another unit by a factor | — | — | — | *currency* |
-| **setting** | an engine-wide value by name — calendar, timezone, exchange rates, currency, units | — | — | — | an *assumption* a program declares |
+| **currency** (on a measure) | the dimension holding each row's currency code | — | — | — | a unit |
+| **setting** | an organisation-wide value by name — calendar, timezone, exchange rates, currency | — | — | — | an *assumption* a program declares |
 | **checks** | how much extra reading checks may cost: thorough or light | — | — | — | a *verification* a program writes |
 | **timeZone** (on a shape) | the zone the time column's moments are written in | — | — | — | the asker's `timezone` setting |
 | **cumulative** | running totals along a time grain, reset by a grain | rolling window | cumulative metric | — | a rolling window of fixed width |
@@ -1296,7 +1308,7 @@ Looker. Section 20 covers what is beyond analysis.
 | The same dimension meaning the same key everywhere | ✗ | MetricFlow, Kimball |
 | Display formats | ◐ units only | all |
 | Currencies — amounts in their currency, converted at a declared rate and date | ◐ never added across currencies; converted at the span's end; not at each transaction's date | Looker, Snowflake, custom everywhere |
-| Units — hours to days, FTE to hours, by a declared rule | ◐ `units`, fixed and organisation factors | custom everywhere |
+| Units — hours to days, FTE to hours, by a declared rule | ✗ to be modelled like exchange rates, as the organisation's own conversions | custom everywhere |
 | Language and locale of labels and numbers | ✗ | Looker, Metabase |
 | Curated views — which measures a person or agent sees | ✗ | Cube, LookML, Snowflake semantic views |
 | Synonyms and descriptions per measure and dimension | ◐ per program only | Snowflake, Cube, dbt |
