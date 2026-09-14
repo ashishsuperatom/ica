@@ -36,6 +36,22 @@ export interface EngineOptions {
   today?: () => string
   /** The organisation's own values for assumptions — its working week, its targets. A caller's value wins. */
   assumptions?: Record<string, unknown>
+  /** Reads SQL without running it: the base tables it reads and the columns it outputs. With it, definitions are
+   *  checked against their SQL — a relation program that names a table, a shape column no statement outputs.
+   *  `managerInspect` gives one backed by the datasource manager's SQL parser. */
+  inspect?: (sql: string, dialect: Dialect) => Promise<SqlAnalysis>
+}
+
+export interface SqlAnalysis { tables: string[]; outputs: string[]; star: boolean }
+
+/** An inspect function that asks the datasource manager, which parses with the same SQLGlot that rewrites queries. */
+export function managerInspect(url = process.env.DATASOURCE_URL ?? 'http://localhost:4000') {
+  return async (sql: string, dialect: Dialect): Promise<SqlAnalysis> => {
+    const res = await fetch(`${url}/analyze`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sql, dialect }) })
+    const body: any = await res.json()
+    if (!res.ok) throw new Error(`the SQL does not parse: ${body.error ?? res.status}`)
+    return body
+  }
 }
 
 /** For one request only, a change to what a program gives — Pearl's do-operator. Applied wherever that name is
@@ -298,6 +314,7 @@ export function createEngine(o: EngineOptions) {
     const shape = contract.shape!
     const today = clock()
     const when: When = kindOf(shape) === 'flow' ? { from: today, to: today, where: {} } : { asAt: today, where: {} }
+    if (o.inspect) await inspectRelation(hash, body, contract, when, today)
     const st = await expand(contract.name, contract, hash, body, when, { today, context: {}, interventions: {} }, new Map(), [], [], [])
     const columns = new Set<string>()
     for (const d of Object.values(shape.dimensions)) { columns.add(d.column); if (d.label) columns.add(d.label) }
@@ -316,6 +333,51 @@ export function createEngine(o: EngineOptions) {
     } else {
       await o.query(st.source, probe.sql, st.params)
     }
+  }
+
+  /** The checks only a parser can make, before anything runs. */
+  async function inspectRelation(hash: string, body: string, contract: Contract, when: When, today: string): Promise<void> {
+    const fn = await load(hash, body)
+    const out = (await fn(readingContext(contract, { today, context: {}, interventions: {} }, [], []), when)) as Statement
+    if (typeof out?.sql !== 'string') return
+    if (contract.kind === 'program') {
+      // ONLY A CONCEPT NAMES A TABLE. A relation program reads data through the relations in its braces; any other
+      // table in its SQL is a data read that bypasses the one definition of that data.
+      const names: string[] = []
+      const marked = out.sql.replace(/\{\{([^}]+)\}\}/g, (_m, n) => { names.push(n); return `__relation_${names.length - 1}` })
+      const first = names.length ? o.store.resolve(names[0]) : null
+      const childSource = first ? o.store.getProgram(first)!.contract : null
+      const dialect = dialectOfContract(childSource) ?? 'oracle'
+      const { tables } = await o.inspect!(marked, dialect)
+      const direct = tables.filter((t) => !/^__relation_\d+$/.test(t))
+      if (direct.length) throw new Error(`it reads ${direct.join(', ')} directly — a program reads data only through the relations named in {{braces}}`)
+      return
+    }
+    const dialect = o.dialects[out.source]
+    if (!dialect) return
+    const { outputs, star } = await o.inspect!(out.sql, dialect)
+    if (star) return
+    const declared = new Set<string>()
+    for (const d of Object.values(contract.shape!.dimensions)) { declared.add(d.column); if (d.label) declared.add(d.label) }
+    for (const m of Object.values(contract.shape!.measures)) if (!isDerived(m) && m.column) declared.add(m.column)
+    if (contract.shape!.time) declared.add(contract.shape!.time)
+    const have = new Set(outputs.map((c) => c.toLowerCase()))
+    const missing = [...declared].filter((c) => !have.has(c.toLowerCase()))
+    if (missing.length) throw new Error(`the shape names ${missing.map((c) => `"${c}"`).join(', ')}, which its SQL does not output (it outputs ${outputs.join(', ')})`)
+  }
+
+  /** The dialect a relation's SQL is written in: its concept's source, or, for a program, that of what it builds on. */
+  function dialectOfContract(c: Contract | null, seen = new Set<string>()): Dialect | null {
+    if (!c) return null
+    if (c.kind === 'concept') return o.dialects[c.reads.sources[0]] ?? null
+    for (const n of c.reads.programs) {
+      if (seen.has(n)) continue
+      seen.add(n)
+      const h = o.store.resolve(n)
+      const d = h ? dialectOfContract(o.store.getProgram(h)!.contract, seen) : null
+      if (d) return d
+    }
+    return null
   }
 
   async function define(input: { body: string; contract: Contract },

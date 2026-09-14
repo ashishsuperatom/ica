@@ -182,6 +182,19 @@ export async function sqlSignature(sql: string, opts: { dialect?: string } = {})
   }
 }
 
+/** What a statement reads and outputs, for the program graph: base tables (not names a WITH defines), the output
+ *  columns of its outermost query, and whether it outputs `*`. Throws with the parser's message on bad SQL. */
+export interface SqlAnalysis { tables: string[]; outputs: string[]; star: boolean }
+
+export async function analyzeSql(sql: string, opts: { dialect?: string } = {}): Promise<SqlAnalysis> {
+  const w = await acquire()
+  let msg: any
+  try { msg = await once(w, { op: 'analyze', sql, dialect: opts.dialect }); release(w) }
+  catch (e) { if (w.alive) release(w); throw e }
+  if (!msg.ok) throw new Error(String(msg.error || 'could not analyze SQL'))
+  return { tables: msg.tables, outputs: msg.outputs, star: msg.star }
+}
+
 /** Kill the whole pool now (idempotent). Wired to manager shutdown so children never outlive the parent. */
 export function shutdownPool(): void {
   if (reapTimer) { clearTimeout(reapTimer); reapTimer = null }

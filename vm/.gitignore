@@ -11,3 +11,6 @@ registry.json
 # per-project secrets (bridges' credentials) — bridge.mjs is committed, creds are not
 projects/**/.env
 projects/**/*.pem
+
+# Python bytecode
+__pycache__/

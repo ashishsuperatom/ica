@@ -265,8 +265,28 @@ def signature(req):
     }
 
 
+# ── WHAT A STATEMENT READS AND WHAT IT OUTPUTS ───────────────────────────────────────────────────────────
+# For the program graph, which composes SQL and must check it: the base tables a statement reads (a name defined
+# by a WITH is not a table), and the columns its outermost query outputs — or that it outputs `*`, which cannot
+# be listed without a schema.
+def analyze(req):
+    dialect = _dialect(req.get("dialect") or req.get("source_dialect"))
+    tree = sqlglot.parse_one(req.get("sql") or "", read=dialect)
+    ctes = {c.alias_or_name.lower() for c in tree.find_all(exp.CTE)}
+    tables = sorted({t.name for t in tree.find_all(exp.Table) if t.name and t.name.lower() not in ctes})
+    outputs, star = [], False
+    for projection in getattr(tree, "selects", []):
+        if isinstance(projection, exp.Star) or (isinstance(projection, exp.Column) and isinstance(projection.this, exp.Star)):
+            star = True
+        else:
+            outputs.append(projection.alias_or_name)
+    return {"tables": tables, "outputs": outputs, "star": star}
+
+
 def handle(req):
     op = req.get("op", "rewrite")
+    if op == "analyze":
+        return {"ok": True, **analyze(req)}
     if op == "ping":
         return {"ok": True, "pong": True}
     if op == "signature":

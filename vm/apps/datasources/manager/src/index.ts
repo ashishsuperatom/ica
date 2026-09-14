@@ -13,7 +13,7 @@ import http from 'node:http'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { dirname, join, isAbsolute } from 'node:path'
-import { sqlSignature, rewriteSqlDetailed } from './sqlglot-pool.js'
+import { sqlSignature, rewriteSqlDetailed, analyzeSql } from './sqlglot-pool.js'
 import { QueryCache, cacheKey } from './query-cache.js'
 
 // Result caps for AGENT queries — a runaway/unbounded query must not dump a whole table (192K rows would
@@ -198,6 +198,15 @@ const server = http.createServer(async (req, res) => {
     if (!b?.sql) return send(res, 400, { error: 'body must have { sql, dialect? }' })
     const sig = await sqlSignature(String(b.sql), { dialect: b.dialect })
     return send(res, 200, { signature: sig })   // null when it will not parse: no signature, not an error
+  }
+
+  // What a statement reads and outputs — for the program graph's checks on the SQL it composes. No source is
+  // queried; `dialect` is the grammar to read it in.
+  if (req.method === 'POST' && url.pathname === '/analyze') {
+    let b: any; try { b = await readBody(req) } catch (e: any) { return send(res, 400, { error: e.message }) }
+    if (!b?.sql) return send(res, 400, { error: 'body must have { sql, dialect? }' })
+    try { return send(res, 200, await analyzeSql(String(b.sql), { dialect: b.dialect })) }
+    catch (e: any) { return send(res, 422, { error: e?.message ?? String(e) }) }
   }
 
   if (req.method !== 'POST') return send(res, 405, { error: 'POST only' })

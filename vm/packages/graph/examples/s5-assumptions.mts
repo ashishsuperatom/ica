@@ -13,15 +13,15 @@ import { readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { query } from '@superatom/scaffold'
-import { GraphStore, createEngine, trace, type Contract } from '../src/index.ts'
+import { GraphStore, createEngine, managerInspect, trace, type Contract } from '../src/index.ts'
 
 const here = fileURLToPath(new URL('.', import.meta.url))
 const state = join(here, '..', '..', '..', '.state', 'graph-slice-s5')
 rmSync(state, { recursive: true, force: true })
 const store = new GraphStore(join(state, 'graph.sqlite'))
 const modulesDir = join(state, 'modules')
-const engine = createEngine({ store, modulesDir, query, dialects: { F5NETSUITE: 'oracle' } })
-const organisation = createEngine({ store, modulesDir, query, dialects: { F5NETSUITE: 'oracle' },
+const engine = createEngine({ store, modulesDir, query, dialects: { F5NETSUITE: 'oracle' }, inspect: managerInspect() })
+const organisation = createEngine({ store, modulesDir, query, dialects: { F5NETSUITE: 'oracle' }, inspect: managerInspect(),
   assumptions: { 'working week': 37.5, 'pillars outside capacity': ['4', '48', '24'] } })   // OH, Microsoft, Jade
 
 const load = (dir: string) => ({
