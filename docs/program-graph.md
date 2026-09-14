@@ -1203,6 +1203,9 @@ each corresponds to elsewhere and what it must not be confused with.
 | **time grain** | day, week, month, quarter, year, or a calendar's | granularity | time granularity | timeframe | an entity's *grain* |
 | **calendar** | data defining grains beyond the built-in ones | custom granularities | custom granularities on the time spine | — | a date dimension table read as a relation |
 | **rollup** | how a stock is read across a span: last or average | — | — | — | SQL `ROLLUP`, and subtotals |
+| **totals** | the same question at coarser splits, each asked of the source | totals / rollup in queries | — | nested totals | *rollup* |
+| **share** | a measure as a part of its total within splits | — | — | `all()` percent | a ratio measure |
+| **limitPer** | keep the first N rows within each group | — | — | — | a limit on the whole |
 | **cumulative** | running totals along a time grain, reset by a grain | rolling window | cumulative metric | — | a rolling window of fixed width |
 | **fill** | include periods with no rows | — | `fill_nulls_with`, `join_to_timespine` | — | filling a missing attribute |
 | **compare** | the same question at another time, aligned | time shift | offset window | — | a *counterfactual* |
@@ -1226,10 +1229,10 @@ Looker. Section 20 covers what is beyond analysis.
 
 | Capability | Us | Where it exists |
 |---|---|---|
-| Pivot — rows by columns | ✗ long rows only | Rill, Metabase, Looker |
-| Subtotals and grand totals, correct per measure kind (a ratio or distinct count is not summed) | ✗ | Rill, Looker, Metabase, Cube |
-| Percent of total, share of parent | ✗ | Rill, Looker, Metabase, Cube |
-| Top N within each group; rank; row number | ✗ global top N only | Looker, Metabase, Cube |
+| Pivot — rows by columns | ◐ long rows with totals at every level; the pivoting is the display's | Rill, Metabase, Looker |
+| Subtotals and grand totals, correct per measure kind (a ratio or distinct count is not summed) | ◐ `totals`: each level asked of the source; the layout is the display's | Rill, Looker, Metabase, Cube |
+| Percent of total, share of parent | ◐ `share` within any splits, additive measures | Rill, Looker, Metabase, Cube |
+| Top N within each group; rank; row number | ◐ `limitPer`; no rank or row number column | Looker, Metabase, Cube |
 | An "other" row after a top N | ✗ | Rill, Looker |
 | Rolling windows — 7-day average, trailing 12 months | ✗ running totals only | Cube, MetricFlow, Rill |
 | Relative dates — last 30 days, quarter to date, previous complete month | ✗ | Cube, Metabase, Rill, Looker |

@@ -185,7 +185,7 @@ function checkParts(shape: Shape, p: Plan, rows: Record<string, any>[], whole: R
 
 /** Having, then order, then limit — on rows already in hand. Ties are broken by the split, so the order is stable,
  *  and rows with no order asked for come in the order of the split. */
-export function arrange(rows: Record<string, any>[], after: { having?: Record<string, Condition>; order?: Array<{ by: string; desc?: boolean }>; limit?: number },
+export function arrange(rows: Record<string, any>[], after: { having?: Record<string, Condition>; order?: Array<{ by: string; desc?: boolean }>; limit?: number; limitPer?: string[] },
                         by: string[]): Record<string, any>[] {
   let out = rows
   if (after.having) out = out.filter((r) => Object.entries(after.having!).every(([m, c]) => holds(r[m], c)))
@@ -198,7 +198,15 @@ export function arrange(rows: Record<string, any>[], after: { having?: Record<st
       return 0
     })
   }
-  if (after.limit != null) out = out.slice(0, after.limit)
+  if (after.limit != null && after.limitPer?.length) {
+    const kept = new Map<string, number>()
+    out = out.filter((r) => {
+      const k = JSON.stringify(after.limitPer!.map((d) => r[d] ?? null))
+      const n = kept.get(k) ?? 0
+      kept.set(k, n + 1)
+      return n < after.limit!
+    })
+  } else if (after.limit != null) out = out.slice(0, after.limit)
   return out
 }
 

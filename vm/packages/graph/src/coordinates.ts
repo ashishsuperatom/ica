@@ -40,6 +40,14 @@ export interface Coordinates {
   /** Row order. Required for a limit, so which rows are kept is never the source's choice. */
   order?: Array<{ by: string; desc?: boolean }>
   limit?: number
+  /** With a limit: keep that many rows within each group of these splits — the top three customers per pillar. */
+  limitPer?: string[]
+  /** Also answer at these coarser splits — each a subset of `by`, `[]` for the grand total — computed by the
+   *  source for each, so a ratio or a distinct count is right at every level. Totals count every row, including
+   *  rows a limit or having leaves out. */
+  totals?: string[][]
+  /** Each measure as a share of its total within these splits — `[]` for the whole. Additive measures only. */
+  share?: { measures: string[]; within: string[] }
   /** A span: from inclusive, to exclusive, as YYYY-MM-DD. */
   during?: { from: string; to: string }
   /** An instant, as YYYY-MM-DD. Only a stock has a value at an instant. */
@@ -84,7 +92,7 @@ export interface Plan {
   /** How rows from several statements become one result. */
   combine: 'single' | 'label-period' | 'average-over-periods'
   /** Work left for after the statements run. */
-  after: { having?: Coordinates['having']; order?: Coordinates['order']; limit?: number; fill?: { periods: string[] }
+  after: { having?: Coordinates['having']; order?: Coordinates['order']; limit?: number; limitPer?: string[]; fill?: { periods: string[] }
            cumulative?: { reset: Grain | 'never'; keep: { from: string; to: string } } }
   /** The grains this plan was made with: built in, and the calendar's. */
   grains: Grains
@@ -247,6 +255,10 @@ export async function plan(shape: Shape, read: ReadBody, c: Coordinates, dialect
   for (const m of Object.keys(having)) if (!measures.includes(m)) refuse(`having on "${m}" needs it among the measures asked for`)
   const orderable = [...by, ...splits.filter(hasLabel).map((d) => `${d}_label`), ...measures]
   for (const o of c.order ?? []) if (!orderable.includes(o.by)) refuse(`cannot order by "${o.by}" — it is not in the result: ${orderable.join(', ')}`)
+  if (c.limitPer) {
+    if (c.limit == null) refuse('limitPer says how many rows to keep per group; it needs a limit')
+    for (const d of c.limitPer) if (!by.includes(d)) refuse(`limitPer "${d}" must be one of the splits: ${by.join(', ')}`)
+  }
   if (c.limit != null) {
     if (!Number.isInteger(c.limit) || c.limit < 1) refuse('limit must be a whole number above zero')
     if (!c.order?.length) refuse('a limit needs an order — otherwise which rows are kept is the source\'s choice, not the question\'s')
@@ -388,7 +400,7 @@ export async function plan(shape: Shape, read: ReadBody, c: Coordinates, dialect
       unsplit: unsplitSql ? { source: body.source, tables: t, params, sql: unsplitSql } : undefined,
     }
   }
-  const pushable = (statements: number) => statements === 1 && !acrossPeriods
+  const pushable = (statements: number) => statements === 1 && !acrossPeriods && !c.limitPer
   const partialIf = (pushed: boolean) => pushed && (c.limit != null || Object.keys(having).length > 0)
 
   // ── a flow: one statement bounded by the span ─────────────────────────────────────────────────────────
@@ -411,7 +423,7 @@ export async function plan(shape: Shape, read: ReadBody, c: Coordinates, dialect
     return {
       statements: [statement], kind, measures, fetched, by, grain, combine: 'single', partial: partialIf(pushed), orderedAtSource: pushed && !!c.order?.length, caveats, grains: grainSet, paths: Object.fromEntries([...paths].map(([k, v]) => [k, v.alias])), labelled: by.filter((d) => !grainSet.has(d) && hasLabel(d)),
       after: {
-        ...(pushed ? {} : { having: c.having, order: c.order, limit: c.limit }),
+        ...(pushed ? {} : { having: c.having, order: c.order, limit: c.limit, limitPer: c.limitPer }),
         fill: c.fill && grain ? { periods: grainSet.periods(grain, keep.from, keep.to).map((p) => p.label) } : undefined,
         cumulative: c.cumulative ? { reset: c.cumulative.reset ?? 'never', keep } : undefined,
       },
@@ -423,7 +435,7 @@ export async function plan(shape: Shape, read: ReadBody, c: Coordinates, dialect
     wrap({ asAt: date, where }, splits, () => [], {}, { period, pushdown })
   const finish = (statements: Statement[], combine: Plan['combine'], pushed: boolean): Plan => ({
     statements, kind, measures, fetched, by, grain, combine, partial: partialIf(pushed), orderedAtSource: pushed && !!c.order?.length, caveats, grains: grainSet, paths: Object.fromEntries([...paths].map(([k, v]) => [k, v.alias])), labelled: by.filter((d) => !grainSet.has(d) && hasLabel(d)),
-    after: pushed ? {} : { having: c.having, order: c.order, limit: c.limit },
+    after: pushed ? {} : { having: c.having, order: c.order, limit: c.limit, limitPer: c.limitPer },
   })
 
   if (c.at) {

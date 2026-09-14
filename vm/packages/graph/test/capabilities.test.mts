@@ -344,3 +344,38 @@ test('comparison: a stock at an instant against a year before', async () => {
     assert.deepEqual([row.headcount, row.headcount_compare], [at('2026-06-30', team), at('2025-12-31', team)])
   }
 })
+
+// ── totals, shares, top N per group ───────────────────────────────────────────────────────────────────────
+
+test('pivot totals: each level asked of the source, so a ratio and a distinct count are right at every level', async () => {
+  const { engine } = await setup()
+  const r = (await engine.call<any>('orders', { measures: ['revenue', 'price', 'customers'], by: ['region', 'month'], during: H1,
+    totals: [['region'], ['month'], []] })).value
+  const os = ORDERS.filter((o) => inSpan(o))
+  const grand = r.totals.find((t: any) => t.by.length === 0).rows[0]
+  assert.equal(grand.revenue, sum(os, (o) => o.amount))
+  assert.equal(grand.price, sum(os, (o) => o.amount) / sum(os, (o) => o.units), 'the ratio of the totals, not a total of ratios')
+  assert.equal(grand.customers, new Set(os.map((o) => o.customer_id)).size, 'people counted once across months')
+  const north = r.totals.find((t: any) => t.by[0] === 'region').rows.find((x: any) => x.region === 'north')
+  assert.equal(north.customers, 1, 'c1 bought in two months and is one customer')
+  const months = r.rows.filter((x: any) => x.region === 'north').reduce((a: number, x: any) => a + x.customers, 0)
+  assert.equal(months, 2, 'while the month cells count it twice — which is why totals are not sums')
+})
+
+test('share: each customer\'s part of its region, and of the whole', async () => {
+  const { engine } = await setup()
+  const r = (await engine.call<any>('orders', { measures: ['revenue'], by: ['region', 'customer'], during: H1, share: { measures: ['revenue'], within: ['region'] } })).value
+  for (const region of ['north', 'south']) {
+    const total = r.rows.filter((x: any) => x.region === region).reduce((a: number, x: any) => a + x.revenue_share, 0)
+    assert.ok(Math.abs(total - 1) < 1e-9, `${region} shares add to one`)
+  }
+  await assert.rejects(engine.call('orders', { measures: ['price'], by: ['region'], during: H1, share: { measures: ['price'], within: [] } }), /does not add up/)
+})
+
+test('top N per group: the largest customer in each region', async () => {
+  const { engine } = await setup()
+  const r = (await engine.call<any>('orders', { measures: ['revenue'], by: ['region', 'customer'], during: H1,
+    order: [{ by: 'revenue', desc: true }], limit: 1, limitPer: ['region'], totals: [['region']] })).value
+  assert.deepEqual(r.rows.map((x: any) => [x.region, x.customer, x.revenue]).sort(), [['north', 'c1', 320], ['south', 'c4', 400], [null, 'c3', 80]].sort())
+  assert.equal(r.totals[0].rows.find((x: any) => x.region === 'south').revenue, 700, 'the total counts the customers the limit leaves out')
+})

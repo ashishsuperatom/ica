@@ -109,3 +109,21 @@ test('NetSuite: utilised hours by manager and by location — attributes reached
   const loc = (await engine.call<any>('utilised hours', { measures: ['hours'], by: ['employee.location'], where: { 'employee.location': { isNull: false } }, during: Q2 })).value.rows
   assert.ok(loc.length > 1 && loc.every((x: any) => x['employee.location_label']))
 })
+
+test('NetSuite: a pivot of hours by pillar and month with totals, shares and the top two people per pillar', live, async () => {
+  const { engine } = await netsuite()
+  const r = (await engine.call<any>('utilised hours', { measures: ['hours', 'hours_per_entry'], by: ['pillar', 'month'], during: Q2,
+    totals: [['pillar'], ['month'], []], share: { measures: ['hours'], within: ['month'] } })).value
+  const grand = r.totals.find((t: any) => !t.by.length).rows[0]
+  const cells = r.rows.reduce((a: number, x: any) => a + x.hours, 0)
+  assert.ok(Math.abs(grand.hours - cells) < 1e-6)
+  for (const month of ['2026-04', '2026-05', '2026-06']) {
+    const s = r.rows.filter((x: any) => x.month === month).reduce((a: number, x: any) => a + x.hours_share, 0)
+    assert.ok(Math.abs(s - 1) < 1e-9, `${month} shares add to one`)
+  }
+  const top = (await engine.call<any>('utilised hours', { measures: ['hours'], by: ['pillar', 'employee'], during: Q2,
+    order: [{ by: 'hours', desc: true }], limit: 2, limitPer: ['pillar'] })).value.rows
+  const perPillar = new Map<string, number>()
+  for (const x of top) perPillar.set(x.pillar, (perPillar.get(x.pillar) ?? 0) + 1)
+  assert.ok([...perPillar.values()].every((n) => n <= 2) && perPillar.size > 5)
+})

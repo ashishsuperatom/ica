@@ -16,6 +16,7 @@ import { contractProblem, type Contract } from './contract.js'
 import { conditionSql, plan, sqlFor, type AttributeSource, type Condition, type Coordinates, type Dialect, type ReadBody, type ResolvedStatement, type When } from './coordinates.js'
 import { runPlan } from './execute.js'
 import { comparisonCoordinates, difference, mergeComparison, type Comparison } from './compare.js'
+import { atLevel, summaryProblem, withShares } from './summaries.js'
 import { programHash } from './hash.js'
 import type { Calendar } from './calendar.js'
 import { isDerived, kindOf, type Shape, type Statement } from './shape.js'
@@ -519,13 +520,25 @@ export function createEngine(o: EngineOptions) {
           return { p, result }
         }
         const coordinates = request as Coordinates
-        if (coordinates.compare) {
-          const both = comparisonCoordinates(coordinates as Coordinates & { compare: Comparison }, today, kindOf(shape) === 'flow')
-          const [now, then] = await Promise.all([ask(both.current, 'now'), ask(both.previous, 'compared with')])
+        summaryProblem(shape, coordinates)
+        const answer = async (c: Coordinates, side?: string): Promise<any> => {
+          if (!c.compare) return (await ask(c, side)).result
+          const both = comparisonCoordinates(c as Coordinates & { compare: Comparison }, today, kindOf(shape) === 'flow')
+          const [now, then] = await Promise.all([ask(both.current, side ? `${side}, now` : 'now'), ask(both.previous, side ? `${side}, compared with` : 'compared with')])
           caveats.push(...both.caveats)
-          value = mergeComparison(shape, now.result, then.result, now.p.by, now.p.grain, both.after)
-        } else {
-          value = (await ask(coordinates)).result
+          return mergeComparison(shape, now.result, then.result, now.p.by, now.p.grain, both.after)
+        }
+        const main = coordinates.totals || coordinates.share ? { ...coordinates, totals: undefined, share: undefined } : coordinates
+        value = await answer(main)
+        if (coordinates.share) {
+          const whole = await answer(atLevel(coordinates, coordinates.share.within, coordinates.share.measures), `share within ${coordinates.share.within.join(', ') || 'the whole'}`)
+          value = withShares(value as any, whole, coordinates.share.measures, coordinates.share.within)
+        }
+        if (coordinates.totals?.length) {
+          const levels = await Promise.all(coordinates.totals.map(async (level) =>
+            ({ by: level, ...(await answer(atLevel(coordinates, level), `total by ${level.join(', ') || 'everything'}`)) })))
+          ;(value as any).totals = levels.map(({ by, columns, rows }) => ({ by, columns, rows }))
+          if (coordinates.limit != null || coordinates.having) caveats.push('totals count every row, including rows the limit or having leaves out')
         }
         caveats.push(...(value as any).caveats)
       } else {

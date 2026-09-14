@@ -43,7 +43,7 @@ export function shift(date: string, by: Offset, sign = -1): string {
 
 /** The two questions a comparison asks, and what the reader must be told about how they were matched. */
 export function comparisonCoordinates(c: Coordinates & { compare: Comparison }, today: string, isFlow: boolean) {
-  const { compare, having, order, limit, ...rest } = c
+  const { compare, having, order, limit, limitPer, ...rest } = c
   const caveats: string[] = []
   const current: Coordinates = { ...rest }
   const previous: Coordinates = { ...rest }
@@ -70,12 +70,12 @@ export function comparisonCoordinates(c: Coordinates & { compare: Comparison }, 
     if (!rest.at) refuse('compare an instant with an instant: ask at an instant to compare against one')
     previous.at = compare.at
   } else refuse('compare needs an offset, a during or an at')
-  return { current, previous, after: { having, order, limit }, caveats }
+  return { current, previous, after: { having, order, limit, limitPer }, caveats }
 }
 
 /** One result from two: each row now, the row it is compared with, and the change. */
 export function mergeComparison(shape: Shape, now: Result, then: Result, by: string[], grain: Grain | null,
-                                after: { having?: Coordinates['having']; order?: Coordinates['order']; limit?: number }): Result {
+                                after: { having?: Coordinates['having']; order?: Coordinates['order']; limit?: number; limitPer?: string[] }): Result {
   const measures = now.columns.filter((c) => c.role === 'measure').map((c) => c.name)
   const splits = by.filter((d) => d !== grain)
   // Periods are matched by their place in each span.
