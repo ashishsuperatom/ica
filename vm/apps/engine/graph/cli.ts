@@ -1,6 +1,6 @@
 // ── THE AGENTS' TOOLS FOR THE GRAPH ───────────────────────────────────────────────────────────────────────────
 //
-//   ./catalog [words]                      what programs exist; each relation's measures, dimensions and time
+//   ./catalog [words | name]               one line per program (matching the words); a name shows that program in full
 //   ./define <dir> [--replace "<why>"]     define the program in <dir> (contract.json + program.mjs), or correct one
 //   ./try <program> ['<request>']          ask a program directly, to check it while writing
 //   ./ask '<message>'                      apply a message to this conversation's data session and answer it
@@ -49,10 +49,38 @@ const readTurn = async (name: string) => (await readFile(join(env.home, name), '
 const engine = await openProjectGraph(env)
 
 if (command === 'catalog') {
-  const words = args.join(' ').toLowerCase().trim()
-  const entries = engine.catalog().filter((e) => !words || JSON.stringify(e).toLowerCase().includes(words))
-  out({ programs: entries, note: `${entries.length} of ${engine.catalog().length} programs${words ? ` matching "${words}"` : ''}` })
-} else if (command === 'define') {
+  // A list first, one line a program; the whole shape only of the program asked for by name. Every program's full
+  // shape at once ran to hundreds of lines, most of it about programs the question had nothing to do with.
+  const all = engine.catalog()
+  const text = args.join(' ').trim()
+  const exact = all.find((e) => e.name.toLowerCase() === text.toLowerCase())
+  if (exact) {
+    const e: any = exact, r = e.relation
+    const params = Object.entries(e.params ?? {}).map(([k, v]: [string, any]) => `  ${k} — ${typeof v === 'string' ? v : v.description}`)
+    const assumes = Object.entries(e.assumes ?? {}).map(([k, v]: [string, any]) => `  ${k} — ${v.description}${v.default !== undefined ? ` (default ${JSON.stringify(v.default)})` : ''}`)
+    out([
+      `${e.name} — ${e.kind}, returns ${e.returns}`, `  ${e.description}`,
+      ...(r ? [`holds ${r.holds}${r.time ? `, over time (by day, week, month, quarter, year)` : ''}${r.grain ? `, one row per ${r.grain}` : ''}`,
+               'measures:', ...Object.entries(r.measures).map(([m, d]: [string, any]) => `  ${m} — ${d.unit}, ${d.how}${d.description ? ` — ${d.description}` : ''}`),
+               'dimensions:', ...Object.entries(r.dimensions).map(([n, d]: [string, any]) => `  ${n}${d.labelled ? ` (filter by name with ${n}_label)` : ''}${d.entity ? ` → ${d.entity}` : ''}${d.description ? ` — ${d.description}` : ''}`)] : []),
+      ...(params.length ? ['parameters:', ...params] : []),
+      ...(assumes.length ? ['assumes:', ...assumes] : []),
+    ].join('\n'))
+    process.exit(0)
+  }
+  const words = text.toLowerCase().split(/\s+/).filter(Boolean)
+  const haystack = (e: any) => [e.name, e.description, ...Object.keys(e.relation?.measures ?? {}), ...Object.keys(e.relation?.dimensions ?? {})].join(' ').toLowerCase()
+  const matching = all.filter((e) => words.every((w) => haystack(e).includes(w)))
+  const line = (e: any) => {
+    const r = e.relation
+    const shape = r ? ` · ${Object.keys(r.measures).length} measures, ${Object.keys(r.dimensions).length} dimensions, ${r.holds}${r.time ? ' over time' : ''}` : ''
+    const hits = words.length && r ? [...Object.keys(r.measures), ...Object.keys(r.dimensions)].filter((n) => words.some((w) => n.toLowerCase().includes(w))) : []
+    return `${e.name} — ${e.kind}, returns ${e.returns}${shape}${hits.length ? ` · matches ${hits.join(', ')}` : ''}\n    ${e.description}`
+  }
+  out([...matching.map(line), '', `${matching.length} of ${all.length} programs${words.length ? ` matching "${text}"` : ''} — ./catalog <name> shows one program's measures, dimensions and parameters`].join('\n'))
+  process.exit(0)
+}
+if (command === 'define') {
   const dir = args[0] ?? fail('usage: ./define <dir> [--replace "<why>"] — the directory holds contract.json and program.mjs')
   const at = isAbsolute(dir) ? dir : join(env.home, dir)
   const contract = json(await readFile(join(at, 'contract.json'), 'utf8').catch(() => fail(`${dir}/contract.json is missing`)), 'contract.json')

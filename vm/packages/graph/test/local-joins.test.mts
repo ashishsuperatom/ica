@@ -58,3 +58,17 @@ test('refused: a source that holds back rows cannot be read here to join', async
   const engine = await setup(true)
   await assert.rejects(engine.call('billed', { measures: ['billed'], during: SEPTEMBER, currency: 'AUD' }), /more rows than HR returns at once/)
 })
+
+test('numbers that arrive as text compare as numbers in a relation on local rows', async () => {
+  const store = new GraphStore(join(mkdtempSync(join(tmpdir(), 'graph-lj-')), 'g.sqlite'))
+  const engine = createEngine({ store, modulesDir: mkdtempSync(join(tmpdir(), 'graph-mod-')), dialects: {}, query: async () => [], today: () => '2026-09-14' })
+  const lines: Contract = { name: 'lines', kind: 'concept', description: 'Budget lines.', reads: { sources: ['BOOKS'], programs: [] }, params: {}, returns: 'relation',
+    shape: { dimensions: { category: { column: 'category_id', history: 'stable' }, account: { column: 'account_number', history: 'stable' } },
+             measures: { amount: { aggregate: 'sum', column: 'amount', unit: 'AUD', kind: 'flow' } }, time: 'period_start' } }
+  const ROWS = [{ period_start: '2026-09-01', category_id: '5', account_number: '5005', amount: '100.5' }, { period_start: '2026-09-01', category_id: '7', account_number: '5005', amount: '900' }]
+  await engine.define({ body: `export default async () => ({ source: 'BOOKS', rows: ${JSON.stringify(ROWS)} })`, contract: lines }, { by: 'test' })
+  await engine.define({ body: `export default () => ({ sql: "SELECT l.* FROM {{lines}} l WHERE l.category_id = 5 AND l.account_number IN ('5005')" })`,
+    contract: { ...lines, name: 'base lines', kind: 'program', reads: { sources: [], programs: ['lines'] } } }, { by: 'test' })
+  const r = await engine.call<any>('base lines', { measures: ['amount'], during: { from: '2026-09-01', to: '2026-10-01' } })
+  assert.equal(r.value.rows[0].amount, 100.5)
+})

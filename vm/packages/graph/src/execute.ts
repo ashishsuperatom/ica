@@ -39,7 +39,9 @@ export function runLocal(st: ResolvedStatement): any[] {
     for (const [table, { columns: declared, rows }] of Object.entries(st.tables ?? {})) {
       const columns = [...new Set([...declared, ...rows.flatMap((r) => Object.keys(r))])]
       if (!columns.length) { db.exec(`CREATE TABLE "${table}" (_empty INTEGER)`); continue }
-      db.exec(`CREATE TABLE "${table}" (${columns.map((c) => `"${c}"`).join(', ')})`)
+      // NUMERIC affinity, so a number that arrived as text ('5', '1250.5' — how NetSuite returns them) compares and adds as
+      // a number, as it does in the source; text that is not a number stays text. A program's SQL means the same here.
+      db.exec(`CREATE TABLE "${table}" (${columns.map((c) => `"${c}" NUMERIC`).join(', ')})`)
       const insert = db.prepare(`INSERT INTO "${table}" VALUES (${columns.map(() => '?').join(', ')})`)
       db.exec('BEGIN')
       for (const r of rows) insert.run(...columns.map((c) => local(r[c])))

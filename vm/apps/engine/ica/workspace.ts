@@ -263,7 +263,7 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
 `,
   }
   const usages: Record<string, string> = {
-    catalog: 'catalog [words]   → the programs that exist, with each relation\'s measures, dimensions, entities and time',
+    catalog: 'catalog [words | name]   → one line per program that exists (or matches the words); ./catalog <name> shows that program\'s measures, dimensions, entities, time and parameters',
     define: 'define programs/<name> [--replace "<why>"]   → define the program in that directory (contract.json + program.mjs), or correct the one with its name',
     try: 'try <program> [\'<request json>\']   → ask a program directly, to check it while you write it',
     ask: 'ask \'<message json>\'   → apply a message to this conversation\'s data session and answer it: {"ask":"<program>","request":{…}} starts a question; {"filter":{…}}, {"split":{"add":[…]}}, {"measures":{"add":[…]}}, {"set":{…}}, {"assume":{…}}, {"intervene":{…}}, {"asOf":"YYYY-MM-DD"} follow up — several parts in one message apply together',

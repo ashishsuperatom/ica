@@ -71,7 +71,7 @@ const checks: Check[] = [
   { area: 'sql', name: 'money refused across currencies', run: () => ask('time entries', { measures: ['charged_amount'], during: WEEK }) },
   { area: 'sql', name: 'detail rows', run: () => ask('time entries', { measures: ['hours'], during: WEEK, detail: { limit: 20 }, order: [{ by: 'hours', desc: true }] }, rowsAtLeast(1)) },
   { area: 'sql', name: 'more rows than a read returns', run: () => ask('time entries', { measures: ['hours'], by: ['entry'], during: WEEK }) },
-  { area: 'sql', name: 'members matching typed text', run: async () => { const m = await engine.members('people', 'employee', { search: 'kristy chong', at: 'today' } as any); return { note: JSON.stringify(m.matches.slice(0, 2)) } } },
+  { area: 'sql', name: 'members matching typed text', run: async () => { const m = await engine.members('people', { dimension: 'employee', search: 'kristy chong', at: 'today' }); return { note: JSON.stringify(m.matches.slice(0, 2)) } } },
   // ── relations on relations ────────────────────────────────────────────────────────────────────────────────────
   { area: 'nesting', name: 'a relation on a relation (one level)', run: () => ask('approved time', { measures: ['hours'], by: ['day'], during: WEEK }, rowsAtLeast(3)) },
   { area: 'nesting', name: 'a relation on a relation on a relation', run: () => ask('approved billable time', { measures: ['hours'], by: ['day'], during: WEEK }, rowsAtLeast(3)) },
