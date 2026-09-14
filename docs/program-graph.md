@@ -982,7 +982,7 @@ Each can be done today as a program, so none is a refusal; each is still a gap i
 - **A result from a program cannot be drilled** as a relation can; its contract cannot describe its columns.
 - **Combining a local relation with a SQL one** in one statement is refused; a program aggregates each first.
 - **Rows from a non-SQL source are all fetched**; bounding them by `when` and `where` is left to the body.
-- **Base tables in a relation program's SQL** are not yet parsed for.
+- **Base tables in a relation program's SQL** are parsed for when the engine has an `inspect` function: a table outside the braces is refused at definition, and a shape column no statement outputs is refused before the SQL runs.
 
 ### Decided — assumptions and interventions
 
@@ -1179,6 +1179,41 @@ What follows from it:
 *Open: how a message is classified as a transition of the current state or the start of a new one; how much of
 a changed program's state carries over; how branches are named and shown.*
 
+### Decided — one vocabulary, and where each word comes from
+
+The graph is written by coding agents that have read Cube, dbt MetricFlow, Malloy, LookML and SQL. Where those
+systems use different words for one idea — or one word for different ideas — an agent will mix them. So each idea
+here has exactly one name, the names below are the only ones used in contracts and code, and this table says what
+each corresponds to elsewhere and what it must not be confused with.
+
+| Here | Means | Cube | MetricFlow | Malloy | Not to be confused with |
+|---|---|---|---|---|---|
+| **concept** | a program that reads a data source | — | — | — | a *program*, which reads only programs |
+| **program** | a program that reads only other programs | — | — | — | a *concept* |
+| **relation** | a program's result that is a query not yet run | cube / view | semantic model | source | a database table |
+| **shape** | a relation's declared dimensions, measures, time and grain | the cube definition | the semantic model's YAML | source definition | a TypeScript type |
+| **dimension** | a column questions split and filter by | dimension | dimension | dimension | an *attribute path* |
+| **entity** (on a dimension) | the kind of thing the column identifies — `employee` | a join key | entity | a join's key | *grain* |
+| **grain** (on a shape) | the entity each row is one member of; unique | `primary_key: true` | primary entity | `primary_key` | a time *grain* |
+| **attribute path** | `employee.manager`: a dimension of the relation whose grain is employee, reached through this relation's employee | `Employees.manager` | `employee__manager` — **never written that way here** | `employee.manager` | a dimension of this relation |
+| **measure** | an aggregation of a column: sum, count, count distinct, min, max, average, median | measure | measure (`agg`) | measure | a *derived measure* |
+| **derived measure** | `expression` over measures, computed after aggregation | measure `type: number` | ratio or derived metric | measure expression | a SQL expression on a row |
+| **kind** | `flow` adds over time; `stock` is true at an instant; `ratio` is never added | — | non-additive dimension (for stock) | — | Cube's measure `type` |
+| **coordinates** | the question asked of a relation: measures, by, where, having, order, limit, during, at | query | query (`metrics`, `group_by`) | query | a program's *params* |
+| **time grain** | day, week, month, quarter, year, or a calendar's | granularity | time granularity | timeframe | an entity's *grain* |
+| **calendar** | data defining grains beyond the built-in ones | custom granularities | custom granularities on the time spine | — | a date dimension table read as a relation |
+| **rollup** | how a stock is read across a span: last or average | — | — | — | SQL `ROLLUP`, and subtotals |
+| **cumulative** | running totals along a time grain, reset by a grain | rolling window | cumulative metric | — | a rolling window of fixed width |
+| **fill** | include periods with no rows | — | `fill_nulls_with`, `join_to_timespine` | — | filling a missing attribute |
+| **compare** | the same question at another time, aligned | time shift | offset window | — | a *counterfactual* |
+| **assumption** | a named belief a program reads: a week, a target, a weight | — | — | — | a *filter*, or a dbt `var` |
+| **rule** | a value that depends on who asks or what is read; person over group over data over global | — | — | — | an access *policy* |
+| **policy** | an access restriction that arrives with the request and is applied to the SQL | access policy | — | — | a *rule* |
+| **intervention** | a change for one request: a value, rows left out, rows added | — | — | — | a correction, which is saved |
+| **counterfactual** | a recorded question asked again with a change, both sides recomputed | — | — | — | *compare* |
+| **correction** | a new program replacing one under the same name | — | — | — | an *intervention* |
+| **state** | a session's current question, changed by each follow-up | — | saved query (closest) | — | memory of calls |
+
 ---
 
 ## 19. What is missing, compared with systems that exist
@@ -1214,10 +1249,10 @@ Looker. Section 20 covers what is beyond analysis.
 
 | Capability | Us | Where it exists |
 |---|---|---|
-| Entities and joins by key; join paths found by the engine | ✗ | Cube, MetricFlow, LookML |
-| Fan-out protection — a join that repeats rows cannot inflate a sum | ✗ and the parts-sum check cannot see it | Looker, Cube, MetricFlow |
-| Declared grain and primary key | ✗ | Cube, dbt, MetricFlow |
-| Dimension attributes — an employee's manager, without splitting by it | ✗ | Cube, LookML, Kimball |
+| Entities and joins by key; join paths found by the engine | ◐ one step through an entity to its grain relation; no multi-step paths | Cube, MetricFlow, LookML |
+| Fan-out protection — a join that repeats rows cannot inflate a sum | ◐ entity joins check the grain is unique on every read; hand-written joins in relation programs are unchecked | Looker, Cube, MetricFlow |
+| Declared grain and primary key | ◐ grain for entity relations; facts declare none | Cube, dbt, MetricFlow |
+| Dimension attributes — an employee's manager, without splitting by it | ◐ reached as an attribute path, which splits; alongside the member it adds no rows | Cube, LookML, Kimball |
 | Hierarchies and drill paths — department tree, country to city | ✗ | Cube, Looker, Rill |
 | Values as they were at the time — slowly changing dimensions | ✗ declared, not honoured | dbt snapshots, Kimball |
 | The same dimension meaning the same key everywhere | ✗ | MetricFlow, Kimball |
