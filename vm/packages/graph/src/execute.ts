@@ -18,7 +18,7 @@ import { DatabaseSync } from 'node:sqlite'
 import type { Condition, Plan, ResolvedStatement } from './coordinates.js'
 import { additivity, evaluate, isDerived, type MeasureKind, type Shape } from './shape.js'
 
-export interface Column { name: string; role: 'dimension' | 'label' | 'measure'; unit?: string; kind?: MeasureKind }
+export interface Column { name: string; role: 'dimension' | 'label' | 'measure' | 'time'; unit?: string; kind?: MeasureKind }
 export interface Result {
   columns: Column[]
   rows: Record<string, unknown>[]
@@ -66,6 +66,23 @@ export async function runPlan(shape: Shape, p: Plan, query: RunQuery,
         `Ask for fewer rows: a coarser split, a narrower span, a filter, or a limit`)
     }
     return rows
+  }
+
+  if (p.detail) {
+    const st = p.statements[0]
+    const rows = (await exec(st)).map((row: any) => {
+      for (const [name, alias] of Object.entries(p.paths)) {
+        if (alias in row) { row[name] = row[alias]; delete row[alias] }
+        if (`${alias}_label` in row) { row[`${name}_label`] = row[`${alias}_label`]; delete row[`${alias}_label`] }
+      }
+      const out: Record<string, unknown> = {}
+      for (const col of p.detail!) {
+        const v = row[col.name]
+        out[col.name] = v == null ? null : col.role === 'measure' ? Number(v) : col.role === 'dimension' ? String(v) : v
+      }
+      return out
+    })
+    return { columns: p.detail, rows, caveats: p.caveats }
   }
 
   const splits = p.by.filter((d) => d !== p.grain)
@@ -253,6 +270,8 @@ function holds(v: any, c: Condition): boolean {
   return Object.entries(c).every(([op, x]: [string, any]) => {
     if (op === 'isNull') return (v == null) === Boolean(x)
     if (v == null) return false
+    if (op === 'contains') return String(v).toLowerCase().includes(String(x).toLowerCase())
+    if (op === 'startsWith') return String(v).toLowerCase().startsWith(String(x).toLowerCase())
     const d = compare(v, x)
     return ({ eq: d === 0, ne: d !== 0, gt: d > 0, gte: d >= 0, lt: d < 0, lte: d <= 0,
               in: (x as any[]).some((y) => compare(v, y) === 0), notIn: !(x as any[]).some((y) => compare(v, y) === 0) } as Record<string, boolean>)[op]

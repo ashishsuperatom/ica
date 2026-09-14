@@ -86,12 +86,17 @@ export function conditionSql(expr: string, cond: Condition, what: string, bind: 
   const out: string[] = []
   for (const [op, v] of Object.entries(cond)) {
     if (op === 'isNull') out.push(v ? `${expr} IS NULL` : `${expr} IS NOT NULL`)
+    else if (op === 'contains' || op === 'startsWith') {
+      // Case ignored; the text's own % and _ are matched as themselves.
+      const escaped = String(v).toLowerCase().replace(/[\\%_]/g, (ch) => `\\${ch}`)
+      out.push(`LOWER(${expr}) LIKE ${bind(op === 'contains' ? `%${escaped}%` : `${escaped}%`)} ESCAPE '\\'`)
+    }
     else if (op === 'in' || op === 'notIn') {
       const list = v as Scalar[]
       out.push(list.length ? `${expr} ${op === 'in' ? 'IN' : 'NOT IN'} (${list.map(bind).join(', ')})` : op === 'in' ? '1 = 0' : '1 = 1')
     } else {
       const sqlOp = ({ eq: '=', ne: '<>', gt: '>', gte: '>=', lt: '<', lte: '<=' } as Record<string, string>)[op]
-      if (!sqlOp) refuse(`unknown condition "${op}" on ${what} — use in, notIn, eq, ne, gt, gte, lt, lte or isNull`)
+      if (!sqlOp) refuse(`unknown condition "${op}" on ${what} — use in, notIn, eq, ne, gt, gte, lt, lte, isNull, contains or startsWith`)
       out.push(`${expr} ${sqlOp} ${bind(v)}`)
     }
   }

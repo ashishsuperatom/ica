@@ -14,6 +14,7 @@
 import { randomUUID } from 'node:crypto'
 import { answerRelation } from './answer.js'
 import { difference } from './compare.js'
+import { catalog, members } from './discovery.js'
 import { readingContext } from './composition.js'
 import { contractProblem, type Contract } from './contract.js'
 import type { Coordinates } from './coordinates.js'
@@ -205,7 +206,14 @@ export function createEngine(o: EngineOptions) {
     }
   }
 
-  return { define, call, replay, counterfactual, store: o.store }
+  return {
+    define, call, replay, counterfactual,
+    /** What programs exist, with each relation's measures, dimensions and entities. */
+    catalog: () => catalog(o.store),
+    /** Which members of a relation's dimension match what someone typed. */
+    members: (relation: string, ask: Parameters<typeof members>[3], options: CallOptions = {}) => members(o.store, call, relation, ask, options),
+    store: o.store,
+  }
 }
 
 export type Engine = ReturnType<typeof createEngine>

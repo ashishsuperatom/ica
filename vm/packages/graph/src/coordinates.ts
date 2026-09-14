@@ -34,6 +34,8 @@ export type Scalar = string | number
 export type Condition = Scalar | null | Scalar[] | {
   in?: Scalar[]; notIn?: Scalar[]; eq?: Scalar; ne?: Scalar
   gt?: Scalar; gte?: Scalar; lt?: Scalar; lte?: Scalar; isNull?: boolean
+  /** Text, ignoring case. */
+  contains?: string; startsWith?: string
 }
 
 /** A span of days: from inclusive, to exclusive, as YYYY-MM-DD. */
@@ -55,6 +57,9 @@ export interface Coordinates {
   limit?: number
   /** With a limit: keep that many rows within each group of these splits — the top three customers per pillar. */
   limitPer?: string[]
+  /** Instead of aggregating: the rows themselves — every dimension, label, measure column and the time, one row per
+   *  row of the relation, filtered as asked. The records behind a number. Needs an order and a limit. */
+  detail?: { limit: number }
   /** Also answer at these coarser splits — each a subset of `by`, `[]` for the grand total — computed by the
    *  source for each, so a ratio or a distinct count is right at every level. Totals count every row, including
    *  rows a limit or having leaves out. */
@@ -117,6 +122,8 @@ export interface Plan {
   paths: Record<string, string>
   /** Names in `by` that come with a label. */
   labelled: string[]
+  /** For detail: the columns of the rows, in order. */
+  detail?: Array<{ name: string; role: 'dimension' | 'label' | 'measure' | 'time'; unit?: string }>
   /** A limit or having was pushed into the statement, so parts cannot be checked against the whole. */
   partial: boolean
   /** The statement already returns rows in the order asked for. */
@@ -128,6 +135,7 @@ const refuse = (msg: string): never => { throw new CoordinateError(msg) }
 
 const dateOk = (d: unknown) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)
 const MAX_READINGS = 400
+const MAX_DETAIL = 1000
 
 /** The engine's own parameters are prefixed so they cannot collide with a body's. */
 const P = 'c_'
@@ -169,7 +177,10 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
   const isPath = (d: string) => d.includes('.')
   const providers = new Map<string, { name: string; shape: Shape; read: ReadBody; entity: string }>()
   const paths = new Map<string, { via: string; column: string; label?: string; alias: string }>()
-  for (const d of [...splits, ...Object.keys(where)]) {
+  // A filter may name a dimension's label — `pillar_label` — to filter by what people read rather than the key.
+  const known_ = (d: string) => isPath(d) || !!dimensions[d]
+  const baseOf = (d: string) => (d.endsWith('_label') && known_(d.slice(0, -6)) ? d.slice(0, -6) : d)
+  for (const d of [...splits, ...Object.keys(where).map(baseOf)]) {
     if (!isPath(d) || paths.has(d)) continue
     const [via, attr, ...more] = d.split('.')
     if (more.length) refuse(`"${d}" goes through more than one entity; reach one step at a time`)
@@ -183,13 +194,13 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
     if (a.history === 'current') caveats.push(`"${d}" is read as it is today, not as it was at the time`)
   }
   for (const d of splits) if (!isPath(d) && !dimensions[d]) refuse(`"${d}" is not a dimension of this relation — available: ${known.join(', ')}`)
-  for (const d of Object.keys(where)) {
+  for (const d of Object.keys(where).map(baseOf)) {
     if (!isPath(d) && !dimensions[d]) refuse(`cannot filter on "${d}" — filterable dimensions: ${Object.keys(dimensions).join(', ')}`)
   }
   const hasLabel = (d: string) => (isPath(d) ? !!paths.get(d)!.label : !!dimensions[d]?.label)
   for (const m of Object.keys(having)) if (!measures.includes(m)) refuse(`having on "${m}" needs it among the measures asked for`)
   const orderable = [...by, ...splits.filter(hasLabel).map((d) => `${d}_label`), ...measures]
-  for (const o of c.order ?? []) if (!orderable.includes(o.by)) refuse(`cannot order by "${o.by}" — it is not in the result: ${orderable.join(', ')}`)
+  if (!c.detail) for (const o of c.order ?? []) if (!orderable.includes(o.by)) refuse(`cannot order by "${o.by}" — it is not in the result: ${orderable.join(', ')}`)
   if (c.limitPer) {
     if (c.limit == null) refuse('limitPer says how many rows to keep per group; it needs a limit')
     for (const d of c.limitPer) if (!by.includes(d)) refuse(`limitPer "${d}" must be one of the splits: ${by.join(', ')}`)
@@ -227,7 +238,15 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
   let n = 0
   const bind = (v: unknown) => { const name = `${P}${n++}`; filterParams[name] = v; return `@${name}` }
   const condition = (expr: string, cond: Condition, what: string) => conditionSql(expr, cond, what, bind)
-  const columnOf = (d: string) => (isPath(d) ? `a_${paths.get(d)!.via}.${paths.get(d)!.column}` : `t.${dimensions[d].column}`)
+  const columnOf = (d: string) => {
+    const base = baseOf(d)
+    if (base !== d) {
+      const label = isPath(base) ? paths.get(base)!.label : dimensions[base].label
+      if (!label) refuse(`"${base}" has no label to filter on`)
+      return isPath(base) ? `a_${paths.get(base)!.via}.${label}` : `t.${label}`
+    }
+    return isPath(d) ? `a_${paths.get(d)!.via}.${paths.get(d)!.column}` : `t.${dimensions[d].column}`
+  }
   const filters = Object.entries(where).flatMap(([d, cond]) => condition(columnOf(d), cond, d))
   /** A name in the result as a SQL alias: a path's dot cannot be one. */
   const aliasOf = (name: string) => {
@@ -291,7 +310,7 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
   // One statement: pushdown of having, order and limit is possible — unless work across periods follows.
   const acrossPeriods = Boolean(c.fill || c.cumulative || c.rolling)
   const wrap = async (when: When, dims: string[], bounds: (s: SqlDialect) => string[], extra: Record<string, unknown>,
-                      opts: { period?: string; pushdown: boolean; span?: { from: string; to: string } }): Promise<Statement> => {
+                      opts: { period?: string; pushdown: boolean; span?: { from: string; to: string }; detail?: boolean }): Promise<Statement> => {
     const body = await read(when)
     for (const k of Object.keys(body.params)) if (k.startsWith(P)) refuse(`the relation's parameter "${k}" uses the engine's prefix ${P}`)
     const s = sqlFor(dialects[body.source] ?? refuse(`no dialect is known for ${body.source}`))
@@ -317,6 +336,7 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
       if ('from' in when) caveats.push(`attributes of ${p.entity} are as at ${asAt}`)
     }
     const render = (dimsHere: string[], pushdown: boolean) => {
+      if (opts.detail) return renderDetail()
       const cols: string[] = []
       const group: string[] = []
       for (const d of dimsHere) {
@@ -345,9 +365,27 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
       }
       return sql
     }
+    function renderDetail(): string {
+      const cols: string[] = []
+      for (const [name, d] of Object.entries(dimensions)) {
+        cols.push(`t.${d.column} AS ${name}`)
+        if (d.label) cols.push(`t.${d.label} AS ${name}_label`)
+      }
+      for (const d of splits.filter(isPath)) {
+        cols.push(`${columnOf(d)} AS ${aliasOf(d)}`)
+        if (paths.get(d)!.label) cols.push(`a_${paths.get(d)!.via}.${paths.get(d)!.label} AS ${aliasOf(d)}_label`)
+      }
+      for (const [name, m] of Object.entries(defined)) if (!isDerived(m) && m.column) cols.push(`t.${m.column} AS ${name}`)
+      if (time) cols.push(`${moment(s, opts.span ?? { from: today, to: today })} AS ${time}`)
+      const conds = [...filters, ...bounds(s)]
+      const keys = [...c.order!.map((o) => `${aliasOf(o.by)}${o.desc ? ' DESC' : ''}`)]
+      return s.limit([`SELECT ${cols.join(', ')}`, `FROM (\n${body.sql.trim()}\n) t`, ...joins,
+                      conds.length ? `WHERE ${conds.join('\n  AND ')}` : '', `ORDER BY ${keys.join(', ')}`].filter(Boolean).join('\n'), c.detail!.limit)
+    }
+
     // Rendered before the parameters are gathered: rendering is what binds the having conditions' values.
     const sql = render(dims, opts.pushdown)
-    const unsplitSql = dims.length ? render([], false) : null
+    const unsplitSql = dims.length && !opts.detail ? render([], false) : null
     const params = { ...joinParams, ...filterParams, ...extra }
     const t = Object.keys(tables).length ? tables : undefined
     return {
@@ -355,6 +393,33 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
       unsplit: unsplitSql ? { source: body.source, tables: t, params, sql: unsplitSql } : undefined,
     }
   }
+  // ── the rows themselves ───────────────────────────────────────────────────────────────────────────────
+  if (c.detail) {
+    if (!Number.isInteger(c.detail.limit) || c.detail.limit < 1 || c.detail.limit > MAX_DETAIL) refuse(`detail needs a limit from 1 to ${MAX_DETAIL}`)
+    if (!c.order?.length) refuse('detail needs an order — which rows are shown is the question\'s choice, not the source\'s')
+    if (grain) refuse('detail rows are not grouped, so they take no time grain; filter by the span instead')
+    const detailColumns: NonNullable<Plan['detail']> = []
+    for (const [name, d] of Object.entries(dimensions)) { detailColumns.push({ name, role: 'dimension' }); if (d.label) detailColumns.push({ name: `${name}_label`, role: 'label' }) }
+    for (const d of splits.filter(isPath)) { detailColumns.push({ name: d, role: 'dimension' }); if (paths.get(d)!.label) detailColumns.push({ name: `${d}_label`, role: 'label' }) }
+    for (const [name, m] of Object.entries(defined)) if (!isDerived(m) && m.column) detailColumns.push({ name, role: 'measure', unit: m.unit })
+    if (time) detailColumns.push({ name: time, role: 'time' })
+    const names = new Set(detailColumns.map((x) => x.name))
+    for (const o of c.order!) if (!names.has(o.by)) refuse(`cannot order detail by "${o.by}" — its columns are ${[...names].join(', ')}`)
+    let statement: Statement
+    if (kind === 'flow') {
+      if (!c.during) refuse('detail of a flow needs the span its rows fall in (during)')
+      const { from, to } = c.during!
+      statement = await wrap({ from, to, where }, [], (s) => [`${moment(s, { from, to })} >= ${s.date(`${P}from`)}`, `${moment(s, { from, to })} < ${s.date(`${P}to`)}`],
+                             { [`${P}from`]: from, [`${P}to`]: to }, { pushdown: false, span: { from, to }, detail: true })
+    } else {
+      if (!c.at) refuse('detail of a stock needs the instant its rows are read at (at)')
+      statement = await wrap({ asAt: c.at!, where }, [], () => [], {}, { pushdown: false, detail: true })
+    }
+    return { statements: [statement], kind, measures: [], fetched: [], by: splits.filter(isPath), grain: null, combine: 'single', partial: true,
+             orderedAtSource: true, caveats, grains: grainSet, paths: Object.fromEntries([...paths].map(([k, v]) => [k, v.alias])), labelled: [], after: {},
+             detail: detailColumns }
+  }
+
   const pushable = (statements: number) => statements === 1 && !acrossPeriods && !c.limitPer
   const partialIf = (pushed: boolean) => pushed && (c.limit != null || Object.keys(having).length > 0)
 

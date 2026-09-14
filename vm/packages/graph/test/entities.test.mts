@@ -110,3 +110,43 @@ test('a correction to the entity\'s relation reaches every question that went th
   const ent = (rows: any[]) => rows.find((x) => x['customer.segment'] === 'enterprise').revenue
   assert.equal(ent(after) - ent(before), 400)
 })
+
+// ── detail, text filters, member search, catalogue ────────────────────────────────────────────────────────
+
+test('detail: the rows behind a number, with attributes reached through the entity', async () => {
+  const { engine } = await setup()
+  const r = (await engine.call<any>('orders', { detail: { limit: 2 }, by: ['customer.segment'], where: { 'customer.segment': 'enterprise' }, during: H1,
+    order: [{ by: 'revenue', desc: true }] })).value
+  assert.deepEqual(r.rows.map((x: any) => [x.customer, x['customer.segment'], x.revenue, x.ordered_on]), [['c1', 'enterprise', 300, '2026-01-05'], ['c2', 'enterprise', 250, '2026-02-14']])
+  assert.deepEqual(r.columns.map((c: any) => [c.name, c.role]), [['customer', 'dimension'], ['customer.segment', 'dimension'], ['revenue', 'measure'], ['ordered_on', 'time']])
+  await assert.rejects(engine.call('orders', { detail: { limit: 5 }, during: H1 }), /needs an order/)
+})
+
+test('text conditions on a label, ignoring case, with % and _ taken literally', async () => {
+  const { engine } = await setup()
+  const r = (await engine.call<any>('customers', { by: ['customer'], where: { customer_label: { contains: 'IR' } }, at: '2026-06-30' })).value
+  assert.deepEqual(r.rows.map((x: any) => x.customer_label), ['Birch'])
+  const none = (await engine.call<any>('customers', { by: ['customer'], where: { customer_label: { startsWith: '%' } }, at: '2026-06-30' })).value
+  assert.equal(none.rows.length, 0)
+})
+
+test('members: exact, containing, within a typing mistake, and ambiguity said', async () => {
+  const { engine, store } = await setup()
+  const exact = await engine.members('customers', { dimension: 'customer', search: 'ash' })
+  assert.deepEqual(exact.matches.map((m) => [m.member, m.label, m.match]), [['c1', 'Ash', 'exact']])
+  const typo = await engine.members('customers', { dimension: 'customer', search: 'cedr' })
+  assert.deepEqual(typo.matches.map((m) => [m.label, m.match, m.distance]), [['Cedar', 'close', 1]])
+  const both = await engine.members('customers', { dimension: 'customer', search: 'e' })
+  assert.deepEqual(both.matches.map((m) => m.label), ['Cedar', 'Dune'])
+  assert.equal(both.ambiguous, true, '"e" is in Cedar and Dune, equally')
+  assert.ok(typo.callIds.every((id) => store.getCall(id)), 'each search is a recorded call')
+})
+
+test('catalogue: what exists, and what each relation can be asked', async () => {
+  const { engine } = await setup()
+  const c = engine.catalog()
+  const customersEntry = c.find((e) => e.name === 'customers')!
+  assert.equal(customersEntry.relation!.grain, 'customer')
+  assert.deepEqual(customersEntry.relation!.dimensions.manager, { entity: 'employee', history: 'as-at', labelled: true })
+  assert.equal(c.find((e) => e.name === 'orders')!.relation!.measures.revenue.how, 'sum of amount')
+})
