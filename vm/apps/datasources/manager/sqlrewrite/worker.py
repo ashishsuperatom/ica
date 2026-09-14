@@ -97,6 +97,7 @@ def inject_policies(root, policies, dialect=None):
         {"table": "<name>", "deny": true, "reason": "..."}     reading that table at all is refused
         {"table": "<name>", "predicate": "<sql over {t}>"}     only that table's rows where the predicate holds
         {"predicate": "<sql>"}                                  AND-ed into the outermost WHERE
+        {"table": "<name>", "column": "<name>", "mask": "null"} that column reads as NULL wherever the table is read
 
     A table predicate names the table's columns through `{t}` — `{t}.subsidiary IN (3, 5)` — because the query
     may alias the table anything, or read it twice.
@@ -107,6 +108,9 @@ def inject_policies(root, policies, dialect=None):
     the join inner. A filtered table is the same restriction whatever surrounds it."""
     if not policies:
         return root
+    for pol in policies:
+        if pol.get("table") and pol.get("column") and pol.get("mask"):
+            root = _mask_column(root, str(pol["table"]), str(pol["column"]), str(pol["mask"]))
     for pol in policies:
         table = pol.get("table")
         if table and pol.get("deny"):
@@ -133,6 +137,45 @@ def inject_policies(root, policies, dialect=None):
             condition = exp.condition(pred.replace("{t}", str(tbl.name)), dialect=dialect)
             filtered = exp.select("*").from_(inner).where(condition).subquery(alias)
             tbl.replace(filtered)
+    return root
+
+
+# ── MASKING ONE COLUMN OF A TABLE ────────────────────────────────────────────────────────────────────────
+# Every reference to the column, where the table is read, becomes NULL — keeping the name it was read under, so the
+# query's shape is unchanged. Two cases cannot be masked safely without the table's schema, and are refused instead
+# of guessed at: `*` over the table, which would carry the column out unseen; and an unqualified column name in a
+# query reading several tables, which may or may not be this table's.
+def _mask_column(root, table, column, mask):
+    if mask != "null":
+        raise Denied(f"mask \"{mask}\" is not known — use null")
+    table_l, column_l = table.lower(), column.lower()
+    for select in list(root.find_all(exp.Select)):
+        sources = {}
+        for t in select.find_all(exp.Table):
+            if t.find_ancestor(exp.Select) is select:
+                sources[(t.alias_or_name or "").lower()] = (t.name or "").lower()
+        if table_l not in sources.values():
+            continue
+        for projection in select.expressions:
+            star = isinstance(projection, exp.Star) or (isinstance(projection, exp.Column) and isinstance(projection.this, exp.Star))
+            if star:
+                owner = (projection.table or "").lower() if isinstance(projection, exp.Column) else ""
+                if not owner or sources.get(owner) == table_l:
+                    raise Denied(f"not allowed to read {table}.{column}, and * would include it — select the columns needed")
+        for col in list(select.find_all(exp.Column)):
+            if col.find_ancestor(exp.Select) is not select or (col.name or "").lower() != column_l:
+                continue
+            owner = (col.table or "").lower()
+            if owner:
+                if sources.get(owner) != table_l:
+                    continue
+            elif len(set(sources.values())) > 1:
+                raise Denied(f"not allowed to read {table}.{column}, and \"{col.name}\" is not qualified in a query reading several tables — qualify it")
+            masked = exp.Null()
+            if isinstance(col.parent, exp.Alias) or not isinstance(col.parent, exp.Select):
+                col.replace(masked)
+            else:
+                col.replace(exp.alias_(masked, col.name))
     return root
 
 
