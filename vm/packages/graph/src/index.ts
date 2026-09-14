@@ -25,3 +25,4 @@ export { dayIn, offsetMinutes, stretches, validZone, type Stretch } from './time
 export { catalog, members, type CatalogEntry, type Members, type MemberMatch } from './discovery.js'
 export { expect, seriesKey, lineageOf, observationsOf, withinLimit, surprisesAmong, type Expectation, type Surprise, type TriageNode } from './expectations.js'
 export { Registry, namespaceOf, type Library } from './registry.js'
+export { applyMessage, stateProblem, stateHash, MessageError, type State, type Message, type Step, type Found } from './session.js'

@@ -105,6 +105,15 @@ CREATE TABLE IF NOT EXISTS observation (
 );
 CREATE INDEX IF NOT EXISTS observation_series ON observation(name, series, member, measure, grain, period);
 CREATE INDEX IF NOT EXISTS observation_at ON observation(at);
+-- A person's data session: its steps form a tree; each holds the state and the call that answered it.
+CREATE TABLE IF NOT EXISTS session (
+  id TEXT PRIMARY KEY, who TEXT, title TEXT, current_step INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS session_step (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, parent_step INTEGER, message TEXT NOT NULL, state TEXT NOT NULL,
+  state_hash TEXT NOT NULL, call_id TEXT, error TEXT, at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS session_step_session ON session_step(session_id, id);
 -- What memory let go of: the periods dropped from a series, kept as their distribution — count, sum, sum of squares,
 -- least and greatest, and the periods they span. Recent periods stay whole; the far past stays as its shape.
 CREATE TABLE IF NOT EXISTS series_summary (
@@ -124,6 +133,9 @@ export const MAX_OBSERVATIONS_PER_CALL = 10_000
 export const MAX_FULL_CALLS = 20_000
 /** Calls kept at all; past this the oldest answers without a decision are let go of. */
 export const MAX_CALLS = 200_000
+/** Steps one data session may hold, and sessions kept at all; past that the least recently used sessions go. */
+export const MAX_STEPS_PER_SESSION = 1_000
+export const MAX_SESSIONS = 10_000
 const COMPACT_EVERY = 500
 /** Periods each series keeps whole. Older ones are folded into the series' summary as newer arrive. */
 export const MAX_PERIODS_PER_SERIES = 120
@@ -218,7 +230,8 @@ export class GraphStore {
     try {
       // Let go of whole answers first — oldest first, never one that made a decision — until under the limit.
       const doomed = this.db.prepare(`WITH RECURSIVE doomed(id) AS (
-            SELECT id FROM (SELECT id FROM call WHERE parent_id IS NULL AND decisions NOT LIKE '%"boundary"%' ORDER BY at LIMIT 1)
+            SELECT id FROM (SELECT id FROM call WHERE parent_id IS NULL AND decisions NOT LIKE '%"boundary"%'
+                              AND id NOT IN (SELECT call_id FROM session_step WHERE call_id IS NOT NULL) ORDER BY at LIMIT 1)
             UNION ALL SELECT c.id FROM call c JOIN doomed d ON c.parent_id = d.id)
           DELETE FROM call WHERE id IN (SELECT id FROM doomed)`)
       while (count() > this.limits.calls) {
@@ -229,11 +242,50 @@ export class GraphStore {
       const total = count()
       if (total > this.limits.fullCalls) {
         stripped = Number(this.db.prepare(`UPDATE call SET output = NULL, queries = '[]' WHERE id IN
-            (SELECT id FROM call ORDER BY at LIMIT ?) AND (output IS NOT NULL OR queries <> '[]')`).run(total - this.limits.fullCalls).changes)
+            (SELECT id FROM call ORDER BY at LIMIT ?) AND (output IS NOT NULL OR queries <> '[]')
+            AND id NOT IN (SELECT call_id FROM session_step WHERE call_id IS NOT NULL)`).run(total - this.limits.fullCalls).changes)
       }
       this.db.exec('COMMIT')
     } catch (e) { this.db.exec('ROLLBACK'); throw e }
     return { stripped, removed }
+  }
+
+  // ── data sessions ────────────────────────────────────────────────────────────────────────────────────────
+
+  openSession(id: string, who: Record<string, unknown> | null, title: string | null): void {
+    const now = Date.now()
+    this.db.prepare('INSERT INTO session (id, who, title, current_step, created_at, updated_at) VALUES (?, ?, ?, NULL, ?, ?)')
+      .run(id, who ? JSON.stringify(who) : null, title, now, now)
+    const total = Number((this.db.prepare('SELECT COUNT(*) AS n FROM session').get() as any).n)
+    if (total > MAX_SESSIONS) {
+      const old = this.db.prepare('SELECT id FROM session ORDER BY updated_at LIMIT ?').all(total - MAX_SESSIONS) as any[]
+      for (const s of old) { this.db.prepare('DELETE FROM session_step WHERE session_id = ?').run(s.id); this.db.prepare('DELETE FROM session WHERE id = ?').run(s.id) }
+    }
+  }
+
+  getSession(id: string): { id: string; who: Record<string, unknown> | null; title: string | null; currentStep: number | null } | null {
+    const r: any = this.db.prepare('SELECT * FROM session WHERE id = ?').get(id)
+    return r ? { id: r.id, who: r.who ? JSON.parse(r.who) : null, title: r.title, currentStep: r.current_step == null ? null : Number(r.current_step) } : null
+  }
+
+  addStep(s: { sessionId: string; parent: number | null; message: unknown; state: unknown; stateHash: string; callId: string | null; error: string | null }, moveCurrent: boolean): number {
+    const n = Number((this.db.prepare('SELECT COUNT(*) AS n FROM session_step WHERE session_id = ?').get(s.sessionId) as any).n)
+    if (n >= MAX_STEPS_PER_SESSION) throw new Error(`this session has ${MAX_STEPS_PER_SESSION} steps, the most one holds — start a new session`)
+    const now = Date.now()
+    const id = Number(this.db.prepare(`INSERT INTO session_step (session_id, parent_step, message, state, state_hash, call_id, error, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(s.sessionId, s.parent, JSON.stringify(s.message), JSON.stringify(s.state), s.stateHash, s.callId, s.error, now).lastInsertRowid)
+    this.db.prepare(`UPDATE session SET updated_at = ?${moveCurrent ? ', current_step = ?' : ''} WHERE id = ?`).run(...(moveCurrent ? [now, id, s.sessionId] : [now, s.sessionId]))
+    return id
+  }
+
+  moveCurrent(sessionId: string, step: number): void {
+    this.db.prepare('UPDATE session SET current_step = ?, updated_at = ? WHERE id = ?').run(step, Date.now(), sessionId)
+  }
+
+  steps(sessionId: string): Array<{ id: number; sessionId: string; parent: number | null; message: any; state: any; stateHash: string; callId: string | null; error: string | null; at: number }> {
+    return (this.db.prepare('SELECT * FROM session_step WHERE session_id = ? ORDER BY id').all(sessionId) as any[]).map((r) => ({
+      id: Number(r.id), sessionId: r.session_id, parent: r.parent_step == null ? null : Number(r.parent_step), message: JSON.parse(r.message),
+      state: JSON.parse(r.state), stateHash: r.state_hash, callId: r.call_id, error: r.error, at: Number(r.at) }))
   }
 
   /** The lineage of a program's most recent answer — which exact programs its memory is currently of. */

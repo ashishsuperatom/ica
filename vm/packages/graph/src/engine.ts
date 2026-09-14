@@ -25,6 +25,7 @@ import { MAX_OBSERVATIONS_PER_CALL, type CallRecord } from './store.js'
 import { checkRelation, interfaceMisfit, programParamMisfit, reachesName } from './definition.js'
 import { programHash } from './hash.js'
 import { namespaceOf } from './registry.js'
+import { sessions } from './session.js'
 import { createRuntime, newTrail, type CallOptions, type EngineOptions, type Intervention, type ProgramContext, type Scope } from './runtime.js'
 
 export type { CallOptions, EngineOptions, Intervention, ProgramContext, Query, SqlAnalysis } from './runtime.js'
@@ -303,6 +304,8 @@ export function createEngine(o: EngineOptions) {
 
   return {
     define, call, replay, counterfactual, surprises, explain, review,
+    /** Data sessions: a person's questions as states, each follow-up a message. See session.ts. */
+    sessions: sessions(o.store, rt.programs, () => new Grains(calendarFor(o.assumptions, { today: '', context: {}, interventions: {}, checks: 'light' }, newTrail())), call),
     /** What programs exist, with each relation's measures, dimensions and entities. */
     catalog: () => catalog(rt.programs),
     /** Which members of a relation's dimension match what someone typed. */

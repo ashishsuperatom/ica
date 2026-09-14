@@ -1230,6 +1230,38 @@ reports every decision that would now go the other way.
 June utilisation is the one surprise, triage leads to hours and not headcount; "should team b hire" is yes on Q1 and
 reopens on Q3. The NetSuite demonstration (`examples/s7-s8-memory-and-decisions.mts`) awaits the sanity pass.
 
+### Decided — sessions, libraries, and where this is going
+
+**Two sessions run side by side.** The *agent session* is the conversation with the model, kept by whichever harness runs
+it; the engine only sees its id. The *data session* is what a person has asked of the data: a tree of steps, each a
+state and the answer to it. A first question becomes a state S1, answered D1; a follow-up is a message applied to the
+current state, S2, answered D2. Programs are global; states are the person's. Everything goes through the agent: it
+turns what the person says into a message, applies it, and — when "the third customer" or "that supplier" points at
+something already shown — finds it in the session's answers (`sessions.find`). Messages are typed and checked against
+the contract before anything runs; a refused message leaves the session where it was; going back branches. The
+answers a session showed are kept when call history is compacted. A state names no access, so it can be put in a link
+or pinned to a dashboard and asked again as whoever opens it.
+
+**Namespaces and libraries, minimal.** A name may carry a namespace; inside one, an unqualified name means that
+namespace first. A library is a namespace whose programs live in their own store, mounted read-only: used and
+composed like the organisation's own, remembered in the organisation's memory, never redefined from here.
+*Registration* — anyone in the system publishing a semantic model others can mount, as data sources are registered
+today — builds on this and comes later. First come the models the agent builds for each organisation.
+
+**When a needed program does not exist**, it is built: by the composer itself, or by escalating to the analyst. Both are
+to be tried; the person must be able to see which is happening and why an answer is not immediate. *Open.*
+
+**Every program should be able to run on its own, continuously**, later: a program deployed as a monitor — its code in a
+dynamic worker, its memory in a Durable Object's SQLite — watching its own expectations and reopening its own
+decisions. Not built. It constrains what is built now: a program's memory is keyed by its name and lineage and so can
+be separated from the rest; the engine takes its store, its query function, its clock and its modules from outside.
+What would still have to change: the store behind an interface rather than `node:sqlite` directly, and program modules
+loaded from source rather than files.
+
+**The standard is higher than BI.** The people asking are deciding. The measure of this system is whether a decision
+is better and faster with it — correct numbers, why they moved, what would change them, what to do, and when to look
+again — not whether it reproduces a dashboard.
+
 ### Decided — the engine, and the semantic model built on it
 
 Two things are being built here, and in production only one of them can change.
