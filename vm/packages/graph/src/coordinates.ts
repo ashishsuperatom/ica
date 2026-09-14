@@ -17,7 +17,9 @@
 
 import { addDays, Grains, type Calendar } from './calendar.js'
 import { conditionSql, sqlFor, type Dialect, type SqlDialect } from './dialects.js'
+import { CoordinateError } from './errors.js'
 export { conditionSql, sqlFor, type Dialect, type SqlDialect } from './dialects.js'
+export { CoordinateError } from './errors.js'
 import {
   additivity, componentsOf, isDerived, kindOf, tokens,
   type BaseMeasure, type Shape,
@@ -108,8 +110,6 @@ export interface Plan {
   caveats: string[]
 }
 
-import { CoordinateError } from './errors.js'
-export { CoordinateError } from './errors.js'
 const refuse = (msg: string): never => { throw new CoordinateError(msg) }
 
 const dateOk = (d: unknown) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)
