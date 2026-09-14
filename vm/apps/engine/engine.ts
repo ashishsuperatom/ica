@@ -41,6 +41,7 @@ import type { Engine as GraphEngine } from '@superatom/graph'
 // built image. tsx erases a type-only import, which is why the container runs without it. Making it a value
 // import would break every deploy while working perfectly here.
 import type { EngineMsgType } from '../../../clients/protocol.js'
+import { surfaceAnswer, followupsOf } from './graph/surface-answer.js'
 import { buildDatasourceIndex } from './datasource-index/build.js'
 import type { AgentEvent } from './ica/session.js'
 
@@ -376,6 +377,15 @@ export function isDataCall(command?: string): boolean {
 const A = (verb: 'hello' | 'event' | 'events' | 'status' | 'chunk', lane: string, body: Record<string, any> = {}) =>
   ({ t: `agent:${verb}` as EngineMsgType, lane, ...body })
 
+// Every surface renders `analyst:answer` (and a chat channel `channel:answer`); `session:step` carries the richer
+// form beside it. Next steps go as follow-up chips, which the person sends back as their next question.
+function tellSurfaces(reply: any, channel: string, sid: string, qid: string, timing: { ms: number }, answer: import('../../../clients/protocol.js').Answer, followups: string[] = []) {
+  const category = answer.status === 'answered' ? 'analysis' : answer.status
+  emit(reply, { t: 'analyst:answer', category, answer: { category, ...answer }, timing, sid, qid })
+  if (channel) emit({ type: 'channel' }, { t: 'channel:answer', channel, qid, answer: { category, ...answer }, category })
+  if (followups.length && reply) emit(reply, { t: 'followups', items: followups, qid, sid })
+}
+
 // ── A QUESTION, ANSWERED AS A STEP OF THE PERSON'S DATA SESSION ─────────────────────────────────────────────
 //
 // Each conversation has two sessions side by side: the agent's (the harness transcript, one per conversation) and
@@ -409,6 +419,8 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     try { stopSession?.() } catch { /* best-effort */ }
     emit(reply, A('status', 'analyst', { text: 'Stopped.', sid, qid }))
     emit(reply, { t: 'session:step', sid, qid, stopped: why, timing: { ms: Date.now() - t0 } })
+    emit(reply, { t: 'analyst:answer', category: 'stopped', sid, qid, timing: { ms: Date.now() - t0 },
+      answer: { status: 'answered', category: 'stopped', answer: 'Stopped.' } })
   }
   inflight.set(sid, { qid, stop: stopThisTurn })
 
@@ -500,6 +512,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     if (!done.step) {
       const why = done.escalate?.reason ?? 'no step was applied'
       emit(reply, { t: 'session:step', sid, qid, error: `This question was not answered: ${why}`, timing })
+      tellSurfaces(reply, channel, sid, qid, timing, { status: 'cannot_answer', answer: `This question was not answered: ${why}` })
       return
     }
     // THE STEP AS THE DATA SESSION HOLDS IT — never as the agent described it.
@@ -510,9 +523,13 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       answer: call?.output ?? null, caveats: call?.caveats ?? [], ...(step?.error ? { error: step.error } : {}), timing, by: workingAgent,
     }
     emit(reply, delivered)
+    tellSurfaces(reply, channel, sid, qid, timing, step?.error
+      ? { status: 'error', answer: step.error }
+      : surfaceAnswer(call?.output as any, call?.caveats ?? []), followupsOf(call?.output as any))
     console.log(`[ica] ${workingAgent} · step ${step?.id} · ${(timing.ms / 1000).toFixed(1)}s${step?.error ? ` · ${step.error.slice(0, 120)}` : ''}`)
   } catch (e: any) {
     emit(reply, { t: 'session:step', sid, qid, error: `Failed: ${e?.message ?? e}`, timing: { ms: Date.now() - t0 } })
+    tellSurfaces(reply, channel, sid, qid, { ms: Date.now() - t0 }, { status: 'error', answer: `Failed: ${e?.message ?? e}` })
   } finally {
     if (keepalive) { clearInterval(keepalive); keepalive = null }
     if (narrationTimer) { clearInterval(narrationTimer); narrationTimer = null }
