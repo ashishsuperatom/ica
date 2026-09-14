@@ -1206,6 +1206,15 @@ each corresponds to elsewhere and what it must not be confused with.
 | **totals** | the same question at coarser splits, each asked of the source | totals / rollup in queries | — | nested totals | *rollup* |
 | **share** | a measure as a part of its total within splits | — | — | `all()` percent | a ratio measure |
 | **limitPer** | keep the first N rows within each group | — | — | — | a limit on the whole |
+| **rolling** | each period's value over it and the periods before it | rolling window | cumulative metric with `window` | — | *cumulative* |
+| **detail** | the rows behind a number, not aggregated | drill members | — | — | *members* |
+| **members** | which members of a dimension match what was typed | — | dimension values | — | *detail* |
+| **catalog** | what programs exist and what each relation can be asked | meta endpoint | `list_metrics`, `list_dimensions` | — | memory of calls |
+| **currency** (on a measure) | the dimension holding each row's currency code | — | — | — | *units* |
+| **units** (in a question) | a measure shown in another unit by a factor | — | — | — | *currency* |
+| **setting** | an engine-wide value by name — calendar, timezone, exchange rates, currency, units | — | — | — | an *assumption* a program declares |
+| **checks** | how much extra reading checks may cost: thorough or light | — | — | — | a *verification* a program writes |
+| **timeZone** (on a shape) | the zone the time column's moments are written in | — | — | — | the asker's `timezone` setting |
 | **cumulative** | running totals along a time grain, reset by a grain | rolling window | cumulative metric | — | a rolling window of fixed width |
 | **fill** | include periods with no rows | — | `fill_nulls_with`, `join_to_timespine` | — | filling a missing attribute |
 | **compare** | the same question at another time, aligned | time shift | offset window | — | a *counterfactual* |
@@ -1234,11 +1243,11 @@ Looker. Section 20 covers what is beyond analysis.
 | Percent of total, share of parent | ◐ `share` within any splits, additive measures | Rill, Looker, Metabase, Cube |
 | Top N within each group; rank; row number | ◐ `limitPer`; no rank or row number column | Looker, Metabase, Cube |
 | An "other" row after a top N | ✗ | Rill, Looker |
-| Rolling windows — 7-day average, trailing 12 months | ✗ running totals only | Cube, MetricFlow, Rill |
-| Relative dates — last 30 days, quarter to date, previous complete month | ✗ | Cube, Metabase, Rill, Looker |
-| Time zones | ✗ | Cube, Rill, Looker, Snowflake |
+| Rolling windows — 7-day average, trailing 12 months | ◐ `rolling` over a time grain, additive measures and ratios of them | Cube, MetricFlow, Rill |
+| Relative dates — last 30 days, quarter to date, previous complete month | ◐ `this`, `previous`, `last`, `endOf`, against the recorded day and the calendar | Cube, Metabase, Rill, Looker |
+| Time zones | ◐ today in the asker's zone; timestamps moved exactly across daylight saving; not yet matching on NetSuite | Cube, Rill, Looker, Snowflake |
 | Several time columns in one relation — ordered, shipped | ✗ one only | Cube, LookML, MetricFlow |
-| Text conditions — contains, starts with, pattern | ✗ | all |
+| Text conditions — contains, starts with, pattern | ◐ `contains`, `startsWith`, on keys or labels; no patterns | all |
 | Segments — named, reusable filters | ✗ | Cube, Metabase, LookML |
 | Filtered measures — hours where billable, as a measure | ◐ via a relation program | Cube, LookML, MetricFlow |
 | Binning a number into bands | ✗ | Metabase, Looker, Rill |
@@ -1260,8 +1269,8 @@ Looker. Section 20 covers what is beyond analysis.
 | Values as they were at the time — slowly changing dimensions | ✗ declared, not honoured | dbt snapshots, Kimball |
 | The same dimension meaning the same key everywhere | ✗ | MetricFlow, Kimball |
 | Display formats | ◐ units only | all |
-| Currencies — amounts in their currency, converted at a declared rate and date | ✗ | Looker, Snowflake, custom everywhere |
-| Units — hours to days, FTE to hours, by a declared rule | ✗ | custom everywhere |
+| Currencies — amounts in their currency, converted at a declared rate and date | ◐ never added across currencies; converted at the span's end; not at each transaction's date | Looker, Snowflake, custom everywhere |
+| Units — hours to days, FTE to hours, by a declared rule | ◐ `units`, fixed and organisation factors | custom everywhere |
 | Language and locale of labels and numbers | ✗ | Looker, Metabase |
 | Curated views — which measures a person or agent sees | ✗ | Cube, LookML, Snowflake semantic views |
 | Synonyms and descriptions per measure and dimension | ◐ per program only | Snowflake, Cube, dbt |
@@ -1294,7 +1303,7 @@ Looker. Section 20 covers what is beyond analysis.
 | Capability | Us | Where it exists |
 |---|---|---|
 | Row-level security | ◐ policies from the request, applied in the SQL rewrite | Snowflake, Cube, Metabase |
-| Column masking | ✗ whole-table denial only | Snowflake, Metabase |
+| Column masking | ◐ a column reads as NULL; `*` over the table refused | Snowflake, Metabase |
 | Measure and dimension visibility per role | ✗ | Cube |
 | Multi-tenancy | ✗ | Cube |
 | Access audit — who saw which rows | ◐ memory records who asked | Snowflake, Looker |
@@ -1303,7 +1312,7 @@ Looker. Section 20 covers what is beyond analysis.
 
 | Capability | Us | Where it exists |
 |---|---|---|
-| Drill-through to the rows behind a number | ✗ | Metabase, Looker, Rill, Cube |
+| Drill-through to the rows behind a number | ◐ `detail` with an order and a limit | Metabase, Looker, Rill, Cube |
 | Tables, charts, pivots rendered | ✗ in the graph | all |
 | Dashboards with shared filters | ✗ | Metabase, Rill, Looker |
 | Saved questions and reports | ◐ memory, uncurated | Metabase, MetricFlow |
@@ -1317,8 +1326,8 @@ Looker. Section 20 covers what is beyond analysis.
 
 | Capability | Us | Where it exists |
 |---|---|---|
-| Listing measures and dimensions with descriptions, for the agent | ✗ | dbt Semantic Layer MCP, Cube, Snowflake Cortex Analyst |
-| Searching any dimension's values — "Acme" to customer 123 | ◐ one hand-written resolver | Cortex Analyst, Metabot, Cube |
+| Listing measures and dimensions with descriptions, for the agent | ◐ `engine.catalog()`; no descriptions per measure yet | dbt Semantic Layer MCP, Cube, Snowflake Cortex Analyst |
+| Searching any dimension's values — "Acme" to customer 123 | ◐ `engine.members`: exact, starting, containing, then within typing mistakes, ties said | Cortex Analyst, Metabot, Cube |
 | A verified-query library, reused and used as examples | ◐ memory, uncurated | Cortex Analyst |
 | Synonyms matched to the question | ✗ | Snowflake, Cube |
 | Clarifying an ambiguous question | ◐ the resolver refuses ambiguity | Cortex Analyst, Metabot |
