@@ -28,8 +28,8 @@ export interface CatalogEntry {
     holds: 'flow' | 'stock'
     grain?: string
     time?: string
-    measures: Record<string, { unit: string; kind: string; how: string }>
-    dimensions: Record<string, { entity?: string; history: string; labelled: boolean }>
+    measures: Record<string, { unit: string; kind: string; how: string; description?: string }>
+    dimensions: Record<string, { entity?: string; history: string; labelled: boolean; description?: string }>
   }
 }
 
@@ -44,9 +44,9 @@ export function catalog(store: GraphStore): CatalogEntry[] {
         ...(s.grain ? { grain: s.grain } : {}),
         ...(s.time ? { time: s.time } : {}),
         measures: Object.fromEntries(Object.entries(s.measures).map(([m, d]) =>
-          [m, { unit: d.unit, kind: d.kind, how: isDerived(d) ? d.expression : `${d.aggregate}${d.column ? ` of ${d.column}` : ''}` }])),
+          [m, { unit: d.unit, kind: d.kind, how: isDerived(d) ? d.expression : `${d.aggregate}${d.column ? ` of ${d.column}` : ''}`, ...(d.description ? { description: d.description } : {}) }])),
         dimensions: Object.fromEntries(Object.entries(s.dimensions).map(([n, d]) =>
-          [n, { ...(d.entity ? { entity: d.entity } : {}), history: d.history, labelled: !!d.label }])),
+          [n, { ...(d.entity ? { entity: d.entity } : {}), history: d.history, labelled: !!d.label, ...(d.description ? { description: d.description } : {}) }])),
       }
     }
     return entry

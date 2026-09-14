@@ -30,7 +30,8 @@ const rates: Contract = { name: 'fx', kind: 'concept', description: 'Exchange ra
 const ratesBody = (rows = RATES) => `const R = ${JSON.stringify(rows)}
 export default async (ctx, { asAt }) => ({ source: 'SHOP', rows: R.filter((r) => r.from <= asAt && (!r.to || r.to > asAt)) })`
 
-async function setup(organisation: Record<string, unknown> = { 'exchange rates': 'fx' }, rateRows = RATES) {
+const AT_END = { relation: 'fx', at: 'end' }
+async function setup(organisation: Record<string, unknown> = { 'exchange rates': AT_END }, rateRows = RATES) {
   const store = new GraphStore(join(mkdtempSync(join(tmpdir(), 'graph-fx-')), 'g.sqlite'))
   const engine = createEngine({ store, modulesDir: mkdtempSync(join(tmpdir(), 'graph-mod-')), dialects: {}, query: async () => [], today: () => '2026-09-14', assumptions: organisation })
   await engine.define({ body: `export default async () => ({ source: 'SHOP', rows: ${JSON.stringify(SALES)} })`, contract: sales }, { by: 'test' })
@@ -63,13 +64,30 @@ test('converted to one currency at rates as at the end of the span, and the unit
 })
 
 test('the organisation\'s reporting currency applies when the question names none; a missing rate is refused', async () => {
-  const { engine } = await setup({ 'exchange rates': 'fx', currency: 'NZD' })
+  const { engine } = await setup({ 'exchange rates': AT_END, currency: 'NZD' })
   assert.ok(Math.abs((await engine.call<any>('sales', { measures: ['revenue'], during: Q2 })).value.rows[0].revenue - (100 + 250 * 1.12 + 17)) < 1e-9)
-  const noUsd = await setup({ 'exchange rates': 'fx' }, RATES.filter((r) => r.from_code !== 'USD'))
+  const noUsd = await setup({ 'exchange rates': AT_END }, RATES.filter((r) => r.from_code !== 'USD'))
   await assert.rejects(noUsd.engine.call('sales', { measures: ['revenue'], during: Q2, currency: 'NZD' }), /every amount has a rate to convert it with — 1 row\(s\) have no rate/)
 })
 
 test('refused: two rates for one pair of currencies at the same instant', async () => {
-  const { engine } = await setup({ 'exchange rates': 'fx' }, [...RATES, { from_code: 'USD', to_code: 'NZD', rate: 1.8, from: '2026-06-01', to: null }])
+  const { engine } = await setup({ 'exchange rates': AT_END }, [...RATES, { from_code: 'USD', to_code: 'NZD', rate: 1.8, from: '2026-06-01', to: null }])
   await assert.rejects(engine.call('sales', { measures: ['revenue'], during: Q2, currency: 'NZD' }), /one rate per pair of currencies/)
+})
+
+test('per row: each amount at the rate in effect on its own date, when the organisation converts that way', async () => {
+  const store = new GraphStore(join(mkdtempSync(join(tmpdir(), 'graph-fx-')), 'g.sqlite'))
+  const engine = createEngine({ store, modulesDir: mkdtempSync(join(tmpdir(), 'graph-mod-')), dialects: {}, query: async () => [], today: () => '2026-09-14',
+    assumptions: { 'exchange rates': { relation: 'fx history', at: 'row' } } })
+  await engine.define({ body: `export default async () => ({ source: 'SHOP', rows: ${JSON.stringify(SALES)} })`, contract: sales }, { by: 'test' })
+  const history: Contract = { ...rates, name: 'fx history', shape: { ...rates.shape!, dimensions: { ...rates.shape!.dimensions,
+    effective_from: { column: 'valid_from', history: 'stable' }, effective_to: { column: 'valid_to', history: 'stable' } } } }
+  const rows = RATES.map(({ from, to, ...r }) => ({ ...r, valid_from: from, valid_to: to }))
+  await engine.define({ body: `export default async (ctx, { asAt }) => ({ source: 'SHOP', rows: ${JSON.stringify(rows)}.filter((r) => r.valid_from <= asAt) })`, contract: history }, { by: 'test' })
+  const r = await engine.call<any>('sales', { measures: ['revenue'], by: ['region'], during: Q2, currency: 'NZD' })
+  const au = r.value.rows.find((x: any) => x.region === 'au').revenue
+  assert.ok(Math.abs(au - (200 * 1.10 + 50 * 1.12)) < 1e-9, 'May at the May rate, June at the June rate')
+  assert.ok(store.getCall(r.callId)!.caveats.some((c) => /rate in effect on each row's date/.test(c)))
+  await assert.rejects(createEngine({ store, modulesDir: mkdtempSync(join(tmpdir(), 'graph-mod-')), dialects: {}, query: async () => [], today: () => '2026-09-14',
+    assumptions: { 'exchange rates': 'fx history' } }).call('sales', { measures: ['revenue'], during: Q2, currency: 'NZD' }), /must say which relation holds the rates and how they apply/)
 })

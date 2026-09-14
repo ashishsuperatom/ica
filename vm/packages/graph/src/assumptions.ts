@@ -62,8 +62,11 @@ export function settingFor(organisation: Record<string, unknown> | undefined, sc
 /** The zone a request is asked from: the assumption named `timezone`, from the caller or the organisation, chosen
  *  by rules when it differs by person or group. Null when nobody said. */
 export function zoneFor(organisation: Record<string, unknown> | undefined, context: Record<string, unknown>,
-                        who: Record<string, unknown> | undefined): { zone: string; from: 'caller' | 'organisation' } | null {
-  const [given, from]: [unknown, 'caller' | 'organisation' | null] = 'timezone' in context ? [context.timezone, 'caller']
+                        who: Record<string, unknown> | undefined): { zone: string; from: 'caller' | 'asker' | 'organisation' } | null {
+  // The engine runs on a server somewhere; the person asking is somewhere else. Their zone comes with the request —
+  // set for this request, or as their own — else the organisation's. Never the server's.
+  const [given, from]: [unknown, 'caller' | 'asker' | 'organisation' | null] = 'timezone' in context ? [context.timezone, 'caller']
+    : who && typeof who.timezone === 'string' ? [who.timezone, 'asker']
     : organisation && 'timezone' in organisation ? [organisation.timezone, 'organisation'] : [undefined, null]
   if (from === null) return null
   const value = isRuled(given) ? mostSpecific(given.rules, facts(who), sameValue)?.value : given

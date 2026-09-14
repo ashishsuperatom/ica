@@ -28,8 +28,8 @@ export async function answerRelation(rt: Runtime, program: { name: string; hash:
   const read: ReadBody = (when) => statementFor(rt, name, contract, hash, body, when, scope, trail, path)
   const calendar = calendarFor(rt.o.assumptions, scope, trail)
   const attributes = attributesFor(rt, scope, trail, path)
-  const ratesName = settingFor(rt.o.assumptions, scope, 'exchange rates', trail)
-  const rates = typeof ratesName === 'string' ? ratesFor(rt, scope, trail, path, ratesName) : undefined
+  const ratesSetting = settingFor(rt.o.assumptions, scope, 'exchange rates', trail)
+  const rates = ratesSetting !== undefined ? ratesFor(rt, scope, trail, path, ratesSetting) : undefined
   // "Last 30 days" becomes dates first, against the day this call is answered as of and the request's calendar.
   // A reporting currency set for the organisation or the person applies when the question does not name one.
   const currency = asked.currency ?? (Object.values(shape.measures).some((m) => (m as any).currency) ? settingFor(rt.o.assumptions, scope, 'currency', trail) as string | undefined : undefined)

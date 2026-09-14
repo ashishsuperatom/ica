@@ -45,7 +45,9 @@ export function runLocal(st: ResolvedStatement): any[] {
       for (const r of rows) insert.run(...columns.map((c) => local(r[c])))
       db.exec('COMMIT')
     }
-    const params = Object.fromEntries(Object.entries(st.params).map(([k, v]) => [k, local(v)]))
+    // SQLite refuses a named parameter the statement does not use, so only those it names are passed.
+    const named = new Set([...st.sql.matchAll(/@(\w+)/g)].map((m) => m[1]))
+    const params = Object.fromEntries(Object.entries(st.params).filter(([k]) => named.has(k)).map(([k, v]) => [k, local(v)]))
     return db.prepare(st.sql).all(params as any) as any[]
   } finally { db.close() }
 }

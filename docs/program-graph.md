@@ -1179,6 +1179,32 @@ What follows from it:
 *Open: how a message is classified as a transition of the current state or the start of a new one; how much of
 a changed program's state carries over; how branches are named and shown.*
 
+### Decided — the engine, and the semantic model built on it
+
+Two things are being built here, and in production only one of them can change.
+
+- **The engine** (`vm/packages/graph`) is mechanism: programs, contracts, relations, coordinates, composition,
+  entities, comparison, totals, calendars, time zones, currencies, units, assumptions, rules, interventions,
+  memory. It knows nothing about any organisation. It changes only by its own development.
+- **The semantic model** is each organisation's: its concepts and programs, the shapes and descriptions of its
+  relations, and its settings — which calendar, which time zone, which exchange rates and how they apply, which
+  reporting currency, which unit conversions. The agent builds it, by discovering how that organisation's data and
+  practice work, and changes it through the engine's own interface: `define`, and settings.
+
+So a convention is never written into the engine. How an organisation converts currency — at the end of a period,
+at each transaction's date, through its own consolidated rates — is part of its model; the engine only offers the
+mechanisms and refuses what would be wrong under any convention (adding amounts across currencies). The same holds
+for a working week, a fiscal year, what counts as capacity, and every description. Where the agent finds that the
+engine cannot express something the organisation needs, that is a request for the engine, not something the agent
+works around inside a program.
+
+The time zone is the plainest case: the engine runs on a server somewhere, and people ask from elsewhere. Their
+zone arrives with the request — for that request, or as their own — or the organisation's applies. With neither,
+the engine uses UTC and says so; it never uses the server's own zone.
+
+The examples under `vm/packages/graph/examples/capacity` are a semantic model, written by hand in the role the
+agent will take. They are not part of the engine.
+
 ### Decided — one vocabulary, and where each word comes from
 
 The graph is written by coding agents that have read Cube, dbt MetricFlow, Malloy, LookML and SQL. Where those

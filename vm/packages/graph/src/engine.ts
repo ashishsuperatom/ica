@@ -87,6 +87,7 @@ export function createEngine(o: EngineOptions) {
     const started = Date.now()
     const trail = newTrail()
     if (scope.zone && !parentId) trail.assumed.push({ name: 'timezone', value: scope.zone.zone, from: scope.zone.from })
+    if (!scope.zone && !parentId && !o.today) trail.caveats.push(`today is taken as ${scope.today} in UTC — the request did not say where the asker is`)
 
     const ctx: ProgramContext = {
       ...readingContext(rt, contract, scope, trail),

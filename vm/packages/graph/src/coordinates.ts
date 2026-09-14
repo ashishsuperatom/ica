@@ -150,9 +150,13 @@ const P = 'c_'
  *  attribute through a key without the relation it is asking naming that relation. */
 export type AttributeSource = (entity: string) => Promise<{ name: string; shape: Shape; read: ReadBody }>
 
-/** The relation of exchange rates the request converts with: dimensions `from_currency` and `to_currency`, currency
- *  codes, and the stock `rate` — how many of `to_currency` one `from_currency` buys, as at an instant. */
-export type RatesSource = () => Promise<{ name: string; shape: Shape; read: ReadBody }>
+/** The exchange rates a request converts with, and how the organisation applies them — both part of its semantic
+ *  model, not of the engine. The relation has dimensions `from_currency` and `to_currency` and the stock `rate`, how
+ *  many of `to_currency` one `from_currency` buys.
+ *    at 'end'   one rate per pair, read as at the end of what is asked, for every row
+ *    at 'row'   each row at the rate in effect on its own date: the relation also has dimensions `effective_from`
+ *               and `effective_to` (open when null), and returns every rate in effect up to the instant it is read at */
+export type RatesSource = () => Promise<{ name: string; shape: Shape; read: ReadBody; at: 'end' | 'row' }>
 
 /** What a plan is made in: the calendar, how to reach entities and rates, and the zone the question is asked from. */
 export interface PlanEnvironment {
@@ -239,6 +243,9 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
     const rs = rateSource.shape
     if (!rs.dimensions.from_currency || !rs.dimensions.to_currency || !rs.measures.rate || isDerived(rs.measures.rate) || rs.measures.rate.kind !== 'stock') {
       refuse(`"${rateSource.name}" is not a relation of exchange rates: it needs dimensions "from_currency" and "to_currency" and a stock measure "rate"`)
+    }
+    if (rateSource.at === 'row' && (!rs.dimensions.effective_from || !rs.dimensions.effective_to)) {
+      refuse(`"${rateSource.name}" is applied per row, so it needs dimensions "effective_from" and "effective_to"`)
     }
   }
   const units: Record<string, string> = converting ? Object.fromEntries(moneyMeasures.map((m) => [m, c.currency!])) : {}
@@ -395,11 +402,23 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
       const from = rd.from_currency.column, to = rd.to_currency.column
       const currencyColumns = [...new Set(moneyMeasures.map((m) => dimensions[(defined[m] as BaseMeasure).currency!].column))]
       if (currencyColumns.length > 1) refuse('the money measures asked for keep their currency in different columns; ask for them separately')
-      joins.push(`LEFT JOIN (\n${st.sql.trim()}\n) fx ON fx.${from} = t.${currencyColumns[0]} AND fx.${to} = @${P}currency`)
-      guards.push({ label: `"${rateSource!.name}" has one rate per pair of currencies as at ${asAt}`,
-                    statement: { source: st.source, tables: st.tables, params: st.params,
-                                 sql: `SELECT COUNT(*) AS n, 0 AS d FROM (SELECT g.${from}, g.${to} FROM (\n${st.sql.trim()}\n) g GROUP BY g.${from}, g.${to} HAVING COUNT(*) > 1) x` } })
-      caveats.push(`amounts are converted to ${c.currency} at rates as at ${asAt}`)
+      const perRow = rateSource!.at === 'row'
+      if (perRow) {
+        const ef = rd.effective_from.column, et = rd.effective_to.column
+        // Each row's own date; for a stock, the instant it is read at.
+        const date = kind === 'flow' ? moment(s, 'from' in when ? { from: when.from, to: when.to } : { from: asAt, to: asAt }) : s.date(`${P}rate_at`)
+        joins.push(`LEFT JOIN (\n${st.sql.trim()}\n) fx ON fx.${from} = t.${currencyColumns[0]} AND fx.${to} = @${P}currency AND ${date} >= fx.${ef} AND (fx.${et} IS NULL OR ${date} < fx.${et})`)
+        guards.push({ label: `"${rateSource!.name}" has no two rates in effect at once for a pair of currencies`,
+                      statement: { source: st.source, tables: st.tables, params: st.params,
+                                   sql: `SELECT COUNT(*) AS n, 0 AS d FROM (\n${st.sql.trim()}\n) a JOIN (\n${st.sql.trim()}\n) b ON a.${from} = b.${from} AND a.${to} = b.${to} AND a.${ef} < b.${ef} AND (a.${et} IS NULL OR a.${et} > b.${ef})` } })
+        caveats.push(`amounts are converted to ${c.currency} at the rate in effect on each ${kind === 'flow' ? "row's date" : 'reading'}`)
+      } else {
+        joins.push(`LEFT JOIN (\n${st.sql.trim()}\n) fx ON fx.${from} = t.${currencyColumns[0]} AND fx.${to} = @${P}currency`)
+        guards.push({ label: `"${rateSource!.name}" has one rate per pair of currencies as at ${asAt}`,
+                      statement: { source: st.source, tables: st.tables, params: st.params,
+                                   sql: `SELECT COUNT(*) AS n, 0 AS d FROM (SELECT g.${from}, g.${to} FROM (\n${st.sql.trim()}\n) g GROUP BY g.${from}, g.${to} HAVING COUNT(*) > 1) x` } })
+        caveats.push(`amounts are converted to ${c.currency} at rates as at ${asAt}`)
+      }
       convertedColumn = currencyColumns[0]
     }
     const render = (dimsHere: string[], pushdown: boolean) => {
@@ -455,7 +474,7 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
     // Rendered before the parameters are gathered: rendering is what binds the having conditions' values.
     const sql = render(dims, opts.pushdown)
     const unsplitSql = dims.length && !opts.detail ? render([], false) : null
-    const params = { ...joinParams, ...filterParams, ...extra, ...(converting ? { [`${P}currency`]: c.currency } : {}) }
+    const params = { ...joinParams, ...filterParams, ...extra, ...(converting ? { [`${P}currency`]: c.currency, [`${P}rate_at`]: asAt } : {}) }
     const t = Object.keys(tables).length ? tables : undefined
     return {
       source: body.source, tables: t, params, period: opts.period, sql, guards,

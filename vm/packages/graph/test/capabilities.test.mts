@@ -454,7 +454,12 @@ test('time zones: today is the date where the asker is', async () => {
   await engine.define({ body: `export default (ctx) => ctx.today`, contract: { name: 'today', kind: 'program', description: 'Today.', reads: { sources: [], programs: [] }, params: {}, returns: 'value' } }, { by: 'test' })
   assert.equal((await engine.call('today')).value, dayIn('UTC'))
   assert.equal((await engine.call('today', {}, { who: { country: 'NZ' } })).value, dayIn('Pacific/Kiritimati'))
+  assert.equal((await engine.call('today', {}, { who: { country: 'NZ', timezone: 'Pacific/Pago_Pago' } })).value, dayIn('Pacific/Pago_Pago'), 'the asker\'s own zone')
   await assert.rejects(engine.call('today', {}, { assume: { timezone: 'Mars/Olympus' } }), /not a time zone/)
+  const nowhere = createEngine({ store, modulesDir: mkdtempSync(join(tmpdir(), 'graph-mod-')), dialects: {}, query: async () => [] })
+  const r = await nowhere.call('today')
+  assert.equal(r.value, dayIn('UTC'), 'no zone said: UTC, never the server\'s own')
+  assert.ok(store.getCall(r.callId)!.caveats.some((c) => /in UTC — the request did not say where the asker is/.test(c)))
 })
 
 // ── rolling windows ───────────────────────────────────────────────────────────────────────────────────────

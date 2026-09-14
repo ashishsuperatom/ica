@@ -35,7 +35,7 @@ export interface CallRecord {
   /** The date the call took as today. Anything that reads the clock reads this, so a replay can use the same day. */
   today: string
   /** Every assumption this call read, its value, and where the value came from. */
-  assumptions: Array<{ name: string; value: unknown; from: 'caller' | 'organisation' | 'default'; about?: Record<string, unknown>; rule?: Record<string, unknown> }>
+  assumptions: Array<{ name: string; value: unknown; from: 'caller' | 'asker' | 'organisation' | 'default'; about?: Record<string, unknown>; rule?: Record<string, unknown> }>
   /** Who asked, as the request said. */
   who: Record<string, unknown> | null
   /** The interventions in force for this call — on every call they reached. An answer with any is hypothetical, not a fact. */

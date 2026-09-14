@@ -57,7 +57,7 @@ export interface CallOptions {
   assume?: Record<string, unknown>
   /** Changes for this request only, by program name. The answer is hypothetical. */
   intervene?: Record<string, Intervention>
-  /** Who is asking — their id, groups, department. Rules for assumptions are chosen by it. */
+  /** Who is asking — their id, groups, department, and `timezone`, where they are. Rules are chosen by it. */
   who?: Record<string, unknown>
   /** What the person asking may read, by source, as decided by the system that authorises them. Every query this
    *  request makes carries its source's policies; the engine only passes them on. */
@@ -75,7 +75,7 @@ export interface Scope {
   who?: Record<string, unknown>
   access?: Record<string, unknown[]>
   /** The zone the request is asked from, and who said so. */
-  zone?: { zone: string; from: 'caller' | 'organisation' }
+  zone?: { zone: string; from: 'caller' | 'asker' | 'organisation' }
   checks: Checks
 }
 
@@ -117,7 +117,7 @@ export interface Runtime {
   o: EngineOptions
   /** The engine's dialects, with the local engine's added. */
   dialects: Record<string, Dialect>
-  /** Today's date — in a zone when one is given, else where the engine runs — unless the engine was given a clock. */
+  /** Today's date in a zone — UTC when none is given, never the server's own — unless the engine was given a clock. */
   clock: (zone?: string) => string
   load(hash: string, body: string): Promise<Body>
 }
@@ -127,7 +127,7 @@ export function createRuntime(o: EngineOptions): Runtime {
   return {
     o,
     dialects: { ...o.dialects, [LOCAL]: 'sqlite' },
-    clock: o.today ? () => o.today!() : (zone) => (zone ? dayIn(zone) : new Date().toLocaleDateString('en-CA')),
+    clock: o.today ? () => o.today!() : (zone) => dayIn(zone ?? 'UTC'),
     /** A body becomes a module file named by its hash. Because a hash is immutable, the file is written once and a
      *  cached import is always the right one — no cache-busting, which the mutable version needed to avoid
      *  silently running the previous edit. */

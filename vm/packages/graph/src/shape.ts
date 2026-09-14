@@ -33,6 +33,8 @@ export interface Dimension {
   label?: string
   /** Whether the value is as it is now, as it was at the time, or never changes (an entity's own identity). */
   history: 'current' | 'as-at' | 'stable'
+  /** What this dimension is, for whoever chooses between dimensions — written by whoever models the data. */
+  description?: string
   /** The entity this column identifies — `employee`, `customer`. Declaring it lets a question reach that entity's
    *  attributes through this dimension: `employee.manager`. (MetricFlow: an entity; Cube: a join key.) */
   entity?: string
@@ -45,6 +47,8 @@ export interface BaseMeasure {
   column?: string
   unit: string
   kind: 'flow' | 'stock'
+  /** What this measure is, for whoever chooses between measures — written by whoever models the data. */
+  description?: string
   /** For an amount of money: the dimension holding each row's currency code. Amounts in different currencies are
    *  never added together — a question converts them to one currency, or keeps them apart by currency. */
   currency?: string
@@ -53,6 +57,7 @@ export interface BaseMeasure {
 /** A measure computed from other measures after they are aggregated — MetricFlow's ratio and derived metrics.
  *  `expression` uses measure names, numbers, + - * / and parentheses: `billable / hours`. */
 export interface DerivedMeasure {
+  description?: string
   expression: string
   unit: string
   kind: MeasureKind

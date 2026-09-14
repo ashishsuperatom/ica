@@ -95,14 +95,19 @@ export async function expand(rt: Runtime, self: string, contract: Contract, hash
   return { source, sql, params, ...(Object.keys(tables).length ? { tables } : {}) }
 }
 
-/** The relation of exchange rates a request converts with, named by the setting `exchange rates`. */
-export function ratesFor(rt: Runtime, scope: Scope, trail: Trail, path: string[], name: string): RatesSource {
+/** The exchange rates a request converts with, as the setting `exchange rates` describes them:
+ *  `{ relation: '<name>', at: 'end' | 'row' }`. How rates apply is the organisation's convention, so it is stated. */
+export function ratesFor(rt: Runtime, scope: Scope, trail: Trail, path: string[], setting: unknown): RatesSource {
   return async () => {
+    const { relation: name, at } = (setting ?? {}) as { relation?: string; at?: string }
+    if (typeof name !== 'string' || (at !== 'end' && at !== 'row')) {
+      throw new Error('the setting "exchange rates" must say which relation holds the rates and how they apply: { relation, at: "end" | "row" }')
+    }
     const hash = rt.o.store.resolve(name)
     const program = hash ? rt.o.store.getProgram(hash) : null
     if (!program || program.contract.returns !== 'relation') throw new Error(`the exchange rates "${name}" are not a relation`)
     trail.used.set(hash!, name)
-    return { name, shape: program.contract.shape!, read: (when) => statementFor(rt, name, program.contract, hash!, program.body, when, scope, trail, path) }
+    return { name, at, shape: program.contract.shape!, read: (when) => statementFor(rt, name, program.contract, hash!, program.body, when, scope, trail, path) }
   }
 }
 
