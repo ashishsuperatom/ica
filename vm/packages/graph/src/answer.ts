@@ -18,6 +18,7 @@ import type { Runtime, Scope, Trail } from './runtime.js'
 import { kindOf } from './shape.js'
 import { Grains } from './calendar.js'
 import { resolveRelative } from './relative.js'
+import { convertUnits } from './units.js'
 import { atLevel, summaryProblem, withShares } from './summaries.js'
 
 export async function answerRelation(rt: Runtime, program: { name: string; hash: string; contract: Contract; body: string },
@@ -68,6 +69,10 @@ export async function answerRelation(rt: Runtime, program: { name: string; hash:
       ({ by: level, ...(await answer(atLevel(coordinates, level), `total by ${level.join(', ') || 'everything'}`)) })))
     value = { ...value, totals: levels.map(({ by, columns, rows }) => ({ by, columns, rows })) }
     if (coordinates.limit != null || coordinates.having) trail.caveats.push('totals count every row, including rows the limit or having leaves out')
+  }
+  if (coordinates.units) {
+    const table = settingFor(rt.o.assumptions, scope, 'units', trail) as Record<string, Record<string, number>> | undefined
+    value = convertUnits(shape, value, coordinates.units, table, trail.caveats)
   }
   trail.caveats.push(...value.caveats)
   return value

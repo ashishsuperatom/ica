@@ -179,6 +179,12 @@ export function evaluate(shape: Shape, name: string, row: Record<string, unknown
 // ── checks ────────────────────────────────────────────────────────────────────────────────────────────────
 
 const ident = /^[a-z][a-z0-9_]*$/
+/** Words SQL reserves. The engine writes names and columns as plain identifiers, so one of these breaks the SQL it
+ *  writes — on some sources silently. Quoting instead would change case rules on Oracle. */
+const RESERVED = new Set(('all and as asc between by case cast check column create current date default delete desc distinct drop else end ' +
+  'exists false fetch for from full group having in index inner insert intersect into is join key left level like limit minus not null ' +
+  'number of offset on or order outer over partition primary right row rows select session set size start table then time timestamp to ' +
+  'top true union unique update user using values view when where with').split(' '))
 
 /** Everything that must be true of a shape before the concept can answer anything. */
 export function shapeProblem(s: any): string | null {
@@ -223,6 +229,10 @@ export function shapeProblem(s: any): string | null {
   if (s.timeZone !== undefined) {
     if (!s.time) return 'timeZone describes the time column, and the shape has none'
     if (!validZone(s.timeZone)) return `timeZone "${s.timeZone}" is not a time zone — use a name like UTC or Pacific/Auckland`
+  }
+  const columns = [s.time, ...Object.values<any>(dimensions).flatMap((d) => [d.column, d.label]), ...Object.values<any>(measures).map((m) => m.column)].filter(Boolean)
+  for (const name of [...Object.keys(dimensions), ...Object.keys(measures), ...columns]) {
+    if (RESERVED.has(String(name).toLowerCase())) return `"${name}" is a word SQL reserves; name it something else — "${name}_at", "${name}_code"`
   }
   for (const name of [...Object.keys(dimensions), ...Object.keys(measures)]) {
     if (!ident.test(name)) return `"${name}" must be a lower-case identifier (letters, digits, underscores)`

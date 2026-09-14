@@ -59,6 +59,8 @@ export interface Coordinates {
   limitPer?: string[]
   /** The currency amounts are reported in, converted at rates as at the span's end or the instant asked. */
   currency?: string
+  /** Measures shown in another unit: `{ hours: 'day' }`. See units.ts. */
+  units?: Record<string, string>
   /** Instead of aggregating: the rows themselves — every dimension, label, measure column and the time, one row per
    *  row of the relation, filtered as asked. The records behind a number. Needs an order and a limit. */
   detail?: { limit: number }
@@ -148,8 +150,8 @@ const P = 'c_'
  *  attribute through a key without the relation it is asking naming that relation. */
 export type AttributeSource = (entity: string) => Promise<{ name: string; shape: Shape; read: ReadBody }>
 
-/** The relation of exchange rates the request converts with: dimensions `from` and `to`, currency codes, and the
- *  stock `rate` — how many of `to` one `from` buys, as at an instant. */
+/** The relation of exchange rates the request converts with: dimensions `from_currency` and `to_currency`, currency
+ *  codes, and the stock `rate` — how many of `to_currency` one `from_currency` buys, as at an instant. */
 export type RatesSource = () => Promise<{ name: string; shape: Shape; read: ReadBody }>
 
 /** What a plan is made in: the calendar, how to reach entities and rates, and the zone the question is asked from. */
@@ -235,8 +237,8 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
     if (!rates) refuse('no exchange rates are named for this request, so amounts cannot be converted — set the assumption "exchange rates" to a relation of rates')
     rateSource = await rates!()
     const rs = rateSource.shape
-    if (!rs.dimensions.from || !rs.dimensions.to || !rs.measures.rate || isDerived(rs.measures.rate) || rs.measures.rate.kind !== 'stock') {
-      refuse(`"${rateSource.name}" is not a relation of exchange rates: it needs dimensions "from" and "to" and a stock measure "rate"`)
+    if (!rs.dimensions.from_currency || !rs.dimensions.to_currency || !rs.measures.rate || isDerived(rs.measures.rate) || rs.measures.rate.kind !== 'stock') {
+      refuse(`"${rateSource.name}" is not a relation of exchange rates: it needs dimensions "from_currency" and "to_currency" and a stock measure "rate"`)
     }
   }
   const units: Record<string, string> = converting ? Object.fromEntries(moneyMeasures.map((m) => [m, c.currency!])) : {}
@@ -390,7 +392,7 @@ export async function plan(shape: Shape, read: ReadBody, c: ResolvedCoordinates,
       }
       Object.assign(tables, st.tables ?? {})
       const rd = rateSource!.shape.dimensions
-      const from = rd.from.column, to = rd.to.column
+      const from = rd.from_currency.column, to = rd.to_currency.column
       const currencyColumns = [...new Set(moneyMeasures.map((m) => dimensions[(defined[m] as BaseMeasure).currency!].column))]
       if (currencyColumns.length > 1) refuse('the money measures asked for keep their currency in different columns; ask for them separately')
       joins.push(`LEFT JOIN (\n${st.sql.trim()}\n) fx ON fx.${from} = t.${currencyColumns[0]} AND fx.${to} = @${P}currency`)

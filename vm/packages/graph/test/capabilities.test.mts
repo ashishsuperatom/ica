@@ -487,3 +487,22 @@ test('checks: light answers in one statement and says it was not reconciled', as
   assert.equal(store.getCall(light.callId)!.queries.length, 1)
   assert.ok(store.getCall(light.callId)!.caveats.some((c) => /checks were light/.test(c)))
 })
+
+// ── units ─────────────────────────────────────────────────────────────────────────────────────────────────
+test('units: a measure in another unit, with its comparison and totals, from the organisation\'s conversions', async () => {
+  const store = new GraphStore(join(mkdtempSync(join(tmpdir(), 'graph-u-')), 'g.sqlite'))
+  const hours: Contract = { name: 'hours', kind: 'concept', description: 'Hours.', reads: { sources: ['T'], programs: [] }, params: {}, returns: 'relation',
+    shape: { dimensions: { team: { column: 'team', history: 'stable' } }, measures: { hours: { aggregate: 'sum', column: 'h', unit: 'h', kind: 'flow' } }, time: 'worked_on' } }
+  const rows = [{ worked_on: '2026-05-01', team: 'a', h: 16 }, { worked_on: '2026-06-01', team: 'a', h: 40 }, { worked_on: '2026-06-02', team: 'b', h: 8 }]
+  const engine = createEngine({ store, modulesDir: mkdtempSync(join(tmpdir(), 'graph-mod-')), dialects: {}, query: async () => [], today: () => '2026-09-14',
+    assumptions: { units: { h: { day: 0.125 } } } })
+  await engine.define({ body: `export default async () => ({ source: 'T', rows: ${JSON.stringify(rows)} })`, contract: hours }, { by: 'test' })
+  const r = (await engine.call<any>('hours', { by: ['team'], during: { from: '2026-06-01', to: '2026-07-01' }, compare: { offset: { months: 1 } },
+    totals: [[]], units: { hours: 'day' } })).value
+  const a = r.rows.find((x: any) => x.team === 'a')
+  assert.deepEqual([a.hours, a.hours_compare, a.hours_change], [5, 2, 3])
+  assert.equal(r.columns.find((c: any) => c.name === 'hours').unit, 'day')
+  assert.equal(r.totals[0].rows[0].hours, 6)
+  assert.equal((await engine.call<any>('hours', { during: { from: '2026-06-01', to: '2026-07-01' }, units: { hours: 'min' } })).value.rows[0].hours, 48 * 60)
+  await assert.rejects(engine.call('hours', { during: { from: '2026-06-01', to: '2026-07-01' }, units: { hours: 'fortnight' } }), /no conversion from h to fortnight/)
+})

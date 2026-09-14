@@ -9,10 +9,10 @@ import { join } from 'node:path'
 import { GraphStore, createEngine, type Contract } from '../src/index.ts'
 
 const SALES = [
-  { sold_on: '2026-05-03', region: 'nz', currency: 'NZD', amount: 100 },
-  { sold_on: '2026-05-10', region: 'au', currency: 'AUD', amount: 200 },
-  { sold_on: '2026-06-01', region: 'au', currency: 'AUD', amount: 50 },
-  { sold_on: '2026-06-20', region: 'us', currency: 'USD', amount: 10 },
+  { sold_on: '2026-05-03', region: 'nz', currency_code: 'NZD', amount: 100 },
+  { sold_on: '2026-05-10', region: 'au', currency_code: 'AUD', amount: 200 },
+  { sold_on: '2026-06-01', region: 'au', currency_code: 'AUD', amount: 50 },
+  { sold_on: '2026-06-20', region: 'us', currency_code: 'USD', amount: 10 },
 ]
 // Rates into NZD, changing on 1 June.
 const RATES = [
@@ -21,11 +21,11 @@ const RATES = [
   { from_code: 'USD', to_code: 'NZD', rate: 1.70, from: '2026-01-01', to: null },
 ]
 const sales: Contract = { name: 'sales', kind: 'concept', description: 'Sales.', reads: { sources: ['SHOP'], programs: [] }, params: {}, returns: 'relation',
-  shape: { dimensions: { region: { column: 'region', history: 'stable' }, currency: { column: 'currency', history: 'stable' } },
+  shape: { dimensions: { region: { column: 'region', history: 'stable' }, currency: { column: 'currency_code', history: 'stable' } },
            measures: { revenue: { aggregate: 'sum', column: 'amount', unit: 'money', kind: 'flow', currency: 'currency' },
                        sales: { aggregate: 'count', unit: 'sales', kind: 'flow' } }, time: 'sold_on' } }
 const rates: Contract = { name: 'fx', kind: 'concept', description: 'Exchange rates as at an instant.', reads: { sources: ['SHOP'], programs: [] }, params: {}, returns: 'relation',
-  shape: { dimensions: { from: { column: 'from_code', history: 'stable' }, to: { column: 'to_code', history: 'stable' } },
+  shape: { dimensions: { from_currency: { column: 'from_code', history: 'stable' }, to_currency: { column: 'to_code', history: 'stable' } },
            measures: { rate: { aggregate: 'max', column: 'rate', unit: 'ratio', kind: 'stock' } } } }
 const ratesBody = (rows = RATES) => `const R = ${JSON.stringify(rows)}
 export default async (ctx, { asAt }) => ({ source: 'SHOP', rows: R.filter((r) => r.from <= asAt && (!r.to || r.to > asAt)) })`
