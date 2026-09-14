@@ -1,0 +1,18 @@
+{
+  "name": "working days",
+  "kind": "concept",
+  "description": "The working days of each NetSuite work calendar, one row per calendar per day worked, with the hours in that day. A day is worked when its weekday is ticked on the calendar and it is not one of that calendar's public holidays; holidays belong to a calendar (Melbourne, Auckland, …), not to a country.",
+  "reads": { "sources": ["F5NETSUITE"], "programs": [] },
+  "params": {},
+  "returns": "relation",
+  "shape": {
+    "dimensions": {
+      "work_calendar": { "column": "calendar_id", "label": "calendar_name", "history": "stable" }
+    },
+    "measures": {
+      "working_days": { "aggregate": "count", "unit": "days", "kind": "flow" },
+      "working_hours": { "aggregate": "sum", "column": "hours", "unit": "h", "kind": "flow", "description": "Hours in the working day on that calendar." }
+    },
+    "time": "work_date"
+  }
+}

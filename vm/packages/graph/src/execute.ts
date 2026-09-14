@@ -36,8 +36,8 @@ export class CappedError extends Error {}
 export function runLocal(st: ResolvedStatement): any[] {
   const db = new DatabaseSync(':memory:')
   try {
-    for (const [table, rows] of Object.entries(st.tables ?? {})) {
-      const columns = [...new Set(rows.flatMap((r) => Object.keys(r)))]
+    for (const [table, { columns: declared, rows }] of Object.entries(st.tables ?? {})) {
+      const columns = [...new Set([...declared, ...rows.flatMap((r) => Object.keys(r))])]
       if (!columns.length) { db.exec(`CREATE TABLE "${table}" (_empty INTEGER)`); continue }
       db.exec(`CREATE TABLE "${table}" (${columns.map((c) => `"${c}"`).join(', ')})`)
       const insert = db.prepare(`INSERT INTO "${table}" VALUES (${columns.map(() => '?').join(', ')})`)

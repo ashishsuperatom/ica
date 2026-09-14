@@ -1,0 +1,22 @@
+{
+  "name": "budget",
+  "kind": "concept",
+  "description": "Budgeted amounts by accounting period, subsidiary, department, budget category and account, as held in NetSuite. Each category is a separate version of the budget (Local $ currency, Forecast 6+6, Forecast 3+9, …), so amounts are only added within one category.",
+  "reads": { "sources": ["F5NETSUITE"], "programs": [] },
+  "params": {},
+  "returns": "relation",
+  "shape": {
+    "dimensions": {
+      "subsidiary": { "column": "subsidiary_id", "label": "subsidiary_name", "history": "stable" },
+      "department": { "column": "department_id", "label": "department_name", "history": "stable" },
+      "category": { "column": "category_id", "label": "category_name", "history": "stable", "description": "The budget version; Base Budget in the Fusion5 reports is category 5, Local $ currency." },
+      "account": { "column": "account_number", "label": "account_name", "history": "stable" },
+      "account_type": { "column": "account_type", "history": "stable", "description": "Income, OthIncome, COGS, Expense, OthExpense, Stat, …" },
+      "currency": { "column": "currency_code", "history": "stable" }
+    },
+    "measures": {
+      "amount": { "aggregate": "sum", "column": "amount", "unit": "money", "kind": "flow", "currency": "currency" }
+    },
+    "time": "period_start"
+  }
+}

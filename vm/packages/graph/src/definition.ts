@@ -9,15 +9,8 @@ import { sqlFor, type Dialect, type When } from './coordinates.js'
 import { namespaceOf } from './registry.js'
 import { runLocal } from './execute.js'
 import { newTrail, type Runtime } from './runtime.js'
-import { isDerived, kindOf, type Shape, type Statement } from './shape.js'
+import { declaredColumns, isDerived, kindOf, type Shape, type Statement } from './shape.js'
 
-const declaredColumns = (shape: Shape) => {
-  const columns = new Set<string>()
-  for (const d of Object.values(shape.dimensions)) { columns.add(d.column); if (d.label) columns.add(d.label) }
-  for (const m of Object.values(shape.measures)) if (!isDerived(m) && m.column) columns.add(m.column)
-  if (shape.time) columns.add(shape.time)
-  return columns
-}
 
 /** A relation is read once when it is defined: its SQL parsed if the engine can, every column its shape names
  *  counted, and its grain checked to repeat no member. */
@@ -40,7 +33,7 @@ export async function checkRelation(rt: Runtime, hash: string, body: string, con
   }
   if (st.tables) {
     // A local table has exactly the columns its rows have; a missing one is named rather than left to SQLite.
-    const have = new Set(Object.values(st.tables).flatMap((rows) => rows.flatMap((r) => Object.keys(r))))
+    const have = new Set(Object.values(st.tables).flatMap(({ rows }) => rows.flatMap((r) => Object.keys(r))))
     const rowsAreTheRelation = Object.keys(st.tables).length === 1 && /^SELECT \* FROM r_/.test(st.sql)
     const missing = rowsAreTheRelation && have.size ? [...columns].filter((c) => !have.has(c)) : []
     if (missing.length) throw new Error(`the rows have no ${missing.map((c) => `"${c}"`).join(', ')}`)

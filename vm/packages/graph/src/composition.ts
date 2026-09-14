@@ -14,10 +14,10 @@ import { Grains } from './calendar.js'
 import { resolveSpan } from './relative.js'
 import { namespaceOf } from './registry.js'
 import type { Contract } from './contract.js'
-import type { AttributeSource, RatesSource, ResolvedStatement, When } from './coordinates.js'
+import type { AttributeSource, LocalTable, RatesSource, ResolvedStatement, When } from './coordinates.js'
 import { intervened } from './interventions.js'
 import { LOCAL, type ProgramContext, type Runtime, type Scope, type Trail } from './runtime.js'
-import { kindOf, type Statement } from './shape.js'
+import { declaredColumns, kindOf, type Statement } from './shape.js'
 
 export const compareAt = (value: number, op: '<' | '<=' | '>' | '>=', threshold: number) =>
   op === '<' ? value < threshold : op === '<=' ? value <= threshold : op === '>' ? value > threshold : value >= threshold
@@ -66,7 +66,7 @@ export async function expand(rt: Runtime, self: string, contract: Contract, hash
     if (!contract.reads.sources.includes(out.source)) throw new Error(`"${contract.name}" read ${out.source}, which its contract does not declare`)
     if (Array.isArray(out.rows)) {
       const table = `r_${hash.slice(5, 17)}`
-      return { source: LOCAL, sql: `SELECT * FROM ${table}`, params: out.params ?? {}, tables: { [table]: out.rows } }
+      return { source: LOCAL, sql: `SELECT * FROM ${table}`, params: out.params ?? {}, tables: { [table]: { columns: [...declaredColumns(contract.shape!)], rows: out.rows } } }
     }
     if (!rt.o.dialects[out.source]) throw new Error(`"${contract.name}" returned SQL for ${out.source}, which is not a SQL source — return its rows instead`)
     return { source: out.source, sql: out.sql!, params: out.params ?? {} }
@@ -76,7 +76,7 @@ export async function expand(rt: Runtime, self: string, contract: Contract, hash
   const kind = kindOf(contract.shape!)
   let source: string | null = null
   const params: Record<string, unknown> = { ...(out.params ?? {}) }
-  const tables: Record<string, Record<string, unknown>[]> = {}
+  const tables: Record<string, LocalTable> = {}
   const parts = new Map<string, string>()
   for (const [, name] of out.sql.matchAll(/\{\{([^}]+)\}\}/g)) {
     if (parts.has(name)) continue

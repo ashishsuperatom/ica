@@ -257,3 +257,12 @@ export function shapeProblem(s: any): string | null {
   }
   return null
 }
+
+/** Every column a shape names: each dimension and its label, each measure read from a column, and the time. */
+export function declaredColumns(shape: Shape): Set<string> {
+  const columns = new Set<string>()
+  for (const d of Object.values(shape.dimensions)) { columns.add(d.column); if (d.label) columns.add(d.label) }
+  for (const m of Object.values(shape.measures)) if (!isDerived(m) && m.column) columns.add(m.column)
+  if (shape.time) columns.add(shape.time)
+  return columns
+}

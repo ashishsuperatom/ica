@@ -1,0 +1,26 @@
+{
+  "name": "time entries",
+  "kind": "concept",
+  "description": "Timesheet lines as recorded: hours one person worked on one day against one project, with the approval status and the billable, utilised and productive flags. Billed time carries the charge NetSuite raised for it: charged_amount, and charge_rate, the rate per hour it was charged at, in charge_currency.",
+  "reads": { "sources": ["F5NETSUITE"], "programs": [] },
+  "params": {},
+  "returns": "relation",
+  "shape": {
+    "dimensions": {
+      "entry": { "column": "entry_id", "history": "stable" },
+      "employee": { "column": "employee_id", "label": "employee_name", "history": "stable", "entity": "employee" },
+      "project": { "column": "project_id", "label": "project_name", "history": "stable", "entity": "project", "description": "The project the time was booked to." },
+      "approval": { "column": "approval_id", "label": "approval_name", "history": "current", "description": "Open, Pending Approval, Approved, Rejected; empty on older lines." },
+      "billable": { "column": "billable", "history": "current" },
+      "utilised": { "column": "utilised", "history": "current" },
+      "productive": { "column": "productive", "history": "current" },
+      "charge_currency": { "column": "charge_currency", "history": "stable" }
+    },
+    "measures": {
+      "hours": { "aggregate": "sum", "column": "hours", "unit": "h", "kind": "flow" },
+      "entries": { "aggregate": "count", "unit": "entries", "kind": "flow" },
+      "charged_amount": { "aggregate": "sum", "column": "charged_amount", "unit": "money", "kind": "flow", "currency": "charge_currency", "description": "What was charged for the time; empty for time with no charge." }
+    },
+    "time": "worked_on"
+  }
+}

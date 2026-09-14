@@ -1,0 +1,32 @@
+{
+  "name": "allocations",
+  "kind": "concept",
+  "description": "Resource allocation spread over working days: one row per allocation per day the person works, carrying the hours that fall on that day. NetSuite records an allocation as hours across a date range; the hours are spread evenly over the working days of the person's own work calendar in that range (weekdays, less that calendar's holidays; Monday to Friday for anyone without a calendar). Hard allocation is a confirmed commitment, soft is tentative. Each row also carries rate, the allocation's charge-out rate per hour in the project's currency.",
+  "reads": { "sources": ["F5NETSUITE"], "programs": [] },
+  "params": {},
+  "returns": "relation",
+  "shape": {
+    "dimensions": {
+      "allocation": { "column": "allocation_id", "history": "stable" },
+      "commitment": { "column": "commitment", "history": "current", "description": "Hard or Soft." },
+      "resource": { "column": "resource_id", "label": "resource_name", "history": "stable", "entity": "employee", "description": "The person allocated." },
+      "resource_subsidiary": { "column": "resource_subsidiary_id", "label": "resource_subsidiary_name", "history": "current" },
+      "resource_pillar": { "column": "resource_department_id", "label": "resource_department_name", "history": "current", "description": "The allocated person's department, which is their pillar." },
+      "resource_role": { "column": "resource_title", "history": "current" },
+      "project": { "column": "project_id", "label": "project_name", "history": "stable", "entity": "project" },
+      "project_subsidiary": { "column": "project_subsidiary_id", "label": "project_subsidiary_name", "history": "current", "description": "The project's subsidiary, which is the revenue subsidiary." },
+      "project_pillar": { "column": "project_pillar_id", "label": "project_pillar_name", "history": "current", "description": "The project's pillar, which is the revenue pillar." },
+      "project_status": { "column": "project_status_id", "label": "project_status_name", "history": "current" },
+      "project_type": { "column": "project_type_id", "label": "project_type_name", "history": "current" },
+      "customer": { "column": "customer_id", "label": "customer_name", "history": "current", "entity": "customer" },
+      "billable": { "column": "billable", "history": "current", "description": "T when the allocation is marked billable." },
+      "currency": { "column": "currency_code", "history": "current", "description": "The project's currency, which the rate is in." }
+    },
+    "measures": {
+      "hours": { "aggregate": "sum", "column": "hours", "unit": "h", "kind": "flow", "description": "Allocated hours falling on the day." },
+      "allocations": { "aggregate": "count distinct", "column": "allocation_id", "unit": "allocations", "kind": "flow" },
+      "people": { "aggregate": "count distinct", "column": "resource_id", "unit": "people", "kind": "flow" }
+    },
+    "time": "work_date"
+  }
+}

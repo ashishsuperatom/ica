@@ -92,7 +92,9 @@ export type When = { asAt: string; where: Coordinates['where'] } | { from: strin
 export type ReadBody = (when: When) => Promise<ResolvedStatement>
 
 /** A body's statement, with its SQL settled: rows from a non-SQL source are named as local tables. */
-export interface ResolvedStatement { source: string; sql: string; params: Record<string, unknown>; tables?: Record<string, Record<string, unknown>[]> }
+/** Rows from a non-SQL source, and the columns the relation declares: a span with no rows still has its columns. */
+export interface LocalTable { columns: string[]; rows: Record<string, unknown>[] }
+export interface ResolvedStatement { source: string; sql: string; params: Record<string, unknown>; tables?: Record<string, LocalTable> }
 
 export interface Statement extends ResolvedStatement {
   /** The period this statement's rows belong to, for a stock read at the end of each period. */
