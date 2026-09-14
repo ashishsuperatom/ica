@@ -99,6 +99,14 @@ CREATE TABLE IF NOT EXISTS observation (
   at        INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS observation_series ON observation(name, series, member, measure, grain, period);
+CREATE INDEX IF NOT EXISTS observation_at ON observation(at);
+-- What memory let go of: the periods dropped from a series, kept as their distribution — count, sum, sum of squares,
+-- least and greatest, and the periods they span. Recent periods stay whole; the far past stays as its shape.
+CREATE TABLE IF NOT EXISTS series_summary (
+  name TEXT NOT NULL, series TEXT NOT NULL, member TEXT NOT NULL, measure TEXT NOT NULL, grain TEXT NOT NULL,
+  n INTEGER NOT NULL, sum REAL NOT NULL, sumsq REAL NOT NULL, min REAL, max REAL, first_period TEXT, last_period TEXT,
+  PRIMARY KEY (name, series, member, measure, grain)
+);
 CREATE INDEX IF NOT EXISTS call_hash   ON call(hash);
 `
 
@@ -107,8 +115,10 @@ const KEPT_ROWS = 500
 /** Values one answer may add to the series in memory. An answer with more — every employee by every day — is not
  *  remembered as series at all: a partial series would teach an expectation from whichever rows happened to fit. */
 export const MAX_OBSERVATIONS_PER_CALL = 10_000
-/** Periods each series keeps. Older ones are dropped as newer arrive. */
+/** Periods each series keeps whole. Older ones are folded into the series' summary as newer arrive. */
 export const MAX_PERIODS_PER_SERIES = 120
+/** Values memory keeps whole across every series. Past this, the oldest are folded into their summaries. */
+export const MAX_OBSERVATIONS = 1_000_000
 
 export class GraphStore {
   readonly db: DatabaseSync
@@ -201,9 +211,8 @@ export class GraphStore {
     const replace = this.db.prepare(`DELETE FROM observation WHERE name = ? AND series = ? AND member = ? AND measure = ? AND grain = ? AND period = ?`)
     const insert = this.db.prepare(`INSERT INTO observation (name, hash, call_id, series, member, grain, period, measure, value, at)
                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    const trim = this.db.prepare(`DELETE FROM observation WHERE name = ? AND series = ? AND member = ? AND measure = ? AND grain = ? AND period NOT IN
-                                    (SELECT period FROM observation WHERE name = ? AND series = ? AND member = ? AND measure = ? AND grain = ?
-                                      ORDER BY period DESC LIMIT ${MAX_PERIODS_PER_SERIES})`)
+    const beyond = this.db.prepare(`SELECT id, name, series, member, measure, grain, period, value FROM observation
+                                     WHERE name = ? AND series = ? AND member = ? AND measure = ? AND grain = ? ORDER BY period DESC LIMIT -1 OFFSET ${MAX_PERIODS_PER_SERIES}`)
     this.db.exec('BEGIN')
     try {
       const touched = new Map<string, Observation>()
@@ -212,10 +221,39 @@ export class GraphStore {
         insert.run(r.name, r.hash, r.callId, r.series, r.member, r.grain, r.period, r.measure, r.value, r.at)
         touched.set(JSON.stringify([r.name, r.series, r.member, r.measure, r.grain]), r)
       }
-      for (const r of touched.values()) trim.run(r.name, r.series, r.member, r.measure, r.grain, r.name, r.series, r.member, r.measure, r.grain)
+      for (const r of touched.values()) this.fold(beyond.all(r.name, r.series, r.member, r.measure, r.grain) as any[])
+      const total = Number((this.db.prepare('SELECT COUNT(*) AS n FROM observation').get() as any).n)
+      if (total > MAX_OBSERVATIONS) {
+        this.fold(this.db.prepare('SELECT id, name, series, member, measure, grain, period, value FROM observation ORDER BY at, period LIMIT ?').all(total - MAX_OBSERVATIONS) as any[])
+      }
       this.db.exec('COMMIT')
       return true
     } catch (e) { this.db.exec('ROLLBACK'); throw e }
+  }
+
+  /** Let go of observations, keeping them in their series' summary distribution. Runs inside the caller's transaction. */
+  private fold(rows: Array<{ id: number; name: string; series: string; member: string; measure: string; grain: string; period: string; value: number | null }>): void {
+    if (!rows.length) return
+    const add = this.db.prepare(`INSERT INTO series_summary (name, series, member, measure, grain, n, sum, sumsq, min, max, first_period, last_period)
+                                 VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+                                 ON CONFLICT (name, series, member, measure, grain) DO UPDATE SET
+                                   n = n + 1, sum = sum + excluded.sum, sumsq = sumsq + excluded.sumsq,
+                                   min = MIN(COALESCE(min, excluded.min), excluded.min), max = MAX(COALESCE(max, excluded.max), excluded.max),
+                                   first_period = MIN(first_period, excluded.first_period), last_period = MAX(last_period, excluded.last_period)`)
+    const drop = this.db.prepare('DELETE FROM observation WHERE id = ?')
+    for (const r of rows) {
+      if (r.value != null) add.run(r.name, r.series, r.member, r.measure, r.grain, r.value, r.value * r.value, r.value, r.value, r.period, r.period)
+      drop.run(r.id)
+    }
+  }
+
+  /** The distribution of a series' periods that memory let go of, if any. */
+  summary(q: { name: string; series: string; member: string; measure: string; grain: string }) {
+    const r: any = this.db.prepare('SELECT * FROM series_summary WHERE name = ? AND series = ? AND member = ? AND measure = ? AND grain = ?')
+      .get(q.name, q.series, q.member, q.measure, q.grain)
+    if (!r) return null
+    const n = Number(r.n), mean = Number(r.sum) / n
+    return { n, mean, sd: Math.sqrt(Math.max(0, Number(r.sumsq) / n - mean * mean)), min: r.min, max: r.max, from: r.first_period, to: r.last_period }
   }
 
   /** One series, a value per period — a period answered again, after a correction, has replaced what memory held. */

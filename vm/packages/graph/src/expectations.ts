@@ -31,6 +31,8 @@ export interface Expectation {
   value?: number | null
   z?: number | null
   surprising?: boolean
+  /** The periods memory no longer keeps whole, as their distribution. */
+  longRun?: { n: number; mean: number; sd: number; min: number | null; max: number | null; from: string; to: string }
 }
 
 const MIN_HISTORY = 4
@@ -75,17 +77,18 @@ export function observationsOf(call: { id: string; name: string; hash: string; r
 
 export function expect(store: GraphStore, q: { name: string; request: unknown; context?: Record<string, unknown> | null; measure: string; grain: string
                                                  member?: Record<string, unknown>; period: string; window?: number; value?: number | null; threshold?: number }): Expectation {
-  const history = store.series({ name: q.name, series: seriesKey(q.request, q.context ?? null), member: canonical(q.member ?? {}),
-                                 measure: q.measure, grain: q.grain, before: q.period })
+  const key = { name: q.name, series: seriesKey(q.request, q.context ?? null), member: canonical(q.member ?? {}), measure: q.measure, grain: q.grain }
+  const longRun = store.summary(key) ?? undefined
+  const history = store.series({ ...key, before: q.period })
     .slice(-(q.window ?? DEFAULT_WINDOW))
     .map((h) => h.value)
     .filter((v): v is number => v != null && Number.isFinite(v))
-  if (history.length < MIN_HISTORY) return { n: history.length, known: false }
+  if (history.length < MIN_HISTORY) return { n: history.length, known: false, ...(longRun ? { longRun } : {}) }
   const median = middle(history)
   const mad = middle(history.map((v) => Math.abs(v - median)))
   const spread = Math.max(1.4826 * mad, Math.abs(median) * SPREAD_FLOOR, 1e-9)
   const k = q.threshold ?? DEFAULT_THRESHOLD
-  const out: Expectation = { n: history.length, known: true, median, spread, low: median - k * spread, high: median + k * spread }
+  const out: Expectation = { n: history.length, known: true, median, spread, low: median - k * spread, high: median + k * spread, ...(longRun ? { longRun } : {}) }
   if (q.value !== undefined) {
     out.value = q.value
     out.z = q.value == null ? null : (q.value - median) / spread

@@ -110,3 +110,16 @@ test('S8: a decision records its boundary, and a later review reopens it when th
   assert.equal(b.flipped[0].now.took, false)
   assert.ok(b.flipped[0].now.margin! < 0)
 })
+
+test('memory lets go of old periods into the series\' summary distribution', async () => {
+  const store = new GraphStore(join(mkdtempSync(join(tmpdir(), 'graph-mem-')), 'memory.sqlite'))
+  const rows = Array.from({ length: 130 }, (_, i) => ({ name: 'n', hash: 'h', callId: 'c', series: 's', member: '{}', grain: 'day', measure: 'm',
+    period: `2026-${String(1 + Math.floor(i / 28)).padStart(2, '0')}-${String(1 + (i % 28)).padStart(2, '0')}`, value: i, at: 1 }))
+  assert.equal(store.recordObservations(rows), true)
+  const kept = store.series({ name: 'n', series: 's', member: '{}', measure: 'm', grain: 'day' })
+  assert.equal(kept.length, 120)
+  assert.equal(kept[0].value, 10, 'the ten oldest were let go')
+  const s = store.summary({ name: 'n', series: 's', member: '{}', measure: 'm', grain: 'day' })!
+  assert.deepEqual([s.n, s.mean, s.min, s.max, s.from], [10, 4.5, 0, 9, '2026-01-01'])
+  assert.equal(store.recordObservations(Array.from({ length: 10_001 }, () => rows[0])), false, 'one answer too large is refused whole')
+})
