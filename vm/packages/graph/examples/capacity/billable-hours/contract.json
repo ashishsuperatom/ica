@@ -2,17 +2,40 @@
   "name": "billable hours",
   "kind": "program",
   "description": "Utilised hours that can be billed to a client, over a span.",
-  "reads": { "sources": [], "programs": ["utilised hours"] },
+  "reads": {
+    "sources": [],
+    "programs": [
+      "utilised hours"
+    ]
+  },
   "params": {},
   "returns": "relation",
   "shape": {
     "dimensions": {
-      "employee":   { "column": "employee_id",   "label": "employee_name",   "history": "stable" },
-      "pillar":     { "column": "pillar_id",     "label": "pillar_name",     "history": "current" },
-      "subsidiary": { "column": "subsidiary_id", "label": "subsidiary_name", "history": "current" }
+      "employee": {
+        "column": "employee_id",
+        "label": "employee_name",
+        "history": "stable",
+        "entity": "employee"
+      },
+      "pillar": {
+        "column": "pillar_id",
+        "label": "pillar_name",
+        "history": "current"
+      },
+      "subsidiary": {
+        "column": "subsidiary_id",
+        "label": "subsidiary_name",
+        "history": "current"
+      }
     },
     "measures": {
-      "hours": { "aggregate": "sum", "column": "hours", "unit": "h", "kind": "flow" }
+      "hours": {
+        "aggregate": "sum",
+        "column": "hours",
+        "unit": "h",
+        "kind": "flow"
+      }
     },
     "time": "worked_on"
   }

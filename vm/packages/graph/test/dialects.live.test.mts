@@ -21,6 +21,7 @@ async function netsuite() {
   const dir = new URL('../examples/capacity/utilised-hours-corrected/', import.meta.url)
   const body = readFileSync(new URL('program.mjs', dir), 'utf8')
   const contract = JSON.parse(readFileSync(new URL('contract.json', dir), 'utf8')) as Contract
+  contract.shape!.dimensions.employee.entity = 'employee'
   ;(contract.shape!.measures as any).typical_entry = { aggregate: 'median', column: 'hours', unit: 'h', kind: 'flow' }
   ;(contract.shape!.measures as any).entries = { aggregate: 'count', unit: 'entries', kind: 'flow' }
   ;(contract.shape!.measures as any).hours_per_entry = { expression: 'hours / entries', unit: 'h per entry', kind: 'ratio' }
@@ -90,4 +91,21 @@ test('NetSuite: an April fiscal calendar splits the same hours as the calendar m
   const got = new Map(fq.map((r: any) => [r.fiscal_quarter, r.hours]))
   assert.ok(Math.abs((got.get('FY2026-Q4') as number) - byMonth(['2026-01', '2026-02', '2026-03'])) < 1e-6)
   assert.ok(Math.abs((got.get('FY2027-Q1') as number) - byMonth(['2026-04', '2026-05', '2026-06'])) < 1e-6)
+})
+
+test('NetSuite: utilised hours by manager and by location — attributes reached through the employee', live, async () => {
+  const { engine, store } = await netsuite()
+  const dir = new URL('../examples/capacity/employees/', import.meta.url)
+  await engine.define({ body: readFileSync(new URL('program.mjs', dir), 'utf8'), contract: JSON.parse(readFileSync(new URL('contract.json', dir), 'utf8')) }, { by: 'test' })
+  const total = (await engine.call<any>('utilised hours', { measures: ['hours'], during: Q2 })).value.rows[0].hours
+  const r = await engine.call<any>('utilised hours', { measures: ['hours'], by: ['employee.manager'], during: Q2, order: [{ by: 'hours', desc: true }] })
+  const sum = r.value.rows.reduce((a: number, x: any) => a + x.hours, 0)
+  assert.ok(Math.abs(sum - total) < 1e-6, `by manager ${sum} vs total ${total}`)
+  const named = r.value.rows.filter((x: any) => x['employee.manager'] != null)
+  assert.ok(named.length > 10 && named.every((x: any) => x['employee.manager_label']), 'managers are named')
+  assert.ok(store.getCall(r.callId)!.caveats.some((x) => /some rows have no "employee.manager"/.test(x)))
+  const c = store.getCall(r.callId)!
+  assert.ok(c.verifications.some((v) => /"employees" has one row per employee/.test(v.label) && v.held))
+  const loc = (await engine.call<any>('utilised hours', { measures: ['hours'], by: ['employee.location'], where: { 'employee.location': { isNull: false } }, during: Q2 })).value.rows
+  assert.ok(loc.length > 1 && loc.every((x: any) => x['employee.location_label']))
 })

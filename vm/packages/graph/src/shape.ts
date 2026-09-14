@@ -32,6 +32,9 @@ export interface Dimension {
   label?: string
   /** Whether the value is as it is now, as it was at the time, or never changes (an entity's own identity). */
   history: 'current' | 'as-at' | 'stable'
+  /** The entity this column identifies — `employee`, `customer`. Declaring it lets a question reach that entity's
+   *  attributes through this dimension: `employee.manager`. (MetricFlow: an entity; Cube: a join key.) */
+  entity?: string
 }
 
 /** A measure aggregated from a column of the rows. */
@@ -58,6 +61,10 @@ export interface Shape {
   measures: Record<string, Measure>
   /** The output date column a flow is bounded and bucketed by. */
   time?: string
+  /** The dimension each row is one member of, when a row is one member of an entity — one row per employee. It is
+   *  what makes this relation the one that holds that entity's attributes, and it is checked to be unique.
+   *  (MetricFlow: the primary entity; Cube and Malloy: the primary key.) */
+  grain?: string
 }
 
 /** What a concept's body returns for one reading. SQL for a SQL source; rows for any other, which the engine
@@ -206,7 +213,15 @@ export function shapeProblem(s: any): string | null {
     if (!ident.test(name)) return `"${name}" must be a lower-case identifier (letters, digits, underscores)`
     if ((BUILT_IN as readonly string[]).includes(name)) return `"${name}" is a time grain and cannot also be declared`
   }
+  if (s.grain !== undefined) {
+    const g = dimensions[s.grain]
+    if (!g) return `grain "${s.grain}" is not a dimension`
+    if (!g.entity) return `grain "${s.grain}" must declare the entity it identifies`
+    if (baseKind !== 'stock') return 'a relation with a grain lists members as at an instant, so its measures are stocks'
+  }
   for (const [name, d] of Object.entries<any>(dimensions)) {
+    if (d.entity !== undefined && !ident.test(d.entity)) return `dimension "${name}": entity must be a lower-case identifier`
+    if (name.includes('.')) return `"${name}": a dot reaches an attribute through an entity and cannot be part of a name`
     if (!d.column) return `dimension "${name}" has no column`
     if (!['current', 'as-at', 'stable'].includes(d.history)) return `dimension "${name}" history must be current, as-at or stable`
   }

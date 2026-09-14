@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { contractProblem, type Contract } from './contract.js'
-import { conditionSql, plan, sqlFor, type Condition, type Coordinates, type Dialect, type ReadBody, type ResolvedStatement, type When } from './coordinates.js'
+import { conditionSql, plan, sqlFor, type AttributeSource, type Condition, type Coordinates, type Dialect, type ReadBody, type ResolvedStatement, type When } from './coordinates.js'
 import { runPlan } from './execute.js'
 import { comparisonCoordinates, difference, mergeComparison, type Comparison } from './compare.js'
 import { programHash } from './hash.js'
@@ -180,6 +180,21 @@ export function createEngine(o: EngineOptions) {
     }
   }
 
+  /** The relation whose grain is an entity — exactly one, or the question is refused rather than a guess made.
+   *  Reading it is not a step deeper into the graph: it is read only by instant, never through attributes of its
+   *  own, so a relation may reach attributes through its own grain. */
+  function attributesFor(scope: Scope, used: Map<string, string>, queries: QueryLog, assumed: AssumedLog, path: string[]): AttributeSource {
+    return async (entity) => {
+      const found = o.store.current().map(({ name, hash }) => ({ name, hash, program: o.store.getProgram(hash)! }))
+        .filter(({ program: { contract: c } }) => c.returns === 'relation' && c.shape?.grain && c.shape.dimensions[c.shape.grain].entity === entity)
+      if (!found.length) throw new Error(`no relation has ${entity} as its grain, so attributes of ${entity} cannot be reached`)
+      if (found.length > 1) throw new Error(`${found.map((f) => `"${f.name}"`).join(' and ')} all have ${entity} as their grain — which holds its attributes is a decision, not a lookup`)
+      const { name, hash, program } = found[0]
+      used.set(hash, name)
+      return { name, shape: program.contract.shape!, read: (when) => statementFor(name, program.contract, hash, program.body, when, scope, used, queries, assumed, path) }
+    }
+  }
+
   /** The calendar a request uses: the assumption named `calendar`, from the caller or the organisation, chosen by
    *  rules when it differs by who is asking. No calendar means the built-in grains only. */
   function calendarFor(scope: Scope, assumed: AssumedLog): Calendar {
@@ -322,6 +337,15 @@ export function createEngine(o: EngineOptions) {
     if (shape.time) columns.add(shape.time)
     // Aggregated, with no outer filter: NetSuite does not check the columns of a query it can see returns nothing.
     const probe = { ...st, sql: `SELECT ${[...columns].map((c, i) => `COUNT(t.${c}) AS c${i}`).join(', ')}\nFROM (\n${st.sql.trim()}\n) t` }
+    // A GRAIN IS A PROMISE THAT NO MEMBER REPEATS. Every join to this relation relies on it; checked now, and again
+    // whenever it is joined.
+    if (shape.grain) {
+      const key = shape.dimensions[shape.grain].column
+      const unique = { ...st, sql: `SELECT COUNT(*) AS n, COUNT(DISTINCT g.${key}) AS d FROM (\n${st.sql.trim()}\n) g` }
+      const { runLocal } = await import('./execute.js')
+      const [c] = st.tables ? runLocal(unique) : await o.query(st.source, unique.sql, st.params)
+      if (Number(c?.n) !== Number(c?.d)) throw new Error(`its grain is ${shape.grain}, but ${c?.n} rows hold only ${c?.d} distinct ${shape.grain} values as at ${today}`)
+    }
     if (st.tables) {
       // A local table has exactly the columns its rows have; a missing one is named rather than left to SQLite.
       const have = new Set(Object.values(st.tables).flatMap((rows) => rows.flatMap((r) => Object.keys(r))))
@@ -483,7 +507,7 @@ export function createEngine(o: EngineOptions) {
         const shape = contract.shape!
         const calendar = calendarFor(scope, assumed)
         const ask = async (coordinates: Coordinates, side?: string) => {
-          const p = await plan(shape, read, coordinates, dialects, today, calendar)
+          const p = await plan(shape, read, coordinates, dialects, today, calendar, attributesFor(scope, used, queries, assumed, path))
           const result = await runPlan(shape, p, (src, sql, params) => o.query(src, sql, params, { policies: scope.access?.[src] }),
             (q) => queries.push(q),
             (label, held, detail) => {
@@ -628,6 +652,8 @@ function interfaceMisfit(old: Contract, next: Contract): string | null {
     if (isDerived(m) !== isDerived(e)) return `measure "${n}" changes between computed and aggregated`
   }
   if (a.time !== b.time) return `its time column changes from ${a.time} to ${b.time}`
+  if (a.grain !== b.grain) return `its grain changes from ${a.grain ?? 'none'} to ${b.grain ?? 'none'}`
+  for (const [n, d] of Object.entries(a.dimensions)) if (d.entity && b.dimensions[n]?.entity !== d.entity) return `dimension "${n}" no longer identifies ${d.entity}`
   return null
 }
 

@@ -65,13 +65,26 @@ export async function runPlan(shape: Shape, p: Plan, query: RunQuery,
   const splits = p.by.filter((d) => d !== p.grain)
   // A member's identity is compared as text, so 15 and '15' from two sources are the same member.
   const normal = (row: any) => {
-    for (const d of p.by) if (row[d] != null) row[d] = String(row[d])
+    for (const [name, alias] of Object.entries(p.paths)) {
+      if (alias in row) { row[name] = row[alias]; delete row[alias] }
+      if (`${alias}_label` in row) { row[`${name}_label`] = row[`${alias}_label`]; delete row[`${alias}_label`] }
+    }
+    // A source may leave a null column out of a row altogether (NetSuite does); every split and label is present.
+    for (const d of p.by) {
+      row[d] = row[d] == null ? null : String(row[d])
+      if (p.labelled.includes(d) && row[`${d}_label`] === undefined) row[`${d}_label`] = null
+    }
     for (const m of p.fetched) row[m] = row[m] == null ? null : Number(row[m])
     return row
   }
 
   if (p.partial) note('the result is filtered or limited, so its rows are not checked against the whole')
   const results = await Promise.all(p.statements.map(async (st) => {
+    // A join to an entity that repeats a member would repeat every row joined to it, and every sum with them.
+    for (const g of st.guards ?? []) {
+      const [c] = await exec(g.statement)
+      verify(g.label, Number(c?.n ?? 0) === Number(c?.d ?? 0), `${c?.n} rows, ${c?.d} distinct`)
+    }
     const rows = (await exec(st)).map(normal)
     if (st.unsplit && !p.partial) {
       const [whole] = (await exec(st.unsplit)).map(normal)
@@ -81,6 +94,11 @@ export async function runPlan(shape: Shape, p: Plan, query: RunQuery,
   }))
 
   let rows: Record<string, any>[] = results.flat()
+  for (const name of Object.keys(p.paths)) {
+    if (p.by.includes(name) && rows.some((r) => r[name] == null)) {
+      note(`some rows have no "${name}" — the member has none recorded, or was not there as at the instant read — and are shown together as none`)
+    }
+  }
   const recompute = (r: Record<string, any>) => { for (const m of p.fetched) if (isDerived(shape.measures[m])) r[m] = evaluate(shape, m, r); return r }
 
   if (p.combine === 'average-over-periods') {
@@ -135,7 +153,7 @@ export async function runPlan(shape: Shape, p: Plan, query: RunQuery,
   const columns: Column[] = []
   for (const d of p.by) {
     columns.push({ name: d, role: 'dimension' })
-    if (shape.dimensions[d]?.label) columns.push({ name: `${d}_label`, role: 'label' })
+    if (p.labelled.includes(d)) columns.push({ name: `${d}_label`, role: 'label' })
   }
   for (const m of p.measures) columns.push({ name: m, role: 'measure', unit: shape.measures[m].unit, kind: shape.measures[m].kind })
   return { columns, rows, caveats: p.caveats }

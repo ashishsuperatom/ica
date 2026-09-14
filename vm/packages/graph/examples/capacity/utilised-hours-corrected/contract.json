@@ -15,7 +15,8 @@
       "employee": {
         "column": "employee_id",
         "label": "employee_name",
-        "history": "stable"
+        "history": "stable",
+        "entity": "employee"
       },
       "pillar": {
         "column": "pillar_id",

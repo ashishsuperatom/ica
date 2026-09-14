@@ -132,6 +132,11 @@ export class GraphStore {
     } catch (e) { this.db.exec('ROLLBACK'); throw e }
   }
 
+  /** Every name and the program it points at now. */
+  current(): Array<{ name: string; hash: string }> {
+    return (this.db.prepare('SELECT name, hash FROM name WHERE valid_to IS NULL ORDER BY name').all() as any[]).map((r) => ({ name: r.name, hash: r.hash }))
+  }
+
   history(name: string): Array<{ hash: string; from: number; to: number | null; by: string; reason: string | null }> {
     return (this.db.prepare('SELECT * FROM name WHERE name = ? ORDER BY valid_from').all(name) as any[])
       .map((r) => ({ hash: r.hash, from: r.valid_from, to: r.valid_to, by: r.changed_by, reason: r.reason }))
