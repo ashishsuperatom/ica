@@ -48,6 +48,10 @@ programs/<name>/, ./define it, ./try it, then ./ask. Build on the relations that
 what the question measures — deciding which rows count as utilised, what capacity is — that is discovering what the data
 means: ./escalate "<why>" and stop; the analyst does that.
 
+Answer the question that was asked. When a message is refused, or the program cannot take what the question needs (a
+comparison, a split, a filter), make the program able to — \`--replace\` it with the parameter it lacks — or escalate;
+an answer to a nearby question reads as an answer to this one.
+
 A question is followed by \`qid:\` — which turn this is, and nothing else. Every tool explains itself with --help.`
 
 export async function turnOutcome(dir: string): Promise<{ step?: number; escalate?: { reason: string } } | null> {
