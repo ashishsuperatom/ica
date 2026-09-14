@@ -6,7 +6,7 @@ import { renderInlineMd } from './format'
 // A UNIT boundary in the stream is a generic concept: `user` is one KIND of it (a question), `segment` is the
 // general one (a modeller consolidation batch, a concept, any agent's unit of work). Both open a navigable,
 // collapsible unit — that's what the accordion + Shift-Arrow nav operate on, NOT "questions" specifically.
-export type AgentEvent = { kind: 'command' | 'message' | 'reasoning' | 'file' | 'turn' | 'user' | 'segment' | 'narration'; id?: string; text?: string; command?: string; output?: string; status?: string; done?: boolean; at?: number; ms?: number; agent?: 'composer' | 'analyst' | 'narrator' | 'modeler' }
+export type AgentEvent = { kind: 'command' | 'message' | 'reasoning' | 'file' | 'turn' | 'user' | 'segment' | 'narration'; id?: string; text?: string; command?: string; output?: string; status?: string; done?: boolean; at?: number; ms?: number; agent?: 'composer' | 'analyst' | 'narrator' }
 
 // Everything upstream measures in milliseconds; nobody reads milliseconds.
 export function fmtDur(ms: number): string {
@@ -197,7 +197,7 @@ export function CodexEventLog({ events, busy, claude }: { events: AgentEvent[]; 
   let curQ = ''                          // id of the question the following events belong to
   const rows: React.ReactElement[] = []
   events.forEach((e, i) => {
-    const c = e.agent === 'composer' ? '#4a90d9' : e.agent === 'analyst' ? '#c08a2b' : e.agent === 'modeler' ? '#7fae82' : e.agent === 'narrator' ? '#a99f8c' : ''
+    const c = e.agent === 'composer' ? '#4a90d9' : e.agent === 'analyst' ? '#c08a2b' : e.agent === 'narrator' ? '#a99f8c' : ''
     // A UNIT boundary (a question OR a generic segment) → anchor it for Shift+Arrow nav (data-qlog, distinct from
     // the chat feed's data-role="q") AND make it the accordion header (click to collapse/expand its steps).
     if (isUnitBoundary(e)) {

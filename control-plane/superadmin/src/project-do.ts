@@ -39,7 +39,7 @@ interface ConnInfo {
   orgRole?: string   // "admin" | "member" — from JWT, used for persona enforcement
   instanceId?: string // singleton identity: which process this connection belongs to (stable per boot)
   epoch?: number     // singleton generation: the process boot time — a NEWER process has a higher epoch
-  channels?: Set<string>   // agent-LOG channels this connection has attached to (analyst-log / composer-log / concept-log)
+  channels?: Set<string>   // agent-LOG channels this connection has attached to (composer-log / analyst-log / narration)
 }
 
 interface Envelope {

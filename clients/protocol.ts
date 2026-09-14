@@ -50,32 +50,15 @@ export type ClientPayload = Analyse | { t: Exclude<ClientMsgType, 'analyse'>; [k
 
 // ── Engine → client payloads ──────────────────────────────────────────────────
 // `t` values a surface may RECEIVE. A surface can ignore any it doesn't render.
-// THE VERBS a user can prefix a question with. Declared here, in the shared contract, because both sides need
-// the same list: the engine routes on it and the client filters on it. The engine's verbs/ module imports this
-// rather than keeping its own copy, so there is one place a new verb is added.
-export type Verb = 'edit' | 'explain' | 'run' | 'check' | 'program' | 'view'
-
 export type EngineMsgType =
   | 'tick' | 'welcome' | 'machine:waking' | 'error' | 'done'
   // THE ANSWER and its story — what every surface renders, however differently.
   | 'session:step' | 'analyst:answer' | 'narration' | 'followups'
-  // VERB TURNS (explain:, check:, …) — their events, sent straight to the ASKER as they happen. NOT an agent
-  // lane and NOT gated on anyone attaching to one: the user asked for this turn by name, so its progress is
-  // theirs by right. Everything is sent; the client decides what to render — today just `kind: 'message'`,
-  // and showing the tool calls later is a client change with nothing to alter in the engine.
-  //
-  // One type carrying `verb` rather than one type per verb: the client filters on the field, and the next
-  // verb needs no new message and no new case anywhere that already handles this one.
-  | 'verb:event'
   // STOP — the client asks for the turn in a session to be abandoned; the engine confirms whether one was
   // running. A turn can span two agents and several minutes, so this is scoped to the SESSION, not a question:
   // by the time the message lands, the work may have moved from the composer to the analyst.
   | 'turn:stop' | 'turn:stopped'
-  // A PROGRAM RUNNING — what it is doing, while it does it. Sent for the whole turn, whether the engine started
-  // the program or the agent did from its own shell; run.mjs writes the same trace either way. This is the
-  // difference between a three-minute query and a hang, which from outside look identical.
-  | 'program:event'
-  // AGENT LANES — one vocabulary for every agent (composer, analyst, concept-modeller, and any later one),
+  // AGENT LANES — one vocabulary for every agent (composer, analyst, and any later one),
   // keyed by `lane`. This replaced a per-agent set (analyst:status/stream/category/progress/done,
   // concept:event/status/stream): a new agent needed new message types, and every consumer had to learn them.
   | 'agent:hello'      // the lane announces itself: label, stream kind, whether it has a raw terminal
@@ -108,10 +91,8 @@ export type EnginePayload =
   | { t: 'tick' }                                                     // liveness ping
   | { t: 'machine:waking' }                                           // engine is suspended, coming up
   | { t: 'analyst:answer'; category?: string; answer: Answer; timing?: unknown; sid?: string; qid?: string; reused?: boolean }
-  | { t: 'program:event'; ev: { t: string; text: string; run?: string; program?: string; sql?: string; ms?: number; rows?: number; error?: string }; sid?: string; qid?: string }
   | { t: 'turn:stop'; sessionId: string; reason?: string }
   | { t: 'turn:stopped'; sessionId: string; stopped: boolean }
-  | { t: 'verb:event'; verb: Verb; ev: { kind: string; text?: string; command?: string; id?: string; done?: boolean }; sid?: string; qid?: string }
   | { t: 'narration'; text: string; qid?: string; sid?: string }      // a business-language beat while work happens
   | { t: 'followups'; items: string[]; qid?: string; sid?: string }
   | { t: 'agent:status'; lane: Lane; text?: string; category?: string; progress?: string; state?: 'done'; question?: string; sid?: string }
@@ -123,7 +104,7 @@ export type EnginePayload =
 
 // WHICH AGENT a lane frame belongs to. A lane is one agent's observable work stream; `lane` is the routing key
 // so a consumer places the frame without knowing anything about the agent behind it.
-export type Lane = 'composer' | 'analyst' | 'modeler' | (string & {})
+export type Lane = 'composer' | 'analyst' | (string & {})
 
 // ── The Answer (the JSON every surface renders, each in its own way) ──────────
 export type AnswerStatus = 'answered' | 'unknowable' | 'cannot_answer' | 'error'

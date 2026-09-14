@@ -411,19 +411,6 @@ final class HubClient {
             onAnswer?(qid, question.text, EngineAnswer(object: enriched).answer ?? "Your answer is ready.")
             return
 
-        case "program:event":
-            // The program itself, not the story about it. Only start / end / failed arrive
-            // unasked — the per-unit, per-query detail goes to the `program` log channel,
-            // which this client deliberately does NOT attach to: dozens of lines per run is
-            // operator volume, and the question a phone needs answered is simply "is
-            // something actually happening?"
-            guard let event = msg["ev"] as? [String: Any],
-                  let text = (event["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !text.isEmpty else { return }
-            guard let qid = attribute(msg) else { return }
-            try? db.appendBeat(questionId: qid, text: text, source: .program)
-            return
-
         case "followups":
             // Suggested next questions. Stored like any other block so they survive a
             // relaunch and arrive through the same path on reconnect.

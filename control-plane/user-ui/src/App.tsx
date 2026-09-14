@@ -73,7 +73,7 @@ export function CloudGate() {
   return <App token={token} projectId={projectId} />
 }
 
-type View = 'chat' | 'analyst' | 'composer' | 'modeler'   // the tabs: chat (answers) + the two agent-log views
+type View = 'chat' | 'analyst' | 'composer'   // the tabs: chat (answers) + the two agent-log views
 type FeedItem =
   | { id: string; type: 'user-msg'; text: string }
   | { id: string; type: 'step'; text: string }
@@ -160,7 +160,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // `navigate` pushes a history entry; popstate syncs it back.
   const readView = (): View => {
     const seg = location.pathname.replace(/\/+$/, '').split('/').pop()
-    return seg === 'analyst' || seg === 'composer' || seg === 'modeler' ? seg : 'chat'
+    return seg === 'analyst' || seg === 'composer' ? seg : 'chat'
   }
   const [view, setView] = useState<View>(readView)
   const navigate = useCallback((v: View) => {
@@ -206,8 +206,6 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [askTick, setAskTick] = useState(0)                    // bumps on every new question → useLogNav jumps each log view to it
   const anLogRef = useRef<HTMLDivElement>(null)
   const coLogRef = useRef<HTMLDivElement>(null)
-  const [moEvents, setMoEvents] = useState<AgentEvent[]>([])   // CONCEPT MODELLER log (concept-log channel)
-  const moLogRef = useRef<HTMLDivElement>(null)
   const [role, setRole]         = useState<'user' | 'developer'>('developer')   // for now: everyone is developer (sees the agents)
   // Live as-you-type suggestions from the fast-router (optional; absent if not configured).
   const [liveSuggest, setLiveSuggest] = useState<{ items: any[]; intent?: any } | null>(null)
@@ -255,7 +253,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [proj, setProj] = useState<{ id?: string; name?: string } | null>(null)   // read-only project info from the ProjectDO (welcome)
   const newId = () => (crypto.randomUUID?.() ?? Math.random().toString(36).slice(2))
   const readSid = () => (location.pathname.match(/^\/c\/([A-Za-z0-9_-]+)/)?.[1] ?? '')
-  // The session id comes from the URL (/c/<id>). Opening an agent tab directly (/composer, /analyst, /modeler) has
+  // The session id comes from the URL (/c/<id>). Opening an agent tab directly (/composer, /analyst) has
   // no /c/<id>, so falling straight to newId() would mint a FRESH session — and every per-session store (the logs,
   // the feed) would look up a key that has never existed and come back empty. Fall back to the most recent saved
   // session first, so a cold load on any tab lands on the chat you were actually in.
@@ -327,11 +325,9 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // Shift+Arrow between questions) — see logNav.ts. contentKey = a number that grows as the log grows.
   useLogNav(anLogRef,  view === 'analyst',  anEvents,  askTick)   // pass the ARRAY (new ref on every merge, incl. in-place streaming) — not .length; askTick = force-jump on a new question
   useLogNav(coLogRef,  view === 'composer', coEvents,  askTick)
-  useLogNav(moLogRef,  view === 'modeler',  moEvents,  askTick)
 
   usePersistLog('sa-anlog-', sessionId, anEvents, setAnEvents)   // analyst + composer logs both survive a reload
   usePersistLog('sa-colog-', sessionId, coEvents, setCoEvents)
-  usePersistLog('sa-molog-', sessionId, moEvents, setMoEvents)
 
   // Per-step timer (UI-only, nice-to-have): tick every second while busy so the CURRENT analysis beat counts up.
   useEffect(() => {
@@ -438,16 +434,16 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
 
         if (typeof msg.t === 'string' && msg.t.startsWith('agent:')) {
           // ── GENERIC AGENT-LANE PROTOCOL ─────────────────────────────────────────────────────────────────
-          // ONE consumer for EVERY lane (composer / analyst / concept-modeller / any future agent). `lane` is
+          // ONE consumer for EVERY lane (composer / analyst / any future agent). `lane` is
           // the routing key. The engine owns the vocabulary (agent:hello|event|events|status); the UI hardcodes
           // no agent name here — a new lane needs zero new handlers. (The raw-terminal byte stream keeps its own
           // `analyst:chunk` type below; the answer/narration are a different, user-facing protocol.)
           const verb = msg.t.slice(6)
           // LANE SCOPE. The composer is SESSION-scoped — the engine runs one per chat (composersBySession) — while
-          // the analyst and modeller are PROJECT-scoped singletons. So a composer frame belongs to exactly one chat:
+          // the analyst is a PROJECT-scoped singleton. So a composer frame belongs to exactly one chat:
           // drop it unless it's this chat's, otherwise a second chat's composer streams into the view you're on.
           if (msg.lane === 'composer' && msg.sid && msg.sid !== sidRef.current) return
-          const setEvents = msg.lane === 'composer' ? setCoEvents : msg.lane === 'modeler' ? setMoEvents : setAnEvents
+          const setEvents = msg.lane === 'composer' ? setCoEvents : setAnEvents
           if (verb === 'event') {
             setEvents(evs => mergeEvent(evs, { ...msg.ev, agent: msg.lane }))   // merge by id → a streaming block updates in place
           } else if (verb === 'events') {
@@ -461,10 +457,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
             // Terminal toggle. (label/hue/interactive/controls ride along for a later fully-declarative sidebar.)
             if (msg.lane === 'analyst') { const k = msg.streamKind === 'pty' ? 'pty' : 'events'; anStreamKindRef.current = k; setAnStreamKind(k); setAnHasPty(!!msg.pty) }
           } else if (verb === 'status') {
-            if (msg.lane === 'modeler') {
-              // The modeller is project-level (no shared question header) — surface its status IN its own log.
-              if (msg.text) setMoEvents(evs => mergeEvent(evs, { id: 'ms-' + Date.now(), kind: 'message', text: msg.text, agent: 'modeler', done: true }))
-            } else if (msg.state === 'done') {
+            if (msg.state === 'done') {
               setAnBusy(false); setAnStatus('Done ✓'); setAnProgress(''); setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []; narrationMetaRef.current = []; setExpandedGroups(new Set()); setBusy(false); busyRef.current = false; clearWatchdog()
             } else {
               // Live turn state — the spinner is driven by the tick heartbeat (armWatchdog), never a flag we must
@@ -497,35 +490,6 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           // reconnect. Keep the first arrival and ignore the echo.
           if (msg.text && !narrationLogRef.current.includes(msg.text)) { narrationLogRef.current = [...narrationLogRef.current, msg.text]; narrationTimesRef.current = [...narrationTimesRef.current, Date.now()]; narrationMetaRef.current = [...narrationMetaRef.current, { kind: 'narrator' }]; setNarrationLog(narrationLogRef.current); setNowMs(Date.now())   // append a beat + stamp its arrival (chat-view analysis card)
             setAnEvents(evs => [...evs, { id: 'narr-' + narrationTimesRef.current.length, kind: 'narration', text: msg.text, agent: 'narrator', done: true }]) }   // ALSO drop it into the analyst-tab stream so it interleaves by time with the agent's events
-        } else if (msg.t === 'verb:event') {
-          // A verb turn (explain:, check:) streams its own events straight to us — never gated on attaching to
-          // an agent lane, because the user asked for this turn by name.
-          //
-          // WHAT WE RENDER is a CLIENT choice. By default only `message`, the agent's prose, which for an
-          // explain IS the explanation; the tool calls and file reads arrive too and are dropped. A developer
-          // can see all of it by setting the flag below — nothing is being hidden, it is just noise for the
-          // person who asked a business question.
-          const ev: any = (msg as any).ev
-          const text = verbEventLine(ev)
-          if (text && !narrationLogRef.current.includes(text)) {
-            narrationLogRef.current = [...narrationLogRef.current, text]
-            narrationTimesRef.current = [...narrationTimesRef.current, Date.now()]
-            narrationMetaRef.current = [...narrationMetaRef.current, { kind: 'narrator' }]
-            setNarrationLog(narrationLogRef.current); setNowMs(Date.now())
-          }
-        } else if (msg.t === 'program:event') {
-          // THE PROGRAM ITSELF, not the story about it. These arrive whether the engine started the program or
-          // the agent did from its own shell, so a long query no longer reads as the agent having stalled.
-          const ev: any = (msg as any).ev
-          const text = String(ev?.text ?? '').trim()
-          if (text) {
-            narrationLogRef.current = [...narrationLogRef.current, text]
-            narrationTimesRef.current = [...narrationTimesRef.current, Date.now()]
-            // A query's SQL is kept whole behind the line and shown on click — enough to recognise it at a
-            // glance, all of it when that is not enough.
-            narrationMetaRef.current = [...narrationMetaRef.current, { kind: 'program', detail: typeof ev?.sql === 'string' ? ev.sql : undefined }]
-            setNarrationLog(narrationLogRef.current); setNowMs(Date.now())
-          }
         } else if (msg.t === 'analyst:answer') {
           // NEVER surface the agent's raw terminal (lastLines) as an answer — that leaks internal logs.
           // The agent is expected to always produce an answer (incl. a plain-text reply for conversational
@@ -596,16 +560,13 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     ws.send(JSON.stringify(CLOUD ? { to: { type: 'code-engine' }, payload } : payload))
   }
   // Subscribe to every agent-log channel (called on connect). The DO forwards each only to THIS user's devices,
-  // so the console always has the composer/analyst/semantic logs from the moment it connects — no missing a
+  // so the console always has the composer/analyst logs from the moment it connects — no missing a
   // question's log by attaching late. Stays for the connection's life (the DO drops it on WS close).
   // 'narration' is here for the same reason as the log channels: a channel is fanned to the QUESTION'S OWNER,
   // so it keeps arriving across a reconnect, whereas anything addressed to our old wsId is lost the moment we
   // reconnect. Beats used to travel only that second way, which is why a healthy turn could show an empty
   // analysis card for ten minutes.
-  // 'program' carries the step-by-step detail of a running program. Attached by default because a long query
-// looking like a hang is the problem this solves; a client that would rather not see it simply never attaches,
-// and still gets the program started/finished/failed lines, which are sent to everyone.
-const attachLogs = () => ['analyst-log', 'composer-log', 'concept-log', 'narration', 'program'].forEach((channel) => send({ t: 'log:attach', channel }))
+const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((channel) => send({ t: 'log:attach', channel }))
 
   // Recover a full Q&A PAIR from the DO into the right session's feed. A qid is a pair, so we restore the
   // QUESTION card too — its id is the qid (matching how ask() writes it), so it dedups whether or not the
@@ -901,17 +862,17 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'concept-log', 'narrati
   // Buildable-gap queue — questions the analyst couldn't answer because the model lacked a concept,
   // now being (or already) modeled. Shown on BOTH the Analyst and Semantic-model views.
 
-  // ONE general agent view — composer, analyst, and concept-modeller are the SAME surface (header + a
+  // ONE general agent view — composer and analyst are the SAME surface (header + a
   // scrollable question-segmented event log with identical accordion + Shift-Arrow nav). Only the per-view
-  // extras differ (analyst adds a terminal toggle + input bar; the modeller is read-only). Everything shared
-  // lives here so the three never drift; the differences ride in as `headerExtras` / `panels` / `footer` / `termRef`.
+  // extras differ (analyst adds a terminal toggle + input bar). Everything shared
+  // lives here so the two never drift; the differences ride in as `headerExtras` / `panels` / `footer` / `termRef`.
   const agentLane = (cfg: {
     key: Exclude<View, 'chat'>
     label: string
     desc: string
     events: AgentEvent[]
     logRef: React.RefObject<HTMLDivElement | null>
-    question?: string            // header context line; defaults to the live question (modeller passes '')
+    question?: string            // header context line; defaults to the live question
     busy?: boolean
     claude?: boolean
     headerExtras?: React.ReactNode
@@ -955,10 +916,6 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'concept-log', 'narrati
         <div onClick={() => navigate('analyst')}
           style={{ ...s.sessionItem, ...(view === 'analyst' ? s.sessionItemActive : {}) }}>
           ◇ Analyst
-        </div>
-        <div onClick={() => navigate('modeler')}
-          style={{ ...s.sessionItem, ...(view === 'modeler' ? s.sessionItemActive : {}) }}>
-          ◇ Concept Modeller
         </div>
         <button style={s.newChat} onClick={() => { navigate('chat'); newChat() }}>+ New chat</button>
         <div style={s.sessionList}>
@@ -1025,13 +982,6 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'concept-log', 'narrati
             <button onClick={() => sessionCtl('new')} style={s.backBtn} title="Start a completely fresh session">↻ New session</button>
           </>
         ),
-      })}
-
-      {/* Concept Modeller (System 4) — the OFFLINE consolidation agent that distils finished analyses into
-          concepts. Read-only, project-level (no per-question input); same log surface as the other two. */}
-      {agentLane({
-        key: 'modeler', label: 'Concept Modeller', events: moEvents, logRef: moLogRef, claude: false, question: '',
-        desc: 'Offline consolidation — distils finished analyses into reusable concepts.',
       })}
 
       {/* Chat/answer view */}
@@ -1413,30 +1363,6 @@ function asText(v: unknown): string {
     return parts.length ? parts.join(' · ') : ''
   }
   return ''
-}
-
-// DEVELOPER VIEW for verb turns. `null` = not looked up yet; read from localStorage once, on the first event
-// that arrives, then remembered. Absent or anything but "1"/"true" means off, which is the normal case.
-//
-//   localStorage.setItem('sa-verb-events', '1')   → show every event, not just the prose
-let showAllVerbEvents: boolean | null = null
-function wantsAllVerbEvents(): boolean {
-  if (showAllVerbEvents === null) {
-    try { const v = localStorage.getItem('sa-verb-events'); showAllVerbEvents = v === '1' || v === 'true' }
-    catch { showAllVerbEvents = false }   // private mode / blocked storage — the default is off anyway
-  }
-  return showAllVerbEvents
-}
-
-/** One chat line for a verb-turn event, or '' to drop it. Prose always; the machinery only when asked for. */
-function verbEventLine(ev: any): string {
-  if (!ev?.kind) return ''
-  if (ev.kind === 'message') return typeof ev.text === 'string' ? ev.text.trim() : ''
-  if (!wantsAllVerbEvents()) return ''
-  if (ev.kind === 'command') return '$ ' + String(ev.command ?? '').replace(/\s+/g, ' ').slice(0, 300)
-  if (ev.kind === 'file') return 'file · ' + String(ev.text ?? '').slice(0, 300)
-  if (ev.kind === 'reasoning') return String(ev.text ?? '').trim().slice(0, 300)
-  return ''   // 'turn' and anything a later harness adds: no line, rather than a mystery one
 }
 
 // A FINISHED question's beats. Its own expand state, because a reader opening an old card wants it opened
