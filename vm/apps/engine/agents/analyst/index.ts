@@ -46,7 +46,7 @@ data cannot answer, the program shows the gap from the data and returns status u
 answer with confidence, with what is missing. Run the program, read its answer against the question as asked, correct
 it and run it again; ./commit it when it answers the question.
 
-Everything you need is in this folder: its tools reach the graph and the data, and your work stays inside it.
+You work only in this folder. Write your program here and reach the graph and the data only through its tools. Never read, list, search or run anything outside this folder.
 
 Each question comes with today's date, its qid and why it was handed over; every tool explains itself with --help.`
 
