@@ -70,7 +70,8 @@ export interface FactPlan {
   time?: { role: string; level: string; calendar: string }
   /** When grouped rows span several instants, a stock is taken at the last or first, or averaged. */
   stockOverTime: boolean
-  convert?: { currency: string; at: 'row' | 'end' }
+  /** `on`: the one day every row converts on, when it is not the end of the span — a fact with no time, answered today. */
+  convert?: { currency: string; at: 'row' | 'end'; on?: string }
 }
 export type Expr = { ref: string } | { op: '+' | '-' | '*' | '/'; args: [Expr, Expr] }
 export interface Plan {
@@ -230,6 +231,11 @@ export function check(s: Schema, q: Question, context: { today?: string } = {}):
         const def = s.conditions?.[w.condition]
         if (!def) return refuse('A1', `"${w.condition}" is not a condition of the schema — its conditions are ${Object.keys(s.conditions ?? {}).join(', ') || 'none'}`)
         let base: string[] = []
+        // A condition about another fact asked about is about that fact alone.
+        if (s.objects[def.on]?.kind === 'fact' && def.on !== p.fact) {
+          if (facts.includes(def.on)) continue
+          return refuse('C3', `the condition "${w.condition}" is about ${def.on}, and no measure asked about is from it`)
+        }
         if (def.on !== p.fact) {
           const r = reach(s, p.fact, { to: def.on, via: w.via }, facts)
           if ('refuse' in r) return r.refuse
@@ -296,13 +302,15 @@ export function check(s: Schema, q: Question, context: { today?: string } = {}):
         if (!byCurrency) {
           if (!s.conversion) return refuse('E1', `${p.fact}.${name} is money in more than one currency, and the schema has no exchange rates to convert it — group by currency`)
           if (!q.currency) return refuse('E1', `${p.fact}.${name} is money in more than one currency — say the currency to report in, or group by currency`)
-          if (s.conversion.at === 'end' && !q.span) return refuse('E2', `money is converted at the end of the span asked about, and the question has no span`)
-          if (s.conversion.at === 'row' && !p.time) return refuse('E2', `money is converted on each row's date, and ${p.fact} has no date — group by currency`)
-          p.convert = { currency: q.currency, at: s.conversion.at }
+          // A fact with no time is as it stands now: its money converts at today's rates.
+          const today = !p.time && !q.span ? q.asOf ?? context.today : undefined
+          if (s.conversion.at === 'end' && !q.span && !today) return refuse('E2', `money is converted at the end of the span asked about, and the question has no span`)
+          if (s.conversion.at === 'row' && !p.time && !today) return refuse('E2', `money is converted on each row's date, and ${p.fact} has no date — group by currency`)
+          p.convert = today ? { currency: q.currency, at: 'end', on: today } : { currency: q.currency, at: s.conversion.at }
         }
       }
     }
-    if (p.convert) notes.push(`${p.fact}: money converted to ${p.convert.currency} at ${p.convert.at === 'row' ? "each row's date" : 'the end of the span'}`)
+    if (p.convert) notes.push(`${p.fact}: money converted to ${p.convert.currency} at ${p.convert.on ? `the rates of ${p.convert.on}` : p.convert.at === 'row' ? "each row's date" : 'the end of the span'}`)
     if (p.by.some((b) => 'path' in b && walk(s, p.fact, b.path)!.walked.some((a) => a.kind === 'as-of'))) notes.push(`${p.fact}: ${p.by.filter((b) => 'path' in b && walk(s, p.fact, b.path)!.walked.some((a) => a.kind === 'as-of')).map(stepText).join(', ')} taken as it was on each row's date`)
     if (p.by.some((b) => 'path' in b && walk(s, p.fact, b.path)!.walked.some((a) => a.partial))) notes.push(`${p.fact}: rows with nothing along ${p.by.filter((b) => 'path' in b && walk(s, p.fact, b.path)!.walked.some((a) => a.partial)).map(stepText).join(', ')} are kept as "none"`)
   }

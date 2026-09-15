@@ -80,8 +80,8 @@ export function nextMoves(s: Schema, q: Question): Array<{ move: Move; reads: st
 
 /** One text for every question that means the same (§7.1): measures and targets in order of text, paths in normal
  *  form as the plan resolved them, filters sorted, members as keys. */
-export function canonical(s: Schema, q: Question): string | undefined {
-  const v = check(s, q)
+export function canonical(s: Schema, q: Question, context: { today?: string } = {}): string | undefined {
+  const v = check(s, q, context)
   if (!v.ok) return undefined
   const facts = [...v.plan.facts].sort((a, b) => a.fact.localeCompare(b.fact)).map((f) => ({
     fact: f.fact, measures: [...f.measures].sort(),

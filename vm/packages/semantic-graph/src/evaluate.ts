@@ -258,7 +258,7 @@ function rate(s: Schema, I: Instance, fp: FactPlan, plan: Plan, row: Row, curren
   const to = fp.convert!.currency
   if (from === to) return 1
   const c = s.conversion!
-  const on = fp.convert!.at === 'end' ? dayBefore(plan.span!.to) : rowDate(s, fp.fact, row)!
+  const on = fp.convert!.on ?? (fp.convert!.at === 'end' ? dayBefore(plan.span!.to) : rowDate(s, fp.fact, row)!)
   // A rate is measured, so none dated after the day the answer is given as of is known.
   const date = plan.asOf && plan.asOf < on ? plan.asOf : on
   const best = (I.rows[c.fact] ?? []).filter((r) => r.arrows[c.from] === from && r.arrows[c.to] === to && r.arrows[c.day] <= date).sort((a, b) => b.arrows[c.day].localeCompare(a.arrows[c.day]))[0]

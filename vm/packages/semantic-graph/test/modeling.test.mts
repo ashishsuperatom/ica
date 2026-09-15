@@ -89,3 +89,26 @@ test('the agent finds conditions and attributes, and reads them in the graph', (
   assert.match(text, /rag\s+text\s+Red, Amber, Green — the project health rating/)
   assert.match(text, /at-risk project\s+rated Red or Amber/)
 })
+
+test('a condition about one of the facts asked about keeps that fact alone', async () => {
+  const v = check(s, { measures: ['Sale.hours', 'Budget.budget'], by: [{ to: 'Branch', via: { Sale: ['project', 'branch'] } }], where: [{ condition: 'hard sale' }, { to: 'BudgetVersion', in: ['base'] }], currency: 'AUD', span: { from: '2026-09-01', to: '2026-11-01' } })
+  if (!v.ok) assert.fail(v.reason)
+  const hard = evaluate(s, I, v.plan).rows
+  const all = check(s, { measures: ['Sale.hours', 'Budget.budget'], by: [{ to: 'Branch', via: { Sale: ['project', 'branch'] } }], where: [{ to: 'BudgetVersion', in: ['base'] }], currency: 'AUD', span: { from: '2026-09-01', to: '2026-11-01' } })
+  if (!all.ok) assert.fail(all.reason)
+  const every = evaluate(s, I, all.plan).rows
+  const budgetBy = (rows: unknown[][]) => Object.fromEntries(rows.filter((r) => r[2] !== null).map((r) => [r[0], r[2]]))
+  assert.deepEqual(budgetBy(hard), budgetBy(every), 'the budget is not kept to hard sales')
+  assert.ok(hard.reduce((n, r) => n + Number(r[1] ?? 0), 0) < every.reduce((n, r) => n + Number(r[1] ?? 0), 0), 'the sales are')
+  assert.deepEqual((await runSql(s, sources, v.plan, query)).rows, hard)
+})
+
+test('money on a fact with no time converts at the rates of the day it is answered', async () => {
+  const timeless: Schema = { ...s, objects: { ...s.objects, Contract: { ...s.objects.Contract, arrows: { project: 'Project' } } } }
+  const t = toSqlite(timeless, I)
+  const v = check(timeless, { measures: ['Contract.value'], currency: 'AUD' }, { today: '2026-12-31' })
+  if (!v.ok) assert.fail(v.reason)
+  assert.ok(v.plan.notes.some((n) => /at the rates of 2026-12-31/.test(n)))
+  assert.deepEqual((await runSql(timeless, t.sources, v.plan, t.query)).rows, evaluate(timeless, I, v.plan).rows)
+  assert.ok(!check(timeless, { measures: ['Contract.value'], currency: 'AUD' }).ok, 'without a day to answer on, it asks for one')
+})

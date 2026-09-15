@@ -1,6 +1,6 @@
 // Allocations overlapping the span, each spread evenly over the weekdays (Monday to Friday) of its own range — 80 hours
 // over 10 weekdays is 8 a day — and only the days inside the span kept. An allocation on weekend days only is placed on
-// its first day. Allocations on job records that are not projects (no status or no type) are not counted.
+// its first day. Which allocations count as on a real project is the graph's "valid project" condition.
 //
 // Revenue is projected from billable allocations only: hours × the allocation's charge-out rate, except on Milestone
 // Fixed Price and Prepayment projects, which are priced at the project's forecasting rate (custentity9) when it has
@@ -20,7 +20,7 @@ export default async (ctx, { from, to }) => {
              CASE ra.allocationtype WHEN 1 THEN 'Hard' WHEN 2 THEN 'Soft' END AS commitment,
              COALESCE(ra.custevent_f5_ra_billable, 'F') AS billable, ra.allocationresource AS person_id, ra.project AS project_id
         FROM resourceallocation ra
-        JOIN job j ON j.id = ra.project AND j.entitystatus IS NOT NULL AND j.jobtype IS NOT NULL
+        LEFT JOIN job j ON j.id = ra.project
         LEFT JOIN jobtype jt ON jt.id = j.jobtype
        WHERE ra.startdate < TO_DATE(@to, 'YYYY-MM-DD') AND ra.enddate >= TO_DATE(@from, 'YYYY-MM-DD') AND ra.id > @after
        ORDER BY ra.id FETCH FIRST ${PAGE} ROWS ONLY`, { from, to, after })

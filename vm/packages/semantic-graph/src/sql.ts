@@ -233,8 +233,8 @@ function statement(s: Schema, src: Sources, plan: Plan, fp: FactPlan, dialects: 
     if ('none' in w) { where.push(`${expr} IS ${w.none ? '' : 'NOT '}NULL`); continue }
     if ('notIn' in w) { where.push(`(${expr} IS NULL OR ${expr} NOT IN (${w.notIn.map(param).join(', ')}))`); continue }
     if ('range' in w) {
-      const dated = typeof w.range.from === 'string' || typeof w.range.to === 'string'
-      const v = (x: string | number) => (dated ? d.date(param(x)) : param(x))
+      // Date attributes are written by their sources as YYYY-MM-DD text, which compares in date order.
+      const v = (x: string | number) => param(x)
       if (w.range.from !== undefined) where.push(`${expr} >= ${v(w.range.from)}`)
       if (w.range.to !== undefined) where.push(`${expr} < ${v(w.range.to)}`)
       continue
@@ -274,7 +274,7 @@ function statement(s: Schema, src: Sources, plan: Plan, fp: FactPlan, dialects: 
     const raw = col('f', fs.measures[name] ?? fail(`${fp.fact}.${name} has no column`))
     let v = raw
     if (fp.convert && m.currency && baseUnits(m.unit).money) {
-      const known = rates?.get(`${plan.span?.to}|${plan.asOf ?? ''}|${fp.convert.currency}`)
+      const known = rates?.get(rateKey(plan, fp))
       if (!known) take(src.facts[s.conversion!.fact]?.params)
       const rate = rateExpr(s, src, plan, fp, m.currency, d, param, reach, col, rowDate, known)
       v = `(${raw} * ${rate})`
@@ -305,12 +305,14 @@ function rateExpr(s: Schema, src: Sources, plan: Plan, fp: FactPlan, currency: s
   if (rs.source !== src.facts[fp.fact].source) fail(`the exchange rates are in ${rs.source} and ${fp.fact} in ${src.facts[fp.fact].source}; one statement cannot read both`)
   const cur = Array.isArray(currency) ? reach(currency) : col('f', src.facts[fp.fact].attributes?.[currency.attribute] ?? fail(`${fp.fact}.${currency.attribute} has no column`))
   const to = param(fp.convert!.currency)
-  let on = fp.convert!.at === 'end' ? d.date(param(dayBefore(plan.span!.to))) : rowDate ?? fail(`${fp.fact} has no date to convert its money on`)
+  let on = fp.convert!.on ? d.date(param(fp.convert!.on)) : fp.convert!.at === 'end' ? d.date(param(dayBefore(plan.span!.to))) : rowDate ?? fail(`${fp.fact} has no date to convert its money on`)
   if (plan.asOf) { const asOf = d.date(param(plan.asOf)); on = `CASE WHEN ${on} > ${asOf} THEN ${asOf} ELSE ${on} END` }
   const r = (x: string) => col('r', x)
   const found = d.first(r(rs.measures[c.rate]), `(${rs.sql}) r`, `${r(rs.arrows[c.from])} = ${cur} AND ${r(rs.arrows[c.to])} = ${to} AND ${r(rs.time!)} <= ${on}`, `${r(rs.time!)} DESC`)
   return `(CASE WHEN ${cur} = ${to} THEN 1 ELSE ${found} END)`
 }
+/** The one day a fact plan's money converts on, with the answer's as-of and currency: which rates it reads. */
+const rateKey = (p: Plan, fp: FactPlan) => `${fp.convert!.on ?? p.span?.to}|${p.asOf ?? ''}|${fp.convert!.currency}`
 const dayBefore = (x: string) => { const t = new Date(x + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() - 1); return t.toISOString().slice(0, 10) }
 
 /** Rates into a currency as at a date, by the date asked (span end | as-of | currency): from-currency → rate. */
@@ -323,13 +325,13 @@ async function ratesFor(s: Schema, src: SourcesFor, plan: Plan, query: Query, d:
   const c = s.conversion
   if (!c) return out
   for (const p of plansOf(plan)) for (const fp of p.facts) {
-    if (!fp.convert || fp.convert.at !== 'end' || !p.span) continue
-    const key = `${p.span.to}|${p.asOf ?? ''}|${fp.convert.currency}`
+    if (!fp.convert || fp.convert.at !== 'end' || (!p.span && !fp.convert.on)) continue
+    const key = rateKey(p, fp)
     if (out.has(key)) continue
     const rs = forFact(src, fp.fact).facts[c.fact]
     if (!rs?.sql || !rs.time) continue
     const dr = dialectOf(d, rs.source), q = (x: string) => `r.${dr.quote(x)}`
-    let on = dayBefore(p.span.to)
+    let on = fp.convert.on ?? dayBefore(p.span!.to)
     if (p.asOf && p.asOf < on) on = p.asOf
     const params = { ...rs.params, to_currency: fp.convert.currency, on }
     const latest = await query(rs.source, `SELECT ${q(rs.arrows[c.from])} AS c, MAX(${q(rs.time)}) AS d FROM (${rs.sql}) r WHERE ${q(rs.arrows[c.to])} = @to_currency AND ${q(rs.time)} <= ${dr.date('@on')} GROUP BY ${q(rs.arrows[c.from])}`, params, { policies: options.access?.[rs.source] })

@@ -255,7 +255,7 @@ export function createGraph(o: GraphOptions) {
       return { ok: false, callId: id, rule: verdict.rule, reason: verdict.reason, ...(verdict.choices ? { choices: verdict.choices } : {}) }
     }
     const plan = verdict.plan
-    const key = canonical(m.schema, q)!
+    const key = canonical(m.schema, q, { today })!
     const nodes = nodesOf(m.schema, plan)
     try {
       if (!m.sources) throw new Error(`the schema "${a.model}" has no sources, so nothing can be read`)

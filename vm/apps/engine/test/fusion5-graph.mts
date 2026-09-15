@@ -20,9 +20,11 @@ console.log(`loaded and checked in ${((Date.now() - t) / 1000).toFixed(1)}s`)
 
 const AU = { to: 'Subsidiary', in: ['AU'] }
 const questions: Array<[string, any, string?]> = [
-  // ['Timesheet hours, AU, August by week', { measures: ['TimeDay.hours', 'TimeDay.people'], by: [{ to: 'Week' }], where: [AU], span: { from: '2026-08-03', through: '2026-08-30' } }],
-  ['Projected revenue, AU, Jul–Oct, hard and soft', { measures: ['AllocationDay.revenue', 'AllocationDay.hours', 'AllocationDay.unpriced hours'], by: [{ to: 'Month' }, { to: 'Commitment' }], where: [AU], span: { from: '2026-07-01', through: '2026-10-31' }, currency: 'AUD' }],
-  ['Remaining soft by project, AU, September', { measures: ['AllocationDay.revenue'], by: [{ to: 'Project' }], where: [AU, { to: 'Commitment', in: ['Soft'] }], span: { from: '2026-09-01', through: '2026-09-30' }, currency: 'AUD', order: { by: 'AllocationDay.revenue', desc: true }, limit: 7 }],
+  //   ['Base revenue budget, AU, Jul–Oct', { measures: ['BudgetLine.budget'], by: [{ to: 'Month' }], where: [AU, { condition: 'base revenue budget' }], span: { from: '2026-07-01', through: '2026-10-31' }, currency: 'AUD' }],
+  // ['Projected vs base budget, AU, Sep–Oct', { measures: ['AllocationDay.revenue', 'BudgetLine.budget', '[AllocationDay.revenue] / [BudgetLine.budget]'], by: [{ to: 'Month' }], where: [AU, { condition: 'base revenue budget' }], span: { from: '2026-09-01', through: '2026-10-31' }, currency: 'AUD' }],
+  ['PMO projects by RAG, AU', { measures: ['ProjectState.projects', 'ProjectState.remaining budget'], by: [{ attribute: 'rag', of: 'Project' }], where: [AU, { condition: 'PMO project' }], currency: 'AUD' }],
+  ['Upcoming go-lives, AU PMO, next 3 months', { measures: ['ProjectState.projects'], by: [{ attribute: 'rag', of: 'Project' }], where: [AU, { condition: 'PMO project' }, { attribute: 'go-live', of: 'Project', range: { from: '2026-09-15', to: '2026-12-15' } }], currency: 'AUD' }],
+  //   ['Timesheet revenue and billable hours, AU, first week of August', { measures: ['TimeDay.revenue', 'TimeDay.hours'], by: [{ to: 'TimeType' }], where: [AU], span: { from: '2026-08-03', through: '2026-08-09' }, currency: 'AUD' }],
 ]
 for (const [name, q] of questions) {
   t = Date.now()
