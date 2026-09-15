@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Enterprise engine \u2014 the ICA agents answering over the program graph (packages/graph). See docs/program-graph.md.",
+  "description": "Enterprise engine \u2014 the ICA agents answering over the semantic graph (packages/semantic-graph). See docs/semantic-graph.md.",
   "scripts": {
     "dev": "tsx engine.ts",
     "smoke": "tsx smoke.ts"
@@ -15,10 +15,10 @@
     "@openai/codex": "^0.144.0",
     "@openai/codex-sdk": "^0.144.4",
     "@opencode-ai/sdk": "^1.18.0",
-    "@superatom/graph": "workspace:*",
+    "@superatom/datasource-index": "workspace:*",
     "@superatom/grounding": "workspace:*",
     "@superatom/introspect": "workspace:*",
-    "@superatom/datasource-index": "workspace:*",
+    "@superatom/semantic-graph": "workspace:*",
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/headless": "^6.0.0",
     "node-pty": "^1.0.0",

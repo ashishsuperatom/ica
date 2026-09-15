@@ -54,15 +54,15 @@ importers:
       '@superatom/datasource-index':
         specifier: workspace:*
         version: link:../../packages/datasource-index
-      '@superatom/graph':
-        specifier: workspace:*
-        version: link:../../packages/graph
       '@superatom/grounding':
         specifier: workspace:*
         version: link:../../packages/grounding
       '@superatom/introspect':
         specifier: workspace:*
         version: link:../../packages/introspect
+      '@superatom/semantic-graph':
+        specifier: workspace:*
+        version: link:../../packages/semantic-graph
       '@xterm/addon-serialize':
         specifier: ^0.14.0
         version: 0.14.0
@@ -104,8 +104,6 @@ importers:
         specifier: ^7.6.0
         version: 7.6.13
 
-  packages/graph: {}
-
   packages/grounding:
     dependencies:
       better-sqlite3:
@@ -117,6 +115,8 @@ importers:
         version: 7.6.13
 
   packages/introspect: {}
+
+  packages/semantic-graph: {}
 
 packages:
 

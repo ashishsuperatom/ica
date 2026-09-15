@@ -1,9 +1,9 @@
-// THE ANALYST — builds what the graph is missing.
+// THE ANALYST — takes the questions a conversation could not answer from the semantic graph.
 //
-// One analyst for the project, in the shared workspace. A question reaches it when the composer escalated: the program
-// it needs does not exist, and building it takes discovery — reading the data sources, understanding what their
-// tables mean, writing concepts and the programs on them. It defines what it builds, then answers the person's
-// question by applying a message to their data session with ./ask, like the composer does.
+// One analyst for the project, in the shared workspace, with the semantic graph's tools and the data sources'. A
+// question reaches it when the composer escalated. It answers with a program on the graph when the graph holds what the
+// question needs in a way the composer did not find; otherwise it says what the graph is missing and where that is in
+// the data, so it can be added. Programs read only the graph; the data tools are for understanding.
 
 import { writeFile, mkdir, rm } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
@@ -11,7 +11,6 @@ import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { agentConfig, type AgentOverride } from '../../config/index.js'
 import { createSession, prepareWorkspace, type Harness, type Session, type RunHandlers } from '../../ica/index.js'
-import { GRAPH_REFERENCE } from '../shared-prompts/graph-reference.js'
 import { todayIn, turnOutcome, type TurnResult } from '../composer/index.js'
 
 export interface AnalystOpts {
@@ -29,26 +28,23 @@ export interface Analyst {
   cwd: string
 }
 
-const ROLE = `You build what the organisation's graph is missing, and answer the question that needed it.
+const ROLE = `You take the questions a conversation could not answer from the organisation's semantic graph.
 
-A question reaches you when the program it needs does not exist. Find what exists with ./catalog, read a program with ./program, and use it. Explore
-the data with ./sources, ./find-schema, ./introspect and ./query until you know what the tables mean and which rows
-count — profile every column that classifies a row (its types, statuses and flags) before deciding — then write the concepts that read them (relations, at their finest grain, with shapes that say what each column
-is) and the programs on those concepts, and ./define each, checking each with ./try — at the finest split a question
-will use (per person, per week, per project), where a wrong definition shows as values that cannot be true. Name a program for the idea it
-computes, not for the question that asked for it, so the next question finds it. The program a question asks returns
-an answer: its views, its narration, and the next steps a person could take.
+Read the question in the graph's terms with ./resolve-terms, ./overview, ./describe and the finds, and look into the data
+with ./sources, ./find-schema, ./introspect and ./query to understand what the question needs and whether the graph
+holds it in a way that was missed. When it does, answer with a program on the graph, program.mjs, run with ./run-program:
+its data comes only from the graph questions it asks. When it does not, ./escalate with what the graph is missing and
+where it is in the data, which the person is told.
 
-Finish by answering the person: apply a message to their data session with ./ask. Work in the foreground; every tool
-explains itself with --help. A question is followed by \`today:\` (the date it is asked on), \`qid:\` and, when the composer handed it over, why.`
+Each question comes with today's date, its qid and why it was handed over; every tool explains itself with --help.`
 
 export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
   const cfg = agentConfig('analyst')
   const harness: Harness = opts.ica?.harness ?? cfg.harness
-  const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl, projectDir: opts.projectDir })
+  const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl, projectDir: opts.projectDir, tools: 'shared' })
   const context = (() => { try { return readFileSync(join(cwd, 'CONTEXT.md'), 'utf8') } catch { return '' } })()
   const session = createSession(harness, { cwd, model: opts.ica?.model ?? cfg.model, provider: opts.ica?.provider ?? cfg.provider, baseUrl: opts.ica?.baseUrl,
-                                           resumeId: opts.ica?.resumeId, systemReference: [ROLE, GRAPH_REFERENCE, context].join('\n\n') })
+                                           resumeId: opts.ica?.resumeId, systemReference: [ROLE, context].join('\n\n') })
 
   return {
     cwd, session,
@@ -69,5 +65,5 @@ export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
 }
 
 export async function promptVersion(): Promise<string> {
-  return createHash('sha256').update(ROLE + GRAPH_REFERENCE).digest('hex').slice(0, 12)
+  return createHash('sha256').update(ROLE).digest('hex').slice(0, 12)
 }

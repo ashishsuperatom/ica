@@ -1,27 +1,28 @@
 # Engine — plan (reference)
 
 The engine turns a person's question into an answer over their organisation's data. It runs one project, connects
-out to the hub over WebSocket, and drives coding agents (ICAs) that write and call **programs** in the program graph.
-The design — programs, concepts, shapes, memory, expectations, sessions — is **`docs/program-graph.md`**. This file
-is what is built and what is next.
+out to the hub over WebSocket, and drives coding agents (ICAs) that answer with **programs on the semantic graph**.
+The design is **`docs/semantic-graph.md`**. This file is what is built and what is next.
 
 ---
 
-## The graph (`vm/packages/graph`)
+## The semantic graph (`vm/packages/semantic-graph`)
 
-- A **program** is JavaScript, identified by the hash of its content; a **name** points at a hash.
-- A **concept** is a program that reads a data source. A program reads other programs.
-- Every program returns a `value`, `rows`, a `relation` or an `answer`. A relation has a **shape**: its dimensions,
-  measures and time.
-- Every call is recorded: **memory**, **expectations**, **decisions**.
-- Each conversation has a **data session**. Its steps are states and the answers on them.
+- A project commits its model in `vm/projects/<id>/semantic/`: `schema.json` (entities, calendars, facts, arrows,
+  measures), `sources.json` (where each object's rows are), `settings.json`, and producing programs.
+- A **question** — measures, grouped by where arrows lead, kept to records, over a span — is checked by the graph's
+  rules, compiled to the source's own SQL and run through the datasource manager.
+- Every answer is recorded: **memory**, **expectations**, **decisions**. Each conversation has a **data session**:
+  its steps, each with its answer.
+- An **answer program** (`programs.ts`) asks the graph with `ctx.ask` and returns headline, data, views, narration
+  citing cells, and next steps. Rows carry record ids beside their names.
 
 ## Agents (`agents/`)
 
 | agent | job |
 |---|---|
-| composer | one per conversation. Turns a question into a message on the person's data session (`./ask`), defines programs on existing ones, or `./escalate`s |
-| analyst | builds the concepts and programs the graph lacks, then answers with `./ask` |
+| composer | one per conversation. Reads the question in the graph's terms, answers with a program (`./run-program`), or `./escalate`s |
+| analyst | takes escalated questions: explores the data, answers on the graph when it can, else says what the graph is missing |
 | narrator | one line of live narration while work runs |
 | connector | the admin's agent for connecting a data source (writes, tests and registers a bridge) |
 | grounding | builds value → id resolution for a source |
@@ -32,21 +33,26 @@ Harness, provider and model per agent: `config/default.json`, overridable per pr
 
 Generated into each working directory by `ica/workspace.ts`; each explains itself with `--help`.
 
-- the graph — `./catalog ./define ./try ./ask ./find ./members`
-- the data — `./sources ./query ./introspect ./find-schema ./resolve`
+- the semantic graph — `./resolve-terms ./find-measure ./find-dimension ./find-record ./describe ./group-paths ./overview
+  ./check-question ./try-question ./run-program ./source-records ./trace-answer` (composer, analyst)
+- the data — `./sources ./query ./introspect ./find-schema ./resolve` (analyst, connector, grounding)
 - hand-off — `./escalate`
+
+## Verbs (`graph/semantic-verbs.ts`, `graph/semantic-turns.ts`)
+
+`view: <Entity> <id>` · `run: [qid]` · `check: [qid]` · `program: [qid]` · `explain:` · `edit: <change>` — on the
+answer on screen. Run, check, program and a kept view need no model.
 
 ## State
 
 Under `~/.superatom/state/<projectId>/` (`ENGINE_STATE_DIR`):
 
-- `db/` — `graph.sqlite` (programs, memory, sessions), `datasource-index.sqlite` (the datasource schema index read
-  by `./find-schema`, `vm/packages/datasource-index`), `grounding.sqlite`, `agent-sessions.sqlite` (which harness
-  session each agent resumes). Outside every agent's cwd.
+- `db/` — `semantic-graph.sqlite` (definitions, memory, data sessions), `datasource-index.sqlite` (read by
+  `./find-schema`), `grounding.sqlite`, `agent-sessions.sqlite`. Outside every agent's cwd.
 - `workspace/` — the analyst, connector and grounding agents' directory.
-- `sessions/<sessionId>/` — one conversation's directory, the composer's.
-
-Committed per project: `vm/projects/<projectId>/datasources/`.
+- `sessions/<sessionId>/` — one conversation's directory, the composer's; a turn's files in `out/<qid>/`
+  (`step.json`, `program.mjs`, `params.json`, `explain.md`).
+- `views/` — the kept view programs, one per kind of record and lens.
 
 ## Surfaces
 
@@ -57,6 +63,7 @@ talk only to the project's Durable Object.
 
 ## Next
 
-5. **Surfaces render `session:step`** — web and iOS draw the step's state and answer directly.
-6. **End to end on local NetSuite** — a question through composer → escalate → analyst → graph → surface.
-7. **The Fusion5 scenarios** — the questions in `docs/program-graph.md` §17, answered and checked.
+1. **The conversation's state as coordinates** — each step records measures, groups, records, span and context,
+   taken from the program's graph questions; a follow-up or a click is a change to that state.
+2. **The graph builder** — an agent that extends the semantic graph from feedback and the data.
+3. **Budget on NetSuite** — the BudgetLine source, fast enough to load.

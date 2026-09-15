@@ -1,0 +1,52 @@
+{
+  "name": "Fusion5 — resource allocation and revenue (Scenario 1)",
+  "objects": {
+    "Project": { "kind": "entity", "description": "A client project.", "synonyms": ["job", "engagement"],
+      "arrows": { "subsidiary": "Subsidiary", "pillar": "Pillar", "customer": "Customer", "currency": "Currency", "type": "ProjectType",
+                  "manager": "Person", "senior supplier": { "to": "Person", "partial": true } } },
+    "Person": { "kind": "entity", "description": "An employee.", "synonyms": ["employee", "resource", "consultant"],
+      "arrows": { "subsidiary": "Subsidiary", "pillar": { "to": "Pillar", "kind": "as-of" }, "manager": { "to": "Person", "partial": true } } },
+    "Customer": { "kind": "entity", "synonyms": ["client"] },
+    "Subsidiary": { "kind": "entity", "arrows": { "currency": "Currency" },
+      "members": { "2": "Fusion5 Pty Ltd", "3": "Fusion5 Ltd" }, "names": { "AU": "2", "Australia": "2", "NZ": "3", "New Zealand": "3" } },
+    "Pillar": { "kind": "entity", "synonyms": ["practice", "department"],
+      "members": { "15": "CEC", "42": "BC", "37": "FO", "5": "NetSuite" }, "names": { "CEC": "15", "BC": "42", "FO": "37", "NetSuite": "5" } },
+    "Currency": { "kind": "entity", "members": { "AUD": "Australian dollar", "NZD": "New Zealand dollar" } },
+    "ProjectType": { "kind": "entity", "members": { "14": "Milestone Fixed Price", "1": "Implementation", "3": "PartnerPlus" } },
+    "Account": { "kind": "entity", "members": { "5005": "Consulting", "5102": "PartnerPlus CST PrePaid Hours", "5010": "Consulting – Intercompany" } },
+    "BudgetCategory": { "kind": "entity", "members": { "5": "Local $ currency", "7": "Forecast 6+6" }, "names": { "Base Budget": "5" } },
+    "Day": { "kind": "calendar", "level": "day", "arrows": { "month": "Month" } },
+    "Month": { "kind": "calendar", "level": "month", "arrows": { "quarter": "Quarter" } },
+    "Quarter": { "kind": "calendar", "level": "quarter", "arrows": { "year": "Year" } },
+    "Year": { "kind": "calendar", "level": "year" },
+
+    "AllocationDay": { "kind": "fact", "description": "Resource allocation spread over working days: the hours on one day.",
+      "synonyms": ["allocation", "resource allocation", "booking"],
+      "arrows": { "person": "Person", "project": "Project", "day": "Day" },
+      "attributes": { "commitment": { "members": ["Hard", "Soft"] } },
+      "measures": {
+        "hours": { "unit": "h", "kind": "flow", "aggregate": "sum", "synonyms": ["allocated hours"] },
+        "revenue": { "unit": "money", "kind": "flow", "aggregate": "sum", "currency": ["project", "currency"], "synonyms": ["projected revenue", "forecast revenue"] },
+        "unpriced hours": { "unit": "h", "kind": "flow", "aggregate": "sum" },
+        "people": { "unit": "people", "kind": "flow", "aggregate": "count distinct", "of": "person", "synonyms": ["headcount"] }
+      } },
+    "TimesheetLine": { "kind": "fact", "description": "Hours recorded by one person on one day on one project.",
+      "synonyms": ["timesheet", "actuals"],
+      "arrows": { "person": "Person", "project": "Project", "day": "Day" },
+      "attributes": { "approval": { "members": ["Open", "Approved"] } },
+      "measures": {
+        "hours": { "unit": "h", "kind": "flow", "aggregate": "sum", "synonyms": ["actual hours"] },
+        "charged": { "unit": "money", "kind": "flow", "aggregate": "sum", "currency": ["project", "currency"], "synonyms": ["billed revenue"] }
+      } },
+    "BudgetLine": { "kind": "fact", "description": "A budgeted amount for a subsidiary, pillar and account in a month, in one budget category.",
+      "synonyms": ["budget"],
+      "arrows": { "subsidiary": "Subsidiary", "pillar": "Pillar", "account": "Account", "category": { "to": "BudgetCategory", "kind": "version" }, "month": "Month" },
+      "measures": { "budget": { "unit": "money", "kind": "flow", "aggregate": "sum", "currency": ["subsidiary", "currency"], "versions": "category" } } },
+    "RateCard": { "kind": "fact", "description": "The hourly rate a person is charged at on a project.",
+      "arrows": { "project": "Project", "person": "Person" },
+      "measures": { "rate": { "unit": "money/h", "kind": "value-per-unit", "aggregate": "max", "currency": ["project", "currency"] } } },
+    "ExchangeRate": { "kind": "fact", "arrows": { "from": "Currency", "to": "Currency", "day": "Day" },
+      "measures": { "rate": { "unit": "ratio", "kind": "value-per-unit", "aggregate": "max" } } }
+  },
+  "conversion": { "fact": "ExchangeRate", "from": "from", "to": "to", "day": "day", "rate": "rate", "at": "end" }
+}

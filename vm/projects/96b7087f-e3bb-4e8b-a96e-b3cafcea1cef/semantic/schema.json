@@ -1,0 +1,73 @@
+{
+  "name": "Fusion5",
+  "objects": {
+    "Currency":       { "kind": "entity", "description": "A currency, by its code." },
+    "Subsidiary":     { "kind": "entity", "description": "A Fusion5 legal entity.", "synonyms": ["entity", "company", "region", "country"],
+                        "arrows": { "currency": "Currency", "parent": { "to": "Subsidiary", "partial": true } },
+                        "members": { "1": "F5 Parent", "2": "Fusion5 Pty Ltd", "3": "Fusion5 Ltd" },
+                        "names": { "AU": "2", "Australia": "2", "NZ": "3", "New Zealand": "3" } },
+    "Pillar":         { "kind": "entity", "description": "A practice pillar (NetSuite department), in a tree: BC, CEC, FO and Retail are under Microsoft.", "synonyms": ["practice", "department", "business unit"],
+                        "arrows": { "parent": { "to": "Pillar", "partial": true } } },
+    "Customer":       { "kind": "entity", "description": "A client.", "synonyms": ["client"] },
+    "ProjectType":    { "kind": "entity", "description": "A project's contract type: Implementation, Milestone Fixed Price, PartnerPlus, …", "synonyms": ["contract type", "job type"] },
+    "ProjectStatus":  { "kind": "entity", "description": "A project's status; In Progress is live work.", "synonyms": ["status"] },
+    "WorkCalendar":   { "kind": "entity", "description": "A working pattern with its public holidays." },
+    "ReportLine":     { "kind": "entity", "description": "Where an account is reported: consulting revenue is the budget line of the 4 Month Summary.",
+                        "members": { "consulting revenue": "Consulting revenue" }, "names": { "Consulting revenue": "consulting revenue", "revenue": "consulting revenue" } },
+    "Account":        { "kind": "entity", "description": "A general ledger account.", "arrows": { "report line": { "to": "ReportLine", "partial": true } } },
+    "BudgetCategory": { "kind": "entity", "description": "A version of the budget.", "synonyms": ["budget version"],
+                        "members": { "1": "Legacy", "2": "Forecast", "4": "Fusion5 Australia", "5": "Local $ currency", "6": "GBP Budget", "7": "Forecast 6+6", "8": "Reforecast 9+3", "9": "Forecast 3+9" },
+                        "names": { "Base Budget": "5", "base": "5" } },
+    "Person":         { "kind": "entity", "description": "An employee.", "synonyms": ["employee", "resource", "consultant", "staff"],
+                        "arrows": { "subsidiary": "Subsidiary", "pillar": { "to": "Pillar", "partial": true }, "manager": { "to": "Person", "partial": true }, "calendar": { "to": "WorkCalendar", "partial": true } } },
+    "Project":        { "kind": "entity", "description": "A client project (NetSuite job).", "synonyms": ["job", "engagement"],
+                        "arrows": { "subsidiary": "Subsidiary", "pillar": { "to": "Pillar", "partial": true }, "customer": { "to": "Customer", "partial": true },
+                                    "currency": "Currency", "type": { "to": "ProjectType", "partial": true }, "status": { "to": "ProjectStatus", "partial": true },
+                                    "manager": { "to": "Person", "partial": true }, "senior supplier": { "to": "Person", "partial": true } } },
+    "Commitment":     { "kind": "entity", "description": "Whether an allocation is confirmed.", "members": { "Hard": "Hard", "Soft": "Soft" } },
+    "Billable":       { "kind": "entity", "description": "Whether time or an allocation is billable.", "members": { "T": "Billable", "F": "Not billable" } },
+    "Approval":       { "kind": "entity", "description": "Where a timesheet line is in approval.", "members": { "0": "Not recorded", "1": "Open", "2": "Pending Approval", "3": "Approved", "4": "Rejected" } },
+
+    "Day":     { "kind": "calendar", "level": "day", "arrows": { "month": "Month", "week": "Week" } },
+    "Week":    { "kind": "calendar", "level": "week" },
+    "Month":   { "kind": "calendar", "level": "month", "arrows": { "quarter": "Quarter" } },
+    "Quarter": { "kind": "calendar", "level": "quarter", "arrows": { "year": "Year" } },
+    "Year":    { "kind": "calendar", "level": "year" },
+
+    "AllocationDay": {
+      "kind": "fact", "description": "Resource allocations spread over the working days of each person's calendar: the hours falling on one day.",
+      "synonyms": ["allocation", "resource allocation", "booking", "forecast"],
+      "arrows": { "person": "Person", "project": "Project", "day": "Day", "commitment": "Commitment", "billable": "Billable" },
+      "defaults": { "Subsidiary": ["project", "subsidiary"], "Pillar": ["project", "pillar"] },
+      "measures": {
+        "hours": { "unit": "h", "kind": "flow", "aggregate": "sum", "synonyms": ["allocated hours", "booked hours"] },
+        "revenue": { "unit": "money", "kind": "flow", "aggregate": "sum", "currency": ["project", "currency"], "synonyms": ["projected revenue", "forecast revenue", "allocation revenue"] },
+        "unpriced hours": { "unit": "h", "kind": "flow", "aggregate": "sum", "synonyms": ["hours with no rate"] },
+        "people": { "unit": "people", "kind": "flow", "aggregate": "count distinct", "of": "person", "synonyms": ["headcount", "resources"] }
+      }
+    },
+    "TimeDay": {
+      "kind": "fact", "description": "Time recorded against projects: a person's hours on a project on a day, with what was charged.",
+      "synonyms": ["timesheet", "time", "actuals", "time entries"],
+      "arrows": { "person": "Person", "project": "Project", "day": "Day", "approval": "Approval", "billable": "Billable", "currency": "Currency" },
+      "defaults": { "Subsidiary": ["project", "subsidiary"], "Pillar": ["project", "pillar"] },
+      "measures": {
+        "hours": { "unit": "h", "kind": "flow", "aggregate": "sum", "synonyms": ["actual hours", "worked hours", "timesheet hours"] },
+        "charged": { "unit": "money", "kind": "flow", "aggregate": "sum", "currency": ["currency"], "synonyms": ["billed", "charged amount", "actual revenue"] },
+        "people": { "unit": "people", "kind": "flow", "aggregate": "count distinct", "of": "person" }
+      }
+    },
+    "BudgetLine": {
+      "kind": "fact", "description": "A budgeted amount for a subsidiary, pillar and account in a month, in one budget category.",
+      "synonyms": ["budget"],
+      "arrows": { "subsidiary": "Subsidiary", "pillar": "Pillar", "account": "Account", "category": { "to": "BudgetCategory", "kind": "version" }, "month": "Month", "currency": "Currency" },
+      "measures": { "budget": { "unit": "money", "kind": "flow", "aggregate": "sum", "currency": ["currency"], "versions": "category", "synonyms": ["budget amount", "base budget"] } }
+    },
+    "ExchangeRate": {
+      "kind": "fact", "description": "Units of one currency per unit of another, by day.",
+      "arrows": { "from": "Currency", "to": "Currency", "day": "Day" },
+      "measures": { "rate": { "unit": "ratio", "kind": "value-per-unit", "aggregate": "max" } }
+    }
+  },
+  "conversion": { "fact": "ExchangeRate", "from": "from", "to": "to", "day": "day", "rate": "rate", "at": "end" }
+}

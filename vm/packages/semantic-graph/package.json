@@ -1,0 +1,13 @@
+{
+  "name": "@superatom/semantic-graph",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "The semantic model as a graph: entities, facts and measures, and the path algebra that says which questions it answers.",
+  "scripts": {
+    "test": "tsx --test test/*.test.mts"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

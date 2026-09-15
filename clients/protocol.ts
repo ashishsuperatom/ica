@@ -118,7 +118,8 @@ export interface Answer {
   table?: { columns: string[]; rows: unknown[][]; totalRows?: number; total?: unknown[] }
   // Multi-block report: an ORDERED list of sections. A simple answer omits this and uses figures/table above.
   // kind:'table' → columns/rows (+ optional total/note); 'kpis' → items (same shape as figures); 'text' → body.
-  sections?: { kind: 'table' | 'kpis' | 'text'; title?: string; columns?: string[]; rows?: unknown[][]; total?: unknown[]; note?: string; items?: { label: string; display: string; sub?: string; value?: unknown; neg?: boolean }[]; body?: string }[]
+  // A table column may say which kind of record its cells name ({label, entity}); such a cell is {value, display?, id}.
+  sections?: { kind: 'table' | 'kpis' | 'text' | 'files'; title?: string; columns?: (string | { label: string; entity?: string; unit?: string })[]; rows?: unknown[][]; total?: unknown[]; note?: string; items?: { label: string; display: string; sub?: string; value?: unknown; neg?: boolean }[]; body?: string }[]
   caveat?: string
   [k: string]: unknown
 }

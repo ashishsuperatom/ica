@@ -1,0 +1,5 @@
+{
+  "produces": "AllocationDay",
+  "reads": { "sources": ["F5NETSUITE"], "objects": [] },
+  "description": "Each resource allocation's hours spread evenly over the working days of the allocated person's calendar (weekdays less its holidays), priced at the allocation's billing rate; summed per person, project, day, commitment and billability."
+}

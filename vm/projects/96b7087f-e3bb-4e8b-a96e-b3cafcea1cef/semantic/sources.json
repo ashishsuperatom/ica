@@ -1,0 +1,143 @@
+{
+  "entities": {
+    "Currency": {
+      "source": "F5NETSUITE",
+      "sql": "SELECT c.symbol AS id, c.name AS label FROM currency c",
+      "key": "id",
+      "label": "label",
+      "arrows": {}
+    },
+    "Subsidiary": {
+      "source": "F5NETSUITE",
+      "sql": "SELECT s.id AS id, s.name AS label, s.parent AS parent, c.symbol AS currency FROM subsidiary s LEFT JOIN currency c ON c.id = s.currency",
+      "key": "id",
+      "label": "label",
+      "arrows": {
+        "currency": "currency",
+        "parent": "parent"
+      }
+    },
+    "Pillar": {
+      "source": "F5NETSUITE",
+      "sql": "SELECT d.id AS id, d.name AS label, d.parent AS parent FROM department d",
+      "key": "id",
+      "label": "label",
+      "arrows": {
+        "parent": "parent"
+      }
+    },
+    "Customer": {
+      "source": "F5NETSUITE",
+      "sql": "SELECT c.id AS id, c.companyname AS label FROM customer c",
+      "key": "id",
+      "label": "label",
+      "arrows": {}
+    },
+    "ProjectType": {
+      "source": "F5NETSUITE",
+      "sql": "SELECT t.id AS id, t.name AS label FROM jobtype t",
+      "key": "id",
+      "label": "label",
+      "arrows": {}
+    },
+    "ProjectStatus": {
+      "source": "F5NETSUITE",
+      "sql": "SELECT DISTINCT j.entitystatus AS id, BUILTIN.DF(j.entitystatus) AS label FROM job j WHERE j.entitystatus IS NOT NULL",
+      "key": "id",
+      "label": "label",
+      "arrows": {}
+    },
+    "WorkCalendar": {
+      "source": "F5NETSUITE",
+      "sql": "SELECT w.id AS id, w.name AS label FROM workcalendar w",
+      "key": "id",
+      "label": "label",
+      "arrows": {}
+    },
+    "Account": {
+      "source": "F5NETSUITE",
+      "sql": "SELECT a.id AS id, a.acctnumber || ' ' || a.accountsearchdisplayname AS label, CASE WHEN a.acctnumber IN ('5005', '5102', '5010') THEN 'consulting revenue' END AS report_line FROM account a",
+      "key": "id",
+      "label": "label",
+      "arrows": {
+        "report line": "report_line"
+      }
+    },
+    "Person": {
+      "source": "F5NETSUITE",
+      "sql": "SELECT e.id AS id, e.firstname || ' ' || e.lastname AS label, e.subsidiary AS subsidiary, e.department AS pillar, e.supervisor AS manager, e.workcalendar AS calendar FROM employee e",
+      "key": "id",
+      "label": "label",
+      "arrows": {
+        "subsidiary": "subsidiary",
+        "pillar": "pillar",
+        "manager": "manager",
+        "calendar": "calendar"
+      }
+    },
+    "Project": {
+      "source": "F5NETSUITE",
+      "sql": "SELECT j.id AS id, j.entityid || ' ' || j.companyname AS label, j.subsidiary AS subsidiary, j.custentity_f5_prj_pillar AS pillar, j.customer AS customer, c.symbol AS currency, j.jobtype AS type, j.entitystatus AS status, j.custentity_f5_prj_manager AS manager, j.custentity_f5_prj_senior_supplier AS senior_supplier FROM job j LEFT JOIN currency c ON c.id = j.currency",
+      "key": "id",
+      "label": "label",
+      "arrows": {
+        "subsidiary": "subsidiary",
+        "pillar": "pillar",
+        "customer": "customer",
+        "currency": "currency",
+        "type": "type",
+        "status": "status",
+        "manager": "manager",
+        "senior supplier": "senior_supplier"
+      }
+    }
+  },
+  "facts": {
+    "AllocationDay": {
+      "source": "@local",
+      "program": "spread allocations",
+      "arrows": {
+        "person": "person_id",
+        "project": "project_id",
+        "commitment": "commitment",
+        "billable": "billable"
+      },
+      "time": "day",
+      "measures": {
+        "hours": "hours",
+        "revenue": "revenue",
+        "unpriced hours": "unpriced_hours",
+        "people": "person_id"
+      }
+    },
+    "TimeDay": {
+      "source": "F5NETSUITE",
+      "sql": "SELECT tb.employee AS person_id, tb.customer AS project_id, tb.trandate AS day, COALESCE(TO_CHAR(tb.approvalstatus), '0') AS approval, COALESCE(tb.isbillable, 'F') AS billable, COALESCE(ch.cur, jc.symbol) AS currency, SUM(TO_NUMBER(tb.hours)) AS hours, SUM(ch.amount) AS charged FROM timebill tb JOIN job j ON j.id = tb.customer LEFT JOIN currency jc ON jc.id = j.currency LEFT JOIN (SELECT c.timerecord, MAX(cc.symbol) AS cur, SUM(TO_NUMBER(c.amount)) AS amount FROM charge c LEFT JOIN currency cc ON cc.id = c.currency WHERE c.use = 'Actual' AND c.chargetype = -13 AND c.chargedate >= TO_DATE(@span_from, 'YYYY-MM-DD') AND c.chargedate < TO_DATE(@span_to, 'YYYY-MM-DD') GROUP BY c.timerecord) ch ON ch.timerecord = tb.id WHERE tb.trandate >= TO_DATE(@span_from, 'YYYY-MM-DD') AND tb.trandate < TO_DATE(@span_to, 'YYYY-MM-DD') GROUP BY tb.employee, tb.customer, tb.trandate, COALESCE(TO_CHAR(tb.approvalstatus), '0'), COALESCE(tb.isbillable, 'F'), COALESCE(ch.cur, jc.symbol)",
+      "arrows": {
+        "person": "person_id",
+        "project": "project_id",
+        "approval": "approval",
+        "billable": "billable",
+        "currency": "currency"
+      },
+      "time": "day",
+      "measures": {
+        "hours": "hours",
+        "charged": "charged",
+        "people": "person_id"
+      }
+    },
+    "ExchangeRate": {
+      "source": "F5NETSUITE",
+      "sql": "SELECT tc.symbol AS from_currency, bc.symbol AS to_currency, r.effectivedate AS day, TO_NUMBER(r.exchangerate) AS rate FROM currencyrate r JOIN currency tc ON tc.id = r.transactioncurrency JOIN currency bc ON bc.id = r.basecurrency",
+      "arrows": {
+        "from": "from_currency",
+        "to": "to_currency"
+      },
+      "time": "day",
+      "measures": {
+        "rate": "rate"
+      }
+    }
+  }
+}

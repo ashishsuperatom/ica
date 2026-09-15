@@ -4,17 +4,19 @@
 //
 //   sessions/<id>/  one conversation's directory — the composer's cwd for that conversation
 //   workspace/      the shared directory — the analyst, grounding and connector agents work here
-//   db/             the ENGINE's private state: graph.sqlite (programs, memory, data sessions), datasource-index.sqlite
-//                   (./find-schema), grounding.sqlite, agent-sessions.sqlite. Outside every agent's cwd, so an `ls` never surfaces it.
+//   db/             the ENGINE's private state: semantic-graph.sqlite (the model, memory, data sessions),
+//                   datasource-index.sqlite (./find-schema), grounding.sqlite, agent-sessions.sqlite. Outside every agent's
+//                   cwd, so an `ls` never surfaces it.
 //
-// In either directory the agent finds its tools, generated here with the absolute paths they need:
+// In its directory an agent finds the tools for its part, generated here with the absolute paths they need:
 //
-//   the graph       ./catalog ./program ./interpret ./define ./try ./ask ./find ./members
-//   the data        ./sources ./query ./introspect ./find-schema ./resolve
-//   hand-off        ./escalate
+//   the semantic graph   ./resolve-terms ./find-measure ./find-dimension ./find-record ./describe ./group-paths ./overview
+//                        ./check-question ./try-question ./run-program ./source-records ./trace-answer   (conversation, analyst)
+//   the data             ./sources ./query ./introspect ./find-schema ./resolve                            (analyst, connector, grounding)
+//   hand-off             ./escalate                                                                          (conversation)
 //
-// and writes the programs it defines under programs/<name>/ (contract.json + program.mjs). Which turn is live is in
-// .turn, which data session this conversation is in .session — both written by the engine before it asks.
+// Which turn is live is in .turn, which data session this conversation is in .session — both written by the engine
+// before it asks. A turn's files are in out/<qid>/.
 
 import { mkdir, writeFile, chmod, symlink, readlink, rm, readdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
@@ -22,7 +24,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 
-const graphCli = fileURLToPath(new URL('../graph/cli.ts', import.meta.url))
+const semanticCli = fileURLToPath(new URL('../graph/semantic-cli.ts', import.meta.url))
 
 export interface WorkspaceSpec {
   root: string
@@ -32,6 +34,9 @@ export interface WorkspaceSpec {
   projectDir?: string
   /** One conversation, one working directory: when given, the agent works in sessions/<sessionId>. */
   sessionId?: string
+  /** A conversation's directory has the semantic graph and ./escalate. The shared workspace — where the analyst, connector
+   *  and grounding agents all work, so one set of tools for all of them — has the semantic graph and the data. */
+  tools?: 'conversation' | 'shared'
 }
 
 export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
@@ -39,7 +44,11 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
   const dir = s.sessionId ? join(projectHome, 'sessions', s.sessionId) : join(projectHome, 'workspace')
   const dbDir = join(projectHome, 'db')
   const managerUrl = s.managerUrl ?? 'http://localhost:4000'
-  for (const sub of ['', 'data', 'grounding', 'programs', 'out', '.tools']) await mkdir(join(dir, sub), { recursive: true })
+  // The project's committed model. Every agent in the shared workspace writes the same tools, so each resolves it the
+  // same way as the engine does (ENGINE_PROJECT_DIR, else vm/projects/<id>) when its caller does not say.
+  const projectDir = s.projectDir ?? process.env.ENGINE_PROJECT_DIR ?? fileURLToPath(new URL(`../../../projects/${s.projectId}`, import.meta.url))
+  const conversation = s.tools === 'conversation'
+  for (const sub of conversation ? ['', 'out', '.tools'] : ['', 'data', 'grounding', 'out', '.tools']) await mkdir(join(dir, sub), { recursive: true })
   await mkdir(dbDir, { recursive: true })
 
   // @superatom/* must resolve from the project home for the data seams below. State lives outside the repository
@@ -67,15 +76,16 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
   }
 
 
-  await writeFile(join(dir, 'CONTEXT.md'),
+  if (!conversation) await writeFile(join(dir, 'CONTEXT.md'),
 `# Project ${s.projectId}
 
-Programs live in the graph. Find what exists with ./catalog and read one with ./program; write a program in programs/<name>/ as contract.json and
-program.mjs and define it with ./define; check it with ./try; answer the person by applying a message to their data
-session with ./ask. Every tool explains itself with --help.
+The data sources: ./sources lists them, ./find-schema searches their fields, ./introspect and ./query read them, and
+./resolve turns a name into ids. data/query.mjs, data/introspect.mjs and grounding/grounding.mjs are the same seams to
+import. The semantic graph: ./overview, ./describe and the finds read it; a program on it answers with ./run-program.
+Every tool explains itself with --help.
 `)
 
-  await writeFile(join(dir, 'data', 'query.mjs'),
+  if (!conversation) await writeFile(join(dir, 'data', 'query.mjs'),
 `// The data seam. You never see databases, ports, dialects, or credentials — you call
 // query(dataSourceId, query, params) — the manager runs the query against the source. There is ONE endpoint: the datasource-manager, which routes
 // by id to the right bridge; the bridge binds @name params in its own dialect and runs the query.
@@ -103,7 +113,7 @@ export async function sources() {   // list data sources + their kind/dialect
 }
 `)
 
-  await writeFile(join(dir, 'data', 'introspect.mjs'),
+  if (!conversation) await writeFile(join(dir, 'data', 'introspect.mjs'),
 `// Introspection helpers over the data seam — DIALECT-SPECIFIC, resolved per source automatically.
 // They hide the SQL, NEVER the DATA: every helper returns raw evidence (values, distributions,
 // mismatches, sample rows) so YOU can catch bad data — they never hand you a black-box verdict.
@@ -125,7 +135,7 @@ export async function forSource(id) {
 }
 `)
 
-  await writeFile(join(dir, 'grounding', 'grounding.mjs'),
+  if (!conversation) await writeFile(join(dir, 'grounding', 'grounding.mjs'),
 `// The GROUNDING seam. Grounding turns a fuzzy human reference — a name, a place, an id — into concrete
 // structured ids, using indexes built per-project FROM this project's OWN data (nothing dataset-specific is
 // assumed; entity types, hierarchies and value patterns are all discovered here and stored). The grounding
@@ -172,22 +182,14 @@ export const stats = () => store.stats()   // the ONE structural reader (defined
 export const raw = store
 `)
 
-  const graphTool = (command: string) => `// ${command} — the graph. See apps/engine/graph/cli.ts.
+  const graphTool = (command: string) => `// ${command} — the semantic graph. See apps/engine/graph/semantic-cli.ts.
 import { spawnSync } from 'node:child_process'
-const r = spawnSync('tsx', [${JSON.stringify(graphCli)}, ${JSON.stringify(command)}, ...process.argv.slice(2),
-  '--db', ${JSON.stringify(dbDir)}, '--project', ${JSON.stringify(s.projectDir ?? projectHome)},
+const r = spawnSync('tsx', [${JSON.stringify(semanticCli)}, ${JSON.stringify(command)}, ...process.argv.slice(2),
+  '--db', ${JSON.stringify(dbDir)}, '--project', ${JSON.stringify(projectDir)},
   '--manager', ${JSON.stringify(managerUrl)}, '--home', ${JSON.stringify(dir)}], { stdio: 'inherit', env: { ...process.env, NODE_NO_WARNINGS: '1' } })
 process.exit(r.status ?? 1)
 `
   const drivers: Record<string, string> = {
-    catalog: graphTool('catalog'),
-    program: graphTool('program'),
-    interpret: graphTool('interpret'),
-    define: graphTool('define'),
-    try: graphTool('try'),
-    ask: graphTool('ask'),
-    find: graphTool('find'),
-    members: graphTool('members'),
     escalate: `// Hand this question to the analyst and stop.
 import { readFile, mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -265,21 +267,19 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
 `,
   }
   const usages: Record<string, string> = {
-    catalog: 'catalog [words]   → one line per program that exists, or per program matching the words',
-    program: 'program <name>   → one program in full: its measures, dimensions (and how to filter each by name), parameters and assumptions',
-    interpret: 'interpret \'<reading json>\'   → check how you read the question against a program — { question, program, measures:[{term,measure}], filters:[{term,dimension}], period:{term,during:{from,to}}|{term,at}, splits:[{term,dimension}|{term,grain}] } — resolves each term to its member and returns the request for ./ask, or what the program cannot take',
-    define: 'define programs/<name> [--replace "<why>"]   → define the program in that directory (contract.json + program.mjs), or correct the one with its name',
-    try: 'try <program> [\'<request json>\']   → ask a program directly, to check it while you write it',
-    ask: 'ask \'<message json>\'   → apply a message to this conversation\'s data session and answer it: {"ask":"<program>","request":{…}} starts a question; {"filter":{…}}, {"split":{"add":[…]}}, {"measures":{"add":[…]}}, {"set":{…}}, {"assume":{…}}, {"intervene":{…}}, {"asOf":"YYYY-MM-DD"} follow up — several parts in one message apply together',
-    find: 'find \'<query json>\'   → something the person was shown: {"row":3} in the current answer · {"text":"acme"} · {"column":"region","equals":"north"}',
-    members: 'members <relation> <dimension> [text]   → which members of a dimension match what was typed',
-    escalate: 'escalate "<what is blocking you>"   → hand this question to the analyst and stop.',
+    escalate: conversation
+      ? 'escalate "<what is blocking you>"   → hand this question to the analyst and stop.'
+      : 'escalate "<what the graph is missing>"   → stop, telling the person what the graph does not hold yet and where in the data it is.',
     'find-schema':  'find-schema "<term>" [--source <SOURCE>] [--full]   → search ALL datasources for a field/table by name, type, or description (SOURCE.TABLE.COLUMN : type); --source filters to one; --full adds PK/nullable/references',
     'sources':      'sources   → every data source with its kind + dialect (JSON)',
     'query':        'query "<source>" "<query>"   → run a query against a source → JSON rows   (list sources: ./sources)',
     'introspect':   'introspect "<source>" <cmd>   where <cmd> = tables | columns "<table>" | sample "<table>" [n] | profile "<table>" "<column>" | verify-join "<fromT>" "<fromCol>" "<toT>" "<toCol>"',
     'resolve':      'resolve "<text>"   → resolve a fuzzy name/value to concrete ids (JSON)',
   }
+  // A conversation has the semantic graph and hands off with ./escalate; the analyst has the graph and the data; the
+  // connector and grounding agents have the data.
+  if (conversation) for (const name of Object.keys(drivers)) if (name !== 'escalate') delete drivers[name]
+  for (const name of Object.keys(SEMANTIC_USAGE)) { drivers[name] = graphTool(name); usages[name] = SEMANTIC_USAGE[name] }
   for (const [name, body] of Object.entries(drivers)) {
     // Prepend a --help guard. ESM hoists the body's imports above this, but they only OPEN cheap handles; the
     // guard still short-circuits before any query/search runs, printing usage and nothing else.
@@ -297,8 +297,23 @@ if command -v tsx >/dev/null 2>&1; then exec tsx "$D" "$@"; else exec npx --yes 
     await chmod(join(dir, name), 0o755)
   }
 
-  await removeWhatIsNotOurs(dir, Object.keys(drivers))
+  await removeWhatIsNotOurs(dir, Object.keys(drivers), conversation)
   return dir
+}
+
+const SEMANTIC_USAGE: Record<string, string> = {
+  'resolve-terms': `resolve-terms '<the question as asked>' [--json]   → a table of each term of the question in the graph at once: measures, dimensions, records by name, dates as spans; near misses repaired, several meanings marked ambiguous, and the words the graph does not hold; its last column is how a question names each`,
+  'overview': 'overview [--json]   → every fact with its measures, every dimension with what it links to, every calendar, drawn as graph patterns',
+  describe: 'describe <name> [--json]   → what a fact or dimension holds: measures, what it links to and by default, what links to it, drawn as graph patterns',
+  'group-paths': 'group-paths <fact> <dimension> [--json]   → every way a measure can be grouped or filtered by a dimension, the default first, each with its via; e.g. group-paths AllocationDay Pillar',
+  'find-measure': 'find-measure <term>   → the measure a term means (revenue, hours) and the fact it belongs to; ./describe <fact> shows what it can be grouped by',
+  'find-dimension': 'find-dimension <term>   → the dimension a term or a name belongs to: "practice" is Pillar, "Soft" is a Commitment, "CEC" is a Pillar record',
+  'find-record': 'find-record <Dimension> <name>   → the record a typed name means (a pillar, project, person), typos included; says when several fit',
+  'check-question': `check-question '<question>'   → the answer's columns and notes, or why it is refused and the readings to choose from. A question: {"measures":["Fact.measure" | "[A.x] / [B.y]"], "by":[{"to":"Pillar","via":["person","pillar"]} | {"attribute":"a"}], "where":[{"to":"Dimension","via":[…],"in":["key"]} | {"attribute":"a","in":["v"]}], "span":{"from":"2026-09-01","through":"2026-10-31"} | {"this":"Month"} | {"previous":"Month","count":3} | {"last":30,"unit":"Day"}, "currency":"AUD", "order":{"by":"column","desc":true}, "limit":10} — also having, totals, share, compare, fill, cumulative, rolling, limitPer, notIn/none/contains/startsWith`,
+  'try-question': `try-question '<question>'   → the question's answer, to see what the data says while writing the program`,
+  'run-program': `run-program [program.mjs] ['<params>']   → run the program in this folder and give its answer as this conversation's next step. A program is named for its idea and takes the question's values (span, records) as params: export const meta = { name, description, params: { name: 'what it means' }, logic }; export default async (ctx, params) => ({ headline?: { label, value: <cell> }, data: { name: <table> }, views: [{ id, component: 'table'|'bar'|'line'|'kpi', data: '<data key>', title, encode: { columns: [...] } | { x, y, series } }], narration: [{ text: 'October is {oct}', cites: { oct: <cell> }, why }], nextSteps: [{ label, why }] }). ctx.ask(question, label) returns a table { columns: [{ name, role, unit }], rows: [{ Pillar: 7, Pillar_label: 'Consulting', Month: '2026-09', revenue: 4372656 }] } — a record by its id, its name beside it — the program's only data; ctx.transform(label, () => …), ctx.decide(label, took, why), ctx.decideAt(label, value, op, threshold, why), await ctx.verify(label, () => holds), ctx.caveat(text), ctx.explain(text). A cell is { data: '<data key>', row: 0 | { Month: '2026-09' }, column }; every number in a sentence is a {slot} citing a cell`,
+  'source-records': `source-records '<row>'   → the source records that make up one row of the current answer, e.g. source-records '["15","2026-09"]'`,
+  'trace-answer': 'trace-answer [call]   → how the current answer (or a call) was reached',
 }
 
 // ── THE WORKSPACE HOLDS WHAT THIS ENGINE WRITES, AND NOTHING ELSE ─────────────────────────────────────────────
@@ -306,7 +321,7 @@ if command -v tsx >/dev/null 2>&1; then exec tsx "$D" "$@"; else exec npx --yes 
 // programs and turn files were read as current, and used. So preparing a workspace also removes what the current
 // engine does not put there. Each entry below names who writes it.
 const OWNED = new Set([
-  'CONTEXT.md', 'data', 'grounding', 'programs', 'out', '.tools',   // this file
+  'CONTEXT.md', 'data', 'grounding', 'out', '.tools',               // this file
   '.turn', '.session', '.agent',                                    // agents/composer, agents/analyst: the turn in progress
   'AGENTS.md', 'SYSTEM_REFERENCE.md', '.claude',                    // the harnesses (ica/pi.ts, ica/codex.ts, ica/claude.ts)
   'connector', 'templates',                                         // agents/connector
@@ -316,18 +331,19 @@ const OWNED_IN: Record<string, Set<string>> = {
   grounding: new Set(['grounding.mjs', 'GROUNDING.md']),            // GROUNDING.md: agents/grounding
 }
 
-async function removeWhatIsNotOurs(dir: string, tools: string[]) {
-  const owned = new Set([...OWNED, ...tools])
+async function removeWhatIsNotOurs(dir: string, tools: string[], conversation = false) {
+  const owned = new Set([...OWNED, ...tools].filter((e) => !(conversation && ['data', 'grounding', 'CONTEXT.md'].includes(e))))
   const gone = (p: string) => rm(p, { recursive: true, force: true })
   for (const e of await readdir(dir)) if (!owned.has(e)) await gone(join(dir, e))
   for (const [sub, keep] of Object.entries(OWNED_IN))
     for (const e of await readdir(join(dir, sub)).catch(() => [] as string[])) if (!keep.has(e)) await gone(join(dir, sub, e))
   for (const e of await readdir(join(dir, '.tools'))) if (!tools.includes(e.replace(/\.mjs$/, ''))) await gone(join(dir, '.tools', e))
-  // A program is a directory with a contract.json; anything else in programs/ was written for an earlier engine.
-  for (const e of await readdir(join(dir, 'programs'))) if (!existsSync(join(dir, 'programs', e, 'contract.json'))) await gone(join(dir, 'programs', e))
-  // A turn leaves step.json or escalate.json, or nothing yet while it runs.
+  // A turn leaves what it answered with — step.json, and the program.mjs and params.json it ran — or escalate.json or
+  // explain.md, or nothing yet while it runs. The verbs read these after a restart, so they are kept; anything else in
+  // out/ was written for an earlier engine.
+  const TURN_FILES = new Set(['step.json', 'escalate.json', 'program.mjs', 'params.json', 'explain.md'])
   for (const e of await readdir(join(dir, 'out'))) {
     const files = await readdir(join(dir, 'out', e)).catch(() => null)
-    if (files === null || files.some((f) => f !== 'step.json' && f !== 'escalate.json')) await gone(join(dir, 'out', e))
+    if (files === null || files.some((f) => !TURN_FILES.has(f))) await gone(join(dir, 'out', e))
   }
 }

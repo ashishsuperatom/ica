@@ -4,7 +4,7 @@
 // never writes, never runs an agent or a program, and never touches the data sources except to list them.
 //
 // What it shows comes from the project's stores:
-//   • graph.sqlite — programs and the names pointing at them, every call (memory), every data session and its steps
+//   • semantic-graph.sqlite — the semantic model's definitions and their history, every answer (memory), every data session and its steps
 //   • datasource-index.sqlite — the fields each source has, as ./find-schema searches them
 //   • grounding.sqlite — what the grounding agent indexed
 //   • agent-sessions.sqlite — which harness session each agent resumes
@@ -14,7 +14,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import { existsSync, statSync } from 'node:fs'
 import { join, resolve, sep, relative } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import type { Engine as GraphEngine, CallRecord } from '@superatom/graph'
+import type { CallRecord, createGraph } from '@superatom/semantic-graph'
 import { dataSourceStats, type DataSourceIndex } from '@superatom/datasource-index'
 import { GroundingStore } from '@superatom/grounding'   // the ONE loader/reader for the grounding store
 import type { AgentSessions } from './agent-sessions.js'
@@ -28,7 +28,7 @@ const MAX_ROWS = 500
 const IGNORE_DIRS = new Set(['node_modules', '.git'])
 
 export interface InspectorDeps {
-  graph: () => Promise<GraphEngine>
+  graph: () => Promise<ReturnType<typeof createGraph>>
   index: DataSourceIndex
   agentSessions: AgentSessions
   projectId: string
@@ -53,12 +53,12 @@ function sandbox(roots: string[], p: string): string | null {
 
 const limitOf = (a: any, fallback: number) => Math.min(Number(a.limit) || fallback, MAX_ROWS)
 
-/** One call in a list: what was asked of which program, how it went — never its whole output. */
+/** One answer in a list: what was asked, how it went — never its whole output. */
 function slimCall(c: CallRecord) {
+  const q: any = c.question
   return {
-    id: c.id, parentId: c.parentId, name: c.name, hash: c.hash, request: c.request, error: c.error, ms: c.ms, at: c.at,
-    decisions: c.decisions.length, verifications: c.verifications.length, failedVerifications: c.verifications.filter((v) => !v.held).length,
-    caveats: c.caveats.length, queries: c.queries.length,
+    id: c.id, parentId: c.parentId, sessionId: c.sessionId, program: q?.program ?? null, question: q, refusal: c.refusal, error: c.error, ms: c.ms, at: c.at,
+    decisions: c.decisions?.length ?? 0, caveats: c.caveats.length, statements: c.statements.length,
   }
 }
 
@@ -66,47 +66,38 @@ export function createInspector(deps: InspectorDeps) {
   const { projectId, datasourceUrl, roots } = deps
   const browsable = [roots.workspace, roots.sessions]
 
-  // ── the graph ──────────────────────────────────────────────────────────────
+  // ── the semantic graph ─────────────────────────────────────────────────────
 
-  /** Every program a name points at, as the agents' ./catalog sees it, with who defined it and how often it changed. */
+  /** Every definition a name points at — the schema, its sources, settings and producing programs — with its versions. */
   async function programs() {
     const g = await deps.graph()
-    const names = new Map(g.store.current().map((n) => [n.name, n.hash]))
     return {
-      programs: g.catalog().map((e) => {
-        const hash = names.get(e.name) ?? null
-        const stored = hash ? g.store.getProgram(hash) : null
-        const history = g.store.history(e.name)
-        return { ...e, hash, definedBy: stored?.createdBy ?? null, definedAt: stored?.createdAt ?? null, versions: history.length }
+      programs: g.store.names().map((n) => {
+        const d = g.store.getDefinition(n.hash)
+        return { kind: n.kind, name: n.name, hash: n.hash, definedBy: d?.createdBy ?? null, definedAt: d?.createdAt ?? null, versions: g.store.history(n.kind, n.name).length }
       }),
     }
   }
 
-  /** One program: its contract and body, every version its name has pointed at, and the calls that went through it. */
+  /** One definition in full, by hash, or by kind and name, with every version its name has pointed at. */
   async function program(a: any) {
     const g = await deps.graph()
-    const hash = a.hash ? String(a.hash) : g.store.resolve(String(a.name ?? ''))
-    const stored = hash ? g.store.getProgram(hash) : null
-    if (!stored) return { error: `no program ${a.hash ?? a.name}` }
-    const name = stored.contract.name
-    const calls = g.store.callsThrough(stored.hash)
-    return {
-      program: {
-        hash: stored.hash, name, contract: stored.contract, body: stored.body, definedBy: stored.createdBy, definedAt: stored.createdAt,
-        current: g.store.resolve(name) === stored.hash, history: g.store.history(name),
-        calls: calls.length, recentCalls: calls.slice(-limitOf(a, 20)).reverse().map(slimCall),
-      },
-    }
+    const kind = (a.kind ?? 'program') as any
+    const hash = a.hash ? String(a.hash) : g.store.resolve(kind, String(a.name ?? ''))
+    const d = hash ? g.store.getDefinition(hash) : null
+    if (!d) return { error: `no definition ${a.hash ?? a.name}` }
+    const name = a.name ?? g.store.names(d.kind).find((n) => n.hash === d.hash)?.name ?? null
+    return { program: { ...d, name, current: name ? g.store.resolve(d.kind, name) === d.hash : false, history: name ? g.store.history(d.kind, name) : [], calls: g.store.callsOn(d.hash).length } }
   }
 
-  /** Calls newest first: those a person or an agent made, or every call with `nested`. */
+  /** Answers newest first. */
   async function calls(a: any) {
     const g = await deps.graph()
-    const r = g.store.recentCalls({ name: a.name || undefined, failed: !!a.failed, nested: !!a.nested, limit: limitOf(a, 100), offset: Math.max(Number(a.offset) || 0, 0) })
+    const r = g.store.recentCalls({ failed: !!a.failed, limit: limitOf(a, 100), offset: Math.max(Number(a.offset) || 0, 0) })
     return { total: r.total, calls: r.calls.map(slimCall) }
   }
 
-  /** One call in full — its output, decisions, checks, caveats and queries — and the calls it made. */
+  /** One answer in full — its question, plan, output, statements, caveats — and the answers it asked for. */
   async function call(a: any) {
     const g = await deps.graph()
     const c = g.store.getCall(String(a.id))
@@ -128,7 +119,7 @@ export function createInspector(deps: InspectorDeps) {
     const steps = g.store.steps(s.id).map((t) => {
       const c = t.callId ? g.store.getCall(t.callId) : null
       const out: any = c?.output
-      return { ...t, program: c?.name ?? null, ms: c?.ms ?? null, callError: c?.error ?? null,
+      return { ...t, program: (c?.question as any)?.program ?? null, ms: c?.ms ?? null, callError: c?.error ?? c?.refusal?.reason ?? null,
                narration: Array.isArray(out?.narration) ? out.narration.map((n: any) => n.text) : [], caveats: c?.caveats ?? [] }
     })
     return { session: { ...s, steps } }
@@ -221,7 +212,7 @@ export function createInspector(deps: InspectorDeps) {
       try { bytes = statSync(path).size } catch { /* wal-only moment */ }
       return { name, path, exists: true, bytes, tables }
     }
-    return { databases: ['graph.sqlite', 'datasource-index.sqlite', 'grounding.sqlite', 'agent-sessions.sqlite'].map(inspect) }
+    return { databases: ['semantic-graph.sqlite', 'datasource-index.sqlite', 'grounding.sqlite', 'agent-sessions.sqlite'].map(inspect) }
   }
 
   /** Everything the landing screen needs in ONE round-trip. */
