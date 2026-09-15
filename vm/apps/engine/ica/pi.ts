@@ -173,6 +173,7 @@ export function createPiSession(opts: PiSessionOpts): Session {
   let running = false
   let activeHandler: RunHandlers | undefined
   let activeAnswer = ''
+  let lastEventAt = Date.now()   // when the running turn last showed a sign of life
   const rawSubs = new Set<(chunk: string) => void>()
   // Every normalised event of the CURRENT turn, kept so a client that connects late — or reconnects — can be
   // shown what it missed instead of a blank panel. Every other harness keeps one; pi kept none, so a reload
@@ -270,7 +271,8 @@ export function createPiSession(opts: PiSessionOpts): Session {
       // is meant to write one sentence — ran with bash, read, edit and write available to it.
       ...(opts.noTools ? { noTools: 'all' as const } : {}),
     }))
-    session.subscribe?.((ev: any) => {                                   // ONE subscription; routes to the active turn
+    session.subscribe?.((ev: any) => {
+      lastEventAt = Date.now()                                           // the turn is alive; the watchdog waits
       const norm = normPiEvent(ev, liveCommands)                          // the SHARED shape — see normPiEvent
       if (norm) {
         const at = eventLog.findIndex((e) => e.id && e.id === norm.id)     // a step UPDATES in place, start → completion
@@ -292,6 +294,12 @@ export function createPiSession(opts: PiSessionOpts): Session {
     return session
   }
 
+  // A TURN THAT NEVER ENDS. pi is told when a turn finishes, so nothing watched the clock — and a model call
+  // that stalls held the turn, the queue behind it and the person waiting, with no event and no end. Two guards,
+  // the same pair claude has: silence for STALL, and an absolute cap however lively it is.
+  const STALL = Number(process.env.ICA_PI_STALL_MS) || 4 * 60 * 1000
+  const HARD_TURN = Number(process.env.ICA_MAX_TURN_MS) || 30 * 60 * 1000
+
   async function pump() {
     if (running || !queue.length) return
     running = true
@@ -302,8 +310,19 @@ export function createPiSession(opts: PiSessionOpts): Session {
     const text = opts.system?.trim() ? `${opts.system.trim()}\n\n${prompt}` : prompt
     activeHandler = h; activeAnswer = ''
     const t0 = Date.now()
+    lastEventAt = t0
+    let ended: string | null = null
+    const watchdog = setInterval(() => {
+      const silent = Date.now() - lastEventAt, spent = Date.now() - t0
+      if (silent < STALL && spent < HARD_TURN) return
+      ended = silent >= STALL ? `nothing came back for ${Math.round(silent / 1000)}s` : `the turn ran past ${Math.round(HARD_TURN / 60000)} minutes`
+      console.warn(`[ica:pi] ending the turn — ${ended}`)
+      try { session?.abort?.() } catch { /* not running */ }
+    }, 5000)
     try { await s.prompt(text); await s.waitForIdle?.() }
     catch (e: any) { activeAnswer = `pi error: ${e?.message ?? e}` }
+    finally { clearInterval(watchdog) }
+    if (ended) activeAnswer = `pi: the turn was ended — ${ended}`
     activeHandler = undefined
     running = false
     resolve({ lastLines: activeAnswer, ms: Date.now() - t0 })            // SDK-precise completion
