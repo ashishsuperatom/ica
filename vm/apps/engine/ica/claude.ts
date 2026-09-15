@@ -76,6 +76,7 @@ export interface ClaudeSessionOpts {
   bufferCap?: number          // rolling output buffer size (default 64000)
   resumeId?: string           // resume this claude session id (--resume); else a fresh id we own (--session-id)
   systemReference?: string    // authoritative authoring reference → injected via --append-system-prompt-file (no PTY typing)
+  thinking?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'   // --effort: low to max; off and minimal are low
 }
 
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|[\r\b]/g, '')
@@ -204,7 +205,7 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
     const KEEP = new Set(['CLAUDE_CODE_OAUTH_TOKEN'])
     const childEnv: Record<string, any> = { ...process.env, TERM: 'xterm-256color' }
     for (const k of Object.keys(childEnv)) if (k.startsWith('CLAUDE_CODE_') && !KEEP.has(k)) delete childEnv[k]
-    pty = m.spawn(bin, ['--model', model, '--dangerously-skip-permissions', ...sysRefFlag, ...sessionArgs()],
+    pty = m.spawn(bin, ['--model', model, '--dangerously-skip-permissions', ...(opts.thinking ? ['--effort', ['off', 'minimal'].includes(opts.thinking) ? 'low' : opts.thinking] : []), ...sysRefFlag, ...sessionArgs()],
       { name: 'xterm-256color', cols, rows, cwd: opts.cwd, env: childEnv as any })
     lastDataAt = Date.now()
     pty.onData((d: string) => {

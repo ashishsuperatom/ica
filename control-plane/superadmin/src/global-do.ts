@@ -19,7 +19,7 @@ import { LoginCodeStore } from './auth/login-code-store.js'
 // "the current one" rather than aging into a pinned build.
 const DEFAULT_CATALOGUE: Record<string, string[]> = {
   'opencode-go': [
-    'deepseek-v4-flash', 'deepseek-v4-pro', 'glm-5.1', 'glm-5.2', 'glm-5.3', 'glm-5.3-flash',
+    'deepseek-v4-flash', 'deepseek-v4.1-flash', 'deepseek-v4-pro', 'glm-5.1', 'glm-5.2', 'glm-5.3', 'glm-5.3-flash',
     'gpt-5.6-luna', 'grok-4.6', 'hy3', 'hy4-preview', 'kimi-k2.6', 'kimi-k2.7-code', 'kimi-k3',
     'longcat-2.0', 'mimo-v2.5', 'mimo-v2.5-pro', 'minimax-m2.7', 'minimax-m3', 'omen-alpha',
     'qwen3.6-plus', 'qwen3.7-max', 'qwen3.7-plus', 'qwen3.8-flash', 'qwen3.8-max',

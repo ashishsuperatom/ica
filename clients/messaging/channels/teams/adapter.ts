@@ -163,7 +163,7 @@ function adaptiveCard(a: Answer, category?: string): unknown {
   // simple answer has no `sections` and is unaffected — this whole block is skipped.
   for (const s of a.sections ?? []) {
     if (s.title) body.push({ type: 'TextBlock', text: s.title, weight: 'Bolder', size: 'Small', spacing: 'Medium', wrap: true })
-    if (s.kind === 'table' && s.columns?.length) pushTable(body, s.columns, s.rows ?? [], undefined, s.note)
+    if (s.kind === 'table' && s.columns?.length) pushTable(body, s.columns.map((c) => (typeof c === 'string' ? c : c.label)), s.rows ?? [], undefined, s.note)
     else if (s.kind === 'kpis' && s.items?.length) body.push({ type: 'FactSet', facts: s.items.map((f) => ({ title: f.label, value: f.sub ? `${f.display}  (${f.sub})` : f.display })), spacing: 'Small' })
     else if (s.kind === 'text' && s.body) body.push({ type: 'TextBlock', text: s.body, wrap: true, spacing: 'Small' })
   }
@@ -191,7 +191,11 @@ function pushTable(body: any[], cols: string[], rows: unknown[][], totalRows?: n
 function row(cells: string[], header = false): unknown {
   return { type: 'TableRow', cells: cells.map((c) => ({ type: 'TableCell', items: [{ type: 'TextBlock', text: c, wrap: true, weight: header ? 'Bolder' : 'Default' }] })) }
 }
-function fmt(v: unknown): string { return v == null ? '' : typeof v === 'number' ? v.toLocaleString() : String(v) }
+function fmt(v: unknown): string {
+  // A cell that names a record is { value, display?, id }: Teams shows its words.
+  if (v && typeof v === 'object' && 'value' in v) { const c = v as { value: unknown; display?: string }; return c.display ?? fmt(c.value) }
+  return v == null ? '' : typeof v === 'number' ? v.toLocaleString() : String(v)
+}
 
 // ── Bot Framework JWKS (for inbound JWT validation) ───────────────────────────
 // Cache the signing keys (refreshed daily). The OpenID config points at the JWKS uri.

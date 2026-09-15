@@ -53,7 +53,7 @@ export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
   const harness: Harness = opts.ica?.harness ?? cfg.harness
   const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl, projectDir: opts.projectDir, tools: 'shared' })
   const context = (() => { try { return readFileSync(join(cwd, 'CONTEXT.md'), 'utf8') } catch { return '' } })()
-  const session = createSession(harness, { cwd, model: opts.ica?.model ?? cfg.model, provider: opts.ica?.provider ?? cfg.provider, baseUrl: opts.ica?.baseUrl,
+  const session = createSession(harness, { cwd, model: opts.ica?.model ?? cfg.model, provider: opts.ica?.provider ?? cfg.provider, thinking: cfg.thinking, baseUrl: opts.ica?.baseUrl,
                                            resumeId: opts.ica?.resumeId, systemReference: [ROLE, context].join('\n\n') })
 
   return {

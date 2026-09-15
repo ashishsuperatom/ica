@@ -33,6 +33,7 @@ export interface PiSessionOpts {
   noTools?: boolean          // a PURE TEXT agent (the narrator): no tools at all
   system?: string            // REPLACES the coding prompt — for an agent that only writes prose
   resumeId?: string          // a prior session's file, to continue the conversation instead of starting over
+  thinking?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'   // pi clamps it to what the model offers
 }
 
 // Turn one SDK event into a human-readable stream chunk (tool starts + assistant text).
@@ -264,6 +265,7 @@ export function createPiSession(opts: PiSessionOpts): Session {
       cwd: opts.cwd, agentDir: getAgentDir(), modelRuntime: runtime,
       settingsManager: SettingsManager.create(opts.cwd, getAgentDir()),
       resourceLoader: rl, sessionManager: sm, model,
+      ...(opts.thinking ? { thinkingLevel: opts.thinking } : {}),
       // A pure-text agent gets NO tools. Until now `noTools` was not even passed to pi, so the narrator — which
       // is meant to write one sentence — ran with bash, read, edit and write available to it.
       ...(opts.noTools ? { noTools: 'all' as const } : {}),

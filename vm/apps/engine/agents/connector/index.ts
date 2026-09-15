@@ -48,7 +48,7 @@ export async function createConnector(opts: ConnectorOpts): Promise<Connector> {
   // we've already figured out. Copied in so the agent can read ./templates/<kind>.md.
   await cp(join(__dirname, 'templates'), join(cwd, 'templates'), { recursive: true }).catch(() => {})
 
-  const session = createSession(harness, { cwd, model, provider, resumeId: opts.ica?.resumeId })
+  const session = createSession(harness, { cwd, model, provider, thinking: cfg.thinking, resumeId: opts.ica?.resumeId })
   const manager = opts.managerUrl ?? 'http://localhost:4000'
   const preamble =
     `You are the infrastructure connector agent. Read ./connector/CONNECTOR.md for your role + the bridge protocol, then help ` +

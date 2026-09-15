@@ -14,6 +14,7 @@ import type { Session, RunHandlers, RunResult } from './session.js'   // the sha
 import { providersOn, isDisabled } from '../../../packages/agent-contract/contract.mjs'
 
 export interface OpencodeSessionOpts {
+  thinking?: string   // the model's variant (low, high, max…); off sends none, the model's default
   cwd: string
   provider?: string   // default 'opencode-go'
   model?: string      // default: the profile's harnessModel.opencode
@@ -221,7 +222,7 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
         query: { directory: opts.cwd },
         // `system` REPLACES opencode's default coding prompt; `tools:{'*':false}` disables the whole toolset —
         // so a pure-LLM agent (narrator) pays for neither the agent scaffolding nor the tool schemas.
-        body: { model: { providerID, modelID }, parts: [{ type: 'text', text: prompt }], ...(effSystem ? { system: effSystem } : {}), ...(opts.noTools ? { tools: { '*': false } } : {}) },
+        body: { model: { providerID, modelID }, ...(opts.thinking && opts.thinking !== 'off' ? { variant: opts.thinking } as any : {}), parts: [{ type: 'text', text: prompt }], ...(effSystem ? { system: effSystem } : {}), ...(opts.noTools ? { tools: { '*': false } } : {}) },
       })
       answer = partsText(res?.data?.parts ?? res?.parts ?? [])
       await pollMessages(h)                                            // final scan (part-id dedupe) — catch an event that landed after the last poll

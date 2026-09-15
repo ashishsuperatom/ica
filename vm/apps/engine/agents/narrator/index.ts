@@ -174,7 +174,7 @@ export function createNarrator(opts: NarratorOpts): Narrator {
     async narrate(question: string, activity: string, recent: string[] = []): Promise<string> {
       // noTools + system=NARRATE → a PURE text completion: no coding-agent scaffolding, no tool schemas, no tool
       // calls. The instructions live in the (well-cached) system prompt; only the per-turn activity travels here.
-      session ??= createSession(harness, { cwd: opts.cwd, model, provider, baseUrl: opts.ica?.baseUrl, noTools: true, system: NARRATE })
+      session ??= createSession(harness, { cwd: opts.cwd, model, provider, thinking: cfg.thinking, baseUrl: opts.ica?.baseUrl, noTools: true, system: NARRATE })
       strategy.prepare(session)
       const { lastLines } = await session.run(strategy.prompt(question, activity, recent))
       // Keep the full update (may be a couple of sentences when there's a real finding). Strip any stray

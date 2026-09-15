@@ -854,7 +854,7 @@ function ProjectDetailPage() {
   const [prof, setProf] = useState<{ profile: any; version: number; running: any } | null>(null)
   // TYPED, and never null while rendering. This was `any` and initialised to null: the card dereferenced
   // draft.agents on the first paint, before the fetch resolved, and `any` meant the typecheck could not see it.
-  type Draft = { agents: Record<string, { harness?: string; provider?: string; model?: string }>; harnessNotes?: any }
+  type Draft = { agents: Record<string, { harness?: string; provider?: string; model?: string; thinking?: string }>; harnessNotes?: any }
   const [draft, setDraft] = useState<Draft | null>(null)
   const [profMsg, setProfMsg] = useState<string>('')
   // The OPTIONS come from the platform catalogue, never from a list this file carries — so the editor can only
@@ -1178,6 +1178,7 @@ function ProjectDetailPage() {
             const doc: Draft = draft ?? { agents: {} }
             const AGENTS = ['analyst', 'connector', 'grounding', 'modeller', 'composer', 'narrator']
             const HARNESSES = ['claude-code-pty', 'opencode', 'pi', 'codex']
+            const THINKING = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
             const running = prof?.running
             // A harness reaches only certain accounts, and an account carries only certain models — so changing
             // one clears what it invalidates instead of leaving a pair that cannot exist. With exactly one
@@ -1219,11 +1220,12 @@ function ProjectDetailPage() {
                     : <span style={{ color: 'var(--muted)' }}>engine has not reported — start it to see what it is running</span>}
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr 1fr', gap: 8, alignItems: 'center' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr 1fr auto', gap: 8, alignItems: 'center' }}>
                   <span className="muted" style={{ fontSize: 12 }}>agent</span>
                   <span className="muted" style={{ fontSize: 12 }}>harness</span>
                   <span className="muted" style={{ fontSize: 12 }}>provider</span>
                   <span className="muted" style={{ fontSize: 12 }}>model</span>
+                  <span className="muted" style={{ fontSize: 12 }}>thinking</span>
                   {AGENTS.map(a => {
                     const cur = doc.agents?.[a] ?? {}
                     const live = running?.agents?.[a]
@@ -1262,6 +1264,13 @@ function ProjectDetailPage() {
                             <option key={m} value={m}>{m}</option>)}
                           {cur.model && !(cur.provider ? cat?.models?.[cur.provider] ?? [] : []).includes(cur.model) &&
                             <option value={cur.model}>{cur.model} (not in the catalogue)</option>}
+                        </select>
+                        {/* How much the model reasons. Each harness takes it its own way and clamps it to what the
+                            model offers; unset keeps the harness's default. */}
+                        <select className="input" value={cur.thinking ?? ''} onChange={e => setAgent(a, 'thinking', e.target.value)}
+                                style={{ fontSize: 13, padding: '6px 9px' }}>
+                          <option value="">— default —</option>
+                          {THINKING.map(t => <option key={t} value={t}>{t}</option>)}
                         </select>
                       </div>
                     )

@@ -25,7 +25,8 @@
     "narrator": {
       "harness": "pi",
       "provider": "opencode-go",
-      "model": "deepseek-v4-flash"
+      "model": "deepseek-v4.1-flash",
+      "thinking": "off"
     }
   },
   "harnessNotes": {

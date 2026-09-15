@@ -47,7 +47,7 @@ export async function createGroundingAgent(opts: GroundingAgentOpts): Promise<Gr
   // Distinct filename so it never clobbers the other agents' files in the shared workspace.
   await cp(join(__dirname, 'SYSTEM.md'), join(cwd, 'grounding/GROUNDING.md'))
 
-  const session = createSession(harness, { cwd, model, provider, resumeId: opts.ica?.resumeId })
+  const session = createSession(harness, { cwd, model, provider, thinking: cfg.thinking, resumeId: opts.ica?.resumeId })
   const preamble = 'Read ./CONTEXT.md FIRST (the tools + seams), then ./grounding/GROUNDING.md (your instructions) and follow it exactly. Explore data with `./sources` / `./introspect` / `./query`. You PERSIST what you discover by calling build(config) on ./grounding/grounding.mjs.'
 
   return {

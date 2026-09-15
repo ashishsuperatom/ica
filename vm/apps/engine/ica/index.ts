@@ -40,15 +40,21 @@ export interface SessionOpts {
   // programs to learn the shape. Harness-agnostic: each harness delivers it its own way and reports how via
   // Session.referencePlacement; if a harness can't, it degrades to 'file' and the caller writes it to the workspace.
   systemReference?: string
+  // How much the model reasons before it answers. Each harness takes it its own way, clamped to what it and the model
+  // offer; unset, the harness's own default.
+  thinking?: Thinking
 }
+
+export type Thinking = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export const THINKING: Thinking[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 
 
 export function createSession(harness: Harness, opts: SessionOpts): Session {
   switch (harness) {
-    case 'opencode':    return createOpencodeSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model, baseUrl: opts.baseUrl, noTools: opts.noTools, system: opts.system, systemReference: opts.systemReference, resumeId: opts.resumeId })
-    case 'pi':          return createPiSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model, systemReference: opts.systemReference, noTools: opts.noTools, system: opts.system, resumeId: opts.resumeId })
-    case 'claude-code-pty': return createClaudeSession({ cwd: opts.cwd, model: opts.model, bin: opts.bin, resumeId: opts.resumeId, systemReference: opts.systemReference })
-    case 'codex':       return createCodexSession({ cwd: opts.cwd, model: opts.model, resumeId: opts.resumeId, systemReference: opts.systemReference })
+    case 'opencode':    return createOpencodeSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model, baseUrl: opts.baseUrl, noTools: opts.noTools, system: opts.system, systemReference: opts.systemReference, resumeId: opts.resumeId, thinking: opts.thinking })
+    case 'pi':          return createPiSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model, systemReference: opts.systemReference, noTools: opts.noTools, system: opts.system, resumeId: opts.resumeId, thinking: opts.thinking })
+    case 'claude-code-pty': return createClaudeSession({ cwd: opts.cwd, model: opts.model, bin: opts.bin, resumeId: opts.resumeId, systemReference: opts.systemReference, thinking: opts.thinking })
+    case 'codex':       return createCodexSession({ cwd: opts.cwd, model: opts.model, resumeId: opts.resumeId, systemReference: opts.systemReference, ...(opts.thinking ? { reasoningEffort: ({ off: 'minimal', max: 'xhigh' } as const)[opts.thinking as 'off' | 'max'] ?? opts.thinking as 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' } : {}) })
     case 'mock':        return createMockSession(opts)
     default:            throw new Error(`unknown harness: ${harness}`)
   }

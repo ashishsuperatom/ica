@@ -35,7 +35,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { Harness } from '../ica/index.js'
+import { THINKING, type Harness, type Thinking } from '../ica/index.js'
 import { harnessCanUse, providersForHarness } from '../../../packages/agent-contract/contract.mjs'
 
 export type AgentName = 'analyst' | 'connector' | 'grounding' | 'composer' | 'narrator'
@@ -54,6 +54,8 @@ export interface AgentProfile {
   harness: Harness
   provider: string
   model: string
+  /** How much the model reasons; unset, the harness's default. */
+  thinking?: Thinking
 }
 
 export interface Profile {
@@ -146,6 +148,7 @@ export function validate(p: any): string[] {
     for (const field of ['harness', 'provider', 'model'] as const) {
       if (typeof a?.[field] !== 'string' || !a[field]) bad.push(`agents.${name}.${field} is missing`)
     }
+    if (a?.thinking !== undefined && !THINKING.includes(a.thinking)) bad.push(`agents.${name}.thinking "${a.thinking}" is not one of ${THINKING.join(', ')}`)
     if (a?.harness && !HARNESSES.has(a.harness)) bad.push(`agents.${name}.harness "${a.harness}" is not a harness`)
     // THE PAIR. A harness reaches only the accounts it can authenticate against — claude-code-pty drives a CLI
     // with its own subscription and nothing else. Refused here as well as narrowed in the editor, because a
@@ -179,7 +182,7 @@ export function describeConfig(): string[] {
   const out = [`profile v${active.version} · ${source}`]
   for (const a of AGENTS) {
     const r = active.agents[a]
-    if (r) out.push(`  ${a.padEnd(10)} ${r.harness} · ${r.provider} · ${r.model}`)
+    if (r) out.push(`  ${a.padEnd(10)} ${r.harness} · ${r.provider} · ${r.model}${r.thinking ? ` · thinking ${r.thinking}` : ""}`)
   }
   return out
 }
