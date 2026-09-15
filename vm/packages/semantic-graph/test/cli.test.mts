@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { run } from '../src/cli.js'
+import { prompt, run } from '../src/cli.js'
 
 test('building, refusing, reading, exporting and importing a model with the tool', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'sg-cli-'))
@@ -39,4 +39,13 @@ test('building, refusing, reading, exporting and importing a model with the tool
   out.length = 0
   await other('show', 'Sale', '--json')
   assert.equal(JSON.parse(out.join('\n')).measures[0].name, 'units')
+})
+
+test('the prompt covers every command, and its version follows its content', async () => {
+  const p = prompt()
+  for (const cmd of ['add-entity', 'add-measure', 'promote-attribute', 'dimensions', 'history', 'export']) assert.match(p.text, new RegExp(`semantic-graph ${cmd}`))
+  assert.match(p.version, /^[0-9a-f]{12}$/)
+  const out: string[] = []
+  assert.equal(await run(['prompt', '--json'], (s) => out.push(s)), 0)
+  assert.deepEqual(JSON.parse(out.join('\n')), p)
 })

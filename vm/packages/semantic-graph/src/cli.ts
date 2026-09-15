@@ -10,6 +10,7 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 import { ModelStore, operationsFor, type Operation } from './modelstore.js'
 import { catalog, dimensions, conformedDimensions, node, paths } from './discovery.js'
 import { catalogText, dimensionsText, nodeText, pathsText } from './patterns.js'
@@ -18,6 +19,7 @@ import { sourcesProblems } from './producers.js'
 
 type Flags = Record<string, string | true>
 const COMMANDS: Record<string, { usage: string; does: string }> = {
+  'prompt':            { usage: 'prompt [--json]', does: 'the guide an agent needs to work with this tool, versioned by its content' },
   'models':            { usage: 'models', does: 'the models in this store' },
   'create-model':      { usage: 'create-model <name>', does: 'a new, empty model' },
   'add-entity':        { usage: 'add-entity <Name> [--description] [--synonyms a,b] [--members key=label,…] [--names name=key,…] [--history current]', does: 'a thing with identity' },
@@ -45,6 +47,63 @@ const COMMANDS: Record<string, { usage: string; does: string }> = {
   'changes':           { usage: 'changes [--limit n]', does: 'the latest changes, applied or refused' },
   'export':            { usage: 'export <dir>', does: 'the model as files, for review' },
   'import':            { usage: 'import <dir>', does: 'build a model from exported files, one recorded operation per node' },
+}
+
+const READING = ['overview', 'show', 'dimensions', 'paths', 'check', 'history', 'changes', 'models']
+const BUILDING = ['create-model', 'add-entity', 'add-calendar', 'add-fact', 'add-arrow', 'add-measure', 'add-attribute', 'add-condition', 'add-equation', 'set', 'rename', 'remove', 'promote-attribute', 'bind', 'add-program', 'set-setting', 'set-conversion']
+
+/** The guide an agent is given to work with the tool: what a model is made of, how to change it, and every command —
+ *  written from the command table itself, so it says what this version of the tool does. */
+export function prompt(): { version: string; text: string } {
+  const lines = (names: string[]) => names.map((c) => `  semantic-graph ${COMMANDS[c].usage}\n      ${COMMANDS[c].does}`).join('\n')
+  const text = `# Working on a semantic graph
+
+A semantic graph is the model of an organisation's data that questions are answered from. You read it and change it with
+\`semantic-graph\`; every change is an operation the tool checks and records.
+
+## What a model is made of
+
+- Entity — a thing with identity (Store, Product). It can list members and names people use, carry attributes, and link
+  to other entities.
+- Attribute — a value an entity or a fact carries that leads nowhere (a store's opening date, a product's condition):
+  text (optionally listed values), date, number or flag.
+- Calendar — computed time levels: day, week, month, quarter, year.
+- Fact — recorded events at a grain (a sale: a product in a store on a day). Facts carry measures; one row is identified
+  by the fact's grain arrows.
+- Measure — a number on a fact: a unit; a kind — flow (adds up over time), stock (a level at an instant), value per unit
+  (a rate; never adds); an aggregate; for money, where its currency comes from.
+- Arrow — a link from an object: grain (a fact's rows are about it), belongs, as-of (changes over time), version, self
+  (a tree); partial when it may be empty.
+- Condition — a named set of filters on one object ("active store"), kept to by name. A fact can always be kept to some.
+- Dimension — how a fact's measures are sliced: any entity, attribute or calendar level the fact reaches along arrows.
+
+## How to change it
+
+- Read before you add: \`overview\`, \`show <id>\`, \`dimensions <Fact>\`. One idea is one node; a new word for an existing
+  idea is a synonym on that node (\`set <id> synonyms …\`).
+- Name nodes for what they are. Ids: an object by its name (Store), a measure, attribute or arrow by its owner
+  (Sale.units, Store.region), a condition as condition:<name>.
+- Give every change \`--reason\` (why) and \`--from\` (the document, question or feedback it came from).
+- A refusal says what to change: a duplicate names what already has that meaning; a problem names what would break; a
+  removal names what still uses the node. \`--dry-run\` shows what an operation would do.
+- \`promote-attribute\` turns an attribute into an entity when it turns out to have identity; \`rename\` rewrites what
+  refers to a node.
+- \`check\` confirms the model has no problems; \`history <id>\` shows how a node came to be.
+
+## Commands
+
+Reading
+${lines(READING)}
+
+Building
+${lines(BUILDING)}
+
+Moving
+${lines(['export', 'import'])}
+
+Every command takes --db <file>, --model <name> and --json; every change --by, --reason, --from and --dry-run.
+`
+  return { version: createHash('sha256').update(text).digest('hex').slice(0, 12), text }
 }
 
 function parse(argv: string[]): { command: string; args: string[]; flags: Flags } {
@@ -88,6 +147,7 @@ export async function run(argv: string[], out: (s: string) => void = console.log
   if (!spec) { say(`no command "${command}" — semantic-graph help lists them`); return 1 }
   if (flags.help) { say(`semantic-graph ${spec.usage}\n  ${spec.does}`); return 0 }
 
+  if (command === 'prompt') { const p = prompt(); say(flags.json ? p : `${p.text}\n<!-- semantic-graph prompt ${p.version} -->`); return 0 }
   const dbFile = text(flags.db) ?? process.env.SEMANTIC_GRAPH_DB ?? (process.env.ENGINE_PROJECT_DIR ? join(process.env.ENGINE_PROJECT_DIR, 'db', 'semantic-graph.sqlite') : undefined)
   if (!dbFile) { say('say which store: --db <file>, SEMANTIC_GRAPH_DB, or ENGINE_PROJECT_DIR for a project'); return 1 }
   const store = new ModelStore(dbFile)

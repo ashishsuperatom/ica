@@ -56,6 +56,8 @@ An accepted operation is written in one transaction with its change record.
 | `set-setting <key> <value>`, `set-conversion` | organisation settings; how money converts |
 
 Reading: `overview`, `show <id>`, `dimensions <Fact>…`, `paths <Fact> <Object>`, `check`, `history <id>`, `changes`.
+`prompt` prints the guide an agent is given to use the tool, written from the tool's own command table and versioned by
+its content (`prompt --json` gives `{ version, text }`): wherever an agent needs it, take it from here rather than copying it.
 Moving: `export <dir>` writes the model as files for review; `import <dir>` builds a model from such files, one recorded
 operation per node.
 
