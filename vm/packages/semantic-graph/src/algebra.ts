@@ -334,7 +334,7 @@ export function check(s: Schema, q: Question, context: { today?: string } = {}):
 
 /** A sub-question: the same measures, filters, span and currency, at a coarser grouping or another span. */
 const sub = (q: Question, change: Partial<Question>): Question =>
-  ({ measures: q.measures, by: q.by, where: q.where, span: q.span, currency: q.currency, asOf: q.asOf, ...change })
+  ({ measures: q.measures, by: q.by, where: q.where, without: q.without, span: q.span, currency: q.currency, asOf: q.asOf, ...change })
 
 function extend(s: Schema, q: Question, plan: Plan, context: { today?: string }): Verdict {
   const { targets, outputs } = plan
@@ -353,7 +353,7 @@ function extend(s: Schema, q: Question, plan: Plan, context: { today?: string })
     plan.totals = []
     for (const level of q.totals) {
       const bad = subset(level, 'totals:'); if (bad) return bad
-      const v = check(s, sub(q, { by: at(level) }))
+      const v = check(s, sub(q, { by: at(level) }), context)
       if (!v.ok) return v
       plan.totals.push({ by: level, plan: v.plan })
     }
@@ -372,7 +372,7 @@ function extend(s: Schema, q: Question, plan: Plan, context: { today?: string })
       if (d.kind === 'value-per-unit' || !['sum', 'count'].includes(d.aggregate)) return refuse('B3', `${name} is combined by ${d.aggregate}; its parts do not add up to its whole, so it has no share`)
       if (d.kind === 'stock' && plan.facts.find((f) => f.fact === fact)!.stockOverTime) return refuse('B3', `${name} is a level taken at one instant per group; groups at different instants do not add up to a whole`)
     }
-    const v = check(s, sub(q, { by: at(q.share.within) }))
+    const v = check(s, sub(q, { by: at(q.share.within) }), context)
     if (!v.ok) return v
     plan.share = { outputs: q.share.outputs, within: q.share.within, plan: v.plan }
     plan.columns.push(...q.share.outputs.map((n) => ({ name: `${n} share within ${q.share!.within.join(', ') || 'all'}`, unit: 'ratio' })))
@@ -404,7 +404,7 @@ function extend(s: Schema, q: Question, plan: Plan, context: { today?: string })
     if (q.rolling && q.rolling.window > 1) {
       // The periods before the span are read too, so its first periods have whole windows.
       const from = periodOf(def, shiftPeriods(def, keyOf(def, q.span.from), 1 - q.rolling.window)).from
-      const wider = check(s, { ...sub(q, { span: { from, to: q.span.to } }), by: q.by })
+      const wider = check(s, { ...sub(q, { span: { from, to: q.span.to } }), by: q.by }, context)
       if (!wider.ok) return wider
       plan.span = { from, to: q.span.to }
       plan.facts = wider.plan.facts
@@ -462,11 +462,11 @@ function extend(s: Schema, q: Question, plan: Plan, context: { today?: string })
     if (today && q.span.from <= today && addDays(today, 1) < q.span.to) {
       const elapsed = Math.round((Date.parse(addDays(today, 1)) - Date.parse(q.span.from)) / 86400000)
       const cut = { from: span.from, to: addDays(span.from, elapsed) }
-      const cutOk = check(s, { ...sub(q, { span: cut }), fill: q.fill, cumulative: q.cumulative, rolling: q.rolling })
+      const cutOk = check(s, { ...sub(q, { span: cut }), fill: q.fill, cumulative: q.cumulative, rolling: q.rolling }, context)
       if (cutOk.ok) { span = cut; plan.notes.push(`the span is still running, so it is compared with the first ${elapsed} days of the earlier one`) }
       else plan.notes.push(`the span is still running, but the earlier one cannot be cut at ${cut.to} (${cutOk.reason}), so it is compared whole`)
     }
-    const v = check(s, { ...sub(q, { span }), fill: q.fill, cumulative: q.cumulative, rolling: q.rolling })
+    const v = check(s, { ...sub(q, { span }), fill: q.fill, cumulative: q.cumulative, rolling: q.rolling }, context)
     if (!v.ok) return v
     plan.compare = { back: 'back' in q.compare ? q.compare.back : null, plan: v.plan, ...(time ? { time } : {}) }
     for (const o of outputFor(plan)) plan.columns.push({ name: `${o.name} before`, unit: o.unit }, { name: `${o.name} change`, unit: o.unit })

@@ -9,12 +9,15 @@
     },
     "Subsidiary": {
       "source": "F5NETSUITE",
-      "sql": "SELECT s.id AS id, s.name AS label, s.parent AS parent, c.symbol AS currency FROM subsidiary s LEFT JOIN currency c ON c.id = s.currency",
+      "sql": "SELECT s.id AS id, s.name AS label, s.parent AS parent, c.symbol AS currency, s.country AS country FROM subsidiary s LEFT JOIN currency c ON c.id = s.currency",
       "key": "id",
       "label": "label",
       "arrows": {
         "currency": "currency",
         "parent": "parent"
+      },
+      "attributes": {
+        "country": "country"
       }
     },
     "Pillar": {
@@ -77,7 +80,7 @@
     },
     "Project": {
       "source": "F5NETSUITE",
-      "sql": "SELECT j.id AS id, j.entityid || ' ' || j.companyname AS label, j.subsidiary AS subsidiary, j.custentity_f5_prj_pillar AS pillar, j.customer AS customer, c.symbol AS currency, j.jobtype AS type, j.entitystatus AS status, j.custentity_f5_prj_manager AS manager, j.custentity_f5_prj_senior_supplier AS senior_supplier, CASE j.custentity_f5_project_rag WHEN 1 THEN 'Red' WHEN 2 THEN 'Amber' WHEN 3 THEN 'Green' END AS rag, TO_CHAR(j.custentity_f5_next_go_live, 'YYYY-MM-DD') AS go_live, j.custentityf5_gone_live AS gone_live, TO_CHAR(j.startdate, 'YYYY-MM-DD') AS start_date, TO_CHAR(COALESCE(j.enddate, j.calculatedenddate), 'YYYY-MM-DD') AS end_date, TO_CHAR(j.datecreated, 'YYYY-MM-DD') AS created, CASE WHEN j.custentity_f5_project_rag IN (1, 2) OR TO_NUMBER(j.custentity_f5_total_project_budget) - TO_NUMBER(j.custentity_f5_prj_actual_budget_comsumed) < 0 THEN 'T' ELSE 'F' END AS at_risk FROM job j LEFT JOIN currency c ON c.id = j.currency",
+      "sql": "SELECT j.id AS id, j.entityid || ' ' || j.companyname AS label, j.subsidiary AS subsidiary, j.custentity_f5_prj_pillar AS pillar, j.customer AS customer, c.symbol AS currency, j.jobtype AS type, j.entitystatus AS status, j.custentity_f5_prj_manager AS manager, j.custentity_f5_prj_senior_supplier AS senior_supplier, CASE j.custentity_f5_project_rag WHEN 1 THEN 'Red' WHEN 2 THEN 'Amber' WHEN 3 THEN 'Green' END AS rag, TO_CHAR(j.custentity_f5_next_go_live, 'YYYY-MM-DD') AS go_live, j.custentityf5_gone_live AS gone_live, TO_CHAR(j.startdate, 'YYYY-MM-DD') AS start_date, TO_CHAR(COALESCE(j.enddate, j.calculatedenddate), 'YYYY-MM-DD') AS end_date, TO_CHAR(j.datecreated, 'YYYY-MM-DD') AS created, CASE WHEN j.custentity_f5_project_rag IN (1, 2) OR TO_NUMBER(j.custentity_f5_total_project_budget) - TO_NUMBER(j.custentity_f5_prj_actual_budget_comsumed) < 0 THEN 'T' ELSE 'F' END AS at_risk, CASE j.custentity_f5_rag_cus_sat WHEN 1 THEN 'Red' WHEN 2 THEN 'Amber' WHEN 3 THEN 'Green' END AS rag_customer, CASE j.custentity_f5_rag_resource WHEN 1 THEN 'Red' WHEN 2 THEN 'Amber' WHEN 3 THEN 'Green' END AS rag_resource, j.comments AS comments FROM job j LEFT JOIN currency c ON c.id = j.currency",
       "key": "id",
       "label": "label",
       "arrows": {
@@ -97,7 +100,10 @@
         "start": "start_date",
         "end": "end_date",
         "created": "created",
-        "at risk": "at_risk"
+        "at risk": "at_risk",
+        "customer satisfaction RAG": "rag_customer",
+        "resource RAG": "rag_resource",
+        "comments": "comments"
       }
     }
   },
@@ -148,6 +154,18 @@
         "total budget": "total_budget",
         "budget consumed": "consumed",
         "remaining budget": "remaining"
+      }
+    },
+    "ProjectDelivery": {
+      "source": "F5NETSUITE",
+      "sql": "SELECT j.id AS project_id, d.revenue AS revenue_delivered, TO_NUMBER(j.custentity_f5_total_project_budget) - COALESCE(d.revenue, 0) AS remaining, d.hours AS hours FROM job j LEFT JOIN (SELECT e.billto, SUM(e.hours * CASE WHEN jt.name IN ('Milestone Fixed Price', 'Prepayment') THEN COALESCE(TO_NUMBER(pj.custentity9), e.rate) ELSE e.rate END) AS revenue, SUM(e.hours) AS hours FROM (SELECT c.billto, TO_NUMBER(tb.hours) AS hours, TO_NUMBER(c.rate) AS rate, ROW_NUMBER() OVER (PARTITION BY c.timerecord ORDER BY c.createddate DESC, c.id DESC) AS rn FROM charge c JOIN timebill tb ON tb.id = c.timerecord WHERE c.timerecord IS NOT NULL AND (c.use = 'Actual' OR c.stage != 'BILLED') AND tb.isbillable = 'T' AND tb.timetype = 'A' AND COALESCE(tb.approvalstatus, 0) <> 4 AND tb.trandate < TRUNC(SYSDATE) AND c.billto IN (SELECT id FROM job WHERE entitystatus = 2)) e JOIN job pj ON pj.id = e.billto LEFT JOIN jobtype jt ON jt.id = pj.jobtype WHERE e.rn = 1 GROUP BY e.billto) d ON d.billto = j.id WHERE j.entitystatus = 2",
+      "arrows": {
+        "project": "project_id"
+      },
+      "measures": {
+        "revenue delivered": "revenue_delivered",
+        "estimated remaining budget": "remaining",
+        "hours delivered": "hours"
       }
     },
     "BudgetLine": {

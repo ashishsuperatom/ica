@@ -31,6 +31,15 @@
         "Australia": "2",
         "NZ": "3",
         "New Zealand": "3"
+      },
+      "attributes": {
+        "country": {
+          "type": "text",
+          "synonyms": [
+            "country"
+          ],
+          "description": "the subsidiary's country code: AU, NZ, GB, IN"
+        }
       }
     },
     "Pillar": {
@@ -235,6 +244,28 @@
             "F"
           ],
           "description": "rated Red or Amber, or with more budget consumed than its total budget"
+        },
+        "customer satisfaction RAG": {
+          "type": "text",
+          "members": [
+            "Red",
+            "Amber",
+            "Green"
+          ],
+          "description": "the Red/Amber/Green rating for customer satisfaction"
+        },
+        "resource RAG": {
+          "type": "text",
+          "members": [
+            "Red",
+            "Amber",
+            "Green"
+          ],
+          "description": "the Red/Amber/Green rating for resourcing"
+        },
+        "comments": {
+          "type": "text",
+          "description": "the project's single free-text comments field (NetSuite keeps no dated comment or corrective-action log here)"
         }
       }
     },
@@ -572,6 +603,71 @@
           ],
           "synonyms": [
             "budget remaining"
+          ]
+        }
+      }
+    },
+    "ProjectDelivery": {
+      "kind": "fact",
+      "description": "Each In Progress project as it stands now: the revenue its time has delivered to date (billable Actual hours, rejected time left out, each at its latest eligible charge rate, or the project's forecasting rate on Milestone Fixed Price and Prepayment projects) and the estimated remaining budget, its total budget less that revenue. Projects not In Progress are not covered.",
+      "synonyms": [
+        "delivery",
+        "project delivery",
+        "budget at risk"
+      ],
+      "arrows": {
+        "project": "Project"
+      },
+      "keptTo": [
+        "valid project"
+      ],
+      "history": "current",
+      "defaults": {
+        "Subsidiary": [
+          "project",
+          "subsidiary"
+        ],
+        "Pillar": [
+          "project",
+          "pillar"
+        ]
+      },
+      "measures": {
+        "revenue delivered": {
+          "unit": "money",
+          "kind": "flow",
+          "aggregate": "sum",
+          "currency": [
+            "project",
+            "currency"
+          ],
+          "synonyms": [
+            "delivered revenue",
+            "T&M revenue to date",
+            "revenue to date"
+          ]
+        },
+        "estimated remaining budget": {
+          "unit": "money",
+          "kind": "flow",
+          "aggregate": "sum",
+          "currency": [
+            "project",
+            "currency"
+          ],
+          "synonyms": [
+            "est. remaining budget",
+            "remaining budget at risk",
+            "budget at risk",
+            "estimated remaining"
+          ]
+        },
+        "hours delivered": {
+          "unit": "h",
+          "kind": "flow",
+          "aggregate": "sum",
+          "synonyms": [
+            "hours to date"
           ]
         }
       }

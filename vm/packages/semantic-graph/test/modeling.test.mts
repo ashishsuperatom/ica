@@ -112,3 +112,10 @@ test('money on a fact with no time converts at the rates of the day it is answer
   assert.deepEqual((await runSql(timeless, t.sources, v.plan, t.query)).rows, evaluate(timeless, I, v.plan).rows)
   assert.ok(!check(timeless, { measures: ['Contract.value'], currency: 'AUD' }).ok, 'without a day to answer on, it asks for one')
 })
+
+test('totals and shares are checked as their question was: the same day, the same conditions set aside', () => {
+  const timeless: Schema = { ...s, objects: { ...s.objects, Contract: { ...s.objects.Contract, arrows: { project: 'Project' }, keptTo: ['sydney project'] } } }
+  const v = check(timeless, { measures: ['Contract.value'], by: [{ attribute: 'rag', of: 'Project' }], currency: 'AUD', totals: [[]], without: ['sydney project'] }, { today: '2026-12-31' })
+  if (!v.ok) assert.fail(v.reason)
+  assert.deepEqual(evaluate(timeless, I, v.plan).totals?.[0].rows, [[15000]], 'both projects, as the question set the condition aside')
+})

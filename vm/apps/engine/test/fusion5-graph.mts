@@ -19,12 +19,13 @@ const g = await openSemanticGraph({ dbDir, projectDir, managerUrl })
 console.log(`loaded and checked in ${((Date.now() - t) / 1000).toFixed(1)}s`)
 
 const AU = { to: 'Subsidiary', in: ['AU'] }
+const PMO = { condition: 'PMO project' }
 const questions: Array<[string, any, string?]> = [
-  //   ['Base revenue budget, AU, Jul–Oct', { measures: ['BudgetLine.budget'], by: [{ to: 'Month' }], where: [AU, { condition: 'base revenue budget' }], span: { from: '2026-07-01', through: '2026-10-31' }, currency: 'AUD' }],
-  // ['Projected vs base budget, AU, Sep–Oct', { measures: ['AllocationDay.revenue', 'BudgetLine.budget', '[AllocationDay.revenue] / [BudgetLine.budget]'], by: [{ to: 'Month' }], where: [AU, { condition: 'base revenue budget' }], span: { from: '2026-09-01', through: '2026-10-31' }, currency: 'AUD' }],
-  ['PMO projects by RAG, AU', { measures: ['ProjectState.projects', 'ProjectState.remaining budget'], by: [{ attribute: 'rag', of: 'Project' }], where: [AU, { condition: 'PMO project' }], currency: 'AUD' }],
-  ['Upcoming go-lives, AU PMO, next 3 months', { measures: ['ProjectState.projects'], by: [{ attribute: 'rag', of: 'Project' }], where: [AU, { condition: 'PMO project' }, { attribute: 'go-live', of: 'Project', range: { from: '2026-09-15', to: '2026-12-15' } }], currency: 'AUD' }],
-  //   ['Timesheet revenue and billable hours, AU, first week of August', { measures: ['TimeDay.revenue', 'TimeDay.hours'], by: [{ to: 'TimeType' }], where: [AU], span: { from: '2026-08-03', through: '2026-08-09' }, currency: 'AUD' }],
+  ['PMO Summary: projects and estimated remaining budget by pillar and RAG', { measures: ['ProjectState.projects', 'ProjectDelivery.estimated remaining budget'], by: [{ to: 'Pillar' }, { attribute: 'rag', of: 'Project' }], where: [PMO], currency: 'AUD', totals: [['Project.rag']] }],
+  ['Q1 red FO projects, managers, estimated remaining', { measures: ['ProjectDelivery.estimated remaining budget'], by: [{ to: 'Project' }, { to: 'Person', via: ['project', 'manager'] }], where: [PMO, { attribute: 'rag', of: 'Project', in: ['Red'] }, { to: 'Pillar', in: ['37'] }], currency: 'AUD', order: { by: 'ProjectDelivery.estimated remaining budget', desc: true } }],
+  // ['Q4 red Milestone Fixed Price: total at risk', { measures: ['ProjectState.projects', 'ProjectDelivery.estimated remaining budget'], where: [PMO, { attribute: 'rag', of: 'Project', in: ['Red'] }, { to: 'ProjectType', via: ['project', 'type'], in: ['14'] }], currency: 'AUD' }],
+  // ['Q7 senior suppliers with red and amber projects', { measures: ['ProjectState.projects', 'ProjectDelivery.estimated remaining budget'], by: [{ to: 'Person', via: ['project', 'senior supplier'] }], where: [PMO, { attribute: 'rag', of: 'Project', in: ['Red', 'Amber'] }], currency: 'AUD', order: { by: 'ProjectState.projects', desc: true }, limit: 5 }],
+  // ['Q8 red, go-live in 60 days, over $100K remaining', { measures: ['ProjectDelivery.estimated remaining budget'], by: [{ to: 'Project' }], where: [PMO, { attribute: 'rag', of: 'Project', in: ['Red'] }, { attribute: 'go-live', of: 'Project', range: { from: '2026-09-15', to: '2026-11-15' } }], having: [{ output: 'ProjectDelivery.estimated remaining budget', op: '>', value: 100000 }], currency: 'AUD' }],
 ]
 for (const [name, q] of questions) {
   t = Date.now()
@@ -32,7 +33,9 @@ for (const [name, q] of questions) {
   console.log(`\n── ${name} · ${((Date.now() - t) / 1000).toFixed(1)}s`)
   if (!a.ok) { console.log('  REFUSED/FAILED:', a.rule ?? '', a.reason); const c = g.store.getCall(a.callId); for (const s of c?.statements ?? []) console.log(`  read ${s.fact} ${s.source} ${s.rows} rows ${s.ms}ms`); continue }
   console.log('  columns', a.result.columns.map((c) => c.name).join(' | '))
-  for (const r of a.result.rows) console.log('  ', r.map((x) => (typeof x === 'number' ? Math.round(x * 100) / 100 : x)).join(' | '))
+  const label = (i: number, x: unknown) => (a.result.labels?.[i]?.[String(x)] ?? x)
+  for (const r of a.result.rows) console.log('  ', r.map((x, i) => (typeof x === 'number' ? Math.round(x * 100) / 100 : label(i, x))).join(' | '))
+  for (const t of a.result.totals ?? []) for (const r of t.rows) console.log('   total', JSON.stringify(t.by), r.map((x) => (typeof x === 'number' ? Math.round(x) : x)).join(' | '))
   for (const c of a.caveats) console.log('  note:', c)
   for (const s of g.store.getCall(a.callId)!.statements) console.log(`  read ${s.fact} from ${s.source}: ${s.rows} rows in ${s.ms} ms`)
 }
