@@ -12,9 +12,7 @@ resolveValueByPattern(v)    identifier → { type, where it lives }            (
 - **Isolated store** — its own SQLite (not the semantic model's `project.sqlite`).
 - **Built by the grounding agent** (admin-triggered, cold) at setup + on data change; **read by the analyst**
   at query time. The agent is never invoked per query.
-- **Distinct from semantic atoms** — atoms are *knowledge* (where/how, with the model); grounding is *value
-  resolution* (indexes, here). A semantic unit may say "resolve places via this hierarchy"; grounding executes it.
+- **Distinct from the semantic graph** — what a concept means and where it lives is the graph's knowledge
+  (`docs/semantic-graph.md`); grounding is *value resolution* (indexes, here).
 
-Status: **skeleton** — contract (`types.ts`) + store schema + builder/reader shells. Real resolvers land next:
-hierarchy execution (piece 2), per-type fuzzy+semantic entity search (piece 3), learned pattern matching
-(piece 4), then the grounding agent (piece 5). See `docs/grounding-and-atoms-plan.md`.
+Built: the store, the hierarchy, entity and pattern resolvers, and the grounding agent. See `docs/grounding.md`.

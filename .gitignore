@@ -37,3 +37,7 @@ vm/projects/totalgroup/programs/**/program.json
 
 # deploy targets (hosts/ports change; not shared)
 .deploy-targets.env
+
+# Python bytecode
+__pycache__/
+*.pyc
