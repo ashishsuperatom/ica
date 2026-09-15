@@ -125,7 +125,7 @@ else if (command === 'members') {
   // The program and what it was run with, beside the answer: what run:, check:, program: and edit: act on.
   await writeFile(join(env.home, 'out', qid, 'program.mjs'), source)
   await writeFile(join(env.home, 'out', qid, 'params.json'), JSON.stringify(run.params, null, 2))
-  await writeFile(join(env.home, 'out', qid, 'built.json'), JSON.stringify({ graph: 'semantic', kind: 'program', sessionId, step: stepId, callId: run.callId }, null, 2))
+  await writeFile(join(env.home, 'out', qid, 'built.json'), JSON.stringify({ graph: 'semantic', kind: 'program', sessionId, step: stepId, callId: run.callId, program: run.name, source: run.source, params: run.params }, null, 2))
   out(`committed ${run.name} as step ${stepId}`)
 } else if (command === 'moves') {
   const s = current() ?? fail('this conversation has no answer to move from yet')
