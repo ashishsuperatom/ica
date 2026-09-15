@@ -9,5 +9,8 @@
   },
   "exports": {
     ".": "./src/index.ts"
+  },
+  "bin": {
+    "semantic-graph": "./bin/semantic-graph"
   }
 }

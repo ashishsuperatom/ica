@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# semantic-graph — the one tool for working on a semantic graph (see ../MODELING.md).
+HERE="$(cd "$(dirname "$0")" && pwd)"
+export NODE_NO_WARNINGS=1
+if command -v tsx >/dev/null 2>&1; then exec tsx "$HERE/../src/cli.ts" "$@"; else exec npx --yes tsx "$HERE/../src/cli.ts" "$@"; fi

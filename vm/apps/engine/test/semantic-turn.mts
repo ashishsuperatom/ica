@@ -10,8 +10,9 @@ import { join } from 'node:path'
 import { createSemanticTurns } from '../graph/semantic-turns.js'
 import { parseVerb } from '../graph/semantic-verbs.js'
 import { createComposer } from '../agents/composer/index.js'
-import { MODEL, openSemanticGraph } from '../graph/semantic.js'
+import { MODEL, openSemanticGraph, semanticFile } from '../graph/semantic.js'
 import { instance, schema } from '../../../packages/semantic-graph/test/fixtures/branches.js'
+import { ModelStore } from '../../../packages/semantic-graph/src/index.js'
 import { toSqlite } from '../../../packages/semantic-graph/test/fixtures/sqlite.js'
 
 const questions = process.argv.slice(2)
@@ -33,9 +34,9 @@ const managerUrl = `http://127.0.0.1:${(server.address() as any).port}`
 
 const root = process.env.STATE ?? mkdtempSync(join(tmpdir(), 'sg-turn-'))
 const projectDir = join(root, 'project')
-mkdirSync(join(projectDir, 'semantic'), { recursive: true })
-writeFileSync(join(projectDir, 'semantic', 'schema.json'), JSON.stringify(schema))
-writeFileSync(join(projectDir, 'semantic', 'sources.json'), JSON.stringify(sources))
+mkdirSync(projectDir, { recursive: true })
+// The model, built in the project's graph store through its operations — as the semantic-graph tool builds one.
+new ModelStore(semanticFile(join(root, 'branches', 'db'))).import(MODEL, { schema, sources }, { by: 'test' })
 writeFileSync(join(projectDir, 'settings.json'), JSON.stringify({ timezone: 'Australia/Sydney', currency: 'AUD' }))
 
 const sid = `trial-${Date.now().toString(36)}`

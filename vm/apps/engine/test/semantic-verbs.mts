@@ -12,8 +12,9 @@ import { join } from 'node:path'
 import assert from 'node:assert/strict'
 import { prepareWorkspace } from '../ica/workspace.js'
 import { instance, schema } from '../../../packages/semantic-graph/test/fixtures/branches.js'
+import { ModelStore } from '../../../packages/semantic-graph/src/index.js'
 import { toSqlite } from '../../../packages/semantic-graph/test/fixtures/sqlite.js'
-import { openSemanticGraph } from '../graph/semantic.js'
+import { MODEL, openSemanticGraph, semanticFile } from '../graph/semantic.js'
 import { createSemanticTurns } from '../graph/semantic-turns.js'
 import { parseVerb } from '../graph/semantic-verbs.js'
 
@@ -33,9 +34,9 @@ const managerUrl = `http://127.0.0.1:${(server.address() as any).port}`
 
 const root = mkdtempSync(join(tmpdir(), 'sg-verbs-'))
 const projectDir = join(root, 'project')
-mkdirSync(join(projectDir, 'semantic'), { recursive: true })
-writeFileSync(join(projectDir, 'semantic', 'schema.json'), JSON.stringify(schema))
-writeFileSync(join(projectDir, 'semantic', 'sources.json'), JSON.stringify(sources))
+mkdirSync(projectDir, { recursive: true })
+// The model, built in the project's graph store through its operations — as the semantic-graph tool builds one.
+new ModelStore(semanticFile(join(root, 'p', 'db'))).import(MODEL, { schema, sources }, { by: 'test' })
 const dbDir = join(root, 'p', 'db')
 const cwd = await prepareWorkspace({ root, projectId: 'p', managerUrl, projectDir, sessionId: 's1', tools: 'conversation' })
 writeFileSync(join(cwd, '.session'), 's1'); writeFileSync(join(cwd, '.turn'), 'q1')

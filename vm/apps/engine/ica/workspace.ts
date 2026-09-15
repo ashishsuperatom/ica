@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 
 const semanticCli = fileURLToPath(new URL('../graph/semantic-cli.ts', import.meta.url))
+const modelCli = fileURLToPath(new URL('../../../packages/semantic-graph/src/cli.ts', import.meta.url))
 
 export interface WorkspaceSpec {
   root: string
@@ -280,6 +281,19 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
   // connector and grounding agents have the data.
   if (conversation) for (const name of Object.keys(drivers)) if (name !== 'escalate') delete drivers[name]
   for (const name of Object.keys(SEMANTIC_USAGE)) { drivers[name] = graphTool(name); usages[name] = SEMANTIC_USAGE[name] }
+  // Building the model: the one semantic-graph tool, on this project's store, with the agent at work as who changed it.
+  if (!conversation) {
+    drivers['semantic-graph'] = `// semantic-graph — the project's model, built and changed through checked, recorded operations. See packages/semantic-graph/MODELING.md.
+import { spawnSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+const agent = (() => { try { return readFileSync(${JSON.stringify(join(dir, '.agent'))}, 'utf8').trim() } catch { return 'agent' } })()
+const args = process.argv.slice(2).map((a) => (a === '-h' ? '--help' : a))
+const r = spawnSync('tsx', [${JSON.stringify(modelCli)}, ...args, '--db', ${JSON.stringify(join(dbDir, 'semantic-graph.sqlite'))}, '--model', 'model'],
+  { stdio: 'inherit', env: { ...process.env, NODE_NO_WARNINGS: '1', SEMANTIC_GRAPH_BY: agent } })
+process.exit(r.status ?? 1)
+`
+    usages['semantic-graph'] = 'semantic-graph help   → the commands that read and build the project\'s model; every change is checked and recorded with who made it and why'
+  }
   for (const [name, body] of Object.entries(drivers)) {
     // Prepend a --help guard. ESM hoists the body's imports above this, but they only OPEN cheap handles; the
     // guard still short-circuits before any query/search runs, printing usage and nothing else.
@@ -287,7 +301,7 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
     // line and exits 1 — the agent reads a clear reason, not a Node stack trace.
     const help = `process.on('unhandledRejection', (e) => { console.error(String(e && e.message || e)); process.exit(1) })
 process.on('uncaughtException', (e) => { console.error(String(e && e.message || e)); process.exit(1) })
-if (process.argv.slice(2).some(a => a === '-h' || a === '--help')) { console.log(${JSON.stringify(usages[name])}); process.exit(0) }\n`
+${name === 'semantic-graph' ? '' : `if (process.argv.slice(2).some(a => a === '-h' || a === '--help')) { console.log(${JSON.stringify(usages[name])}); process.exit(0) }\n`}`
     await writeFile(join(dir, '.tools', name + '.mjs'), help + body)
     await writeFile(join(dir, name),
 `#!/usr/bin/env bash

@@ -37,7 +37,7 @@ import { DataSourceIndex, dataSourceStats } from '@superatom/datasource-index'
 // built image. tsx erases a type-only import, which is why the container runs without it. Making it a value
 // import would break every deploy while working perfectly here.
 import type { EngineMsgType } from '../../../clients/protocol.js'
-import { openSemanticGraph } from './graph/semantic.js'
+import { modelVersion, openSemanticGraph } from './graph/semantic.js'
 import { CATEGORY, explainAnswer, parseVerb, type VerbMatch, type ViewRef } from './graph/semantic-verbs.js'
 import { createSemanticTurns } from './graph/semantic-turns.js'
 import { readFile as readFileAsync } from 'node:fs/promises'
@@ -155,8 +155,14 @@ const genId = () => 'q_' + Date.now().toString(36) + Math.random().toString(36).
 // db/semantic-graph.sqlite. Opened on first use, because loading its sources checks them at the datasource manager,
 // which may come up after the engine.
 let semanticGraph: ReturnType<typeof openSemanticGraph> | null = null
-const getSemantic = () => (semanticGraph ??= openSemanticGraph({ dbDir: DB_DIR, projectDir: PROJECT_DIR, managerUrl: DATASOURCE })
-  .catch((e) => { semanticGraph = null; throw e }))
+// The model is changed through the semantic-graph tool while the engine runs: a newer change opens it again.
+let semanticVersion = -1
+const getSemantic = () => {
+  const now = modelVersion(DB_DIR)
+  if (now !== semanticVersion) { semanticGraph = null; semanticVersion = now }
+  return (semanticGraph ??= openSemanticGraph({ dbDir: DB_DIR, projectDir: PROJECT_DIR, managerUrl: DATASOURCE })
+    .catch((e) => { semanticGraph = null; semanticVersion = -1; throw e }))
+}
 
 // The datasource index: every source's tables and columns, searchable by the agents' ./find-schema.
 const indexStore = new DataSourceIndex(join(DB_DIR, 'datasource-index.sqlite'))

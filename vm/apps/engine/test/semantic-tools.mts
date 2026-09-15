@@ -13,6 +13,8 @@ import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
 import { prepareWorkspace } from '../ica/workspace.js'
 import { instance, schema } from '../../../packages/semantic-graph/test/fixtures/branches.js'
+import { ModelStore } from '../../../packages/semantic-graph/src/index.js'
+import { MODEL, openSemanticGraph, semanticFile } from '../graph/semantic.js'
 import { toSqlite } from '../../../packages/semantic-graph/test/fixtures/sqlite.js'
 
 // The data, in SQLite, behind a manager that speaks the manager's HTTP.
@@ -32,9 +34,9 @@ const managerUrl = `http://127.0.0.1:${(server.address() as any).port}`
 
 const root = mkdtempSync(join(tmpdir(), 'sg-tools-'))
 const projectDir = join(root, 'project')
-mkdirSync(join(projectDir, 'semantic'), { recursive: true })
-writeFileSync(join(projectDir, 'semantic', 'schema.json'), JSON.stringify(schema))
-writeFileSync(join(projectDir, 'semantic', 'sources.json'), JSON.stringify(sources))
+mkdirSync(projectDir, { recursive: true })
+// The model, built in the project's graph store through its operations — as the semantic-graph tool builds one.
+new ModelStore(semanticFile(join(root, 'p', 'db'))).import(MODEL, { schema, sources }, { by: 'test' })
 void DatabaseSync
 
 const cwd = await prepareWorkspace({ root, projectId: 'p', managerUrl, projectDir, sessionId: 's1', tools: 'conversation' })
@@ -45,7 +47,6 @@ const tool = async (name: string, ...args: string[]) => {
   catch (e: any) { return `EXIT ${e.code}: ${e.stderr}${e.stdout}` }
 }
 // The engine opens the conversation's data session before the composer's turn.
-const { openSemanticGraph } = await import('../graph/semantic.js')
 ;(await openSemanticGraph({ dbDir: join(root, 'p', 'db'), projectDir, managerUrl })).openSession(null, null, 's1')
 
 const tools = execFileSync('ls', [cwd], { encoding: 'utf8' }).split('\n').filter(Boolean)

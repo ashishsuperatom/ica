@@ -8,7 +8,9 @@ The design is **`docs/semantic-graph.md`**. This file is what is built and what 
 
 ## The semantic graph (`vm/packages/semantic-graph`)
 
-- A project's model lives in its home, `~/.superatom/state/<id>/semantic/`: `schema.json` (entities, calendars, facts, arrows,
+- A project's model lives in its graph store, `~/.superatom/state/<id>/db/semantic-graph.sqlite`, built and changed only
+  through the `semantic-graph` tool (`vm/packages/semantic-graph/MODELING.md`); `export` writes it as files for review. It
+  holds the schema (entities, calendars, facts, arrows,
   measures), `sources.json` (where each object's rows are), `settings.json`, and producing programs.
 - A **question** — measures, grouped by where arrows lead, kept to records, over a span — is checked by the graph's
   rules, compiled to the source's own SQL and run through the datasource manager.
@@ -49,7 +51,7 @@ Everything that belongs to one project lives in its **home**, `~/.superatom/stat
 the repository holds only the platform. `~/.superatom/state/INDEX.md` lists this machine's projects.
 
 - `.env` (hub, key, source credentials; `PROJECT_NAME`, `DATASOURCE_PORT` for `ecosystem.config.cjs`), `settings.json`,
-  `secrets/`, `datasources/` (bridges, registry, index seeds), `semantic/` (the model), `checks/` (its live questions),
+  `secrets/`, `datasources/` (bridges, registry, index seeds), `checks/` (its live questions),
   `clients/` (its Teams app), `fast-router/` (its test questions)
 
 - `db/` — `semantic-graph.sqlite` (definitions, memory, data sessions), `datasource-index.sqlite` (read by
