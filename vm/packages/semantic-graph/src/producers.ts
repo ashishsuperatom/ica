@@ -51,6 +51,9 @@ export function sourcesProblems(s: Schema, src: Sources): string[] {
     if (!s.objects[o]) { out.push(`the sources name ${o}, which the schema does not have`); continue }
     if (s.objects[o].kind === 'fact' !== o in src.facts) out.push(`${o} is ${s.objects[o].kind === 'fact' ? 'a fact' : 'an entity'} and its source is given as ${o in src.facts ? 'a fact' : 'an entity'}'s`)
     if (!x.sql && !x.program) out.push(`${o}: a source is a statement or a program`)
+    for (const r of Object.keys(x.arrows ?? {})) if (!arrows(s, o).some((a) => a.role === r)) out.push(`${o}'s source has a column for the arrow ${r}, which ${o} does not have`)
+    for (const a of Object.keys(x.attributes ?? {})) if (!s.objects[o].attributes?.[a]) out.push(`${o}'s source has a column for the attribute ${a}, which ${o} does not have`)
+    if ('measures' in x) for (const m of Object.keys(x.measures ?? {})) if (!s.objects[o].measures?.[m]) out.push(`${o}'s source has a column for the measure ${m}, which ${o} does not have`)
     if (x.sql && x.program) out.push(`${o}: a source is a statement or a program, not both`)
     for (const n of namedIn(x.sql ?? '')) {
       if (!statementOf(n) && !src.facts[n]?.program && !src.entities[n]?.program) out.push(`${o} is built on {{${n}}}, which has no source`)
@@ -122,7 +125,7 @@ export async function loadModule(hash: string, body: string, cache: Map<string, 
 /** The declared columns of an object's source — what a program's rows must carry. */
 export function declaredColumns(x: FactSource | EntitySource): string[] {
   if ('measures' in x) return [...new Set([...Object.values(x.arrows), ...(x.time ? [x.time] : []), ...Object.values(x.attributes ?? {}), ...Object.values(x.measures)])]
-  return [...new Set([x.key, ...Object.values(x.arrows)])]
+  return [...new Set([x.key, ...Object.values(x.arrows), ...Object.values(x.attributes ?? {})])]
 }
 
 export type { Query, Dialect }

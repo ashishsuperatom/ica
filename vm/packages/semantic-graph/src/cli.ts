@@ -168,7 +168,7 @@ export async function run(argv: string[], out: (s: string) => void = console.log
       case 'bind': {
         need(1)
         const binding: any = Object.fromEntries(Object.entries({
-          source: text(flags.source), sql: text(flags.sql), program: text(flags.program), key: text(flags.key), label: text(flags.label), time: text(flags.time), timeZone: text(flags['time-zone']),
+          source: typeof flags.source === 'string' ? flags.source : undefined, sql: text(flags.sql), program: text(flags.program), key: text(flags.key), label: text(flags.label), time: text(flags.time), timeZone: text(flags['time-zone']),
           arrows: json(flags.arrows, '--arrows') ?? {}, attributes: json(flags.attributes, '--attributes'), measures: json(flags.measures, '--measures'), history: json(flags.history, '--history'), params: json(flags.params, '--params'),
         }).filter(([, v]) => v !== undefined))
         return change({ op: 'bind', object: args[0], binding })

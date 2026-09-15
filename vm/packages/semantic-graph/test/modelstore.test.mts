@@ -60,9 +60,11 @@ test('an operation that would duplicate, break or dangle is refused, recorded, a
   refused({ op: 'remove', id: 'Store' }, /still used: the arrow Sale.store leads to it/)
   refused({ op: 'remove', id: 'Product.category' }, /the condition "frozen product" may use it/)
   refused({ op: 'set', id: 'Sale.store', property: 'unit', value: 'x' }, /what can be set on it: kind, partial, synonyms/)
+  refused({ op: 'add-condition', name: 'eastern', on: 'Store', where: [{ to: 'Region', via: ['area'], in: ['east'] }] }, /goes via area, which is not a path from Store/)
+  refused({ op: 'bind', object: 'Store', binding: { source: 'shop', sql: 'SELECT 1', key: 'id', arrows: { region: 'region', owner: 'owner' } } }, /column for the arrow owner, which Store does not have/)
   assert.equal(JSON.stringify(g.state('retail')), before)
-  const log = g.changes('retail', { limit: 7 })
-  assert.equal(log.filter((c) => !c.applied).length, 7)
+  const log = g.changes('retail', { limit: 9 })
+  assert.equal(log.filter((c) => !c.applied).length, 9)
   assert.equal(log[0].from, 'CONCEPTS.md')
 })
 

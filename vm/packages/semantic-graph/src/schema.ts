@@ -160,6 +160,20 @@ export function schemaProblems(s: Schema): string[] {
   for (const [n, c] of Object.entries(s.conditions ?? {})) {
     if (!s.objects[c.on]) out.push(`the condition "${n}" is about ${c.on}, which is not an object of the schema`)
     if (!c.where?.length) out.push(`the condition "${n}" keeps to nothing`)
+    if (!s.objects[c.on]) continue
+    for (const w of c.where ?? []) {
+      const via = Array.isArray(w.via) ? w.via : undefined
+      const end = via ? walk(s, c.on, via) : undefined
+      if (via && !end) { out.push(`the condition "${n}" goes via ${via.join('.')}, which is not a path from ${c.on}`); continue }
+      if ('condition' in w) { if (!s.conditions?.[w.condition as string]) out.push(`the condition "${n}" uses "${w.condition}", which is not a condition of the schema`) }
+      else if ('attribute' in w) {
+        const owner = (w.of as string | undefined) ?? end?.object ?? c.on
+        if (!s.objects[owner]?.attributes?.[w.attribute as string]) out.push(`the condition "${n}" keeps to ${owner}.${w.attribute}, which is not an attribute`)
+      } else if ('to' in w) {
+        if (!s.objects[w.to as string]) out.push(`the condition "${n}" keeps to ${w.to}, which is not an object of the schema`)
+        else if (end && end.object !== w.to) out.push(`the condition "${n}" goes via ${via!.join('.')} to ${end.object}, not ${w.to}`)
+      }
+    }
   }
   for (const e of s.equations ?? []) {
     const [a, b] = e.paths.map((p) => walk(s, e.on, p))

@@ -378,23 +378,28 @@ export function createGraph(o: GraphOptions) {
     }
     let src = intervenedSources(s, sources, ivs.filter((x) => !(sources.facts[x.on] ?? sources.entities[x.on])?.program), dialectFor)
     const produced = [...Object.entries(src.facts), ...Object.entries(src.entities)].filter(([, x]) => x.program).map(([o]) => o)
+    const readsOf = (obj: string) => {
+      const x = (src.facts[obj] ?? src.entities[obj])!
+      const def = definition(c.pinned?.[x.program!] ?? resolveName('program', x.program!, c.namespace) ?? '')?.body as ProgramDef | undefined
+      return def?.reads.objects ?? []
+    }
     const ordered: string[] = []
     const visit = (obj: string, trail: string[]) => {
       if (ordered.includes(obj)) return
       if (trail.includes(obj)) throw new Error(`programs read each other in a circle: ${[...trail, obj].join(' → ')}`)
-      const x = (src.facts[obj] ?? src.entities[obj])!
-      const def = definition(c.pinned?.[x.program!] ?? resolveName('program', x.program!, c.namespace) ?? '')?.body as ProgramDef | undefined
-      for (const r of def?.reads.objects ?? []) if (produced.includes(r)) visit(r, [...trail, obj])
+      for (const r of readsOf(obj)) if (produced.includes(r)) visit(r, [...trail, obj])
       ordered.push(obj)
     }
     for (const obj of produced) visit(obj, [])
+    // A program runs when the question needs its object, or a program that runs reads it.
     const needed = new Set(nodes)
+    for (const obj of [...ordered].reverse()) if (needed.has(obj)) for (const r of readsOf(obj)) needed.add(r)
     for (const obj of ordered) {
       const x = (src.facts[obj] ?? src.entities[obj])!
       const hash = c.pinned?.[x.program!] ?? resolveName('program', x.program!, c.namespace) ?? (() => { throw new Error(`${obj} is produced by the program "${x.program}", which does not exist`) })()
       const def = definition(hash)!.body as ProgramDef
       c.programs[x.program!] = hash
-      if (!needed.has(obj) && !ordered.slice(ordered.indexOf(obj) + 1).some((later) => needed.has(later))) continue
+      if (!needed.has(obj)) continue
       const fn = await loadModule(hash, def.body, modules)
       const ctx = {
         today: c.today,
@@ -482,14 +487,14 @@ export function createGraph(o: GraphOptions) {
       }
       for (const p of plansOf(plan!)) for (const fp of p.facts.filter((f) => factsHere.includes(f.fact))) {
         const fs = src.facts[fp.fact]
-        const paths = [...fp.by, ...fp.where].flatMap((x) => ('path' in x ? [{ path: x.path, end: x }] : []))
+        const paths = [...fp.by, ...fp.where].flatMap<{ path: string[]; end: any }>((x) => ('path' in x ? [{ path: x.path, end: x }] : 'attribute' in x && x.at?.length ? [{ path: x.at, end: x }] : []))
         for (const m of fp.measures) { const c = s.objects[fp.fact].measures![m].currency; if (Array.isArray(c) && fp.convert) paths.push({ path: c, end: {} as any }) }
         for (const { path, end } of paths) {
           if (!fs.arrows[path[0]]) continue
           let obj = walk(s, fp.fact, [path[0]])!.object
           if (s.objects[obj].kind !== 'entity') continue
           let keys = (local.prepare(`SELECT DISTINCT ${q(fs.arrows[path[0]])} AS k FROM (${fs.sql}) f`).all() as Array<{ k: unknown }>).map((r) => String(r.k))
-          const needsEnd = 'under' in end && end.under || 'contains' in end || 'startsWith' in end
+          const needsEnd = 'under' in end && end.under || 'contains' in end || 'startsWith' in end || 'attribute' in end
           if ('under' in end && end.under) whole.add(walk(s, fp.fact, path)!.object)
           for (let i = 1; i <= path.length; i++) {
             if (i === path.length && !needsEnd) break
