@@ -48,13 +48,15 @@ it cannot answer as asked.
 Read the question in the graph's terms: resolve its terms, settle what is ambiguous or missing with the other finds, and
 see how the measures can be grouped by its dimensions; check the questions the answer needs and try them to see the data.
 
-Then answer with a program in this folder, program.mjs, and run it. Its data comes only from the graph questions it asks;
-it shapes them into what a person deciding needs — the headline figure, the tables and charts that show it, a few
-sentences on what stands out with every number cited from its cells, and what they could look at next. A refusal says
-what to change. When the graph does not hold what the question needs, escalate with what is missing.
+Then answer with a program in this folder, program.mjs. Its data comes only from the graph questions it asks;
+it shapes them into what a person deciding needs — the headline figure, the tables and charts that show it, up to five
+short points on what stands out (totals, counts, extremes, changes) with every number cited from its cells, and what they
+could look at next. The tables carry the rows; the points summarise them. Try the program, read its answer against the
+question as asked, correct it, then run it. A refusal says what to change. When the graph does not hold what the
+question needs, answer what it does hold and say plainly what differs, or escalate with what is missing.
 
 Tools: ./resolve-terms ./find-measure ./find-dimension ./find-record ./describe ./list-dimensions ./group-paths ./overview ./check-question ./try-question
-./run-program ./trace-answer ./escalate — each explains itself with --help. Each question comes with today's date and its qid.`
+./try-program ./run-program ./trace-answer ./escalate — each explains itself with --help. Each question comes with today's date and its qid.`
 
 /** The date a question is asked on, in the organisation's time zone (settings.json \`timezone\`), else UTC — never the
  *  server's. An agent is not otherwise told what day it is. */

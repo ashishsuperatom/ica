@@ -62,7 +62,9 @@ export function surfaceAnswer(a: Delivered | Table | null | undefined, caveats: 
     return { status: 'answered', answer: t.rows.length ? '' : 'No rows match this question.', sections: [section(t)], ...(caveats.length ? { caveat: caveats.join('\n') } : {}) }
   }
   a = a as Delivered | null | undefined
-  const prose = (a?.narration ?? []).map((s) => s.text).join(' ')
+  // The narration's points read as a list, one point to a line.
+  const points = (a?.narration ?? []).map((s) => s.text)
+  const prose = points.length > 1 ? points.map((t) => `- ${t}`).join('\n') : (points[0] ?? '')
   const data = { ...(a?.data ?? {}) }
   const sections: NonNullable<Answer['sections']> = []
   if (a?.headline) sections.push({ kind: 'kpis', items: [{ label: a.headline.label, display: a.headline.display, value: null }] } as any)

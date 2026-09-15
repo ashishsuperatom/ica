@@ -7,6 +7,7 @@
 //   ./find-record <Entity> <text>  which member was meant by what was typed
 //   ./check-question '<question>'   the plan for a question, or the rule that refuses it and the choices
 //   ./try-question '<q>'            see a question's answer while writing the program
+//   ./try-program [file] [params]   the answer program's answer as a person would read it, not yet given
 //   ./run-program [file] [params]   run the answer program as this conversation's next step
 //   ./source-records '<group>'         the rows behind one group of the current answer
 //   ./trace-answer [call]           how an answer was reached
@@ -23,7 +24,7 @@ const flag = (name: string) => { const i = argv.indexOf(`--${name}`); if (i < 0)
 const env = { dbDir: flag('db')!, projectDir: flag('project')!, managerUrl: flag('manager')!, home: flag('home')! }
 // Each tool is named for what it does to what: the wrapper passes its own name.
 const TOOLS: Record<string, string> = { 'resolve-terms': 'terms', 'overview': 'catalog', 'describe': 'node', 'group-paths': 'paths', 'list-dimensions': 'dimensions', 'find-measure': 'find-measure', 'find-dimension': 'find', 'find-record': 'members',
-  'check-question': 'check', 'try-question': 'try', 'run-program': 'program', 'source-records': 'detail', 'trace-answer': 'trace' }
+  'check-question': 'check', 'try-question': 'try', 'try-program': 'try-program', 'run-program': 'program', 'source-records': 'detail', 'trace-answer': 'trace' }
 // How nodes connect reads as graph patterns; --json (or SEMANTIC_TOOL_FORMAT=json) gives the same views as JSON.
 const asJson = argv.includes('--json') ? (argv.splice(argv.indexOf('--json'), 1), true) : process.env.SEMANTIC_TOOL_FORMAT === 'json'
 const [tool, ...args] = argv
@@ -92,6 +93,17 @@ else if (command === 'members') {
   const a = await graph.ask(q, { model: MODEL, ...(sessionId ? { sessionId } : {}) })
   // As ctx.ask gives it to a program.
   out(a.ok ? (({ columns, rows, notes }) => ({ columns, rows: rows.slice(0, 25), ...(rows.length > 25 ? { total: rows.length } : {}), notes }))(tableOf(a.result)) : { refused: { ...(a.rule ? { rule: a.rule } : {}), reason: a.reason, ...((a as any).choices ? { choices: (a as any).choices } : {}) } })
+} else if (command === 'try-program') {
+  const [file = 'program.mjs', paramsText] = args
+  const source = await readFile(join(env.home, file), 'utf8').catch(() => fail(`${file} is not in this folder`))
+  const params = paramsText ? json(paramsText, 'the parameters') : {}
+  const r = await runProgram(graph, source, params, { model: MODEL, sessionId: sessionId ?? undefined, today: new Date().toISOString().slice(0, 10), onExplain: (t) => console.error(`… ${t}`) })
+  if (r.error) out({ refused: r.error, steps: r.steps })
+  else {
+    const a = r.answer!
+    out({ headline: a.headline ? `${a.headline.label}: ${a.headline.display}` : null, narration: a.narration.map((n) => n.text), views: a.views.map((v) => `${v.id}: ${v.component} of ${v.data}`),
+      data: Object.fromEntries(Object.entries(a.data).map(([k, t]) => [k, { rows: t.rows.length, columns: t.columns.map((c) => c.name), first: t.rows.slice(0, 20) }])), notes: a.notes, steps: r.steps.map((x) => `${x.kind}: ${'label' in x ? x.label : x.text}`) })
+  }
 } else if (command === 'program') {
   if (!sessionId) fail('there is no data session for this conversation')
   const qid = await readTurn('.turn') || fail('there is no turn in progress here')

@@ -154,6 +154,7 @@ export function deliver(answer: ProgramAnswer, notes: string[]) {
     const label = col.role === 'dimension' && t.columns.some((x) => x.name === `${col.name}_label`) ? row![`${col.name}_label`] : undefined
     return label !== undefined && !c.format ? String(label ?? 'none') : write(row![col.name], c.format ?? formatOf(col))
   }
+  if ((answer.narration ?? []).length > 5) refuse(`the narration has ${answer.narration.length} points — up to five on what stands out; the tables carry every row`)
   const narration = (answer.narration ?? []).map((s, i) => {
     if (typeof s?.text !== 'string') refuse(`sentence ${i + 1} has no text`)
     const typed = s.text.replace(/\{[a-zA-Z_]\w*\}/g, '').match(/(?<![\w-])\d[\d,]*(\.\d+)?%?/g)?.map((n) => n.replace(/,$/, '')).filter((n) => !/^(19|20)\d\d$/.test(n))
