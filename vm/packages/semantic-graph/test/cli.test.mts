@@ -43,7 +43,7 @@ test('building, refusing, reading, exporting and importing a model with the tool
 
 test('the prompt covers every command, and its version follows its content', async () => {
   const p = prompt()
-  for (const cmd of ['add-entity', 'add-measure', 'promote-attribute', 'dimensions', 'history', 'export']) assert.match(p.text, new RegExp(`semantic-graph ${cmd}`))
+  for (const cmd of ['add-entity', 'add-measure', 'promote-attribute', 'dimensions', 'history', 'export']) assert.match(p.text, new RegExp(`^  ${cmd} `, 'm'))
   assert.match(p.version, /^[0-9a-f]{12}$/)
   const out: string[] = []
   assert.equal(await run(['prompt', '--json'], (s) => out.push(s)), 0)
