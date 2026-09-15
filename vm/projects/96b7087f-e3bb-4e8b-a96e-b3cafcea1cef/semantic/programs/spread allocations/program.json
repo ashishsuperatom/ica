@@ -1,5 +1,10 @@
 {
   "produces": "AllocationDay",
-  "reads": { "sources": ["F5NETSUITE"], "objects": [] },
-  "description": "Each resource allocation's hours spread evenly over the working days of the allocated person's calendar (weekdays less its holidays), priced at the allocation's billing rate; summed per person, project, day, commitment and billability."
+  "reads": {
+    "sources": [
+      "F5NETSUITE"
+    ],
+    "objects": []
+  },
+  "description": "Each resource allocation on a real project (one with a status and a type) spread evenly over the weekdays of its range, weekend-only allocations on their first day. Revenue is projected from billable allocations: hours \u00d7 the charge-out rate, or the project's forecasting rate on Milestone Fixed Price and Prepayment projects. Summed per person, project, day, commitment and billability."
 }

@@ -57,6 +57,8 @@ export interface EntitySource {
   arrows: Record<string, string>
   /** The column people read an element by, for filters on labels and member search. */
   label?: string
+  /** attribute → column. */
+  attributes?: Record<string, string>
   /** as-of arrow role → a statement of its history: the element, where it led, [from, to). */
   history?: Record<string, { sql: string; key: string; value: string; from: string; to: string; params?: Record<string, unknown> }>
   params?: Record<string, unknown>
@@ -203,7 +205,24 @@ function statement(s: Schema, src: Sources, plan: Plan, fp: FactPlan, dialects: 
     }
     return reached.get(text)!
   }
-  const stepExpr = (x: Step) => ('attribute' in x ? col('f', fs.attributes?.[x.attribute] ?? fail(`${fp.fact}.${x.attribute} has no column`)) : reach(x.path))
+  /** An attribute of the element a path leads to, from that entity's own source. */
+  const attributeOf = (path: string[], attribute: string): string => {
+    const key = reach(path)
+    const object = walk(s, fp.fact, path)!.object
+    const es = src.entities[object] ?? fail(`${object} has no source, so its attributes cannot be read`)
+    const c = es.attributes?.[attribute] ?? fail(`the source of ${object} has no column for ${attribute}`)
+    const text = `${path.join('.')}#entity`
+    if (!reached.has(text)) {
+      sameSource(object, es.source)
+      take(es.params)
+      const alias = `j${joins.length}`
+      joins.push(`LEFT JOIN (${es.sql}) ${alias} ON ${col(alias, es.key)} = ${key}`)
+      reached.set(text, alias)
+      guards.set(`${object}#attributes`, { label: `${object} has one row per key`, source: es.source, params: es.params, sql: `SELECT COUNT(*) AS n, COUNT(DISTINCT g.${q(es.key)}) AS d FROM (${es.sql}) g` })
+    }
+    return col(reached.get(text)!, c)
+  }
+  const stepExpr = (x: Step) => ('attribute' in x ? (x.at?.length ? attributeOf(x.at, x.attribute) : col('f', fs.attributes?.[x.attribute] ?? fail(`${fp.fact}.${x.attribute} has no column`))) : reach(x.path))
 
   const keys = fp.by.map(stepExpr)
   const where: string[] = []
@@ -213,6 +232,13 @@ function statement(s: Schema, src: Sources, plan: Plan, fp: FactPlan, dialects: 
     const expr = stepExpr(w)
     if ('none' in w) { where.push(`${expr} IS ${w.none ? '' : 'NOT '}NULL`); continue }
     if ('notIn' in w) { where.push(`(${expr} IS NULL OR ${expr} NOT IN (${w.notIn.map(param).join(', ')}))`); continue }
+    if ('range' in w) {
+      const dated = typeof w.range.from === 'string' || typeof w.range.to === 'string'
+      const v = (x: string | number) => (dated ? d.date(param(x)) : param(x))
+      if (w.range.from !== undefined) where.push(`${expr} >= ${v(w.range.from)}`)
+      if (w.range.to !== undefined) where.push(`${expr} < ${v(w.range.to)}`)
+      continue
+    }
     if ('contains' in w || 'startsWith' in w) {
       const labelled = 'attribute' in w ? expr : labelOf(w.path)
       // LIKE without ESCAPE, which every source accepts: a % or _ typed in a name matches loosely.
@@ -220,7 +246,7 @@ function statement(s: Schema, src: Sources, plan: Plan, fp: FactPlan, dialects: 
       where.push(`LOWER(${labelled}) LIKE ${param(pattern)}`)
       continue
     }
-    const list = w.in.map(param).join(', ')
+    const list = (w as { in: string[] }).in.map(param).join(', ')
     if (!w.under) { where.push(`${expr} IN (${list})`); continue }
     const object = (w as { path: string[] }).path.reduce((o, r) => arrow(s, o, r)!.to, fp.fact)
     const es = src.entities[object] ?? fail(`${object} has no source`)

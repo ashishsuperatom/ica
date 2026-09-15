@@ -28,13 +28,15 @@ export function toSqlite(s: Schema, I: Instance): { query: Query; sources: Sourc
         attributes: Object.fromEntries(attributes.map((a) => [a, `t:${a}`])), measures: Object.fromEntries(measures.map((m) => [m, `m:${m}`])) }
     } else if (o.kind === 'entity') {
       const plain = arrows(s, name).filter((a) => a.kind !== 'as-of').map((a) => a.role)
-      table(name, ['key', 'label', ...plain], Object.entries(I.elements[name] ?? {}).map(([k, e]) => [k, e.label ?? o.members?.[k] ?? k, ...plain.map((a) => e.arrows?.[a] ?? null)]))
+      const attributes = Object.keys(o.attributes ?? {})
+      table(name, ['key', 'label', ...plain, ...attributes.map((a) => `t:${a}`)], Object.entries(I.elements[name] ?? {}).map(([k, e]) => [k, e.label ?? o.members?.[k] ?? k, ...plain.map((a) => e.arrows?.[a] ?? null), ...attributes.map((a) => e.attributes?.[a] ?? null)]))
       const history: NonNullable<Sources['entities'][string]['history']> = {}
       for (const a of arrows(s, name).filter((x) => x.kind === 'as-of')) {
         table(`${name}.${a.role}`, ['key', 'value', 'from', 'to'], Object.entries(I.elements[name] ?? {}).flatMap(([k, e]) => (e.history?.[a.role] ?? []).map((h) => [k, h.value, h.from, h.to ?? null])))
         history[a.role] = { sql: `SELECT * FROM ${q(`${name}.${a.role}`)}`, key: 'key', value: 'value', from: 'from', to: 'to' }
       }
-      sources.entities[name] = { source: 'DB', sql: `SELECT * FROM ${q(name)}`, key: 'key', label: 'label', arrows: Object.fromEntries(plain.map((a) => [a, a])), history }
+      sources.entities[name] = { source: 'DB', sql: `SELECT * FROM ${q(name)}`, key: 'key', label: 'label', arrows: Object.fromEntries(plain.map((a) => [a, a])), history,
+        ...(attributes.length ? { attributes: Object.fromEntries(attributes.map((a) => [a, `t:${a}`])) } : {}) }
     }
   }
   const query: Query = async (_source, sql, params) => db.prepare(sql).all(params as any) as Array<Record<string, unknown>>

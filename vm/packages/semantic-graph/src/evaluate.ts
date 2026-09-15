@@ -5,7 +5,7 @@
 // an instant, facts added up separately and then joined on their targets. It is written for being obviously right,
 // not fast: it is the oracle compiled queries are tested against.
 
-import { meets, type Expr, type FactPlan, type Plan } from './algebra.js'
+import { meets, type Expr, type FactPlan, type Plan, type Step } from './algebra.js'
 import { keyOf, periodOf, periodsBetween, shiftPeriods } from './calendar.js'
 import { DataError, follow, followPath, period, rowDate, type Instance, type Key, type Row } from './instance.js'
 import { arrow, timeArrow, type Schema } from './schema.js'
@@ -150,7 +150,7 @@ const compareWith = (v: number, op: string, x: number) => op === '<' ? v < x : o
 export function detail(s: Schema, I: Instance, plan: Plan, key: Array<Key | null>): Array<{ fact: string; rows: Row[] }> {
   return plan.facts.map((fp) => ({
     fact: fp.fact,
-    rows: (I.rows[fp.fact] ?? []).filter((row) => keep(s, I, fp, plan, row) && fp.by.every((b, i) => ('path' in b ? followPath(s, I, fp.fact, row, b.path) : row.attributes?.[b.attribute] ?? null) === key[i])),
+    rows: (I.rows[fp.fact] ?? []).filter((row) => keep(s, I, fp, plan, row) && fp.by.every((b, i) => stepValue(s, I, fp.fact, row, b) === key[i])),
   }))
 }
 
@@ -168,7 +168,7 @@ function foldFact(s: Schema, I: Instance, fp: FactPlan, plan: Plan): Groups {
   const def = s.objects[fp.fact]
   const time = timeArrow(s, fp.fact)
   const rows = (I.rows[fp.fact] ?? []).filter((row) => keep(s, I, fp, plan, row))
-  const keyOf = (row: Row) => fp.by.map((b) => ('path' in b ? followPath(s, I, fp.fact, row, b.path) : row.attributes?.[b.attribute] ?? null))
+  const keyOf = (row: Row) => fp.by.map((b) => stepValue(s, I, fp.fact, row, b))
   const groups = new Map<string, { key: Key[]; rows: Row[] }>()
   for (const row of rows) {
     const key = keyOf(row) as Key[]
@@ -228,7 +228,7 @@ function keep(s: Schema, I: Instance, fp: FactPlan, plan: Plan, row: Row): boole
     if (p.from < plan.span.from || p.from >= plan.span.to) return false
   }
   for (const w of fp.where) {
-    if ('attribute' in w) { const v = row.attributes?.[w.attribute] ?? null; if (!meets(w, v, v)) return false; continue }
+    if ('attribute' in w) { const v = stepValue(s, I, fp.fact, row, w); if (!meets(w, v, v === null ? null : String(v))) return false; continue }
     let v = followPath(s, I, fp.fact, row, w.path)
     if (!w.under) { if (!meets(w, v, v === null ? null : I.elements[pathEnd(s, fp.fact, w.path)]?.[v]?.label ?? s.objects[pathEnd(s, fp.fact, w.path)].members?.[v] ?? v)) return false; continue }
     // Under: the element itself or anything it reaches along the self arrow.
@@ -241,6 +241,16 @@ function keep(s: Schema, I: Instance, fp: FactPlan, plan: Plan, row: Row): boole
   return true
 }
 const pathEnd = (s: Schema, from: string, path: string[]) => path.reduce((o, role) => arrow(s, o, role)!.to, from)
+
+/** What a step gives for a row: where its path leads, its own attribute, or an attribute of the element a path leads to. */
+function stepValue(s: Schema, I: Instance, fact: string, row: Row, step: Step): Key | null {
+  if ('path' in step) return followPath(s, I, fact, row, step.path)
+  if (!step.at?.length) return row.attributes?.[step.attribute] ?? null
+  const key = followPath(s, I, fact, row, step.at)
+  if (key === null) return null
+  const v = I.elements[pathEnd(s, fact, step.at)]?.[key]?.attributes?.[step.attribute]
+  return v === undefined || v === null ? null : String(v)
+}
 
 /** 1 of a row's currency in the plan's currency, from the conversion fact: the latest rate on or before the date. */
 function rate(s: Schema, I: Instance, fp: FactPlan, plan: Plan, row: Row, currency: string[] | { attribute: string }): number {

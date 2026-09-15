@@ -20,8 +20,9 @@ console.log(`loaded and checked in ${((Date.now() - t) / 1000).toFixed(1)}s`)
 
 const AU = { to: 'Subsidiary', in: ['AU'] }
 const questions: Array<[string, any, string?]> = [
-  ['Timesheet hours, AU, August by week', { measures: ['TimeDay.hours', 'TimeDay.people'], by: [{ to: 'Week' }], where: [AU], span: { from: '2026-08-03', through: '2026-08-30' } }],
-  ['Projected revenue, AU, Sep–Oct, hard and soft', { measures: ['AllocationDay.revenue', 'AllocationDay.hours', 'AllocationDay.unpriced hours'], by: [{ to: 'Month' }, { to: 'Commitment' }], where: [AU], span: { from: '2026-09-01', through: '2026-10-31' }, currency: 'AUD' }],
+  // ['Timesheet hours, AU, August by week', { measures: ['TimeDay.hours', 'TimeDay.people'], by: [{ to: 'Week' }], where: [AU], span: { from: '2026-08-03', through: '2026-08-30' } }],
+  ['Projected revenue, AU, Jul–Oct, hard and soft', { measures: ['AllocationDay.revenue', 'AllocationDay.hours', 'AllocationDay.unpriced hours'], by: [{ to: 'Month' }, { to: 'Commitment' }], where: [AU], span: { from: '2026-07-01', through: '2026-10-31' }, currency: 'AUD' }],
+  ['Remaining soft by project, AU, September', { measures: ['AllocationDay.revenue'], by: [{ to: 'Project' }], where: [AU, { to: 'Commitment', in: ['Soft'] }], span: { from: '2026-09-01', through: '2026-09-30' }, currency: 'AUD', order: { by: 'AllocationDay.revenue', desc: true }, limit: 7 }],
 ]
 for (const [name, q] of questions) {
   t = Date.now()

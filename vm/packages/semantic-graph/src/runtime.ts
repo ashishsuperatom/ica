@@ -726,7 +726,12 @@ export function nodesOf(s: Schema, plan: Plan): string[] {
       out.add(fp.fact)
       for (const m of fp.measures) out.add(`${fp.fact}.${m}`)
       for (const step of [...fp.by, ...fp.where]) {
-        if ('attribute' in step) { out.add(`${fp.fact}.@${step.attribute}`); continue }
+        if ('attribute' in step) {
+          const owner = step.at?.length ? walk(s, fp.fact, step.at)!.object : fp.fact
+          out.add(`${owner}.@${step.attribute}`)
+          if (step.at?.length) { for (const a of walk(s, fp.fact, step.at)!.walked) out.add(a.to); let at = fp.fact; for (const role of step.at) { out.add(`${at}.${role}`); at = walk(s, at, [role])!.object } }
+          continue
+        }
         for (const a of walk(s, fp.fact, step.path)!.walked) out.add(a.to)
         let at = fp.fact
         for (const role of step.path) { out.add(`${at}.${role}`); at = walk(s, at, [role])!.object }

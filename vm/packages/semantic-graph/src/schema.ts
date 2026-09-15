@@ -44,9 +44,26 @@ export interface ObjectDef {
   names?: Record<string, string>
   /** facts */
   measures?: Record<string, Measure>
-  attributes?: Record<string, { members?: string[]; synonyms?: string[] }>
+  /** Values a fact row or an entity element carries that lead nowhere: a status, a flag, a date, a number. Grouped and
+   *  filtered by, never added up. `type` says how they compare: dates and numbers by range, text by value. */
+  attributes?: Record<string, AttributeDef>
+  /** facts: the named conditions its rows are always kept to, unless a question sets one aside. */
+  keptTo?: string[]
+  /** facts and entities: the source holds only the current state — no earlier state can be read back. */
+  history?: 'current'
   /** facts: the path a target means when several reach it. */
   defaults?: Record<string, string[]>
+}
+
+export interface AttributeDef { type?: 'text' | 'date' | 'number' | 'flag'; members?: string[]; synonyms?: string[]; description?: string }
+
+/** A condition people name — "a valid project", "the PMO population" — kept as one definition: filters on the object
+ *  it is about (`on`), each reached from that object. A question keeps to it by name, from any fact that reaches it. */
+export interface ConditionDef {
+  on: string
+  description?: string
+  synonyms?: string[]
+  where: Array<Record<string, unknown>>
 }
 
 export interface Equation { on: string; paths: [string[], string[]] }
@@ -63,6 +80,7 @@ export interface Schema {
   objects: Record<string, ObjectDef>
   equations?: Equation[]
   conversion?: Conversion
+  conditions?: Record<string, ConditionDef>
 }
 
 
@@ -126,6 +144,11 @@ export function schemaProblems(s: Schema): string[] {
       }
     }
     for (const [target, p] of Object.entries(o.defaults ?? {})) if (walk(s, name, p)?.object !== target) out.push(`${name}: the default ${p.join('.')} does not lead to ${target}`)
+    for (const c of o.keptTo ?? []) if (!s.conditions?.[c]) out.push(`${name} is kept to "${c}", which is not a condition of the schema`)
+  }
+  for (const [n, c] of Object.entries(s.conditions ?? {})) {
+    if (!s.objects[c.on]) out.push(`the condition "${n}" is about ${c.on}, which is not an object of the schema`)
+    if (!c.where?.length) out.push(`the condition "${n}" keeps to nothing`)
   }
   for (const e of s.equations ?? []) {
     const [a, b] = e.paths.map((p) => walk(s, e.on, p))

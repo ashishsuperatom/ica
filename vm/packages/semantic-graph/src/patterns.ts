@@ -31,7 +31,10 @@ export function nodeText(s: Schema, name: string): string {
   if (v.measures?.length) out.push('', '  measures', ...table([['name', 'unit', 'aggregate', 'notes'], ...v.measures.map((m) => [m.name, m.unit, m.aggregate,
     [m.currency ? `currency by ${m.currency}` : '', m.overTime ? `over time: ${m.overTime}` : '', m.of ? `counts ${m.of}` : '', m.weight ? `weighted by ${m.weight}` : '', m.versions ? `by version ${m.versions}` : '',
       m.synonyms?.length ? `also: ${m.synonyms.join(', ')}` : ''].filter(Boolean).join('; ')])]))
-  if (v.attributes?.length) out.push('', '  attributes', ...table(v.attributes.map((a) => [a.name, a.values ? a.values.join(', ') : ''])))
+  if (v.attributes?.length) out.push('', '  attributes', ...table(v.attributes.map((a) => [a.name, a.type ?? 'text', [a.values ? a.values.join(', ') : '', a.description ?? ''].filter(Boolean).join(' — ')])))
+  if (v.keptTo?.length) out.push('', `  always kept to: ${v.keptTo.join(', ')} — unless a question sets it aside with "without"`)
+  if (v.history) out.push('', '  holds only its current state: earlier states cannot be read back')
+  if (v.conditions?.length) out.push('', '  conditions about it', ...table(v.conditions.map((c) => [c.name, [c.description, JSON.stringify(c.where)].filter(Boolean).join(' — ')])))
   if (v.members) {
     out.push('', `  members (${v.members.count}${v.members.count > v.members.sample.length ? `, first ${v.members.sample.length}` : ''})`, ...table(v.members.sample.map((m) => [m.key, m.label])))
     if (v.members.names) out.push('', '  names people use', ...table(Object.entries(v.members.names).map(([n, k]) => [n, `= ${k}`])))
@@ -66,13 +69,17 @@ export function catalogText(s: Schema): string {
     if (o.defaults) out.push('  by default', ...table(Object.entries(o.defaults).map(([to, p]) => [`to (:${to})`, `via ${p.join('.')}`])))
     out.push('  measures', ...table(Object.entries(o.measures ?? {}).map(([m, d]) => [m, d.unit, d.aggregate])))
     if (o.attributes) out.push(`  attributes: ${Object.keys(o.attributes).join(', ')}`)
+    if (o.keptTo?.length) out.push(`  always kept to: ${o.keptTo.join(', ')}`)
+    if (o.history) out.push('  holds only its current state')
   }
   out.push('', '', 'DIMENSIONS: what measures are grouped by and kept to')
   for (const e of c.entities) {
     const as = arrows(s, e.name)
     out.push('', `(:${e.name})${e.members ? `  ${plural(e.members, 'member')} listed` : ''}${e.description ? `  ${e.description}` : ''}`)
     if (as.length) out.push(...table(arrowRows(as)))
+    if (e.attributes?.length) out.push(`    attributes: ${e.attributes.join(', ')}`)
   }
+  if (c.conditions.length) out.push('', '', 'CONDITIONS: kept to by name', ...table(c.conditions.map((x) => [x.name, `on (:${x.on})`, x.description ?? '']), '  '))
   out.push('', '', 'CALENDARS', ...table([['calendar', 'cuts by', 'rolls up to'], ...c.calendars.map((k) => [`(:${k.name})`, String(k.cuts ?? ''), k.rollsUpTo.map((x) => `(:${x})`).join(' ')])], '  '))
   return out.join('\n')
 }

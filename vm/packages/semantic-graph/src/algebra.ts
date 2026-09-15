@@ -10,14 +10,19 @@ import { arrow, baseUnits, sameUnits, timeArrow, timesUnits, unitText, walk, typ
 
 // ── The question ──
 
-/** Group by an object reached from each fact (optionally saying by which path, for all facts or per fact), or by an
- *  attribute of the one fact that has it. */
-export type Target = { to: string; via?: string[] | Record<string, string[]> } | { attribute: string }
+/** Group by an object reached from each fact (optionally saying by which path, for all facts or per fact), by an
+ *  attribute of the one fact that has it, or by an attribute `of` an object each fact reaches (its path as for `to`). */
+export type Target = { to: string; via?: string[] | Record<string, string[]> } | { attribute: string; of?: string; via?: string[] | Record<string, string[]> }
 /** Keep rows whose target is one of `in` — or, with `under`, anywhere below one of them along that self arrow. */
 /** What a filter keeps: members in or not in a list, rows with nothing at the end of a partial path (or with something),
  *  or members whose label contains or starts with some text, ignoring case. One of them. */
 export type Condition = { in: string[] } | { notIn: string[] } | { none: boolean } | { contains: string } | { startsWith: string }
-export type Filter = ({ to: string; via?: string[] | Record<string, string[]>; under?: string } | { attribute: string }) & Condition
+  /** Values in [from, to): dates as YYYY-MM-DD, or numbers — for attributes that are dates or numbers. */
+  | { range: { from?: string | number; to?: string | number } }
+/** A filter keeps rows by one condition on a target — or keeps them to a named condition of the schema, reached from the
+ *  fact along `via` when the fact reaches its object more than one way. */
+export type Filter = (({ to: string; via?: string[] | Record<string, string[]>; under?: string } | { attribute: string; of?: string; via?: string[] | Record<string, string[]> }) & Condition)
+  | { condition: string; via?: string[] | Record<string, string[]> }
 
 export interface Question {
   /** `Fact.measure`, or an expression over them: `[AllocationDay.revenue] / [BudgetLine.budget]`. */
@@ -30,6 +35,8 @@ export interface Question {
   currency?: string
   /** The day the answer is given as of. A measured value — an exchange rate — dated after it is not known yet. */
   asOf?: string
+  /** Named conditions a fact is always kept to, set aside for this question. */
+  without?: string[]
   order?: { by: string; desc?: boolean }
   limit?: number
   /** Keep only groups whose output meets a condition — applied before order and limit. */
@@ -53,7 +60,8 @@ export interface Question {
 
 // ── The plan ──
 
-export type Step = { path: string[] } | { attribute: string }
+/** Where a row leads along a path; an attribute of the row itself; or an attribute of the element a path leads to. */
+export type Step = { path: string[] } | { attribute: string; at?: string[] }
 export interface FactPlan {
   fact: string
   measures: string[]
@@ -123,10 +131,20 @@ type Reach = { step: Step } | { refuse: Verdict } | { choose: string[] } | { non
 
 function reach(s: Schema, fact: string, t: Target | Filter, facts: string[]): Reach {
   if ('attribute' in t) {
-    if (s.objects[fact].attributes?.[t.attribute]) return { step: { attribute: t.attribute } }
-    const owner = facts.find((f) => s.objects[f].attributes?.[t.attribute])
-    return owner ? { none: `${t.attribute} is an attribute of ${owner}` } : { refuse: refuse('A1', `no fact asked about has the attribute "${t.attribute}"`) }
+    if (!t.of || t.of === fact) {
+      if (s.objects[fact].attributes?.[t.attribute]) return { step: { attribute: t.attribute } }
+      if (t.of) return { refuse: refuse('A1', `${fact} has no attribute "${t.attribute}" — its attributes are ${Object.keys(s.objects[fact].attributes ?? {}).join(', ') || 'none'}`) }
+      const owner = facts.find((f) => s.objects[f].attributes?.[t.attribute])
+      if (owner) return { none: `${t.attribute} is an attribute of ${owner}` }
+      const holders = Object.entries(s.objects).filter(([n, o]) => o.kind !== 'fact' && o.attributes?.[t.attribute]).map(([n]) => n)
+      return { refuse: refuse('A1', holders.length ? `"${t.attribute}" is an attribute of ${holders.join(' and ')} — say which: {"attribute": "${t.attribute}", "of": "${holders[0]}"}` : `no fact asked about has the attribute "${t.attribute}"`) }
+    }
+    if (!s.objects[t.of]) return { refuse: refuse('A1', `there is no ${t.of}`) }
+    if (!s.objects[t.of].attributes?.[t.attribute]) return { refuse: refuse('A1', `${t.of} has no attribute "${t.attribute}" — its attributes are ${Object.keys(s.objects[t.of].attributes ?? {}).join(', ') || 'none'}`) }
+    const r = reach(s, fact, { to: t.of, via: t.via }, facts)
+    return 'step' in r ? { step: { attribute: t.attribute, at: (r.step as { path: string[] }).path } } : r
   }
+  if ('condition' in t) return { refuse: refuse('Q', `the condition "${t.condition}" is kept to, not grouped by`) }
   if (!s.objects[t.to]) return { refuse: refuse('A1', `there is no ${t.to}`) }
   const reaching = pathsFrom(s, fact).filter((p) => p.object === t.to)
   // A path through a self arrow (a manager, a parent) leads to a different element of the same kind — the person's manager,
@@ -164,8 +182,8 @@ function reach(s: Schema, fact: string, t: Target | Filter, facts: string[]): Re
   return { none: fansOut ? `${fact} does not reach ${t.to}: ${t.to} reaches what ${fact} is kept by, so going from it back to ${fact} would count rows more than once` : `${fact} does not reach ${t.to}` }
 }
 
-const targetText = (t: Target | Filter) => ('attribute' in t ? t.attribute : t.to + (Array.isArray(t.via) ? ` by ${t.via.join('.')}` : ''))
-const stepText = (x: Step) => ('path' in x ? pathText(x.path) : x.attribute)
+const targetText = (t: Target | Filter) => ('condition' in t ? t.condition : 'attribute' in t ? (t.of ? `${t.of}.${t.attribute}` : t.attribute) : t.to + (Array.isArray(t.via) ? ` by ${t.via.join('.')}` : ''))
+const stepText = (x: Step) => ('attribute' in x ? (x.at?.length ? `${pathText(x.at)}.${x.attribute}` : x.attribute) : pathText(x.path))
 
 // ── check ──
 
@@ -199,48 +217,57 @@ export function check(s: Schema, q: Question, context: { today?: string } = {}):
       else p.by.push(r.step)
     }
   }
-  // A1, C3: filters. A filter on another fact's version or attribute is about that fact alone.
+  // A1, C3: filters. A filter on another fact's version or attribute is about that fact alone. A named condition is its
+  // filters, reached from the fact through the object it is about; a fact's own conditions apply unless set aside.
+  for (const c of q.without ?? []) if (!s.conditions?.[c]) return refuse('A1', `"${c}" is not a condition of the schema — its conditions are ${Object.keys(s.conditions ?? {}).join(', ') || 'none'}`)
   for (const p of plans) {
-    for (const w of q.where ?? []) {
+    const named = (q.where ?? []).filter((w): w is { condition: string } => 'condition' in w).map((w) => w.condition)
+    const always = (s.objects[p.fact].keptTo ?? []).filter((c) => !named.includes(c) && !(q.without ?? []).includes(c))
+    if (always.length) notes.push(`${p.fact}: kept to ${always.map((c) => s.conditions?.[c]?.description ? `${c} (${s.conditions[c].description})` : c).join('; ')}`)
+    const asked: Array<{ w: Filter; own: boolean }> = [...(q.where ?? []).map((w) => ({ w, own: false })), ...always.map((c) => ({ w: { condition: c } as Filter, own: true }))]
+    for (const { w, own } of asked) {
+      if ('condition' in w) {
+        const def = s.conditions?.[w.condition]
+        if (!def) return refuse('A1', `"${w.condition}" is not a condition of the schema — its conditions are ${Object.keys(s.conditions ?? {}).join(', ') || 'none'}`)
+        let base: string[] = []
+        if (def.on !== p.fact) {
+          const r = reach(s, p.fact, { to: def.on, via: w.via }, facts)
+          if ('refuse' in r) return r.refuse
+          if ('none' in r) { if (own) continue; return refuse('C3', `${r.none}, so it cannot be kept to ${w.condition}`) }
+          if ('choose' in r) { choices.push({ target: def.on, fact: p.fact, paths: r.choose }); continue }
+          base = (r.step as { path: string[] }).path
+        }
+        for (const cw of def.where as Filter[]) {
+          if ('condition' in cw) return refuse('Q', `the condition "${w.condition}" names another condition; a condition keeps to filters on ${def.on}`)
+          // Each filter of the condition is reached from its object, then from the fact through it.
+          const inner = reach(s, def.on, cw, [def.on])
+          if (!('step' in inner)) return refuse('Q', `the condition "${w.condition}": ${'refuse' in inner ? inner.refuse.ok ? '' : inner.refuse.reason : 'none' in inner ? inner.none : `${def.on} reaches ${targetText(cw)} by ${inner.choose.join(' or ')} — the condition must say which`}`)
+          const st = inner.step
+          const step: Step = 'attribute' in st ? (base.length || st.at ? { attribute: st.attribute, at: normalise(s, p.fact, [...base, ...(st.at ?? [])]) } : { attribute: st.attribute }) : { path: normalise(s, p.fact, [...base, ...st.path]) }
+          const bad = addFilter(s, p, step, cw, notes); if (bad) return bad
+        }
+        continue
+      }
       const r = reach(s, p.fact, w, facts)
       if ('refuse' in r) return r.refuse
       if ('none' in r) {
-        const scoped = 'attribute' in w || facts.some((o) => o !== p.fact && Object.keys(s.objects[o].arrows ?? {}).some((role) => { const a = arrow(s, o, role)!; return a.kind === 'version' && a.to === w.to }))
+        const scoped = 'attribute' in w || facts.some((o) => o !== p.fact && Object.keys(s.objects[o].arrows ?? {}).some((role) => { const a = arrow(s, o, role)!; return a.kind === 'version' && a.to === (w as { to: string }).to }))
         if (scoped) continue
-        return refuse('C3', `${r.none}, so it cannot be kept to ${conditionText(w)} while the other measures are`)
+        return refuse('C3', `${r.none}, so it cannot be kept to ${conditionText(w as Condition)} while the other measures are`)
       }
       if ('choose' in r) { choices.push({ target: targetText(w), fact: p.fact, paths: r.choose }); continue }
-      const kinds = (['in', 'notIn', 'none', 'contains', 'startsWith'] as const).filter((k) => k in w)
-      if (kinds.length !== 1) return refuse('Q', `a filter keeps rows by one condition — in, notIn, none, contains or startsWith — and this one has ${kinds.length ? kinds.join(' and ') : 'none'}`)
-      const listed = 'in' in w ? w.in : 'notIn' in w ? w.notIn : undefined
-      let members = listed
-      if (!('attribute' in w)) {
-        const o = s.objects[w.to]
-        members = listed?.map((v) => o.names?.[v] ?? v)
-        const unknown = o.members && members ? members.filter((m) => !o.members![m]) : []
-        if (unknown.length) return refuse('A1', `${w.to} has no member ${unknown.join(', ')}`)
-        if (w.under) {
-          const a = arrow(s, w.to, w.under)
-          if (a?.kind !== 'self') return refuse('A5', `${w.to}.${w.under} is not an arrow from ${w.to} to itself, so there is nothing "under" to follow`)
-          if (!('in' in w)) return refuse('A5', 'everything under is kept for members in a list')
-        }
-        if ('none' in w && 'path' in r.step && !walk(s, p.fact, r.step.path)!.walked.some((a) => a.partial)) {
-          return refuse('A4', `every ${p.fact} row reaches a ${w.to} along ${r.step.path.join('.')}, so none of them has nothing there`)
-        }
-      } else {
-        const known = s.objects[p.fact].attributes![w.attribute].members
-        const unknown = known && listed ? listed.filter((v) => !known.includes(v)) : []
-        if (unknown.length) return refuse('A1', `${p.fact}.${w.attribute} has no value ${unknown.join(', ')}`)
-      }
-      const condition: Condition = 'in' in w ? { in: members! } : 'notIn' in w ? { notIn: members! } : 'none' in w ? { none: w.none } : 'contains' in w ? { contains: w.contains } : { startsWith: (w as { startsWith: string }).startsWith }
-      p.where.push({ ...r.step, ...condition, ...('under' in w && w.under ? { under: w.under } : {}) })
-      if ('notIn' in w) notes.push(`${p.fact}: rows not in ${w.notIn.join(', ')} include those with nothing there`)
+      const bad = addFilter(s, p, r.step, w, notes); if (bad) return bad
     }
   }
   if (choices.length) return refuse('A2', choices.map((c) => `${c.fact} reaches ${c.target} by ${c.paths.join(' or ')}`).join('; ') + ' — say which', choices)
 
   for (const p of plans) {
     const f = s.objects[p.fact]
+    // F2: a source that holds only the current state cannot answer as of an earlier day.
+    if (f.history === 'current') {
+      if (q.asOf && context.today && q.asOf < context.today) return refuse('F2', `${p.fact} holds only its current state; how it stood on ${q.asOf} cannot be read back — ask about it as it is now`)
+      notes.push(`${p.fact}: as it stands now; earlier states are not kept`)
+    }
     const time = timeArrow(s, p.fact)
     if (time) p.time = { role: time.role, level: s.objects[time.to].level ?? time.to, calendar: time.to }
 
@@ -476,13 +503,56 @@ function calendarTarget(s: Schema, plan: Plan): { index: number; object: string 
   return undefined
 }
 
-export const conditionText = (c: Condition) => 'in' in c ? c.in.join(', ') : 'notIn' in c ? `anything but ${c.notIn.join(', ')}` : 'none' in c ? (c.none ? 'nothing' : 'something') : 'contains' in c ? `labels containing "${c.contains}"` : `labels starting "${c.startsWith}"`
+export const conditionText = (c: Condition) => 'in' in c ? c.in.join(', ') : 'notIn' in c ? `anything but ${c.notIn.join(', ')}` : 'none' in c ? (c.none ? 'nothing' : 'something')
+  : 'range' in c ? [c.range.from !== undefined ? `from ${c.range.from}` : '', c.range.to !== undefined ? `before ${c.range.to}` : ''].filter(Boolean).join(' ') : 'contains' in c ? `labels containing "${c.contains}"` : `labels starting "${c.startsWith}"`
+
+/** One filter, checked against what it is on, added to a fact's plan. */
+function addFilter(s: Schema, p: FactPlan, step: Step, w: Filter, notes: string[]): Verdict | undefined {
+  const c = w as Condition & { under?: string }
+  const kinds = (['in', 'notIn', 'none', 'contains', 'startsWith', 'range'] as const).filter((k) => k in c)
+  if (kinds.length !== 1) return refuse('Q', `a filter keeps rows by one condition — in, notIn, none, contains, startsWith or range — and this one has ${kinds.length ? kinds.join(' and ') : 'none'}`)
+  const listed = 'in' in c ? c.in : 'notIn' in c ? c.notIn : undefined
+  let members = listed
+  if ('attribute' in step) {
+    const owner = step.at?.length ? walk(s, p.fact, step.at)!.object : p.fact
+    const def = s.objects[owner].attributes![step.attribute]
+    const unknown = def.members && listed ? listed.filter((v) => !def.members!.includes(v)) : []
+    if (unknown.length) return refuse('A1', `${owner}.${step.attribute} has no value ${unknown.join(', ')} — its values are ${def.members!.join(', ')}`)
+    if ('range' in c && !['date', 'number'].includes(def.type ?? '')) return refuse('A1', `${owner}.${step.attribute} is not a date or a number, so it has no range`)
+  } else {
+    const to = walk(s, p.fact, step.path)!.object
+    const o = s.objects[to]
+    if ('range' in c) return refuse('A1', `${to} is a dimension; a range keeps dates or numbers — filter by its members, or by an attribute of it`)
+    members = listed?.map((v) => o.names?.[v] ?? v)
+    const unknown = o.members && members ? members.filter((m) => !o.members![m]) : []
+    if (unknown.length) return refuse('A1', `${to} has no member ${unknown.join(', ')}`)
+    if (c.under) {
+      const a = arrow(s, to, c.under)
+      if (a?.kind !== 'self') return refuse('A5', `${to}.${c.under} is not an arrow from ${to} to itself, so there is nothing "under" to follow`)
+      if (!('in' in c)) return refuse('A5', 'everything under is kept for members in a list')
+    }
+    if ('none' in c && !walk(s, p.fact, step.path)!.walked.some((a) => a.partial)) {
+      return refuse('A4', `every ${p.fact} row reaches a ${to} along ${step.path.join('.')}, so none of them has nothing there`)
+    }
+  }
+  const condition: Condition = 'in' in c ? { in: members! } : 'notIn' in c ? { notIn: members! } : 'none' in c ? { none: c.none } : 'range' in c ? { range: c.range } : 'contains' in c ? { contains: c.contains } : { startsWith: (c as { startsWith: string }).startsWith }
+  p.where.push({ ...step, ...condition, ...(c.under ? { under: c.under } : {}) })
+  if ('notIn' in c) notes.push(`${p.fact}: rows not in ${c.notIn.join(', ')} include those with nothing there`)
+  return undefined
+}
 
 /** Whether a member (its key and label) meets a condition — the one definition the evaluator uses. */
-export function meets(c: Condition, key: string | null, label: string | null): boolean {
+export function meets(c: Condition, key: string | number | null, label: string | null): boolean {
   if ('none' in c) return c.none ? key === null : key !== null
-  if ('in' in c) return key !== null && c.in.includes(key)
-  if ('notIn' in c) return key === null || !c.notIn.includes(key)
+  if ('in' in c) return key !== null && c.in.includes(String(key))
+  if ('notIn' in c) return key === null || !c.notIn.includes(String(key))
+  if ('range' in c) {
+    if (key === null) return false
+    const num = (v: unknown) => (typeof v === 'number' ? v : Number(v))
+    const numeric = typeof c.range.from === 'number' || typeof c.range.to === 'number'
+    const k = numeric ? num(key) : String(key)
+    return (c.range.from === undefined || k >= (numeric ? num(c.range.from) : String(c.range.from))) && (c.range.to === undefined || k < (numeric ? num(c.range.to) : String(c.range.to)))
+  }
   const text = (label ?? '').toLowerCase()
   return key !== null && ('contains' in c ? text.includes(c.contains.toLowerCase()) : text.startsWith(c.startsWith.toLowerCase()))
 }

@@ -85,8 +85,8 @@ export function canonical(s: Schema, q: Question): string | undefined {
   if (!v.ok) return undefined
   const facts = [...v.plan.facts].sort((a, b) => a.fact.localeCompare(b.fact)).map((f) => ({
     fact: f.fact, measures: [...f.measures].sort(),
-    by: f.by.map((b) => ('path' in b ? b.path.join('.') : `@${b.attribute}`)).sort(),
-    where: f.where.map((w) => `${'path' in w ? w.path.join('.') : `@${w.attribute}`}${w.under ? `^${w.under}` : ''}${'in' in w ? `∈${[...w.in].sort().join('|')}` : 'notIn' in w ? `∉${[...w.notIn].sort().join('|')}` : 'none' in w ? (w.none ? '=∅' : '≠∅') : 'contains' in w ? `~*${w.contains.toLowerCase()}*` : `~${w.startsWith.toLowerCase()}*`}`).sort(),
+    by: f.by.map((b) => ('path' in b ? b.path.join('.') : `${b.at?.length ? b.at.join('.') + '.' : ''}@${b.attribute}`)).sort(),
+    where: f.where.map((w) => `${'path' in w ? w.path.join('.') : `${w.at?.length ? w.at.join('.') + '.' : ''}@${w.attribute}`}${w.under ? `^${w.under}` : ''}${'in' in w ? `∈${[...w.in].sort().join('|')}` : 'notIn' in w ? `∉${[...w.notIn].sort().join('|')}` : 'none' in w ? (w.none ? '=∅' : '≠∅') : 'range' in w ? `∈[${w.range.from ?? ''},${w.range.to ?? ''})` : 'contains' in w ? `~*${w.contains.toLowerCase()}*` : `~${(w as { startsWith: string }).startsWith.toLowerCase()}*`}`).sort(),
     convert: f.convert,
   }))
   return JSON.stringify({ outputs: v.plan.outputs.map((o) => o.name).sort(), facts, span: q.span ?? null, asOf: q.asOf ?? null, order: q.order ?? null, limit: q.limit ?? null, having: q.having ?? null, totals: q.totals ?? null, share: q.share ?? null, compare: q.compare ?? null, fill: q.fill ?? null, cumulative: q.cumulative ?? null, rolling: q.rolling ?? null, limitPer: q.limitPer ?? null })

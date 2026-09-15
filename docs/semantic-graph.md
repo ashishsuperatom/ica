@@ -36,6 +36,12 @@ A schema **S** is a directed graph with typed nodes and typed arrows, and equati
   or an organisation's fiscal levels).
 - **Fact** — a set of events at a grain: `AllocationDay` is one person on one project on one day. A fact carries
   **measures**. Its grain is the set of its **grain arrows** (2.2); two rows of a fact never share all grain values.
+- **Attributes** — values a fact row or an entity element carries that lead nowhere: a project's RAG, its go-live date,
+  its total budget. Each has a type (text, date, number, flag); text may list its values. Grouped and filtered by —
+  dates and numbers by range — never added up.
+- **Conditions** — a condition people name ("a valid project", "the PMO population") is one definition: filters on the
+  object it is about. A question keeps to it by name from any fact that reaches that object; a fact may be **kept to**
+  some conditions always, unless a question sets one aside. A source that holds only its **current state** says so.
 
 ### 2.2 Arrows
 
@@ -119,7 +125,8 @@ A **question** is a pattern `Q = (M, G, W, T, C)`:
 - `M` — measures, each `(F, m)`; derived measures over them;
 - `G` — grouping paths: for each fact `F` in `M`, a path from `F` to a **target object**; a target common to all facts is
   a *conformed* grouping;
-- `W` — filters: a path to an object and a set of members (or a condition on an attribute);
+- `W` — filters: a path to an object and a set of members, a condition on an attribute (of the fact, or of an object a
+  path reaches — a set of values or a range), or a named condition;
 - `T` — a time span on the facts' time paths, and for stocks an instant or a roll-up;
 - `C` — coordinates applied to the result: order, limit, having, compare, cumulative, rolling, fill, totals, share.
 
@@ -204,6 +211,8 @@ Each rule is a consequence of §1, not a design choice.
 **F. Versions**
 
 - **F1** — A measure with a `version` arrow is filtered to one version or grouped by version.
+- **F2** — A fact whose source holds only its current state is answered as it stands now; a question as of an earlier
+  day is refused, with the reason.
 
 ---
 

@@ -22,9 +22,15 @@ export interface NodeView {
   arrows: Array<{ role: string; to: string; kind: string; partial?: boolean }>
   pointedAtBy: Array<{ from: string; role: string; kind: string }>
   measures?: Array<{ name: string; unit: string; kind: string; aggregate: string; currency?: string; overTime?: string; of?: string; weight?: string; versions?: string; synonyms?: string[] }>
+  /** facts: the conditions its rows are always kept to. */
+  keptTo?: string[]
+  /** the named conditions about this object. */
+  conditions?: Array<{ name: string; description?: string; where: unknown[] }>
+  /** the source holds only the current state. */
+  history?: 'current'
   /** facts: the path taken to a dimension when a question does not say which. */
   defaults?: Record<string, string>
-  attributes?: Array<{ name: string; values?: string[] }>
+  attributes?: Array<{ name: string; type?: string; values?: string[]; description?: string }>
   members?: { count: number; sample: Array<{ key: string; label: string }>; names?: Record<string, string> }
   calendar?: { level?: string; fiscal?: unknown; periods?: number }
 }
@@ -46,8 +52,12 @@ export function node(s: Schema, name: string): NodeView {
         ...(d.overTime ? { overTime: d.overTime } : {}), ...(d.of ? { of: d.of } : {}), ...(d.weight ? { weight: d.weight } : {}), ...(d.versions ? { versions: d.versions } : {}),
         ...(d.synonyms ? { synonyms: d.synonyms } : {}) })),
       ...(o.defaults ? { defaults: Object.fromEntries(Object.entries(o.defaults).map(([t, p]) => [t, p.join('.')])) } : {}),
-      attributes: Object.entries(o.attributes ?? {}).map(([a, d]) => ({ name: a, ...(d.members ? { values: d.members } : {}) })),
+
     } : {}),
+    ...(o.attributes ? { attributes: Object.entries(o.attributes).map(([a, d]) => ({ name: a, ...(d.type ? { type: d.type } : {}), ...(d.members ? { values: d.members } : {}), ...(d.description ? { description: d.description } : {}) })) } : {}),
+    ...(o.keptTo?.length ? { keptTo: o.keptTo } : {}),
+    ...(o.history ? { history: o.history } : {}),
+    ...(Object.entries(s.conditions ?? {}).some(([, c]) => c.on === name) ? { conditions: Object.entries(s.conditions ?? {}).filter(([, c]) => c.on === name).map(([n, c]) => ({ name: n, ...(c.description ? { description: c.description } : {}), where: c.where })) } : {}),
     ...(o.members ? { members: { count: Object.keys(o.members).length, sample: Object.entries(o.members).slice(0, 10).map(([key, label]) => ({ key, label })), ...(o.names ? { names: o.names } : {}) } } : {}),
     ...(o.kind === 'calendar' ? { calendar: { ...(o.level ? { level: o.level } : {}), ...(o.fiscal ? { fiscal: o.fiscal } : {}), ...(o.periods ? { periods: o.periods.length } : {}) } } : {}),
   }
@@ -66,6 +76,7 @@ export type Found =
   | { kind: 'attribute'; node: string; attribute: string; value?: string; as: string }
   | { kind: 'role'; node: string; role: string; to: string; as: string }
   | { kind: 'member'; node: string; key: string; label: string; as: string }
+  | { kind: 'condition'; node: string; condition: string; as: string }
 
 const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}&+]+/gu, ' ').trim()
 
@@ -92,6 +103,10 @@ export function find(s: Schema, word: string): Found[] {
     }
     for (const [key, label] of Object.entries(o.members ?? {})) if (is(label) || key === word.trim()) out.push({ kind: 'member', node: name, key, label, as: is(label) ? 'its label' : 'its key' })
     for (const [n, key] of Object.entries(o.names ?? {})) if (is(n)) out.push({ kind: 'member', node: name, key, label: o.members?.[key] ?? key, as: `a name people use, "${n}"` })
+  }
+  for (const [n, c] of Object.entries(s.conditions ?? {})) {
+    if (is(n)) out.push({ kind: 'condition', node: c.on, condition: n, as: 'its name' })
+    for (const syn of c.synonyms ?? []) if (is(syn)) out.push({ kind: 'condition', node: c.on, condition: n, as: `a synonym, "${syn}"` })
   }
   // One entry per thing found, however many of its words matched.
   const seen = new Map<string, Found>()
@@ -149,12 +164,16 @@ export function catalog(s: Schema) {
       keptBy: arrows(s, name).map((a) => `${a.role} → ${a.to}`),
       measures: Object.entries(o.measures ?? {}).map(([m, d]) => `${m} (${d.unit}, ${d.kind}, ${d.aggregate})`),
       ...(o.attributes ? { attributes: Object.keys(o.attributes) } : {}),
+      ...(o.keptTo?.length ? { keptTo: o.keptTo } : {}),
+      ...(o.history ? { history: o.history } : {}),
     })),
     entities: entries.filter(([, o]) => o.kind === 'entity').map(([name, o]) => ({
       name, ...(o.description ? { description: o.description } : {}),
       belongs: arrows(s, name).map((a) => `${a.role} → ${a.to}${a.kind === 'as-of' ? ' (changes over time)' : a.partial ? ' (may be none)' : ''}`),
       ...(o.members ? { members: Object.keys(o.members).length } : {}),
+      ...(o.attributes ? { attributes: Object.keys(o.attributes) } : {}),
     })),
+    conditions: Object.entries(s.conditions ?? {}).map(([name, c]) => ({ name, on: c.on, ...(c.description ? { description: c.description } : {}) })),
     calendars: entries.filter(([, o]) => o.kind === 'calendar').map(([name, o]) => ({ name, cuts: o.fiscal ? `fiscal ${o.fiscal.period}s from month ${o.fiscal.startMonth}` : o.periods ? `${o.periods.length} listed periods` : o.level, rollsUpTo: arrows(s, name).map((a) => a.to) })),
   }
 }

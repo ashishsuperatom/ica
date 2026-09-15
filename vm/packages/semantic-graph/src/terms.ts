@@ -206,9 +206,13 @@ export function termsText(s: Schema, read: TermsResolved, question?: string): st
         if (kind === 'fact') return ['fact', `(:${m.node})`, `./describe ${m.node} for its measures`]
         return [kind === 'calendar' ? 'calendar' : 'dimension', `(:${m.node})`, j({ to: m.node })]
       }
-      case 'attribute': return m.value !== undefined
-        ? ['value', `(:${m.node}).${m.attribute} = ${m.value}`, j({ attribute: m.attribute, in: [m.value] })]
-        : ['attribute', `(:${m.node}).${m.attribute}`, j({ attribute: m.attribute })]
+      case 'attribute': {
+        const of = s.objects[m.node]?.kind === 'fact' ? {} : { of: m.node }
+        return m.value !== undefined
+          ? ['value', `(:${m.node}).${m.attribute} = ${m.value}`, j({ attribute: m.attribute, ...of, in: [m.value] })]
+          : ['attribute', `(:${m.node}).${m.attribute}`, j({ attribute: m.attribute, ...of })]
+      }
+      case 'condition': return ['condition', `${m.condition} on (:${m.node})`, j({ condition: m.condition })]
       case 'role': return ['arrow', `(:${m.node})-[${m.role}]->(:${m.to})`, `${j({ to: m.to })}, via ending in ${j(m.role)}`]
       case 'member': return ['record', `(:${m.node}) ${m.key === m.label ? m.key : `${m.key} ${m.label}`}`, j({ to: m.node, in: [m.key] })]
       case 'span': return ['span', m.reads, j({ span: m.span })]
