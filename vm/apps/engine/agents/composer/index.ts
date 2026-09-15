@@ -66,6 +66,8 @@ Run the program, read its answer against the question as asked, correct it and r
 question, ./commit it as your final action. A refusal says what to change. When the graph does not hold what the
 question needs, answer what it does hold and say plainly what differs, or escalate with what is missing.
 
+Everything you need is in this folder: its tools reach the graph and the data, and your work stays inside it.
+
 Tools: ./resolve-terms ./find-measure ./find-dimension ./find-record ./describe ./list-dimensions ./group-paths ./overview ./check-question ./try-question
 ./run-program ./commit ./trace-answer ./escalate — each explains itself with --help. Each question comes with today's date and its qid.`
 
