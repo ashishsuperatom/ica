@@ -84,6 +84,7 @@ let source = 'default.json'
 function adopt(p: Partial<Profile>, from: string): void {
   const agents = { ...BAKED.agents }
   for (const [name, a] of Object.entries(p.agents ?? {})) {
+    if (!AGENTS.includes(name as AgentName)) continue
     agents[name as AgentName] = { ...agents[name as AgentName], ...(a as AgentProfile) }
   }
   active = { version: p.version ?? BAKED.version, agents, harnessNotes: p.harnessNotes ?? BAKED.harnessNotes }
@@ -142,7 +143,8 @@ export function validate(p: any): string[] {
   // choice is a project running the engine's own defaults.
   if (p.agents !== undefined && (typeof p.agents !== 'object' || Array.isArray(p.agents))) return ['profile.agents is not an object']
   for (const [name, a] of Object.entries((p.agents ?? {}) as Record<string, any>)) {
-    if (!AGENTS.includes(name as AgentName)) { bad.push(`"${name}" is not an agent`); continue }
+    // An agent this engine no longer has is left out, not a reason to refuse the agents it does have.
+    if (!AGENTS.includes(name as AgentName)) { console.warn(`[config] the profile names "${name}", which is not an agent here — left out`); continue }
     // All three, on every agent — the shape IS the contract, and a half-specified agent is the ambiguity this
     // whole module exists to remove.
     for (const field of ['harness', 'provider', 'model'] as const) {

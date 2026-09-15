@@ -1176,7 +1176,7 @@ function ProjectDetailPage() {
           {role === 'superadmin' && (() => {
             // The document being edited, never null: an unconfigured project is an empty one, not an absent one.
             const doc: Draft = draft ?? { agents: {} }
-            const AGENTS = ['analyst', 'connector', 'grounding', 'modeller', 'composer', 'narrator']
+            const AGENTS = ['analyst', 'connector', 'grounding', 'composer', 'narrator']
             const HARNESSES = ['claude-code-pty', 'opencode', 'pi', 'codex']
             const THINKING = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
             const running = prof?.running
