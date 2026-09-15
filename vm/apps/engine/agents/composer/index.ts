@@ -1,9 +1,9 @@
 // THE COMPOSER — answers a conversation's questions from the semantic graph.
 //
 // One composer per conversation, in the conversation's own directory. It reads the question in the graph's terms and
-// answers with a program on the graph, run as the conversation's next step with ./run-program — or hands the question
+// answers with a program on the graph, run with ./run-program and given as the conversation's next step with ./commit — or hands the question
 // to the analyst with ./escalate when the graph does not hold what it needs. The turn ends when a step has been applied
-// (out/<qid>/step.json), the question has been escalated, or an explanation has been written.
+// (out/<qid>/built.json), the question has been escalated, or an explanation has been written.
 
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -51,12 +51,13 @@ see how the measures can be grouped by its dimensions; check the questions the a
 Then answer with a program in this folder, program.mjs. Its data comes only from the graph questions it asks;
 it shapes them into what a person deciding needs — the headline figure, the tables and charts that show it, up to five
 short points on what stands out (totals, counts, extremes, changes) with every number cited from its cells, and what they
-could look at next. The tables carry the rows; the points summarise them. Try the program, read its answer against the
-question as asked, correct it, then run it. A refusal says what to change. When the graph does not hold what the
+could look at next. The tables carry the rows; the points summarise them. Run the program, read its answer against the
+question as asked, correct it and run it again; when it answers the question, ./commit it as your final action. A refusal
+says what to change. When the graph does not hold what the
 question needs, answer what it does hold and say plainly what differs, or escalate with what is missing.
 
 Tools: ./resolve-terms ./find-measure ./find-dimension ./find-record ./describe ./list-dimensions ./group-paths ./overview ./check-question ./try-question
-./try-program ./run-program ./trace-answer ./escalate — each explains itself with --help. Each question comes with today's date and its qid.`
+./run-program ./commit ./trace-answer ./escalate — each explains itself with --help. Each question comes with today's date and its qid.`
 
 /** The date a question is asked on, in the organisation's time zone (settings.json \`timezone\`), else UTC — never the
  *  server's. An agent is not otherwise told what day it is. */
@@ -70,7 +71,7 @@ const dayIn = (zone: string) => new Intl.DateTimeFormat('en-CA', { timeZone: zon
 export const dayOf = (projectDir?: string) => dayIn(zoneOf(projectDir))
 
 export async function turnOutcome(dir: string): Promise<{ step?: number; escalate?: { reason: string }; explained?: true } | null> {
-  try { const s = JSON.parse(await readFile(join(dir, 'step.json'), 'utf8')); if (typeof s.step === 'number') return { step: s.step } } catch { /* not yet */ }
+  try { const s = JSON.parse(await readFile(join(dir, 'built.json'), 'utf8')); if (typeof s.step === 'number') return { step: s.step } } catch { /* not yet */ }
   try { const e = JSON.parse(await readFile(join(dir, 'escalate.json'), 'utf8')); return { escalate: { reason: String(e.reason ?? 'escalated') } } } catch { /* not yet */ }
   // An explain: turn reports on an answer and is done when its explanation is written.
   try { if ((await readFile(join(dir, 'explain.md'), 'utf8')).trim()) return { explained: true } } catch { /* not yet */ }

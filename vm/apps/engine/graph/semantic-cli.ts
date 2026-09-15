@@ -7,8 +7,8 @@
 //   ./find-record <Entity> <text>  which member was meant by what was typed
 //   ./check-question '<question>'   the plan for a question, or the rule that refuses it and the choices
 //   ./try-question '<q>'            see a question's answer while writing the program
-//   ./try-program [file] [params]   the answer program's answer as a person would read it, not yet given
-//   ./run-program [file] [params]   run the answer program as this conversation's next step
+//   ./run-program [file] [params]   run the answer program and read its answer, as often as it takes
+//   ./commit                        give the last run's answer as this conversation's next step: out/<qid>/built.json
 //   ./source-records '<group>'         the rows behind one group of the current answer
 //   ./trace-answer [call]           how an answer was reached
 //
@@ -16,6 +16,7 @@
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 import { catalog, catalogText, conformedDimensions, dimensions, dimensionsText, termsText, check, nodeText, pathsText, find, nextMoves, node, paths, runProgram, tableOf, type Result } from '@superatom/semantic-graph'
 import { MODEL, openSemanticGraph } from './semantic.js'
 
@@ -24,12 +25,13 @@ const flag = (name: string) => { const i = argv.indexOf(`--${name}`); if (i < 0)
 const env = { dbDir: flag('db')!, projectDir: flag('project')!, managerUrl: flag('manager')!, home: flag('home')! }
 // Each tool is named for what it does to what: the wrapper passes its own name.
 const TOOLS: Record<string, string> = { 'resolve-terms': 'terms', 'overview': 'catalog', 'describe': 'node', 'group-paths': 'paths', 'list-dimensions': 'dimensions', 'find-measure': 'find-measure', 'find-dimension': 'find', 'find-record': 'members',
-  'check-question': 'check', 'try-question': 'try', 'try-program': 'try-program', 'run-program': 'program', 'source-records': 'detail', 'trace-answer': 'trace' }
+  'check-question': 'check', 'try-question': 'try', 'run-program': 'program', 'commit': 'commit', 'source-records': 'detail', 'trace-answer': 'trace' }
 // How nodes connect reads as graph patterns; --json (or SEMANTIC_TOOL_FORMAT=json) gives the same views as JSON.
 const asJson = argv.includes('--json') ? (argv.splice(argv.indexOf('--json'), 1), true) : process.env.SEMANTIC_TOOL_FORMAT === 'json'
 const [tool, ...args] = argv
 const command = TOOLS[tool] ?? ''
 
+const hashOf = (text: string) => createHash('sha256').update(text).digest('hex')
 const out = (x: unknown) => console.log(typeof x === 'string' ? x : JSON.stringify(x, null, 2))
 const fail = (msg: string): never => { console.error(msg); process.exit(1) }
 const json = (text: string | undefined, what: string) => {
@@ -93,37 +95,38 @@ else if (command === 'members') {
   const a = await graph.ask(q, { model: MODEL, ...(sessionId ? { sessionId } : {}) })
   // As ctx.ask gives it to a program.
   out(a.ok ? (({ columns, rows, notes }) => ({ columns, rows: rows.slice(0, 25), ...(rows.length > 25 ? { total: rows.length } : {}), notes }))(tableOf(a.result)) : { refused: { ...(a.rule ? { rule: a.rule } : {}), reason: a.reason, ...((a as any).choices ? { choices: (a as any).choices } : {}) } })
-} else if (command === 'try-program') {
-  const [file = 'program.mjs', paramsText] = args
-  const source = await readFile(join(env.home, file), 'utf8').catch(() => fail(`${file} is not in this folder`))
-  const params = paramsText ? json(paramsText, 'the parameters') : {}
-  const r = await runProgram(graph, source, params, { model: MODEL, sessionId: sessionId ?? undefined, today: new Date().toISOString().slice(0, 10), onExplain: (t) => console.error(`… ${t}`) })
-  if (r.error) out({ refused: r.error, steps: r.steps })
-  else {
-    const a = r.answer!
-    out({ headline: a.headline ? `${a.headline.label}: ${a.headline.display}` : null, narration: a.narration.map((n) => n.text), views: a.views.map((v) => `${v.id}: ${v.component} of ${v.data}`),
-      data: Object.fromEntries(Object.entries(a.data).map(([k, t]) => [k, { rows: t.rows.length, columns: t.columns.map((c) => c.name), first: t.rows.slice(0, 20) }])), notes: a.notes, steps: r.steps.map((x) => `${x.kind}: ${'label' in x ? x.label : x.text}`) })
-  }
 } else if (command === 'program') {
-  if (!sessionId) fail('there is no data session for this conversation')
-  const qid = await readTurn('.turn') || fail('there is no turn in progress here')
   const [file = 'program.mjs', paramsText] = args
   const source = await readFile(join(env.home, file), 'utf8').catch(() => fail(`${file} is not in this folder`))
   const params = paramsText ? json(paramsText, 'the parameters') : {}
   const today = new Date().toISOString().slice(0, 10)
-  const r = await runProgram(graph, source, params, { model: MODEL, sessionId, today, onExplain: (t) => console.error(`… ${t}`) })
+  const r = await runProgram(graph, source, params, { model: MODEL, sessionId: sessionId ?? undefined, today, onExplain: (t) => console.error(`… ${t}`) })
   if (r.error) out({ refused: r.error, steps: r.steps })
   else {
-    // The program's answer is this conversation's next step, and ends the turn.
-    const s = graph.store.getSession(sessionId)
-    const stepId = graph.store.addStep({ sessionId, parent: s?.currentStep ?? null, move: { program: r.meta!.name, params }, question: { program: r.meta!.name, params }, canonical: null, callId: r.callId, refusal: null }, true)
-    await mkdir(join(env.home, 'out', qid), { recursive: true })
-    // The program and what it was run with, beside the answer: what run:, check:, program: and edit: act on.
-    await writeFile(join(env.home, 'out', qid, 'program.mjs'), source)
-    await writeFile(join(env.home, 'out', qid, 'params.json'), JSON.stringify(params, null, 2))
-    await writeFile(join(env.home, 'out', qid, 'step.json'), JSON.stringify({ graph: 'semantic', kind: 'program', sessionId, step: stepId, callId: r.callId }, null, 2))
-    out({ step: stepId, narration: r.answer!.narration.map((n) => n.text), views: r.answer!.views.map((v) => `${v.id}: ${v.component} of ${v.data}`), data: Object.fromEntries(Object.entries(r.answer!.data).map(([k, t]) => [k, { columns: t.columns.map((c) => c.name), rows: t.rows.slice(0, 5), total: t.rows.length }])), notes: r.answer!.notes, steps: r.steps.map((x) => `${x.kind}: ${'label' in x ? x.label : x.text}`) })
+    // The run is kept beside the turn, so ./commit gives exactly the answer read here.
+    const qid = await readTurn('.turn')
+    if (qid) {
+      await mkdir(join(env.home, 'out', qid), { recursive: true })
+      await writeFile(join(env.home, 'out', qid, 'run.json'), JSON.stringify({ file, source: hashOf(source), name: r.meta!.name, params, callId: r.callId }, null, 2))
+    }
+    const a = r.answer!
+    out({ headline: a.headline ? `${a.headline.label}: ${a.headline.display}` : null, narration: a.narration.map((n) => n.text), views: a.views.map((v) => `${v.id}: ${v.component} of ${v.data}`),
+      data: Object.fromEntries(Object.entries(a.data).map(([k, t]) => [k, { rows: t.rows.length, columns: t.columns.map((c) => c.name), first: t.rows.slice(0, 20) }])), notes: a.notes, steps: r.steps.map((x) => `${x.kind}: ${'label' in x ? x.label : x.text}`) })
   }
+} else if (command === 'commit') {
+  if (!sessionId) fail('there is no data session for this conversation')
+  const qid = await readTurn('.turn') || fail('there is no turn in progress here')
+  const run = await readFile(join(env.home, 'out', qid, 'run.json'), 'utf8').then(JSON.parse).catch(() => null) ?? fail('there is no run to commit: ./run-program first')
+  const source = await readFile(join(env.home, run.file), 'utf8').catch(() => fail(`${run.file} is not in this folder`))
+  if (hashOf(source) !== run.source) fail(`${run.file} has changed since it was run: ./run-program it, read its answer, then ./commit`)
+  // The run's answer is this conversation's next step, and ends the turn.
+  const s = graph.store.getSession(sessionId)
+  const stepId = graph.store.addStep({ sessionId, parent: s?.currentStep ?? null, move: { program: run.name, params: run.params }, question: { program: run.name, params: run.params }, canonical: null, callId: run.callId, refusal: null }, true)
+  // The program and what it was run with, beside the answer: what run:, check:, program: and edit: act on.
+  await writeFile(join(env.home, 'out', qid, 'program.mjs'), source)
+  await writeFile(join(env.home, 'out', qid, 'params.json'), JSON.stringify(run.params, null, 2))
+  await writeFile(join(env.home, 'out', qid, 'built.json'), JSON.stringify({ graph: 'semantic', kind: 'program', sessionId, step: stepId, callId: run.callId }, null, 2))
+  out(`committed ${run.name} as step ${stepId}`)
 } else if (command === 'moves') {
   const s = current() ?? fail('this conversation has no answer to move from yet')
   const q = s.question

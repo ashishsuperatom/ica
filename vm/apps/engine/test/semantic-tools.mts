@@ -51,7 +51,7 @@ const tool = async (name: string, ...args: string[]) => {
 
 const tools = execFileSync('ls', [cwd], { encoding: 'utf8' }).split('\n').filter(Boolean)
 console.log('tools:', tools.join(' '))
-assert.ok([...Object.keys({'resolve-terms':1,'overview':1,'find-measure':1,'describe':1,'group-paths':1,'find-dimension':1,'find-record':1,'check-question':1,'try-question':1,'try-program':1,'run-program':1,'source-records':1,'trace-answer':1}), 'escalate'].every((t) => tools.includes(t)))
+assert.ok([...Object.keys({'resolve-terms':1,'overview':1,'find-measure':1,'describe':1,'group-paths':1,'find-dimension':1,'find-record':1,'check-question':1,'try-question':1,'run-program':1,'commit':1,'source-records':1,'trace-answer':1}), 'escalate'].every((t) => tools.includes(t)))
 assert.ok(!tools.includes('define') && !tools.includes('query'))
 const terms = await tool('resolve-terms', 'How many hours did each branch work in September and October 2026?')
 console.log('resolve-terms:', terms.replace(/\s+/g, ' ').slice(0, 200))
@@ -75,7 +75,7 @@ assert.match(refused, /"rule": "A2"/)
 const tried = (await tool('try-question', JSON.stringify({ measures: ['Sale.hours'], by: [{ to: 'Branch', via: ['project', 'branch'] }], span: { from: '2026-09-01', through: '2026-10-31' } })))
 console.log('try:', tried.replace(/\s+/g, ' ').slice(0, 300))
 assert.match(tried, /"Branch": "b1",\s*"Branch_label": "Sydney",\s*"hours": 21/)
-assert.ok(!existsSync(join(cwd, 'out', 'q1', 'step.json')), 'trying a question is not the answer')
+assert.ok(!existsSync(join(cwd, 'out', 'q1', 'built.json')), 'trying a question is not the answer')
 writeFileSync(join(cwd, 'program.mjs'), `
 export const meta = { name: 'hours by branch', description: 'Hours each branch worked over a span, and its share', params: { from: 'first day', through: 'last day' } }
 export default async (ctx, p) => {
@@ -92,7 +92,10 @@ export default async (ctx, p) => {
 const ran = (await tool('run-program', 'program.mjs', JSON.stringify({ from: '2026-09-01', through: '2026-10-31' })))
 console.log('run-program:', ran.replace(/\s+/g, ' ').slice(0, 400))
 assert.match(ran, /Sydney worked the most/)
-const stepFile = JSON.parse(readFileSync(join(cwd, 'out', 'q1', 'step.json'), 'utf8'))
+assert.ok(!existsSync(join(cwd, 'out', 'q1', 'built.json')), 'running a program is not the answer')
+const committed = await tool('commit')
+console.log('commit:', committed.trim())
+const stepFile = JSON.parse(readFileSync(join(cwd, 'out', 'q1', 'built.json'), 'utf8'))
 assert.equal(stepFile.kind, 'program')
 const { surfaceAnswer } = await import('../graph/surface-answer.js')
 const g2 = await openSemanticGraph({ dbDir: join(root, 'p', 'db'), projectDir, managerUrl })

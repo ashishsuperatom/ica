@@ -385,7 +385,7 @@ const { deliverSemanticStep, semanticVerb, keepView } = createSemanticTurns({
 // Each conversation has two sessions side by side: the agent's (the harness transcript, one per conversation) and
 // the data session in the semantic graph's memory — the steps the person's questions have become, each with its
 // answer. A leading verb (edit:, run:, view: …) is handled first (graph/semantic-turns.ts). Otherwise the turn goes to
-// the composer, which answers with a program on the graph (./run-program) or hands the question to the analyst with
+// the composer, which answers with a program on the graph (./run-program, ./commit) or hands the question to the analyst with
 // ./escalate. The turn ends when a step has been applied, and the engine delivers that step.
 async function analyse(question: string, from: any, sid = '', qidIn = '', channel = '') {
   if (busySessions.has(sid)) {
@@ -526,7 +526,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     }
     // THE STEP AS THE DATA SESSION HOLDS IT — never as the agent described it.
     const cwd = workingAgent === 'analyst' ? analyst.cwd : composer.cwd
-    const held = await readJsonSafe(join(cwd, 'out', qid, 'step.json')) as any
+    const held = await readJsonSafe(join(cwd, 'out', qid, 'built.json')) as any
     // A view built for the first time is kept, so every later look at that kind of record runs it with no model.
     if (verbTurn?.view && held?.kind === 'program') await keepView(verbTurn.view, join(cwd, 'out', qid, 'program.mjs'))
     await deliverSemanticStep({ sid, qid, step: done.step, kind: held?.kind, reply, channel, timing, by: workingAgent, question, category: verbTurn ? CATEGORY[verbTurn.verb] : undefined })

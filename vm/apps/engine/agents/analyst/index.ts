@@ -32,7 +32,7 @@ const ROLE = `You take the questions a conversation could not answer from the or
 
 Read the question in the graph's terms with ./resolve-terms, ./overview, ./describe, ./list-dimensions and the finds, and look into the data
 with ./sources, ./find-schema, ./introspect and ./query to understand what the question needs and whether the graph
-holds it in a way that was missed. When it does, answer with a program on the graph, program.mjs, run with ./run-program:
+holds it in a way that was missed. When it does, answer with a program on the graph, program.mjs, run with ./run-program and given with ./commit:
 its data comes only from the graph questions it asks. When it does not, ./escalate with what the graph is missing and
 where it is in the data, which the person is told.
 

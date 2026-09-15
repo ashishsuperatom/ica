@@ -43,8 +43,8 @@ export function viewPrompt(v: ViewRef): string {
   return `view: ${v.entity} ${v.id}${v.lens === 'canonical' ? '' : ` ${v.lens}`}
 
 Write a view of one ${v.entity}${v.lens === 'canonical' ? '' : ` through the lens "${v.lens}"`}: what someone opening it wants to see at a glance.
-Its only parameter is id, so the same program serves every ${v.entity}, with the same shape each time. Write it as program.mjs and run
-./run-program program.mjs '${JSON.stringify({ id: v.id })}'.`
+Its only parameter is id, so the same program serves every ${v.entity}, with the same shape each time. Write it as program.mjs, run
+./run-program program.mjs '${JSON.stringify({ id: v.id })}', and ./commit it.`
 }
 
 export function explainPrompt(raw: string, s: { qid?: string; callId: string; program: boolean }): string {
@@ -58,7 +58,7 @@ export function editPrompt(raw: string, rest: string, s: { qid: string; params: 
   return `${raw}
 
 Change the program behind the answer on screen: out/${s.qid}/program.mjs, run with ${JSON.stringify(s.params)}. Copy it to program.mjs,
-make the change "${rest}", and run ./run-program program.mjs '${JSON.stringify(s.params)}'.`
+make the change "${rest}", run ./run-program program.mjs '${JSON.stringify(s.params)}', and ./commit it.`
 }
 
 /** A program's source and parameters as the files a surface shows. */

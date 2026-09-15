@@ -58,7 +58,7 @@ the repository holds only the platform. `~/.superatom/state/INDEX.md` lists this
   `./find-schema`), `grounding.sqlite`, `agent-sessions.sqlite`. Outside every agent's cwd.
 - `workspace/` — the analyst, connector and grounding agents' directory.
 - `sessions/<sessionId>/` — one conversation's directory, the composer's; a turn's files in `out/<qid>/`
-  (`step.json`, `program.mjs`, `params.json`, `explain.md`).
+  (`built.json`, `run.json`, `program.mjs`, `params.json`, `explain.md`).
 - `views/` — the kept view programs, one per kind of record and lens.
 
 ## Surfaces

@@ -54,6 +54,7 @@ export default async (ctx, p) => {
 writeFileSync(join(cwd, 'program.mjs'), PROGRAM)
 const ran = await promisify(execFile)(join(cwd, 'run-program'), ['program.mjs', JSON.stringify({ from: '2026-09-01', through: '2026-10-31' })], { cwd, encoding: 'utf8' })
 assert.match(ran.stdout, /Sydney worked 21 h/)
+await promisify(execFile)(join(cwd, 'commit'), [], { cwd, encoding: 'utf8' })
 
 // The engine's side, captured.
 const told: Array<{ qid: string; answer: any; followups?: string[] }> = []
@@ -66,7 +67,7 @@ const turn = (text: string, qid: string) => turns.semanticVerb(parseVerb(text)!,
 const last = () => told.at(-1)!.answer
 
 // Ids: the answer's table says which kind each name column holds, and each cell carries its record's id.
-await turns.deliverSemanticStep({ sid: 's1', qid: 'q1', step: JSON.parse((await import('node:fs')).readFileSync(join(cwd, 'out', 'q1', 'step.json'), 'utf8')).step, kind: 'program', reply: null, channel: '', timing: { ms: 1 }, by: 'composer', question: 'hours by branch' })
+await turns.deliverSemanticStep({ sid: 's1', qid: 'q1', step: JSON.parse((await import('node:fs')).readFileSync(join(cwd, 'out', 'q1', 'built.json'), 'utf8')).step, kind: 'program', reply: null, channel: '', timing: { ms: 1 }, by: 'composer', question: 'hours by branch' })
 const table = last().sections.find((s: any) => s.kind === 'table')
 assert.deepEqual(table.columns[0], { label: 'Branch', entity: 'Branch' })
 assert.deepEqual(table.rows[0][0], { value: 'Sydney', display: 'Sydney', id: 'b1' })

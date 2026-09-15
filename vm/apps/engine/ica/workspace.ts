@@ -11,14 +11,14 @@
 // In its directory an agent finds the tools for its part, generated here with the absolute paths they need:
 //
 //   the semantic graph   ./resolve-terms ./find-measure ./find-dimension ./find-record ./describe ./group-paths ./overview
-//                        ./check-question ./try-question ./run-program ./source-records ./trace-answer   (conversation, analyst)
+//                        ./check-question ./try-question ./run-program ./commit ./source-records ./trace-answer   (conversation, analyst)
 //   the data             ./sources ./query ./introspect ./find-schema ./resolve                            (analyst, connector, grounding)
 //   hand-off             ./escalate                                                                          (conversation)
 //
 // Which turn is live is in .turn, which data session this conversation is in .session — both written by the engine
 // before it asks. A turn's files are in out/<qid>/.
 
-import { mkdir, writeFile, chmod, symlink, readlink, rm, readdir } from 'node:fs/promises'
+import { mkdir, writeFile, chmod, symlink, readlink, rm, readdir, rename } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -326,8 +326,8 @@ const SEMANTIC_USAGE: Record<string, string> = {
   'find-record': 'find-record <Dimension> <name>   → the record a typed name means (a pillar, project, person), typos included; says when several fit',
   'check-question': `check-question '<question>'   → the answer's columns and notes, or why it is refused and the readings to choose from. A question: {"measures":["Fact.measure" | "[A.x] / [B.y]"], "by":[{"to":"Pillar","via":["person","pillar"]} | {"attribute":"a"} | {"attribute":"rag","of":"Project"}], "where":[{"to":"Dimension","via":[…],"in":["key"]} | {"attribute":"a","in":["v"]} | {"attribute":"golive","of":"Project","range":{"from":"2026-10-01","to":"2026-11-01"}} | {"condition":"valid project"}], "without":["a condition a fact is always kept to"], "span":{"from":"2026-09-01","through":"2026-10-31"} | {"this":"Month"} | {"previous":"Month","count":3} | {"last":30,"unit":"Day"}, "currency":"AUD", "order":{"by":"column","desc":true}, "limit":10} — also having, totals, share, compare, fill, cumulative, rolling, limitPer, notIn/none/contains/startsWith`,
   'try-question': `try-question '<question>'   → the question's answer, to see what the data says while writing the program`,
-  'try-program': `try-program [program.mjs] ['<params>']   → the program's answer as the person would read it — headline, narration, tables with their row counts — without giving it yet`,
-  'run-program': `run-program [program.mjs] ['<params>']   → run the program in this folder and give its answer as this conversation's next step. A program is named for its idea and takes the question's values (span, records) as params: export const meta = { name, description, params: { name: 'what it means' }, logic }; export default async (ctx, params) => ({ headline?: { label, value: <cell> }, data: { name: <table> }, views: [{ id, component: 'table'|'bar'|'line'|'kpi', data: '<data key>', title, encode: { columns: [...] } | { x, y, series } }], narration: [{ text: 'October is {oct}', cites: { oct: <cell> }, why }], nextSteps: [{ label, why }] }). ctx.ask(question, label) returns a table { columns: [{ name, role, unit }], rows: [{ Pillar: 7, Pillar_label: 'Consulting', Month: '2026-09', revenue: 4372656 }] } — a record by its id, its name beside it — the program's only data; ctx.transform(label, () => …), ctx.decide(label, took, why), ctx.decideAt(label, value, op, threshold, why), await ctx.verify(label, () => holds), ctx.caveat(text), ctx.explain(text). A cell is { data: '<data key>', row: 0 | { Month: '2026-09' }, column }; every number in a sentence is a {slot} citing a cell`,
+  commit: `commit   → give the answer of the last ./run-program as this conversation's next step, and end the turn`,
+  'run-program': `run-program [program.mjs] ['<params>']   → run the program in this folder and read its answer as the person would — headline, narration, tables with their row counts; run it as often as it takes, then ./commit. A program is named for its idea and takes the question's values (span, records) as params: export const meta = { name, description, params: { name: 'what it means' }, logic }; export default async (ctx, params) => ({ headline?: { label, value: <cell> }, data: { name: <table> }, views: [{ id, component: 'table'|'bar'|'line'|'kpi', data: '<data key>', title, encode: { columns: [...] } | { x, y, series } }], narration: [{ text: 'October is {oct}', cites: { oct: <cell> }, why }], nextSteps: [{ label, why }] }). ctx.ask(question, label) returns a table { columns: [{ name, role, unit }], rows: [{ Pillar: 7, Pillar_label: 'Consulting', Month: '2026-09', revenue: 4372656 }] } — a record by its id, its name beside it — the program's only data; ctx.transform(label, () => …), ctx.decide(label, took, why), ctx.decideAt(label, value, op, threshold, why), await ctx.verify(label, () => holds), ctx.caveat(text), ctx.explain(text). A cell is { data: '<data key>', row: 0 | { Month: '2026-09' }, column }; every number in a sentence is a {slot} citing a cell`,
   'source-records': `source-records '<row>'   → the source records that make up one row of the current answer, e.g. source-records '["15","2026-09"]'`,
   'trace-answer': 'trace-answer [call]   → how the current answer (or a call) was reached',
 }
@@ -354,11 +354,13 @@ async function removeWhatIsNotOurs(dir: string, tools: string[], conversation = 
   for (const [sub, keep] of Object.entries(OWNED_IN))
     for (const e of await readdir(join(dir, sub)).catch(() => [] as string[])) if (!keep.has(e)) await gone(join(dir, sub, e))
   for (const e of await readdir(join(dir, '.tools'))) if (!tools.includes(e.replace(/\.mjs$/, ''))) await gone(join(dir, '.tools', e))
-  // A turn leaves what it answered with — step.json, and the program.mjs and params.json it ran — or escalate.json or
+  // A turn leaves what it answered with — built.json and the run.json it came from, and the program.mjs and params.json it ran — or escalate.json or
   // explain.md, or nothing yet while it runs. The verbs read these after a restart, so they are kept; anything else in
   // out/ was written for an earlier engine.
-  const TURN_FILES = new Set(['step.json', 'escalate.json', 'program.mjs', 'params.json', 'explain.md'])
+  const TURN_FILES = new Set(['built.json', 'run.json', 'escalate.json', 'program.mjs', 'params.json', 'explain.md'])
   for (const e of await readdir(join(dir, 'out'))) {
+    // An answer given before built.json was named step.json.
+    if (existsSync(join(dir, 'out', e, 'step.json')) && !existsSync(join(dir, 'out', e, 'built.json'))) await rename(join(dir, 'out', e, 'step.json'), join(dir, 'out', e, 'built.json')).catch(() => {})
     const files = await readdir(join(dir, 'out', e)).catch(() => null)
     if (files === null || files.some((f) => !TURN_FILES.has(f))) await gone(join(dir, 'out', e))
   }

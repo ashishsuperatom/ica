@@ -55,7 +55,7 @@ export function createSemanticTurns(d: TurnDeps) {
   let callId: string | null = null
   let qid: string | undefined
   if (rest && /^[\w-]{6,}$/.test(rest)) {
-    const s = await readJson(join(cwd, 'out', rest, 'step.json')) as any
+    const s = await readJson(join(cwd, 'out', rest, 'built.json')) as any
     if (!s?.callId) return { error: `There is no answer \`${rest}\` in this conversation.` }
     callId = s.callId; qid = rest
   } else {
@@ -64,7 +64,7 @@ export function createSemanticTurns(d: TurnDeps) {
     callId = step?.callId ?? null
     // The question id it was answered under, so its program files can be read.
     if (callId) for (const dir of await readdir(join(cwd, 'out')).catch(() => [] as string[])) {
-      const s = await readJson(join(cwd, 'out', dir, 'step.json')) as any
+      const s = await readJson(join(cwd, 'out', dir, 'built.json')) as any
       if (s?.callId === callId) { qid = dir; break }
     }
   }
@@ -85,7 +85,7 @@ export function createSemanticTurns(d: TurnDeps) {
   await mkdir(dir, { recursive: true })
   await writeFile(join(dir, 'program.mjs'), p.source)
   await writeFile(join(dir, 'params.json'), JSON.stringify(p.params, null, 2))
-  await writeFile(join(dir, 'step.json'), JSON.stringify({ graph: 'semantic', kind: 'program', sessionId: sid, step, callId: r.callId }, null, 2))
+  await writeFile(join(dir, 'built.json'), JSON.stringify({ graph: 'semantic', kind: 'program', sessionId: sid, step, callId: r.callId }, null, 2))
   return { step, callId: r.callId }
 }
 
