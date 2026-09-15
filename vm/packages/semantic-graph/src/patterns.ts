@@ -4,8 +4,8 @@
 // an arrow reads as a step to walk, and a path reads as the `via` a question names. Every name is written exactly as a
 // question uses it. (The same views as JSON are node, paths and catalog in discovery.ts.)
 
-import { catalog, node, paths } from './discovery.js'
-import { arrows, walk, type Schema } from './schema.js'
+import { catalog, conformedDimensions, dimensions, node, paths, type Dimension } from './discovery.js'
+import { arrows, grainOf, walk, type Schema } from './schema.js'
 
 const KIND_SAID: Record<string, string> = { 'as-of': 'changes over time', version: 'a version, never combined across', rollup: 'rolls up', self: 'to its own kind' }
 const notesOf = (a: { kind: string; partial?: boolean }) => [KIND_SAID[a.kind], a.partial ? 'may be none' : ''].filter(Boolean).join(', ')
@@ -26,11 +26,17 @@ export function nodeText(s: Schema, name: string): string {
   if (v.description) out.push(`  ${v.description}`)
   if (v.synonyms?.length) out.push(`  also called: ${v.synonyms.join(', ')}`)
   if (v.calendar) out.push(`  cuts time by: ${v.calendar.level ?? (v.calendar.fiscal ? 'a fiscal calendar' : plural(v.calendar.periods ?? 0, 'listed period'))}`)
-  if (v.arrows.length) out.push('', v.kind === 'fact' ? '  kept by' : '  belongs to', ...table(arrowRows(v.arrows)))
+  if (v.kind === 'fact') {
+    const g = grainOf(s, v.name)
+    out.push('', `  grain: one row per ${g.join(' × ')}`, ...table(arrowRows(v.arrows.filter((a) => g.includes(a.role)))))
+    const props = v.arrows.filter((a) => !g.includes(a.role))
+    if (props.length) out.push('', '  links of the row, not part of its grain', ...table(arrowRows(props)))
+  } else if (v.arrows.length) out.push('', '  belongs to', ...table(arrowRows(v.arrows)))
   if (v.defaults) out.push('', '  path taken when a question does not say', ...table(Object.entries(v.defaults).map(([to, p]) => [`to (:${to})`, `via ${p}`])))
-  if (v.measures?.length) out.push('', '  measures', ...table([['name', 'unit', 'aggregate', 'notes'], ...v.measures.map((m) => [m.name, m.unit, m.aggregate,
+  if (v.measures?.length) out.push('', '  measures', ...table([['name', 'unit', 'kind', 'aggregate', 'notes'], ...v.measures.map((m) => [m.name, m.unit, m.kind, m.aggregate,
     [m.currency ? `currency by ${m.currency}` : '', m.overTime ? `over time: ${m.overTime}` : '', m.of ? `counts ${m.of}` : '', m.weight ? `weighted by ${m.weight}` : '', m.versions ? `by version ${m.versions}` : '',
       m.synonyms?.length ? `also: ${m.synonyms.join(', ')}` : ''].filter(Boolean).join('; ')])]))
+  if (v.kind === 'fact') out.push('', '  dimensions (./list-dimensions for every path)', ...dimensionRows(dimensions(s, v.name), 6))
   if (v.attributes?.length) out.push('', '  attributes', ...table(v.attributes.map((a) => [a.name, a.type ?? 'text', [a.values ? a.values.join(', ') : '', a.description ?? ''].filter(Boolean).join(' — ')])))
   if (v.keptTo?.length) out.push('', `  always kept to: ${v.keptTo.join(', ')} — unless a question sets it aside with "without"`)
   if (v.history) out.push('', '  holds only its current state: earlier states cannot be read back')
@@ -65,14 +71,16 @@ export function catalogText(s: Schema): string {
   for (const f of c.facts) {
     const o = s.objects[f.name]
     out.push('', `(:${f.name})${f.description ? `  ${f.description}` : ''}`)
-    out.push('  kept by', ...table(arrowRows(arrows(s, f.name))))
+    out.push(`  grain: one row per ${grainOf(s, f.name).join(' × ')}`, ...table(arrowRows(arrows(s, f.name))))
     if (o.defaults) out.push('  by default', ...table(Object.entries(o.defaults).map(([to, p]) => [`to (:${to})`, `via ${p.join('.')}`])))
-    out.push('  measures', ...table(Object.entries(o.measures ?? {}).map(([m, d]) => [m, d.unit, d.aggregate])))
+    out.push('  measures', ...table(Object.entries(o.measures ?? {}).map(([m, d]) => [m, d.unit, d.kind, d.aggregate])))
+    const dims = dimensions(s, f.name)
+    out.push(`  dimensions: ${dims.filter((d) => d.kind !== 'attribute').map((d) => d.name).join(', ')}; and ${plural(dims.filter((d) => d.kind === 'attribute').length, 'attribute')}`)
     if (o.attributes) out.push(`  attributes: ${Object.keys(o.attributes).join(', ')}`)
     if (o.keptTo?.length) out.push(`  always kept to: ${o.keptTo.join(', ')}`)
     if (o.history) out.push('  holds only its current state')
   }
-  out.push('', '', 'DIMENSIONS: what measures are grouped by and kept to')
+  out.push('', '', 'ENTITIES: things with identity, the dimensions facts reach')
   for (const e of c.entities) {
     const as = arrows(s, e.name)
     out.push('', `(:${e.name})${e.members ? `  ${plural(e.members, 'member')} listed` : ''}${e.description ? `  ${e.description}` : ''}`)
@@ -82,4 +90,29 @@ export function catalogText(s: Schema): string {
   if (c.conditions.length) out.push('', '', 'CONDITIONS: kept to by name', ...table(c.conditions.map((x) => [x.name, `on (:${x.on})`, x.description ?? '']), '  '))
   out.push('', '', 'CALENDARS', ...table([['calendar', 'cuts by', 'rolls up to'], ...c.calendars.map((k) => [`(:${k.name})`, String(k.cuts ?? ''), k.rollsUpTo.map((x) => `(:${x})`).join(' ')])], '  '))
   return out.join('\n')
+}
+
+/** Dimensions as rows: name, kind, the path a question takes, and what to know. `limit` keeps a view short. */
+function dimensionRows(dims: Dimension[], limit?: number): string[] {
+  const shown = limit ? dims.filter((d) => d.kind !== 'attribute' || !d.of || d.paths[0]?.length === 0).slice(0, 999) : dims
+  const rows = shown.map((d) => [d.name, d.kind,
+    d.default ? (d.default.length ? `via ${d.default.join('.')}` : 'on the row') : `${d.paths.length} paths — say which`,
+    [d.partial ? 'may be none' : '', d.asOf ? 'as it was on the row\'s date' : '', d.paths.length > 1 && d.default ? `${d.paths.length} paths` : ''].filter(Boolean).join(', ')])
+  const out = table([['dimension', 'kind', 'path', 'notes'], ...rows])
+  const attributes = dims.length - shown.length
+  return attributes > 0 ? [...out, `    and ${plural(attributes, 'attribute')} of the entities reached`] : out
+}
+
+/** Every dimension of a fact with its paths; for several facts, the dimensions they share. */
+export function dimensionsText(s: Schema, facts: string[]): string {
+  if (facts.length === 1) {
+    const dims = dimensions(s, facts[0])
+    const lines = [`(:${facts[0]}) is sliced by ${plural(dims.length, 'dimension')}`, '', ...dimensionRows(dims)]
+    const several = dims.filter((d) => d.paths.length > 1)
+    if (several.length) lines.push('', 'more than one path', ...several.flatMap((d) => [`  ${d.name}`, ...d.paths.map((p) => `    via ${p.join('.')}${d.default && p.join('.') === d.default.join('.') ? '  default' : ''}`)]))
+    return lines.join('\n')
+  }
+  const shared = conformedDimensions(s, facts)
+  if (!shared.length) return `${facts.join(', ')} share no dimension, so their measures cannot be put side by side`
+  return [`${facts.join(' and ')} share ${plural(shared.length, 'dimension')} — their measures can be put side by side by any of them`, '', ...table([['dimension', 'kind'], ...shared.map((d) => [d.name, d.kind])])].join('\n')
 }

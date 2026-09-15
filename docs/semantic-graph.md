@@ -27,6 +27,9 @@ The design takes established results, not new ones:
 
 ## 2. The schema
 
+The definitions of every term — entity, attribute, calendar, fact, grain, measure, arrow, condition, and the derived
+dimension, path and conformed dimension — are in `vm/packages/semantic-graph/CONCEPTS.md`, kept with the code.
+
 A schema **S** is a directed graph with typed nodes and typed arrows, and equations between paths.
 
 ### 2.1 Objects

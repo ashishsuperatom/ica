@@ -62,6 +62,8 @@ assert.ok(together.every((x) => !x.startsWith('EXIT')), together.find((x) => x.s
 // Graph patterns by default; the same view as JSON on asking.
 assert.match(await tool('describe', 'Sale'), /^\(:Sale\) fact/)
 assert.equal(JSON.parse(await tool('describe', 'Sale', '--json')).name, 'Sale')
+assert.match(await tool('list-dimensions', 'Sale'), /\(:Sale\) is sliced by \d+ dimensions/)
+assert.match(await tool('list-dimensions', 'Sale', 'Budget'), /share \d+ dimensions/)
 console.log('help:', (await tool('check-question', '--help')).slice(0, 80))
 console.log('find-measure hours:', (await tool('find-measure', 'hours')).replace(/\s+/g, ' ').slice(0, 120))
 console.log('find sydney:', (await tool('find-dimension', 'sydney')).replace(/\s+/g, ' ').slice(0, 160))

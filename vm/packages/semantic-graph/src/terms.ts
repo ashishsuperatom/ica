@@ -204,7 +204,7 @@ export function termsText(s: Schema, read: TermsResolved, question?: string): st
       case 'object': {
         const kind = s.objects[m.node]?.kind
         if (kind === 'fact') return ['fact', `(:${m.node})`, `./describe ${m.node} for its measures`]
-        return [kind === 'calendar' ? 'calendar' : 'dimension', `(:${m.node})`, j({ to: m.node })]
+        return [kind === 'calendar' ? 'calendar' : 'entity', `(:${m.node})`, j({ to: m.node })]
       }
       case 'attribute': {
         const of = s.objects[m.node]?.kind === 'fact' ? {} : { of: m.node }

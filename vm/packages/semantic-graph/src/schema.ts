@@ -47,6 +47,8 @@ export interface ObjectDef {
   /** Values a fact row or an entity element carries that lead nowhere: a status, a flag, a date, a number. Grouped and
    *  filtered by, never added up. `type` says how they compare: dates and numbers by range, text by value. */
   attributes?: Record<string, AttributeDef>
+  /** facts: what one row is about — its grain, time and version arrows. Optional; when stated it must be exactly those. */
+  grain?: string[]
   /** facts: the named conditions its rows are always kept to, unless a question sets one aside. */
   keptTo?: string[]
   /** facts and entities: the source holds only the current state — no earlier state can be read back. */
@@ -83,6 +85,11 @@ export interface Schema {
   conditions?: Record<string, ConditionDef>
 }
 
+
+/** A fact's grain: the arrows one row is identified by — every arrow except those that belong to the row as properties. */
+export function grainOf(s: Schema, fact: string): string[] {
+  return arrows(s, fact).filter((a) => a.kind !== 'belongs').map((a) => a.role)
+}
 
 /** The arrow `role` out of `object`, with its kind made explicit. */
 export function arrow(s: Schema, object: string, role: string): Required<Pick<Arrow, 'to' | 'kind'>> & Arrow | undefined {
@@ -145,6 +152,10 @@ export function schemaProblems(s: Schema): string[] {
     }
     for (const [target, p] of Object.entries(o.defaults ?? {})) if (walk(s, name, p)?.object !== target) out.push(`${name}: the default ${p.join('.')} does not lead to ${target}`)
     for (const c of o.keptTo ?? []) if (!s.conditions?.[c]) out.push(`${name} is kept to "${c}", which is not a condition of the schema`)
+    if (o.grain) {
+      const actual = grainOf(s, name)
+      if ([...o.grain].sort().join() !== [...actual].sort().join()) out.push(`${name} states its grain as ${o.grain.join(' × ')}, and its grain arrows are ${actual.join(' × ')}`)
+    }
   }
   for (const [n, c] of Object.entries(s.conditions ?? {})) {
     if (!s.objects[c.on]) out.push(`the condition "${n}" is about ${c.on}, which is not an object of the schema`)

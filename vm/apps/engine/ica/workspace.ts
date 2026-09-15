@@ -306,6 +306,7 @@ const SEMANTIC_USAGE: Record<string, string> = {
   'overview': 'overview [--json]   → every fact with its measures, every dimension with what it links to, every calendar, drawn as graph patterns',
   describe: 'describe <name> [--json]   → what a fact or dimension holds: measures, what it links to and by default, what links to it, drawn as graph patterns',
   'group-paths': 'group-paths <fact> <dimension> [--json]   → every way a measure can be grouped or filtered by a dimension, the default first, each with its via; e.g. group-paths AllocationDay Pillar',
+  'list-dimensions': 'list-dimensions <Fact> [<Fact> …] [--json]   → every dimension a fact can be sliced or filtered by — entities, attributes, calendar levels — with the path to each and the default; for several facts, the dimensions they share, by which their measures can be put side by side',
   'find-measure': 'find-measure <term>   → the measure a term means (revenue, hours) and the fact it belongs to; ./describe <fact> shows what it can be grouped by',
   'find-dimension': 'find-dimension <term>   → the dimension a term or a name belongs to: "practice" is Pillar, "Soft" is a Commitment, "CEC" is a Pillar record',
   'find-record': 'find-record <Dimension> <name>   → the record a typed name means (a pillar, project, person), typos included; says when several fit',

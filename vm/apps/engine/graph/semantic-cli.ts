@@ -15,14 +15,14 @@
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { catalog, catalogText, termsText, check, nodeText, pathsText, find, nextMoves, node, paths, runProgram, tableOf, type Result } from '@superatom/semantic-graph'
+import { catalog, catalogText, conformedDimensions, dimensions, dimensionsText, termsText, check, nodeText, pathsText, find, nextMoves, node, paths, runProgram, tableOf, type Result } from '@superatom/semantic-graph'
 import { MODEL, openSemanticGraph } from './semantic.js'
 
 const argv = process.argv.slice(2)
 const flag = (name: string) => { const i = argv.indexOf(`--${name}`); if (i < 0) return undefined; const v = argv[i + 1]; argv.splice(i, 2); return v }
 const env = { dbDir: flag('db')!, projectDir: flag('project')!, managerUrl: flag('manager')!, home: flag('home')! }
 // Each tool is named for what it does to what: the wrapper passes its own name.
-const TOOLS: Record<string, string> = { 'resolve-terms': 'terms', 'overview': 'catalog', 'describe': 'node', 'group-paths': 'paths', 'find-measure': 'find-measure', 'find-dimension': 'find', 'find-record': 'members',
+const TOOLS: Record<string, string> = { 'resolve-terms': 'terms', 'overview': 'catalog', 'describe': 'node', 'group-paths': 'paths', 'list-dimensions': 'dimensions', 'find-measure': 'find-measure', 'find-dimension': 'find', 'find-record': 'members',
   'check-question': 'check', 'try-question': 'try', 'run-program': 'program', 'source-records': 'detail', 'trace-answer': 'trace' }
 // How nodes connect reads as graph patterns; --json (or SEMANTIC_TOOL_FORMAT=json) gives the same views as JSON.
 const asJson = argv.includes('--json') ? (argv.splice(argv.indexOf('--json'), 1), true) : process.env.SEMANTIC_TOOL_FORMAT === 'json'
@@ -63,6 +63,9 @@ else if (command === 'paths') {
   const [from, to] = args
   if (!from || !to) fail('usage: ./group-paths <from> <to>')
   out(asJson ? paths(m.schema, from, to).map((p) => p.join('.')) : pathsText(m.schema, from, to))
+} else if (command === 'dimensions') {
+  if (!args.length) fail('usage: ./list-dimensions <Fact> [<Fact> …]')
+  out(asJson ? (args.length === 1 ? dimensions(m.schema, args[0]) : conformedDimensions(m.schema, args)) : dimensionsText(m.schema, args))
 } else if (command === 'terms') {
   const text = args.join(' ').trim() || fail("usage: ./resolve-terms '<the question as asked>'")
   const read = await graph.resolveQuestionTerms(MODEL, text, { today: new Date().toISOString().slice(0, 10) })

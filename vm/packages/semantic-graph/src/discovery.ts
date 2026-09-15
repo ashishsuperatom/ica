@@ -12,7 +12,7 @@
 // Every answer is in the graph's own terms, so what an agent builds from them is a question the algebra can check.
 
 import { pathsFrom } from './paths.js'
-import { arrows, type Schema } from './schema.js'
+import { arrows, grainOf, walk, type Schema } from './schema.js'
 
 export interface NodeView {
   name: string
@@ -176,4 +176,64 @@ export function catalog(s: Schema) {
     conditions: Object.entries(s.conditions ?? {}).map(([name, c]) => ({ name, on: c.on, ...(c.description ? { description: c.description } : {}) })),
     calendars: entries.filter(([, o]) => o.kind === 'calendar').map(([name, o]) => ({ name, cuts: o.fiscal ? `fiscal ${o.fiscal.period}s from month ${o.fiscal.startMonth}` : o.periods ? `${o.periods.length} listed periods` : o.level, rollsUpTo: arrows(s, name).map((a) => a.to) })),
   }
+}
+
+// ── Dimensions: how a fact's measures can be sliced ──
+
+export interface Dimension {
+  /** How a question names it: an entity or calendar by its name, an attribute as Owner.attribute (the fact's own by name). */
+  name: string
+  kind: 'entity' | 'attribute' | 'calendar'
+  /** For an attribute: the object that carries it. */
+  of?: string
+  attribute?: string
+  /** Every path from the fact to it (to its owner, for an attribute), normal form; [] for the fact's own attribute. */
+  paths: string[][]
+  /** The path taken when a question does not say: the only one, or the fact's default. */
+  default?: string[]
+  /** Some rows reach nothing there. */
+  partial: boolean
+  /** Followed as it was on each row's date. */
+  asOf: boolean
+}
+
+/** Every dimension of a fact: what it reaches along arrows, the attributes of itself and of what it reaches, and the
+ *  calendar levels of its time. A path through a self arrow (a parent, a manager) counts only when nothing else leads
+ *  there, as when reading a question. */
+export function dimensions(s: Schema, fact: string, maxSteps = 4): Dimension[] {
+  const f = s.objects[fact]
+  if (f?.kind !== 'fact') throw new Error(`${fact} is not a fact — dimensions belong to facts`)
+  const byObject = new Map<string, string[][]>()
+  for (const p of pathsFrom(s, fact, maxSteps)) (byObject.get(p.object) ?? byObject.set(p.object, []).get(p.object)!).push(p.steps)
+  const out: Dimension[] = []
+  const info = (object: string, all: string[][]) => {
+    const direct = all.filter((steps) => !walk(s, fact, steps)!.walked.some((a) => a.kind === 'self'))
+    const use = direct.length ? direct : all
+    const d = f.defaults?.[object]
+    const chosen = use.length === 1 ? use[0] : d
+    const walked = (steps: string[]) => walk(s, fact, steps)!.walked
+    return { paths: use, ...(chosen ? { default: chosen } : {}), partial: (chosen ? walked(chosen) : use.flatMap(walked)).some((a) => a.partial), asOf: (chosen ? walked(chosen) : use.flatMap(walked)).some((a) => a.kind === 'as-of') }
+  }
+  for (const a of Object.keys(f.attributes ?? {})) out.push({ name: a, kind: 'attribute', of: fact, attribute: a, paths: [[]], default: [], partial: false, asOf: false })
+  for (const [object, all] of byObject) {
+    const o = s.objects[object]
+    if (o.kind === 'fact') continue
+    const i = info(object, all)
+    out.push({ name: object, kind: o.kind === 'calendar' ? 'calendar' : 'entity', ...i })
+    for (const a of Object.keys(o.attributes ?? {})) out.push({ name: `${object}.${a}`, kind: 'attribute', of: object, attribute: a, ...i })
+  }
+  const order = { calendar: 0, entity: 1, attribute: 2 }
+  return out.sort((x, y) => order[x.kind] - order[y.kind] || x.name.localeCompare(y.name))
+}
+
+/** The dimensions several facts share — by which their measures can be put side by side. */
+export function conformedDimensions(s: Schema, facts: string[]): Dimension[] {
+  if (!facts.length) return []
+  const each = facts.map((f) => new Map(dimensions(s, f).map((d) => [d.name, d])))
+  return [...each[0].values()].filter((d) => each.every((m) => m.has(d.name)))
+}
+
+/** A fact's grain with what each part leads to. */
+export function grain(s: Schema, fact: string) {
+  return grainOf(s, fact).map((role) => ({ role, to: arrows(s, fact).find((a) => a.role === role)!.to }))
 }
