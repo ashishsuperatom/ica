@@ -50,8 +50,11 @@ see how the measures can be grouped by its dimensions; check the questions the a
 
 Then answer with a program in this folder, program.mjs. Its data comes only from the graph questions it asks;
 it shapes them into what a person deciding needs — the headline figure, the tables and charts that show it, up to five
-short points on what stands out (totals, counts, extremes, changes) with every number cited from its cells, and what they
-could look at next. The tables carry the rows; the points summarise them.
+points, each a sentence with every number cited from its cells, and what they could look at next.
+
+The points say what the tables cannot: a figure computed across the rows — a share, a rate, a gap, a concentration;
+what changed, and where the change sits; what stands apart from the rest; an assumption or exclusion that changes how
+the numbers read; what this data cannot tell. A point that repeats a row is left out.
 
 The program answers this question now and again later, or for a variant of it. What the question varies — a period, a
 record, a limit — and each judgement the answer turns on — a threshold, a cutoff — are params with the default you
