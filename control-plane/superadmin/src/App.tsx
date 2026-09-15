@@ -556,7 +556,7 @@ function OrgDetailPage() {
       {/* Deleting an ORGANISATION is a platform act — the customer console never offers it, and the API refuses
           it for anyone but superadmin regardless. */}
       {tab === 'settings' && HOST_SCOPE !== 'admin' && (
-        <div className="card" style={{ padding: 18, borderColor: 'var(--bad)', maxWidth: 720 }}>
+        <div className="card" style={{ padding: 18, borderColor: 'var(--bad)' }}>
           <h3 style={{ margin: '0 0 4px', color: 'var(--bad)' }}>Danger zone</h3>
           <div className="between">
             <div><strong>Delete this organization</strong><div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>Removes the org and every project inside it.</div></div>
@@ -778,7 +778,7 @@ function IndexPanel({ hub }: { hub: ReturnType<typeof useProjectHub> }) {
 
   return (
     <>
-      <div className="muted" style={{ marginBottom: 12, maxWidth: 720 }}>
+      <div className="muted" style={{ marginBottom: 12 }}>
         The index records the tables and fields each connected source has, so an agent can find where something
         lives instead of guessing. Building is resumable — running it again picks up where it left off and skips
         what is already indexed.
@@ -1143,7 +1143,7 @@ function ProjectDetailPage() {
       )}
 
       {view === 'settings' && (
-        <div style={{ maxWidth: 720, display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div className="card" style={{ padding: 18 }}>
             <strong>Teams bot credential</strong>
             <div className="muted" style={{ fontSize: 12.5, margin: '4px 0 12px' }}>Generate a scoped service token so a Teams bot can act as this project’s runtime. Shown once.</div>
@@ -1220,7 +1220,7 @@ function ProjectDetailPage() {
                     : <span style={{ color: 'var(--muted)' }}>engine has not reported — start it to see what it is running</span>}
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr 1fr auto', gap: 8, alignItems: 'center' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'auto repeat(4, minmax(160px, 1fr))', gap: 8, alignItems: 'center' }}>
                   <span className="muted" style={{ fontSize: 12 }}>agent</span>
                   <span className="muted" style={{ fontSize: 12 }}>harness</span>
                   <span className="muted" style={{ fontSize: 12 }}>provider</span>
