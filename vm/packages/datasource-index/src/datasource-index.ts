@@ -12,7 +12,7 @@ import type { DataSourceIndex } from './store.js'
 
 export interface DataSourceEntry {
   key: string                 // 'SOURCE.CONTAINER.FIELD' — flat, name-based, stable; the FTS key
-  source: string              // datasource NAME (e.g. 'fusion5') — names, never ids, so search reads meaningfully
+  source: string              // datasource NAME (e.g. 'erp') — names, never ids, so search reads meaningfully
   container: string           // table / collection name
   field: string               // column / attribute / field name
   type?: string               // the field's type — native for SQL ('nvarchar','int','NUMBER'); a shape for API/JSON ('string[]','object')
@@ -146,8 +146,8 @@ function rowToEntry(r: any): DataSourceEntry {
 /** What a schema search found — the rows, AND how much it did not show.
  *
  *  The count is not a nicety. This returns a bounded slice, and an agent handed six fields with no total
- *  concludes there are six. That happened: a search for "customer" returned 6 TotalGroup fields out of 324 in
- *  the index, and the agent reasonably decided TotalGroup had almost no customer data. A truncated answer that
+ *  concludes there are six. That happened: a search for "customer" returned 6 fields of one source out of 324 in
+ *  the index, and the agent reasonably decided that source had almost no customer data. A truncated answer that
  *  cannot be recognised as truncated is worse than a short one. */
 export interface DataSourceSearchResult {
   entries: DataSourceEntry[]
@@ -167,7 +167,7 @@ export interface DataSourceSearchResult {
  *     first, because when it hits it is the better answer; OR is the fallback rather than the default.
  *
  *  2. SOURCES GET A FAIR SHARE. One cap across every source, ordered by bm25, let a source with shorter names
- *     take the whole budget: "customer" returned 54 NetSuite fields and 6 TotalGroup ones, though TotalGroup
+ *     take the whole budget: "customer" returned 54 fields from one source and 6 from another, though the second
  *     had 324 matches to NetSuite's 179 — bm25 favours short documents, and `invoice` is shorter than
  *     `vw_rpt_invoice_register`. Each source now gets its own slice of the limit, and unused slices are given
  *     back, so a wide source cannot be crowded out by a terse one.
@@ -243,7 +243,7 @@ export function searchDataSource(store: DataSourceIndex, query: string, opts: { 
   return { entries: rows, shown: rows.length, matched: total, bySource }
 }
 
-/** Enable/disable by exact key, or a whole container/source via a LIKE pattern on the key (e.g. 'fusion5.employee.%'). */
+/** Enable/disable by exact key, or a whole container/source via a LIKE pattern on the key (e.g. 'erp.employee.%'). */
 export function setEnabled(store: DataSourceIndex, keyOrPattern: string, enabled: boolean): number {
   ensureDataSourceIndex(store)
   const op = keyOrPattern.includes('%') ? 'LIKE' : '='

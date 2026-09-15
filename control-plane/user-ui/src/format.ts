@@ -73,7 +73,7 @@ export function renderAnswerBody(answer: unknown): string {
 }
 
 // ── TABLE CELLS AND COLUMNS ─────────────────────────────────────────────────────────────────────────────────
-// A cell is a scalar, or a scalar WITH an identity: `{ v: 'Fusion5 PTY LTD', id: 431 }`. Co-located, so the id
+// A cell is a scalar, or a scalar WITH an identity: `{ v: 'Acme Pty Ltd', id: 431 }`. Co-located, so the id
 // can never drift out of step with the value it belongs to, and a row that has no id is simply a plain value
 // with no special case anywhere.
 //

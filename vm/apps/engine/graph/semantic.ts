@@ -1,6 +1,6 @@
 // ── A PROJECT'S SEMANTIC GRAPH ──────────────────────────────────────────────────────────────────────────────
 //
-// The semantic model a project commits — projects/<id>/semantic/ — loaded into the engine-private store
+// A project's semantic model — <project home>/semantic/ — loaded into the engine-private store
 // (db/semantic-graph.sqlite), and run through the datasource manager:
 //
 //   semantic/schema.json                     the schema: entities, calendars, facts, arrows, measures

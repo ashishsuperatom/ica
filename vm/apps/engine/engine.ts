@@ -45,7 +45,13 @@ import { buildDatasourceIndex } from './datasource-index/build.js'
 import type { AgentEvent } from './ica/session.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-try { process.loadEnvFile(join(__dirname, '.env')) } catch { /* no .env — rely on the ambient environment */ }
+// The project's own .env, from its home (ecosystem.config.cjs passes it already; this is for an engine started by hand
+// with ICA_PROJECT or ENGINE_PROJECT_DIR). A value already set is never overridden.
+{
+  const home = process.env.ENGINE_PROJECT_DIR
+    ?? (process.env.ICA_PROJECT ? join(process.env.ENGINE_STATE_DIR ?? join(homedir(), '.superatom', 'state'), process.env.ICA_PROJECT) : undefined)
+  if (home) try { process.loadEnvFile(join(home, '.env')) } catch { /* no .env — rely on the ambient environment */ }
+}
 // Resilience: a stray async error from a flaky agent CLI/harness (a PTY that vanished, an opencode server
 // that timed out starting) must NEVER take the engine down. Fly would restart it, but crash-looping drops
 // the in-flight answer and looks like "nothing happened" to the user. Log it and keep serving.
@@ -54,12 +60,12 @@ process.on('uncaughtException',  (e: any) => log.error('engine', 'uncaughtExcept
 
 const HUB = process.env.ICA_HUB || 'ws://localhost:5174'
 const PROJECT = process.env.ICA_PROJECT || ''
-// Persistence roots. All GENERATED per-project state lives under ONE root, OUTSIDE the engine code app:
-//   <STATE_ROOT>/<projectId>/ — the agents' directories (workspace/, sessions/<id>/) AND the project's DBs together
-//   (semantic-graph.sqlite · datasource-index.sqlite · grounding.sqlite · agent-sessions.sqlite). Committed per-project INPUTS (the datasource
-//   bridges) live separately in <repo>/projects/<projectId>/. Env-overridable so Fly points them at the
-//   mounted VOLUME (else state would sit on the ephemeral container layer and be wiped on every restart);
-//   the existing per-root env vars still win, so Fly's layout is unchanged.
+// THE PROJECT'S HOME. Everything that belongs to one project — and nothing of the platform — lives under ONE root,
+// outside the repository, keyed by the project id:
+//   <STATE_ROOT>/<projectId>/  .env (its hub, key, source credentials) · settings.json · secrets/ · datasources/ (its
+//   bridges, registry, index seeds) · semantic/ (its model) · db/ (semantic-graph.sqlite · datasource-index.sqlite ·
+//   grounding.sqlite · agent-sessions.sqlite) · workspace/ · sessions/<id>/ · views/
+// The repository holds only the platform. Env-overridable so Fly points the root at the mounted volume.
 const VM_ROOT = join(__dirname, '..', '..')                              // apps/engine → the vm monorepo root
 // Outside the repository, so an agent working in its workspace is not one directory away from the engine's source.
 const STATE_ROOT = process.env.ENGINE_STATE_DIR ?? join(homedir(), '.superatom', 'state')
@@ -75,8 +81,12 @@ const WORKSPACE = join(WORKSPACE_ROOT, PROJECT, 'workspace')   // the shared age
 // A conversation's composer works in sessions/<id>/ (ica/workspace.ts).
 const SESSIONS = join(WORKSPACE_ROOT, PROJECT, 'sessions')
 const DB_DIR    = join(WORKSPACE_ROOT, PROJECT, 'db')          // ENGINE-private DBs — a sibling, NOT under WORKSPACE
-// Committed per-project CONFIG (index seeds, datasource notes) — distinct from generated state above.
-const PROJECT_DIR = process.env.ENGINE_PROJECT_DIR ?? join(__dirname, '..', '..', 'projects', PROJECT)
+// The project's home. A box set up before homes moved out of the repository still has <repo>/projects/<id>/ — read
+// there until it is moved, and say so.
+const LEGACY_PROJECT_DIR = join(VM_ROOT, 'projects', PROJECT)
+const PROJECT_DIR = process.env.ENGINE_PROJECT_DIR
+  ?? (!existsSync(join(STATE_ROOT, PROJECT, '.env')) && existsSync(LEGACY_PROJECT_DIR) ? LEGACY_PROJECT_DIR : join(STATE_ROOT, PROJECT))
+if (PROJECT_DIR === LEGACY_PROJECT_DIR) console.warn(`[ica] the project's home is still in the repository (${LEGACY_PROJECT_DIR}); move it to ${join(STATE_ROOT, PROJECT)}`)
 const KEY = process.env.ICA_KEY || ''
 // ONE fleet switch for the WORK agents (analyst/connector/grounding): ICA_AGENT_HARNESS =
 // claude-code | codex | opencode picks the brain for ALL of them, and each agent's MODEL is INHERITED from
@@ -86,9 +96,8 @@ const KEY = process.env.ICA_KEY || ''
 // Read here only for REPORTING — each agent asks the resolver for its own configuration when it is built, so
 // nothing hands an agent half of its identity.
 // Where the connector agent writes bridges (shared with the datasource-manager, which loads them by absolute
-// path). Defaults to the project's COMMITTED inputs folder so connector-written bridges land beside any
-// hand-authored ones (one place, no duplicate); on Fly override via env to the mounted volume.
-const DATASOURCES_DIR  = process.env.DATASOURCES_DIR || join(VM_ROOT, 'projects', PROJECT, 'datasources')
+// path): the project home's datasources/, beside any hand-authored ones; on Fly override via env to the volume.
+const DATASOURCES_DIR  = process.env.DATASOURCES_DIR || join(PROJECT_DIR, 'datasources')
 const OC_URL = process.env.ICA_OC_URL                // opencode: connect to a shared standalone server
 const DATASOURCE = process.env.DATASOURCE_URL || 'http://localhost:4000'   // the one data seam
 
@@ -142,7 +151,7 @@ const agentSessions = openAgentSessions(join(DB_DIR, 'agent-sessions.sqlite'))
 const genId = () => 'q_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
 
 // ── THE PROJECT'S SEMANTIC GRAPH ──────────────────────────────────────────────────────────────────────────────
-// The project's semantic model (projects/<id>/semantic/, graph/semantic.ts); its memory and data sessions are
+// The project's semantic model (<project home>/semantic/, graph/semantic.ts); its memory and data sessions are
 // db/semantic-graph.sqlite. Opened on first use, because loading its sources checks them at the datasource manager,
 // which may come up after the engine.
 let semanticGraph: ReturnType<typeof openSemanticGraph> | null = null

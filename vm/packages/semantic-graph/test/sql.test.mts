@@ -5,7 +5,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { check, CompileError, compileSql, evaluate, materialise, runSql, type Instance, type Question, type Schema } from '../src/index.js'
 import * as branches from './fixtures/branches.js'
-import * as f5 from './fixtures/fusion5-sim.js'
+import * as consultancy from './fixtures/consultancy.js'
 import { toSqlite } from './fixtures/sqlite.js'
 
 const round = (x: unknown): unknown => (typeof x === 'number' ? Math.round(x * 1e6) / 1e6 : Array.isArray(x) ? x.map(round) : x && typeof x === 'object' ? Object.fromEntries(Object.entries(x).map(([k, v]) => [k, round(v)])) : x)
@@ -52,17 +52,17 @@ test('branches: every rule, in SQL, gives the reference answer', async () => {
   ])
 })
 
-test('Scenario 1: every question, in SQL, gives the reference answer', async () => {
-  const I = materialise(f5.model)
+test('the consultancy: every question, in SQL, gives the reference answer', async () => {
+  const I = materialise(consultancy.model)
   const SPAN = { from: '2026-09-01', to: '2026-11-01' }
-  await same(f5.schema, I, [
-    ['AU revenue, hard and soft', { measures: ['AllocationDay.revenue'], by: [{ to: 'Month' }, { attribute: 'commitment' }], where: [{ to: 'Subsidiary', via: ['project', 'subsidiary'], in: ['AU'] }], span: SPAN, currency: 'AUD' }],
+  await same(consultancy.schema, I, [
+    ['AU revenue, hard and soft', { measures: ['AllocationDay.revenue'], by: [{ to: 'Month' }, { attribute: 'commitment' }], where: [{ to: 'Company', via: ['project', 'company'], in: ['AU'] }], span: SPAN, currency: 'AUD' }],
     ['all revenue in AUD, as of today', { measures: ['AllocationDay.revenue'], by: [{ to: 'Month' }], span: SPAN, currency: 'AUD', asOf: '2026-09-15' }],
-    ['revenue against Base Budget', { measures: ['AllocationDay.revenue', 'BudgetLine.budget', '[AllocationDay.revenue] - [BudgetLine.budget]'], by: [{ to: 'Pillar', via: { AllocationDay: ['project', 'pillar'], BudgetLine: ['pillar'] } }, { to: 'Month' }], where: [{ to: 'Subsidiary', via: { AllocationDay: ['project', 'subsidiary'], BudgetLine: ['subsidiary'] }, in: ['AU'] }, { to: 'BudgetCategory', in: ['Base Budget'] }], span: SPAN, currency: 'AUD' }],
-    ['by the pillar a person was in', { measures: ['AllocationDay.hours'], by: [{ to: 'Pillar', via: ['person', 'pillar'] }, { to: 'Month' }], span: SPAN }],
-    ['by the project manager\'s pillar that day', { measures: ['AllocationDay.hours'], by: [{ to: 'Pillar', via: ['project', 'manager', 'pillar'] }], span: SPAN }],
+    ['revenue against Base Budget', { measures: ['AllocationDay.revenue', 'BudgetLine.budget', '[AllocationDay.revenue] - [BudgetLine.budget]'], by: [{ to: 'Practice', via: { AllocationDay: ['project', 'practice'], BudgetLine: ['practice'] } }, { to: 'Month' }], where: [{ to: 'Company', via: { AllocationDay: ['project', 'company'], BudgetLine: ['company'] }, in: ['AU'] }, { to: 'BudgetCategory', in: ['Base Budget'] }], span: SPAN, currency: 'AUD' }],
+    ['by the practice a person was in', { measures: ['AllocationDay.hours'], by: [{ to: 'Practice', via: ['person', 'practice'] }, { to: 'Month' }], span: SPAN }],
+    ['by the project manager\'s practice that day', { measures: ['AllocationDay.hours'], by: [{ to: 'Practice', via: ['project', 'manager', 'practice'] }], span: SPAN }],
     ['everyone under e1', { measures: ['AllocationDay.hours'], where: [{ to: 'Person', via: ['person'], under: 'manager', in: ['e1'] }], span: SPAN }],
-    ['pillar shares with totals', { measures: ['AllocationDay.hours', 'AllocationDay.unpriced hours'], by: [{ to: 'Pillar', via: ['project', 'pillar'] }], span: SPAN, share: { outputs: ['AllocationDay.hours'], within: [] }, totals: [[]] }],
+    ['practice shares with totals', { measures: ['AllocationDay.hours', 'AllocationDay.unpriced hours'], by: [{ to: 'Practice', via: ['project', 'practice'] }], span: SPAN, share: { outputs: ['AllocationDay.hours'], within: [] }, totals: [[]] }],
     ['October against September', { measures: ['AllocationDay.revenue'], by: [{ to: 'Month' }], span: { from: '2026-10-01', to: '2026-11-01' }, currency: 'AUD', compare: { back: { months: 1 } } }],
   ])
 })

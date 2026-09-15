@@ -1,7 +1,3 @@
 node_modules
 .env
 dist/
-# generated per build from apps/<project>/app.json + the template:
-apps/*/manifest.json
-apps/*/color.png
-apps/*/outline.png

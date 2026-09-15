@@ -34,15 +34,15 @@ A schema **S** is a directed graph with typed nodes and typed arrows, and equati
 
 ### 2.1 Objects
 
-- **Entity** — a set of things with identity: Project, Person, Pillar, Currency. It may list its **members** and the
-  **names** people use for them (`AU` → Subsidiary 2). An entity may be a **calendar level** (Day, Month, Quarter, Year,
+- **Entity** — a set of things with identity: Store, Product, Region, Currency. It may list its **members** and the
+  **names** people use for them (`SYD` → Store 3). An entity may be a **calendar level** (Day, Month, Quarter, Year,
   or an organisation's fiscal levels).
-- **Fact** — a set of events at a grain: `AllocationDay` is one person on one project on one day. A fact carries
+- **Fact** — a set of events at a grain: `Sale` is one product sold in one store on one day. A fact carries
   **measures**. Its grain is the set of its **grain arrows** (2.2); two rows of a fact never share all grain values.
 - **Attributes** — values a fact row or an entity element carries that lead nowhere: a project's RAG, its go-live date,
   its total budget. Each has a type (text, date, number, flag); text may list its values. Grouped and filtered by —
   dates and numbers by range — never added up.
-- **Conditions** — a condition people name ("a valid project", "the PMO population") is one definition: filters on the
+- **Conditions** — a condition people name ("an active store", "a clearance product") is one definition: filters on the
   object it is about. A question keeps to it by name from any fact that reaches that object; a fact may be **kept to**
   some conditions always, unless a question sets one aside. A source that holds only its **current state** says so.
 
@@ -53,10 +53,10 @@ is never an arrow — it is a fact with two arrows out (a *span* `A ← F → B`
 
 | Kind | Meaning | Totality | Example |
 |---|---|---|---|
-| `grain` | a fact's coordinate | total | `AllocationDay.person → Person` |
-| `belongs` | an entity belongs to one entity | total or partial (declared) | `Project.pillar → Pillar` |
+| `grain` | a fact's coordinate | total | `Sale.store → Store` |
+| `belongs` | an entity belongs to one entity | total or partial (declared) | `Store.region → Region` |
 | `rollup` | a level of a hierarchy into the next: strict and covering | total | `Branch.state → State`, `Day.month → Month` |
-| `as-of` | belongs, but its value depends on a date (valid time) | total per date | `Person.pillar @ Day → Pillar` |
+| `as-of` | belongs, but its value depends on a date (valid time) | total per date | `Employee.store @ Day → Store` |
 | `version` | a coordinate whose members are alternative versions, never combined | total | `BudgetLine.category → BudgetCategory` |
 | `self` | an entity belongs to another of its own kind; forms a hierarchy by closure | partial | `Person.manager → Person` |
 
@@ -65,16 +65,16 @@ Quarter → Year is; drilling up and down is the same move on both. Time differs
 generated from keys rather than listed, it is ordered (spans, first and last), and it is when `as-of` arrows and stocks
 are evaluated.
 
-An arrow also has a **role**: its name. Several arrows may share a codomain — `Project.pillar` and `Person.pillar` both
-land in Pillar — and are different arrows (role-playing).
+An arrow also has a **role**: its name. Several arrows may share a codomain — `Sale.store` and `Employee.store` both
+land in Store — and are different arrows (role-playing).
 
 ### 2.3 Paths and equations
 
 A **path** is a sequence of composable arrows; it denotes the composite function. A path may visit an object more than
 once (`person.manager.manager`). Paths are bounded in length by the query, not by the schema.
 
-A **path equation** declares two paths equal as functions: `AllocationDay.project.subsidiary.currency =
-AllocationDay.project.currency`. Equations define the **normal form** of a path (§8.1) and are checked on the data.
+A **path equation** declares two paths equal as functions: `Sale.store.company.currency =
+Sale.store.currency`. Equations define the **normal form** of a path (§8.1) and are checked on the data.
 
 ### 2.4 Measures
 
@@ -91,8 +91,8 @@ A measure `m` of a fact `F` is a function `m: F → Q` into a **quantity type** 
 A **derived measure** is an expression over measures (`revenue / budget`, `hours × rate`). It is evaluated after
 aggregation, at the question's grain — never aggregated itself.
 
-A **computed fact** is a fact whose rows are defined from other facts (`AllocationRevenue` from `AllocationDay` and the
-rates it names). Its definition is a `computed-from` edge in the dependency graph (§9), not an arrow of the schema.
+A **computed fact** is a fact whose rows are defined from other facts (`SaleMargin` from `Sale` and the
+costs it names). Its definition is a `computed-from` edge in the dependency graph (§9), not an arrow of the schema.
 
 ### 2.5 Well-formedness (checked when a schema is defined)
 
@@ -159,7 +159,7 @@ Each rule is a consequence of §1, not a design choice.
 **A. Paths**
 
 - **A1 — Grouping is along functions.** Each grouping and filter path is a path of arrows from the fact. Nothing is
-  reached against an arrow: from Pillar to its projects is not a function, and summing along it multiplies rows (the
+  reached against an arrow: from Region to its stores is not a function, and summing along it multiplies rows (the
   fan trap).
 - **A2 — Roles are chosen.** When a fact reaches a target by several paths not equal under the path equations, the
   question names the path, or the fact declares a default for that target; otherwise the choices are returned.
@@ -225,7 +225,7 @@ Moves on a pattern `Q` keep it answerable when the rules are rechecked, and the 
 
 | Move | On the pattern |
 |---|---|
-| drill up | a grouping path `p` becomes `p · f` for an arrow `f` out of its target (`project` → `project.pillar`, `day` → `day.month`) |
+| drill up | a grouping path `p` becomes `p · f` for an arrow `f` out of its target (`store` → `store.region`, `day` → `day.month`) |
 | drill down | `p · f` becomes `p` |
 | slice | add a filter on a path's target to one member |
 | dice | filters on several targets |
@@ -280,8 +280,8 @@ pattern, answer and series downstream of it, and is known by traversal.
 
 ## 10. Interventions, counterfactuals and causes
 
-- An **intervention** `do(·)` replaces part of the instance: a measure's values (`do(rate := 180)`), an arrow's value for
-  some elements (`do(project 52262.pillar := FO)`), rows added or removed (`do(allocation += …)`). The pattern is
+- An **intervention** `do(·)` replaces part of the instance: a measure's values (`do(price := 180)`), an arrow's value for
+  some elements (`do(store 12.region := West)`), rows added or removed (`do(sale += …)`). The pattern is
   unchanged; it is evaluated on the intervened instance `I′`.
 - A **counterfactual** evaluates the same pattern on `I` and on `I′` for the same as-of date, and reports the difference.
 - A **causal graph** over quantities — measures at grains — is declared with **structural equations**: the `computed-from`
@@ -414,9 +414,9 @@ Not yet, and said plainly:
 ## 16. Experiment
 
 1. **Textbook cases**, each a small schema with simulated data and a known correct result: the fan trap, the chasm trap,
-   role-playing dimensions, a non-strict hierarchy, a person who changed pillar mid-month (`as-of`), a stock rolled up
+   role-playing dimensions, a non-strict hierarchy, an employee who moved store mid-month (`as-of`), a stock rolled up
    over time, a ratio across two facts, money in two currencies, budget versions, a manager hierarchy.
-2. **Fusion5 Scenario 1** on simulated data: revenue by pillar and month, against budget, drill up and down, slices, a
+2. **A consultancy** on simulated data: revenue by practice and month, against budget, drill up and down, slices, a
    state walked through messages, refused moves, an intervention on a rate and on an arrow, a counterfactual.
 3. **Reading questions**: worded variants reaching the same canonical form; a misread term repaired from its
    neighbourhood.

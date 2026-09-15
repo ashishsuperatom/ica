@@ -4,7 +4,7 @@
 import { QdrantClient } from '@qdrant/js-client-rest'
 
 const client = new QdrantClient({ url: process.env.QDRANT_URL || 'http://127.0.0.1:6333' })
-const COLL = 'proj_totalgroup'        // collection per project
+const COLL = 'proj_smoke-test'        // a throwaway collection: this proves connectivity, for no project
 const DIM = 8                          // tiny hand-made vectors so the nearest match is deterministic
 
 const ok = (b, m) => console.log(`  ${b ? '✅' : '❌'} ${m}`)

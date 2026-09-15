@@ -1,4 +1,4 @@
-// Simulated data in the shape of Fusion5's NetSuite, for Scenario 1: made-up people, projects, allocations, a rate
+// Simulated data for a made-up consultancy: made-up people, projects, allocations, a rate
 // card, budgets and exchange rates, produced by programs the way real ones would read a source. Deterministic.
 // `raw` is what the programs read; tests compute expected answers from `raw` directly, without the graph.
 
@@ -7,21 +7,21 @@ import type { Model } from '../../src/model.js'
 import type { Element, Row } from '../../src/instance.js'
 import type { Schema } from '../../src/schema.js'
 
-export const schema: Schema = JSON.parse(readFileSync(new URL('../../graphs/fusion5-scenario1.json', import.meta.url), 'utf8'))
+export const schema: Schema = JSON.parse(readFileSync(new URL('./consultancy.json', import.meta.url), 'utf8'))
 
 let seed = 7
 const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
 const pick = <T,>(xs: T[]) => xs[Math.floor(rand() * xs.length)]
 
-const pillars = ['15', '42', '37', '5']
+const practices = ['15', '42', '37', '5']
 export const people = Array.from({ length: 12 }, (_, i) => ({
-  id: `e${i + 1}`, subsidiary: i < 8 ? '2' : '3', pillar: pillars[i % 4], manager: i < 2 ? null : `e${(i % 2) + 1}`,
-  // e3 moves from CEC to FO on 1 October.
+  id: `e${i + 1}`, company: i < 8 ? '2' : '3', practice: practices[i % 4], manager: i < 2 ? null : `e${(i % 2) + 1}`,
+  // e3 moves from Data to Security on 1 October.
   moves: i === 2 ? { on: '2026-10-01', to: '37' } : undefined,
 }))
 export const projects = Array.from({ length: 8 }, (_, i) => ({
-  id: `j${i + 1}`, subsidiary: i < 6 ? '2' : '3', currency: i < 6 ? 'AUD' : 'NZD', pillar: pillars[(i + 1) % 4], customer: `c${(i % 3) + 1}`,
-  type: ['1', '14', '3'][i % 3], manager: `e${(i % 4) + 1}`, seniorSupplier: i % 2 ? `e${i + 3}` : null,
+  id: `j${i + 1}`, company: i < 6 ? '2' : '3', currency: i < 6 ? 'AUD' : 'NZD', practice: practices[(i + 1) % 4], customer: `c${(i % 3) + 1}`,
+  type: ['1', '14', '3'][i % 3], manager: `e${(i % 4) + 1}`, sponsor: i % 2 ? `e${i + 3}` : null,
 }))
 /** A rate card: hourly rate by project and person; some pairs have none (unpriced). */
 export const rates = new Map<string, number>()
@@ -43,35 +43,35 @@ export const allocations = Array.from({ length: 40 }, () => {
   return { person: person.id, project: project.id, commitment: rand() > 0.35 ? 'Hard' : 'Soft', days: days.slice(start, start + 5 + Math.floor(rand() * 15)), hoursPerDay: pick([4, 6, 8]) }
 }).filter((a) => a !== undefined)
 export const budgets = [
-  ...['2026-09', '2026-10'].flatMap((month) => pillars.flatMap((pillar) => ['2', '3'].flatMap((subsidiary) => [
-    { subsidiary, pillar, account: '5005', category: '5', month, amount: 10000 + Math.round(rand() * 50) * 1000 },
-    { subsidiary, pillar, account: '5102', category: '5', month, amount: Math.round(rand() * 10) * 1000 },
-    { subsidiary, pillar, account: '5005', category: '7', month, amount: 99999 },
+  ...['2026-09', '2026-10'].flatMap((month) => practices.flatMap((practice) => ['2', '3'].flatMap((company) => [
+    { company, practice, account: '5005', category: '5', month, amount: 10000 + Math.round(rand() * 50) * 1000 },
+    { company, practice, account: '5102', category: '5', month, amount: Math.round(rand() * 10) * 1000 },
+    { company, practice, account: '5005', category: '7', month, amount: 99999 },
   ]))),
 ]
 export const exchange = [{ from: 'NZD', to: 'AUD', day: '2026-09-01', rate: 0.91 }, { from: 'NZD', to: 'AUD', day: '2026-10-15', rate: 0.93 }]
 
-const pillarHistory = (p: (typeof people)[number]) => p.moves
-  ? [{ from: '2020-01-01', to: p.moves.on, value: p.pillar }, { from: p.moves.on, value: p.moves.to }]
-  : [{ from: '2020-01-01', value: p.pillar }]
+const practiceHistory = (p: (typeof people)[number]) => p.moves
+  ? [{ from: '2020-01-01', to: p.moves.on, value: p.practice }, { from: p.moves.on, value: p.moves.to }]
+  : [{ from: '2020-01-01', value: p.practice }]
 
 export const model: Model = {
   schema,
   programs: [
     { produces: 'Currency', reads: [], run: () => ({ AUD: {}, NZD: {} }) },
-    { produces: 'Subsidiary', reads: [], run: () => ({ '2': { label: 'Fusion5 Pty Ltd', arrows: { currency: 'AUD' } }, '3': { label: 'Fusion5 Ltd', arrows: { currency: 'NZD' } } }) },
-    { produces: 'Pillar', reads: [], run: () => Object.fromEntries(pillars.map((p) => [p, {}])) },
+    { produces: 'Company', reads: [], run: () => ({ '2': { label: 'Acme Consulting Pty Ltd', arrows: { currency: 'AUD' } }, '3': { label: 'Acme Consulting Ltd', arrows: { currency: 'NZD' } } }) },
+    { produces: 'Practice', reads: [], run: () => Object.fromEntries(practices.map((p) => [p, {}])) },
     { produces: 'Customer', reads: [], run: () => ({ c1: {}, c2: {}, c3: {} }) },
     { produces: 'ProjectType', reads: [], run: () => ({ '1': {}, '14': {}, '3': {} }) },
     { produces: 'Account', reads: [], run: () => ({ '5005': {}, '5102': {}, '5010': {} }) },
     { produces: 'BudgetCategory', reads: [], run: () => ({ '5': {}, '7': {} }) },
     {
-      produces: 'Person', reads: ['Subsidiary', 'Pillar'],
-      run: () => Object.fromEntries(people.map((p): [string, Element] => [p.id, { arrows: { subsidiary: p.subsidiary, manager: p.manager }, history: { pillar: pillarHistory(p) } }])),
+      produces: 'Person', reads: ['Company', 'Practice'],
+      run: () => Object.fromEntries(people.map((p): [string, Element] => [p.id, { arrows: { company: p.company, manager: p.manager }, history: { practice: practiceHistory(p) } }])),
     },
     {
-      produces: 'Project', reads: ['Person', 'Customer', 'Subsidiary', 'Pillar', 'Currency', 'ProjectType'],
-      run: () => Object.fromEntries(projects.map((p): [string, Element] => [p.id, { arrows: { subsidiary: p.subsidiary, pillar: p.pillar, customer: p.customer, currency: p.currency, type: p.type, manager: p.manager, 'senior supplier': p.seniorSupplier } }])),
+      produces: 'Project', reads: ['Person', 'Customer', 'Company', 'Practice', 'Currency', 'ProjectType'],
+      run: () => Object.fromEntries(projects.map((p): [string, Element] => [p.id, { arrows: { company: p.company, practice: p.practice, customer: p.customer, currency: p.currency, type: p.type, manager: p.manager, 'sponsor': p.sponsor } }])),
     },
     {
       produces: 'RateCard', reads: [],
@@ -94,8 +94,8 @@ export const model: Model = {
     },
     { produces: 'TimesheetLine', reads: ['Person', 'Project'], run: () => [] },
     {
-      produces: 'BudgetLine', reads: ['Subsidiary', 'Pillar', 'Account', 'BudgetCategory'],
-      run: () => budgets.map((b) => ({ arrows: { subsidiary: b.subsidiary, pillar: b.pillar, account: b.account, category: b.category, month: b.month }, measures: { budget: b.amount } })),
+      produces: 'BudgetLine', reads: ['Company', 'Practice', 'Account', 'BudgetCategory'],
+      run: () => budgets.map((b) => ({ arrows: { company: b.company, practice: b.practice, account: b.account, category: b.category, month: b.month }, measures: { budget: b.amount } })),
     },
     { produces: 'ExchangeRate', reads: ['Currency'], run: () => exchange.map((x) => ({ arrows: { from: x.from, to: x.to, day: x.day }, measures: { rate: x.rate } })) },
   ],

@@ -125,15 +125,15 @@ struct Monogram: View {
             )
     }
 
-    /// "Fusion5" → "F5", "TotalGroup" → "TG", "Acme Freight Co" → "AF".
+    /// "Acme5" → "A5", "NorthWind" → "NW", "Acme Freight Co" → "AF".
     private var initials: String {
         let words = name.split(whereSeparator: { $0 == " " || $0 == "-" || $0 == "_" })
         if words.count >= 2 {
             return words.prefix(2).compactMap { $0.first }.map(String.init).joined().uppercased()
         }
         guard let word = words.first else { return "?" }
-        // A single word: take its capitals (TotalGroup → TG), or a leading letter plus a
-        // trailing digit (Fusion5 → F5), or just the first two characters.
+        // A single word: take its capitals (NorthWind → NW), or a leading letter plus a
+        // trailing digit (Acme5 → A5), or just the first two characters.
         let capitals = word.filter(\.isUppercase)
         if capitals.count >= 2 { return String(capitals.prefix(2)) }
         if let digit = word.last, digit.isNumber, let first = word.first {

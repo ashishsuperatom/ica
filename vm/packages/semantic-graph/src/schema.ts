@@ -1,7 +1,7 @@
 // ── THE SCHEMA (docs/semantic-graph.md §2) ──────────────────────────────────────────────────────────────────
 //
 // A finitely presented category: objects (entities, calendar levels, facts), arrows between them that are functions,
-// and equations between paths. Measures are functions from a fact into a quantity type. Nothing here is Fusion5's:
+// and equations between paths. Measures are functions from a fact into a quantity type. Nothing here is any one organisation's:
 // a schema is data, and this file only says what a well-formed one is.
 
 import { calendarProblem, nests, type CalendarDef } from './calendar.js'

@@ -1,16 +1,17 @@
 // Measure TRUE end-to-end round-trip latency (client SEND → client RECEIVE) against the deployed
 // fast-router over the real hub, and split it into worker-compute vs network. Sequential (one query
 // at a time, waits for each reply) so the serial inference queue never overlaps the measurements.
-//   node scripts/latency-test.mjs           (default queries, projectId=totalgroup)
+//   node scripts/latency-test.mjs           (the project's queries from its home)
 //   PROJECT=<id> node scripts/latency-test.mjs "query one" "query two"
 import WebSocket from 'ws'
 import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 const cfg = JSON.parse(readFileSync(new URL('../fast-router.local.json', import.meta.url), 'utf8'))
-const PROJECT = process.env.PROJECT || 'totalgroup'
-const QUERIES = process.argv.slice(2).length ? process.argv.slice(2) : [
-  'vendors on the dahej udaipur lane', 'overdue invoices in raipur',
-  'who grew but is paying slower', 'solar customers revenue', 'total revenue last year',
-]
+const PROJECT = process.env.PROJECT || cfg.id
+// The queries: given as arguments, or the project's own in its home (<state>/<projectId>/fast-router/queries.json).
+const QUERIES = process.argv.slice(2).length ? process.argv.slice(2)
+  : JSON.parse(readFileSync(join(process.env.ENGINE_STATE_DIR || join(homedir(), '.superatom', 'state'), cfg.id, 'fast-router', 'queries.json'), 'utf8'))
 const WARMUP = 2
 const queue = [...Array(WARMUP).fill('__warm__'), ...QUERIES]
 const ws = new WebSocket(`${cfg.hubHost}/_ws/${cfg.id}?key=${cfg.key}`)

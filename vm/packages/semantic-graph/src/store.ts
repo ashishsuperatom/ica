@@ -4,7 +4,7 @@
 //
 //   definition   what exists — a schema, the sources that say where its objects' rows are, a program that produces a
 //                fact. Written once per content hash, never updated.
-//   name         what a name points at, with every earlier pointing kept: what "fusion5" meant on any day is answerable.
+//   name         what a name points at, with every earlier pointing kept: what a model name meant on any day is answerable.
 //   call         memory — every question asked: the question and its canonical form, the plan, the exact definitions
 //                it ran on, each statement with its SQL, rows and time, the answer, caveats, the day, who asked,
 //                assumptions and interventions, or the refusal or error.

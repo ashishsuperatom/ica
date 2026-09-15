@@ -29,7 +29,7 @@ import { dsiKey, type DataSourceEntry } from '@superatom/datasource-index'
 //                 for a shared entity).
 //   6. DESCRIBE   AI writes table/column descriptions (→ the desc_ai field). LAST on purpose: it is richest once
 //                 the profile (4) and links (5) exist — it can say "customer id · 99% populated · joins to
-//                 F5NETSUITE.customer.id" instead of guessing from a name. (5 before 6 — linking needs no prose;
+//                 ERP.customer.id" instead of guessing from a name. (5 before 6 — linking needs no prose;
 //                 descriptions improve once links exist.)
 // ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 

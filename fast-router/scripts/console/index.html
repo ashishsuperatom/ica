@@ -58,7 +58,7 @@
 <main>
   <div class="box">
     <input id="q" placeholder="Type a question… (suggestions stream as you type)" autocomplete="off" spellcheck="false" />
-    <input id="proj" value="totalgroup" title="projectId" />
+    <input id="proj" value="" placeholder="project id" title="projectId" />
   </div>
   <div class="meta">
     <span>inputId <b id="mInput">—</b></span>
@@ -190,7 +190,7 @@ $('q').addEventListener('input', () => {
     seq++
     $('mSeq').textContent = seq
     ws.send(JSON.stringify({ to:{ type:'fast-router' }, payload:{
-      t:'suggest', projectId: $('proj').value.trim() || 'totalgroup', userId: USER, inputId, seq, text
+      t:'suggest', projectId: $('proj').value.trim(), userId: USER, inputId, seq, text
     }}))
   }, 120)
 })

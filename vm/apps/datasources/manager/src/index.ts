@@ -5,7 +5,7 @@
 //   list sources                      →  GET  /sources
 //
 // The manager routes by `id` to a BRIDGE loaded in-process. A bridge owns the connection to its
-// remote source (e.g. the TotalGroup bridge holds the WebSocket to the remote DB). Adding a source
+// remote source (e.g. a bridge that holds the WebSocket to a remote database). Adding a source
 // = add a bridge to the registry below; nothing else in the system changes. Local port only —
 // callers (ICA units, the semantic-model agent) never see a database, port, or credential.
 

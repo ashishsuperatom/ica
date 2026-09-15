@@ -1,9 +1,9 @@
-// Scenario 1 on simulated data. Every expected number is computed straight from the raw simulated records, without
+// the consultancy on simulated data. Every expected number is computed straight from the raw simulated records, without
 // the schema, paths or evaluator — so a pass means the graph's answer equals the answer worked out by hand.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { applyMove, canonical, check, conformance, counterfactual, evaluate, materialise, schemaProblems, type Question } from '../src/index.js'
-import { allocations, budgets, exchange, model, people, projects, rates, schema as s } from './fixtures/fusion5-sim.js'
+import { allocations, budgets, exchange, model, people, projects, rates, schema as s } from './fixtures/consultancy.js'
 
 const I = materialise(model)
 const answer = (q: Question) => { const v = check(s, q); if (!v.ok) assert.fail(`${v.rule}: ${v.reason}`); return evaluate(s, I, v.plan).rows }
@@ -22,7 +22,7 @@ const sumBy = <T,>(xs: T[], key: (x: T) => string, value: (x: T) => number) => {
   return m
 }
 
-test('the Scenario 1 schema is well formed and the simulated data conforms', () => {
+test('the the consultancy schema is well formed and the simulated data conforms', () => {
   assert.deepEqual(schemaProblems(s), [])
   assert.deepEqual(conformance(s, I), [])
   assert.ok(I.rows.AllocationDay.length > 200)
@@ -31,29 +31,29 @@ test('the Scenario 1 schema is well formed and the simulated data conforms', () 
 test('projected revenue from allocations for AU, September and October, hard and soft', () => {
   const rows = answer({
     measures: ['AllocationDay.revenue'], by: [{ to: 'Month' }, { attribute: 'commitment' }],
-    where: [{ to: 'Subsidiary', via: ['project', 'subsidiary'], in: ['AU'] }],
+    where: [{ to: 'Company', via: ['project', 'company'], in: ['AU'] }],
     span: { from: '2026-09-01', to: '2026-11-01' }, currency: 'AUD',
   })
-  const expected = sumBy(days.filter((d) => project(d.project).subsidiary === '2'), (d) => `${d.month}|${d.commitment}`, (d) => d.revenue)
+  const expected = sumBy(days.filter((d) => project(d.project).company === '2'), (d) => `${d.month}|${d.commitment}`, (d) => d.revenue)
   assert.deepEqual(round(rows), round([...expected].sort().map(([k, v]) => [...k.split('|'), v])))
 })
 
-test('both subsidiaries in AUD: NZD revenue converted at the rate on the last day of the span', () => {
+test('both companies in AUD: NZD revenue converted at the rate on the last day of the span', () => {
   const rows = answer({ measures: ['AllocationDay.revenue'], by: [{ to: 'Month' }], span: { from: '2026-09-01', to: '2026-11-01' }, currency: 'AUD' })
   const rateAtEnd = exchange.filter((x) => x.day <= '2026-10-31').sort((a, b) => b.day.localeCompare(a.day))[0].rate
   const expected = sumBy(days, (d) => d.month, (d) => d.revenue * (project(d.project).currency === 'NZD' ? rateAtEnd : 1))
   assert.deepEqual(round(rows), round([...expected].sort()))
 })
 
-test('AU revenue against the Base Budget by project pillar and month', () => {
+test('AU revenue against the Base Budget by project practice and month', () => {
   const rows = answer({
     measures: ['AllocationDay.revenue', 'BudgetLine.budget', '[AllocationDay.revenue] - [BudgetLine.budget]'],
-    by: [{ to: 'Pillar', via: { AllocationDay: ['project', 'pillar'], BudgetLine: ['pillar'] } }, { to: 'Month' }],
-    where: [{ to: 'Subsidiary', via: { AllocationDay: ['project', 'subsidiary'], BudgetLine: ['subsidiary'] }, in: ['AU'] }, { to: 'BudgetCategory', in: ['Base Budget'] }],
+    by: [{ to: 'Practice', via: { AllocationDay: ['project', 'practice'], BudgetLine: ['practice'] } }, { to: 'Month' }],
+    where: [{ to: 'Company', via: { AllocationDay: ['project', 'company'], BudgetLine: ['company'] }, in: ['AU'] }, { to: 'BudgetCategory', in: ['Base Budget'] }],
     span: { from: '2026-09-01', to: '2026-11-01' }, currency: 'AUD',
   })
-  const revenue = sumBy(days.filter((d) => project(d.project).subsidiary === '2'), (d) => `${project(d.project).pillar}|${d.month}`, (d) => d.revenue)
-  const budget = sumBy(budgets.filter((b) => b.subsidiary === '2' && b.category === '5'), (b) => `${b.pillar}|${b.month}`, (b) => b.amount)
+  const revenue = sumBy(days.filter((d) => project(d.project).company === '2'), (d) => `${project(d.project).practice}|${d.month}`, (d) => d.revenue)
+  const budget = sumBy(budgets.filter((b) => b.company === '2' && b.category === '5'), (b) => `${b.practice}|${b.month}`, (b) => b.amount)
   const keys = [...new Set([...revenue.keys(), ...budget.keys()])].sort()
   const expected = keys.map((k) => { const r = revenue.get(k) ?? null, b = budget.get(k) ?? null; return [...k.split('|'), r, b, r === null || b === null ? null : r - b] })
   assert.deepEqual(round(rows), round(expected))
@@ -61,18 +61,18 @@ test('AU revenue against the Base Budget by project pillar and month', () => {
 
 test('refused, with the reason: the questions that went wrong in the trials', () => {
   assert.match(refusal({ measures: ['AllocationDay.revenue', 'BudgetLine.budget'], by: [{ to: 'Customer' }], where: [{ to: 'BudgetCategory', in: ['5'] }], currency: 'AUD' }).reason, /BudgetLine does not reach Customer/)
-  const pillar = refusal({ measures: ['AllocationDay.hours'], by: [{ to: 'Pillar' }] })
-  assert.equal(pillar.rule, 'A2')
-  assert.ok(pillar.choices![0].paths.includes('project.pillar') && pillar.choices![0].paths.includes('person.pillar'))
+  const practice = refusal({ measures: ['AllocationDay.hours'], by: [{ to: 'Practice' }] })
+  assert.equal(practice.rule, 'A2')
+  assert.ok(practice.choices![0].paths.includes('project.practice') && practice.choices![0].paths.includes('person.practice'))
   assert.equal(refusal({ measures: ['BudgetLine.budget'], by: [{ to: 'Day' }], where: [{ to: 'BudgetCategory', in: ['5'] }], currency: 'AUD' }).rule, 'A1')
   assert.equal(refusal({ measures: ['BudgetLine.budget'], by: [{ to: 'Month' }], currency: 'AUD' }).rule, 'F1')
-  assert.match(refusal({ measures: ['AllocationDay.hours'], where: [{ to: 'Subsidiary', via: ['project', 'subsidiary'], in: ['Singapore'] }] }).reason, /no member Singapore/)
+  assert.match(refusal({ measures: ['AllocationDay.hours'], where: [{ to: 'Company', via: ['project', 'company'], in: ['Singapore'] }] }).reason, /no member Singapore/)
 })
 
-test('people by the pillar they were in that day: someone who moved counts where they were', () => {
-  const rows = answer({ measures: ['AllocationDay.hours'], by: [{ to: 'Pillar', via: ['person', 'pillar'] }, { to: 'Month' }] })
-  const pillarOn = (id: string, day: string) => { const p = people.find((x) => x.id === id)!; return p.moves && day >= p.moves.on ? p.moves.to : p.pillar }
-  const expected = sumBy(days, (d) => `${pillarOn(d.person, d.day)}|${d.month}`, (d) => d.hours)
+test('people by the practice they were in that day: someone who moved counts where they were', () => {
+  const rows = answer({ measures: ['AllocationDay.hours'], by: [{ to: 'Practice', via: ['person', 'practice'] }, { to: 'Month' }] })
+  const practiceOn = (id: string, day: string) => { const p = people.find((x) => x.id === id)!; return p.moves && day >= p.moves.on ? p.moves.to : p.practice }
+  const expected = sumBy(days, (d) => `${practiceOn(d.person, d.day)}|${d.month}`, (d) => d.hours)
   assert.deepEqual(rows, [...expected].sort().map(([k, v]) => [...k.split('|'), v]))
 })
 
@@ -82,12 +82,12 @@ test('people allocated each month are counted once each', () => {
   assert.deepEqual(rows, expected)
 })
 
-test('drill up from projects to their pillars gives the same numbers as asking by project pillar', () => {
+test('drill up from projects to their practices gives the same numbers as asking by project practice', () => {
   const byProject: Question = { measures: ['AllocationDay.hours'], by: [{ to: 'Project' }] }
-  const up = applyMove(s, byProject, { move: 'drill up', target: 0, along: 'pillar' })
+  const up = applyMove(s, byProject, { move: 'drill up', target: 0, along: 'practice' })
   assert.ok(up.verdict.ok)
-  assert.deepEqual(evaluate(s, I, (up.verdict as any).plan).rows, answer({ measures: ['AllocationDay.hours'], by: [{ to: 'Pillar', via: ['project', 'pillar'] }] }))
-  assert.equal(canonical(s, up.question), canonical(s, { measures: ['AllocationDay.hours'], by: [{ to: 'Pillar', via: ['project', 'pillar'] }] }))
+  assert.deepEqual(evaluate(s, I, (up.verdict as any).plan).rows, answer({ measures: ['AllocationDay.hours'], by: [{ to: 'Practice', via: ['project', 'practice'] }] }))
+  assert.equal(canonical(s, up.question), canonical(s, { measures: ['AllocationDay.hours'], by: [{ to: 'Practice', via: ['project', 'practice'] }] }))
 })
 
 test('what if j1 were charged at 300 an hour: only j1\'s priced hours change, and revenue is produced again from the new rate', () => {
@@ -98,7 +98,7 @@ test('what if j1 were charged at 300 an hour: only j1\'s priced hours change, an
 })
 
 test('AU and 2 are the same question', () => {
-  const q = (v: string): Question => ({ measures: ['AllocationDay.hours'], where: [{ to: 'Subsidiary', via: ['project', 'subsidiary'], in: [v] }] })
+  const q = (v: string): Question => ({ measures: ['AllocationDay.hours'], where: [{ to: 'Company', via: ['project', 'company'], in: [v] }] })
   assert.equal(canonical(s, q('AU')), canonical(s, q('2')))
 })
 

@@ -29,9 +29,9 @@ await cls('e-commerce', 'Can I return these shoes if they do not fit?',
   ['browse products', 'place order', 'compare items', 'file complaint', 'return or refund'])
 await cls('banking', 'Someone made a charge on my card that I did not authorize.',
   ['check balance', 'transfer money', 'report fraud', 'loan inquiry', 'replace card'])
-await cls('freight-analytics', 'show me total revenue by branch for last year',
+await cls('retail-analytics', 'show me total revenue by store for last year',
   ['lookup', 'analysis', 'edit', 'action', 'unknown'])
-await cls('freight-analytics', 'delete the duplicate vendor entry for the Raipur branch',
+await cls('retail-analytics', 'delete the duplicate supplier entry for the Springfield store',
   ['lookup', 'analysis', 'edit', 'action', 'unknown'])
 
 console.log('═══════ 2. MULTI-LABEL — sentiment & topic tagging ═══════\n')
@@ -51,7 +51,7 @@ await ner('legal', 'In Roe v. Wade the Supreme Court ruled in 1973 under the Fou
   ['party', 'court', 'year', 'legal provision'])
 await ner('finance', 'Tesla reported 25.2 billion dollars in revenue for Q3, beating analyst estimates.',
   ['company', 'money amount', 'financial metric', 'time period'])
-await ner('freight', 'Full vendor review for Dahej to Udaipur on 14-wheeler trucks from the Raipur branch.',
-  ['origin', 'destination', 'vehicle type', 'branch'])
+await ner('retail', 'Full supplier review for Springfield to Shelbyville on refrigerated trucks from the Ogdenville store.',
+  ['origin', 'destination', 'vehicle type', 'store'])
 
 process.exit(0)

@@ -3,7 +3,7 @@
 import WebSocket from 'ws'
 import { readFileSync } from 'node:fs'
 const KEY = readFileSync('/tmp/frkey.txt', 'utf8').trim()
-const PROJECT_DO = process.argv[2] || '22dd6ecd-7878-4739-bb23-bc7703737807'  // totalgroup
+const PROJECT_DO = process.argv[2] || (() => { console.error('usage: node scripts/user-pipeline-test.mjs <projectId>'); process.exit(1) })()
 const ws = new WebSocket(`wss://superatom.site/_ws/${PROJECT_DO}?key=${KEY}`)
 ws.on('open', () => ws.send(JSON.stringify({ type: 'hello', key: KEY, role: 'runtime' })))
 ws.on('message', (raw) => {
@@ -11,9 +11,9 @@ ws.on('message', (raw) => {
   if (m.payload?.t === 'welcome') {
     console.log('✅ connected to project DO as runtime:', m.payload.wsId)
     ws.send(JSON.stringify({ to: { type: 'code-engine' }, payload: {
-      t: 'suggest', projectId: PROJECT_DO, inputId: 'pipe-test', seq: 1, text: 'vendors on the dahej udaipur lane',
+      t: 'suggest', projectId: PROJECT_DO, inputId: 'pipe-test', seq: 1, text: process.argv[3] || 'total revenue last year',
     } }))
-    console.log('→ sent suggest to code-engine ("vendors on the dahej udaipur lane")')
+    console.log(`→ sent suggest to code-engine ("${process.argv[3] || 'total revenue last year'}")`)
   }
   if (m.payload?.t === 'suggestions') {
     const p = m.payload

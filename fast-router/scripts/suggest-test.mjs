@@ -2,14 +2,12 @@
 // the same thing the console shows, but headless, to verify quality.  node scripts/suggest-test.mjs
 import WebSocket from 'ws'
 import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 const cfg = JSON.parse(readFileSync(new URL('../fast-router.local.json', import.meta.url), 'utf8'))
-const QUERIES = process.argv.slice(2).length ? process.argv.slice(2) : [
-  'vendors on the dahej udaipur lane',
-  'who grew but is paying slower',
-  'overdue invoices in raipur',
-  'why did revenue change last year',
-  'solar customers revenue',
-]
+// The queries: given as arguments, or the project's own in its home (<state>/<projectId>/fast-router/queries.json).
+const QUERIES = process.argv.slice(2).length ? process.argv.slice(2)
+  : JSON.parse(readFileSync(join(process.env.ENGINE_STATE_DIR || join(homedir(), '.superatom', 'state'), cfg.id, 'fast-router', 'queries.json'), 'utf8'))
 const ws = new WebSocket(`${cfg.hubHost}/_ws/${cfg.id}?key=${cfg.key}`)
 const pending = new Map()
 ws.on('open', () => ws.send(JSON.stringify({ type: 'hello', key: cfg.key, role: 'runtime' })))
@@ -28,7 +26,7 @@ ws.on('message', (raw) => {
 let seq = 0
 function run() {
   // unique inputId per query so they don't drop-stale each other (each = its own "input session")
-  for (const q of QUERIES) { seq++; pending.set(seq, q); ws.send(JSON.stringify({ to: { type: 'fast-router' }, payload: { t: 'suggest', projectId: 'totalgroup', userId: 'tester', inputId: 'test-' + seq, seq, text: q } })) }
+  for (const q of QUERIES) { seq++; pending.set(seq, q); ws.send(JSON.stringify({ to: { type: 'fast-router' }, payload: { t: 'suggest', projectId: cfg.id, userId: 'tester', inputId: 'test-' + seq, seq, text: q } })) }
 }
 setTimeout(() => { console.error('timeout'); process.exit(1) }, 20000)
 ws.on('close', () => process.exit(0))

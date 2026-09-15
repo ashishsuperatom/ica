@@ -1,12 +1,15 @@
 // Seed a project's Qdrant collection with sample prior questions (embedded), so semantic match has
 // something to match against. In production these arrive via `ingest`; this is the test fixture.
-//   node_modules/.bin/tsx scripts/seed.ts
+// The questions are the project's, in its home: <state>/<projectId>/fast-router/sample_questions.json.
+//   PROJECT=<projectId> node_modules/.bin/tsx scripts/seed.ts
 import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { QdrantClient } from '@qdrant/js-client-rest'
 import { ingest, ensureCollection } from '../src/router.js'
 
-const data = JSON.parse(readFileSync(new URL('./sample_questions.json', import.meta.url), 'utf8'))
-const projectId = process.env.SEED_PROJECT || data.projectId   // override to seed the real (UUID) project
+const projectId = process.env.PROJECT || process.env.SEED_PROJECT || (() => { throw new Error('say which project: PROJECT=<projectId>') })()
+const data = JSON.parse(readFileSync(join(process.env.ENGINE_STATE_DIR || join(homedir(), '.superatom', 'state'), projectId, 'fast-router', 'sample_questions.json'), 'utf8'))
 const collection = `proj_${projectId}`
 const qdrant = new QdrantClient({ url: process.env.QDRANT_URL || 'http://127.0.0.1:6333' })
 

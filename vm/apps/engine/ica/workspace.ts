@@ -44,9 +44,9 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
   const dir = s.sessionId ? join(projectHome, 'sessions', s.sessionId) : join(projectHome, 'workspace')
   const dbDir = join(projectHome, 'db')
   const managerUrl = s.managerUrl ?? 'http://localhost:4000'
-  // The project's committed model. Every agent in the shared workspace writes the same tools, so each resolves it the
-  // same way as the engine does (ENGINE_PROJECT_DIR, else vm/projects/<id>) when its caller does not say.
-  const projectDir = s.projectDir ?? process.env.ENGINE_PROJECT_DIR ?? fileURLToPath(new URL(`../../../projects/${s.projectId}`, import.meta.url))
+  // The project's home, where its model is. Every agent in the shared workspace writes the same tools, so each resolves
+  // it the way the engine does (ENGINE_PROJECT_DIR, else the project home) when its caller does not say.
+  const projectDir = s.projectDir ?? process.env.ENGINE_PROJECT_DIR ?? projectHome
   const conversation = s.tools === 'conversation'
   for (const sub of conversation ? ['', 'out', '.tools'] : ['', 'data', 'grounding', 'out', '.tools']) await mkdir(join(dir, sub), { recursive: true })
   await mkdir(dbDir, { recursive: true })
@@ -216,8 +216,8 @@ if (!q) { console.log(JSON.stringify({ hint: 'find-schema "<term>" [--source <SO
 const r = searchDataSource(store, q, { source, limit: full ? 40 : 60 })
 const view = (e) => full ? e : (e.key + ' : ' + (e.type || '?') + (e.isKey ? ' [PK]' : '') + (e.references ? (' → ' + e.references) : ''))
 // SAY WHAT WAS NOT SHOWN. This returns a bounded slice, and a bare array of six fields reads as "there are
-// six". That is not hypothetical: a search for "customer" showed 6 TotalGroup fields out of 324, and the
-// agent concluded TotalGroup held almost no customer data. The count and the per-source split make a slice
+// six". That is not hypothetical: a search for "customer" showed 6 fields of one source out of 324, and the
+// agent concluded that source held almost no customer data. The count and the per-source split make a slice
 // recognisable as one, and point at the flag that narrows it.
 const spread = Object.entries(r.bySource).map(([s, n]) => s + ':' + n).join(' · ')
 console.log(JSON.stringify({

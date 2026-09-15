@@ -20,11 +20,11 @@ const CASES = [
     ],
   },
   {
-    template: 'vendors from {origin} to {destination} on {vehicle} (freight domain)',
-    labels: ['origin', 'destination', 'vehicle type', 'branch'],
+    template: 'suppliers from {origin} to {destination} on {vehicle} (retail domain)',
+    labels: ['origin', 'destination', 'vehicle type', 'store'],
     asks: [
-      'who do we use from Raipur to Nagpur with 10-wheeler trucks',
-      'vendor list Dahej to Udaipur on 14-wheeler from the Ahmedabad branch',
+      'who do we use from Springfield to Capital City with refrigerated trucks',
+      'supplier list Shelbyville to Ogdenville on flatbeds from the North Haverbrook store',
     ],
   },
   {

@@ -77,8 +77,8 @@ Model weights, Qdrant storage, per-project corpora/indexes, and project API keys
 ```bash
 pnpm install
 # provide the projects this worker serves (holds API keys — gitignored):
-#   projects.local.json  →  [{ "id": "totalgroup", "key": "sk-proj-..." }]
-# or env FR_PROJECTS='[{"id":"totalgroup","key":"sk-proj-..."}]'
+#   projects.local.json  →  [{ "id": "<projectId>", "key": "sk-proj-..." }]
+# or env FR_PROJECTS='[{"id":"<projectId>","key":"sk-proj-..."}]'
 pnpm start          # or: pnpm dev  (watch)
 ```
 

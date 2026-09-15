@@ -1171,7 +1171,7 @@ function FeedCard({ item, onPick }: { item: FeedItem; onPick?: (t: string) => vo
   return null
 }
 
-// ── Answer card — the "exhibit" standard from the TotalGroup/Fusion5 benchmark.html ──────────────────
+// ── Answer card — the "exhibit" standard ──────────────────
 // Editorial financial-report look: uppercase navy type label, serif lead, thick ink rule, a KPI "figs"
 // strip, rigorous fin-tables (uppercase head, ink rules, right-aligned tabular figures), a red-accent
 // caveat, and a source line. Theme-aware (light/dark) with real contrast. The program's view-model drives
@@ -1722,7 +1722,7 @@ function AnswerCard({ answer: a, category, timing, qid, at }: { answer: any; cat
       {Array.isArray(a.sections) && a.sections.map((s: any, i: number) => <SectionBlock key={i} s={s} />)}
       {/* Backward-compat: programs built in the OLDER format (and reused since) emit a flat top-level `table`
           instead of a `table` section. Render it too — dropping it stranded every pre-format program (e.g. all
-          of TotalGroup's), silently losing real rows. */}
+          of one early project's), silently losing real rows. */}
       {a.table?.columns && (!Array.isArray(a.sections) || !a.sections.some((s: any) => s?.kind === 'table')) && (
         <DataTable columns={a.table.columns} rows={a.table.rows ?? []} total={a.table.total} totalRows={a.table.totalRows} title={a.table.title} note={a.table.note} csvName={a.table.title} />
       )}

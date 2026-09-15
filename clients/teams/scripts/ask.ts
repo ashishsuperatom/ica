@@ -1,7 +1,7 @@
 // Engine smoke test — the fastest "does it work" check, with NO Teams/Azure.
 // It exercises the exact path the bot uses (engine-client → hub → code-engine)
 // and prints the JSON answer. Run this FIRST to prove the transport + a project
-// (e.g. totalgroup) end to end, before wiring any Teams/bot infrastructure.
+// (by its project id) end to end, before wiring any Teams/bot infrastructure.
 //
 //   cd clients/teams
 //   cp .env.example .env      # fill SA_HUB_WS, SA_PROJECT_ID, SA_ENGINE_KEY

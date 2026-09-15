@@ -16,8 +16,8 @@
 #
 #   vm/docker/deploy-box.sh <ssh-host> [ssh-port] [remote-dir]
 #
-# Example (fusion5, through the ngrok tunnel):
-#   vm/docker/deploy-box.sh ashish.tandi@fusion5.com@0.tcp.au.ngrok.io 16082
+# Example (a box reached through a tunnel):
+#   vm/docker/deploy-box.sh user@example.com@0.tcp.au.ngrok.io 16082
 set -euo pipefail
 
 HOST="${1:?usage: deploy-box.sh <ssh-host> [ssh-port] [remote-dir]}"
