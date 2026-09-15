@@ -3,7 +3,7 @@
 // A program is a module with two exports:
 //
 //   meta     { name, description, params: { name: what it means }, logic }
-//   default  async (ctx, params) => { headline?, data, views, narration, nextSteps }
+//   default  async (ctx, params) => { status?, missing?, scope?, headline?, data, views, narration, nextSteps }
 //
 // Its only data is what it asks the graph — ctx.ask(question) — so every number rests on a checked, recorded question.
 // Everything else is the program's: how the answers are combined and ranked (ctx.transform), which way it went and why
@@ -15,7 +15,7 @@
 // narration is a {slot} that cites a cell, and a sentence that types a number is refused.
 
 import { randomUUID } from 'node:crypto'
-import type { createGraph, AskOptions } from './runtime.js'
+import { readableDay, readableSpan, type createGraph, type AskOptions } from './runtime.js'
 import type { QuestionAsked } from './time.js'
 
 export interface ProgramMeta { name: string; description: string; params?: Record<string, string>; logic?: string }
@@ -29,6 +29,12 @@ export interface Table {
 }
 export interface ProgramCell { data: string; /** A row by its index from 0, or by the values that pick it out. */ row?: number | Record<string, unknown>; column: string; format?: 'number' | 'integer' | 'percent' | 'money' | 'hours' | 'text' }
 export interface ProgramAnswer {
+  /** answered by default; unknowable when the data does not hold what the question needs, uncertain when the program
+   *  could not answer with confidence — either with `missing`, the plain reason. */
+  status?: 'answered' | 'unknowable' | 'uncertain'
+  missing?: string
+  /** The records and conditions the answer is kept to, in plain words. */
+  scope?: string
   headline?: { label: string; value: ProgramCell }
   data: Record<string, Table>
   views: Array<{ id: string; component: string; data: string; title?: string; encode: Record<string, string | string[]> }>
@@ -54,6 +60,8 @@ export async function runProgram(graph: Graph, source: string, params: Record<st
   const started = Date.now()
   const steps: ProgramStep[] = []
   const notes: string[] = []
+  // The time each answer holds for, from the questions it asked: a span, or the state as of the day it ran.
+  const periods: string[] = []
   let meta: ProgramMeta | undefined
   let delivered: ReturnType<typeof deliver> | undefined
   let error: string | undefined
@@ -72,6 +80,9 @@ export async function runProgram(graph: Graph, source: string, params: Record<st
         const answered = r as Extract<typeof r, { ok: true }>
         const table = tableOf(answered.result)
         steps.push({ kind: 'ask', label, callId: answered.callId, rows: table.rows.length })
+        const plan = answered.plan as { span?: { from: string; to: string }; asOf?: string } | undefined
+        const period = plan?.span ? readableSpan(plan.span) + (plan.asOf ? `, as recorded on ${readableDay(plan.asOf)}` : '') : `as of ${readableDay(plan?.asOf ?? a.today ?? new Date().toISOString().slice(0, 10))}`
+        if (!periods.includes(period)) periods.push(period)
         for (const n of table.notes ?? []) if (!notes.includes(n)) notes.push(n)
         return table
       },
@@ -91,7 +102,7 @@ export async function runProgram(graph: Graph, source: string, params: Record<st
       explain: (text: string) => { steps.push({ kind: 'explain', text }); a.onExplain?.(text) },
     }
     const answer = await mod.default(ctx, params)
-    delivered = deliver(answer, notes)
+    delivered = deliver(answer, notes, periods)
   } catch (e: any) {
     error = e?.message ?? String(e)
   }
@@ -125,8 +136,8 @@ export function tableOf(r: { columns: Array<{ name: string; unit?: string }>; ro
 }
 
 /** The answer checked and its narration written from its cells. */
-export function deliver(answer: ProgramAnswer, notes: string[]) {
-  if (!answer || typeof answer !== 'object' || !answer.data || typeof answer.data !== 'object') refuse('a program returns { headline?, data, views, narration, nextSteps }')
+export function deliver(answer: ProgramAnswer, notes: string[], periods: string[] = []) {
+  if (!answer || typeof answer !== 'object' || !answer.data || typeof answer.data !== 'object') refuse('a program returns { status?, missing?, scope?, headline?, data, views, narration, nextSteps }')
   for (const [name, t] of Object.entries(answer.data)) {
     if (!Array.isArray(t?.columns) || !Array.isArray(t?.rows)) refuse(`dataset "${name}" is { columns, rows } — ctx.ask returns one, and a transformed one keeps that shape`)
     for (const c of t.columns) if (!c?.name || !['dimension', 'measure'].includes(c.role)) refuse(`dataset "${name}": each column has a name and a role, dimension or measure`)
@@ -154,6 +165,9 @@ export function deliver(answer: ProgramAnswer, notes: string[]) {
     const label = col.role === 'dimension' && t.columns.some((x) => x.name === `${col.name}_label`) ? row![`${col.name}_label`] : undefined
     return label !== undefined && !c.format ? String(label ?? 'none') : write(row![col.name], c.format ?? formatOf(col))
   }
+  const status = answer.status ?? 'answered'
+  if (!['answered', 'unknowable', 'uncertain'].includes(status)) refuse('status is answered, unknowable or uncertain')
+  if (status !== 'answered' && !answer.missing) refuse(`an ${status} answer says what is missing: missing: '<the plain reason>'`)
   if ((answer.narration ?? []).length > 5) refuse(`the narration has ${answer.narration.length} points — up to five on what stands out; the tables carry every row`)
   const narration = (answer.narration ?? []).map((s, i) => {
     if (typeof s?.text !== 'string') refuse(`sentence ${i + 1} has no text`)
@@ -164,6 +178,9 @@ export function deliver(answer: ProgramAnswer, notes: string[]) {
   })
   const headline = answer.headline ? { label: answer.headline.label, display: cell(answer.headline.value, 'the headline'), value: null } : undefined
   return {
+    ...(status !== 'answered' ? { status, missing: answer.missing } : {}),
+    ...(periods.length ? { period: periods.join(' · ') } : {}),
+    ...(answer.scope ? { scope: answer.scope } : {}),
     ...(headline ? { headline } : {}),
     data: Object.fromEntries(Object.entries(answer.data).map(([k, t]) => [k, { columns: t.columns, rows: t.rows }])),
     views, narration, nextSteps: (answer.nextSteps ?? []).filter((n) => n?.label), notes,

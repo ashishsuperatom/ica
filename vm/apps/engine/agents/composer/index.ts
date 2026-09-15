@@ -51,9 +51,19 @@ see how the measures can be grouped by its dimensions; check the questions the a
 Then answer with a program in this folder, program.mjs. Its data comes only from the graph questions it asks;
 it shapes them into what a person deciding needs — the headline figure, the tables and charts that show it, up to five
 short points on what stands out (totals, counts, extremes, changes) with every number cited from its cells, and what they
-could look at next. The tables carry the rows; the points summarise them. Run the program, read its answer against the
-question as asked, correct it and run it again; when it answers the question, ./commit it as your final action. A refusal
-says what to change. When the graph does not hold what the
+could look at next. The tables carry the rows; the points summarise them.
+
+The program answers this question now and again later, or for a variant of it. What the question varies — a period, a
+record, a limit — and each judgement the answer turns on — a threshold, a cutoff — are params with the default you
+chose; a window relative to today is worked out from the run date. When the question leaves one unsaid, run on the
+default and say what you took with ctx.caveat. An answer stands alone: the time it holds for comes with it from the
+graph questions it asks; it says its scope, how far to trust it, and the true total when a list is cut short; a slice
+the data covers is given as that slice; an empty or surprising figure is looked into before it is reported. When the
+data cannot answer, the program shows the gap from the data and returns status unknowable, or uncertain when it cannot
+answer with confidence, with what is missing.
+
+Run the program, read its answer against the question as asked, correct it and run it again; when it answers the
+question, ./commit it as your final action. A refusal says what to change. When the graph does not hold what the
 question needs, answer what it does hold and say plainly what differs, or escalate with what is missing.
 
 Tools: ./resolve-terms ./find-measure ./find-dimension ./find-record ./describe ./list-dimensions ./group-paths ./overview ./check-question ./try-question

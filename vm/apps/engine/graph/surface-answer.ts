@@ -8,6 +8,10 @@ import type { Answer } from '../../../../clients/protocol.js'
 type Column = { name: string; role?: string; unit?: string; kind?: string; entity?: string }
 type Table = { columns: Column[]; rows: Record<string, unknown>[] }
 type Delivered = {
+  status?: 'answered' | 'unknowable' | 'uncertain'
+  missing?: string
+  period?: string
+  scope?: string
   headline?: { label: string; display: string }
   data?: Record<string, Table>
   views?: { id?: string; component?: string; data?: string; title?: string; encode?: { columns?: string[] } }[]
@@ -85,7 +89,12 @@ export function surfaceAnswer(a: Delivered | Table | null | undefined, caveats: 
     sections.push(section(t, v.title, v.encode?.columns))
   }
   for (const [key, t] of Object.entries(data)) if (!shown.has(key) && t?.columns) sections.push(section(t, heading(key)))
-  return { status: 'answered', answer: prose, ...(sections.length ? { sections } : {}), ...(caveats.length ? { caveat: caveats.join('\n') } : {}) }
+  // What the answer holds for travels with it: its period and scope; an answer that could not be given says why.
+  const doubt = a?.status === 'uncertain' && a.missing ? [`Not answered with confidence: ${a.missing}`] : []
+  const told = [...doubt, ...caveats]
+  return { status: a?.status === 'unknowable' ? 'unknowable' : 'answered', answer: a?.status === 'unknowable' && !prose ? a.missing : prose,
+    ...(a?.period ? { period: a.period } : {}), ...(a?.scope ? { scope: a.scope } : {}),
+    ...(sections.length ? { sections } : {}), ...(told.length ? { caveat: told.join('\n') } : {}) }
 }
 
 export const followupsOf = (a: Delivered | null | undefined): string[] => (a?.nextSteps ?? []).map((s) => s.label).filter(Boolean)

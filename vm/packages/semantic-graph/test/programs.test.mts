@@ -35,6 +35,7 @@ test('a program asks the graph, transforms, checks, and says what it found in ci
   const r = await runProgram(g, PROGRAM, { from: '2026-09-01', through: '2026-10-31' }, { model: 'b', today: '2026-10-10' })
   assert.equal(r.error, undefined)
   assert.equal(r.answer!.narration[0].text, 'Sydney worked 21 h, 72.4% of all hours.')
+  assert.equal(r.answer!.period, '1 Sep 2026 – 31 Oct 2026', 'the time an answer holds for comes from the questions it asked')
   assert.deepEqual(r.steps.map((x) => x.kind), ['ask', 'transform', 'transform', 'verify', 'decide'])
   const run = g.store.getCall(r.callId)!
   assert.deepEqual(run.question, { program: 'hours by branch', params: { from: '2026-09-01', through: '2026-10-31' } })
@@ -54,4 +55,12 @@ test('a year followed by a comma is a year, not a typed number', () => {
   const t = { columns: [{ name: 'hours', role: 'measure' as const, unit: 'h' }], rows: [{ hours: 5 }] }
   const d = deliver({ data: { t }, views: [], narration: [{ text: 'In October 2026, {h} were worked.', cites: { h: { data: 't', row: 0, column: 'hours' } } }], nextSteps: [] }, [])
   assert.equal(d.narration[0].text, 'In October 2026, 5 h were worked.')
+})
+
+test('an answer the data cannot give says what is missing, and narration is up to five points', () => {
+  const t = { columns: [{ name: 'hours', role: 'measure' as const, unit: 'h' }], rows: [{ hours: 5 }] }
+  assert.throws(() => deliver({ status: 'unknowable', data: {}, views: [], narration: [], nextSteps: [] }, []), /says what is missing/)
+  assert.equal(deliver({ status: 'unknowable', missing: 'no dated comments are recorded', data: {}, views: [], narration: [], nextSteps: [] }, []).missing, 'no dated comments are recorded')
+  const point = { text: '{h} were worked.', cites: { h: { data: 't', row: 0, column: 'hours' } } }
+  assert.throws(() => deliver({ data: { t }, views: [], narration: Array(6).fill(point), nextSteps: [] }, []), /up to five/)
 })

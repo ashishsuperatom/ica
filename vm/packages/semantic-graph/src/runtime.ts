@@ -810,8 +810,8 @@ export type ContextMove =
 export interface SessionContext { assume: Record<string, unknown>; intervene: Intervention[]; today?: string }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-const readableDay = (d: string) => `${Number(d.slice(8))} ${MONTHS[Number(d.slice(5, 7)) - 1]} ${d.slice(0, 4)}`
-const readableSpan = (s: { from: string; to: string }) => `${readableDay(s.from)} – ${readableDay(addDays(s.to, -1))}`
+export const readableDay = (d: string) => `${Number(d.slice(8))} ${MONTHS[Number(d.slice(5, 7)) - 1]} ${d.slice(0, 4)}`
+export const readableSpan = (s: { from: string; to: string }) => `${readableDay(s.from)} – ${readableDay(addDays(s.to, -1))}`
 
 /** What changes how an answer's numbers read, from what the plan did: currency converted, groups with nothing there, a
  *  comparison cut to like for like. Everything else about how it was computed stays in the record. */
