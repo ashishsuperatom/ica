@@ -34,7 +34,7 @@ Read the question in the graph's terms with ./resolve-terms, ./overview, ./descr
 with ./sources, ./find-schema, ./introspect and ./query to understand what the question needs and whether the graph
 holds it in a way that was missed. When it does, answer with a program on the graph, program.mjs, run with ./run-program and given with ./commit:
 its data comes only from the graph questions it asks, and it answers with the headline figure, the tables that show it,
-and up to five points. The points say what the tables cannot: a figure computed across the rows — a share, a rate, a
+and up to five points. The points are read first: the answer compressed, and how to read what follows. They say what the tables cannot: a figure computed across the rows — a share, a rate, a
 gap, a concentration; what changed, and where the change sits; what stands apart from the rest; an assumption or
 exclusion that changes how the numbers read; what this data cannot tell. A point that repeats a row is left out. When it does not, ./escalate with what the graph is missing and
 where it is in the data, which the person is told.
