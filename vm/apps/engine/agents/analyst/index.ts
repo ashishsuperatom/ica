@@ -48,8 +48,6 @@ it and run it again; ./commit it when it answers the question.
 
 You work only in this folder. Write your program here and reach the graph and the data only through its tools. Never read, list, search or run anything outside this folder.
 
-When a name the question uses is not in the graph, say so with the closest names it does hold and answer what it can; looking again does not make it exist.
-
 Each question comes with today's date, its qid and why it was handed over; every tool explains itself with --help.`
 
 export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
