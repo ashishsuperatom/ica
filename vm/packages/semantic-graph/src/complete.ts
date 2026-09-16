@@ -17,6 +17,7 @@
 // that offers.
 
 import { check, type Question } from './algebra.js'
+import { resolveSpan, type SpanAsked } from './time.js'
 import { arrows, type Schema } from './schema.js'
 import { paths } from './discovery.js'
 import type { Found } from './discovery.js'
@@ -34,9 +35,12 @@ export interface Fragment {
   values?: Array<{ text: string; meanings: Array<{ object: string; key: string; label?: string }> }>
   /** Named conditions to keep to. */
   conditions?: string[]
-  span?: Question['span']
+  /** As a question is asked: two days, `through` for the last day, or a relative span ("this Month"). */
+  span?: SpanAsked
   currency?: string
   asOf?: string
+  /** The words the question used, for saying which of them a reading accounts for. */
+  phrases?: string[]
 }
 
 export interface Completion {
@@ -119,6 +123,10 @@ function routes(s: Schema, fact: string, to: string): Array<{ path: string[]; wh
 /** Build every question the fragment could be, without checking them — `complete` does that. */
 function candidates(s: Schema, f: Fragment): Array<{ question: Question; why: string[]; uncertain: string[]; cost: number }> {
   const out: Array<{ question: Question; why: string[]; uncertain: string[]; cost: number }> = []
+  // A span as a question says it — two days, a last day, or a relative one — becomes the pair the rules check.
+  const today = f.asOf ?? new Date().toISOString().slice(0, 10)
+  let span: Question['span'] | undefined
+  try { span = f.span ? resolveSpan(s, f.span, today).span : undefined } catch { span = undefined }
   const facts = factsFor(s, f.measures)
   if (facts.length > 1) { /* a word that is a measure of several facts: each is a candidate, ranked below */ }
 
@@ -158,7 +166,7 @@ function candidates(s: Schema, f: Fragment): Array<{ question: Question; why: st
     for (const d of drafts) {
       out.push({
         question: { measures: on.measures, ...(d.by.length ? { by: d.by } : {}), ...(d.where.length ? { where: d.where } : {}),
-          ...(f.span ? { span: f.span } : {}), ...(f.currency ? { currency: f.currency } : {}), ...(f.asOf ? { asOf: f.asOf } : {}) } as Question,
+          ...(span ? { span } : {}), ...(f.currency ? { currency: f.currency } : {}), ...(f.asOf ? { asOf: f.asOf } : {}) } as Question,
         why: d.why, uncertain: d.uncertain, cost: d.cost,
       })
     }

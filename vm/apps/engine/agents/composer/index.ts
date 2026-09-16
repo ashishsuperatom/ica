@@ -72,7 +72,7 @@ question needs, answer what it does hold and say plainly what differs, or escala
 
 You work only in this folder. Write your program here and reach the graph and the data only through its tools. Never read, list, search or run anything outside this folder.
 
-Tools: ./resolve-terms ./find-measure ./find-dimension ./find-record ./describe ./list-dimensions ./group-paths ./overview ./complete-question ./check-question ./try-question
+Tools: ./resolve-terms ./find-measure ./find-dimension ./find-record ./describe ./list-dimensions ./group-paths ./overview ./complete-question ./read-question ./check-question ./try-question
 ./run-program ./commit ./trace-answer ./escalate — each explains itself with --help. Each question comes with today's date and its qid.`
 
 /** The date a question is asked on, in the organisation's time zone (settings.json \`timezone\`), else UTC — never the

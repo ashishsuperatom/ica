@@ -51,7 +51,7 @@ const tool = async (name: string, ...args: string[]) => {
 
 const tools = execFileSync('ls', [cwd], { encoding: 'utf8' }).split('\n').filter(Boolean)
 console.log('tools:', tools.join(' '))
-assert.ok([...Object.keys({'resolve-terms':1,'overview':1,'find-measure':1,'describe':1,'group-paths':1,'find-dimension':1,'find-record':1,'check-question':1,'try-question':1,'run-program':1,'commit':1,'complete-question':1,'source-records':1,'trace-answer':1}), 'escalate'].every((t) => tools.includes(t)))
+assert.ok([...Object.keys({'resolve-terms':1,'overview':1,'find-measure':1,'describe':1,'group-paths':1,'find-dimension':1,'find-record':1,'check-question':1,'try-question':1,'run-program':1,'commit':1,'complete-question':1,'read-question':1,'source-records':1,'trace-answer':1}), 'escalate'].every((t) => tools.includes(t)))
 assert.ok(!tools.includes('define') && !tools.includes('query'))
 const terms = await tool('resolve-terms', 'How many hours did each branch work in September and October 2026?')
 console.log('resolve-terms:', terms.replace(/\s+/g, ' ').slice(0, 200))

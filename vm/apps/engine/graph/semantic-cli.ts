@@ -7,6 +7,7 @@
 //   ./find-record <Entity> <text>  which member was meant by what was typed
 //   ./check-question '<question>'   the plan for a question, or the rule that refuses it and the choices
 //   ./complete-question '<what you know>'   the questions a fragment could be, ranked, each with its reason
+//   ./read-question '<what you know>'       the same, said back and tried against the data, with what to change
 //   ./try-question '<q>'            see a question's answer while writing the program
 //   ./run-program [file] [params]   run the answer program and read its answer, as often as it takes
 //   ./commit                        give the last run's answer as this conversation's next step: out/<qid>/built.json
@@ -18,7 +19,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
-import { completions, catalog, catalogText, conformedDimensions, dimensions, dimensionsText, termsText, check, nodeText, pathsText, find, nextMoves, node, paths, runProgram, tableOf, type Result } from '@superatom/semantic-graph'
+import { tied, revisions, judgedText, judge, completions, catalog, catalogText, conformedDimensions, dimensions, dimensionsText, termsText, check, nodeText, pathsText, find, nextMoves, node, paths, runProgram, tableOf, type Result } from '@superatom/semantic-graph'
 import { MODEL, openSemanticGraph } from './semantic.js'
 
 const argv = process.argv.slice(2)
@@ -26,7 +27,7 @@ const flag = (name: string) => { const i = argv.indexOf(`--${name}`); if (i < 0)
 const env = { dbDir: flag('db')!, projectDir: flag('project')!, managerUrl: flag('manager')!, home: flag('home')! }
 // Each tool is named for what it does to what: the wrapper passes its own name.
 const TOOLS: Record<string, string> = { 'resolve-terms': 'terms', 'overview': 'catalog', 'describe': 'node', 'group-paths': 'paths', 'list-dimensions': 'dimensions', 'find-measure': 'find-measure', 'find-dimension': 'find', 'find-record': 'members',
-  'check-question': 'check', 'complete-question': 'complete', 'try-question': 'try', 'run-program': 'program', 'commit': 'commit', 'source-records': 'detail', 'trace-answer': 'trace' }
+  'check-question': 'check', 'complete-question': 'complete', 'read-question': 'read-question', 'try-question': 'try', 'run-program': 'program', 'commit': 'commit', 'source-records': 'detail', 'trace-answer': 'trace' }
 // How nodes connect reads as graph patterns; --json (or SEMANTIC_TOOL_FORMAT=json) gives the same views as JSON.
 const asJson = argv.includes('--json') ? (argv.splice(argv.indexOf('--json'), 1), true) : process.env.SEMANTIC_TOOL_FORMAT === 'json'
 const [tool, ...args] = argv
@@ -128,6 +129,23 @@ else if (command === 'members') {
   await writeFile(join(env.home, 'out', qid, 'params.json'), JSON.stringify(run.params, null, 2))
   await writeFile(join(env.home, 'out', qid, 'built.json'), JSON.stringify({ graph: 'semantic', kind: 'program', sessionId, step: stepId, callId: run.callId, program: run.name, source: run.source, params: run.params }, null, 2))
   out(`committed ${run.name} as step ${stepId}`)
+} else if (command === 'read-question') {
+  // The whole loop in one move: the questions a fragment could be, each said back in the graph's words, the first
+  // few actually asked so the data can separate them, and what to change when one does not hold.
+  const asked = json(args[0], 'what you know') as any
+  const { done, refused } = completions(m.schema, asked)
+  const phrases = Array.isArray(asked.phrases) ? asked.phrases as string[] : []
+  const ask = async (q: any) => {
+    const a = await graph.ask(q, { model: MODEL, today: new Date().toISOString().slice(0, 10) })
+    return a.ok ? { ok: true as const, result: { rows: a.result.rows } } : { ok: false as const, rule: a.rule ?? 'error', reason: a.reason ?? 'failed' }
+  }
+  const judged = await judge(m.schema, done, phrases, ask)
+  const ties = tied(judged)
+  const best = judged[0]
+  const ways = best?.evidence ? revisions(m.schema, best.completion.question, best.evidence) : []
+  if (asJson) out({ readings: judged.map((j) => ({ question: j.completion.question, said: j.said, why: j.why, uncertain: j.completion.uncertain, leftOver: j.leftOver, evidence: j.evidence })), tied: ties.map((t) => t.differ), revisions: ways, refused })
+  else if (!judged.length) out(refused.length ? `nothing completes yet:\n${refused.map((r) => `  ${r.rule}: ${r.reason}`).join('\n')}` : 'nothing in the graph fits that')
+  else out([judgedText(judged, ties), ways.length ? `\nif that is not it: ${ways.map((w) => w.why).join('; ')}` : ''].filter(Boolean).join('\n'))
 } else if (command === 'complete') {
   const asked = json(args[0], 'what you know') as any
   const { done, refused } = completions(m.schema, asked)
