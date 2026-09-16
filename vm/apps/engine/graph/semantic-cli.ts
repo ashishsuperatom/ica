@@ -21,7 +21,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
-import { mistakes, fragmentOf, tied, revisions, judgedText, judge, completions, catalog, catalogText, conformedDimensions, dimensions, dimensionsText, termsText, check, nodeText, pathsText, find, nextMoves, node, paths, runProgram, tableOf, type Result } from '@superatom/semantic-graph'
+import { termsBrief, mistakes, fragmentOf, tied, revisions, judgedText, judge, completions, catalog, catalogText, conformedDimensions, dimensions, dimensionsText, termsText, check, nodeText, pathsText, find, nextMoves, node, paths, runProgram, tableOf, type Result } from '@superatom/semantic-graph'
 import { MODEL, openSemanticGraph } from './semantic.js'
 
 const argv = process.argv.slice(2)
@@ -140,10 +140,14 @@ async function match(text: string) {
   const judged = await judge(m.schema, done, over, ask)
   const ties = tied(judged)
   const ways = judged[0]?.evidence ? revisions(m.schema, judged[0].completion.question, judged[0].evidence) : []
-  if (asJson) out({ terms: read, readings: judged.map((j) => ({ question: j.completion.question, said: j.said, why: j.why, uncertain: j.completion.uncertain, leftOver: j.leftOver, evidence: j.evidence })), tied: ties.map((t) => t.differ), revisions: ways, refused: dedupe(refused) })
+  // THE BEST FEW, not every reading the graph could build: the rest are counted, so nothing is hidden and nothing
+  // is dumped. An agent that wants more can say more of the question.
+  const top = judged.slice(0, 3)
+  const rest = judged.length - top.length
+  if (asJson) out({ terms: termsBrief(read), readings: top.map((j) => ({ question: j.completion.question, said: j.said, why: j.why, uncertain: j.completion.uncertain, leftOver: j.leftOver, evidence: j.evidence })), ...(rest > 0 ? { more: rest } : {}), tied: ties.map((t) => t.differ), revisions: ways, refused: dedupe(refused) })
   else {
     const said = [termsText(m.schema, read, text)]
-    if (judged.length) said.push('', judgedText(judged, ties))
+    if (top.length) said.push('', judgedText(top, ties), ...(rest > 0 ? [`and ${rest} more reading${rest > 1 ? 's' : ''} the graph can build — say more of the question to narrow it`] : []))
     else said.push('', dedupe(refused).length ? `nothing completes yet:\n${dedupe(refused).map((r) => `  ${r.rule}: ${r.reason}`).join('\n')}` : 'nothing in the graph fits that yet — ./look to see what it holds')
     if (ways.length) said.push('', `if that is not it: ${ways.map((w) => w.why).join('; ')}`)
     out(said.join('\n'))
@@ -165,7 +169,13 @@ if (command === 'match') {
   } else if (m.schema.objects[second]) {
     out(asJson ? paths(m.schema, first, second).map((p) => p.join('.')) : pathsText(m.schema, first, second))
   } else {
-    out(await graph.members(MODEL, first, second))
+    // WHAT COMES BACK IS READ, NOT STORED. A name that matches two hundred records says "narrow it", not two
+    // hundred lines: the closest few are shown with the total, so the answer stays something a person — or an
+    // agent with a finite head — can actually use.
+    const found: any = await graph.members(MODEL, first, second)
+    const shown = (found.matches ?? []).slice(0, 10)
+    const more = (found.matches?.length ?? 0) - shown.length
+    out({ ...found, matches: shown, ...(more > 0 ? { more, advice: `${found.matches.length} names match "${second}" — say more of the name to narrow it` } : {}) })
   }
 } else if (command === 'ask' && !args.join(' ').trim().startsWith('{')) {
   // WORDS, HANDED TO THE TOOL THAT READS WORDS. "ask" means asking in English, so a question in English arrives

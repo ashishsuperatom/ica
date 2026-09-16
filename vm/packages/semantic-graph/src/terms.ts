@@ -195,6 +195,11 @@ function dedupe(hits: Found[]): Found[] {
 
 /** The terms as a table a reader scans: each phrase in the order asked, what it is, and how a question names it —
  *  the last column exact JSON, to be copied into the question. */
+/** The same, for a reader that takes JSON: a term keeps its first few meanings and says how many it had. */
+export function termsBrief(read: TermsResolved, few = 5): TermsResolved {
+  return { ...read, terms: read.terms.map((t) => (t.means.length > few ? { ...t, means: t.means.slice(0, few), more: t.means.length - few } as typeof t : t)) }
+}
+
 export function termsText(s: Schema, read: TermsResolved, question?: string): string {
   const rows: string[][] = []
   const j = (x: unknown) => JSON.stringify(x).replace(/":/g, '": ').replace(/,"/g, ', "')
@@ -222,8 +227,12 @@ export function termsText(s: Schema, read: TermsResolved, question?: string): st
   for (const t of read.terms) {
     const phrase = t.repaired ? `${t.phrase}  (typed "${t.repaired.typed}")` : t.phrase
     if (t.means.length === 1) { rows.push([phrase, ...said(t.means[0])]); continue }
+    // A word that means a dozen things prints the first few and says how many more: a table nobody can read is
+    // worse than a count, and everything printed here is read by someone with a finite head.
+    const FEW = 5
     rows.push([phrase, t.ambiguous ? 'ambiguous, one of:' : '', '', ''])
-    for (const m of t.means) rows.push(['', ...said(m).map((c, i) => (i === 0 ? `  ${c}` : c)) as [string, string, string]])
+    for (const m of t.means.slice(0, FEW)) rows.push(['', ...said(m).map((c, i) => (i === 0 ? `  ${c}` : c)) as [string, string, string]])
+    if (t.means.length > FEW) rows.push(['', `  and ${t.means.length - FEW} more`, '', ''])
   }
   const widths: number[] = []
   const all = [['phrase', 'kind', 'is', 'in a question'], ...rows]
