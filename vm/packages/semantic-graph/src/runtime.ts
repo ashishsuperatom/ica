@@ -269,7 +269,7 @@ export function createGraph(o: GraphOptions) {
       const r = await runSql(m.schema, prepared.sources, plan, prepared.query, dialectFor, { access: a.access, checks: o.checks, zone, onStatement: (s) => statements.push(s) })
       // Names are for reading: an answer whose names cannot be read is given with its keys, and the record says why.
       const labels = await labelsFor(m.schema, m.sources, plan, r.rows, a.access, statements).catch((e: any) => { said.push(`names not read: ${e?.message ?? e}`); return {} })
-      const result: Result = { columns: r.columns, rows: r.rows, ...(r.totals ? { totals: r.totals } : {}), ...(Object.keys(labels).length ? { labels } : {}), notes: [...forReader, ...readerNotes(m.schema, plan)] }
+      const result: Result = { columns: r.columns, rows: r.rows, ...(r.totals ? { totals: r.totals } : {}), ...(Object.keys(labels).length ? { labels } : {}), notes: [...forReader, ...readerNotes(m.schema, plan, { columns: r.columns, rows: r.rows })] }
       const caveats = [...said, ...r.notes, ...r.caveats]
       // A hypothetical answer is not something that happened: it adds nothing to memory's series.
       const observations = hypothetical ? [] : observationsOf(m.schema, plan, q, result, id, started, `${m.schemaHash}|${m.sourcesHash}`)
@@ -834,9 +834,23 @@ export const readableDay = (d: string) => `${Number(d.slice(8))} ${MONTHS[Number
 export const readableSpan = (s: { from: string; to: string }) => `${readableDay(s.from)} – ${readableDay(addDays(s.to, -1))}`
 
 /** What changes how an answer's numbers read, from what the plan did: currency converted, groups with nothing there, a
- *  comparison cut to like for like. Everything else about how it was computed stays in the record. */
-export function readerNotes(s: Schema, plan: Plan): string[] {
+ *  comparison cut to like for like. Everything else about how it was computed stays in the record.
+ *
+ *  A NOTE EARNS ITS PLACE ONLY IF THE ANSWER READS DIFFERENTLY WITHOUT IT. What the plan COULD have done is not
+ *  news; what it DID, where a reader would otherwise read the number wrongly, is. So the rows are consulted: a
+ *  group that is empty of nothing needs no warning about "none", and a path nobody could mistake — a project's
+ *  pillar is the Pillar — is not worth a line. Ten true sentences that change nothing are read as noise, and the
+ *  two that matter are lost among them. */
+export function readerNotes(s: Schema, plan: Plan, result?: { columns: Array<{ name: string }>; rows: unknown[][] }): string[] {
   const out = new Set<string>()
+  // Did this grouping actually produce a row with nothing there? The column is found by the object it groups by;
+  // when that cannot be told apart from another, the note is kept rather than wrongly dropped.
+  const hasNone = (object: string): boolean => {
+    if (!result) return true
+    const at = plan.targets.map((t, i) => [t, i] as const).filter(([t]) => t === object || t.startsWith(`${object} by `))
+    if (at.length !== 1) return true
+    return result.rows.some((r) => r[at[0][1]] === null || r[at[0][1]] === undefined)
+  }
   for (const p of plansOf(plan)) for (const fp of p.facts) {
     if (fp.convert) {
       const on = fp.convert.at === 'end' && p.span ? (p.asOf && p.asOf < addDays(p.span.to, -1) ? p.asOf : addDays(p.span.to, -1)) : undefined
@@ -848,7 +862,7 @@ export function readerNotes(s: Schema, plan: Plan): string[] {
       const i = walked.findIndex((a) => a.partial)
       if (i < 0) continue
       const from = i === 0 ? fp.fact : walked[i - 1].to
-      out.add(`${from} rows with no ${walked[i].role} are shown as "none"`)
+      if (hasNone(walk(s, fp.fact, b.path)!.object)) out.add(`${from} rows with no ${walked[i].role} are shown as "none"`)
     }
   }
   for (const p of [plan]) for (const fp of p.facts) {
@@ -858,7 +872,12 @@ export function readerNotes(s: Schema, plan: Plan): string[] {
       const object = walk(s, fp.fact, step.path)!.object
       if (s.objects[object].kind === 'calendar') continue
       const ways = pathsFrom(s, fp.fact).filter((x) => x.object === object && !walk(s, fp.fact, x.steps)!.walked.some((a) => a.kind === 'self'))
-      if (ways.length > 1) out.add(`${object} is the ${step.path.slice(0, -1).map((r) => r).join("'s ")}'s ${step.path.at(-1)}`)
+      // Which way this answer took matters only when a reader could have taken another. "Pillar is the project's
+      // pillar" is the same word twice; "Person is the project's manager" says which of ten Persons this is.
+      const role = String(step.path.at(-1))
+      if (ways.length > 1 && role.toLowerCase() !== object.toLowerCase()) {
+        out.add(`${object} is the ${step.path.slice(0, -1).map((r) => r).join("'s ")}'s ${role}`)
+      }
     }
     // A span that cuts the periods it is grouped by: the first or last is only part of one.
     for (const b of fp.by) {
