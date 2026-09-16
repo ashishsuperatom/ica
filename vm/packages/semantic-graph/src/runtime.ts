@@ -722,9 +722,10 @@ export function createGraph(o: GraphOptions) {
     // distinctive one, or how much of a word to trust, or how common a word is in this particular data — the
     // source answers that by whether it can satisfy the conjunction, and it answers it with its own index.
     const words = [...new Set(typed.trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').split(' ').filter((w) => w.length > 1))]
+    const keyCol = q(es.key), labelCol = q(es.label), from = es.sql
     const holding = async (ws: string[]) => {
-      const where = ws.map((_, i) => `LOWER(e.${q(es.label)}) LIKE @w${i}`).join(' AND ')
-      const r = await run(dm.limit(`SELECT e.${q(es.key)} AS k, e.${q(es.label)} AS l FROM (${es.sql}) e WHERE ${where}`, a.limit ?? 200),
+      const where = ws.map((_, i) => `LOWER(e.${labelCol}) LIKE @w${i}`).join(' AND ')
+      const r = await run(dm.limit(`SELECT e.${keyCol} AS k, e.${labelCol} AS l FROM (${from}) e WHERE ${where}`, a.limit ?? 200),
         Object.fromEntries(ws.map((w, i) => [`w${i}`, `%${w}%`])))
       return r.rows.map((x) => ({ key: String(x.k), label: String(x.l) }))
     }
@@ -941,7 +942,8 @@ function* combinations<T>(xs: T[], k: number): Generator<T[]> {
   if (k <= 0) { yield []; return }
   if (k > xs.length) return
   if (k === xs.length) { yield xs; return }
-  const [head, ...rest] = xs
+  const head = xs[0]!
+  const rest = xs.slice(1)
   for (const c of combinations(rest, k - 1)) yield [head, ...c]
   yield* combinations(rest, k)
 }
