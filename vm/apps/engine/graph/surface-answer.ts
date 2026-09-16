@@ -43,7 +43,7 @@ function readable(t: Table, chosen?: string[]): string[] {
 function section(t: Table, title?: string, chosen?: string[]) {
   const cols = readable(t, chosen)
   const meta = new Map(t.columns.map((c) => [c.name, c]))
-  // A column of names beside its ids (`Pillar` and `Pillar_label`) reads as the names, and each cell carries its
+  // A column of names beside its ids (`X` and `X_label`) reads as the names, and each cell carries its
   // record's id and the column its kind — so a surface can open the record.
   const idOf = (c: string) => (c.endsWith('_label') && meta.has(c.slice(0, -6)) ? c.slice(0, -6) : undefined)
   const entityOf = (c: string) => { const id = idOf(c); return id ? meta.get(id)?.entity ?? id : undefined }

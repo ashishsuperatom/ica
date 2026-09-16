@@ -29,8 +29,12 @@ const flag = (name: string) => { const i = argv.indexOf(`--${name}`); if (i < 0)
 const env = { dbDir: flag('db')!, projectDir: flag('project')!, managerUrl: flag('manager')!, home: flag('home')! }
 // Each tool is named for what it does to what: the wrapper passes its own name.
 const TOOLS: Record<string, string> = { match: 'match', look: 'look', ask: 'ask', 'run-program': 'program', commit: 'commit', trace: 'trace' }
-// How nodes connect reads as graph patterns; --json (or SEMANTIC_TOOL_FORMAT=json) gives the same views as JSON.
-const asJson = argv.includes('--json') ? (argv.splice(argv.indexOf('--json'), 1), true) : process.env.SEMANTIC_TOOL_FORMAT === 'json'
+// WHAT A VIEW IS FOR DECIDES HOW IT IS WRITTEN. Something to weigh — a node, the readings of a question — is
+// written to be read, because what sits next to what is the point of it; something to use — paths, keys, rows — is
+// given as it will be used. `--json` and `--text` ask for the other one where both make sense.
+const takeFlag = (name: string) => (argv.includes(name) ? (argv.splice(argv.indexOf(name), 1), true) : false)
+const asJson = takeFlag('--json') || process.env.SEMANTIC_TOOL_FORMAT === 'json'
+const asText = takeFlag('--text')
 const [tool, ...args] = argv
 const command = TOOLS[tool] ?? ''
 
@@ -215,7 +219,10 @@ if (command === 'match') {
     if (asJson) out({ node: node(m.schema, first), ...(isFact ? { dimensions: dimensions(m.schema, first) } : {}) })
     else out([nodeText(m.schema, first), ...(isFact ? ['', dimensionsText(m.schema, [first])] : [])].join('\n'))
   } else if (m.schema.objects[second]) {
-    out(asJson ? paths(m.schema, first, second).map((p) => p.join('.')) : pathsText(m.schema, first, second))
+    // THE WAYS FROM ONE NODE TO ANOTHER ARE VALUES, NOT A SHAPE TO STUDY: each is a `via` to be pasted into a
+    // question. Said as prose they cost five times as much and read no better, so they are given as they are used.
+    // `--text` spells them out for a person reading along.
+    out(asText ? pathsText(m.schema, first, second) : paths(m.schema, first, second).map((p) => p.join('.')))
   } else {
     // WHAT COMES BACK IS READ, NOT STORED. A name that matches two hundred records says "narrow it", not two
     // hundred lines: the closest few are shown with the total, so the answer stays something a person — or an

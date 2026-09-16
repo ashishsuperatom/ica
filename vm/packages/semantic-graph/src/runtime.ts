@@ -320,7 +320,7 @@ export function createGraph(o: GraphOptions) {
   }
 
   /** The nodes a word is: exactly, in the schema's own words — and, for entities whose members live at their source, a
-   *  member whose name is that word ("CEC" is a Pillar). */
+   *  member whose name is that word — a word that names one record of one kind. */
   async function matchWord(modelName: string, word: string, a: { access?: Record<string, unknown[]> } = {}) {
     const m = model(modelName)
     const found: Array<Record<string, unknown>> = find(m.schema, word)
@@ -707,7 +707,7 @@ export function createGraph(o: GraphOptions) {
     if (!es?.sql || !es.label) throw new Error(`the source of ${object} names no label column, so its members cannot be searched`)
     const dm = dialectFor(es.source), q = dm.quote
     const run = async (sql: string, params: Record<string, unknown>) => o_query(es.source, sql, { ...es.params, ...params }, a.access?.[es.source])
-    // Names are searched as typed: LIKE with no ESCAPE, which every source accepts (SuiteQL refuses ESCAPE).
+    // Names are searched as typed: LIKE with no ESCAPE, which every source accepts (some refuse ESCAPE).
     const pattern = `%${typed.trim().toLowerCase()}%`
     const near = await run(dm.limit(`SELECT e.${q(es.key)} AS k, e.${q(es.label)} AS l FROM (${es.sql}) e WHERE LOWER(e.${q(es.label)}) LIKE @m`, a.limit ?? 200), { m: pattern })
     const found = bestMembers(near.rows.map((r) => ({ key: String(r.k), label: String(r.l) })), typed)
@@ -880,7 +880,7 @@ export const readableSpan = (s: { from: string; to: string }) => `${readableDay(
  *  A NOTE EARNS ITS PLACE ONLY IF THE ANSWER READS DIFFERENTLY WITHOUT IT. What the plan COULD have done is not
  *  news; what it DID, where a reader would otherwise read the number wrongly, is. So the rows are consulted: a
  *  group that is empty of nothing needs no warning about "none", and a path nobody could mistake — a project's
- *  pillar is the Pillar — is not worth a line. Ten true sentences that change nothing are read as noise, and the
+ *  kind is named after the arrow that reaches it — is not worth a line. Ten true sentences that change nothing are read as noise, and the
  *  two that matter are lost among them. */
 export function readerNotes(s: Schema, plan: Plan, result?: { columns: Array<{ name: string }>; rows: unknown[][] }): string[] {
   const out = new Set<string>()
@@ -913,8 +913,8 @@ export function readerNotes(s: Schema, plan: Plan, result?: { columns: Array<{ n
       const object = walk(s, fp.fact, step.path)!.object
       if (s.objects[object].kind === 'calendar') continue
       const ways = pathsFrom(s, fp.fact).filter((x) => x.object === object && !walk(s, fp.fact, x.steps)!.walked.some((a) => a.kind === 'self'))
-      // Which way this answer took matters only when a reader could have taken another. "Pillar is the project's
-      // pillar" is the same word twice; "Person is the project's manager" says which of ten Persons this is.
+      // Which way this answer took matters only when a reader could have taken another. A note naming an object by
+      // the arrow of the same name says the same word twice; one naming a different arrow says WHICH of them it is.
       const role = String(step.path.at(-1))
       if (ways.length > 1 && role.toLowerCase() !== object.toLowerCase()) {
         out.add(`${object} is the ${step.path.slice(0, -1).map((r) => r).join("'s ")}'s ${role}`)

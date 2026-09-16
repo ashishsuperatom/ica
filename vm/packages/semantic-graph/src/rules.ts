@@ -8,14 +8,14 @@
 //   organisation   the model's settings
 //   default        what the reader of the setting falls back to
 //
-// A value may be given as rules — { rules: [{ when: { "who.department": "finance", "Pillar": "5" }, value: 0.7 }, …] } —
+// A value may be given as rules — { rules: [{ when: { "who.<attribute>": "<value>", "<Dimension>": "<key>" }, value: <v> }, …] } —
 // and the most specific rule that applies to who is asking and what is being asked about gives it (the combining
 // algorithms of XACML; specificity ranked as CSS ranks selectors): a rule for one person (who.id) beats a rule for a
 // group they are in (any other who.*), which beats a rule about the data alone, which beats a rule with no conditions;
 // within a kind, more conditions win. Two rules equally specific that disagree are refused: which one is meant is a
 // decision, not a lookup. A layer whose rules do not apply passes to the next layer.
 //
-// What is asked about is the graph's own: the members a question keeps, by object — { Pillar: ["15"], Subsidiary: ["2"] }.
+// What is asked about is the graph's own: the members a question keeps, by object — { <Dimension>: ["<key>"], <Dimension>: ["<key>"] }.
 // Every value read is recorded on the answer with the layer and rule it came from.
 
 export type Scalar = string | number | boolean

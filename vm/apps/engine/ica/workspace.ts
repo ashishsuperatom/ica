@@ -83,6 +83,11 @@ The data sources: ./sources lists them, ./find-schema searches their fields, ./i
 ./resolve turns a name into ids. data/query.mjs, data/introspect.mjs and grounding/grounding.mjs are the same seams to
 import. The semantic graph: ./match reads a question into it and ./look reads the graph itself; a program on it answers with ./run-program.
 Every tool explains itself with --help.
+
+What a tool gives back is shaped by what it is for. Something to weigh — a node, the readings of a question, a
+refusal — is written to be read, since what sits next to what is the point of it. Something to use — paths, keys,
+rows — is given as JSON, and --json asks for that where both make sense. A long answer is kept whole on disk and
+its beginning shown, with where the rest is: take what you need from it with grep or jq rather than reading it all.
 `)
 
   if (!conversation) await writeFile(join(dir, 'data', 'query.mjs'),
@@ -324,7 +329,19 @@ if [ ! -f "$CODE" ] && [ ! -f "$PID" ]; then
   echo $! >"$PID"
 fi
 while [ ! -f "$CODE" ]; do sleep 0.3; done
-cat "$OUT"; [ -s "$ERR" ] && cat "$ERR" >&2
+# ── A BIG ANSWER IS KEPT, NOT POURED ─────────────────────────────────────────────────────────────────
+# What a tool found is worth having whole; what a reader can hold is another matter. A long answer stays
+# on disk in full and its beginning is shown, with where the rest is and how much of it there is — so
+# nothing is lost, nothing is capped away silently, and what is needed from it can be taken with the
+# tools already here (grep, jq) instead of being read in its entirety first.
+BYTES=$(wc -c < "$OUT" | tr -d ' ')
+if [ "$BYTES" -gt 16000 ]; then
+  head -c 12000 "$OUT"
+  printf '\\n\\n— shown: the first 12000 of %s characters (%s lines). All of it is in %s — take what you need from it (grep, jq), it is not going anywhere.\\n' "$BYTES" "$(wc -l < "$OUT" | tr -d ' ')" "$OUT"
+else
+  cat "$OUT"
+fi
+[ -s "$ERR" ] && cat "$ERR" >&2
 exit "$(cat "$CODE")"
 `
 : `#!/usr/bin/env bash
@@ -344,11 +361,11 @@ const READ_ONLY = new Set(['match', 'look', 'ask', 'trace'])
 const SEMANTIC_USAGE: Record<string, string> = {
   match: `match '<the question, as asked>' [--json]   → the subgraphs the question could be. Give it minutes, not seconds: it tries the best few against the data. Its words are resolved to measures, dimensions, conditions and records (looked up by name at their sources); every route the graph holds is built; each is said back in the graph's own words with what is uncertain about it; the best few are asked against the data so it can separate them. Ends with what to change if the first one is not it.
   Read the sentence first and say what its parts are — you know what the words mean, and the graph does not: match '{"question":"<as asked>","parts":[{"text":"<the words>","is":"<the kind of thing they name, or measure/grouping/period/condition>"}]}'. Where a name begins and ends is yours to decide; what it means is the graph's, and a part it cannot place is reported rather than assumed`,
-  look: `look [<node>] [<to>|<text>]   → the graph itself: nothing for every fact, dimension and calendar; a node for what it holds, what it links to, what links to it and what it is sliced by; two nodes for every way from one to the other; a node and some text for which record that text means`,
-  ask: `ask '<question>' [--json]   → a question's answer, or the rule that refuses it and what to change. Give it minutes, not seconds: a fact built by a program reads a whole span from the source before it groups, which is tens of seconds when nothing has read that span yet and nothing at all when something has. A question: {"measures":["Fact.measure" | "[A.x] / [B.y]"], "by":[{"to":"Pillar","via":["person","pillar"]} | {"attribute":"a"} | {"attribute":"rag","of":"Project"}], "where":[{"to":"Dimension","via":[…],"in":["key"]} | {"attribute":"a","in":["v"]} | {"condition":"valid project"}], "without":["a condition a fact is always kept to"], "span":{"from":"2026-09-01","through":"2026-10-31"} | {"this":"Month"} | {"previous":"Month","count":3} | {"last":30,"unit":"Day"}, "currency":"AUD", "order":{"by":"column","desc":true}, "limit":10 — also having, totals, share, compare, fill, cumulative, rolling, limitPer, notIn/none/contains/startsWith`,
-  'run-program': `run-program [program.mjs] ['<params>']   → run the program in this folder and read its answer as the person would — headline, narration, tables with their row counts; run it as often as it takes, then ./commit. Allow it a few minutes: a question whose fact is built by a program reads a whole span before it groups. A program is named for its idea and takes the question's values (span, records) as params: export const meta = { name, description, params: { name: 'what it means' }, logic }; export default async (ctx, params) => ({ status?: 'answered'|'unknowable'|'uncertain', missing?: '<the plain reason, when not answered>', scope?: '<the records and conditions kept to>', headline?: { label, value: <cell> }, data: { name: <table> }, views: [{ id, component: 'table'|'bar'|'line'|'kpi', data: '<data key>', title, encode: { columns: [...] } | { x, y, series } }], narration: [{ text: 'October is {oct}', cites: { oct: <cell> }, why }], nextSteps: [{ label, why }] }). ctx.ask(question, label) returns a table { columns: [{ name, role, unit }], rows: [{ Pillar: 7, Pillar_label: 'Consulting', Month: '2026-09', revenue: 4372656 }] } — a record by its id, its name beside it — the program's only data; ctx.transform(label, () => …), ctx.decide(label, took, why), ctx.decideAt(label, value, op, threshold, why), await ctx.verify(label, () => holds), ctx.caveat(text), ctx.explain(text). A cell is { data: '<data key>', row: 0 | { Month: '2026-09' }, column }; every number in a sentence is a {slot} citing a cell`,
+  look: `look [<node>] [<to>|<text>]   → the graph itself: nothing for every fact, dimension and calendar; a node for what it holds, what it links to, what links to it and what it is sliced by; two nodes for every way from one to the other (as the "via" they are written in — add --text to read them as sentences); a node and some text for which record that text means`,
+  ask: `ask '<question>' [--json]   → a question's answer, or the rule that refuses it and what to change. Give it minutes, not seconds: a fact built by a program reads a whole span from the source before it groups, which is tens of seconds when nothing has read that span yet and nothing at all when something has. A question: {"measures":["Fact.measure" | "[A.x] / [B.y]"], "by":[{"to":"<Dimension>","via":["<role>","<role>"]} | {"attribute":"<attribute>"} | {"attribute":"<attribute>","of":"<Object>"}], "where":[{"to":"Dimension","via":[…],"in":["key"]} | {"attribute":"<attribute>","in":["<value>"]} | {"condition":"<a condition the graph names>"}], "without":["a condition a fact is always kept to"], "span":{"from":"2026-09-01","through":"2026-10-31"} | {"this":"Month"} | {"previous":"Month","count":3} | {"last":30,"unit":"Day"}, "currency":"<currency>", "order":{"by":"column","desc":true}, "limit":10 — also having, totals, share, compare, fill, cumulative, rolling, limitPer, notIn/none/contains/startsWith`,
+  'run-program': `run-program [program.mjs] ['<params>']   → run the program in this folder and read its answer as the person would — headline, narration, tables with their row counts; run it as often as it takes, then ./commit. Allow it a few minutes: a question whose fact is built by a program reads a whole span before it groups. A program is named for its idea and takes the question's values (span, records) as params: export const meta = { name, description, params: { name: 'what it means' }, logic }; export default async (ctx, params) => ({ status?: 'answered'|'unknowable'|'uncertain', missing?: '<the plain reason, when not answered>', scope?: '<the records and conditions kept to>', headline?: { label, value: <cell> }, data: { name: <table> }, views: [{ id, component: 'table'|'bar'|'line'|'kpi', data: '<data key>', title, encode: { columns: [...] } | { x, y, series } }], narration: [{ text: '<a sentence with a {slot} in it>', cites: { slot: <cell> }, why }], nextSteps: [{ label, why }] }). ctx.ask(question, label) returns a table { columns: [{ name, role, unit }], rows: [{ <Dimension>: '<key>', <Dimension>_label: '<its name>', <Calendar>: '<period>', <measure>: <number> }] } — a record by its id, its name beside it — the program's only data; ctx.transform(label, () => …), ctx.decide(label, took, why), ctx.decideAt(label, value, op, threshold, why), await ctx.verify(label, () => holds), ctx.caveat(text), ctx.explain(text). A cell is { data: '<data key>', row: 0 | { <Calendar>: '<period>' }, column }; every number in a sentence is a {slot} citing a cell`,
   commit: `commit   → give the answer of the last ./run-program as this conversation's next step, and end the turn`,
-  trace: `trace ['<group>'] [<call>]   → what is under the answer on screen: the rows of one group (a group is JSON, e.g. '{"Pillar":"15"}'), or with no group, the steps and questions it was reached by`,
+  trace: `trace ['<group>'] [<call>]   → what is under the answer on screen: the rows of one group (a group is JSON, e.g. '{"<Dimension>":"<key>"}'), or with no group, the steps and questions it was reached by`,
 }
 
 // ── THE WORKSPACE HOLDS WHAT THIS ENGINE WRITES, AND NOTHING ELSE ─────────────────────────────────────────────
