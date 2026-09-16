@@ -141,20 +141,23 @@ export function bestMembers(candidates: Array<{ key: string; label: string }>, t
     ['contains', (l) => norm(l).includes(t)],
     ['close', (l) => { const m = Math.min(mistakes(norm(l), t), ...norm(l).split(' ').map((word) => mistakes(word, t))); return m <= allowed ? m : false }],
   ]
-  // A NAME OF SEVERAL WORDS IS NOT ONE LONG WORD. "Paspley D365 Commerce - Build + Deploy Phase" is one typo away
-  // from a real project, but as a single string it is a dozen edits from it: the source writes a job number in
-  // front, punctuation where the question had none, a letter the person left out. Counting mistakes across the
-  // whole phrase calls that no match at all.
+  // A NAME OF SEVERAL WORDS IS NOT ONE LONG WORD. Mistakes counted across a whole phrase grow with its length:
+  // one letter wrong in one word, plus anything the source puts around the name that the asker never saw, is a
+  // distance no threshold can admit without admitting everything. The phrase is one word away and reads as a
+  // dozen.
   //
   // So a phrase of several words is matched WORD BY WORD: how many of the words typed does this name hold, each
-  // either as it was written or one mistake from it. A name holding six of the six words typed is the one meant,
-  // whatever else surrounds it; one holding three is a different project that shares some words.
+  // either as written or one mistake from it. Holding all of them is the name meant, whatever else surrounds it;
+  // holding some of them is a different thing that shares words.
+  //
+  // EVERY WORD, OR IT IS NOT THAT NAME. A name holding some of what was typed is a different thing that shares
+  // words, and returning it is worse than returning nothing: the asker is told, with no hedge, that the thing they
+  // named is this other one. What is not found can be asked about again; what is wrongly found is answered.
   const typedWords = t.split(' ').filter((w) => w.length > 1)
   if (typedWords.length > 1) {
     tiers.push(['holds the words', (l) => {
       const words = norm(l).split(' ').filter(Boolean)
-      const held = typedWords.filter((u) => words.some((w) => w === u || w.includes(u) || mistakes(w, u) <= 1)).length
-      return held >= 2 && held * 2 >= typedWords.length ? typedWords.length - held : false
+      return typedWords.every((u) => words.some((w) => w === u || w.includes(u) || mistakes(w, u) <= 1)) ? 0 : false
     }])
   }
   for (const [how, test] of tiers) {

@@ -338,9 +338,12 @@ export function createGraph(o: GraphOptions) {
 
   /** What each term of a question is in the graph: its phrases looked up as names at every entity source that has
    *  them — one lookup per entity — then read whole with the schema (terms.ts). */
-  async function resolveQuestionTerms(modelName: string, text: string, a: { today: string; access?: Record<string, unknown[]> }) {
+  /** `spans`: the parts of the question, as whoever read the language marked them out. Without them every run of one
+   *  to four words is tried, which is how a name of seven words is never found whole and a common word is looked up
+   *  for nothing. A span is a CLAIM about where a name begins and ends — what it means is still settled here. */
+  async function resolveQuestionTerms(modelName: string, text: string, a: { today: string; access?: Record<string, unknown[]>; spans?: string[] }) {
     const m = model(modelName)
-    const phrases = recordPhrases(text)
+    const phrases = a.spans?.length ? [...new Set(a.spans.map((x) => x.toLowerCase().replace(/[^\p{L}\p{N}&+]+/gu, ' ').trim()).filter(Boolean))] : recordPhrases(text)
     const records = new Map<string, Found[]>()
     const unread: string[] = []
     await Promise.all(Object.entries(m.sources?.entities ?? {}).map(async ([object, es]) => {
@@ -709,28 +712,40 @@ export function createGraph(o: GraphOptions) {
     const near = await run(dm.limit(`SELECT e.${q(es.key)} AS k, e.${q(es.label)} AS l FROM (${es.sql}) e WHERE LOWER(e.${q(es.label)}) LIKE @m`, a.limit ?? 200), { m: pattern })
     const found = bestMembers(near.rows.map((r) => ({ key: String(r.k), label: String(r.l) })), typed)
     if (found.matches.length) return { ...found, from: `the source of ${object}` }
-    // NOTHING HOLDS THE WHOLE PHRASE. A name of several words is rarely written the way it is asked for: a letter
-    // left out, a job number in front, punctuation the question had none of. So the WORDS are searched instead —
-    // each by its opening, which survives a mistake made later in the word — in ONE query, and what comes back is
-    // scored by how much of what was typed each name holds. This finds a row wherever it sits in the table,
-    // which a scan of the first N rows cannot.
-    const words = [...new Set(typed.trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').split(' ').filter((w) => w.length >= 4))]
-      .sort((x, y) => y.length - x.length).slice(0, 4)
-    // ONE WORD AT A TIME, THE LONGEST FIRST. Asked together, the common words fill the answer before the rare one
-    // is reached — "build", "deploy" and "phase" match hundreds of projects and "pasp" matches four, and a row
-    // limit shared between them keeps the hundreds. Asked on its own, the rare word costs one small query and
-    // brings back the row that was wanted. The answer is scored against EVERYTHING typed, however it was found.
-    const seen = new Map<string, { key: string; label: string }>()
-    for (const w of words) {
-      const near2 = await run(dm.limit(`SELECT e.${q(es.key)} AS k, e.${q(es.label)} AS l FROM (${es.sql}) e WHERE LOWER(e.${q(es.label)}) LIKE @w`, 100), { w: `%${w.slice(0, 4)}%` })
-      for (const r of near2.rows) seen.set(String(r.k), { key: String(r.k), label: String(r.l) })
-      const held = bestMembers([...seen.values()], typed)
-      // A name holding every word typed is the one meant; nothing a later word finds can better it.
-      if (held.matches.length && held.matches[0].missing === 0) return { ...held, from: `the source of ${object}` }
+    // NOTHING HOLDS THE WHOLE PHRASE. A name of several words is seldom written the way it is asked for: a word
+    // spelled wrong, something in front of it the asker never saw, punctuation where the question had none. So the
+    // source is asked for the rows that hold ALL of the words, and if it has none, for the rows that hold all but
+    // one — each word dropped in turn — and so on while there is more than one word left.
+    //
+    // WHY THIS AND NOT A CLEVERER SEARCH. A word that cannot be satisfied is exactly the word that was mistyped,
+    // and dropping it is how the rest of the phrase is allowed to speak. Nothing has to guess which word is the
+    // distinctive one, or how much of a word to trust, or how common a word is in this particular data — the
+    // source answers that by whether it can satisfy the conjunction, and it answers it with its own index.
+    const words = [...new Set(typed.trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').split(' ').filter((w) => w.length > 1))]
+    const holding = async (ws: string[]) => {
+      const where = ws.map((_, i) => `LOWER(e.${q(es.label)}) LIKE @w${i}`).join(' AND ')
+      const r = await run(dm.limit(`SELECT e.${q(es.key)} AS k, e.${q(es.label)} AS l FROM (${es.sql}) e WHERE ${where}`, a.limit ?? 200),
+        Object.fromEntries(ws.map((w, i) => [`w${i}`, `%${w}%`])))
+      return r.rows.map((x) => ({ key: String(x.k), label: String(x.l) }))
     }
-    if (seen.size) {
-      const held = bestMembers([...seen.values()], typed)
+    // A word the source cannot satisfy is a word that was not written the way the source holds it, so it is let
+    // go and the rest of the phrase is asked again — one word at a time, then two, while more than one remains.
+    // The work is bounded, and when the bound is reached that is SAID, because "I stopped looking" and "it is not
+    // there" are different answers and only one of them invites asking again.
+    const BUDGET = 24
+    let spent = 0
+    for (let drop = 0; words.length - drop > 1; drop++) {
+      const found = new Map<string, { key: string; label: string }>()
+      for (const ws of combinations(words, words.length - drop)) {
+        if (spent >= BUDGET) break
+        spent++
+        for (const c of await holding(ws)) found.set(c.key, c)
+      }
+      // Scored against EVERYTHING that was typed, including any word let go to find it: a name that holds it after
+      // all — one mistake away — is what was meant, and one that never holds it is a different thing.
+      const held = found.size ? bestMembers([...found.values()], typed) : { matches: [], ambiguous: false }
       if (held.matches.length) return { ...held, from: `the source of ${object}` }
+      if (spent >= BUDGET) return { matches: [], ambiguous: false, from: `the source of ${object}`, note: `no ${object} holds those words; not every way of reading them as a name was tried` }
     }
     // Last, every label, for a mistake in a single short name. A source that stops early is SAID to have stopped:
     // scoring a prefix of the rows as though it were all of them is how a wrong record is returned as the only one.
@@ -920,3 +935,13 @@ export function readerNotes(s: Schema, plan: Plan, result?: { columns: Array<{ n
   return [...out]
 }
 
+
+/** Every way of choosing k of these, in order — smaller choices are made by leaving more out. */
+function* combinations<T>(xs: T[], k: number): Generator<T[]> {
+  if (k <= 0) { yield []; return }
+  if (k > xs.length) return
+  if (k === xs.length) { yield xs; return }
+  const [head, ...rest] = xs
+  for (const c of combinations(rest, k - 1)) yield [head, ...c]
+  yield* combinations(rest, k)
+}

@@ -71,24 +71,25 @@ test('which member was meant: exact, starting with, containing, a typing mistake
   assert.deepEqual((await g.members('crm', 'Customer', 'Umbrella')).matches, [])
 })
 
-test('a name of several words is matched word by word: a typo, a number in front and punctuation do not lose it', () => {
-  const projects = [
-    { key: '314023', label: '51781 Paspaley D365 Commerce - Build + Deploy Phase' },
-    { key: '297975', label: '50139 Paspaley D365 Commerce' },
-    { key: '252189', label: '44626 Build and deploy WatchGuard firewalls' },
-    { key: '228736', label: '41998 Canon | D365 Build and Deploy' },
+test('a name of several words is matched word by word: a mistake, a code in front and punctuation do not lose it', () => {
+  const things = [
+    { key: 'p1', label: '51781 Northwind D365 Commerce - Build + Deploy Phase' },
+    { key: 'p2', label: '50139 Northwind D365 Commerce' },
+    { key: 'p3', label: '44626 Build and deploy Contoso firewalls' },
+    { key: 'p4', label: '41998 Initech | D365 Build and Deploy' },
   ]
-  // As a single string this is a dozen edits from the real name; word by word it holds every word typed.
-  const one = bestMembers(projects, 'Paspley D365 Commerce - Build + Deploy Phase')
-  assert.deepEqual(one.matches.map((m) => [m.key, m.how, m.missing]), [['314023', 'holds the words', 0]])
+  // As a single string this is many edits from the name: a code the asker never saw, punctuation the question had
+  // none of, one letter missing. Word by word it holds every word typed.
+  const one = bestMembers(things, 'Northwnd D365 Commerce - Build + Deploy Phase')
+  assert.deepEqual(one.matches.map((m) => [m.key, m.how, m.missing]), [['p1', 'holds the words', 0]])
   assert.equal(one.ambiguous, false)
 
-  // Two mistakes and three words left out still name it, and the projects sharing "build"/"deploy" do not win.
-  assert.deepEqual(bestMembers(projects, 'Paspley Comerce Build Deploy').matches.map((m) => m.key), ['314023'])
+  // Words left out and more than one mistake still name it, and the things sharing its commoner words do not win.
+  assert.deepEqual(bestMembers(things, 'Northwnd Comerce Build Deploy').matches.map((m) => m.key), ['p1'])
 
   // A name holding fewer than half of the words typed is a different thing, not a near miss.
-  assert.deepEqual(bestMembers(projects, 'Acme Warehouse Migration Discovery').matches, [])
+  assert.deepEqual(bestMembers(things, 'Umbrella Warehouse Migration Discovery').matches, [])
 
   // One word is still matched as one word: the whole phrase is what "contains" is about.
-  assert.deepEqual(bestMembers(projects, 'WatchGuard').matches.map((m) => [m.key, m.how]), [['252189', 'contains']])
+  assert.deepEqual(bestMembers(things, 'Contoso').matches.map((m) => [m.key, m.how]), [['p3', 'contains']])
 })
