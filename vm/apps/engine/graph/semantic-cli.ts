@@ -14,7 +14,7 @@
 //                                        change. Checking is what asking already does.
 //   ./run-program [file] [params]        run the answer program and read its answer, as often as it takes
 //   ./commit                             give that answer as this conversation's next step
-//   ./behind ['<group>'|<call>]          what is under the answer on screen: the rows of one group, or its steps
+//   ./trace ['<group>'|<call>]           what is under the answer on screen: the rows of one group, or its steps
 //
 // Each wrapper is generated into the agent's workspace with the paths it needs; the agent passes only the arguments.
 
@@ -28,7 +28,7 @@ const argv = process.argv.slice(2)
 const flag = (name: string) => { const i = argv.indexOf(`--${name}`); if (i < 0) return undefined; const v = argv[i + 1]; argv.splice(i, 2); return v }
 const env = { dbDir: flag('db')!, projectDir: flag('project')!, managerUrl: flag('manager')!, home: flag('home')! }
 // Each tool is named for what it does to what: the wrapper passes its own name.
-const TOOLS: Record<string, string> = { match: 'match', look: 'look', ask: 'ask', 'run-program': 'program', commit: 'commit', behind: 'behind' }
+const TOOLS: Record<string, string> = { match: 'match', look: 'look', ask: 'ask', 'run-program': 'program', commit: 'commit', trace: 'trace' }
 // How nodes connect reads as graph patterns; --json (or SEMANTIC_TOOL_FORMAT=json) gives the same views as JSON.
 const asJson = argv.includes('--json') ? (argv.splice(argv.indexOf('--json'), 1), true) : process.env.SEMANTIC_TOOL_FORMAT === 'json'
 const [tool, ...args] = argv
@@ -150,13 +150,13 @@ if (command === 'match') {
   const s = current() ?? fail('this conversation has no answer to move from yet')
   const q = s.question
   out(nextMoves(m.schema, (q.span && !('to' in q.span) ? { ...q, span: undefined } : q)).map((x) => ({ reads: x.reads, move: x.move })))
-} else if (command === 'behind') {
+} else if (command === 'trace') {
   // WHAT IS UNDER THE ANSWER ON SCREEN: the rows of one group, or the steps it was reached by. A group is JSON.
   const s0 = current() ?? fail('this conversation has no answer to look behind')
   const [what, askedCall] = args
   if (!what || !what.trim().startsWith('{')) { out(graph.trace(what ?? s0.callId ?? fail('no answer to trace'))); }
   else {
-    const callId = askedCall ?? ((s0.question as any)?.program ? fail("an answer program asked several questions — ./behind lists them; name one: ./behind '<group>' <call>") : s0.callId!)
+    const callId = askedCall ?? ((s0.question as any)?.program ? fail("an answer program asked several questions — ./trace lists them; name one: ./trace '<group>' <call>") : s0.callId!)
     out(await graph.detail(callId, json(what, 'the group'), { model: MODEL, limit: 20 }))
   }
 } else fail(`unknown tool "${tool}" — ${Object.keys(TOOLS).join(', ')}`)

@@ -148,28 +148,19 @@ function CodexEvent({ e, claude }: { e: AgentEvent; claude?: boolean }) {
     dangerouslySetInnerHTML={{ __html: renderInlineMd(e.text ?? '') }} />
 }
 
-// Codex reasons SILENTLY before its next action (no event streams during that phase), so a turn can look
-// stuck. Show a "thinking…" line whenever the turn is busy but nothing is actively streaming (the last event
-// has completed / there's no event yet) — the fact it's working, without exposing the reasoning content.
-function ThinkingLine({ since }: { since: number }) {
-  const [n, setN] = useState(1)
+// WAITING IS NOT KNOWING. The page cannot tell what an agent is doing: it knows only that a turn is open and that
+// nothing has arrived for a while. So it says exactly that — the last thing the engine said, and how long ago —
+// and never claims the agent is "thinking", which was the page inventing a state nobody reported.
+function WaitingLine({ since, last }: { since: number; last?: string }) {
   const [, tick] = useState(0)
-  // THE CLOCK RUNS ITSELF, off the wall clock, sharing nothing with the dots or the event stream. Driving it
-  // from events was wrong: they do not arrive on a schedule, so the number advanced in whatever steps they
-  // happened to land in — 4, 5, 7, 8 — which reads as flicker rather than as time passing. Ticking at 200ms
-  // while DISPLAYING whole seconds means a second boundary is never missed, however busy the page is.
-  useEffect(() => {
-    const t = setInterval(() => tick(x => x + 1), 200)
-    const d = setInterval(() => setN(x => (x % 3) + 1), 420)
-    return () => { clearInterval(t); clearInterval(d) }
-  }, [])
+  // THE CLOCK RUNS ITSELF, off the wall clock, sharing nothing with the event stream. Driving it from events was
+  // wrong: they do not arrive on a schedule, so the number advanced in whatever steps they happened to land in.
+  useEffect(() => { const t = setInterval(() => tick((x) => x + 1), 200); return () => clearInterval(t) }, [])
   const ms = Date.now() - since
+  if (ms < 1500) return null   // nothing to say yet: the turn has only just started or just spoke
   return (
-    <div style={{ color: '#9a7b1a', fontSize: 12.5, fontStyle: 'italic', margin: '9px 0' }}>
-      ◐ agent is thinking
-      {/* fixed-width dots: growing them in place shoved the number sideways four times a second */}
-      <span style={{ display: 'inline-block', width: '1.4em', textAlign: 'left' }}>{'.'.repeat(n)}</span>
-      {ms >= 1000 && <span style={{ fontStyle: 'normal', color: '#9a9a92', fontVariantNumeric: 'tabular-nums' }}>{fmtClock(ms)}</span>}
+    <div style={{ color: '#9a9a92', fontSize: 12.5, margin: '9px 0', fontVariantNumeric: 'tabular-nums' }}>
+      {last ? `no word since: ${last}` : 'no word yet'} · {fmtClock(ms)}
     </div>
   )
 }
@@ -184,13 +175,13 @@ export function CodexEventLog({ events, busy, claude }: { events: AgentEvent[]; 
   const streaming = !!last && last.done === false && (last.kind === 'command' || last.kind === 'message' || last.kind === 'reasoning')
   // Shown for as long as the turn is BUSY. Hiding it mid-stream unmounted the component and threw its clock
   // away several times a minute, and a timer that vanishes and reappears is worse than no timer.
-  const thinking = !!busy
+  const waiting = !!busy
   // Counted over events that actually SHOW something, so the clock and the log agree: it restarts when, and
   // only when, there is something new on screen to have restarted for.
   const visibleCount = events.reduce((n, e) => n + (hasContent(e) ? 1 : 0), 0)
   const sinceRef = React.useRef({ n: -1, at: Date.now() })
   if (sinceRef.current.n !== visibleCount) sinceRef.current = { n: visibleCount, at: Date.now() }
-  if (!events.length && !thinking) return null
+  if (!events.length && !waiting) return null
 
   // A coloured left rail per agent — composer (blue), analyst (amber), narrator (grey). Walk the events tracking
   // which QUESTION each belongs to; a collapsed question hides its steps.
@@ -219,5 +210,6 @@ export function CodexEventLog({ events, busy, claude }: { events: AgentEvent[]; 
     if (!hasContent(e)) return                // nothing to draw — don't emit an empty row for it
     rows.push(<div key={e.id ?? `turn${i}`} style={c ? { borderLeft: `3px solid ${c}`, paddingLeft: 10 } : undefined}><CodexEvent e={e} claude={claude} /></div>)
   })
-  return <div>{rows}{thinking && <ThinkingLine since={sinceRef.current.at} />}</div>
+  const lastSaid = [...events].reverse().find((e) => hasContent(e) && (e.kind === 'message' || e.kind === 'command'))
+  return <div>{rows}{waiting && <WaitingLine since={sinceRef.current.at} last={lastSaid?.text?.slice(0, 80)} />}</div>
 }

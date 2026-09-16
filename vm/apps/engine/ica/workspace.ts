@@ -10,7 +10,7 @@
 //
 // In its directory an agent finds the tools for its part, generated here with the absolute paths they need:
 //
-//   the semantic graph   ./match ./look ./ask ./run-program ./commit ./behind   (conversation, analyst)
+//   the semantic graph   ./match ./look ./ask ./run-program ./commit ./trace   (conversation, analyst)
 //   the data             ./sources ./query ./introspect ./find-schema ./resolve                            (analyst, connector, grounding)
 //   hand-off             ./escalate                                                                          (conversation)
 //
@@ -339,7 +339,7 @@ if command -v tsx >/dev/null 2>&1; then exec tsx "$D" "$@"; else exec npx --yes 
 }
 
 /** Tools that only read: their work outlives the call, and asking the same thing twice in a turn costs nothing. */
-const READ_ONLY = new Set(['match', 'look', 'ask', 'behind'])
+const READ_ONLY = new Set(['match', 'look', 'ask', 'trace'])
 
 const SEMANTIC_USAGE: Record<string, string> = {
   match: `match '<the question, as asked>' [--json]   → the subgraphs the question could be. Give it minutes, not seconds: it tries the best few against the data. Its words are resolved to measures, dimensions, conditions and records (looked up by name at their sources); every route the graph holds is built; each is said back in the graph's own words with what is uncertain about it; the best few are asked against the data so it can separate them. Ends with what to change if the first one is not it`,
@@ -347,7 +347,7 @@ const SEMANTIC_USAGE: Record<string, string> = {
   ask: `ask '<question>' [--json]   → a question's answer, or the rule that refuses it and what to change. Give it minutes, not seconds: a fact built by a program reads a whole span from the source before it groups, which is tens of seconds when nothing has read that span yet and nothing at all when something has. A question: {"measures":["Fact.measure" | "[A.x] / [B.y]"], "by":[{"to":"Pillar","via":["person","pillar"]} | {"attribute":"a"} | {"attribute":"rag","of":"Project"}], "where":[{"to":"Dimension","via":[…],"in":["key"]} | {"attribute":"a","in":["v"]} | {"condition":"valid project"}], "without":["a condition a fact is always kept to"], "span":{"from":"2026-09-01","through":"2026-10-31"} | {"this":"Month"} | {"previous":"Month","count":3} | {"last":30,"unit":"Day"}, "currency":"AUD", "order":{"by":"column","desc":true}, "limit":10 — also having, totals, share, compare, fill, cumulative, rolling, limitPer, notIn/none/contains/startsWith`,
   'run-program': `run-program [program.mjs] ['<params>']   → run the program in this folder and read its answer as the person would — headline, narration, tables with their row counts; run it as often as it takes, then ./commit. Allow it a few minutes: a question whose fact is built by a program reads a whole span before it groups. A program is named for its idea and takes the question's values (span, records) as params: export const meta = { name, description, params: { name: 'what it means' }, logic }; export default async (ctx, params) => ({ status?: 'answered'|'unknowable'|'uncertain', missing?: '<the plain reason, when not answered>', scope?: '<the records and conditions kept to>', headline?: { label, value: <cell> }, data: { name: <table> }, views: [{ id, component: 'table'|'bar'|'line'|'kpi', data: '<data key>', title, encode: { columns: [...] } | { x, y, series } }], narration: [{ text: 'October is {oct}', cites: { oct: <cell> }, why }], nextSteps: [{ label, why }] }). ctx.ask(question, label) returns a table { columns: [{ name, role, unit }], rows: [{ Pillar: 7, Pillar_label: 'Consulting', Month: '2026-09', revenue: 4372656 }] } — a record by its id, its name beside it — the program's only data; ctx.transform(label, () => …), ctx.decide(label, took, why), ctx.decideAt(label, value, op, threshold, why), await ctx.verify(label, () => holds), ctx.caveat(text), ctx.explain(text). A cell is { data: '<data key>', row: 0 | { Month: '2026-09' }, column }; every number in a sentence is a {slot} citing a cell`,
   commit: `commit   → give the answer of the last ./run-program as this conversation's next step, and end the turn`,
-  behind: `behind ['<group>'] [<call>]   → what is under the answer on screen: the rows of one group (a group is JSON, e.g. '{"Pillar":"15"}'), or with no group, the steps and questions it was reached by`,
+  trace: `trace ['<group>'] [<call>]   → what is under the answer on screen: the rows of one group (a group is JSON, e.g. '{"Pillar":"15"}'), or with no group, the steps and questions it was reached by`,
 }
 
 // ── THE WORKSPACE HOLDS WHAT THIS ENGINE WRITES, AND NOTHING ELSE ─────────────────────────────────────────────

@@ -51,7 +51,7 @@ const tool = async (name: string, ...args: string[]) => {
 
 const tools = execFileSync('ls', [cwd], { encoding: 'utf8' }).split('\n').filter(Boolean)
 console.log('tools:', tools.join(' '))
-assert.ok([...Object.keys({'match':1,'look':1,'ask':1,'run-program':1,'commit':1,'behind':1}), 'escalate'].every((t) => tools.includes(t)))
+assert.ok([...Object.keys({'match':1,'look':1,'ask':1,'run-program':1,'commit':1,'trace':1}), 'escalate'].every((t) => tools.includes(t)))
 assert.ok(!tools.includes('define') && !tools.includes('query'))
 const terms = await tool('match', 'How many hours did each branch work in September and October 2026?')
 console.log('resolve-terms:', terms.replace(/\s+/g, ' ').slice(0, 200))
@@ -102,7 +102,7 @@ const surfaced = surfaceAnswer(g2.store.getCall(stepFile.callId)!.output as any,
 console.log('surfaced:', JSON.stringify(surfaced).slice(0, 300))
 assert.match(surfaced.answer!, /Sydney worked the most/)
 console.log('members:', (await tool('look', 'Branch', 'Sidney')).replace(/\s+/g, ' ').slice(0, 200))
-console.log('trace:', (await tool('behind')).split('\n').slice(0, 4).join(' | '))
+console.log('trace:', (await tool('trace')).split('\n').slice(0, 4).join(' | '))
 server.close()
 console.log('\nall tools ran as the composer runs them')
 process.exit(0)

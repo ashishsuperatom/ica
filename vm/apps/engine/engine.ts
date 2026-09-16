@@ -452,9 +452,12 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     for (const lane of ['composer-log', 'analyst-log'])
       emit({ type: 'log', channel: lane }, A('event', lane === 'composer-log' ? 'composer' : 'analyst', { ev: { kind: 'user', id: qid, text: question, done: true }, qid, sid }))
     const handlers: RunHandlers = {
-      onOutput: (chunk: string) => emitLog({ t: 'analyst:chunk', text: chunk }),
-      onNarration: (text: string) => { if (reply) emitBeat(reply, text, qid, sid) },
+      onOutput: (chunk: string) => { if (!stopped) emitLog({ t: 'analyst:chunk', text: chunk }) },
+      onNarration: (text: string) => { if (!stopped && reply) emitBeat(reply, text, qid, sid) },
       onEvent: (ev: AgentEvent) => {
+        // STOPPED MEANS STOPPED. The agent may take a moment to notice — a tool it started still has to return —
+        // but nothing more of it reaches the person: what they asked to end, ends on their screen at once.
+        if (stopped) return
         ev.at ??= Date.now()
         if (ev.kind === 'command' && ev.id) {
           if (ev.done || ev.status === 'completed' || ev.status === 'failed') {
@@ -494,7 +497,11 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       verbTurn = { verb: r.verb.verb, view: r.view, explain: r.explain }
       asked = r.prompt
     }
-    workingAgent = 'composer'; stopSession = () => { try { (composer as any).session?.reset?.() } catch { /* best-effort */ } }
+    // Abort first — that is what reaches a turn already running — then reset, which throws the conversation away.
+    workingAgent = 'composer'; stopSession = () => {
+      try { (composer as any).session?.stop?.() } catch { /* best-effort */ }
+      try { (composer as any).session?.reset?.() } catch { /* best-effort */ }
+    }
     let done = await capped(composer.ask(asked, handlers, { qid, sessionId: sid }), () => {
       try { (composer as any).session?.reset?.() } catch { /* best-effort */ }
       return { escalate: { reason: 'the composer did not finish in time' }, ms: Date.now() - t0 }
@@ -503,7 +510,10 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       console.log(`[ica] composer → escalate · ${done.escalate.reason}`)
       currentAgent = 'analyst'; workingAgent = 'analyst'
       emit(reply, A('status', 'analyst', { progress: 'Handing off to the analyst for deeper analysis…', sid }))
-      stopSession = () => { try { (analyst as any).session?.reset?.() } catch { /* best-effort */ } }
+      stopSession = () => {
+        try { (analyst as any).session?.stop?.() } catch { /* best-effort */ }
+        try { (analyst as any).session?.reset?.() } catch { /* best-effort */ }
+      }
       done = await capped(analyst.ask(question, handlers, { qid, sessionId: sid, reason: done.escalate.reason }), () => {
         try { (analyst as any).session?.reset?.() } catch { /* best-effort */ }
         return { escalate: { reason: 'the analyst did not finish in time' }, ms: Date.now() - t0 }

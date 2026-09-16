@@ -50,7 +50,7 @@ Its only parameter is id, so the same program serves every ${v.entity}, with the
 export function explainPrompt(raw: string, s: { qid?: string; callId: string; program: boolean }): string {
   return `${raw}
 
-The person asks how the answer on screen was reached. It is the recorded run ${s.callId}: ./behind ${s.callId} shows it${s.program && s.qid ? `, and its program is out/${s.qid}/program.mjs with out/${s.qid}/params.json` : ''}.
+The person asks how the answer on screen was reached. It is the recorded run ${s.callId}: ./trace ${s.callId} shows it${s.program && s.qid ? `, and its program is out/${s.qid}/program.mjs with out/${s.qid}/params.json` : ''}.
 Answer what they asked, at the length that answers it, in plain language, and write it as markdown to out/<qid>/explain.md.`
 }
 
