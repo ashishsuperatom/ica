@@ -21,7 +21,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
-import { fragmentOf, tied, revisions, judgedText, judge, completions, catalog, catalogText, conformedDimensions, dimensions, dimensionsText, termsText, check, nodeText, pathsText, find, nextMoves, node, paths, runProgram, tableOf, type Result } from '@superatom/semantic-graph'
+import { mistakes, fragmentOf, tied, revisions, judgedText, judge, completions, catalog, catalogText, conformedDimensions, dimensions, dimensionsText, termsText, check, nodeText, pathsText, find, nextMoves, node, paths, runProgram, tableOf, type Result } from '@superatom/semantic-graph'
 import { MODEL, openSemanticGraph } from './semantic.js'
 
 const argv = process.argv.slice(2)
@@ -65,20 +65,79 @@ const current = () => {
   return s?.currentStep ? graph.store.steps(sessionId).find((x) => x.id === s.currentStep) ?? null : null
 }
 
-if (command === 'match') {
+/** Read a question in words into the graph: the subgraphs it could be, ranked, tried, and said back. */
+async function match(text: string) {
   // THE WHOLE FIRST HALF, in one act. Words become things (eagerly, and at the sources for records), things become
   // subgraphs, subgraphs are ranked and the best few are asked so the data can separate them.
-  const text = args.join(' ').trim() || fail("usage: ./match '<the question, as asked>'")
   const today = new Date().toISOString().slice(0, 10)
   const read = await graph.resolveQuestionTerms(MODEL, text, { today })
   const currency = Object.entries(m.settings ?? {}).find(([k]) => /currency/i.test(k))?.[1]
-  const fragment = { ...fragmentOf(read.terms as any), phrases: read.terms.map((t) => t.phrase), ...(typeof currency === 'string' ? { currency } : {}) }
+  const fragment: any = { ...fragmentOf(read.terms as any), phrases: read.terms.map((t) => t.phrase), ...(typeof currency === 'string' ? { currency } : {}) }
+
+  // A NAME THE SOURCES DID NOT HOLD BY ITS WHOLE SELF. "paspley d365 commerce" is a project, typed as people type:
+  // a word misspelt, a code left off the front. The words the graph could not place are put back together and
+  // looked for INSIDE the kinds of thing the question named — which is what a person does, and costs one query
+  // per kind rather than a search of everything.
+  const unplaced = (read.unmatched ?? []).filter((w) => w.length > 2 && !/^\d+$/.test(w))
+  const kinds = [...new Set((read.terms as any[]).flatMap((t) => t.means.filter((x: any) => x.kind === 'object' && m.schema.objects[x.node]?.kind === 'entity').map((x: any) => x.node)))] as string[]
+  // Words the graph could not place are searched for whether or not something else was found: a question names
+  // more than one thing, and a record found for one word says nothing about the words still unaccounted for.
+  if (unplaced.length && kinds.length) {
+    // A NAME THE SOURCES DID NOT HOLD BY ITS WHOLE SELF — a word misspelt, a code left off the front, punctuation
+    // where the question had none. The words the graph could not place are tried against the kinds of thing the
+    // question named, LONGEST RUN FIRST: a run of adjacent words is far more distinctive than any one of them, and
+    // a source that answers a single common word with its row cap may not hold the right row at all. The first run
+    // that comes back small enough to read is scored by how much of what was typed each name actually holds — a
+    // word it contains, or one a single typo away.
+    const runs: string[] = []
+    for (let n = Math.min(unplaced.length, 3); n >= 1; n--) for (let i = 0; i + n <= unplaced.length; i++) runs.push(unplaced.slice(i, i + n).join(' '))
+    // The kind NEAREST the unknown words is tried first: "project paspley d365 commerce" says which kind those
+    // words name, and asking the wrong kind first is how a budget is spent before the right question is asked.
+    const lower = text.toLowerCase()
+    const near = (entity: string) => {
+      const phrase = (read.terms as any[]).find((t) => t.means.some((x: any) => x.node === entity && x.kind === 'object'))?.phrase ?? entity
+      const at = lower.indexOf(String(phrase).toLowerCase()), from = lower.indexOf(unplaced[0])
+      return at < 0 || from < 0 ? 1e6 : Math.abs(from - at)
+    }
+    const order = [...kinds].sort((a, b) => near(a) - near(b))
+    const seen = new Map<string, { object: string; key: string; label: string; hits: number }>()
+    let asked = 0
+    for (const needle of runs) {
+      if (asked >= 12 || [...seen.values()].some((x) => x.hits >= 2)) break
+      for (const entity of order.slice(0, 2)) {
+        if (asked >= 12) break
+        asked++
+        const found: any = await graph.members(MODEL, entity, needle).catch(() => null)
+        const matches = found?.matches ?? []
+        if (!matches.length || matches.length > 25) continue   // nothing, or too many to tell anything from
+        for (const b of matches) {
+          const label = String(b.label).toLowerCase()
+          const parts = label.split(/[^\p{L}\p{N}]+/u).filter(Boolean)
+          const hits = unplaced.filter((u) => label.includes(u) || parts.some((lw) => mistakes(lw, u) <= 1)).length
+          const key = `${entity}|${b.key}`
+          if (!seen.has(key) || seen.get(key)!.hits < hits) seen.set(key, { object: entity, key: String(b.key), label: String(b.label), hits })
+        }
+      }
+    }
+    const best = [...seen.values()].sort((a, b) => b.hits - a.hits).filter((x) => x.hits >= 2).slice(0, 3)
+    if (best.length) {
+      const phrase = unplaced.join(' ')
+      ;(fragment.values ??= []).push({ text: phrase, meanings: best.map((b) => ({ object: b.object, key: b.key, label: b.label })) })
+      read.notes = [...(read.notes ?? []), `"${phrase}" is ${best.map((b) => `${b.label} (a ${b.object})`).join(' or ')}`]
+    }
+  }
+
   const { done, refused } = completions(m.schema, fragment)
   const ask = async (q: any) => {
     const a = await graph.ask(q, { model: MODEL, today })
     return a.ok ? { ok: true as const, result: { rows: a.result.rows } } : { ok: false as const, rule: a.rule ?? 'error', reason: a.reason ?? 'failed' }
   }
-  const judged = await judge(m.schema, done, fragment.phrases ?? [], ask)
+  // WHAT IS LEFT OVER is what the graph never placed — not every word of the question. A phrase that became a
+  // measure, a dimension, a record or a span is accounted for by construction; saying otherwise reads as a fault
+  // where there is none.
+  const placed = new Set((fragment.values ?? []).flatMap((v: any) => String(v.text).split(/\s+/)))
+  const over = (read.unmatched ?? []).filter((w) => w.length > 2 && !placed.has(w))
+  const judged = await judge(m.schema, done, over, ask)
   const ties = tied(judged)
   const ways = judged[0]?.evidence ? revisions(m.schema, judged[0].completion.question, judged[0].evidence) : []
   if (asJson) out({ terms: read, readings: judged.map((j) => ({ question: j.completion.question, said: j.said, why: j.why, uncertain: j.completion.uncertain, leftOver: j.leftOver, evidence: j.evidence })), tied: ties.map((t) => t.differ), revisions: ways, refused: dedupe(refused) })
@@ -89,6 +148,10 @@ if (command === 'match') {
     if (ways.length) said.push('', `if that is not it: ${ways.map((w) => w.why).join('; ')}`)
     out(said.join('\n'))
   }
+}
+
+if (command === 'match') {
+  await match(args.join(' ').trim() || fail("usage: ./match '<the question, as asked>'"))
 } else if (command === 'look') {
   // THE GRAPH ITSELF. Nothing: the whole catalogue. One node: what it holds and what it reaches. Two: the way from
   // one to the other — or, when the second is not a node, which record of the first that text means.
@@ -104,6 +167,11 @@ if (command === 'match') {
   } else {
     out(await graph.members(MODEL, first, second))
   }
+} else if (command === 'ask' && !args.join(' ').trim().startsWith('{')) {
+  // WORDS, HANDED TO THE TOOL THAT READS WORDS. "ask" means asking in English, so a question in English arrives
+  // here often; sending it back with a complaint teaches nothing. It is read into the graph, and the readings say
+  // which one to evaluate.
+  await match(args.join(' ').trim() || fail("usage: ./ask '<question>' — or ./ask '<the question in words>' to have it read into the graph first"))
 } else if (command === 'ask') {
   // EVALUATE A SUBGRAPH. A refusal says the rule and what to change, so asking is also how a question is checked.
   // HOW LONG IT TOOK travels with the answer: a reader — and the agent deciding how long to wait next time — learns

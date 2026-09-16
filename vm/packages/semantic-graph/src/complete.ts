@@ -21,6 +21,8 @@ import { resolveSpan, type SpanAsked } from './time.js'
 import { arrows, type Schema } from './schema.js'
 import { paths } from './discovery.js'
 import type { Found } from './discovery.js'
+/** What a term came to: something of the graph, a span the question stated, or a plain number. */
+type Meaning = Found | { kind: 'span'; span: SpanAsked; reads?: string } | { kind: 'number'; value: number }
 import { patternOf, type Pattern } from './pattern.js'
 
 /** What the words came to, before any path is known. A value may mean several things; each is kept. */
@@ -135,7 +137,10 @@ function candidates(s: Schema, f: Fragment): Array<{ question: Question; why: st
     type Draft = { by: NonNullable<Question['by']>; where: NonNullable<Question['where']>; why: string[]; uncertain: string[]; cost: number }
     let drafts: Draft[] = [{ by: [], where: [], why: [...on.why, ...(facts.length > 1 ? [`measured on ${on.fact}`] : [])], uncertain: facts.length > 1 ? [`the measure is on ${facts.map((x) => x.fact).join(' and ')}`] : [], cost: facts.length > 1 ? 1 : 0 }]
 
-    for (const object of f.by ?? []) {
+    // A thing the question kept to ONE of is not a thing to group by: "for project X, by employee" asks for
+    // employees, and a column holding X in every row says nothing.
+    const keptToOne = new Set((f.values ?? []).filter((v) => v.meanings.length && v.meanings.every((m) => m.object === v.meanings[0].object)).map((v) => v.meanings[0].object))
+    for (const object of (f.by ?? []).filter((o) => !keptToOne.has(o))) {
       const rs = routes(s, on.fact, object)
       if (!rs.length) { drafts = []; break }
       drafts = drafts.flatMap((d) => rs.map((r) => ({
@@ -155,7 +160,7 @@ function candidates(s: Schema, f: Fragment): Array<{ question: Question; why: st
           ...d,
           where: [...d.where, { to: m.object, ...(r.path.length ? { via: r.path } : {}), in: [m.key] } as NonNullable<Question['where']>[number]],
           why: [...d.why, `"${v.text}" is ${m.label ?? m.key}, a ${m.object}, kept to by ${r.path.join('.') || 'the fact itself'}`],
-          uncertain: v.meanings.length > 1 ? [...d.uncertain, `"${v.text}" could be a ${v.meanings.map((x) => x.object).join(' or a ')}`] : d.uncertain,
+          uncertain: v.meanings.length > 1 ? [...d.uncertain, `"${v.text}" could be ${v.meanings.map((x) => `${x.label ?? x.key} (a ${x.object})`).join(' or ')}`] : d.uncertain,
           cost: d.cost + r.cost + (v.meanings.length > 1 ? 2 : 0),
         }))
       }))
@@ -178,19 +183,31 @@ function candidates(s: Schema, f: Fragment): Array<{ question: Question; why: st
 
 /** What `resolve-terms` found, as a fragment to complete. A term with several meanings stays several; nothing is
  *  chosen here, because choosing is what completion does with the graph in hand. */
-export function fragmentOf(terms: Array<{ phrase: string; means: Found[] }>, span?: Question['span'], currency?: string): Fragment {
+export function fragmentOf(terms: Array<{ phrase: string; means: Meaning[] }>, span?: SpanAsked, currency?: string): Fragment {
   const f: Fragment = { measures: [], by: [], byAttribute: [], values: [], conditions: [], ...(span ? { span } : {}), ...(currency ? { currency } : {}) }
   for (const t of terms) {
     const kinds = new Set(t.means.map((m) => m.kind))
+    // A date the question stated is the span it is asked over: "this year", "last 3 months", a month by name.
+    const dated = t.means.find((m) => m.kind === 'span') as { kind: 'span'; span: SpanAsked } | undefined
+    if (dated && !f.span) f.span = dated.span
+    // A word that names a measure on SEVERAL facts is one idea asked for, not several to be added together: it is
+    // kept as the bare name, and completion makes a candidate per fact that has it — which is what "ambiguous"
+    // means here. Named on one fact only, it is that measure.
+    const measures = t.means.filter((x) => x.kind === 'measure') as Array<Extract<Found, { kind: 'measure' }>>
+    if (measures.length > 1) { if (!f.measures.includes(t.phrase)) f.measures.push(t.phrase) }
     for (const m of t.means) {
-      if (m.kind === 'measure') { const ref = `${m.node}.${m.measure}`; if (!f.measures.includes(ref)) f.measures.push(ref) }
+      if (m.kind === 'measure') { if (measures.length > 1) continue; const ref = `${m.node}.${m.measure}`; if (!f.measures.includes(ref)) f.measures.push(ref) }
       else if (m.kind === 'object' && !kinds.has('measure')) { if (!f.by!.includes(m.node)) f.by!.push(m.node) }
       else if (m.kind === 'condition') { if (!f.conditions!.includes(m.condition)) f.conditions!.push(m.condition) }
       else if (m.kind === 'attribute' && m.value === undefined) f.byAttribute!.push({ attribute: m.attribute, of: m.node })
     }
-    // Records, and an attribute matched by one of its values, are what the question is KEPT to.
+    // Records are what the question is KEPT to — unless the same word is also a measure or an object, in which
+    // case that is what it is. A report line called "Consulting revenue" must not turn the word "revenue" into a
+    // filter: a word means an idea once, and the idea nearest the question wins.
     const members = t.means.filter((m) => m.kind === 'member') as Array<Extract<Found, { kind: 'member' }>>
-    if (members.length) f.values!.push({ text: t.phrase, meanings: members.map((m) => ({ object: m.node, key: m.key, label: m.label })) })
+    if (members.length && !kinds.has('measure') && !kinds.has('object')) {
+      f.values!.push({ text: t.phrase, meanings: members.map((m) => ({ object: m.node, key: m.key, label: m.label })) })
+    }
   }
   for (const k of ['by', 'byAttribute', 'values', 'conditions'] as const) if (!f[k]!.length) delete f[k]
   return f

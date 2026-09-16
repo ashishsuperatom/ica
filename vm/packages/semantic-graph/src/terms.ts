@@ -165,7 +165,7 @@ export function resolveTerms(s: Schema, text: string, today: string, records: Ma
   const still: string[] = []
   for (const t of unmatched) {
     still.push(t.typed ?? t.w)
-    if (named.has(t.at)) notes.push(`"${t.w}" may name a record not found by its whole name — ./find-record <Entity> ${t.w}`)
+    if (named.has(t.at)) notes.push(`"${t.w}" may name a record not found by its whole name — look for it in the kind of thing it names`)
   }
 
   const out = terms.sort((a, b) => a.at - b.at).map(({ at: _at, ...t }) => {

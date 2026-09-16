@@ -29,7 +29,8 @@ test('a record whose meaning is not certain forks the question, once per meaning
   const got = complete(branches, f)
   const kept = got.map((g) => (g.question.where![0] as any).to)
   assert.ok(kept.includes('Branch') && kept.includes('State'), kept.join(' | '))
-  assert.match(got[0].uncertain.join('\n'), /"Sydney" could be a/)
+  // Named, not merely typed: a reader can tell the two apart without looking anything up.
+  assert.match(got[0].uncertain.join('\n'), /"Sydney" could be Sydney \(a Branch\) or New South Wales \(a State\)/)
 })
 
 test('a fragment the graph cannot finish comes back empty, rather than nearly right', () => {
