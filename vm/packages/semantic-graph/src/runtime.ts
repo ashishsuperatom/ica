@@ -28,6 +28,8 @@ import { declaredColumns, expandSources, LOCAL, loadModule, namedIn, sourcesProb
 import { DatabaseSync } from 'node:sqlite'
 import { bestMembers, find, type Found } from './discovery.js'
 import { resolveTerms, recordPhrases } from './terms.js'
+import { hashNode, type Memo } from './plan-graph.js'
+import { pushable } from './pushdown.js'
 import { renderAnswer, trace, type AnswerDoc } from './answers.js'
 import { CappedError, detailSql, spanParams, type FactSource, type EntitySource } from './sql.js'
 import { arrows as arrowsOf, timeArrow } from './schema.js'
@@ -50,6 +52,10 @@ export interface GraphOptions {
   dialects?: Record<string, Dialect>
   /** Other organisations' or teams' models, each mounted read-only under a namespace. */
   libraries?: Array<{ namespace: string; store: Store }>
+  /** Results kept against the hash of the work that produced them. A program's rows are the expensive thing, so
+   *  they are what is kept: the same program, span and pushed-down filters is the same work, however often it is
+   *  asked for. Scope it to a turn unless a source has declared how long its rows stay true. */
+  memo?: Memo
   /** A fixed day for every question (a test, a replay harness). Otherwise today is the day where the asker is. */
   today?: () => string
   /** The clock, for today in the asker's zone. */
@@ -431,8 +437,21 @@ export function createGraph(o: GraphOptions) {
       const span = plan?.span
       const t = s.objects[obj].kind === 'fact' ? timeArrow(s, obj) : undefined
       if (t && !span) throw new Error(`${obj} is produced by a program over a span, and the question has none`)
+      // WHAT THE PROGRAM IS GIVEN. A filter on one of the produced fact's own arrows, whose members are listed, is
+      // handed over when the program says it accepts that arrow — so it reads what the question is about instead of
+      // everything. The filter is STILL applied afterwards: pushing it down is an optimisation, never the guarantee.
+      const fp = plan?.facts.find((f) => f.fact === obj)
+      const pushed = fp ? pushable(s, fp, def.ports).pushed : []
+      const keep = Object.fromEntries(pushed.map((k) => [k.role, k.keys]))
+      if (pushed.length) c.onProgram?.(`${x.program} is given ${pushed.map((k) => `${k.keys.length} ${k.role}`).join(', ')}`)
+      const params = { ...(span ? { from: span.from, to: span.to } : {}), ...(pushed.length ? { keep } : {}) }
+      // THE SAME WORK IS THE SAME ROWS. A program, a span and what it was given identify its output exactly; a memo
+      // is therefore about work, not about a question, and two questions that need the same rows read them once.
+      const work = hashNode('produce', { program: hash, params }, [])
+      const held = o.memo?.get(work)
       const started = Date.now()
-      const rows = await fn(ctx, span ? { from: span.from, to: span.to } : {}) as Array<Record<string, unknown>>
+      const rows = (held ? held.value : await fn(ctx, params)) as Array<Record<string, unknown>>
+      if (held) c.onProgram?.(`${obj} from what "${x.program}" produced earlier (${rows.length} rows)`)
       if (!Array.isArray(rows)) throw new Error(`the program "${x.program}" returned something other than rows`)
       const columns = declaredColumns(x)
       const missing = columns.filter((col) => rows.length && !rows.some((r: any) => col in r))
@@ -442,6 +461,7 @@ export function createGraph(o: GraphOptions) {
       const grain: string[] = fx.key ? [fx.key] : [...Object.values(fx.arrows ?? {}), ...(fx.time ? [fx.time] : [])]
       const seen = new Set<string>()
       for (const r of rows) { const k = JSON.stringify(grain.map((g) => r[g])); if (seen.has(k)) throw new Error(`the program "${x.program}" produced two rows for ${grain.map((g) => `${g} ${r[g]}`).join(', ')}`); seen.add(k) }
+      if (!held) o.memo?.put(work, rows)
       c.statements.push({ fact: obj, source: `program ${x.program}`, sql: '', params: span ?? {}, rows: rows.length, ms: Date.now() - started, capped: false })
       c.onProgram?.(`${obj} produced by the program "${x.program}" (${rows.length} rows)`)
       x.source = LOCAL; x.sql = table(columns, rows); delete x.program

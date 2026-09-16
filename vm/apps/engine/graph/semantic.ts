@@ -8,7 +8,7 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { createGraph, managerDialects, managerQuery, ModelStore, Store } from '@superatom/semantic-graph'
+import { createGraph, memoInMemory, managerDialects, managerQuery, ModelStore, Store } from '@superatom/semantic-graph'
 
 export const MODEL = 'model'
 export const semanticFile = (dbDir: string) => join(dbDir, 'semantic-graph.sqlite')
@@ -31,7 +31,11 @@ export async function openSemanticGraph(p: { dbDir: string; projectDir: string; 
     throw new Error(`the project has no model in its graph store (${semanticFile(p.dbDir)})${existsSync(files) ? ` — its files can be imported once: semantic-graph --db ${semanticFile(p.dbDir)} import ${join(p.projectDir, 'semantic')}` : ' — build one with semantic-graph'}`)
   }
   const st = models.state(MODEL)
-  const graph = createGraph({ store: new Store(semanticFile(p.dbDir)), query: managerQuery(p.managerUrl), dialects: await managerDialects(p.managerUrl), ...(p.now ? { now: p.now } : {}) })
+  // WHAT A PROGRAM PRODUCED IS KEPT while this graph is loaded. The rows of a computed fact are the expensive
+  // thing — a spread over a span is tens of seconds against the source — and they are identified by the program,
+  // the span and what was pushed into it, so the composer's several attempts at one question pay for them once.
+  // The graph is reloaded whenever the model changes, so nothing here outlives a correction.
+  const graph = createGraph({ store: new Store(semanticFile(p.dbDir)), query: managerQuery(p.managerUrl), dialects: await managerDialects(p.managerUrl), memo: memoInMemory(), ...(p.now ? { now: p.now } : {}) })
   const by = `the graph store, change ${models.lastChange(MODEL)}`
   graph.defineSchema(MODEL, st.schema, by, 'the model as the graph store holds it', { breaking: true })
   for (const [name, def] of Object.entries(st.programs)) graph.defineProgram(name, def, by)

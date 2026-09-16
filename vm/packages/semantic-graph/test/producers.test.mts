@@ -121,3 +121,39 @@ test('a replay runs the program version the answer ran, after the name has moved
   const again = await g.replay(r.callId, { model: 'b' })
   assert.ok(again.same && again.answer.ok && again.answer.result.rows[0][0] === 20)
 })
+
+test('a program is given the filters it accepts, and its rows are kept against that work', async () => {
+  // The same program, span and pushed-down filters is the same work: asked twice, run once.
+  const { createGraph, memoInMemory, Store } = await import('../src/index.js')
+  let ran = 0
+  const store = new Store(':memory:')
+  const g = createGraph({ store, query: async () => [], memo: memoInMemory(), today: () => '2026-09-16' })
+  g.defineSchema('m', {
+    name: 'm',
+    objects: {
+      Day: { kind: 'calendar', level: 'day' },
+      Thing: { kind: 'entity', members: { a: 'A', b: 'B' } },
+      Made: { kind: 'fact', arrows: { thing: 'Thing', day: 'Day' }, measures: { n: { unit: 'n', kind: 'flow', aggregate: 'sum' } } },
+    },
+  }, 'test')
+  g.defineProgram('makes', { produces: 'Made', reads: { sources: [], objects: [] }, ports: { accepts: { thing: true } },
+    body: `export default async (ctx, { from, to, keep }) => {
+      globalThis.__keep = keep ?? null
+      return (keep?.thing ?? ['a', 'b']).map((t) => ({ thing_id: t, day: from, n: 1 }))
+    }` }, 'test')
+  g.defineSources('m', { facts: { Made: { source: '@local', program: 'makes', arrows: { thing: 'thing_id', day: 'day' }, time: 'day', measures: { n: 'n' } } }, entities: {} }, 'test')
+
+  const q: any = { measures: ['Made.n'], by: [{ to: 'Thing' }], where: [{ to: 'Thing', in: ['a'] }], span: { from: '2026-09-01', to: '2026-09-02' } }
+  const first: any = await g.ask(q, { model: 'm' })
+  assert.ok(first.ok, first.ok ? '' : first.reason)
+  assert.deepEqual((globalThis as any).__keep, { thing: ['a'] }, 'the program was given the filter it accepts')
+  assert.equal(first.result.rows.length, 1)
+  ran = Number((globalThis as any).__keep !== null)
+  assert.equal(ran, 1)
+
+  ;(globalThis as any).__keep = null
+  const again: any = await g.ask(q, { model: 'm' })
+  assert.ok(again.ok)
+  assert.equal((globalThis as any).__keep, null, 'asked again, the program did not run: its rows were already known')
+  assert.deepEqual(again.result.rows, first.result.rows)
+})

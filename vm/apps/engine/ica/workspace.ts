@@ -11,7 +11,7 @@
 // In its directory an agent finds the tools for its part, generated here with the absolute paths they need:
 //
 //   the semantic graph   ./resolve-terms ./find-measure ./find-dimension ./find-record ./describe ./group-paths ./overview
-//                        ./check-question ./try-question ./run-program ./commit ./source-records ./trace-answer   (conversation, analyst)
+//                        ./check-question ./complete-question ./try-question ./run-program ./commit ./source-records ./trace-answer   (conversation, analyst)
 //   the data             ./sources ./query ./introspect ./find-schema ./resolve                            (analyst, connector, grounding)
 //   hand-off             ./escalate                                                                          (conversation)
 //
@@ -324,6 +324,7 @@ const SEMANTIC_USAGE: Record<string, string> = {
   'find-measure': 'find-measure <term>   → the measure a term means (revenue, hours) and the fact it belongs to; ./describe <fact> shows what it can be grouped by',
   'find-dimension': 'find-dimension <term>   → the dimension a term or a name belongs to: "practice" is Pillar, "Soft" is a Commitment, "CEC" is a Pillar record',
   'find-record': 'find-record <Dimension> <name>   → the record a typed name means (a pillar, project, person), typos included; says when several fit',
+  'complete-question': `complete-question '<what you know>'   → the questions a fragment could be, best first, each with why it was built that way and what was uncertain. What you know: {"measures":["revenue" | "Fact.measure"], "by":["Pillar"], "byAttribute":[{"attribute":"rag","of":"Project"}], "values":[{"text":"<as typed>","meanings":[{"object":"Project","key":"314023"}]}], "conditions":["valid project"], "span":{"from":"…","through":"…"}, "currency":"AUD"} — no paths, the graph finds them`,
   'check-question': `check-question '<question>'   → the answer's columns and notes, or why it is refused and the readings to choose from. A question: {"measures":["Fact.measure" | "[A.x] / [B.y]"], "by":[{"to":"Pillar","via":["person","pillar"]} | {"attribute":"a"} | {"attribute":"rag","of":"Project"}], "where":[{"to":"Dimension","via":[…],"in":["key"]} | {"attribute":"a","in":["v"]} | {"attribute":"golive","of":"Project","range":{"from":"2026-10-01","to":"2026-11-01"}} | {"condition":"valid project"}], "without":["a condition a fact is always kept to"], "span":{"from":"2026-09-01","through":"2026-10-31"} | {"this":"Month"} | {"previous":"Month","count":3} | {"last":30,"unit":"Day"}, "currency":"AUD", "order":{"by":"column","desc":true}, "limit":10} — also having, totals, share, compare, fill, cumulative, rolling, limitPer, notIn/none/contains/startsWith`,
   'try-question': `try-question '<question>'   → the question's answer, to see what the data says while writing the program. A question whose fact is built by a program reads a whole span before it groups, so allow it a few minutes`,
   commit: `commit   → give the answer of the last ./run-program as this conversation's next step, and end the turn`,
