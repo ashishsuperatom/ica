@@ -16,6 +16,7 @@ import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { arrows, schemaProblems, type Arrow, type AttributeDef, type ConditionDef, type Measure, type ObjectDef, type Schema } from './schema.js'
 import { sourcesProblems, type ProgramDef } from './producers.js'
+import type { Strategy } from './strategy.js'
 import type { EntitySource, FactSource, Sources } from './sql.js'
 
 export interface ModelState {
@@ -23,6 +24,7 @@ export interface ModelState {
   sources: Sources
   settings: Record<string, unknown>
   programs: Record<string, ProgramDef>
+  strategies: Record<string, Strategy>
 }
 
 export type Operation =
@@ -40,6 +42,8 @@ export type Operation =
   | { op: 'promote-attribute'; id: string; entity: string }
   | { op: 'bind'; object: string; binding: FactSource | EntitySource }
   | { op: 'add-program'; name: string; program: ProgramDef }
+  | { op: 'add-strategy'; name: string; strategy: Strategy }
+  | { op: 'remove-strategy'; name: string }
   | { op: 'set-setting'; key: string; value: unknown }
   | { op: 'set-conversion'; conversion: Schema['conversion'] }
 
@@ -64,6 +68,9 @@ CREATE TABLE IF NOT EXISTS g_edge (
 );
 CREATE TABLE IF NOT EXISTS g_binding (model TEXT NOT NULL, object TEXT NOT NULL, body TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, updated_at INTEGER NOT NULL, PRIMARY KEY (model, object));
 CREATE TABLE IF NOT EXISTS g_program (model TEXT NOT NULL, name TEXT NOT NULL, body TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, updated_at INTEGER NOT NULL, PRIMARY KEY (model, name));
+-- A method: how a kind of question is answered, written with the parts left open. Kept beside the model because a
+-- method is about this graph's shapes, and corrected the same way everything else is.
+CREATE TABLE IF NOT EXISTS g_strategy (model TEXT NOT NULL, name TEXT NOT NULL, body TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, updated_at INTEGER NOT NULL, PRIMARY KEY (model, name));
 CREATE TABLE IF NOT EXISTS g_setting (model TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (model, key));
 CREATE TABLE IF NOT EXISTS g_change (
   id INTEGER PRIMARY KEY AUTOINCREMENT, model TEXT NOT NULL, at INTEGER NOT NULL, by TEXT NOT NULL, op TEXT NOT NULL,
@@ -127,8 +134,9 @@ export class ModelStore {
       else sources.entities[b.object] = JSON.parse(b.body)
     }
     const programs = Object.fromEntries((this.db.prepare('SELECT name, body FROM g_program WHERE model = ? ORDER BY rowid').all(model) as any[]).map((p) => [p.name, JSON.parse(p.body)]))
+    const strategies = Object.fromEntries((this.db.prepare('SELECT name, body FROM g_strategy WHERE model = ? ORDER BY rowid').all(model) as any[]).map((x) => [x.name, JSON.parse(x.body)]))
     const settings = Object.fromEntries((this.db.prepare('SELECT key, value FROM g_setting WHERE model = ? ORDER BY rowid').all(model) as any[]).map((x) => [x.key, JSON.parse(x.value)]))
-    return { schema: s, sources, settings, programs }
+    return { schema: s, sources, settings, programs, strategies }
   }
 
   /** Apply one operation: checked on the state it would leave, written with its change record — or refused and recorded. */
@@ -165,7 +173,7 @@ export class ModelStore {
   /** The model as files: schema.json, sources.json, settings.json, and each program's definition and code. */
   export(model: string) {
     const st = this.state(model)
-    return { schema: st.schema, sources: st.sources, settings: st.settings, programs: st.programs }
+    return { schema: st.schema, sources: st.sources, settings: st.settings, programs: st.programs, strategies: st.strategies }
   }
 
   /** Build a model from exported files, one recorded operation per node, so the change log says how it came to be. */
@@ -195,7 +203,7 @@ export class ModelStore {
   /** Write a state as rows: only what changed is touched, and a changed row's version goes up. */
   private write(model: string, before: ModelState, after: ModelState) {
     const now = Date.now()
-    const put = (table: 'g_node' | 'g_edge' | 'g_binding' | 'g_program', key: string, keyCol: string, rows: Map<string, Record<string, unknown>>, old: Map<string, Record<string, unknown>>) => {
+    const put = (table: 'g_node' | 'g_edge' | 'g_binding' | 'g_program' | 'g_strategy', key: string, keyCol: string, rows: Map<string, Record<string, unknown>>, old: Map<string, Record<string, unknown>>) => {
       for (const [id, row] of rows) {
         const was = old.get(id)
         if (was && JSON.stringify(was) === JSON.stringify(row)) continue
@@ -212,12 +220,14 @@ export class ModelStore {
     put('g_binding', 'object', 'object', bind(after), bind(before))
     const prog = (st: ModelState) => new Map(Object.entries(st.programs).map(([n, p]) => [n, { body: JSON.stringify(p) }]))
     put('g_program', 'name', 'name', prog(after), prog(before))
+    const meth = (st: ModelState) => new Map(Object.entries(st.strategies ?? {}).map(([n, x]) => [n, { body: JSON.stringify(x) }]))
+    put('g_strategy', 'name', 'name', meth(after), meth(before))
     this.db.prepare('DELETE FROM g_setting WHERE model = ?').run(model)
     for (const [k, v] of Object.entries(after.settings)) this.db.prepare('INSERT INTO g_setting (model, key, value, updated_at) VALUES (?, ?, ?, ?)').run(model, k, JSON.stringify(v), now)
   }
 }
 
-const emptyState = (model: string): ModelState => ({ schema: { name: model, objects: {} }, sources: { facts: {}, entities: {} }, settings: {}, programs: {} })
+const emptyState = (model: string): ModelState => ({ schema: { name: model, objects: {} }, sources: { facts: {}, entities: {} }, settings: {}, programs: {}, strategies: {} })
 
 function nodeRows(s: Schema): Map<string, Record<string, unknown>> {
   const out = new Map<string, Record<string, unknown>>()
@@ -451,6 +461,24 @@ function step(before: ModelState, op: Operation): { state: ModelState; notes: st
       st.programs[op.name] = op.program
       break
     }
+    case 'add-strategy': {
+      nameOk(op.name, 'a method')
+      const shape = op.strategy.shape
+      if (!shape?.nodes?.length) refuse('a method says what shape of question it is for')
+      // A method names objects or holes; an object it names must exist, or it can never match anything here.
+      for (const n of shape.nodes) if (!n.object.startsWith('?') && !s.objects[n.object]) refuse(`the method names ${n.object}, which is not in the model`)
+      for (const e of shape.edges ?? []) {
+        if (!shape.nodes.some((n) => n.id === e.from) || !shape.nodes.some((n) => n.id === e.to)) refuse(`the method links ${e.from} to ${e.to}, and one of them is not in its shape`)
+      }
+      st.strategies = { ...st.strategies, [op.name]: op.strategy }
+      break
+    }
+    case 'remove-strategy': {
+      if (!st.strategies?.[op.name]) refuse(`there is no method "${op.name}"`)
+      const { [op.name]: _gone, ...rest } = st.strategies
+      st.strategies = rest
+      break
+    }
     case 'set-setting': if (op.value === null) delete st.settings[op.key]; else st.settings[op.key] = op.value; break
     case 'set-conversion': if (op.conversion) s.conversion = op.conversion; else delete s.conversion; break
   }
@@ -521,7 +549,7 @@ function rename(st: ModelState, id: string, to: string) {
 
 /** The operations that build a model from its files: objects, then arrows, measures and attributes, conditions,
  *  equations, conversion, the properties that refer to others, bindings, programs, settings. */
-export function operationsFor(files: { schema: Schema; sources?: Sources; settings?: Record<string, unknown>; programs?: Record<string, ProgramDef> }): Operation[] {
+export function operationsFor(files: { schema: Schema; sources?: Sources; settings?: Record<string, unknown>; programs?: Record<string, ProgramDef>; strategies?: Record<string, Strategy> }): Operation[] {
   const s = files.schema, ops: Operation[] = []
   for (const [name, o] of Object.entries(s.objects)) {
     const base = clean({ description: o.description, synonyms: o.synonyms })
@@ -546,6 +574,8 @@ export function operationsFor(files: { schema: Schema; sources?: Sources; settin
   }
   for (const [name, b] of Object.entries({ ...(files.sources?.entities ?? {}), ...(files.sources?.facts ?? {}) })) ops.push({ op: 'bind', object: name, binding: b })
   for (const [name, p] of Object.entries(files.programs ?? {})) ops.push({ op: 'add-program', name, program: p })
+  // Methods come last: a method names the objects it is about, so they must be there before it can be kept.
+  for (const [name, x] of Object.entries(files.strategies ?? {})) ops.push({ op: 'add-strategy', name, strategy: x })
   for (const [k, v] of Object.entries(files.settings ?? {})) ops.push({ op: 'set-setting', key: k, value: v })
   return ops
 }

@@ -14,6 +14,7 @@ import { createHash } from 'node:crypto'
 import { ModelStore, operationsFor, type Operation } from './modelstore.js'
 import { catalog, dimensions, conformedDimensions, node, paths } from './discovery.js'
 import { catalogText, dimensionsText, nodeText, pathsText } from './patterns.js'
+import { strategyText } from './strategy.js'
 import { schemaProblems } from './schema.js'
 import { sourcesProblems } from './producers.js'
 
@@ -35,7 +36,10 @@ const COMMANDS: Record<string, { usage: string; does: string }> = {
   'remove':            { usage: 'remove <id>', does: 'remove; refused while anything refers to it' },
   'promote-attribute': { usage: 'promote-attribute <Owner.attribute> <Entity>', does: 'turn an attribute into an entity and an arrow to it' },
   'bind':              { usage: 'bind <Object> --source <id> (--sql <text|@file> | --program <name>) [--key col] [--label col] [--time col] [--arrows <json>] [--attributes <json>] [--measures <json>] [--history <json>] [--params <json>] [--time-zone z]', does: 'where an object\'s rows are' },
-  'add-program':       { usage: 'add-program <name> --produces <Object> --code <@file> [--sources a,b] [--objects A,B] [--description]', does: 'a program that produces an object\'s rows' },
+  'add-program':       { usage: 'add-program <name> --produces <Object> --code <@file> [--sources a,b] [--objects A,B] [--accepts a,b] [--description]', does: 'a program that produces an object\'s rows' },
+  'add-strategy':      { usage: 'add-strategy <name> --about <what it is for> --shape <json|@file> [--refinements <json|@file>] [--says a,b]', does: 'a method: how a kind of question is answered, with the parts left open' },
+  'remove-strategy':   { usage: 'remove-strategy <name>', does: 'remove a method' },
+  'strategies':        { usage: 'strategies', does: 'the methods this model holds' },
   'set-setting':       { usage: 'set-setting <key> <value | json> | set-setting <key> --unset', does: 'an organisation setting' },
   'set-conversion':    { usage: 'set-conversion --fact <Fact> --from <arrow> --to <arrow> --day <arrow> --rate <measure> --at row|end', does: 'how money converts between currencies' },
   'overview':          { usage: 'overview', does: 'every fact, entity, condition and calendar' },
@@ -49,8 +53,8 @@ const COMMANDS: Record<string, { usage: string; does: string }> = {
   'import':            { usage: 'import <dir>', does: 'build a model from exported files, one recorded operation per node' },
 }
 
-const READING = ['overview', 'show', 'dimensions', 'paths', 'check', 'history', 'changes', 'models']
-const BUILDING = ['create-model', 'add-entity', 'add-calendar', 'add-fact', 'add-arrow', 'add-measure', 'add-attribute', 'add-condition', 'add-equation', 'set', 'rename', 'remove', 'promote-attribute', 'bind', 'add-program', 'set-setting', 'set-conversion']
+const READING = ['overview', 'show', 'dimensions', 'paths', 'strategies', 'check', 'history', 'changes', 'models']
+const BUILDING = ['create-model', 'add-entity', 'add-calendar', 'add-fact', 'add-arrow', 'add-measure', 'add-attribute', 'add-condition', 'add-equation', 'set', 'rename', 'remove', 'promote-attribute', 'bind', 'add-program', 'add-strategy', 'remove-strategy', 'set-setting', 'set-conversion']
 
 /** The guide an agent is given to work with the tool: what a model is made of, how to change it, and every command —
  *  written from the command table itself, so it says what this version of the tool does. */
@@ -173,7 +177,15 @@ export async function run(argv: string[], out: (s: string) => void = console.log
         }).filter(([, v]) => v !== undefined))
         return change({ op: 'bind', object: args[0], binding })
       }
-      case 'add-program': need(1); return change({ op: 'add-program', name: args[0], program: { produces: text(flags.produces)!, reads: { sources: list(flags.sources) ?? [], objects: list(flags.objects) ?? [] }, body: text(flags.code) ?? '', ...(flags.description ? { description: text(flags.description) } : {}) } })
+      case 'add-program': need(1); return change({ op: 'add-program', name: args[0], program: { produces: text(flags.produces)!, reads: { sources: list(flags.sources) ?? [], objects: list(flags.objects) ?? [] }, body: text(flags.code) ?? '',
+        ...(list(flags.accepts)?.length ? { ports: { accepts: Object.fromEntries(list(flags.accepts)!.map((r) => [r, true as const])) } } : {}),
+        ...(flags.description ? { description: text(flags.description) } : {}) } })
+      case 'add-strategy': need(1); return change({ op: 'add-strategy', name: args[0], strategy: {
+        name: args[0], about: text(flags.about) ?? '', shape: json(text(flags.shape), 'the shape'),
+        ...(flags.refinements ? { refinements: json(text(flags.refinements), 'the refinements') } : {}),
+        ...(list(flags.says)?.length ? { says: list(flags.says) } : {}),
+        ...(flags.from ? { from: text(flags.from) } : {}) } })
+      case 'remove-strategy': need(1); return change({ op: 'remove-strategy', name: args[0] })
       case 'set-setting': need(unset ? 1 : 2); return change({ op: 'set-setting', key: args[0], value: unset ? null : valueOf(args.slice(1).join(' ')) })
       case 'set-conversion': return change({ op: 'set-conversion', conversion: unset ? undefined : { fact: text(flags.fact)!, from: text(flags.from)!, to: text(flags.to)!, day: text(flags.day)!, rate: text(flags.rate)!, at: (text(flags.at) ?? 'end') as 'row' | 'end' } })
 
@@ -191,6 +203,12 @@ export async function run(argv: string[], out: (s: string) => void = console.log
       }
       case 'dimensions': { need(1); const s = store.state(model).schema; say(flags.json ? (args.length === 1 ? dimensions(s, args[0]) : conformedDimensions(s, args)) : dimensionsText(s, args)); return 0 }
       case 'paths': { need(2); const s = store.state(model).schema; say(flags.json ? paths(s, args[0], args[1]) : pathsText(s, args[0], args[1])); return 0 }
+      case 'strategies': {
+        const held = Object.values(store.state(model).strategies ?? {})
+        if (flags.json) { say(held); return 0 }
+        say(held.length ? held.map(strategyText).join('\n\n') : 'no methods yet')
+        return 0
+      }
       case 'check': {
         const st = store.state(model)
         const problems = [...schemaProblems(st.schema), ...sourcesProblems(st.schema, st.sources).map((p) => `binding: ${p}`)]
@@ -211,6 +229,7 @@ export async function run(argv: string[], out: (s: string) => void = console.log
         writeFileSync(join(dir, 'schema.json'), JSON.stringify(e.schema, null, 2) + '\n')
         writeFileSync(join(dir, 'sources.json'), JSON.stringify(e.sources, null, 2) + '\n')
         writeFileSync(join(dir, 'settings.json'), JSON.stringify(e.settings, null, 2) + '\n')
+        if (Object.keys(e.strategies ?? {}).length) writeFileSync(join(dir, 'strategies.json'), JSON.stringify(e.strategies, null, 2) + '\n')
         for (const [name, p] of Object.entries(e.programs)) {
           mkdirSync(join(dir, 'programs', name), { recursive: true })
           const { body, ...def } = p
@@ -226,7 +245,7 @@ export async function run(argv: string[], out: (s: string) => void = console.log
         const read = (f: string) => (existsSync(join(dir, f)) ? JSON.parse(readFileSync(join(dir, f), 'utf8')) : undefined)
         const programs = existsSync(join(dir, 'programs')) ? Object.fromEntries(readdirSync(join(dir, 'programs')).filter((n) => existsSync(join(dir, 'programs', n, 'program.json')))
           .map((n) => [n, { ...JSON.parse(readFileSync(join(dir, 'programs', n, 'program.json'), 'utf8')), body: readFileSync(join(dir, 'programs', n, 'program.mjs'), 'utf8') }])) : {}
-        const files = { schema: read('schema.json'), sources: read('sources.json'), settings: read('settings.json'), programs }
+        const files = { schema: read('schema.json'), sources: read('sources.json'), settings: read('settings.json'), strategies: read('strategies.json'), programs }
         if (!files.schema) throw new Error(`${dir} has no schema.json`)
         if (ctx.dryRun) { say(`would apply ${operationsFor(files).length} operations`); return 0 }
         const r = store.import(model, files, ctx)
