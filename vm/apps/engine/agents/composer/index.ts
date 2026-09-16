@@ -45,8 +45,9 @@ its measures. A question of the graph is measures, grouped by dimensions, kept t
 a span. The graph checks each question and explains any
 it cannot answer as asked.
 
-Read the question in the graph's terms: resolve its terms, settle what is ambiguous or missing with the other finds, and
-see how the measures can be grouped by its dimensions; check the questions the answer needs and try them to see the data.
+Read the question into the graph with ./match: it resolves the words, finds every subgraph the question could be,
+says each back in the graph's own words and tries the best few against the data. ./look shows the graph itself when
+a reading needs settling, and ./ask evaluates a question to see what the data says.
 
 Then answer with a program in this folder, program.mjs. Its data comes only from the graph questions it asks;
 it shapes them into what a person deciding needs — the headline figure, the tables and charts that show it, up to five
@@ -72,8 +73,8 @@ question needs, answer what it does hold and say plainly what differs, or escala
 
 You work only in this folder. Write your program here and reach the graph and the data only through its tools. Never read, list, search or run anything outside this folder.
 
-Tools: ./resolve-terms ./find-measure ./find-dimension ./find-record ./describe ./list-dimensions ./group-paths ./overview ./complete-question ./read-question ./check-question ./try-question
-./run-program ./commit ./trace-answer ./escalate — each explains itself with --help. Each question comes with today's date and its qid.`
+Tools: ./match ./look ./ask ./run-program ./commit ./behind ./escalate — each explains itself with --help.
+Each question comes with today's date and its qid.`
 
 /** The date a question is asked on, in the organisation's time zone (settings.json \`timezone\`), else UTC — never the
  *  server's. An agent is not otherwise told what day it is. */

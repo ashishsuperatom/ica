@@ -10,8 +10,7 @@
 //
 // In its directory an agent finds the tools for its part, generated here with the absolute paths they need:
 //
-//   the semantic graph   ./resolve-terms ./find-measure ./find-dimension ./find-record ./describe ./group-paths ./overview
-//                        ./check-question ./complete-question ./read-question ./try-question ./run-program ./commit ./source-records ./trace-answer   (conversation, analyst)
+//   the semantic graph   ./match ./look ./ask ./run-program ./commit ./behind   (conversation, analyst)
 //   the data             ./sources ./query ./introspect ./find-schema ./resolve                            (analyst, connector, grounding)
 //   hand-off             ./escalate                                                                          (conversation)
 //
@@ -82,7 +81,7 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
 
 The data sources: ./sources lists them, ./find-schema searches their fields, ./introspect and ./query read them, and
 ./resolve turns a name into ids. data/query.mjs, data/introspect.mjs and grounding/grounding.mjs are the same seams to
-import. The semantic graph: ./overview, ./describe and the finds read it; a program on it answers with ./run-program.
+import. The semantic graph: ./match reads a question into it and ./look reads the graph itself; a program on it answers with ./run-program.
 Every tool explains itself with --help.
 `)
 
@@ -316,22 +315,12 @@ if command -v tsx >/dev/null 2>&1; then exec tsx "$D" "$@"; else exec npx --yes 
 }
 
 const SEMANTIC_USAGE: Record<string, string> = {
-  'resolve-terms': `resolve-terms '<the question as asked>' [--json]   → a table of each term of the question in the graph at once: measures, dimensions, records by name, dates as spans; near misses repaired, several meanings marked ambiguous, and the words the graph does not hold; its last column is how a question names each`,
-  'overview': 'overview [--json]   → every fact with its measures, every dimension with what it links to, every calendar, drawn as graph patterns',
-  describe: 'describe <name> [--json]   → what a fact or dimension holds: measures, what it links to and by default, what links to it, drawn as graph patterns',
-  'group-paths': 'group-paths <fact> <dimension> [--json]   → every way a measure can be grouped or filtered by a dimension, the default first, each with its via; e.g. group-paths AllocationDay Pillar',
-  'list-dimensions': 'list-dimensions <Fact> [<Fact> …] [--json]   → every dimension a fact can be sliced or filtered by — entities, attributes, calendar levels — with the path to each and the default; for several facts, the dimensions they share, by which their measures can be put side by side',
-  'find-measure': 'find-measure <term>   → the measure a term means (revenue, hours) and the fact it belongs to; ./describe <fact> shows what it can be grouped by',
-  'find-dimension': 'find-dimension <term>   → the dimension a term or a name belongs to: "practice" is Pillar, "Soft" is a Commitment, "CEC" is a Pillar record',
-  'find-record': 'find-record <Dimension> <name>   → the record a typed name means (a pillar, project, person), typos included; says when several fit',
-  'complete-question': `complete-question '<what you know>'   → the questions a fragment could be, best first, each with why it was built that way and what was uncertain. What you know: {"measures":["revenue" | "Fact.measure"], "by":["Pillar"], "byAttribute":[{"attribute":"rag","of":"Project"}], "values":[{"text":"<as typed>","meanings":[{"object":"Project","key":"314023"}]}], "conditions":["valid project"], "span":{"from":"…","through":"…"}, "currency":"AUD"} — no paths, the graph finds them`,
-  'read-question': `read-question '<what you know>'   → the questions a fragment could be, each said back in the graph's own words, the first few asked against the data so it can separate them, and what to change when the best one does not hold. Same shape as complete-question, plus "phrases": ["<the words of the question>"] so a reading that accounts for none of them says so`,
-  'check-question': `check-question '<question>'   → the answer's columns and notes, or why it is refused and the readings to choose from. A question: {"measures":["Fact.measure" | "[A.x] / [B.y]"], "by":[{"to":"Pillar","via":["person","pillar"]} | {"attribute":"a"} | {"attribute":"rag","of":"Project"}], "where":[{"to":"Dimension","via":[…],"in":["key"]} | {"attribute":"a","in":["v"]} | {"attribute":"golive","of":"Project","range":{"from":"2026-10-01","to":"2026-11-01"}} | {"condition":"valid project"}], "without":["a condition a fact is always kept to"], "span":{"from":"2026-09-01","through":"2026-10-31"} | {"this":"Month"} | {"previous":"Month","count":3} | {"last":30,"unit":"Day"}, "currency":"AUD", "order":{"by":"column","desc":true}, "limit":10} — also having, totals, share, compare, fill, cumulative, rolling, limitPer, notIn/none/contains/startsWith`,
-  'try-question': `try-question '<question>'   → the question's answer, to see what the data says while writing the program. A question whose fact is built by a program reads a whole span before it groups, so allow it a few minutes`,
-  commit: `commit   → give the answer of the last ./run-program as this conversation's next step, and end the turn`,
+  match: `match '<the question, as asked>' [--json]   → the subgraphs the question could be. Its words are resolved to measures, dimensions, conditions and records (looked up by name at their sources); every route the graph holds is built; each is said back in the graph's own words with what is uncertain about it; the best few are asked against the data so it can separate them. Ends with what to change if the first one is not it`,
+  look: `look [<node>] [<to>|<text>]   → the graph itself: nothing for every fact, dimension and calendar; a node for what it holds, what it links to, what links to it and what it is sliced by; two nodes for every way from one to the other; a node and some text for which record that text means`,
+  ask: `ask '<question>' [--json]   → a question's answer, or the rule that refuses it and what to change. A question: {"measures":["Fact.measure" | "[A.x] / [B.y]"], "by":[{"to":"Pillar","via":["person","pillar"]} | {"attribute":"a"} | {"attribute":"rag","of":"Project"}], "where":[{"to":"Dimension","via":[…],"in":["key"]} | {"attribute":"a","in":["v"]} | {"condition":"valid project"}], "without":["a condition a fact is always kept to"], "span":{"from":"2026-09-01","through":"2026-10-31"} | {"this":"Month"} | {"previous":"Month","count":3} | {"last":30,"unit":"Day"}, "currency":"AUD", "order":{"by":"column","desc":true}, "limit":10 — also having, totals, share, compare, fill, cumulative, rolling, limitPer, notIn/none/contains/startsWith`,
   'run-program': `run-program [program.mjs] ['<params>']   → run the program in this folder and read its answer as the person would — headline, narration, tables with their row counts; run it as often as it takes, then ./commit. Allow it a few minutes: a question whose fact is built by a program reads a whole span before it groups. A program is named for its idea and takes the question's values (span, records) as params: export const meta = { name, description, params: { name: 'what it means' }, logic }; export default async (ctx, params) => ({ status?: 'answered'|'unknowable'|'uncertain', missing?: '<the plain reason, when not answered>', scope?: '<the records and conditions kept to>', headline?: { label, value: <cell> }, data: { name: <table> }, views: [{ id, component: 'table'|'bar'|'line'|'kpi', data: '<data key>', title, encode: { columns: [...] } | { x, y, series } }], narration: [{ text: 'October is {oct}', cites: { oct: <cell> }, why }], nextSteps: [{ label, why }] }). ctx.ask(question, label) returns a table { columns: [{ name, role, unit }], rows: [{ Pillar: 7, Pillar_label: 'Consulting', Month: '2026-09', revenue: 4372656 }] } — a record by its id, its name beside it — the program's only data; ctx.transform(label, () => …), ctx.decide(label, took, why), ctx.decideAt(label, value, op, threshold, why), await ctx.verify(label, () => holds), ctx.caveat(text), ctx.explain(text). A cell is { data: '<data key>', row: 0 | { Month: '2026-09' }, column }; every number in a sentence is a {slot} citing a cell`,
-  'source-records': `source-records '<row>'   → the source records that make up one row of the current answer, e.g. source-records '["15","2026-09"]'`,
-  'trace-answer': 'trace-answer [call]   → how the current answer (or a call) was reached',
+  commit: `commit   → give the answer of the last ./run-program as this conversation's next step, and end the turn`,
+  behind: `behind ['<group>'] [<call>]   → what is under the answer on screen: the rows of one group (a group is JSON, e.g. '{"Pillar":"15"}'), or with no group, the steps and questions it was reached by`,
 }
 
 // ── THE WORKSPACE HOLDS WHAT THIS ENGINE WRITES, AND NOTHING ELSE ─────────────────────────────────────────────

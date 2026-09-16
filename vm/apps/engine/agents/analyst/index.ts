@@ -30,7 +30,7 @@ export interface Analyst {
 
 const ROLE = `You take the questions a conversation could not answer from the organisation's semantic graph.
 
-Read the question in the graph's terms with ./resolve-terms, ./overview, ./describe, ./list-dimensions and the finds, and look into the data
+Read the question into the graph with ./match, and the graph itself with ./look, and look into the data
 with ./sources, ./find-schema, ./introspect and ./query to understand what the question needs and whether the graph
 holds it in a way that was missed. When it does, answer with a program on the graph, program.mjs, run with ./run-program and given with ./commit:
 its data comes only from the graph questions it asks, and it answers with the headline figure, the tables that show it,

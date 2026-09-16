@@ -1,33 +1,34 @@
 // ── THE AGENTS' TOOLS FOR THE SEMANTIC GRAPH ────────────────────────────────────────────────────────────────
 //
-//   ./overview                every fact, entity and calendar, briefly
-//   ./describe <name>          one node: its arrows, what points at it, measures, attributes, members
-//   ./group-paths <from> <to>     every way from one node to another
-//   ./find-dimension <word>             the nodes and members a word is
-//   ./find-record <Entity> <text>  which member was meant by what was typed
-//   ./check-question '<question>'   the plan for a question, or the rule that refuses it and the choices
-//   ./complete-question '<what you know>'   the questions a fragment could be, ranked, each with its reason
-//   ./read-question '<what you know>'       the same, said back and tried against the data, with what to change
-//   ./try-question '<q>'            see a question's answer while writing the program
-//   ./run-program [file] [params]   run the answer program and read its answer, as often as it takes
-//   ./commit                        give the last run's answer as this conversation's next step: out/<qid>/built.json
-//   ./source-records '<group>'         the rows behind one group of the current answer
-//   ./trace-answer [call]           how an answer was reached
+// Answering is SUBGRAPH MATCHING: a question names some things, the schema is a graph, and the answer is the
+// subgraph the question picks out — checked by the rules, then evaluated. So there are four moments, and a tool
+// for each, rather than a tool for each step of each moment.
+//
+//   ./match '<the question, as asked>'   the subgraphs it could be: words resolved, records looked up at their
+//                                        sources, every route built, ranked, each said back in the graph's words,
+//                                        the best few tried against the data so it can separate them
+//   ./look [<node>] [<to>|<text>]        the graph itself: everything, or one node — its measures, what it links
+//                                        to, what links to it, its dimensions — or the way from one node to
+//                                        another, or which record a typed name means
+//   ./ask '<question>'                   evaluate a subgraph: its answer, or the rule that refuses it and what to
+//                                        change. Checking is what asking already does.
+//   ./run-program [file] [params]        run the answer program and read its answer, as often as it takes
+//   ./commit                             give that answer as this conversation's next step
+//   ./behind ['<group>'|<call>]          what is under the answer on screen: the rows of one group, or its steps
 //
 // Each wrapper is generated into the agent's workspace with the paths it needs; the agent passes only the arguments.
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
-import { tied, revisions, judgedText, judge, completions, catalog, catalogText, conformedDimensions, dimensions, dimensionsText, termsText, check, nodeText, pathsText, find, nextMoves, node, paths, runProgram, tableOf, type Result } from '@superatom/semantic-graph'
+import { fragmentOf, tied, revisions, judgedText, judge, completions, catalog, catalogText, conformedDimensions, dimensions, dimensionsText, termsText, check, nodeText, pathsText, find, nextMoves, node, paths, runProgram, tableOf, type Result } from '@superatom/semantic-graph'
 import { MODEL, openSemanticGraph } from './semantic.js'
 
 const argv = process.argv.slice(2)
 const flag = (name: string) => { const i = argv.indexOf(`--${name}`); if (i < 0) return undefined; const v = argv[i + 1]; argv.splice(i, 2); return v }
 const env = { dbDir: flag('db')!, projectDir: flag('project')!, managerUrl: flag('manager')!, home: flag('home')! }
 // Each tool is named for what it does to what: the wrapper passes its own name.
-const TOOLS: Record<string, string> = { 'resolve-terms': 'terms', 'overview': 'catalog', 'describe': 'node', 'group-paths': 'paths', 'list-dimensions': 'dimensions', 'find-measure': 'find-measure', 'find-dimension': 'find', 'find-record': 'members',
-  'check-question': 'check', 'complete-question': 'complete', 'read-question': 'read-question', 'try-question': 'try', 'run-program': 'program', 'commit': 'commit', 'source-records': 'detail', 'trace-answer': 'trace' }
+const TOOLS: Record<string, string> = { match: 'match', look: 'look', ask: 'ask', 'run-program': 'program', commit: 'commit', behind: 'behind' }
 // How nodes connect reads as graph patterns; --json (or SEMANTIC_TOOL_FORMAT=json) gives the same views as JSON.
 const asJson = argv.includes('--json') ? (argv.splice(argv.indexOf('--json'), 1), true) : process.env.SEMANTIC_TOOL_FORMAT === 'json'
 const [tool, ...args] = argv
@@ -35,6 +36,8 @@ const command = TOOLS[tool] ?? ''
 
 const hashOf = (text: string) => createHash('sha256').update(text).digest('hex')
 const out = (x: unknown) => console.log(typeof x === 'string' ? x : JSON.stringify(x, null, 2))
+/** The same refusal, however many candidates hit it, is one thing to fix. */
+const dedupe = <T extends { rule: string; reason: string }>(xs: T[]): T[] => [...new Map(xs.map((x) => [`${x.rule}:${x.reason}`, x])).values()]
 const fail = (msg: string): never => { console.error(msg); process.exit(1) }
 const json = (text: string | undefined, what: string) => {
   if (!text) return fail(`${what} is required`)
@@ -62,41 +65,51 @@ const current = () => {
   return s?.currentStep ? graph.store.steps(sessionId).find((x) => x.id === s.currentStep) ?? null : null
 }
 
-if (command === 'catalog') out(asJson ? catalog(m.schema) : catalogText(m.schema))
-else if (command === 'node') { const name = args.join(' ').trim() || fail('usage: ./describe <name>'); out(asJson ? node(m.schema, name) : nodeText(m.schema, name)) }
-else if (command === 'paths') {
-  const [from, to] = args
-  if (!from || !to) fail('usage: ./group-paths <from> <to>')
-  out(asJson ? paths(m.schema, from, to).map((p) => p.join('.')) : pathsText(m.schema, from, to))
-} else if (command === 'dimensions') {
-  if (!args.length) fail('usage: ./list-dimensions <Fact> [<Fact> …]')
-  out(asJson ? (args.length === 1 ? dimensions(m.schema, args[0]) : conformedDimensions(m.schema, args)) : dimensionsText(m.schema, args))
-} else if (command === 'terms') {
-  const text = args.join(' ').trim() || fail("usage: ./resolve-terms '<the question as asked>'")
-  const read = await graph.resolveQuestionTerms(MODEL, text, { today: new Date().toISOString().slice(0, 10) })
-  out(asJson ? read : termsText(m.schema, read, text))
-} else if (command === 'find-measure') {
-  const term = args.join(' ').trim() || fail('usage: ./find-measure <term>')
-  const found = find(m.schema, term).filter((f) => f.kind === 'measure')
-  out(found.length ? found : { none: `no measure is called "${term}"`, measures: catalog(m.schema).facts.map((f) => ({ fact: f.name, measures: f.measures })) })
-} else if (command === 'find') {
-  const term = args.join(' ').trim() || fail('usage: ./find-dimension <term>')
-  out((await graph.matchWord(MODEL, term)).filter((f) => f.kind !== 'measure'))
-}
-else if (command === 'members') {
-  const [entity, ...text] = args
-  if (!entity || !text.length) fail('usage: ./find-record <Entity> <text>')
-  out(await graph.members(MODEL, entity, text.join(' ')))
-} else if (command === 'check') {
-  const q = spanNamed(json(args.join(' '), 'the question'))
-  const v = check(m.schema, { ...q, ...(q.span?.through ? { span: { from: q.span.from, to: new Date(Date.parse(q.span.through + 'T00:00:00Z') + 86400000).toISOString().slice(0, 10) } } : {}) })
-  out(v.ok ? { ok: true, columns: v.plan.columns.map((c) => (c.unit ? `${c.name} (${c.unit})` : c.name)), notes: v.plan.notes } : v)
-} else if (command === 'try') {
-  // A question asked to see its answer while writing the program; the conversation's answer is the program's.
+if (command === 'match') {
+  // THE WHOLE FIRST HALF, in one act. Words become things (eagerly, and at the sources for records), things become
+  // subgraphs, subgraphs are ranked and the best few are asked so the data can separate them.
+  const text = args.join(' ').trim() || fail("usage: ./match '<the question, as asked>'")
+  const today = new Date().toISOString().slice(0, 10)
+  const read = await graph.resolveQuestionTerms(MODEL, text, { today })
+  const currency = Object.entries(m.settings ?? {}).find(([k]) => /currency/i.test(k))?.[1]
+  const fragment = { ...fragmentOf(read.terms as any), phrases: read.terms.map((t) => t.phrase), ...(typeof currency === 'string' ? { currency } : {}) }
+  const { done, refused } = completions(m.schema, fragment)
+  const ask = async (q: any) => {
+    const a = await graph.ask(q, { model: MODEL, today })
+    return a.ok ? { ok: true as const, result: { rows: a.result.rows } } : { ok: false as const, rule: a.rule ?? 'error', reason: a.reason ?? 'failed' }
+  }
+  const judged = await judge(m.schema, done, fragment.phrases ?? [], ask)
+  const ties = tied(judged)
+  const ways = judged[0]?.evidence ? revisions(m.schema, judged[0].completion.question, judged[0].evidence) : []
+  if (asJson) out({ terms: read, readings: judged.map((j) => ({ question: j.completion.question, said: j.said, why: j.why, uncertain: j.completion.uncertain, leftOver: j.leftOver, evidence: j.evidence })), tied: ties.map((t) => t.differ), revisions: ways, refused: dedupe(refused) })
+  else {
+    const said = [termsText(m.schema, read, text)]
+    if (judged.length) said.push('', judgedText(judged, ties))
+    else said.push('', dedupe(refused).length ? `nothing completes yet:\n${dedupe(refused).map((r) => `  ${r.rule}: ${r.reason}`).join('\n')}` : 'nothing in the graph fits that yet — ./look to see what it holds')
+    if (ways.length) said.push('', `if that is not it: ${ways.map((w) => w.why).join('; ')}`)
+    out(said.join('\n'))
+  }
+} else if (command === 'look') {
+  // THE GRAPH ITSELF. Nothing: the whole catalogue. One node: what it holds and what it reaches. Two: the way from
+  // one to the other — or, when the second is not a node, which record of the first that text means.
+  const [first, ...rest] = args
+  const second = rest.join(' ').trim()
+  if (!first) { out(asJson ? catalog(m.schema) : catalogText(m.schema)); }
+  else if (!second) {
+    const isFact = m.schema.objects[first]?.kind === 'fact'
+    if (asJson) out({ node: node(m.schema, first), ...(isFact ? { dimensions: dimensions(m.schema, first) } : {}) })
+    else out([nodeText(m.schema, first), ...(isFact ? ['', dimensionsText(m.schema, [first])] : [])].join('\n'))
+  } else if (m.schema.objects[second]) {
+    out(asJson ? paths(m.schema, first, second).map((p) => p.join('.')) : pathsText(m.schema, first, second))
+  } else {
+    out(await graph.members(MODEL, first, second))
+  }
+} else if (command === 'ask') {
+  // EVALUATE A SUBGRAPH. A refusal says the rule and what to change, so asking is also how a question is checked.
   const q = spanNamed(json(args.join(' '), 'the question'))
   const a = await graph.ask(q, { model: MODEL, ...(sessionId ? { sessionId } : {}) })
-  // As ctx.ask gives it to a program.
-  out(a.ok ? (({ columns, rows, notes }) => ({ columns, rows: rows.slice(0, 25), ...(rows.length > 25 ? { total: rows.length } : {}), notes }))(tableOf(a.result)) : { refused: { ...(a.rule ? { rule: a.rule } : {}), reason: a.reason, ...((a as any).choices ? { choices: (a as any).choices } : {}) } })
+  out(a.ok ? (({ columns, rows, notes }) => ({ columns, rows: rows.slice(0, 25), ...(rows.length > 25 ? { total: rows.length } : {}), notes }))(tableOf(a.result))
+    : { refused: { ...(a.rule ? { rule: a.rule } : {}), reason: a.reason, ...((a as any).choices ? { choices: (a as any).choices } : {}) } })
 } else if (command === 'program') {
   const [file = 'program.mjs', paramsText] = args
   const source = await readFile(join(env.home, file), 'utf8').catch(() => fail(`${file} is not in this folder`))
@@ -129,47 +142,18 @@ else if (command === 'members') {
   await writeFile(join(env.home, 'out', qid, 'params.json'), JSON.stringify(run.params, null, 2))
   await writeFile(join(env.home, 'out', qid, 'built.json'), JSON.stringify({ graph: 'semantic', kind: 'program', sessionId, step: stepId, callId: run.callId, program: run.name, source: run.source, params: run.params }, null, 2))
   out(`committed ${run.name} as step ${stepId}`)
-} else if (command === 'read-question') {
-  // The whole loop in one move: the questions a fragment could be, each said back in the graph's words, the first
-  // few actually asked so the data can separate them, and what to change when one does not hold.
-  const asked = json(args[0], 'what you know') as any
-  const { done, refused } = completions(m.schema, asked)
-  const phrases = Array.isArray(asked.phrases) ? asked.phrases as string[] : []
-  const ask = async (q: any) => {
-    const a = await graph.ask(q, { model: MODEL, today: new Date().toISOString().slice(0, 10) })
-    return a.ok ? { ok: true as const, result: { rows: a.result.rows } } : { ok: false as const, rule: a.rule ?? 'error', reason: a.reason ?? 'failed' }
-  }
-  const judged = await judge(m.schema, done, phrases, ask)
-  const ties = tied(judged)
-  const best = judged[0]
-  const ways = best?.evidence ? revisions(m.schema, best.completion.question, best.evidence) : []
-  if (asJson) out({ readings: judged.map((j) => ({ question: j.completion.question, said: j.said, why: j.why, uncertain: j.completion.uncertain, leftOver: j.leftOver, evidence: j.evidence })), tied: ties.map((t) => t.differ), revisions: ways, refused })
-  else if (!judged.length) out(refused.length ? `nothing completes yet:\n${refused.map((r) => `  ${r.rule}: ${r.reason}`).join('\n')}` : 'nothing in the graph fits that')
-  else out([judgedText(judged, ties), ways.length ? `\nif that is not it: ${ways.map((w) => w.why).join('; ')}` : ''].filter(Boolean).join('\n'))
-} else if (command === 'complete') {
-  const asked = json(args[0], 'what you know') as any
-  const { done, refused } = completions(m.schema, asked)
-  if (asJson) { out({ completions: done.map((c) => ({ question: c.question, why: c.why, uncertain: c.uncertain })), refused }); }
-  else if (!done.length) {
-    out(refused.length ? `nothing completes yet:\n${refused.map((r) => `  ${r.rule}: ${r.reason}`).join('\n')}` : 'nothing in the graph fits that')
-  } else {
-    out(done.map((c, i) => [
-      `${i + 1}. ${JSON.stringify(c.question)}`,
-      ...c.why.map((w) => `     ${w}`),
-      ...(c.uncertain.length ? [`     uncertain: ${c.uncertain.join('; ')}`] : []),
-    ].join('\n')).join('\n\n'))
-  }
 } else if (command === 'moves') {
   const s = current() ?? fail('this conversation has no answer to move from yet')
   const q = s.question
   out(nextMoves(m.schema, (q.span && !('to' in q.span) ? { ...q, span: undefined } : q)).map((x) => ({ reads: x.reads, move: x.move })))
-} else if (command === 'detail') {
-  const s = current() ?? fail('this conversation has no answer to look behind')
-  const [group, askedCall] = args
-  const callId = askedCall ?? ((s.question as any)?.program ? fail('an answer program asked several questions — ./trace-answer lists them; name one: ./source-records \'<group>\' <call>') : s.callId!)
-  out(await graph.detail(callId, json(group, 'the group'), { model: MODEL, limit: 20 }))
-} else if (command === 'trace') {
-  const call = args[0] ?? current()?.callId ?? fail('no answer to trace')
-  out(graph.trace(call))
+} else if (command === 'behind') {
+  // WHAT IS UNDER THE ANSWER ON SCREEN: the rows of one group, or the steps it was reached by. A group is JSON.
+  const s0 = current() ?? fail('this conversation has no answer to look behind')
+  const [what, askedCall] = args
+  if (!what || !what.trim().startsWith('{')) { out(graph.trace(what ?? s0.callId ?? fail('no answer to trace'))); }
+  else {
+    const callId = askedCall ?? ((s0.question as any)?.program ? fail("an answer program asked several questions — ./behind lists them; name one: ./behind '<group>' <call>") : s0.callId!)
+    out(await graph.detail(callId, json(what, 'the group'), { model: MODEL, limit: 20 }))
+  }
 } else fail(`unknown tool "${tool}" — ${Object.keys(TOOLS).join(', ')}`)
 process.exit(0)
