@@ -65,20 +65,52 @@ const current = () => {
   return s?.currentStep ? graph.store.steps(sessionId).find((x) => x.id === s.currentStep) ?? null : null
 }
 
-/** Read a question in words into the graph: the subgraphs it could be, ranked, tried, and said back. */
-async function match(text: string) {
+/** A part of the question as whoever read the language marked it out: the words, and what kind of thing they name. */
+interface Part { text: string; is?: string }
+
+/** Read a question in words into the graph: the subgraphs it could be, ranked, tried, and said back.
+ *
+ *  WHERE A PART BEGINS AND ENDS IS A QUESTION ABOUT LANGUAGE, AND IS NOT DECIDED HERE. Which words belong to one
+ *  name cannot be settled by any rule over the letters: it is what the sentence MEANS, and the reader of the
+ *  sentence is the one who knows. Given `parts`, this resolves exactly those; given none, it falls back to trying
+ *  every short run of words, which is how a name of many words is never seen whole and a common word is looked up
+ *  for nothing.
+ *
+ *  A PART IS A CLAIM, NOT A TRUTH. What a part means is still settled here, against the graph and the sources, and
+ *  a part that resolves to nothing is reported as such — so a reading that was wrong costs a lookup, never an
+ *  answer. */
+async function match(text: string, parts?: Part[]) {
   // THE WHOLE FIRST HALF, in one act. Words become things (eagerly, and at the sources for records), things become
   // subgraphs, subgraphs are ranked and the best few are asked so the data can separate them.
   const today = new Date().toISOString().slice(0, 10)
-  const read = await graph.resolveQuestionTerms(MODEL, text, { today })
+  const entityOf = (is?: string) => (is && m.schema.objects[is]?.kind === 'entity' ? is : undefined)
+  const named = (parts ?? []).filter((p) => p.text?.trim() && (entityOf(p.is) || !p.is))
+  const read = await graph.resolveQuestionTerms(MODEL, text, { today, ...(named.length ? { spans: named.map((p) => p.text) } : {}) })
   const currency = Object.entries(m.settings ?? {}).find(([k]) => /currency/i.test(k))?.[1]
   const fragment: any = { ...fragmentOf(read.terms as any), phrases: read.terms.map((t) => t.phrase), ...(typeof currency === 'string' ? { currency } : {}) }
 
-  // A NAME THE SOURCES DID NOT HOLD BY ITS WHOLE SELF. "paspley d365 commerce" is a project, typed as people type:
-  // a word misspelt, a code left off the front. The words the graph could not place are put back together and
-  // looked for INSIDE the kinds of thing the question named — which is what a person does, and costs one query
-  // per kind rather than a search of everything.
-  const unplaced = (read.unmatched ?? []).filter((w) => w.length > 2 && !/^\d+$/.test(w))
+  // A PART THAT NAMES SOMETHING, LOOKED FOR WHERE IT WAS SAID TO BE. The words are known, so nothing is
+  // reassembled and nothing is guessed at: one search, in the one kind, for the whole name. A part whose kind was
+  // read wrongly finds nothing there and is reported unfound, which is a lookup spent and not an answer bent.
+  const placedByPart = new Set<string>()
+  for (const p of named) {
+    const kind = entityOf(p.is)
+    if (!kind) continue
+    const phrase = p.text.trim()
+    if ((fragment.values ?? []).some((v: any) => String(v.text).toLowerCase() === phrase.toLowerCase())) { placedByPart.add(phrase); continue }
+    const found: any = await graph.members(MODEL, kind, phrase).catch(() => null)
+    const hits = found?.matches ?? []
+    if (!hits.length) { read.notes = [...(read.notes ?? []), `no ${kind} is named "${phrase}"${found?.note ? ` — ${found.note}` : ''}`]; continue }
+    ;(fragment.values ??= []).push({ text: phrase, meanings: hits.slice(0, 3).map((b: any) => ({ object: kind, key: String(b.key), label: String(b.label) })) })
+    placedByPart.add(phrase)
+    if (hits.length > 1) read.notes = [...(read.notes ?? []), `"${phrase}" is ${hits.slice(0, 3).map((b: any) => b.label).join(' or ')}`]
+  }
+  const fromParts = new Set([...placedByPart].flatMap((x) => x.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean)))
+
+  // WITHOUT PARTS, the words the graph could not place are put back together and looked for inside the kinds of
+  // thing the question named. Every run of them is a guess at where a name begins and ends, which is the guess
+  // `parts` exists to remove — so this runs only when nobody read the sentence for us.
+  const unplaced = named.length ? [] : (read.unmatched ?? []).filter((w) => w.length > 2 && !/^\d+$/.test(w))
   const kinds = [...new Set((read.terms as any[]).flatMap((t) => t.means.filter((x: any) => x.kind === 'object' && m.schema.objects[x.node]?.kind === 'entity').map((x: any) => x.node)))] as string[]
   // Words the graph could not place are searched for whether or not something else was found: a question names
   // more than one thing, and a record found for one word says nothing about the words still unaccounted for.
@@ -135,7 +167,7 @@ async function match(text: string) {
   // WHAT IS LEFT OVER is what the graph never placed — not every word of the question. A phrase that became a
   // measure, a dimension, a record or a span is accounted for by construction; saying otherwise reads as a fault
   // where there is none.
-  const placed = new Set((fragment.values ?? []).flatMap((v: any) => String(v.text).split(/\s+/)))
+  const placed = new Set([...(fragment.values ?? []).flatMap((v: any) => String(v.text).split(/\s+/)), ...fromParts])
   const over = (read.unmatched ?? []).filter((w) => w.length > 2 && !placed.has(w))
   const judged = await judge(m.schema, done, over, ask)
   const ties = tied(judged)
@@ -154,8 +186,24 @@ async function match(text: string) {
   }
 }
 
+/** A breakdown: the question, and the parts whoever read the language marked out in it. */
+const breakdown = (text: string): { question?: string; parts?: Part[] } | null => {
+  if (!text.startsWith('{')) return null
+  try { const x = JSON.parse(text); return x && Array.isArray(x.parts) ? x : null } catch { return null }
+}
+/** What to read, and how it was read — from either form. */
+const asked = (text: string): [string, Part[]?] => {
+  const b = breakdown(text)
+  if (!b) return [text]
+  const parts = (b.parts ?? []).filter((p: any) => typeof p?.text === 'string')
+  return [String(b.question ?? parts.map((p) => p.text).join(' ')), parts]
+}
+
 if (command === 'match') {
-  await match(args.join(' ').trim() || fail("usage: ./match '<the question, as asked>'"))
+  // THE QUESTION, AND HOW IT READS. Given the words alone, the graph must guess where each part of the sentence
+  // begins and ends — which no rule over letters can settle, because it is what the sentence means. Given the
+  // parts, it resolves what it was handed. Both are accepted; only one of them can see a long name whole.
+  await match(...asked(args.join(' ').trim() || fail("usage: ./match '<the question, as asked>'   or   ./match '{\"question\":\"…\",\"parts\":[{\"text\":\"…\",\"is\":\"<a kind of thing, or measure/period/grouping>\"}]}'")))
 } else if (command === 'look') {
   // THE GRAPH ITSELF. Nothing: the whole catalogue. One node: what it holds and what it reaches. Two: the way from
   // one to the other — or, when the second is not a node, which record of the first that text means.
@@ -182,6 +230,9 @@ if (command === 'match') {
       advice: `${capped ? 'at least ' : ''}${all.length} names match "${second}" — say more of the name, or a distinctive part of it, to narrow it`,
     } : {}) })
   }
+} else if (command === 'ask' && breakdown(args.join(' ').trim())) {
+  // A QUESTION READ INTO PARTS. The same act as `match`, asked with the sentence already read.
+  await match(...asked(args.join(' ').trim()))
 } else if (command === 'ask' && !args.join(' ').trim().startsWith('{')) {
   // WORDS, HANDED TO THE TOOL THAT READS WORDS. "ask" means asking in English, so a question in English arrives
   // here often; sending it back with a complaint teaches nothing. It is read into the graph, and the readings say
