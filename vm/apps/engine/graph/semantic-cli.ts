@@ -173,9 +173,14 @@ if (command === 'match') {
     // hundred lines: the closest few are shown with the total, so the answer stays something a person — or an
     // agent with a finite head — can actually use.
     const found: any = await graph.members(MODEL, first, second)
-    const shown = (found.matches ?? []).slice(0, 10)
-    const more = (found.matches?.length ?? 0) - shown.length
-    out({ ...found, matches: shown, ...(more > 0 ? { more, advice: `${found.matches.length} names match "${second}" — say more of the name to narrow it` } : {}) })
+    const all = found.matches ?? []
+    const shown = all.slice(0, 10)
+    const capped = all.length >= 200   // the source stops at its row cap: there may be more it never sent
+    out({ ...found, matches: shown, ...(all.length > shown.length ? {
+      matched: capped ? `${all.length} or more` : all.length,
+      notShown: all.length - shown.length,
+      advice: `${capped ? 'at least ' : ''}${all.length} names match "${second}" — say more of the name, or a distinctive part of it, to narrow it`,
+    } : {}) })
   }
 } else if (command === 'ask' && !args.join(' ').trim().startsWith('{')) {
   // WORDS, HANDED TO THE TOOL THAT READS WORDS. "ask" means asking in English, so a question in English arrives

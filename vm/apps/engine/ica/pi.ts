@@ -319,9 +319,20 @@ export function createPiSession(opts: PiSessionOpts): Session {
       console.warn(`[ica:pi] ending the turn — ${ended}`)
       try { session?.abort?.() } catch { /* not running */ }
     }, 5000)
+    // THE TURN IS OVER WHEN ITS WORK IS DONE, not when the model stops talking. An agent that has committed its
+    // answer often writes a closing paragraph afterwards, and the person waits through it for something already
+    // decided. The caller says what "done" looks like (a file on disk); the moment it is there, the turn resolves.
+    let finished = false
+    const deliverable = h?.doneWhen
+      ? setInterval(async () => {
+          if (finished) return
+          try { if (await h.doneWhen!()) { finished = true; console.log('[ica:pi] the answer is in — ending the turn'); try { session?.abort?.() } catch { /* not running */ } } }
+          catch { /* a check that throws is not an answer */ }
+        }, 250)
+      : null
     try { await s.prompt(text); await s.waitForIdle?.() }
-    catch (e: any) { activeAnswer = `pi error: ${e?.message ?? e}` }
-    finally { clearInterval(watchdog) }
+    catch (e: any) { if (!finished) activeAnswer = `pi error: ${e?.message ?? e}` }
+    finally { clearInterval(watchdog); if (deliverable) clearInterval(deliverable) }
     if (ended) activeAnswer = `pi: the turn was ended — ${ended}`
     activeHandler = undefined
     running = false
