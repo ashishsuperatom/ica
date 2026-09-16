@@ -302,8 +302,32 @@ process.exit(r.status ?? 1)
 process.on('uncaughtException', (e) => { console.error(String(e && e.message || e)); process.exit(1) })
 ${name === 'semantic-graph' ? '' : `if (process.argv.slice(2).some(a => a === '-h' || a === '--help')) { console.log(${JSON.stringify(usages[name])}); process.exit(0) }\n`}`
     await writeFile(join(dir, '.tools', name + '.mjs'), help + body)
-    await writeFile(join(dir, name),
-`#!/usr/bin/env bash
+    // ── A QUESTION TAKES AS LONG AS IT TAKES ──────────────────────────────────────────────────────────────
+    // A tool that is cut short teaches nothing: a query stopped at thirty seconds has not said the answer is
+    // elsewhere, and asking something smaller answers a different question. The budget belongs to the TURN — the
+    // engine ends a turn that goes silent or runs too long — so the work here must outlive the call that started
+    // it. Reading tools therefore run DETACHED and file their result under what was asked, within this turn: a
+    // call that is killed leaves the work running, and asking again picks up the finished result instead of
+    // paying for it twice. Tools that change something (run-program, commit) are never reused this way.
+    const detached = READ_ONLY.has(name)
+    await writeFile(join(dir, name), detached
+? `#!/usr/bin/env bash
+D=${JSON.stringify(join(dir, '.tools', name + '.mjs'))}
+RUNS=${JSON.stringify(join(dir, '.runs'))}
+TURN=$(cat ${JSON.stringify(join(dir, '.turn'))} 2>/dev/null || echo none)
+mkdir -p "$RUNS"
+KEY=$(printf '%s|%s|%s' "$TURN" ${JSON.stringify(name)} "$*" | shasum | cut -c1-16)
+OUT="$RUNS/$KEY.out"; ERR="$RUNS/$KEY.err"; CODE="$RUNS/$KEY.code"; PID="$RUNS/$KEY.pid"
+run() { if command -v tsx >/dev/null 2>&1; then tsx "$D" "$@"; else npx --yes tsx "$D" "$@"; fi; }
+if [ ! -f "$CODE" ] && [ ! -f "$PID" ]; then
+  ( run "$@" >"$OUT" 2>"$ERR"; echo $? >"$CODE"; rm -f "$PID" ) &
+  echo $! >"$PID"
+fi
+while [ ! -f "$CODE" ]; do sleep 0.3; done
+cat "$OUT"; [ -s "$ERR" ] && cat "$ERR" >&2
+exit "$(cat "$CODE")"
+`
+: `#!/usr/bin/env bash
 D=${JSON.stringify(join(dir, '.tools', name + '.mjs'))}
 if command -v tsx >/dev/null 2>&1; then exec tsx "$D" "$@"; else exec npx --yes tsx "$D" "$@"; fi
 `)
@@ -313,6 +337,9 @@ if command -v tsx >/dev/null 2>&1; then exec tsx "$D" "$@"; else exec npx --yes 
   await removeWhatIsNotOurs(dir, Object.keys(drivers), conversation)
   return dir
 }
+
+/** Tools that only read: their work outlives the call, and asking the same thing twice in a turn costs nothing. */
+const READ_ONLY = new Set(['match', 'look', 'ask', 'behind'])
 
 const SEMANTIC_USAGE: Record<string, string> = {
   match: `match '<the question, as asked>' [--json]   → the subgraphs the question could be. Give it minutes, not seconds: it tries the best few against the data. Its words are resolved to measures, dimensions, conditions and records (looked up by name at their sources); every route the graph holds is built; each is said back in the graph's own words with what is uncertain about it; the best few are asked against the data so it can separate them. Ends with what to change if the first one is not it`,
@@ -328,7 +355,7 @@ const SEMANTIC_USAGE: Record<string, string> = {
 // programs and turn files were read as current, and used. So preparing a workspace also removes what the current
 // engine does not put there. Each entry below names who writes it.
 const OWNED = new Set([
-  'CONTEXT.md', 'data', 'grounding', 'out', '.tools',               // this file
+  'CONTEXT.md', 'data', 'grounding', 'out', '.tools', '.runs',      // this file (.runs: work that outlived its call)
   '.turn', '.session', '.agent',                                    // agents/composer, agents/analyst: the turn in progress
   'AGENTS.md', 'SYSTEM_REFERENCE.md', '.claude',                    // the harnesses (ica/pi.ts, ica/codex.ts, ica/claude.ts)
   'connector', 'templates',                                         // agents/connector

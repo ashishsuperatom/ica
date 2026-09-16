@@ -45,6 +45,9 @@ its measures. A question of the graph is measures, grouped by dimensions, kept t
 a span. The graph checks each question and explains any
 it cannot answer as asked.
 
+A question takes as long as it takes: the tools that read run to the end, and asking the same thing again in this
+turn costs nothing, so wait for them rather than cutting them short.
+
 Read the question into the graph with ./match: it resolves the words, finds every subgraph the question could be,
 says each back in the graph's own words and tries the best few against the data. ./look shows the graph itself when
 a reading needs settling, and ./ask evaluates a question to see what the data says.
