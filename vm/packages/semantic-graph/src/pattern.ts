@@ -21,6 +21,7 @@
 
 import { check, type Condition, type FactPlan, type Plan, type Question, type Step } from './algebra.js'
 import { arrow, arrows, type Aggregate, type ArrowKind, type MeasureKind, type Schema } from './schema.js'
+import { foldable } from './laws.js'
 
 /** An object the question stands at. `attribute` marks a value carried by that object rather than the object. */
 export interface PatternNode {
@@ -224,18 +225,8 @@ export function toQuestion(s: Schema, p: Pattern): Question {
 // whether the step keeps the measure meaningful — and when it does not, why, in the schema's own words.
 
 export function admissible(m: PatternMeasure, e: PatternEdge, to: PatternNode): { ok: true } | { ok: false; reason: string } {
-  // A version arrow separates values that are never added together.
-  if (e.kind === 'version' && !m.versions) return { ok: false, reason: `${m.fact}.${m.measure} is not kept in versions, so ${e.role} is not a way to group it` }
-  if (m.versions && e.kind !== 'version' && e.role === m.versions) return { ok: false, reason: `${m.fact}.${m.measure} is kept in ${e.role} versions, which are never added together` }
-  // A level at an instant adds across things, never over time, unless it says which instant stands for the period.
-  if (m.kind === 'stock' && (e.kind === 'rollup' || to.kind === 'calendar') && !m.overTime) {
-    return { ok: false, reason: `${m.fact}.${m.measure} is a level at an instant; over ${to.object}s it needs to say whether it is the last, the first or the average level` }
-  }
-  // A rate is never summed; it is combined only as its own definition says.
-  if (m.kind === 'value-per-unit' && !['min', 'max', 'median', 'weighted average'].includes(m.aggregate)) {
-    return { ok: false, reason: `${m.fact}.${m.measure} is a value per unit; it is combined by min, max, median or a weighted average, never by ${m.aggregate}` }
-  }
-  return { ok: true }
+  return foldable({ fact: m.fact, measure: m.measure, kind: m.kind, aggregate: m.aggregate, versions: m.versions, overTime: m.overTime },
+    { kind: e.kind, role: e.role, toCalendar: to.kind === 'calendar' })
 }
 
 /** Every step out of a node, with whether a measure may be carried along it — the traversal's own answer. */

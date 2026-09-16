@@ -24,8 +24,12 @@ export interface ProgramDef {
   produces: string
   /** What it may read: data sources, and objects of the schema (through their own sources). */
   reads: { sources: string[]; objects: string[] }
-  /** An ES module: `export default async (ctx, { from, to }) => rows` — rows are records of the object's columns. */
+  /** An ES module: `export default async (ctx, { from, to, keep }) => rows` — rows are records of the object's
+   *  columns. `keep` carries the filters the question asked for that this program said it accepts. */
   body: string
+  /** What the program can be given ahead of time, so a filter reaches it instead of its output: the roles of the
+   *  fact it produces, e.g. `{ accepts: { project: true, person: true } }`. Reading less is the whole point. */
+  ports?: { accepts?: Record<string, true> }
   description?: string
 }
 
