@@ -832,6 +832,7 @@ function connect() {
     lastInbound = Date.now()
     let m: any; try { m = JSON.parse(raw.toString()) } catch { return }
     const t = m.payload?.t
+    if (process.env.ICA_TRACE_HUB) console.log(`[ica:trace] ← ${t ?? '(no t)'} from ${m.from?.type ?? '?'}/${m.from?.id ?? '?'}${t === 'error' ? ` — ${m.payload?.reason ?? m.payload?.message ?? ''}` : ''}`)
     if (t === 'welcome') {
       console.log(`[ica] registered (${m.payload.wsId}) — running self-check…`)
       flushOutbox()   // re-registered → deliver anything queued while the socket was flapping (answers, logs)
