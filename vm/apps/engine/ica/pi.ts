@@ -10,6 +10,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createAgentSession, DefaultResourceLoader, getAgentDir, SessionManager, SettingsManager, ModelRuntime } from '@earendil-works/pi-coding-agent'
 import type { Session, RunHandlers, RunResult, AgentEvent } from './session.js'   // the shared session interface
+import { endsWhenDone } from './session.js'   // one definition of "the turn's work is done", for every harness
 import { providersOn } from '../../../packages/agent-contract/contract.mjs'
 
 /** The ChatGPT credential `codex login` already wrote. pi-ai ships an `openai-codex-responses` provider that
@@ -319,20 +320,15 @@ export function createPiSession(opts: PiSessionOpts): Session {
       console.warn(`[ica:pi] ending the turn — ${ended}`)
       try { session?.abort?.() } catch { /* not running */ }
     }, 5000)
-    // THE TURN IS OVER WHEN ITS WORK IS DONE, not when the model stops talking. An agent that has committed its
-    // answer often writes a closing paragraph afterwards, and the person waits through it for something already
-    // decided. The caller says what "done" looks like (a file on disk); the moment it is there, the turn resolves.
-    let finished = false
-    const deliverable = h?.doneWhen
-      ? setInterval(async () => {
-          if (finished) return
-          try { if (await h.doneWhen!()) { finished = true; console.log('[ica:pi] the answer is in — ending the turn'); try { session?.abort?.() } catch { /* not running */ } } }
-          catch { /* a check that throws is not an answer */ }
-        }, 250)
-      : null
+    // The turn ends when its work is done — see `endsWhenDone`. pi is told when the model stops talking, and
+    // that still ends a turn with no deliverable; it is simply not what a turn with one waits for.
+    const deliverable = endsWhenDone(h, () => {
+      console.log('[ica:pi] the answer is in — ending the turn')
+      try { session?.abort?.() } catch { /* not running */ }
+    })
     try { await s.prompt(text); await s.waitForIdle?.() }
-    catch (e: any) { if (!finished) activeAnswer = `pi error: ${e?.message ?? e}` }
-    finally { clearInterval(watchdog); if (deliverable) clearInterval(deliverable) }
+    catch (e: any) { if (!deliverable.arrived()) activeAnswer = `pi error: ${e?.message ?? e}` }
+    finally { clearInterval(watchdog); deliverable.stop() }
     if (ended) activeAnswer = `pi: the turn was ended — ${ended}`
     activeHandler = undefined
     running = false

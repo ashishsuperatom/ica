@@ -12,6 +12,7 @@ import { Codex, type Thread } from '@openai/codex-sdk'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Session, RunHandlers, RunResult, AgentEvent } from './session.js'
+import { endsWhenDone } from './session.js'   // one definition of "the turn's work is done", for every harness
 
 export interface CodexSessionOpts {
   cwd: string
@@ -113,9 +114,14 @@ export function createCodexSession(opts: CodexSessionOpts): Session {
     const seen = new Map<string, number>()
     let answer = ''
     const t0 = Date.now()
+    // The codex SDK gives no way to abort a turn in flight, so the turn is ended the only way it can be: the
+    // stream is closed and whatever the model says next is not listened to. The deliverable is already written.
+    let done = false
+    const deliverable = endsWhenDone(h, () => { done = true; console.log('[ica:codex] the answer is in — ending the turn') })
     try {
       const streamed = await thread!.runStreamed(prompt)
       for await (const ev of streamed.events) {                     // generator ends when the turn completes → exact
+        if (done) { try { await (streamed.events as any).return?.() } catch { /* already closed */ } break }
         if (ev.type === 'thread.started' && (ev as any).thread_id) threadId = (ev as any).thread_id
         const norm = normEvent(ev)                                 // structured event for the UI event log
         if (norm) { eventLog.push(norm); if (eventLog.length > 600) eventLog.shift(); h?.onEvent?.(norm) }
@@ -135,8 +141,8 @@ export function createCodexSession(opts: CodexSessionOpts): Session {
         queue.unshift({ prompt, h, resolve }); running = false
         return pump()
       }
-      answer = `codex error: ${e?.message ?? e}`
-    }
+      if (!deliverable.arrived()) answer = `codex error: ${e?.message ?? e}`
+    } finally { deliverable.stop() }
     running = false
     resolve({ lastLines: answer, ms: Date.now() - t0 })
     pump()

@@ -11,6 +11,7 @@
 import { createOpencode, createOpencodeClient, createOpencodeServer } from '@opencode-ai/sdk'
 import type { AgentEvent } from './session.js'
 import type { Session, RunHandlers, RunResult } from './session.js'   // the shared session interface
+import { endsWhenDone } from './session.js'   // one definition of "the turn's work is done", for every harness
 import { providersOn, isDisabled } from '../../../packages/agent-contract/contract.mjs'
 
 export interface OpencodeSessionOpts {
@@ -216,6 +217,11 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
     const t0 = Date.now()
     let answer = ''
     const poll = setInterval(() => { void pollMessages(h) }, 1000)      // live events via polling (SSE parts broken)
+    // The turn ends when its work is done — see `endsWhenDone`. opencode can be told to stop, so it is.
+    const deliverable = endsWhenDone(h, () => {
+      console.log('[ica:opencode] the answer is in — ending the turn')
+      try { void client.session.abort({ path: { id: sessionId }, query: { directory: opts.cwd } }) } catch { /* already over */ }
+    })
     try {
       const res = await client.session.prompt({                         // resolves when the turn is DONE (exact completion)
         path: { id: sessionId },
@@ -233,8 +239,8 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
         if (info) { const tk = info.tokens ?? {}
           console.log(`[oc-usage] ${modelID} in=${tk.input ?? '?'} out=${tk.output ?? '?'} reason=${tk.reasoning ?? 0} cacheR=${tk.cache?.read ?? 0} cacheW=${tk.cache?.write ?? 0} cost=$${info.cost ?? '?'} · "${String(prompt).slice(0, 26).replace(/\s+/g, ' ')}…"`) }
       } catch { /* usage logging is best-effort */ }
-    } catch (e: any) { answer = `opencode error: ${e?.message ?? e}` }
-    finally { clearInterval(poll); await pollMessages(h) }               // one final poll to catch the last state
+    } catch (e: any) { if (!deliverable.arrived()) answer = `opencode error: ${e?.message ?? e}` }
+    finally { deliverable.stop(); clearInterval(poll); await pollMessages(h) }   // one final poll to catch the last state
     activeHandler = undefined
     running = false
     resolve({ lastLines: answer, ms: Date.now() - t0 })

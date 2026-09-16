@@ -5,7 +5,8 @@
 // Prompts are queued (one turn at a time). This module knows NOTHING about analysis, the
 // hub, or any message protocol — that all lives in the caller.
 
-import type { Session, RunHandlers, RunResult } from './session.js'
+import type { Deliverable, Session, RunHandlers, RunResult } from './session.js'
+import { endsWhenDone } from './session.js'   // one definition of "the turn's work is done", for every harness
 import { randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { statSync, openSync, readSync, closeSync, writeFileSync, readFileSync, renameSync, realpathSync } from 'node:fs'
@@ -132,7 +133,7 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
   let term: any = null            // @xterm/headless Terminal
   let serialize: any = null       // @xterm/addon-serialize — term.serialize() → the snapshot
   let idle: ReturnType<typeof setTimeout> | null = null
-  let donePoll: ReturnType<typeof setInterval> | null = null   // fast completion: poll the caller's doneWhen()
+  let deliverable: Deliverable | null = null                   // the caller's "the work is done" watch, for this turn
   let hardCap: ReturnType<typeof setTimeout> | null = null     // absolute end-of-turn, so nothing can outlive it
   let lastDataAt = 0                          // timestamp of the last PTY byte — drives readiness (settle) detection
   let cols = 120, rows = 34                   // PTY size — the UI resizes this to fill its terminal width (SIGWINCH)
@@ -303,7 +304,7 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
   function finish() {
     if (!current) return
     if (idle) clearTimeout(idle)
-    if (donePoll) { clearInterval(donePoll); donePoll = null }
+    if (deliverable) { deliverable.stop(); deliverable = null }
     if (hardCap) { clearTimeout(hardCap); hardCap = null }
     const job = current; current = null
     job.resolve({ lastLines: lastLines(buf), ms: Date.now() - job.startedAt })
@@ -335,14 +336,9 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
       console.warn(`[ica:claude] turn exceeded ${(HARD_TURN / 60000) | 0}m — ending it so the session is not held open`)
       finish()
     }, HARD_TURN)
-    // Fast path: the instant the caller's deliverable exists (e.g. out/answer.json written), resolve —
-    // don't sit through the idle timeout. Falls back to idle if doneWhen never fires.
-    if (job.h?.doneWhen) {
-      donePoll = setInterval(async () => {
-        if (current !== job) { if (donePoll) { clearInterval(donePoll); donePoll = null } return }
-        try { if (await job.h!.doneWhen!()) finish() } catch { /* predicate error → keep waiting on idle */ }
-      }, 250)
-    }
+    // The turn ends when its work is done — see `endsWhenDone`, which every harness now shares. Here it also
+    // spares us the idle guess below, which is the only reason that guess has to exist at all.
+    deliverable = endsWhenDone(job.h, () => { if (current === job) finish() })
     // Safety net: if the agent hasn't started after a beat (a dropped keystroke), submit once more.
     await delay(2500)
     if (current === job && pty && !WORKING_MARKER.test(stripAnsi(buf).slice(-4000))) pty.write('\r')

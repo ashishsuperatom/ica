@@ -39,11 +39,10 @@ export interface RunHandlers {
   onEvent?: (ev: AgentEvent) => void   // normalized structured event (event-kind harnesses only; the harness
                                        // translates its native events → AgentEvent). The caller forwards these
                                        // to the UI event log; claude-code (pty) uses onOutput instead.
-  // Fast completion: polled (~250ms) after the prompt is submitted. When it returns true the run
-  // resolves IMMEDIATELY, instead of waiting out the idle timeout. Use it when the agent's deliverable
-  // is a file (e.g. out/answer.json) — the moment it's written, we're done; don't wait for silence.
-  // Only a harness with turnEnd: 'inferred' polls this — see Session.turnEnd. A 'native' one is TOLD when the
-  // turn ends, so it resolves on that and never looks at the predicate.
+  // WHAT THE TURN WAS FOR. The caller says what its deliverable looks like — a file on disk, written by the
+  // agent's last act. The moment it is there, the turn is over: the work is done and nothing said afterwards
+  // can change it. EVERY harness honours this (see `endsWhenDone`), because it is a fact about the caller's
+  // work, not about how a harness notices that a model stopped talking.
   doneWhen?: () => boolean | Promise<boolean>
   // Clean, human-readable PROGRESS — the agent's own narration ("Found an exact match … writing the
   // answer"), NEVER tool calls or raw terminal. Harness-specific: claude-code parses its TUI prose;
@@ -77,14 +76,12 @@ export interface Session {
   //                  agent to read it (the legacy behavior). Absent ⇒ treat as 'file'.
   // Lets the engine drop the "go read CONTEXT.md" preamble only when the reference is already in-context.
   referencePlacement?: 'in-context' | 'file'
-  // HOW THIS HARNESS KNOWS A TURN IS OVER — the difference that shapes everything above.
-  //   'native'   the SDK reports it (pi, opencode, codex). run() resolves on that signal. Exact.
+  // HOW THIS HARNESS NOTICES THE MODEL HAS STOPPED TALKING — a fallback, and an event worth recording, but
+  // NOT what a turn waits on. A turn ends when its deliverable exists (`doneWhen`); this is what happens when
+  // there is no deliverable, or the agent stops without producing one.
+  //   'native'   the SDK tells us (pi, opencode, codex). Exact, and free.
   //   'inferred' we are reading a terminal (claude-code) and there is no such signal, so it is deduced from
-  //              the prompt marker returning plus silence — and it additionally polls handlers.doneWhen so a
-  //              caller whose deliverable is a file can end the turn the moment the file appears, instead of
-  //              waiting out the silence.
-  // Stated per harness rather than left to be discovered, because "does doneWhen do anything here?" is
-  // otherwise unanswerable without reading four implementations.
+  //              the prompt marker returning plus silence — a guess, and the reason `doneWhen` was written.
   turnEnd: 'native' | 'inferred'
   run(prompt: string, handlers?: RunHandlers): Promise<RunResult>   // queues one turn; resolves when it completes
   compact(handlers?: RunHandlers): Promise<RunResult>               // shrink context when it grows (same session)
@@ -98,4 +95,38 @@ export interface Session {
   stop(): void
   resize?(cols: number, rows: number): void                         // PTY harnesses only (claude-code) — fit terminal to the UI width
   sessionId?(): string | undefined                                  // the harness session id — persist it to resume across restarts
+}
+
+// ── THE TURN IS OVER WHEN ITS WORK IS DONE ───────────────────────────────────────────────────────────────────
+//
+// An agent whose job is to produce something finishes that job and then, often, writes a closing paragraph about
+// it. The work was over at the first moment; the person waited through the second. Worse, four harnesses each had
+// their own idea of when a turn ends — silence, an SDK event, a prompt marker — and none of them is the question
+// actually being asked, which is: IS THE THING THERE?
+//
+// So it is asked here, once, for all of them. The caller says what its deliverable looks like (`doneWhen`); this
+// watches for it and ends the turn the moment it appears. A harness's own end-of-turn signal stays where it is —
+// it is worth recording, and it is what happens when an agent stops without producing anything — but nothing
+// waits on it when there is a deliverable to wait for instead.
+
+export interface Deliverable {
+  /** Stop watching — always called when the turn resolves, however it resolved. */
+  stop(): void
+  /** Did the deliverable arrive? True when this is why the turn ended, so an abort is not reported as a failure. */
+  arrived(): boolean
+}
+
+export function endsWhenDone(h: RunHandlers | undefined, end: () => void, everyMs = 250): Deliverable {
+  if (!h?.doneWhen) return { stop() {}, arrived: () => false }
+  let here = false
+  let over = false
+  const timer = setInterval(async () => {
+    if (here || over) return
+    try { if (!(await h.doneWhen!())) return } catch { return }   // a check that throws is not an answer
+    here = true
+    clearInterval(timer)
+    end()
+  }, everyMs)
+  timer.unref?.()
+  return { stop() { over = true; clearInterval(timer) }, arrived: () => here }
 }
