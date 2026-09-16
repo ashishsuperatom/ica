@@ -13,8 +13,8 @@ export const schema: Schema = {
     Branch: { kind: 'entity', arrows: { state: { to: 'State', kind: 'rollup' } }, names: { Sydney: 'b1' }, members: { b1: 'Sydney', b2: 'Melbourne', b3: 'Perth' } },
     Person: { kind: 'entity', arrows: { branch: { to: 'Branch', kind: 'as-of' }, manager: { to: 'Person', partial: true } } },
     Project: { kind: 'entity', arrows: { branch: 'Branch', state: 'State', owner: 'Person', sponsor: { to: 'Person', partial: true } } },
-    Currency: { kind: 'entity', members: { AUD: 'Australian dollar', NZD: 'New Zealand dollar' } },
-    BudgetVersion: { kind: 'entity', members: { base: 'Base', forecast: 'Forecast' } },
+    Currency: { kind: 'entity', members: { AUD: 'Australian dollar', NZD: 'Southland dollar' } },
+    BudgetVersion: { kind: 'entity', members: { base: 'Base', projected: 'Projected' } },
     Day: { kind: 'calendar', level: 'day', arrows: { month: 'Month' } },
     Month: { kind: 'calendar', level: 'month', arrows: { quarter: 'Quarter' } },
     Quarter: { kind: 'calendar', level: 'quarter', arrows: { year: 'Year' } },
@@ -71,7 +71,7 @@ export const instance: Instance = {
       j2: { arrows: { branch: 'b3', state: 'WA', owner: 'p2', sponsor: null } },
     },
     Currency: { AUD: {}, NZD: {} },
-    BudgetVersion: { base: {}, forecast: {} },
+    BudgetVersion: { base: {}, projected: {} },
   },
   rows: {
     Sale: [
@@ -84,7 +84,7 @@ export const instance: Instance = {
     Budget: [
       { arrows: { branch: 'b1', month: '2026-09', version: 'base', currency: 'AUD' }, measures: { budget: 2000 } },
       { arrows: { branch: 'b1', month: '2026-10', version: 'base', currency: 'AUD' }, measures: { budget: 1000 } },
-      { arrows: { branch: 'b1', month: '2026-09', version: 'forecast', currency: 'AUD' }, measures: { budget: 9999 } },
+      { arrows: { branch: 'b1', month: '2026-09', version: 'projected', currency: 'AUD' }, measures: { budget: 9999 } },
     ],
     Contract: [
       { arrows: { project: 'j1', signed: '2026-08-03' }, attributes: { currency: 'AUD' }, measures: { value: 10000 } },

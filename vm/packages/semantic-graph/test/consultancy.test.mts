@@ -11,7 +11,7 @@ const refusal = (q: Question) => { const v = check(s, q); assert.equal(v.ok, fal
 const round = (rows: unknown[][]) => rows.map((r) => r.map((x) => (typeof x === 'number' ? Math.round(x * 100) / 100 : x)))
 const project = (id: string) => projects.find((p) => p.id === id)!
 
-/** Every allocated day, flat, from the raw records. */
+/** Every booked day, flat, from the raw records. */
 const days = allocations.flatMap((a) => a.days.map((day) => {
   const rate = rates.get(`${a.project}|${a.person}`)
   return { ...a, day, month: day.slice(0, 7), hours: a.hoursPerDay, revenue: rate === undefined ? 0 : a.hoursPerDay * rate }
@@ -25,12 +25,12 @@ const sumBy = <T,>(xs: T[], key: (x: T) => string, value: (x: T) => number) => {
 test('the the consultancy schema is well formed and the simulated data conforms', () => {
   assert.deepEqual(schemaProblems(s), [])
   assert.deepEqual(conformance(s, I), [])
-  assert.ok(I.rows.AllocationDay.length > 200)
+  assert.ok(I.rows.BookingDay.length > 200)
 })
 
 test('projected revenue from allocations for AU, September and October, hard and soft', () => {
   const rows = answer({
-    measures: ['AllocationDay.revenue'], by: [{ to: 'Month' }, { attribute: 'commitment' }],
+    measures: ['BookingDay.revenue'], by: [{ to: 'Month' }, { attribute: 'commitment' }],
     where: [{ to: 'Company', via: ['project', 'company'], in: ['AU'] }],
     span: { from: '2026-09-01', to: '2026-11-01' }, currency: 'AUD',
   })
@@ -39,17 +39,17 @@ test('projected revenue from allocations for AU, September and October, hard and
 })
 
 test('both companies in AUD: NZD revenue converted at the rate on the last day of the span', () => {
-  const rows = answer({ measures: ['AllocationDay.revenue'], by: [{ to: 'Month' }], span: { from: '2026-09-01', to: '2026-11-01' }, currency: 'AUD' })
+  const rows = answer({ measures: ['BookingDay.revenue'], by: [{ to: 'Month' }], span: { from: '2026-09-01', to: '2026-11-01' }, currency: 'AUD' })
   const rateAtEnd = exchange.filter((x) => x.day <= '2026-10-31').sort((a, b) => b.day.localeCompare(a.day))[0].rate
   const expected = sumBy(days, (d) => d.month, (d) => d.revenue * (project(d.project).currency === 'NZD' ? rateAtEnd : 1))
   assert.deepEqual(round(rows), round([...expected].sort()))
 })
 
-test('AU revenue against the Base Budget by project practice and month', () => {
+test('AU revenue against the Opening Plan by project practice and month', () => {
   const rows = answer({
-    measures: ['AllocationDay.revenue', 'BudgetLine.budget', '[AllocationDay.revenue] - [BudgetLine.budget]'],
-    by: [{ to: 'Practice', via: { AllocationDay: ['project', 'practice'], BudgetLine: ['practice'] } }, { to: 'Month' }],
-    where: [{ to: 'Company', via: { AllocationDay: ['project', 'company'], BudgetLine: ['company'] }, in: ['AU'] }, { to: 'BudgetCategory', in: ['Base Budget'] }],
+    measures: ['BookingDay.revenue', 'PlanLine.budget', '[BookingDay.revenue] - [PlanLine.budget]'],
+    by: [{ to: 'Practice', via: { BookingDay: ['project', 'practice'], PlanLine: ['practice'] } }, { to: 'Month' }],
+    where: [{ to: 'Company', via: { BookingDay: ['project', 'company'], PlanLine: ['company'] }, in: ['AU'] }, { to: 'BudgetCategory', in: ['Opening Plan'] }],
     span: { from: '2026-09-01', to: '2026-11-01' }, currency: 'AUD',
   })
   const revenue = sumBy(days.filter((d) => project(d.project).company === '2'), (d) => `${project(d.project).practice}|${d.month}`, (d) => d.revenue)
@@ -60,50 +60,50 @@ test('AU revenue against the Base Budget by project practice and month', () => {
 })
 
 test('refused, with the reason: the questions that went wrong in the trials', () => {
-  assert.match(refusal({ measures: ['AllocationDay.revenue', 'BudgetLine.budget'], by: [{ to: 'Customer' }], where: [{ to: 'BudgetCategory', in: ['5'] }], currency: 'AUD' }).reason, /BudgetLine does not reach Customer/)
-  const practice = refusal({ measures: ['AllocationDay.hours'], by: [{ to: 'Practice' }] })
+  assert.match(refusal({ measures: ['BookingDay.revenue', 'PlanLine.budget'], by: [{ to: 'Customer' }], where: [{ to: 'BudgetCategory', in: ['5'] }], currency: 'AUD' }).reason, /PlanLine does not reach Customer/)
+  const practice = refusal({ measures: ['BookingDay.hours'], by: [{ to: 'Practice' }] })
   assert.equal(practice.rule, 'A2')
   assert.ok(practice.choices![0].paths.includes('project.practice') && practice.choices![0].paths.includes('person.practice'))
-  assert.equal(refusal({ measures: ['BudgetLine.budget'], by: [{ to: 'Day' }], where: [{ to: 'BudgetCategory', in: ['5'] }], currency: 'AUD' }).rule, 'A1')
-  assert.equal(refusal({ measures: ['BudgetLine.budget'], by: [{ to: 'Month' }], currency: 'AUD' }).rule, 'F1')
-  assert.match(refusal({ measures: ['AllocationDay.hours'], where: [{ to: 'Company', via: ['project', 'company'], in: ['Singapore'] }] }).reason, /no member Singapore/)
+  assert.equal(refusal({ measures: ['PlanLine.budget'], by: [{ to: 'Day' }], where: [{ to: 'BudgetCategory', in: ['5'] }], currency: 'AUD' }).rule, 'A1')
+  assert.equal(refusal({ measures: ['PlanLine.budget'], by: [{ to: 'Month' }], currency: 'AUD' }).rule, 'F1')
+  assert.match(refusal({ measures: ['BookingDay.hours'], where: [{ to: 'Company', via: ['project', 'company'], in: ['Singapore'] }] }).reason, /no member Singapore/)
 })
 
 test('people by the practice they were in that day: someone who moved counts where they were', () => {
-  const rows = answer({ measures: ['AllocationDay.hours'], by: [{ to: 'Practice', via: ['person', 'practice'] }, { to: 'Month' }] })
+  const rows = answer({ measures: ['BookingDay.hours'], by: [{ to: 'Practice', via: ['person', 'practice'] }, { to: 'Month' }] })
   const practiceOn = (id: string, day: string) => { const p = people.find((x) => x.id === id)!; return p.moves && day >= p.moves.on ? p.moves.to : p.practice }
   const expected = sumBy(days, (d) => `${practiceOn(d.person, d.day)}|${d.month}`, (d) => d.hours)
   assert.deepEqual(rows, [...expected].sort().map(([k, v]) => [...k.split('|'), v]))
 })
 
-test('people allocated each month are counted once each', () => {
-  const rows = answer({ measures: ['AllocationDay.people'], by: [{ to: 'Month' }] })
+test('people booked each month are counted once each', () => {
+  const rows = answer({ measures: ['BookingDay.people'], by: [{ to: 'Month' }] })
   const expected = [...new Set(days.map((d) => d.month))].sort().map((m) => [m, new Set(days.filter((d) => d.month === m).map((d) => d.person)).size])
   assert.deepEqual(rows, expected)
 })
 
 test('drill up from projects to their practices gives the same numbers as asking by project practice', () => {
-  const byProject: Question = { measures: ['AllocationDay.hours'], by: [{ to: 'Project' }] }
+  const byProject: Question = { measures: ['BookingDay.hours'], by: [{ to: 'Project' }] }
   const up = applyMove(s, byProject, { move: 'drill up', target: 0, along: 'practice' })
   assert.ok(up.verdict.ok)
-  assert.deepEqual(evaluate(s, I, (up.verdict as any).plan).rows, answer({ measures: ['AllocationDay.hours'], by: [{ to: 'Practice', via: ['project', 'practice'] }] }))
-  assert.equal(canonical(s, up.question), canonical(s, { measures: ['AllocationDay.hours'], by: [{ to: 'Practice', via: ['project', 'practice'] }] }))
+  assert.deepEqual(evaluate(s, I, (up.verdict as any).plan).rows, answer({ measures: ['BookingDay.hours'], by: [{ to: 'Practice', via: ['project', 'practice'] }] }))
+  assert.equal(canonical(s, up.question), canonical(s, { measures: ['BookingDay.hours'], by: [{ to: 'Practice', via: ['project', 'practice'] }] }))
 })
 
 test('what if j1 were charged at 300 an hour: only j1\'s priced hours change, and revenue is produced again from the new rate', () => {
-  const c = counterfactual(model, { measures: ['AllocationDay.revenue'], by: [{ to: 'Project' }], currency: 'AUD', span: { from: '2026-09-01', to: '2026-11-01' } }, [{ on: 'RateCard', match: { project: 'j1' }, set: { rate: 300 } }])
+  const c = counterfactual(model, { measures: ['BookingDay.revenue'], by: [{ to: 'Project' }], currency: 'AUD', span: { from: '2026-09-01', to: '2026-11-01' } }, [{ on: 'RateCard', match: { project: 'j1' }, set: { rate: 300 } }])
   const expected = days.filter((d) => d.project === 'j1' && rates.has(`j1|${d.person}`)).reduce((a, d) => a + d.hours * (300 - rates.get(`j1|${d.person}`)!), 0)
   for (const r of c.rows) assert.equal(r.difference[0], r.key[0] === 'j1' ? expected : 0, String(r.key[0]))
-  assert.ok(c.notes.some((n) => /produced again: AllocationDay/.test(n)))
+  assert.ok(c.notes.some((n) => /produced again: BookingDay/.test(n)))
 })
 
 test('AU and 2 are the same question', () => {
-  const q = (v: string): Question => ({ measures: ['AllocationDay.hours'], where: [{ to: 'Company', via: ['project', 'company'], in: [v] }] })
+  const q = (v: string): Question => ({ measures: ['BookingDay.hours'], where: [{ to: 'Company', via: ['project', 'company'], in: [v] }] })
   assert.equal(canonical(s, q('AU')), canonical(s, q('2')))
 })
 
 test('as of 15 September, the rate dated 15 October is not known yet: the latest known rate converts', () => {
-  const q: Question = { measures: ['AllocationDay.revenue'], span: { from: '2026-09-01', to: '2026-11-01' }, currency: 'AUD' }
+  const q: Question = { measures: ['BookingDay.revenue'], span: { from: '2026-09-01', to: '2026-11-01' }, currency: 'AUD' }
   const nzd = days.filter((d) => project(d.project).currency === 'NZD').reduce((a, d) => a + d.revenue, 0)
   const aud = days.filter((d) => project(d.project).currency === 'AUD').reduce((a, d) => a + d.revenue, 0)
   assert.deepEqual(round(answer({ ...q, asOf: '2026-09-15' })), round([[aud + nzd * 0.91]]))

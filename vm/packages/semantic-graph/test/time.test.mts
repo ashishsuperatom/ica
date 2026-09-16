@@ -114,7 +114,7 @@ test('moments are placed in the asker\'s days by the offset in force at each mom
   const v = check(s, { measures: ['Login.n'], by: [{ to: 'Day' }], span: { from: '2026-10-04', to: '2026-10-06' } })
   assert.ok(v.ok)
   // In Sydney: 13:30 UTC is 23:30 on the 3rd (+10); 14:30 is 00:30 on the 4th; after the change 12:30 UTC on the 4th is 23:30 (+11), 13:30 is 00:30 on the 5th.
-  assert.deepEqual((await runSql(s, sources, v.plan, query, undefined, { zone: 'Australia/Sydney' })).rows, [['2026-10-04', 4], ['2026-10-05', 1]])
+  assert.deepEqual((await runSql(s, sources, v.plan, query, undefined, { zone: 'Australia/Sydney' })).rows, [['2026-10-04', 4], ['2026-10-05', 1]])   // platform-word: a timezone is the world's name, and this test is about this zone's own change
   assert.deepEqual((await runSql(s, sources, v.plan, query, undefined, { zone: 'UTC' })).rows, [['2026-10-04', 2]])
 })
 

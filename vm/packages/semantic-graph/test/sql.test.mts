@@ -56,14 +56,14 @@ test('the consultancy: every question, in SQL, gives the reference answer', asyn
   const I = materialise(consultancy.model)
   const SPAN = { from: '2026-09-01', to: '2026-11-01' }
   await same(consultancy.schema, I, [
-    ['AU revenue, hard and soft', { measures: ['AllocationDay.revenue'], by: [{ to: 'Month' }, { attribute: 'commitment' }], where: [{ to: 'Company', via: ['project', 'company'], in: ['AU'] }], span: SPAN, currency: 'AUD' }],
-    ['all revenue in AUD, as of today', { measures: ['AllocationDay.revenue'], by: [{ to: 'Month' }], span: SPAN, currency: 'AUD', asOf: '2026-09-15' }],
-    ['revenue against Base Budget', { measures: ['AllocationDay.revenue', 'BudgetLine.budget', '[AllocationDay.revenue] - [BudgetLine.budget]'], by: [{ to: 'Practice', via: { AllocationDay: ['project', 'practice'], BudgetLine: ['practice'] } }, { to: 'Month' }], where: [{ to: 'Company', via: { AllocationDay: ['project', 'company'], BudgetLine: ['company'] }, in: ['AU'] }, { to: 'BudgetCategory', in: ['Base Budget'] }], span: SPAN, currency: 'AUD' }],
-    ['by the practice a person was in', { measures: ['AllocationDay.hours'], by: [{ to: 'Practice', via: ['person', 'practice'] }, { to: 'Month' }], span: SPAN }],
-    ['by the project manager\'s practice that day', { measures: ['AllocationDay.hours'], by: [{ to: 'Practice', via: ['project', 'manager', 'practice'] }], span: SPAN }],
-    ['everyone under e1', { measures: ['AllocationDay.hours'], where: [{ to: 'Person', via: ['person'], under: 'manager', in: ['e1'] }], span: SPAN }],
-    ['practice shares with totals', { measures: ['AllocationDay.hours', 'AllocationDay.unpriced hours'], by: [{ to: 'Practice', via: ['project', 'practice'] }], span: SPAN, share: { outputs: ['AllocationDay.hours'], within: [] }, totals: [[]] }],
-    ['October against September', { measures: ['AllocationDay.revenue'], by: [{ to: 'Month' }], span: { from: '2026-10-01', to: '2026-11-01' }, currency: 'AUD', compare: { back: { months: 1 } } }],
+    ['AU revenue, hard and soft', { measures: ['BookingDay.revenue'], by: [{ to: 'Month' }, { attribute: 'commitment' }], where: [{ to: 'Company', via: ['project', 'company'], in: ['AU'] }], span: SPAN, currency: 'AUD' }],
+    ['all revenue in AUD, as of today', { measures: ['BookingDay.revenue'], by: [{ to: 'Month' }], span: SPAN, currency: 'AUD', asOf: '2026-09-15' }],
+    ['revenue against Opening Plan', { measures: ['BookingDay.revenue', 'PlanLine.budget', '[BookingDay.revenue] - [PlanLine.budget]'], by: [{ to: 'Practice', via: { BookingDay: ['project', 'practice'], PlanLine: ['practice'] } }, { to: 'Month' }], where: [{ to: 'Company', via: { BookingDay: ['project', 'company'], PlanLine: ['company'] }, in: ['AU'] }, { to: 'BudgetCategory', in: ['Opening Plan'] }], span: SPAN, currency: 'AUD' }],
+    ['by the practice a person was in', { measures: ['BookingDay.hours'], by: [{ to: 'Practice', via: ['person', 'practice'] }, { to: 'Month' }], span: SPAN }],
+    ['by the project manager\'s practice that day', { measures: ['BookingDay.hours'], by: [{ to: 'Practice', via: ['project', 'manager', 'practice'] }], span: SPAN }],
+    ['everyone under e1', { measures: ['BookingDay.hours'], where: [{ to: 'Person', via: ['person'], under: 'manager', in: ['e1'] }], span: SPAN }],
+    ['practice shares with totals', { measures: ['BookingDay.hours', 'BookingDay.unpriced hours'], by: [{ to: 'Practice', via: ['project', 'practice'] }], span: SPAN, share: { outputs: ['BookingDay.hours'], within: [] }, totals: [[]] }],
+    ['October against September', { measures: ['BookingDay.revenue'], by: [{ to: 'Month' }], span: { from: '2026-10-01', to: '2026-11-01' }, currency: 'AUD', compare: { back: { months: 1 } } }],
   ])
 })
 

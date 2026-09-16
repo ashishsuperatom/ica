@@ -1,4 +1,4 @@
-// Where rows come from. A program spreads planned hours over working days and a second program builds a forecast on
+// Where rows come from. A program spreads planned hours over working days and a second program builds a projected on
 // the sales it reads; a fact is a statement on another fact. An intervention on sales reaches both. Sources are
 // checked when they are defined; a schema that would break a session's question is refused; a replay runs the exact
 // program an answer ran, even after the name moved.
@@ -11,12 +11,12 @@ import { toSqlite } from './fixtures/sqlite.js'
 function model() {
   const s: Schema = structuredClone(base)
   s.objects.Planned = { kind: 'fact', arrows: { project: 'Project', day: 'Day' }, measures: { hours: { unit: 'h', kind: 'flow', aggregate: 'sum' } } }
-  s.objects.Forecast = { kind: 'fact', arrows: { project: 'Project', day: 'Day' }, measures: { hours: { unit: 'h', kind: 'flow', aggregate: 'sum' } } }
+  s.objects.Projected = { kind: 'fact', arrows: { project: 'Project', day: 'Day' }, measures: { hours: { unit: 'h', kind: 'flow', aggregate: 'sum' } } }
   s.objects.HardSale = { kind: 'fact', arrows: { person: 'Person', project: 'Project', day: 'Day' }, measures: { hours: { unit: 'h', kind: 'flow', aggregate: 'sum' } } }
   const { query, sources } = toSqlite(base, I)
   const src: Sources = structuredClone(sources)
   src.facts.Planned = { source: '@local', program: 'spread plan', arrows: { project: 'project_id' }, time: 'day', measures: { hours: 'hours' } }
-  src.facts.Forecast = { source: '@local', program: 'forecast', arrows: { project: 'project_id' }, time: 'day', measures: { hours: 'hours' } }
+  src.facts.Projected = { source: '@local', program: 'projected', arrows: { project: 'project_id' }, time: 'day', measures: { hours: 'hours' } }
   src.facts.HardSale = { source: 'DB', sql: `SELECT * FROM {{Sale}} x WHERE x."t:commitment" = 'Hard'`, arrows: { person: 'a:person', project: 'a:project' }, time: 'time', measures: { hours: 'm:hours' } }
   return { s, query, src }
 }
@@ -30,7 +30,7 @@ const SPREAD = `export default async (ctx, { from, to }) => {
   return rows
 }`
 // Sales so far, by project and day, grown by a tenth.
-const FORECAST = `export default async (ctx) => {
+const PROJECTED = `export default async (ctx) => {
   const byKey = new Map()
   for (const r of await ctx.rows('Sale')) { const k = r['a:project'] + '|' + r.time; byKey.set(k, (byKey.get(k) ?? 0) + r['m:hours']) }
   return [...byKey].map(([k, h]) => ({ project_id: k.split('|')[0], day: k.split('|')[1], hours: Math.round(h * 1.1 * 100) / 100 }))
@@ -41,7 +41,7 @@ async function setup(wrap?: (q: Query) => Query) {
   const g = createGraph({ store: new Store(':memory:'), query: wrap ? wrap(query) : query, today: () => '2026-10-10' })
   g.defineSchema('b', s, 't')
   g.defineProgram('spread plan', { produces: 'Planned', reads: { sources: [], objects: [] }, body: SPREAD }, 't')
-  g.defineProgram('forecast', { produces: 'Forecast', reads: { sources: [], objects: ['Sale'] }, body: FORECAST }, 't')
+  g.defineProgram('projected', { produces: 'Projected', reads: { sources: [], objects: ['Sale'] }, body: PROJECTED }, 't')
   await g.defineSources('b', src, 't')
   return { g, s, src, query }
 }
@@ -63,7 +63,7 @@ test('a program produces a fact; its rows join the entities of a SQL source, rea
 
 test('a statement on another fact, and a program on the rows of another fact: an intervention on sales reaches both', async () => {
   const { g } = await setup()
-  const q = { measures: ['HardSale.hours', 'Forecast.hours'], by: [B], span: { from: '2026-09-01', to: '2026-11-01' } }
+  const q = { measures: ['HardSale.hours', 'Projected.hours'], by: [B], span: { from: '2026-09-01', to: '2026-11-01' } }
   const c = await g.counterfactual(q, [{ on: 'Sale', match: { project: 'j1' }, scale: { hours: 2 } }], { model: 'b' })
   assert.ok(c.ok, JSON.stringify((c as any).intervened ?? c.actual))
   assert.deepEqual(c.rows.map((x) => [x.key[0], x.actual, x.intervened]), [['b1', [21, 23.1], [42, 46.2]], ['b3', [null, 8.8], [null, 8.8]]])
@@ -77,8 +77,8 @@ test('sources are checked when they are defined', async () => {
   await assert.rejects(g.defineSources('b', circle, 't'), /in a circle/)
   const noProgram = structuredClone(src); noProgram.facts.Planned.program = 'nothing'
   await assert.rejects(g.defineSources('b', noProgram, 't'), /"nothing", which does not exist/)
-  const wrongProgram = structuredClone(src); wrongProgram.facts.Planned.program = 'forecast'
-  await assert.rejects(g.defineSources('b', wrongProgram, 't'), /produces Forecast, not Planned/)
+  const wrongProgram = structuredClone(src); wrongProgram.facts.Planned.program = 'projected'
+  await assert.rejects(g.defineSources('b', wrongProgram, 't'), /produces Projected, not Planned/)
   const noArrow = structuredClone(src); delete (noArrow.facts.Sale.arrows as any).project
   await assert.rejects(g.defineSources('b', noArrow, 't'), /Sale.project has no column/)
 })

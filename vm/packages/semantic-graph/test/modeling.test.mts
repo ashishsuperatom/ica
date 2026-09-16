@@ -12,20 +12,20 @@ const s: Schema = {
   objects: {
     ...branches.objects,
     Project: { ...branches.objects.Project, attributes: {
-      rag: { type: 'text', members: ['Red', 'Amber', 'Green'], description: 'the project health rating' },
+      health: { type: 'text', members: ['Stop', 'Watch', 'Go'], description: 'the project health rating' },
       golive: { type: 'date', synonyms: ['go-live date'] },
       budget: { type: 'number' },
     } },
   },
   conditions: {
-    'at-risk project': { on: 'Project', description: 'rated Red or Amber', synonyms: ['risky project'], where: [{ attribute: 'rag', in: ['Red', 'Amber'] }] },
+    'at-risk project': { on: 'Project', description: 'rated Stop or Watch', synonyms: ['risky project'], where: [{ attribute: 'health', in: ['Stop', 'Watch'] }] },
     'hard sale': { on: 'Sale', description: 'a committed sale', where: [{ attribute: 'commitment', in: ['Hard'] }] },
     'sydney project': { on: 'Project', where: [{ to: 'Branch', via: ['branch'], in: ['Sydney'] }] },
   },
 }
 const I: Instance = { ...base, elements: { ...base.elements, Project: {
-  j1: { ...base.elements.Project.j1, attributes: { rag: 'Red', golive: '2026-10-20', budget: 100 } },
-  j2: { ...base.elements.Project.j2, attributes: { rag: 'Green', golive: '2026-12-01', budget: null } },
+  j1: { ...base.elements.Project.j1, attributes: { health: 'Stop', golive: '2026-10-20', budget: 100 } },
+  j2: { ...base.elements.Project.j2, attributes: { health: 'Go', golive: '2026-12-01', budget: null } },
 } } }
 const { query, sources } = toSqlite(s, I)
 const same = async (q: Question, expected: unknown[][], context = {}) => {
@@ -42,12 +42,12 @@ test('the schema with attributes on a dimension and named conditions is sound', 
 })
 
 test('an attribute of what a fact reaches: grouped by, and kept to by value or by range', async () => {
-  await same({ measures: ['Sale.hours'], by: [{ attribute: 'rag', of: 'Project' }] }, [['Green', 8], ['Red', 21]])
+  await same({ measures: ['Sale.hours'], by: [{ attribute: 'health', of: 'Project' }] }, [['Go', 8], ['Stop', 21]])
   await same({ measures: ['Sale.hours'], where: [{ attribute: 'golive', of: 'Project', range: { from: '2026-10-01', to: '2026-11-01' } }] }, [[21]])
   await same({ measures: ['Sale.hours'], where: [{ attribute: 'budget', of: 'Project', range: { from: 50 } }] }, [[21]])
-  const unknown = check(s, { measures: ['Sale.hours'], where: [{ attribute: 'rag', of: 'Project', in: ['Purple'] }] })
-  assert.ok(!unknown.ok && /no value Purple — its values are Red, Amber, Green/.test(unknown.reason))
-  const unsaid = check(s, { measures: ['Sale.hours'], by: [{ attribute: 'rag' }] })
+  const unknown = check(s, { measures: ['Sale.hours'], where: [{ attribute: 'health', of: 'Project', in: ['Purple'] }] })
+  assert.ok(!unknown.ok && /no value Purple — its values are Stop, Watch, Go/.test(unknown.reason))
+  const unsaid = check(s, { measures: ['Sale.hours'], by: [{ attribute: 'health' }] })
   assert.ok(!unsaid.ok && /"of": "Project"/.test(unsaid.reason), 'says whose attribute it is')
   const dimension = check(s, { measures: ['Sale.hours'], where: [{ to: 'Branch', via: ['project', 'branch'], range: { from: 'a' } }] })
   assert.ok(!dimension.ok && /range keeps dates or numbers/.test(dimension.reason))
@@ -86,8 +86,8 @@ test('the agent finds conditions and attributes, and reads them in the graph', (
   const terms = resolveTerms(s, 'hours on at-risk projects', '2026-09-15')
   assert.ok(terms.terms.some((t) => t.means.some((m: any) => m.kind === 'condition' && m.condition === 'at-risk project')), JSON.stringify(terms))
   const text = nodeText(s, 'Project')
-  assert.match(text, /rag\s+text\s+Red, Amber, Green — the project health rating/)
-  assert.match(text, /at-risk project\s+rated Red or Amber/)
+  assert.match(text, /health\s+text\s+Stop, Watch, Go — the project health rating/)
+  assert.match(text, /at-risk project\s+rated Stop or Watch/)
 })
 
 test('a condition about one of the facts asked about keeps that fact alone', async () => {
@@ -115,7 +115,7 @@ test('money on a fact with no time converts at the rates of the day it is answer
 
 test('totals and shares are checked as their question was: the same day, the same conditions set aside', () => {
   const timeless: Schema = { ...s, objects: { ...s.objects, Contract: { ...s.objects.Contract, arrows: { project: 'Project' }, keptTo: ['sydney project'] } } }
-  const v = check(timeless, { measures: ['Contract.value'], by: [{ attribute: 'rag', of: 'Project' }], currency: 'AUD', totals: [[]], without: ['sydney project'] }, { today: '2026-12-31' })
+  const v = check(timeless, { measures: ['Contract.value'], by: [{ attribute: 'health', of: 'Project' }], currency: 'AUD', totals: [[]], without: ['sydney project'] }, { today: '2026-12-31' })
   if (!v.ok) assert.fail(v.reason)
   assert.deepEqual(evaluate(timeless, I, v.plan).totals?.[0].rows, [[15000]], 'both projects, as the question set the condition aside')
 })
@@ -131,7 +131,7 @@ test('a fact states its grain and is sliced by dimensions: entities, attributes 
   assert.equal(d.get('Branch')?.default, undefined, 'several paths and no default: a question says which')
   assert.ok((d.get('Branch')?.paths.length ?? 0) > 1)
   assert.deepEqual([d.get('commitment')?.kind, d.get('commitment')?.of], ['attribute', 'Sale'])
-  assert.deepEqual([d.get('Project.rag')?.kind, d.get('Project.rag')?.of, d.get('Project.rag')?.default], ['attribute', 'Project', ['project']])
+  assert.deepEqual([d.get('Project.health')?.kind, d.get('Project.health')?.of, d.get('Project.health')?.default], ['attribute', 'Project', ['project']])
   assert.ok(d.get('Person')?.partial, 'a sponsor may be none')
   assert.deepEqual(conformedDimensions(s, ['Sale', 'Budget']).map((x) => x.name), ['Month', 'Quarter', 'Year', 'Branch', 'Region', 'State'])
   assert.throws(() => dimensions(s, 'Project'), /dimensions belong to facts/)

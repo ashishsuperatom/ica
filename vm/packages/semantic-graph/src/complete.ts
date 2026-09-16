@@ -202,7 +202,7 @@ export function fragmentOf(terms: Array<{ phrase: string; means: Meaning[] }>, s
       else if (m.kind === 'attribute' && m.value === undefined) f.byAttribute!.push({ attribute: m.attribute, of: m.node })
     }
     // Records are what the question is KEPT to — unless the same word is also a measure or an object, in which
-    // case that is what it is. A report line called "Consulting revenue" must not turn the word "revenue" into a
+    // case that is what it is. A record whose name happens to contain a measure's word must not turn that word into a
     // filter: a word means an idea once, and the idea nearest the question wins.
     const members = t.means.filter((m) => m.kind === 'member') as Array<Extract<Found, { kind: 'member' }>>
     if (members.length && !kinds.has('measure') && !kinds.has('object')) {

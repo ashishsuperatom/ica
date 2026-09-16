@@ -107,7 +107,7 @@ export function semanticTable(r: { columns: Array<{ name: string; unit?: string 
   const targets = r.columns.filter((c) => !c.unit).length
   const rowsNamed = r.rows.map(named).sort((a, b) => { for (let i = 0; i < targets; i++) { const c = String(a[i] ?? '\uffff').localeCompare(String(b[i] ?? '\uffff'), undefined, { numeric: true }); if (c) return c } return 0 })
   // Headings a person reads: "Month" for "Month by day.month" unless two columns would read the same, "Revenue" for
-  // "AllocationDay.revenue", and an expression's measures by their own names.
+  // "Fact.measure", and an expression's measures by their own names.
   const plain = (name: string) => name.includes(' by ') ? name.slice(0, name.indexOf(' by ')) : name.replace(/\[?[A-Z]\w*\.([^\]\s*/+-]+(?: [^\]*/+-]+)*)\]?/g, (_m, measure: string) => measure.trim())
   const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
   const short = r.columns.map((c) => capital(plain(c.name)))

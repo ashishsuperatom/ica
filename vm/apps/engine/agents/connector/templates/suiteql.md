@@ -5,7 +5,7 @@ writes SuiteQL (not HTTP). You write a bridge that authenticates, runs SuiteQL, 
 
 ## Connect
 - **Auth: OAuth 2.0 machine-to-machine.** Build a **PS256** JWT (RSASSA-PSS, SHA-256, salt length **32**) —
-  header `{alg:"PS256", typ:"JWT", kid:<CERT_ID>}`, payload `{iss:<CLIENT_ID>, scope:["rest_webservices","suite_analytics"], aud:<token_url>, iat, exp:+1h}` — signed with the account's private key
+  header `{alg:"PS256", typ:"JWT", kid:<CERT_ID>}`, payload `{iss:<CLIENT_ID>, scope:["rest_webservices","suite_analytics"], aud:<token_url>   <!-- platform-word: aud is the JWT audience claim -->, iat, exp:+1h}` — signed with the account's private key
   (`node:crypto`, no deps). Exchange it (`grant_type=client_credentials`, `client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer`) at
   `https://<ACCOUNT>.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token` for an access token; **cache + auto-refresh**.
 - **Query:** `POST https://<ACCOUNT>.suitetalk.api.netsuite.com/services/rest/query/v1/suiteql?limit=1000&offset=N`

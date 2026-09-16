@@ -79,7 +79,7 @@ export const model: Model = {
     },
     {
       // Allocation spread over working days; revenue is hours × the rate card's rate, or unpriced when there is none.
-      produces: 'AllocationDay', reads: ['Person', 'Project', 'RateCard'],
+      produces: 'BookingDay', reads: ['Person', 'Project', 'RateCard'],
       run: (I) => {
         const card = new Map((I.rows.RateCard ?? []).map((r) => [`${r.arrows.project}|${r.arrows.person}`, r.measures.rate]))
         const rows = new Map<string, Row>()
@@ -94,7 +94,7 @@ export const model: Model = {
     },
     { produces: 'TimesheetLine', reads: ['Person', 'Project'], run: () => [] },
     {
-      produces: 'BudgetLine', reads: ['Company', 'Practice', 'Account', 'BudgetCategory'],
+      produces: 'PlanLine', reads: ['Company', 'Practice', 'Account', 'BudgetCategory'],
       run: () => budgets.map((b) => ({ arrows: { company: b.company, practice: b.practice, account: b.account, category: b.category, month: b.month }, measures: { budget: b.amount } })),
     },
     { produces: 'ExchangeRate', reads: ['Currency'], run: () => exchange.map((x) => ({ arrows: { from: x.from, to: x.to, day: x.day }, measures: { rate: x.rate } })) },

@@ -1,0 +1,23 @@
+# WORDS THE PLATFORM USES FOR ITS OWN REASONS.
+#
+# A model may name one of its things with an ordinary word, and the platform goes on needing that word for what it
+# always meant. Each line here is a CLAIM that this is our word and not a customer's — the opposite of a list of
+# somebody's data, and it stays short because that is the whole point of it.
+#
+# A phrase is claimed only when it is plainly the language's and not a model's — it should be rare here.
+# For a single line that must keep a word, write `platform-word: <why>` on it instead of claiming it for everywhere.
+actual
+base
+hard
+soft
+open
+rejected
+revenue
+green
+legacy
+planned
+timesheet
+not recorded
+# A currency code belongs to the world, not to whoever happens to keep books in it: tests and examples need one,
+# and every one of them is somebody's. What must not appear is a customer's own vocabulary around it.
+aud

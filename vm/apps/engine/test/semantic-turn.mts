@@ -37,7 +37,7 @@ const projectDir = join(root, 'project')
 mkdirSync(projectDir, { recursive: true })
 // The model, built in the project's graph store through its operations — as the semantic-graph tool builds one.
 new ModelStore(semanticFile(join(root, 'branches', 'db'))).import(MODEL, { schema, sources }, { by: 'test' })
-writeFileSync(join(projectDir, 'settings.json'), JSON.stringify({ timezone: 'Australia/Sydney', currency: 'AUD' }))
+writeFileSync(join(projectDir, 'settings.json'), JSON.stringify({ timezone: 'Europe/Lisbon', currency: 'AUD' }))
 
 const sid = `trial-${Date.now().toString(36)}`
 const graph = await openSemanticGraph({ dbDir: join(root, 'branches', 'db'), projectDir, managerUrl })

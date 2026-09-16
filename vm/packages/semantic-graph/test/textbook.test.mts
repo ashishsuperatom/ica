@@ -46,7 +46,7 @@ test('chasm trap: sales and budget are added up apart, then put side by side', (
 
 test('versions: a budget is never added across versions', () => {
   refused({ measures: ['Budget.budget'], by: [{ to: 'Month' }], currency: 'AUD' }, 'F1', /versions/)
-  assert.deepEqual(run({ measures: ['Budget.budget'], by: [{ to: 'BudgetVersion' }], currency: 'AUD', span: { from: '2026-09-01', to: '2026-10-01' } }), [['base', 2000], ['forecast', 9999]])
+  assert.deepEqual(run({ measures: ['Budget.budget'], by: [{ to: 'BudgetVersion' }], currency: 'AUD', span: { from: '2026-09-01', to: '2026-10-01' } }), [['base', 2000], ['projected', 9999]])
 })
 
 test('a filter on one fact\'s version is about that fact; a filter on something another fact cannot reach is refused', () => {

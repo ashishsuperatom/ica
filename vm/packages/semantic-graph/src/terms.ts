@@ -3,7 +3,7 @@
 // A person asks in their own words; a question of the graph is in the graph's. Reading the question whole finds what
 // each of its terms is, all at once:
 //
-//   the longest phrase wins     "base budget" is one term when the graph has it, not "base" and "budget"
+//   the longest phrase wins     a phrase the graph holds is one term, not each of its words on its own
 //   dates become spans          "September and October 2026", "last quarter", "the last 30 days", "Q3 2026"
 //   records are looked up       names at the entity sources, one lookup per entity for every phrase of the question
 //   near misses are repaired    "revenu" reads as revenue, and says it was repaired

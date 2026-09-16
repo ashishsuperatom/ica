@@ -16,7 +16,9 @@
     "logs": "pm2 logs",
     "flush": "pm2 flush",
     "dev": "pnpm run --parallel --filter datasource-manager --filter datasource-demo --filter code-engine dev",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "check:generic": "tsx scripts/platform-says-nothing-about-one-dataset.mts",
+    "check": "pnpm run typecheck && pnpm run check:generic"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

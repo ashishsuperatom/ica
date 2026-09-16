@@ -25,7 +25,7 @@ export type Filter = (({ to: string; via?: string[] | Record<string, string[]>; 
   | { condition: string; via?: string[] | Record<string, string[]> }
 
 export interface Question {
-  /** `Fact.measure`, or an expression over them: `[AllocationDay.revenue] / [BudgetLine.budget]`. */
+  /** `Fact.measure`, or an expression over them: `[A.x] / [B.y]`, over measures of any facts that share a grouping. */
   measures: string[]
   by?: Target[]
   where?: Filter[]
