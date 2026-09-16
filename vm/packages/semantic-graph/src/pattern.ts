@@ -161,45 +161,61 @@ export function patternOf(s: Schema, q: Question, context?: { today?: string }):
 // the checker, the compiler, the tools an agent runs — keep working while the pattern becomes the thing we hold.
 
 export function toQuestion(s: Schema, p: Pattern): Question {
-  const out: Record<string, string[]> = {}   // node id → its path from each fact node it hangs off
-  const from = new Map<string, { fact: string; path: string[] }>()
-  for (const n of p.nodes) if (n.root) from.set(n.id, { fact: n.object, path: [] })
-  // Walk outwards from each fact node, so every node knows the route that reached it.
-  let grew = true
-  while (grew) {
-    grew = false
-    for (const e of p.edges) {
-      const at = from.get(e.from)
-      if (!at || from.has(e.to)) continue
-      from.set(e.to, { fact: at.fact, path: [...at.path, e.role] })
-      grew = true
+  // Every route to every node, from each fact that reaches it. A node reached by two facts by different arrows is
+  // exactly the case a question writes as a per-fact `via` — and it is the shape that makes two facts comparable.
+  const routes = new Map<string, Array<{ fact: string; path: string[] }>>()
+  const byId = new Map(p.nodes.map((n) => [n.id, n]))
+  for (const root of p.nodes.filter((n) => n.root)) {
+    const seen = new Set<string>([root.id])
+    let edge: Array<{ id: string; path: string[] }> = [{ id: root.id, path: [] }]
+    routes.set(root.id, [...(routes.get(root.id) ?? []), { fact: root.object, path: [] }])
+    while (edge.length) {
+      const next: typeof edge = []
+      for (const at of edge) {
+        for (const e of p.edges.filter((x) => x.from === at.id)) {
+          if (seen.has(e.to)) continue
+          seen.add(e.to)
+          const path = [...at.path, e.role]
+          routes.set(e.to, [...(routes.get(e.to) ?? []), { fact: root.object, path }])
+          next.push({ id: e.to, path })
+        }
+      }
+      edge = next
     }
   }
-  const byNode = new Map(p.nodes.map((n) => [n.id, n]))
-  const nodeOf = new Map(p.nodes.map((n) => [n.id, n]))
-  const via = (id: string): { fact: string; path: string[] } => {
-    const found = from.get(id)
-    if (found) return found
-    // A value of the fact's own row: no arrow leads to it, so it is read from the fact it hangs off.
-    const owner = nodeOf.get(id)?.owner
-    return owner ? { fact: nodeOf.get(owner)!.object, path: [] } : { fact: '', path: [] }
+  // A value carried by a fact's own row has no arrow leading to it; it belongs to the fact it hangs off.
+  for (const n of p.nodes) if (n.owner && !routes.has(n.id)) routes.set(n.id, [{ fact: byId.get(n.owner)!.object, path: [] }])
+
+  /** How a question names the way to this node: nothing when there is one route of no steps, a path when every
+   *  fact walks the same one, and a path per fact when they differ. */
+  const allFacts = p.nodes.filter((n) => n.root).map((n) => n.object)
+  const viaOf = (id: string) => {
+    const rs = routes.get(id) ?? []
+    if (!rs.length || rs.every((r) => !r.path.length)) return undefined
+    const distinct = new Set(rs.map((r) => r.path.join('.')))
+    // One path every fact walks is written once; otherwise each fact says its own — including when a node is
+    // reached by only some of them, which is how a filter stays about the fact it belongs to.
+    const reaches = new Set(rs.map((r) => r.fact))
+    if (distinct.size === 1 && allFacts.every((f) => reaches.has(f))) return rs[0].path
+    return Object.fromEntries(rs.map((r) => [r.fact, r.path]))
+  }
+  const ofOwner = (n: PatternNode) => {
+    const rs = routes.get(n.id) ?? []
+    return rs.length && rs.every((r) => !r.path.length && r.fact === n.object) ? undefined : n.object
   }
 
-  const groups = p.nodes.filter((n) => n.group).sort((a, b) => a.group!.order - b.group!.order)
-  const by = groups.map((n) => {
-    const routes = p.nodes.filter((x) => x === n).map(() => via(n.id))
-    const r = routes[0]
-    const target = n.attribute ? { attribute: n.attribute, ...(n.object && (r.path.length || n.object !== r.fact) ? { of: n.object } : {}) } : { to: n.object }
-    return r.path.length ? { ...target, via: r.path } : target
+  const by = p.nodes.filter((n) => n.group).sort((a, b) => a.group!.order - b.group!.order).map((n) => {
+    const via = viaOf(n.id)
+    const target = n.attribute ? { attribute: n.attribute, ...(ofOwner(n) ? { of: n.object } : {}) } : { to: n.object }
+    return via ? { ...target, via } : target
   })
 
-  const where: Question['where'] = []
+  const where: NonNullable<Question['where']> = []
   for (const n of p.nodes) for (const k of n.keep ?? []) {
-    const r = via(n.id)
-    const target = n.attribute ? { attribute: n.attribute, ...(n.object !== r.fact || r.path.length ? { of: n.object } : {}) } : { to: n.object }
-    where.push({ ...target, ...(r.path.length ? { via: r.path } : {}), ...k } as any)
+    const via = viaOf(n.id)
+    const target = n.attribute ? { attribute: n.attribute, ...(ofOwner(n) ? { of: n.object } : {}) } : { to: n.object }
+    where.push({ ...target, ...(via ? { via } : {}), ...k } as NonNullable<Question['where']>[number])
   }
-  void byNode; void out
   return { measures: p.outputs, ...(by.length ? { by } : {}), ...(where.length ? { where } : {}), ...p.coords } as Question
 }
 
