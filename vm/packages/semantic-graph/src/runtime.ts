@@ -709,9 +709,34 @@ export function createGraph(o: GraphOptions) {
     const near = await run(dm.limit(`SELECT e.${q(es.key)} AS k, e.${q(es.label)} AS l FROM (${es.sql}) e WHERE LOWER(e.${q(es.label)}) LIKE @m`, a.limit ?? 200), { m: pattern })
     const found = bestMembers(near.rows.map((r) => ({ key: String(r.k), label: String(r.l) })), typed)
     if (found.matches.length) return { ...found, from: `the source of ${object}` }
-    // Nothing contains the text: look for typing mistakes among all the labels, if the source gives them all.
-    const all = await run(`SELECT e.${q(es.key)} AS k, e.${q(es.label)} AS l FROM (${es.sql}) e`, {})
-    if (all.capped) return { matches: [], ambiguous: false, from: `the source of ${object}`, note: `${es.source} gives only part of ${object}'s members, so typing mistakes were not looked for` }
+    // NOTHING HOLDS THE WHOLE PHRASE. A name of several words is rarely written the way it is asked for: a letter
+    // left out, a job number in front, punctuation the question had none of. So the WORDS are searched instead —
+    // each by its opening, which survives a mistake made later in the word — in ONE query, and what comes back is
+    // scored by how much of what was typed each name holds. This finds a row wherever it sits in the table,
+    // which a scan of the first N rows cannot.
+    const words = [...new Set(typed.trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').split(' ').filter((w) => w.length >= 4))]
+      .sort((x, y) => y.length - x.length).slice(0, 4)
+    // ONE WORD AT A TIME, THE LONGEST FIRST. Asked together, the common words fill the answer before the rare one
+    // is reached — "build", "deploy" and "phase" match hundreds of projects and "pasp" matches four, and a row
+    // limit shared between them keeps the hundreds. Asked on its own, the rare word costs one small query and
+    // brings back the row that was wanted. The answer is scored against EVERYTHING typed, however it was found.
+    const seen = new Map<string, { key: string; label: string }>()
+    for (const w of words) {
+      const near2 = await run(dm.limit(`SELECT e.${q(es.key)} AS k, e.${q(es.label)} AS l FROM (${es.sql}) e WHERE LOWER(e.${q(es.label)}) LIKE @w`, 100), { w: `%${w.slice(0, 4)}%` })
+      for (const r of near2.rows) seen.set(String(r.k), { key: String(r.k), label: String(r.l) })
+      const held = bestMembers([...seen.values()], typed)
+      // A name holding every word typed is the one meant; nothing a later word finds can better it.
+      if (held.matches.length && held.matches[0].missing === 0) return { ...held, from: `the source of ${object}` }
+    }
+    if (seen.size) {
+      const held = bestMembers([...seen.values()], typed)
+      if (held.matches.length) return { ...held, from: `the source of ${object}` }
+    }
+    // Last, every label, for a mistake in a single short name. A source that stops early is SAID to have stopped:
+    // scoring a prefix of the rows as though it were all of them is how a wrong record is returned as the only one.
+    const LABELS = 20000
+    const all = await run(dm.limit(`SELECT e.${q(es.key)} AS k, e.${q(es.label)} AS l FROM (${es.sql}) e`, LABELS), {})
+    if (all.capped || all.rows.length >= LABELS) return { matches: [], ambiguous: false, from: `the source of ${object}`, note: `${es.source} gives only part of ${object}'s members, so typing mistakes were not looked for` }
     return { ...bestMembers(all.rows.map((r) => ({ key: String(r.k), label: String(r.l) })), typed), from: `the source of ${object}` }
   }
   async function o_query(source: string, sql: string, params: Record<string, unknown>, policies?: unknown[]) {
