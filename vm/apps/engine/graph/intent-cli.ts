@@ -83,7 +83,10 @@ if (command === 'intent') {
   const shown = found.slice(0, 3).map((f) => ({
     id: f.intent.id, about: f.intent.label, level: f.intent.level, seenBefore: f.intent.seen,
     ...(f.intent.body as Record<string, unknown>),
-    requires: f.requirements.map((r) => `${r.role}: ${r.ref ?? `${r.node?.label ?? '?'}${r.node ? ` [${r.node.id}]` : ''}`}`),
+    requires: f.requirements.map((r) => {
+      const here = r.node ? store.requiredHere(r.node.id, session) : { required: true, absent: [] as string[] }
+      return `${r.role}: ${r.ref ?? `${r.node?.label ?? '?'}${r.node ? ` [${r.node.id}]` : ''}`}${here.required ? '' : `   (dormant — ${here.absent.map((a) => store.node(a)?.label ?? a).join(', ')} is not in force)`}`
+    }),
   }))
   if (asJson) out({ intents: shown, ...(found.length > 3 ? { more: found.length - 3 } : {}), state: inForce.map((s) => ({ id: s.id, is: s.label, level: s.level, seen: s.seen })), watch: cautions.map((c) => ({ about: c.about, says: c.label, then: (c.body as any).then, seen: c.seen })) })
   else {
@@ -150,7 +153,11 @@ if (command === 'intent') {
   const call = graph.store.getCall(built.callId) ?? fail(`the answer ${built.callId} is not in memory`)
   const output = (call.output ?? {}) as any
   const served: Record<string, any> = output.serves ?? {}
-  const required = store.edges(n.id).out.filter((e) => !e.dst.startsWith('g1:') && !e.dst.startsWith('raw:'))
+  const all = store.edges(n.id).out.filter((e) => !e.dst.startsWith('g1:') && !e.dst.startsWith('raw:'))
+  // What is required depends on the situation: a requirement written because of a state that is not in force is
+  // not demanded, and is named as dormant so a reader can see what a different situation would have asked for.
+  const dormant = all.filter((e) => !store.requiredHere(e.dst, session).required).map((e) => ({ id: e.dst, asks: store.node(e.dst)?.label ?? '?', absent: store.requiredHere(e.dst, session).absent }))
+  const required = all.filter((e) => store.requiredHere(e.dst, session).required)
   // A CELL IS NOT AN ANSWER TO ANY REQUIREMENT. A requirement may say what kind of figure meets it — what it is
   // measured in, and which way it must point — and then a figure of the wrong kind is unmet however confidently it
   // was offered. Without this, pointing at any number satisfies everything, which is a check with nothing in it.
@@ -187,10 +194,11 @@ if (command === 'intent') {
              unmet: wrong ?? (s && 'missing' in s ? s.missing : (s ? undefined : 'the answer does not say')) }
   })
   const missing = rows.filter((r) => !r.met)
-  if (asJson) out({ intent: n.id, judged: built.callId, met: rows.filter((r) => r.met), missing, says: (n.body as any).says ?? [] })
+  if (asJson) out({ intent: n.id, judged: built.callId, met: rows.filter((r) => r.met), missing, dormant, says: (n.body as any).says ?? [] })
   else out([
     `judging the answer against "${n.label}"`,
     ...rows.map((r) => `  ${r.met ? 'met  ' : 'UNMET'}  ${r.role}: ${r.asks}${r.met ? ` — ${r.by}` : r.unmet ? ` — ${r.unmet}` : ''}`),
+    ...dormant.map((d) => `  dormant  ${d.asks} — because ${d.absent.map((a) => store.node(a)?.label ?? a).join(', ')} is not in force`),
     ...(((n.body as any).says ?? []) as string[]).map((t) => `  said?  ${t}`),
     '',
     missing.length ? `${missing.length} of ${rows.length} unmet — point each at the figure that meets it in serves: { "<requirement id>": { data, row, column } }, or say why it cannot be met` : 'every requirement is pointed at a figure in the answer',

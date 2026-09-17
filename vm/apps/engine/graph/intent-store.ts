@@ -256,6 +256,18 @@ export class IntentStore {
     return out.sort((a, b) => b.share - a.share || b.intent.seen - a.intent.seen)
   }
 
+  /** A requirement stands on the states it was written because of. When none of those is in force, it is not a
+   *  requirement here — it is what this conversation would need in some other situation. This is the dependency
+   *  set at the level of what is required, and it is what lets a change of situation change the answer without
+   *  anything being rewritten. */
+  requiredHere(requirement: string, session: string): { required: boolean; because: string[]; absent: string[] } {
+    const because = this.edges(requirement).out.filter((e) => e.role === 'because').map((e) => this.resolve(e.dst))
+    if (!because.length) return { required: true, because, absent: [] }
+    const inForce = new Set(this.state(session).map((s) => s.id))
+    const absent = because.filter((b) => !inForce.has(b))
+    return { required: absent.length < because.length, because, absent }
+  }
+
   /** What to watch for around a node — the approach graph, consulted before exploring the same ground again. */
   cautions(about?: Ref): ApproachNode[] {
     const rows = about
