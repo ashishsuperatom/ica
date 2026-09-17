@@ -27,7 +27,7 @@ const COMMANDS: Record<string, { usage: string; does: string }> = {
   'add-calendar':      { usage: 'add-calendar <Name> --level day|week|month|quarter|year [--fiscal <json>] [--periods <json>]', does: 'a calendar level' },
   'add-fact':          { usage: 'add-fact <Name> [--description] [--synonyms a,b] [--history current]', does: 'recorded events at a grain' },
   'add-arrow':         { usage: 'add-arrow <Owner.role> <Target> [--kind grain|belongs|as-of|version|rollup|self] [--partial] [--synonyms a,b]', does: 'a link from one object to another' },
-  'add-measure':       { usage: 'add-measure <Fact.name> --unit <u> --kind flow|stock|value-per-unit --aggregate <sum|count|count distinct|min|max|average|median|weighted average> [--currency path.to.currency | --currency-attribute a] [--of arrow] [--weight measure] [--versions arrow] [--over-time last|first|average] [--synonyms a,b] [--description]', does: 'a number on a fact' },
+  'add-measure':       { usage: 'add-measure <Fact.name> --unit <u> --kind flow|stock|value-per-unit --aggregate <sum|count|count distinct|min|max|average|median|weighted average> [--currency path.to.currency | --currency-attribute a] [--of arrow] [--weight measure] [--versions arrow] [--over-time last|first|average] [--synonyms a,b] [--description] [--expr "[Fact.a] - [Fact.b]"]', does: 'a number on a fact — or, with --expr, one worked out from its others, defined once' },
   'add-attribute':     { usage: 'add-attribute <Owner.name> --type text|date|number|flag [--members a,b] [--synonyms a,b] [--description]', does: 'a value an entity or fact carries' },
   'add-condition':     { usage: 'add-condition <name> --on <Object> --where <json filters> [--description] [--synonyms a,b]', does: 'a named condition' },
   'add-equation':      { usage: 'add-equation <Object> <path.one> <path.two>', does: 'two paths that must agree' },
@@ -161,6 +161,7 @@ export async function run(argv: string[], out: (s: string) => void = console.log
         op: 'add-measure', id: args[0], unit: text(flags.unit)!, kind: text(flags.kind) as any, aggregate: text(flags.aggregate) as any, description: text(flags.description),
         currency: flags['currency-attribute'] ? { attribute: text(flags['currency-attribute'])! } : text(flags.currency)?.split('.'),
         of: text(flags.of), weight: text(flags.weight), versions: text(flags.versions), overTime: text(flags['over-time']) as any, synonyms: list(flags.synonyms),
+        expr: text(flags.expr),
       })
       case 'add-attribute': need(1); return change({ op: 'add-attribute', id: args[0], type: text(flags.type) as any, members: list(flags.members), synonyms: list(flags.synonyms), description: text(flags.description) })
       case 'add-condition': need(1); return change({ op: 'add-condition', name: args[0], on: text(flags.on)!, where: json(flags.where, '--where') ?? [], description: text(flags.description), synonyms: list(flags.synonyms) })

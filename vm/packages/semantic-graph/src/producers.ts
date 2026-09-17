@@ -68,7 +68,9 @@ export function sourcesProblems(s: Schema, src: Sources): string[] {
     const t = timeArrow(s, f)
     for (const a of arrows(s, f)) if (a.role !== t?.role && !fs.arrows[a.role]) out.push(`${f}.${a.role} has no column in its source`)
     if (t && !fs.time) out.push(`${f} is kept by ${t.to} and its source names no time column`)
-    for (const m of Object.keys(s.objects[f].measures ?? {})) if (!fs.measures[m]) out.push(`${f}.${m} has no column in its source`)
+    // A measure worked out from the fact's others has no column of its own and is never read: it is expanded into
+    // the measures it is made of, and those are the ones that must be bound.
+    for (const [m, d] of Object.entries(s.objects[f].measures ?? {})) if (!d.expr && !fs.measures[m]) out.push(`${f}.${m} has no column in its source`)
     for (const a of Object.keys(s.objects[f].attributes ?? {})) if (!fs.attributes?.[a]) out.push(`${f}.@${a} has no column in its source`)
   }
   for (const [e, es] of Object.entries(src.entities)) {

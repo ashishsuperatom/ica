@@ -121,6 +121,22 @@ export function parseExpr(text: string): Expr {
 }
 const refs = (e: Expr): string[] => ('ref' in e ? [e.ref] : [...refs(e.args[0]), ...refs(e.args[1])])
 
+/** `[Fact.m]` where m is an expression becomes that expression, in brackets of its own, as deep as it goes. */
+function expandDerived(s: Schema, text: string, depth = 0): string | { refuse: string } {
+  if (depth > 8) return { refuse: `${text}: expressions refer to each other in a circle` }
+  const bare = text.includes('[') ? undefined : measureOf(s, text.trim())
+  if (bare?.m.expr) return expandDerived(s, bare.m.expr, depth + 1)
+  let bad: string | undefined
+  const out = text.replace(/\[([^\]]+)\]/g, (whole, ref: string) => {
+    const f = measureOf(s, ref)
+    if (!f?.m.expr) return whole
+    const inner = expandDerived(s, f.m.expr, depth + 1)
+    if (typeof inner !== 'string') { bad = inner.refuse; return whole }
+    return `(${inner})`
+  })
+  return bad ? { refuse: bad } : out
+}
+
 function measureOf(s: Schema, ref: string): { fact: string; name: string; m: Measure } | undefined {
   const dot = ref.indexOf('.')
   const fact = ref.slice(0, dot), name = ref.slice(dot + 1)
@@ -197,7 +213,12 @@ export function check(s: Schema, q: Question, context: { today?: string } = {}):
   const used = new Map<string, { fact: string; name: string; m: Measure }>()
   for (const text of q.measures) {
     let expr: Expr
-    try { expr = parseExpr(text) } catch (e: any) { return refuse('Q', e.message) }
+    // A derived measure is asked for by its name and answered by what it is made of: it is expanded here, before
+    // its parts are looked up, so nothing after this point knows it was ever anything but its expression — the
+    // output keeps the name that was asked, which is the graph's name for the idea.
+    const expanded = expandDerived(s, text)
+    if (typeof expanded !== 'string') return refuse('Q', expanded.refuse)
+    try { expr = parseExpr(expanded) } catch (e: any) { return refuse('Q', e.message) }
     for (const r of refs(expr)) {
       const found = measureOf(s, r)
       if (!found) return refuse('Q', `there is no measure ${r}`)

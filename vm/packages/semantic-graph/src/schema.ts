@@ -27,6 +27,10 @@ export interface Measure {
   /** the version arrow this measure is never combined across. */
   versions?: string
   synonyms?: string[]
+  /** A DERIVED MEASURE: an expression over measures of the same fact, taken after they are added up — `[Fact.a] - [Fact.b]`.
+   *  Defined here, once, so that an idea like a shortfall is not worked out afresh, and differently, inside every
+   *  program that needs it. It has no column of its own and is never read from a source. */
+  expr?: string
 }
 
 export interface ObjectDef {
@@ -141,6 +145,20 @@ export function schemaProblems(s: Schema): string[] {
       if (d.kind === 'value-per-unit' && !['min', 'max', 'median', 'weighted average'].includes(d.aggregate)) out.push(`${at} is a value per unit; it is combined by min, max, median or a weighted average, never by ${d.aggregate}`)
       if (d.kind === 'stock' && d.aggregate === 'count distinct') out.push(`${at}: a stock is a level, not a count of distinct things`)
       if (d.aggregate === 'weighted average' && (!d.weight || !o.measures?.[d.weight])) out.push(`${at}: a weighted average names the measure of ${name} it is weighted by`)
+      if (d.expr) {
+        // What an expression is made of must be here, on this fact, and added up from rows — an expression over an
+        // expression is allowed nowhere, so that nothing can refer to itself by a detour. Its syntax is checked when
+        // it is asked, by the same reader every question goes through.
+        const rs = [...d.expr.matchAll(/\[([^\]]+)\]/g)].map((x) => x[1]!)
+        if (!rs.length) out.push(`${at}: an expression names the measures it is made of, in brackets`)
+        for (const r of rs) {
+          const dot = r.indexOf('.')
+          const fact = r.slice(0, dot), m = r.slice(dot + 1)
+          if (fact !== name) out.push(`${at}: an expression is over measures of ${name}, and ${r} is not one`)
+          else if (!o.measures?.[m]) out.push(`${at}: ${name} has no measure "${m}"`)
+          else if (o.measures[m]!.expr) out.push(`${at}: ${r} is itself an expression; an expression is over measures added up from rows`)
+        }
+      }
       if (d.aggregate === 'count distinct' && (!d.of || !arrow(s, name, d.of))) out.push(`${at}: count distinct names an arrow of ${name}`)
       if (d.overTime && d.kind !== 'stock') out.push(`${at}: only a stock says how it goes over time`)
       if (d.versions && arrow(s, name, d.versions)?.kind !== 'version') out.push(`${at}: "${d.versions}" is not a version arrow of ${name}`)

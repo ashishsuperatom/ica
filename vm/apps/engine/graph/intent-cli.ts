@@ -166,13 +166,21 @@ if (command === 'intent') {
     const node = store.node(e.dst)
     // The id is whatever the writer copied down: accept it bare, since what they saw is what they will write.
     const s = served[e.dst] ?? served[e.dst.slice(e.dst.indexOf(':') + 1)]
-    const expects = (node?.body as any)?.expects as { unit?: string; atLeast?: number } | undefined
+    const expects = (node?.body as any)?.expects as { unit?: string; atLeast?: number; sign?: 'positive' | 'negative' } | undefined
+    // WHAT A FIGURE IS ABOUT IS SAID BY REFERENCE. A requirement may name the graph's measure it wants, and the
+    // figure offered must then carry that measure's name — the graph's name for the idea, not a program's own
+    // word for something it worked out. A unit and a sign say what kind of figure; only the reference says which.
+    const about = (node?.body as any)?.about as string | undefined
     let wrong: string | undefined
-    if (s && !('missing' in s) && expects) {
+    if (s && !('missing' in s) && (expects || about)) {
       const got = at(s.cites)
+      const column = String(s.cites?.column ?? '')
       if (!got) wrong = 'the figure it points at is not in the answer'
-      else if (expects.unit && got.unit !== expects.unit) wrong = `it points at ${got.unit ? `a figure in ${got.unit}` : 'a figure with no unit'}, and this asks for one in ${expects.unit}`
-      else if (expects.atLeast !== undefined && !(typeof got.value === 'number' && got.value >= expects.atLeast)) wrong = `it points at ${JSON.stringify(got.value)}, and this asks for at least ${expects.atLeast}`
+      else if (about?.startsWith('g1:') && about.includes('.') && ![about.slice(3), about.slice(about.indexOf('.') + 1)].some((n) => n.toLowerCase() === column.toLowerCase()))
+        wrong = `it points at the column "${column}", and this asks for the graph's measure ${about.slice(3)} — keep the graph's name for it, from the question that gave it`
+      else if (expects?.unit && got.unit !== expects.unit) wrong = `it points at ${got.unit ? `a figure in ${got.unit}` : 'a figure with no unit'}, and this asks for one in ${expects.unit}`
+      else if (expects?.sign && !(typeof got.value === 'number' && (expects.sign === 'negative' ? got.value < 0 : got.value > 0))) wrong = `it points at ${JSON.stringify(got.value)}, and this asks for a ${expects.sign} figure`
+      else if (expects?.atLeast !== undefined && !(typeof got.value === 'number' && got.value >= expects.atLeast)) wrong = `it points at ${JSON.stringify(got.value)}, and this asks for at least ${expects.atLeast}`
     }
     const met = !!s && !('missing' in s) && !wrong
     return { requirement: e.dst, role: e.role, asks: node?.label ?? '?', met, by: met ? s.display : undefined,
@@ -204,11 +212,14 @@ if (command === 'intent') {
   const raw = args.join(' ').trim() || fail("usage: seed '<json>'")
   const ok = await checker()
   const plan = JSON.parse(raw) as { nodes?: any[]; edges?: any[]; approach?: any[]; state?: string[] }
-  for (const n of plan.nodes ?? []) store.put(n, `seed:${who}`, n.reason)
+  // SEEDING IS NOT USE. A node put here twice is the same node, and counting the second time as another meeting
+  // would show a graph settling that nobody has asked anything of. What is already there is left as it is.
+  let nodes = 0, learned = 0
+  for (const n of plan.nodes ?? []) if (!store.node(n.id)) { store.put(n, `seed:${who}`, n.reason); nodes++ }
   for (const e of plan.edges ?? []) store.link(e.src, e.role, e.dst, `seed:${who}`, ok)
-  for (const a of plan.approach ?? []) store.learn(a, `seed:${who}`)
+  for (const a of plan.approach ?? []) if (!store.cautions(a.about).some((c) => c.label === a.label)) { store.learn(a, `seed:${who}`); learned++ }
   for (const s of plan.state ?? []) store.pushState(session, s, `seed:${who}`)
-  out(`seeded · ${(plan.nodes ?? []).length} nodes, ${(plan.edges ?? []).length} edges, ${(plan.approach ?? []).length} learned, ${(plan.state ?? []).length} pushed`)
+  out(`seeded · ${nodes} new nodes (${(plan.nodes ?? []).length - nodes} already there), ${(plan.edges ?? []).length} edges, ${learned} newly learned, ${(plan.state ?? []).length} pushed`)
 } else {
   fail(`no such command "${command ?? ''}" — try --help`)
 }
