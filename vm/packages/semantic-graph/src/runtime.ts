@@ -255,6 +255,17 @@ export function createGraph(o: GraphOptions) {
       said.push(`hypothetical: ${a.intervene!.map(describeIntervention).join('; ')}`)
       forReader.push(`What if: ${a.intervene!.map(describeIntervention).join('; ')}`)
     }
+    // A THRESHOLD IS NAMED, NOT RETYPED. `having` may say which setting it compares against; it is read here, from
+    // the nearest layer for who is asking, and the answer says which setting gave which number — so changing the
+    // organisation's mind about it changes every question that referred to it, and none that copied it.
+    if (q.having?.some((h) => h.setting)) {
+      q = { ...q, having: q.having.map((h) => {
+        if (!h.setting) return h
+        const v = read(h.setting)
+        if (typeof v === 'number') forReader.push(`Kept to ${h.output} ${h.op} ${v}, from the setting "${h.setting}"`)
+        return { ...h, value: typeof v === 'number' ? v : undefined }
+      }) }
+    }
     const verdict = check(m.schema, q, { today })
     if (!verdict.ok) {
       store.recordCall({ ...base, canonical: null, plan: null, output: null, refusal: { rule: verdict.rule, reason: verdict.reason }, error: null, caveats: said, nodes: [], ms: Date.now() - started })

@@ -90,6 +90,12 @@ export class IntentStore {
       CREATE TABLE IF NOT EXISTS i_change (
         id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, by TEXT NOT NULL, op TEXT NOT NULL,
         target TEXT, args TEXT NOT NULL, reason TEXT, applied INTEGER NOT NULL, reconciles TEXT);
+      -- EVERY QUESTION ASKED, with how it was read and what was in force. A question carries an intent whether or
+      -- not we notice; kept, it is what tells us later which readings recur, which states mattered, and whether
+      -- the intent graph is settling. Thrown away, every question is the first one.
+      CREATE TABLE IF NOT EXISTS i_asked (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, session TEXT NOT NULL, asked TEXT NOT NULL,
+        who TEXT, agent TEXT, intent TEXT, matched_how TEXT, state TEXT NOT NULL, call TEXT);
       -- Which states a session is in: references into i_node, never text. The slice IS the state.
       CREATE TABLE IF NOT EXISTS i_session_state (
         session TEXT NOT NULL, node TEXT NOT NULL, at INTEGER NOT NULL, dropped_at INTEGER,
@@ -195,6 +201,31 @@ export class IntentStore {
   state(session: string): IntentNode[] {
     const rows = this.db.prepare('SELECT node FROM i_session_state WHERE session = ? AND dropped_at IS NULL ORDER BY at').all(session) as any[]
     return rows.map((r) => this.node(r.node)).filter((x): x is IntentNode => !!x)
+  }
+
+  /** A question, as it arrived, with what it was read as and what was in force — kept whether or not anything
+   *  matched, because a question nothing matched is the most useful one to come back to. */
+  asked(x: { session: string; asked: string; who?: string; agent?: string; intent?: string; how?: string; call?: string }): number {
+    const state = this.state(x.session).map((s) => s.id)
+    const r = this.db.prepare('INSERT INTO i_asked (at, session, asked, who, agent, intent, matched_how, state, call) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(Date.now(), x.session, x.asked, x.who ?? null, x.agent ?? null, x.intent ?? null, x.how ?? null, JSON.stringify(state), x.call ?? null)
+    return Number(r.lastInsertRowid)
+  }
+
+  /** What has been asked, newest first — and, for each, whether anything was already settled for it. */
+  asks(limit = 50): Array<{ id: number; at: number; asked: string; who?: string; intent?: string; how?: string; state: string[] }> {
+    return (this.db.prepare('SELECT * FROM i_asked ORDER BY id DESC LIMIT ?').all(limit) as any[])
+      .map((r) => ({ id: r.id, at: r.at, asked: r.asked, who: r.who ?? undefined, intent: r.intent ?? undefined, how: r.matched_how ?? undefined, state: JSON.parse(r.state) }))
+  }
+
+  /** Is this settling? What share of questions reached something already there, and how many states are new.
+   *  Asked of the history rather than assumed — the curve is the only honest evidence of an attractor. */
+  settling(): { asked: number; matched: number; share: number; states: number; statesUsed: number } {
+    const asked = (this.db.prepare('SELECT COUNT(*) n FROM i_asked').get() as any).n as number
+    const matched = (this.db.prepare('SELECT COUNT(*) n FROM i_asked WHERE intent IS NOT NULL').get() as any).n as number
+    const states = (this.db.prepare("SELECT COUNT(*) n FROM i_node WHERE kind = 'state' AND redirect IS NULL").get() as any).n as number
+    const statesUsed = (this.db.prepare("SELECT COUNT(DISTINCT node) n FROM i_session_state").get() as any).n as number
+    return { asked, matched, share: asked ? matched / asked : 0, states, statesUsed }
   }
 
   /** Every intent this graph holds, for when nothing matched: at the frontier the words are no use, and whoever

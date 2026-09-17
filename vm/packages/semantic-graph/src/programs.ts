@@ -36,6 +36,11 @@ export interface ProgramAnswer {
   /** The records and conditions the answer is kept to, in plain words. */
   scope?: string
   headline?: { label: string; value: ProgramCell }
+  /** WHICH FIGURE ANSWERS WHICH REQUIREMENT, by the id of the requirement it serves — or why it cannot be served.
+   *  A requirement written in words is a requirement read as the reader pleases; pointing at the cell that meets it
+   *  is a claim that can be checked. What checks it is the intent side, which is the only side that knows what was
+   *  required; this side only says whether the cells resolve. */
+  serves?: Record<string, ProgramCell | { missing: string }>
   data: Record<string, Table>
   views: Array<{ id: string; component: string; data: string; title?: string; encode: Record<string, string | string[]> }>
   narration: Array<{ text: string; cites?: Record<string, ProgramCell>; why?: string }>
@@ -182,12 +187,28 @@ export function deliver(answer: ProgramAnswer, notes: string[], periods: string[
       `sentence ${i + 1} {${slot}}`))
     return { text, ...(s.why ? { why: s.why } : {}) }
   })
+  // A HEADLINE IS READ ON ITS OWN, so its number carries what it is measured in. A figure a program worked out sits
+  // in a column of its own making, and a column with no unit puts a bare number in front of a reader.
+  if (answer.headline) {
+    const c = answer.headline.value
+    const t = answer.data[c?.data as string]
+    const col = t?.columns.find((x) => x.name === c?.column)
+    if (col && col.role !== 'dimension' && !col.unit && !c?.format) {
+      refuse(`the headline cites ${c.data}.${c.column}, which has no unit — give that column its unit, or the headline shows a bare number`)
+    }
+  }
+  const serves = answer.serves
+    ? Object.fromEntries(Object.entries(answer.serves).map(([id, c]) => [id, 'missing' in (c as any)
+        ? { missing: String((c as any).missing) }
+        : { display: cell(c as ProgramCell, `serves ${id}`), cites: c }]))
+    : undefined
   const headline = answer.headline ? { label: answer.headline.label, display: cell(answer.headline.value, 'the headline'), value: null } : undefined
   return {
     ...(status !== 'answered' ? { status, missing: answer.missing } : {}),
     ...(periods.length ? { period: periods.join(' · ') } : {}),
     ...(answer.scope ? { scope: answer.scope } : {}),
     ...(headline ? { headline } : {}),
+    ...(serves ? { serves } : {}),
     data: Object.fromEntries(Object.entries(answer.data).map(([k, t]) => [k, { columns: t.columns, rows: t.rows }])),
     views, narration, nextSteps: (answer.nextSteps ?? []).filter((n) => n?.label), notes,
   }

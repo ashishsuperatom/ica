@@ -29,7 +29,7 @@ const env = { dbDir: value('db')!, projectDir: value('project')!, managerUrl: va
 const asJson = argv.includes('--json') ? (argv.splice(argv.indexOf('--json'), 1), true) : process.env.SEMANTIC_TOOL_FORMAT === 'json'
 // THE PLAIN FORM IS ASKING. Everything else is a named move, so a question needs no command word in front of it —
 // a tool whose commonest use needs a keyword is a tool that gets read about instead of used.
-const MOVES = new Set(['intent', 'state', 'watch', 'checks', 'suggest', 'proposed', 'history', 'seed'])
+const MOVES = new Set(['intent', 'state', 'watch', 'checks', 'judge', 'suggest', 'proposed', 'history', 'seed'])
 const [first, ...rest] = argv
 const command = first && MOVES.has(first) ? first : 'intent'
 const args = first && MOVES.has(first) ? rest : argv
@@ -41,6 +41,7 @@ if (argv.includes('-h') || argv.includes('--help')) {
   state | state push <id> | state drop <id>   the slice of situation this conversation is answering inside
   watch [<g1:Object[.measure]>]               what to watch for around a node, learned from going this way before
   checks <intent id>                          what an answer must carry, as a list to check against
+  judge [<turn>]                              read the answer you built back against what the intent required
   suggest '<json>'                            {"op":"…","target":"…","args":{…},"reason":"…"} — recorded, never applied
   proposed                                    what is waiting for a person`)
   process.exit(0)
@@ -71,12 +72,20 @@ if (command === 'intent') {
   const text = args.join(' ').trim() || fail("usage: intent '<the question, as asked>'")
   const found = store.intentsFor(text, { owner: who })
   const inForce = store.state(session)
+  // WHAT TO WATCH FOR COMES WITH WHAT IS BEING DECIDED. Held behind a second command it is never read: the run
+  // that prompted this had the caution it needed sitting one call away and never made the call.
+  const refs = [...new Set(found.slice(0, 3).flatMap((f) => f.requirements.map((r) => r.ref).filter((x): x is string => !!x)))]
+  const watch = refs.flatMap((r) => store.cautions(r))
+  const seenIds = new Set<string>()
+  const cautions = watch.filter((c) => !seenIds.has(c.id) && seenIds.add(c.id))
+  // The question is kept whether or not anything matched — a question nothing matched is the one worth revisiting.
+  store.asked({ session, asked: text, agent: who, intent: found[0]?.intent.id, how: found.length ? 'by its words' : 'nothing matched' })
   const shown = found.slice(0, 3).map((f) => ({
     id: f.intent.id, about: f.intent.label, level: f.intent.level, seenBefore: f.intent.seen,
     ...(f.intent.body as Record<string, unknown>),
     requires: f.requirements.map((r) => `${r.role}: ${r.ref ?? `${r.node?.label ?? '?'}${r.node ? ` [${r.node.id}]` : ''}`}`),
   }))
-  if (asJson) out({ intents: shown, ...(found.length > 3 ? { more: found.length - 3 } : {}), state: inForce.map((s) => ({ id: s.id, is: s.label, level: s.level, seen: s.seen })) })
+  if (asJson) out({ intents: shown, ...(found.length > 3 ? { more: found.length - 3 } : {}), state: inForce.map((s) => ({ id: s.id, is: s.label, level: s.level, seen: s.seen })), watch: cautions.map((c) => ({ about: c.about, says: c.label, then: (c.body as any).then, seen: c.seen })) })
   else {
     const lines: string[] = []
     if (!shown.length) {
@@ -93,6 +102,10 @@ if (command === 'intent') {
       for (const [k, v] of Object.entries(s)) if (!['id', 'about', 'level', 'seenBefore', 'requires'].includes(k)) lines.push(`    ${k}: ${Array.isArray(v) ? v.join(' · ') : String(v)}`)
     }
     lines.push('', inForce.length ? `in force: ${inForce.map((s) => `${s.label} [${s.id}]`).join(' · ')}` : 'in force: nothing — no situation has been pushed')
+    if (cautions.length) {
+      lines.push('', 'watch for, from going this way before:')
+      for (const c of cautions) lines.push(`    ${c.about} — ${c.label}${(c.body as any).then ? `\n        → ${(c.body as any).then}` : ''}`)
+    }
     out(lines.join('\n'))
   }
 } else if (command === 'state') {
@@ -115,6 +128,66 @@ if (command === 'intent') {
   const reqs = store.edges(n.id).out
   out(asJson ? { intent: n.id, about: n.label, checks: reqs.map((e) => ({ role: e.role, is: e.dst })), says: (n.body as any).says ?? [] }
     : [`an answer to "${n.label}" must:`, ...reqs.map((e) => `    ${e.role}  ${e.dst}`), ...(((n.body as any).says ?? []) as string[]).map((s) => `    say  ${s}`)].join('\n'))
+} else if (command === 'judge') {
+  // THE SECOND OF THE TWO WAYS THIS GRAPH IS COMPUTED WITH: checking. An answer is read back against what the
+  // intent required, and each requirement is either pointed at a figure in the answer or said to be unmet. This
+  // is why a requirement is a node and not a sentence in a prompt — a sentence can be agreed with and ignored.
+  const { readdir } = await import('node:fs/promises')
+  const asked = store.asks(1)[0]
+  const intentId = args.find((a) => a.startsWith('intent:')) ?? asked?.intent
+    ?? fail('nothing has been asked in this conversation yet, so there is nothing to judge against')
+  const n = store.node(intentId) ?? fail(`there is no intent ${intentId}`)
+  // The answer just built, by the turn it belongs to.
+  const qid = args.find((a) => !a.startsWith('intent:'))
+  const outs = await readdir(join(env.home, 'out')).catch(() => [] as string[])
+  const turn = qid ?? outs.sort().at(-1) ?? fail('no answer has been built in this conversation yet')
+  // JUDGED BEFORE IT IS COMMITTED, so what a run produced is what is read: run.json is written by the run, and
+  // built.json only by the commit. Judging the committed answer would be judging what can no longer be changed.
+  const built = JSON.parse(await readFile(join(env.home, 'out', turn, 'run.json'), 'utf8').catch(() => 'null') ?? 'null')
+    ?? JSON.parse(await readFile(join(env.home, 'out', turn, 'built.json'), 'utf8').catch(() => 'null') ?? 'null')
+    ?? fail(`out/${turn} holds no run — ./run-program first, then judge, then commit`)
+  const graph = await openSemanticGraph(env as any)
+  const call = graph.store.getCall(built.callId) ?? fail(`the answer ${built.callId} is not in memory`)
+  const output = (call.output ?? {}) as any
+  const served: Record<string, any> = output.serves ?? {}
+  const required = store.edges(n.id).out.filter((e) => !e.dst.startsWith('g1:') && !e.dst.startsWith('raw:'))
+  // A CELL IS NOT AN ANSWER TO ANY REQUIREMENT. A requirement may say what kind of figure meets it — what it is
+  // measured in, and which way it must point — and then a figure of the wrong kind is unmet however confidently it
+  // was offered. Without this, pointing at any number satisfies everything, which is a check with nothing in it.
+  const data = (output.data ?? {}) as Record<string, { columns: Array<{ name: string; unit?: string }>; rows: Array<Record<string, unknown>> }>
+  const at = (c: any) => {
+    const t = data[c?.data]
+    if (!t) return null
+    const row = typeof c.row === 'number' ? t.rows[c.row] : t.rows.find((r) => Object.entries(c.row ?? {}).every(([k, v]) => String(r[k]) === String(v))) ?? t.rows[0]
+    const col = t.columns.find((x) => x.name === c.column)
+    return row ? { value: row[c.column], unit: col?.unit } : null
+  }
+  const rows = required.map((e) => {
+    const node = store.node(e.dst)
+    // The id is whatever the writer copied down: accept it bare, since what they saw is what they will write.
+    const s = served[e.dst] ?? served[e.dst.slice(e.dst.indexOf(':') + 1)]
+    const expects = (node?.body as any)?.expects as { unit?: string; atLeast?: number } | undefined
+    let wrong: string | undefined
+    if (s && !('missing' in s) && expects) {
+      const got = at(s.cites)
+      if (!got) wrong = 'the figure it points at is not in the answer'
+      else if (expects.unit && got.unit !== expects.unit) wrong = `it points at ${got.unit ? `a figure in ${got.unit}` : 'a figure with no unit'}, and this asks for one in ${expects.unit}`
+      else if (expects.atLeast !== undefined && !(typeof got.value === 'number' && got.value >= expects.atLeast)) wrong = `it points at ${JSON.stringify(got.value)}, and this asks for at least ${expects.atLeast}`
+    }
+    const met = !!s && !('missing' in s) && !wrong
+    return { requirement: e.dst, role: e.role, asks: node?.label ?? '?', met, by: met ? s.display : undefined,
+             unmet: wrong ?? (s && 'missing' in s ? s.missing : (s ? undefined : 'the answer does not say')) }
+  })
+  const missing = rows.filter((r) => !r.met)
+  if (asJson) out({ intent: n.id, judged: built.callId, met: rows.filter((r) => r.met), missing, says: (n.body as any).says ?? [] })
+  else out([
+    `judging the answer against "${n.label}"`,
+    ...rows.map((r) => `  ${r.met ? 'met  ' : 'UNMET'}  ${r.role}: ${r.asks}${r.met ? ` — ${r.by}` : r.unmet ? ` — ${r.unmet}` : ''}`),
+    ...(((n.body as any).says ?? []) as string[]).map((t) => `  said?  ${t}`),
+    '',
+    missing.length ? `${missing.length} of ${rows.length} unmet — point each at the figure that meets it in serves: { "<requirement id>": { data, row, column } }, or say why it cannot be met` : 'every requirement is pointed at a figure in the answer',
+  ].join('\n'))
+  if (missing.length) process.exitCode = 1
 } else if (command === 'suggest') {
   const raw = args.join(' ').trim() || fail(`usage: suggest '{"op":"…","target":"…","args":{…},"reason":"…"}'`)
   let x: any
@@ -125,7 +198,7 @@ if (command === 'intent') {
 } else if (command === 'proposed') {
   out(store.proposals())
 } else if (command === 'history') {
-  out(store.history())
+  out({ changes: store.history(), asked: store.asks(20), settling: store.settling() })
 } else if (command === 'seed') {
   // Writing this side is not an agent's job; this is how a person (or a seeding script) puts it there.
   const raw = args.join(' ').trim() || fail("usage: seed '<json>'")

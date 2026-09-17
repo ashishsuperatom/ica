@@ -372,6 +372,7 @@ const INTENT_USAGE = `intent '<the question, as asked>'   → what a person in t
   state · state push <id> · state drop <id>   the situation being answered inside — a slice of references, and a change to it is recorded
   watch [<g1:Object[.measure]>]               what to watch for around a node, learned from going this way before
   checks <intent id>                          what an answer must carry, to check your answer against before committing
+  judge [<turn>]                              reads the answer you built back against what the intent required, and names what is unmet
   suggest '{"op":"…","target":"…","args":{…},"reason":"…"}'   what should be added to a graph — recorded, never applied; answer with what is held today and say what differs`
 
 const SEMANTIC_USAGE: Record<string, string> = {
@@ -388,6 +389,7 @@ const SEMANTIC_USAGE: Record<string, string> = {
   export default async (ctx, params) => ({ status, missing, scope, headline, data, views, narration, nextSteps })
   status: 'answered'|'unknowable'|'uncertain' · missing: why, when not answered · scope · headline: { label, value } · data: { <key>: <table> } · views: [{ id, component: 'table'|'bar'|'line'|'kpi', data: '<key of data>', title, encode }] · narration: [{ text, cites: { <slot>: { data: '<key of data>', row, column } }, why }] · nextSteps: [{ label, why }].
   Up to five sentences. Every number in a sentence is a {slot} named in that sentence's cites, and a cell names a KEY of data — so a figure you worked out is cited by putting it in a column of a table you return.
+  serves: { '<requirement id>': <cell> | { missing: '<why it cannot be met>' } } — point each requirement ./intent gave you at the figure in your answer that meets it, so ./intent judge can read it back.
   ctx.ask(question, label) is the program's only data — a table of rows, each record by its id with its name beside it. ctx.transform, ctx.decide, ctx.decideAt, ctx.verify, ctx.caveat and ctx.explain record what the program did and why, so the answer can be read back`,
   commit: `commit   → give the answer of the last ./run-program as this conversation's next step, and end the turn`,
   trace: `trace ['<group>'] [<call>]   → what is under the answer on screen: the rows of one group (a group is JSON, e.g. '{"<Dimension>":"<key>"}'), or with no group, the steps and questions it was reached by`,

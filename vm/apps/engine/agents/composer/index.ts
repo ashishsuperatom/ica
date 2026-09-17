@@ -53,7 +53,8 @@ says each back in the graph's own words and tries the best few against the data.
 a reading needs settling, and ./ask evaluates a question to see what the data says.
 
 ./intent says what a person in this situation is deciding, what an answer must carry to serve that, and what was
-learned the last time this ground was covered. What it holds is what is WANTED; the graph holds what is TRUE. Read
+learned the last time this ground was covered. Point each requirement it names at the figure in your answer that
+meets it, and run ./intent judge before you commit: what it calls unmet is not yet answered. What it holds is what is WANTED; the graph holds what is TRUE. Read
 it before choosing what to compute, and check your answer against it before you commit. What either graph lacks is
 suggested there, never assumed: answer with what is held today and say plainly what differs.
 

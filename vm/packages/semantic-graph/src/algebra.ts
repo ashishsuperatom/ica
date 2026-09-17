@@ -40,7 +40,9 @@ export interface Question {
   order?: { by: string; desc?: boolean }
   limit?: number
   /** Keep only groups whose output meets a condition — applied before order and limit. */
-  having?: Array<{ output: string; op: '<' | '<=' | '>' | '>=' | '=' | '!='; value: number }>
+  /** Keep the groups whose output stands in this relation to a number — or to a SETTING, named rather than copied,
+   *  so a threshold the organisation decides is reachable from a question instead of being retyped into each one. */
+  having?: Array<{ output: string; op: '<' | '<=' | '>' | '>=' | '=' | '!='; value?: number; setting?: string }>
   /** Also answer at these coarser groupings: each a subset of the targets, [] for the grand total. */
   totals?: string[][]
   /** Each of these outputs as a share of its total within a coarser grouping. */
@@ -278,7 +280,16 @@ export function check(s: Schema, q: Question, context: { today?: string } = {}):
     if (time) p.time = { role: time.role, level: s.objects[time.to].level ?? time.to, calendar: time.to }
 
     // D4: a span is cut at the boundaries of the fact's own time grain.
-    if (q.span && p.time && !aligned(q.span, s.objects[p.time.calendar])) return refuse('D4', `${p.fact} is kept by ${p.time.level}; the span ${q.span.from} to ${q.span.to} cuts through a ${p.time.level}`)
+    if (q.span && p.time && !aligned(q.span, s.objects[p.time.calendar])) {
+      // A SPAN THAT CUTS A PERIOD IS NARROWED, NEVER WIDENED, and the refusal says to what. Asked to choose for
+      // itself, a reader picks the periods that OVERLAP what was asked — which quietly answers about time nobody
+      // asked about, and every total comes back larger than the question. The whole periods INSIDE the span
+      // understate by the part that was cut, which is a difference that can be stated; overlap cannot.
+      const inside = contained(q.span, s.objects[p.time.calendar])
+      return refuse('D4', `${p.fact} is kept by ${p.time.level}; the span ${q.span.from} to ${q.span.to} cuts through a ${p.time.level}. `
+        + (inside ? `The whole ${p.time.level}s inside it are ${inside.from} to ${inside.to} — ask for those and say which days were left out. A span of whole ${p.time.level}s that reaches past what was asked answers about time nobody asked about.`
+                  : `No whole ${p.time.level} lies inside it.`))
+    }
 
     const groupedAtOwnTime = p.time && p.by.some((b) => 'path' in b && b.path.length === 1 && b.path[0] === p.time!.role)
     for (const name of p.measures) {
@@ -346,7 +357,12 @@ function extend(s: Schema, q: Question, plan: Plan, context: { today?: string })
   const at = (names: string[]) => (q.by ?? []).filter((t) => names.includes(targetText(t)))
   const outputFor = (p: Plan) => p.outputs
 
-  for (const h of q.having ?? []) if (!outputs.some((o) => o.name === h.output)) return refuse('Q', `having: the answer has no output ${h.output}`)
+  for (const h of q.having ?? []) {
+    if (!outputs.some((o) => o.name === h.output)) return refuse('Q', `having: the answer has no output ${h.output}`)
+    // A setting is read before a question is checked, so by here it has become a number; one that did not is a
+    // setting the organisation does not hold, and saying so is more use than comparing against nothing.
+    if (typeof h.value !== 'number') return refuse('Q', `having: ${h.output} is compared with ${h.setting ? `the setting "${h.setting}", which has no value here` : 'nothing'}`)
+  }
   if (q.having?.length) plan.having = q.having
 
   if (q.totals?.length) {
@@ -498,6 +514,13 @@ function unitsOf(e: Expr, used: Map<string, { m: Measure }>): { units: Units } |
 /** Whether both ends of a span fall on the start of a period at this level. */
 export function aligned(span: { from: string; to: string }, calendar: CalendarDef): boolean {
   return startsPeriod(calendar, span.from) && endsPeriod(calendar, span.to)
+}
+
+/** The whole periods that lie INSIDE a span: where a cut span becomes an answerable one without reaching past it. */
+export function contained(span: { from: string; to: string }, calendar: CalendarDef): { from: string; to: string } | null {
+  const first = startsPeriod(calendar, span.from) ? span.from : periodOf(calendar, shiftPeriods(calendar, keyOf(calendar, span.from), 1)).from
+  const last = endsPeriod(calendar, span.to) ? span.to : periodOf(calendar, keyOf(calendar, addDays(span.to, -1))).from
+  return first < last ? { from: first, to: last } : null
 }
 
 
