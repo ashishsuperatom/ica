@@ -21,6 +21,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
 import { termsBrief, mistakes, fragmentOf, tied, revisions, judgedText, judge, completions, catalog, catalogText, conformedDimensions, dimensions, dimensionsText, termsText, check, nodeText, pathsText, find, nextMoves, node, paths, runProgram, tableOf, type Result } from '@superatom/semantic-graph'
 import { MODEL, openSemanticGraph } from './semantic.js'
 
@@ -277,6 +278,17 @@ if (command === 'match') {
   if (!sessionId) fail('there is no data session for this conversation')
   const qid = await readTurn('.turn') || fail('there is no turn in progress here')
   const run = await readFile(join(env.home, 'out', qid, 'run.json'), 'utf8').then(JSON.parse).catch(() => null) ?? fail('there is no run to commit: ./run-program first')
+  // JUDGED ON THE WAY OUT, NOT ON REQUEST. A check that is run only when someone thinks to run it is skipped on
+  // the third turn, and the third turn is where the frame from the second one has quietly carried over. The
+  // intent side is asked here — a separate process, so this side still knows nothing of what was required —
+  // and an answer with an unmet requirement is not committed; what is unmet is said instead.
+  {
+    const { spawnSync } = await import('node:child_process')
+    const j = spawnSync('tsx', [fileURLToPath(new URL('./intent-cli.ts', import.meta.url)), 'judge', qid, '--db', env.dbDir, '--project', env.projectDir, '--manager', env.managerUrl, '--home', env.home],
+      { encoding: 'utf8', env: { ...process.env, NODE_NO_WARNINGS: '1' } })
+    const said = `${j.stdout ?? ''}${j.stderr ?? ''}`.trim()
+    if (j.status === 1 && /UNMET/.test(said)) fail(`not committed — the answer does not yet serve what was asked:\n${said}`)
+  }
   const source = await readFile(join(env.home, run.file), 'utf8').catch(() => fail(`${run.file} is not in this folder`))
   if (hashOf(source) !== run.source) fail(`${run.file} has changed since it was run: ./run-program it, read its answer, then ./commit`)
   // The run's answer is this conversation's next step, and ends the turn.
