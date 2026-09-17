@@ -215,6 +215,12 @@ if (command === 'match') {
   const [first, ...rest] = args
   const second = rest.join(' ').trim()
   if (!first) { out(asJson ? catalog(m.schema) : catalogText(m.schema)); }
+  // A SETTING IS PART OF THE GRAPH, and is found where the graph is looked at. Looked for as a node and not found,
+  // it was being reported as absent — and an agent that believes a threshold does not exist invents one.
+  else if (!second && !m.schema.objects[first] && m.settings && Object.prototype.hasOwnProperty.call(m.settings, first)) {
+    const v = m.settings[first]
+    out(asJson ? { setting: first, value: v } : `${first} is a setting: ${JSON.stringify(v)}\nname it rather than copy it — having: [{ "output": "<Fact.measure>", "op": "<", "setting": ${JSON.stringify(first)} }]`)
+  }
   else if (!second) {
     const isFact = m.schema.objects[first]?.kind === 'fact'
     if (asJson) out({ node: node(m.schema, first), ...(isFact ? { dimensions: dimensions(m.schema, first) } : {}) })
