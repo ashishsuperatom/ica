@@ -173,7 +173,13 @@ export function deliver(answer: ProgramAnswer, notes: string[], periods: string[
     if (typeof s?.text !== 'string') refuse(`sentence ${i + 1} has no text`)
     const typed = s.text.replace(/\{[a-zA-Z_]\w*\}/g, '').match(/(?<![\w-])\d[\d,]*(\.\d+)?%?/g)?.map((n) => n.replace(/,$/, '')).filter((n) => !/^(19|20)\d\d$/.test(n))
     if (typed?.length) refuse(`sentence ${i + 1} types the number ${typed[0]} — every number is a {slot} citing its cell`)
-    const text = s.text.replace(/\{([a-zA-Z_]\w*)\}/g, (_m, slot: string) => cell(s.cites?.[slot] ?? refuse(`sentence ${i + 1}: {${slot}} cites nothing`), `sentence ${i + 1} {${slot}}`))
+    // A REFUSAL SAYS WHAT TO CHANGE, WHICH MEANS NAMING WHAT IS THERE. A sentence that carries its cells under some
+    // other key reads as citing nothing, and "cites nothing" sends a writer looking for a missing value instead of a
+    // misspelt key — so the keys the sentence does have are named beside the one it needs.
+    const has = Object.keys(s as Record<string, unknown>).filter((k) => !['text', 'cites', 'why'].includes(k))
+    const text = s.text.replace(/\{([a-zA-Z_]\w*)\}/g, (_m, slot: string) => cell(
+      s.cites?.[slot] ?? refuse(`sentence ${i + 1}: {${slot}} cites nothing — a sentence names its cells in cites: { ${slot}: { data, row, column } }${has.length ? `; this one has ${has.join(', ')}` : ''}`),
+      `sentence ${i + 1} {${slot}}`))
     return { text, ...(s.why ? { why: s.why } : {}) }
   })
   const headline = answer.headline ? { label: answer.headline.label, display: cell(answer.headline.value, 'the headline'), value: null } : undefined

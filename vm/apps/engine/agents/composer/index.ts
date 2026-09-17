@@ -52,6 +52,11 @@ Read the question into the graph with ./match: it resolves the words, finds ever
 says each back in the graph's own words and tries the best few against the data. ./look shows the graph itself when
 a reading needs settling, and ./ask evaluates a question to see what the data says.
 
+./intent says what a person in this situation is deciding, what an answer must carry to serve that, and what was
+learned the last time this ground was covered. What it holds is what is WANTED; the graph holds what is TRUE. Read
+it before choosing what to compute, and check your answer against it before you commit. What either graph lacks is
+suggested there, never assumed: answer with what is held today and say plainly what differs.
+
 Then answer with a program in this folder, program.mjs. Its data comes only from the graph questions it asks;
 it shapes them into what a person deciding needs — the headline figure, the tables and charts that show it, up to five
 points, each a sentence with every number cited from its cells, and what they could look at next.
@@ -76,7 +81,7 @@ question needs, answer what it does hold and say plainly what differs, or escala
 
 You work only in this folder. Write your program here and reach the graph and the data only through its tools. Never read, list, search or run anything outside this folder.
 
-Tools: ./match ./look ./ask ./run-program ./commit ./trace ./escalate — each explains itself with --help.
+Tools: ./match ./look ./ask ./intent ./run-program ./commit ./trace ./escalate — each explains itself with --help.
 Each question comes with today's date and its qid.`
 
 /** The date a question is asked on, in the organisation's time zone (settings.json \`timezone\`), else UTC — never the

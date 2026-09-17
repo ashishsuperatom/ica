@@ -11,6 +11,7 @@
 // In its directory an agent finds the tools for its part, generated here with the absolute paths they need:
 //
 //   the semantic graph   ./match ./look ./ask ./run-program ./commit ./trace   (conversation, analyst)
+//   the intent side      ./intent                                          (conversation, analyst)
 //   the data             ./sources ./query ./introspect ./find-schema ./resolve                            (analyst, connector, grounding)
 //   hand-off             ./escalate                                                                          (conversation)
 //
@@ -194,6 +195,13 @@ const r = spawnSync('tsx', [${JSON.stringify(semanticCli)}, ${JSON.stringify(com
   '--manager', ${JSON.stringify(managerUrl)}, '--home', ${JSON.stringify(dir)}], { stdio: 'inherit', env: { ...process.env, NODE_NO_WARNINGS: '1' } })
 process.exit(r.status ?? 1)
 `
+  const intentTool = `// intent — what is being decided, and what we learned going this way. See apps/engine/graph/intent-cli.ts.
+import { spawnSync } from 'node:child_process'
+const r = spawnSync('tsx', [${JSON.stringify(fileURLToPath(new URL('../graph/intent-cli.ts', import.meta.url)))}, ...process.argv.slice(2),
+  '--db', ${JSON.stringify(dbDir)}, '--project', ${JSON.stringify(projectDir)},
+  '--manager', ${JSON.stringify(managerUrl)}, '--home', ${JSON.stringify(dir)}], { stdio: 'inherit', env: { ...process.env, NODE_NO_WARNINGS: '1' } })
+process.exit(r.status ?? 1)
+`
   const drivers: Record<string, string> = {
     escalate: `// Hand this question to the analyst and stop.
 import { readFile, mkdir, writeFile } from 'node:fs/promises'
@@ -285,6 +293,8 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
   // connector and grounding agents have the data.
   if (conversation) for (const name of Object.keys(drivers)) if (name !== 'escalate') delete drivers[name]
   for (const name of Object.keys(SEMANTIC_USAGE)) { drivers[name] = graphTool(name); usages[name] = SEMANTIC_USAGE[name] }
+  drivers['intent'] = intentTool
+  usages['intent'] = INTENT_USAGE
   // Building the model: the one semantic-graph tool, on this project's store, with the agent at work as who changed it.
   if (!conversation) {
     drivers['semantic-graph'] = `// semantic-graph — the project's model, built and changed through checked, recorded operations. See packages/semantic-graph/MODELING.md.
@@ -358,6 +368,12 @@ if command -v tsx >/dev/null 2>&1; then exec tsx "$D" "$@"; else exec npx --yes 
 /** Tools that only read: their work outlives the call, and asking the same thing twice in a turn costs nothing. */
 const READ_ONLY = new Set(['match', 'look', 'ask', 'trace'])
 
+const INTENT_USAGE = `intent '<the question, as asked>'   → what a person in this situation is deciding, what an answer must carry to serve it, and the situation in force for this conversation. The semantic graph says what is true; this says what is wanted. It never returns a number.
+  state · state push <id> · state drop <id>   the situation being answered inside — a slice of references, and a change to it is recorded
+  watch [<g1:Object[.measure]>]               what to watch for around a node, learned from going this way before
+  checks <intent id>                          what an answer must carry, to check your answer against before committing
+  suggest '{"op":"…","target":"…","args":{…},"reason":"…"}'   what should be added to a graph — recorded, never applied; answer with what is held today and say what differs`
+
 const SEMANTIC_USAGE: Record<string, string> = {
   match: `match '<the question, as asked>' [--json]   → the subgraphs the question could be. Give it minutes, not seconds: it tries the best few against the data. Its words are resolved to measures, dimensions, conditions and records (looked up by name at their sources); every route the graph holds is built; each is said back in the graph's own words with what is uncertain about it; the best few are asked against the data so it can separate them. Ends with what to change if the first one is not it.
   Read the sentence first and say what its parts are — you know what the words mean, and the graph does not: match '{"question":"<as asked>","parts":[{"text":"<the words>","is":"<the kind of thing they name, or measure/grouping/period/condition>"}]}'. Where a name begins and ends is yours to decide; what it means is the graph's, and a part it cannot place is reported rather than assumed`,
@@ -370,7 +386,8 @@ const SEMANTIC_USAGE: Record<string, string> = {
   A program is named for its idea and takes the question's values — a span, a record, a judgement it turns on — as params with the default you chose:
   export const meta = { name, description, params: { <name>: '<what it means>' }, logic }
   export default async (ctx, params) => ({ status, missing, scope, headline, data, views, narration, nextSteps })
-  status is answered, unknowable or uncertain, and missing says plainly why when it is not answered; data holds the tables by name; a view renders one of them (table, bar, line or kpi); narration is up to five sentences, each number in them a {slot} citing a cell { data, row, column }; nextSteps are what they could look at next.
+  status: 'answered'|'unknowable'|'uncertain' · missing: why, when not answered · scope · headline: { label, value } · data: { <key>: <table> } · views: [{ id, component: 'table'|'bar'|'line'|'kpi', data: '<key of data>', title, encode }] · narration: [{ text, cites: { <slot>: { data: '<key of data>', row, column } }, why }] · nextSteps: [{ label, why }].
+  Up to five sentences. Every number in a sentence is a {slot} named in that sentence's cites, and a cell names a KEY of data — so a figure you worked out is cited by putting it in a column of a table you return.
   ctx.ask(question, label) is the program's only data — a table of rows, each record by its id with its name beside it. ctx.transform, ctx.decide, ctx.decideAt, ctx.verify, ctx.caveat and ctx.explain record what the program did and why, so the answer can be read back`,
   commit: `commit   → give the answer of the last ./run-program as this conversation's next step, and end the turn`,
   trace: `trace ['<group>'] [<call>]   → what is under the answer on screen: the rows of one group (a group is JSON, e.g. '{"<Dimension>":"<key>"}'), or with no group, the steps and questions it was reached by`,
