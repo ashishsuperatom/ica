@@ -137,7 +137,8 @@ export const oracle: Dialect = {
   row: (select) => `SELECT ${select} FROM dual`,
   limit: (sql, n) => `${sql}\nFETCH FIRST ${Math.floor(n)} ROWS ONLY`,
   first: (select, from, where, orderBy) => `(SELECT ${select} FROM ${from} WHERE ${where} ORDER BY ${orderBy} FETCH FIRST 1 ROWS ONLY)`,
-  under: (e, sql, key, parent, list) => `${e} IN (SELECT c.k FROM (${closure(sqlite.quote, sql, key, parent, true).replace('WITH RECURSIVE up', 'WITH up').replace(/SELECT k FROM up$/, `SELECT k FROM up WHERE anc IN (${list})`)}) c)`,
+  // Oracle's own hierarchical query, which SuiteQL also runs; a recursive WITH it does not.
+  under: (e, sql, key, parent, list) => `${e} IN (SELECT u.${sqlite.quote(key)} FROM (${sql}) u START WITH u.${sqlite.quote(key)} IN (${list}) CONNECT BY NOCYCLE PRIOR u.${sqlite.quote(key)} = u.${sqlite.quote(parent)})`,
 }
 
 /** SQL Server: dates are date; the first rows by TOP; a recursive query cannot sit inside another, so "under" is not written. */

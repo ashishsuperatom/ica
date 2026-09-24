@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, memo } from 'react'
+import { sender, receiver } from '../../../clients/transport'
 import { renderInlineMd, renderAnswerBody, cellValue, cellText, cellId, cellEntity, colLabel, colSpec, formatNumber, isObj_display, buildBeatRows, type BeatMeta, type Cell, type Column, type ColumnSpec } from './format'
 import { CodexEventLog, mergeEvent, type AgentEvent } from './agentEventLog'
 import { useSession, SignIn, UserButton, useUser } from '@clerk/react'
@@ -227,6 +228,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const xtermRef  = useRef<Terminal | null>(null)
   const fitRef    = useRef<FitAddon | null>(null)
   const wsRef     = useRef<WebSocket | null>(null)
+  const wireIn    = useRef<ReturnType<typeof receiver> | null>(null)
   // The agent's RAW terminal stream is captured here for later use (debugging/telemetry) but is NEVER
   // rendered to the end user — the user-facing app shows only clean status, progress narration, and answers.
   const rawStreamRef = useRef('')
@@ -355,6 +357,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
       // from a flaky network: a dot that blinks green and goes out, with nothing anywhere saying why. The hub
       // closes with 4001 (bad/missing token) and 4003 (no access), and neither is worth retrying blindly.
       ws.onclose = (e) => {
+        wireIn.current?.reset()
         setConnected(false); setBusy(false); setStatus(''); clearWatchdog(); busyRef.current = false
         const rejected = e.code === 4001 || e.code === 4003
         console.warn(`[ws] closed ${e.code}${e.reason ? ` — ${e.reason}` : ''}${rejected ? ' (not retrying)' : ''}`)
@@ -375,11 +378,17 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
         if (!closed) setTimeout(connect, 3000)
       }
       ws.onerror = () => ws.close()
+      // What the wire does with a large message — parts, parcels — is the transport's business: frames go in
+      // here, whole messages come out below. Nothing past this line sees either.
+      const inbound = receiver({ deliver: (whole) => onWire(whole) })
+      wireIn.current = inbound
       ws.onmessage = (e) => {
         const raw = JSON.parse(e.data)
-        // Cloud: hub wraps payloads as { from, to, payload }. Unwrap to the code-engine
-        // message; swallow hub control frames (welcome / machine waking).
-        const msg = CLOUD ? raw.payload : raw
+        // Cloud: hub wraps payloads as { from, to, payload }. Unwrap to the code-engine message.
+        const frame = CLOUD ? raw.payload : raw
+        if (frame) void inbound.receive(frame)
+      }
+      const onWire = (msg: any) => {
         if (!msg) return
         if (busyRef.current) armWatchdog()   // any message = engine alive → reset the watchdog
         if (msg.t === 'tick') return          // liveness ping only; nothing to render
@@ -557,7 +566,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
       if (payload?.t === 'analyse') endTurn('Not connected — your question was not sent. Reconnecting…')
       return
     }
-    ws.send(JSON.stringify(CLOUD ? { to: { type: 'code-engine' }, payload } : payload))
+    void sender({ send: (frame) => ws.send(JSON.stringify(CLOUD ? { to: { type: 'code-engine' }, payload: frame } : frame)) }).send(payload)
   }
   // Subscribe to every agent-log channel (called on connect). The DO forwards each only to THIS user's devices,
   // so the console always has the composer/analyst logs from the moment it connects — no missing a

@@ -5,7 +5,8 @@
 // is a new build id and a rollback is a metadata change.
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 
-type Dash = { id: string; name: string; build_id?: string; files?: number; bytes?: number; uploaded_by?: string; uploaded_at?: number }
+type Dash = { id: string; name: string; build_id?: string; files?: number; bytes?: number; uploaded_by?: string; uploaded_at?: number; version?: number; builds?: number }
+type Build = { build_id: string; n: number; files: number; bytes: number; uploaded_by?: string; uploaded_at: number; current: boolean; kind?: string; from_n?: number; pruned?: boolean }
 
 const fmtBytes = (n = 0) => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`
 const fmtWhen = (ms?: number) => ms ? new Date(ms).toLocaleString() : '—'
@@ -61,6 +62,7 @@ export function DashboardsPanel({ api, token, projectId }: { api: (p: string, i?
   const [name, setName] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [err, setErr] = useState('')
+  const [note, setNote] = useState('')
   const [over, setOver] = useState<string | null>(null)
   const pickers = useRef<Record<string, HTMLInputElement | null>>({})
 
@@ -78,27 +80,65 @@ export function DashboardsPanel({ api, token, projectId }: { api: (p: string, i?
     setName(''); load()
   }
 
+  // Upload progress: what has left this machine, then "storing" while the worker hashes and writes. fetch()
+  // cannot report bytes sent; XMLHttpRequest can, so the upload goes that way.
+  const [progress, setProgress] = useState<{ id: string; sent: number; total: number; storing: boolean } | null>(null)
   const publish = async (id: string, files: { path: string; file: File }[]) => {
     if (!files.length) return
-    setErr(''); setBusy(id)
+    setErr(''); setNote(''); setBusy(id)
     try {
       const form = new FormData()
       // The field NAME is the path inside the build — that is what the worker stores it as.
       for (const f of files) form.append(f.path, f.file, f.file.name)
-      // fetch() directly, NOT the shared api(): that sets content-type: application/json, which would stop the
-      // browser writing the multipart boundary and the upload would arrive unparseable.
-      const r = await fetch(`/api/projects/${projectId}/dashboards/${encodeURIComponent(id)}/upload`, {
-        method: 'POST', body: form, headers: token ? { authorization: `Bearer ${token}` } : {},
+      const total = files.reduce((a, f) => a + f.file.size, 0)
+      setProgress({ id, sent: 0, total, storing: false })
+      const { status, text } = await new Promise<{ status: number; text: string }>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.open('POST', `/api/projects/${projectId}/dashboards/${encodeURIComponent(id)}/upload`)
+        if (token) xhr.setRequestHeader('authorization', `Bearer ${token}`)
+        // No content-type by hand: the browser writes the multipart boundary itself.
+        xhr.upload.onprogress = (e) => setProgress({ id, sent: e.loaded, total: e.lengthComputable ? e.total : total, storing: false })
+        xhr.upload.onload = () => setProgress({ id, sent: total, total, storing: true })
+        xhr.onload = () => resolve({ status: xhr.status, text: xhr.responseText })
+        xhr.onerror = () => reject(new Error('the upload failed before a reply'))
+        xhr.send(form)
       })
-      if (!r.ok) setErr(await r.text())
+      if (status < 200 || status >= 300) setErr(text)
+      else {
+        let out: { unchanged?: boolean; restored?: boolean; version?: number } = {}
+        try { out = JSON.parse(text) } catch { /* a bare ok */ }
+        setNote(out.unchanged ? `That build is already live as v${out.version} — nothing uploaded.` : out.restored ? `Same files as an earlier version — published as v${out.version} pointing at them, nothing uploaded.` : out.version ? `Published as v${out.version}.` : '')
+      }
       load()
+      // An open history is refreshed, not left showing the versions from before this upload.
+      if (builds[id]) { setBuilds((b) => ({ ...b, [id]: undefined })); await showBuilds(id) }
     } catch (e: any) { setErr(String(e?.message ?? e)) }
-    finally { setBusy(null) }
+    finally { setBusy(null); setProgress(null) }
   }
 
+  // The ledger of builds, opened per dashboard; "make current" is the rollback, one call, no re-upload.
+  const [builds, setBuilds] = useState<Record<string, Build[] | undefined>>({})
+  const showBuilds = async (id: string) => {
+    if (builds[id]) { setBuilds((b) => ({ ...b, [id]: undefined })); return }
+    const r = await api(`/projects/${projectId}/dashboards/${encodeURIComponent(id)}/builds`)
+    const d = r.ok ? await r.json() as { builds?: Build[] } : { builds: [] }
+    setBuilds((b) => ({ ...b, [id]: d.builds ?? [] }))
+  }
+  // Making an earlier build live again is shown before it is done: what is live now, what will be live after.
+  const [confirm, setConfirm] = useState<{ id: string; build: Build } | null>(null)
+  const makeCurrent = async (id: string, buildId: string) => {
+    setConfirm(null); setErr('')
+    const r = await api(`/projects/${projectId}/dashboards/${encodeURIComponent(id)}/current`, { method: 'PUT', body: JSON.stringify({ buildId }) })
+    if (!r.ok) { setErr(await r.text()); return }
+    setBuilds((b) => ({ ...b, [id]: undefined })); await showBuilds(id); load()
+  }
+
+  // Deleting takes the bytes and the URL with it, so it is a quiet link and then the dashboard's own name typed
+  // back — a click on the wrong row cannot do it.
+  const [deleting, setDeleting] = useState<{ id: string; typed: string } | null>(null)
   const remove = async (id: string) => {
     await api(`/projects/${projectId}/dashboards/${encodeURIComponent(id)}`, { method: 'DELETE' })
-    load()
+    setDeleting(null); load()
   }
 
   return (
@@ -115,6 +155,7 @@ export function DashboardsPanel({ api, token, projectId }: { api: (p: string, i?
         <button className="btn" onClick={create} disabled={!name.trim()}>Create</button>
       </div>
       {err && <div className="muted" style={{ color: '#b3261e', fontSize: 12.5, marginBottom: 10 }}>{err}</div>}
+      {note && <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>{note}</div>}
 
       {!list.length && <div className="muted" style={{ fontSize: 12.5 }}>No dashboards yet.</div>}
 
@@ -127,15 +168,49 @@ export function DashboardsPanel({ api, token, projectId }: { api: (p: string, i?
             </div>
             <div className="row" style={{ gap: 8 }}>
               {d.build_id && <a className="btn" href={`https://${host}/dashboard/${d.id}/`} target="_blank" rel="noreferrer">Open ↗</a>}
-              <button className="btn" onClick={() => remove(d.id)}>Delete</button>
+
             </div>
           </div>
 
           <div className="muted" style={{ fontSize: 12, margin: '6px 0 10px' }}>
             {d.build_id
-              ? <>Published {fmtWhen(d.uploaded_at)} · {d.files} files · {fmtBytes(d.bytes)}{d.uploaded_by ? ` · ${d.uploaded_by}` : ''}</>
+              ? <>{d.version ? <strong>v{d.version}</strong> : 'Published'} · {fmtWhen(d.uploaded_at)} · {d.files} files · {fmtBytes(d.bytes)}{d.uploaded_by ? ` · ${d.uploaded_by}` : ''}
+                  {' · '}<a href="#" onClick={(e) => { e.preventDefault(); showBuilds(d.id) }}>{builds[d.id] ? 'hide history' : `history${d.builds ? ` (${d.builds})` : ''}`}</a></>
               : <>Nothing published yet.</>}
           </div>
+
+          {builds[d.id] && (
+            <table style={{ width: '100%', fontSize: 12.5, borderCollapse: 'collapse', marginBottom: 10 }}>
+              <tbody>
+                {builds[d.id]!.map((b) => (
+                  <tr key={b.build_id} style={{ borderTop: '1px solid var(--hair, #e2e4e8)' }}>
+                    <td style={{ padding: '5px 6px', fontWeight: b.current ? 600 : 400 }}>v{b.n}{b.kind === 'restore' && b.from_n ? ` · restores v${b.from_n}` : ''}{b.current ? ' · live' : ''}{b.pruned ? ' · files removed' : ''}</td>
+                    <td className="muted" style={{ padding: '5px 6px' }}>{fmtWhen(b.uploaded_at)}</td>
+                    <td className="muted" style={{ padding: '5px 6px' }}>{b.files} files · {fmtBytes(b.bytes)}</td>
+                    <td className="muted" style={{ padding: '5px 6px' }}>{b.uploaded_by ?? ''}</td>
+                    <td className="mono muted" style={{ padding: '5px 6px', fontSize: 11 }}>{b.build_id}</td>
+                    <td style={{ padding: '5px 6px', textAlign: 'right' }}>{!b.current && !b.pruned && <button className="btn" onClick={() => setConfirm({ id: d.id, build: b })}>Make live again</button>}</td>
+                  </tr>
+                ))}
+                {!builds[d.id]!.length && <tr><td className="muted" style={{ padding: '5px 6px' }}>No builds recorded yet.</td></tr>}
+              </tbody>
+            </table>
+          )}
+          {confirm?.id === d.id && (() => {
+            const live = builds[d.id]?.find((b) => b.current)
+            const next = (builds[d.id]?.[0]?.n ?? 0) + 1
+            const when = (b?: Build) => b ? `${fmtWhen(b.uploaded_at)}${b.uploaded_by ? ` · ${b.uploaded_by}` : ''} · ${b.files} files · ${fmtBytes(b.bytes)}` : '—'
+            return (
+              <div style={{ border: '1px solid var(--hair, #e2e4e8)', borderRadius: 6, padding: 12, marginBottom: 10, fontSize: 12.5 }}>
+                <div style={{ marginBottom: 6 }}><strong>Live now:</strong> v{live?.n ?? '?'} · {when(live)}</div>
+                <div style={{ marginBottom: 10 }}><strong>After:</strong> v{next}, the files of v{confirm.build.n} ({when(confirm.build)}). v{live?.n ?? '?'} stays in the history.</div>
+                <div className="row" style={{ gap: 8 }}>
+                  <button className="btn" onClick={() => makeCurrent(d.id, confirm.build.build_id)}>Make v{confirm.build.n}'s files live as v{next}</button>
+                  <button className="btn" onClick={() => setConfirm(null)}>Cancel</button>
+                </div>
+              </div>
+            )
+          })()}
 
           {/* Drop the build directory, or pick it. Both end up as the same list of path→file pairs. */}
           <div
@@ -149,7 +224,16 @@ export function DashboardsPanel({ api, token, projectId }: { api: (p: string, i?
               borderRadius: 6, padding: '18px 12px', textAlign: 'center', cursor: 'pointer',
               fontSize: 12.5, color: 'var(--muted, #6c7075)',
             }}>
-            {busy === d.id ? 'Uploading…' : <>Drop the build directory here, or <u>choose a folder</u></>}
+            {busy === d.id
+              ? (progress?.id === d.id
+                  ? <div>
+                      <div style={{ marginBottom: 6 }}>{progress.storing ? 'Storing…' : `Uploading… ${fmtBytes(progress.sent)} of ${fmtBytes(progress.total)} (${progress.total ? Math.round(100 * progress.sent / progress.total) : 0}%)`}</div>
+                      <div style={{ height: 6, borderRadius: 3, background: 'var(--hair, #e2e4e8)', overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${progress.total ? Math.min(100, Math.round(100 * progress.sent / progress.total)) : 0}%`, background: progress.storing ? '#15385c' : '#2f7d5b', transition: 'width .15s linear' }} />
+                      </div>
+                    </div>
+                  : 'Uploading…')
+              : <>Drop the build directory here, or <u>choose a folder</u></>}
           </div>
           <input
             ref={(el) => { pickers.current[d.id] = el }}
@@ -162,6 +246,16 @@ export function DashboardsPanel({ api, token, projectId }: { api: (p: string, i?
               const files = fs.map((f) => ({ path: (f.webkitRelativePath || f.name).split('/').slice(1).join('/') || f.name, file: f }))
               publish(d.id, files); e.target.value = ''
             }} />
+          <div className="muted" style={{ fontSize: 12, marginTop: 10, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            {deleting?.id === d.id
+              ? <>
+                  <span>Type <strong>{d.name}</strong> to delete this dashboard, its builds and its address:</span>
+                  <input className="input" style={{ maxWidth: 220 }} autoFocus value={deleting.typed} onChange={(e) => setDeleting({ id: d.id, typed: e.target.value })} onKeyDown={(e) => { if (e.key === 'Escape') setDeleting(null) }} />
+                  <button className="btn" disabled={deleting.typed.trim() !== d.name} onClick={() => remove(d.id)} style={{ background: deleting.typed.trim() === d.name ? '#b3261e' : undefined }}>Delete for good</button>
+                  <a href="#" onClick={(e) => { e.preventDefault(); setDeleting(null) }}>cancel</a>
+                </>
+              : <a href="#" onClick={(e) => { e.preventDefault(); setDeleting({ id: d.id, typed: '' }) }}>Delete this dashboard…</a>}
+          </div>
         </div>
       ))}
     </div>

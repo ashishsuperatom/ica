@@ -65,6 +65,7 @@ export type EngineMsgType =
   | 'agent:event'      // one work atom (ev.kind: command|message|reasoning|file|turn|user|segment|narration)
   | 'agent:events'     // full replay after a reconnect
   | 'agent:status'     // live state: text | category | progress | state:'done'
+  | 'part'             // one part of a message too large for one frame: { id, part, of, data } — joined by the receiver, either direction
   | 'agent:chunk'      // raw output for a lane that has no structured events
   // The analyst's raw TERMINAL bytes. Deliberately NOT a lane frame: it is a byte stream for an xterm, shared
   // with the admin console, and only sent to a client that asked for it (term:attach).

@@ -46,6 +46,31 @@ final class HubClient {
     private let db: AppDatabase
     private let connection: Connection
     private var socket: URLSessionWebSocketTask?
+    // What the wire does with a large message — parts, parcels — is the transport's business (Transport.swift):
+    // frames go in through `inbound`, whole messages come out to `handle(whole:)`; payloads go out through
+    // `outbound`. Nothing else in this client sees either.
+    // Made once, on first use; kept out of observation — they are plumbing, not state a view watches.
+    @ObservationIgnored private var _inbound: Transport.Receiver?
+    @ObservationIgnored private var _outbound: Transport.Sender?
+    private var inbound: Transport.Receiver {
+        if let r = _inbound { return r }
+        let r = Transport.Receiver(deliver: { [weak self] whole in Task { @MainActor in self?.handle(whole: whole) } }, parcels: parcelStore())
+        _inbound = r
+        return r
+    }
+    private var outbound: Transport.Sender {
+        if let s = _outbound { return s }
+        let s = Transport.Sender(send: { [weak self] frame in Task { @MainActor in self?.send(raw: ["to": ["type": "code-engine"], "payload": frame]) } }, parcels: nil)
+        _outbound = s
+        return s
+    }
+    /// Parcels are fetched from the platform's API at the hub's own host, with the ticket the message carries.
+    private func parcelStore() -> Transport.ParcelStore? {
+        guard let ws = connection.webSocketURL, var c = URLComponents(url: ws, resolvingAgainstBaseURL: false) else { return nil }
+        c.scheme = (c.scheme == "ws") ? "http" : "https"; c.path = ""; c.query = nil
+        guard let api = c.url else { return nil }
+        return Transport.store(api: api, projectId: connection.projectId)
+    }
     private var session: URLSession?
     private var pingTimer: Timer?
     private var reconnectAttempt = 0
@@ -178,7 +203,7 @@ final class HubClient {
     /// Envelope a payload addressed to the code-engine. Clients never set `from` —
     /// the hub stamps the authenticated identity server-side, and the engine trusts it.
     private func send(payload: [String: Any]) {
-        send(raw: ["to": ["type": "code-engine"], "payload": payload])
+        Task { await outbound.send(payload) }
     }
 
     /// Is any question waiting on the engine right now?
@@ -279,6 +304,7 @@ final class HubClient {
     private func handleDrop() {
         stopPing()
         socket = nil
+        inbound.reset()      // whatever was half-arrived came from a socket that is gone
         // The in-flight question is deliberately LEFT OPEN. There is no timeout on a
         // question anywhere in this client: the analyst can think for as long as it needs,
         // and the hub buffers the answer durably, so reconnecting pulls it. Marking the
@@ -290,7 +316,12 @@ final class HubClient {
     private func handle(data: Data) {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
         // The hub wraps engine→client messages as { from, payload }. Tolerate both shapes.
-        let msg = (root["payload"] as? [String: Any]) ?? root
+        let frame = (root["payload"] as? [String: Any]) ?? root
+        Task { await inbound.receive(frame) }
+    }
+
+    private func handle(whole msg: [String: Any]) {
+        let root = msg
         guard let t = msg["t"] as? String else {
             NSLog("[hub] «no t» keys=%@", root.keys.sorted().joined(separator: ","))
             return

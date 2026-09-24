@@ -296,6 +296,17 @@ export default {
 
       // Deleting a dashboard has to take its BYTES with it. The DO row goes either way; without this the
       // objects stay in R2 for a dashboard that no longer exists, and nothing will ever refer to them again.
+      // Rolling back is the DO's one UPDATE, but the worker remembers which build it is serving for a few
+      // seconds — forget that, or the old build keeps being served for up to 15s after the console said done.
+      const roll = subPath.match(/^dashboards\/([^/]+)\/current$/)
+      if (roll && request.method === 'PUT') {
+        const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by: acc.email })
+        const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
+        const r = await stub.fetch(new Request(`http://do/${subPath}`, { method: 'PUT', body }))
+        if (r.ok) { const b = JSON.parse(body || '{}'); if (b?.buildId) buildCache.set(`${projectId}/${roll[1]}`, { buildId: String(b.buildId), at: Date.now() }) }
+        return r
+      }
+
       const del = subPath.match(/^dashboards\/([^/]+)$/)
       if (del && request.method === 'DELETE') {
         await deleteDashboardObjects(del[1], projectId, env)
@@ -789,28 +800,54 @@ async function uploadDashboardBuild(dashId: string, projectId: string, by: strin
   if (!incoming.some((f) => f.rel === (strip ? `${strip}index.html` : 'index.html')))
     return new Response('no index.html at the top of that upload — choose the build directory itself (the folder index.html is in), not its parent', { status: 400 })
 
-  const buildId = new Date().toISOString().replace(/[:.]/g, '-')
-  const base = `dashboard/${projectId}/${dashId}/${buildId}`
-  let files = 0, bytes = 0
-
+  // WHAT THIS BUILD IS, before anything is written: a hash over every file's path and bytes, in path order. The
+  // same build dropped twice — nobody remembers whether the last upload took — is one build, and the ledger
+  // says so instead of growing a version that is not one.
+  const read: Array<{ rel: string; body: ArrayBuffer }> = []
   for (const f of incoming) {
     const rel = strip && f.rel.startsWith(strip) ? f.rel.slice(strip.length) : f.rel
     if (!rel) continue
-    const body = await f.part.arrayBuffer()
-    await env.PACKAGES.put(`${base}/${rel}`, body, { httpMetadata: { contentType: mimeOf(rel) } })
-    files++; bytes += body.byteLength
+    read.push({ rel, body: await f.part.arrayBuffer() })
+  }
+  read.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0))
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', await new Blob(read.flatMap((f) => [f.rel, '\0', f.body, '\0'])).arrayBuffer()))
+  const contentHash = [...digest].map((x) => x.toString(16).padStart(2, '0')).join('')
+  const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
+  const known: any = await stub.fetch(new Request(`http://do/dashboards/${encodeURIComponent(dashId)}/builds?hash=${contentHash}`)).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+  const same = known?.builds?.[0]
+  if (same) {
+    if (same.current) return Response.json({ ok: true, unchanged: true, buildId: same.build_id, version: same.n, files: same.files, bytes: same.bytes, contentHash })
+    // The same build is kept as an earlier version: make it current rather than store it again.
+    const r = await stub.fetch(new Request(`http://do/dashboards/${encodeURIComponent(dashId)}/current`, { method: 'PUT', body: JSON.stringify({ buildId: same.build_id, by }) }))
+    if (r.ok) {
+      const made: any = await r.json().catch(() => ({}))
+      buildCache.set(`${projectId}/${dashId}`, { buildId: String(same.build_id), at: Date.now() })
+      return Response.json({ ok: true, restored: true, buildId: same.build_id, version: made.version ?? null, restores: same.n, files: same.files, bytes: same.bytes, contentHash })
+    }
+  }
+
+  const buildId = new Date().toISOString().replace(/[:.]/g, '-')
+  const base = `dashboard/${projectId}/${dashId}/${buildId}`
+  let files = 0, bytes = 0
+  for (const f of read) {
+    await env.PACKAGES.put(`${base}/${f.rel}`, f.body, { httpMetadata: { contentType: mimeOf(f.rel) } })
+    files++; bytes += f.body.byteLength
   }
 
   // Pointed at LAST: until this line the old build is still the one being served.
-  const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
   await stub.fetch(new Request(`http://do/dashboards/${encodeURIComponent(dashId)}`, {
-    method: 'PUT', body: JSON.stringify({ buildId, files, bytes, by }),
+    method: 'PUT', body: JSON.stringify({ buildId, files, bytes, by, contentHash }),
   }))
   buildCache.set(`${projectId}/${dashId}`, { buildId, at: Date.now() })   // publish takes effect here, not in 15s
   // Keep a few builds back so a rollback has somewhere to go, and let the rest go. Every publish otherwise
   // leaves its predecessor in the bucket for ever — free-ish, but unbounded, and nobody would notice until it
   // was a bill. Best-effort: a failed sweep must never fail the publish that just succeeded.
-  await pruneOldBuilds(dashId, projectId, buildId, env).catch(() => {})
+  // What the newest versions still point at stays, whichever build folder they point at; the rest goes, and the
+  // ledger rows for it are marked rather than removed.
+  const ledger: any = await stub.fetch(new Request(`http://do/dashboards/${encodeURIComponent(dashId)}/builds`)).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+  const referenced = new Set<string>([buildId, ...((ledger?.builds ?? []) as any[]).slice(0, 5).map((b) => String(b.build_id))])
+  const pruned = await pruneOldBuilds(dashId, projectId, referenced, env).catch(() => [] as string[])
+  for (const b of pruned) await stub.fetch(new Request(`http://do/dashboards/${encodeURIComponent(dashId)}/builds/${encodeURIComponent(b)}/pruned`, { method: 'PUT' })).catch(() => {})
   return Response.json({ ok: true, buildId, files, bytes })
 }
 
@@ -844,8 +881,8 @@ async function currentBuild(dashId: string, projectId: string, env: Env): Promis
 
 /** Drop all but the newest few builds. Build ids are ISO timestamps, so sorting them as strings is sorting
  *  them by time. The CURRENT one is always kept, whatever its age. */
-async function pruneOldBuilds(dashId: string, projectId: string, keepBuild: string, env: Env, keep = 5): Promise<void> {
-  if (!env.PACKAGES) return
+async function pruneOldBuilds(dashId: string, projectId: string, keepBuilds: Set<string>, env: Env): Promise<string[]> {
+  if (!env.PACKAGES) return []
   const prefix = `dashboard/${projectId}/${dashId}/`
   const builds = new Set<string>()
   let cursor: string | undefined
@@ -855,7 +892,7 @@ async function pruneOldBuilds(dashId: string, projectId: string, keepBuild: stri
     cursor = page.truncated ? page.cursor : undefined
   } while (cursor)
 
-  const doomed = [...builds].sort().reverse().slice(keep).filter((b) => b && b !== keepBuild)
+  const doomed = [...builds].filter((b) => b && !keepBuilds.has(b))
   for (const b of doomed) {
     let c: string | undefined
     do {
@@ -864,6 +901,7 @@ async function pruneOldBuilds(dashId: string, projectId: string, keepBuild: stri
       c = page.truncated ? page.cursor : undefined
     } while (c)
   }
+  return doomed
 }
 
 /** Remove every object of every build of one dashboard. R2 lists 1000 at a time, so it pages. */

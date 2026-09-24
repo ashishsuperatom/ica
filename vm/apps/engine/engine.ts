@@ -17,11 +17,11 @@
 import './ica/proxy-dispatcher.js'
 import { fetchBoxCredentials, isFleetBox } from './ica/box-credentials.js'
 import WebSocket from 'ws'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { check } from '@superatom/semantic-graph'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { existsSync, mkdirSync, rmSync, readFileSync } from 'node:fs'
-import { randomUUID } from 'node:crypto'
 import { createSession, prepareWorkspace, type Session, type Harness, type RunHandlers } from './ica/index.js'
 import { agentConfig, describeConfig, useCache, receive, applied, type AgentName } from './config/index.js'
 import { createNarrator, capResultData, stripCode, type Narrator } from './agents/narrator/index.js'
@@ -37,7 +37,9 @@ import { DataSourceIndex, dataSourceStats } from '@superatom/datasource-index'
 // built image. tsx erases a type-only import, which is why the container runs without it. Making it a value
 // import would break every deploy while working perfectly here.
 import type { EngineMsgType } from '../../../clients/protocol.js'
-import { modelVersion, openSemanticGraph } from './graph/semantic.js'
+import { sender, receiver } from '../../../clients/transport.js'
+import { randomUUID } from 'node:crypto'
+import { MODEL, modelVersion, openSemanticGraph } from './graph/semantic.js'
 import { CATEGORY, explainAnswer, parseVerb, type VerbMatch, type ViewRef } from './graph/semantic-verbs.js'
 import { createSemanticTurns } from './graph/semantic-turns.js'
 import { readFile as readFileAsync } from 'node:fs/promises'
@@ -722,7 +724,67 @@ function resyncAnalyst(from: any, full = false) {
   }
 }
 
+// ── A PROJECT'S OWN APPLICATION ───────────────────────────────────────────────────────────────────────────────
+// A project may carry an application of its own — a state machine over the graph, its named queries, its blocks —
+// at <project>/app/server/index.mjs. It is not part of the platform and the platform knows nothing of its
+// vocabulary: every payload whose `t` begins with `app:` is handed to it whole, with the seams it may use (the data
+// manager, the graph, who is asking) and a way to reply on the same envelope. Nothing else changes hands. A project
+// without one gets the platform's default UI, as before.
+let projectApp: Promise<{ handle: (payload: any, ctx: any) => Promise<unknown> } | null> | null = null
+async function loadProjectApp(fresh = false) {
+  const file = join(PROJECT_DIR, 'app', 'server', 'index.mjs')
+  if (!existsSync(file)) return null
+  const mod = await import(`${pathToFileURL(file).href}${fresh ? `?t=${Date.now()}` : ''}`)
+  return typeof mod.handle === 'function' ? mod : (typeof mod.default?.handle === 'function' ? mod.default : null)
+}
+// Said once at start, so a project that carries an application is seen to carry it.
+if (existsSync(join(PROJECT_DIR, 'app', 'server', 'index.mjs'))) console.log(`[app] this project carries an application (${join(PROJECT_DIR, 'app', 'server', 'index.mjs')}); app:* payloads go to it`)
+// WHAT THE WIRE DOES WITH A LARGE MESSAGE IS THE TRANSPORT'S BUSINESS (clients/transport.ts), the same module
+// at both ends: a body over the frame limit goes beside the wire as a parcel when a store is at hand, else as
+// parts, and comes back whole. Nothing here, and nothing in a project's application, sees either.
+const parcelStore = undefined   // the parcel route on the worker is the next piece; until then, parts
+const toWire = new Map<string, ReturnType<typeof sender>>()
+const senderFor = (to: any) => {
+  const key = String(to?.id ?? 'broadcast')
+  let s = toWire.get(key)
+  if (!s) { s = sender({ send: (frame) => emit(to, frame as { t: EngineMsgType }), parcels: parcelStore, onFallback: (why) => console.warn(`[wire] parcel not made (${why}); sent as parts`) }); toWire.set(key, s) }
+  return s
+}
+const replyInParts = (to: any, msg: Record<string, unknown>) => { void senderFor(to).send(msg) }
+// Parts coming in are joined per sender; the whole message is handled once.
+const fromWire = new Map<string, ReturnType<typeof receiver>>()
+const receiverFor = (from: any) => {
+  const key = String(from?.id ?? '?')
+  let r = fromWire.get(key)
+  if (!r) { r = receiver({ deliver: (whole) => { void handle(whole, from) }, parcels: parcelStore }); fromWire.set(key, r) }
+  return r
+}
+
+async function handleApp(payload: any, from: any) {
+  if (payload.t === 'app:reload') { projectApp = loadProjectApp(true); const app = await projectApp; emit(from, { t: 'app:reloaded' as EngineMsgType, ok: !!app }); return }
+  const app = await (projectApp ??= loadProjectApp())
+  if (!app) { emit(from, { t: 'app:error' as EngineMsgType, error: 'this project has no application', reqId: payload.reqId }); return }
+  const ctx = {
+    project: PROJECT, projectDir: PROJECT_DIR, who: from?.userId ?? null,
+    graph: () => getSemantic(),
+    check: (q: any, today?: string) => getSemantic().then((g) => check(g.model(MODEL).schema, q, today ? { today } : {})),
+    query: async (source: string, sql: string, params: Record<string, unknown> = {}) => {
+      const r = await fetch(`${DATASOURCE}/query`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: source, sql, params }) })
+      const body: any = await r.json().catch(() => ({}))
+      if (!r.ok || body.error) throw new Error(`${source}: ${body.error ?? `the manager answered ${r.status}`}`)
+      return { rows: body.rows ?? [], notes: body.notes ?? null }
+    },
+    /** The data sources the manager holds, as it describes them. */
+    sources: async () => { const r = await fetch(`${DATASOURCE}/sources`); const body: any = await r.json().catch(() => ({})); return body.sources ?? [] },
+    reply: (msg: Record<string, unknown>) => replyInParts(from, { ...msg, t: String(msg.t ?? 'app:res'), reqId: payload.reqId }),
+  }
+  try { await app.handle(payload, ctx) }
+  catch (e: any) { emit(from, { t: 'app:error' as EngineMsgType, error: e?.message ?? String(e), reqId: payload.reqId }) }
+}
+
 async function handle(payload: any, from: any) {
+  if (payload?.t === 'part' || (payload && typeof payload === 'object' && 'parcel' in payload)) { void receiverFor(from).receive(payload); return }
+  if (typeof payload?.t === 'string' && payload.t.startsWith('app:')) { void handleApp(payload, from); return }
   if (payload.t === 'analyse') { analyse(String(payload.question || ''), from, String(payload.sessionId || ''), String(payload.questionId || ''), String(payload.channel || '')) }   // UI supplies both ids; channel set for chat-channel turns
   else if (payload.t === 'index:build') { handleIndexBuild(from, { rebuild: !!payload.rebuild, only: payload.only ? String(payload.only) : undefined }) }   // admin console → build/refresh the datasource index
   else if (payload.t === 'grounding:build') { handleGrounding(from, !!payload.rebuild) }        // admin console → grounding agent builds (rebuild:true = wipe first, else additive)

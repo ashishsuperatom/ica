@@ -12,6 +12,7 @@
 // open and multiplex; this scaffold favours clarity.
 
 import { WebSocket } from 'ws'
+import { sender, receiver } from '../../transport.js'
 import { config } from './config.js'
 // The canonical wire protocol — one source of truth for every surface.
 import type { Answer, Hello, Analyse, Envelope, EnginePayload } from '../../protocol.js'
@@ -61,15 +62,19 @@ export function askEngine(opts: AskOpts): Promise<{ category?: string; answer: A
     ws.on('open', () => {
       ws.send(JSON.stringify(hello))
       const analyse: Analyse = { t: 'analyse', question, projectId: config.projectId, sessionId, questionId: qid, role: 'user' }
-      const envelope: Envelope<Analyse> = { to: { type: 'code-engine' }, payload: analyse }
-      ws.send(JSON.stringify(envelope))
+      void sender({ send: (frame) => { const envelope: Envelope<unknown> = { to: { type: 'code-engine' }, payload: frame }; ws.send(JSON.stringify(envelope)) } }).send(analyse as unknown as Record<string, unknown>)
     })
 
+    // Frames in through the transport (parts and parcels are its business); whole messages reach the switch.
+    const inbound = receiver({ deliver: (whole) => onWire(whole as EnginePayload & Record<string, any>) })
     ws.on('message', (raw) => {
       let msg: any
       try { msg = JSON.parse(raw.toString()) } catch { return }
       // The hub wraps engine → client messages in an envelope; the browser reads `payload`. Tolerate both.
-      const p = (msg?.payload ?? msg) as EnginePayload & Record<string, any>
+      const frame = msg?.payload ?? msg
+      if (frame) void inbound.receive(frame)
+    })
+    const onWire = (p: EnginePayload & Record<string, any>) => {
       switch (p?.t) {
         case 'tick': return                                  // liveness ping
         case 'machine:waking': onWaking?.(); return          // engine was suspended; it's coming up
@@ -79,7 +84,7 @@ export function askEngine(opts: AskOpts): Promise<{ category?: string; answer: A
         case 'error':
           return done(() => reject(new Error(p.message ?? 'engine error')))
       }
-    })
+    }
 
     ws.on('error', (err) => done(() => reject(err)))
     ws.on('close', (code, reasonBuf) => {

@@ -10,6 +10,7 @@
 // Everything shares the one socket; `reqId` is what keeps concurrent inspector panels apart.
 
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { sender, receiver } from '../../../clients/transport'
 
 const HUB = 'wss://superatom.site'
 /** How long a request waits before we call the engine unresponsive. Generous: a cold Fly machine
@@ -44,6 +45,7 @@ export function useProjectHub(projectId: string | undefined, token: string | nul
       wsRef.current = ws
       ws.onopen = () => ws.send(JSON.stringify({ type: 'hello', token, role: 'admin' }))
       ws.onclose = () => {
+        inbound.reset()
         setStatus('down')
         // Fail every in-flight request rather than leaving panels spinning until their timeouts.
         for (const [, p] of pending.current) { clearTimeout(p.timer); p.reject(new Error('hub disconnected')) }
@@ -51,8 +53,10 @@ export function useProjectHub(projectId: string | undefined, token: string | nul
         if (!closed) setTimeout(connect, 3000)
       }
       ws.onerror = () => ws.close()
-      ws.onmessage = (e) => {
-        const raw = JSON.parse(e.data); const m = raw.payload ?? raw
+      // Frames in through the transport (parts and parcels are its business), whole messages out to the handlers.
+      const inbound = receiver({ deliver: (whole) => onWire(whole) })
+      ws.onmessage = (e) => { const raw = JSON.parse(e.data); const frame = raw.payload ?? raw; if (frame) void inbound.receive(frame) }
+      const onWire = (m: any) => {
         if (m?.t === 'welcome') { setStatus('live'); setErr('') }
         else if (m?.t === 'machine:waking') setWaking(true)
         else if (m?.t === 'engine:ready') setWaking(false)
@@ -83,7 +87,7 @@ export function useProjectHub(projectId: string | undefined, token: string | nul
         reject(new Error('the engine did not answer in time — it may be starting up'))
       }, REQUEST_TIMEOUT_MS)
       pending.current.set(reqId, { resolve, reject, timer })
-      ws.send(JSON.stringify({ to: { type: 'code-engine' }, payload: { t: 'inspect:req', view, reqId, ...args } }))
+      void sender({ send: (frame) => ws.send(JSON.stringify({ to: { type: 'code-engine' }, payload: frame })) }).send({ t: 'inspect:req', view, reqId, ...args })
     })
   }, [])
 

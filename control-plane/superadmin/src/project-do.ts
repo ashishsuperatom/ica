@@ -166,7 +166,7 @@ export class ProjectDO extends DurableObject<Env> {
   // at the latest version in one shot (CREATE IF NOT EXISTS) then jump to the
   // current version number. Existing DOs only run migrations they haven't seen.
 
-  private static CURRENT_SCHEMA = 11
+  private static CURRENT_SCHEMA = 14
 
   private async migrate() {
     // Ensure version tracking table exists
@@ -330,6 +330,53 @@ export class ProjectDO extends DurableObject<Env> {
       `)
     }
 
+    // V12 — EVERY BUILD A DASHBOARD HAS HAD, numbered. The dashboards row knew only the current build, so the
+    // console could not say how many versions had been published, which one was live, or roll back to a named
+    // one. The bytes were already kept in R2 for the last few builds; this is the ledger beside them.
+    if (v < 12) {
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS dashboard_builds (
+          dash_id     TEXT NOT NULL,
+          build_id    TEXT NOT NULL,
+          n           INTEGER NOT NULL,                -- 1, 2, 3… per dashboard: the version people talk about
+          files       INTEGER NOT NULL DEFAULT 0,
+          bytes       INTEGER NOT NULL DEFAULT 0,
+          uploaded_by TEXT,
+          uploaded_at INTEGER NOT NULL,
+          PRIMARY KEY (dash_id, n)
+        );
+      `)
+      // The build each dashboard is on today becomes version 1 of its ledger.
+      this.ctx.storage.sql.exec(`
+        INSERT OR IGNORE INTO dashboard_builds (dash_id, build_id, n, files, bytes, uploaded_by, uploaded_at)
+        SELECT id, build_id, 1, files, bytes, uploaded_by, COALESCE(uploaded_at, created_at * 1000) FROM dashboards WHERE build_id IS NOT NULL
+      `)
+    }
+
+    // V13 — WHAT A BUILD IS MADE OF, as a hash over its files. Uploading the same build twice made two versions
+    // that were one; now an upload that matches a build already kept is answered with that build.
+    if (v < 13) {
+      try { this.ctx.storage.sql.exec('ALTER TABLE dashboard_builds ADD COLUMN content_hash TEXT') } catch {}
+    }
+
+    // V14 — THE LEDGER IS APPEND-ONLY. A version is an event: a publish, or a restore that points a new version at
+    // an earlier build's files. Nothing is updated or deleted; what is live is the newest row. Files pruned from
+    // the bucket are marked, so the row stays and says its files are gone.
+    if (v < 14) {
+      // The key moves from (dash_id, build_id) to (dash_id, n): a restore reuses a build id under a new version.
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS dashboard_builds_v14 (
+          dash_id TEXT NOT NULL, build_id TEXT NOT NULL, n INTEGER NOT NULL, files INTEGER NOT NULL DEFAULT 0, bytes INTEGER NOT NULL DEFAULT 0,
+          uploaded_by TEXT, uploaded_at INTEGER NOT NULL, content_hash TEXT, kind TEXT NOT NULL DEFAULT 'publish', from_n INTEGER, pruned_at INTEGER,
+          PRIMARY KEY (dash_id, n)
+        );
+        INSERT OR IGNORE INTO dashboard_builds_v14 (dash_id, build_id, n, files, bytes, uploaded_by, uploaded_at, content_hash)
+          SELECT dash_id, build_id, n, files, bytes, uploaded_by, uploaded_at, content_hash FROM dashboard_builds;
+        DROP TABLE dashboard_builds;
+        ALTER TABLE dashboard_builds_v14 RENAME TO dashboard_builds;
+      `)
+    }
+
     // Advance to current version
     this.ctx.storage.sql.exec('DELETE FROM _schema_version')
     this.ctx.storage.sql.exec('INSERT INTO _schema_version (version) VALUES (?)', ProjectDO.CURRENT_SCHEMA)
@@ -389,6 +436,10 @@ export class ProjectDO extends DurableObject<Env> {
     if (request.method === 'POST'   && path === '/dashboards')  return this.createDashboard(request)
     if (path.startsWith('/dashboards/')) {
       const id = decodeURIComponent(path.slice('/dashboards/'.length).split('/')[0])
+      const rest = path.slice('/dashboards/'.length).split('/').slice(1)
+      if (rest[0] === 'builds' && request.method === 'GET')    return this.listDashboardBuilds(id, new URL(request.url).searchParams.get('hash'))
+      if (rest[0] === 'builds' && request.method === 'PUT' && rest[1] && rest[2] === 'pruned') return this.markDashboardBuildPruned(id, decodeURIComponent(rest[1]))
+      if (rest[0] === 'current' && request.method === 'PUT')   return this.rollDashboardTo(id, request)
       if (request.method === 'GET')    return this.getDashboard(id)
       if (request.method === 'PUT')    return this.setDashboardBuild(id, request)
       if (request.method === 'DELETE') return this.deleteDashboard(id)
@@ -1486,8 +1537,11 @@ export class ProjectDO extends DurableObject<Env> {
   /** Debug: returns the stored API key so we can verify it matches the machine */
   // ── Dashboards ────────────────────────────────────────────────────────────
   private listDashboards(): Response {
-    const rows = [...this.ctx.storage.sql.exec(
-      'SELECT id, name, build_id, files, bytes, uploaded_by, uploaded_at, created_at FROM dashboards ORDER BY created_at DESC')]
+    const rows = [...this.ctx.storage.sql.exec(`
+      SELECT d.id, d.name, d.build_id, d.files, d.bytes, d.uploaded_by, d.uploaded_at, d.created_at,
+             (SELECT n FROM dashboard_builds b WHERE b.dash_id = d.id AND b.build_id = d.build_id) AS version,
+             (SELECT COUNT(*) FROM dashboard_builds b WHERE b.dash_id = d.id) AS builds
+      FROM dashboards d ORDER BY d.created_at DESC`)]
     return Response.json({ dashboards: rows })
   }
 
@@ -1515,14 +1569,51 @@ export class ProjectDO extends DurableObject<Env> {
     const b: any = await request.json().catch(() => ({}))
     const rows = [...this.ctx.storage.sql.exec('SELECT id FROM dashboards WHERE id = ?', id)]
     if (!rows.length) return new Response('no such dashboard', { status: 404 })
-    this.ctx.storage.sql.exec(
-      'UPDATE dashboards SET build_id = ?, files = ?, bytes = ?, uploaded_by = ?, uploaded_at = ? WHERE id = ?',
-      String(b?.buildId ?? ''), Number(b?.files ?? 0), Number(b?.bytes ?? 0), String(b?.by ?? ''), Date.now(), id)
+    const buildId = String(b?.buildId ?? ''), files = Number(b?.files ?? 0), bytes = Number(b?.bytes ?? 0), by = String(b?.by ?? ''), at = Date.now()
+    const contentHash = b?.contentHash ? String(b.contentHash) : null
+    const [last] = this.ctx.storage.sql.exec('SELECT MAX(n) AS n FROM dashboard_builds WHERE dash_id = ?', id)
+    const n = Number((last as any)?.n ?? 0) + 1
+    this.ctx.storage.sql.exec("INSERT INTO dashboard_builds (dash_id, build_id, n, files, bytes, uploaded_by, uploaded_at, content_hash, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'publish')", id, buildId, n, files, bytes, by, at, contentHash)
+    this.ctx.storage.sql.exec('UPDATE dashboards SET build_id = ?, files = ?, bytes = ?, uploaded_by = ?, uploaded_at = ? WHERE id = ?', buildId, files, bytes, by, at, id)
+    return Response.json({ ok: true, version: n })
+  }
+
+  /** Every build this dashboard has had, newest first, with which one is current. */
+  private listDashboardBuilds(id: string, hash: string | null = null): Response {
+    const [d] = this.ctx.storage.sql.exec('SELECT build_id FROM dashboards WHERE id = ?', id)
+    if (!d) return new Response('no such dashboard', { status: 404 })
+    const cols = 'build_id, n, files, bytes, uploaded_by, uploaded_at, content_hash, kind, from_n, pruned_at'
+    const rows = (hash
+      ? [...this.ctx.storage.sql.exec(`SELECT ${cols} FROM dashboard_builds WHERE dash_id = ? AND content_hash = ? AND pruned_at IS NULL ORDER BY n DESC`, id, hash)]
+      : [...this.ctx.storage.sql.exec(`SELECT ${cols} FROM dashboard_builds WHERE dash_id = ? ORDER BY n DESC`, id)])
+    const top = Math.max(0, ...rows.map((r: any) => Number(r.n)))
+    return Response.json({ builds: rows.map((r: any) => ({ ...r, current: Number(r.n) === top && r.build_id === (d as any).build_id, pruned: r.pruned_at != null })) })
+  }
+
+  /** Make an earlier build live again: a NEW version that points at that build's files. The ledger only grows;
+   *  the bytes never move; the row it came from says which version this restores. */
+  private async rollDashboardTo(id: string, request: Request): Promise<Response> {
+    const b: any = await request.json().catch(() => ({}))
+    const buildId = String(b?.buildId ?? ''), by = String(b?.by ?? '')
+    const [row] = this.ctx.storage.sql.exec('SELECT * FROM dashboard_builds WHERE dash_id = ? AND build_id = ? AND pruned_at IS NULL ORDER BY n ASC LIMIT 1', id, buildId)
+    if (!row) return new Response('no such build of this dashboard, or its files are gone', { status: 404 })
+    const r: any = row
+    const [last] = this.ctx.storage.sql.exec('SELECT MAX(n) AS n FROM dashboard_builds WHERE dash_id = ?', id)
+    const n = Number((last as any)?.n ?? 0) + 1, at = Date.now()
+    this.ctx.storage.sql.exec("INSERT INTO dashboard_builds (dash_id, build_id, n, files, bytes, uploaded_by, uploaded_at, content_hash, kind, from_n) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'restore', ?)", id, buildId, n, r.files, r.bytes, by, at, r.content_hash, r.n)
+    this.ctx.storage.sql.exec('UPDATE dashboards SET build_id = ?, files = ?, bytes = ?, uploaded_by = ?, uploaded_at = ? WHERE id = ?', buildId, r.files, r.bytes, by, at, id)
+    return Response.json({ ok: true, version: n, restores: r.n })
+  }
+
+  /** A build whose bytes were pruned from the bucket stays in the ledger and says so: nothing to restore from. */
+  private markDashboardBuildPruned(id: string, buildId: string): Response {
+    this.ctx.storage.sql.exec('UPDATE dashboard_builds SET pruned_at = ? WHERE dash_id = ? AND build_id = ? AND pruned_at IS NULL', Date.now(), id, buildId)
     return Response.json({ ok: true })
   }
 
   private deleteDashboard(id: string): Response {
     this.ctx.storage.sql.exec('DELETE FROM dashboards WHERE id = ?', id)
+    this.ctx.storage.sql.exec('DELETE FROM dashboard_builds WHERE dash_id = ?', id)
     return Response.json({ ok: true })   // the R2 objects are removed by the worker, which owns the bucket
   }
 
