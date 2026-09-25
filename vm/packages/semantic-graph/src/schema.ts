@@ -175,6 +175,9 @@ export function schemaProblems(s: Schema): string[] {
           else if (o.measures[m]!.expr && !o.measures[m]!.at) out.push(`${at}: ${r} is itself an expression; an expression is over measures added up from rows`)
         }
       }
+      // A condition on a measure keeps ROWS; an expression after aggregation has no rows of its own, so a condition on
+      // it would be applied nowhere. Say so, rather than accept a definition that silently means something else.
+      if (d.where?.length && d.expr && d.at !== 'row') out.push(`${at} is an expression over added-up measures, so it cannot be kept to rows of its own; keep the measures it is made of, or work it out per row`)
       for (const w of d.where ?? []) {
         if ('measure' in w) {
           const other = o.measures?.[w.measure]

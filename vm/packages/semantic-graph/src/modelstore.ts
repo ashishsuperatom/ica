@@ -32,7 +32,7 @@ export type Operation =
   | { op: 'add-calendar'; name: string; level?: string; fiscal?: ObjectDef['fiscal']; periods?: ObjectDef['periods']; description?: string; synonyms?: string[] }
   | { op: 'add-fact'; name: string; description?: string; synonyms?: string[]; history?: 'current' }
   | { op: 'add-arrow'; id: string; to: string; kind?: Arrow['kind']; partial?: boolean; synonyms?: string[] }
-  | ({ op: 'add-measure'; id: string; description?: string } & Measure)
+  | ({ op: 'add-measure'; id: string; description?: string; column?: string } & Measure)
   | ({ op: 'add-attribute'; id: string } & AttributeDef)
   | ({ op: 'add-condition'; name: string } & ConditionDef)
   | { op: 'add-equation'; on: string; paths: [string[], string[]] }
@@ -360,8 +360,15 @@ function step(before: ModelState, op: Operation): { state: ModelState; notes: st
       const o = s.objects[fact] ?? refuse(`there is no ${fact}`)
       if (o.kind !== 'fact') refuse(`${fact} is ${o.kind === 'entity' ? 'an entity' : 'a calendar'}; measures belong to facts — an entity's numbers are attributes, or a fact with one row per ${fact}`)
       if (o.measures?.[name] || o.attributes?.[name] || o.arrows?.[name] !== undefined) refuse(`${fact} already has "${name}"`)
-      const { op: _o, id: _i, ...m } = op as any
+      const { op: _o, id: _i, column, ...m } = op as any
       ;(o.measures ??= {})[name] = clean(m)
+      // A fact already bound to its rows needs the new measure's column in the same change: a measure and its
+      // column cannot be added one after the other, because each is refused without the other.
+      const fs = st.sources.facts[fact]
+      if (column) {
+        if (!fs) refuse(`${fact} is not bound to a source yet; bind it with the column, or leave --column out`)
+        fs.measures = { ...(fs.measures ?? {}), [name]: String(column) }
+      }
       const shared = Object.entries(s.objects).flatMap(([f, x]) => Object.entries(x.measures ?? {}).filter(([n, d]) => `${f}.${n}` !== op.id && (d.synonyms ?? []).some((w) => (op.synonyms ?? []).some((v) => same(v, w)))).map(([n]) => `${f}.${n}`))
       if (shared.length) notes.push(`a synonym is shared with ${shared.join(', ')}: a question using it will be asked which`)
       break

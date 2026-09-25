@@ -136,3 +136,10 @@ test('the store records, validates, renames, exports and imports a measure\'s ow
   await sg('show', 'Shift.short', '--json')
   assert.deepEqual(JSON.parse(said.at(-1)!).where, [{ measure: 'worked', op: '<', setting: 'short shift' }])
 })
+
+test('a condition on an expression measure is refused: it has no rows of its own to keep', () => {
+  const bad = structuredClone(base)
+  bad.objects.Shift!.measures!['long total'] = { unit: 'h', kind: 'flow', aggregate: 'sum', expr: '[Shift.worked]', where: [{ measure: 'worked', op: '>', value: 9 }] }
+  const p = schemaProblems(bad)
+  assert.ok(p.some((x) => x.includes('cannot be kept to rows of its own')), p.join('\n'))
+})
