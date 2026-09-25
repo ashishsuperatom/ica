@@ -234,7 +234,11 @@ function foldFact(s: Schema, I: Instance, fp: FactPlan, plan: Plan): Groups {
         let num = 0, den = 0
         for (const r of own) { const v = value(r), w = r.measures[m.weight!]; if (v !== null && w) { num += v * w; den += w } }
         values[name] = den ? num / den : null
-      } else values[name] = fold(m.aggregate, own, value, raw)
+      } else {
+        values[name] = fold(m.aggregate, own, value, raw)
+        // A kept sum over no qualifying rows is nothing added up: zero, as the compiler answers it.
+        if (held && m.aggregate === 'sum' && values[name] === null) values[name] = 0
+      }
     }
     out.set(k, { key: g.key, values })
   }

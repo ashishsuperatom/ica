@@ -297,7 +297,7 @@ function statement(s: Schema, src: Sources, plan: Plan, fp: FactPlan, dialects: 
     }
     const w = m.weight ? col('f', fs.measures[m.weight]) : ''
     selects.push(`${
-      m.aggregate === 'sum' ? `SUM(${kept(v)})` : m.aggregate === 'count' ? `COUNT(${kept(raw)})` : m.aggregate === 'min' ? `MIN(${kept(v)})` : m.aggregate === 'max' ? `MAX(${kept(v)})`
+      m.aggregate === 'sum' ? (held.length ? `COALESCE(SUM(${kept(v)}), 0)` : `SUM(${v})`) : m.aggregate === 'count' ? `COUNT(${kept(raw)})` : m.aggregate === 'min' ? `MIN(${kept(v)})` : m.aggregate === 'max' ? `MAX(${kept(v)})`
       : m.aggregate === 'average' ? `AVG(${kept(v)})` : m.aggregate === 'median' ? d.median(kept(v)).sql : m.aggregate === 'count distinct' ? `COUNT(DISTINCT ${kept(col('f', fs.arrows[m.of!]))})`
       : `SUM(CASE WHEN ${only}${v} IS NOT NULL AND ${w} <> 0 THEN ${v} * ${w} END) / SUM(CASE WHEN ${only}${v} IS NOT NULL AND ${w} <> 0 THEN ${w} END)`
     } AS m${i}`)

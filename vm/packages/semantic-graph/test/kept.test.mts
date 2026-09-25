@@ -37,7 +37,8 @@ test('a count of rows under a threshold, by group, is the oracle\'s — and a fa
   // p1 has one short shift (6h); p2 has one (7h) — the row with nothing recorded meets no comparison.
   assert.deepEqual(await both(s, { measures: ['Shift.short', 'Shift.shortHours', 'Shift.shifts'], by: [{ to: 'Person' }] }), [['p1', 1, 6, 6], ['p2', 1, 7, 6]])
   // A group with no kept row: the sum is absent, the count is 0.
-  assert.deepEqual(await both(s, { measures: ['Shift.short', 'Shift.shortHours'], by: [{ to: 'Person' }], where: [{ attribute: 'site', in: ['south'] }] }), [['p1', 0, null], ['p2', 0, null]])
+  // No qualifying row at all: a count is 0 and a sum is 0 — nothing added up is zero, not unknown.
+  assert.deepEqual(await both(s, { measures: ['Shift.short', 'Shift.shortHours'], by: [{ to: 'Person' }], where: [{ attribute: 'site', in: ['south'] }] }), [['p1', 0, 0], ['p2', 0, 0]])
   const v = check(s, { measures: ['Shift.short'] })
   assert.ok(v.ok)
   assert.deepEqual(v.plan.facts[0].kept, { short: [{ measure: 'worked', op: '<', value: 8 }] })
