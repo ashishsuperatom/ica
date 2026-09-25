@@ -5,7 +5,7 @@
 // an instant, facts added up separately and then joined on their targets. It is written for being obviously right,
 // not fast: it is the oracle compiled queries are tested against.
 
-import { meets, type Expr, type FactPlan, type Plan, type Step } from './algebra.js'
+import { compares, meets, type Expr, type FactPlan, type Kept, type Plan, type Step } from './algebra.js'
 import { keyOf, periodOf, periodsBetween, shiftPeriods } from './calendar.js'
 import { DataError, follow, followPath, period, rowDate, type Instance, type Key, type Row } from './instance.js'
 import { arrow, timeArrow, type Schema } from './schema.js'
@@ -49,6 +49,8 @@ export function assemble(plan: Plan, folded: Map<Plan, Groups[]>): Result {
     })
   }
 
+  if (plan.runs) rows = withRuns(plan, rows)
+
   if (plan.compare) {
     const time = plan.compare.time
     // A group before is matched with the group now that is the same number of periods forward.
@@ -71,7 +73,7 @@ export function assemble(plan: Plan, folded: Map<Plan, Groups[]>): Result {
 
   for (const h of plan.having ?? []) {
     const i = n + plan.outputs.findIndex((o) => o.name === h.output)
-    rows = rows.filter((r) => { const v = r[i]; return v !== null && typeof v === 'number' && compareWith(v, h.op, h.value) })
+    rows = rows.filter((r) => { const v = r[i]; return v !== null && typeof v === 'number' && compares(v, h.op, h.value!) })
   }
   if (plan.order) {
     const i = plan.columns.findIndex((c) => c.name === plan.order!.by)
@@ -144,7 +146,36 @@ function along(plan: Plan, joined: Array<{ key: Array<Key | null>; values: Recor
 function sortByKey<T extends Array<Key | number | null>>(rows: T[], n: number): T[] {
   return rows.sort((a, b) => { for (let i = 0; i < n; i++) { if (a[i] === b[i]) continue; if (a[i] === null) return 1; if (b[i] === null) return -1; const c = String(a[i]).localeCompare(String(b[i])); if (c) return c } return 0 })
 }
-const compareWith = (v: number, op: string, x: number) => op === '<' ? v < x : op === '<=' ? v <= x : op === '>' ? v > x : op === '>=' ? v >= x : op === '=' ? v === x : v !== x
+
+/** THE LONGEST RUN: for each group with the calendar left out, its periods in calendar order; a run continues only into
+ *  the period that follows (a period missing from the answer breaks it) and only while the output meets the comparison.
+ *  One number per group, carried on each of its rows as an extra column, after the outputs and shares. */
+function withRuns(plan: Plan, rows: Array<Array<Key | number | null>>): Array<Array<Key | number | null>> {
+  const { target: t, output, op, value, def } = plan.runs!
+  const n = plan.targets.length
+  const col = n + plan.outputs.findIndex((o) => o.name === output)
+  const groupOf = (r: Array<Key | number | null>) => JSON.stringify(r.slice(0, n).map((k, i) => (i === t ? '*' : k)))
+  const groups = new Map<string, Array<{ period: string; meets: boolean }>>()
+  for (const r of rows) {
+    const v = r[col]
+    const g = groupOf(r)
+    if (!groups.has(g)) groups.set(g, [])
+    groups.get(g)!.push({ period: String(r[t]), meets: typeof v === 'number' && compares(v, op, value) })
+  }
+  const next = (period: string) => { try { return shiftPeriods(def, period, 1) } catch { return undefined } }
+  const longest = new Map<string, number>()
+  for (const [g, periods] of groups) {
+    periods.sort((a, b) => periodOf(def, a.period).from.localeCompare(periodOf(def, b.period).from))
+    let best = 0, run = 0, before: string | undefined
+    for (const p of periods) {
+      run = p.meets ? (before !== undefined && next(before) === p.period ? run + 1 : 1) : 0
+      best = Math.max(best, run)
+      before = p.period
+    }
+    longest.set(g, best)
+  }
+  return rows.map((r) => [...r, longest.get(groupOf(r)) ?? 0])
+}
 
 /** The rows behind one group of an answer: for each fact, its rows whose paths lead to that group. */
 export function detail(s: Schema, I: Instance, plan: Plan, key: Array<Key | null>): Array<{ fact: string; rows: Row[] }> {
@@ -154,10 +185,12 @@ export function detail(s: Schema, I: Instance, plan: Plan, key: Array<Key | null
   }))
 }
 
-function calc(e: Expr, v: Record<string, number | null>): number | null {
+export function calc(e: Expr, v: Record<string, number | null>): number | null {
   if ('ref' in e) return v[e.ref] ?? null
+  if ('num' in e) return e.num
   const a = calc(e.args[0], v), b = calc(e.args[1], v)
   if (a === null || b === null) return null
+  if ('fn' in e) return e.fn === 'max' ? Math.max(a, b) : Math.min(a, b)
   if (e.op === '+') return a + b
   if (e.op === '-') return a - b
   if (e.op === '*') return a * b
@@ -181,21 +214,27 @@ function foldFact(s: Schema, I: Instance, fp: FactPlan, plan: Plan): Groups {
     const values: Record<string, number | null> = {}
     for (const name of fp.measures) {
       const m = def.measures![name]
-      const value = (row: Row) => { const v = row.measures[name]; return v === null || v === undefined ? null : fp.convert && m.currency ? v * rate(s, I, fp, plan, row, m.currency) : v }
+      // A measure worked out per row is its expression over the row's columns; a part that is missing makes it missing.
+      const perRow = fp.perRow?.[name]
+      const raw = (row: Row): number | null => (perRow ? calc(perRow, row.measures) : row.measures[name] ?? null)
+      const value = (row: Row) => { const v = raw(row); return v === null ? null : fp.convert && m.currency ? v * rate(s, I, fp, plan, row, m.currency) : v }
+      // A measure kept to a condition of its own is folded from the rows where it holds; the others are as if absent.
+      const held = fp.kept?.[name]
+      const own = held ? g.rows.filter((row) => held.every((w) => holds(s, I, fp, row, w))) : g.rows
       if (m.kind === 'stock' && fp.stockOverTime && time) {
         // The level at each instant is folded across everything else; then one instant, or the average of all, per group.
         const allInstants = [...new Set(rows.filter((r) => JSON.stringify(keyOfTimeBucket(fp, r, keyOf)) === JSON.stringify(keyOfTimeBucket(fp, g.rows[0], keyOf))).map((r) => r.arrows[time.role]))].sort()
-        const at = (instant: Key) => fold(m.aggregate, g.rows.filter((r) => r.arrows[time.role] === instant), value, name)
+        const at = (instant: Key) => fold(m.aggregate, own.filter((r) => r.arrows[time.role] === instant), value, raw)
         values[name] = m.overTime === 'last' ? at(allInstants[allInstants.length - 1]) ?? (m.aggregate === 'sum' || m.aggregate === 'count' ? 0 : null)
           : m.overTime === 'first' ? at(allInstants[0]) ?? (m.aggregate === 'sum' || m.aggregate === 'count' ? 0 : null)
           : mean(allInstants.map((i) => at(i) ?? (m.aggregate === 'sum' || m.aggregate === 'count' ? 0 : null)))
       } else if (m.aggregate === 'count distinct') {
-        values[name] = new Set(g.rows.map((r) => r.arrows[m.of!])).size
+        values[name] = new Set(own.map((r) => r.arrows[m.of!])).size
       } else if (m.aggregate === 'weighted average') {
         let num = 0, den = 0
-        for (const r of g.rows) { const v = value(r), w = r.measures[m.weight!]; if (v !== null && w) { num += v * w; den += w } }
+        for (const r of own) { const v = value(r), w = r.measures[m.weight!]; if (v !== null && w) { num += v * w; den += w } }
         values[name] = den ? num / den : null
-      } else values[name] = fold(m.aggregate, g.rows, value, name)
+      } else values[name] = fold(m.aggregate, own, value, raw)
     }
     out.set(k, { key: g.key, values })
   }
@@ -209,9 +248,9 @@ function keyOfTimeBucket(fp: FactPlan, row: Row, keyOf: (r: Row) => Array<Key | 
   return fp.by.map((b, i) => ('path' in b && b.path[0] === fp.time?.role ? key[i] : '*'))
 }
 
-function fold(aggregate: string, rows: Row[], value: (r: Row) => number | null, name: string): number | null {
+function fold(aggregate: string, rows: Row[], value: (r: Row) => number | null, raw: (r: Row) => number | null): number | null {
   const vs = rows.map(value).filter((v): v is number => v !== null)
-  if (aggregate === 'count') return rows.filter((r) => r.measures[name] !== null && r.measures[name] !== undefined).length
+  if (aggregate === 'count') return rows.filter((r) => raw(r) !== null).length
   if (!vs.length) return null
   if (aggregate === 'sum') return vs.reduce((a, b) => a + b, 0)
   if (aggregate === 'min') return Math.min(...vs)
@@ -227,18 +266,21 @@ function keep(s: Schema, I: Instance, fp: FactPlan, plan: Plan, row: Row): boole
     const p = period(s, fp.time.calendar, row.arrows[fp.time.role])
     if (p.from < plan.span.from || p.from >= plan.span.to) return false
   }
-  for (const w of fp.where) {
-    if ('attribute' in w) { const v = stepValue(s, I, fp.fact, row, w); if (!meets(w, v, v === null ? null : String(v))) return false; continue }
-    let v = followPath(s, I, fp.fact, row, w.path)
-    if (!w.under) { if (!meets(w, v, v === null ? null : I.elements[pathEnd(s, fp.fact, w.path)]?.[v]?.label ?? s.objects[pathEnd(s, fp.fact, w.path)].members?.[v] ?? v)) return false; continue }
-    // Under: the element itself or anything it reaches along the self arrow.
-    const object = pathEnd(s, fp.fact, w.path)
-    const date = rowDate(s, fp.fact, row)
-    let found = false
-    while (v !== null && !found) { found = meets(w, v, null); v = follow(s, I, object, v, w.under, date) }
-    if (!found) return false
-  }
-  return true
+  return fp.where.every((w) => holds(s, I, fp, row, w))
+}
+
+/** Whether one filter holds for a row — the question's, or a measure's own; a row's missing measure meets no comparison. */
+function holds(s: Schema, I: Instance, fp: FactPlan, row: Row, w: Kept): boolean {
+  if ('measure' in w) { const v = row.measures[w.measure]; return v !== null && v !== undefined && compares(v, w.op, w.value) }
+  if ('attribute' in w) { const v = stepValue(s, I, fp.fact, row, w); return meets(w, v, v === null ? null : String(v)) }
+  let v = followPath(s, I, fp.fact, row, w.path)
+  if (!w.under) return meets(w, v, v === null ? null : I.elements[pathEnd(s, fp.fact, w.path)]?.[v]?.label ?? s.objects[pathEnd(s, fp.fact, w.path)].members?.[v] ?? v)
+  // Under: the element itself or anything it reaches along the self arrow.
+  const object = pathEnd(s, fp.fact, w.path)
+  const date = rowDate(s, fp.fact, row)
+  let found = false
+  while (v !== null && !found) { found = meets(w, v, null); v = follow(s, I, object, v, w.under, date) }
+  return found
 }
 const pathEnd = (s: Schema, from: string, path: string[]) => path.reduce((o, role) => arrow(s, o, role)!.to, from)
 

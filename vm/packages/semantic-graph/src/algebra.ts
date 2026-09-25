@@ -6,7 +6,7 @@
 
 import { normalise, pathsFrom, pathText } from './paths.js'
 import { addDays, endsPeriod, keyOf, monthsIn, periodOf, periodsBetween, shiftPeriods, startsPeriod, builtIn, type CalendarDef } from './calendar.js'
-import { arrow, baseUnits, sameUnits, timeArrow, timesUnits, unitText, walk, type Measure, type Schema, type Units } from './schema.js'
+import { arrow, baseUnits, sameUnits, timeArrow, timesUnits, unitText, walk, type CompareOp, type Measure, type MeasureFilter, type Schema, type Units } from './schema.js'
 
 // ── The question ──
 
@@ -56,6 +56,10 @@ export interface Question {
   rolling?: { window: number; average?: boolean }
   /** With order and limit: keep that many groups within each group of these targets — the top three per pillar. */
   limitPer?: string[]
+  /** Along a calendar grouped by: for each group with that calendar left out, the longest run of CONSECUTIVE periods
+   *  (a period missing from the answer breaks it) in which the output stands in this relation to a number — or to a
+   *  setting, named rather than copied. An extra column, `<output> longest run`, in that calendar's periods. */
+  runs?: { output: string; op: CompareOp; value?: number; setting?: string; along: string }
   /** The same question over the span moved back, side by side with the change. */
   compare?: { back: { years?: number; months?: number; days?: number; periods?: number } } | { span: { from: string; to: string } }
 }
@@ -64,18 +68,25 @@ export interface Question {
 
 /** Where a row leads along a path; an attribute of the row itself; or an attribute of the element a path leads to. */
 export type Step = { path: string[] } | { attribute: string; at?: string[] }
+/** A filter as a plan holds it: a step and its condition, or a row's measure against a number — settings resolved. */
+export type Kept = (Step & Condition & { under?: string }) | { measure: string; op: CompareOp; value: number }
 export interface FactPlan {
   fact: string
   measures: string[]
   by: Step[]
   where: Array<Step & Condition & { under?: string }>
+  /** The rows each measure is added up from, when it keeps to a condition of its own: only those where all of these
+   *  hold. A setting named in the schema is a number by here. */
+  kept?: Record<string, Kept[]>
+  /** Measures worked out per row before they are added up: the expression, its refs the fact's own column measures. */
+  perRow?: Record<string, Expr>
   time?: { role: string; level: string; calendar: string }
   /** When grouped rows span several instants, a stock is taken at the last or first, or averaged. */
   stockOverTime: boolean
   /** `on`: the one day every row converts on, when it is not the end of the span — a fact with no time, answered today. */
   convert?: { currency: string; at: 'row' | 'end'; on?: string }
 }
-export type Expr = { ref: string } | { op: '+' | '-' | '*' | '/'; args: [Expr, Expr] }
+export type Expr = { ref: string } | { num: number } | { op: '+' | '-' | '*' | '/'; args: [Expr, Expr] } | { fn: 'max' | 'min'; args: [Expr, Expr] }
 export interface Plan {
   columns: Array<{ name: string; unit?: string }>
   targets: string[]
@@ -95,6 +106,8 @@ export interface Plan {
   /** Work along the calendar grouped by, on the facts' values before outputs are computed. `keep` is the span shown. */
   along?: { target: number; def: CalendarDef; keep: { from: string; to: string }; fill: boolean; cumulative?: { reset?: CalendarDef }; rolling?: { window: number; average: boolean } }
   limitPer?: number[]
+  /** The longest run of consecutive periods of the calendar at `target` in which `output` meets the comparison. */
+  runs?: { output: string; op: CompareOp; value: number; target: number; def: CalendarDef }
   notes: string[]
 }
 
@@ -104,13 +117,23 @@ const refuse = (rule: string, reason: string, choices?: Array<{ target: string; 
 
 // ── Measures and expressions ──
 
+/** Measures in brackets, numbers, + - * /, brackets, and max(a, b) / min(a, b) — nested as deep as they go. */
 export function parseExpr(text: string): Expr {
-  const tokens = text.match(/\[[^\]]+\]|[A-Za-z_][\w ]*\.[\w ]*\w|[-+*/()]/g) ?? []
+  const tokens = text.match(/\[[^\]]+\]|\d+(?:\.\d+)?|\b(?:max|min)\b(?=\s*\()|[A-Za-z_][\w ]*\.[\w ]*\w|[-+*/(),]/g) ?? []
   let i = 0
   const atom = (): Expr => {
     const t = tokens[i++]
     if (t === '(') { const e = sum(); if (tokens[i++] !== ')') throw new Error(`"${text}": a bracket is not closed`); return e }
-    if (!t || '+-*/)'.includes(t)) throw new Error(`"${text}" is not an expression of measures`)
+    if (t === 'max' || t === 'min') {
+      if (tokens[i++] !== '(') throw new Error(`"${text}": ${t} takes two arguments in brackets, ${t}(a, b)`)
+      const a = sum()
+      if (tokens[i++] !== ',') throw new Error(`"${text}": ${t} takes two arguments, ${t}(a, b)`)
+      const b = sum()
+      if (tokens[i++] !== ')') throw new Error(`"${text}": a bracket is not closed`)
+      return { fn: t, args: [a, b] }
+    }
+    if (!t || '+-*/),'.includes(t)) throw new Error(`"${text}" is not an expression of measures`)
+    if (/^\d/.test(t)) return { num: Number(t) }
     return { ref: t.replace(/^\[|\]$/g, '').trim() }
   }
   const product = (): Expr => { let e = atom(); while (tokens[i] === '*' || tokens[i] === '/') { const op = tokens[i++] as '*' | '/'; e = { op, args: [e, atom()] } } return e }
@@ -119,17 +142,18 @@ export function parseExpr(text: string): Expr {
   if (i !== tokens.length) throw new Error(`"${text}" is not an expression of measures`)
   return e
 }
-const refs = (e: Expr): string[] => ('ref' in e ? [e.ref] : [...refs(e.args[0]), ...refs(e.args[1])])
+export const refs = (e: Expr): string[] => ('ref' in e ? [e.ref] : 'num' in e ? [] : [...refs(e.args[0]), ...refs(e.args[1])])
 
 /** `[Fact.m]` where m is an expression becomes that expression, in brackets of its own, as deep as it goes. */
 function expandDerived(s: Schema, text: string, depth = 0): string | { refuse: string } {
   if (depth > 8) return { refuse: `${text}: expressions refer to each other in a circle` }
   const bare = text.includes('[') ? undefined : measureOf(s, text.trim())
-  if (bare?.m.expr) return expandDerived(s, bare.m.expr, depth + 1)
+  // A measure worked out per row is added up like any other: it is a column of the answer, not something to expand.
+  if (bare?.m.expr && bare.m.at !== 'row') return expandDerived(s, bare.m.expr, depth + 1)
   let bad: string | undefined
   const out = text.replace(/\[([^\]]+)\]/g, (whole, ref: string) => {
     const f = measureOf(s, ref)
-    if (!f?.m.expr) return whole
+    if (!f?.m.expr || f.m.at === 'row') return whole
     const inner = expandDerived(s, f.m.expr, depth + 1)
     if (typeof inner !== 'string') { bad = inner.refuse; return whole }
     return `(${inner})`
@@ -206,8 +230,32 @@ const stepText = (x: Step) => ('attribute' in x ? (x.at?.length ? `${pathText(x.
 
 // ── check ──
 
-/** `today`, when known, lets a comparison of a span still running be like for like. */
-export function check(s: Schema, q: Question, context: { today?: string } = {}): Verdict {
+/** The settings a question refers to by name — through the measures it asks for, each kept to its own condition,
+ *  and through its longest run — so whoever asks can read them first and hand them to check() as numbers. */
+export function settingsNamed(s: Schema, q: Question): Array<{ setting: string; about: string }> {
+  const out: Array<{ setting: string; about: string }> = []
+  for (const text of q.measures ?? []) {
+    const expanded = expandDerived(s, text)
+    if (typeof expanded !== 'string') continue
+    let e: Expr
+    try { e = parseExpr(expanded) } catch { continue }
+    for (const r of refs(e)) {
+      const f = measureOf(s, r)
+      for (const w of f?.m.where ?? []) if ('measure' in w && w.setting) out.push({ setting: w.setting, about: `${r}: rows where ${w.measure} ${w.op}` })
+    }
+  }
+  if (q.runs?.setting) out.push({ setting: q.runs.setting, about: `a run of ${q.runs.output} ${q.runs.op}` })
+  return out.filter((x, i) => out.findIndex((y) => y.setting === x.setting && y.about === x.about) === i)
+}
+
+export interface CheckContext {
+  /** `today`, when known, lets a comparison of a span still running be like for like. */
+  today?: string
+  /** Settings read for whoever asks, by name: what a measure's own condition or a longest run compares against. */
+  settings?: Record<string, unknown>
+}
+
+export function check(s: Schema, q: Question, context: CheckContext = {}): Verdict {
   if (!q.measures?.length) return refuse('Q', 'a question asks for at least one measure')
   const outputs: Plan['outputs'] = []
   const used = new Map<string, { fact: string; name: string; m: Measure }>()
@@ -244,51 +292,59 @@ export function check(s: Schema, q: Question, context: { today?: string } = {}):
   // A1, C3: filters. A filter on another fact's version or attribute is about that fact alone. A named condition is its
   // filters, reached from the fact through the object it is about; a fact's own conditions apply unless set aside.
   for (const c of q.without ?? []) if (!s.conditions?.[c]) return refuse('A1', `"${c}" is not a condition of the schema — its conditions are ${Object.keys(s.conditions ?? {}).join(', ') || 'none'}`)
+  const filtering = { facts, choices, notes }
   for (const p of plans) {
     const named = (q.where ?? []).filter((w): w is { condition: string } => 'condition' in w).map((w) => w.condition)
     const always = (s.objects[p.fact].keptTo ?? []).filter((c) => !named.includes(c) && !(q.without ?? []).includes(c))
     if (always.length) notes.push(`${p.fact}: kept to ${always.map((c) => s.conditions?.[c]?.description ? `${c} (${s.conditions[c].description})` : c).join('; ')}`)
     const asked: Array<{ w: Filter; own: boolean }> = [...(q.where ?? []).map((w) => ({ w, own: false })), ...always.map((c) => ({ w: { condition: c } as Filter, own: true }))]
     for (const { w, own } of asked) {
-      if ('condition' in w) {
-        const def = s.conditions?.[w.condition]
-        if (!def) return refuse('A1', `"${w.condition}" is not a condition of the schema — its conditions are ${Object.keys(s.conditions ?? {}).join(', ') || 'none'}`)
-        let base: string[] = []
-        // A condition about another fact asked about is about that fact alone.
-        if (s.objects[def.on]?.kind === 'fact' && def.on !== p.fact) {
-          if (facts.includes(def.on)) continue
-          return refuse('C3', `the condition "${w.condition}" is about ${def.on}, and no measure asked about is from it`)
+      const bad = applyFilter(s, p, w, own, p.where, filtering); if (bad) return bad
+    }
+    // A MEASURE KEPT TO A CONDITION OF ITS OWN: its filters are resolved by the same reading as the question's, into
+    // a list of its own, so the plan says which rows each measure is added up from and nothing after it knows a setting.
+    for (const name of p.measures) {
+      const m = s.objects[p.fact].measures![name]
+      if (!m.where?.length) continue
+      const kept: Kept[] = []
+      for (const w of m.where) {
+        if ('measure' in w) {
+          if (!s.objects[p.fact].measures?.[w.measure]) return refuse('Q', `${p.fact}.${name} keeps to rows by ${w.measure}, which is not a measure of ${p.fact}`)
+          const value = typeof w.value === 'number' ? w.value : w.setting ? context.settings?.[w.setting] : undefined
+          if (typeof value !== 'number') return refuse('Q', `${p.fact}.${name} keeps to rows where ${w.measure} ${w.op} ${w.setting ? `the setting "${w.setting}", which has no value here` : 'nothing'}${w.setting ? ' — give the setting a value' : ' — give the comparison a value or a setting'}`)
+          kept.push({ measure: w.measure, op: w.op, value })
+          continue
         }
-        if (def.on !== p.fact) {
-          const r = reach(s, p.fact, { to: def.on, via: w.via }, facts)
-          if ('refuse' in r) return r.refuse
-          if ('none' in r) { if (own) continue; return refuse('C3', `${r.none}, so it cannot be kept to ${w.condition}`) }
-          if ('choose' in r) { choices.push({ target: def.on, fact: p.fact, paths: r.choose }); continue }
-          base = (r.step as { path: string[] }).path
-        }
-        for (const cw of def.where as Filter[]) {
-          if ('condition' in cw) return refuse('Q', `the condition "${w.condition}" names another condition; a condition keeps to filters on ${def.on}`)
-          // Each filter of the condition is reached from its object, then from the fact through it.
-          const inner = reach(s, def.on, cw, [def.on])
-          if (!('step' in inner)) return refuse('Q', `the condition "${w.condition}": ${'refuse' in inner ? inner.refuse.ok ? '' : inner.refuse.reason : 'none' in inner ? inner.none : `${def.on} reaches ${targetText(cw)} by ${inner.choose.join(' or ')} — the condition must say which`}`)
-          const st = inner.step
-          const step: Step = 'attribute' in st ? (base.length || st.at ? { attribute: st.attribute, at: normalise(s, p.fact, [...base, ...(st.at ?? [])]) } : { attribute: st.attribute }) : { path: normalise(s, p.fact, [...base, ...st.path]) }
-          const bad = addFilter(s, p, step, cw, notes); if (bad) return bad
-        }
-        continue
+        const bad = applyFilter(s, p, w, false, kept as FactPlan['where'], { ...filtering, facts: [p.fact], measure: name }); if (bad) return bad
       }
-      const r = reach(s, p.fact, w, facts)
-      if ('refuse' in r) return r.refuse
-      if ('none' in r) {
-        const scoped = 'attribute' in w || facts.some((o) => o !== p.fact && Object.keys(s.objects[o].arrows ?? {}).some((role) => { const a = arrow(s, o, role)!; return a.kind === 'version' && a.to === (w as { to: string }).to }))
-        if (scoped) continue
-        return refuse('C3', `${r.none}, so it cannot be kept to ${conditionText(w as Condition)} while the other measures are`)
-      }
-      if ('choose' in r) { choices.push({ target: targetText(w), fact: p.fact, paths: r.choose }); continue }
-      const bad = addFilter(s, p, r.step, w, notes); if (bad) return bad
+      if (kept.length) (p.kept ??= {})[name] = kept
     }
   }
   if (choices.length) return refuse('A2', choices.map((c) => `${c.fact} reaches ${c.target} by ${c.paths.join(' or ')}`).join('; ') + ' — say which', choices)
+
+  // A MEASURE WORKED OUT PER ROW: its expression is read here, over the fact's own columns, and its units are worked
+  // out from theirs — so a shortfall summed row by row is one column of the plan, folded like any other.
+  for (const p of plans) {
+    const f = s.objects[p.fact]
+    for (const name of p.measures) {
+      const m = f.measures![name]
+      if (m.at !== 'row') continue
+      let e: Expr
+      try { e = parseExpr(m.expr ?? '') } catch (x: any) { return refuse('Q', `${p.fact}.${name}: ${x.message}`) }
+      const columns = new Map<string, { m: Measure }>()
+      for (const r of refs(e)) {
+        const found = measureOf(s, r)
+        if (!found || found.fact !== p.fact) return refuse('Q', `${p.fact}.${name} is worked out per row over measures of ${p.fact}, and ${r} is not one`)
+        if (found.m.expr) return refuse('Q', `${p.fact}.${name}: ${r} is itself worked out from an expression; a row expression is over the columns of ${p.fact}`)
+        columns.set(found.name, found)
+      }
+      const rowExpr = rename(e, (r) => r.slice(r.indexOf('.') + 1))
+      const u = unitsOf(rowExpr, columns)
+      if ('refuse' in u) return refuse('E1', `${p.fact}.${name}: ${u.refuse}`)
+      if (!u.literal && unitText(u.units) !== unitText(baseUnits(m.unit))) return refuse('E3', `${p.fact}.${name} is declared in ${m.unit}, and its expression works out in ${unitText(u.units)}`)
+      ;(p.perRow ??= {})[name] = rowExpr
+    }
+  }
 
   for (const p of plans) {
     const f = s.objects[p.fact]
@@ -449,6 +505,23 @@ function extend(s: Schema, q: Question, plan: Plan, context: { today?: string })
     }
   }
 
+  // THE LONGEST RUN along a calendar: consecutive periods in which an output meets a comparison, per group.
+  if (q.runs) {
+    const r = q.runs
+    if (!outputs.some((o) => o.name === r.output)) return refuse('Q', `runs: the answer has no output ${r.output} — its outputs are ${outputs.map((o) => o.name).join(', ')}`)
+    const i = targets.indexOf(r.along)
+    if (i < 0) return refuse('Q', `a longest run goes along a calendar the question groups by, and ${r.along} is not one of its targets (${targets.join(', ') || 'none'}) — group by it`)
+    const b = plan.facts[0].by[i]
+    const end = b && 'path' in b ? walk(s, plan.facts[0].fact, b.path)!.object : undefined
+    if (!end || s.objects[end].kind !== 'calendar') return refuse('Q', `a longest run goes along a calendar, and ${r.along} is not one`)
+    if (!['<', '<=', '>', '>=', '=', '!='].includes(r.op)) return refuse('Q', `runs: "${r.op}" is not a comparison (<, <=, >, >=, =, !=)`)
+    if (typeof r.value !== 'number') return refuse('Q', `runs: ${r.output} is compared with ${r.setting ? `the setting "${r.setting}", which has no value here` : 'nothing'}`)
+    const def = s.objects[end]
+    plan.runs = { output: r.output, op: r.op, value: r.value, target: i, def }
+    plan.columns.push({ name: `${r.output} longest run`, unit: periodsUnit(def) })
+    plan.notes.push(`${r.output} longest run: the most consecutive ${r.along} periods in a row, per group, with ${r.output} ${r.op} ${r.value}; a period missing from the answer breaks a run`)
+  }
+
   if (q.limitPer) {
     if (!q.limit || !q.order) return refuse('Q', 'a limit within groups keeps the first of each group, so it needs an order and a limit')
     const bad = subset(q.limitPer, 'limit per'); if (bad) return bad
@@ -522,15 +595,30 @@ export function shiftDate(date: string, months: number, days: number): string {
   return t.toISOString().slice(0, 10)
 }
 
-function unitsOf(e: Expr, used: Map<string, { m: Measure }>): { units: Units } | { refuse: string } {
+/** The unit an expression works out in. A NUMBER HAS NO UNIT OF ITS OWN: beside a measure in +, -, max or min it
+ *  stands in that measure's unit (`max(0, shortfall)` is a shortfall); in * and / it is a plain scale. */
+function unitsOf(e: Expr, used: Map<string, { m: Measure }>): { units: Units; literal?: boolean } | { refuse: string } {
   if ('ref' in e) return { units: baseUnits(used.get(e.ref)!.m.unit) }
+  if ('num' in e) return { units: {}, literal: true }
   const [a, b] = e.args.map((x) => unitsOf(x, used))
   if ('refuse' in a) return a
   if ('refuse' in b) return b
-  if (e.op === '*') return { units: timesUnits(a.units, b.units) }
-  if (e.op === '/') return { units: timesUnits(a.units, b.units, -1) }
-  return sameUnits(a.units, b.units) ? { units: a.units } : { refuse: `${unitText(a.units)} and ${unitText(b.units)} are not the same unit, so they cannot be ${e.op === '+' ? 'added' : 'subtracted'}` }
+  if ('op' in e && e.op === '*') return { units: timesUnits(a.units, b.units), ...(a.literal && b.literal ? { literal: true } : {}) }
+  if ('op' in e && e.op === '/') return { units: timesUnits(a.units, b.units, -1), ...(a.literal && b.literal ? { literal: true } : {}) }
+  if (a.literal) return b
+  if (b.literal) return a
+  const how = 'fn' in e ? `compared by ${e.fn}` : e.op === '+' ? 'added' : 'subtracted'
+  return sameUnits(a.units, b.units) ? { units: a.units } : { refuse: `${unitText(a.units)} and ${unitText(b.units)} are not the same unit, so they cannot be ${how}` }
 }
+
+/** An expression with each ref renamed. */
+const rename = (e: Expr, f: (r: string) => string): Expr => ('ref' in e ? { ref: f(e.ref) } : 'num' in e ? e : 'fn' in e ? { fn: e.fn, args: [rename(e.args[0], f), rename(e.args[1], f)] } : { op: e.op, args: [rename(e.args[0], f), rename(e.args[1], f)] })
+
+/** What a calendar's periods are called, as a unit: weeks, months, periods. */
+const periodsUnit = (c: CalendarDef) => { const b = builtIn(c); return b ? `${b}s` : c.fiscal ? `fiscal ${c.fiscal.period}s` : 'periods' }
+
+/** Whether a value stands in a relation to a number — the one definition having, a measure's own condition and a run use. */
+export const compares = (v: number, op: CompareOp, x: number) => op === '<' ? v < x : op === '<=' ? v <= x : op === '>' ? v > x : op === '>=' ? v >= x : op === '=' ? v === x : v !== x
 
 /** Whether both ends of a span fall on the start of a period at this level. */
 export function aligned(span: { from: string; to: string }, calendar: CalendarDef): boolean {
@@ -558,8 +646,53 @@ function calendarTarget(s: Schema, plan: Plan): { index: number; object: string 
 export const conditionText = (c: Condition) => 'in' in c ? c.in.join(', ') : 'notIn' in c ? `anything but ${c.notIn.join(', ')}` : 'none' in c ? (c.none ? 'nothing' : 'something')
   : 'range' in c ? [c.range.from !== undefined ? `from ${c.range.from}` : '', c.range.to !== undefined ? `before ${c.range.to}` : ''].filter(Boolean).join(' ') : 'contains' in c ? `labels containing "${c.contains}"` : `labels starting "${c.startsWith}"`
 
-/** One filter, checked against what it is on, added to a fact's plan. */
-function addFilter(s: Schema, p: FactPlan, step: Step, w: Filter, notes: string[]): Verdict | undefined {
+/** One filter of a question — or of a measure's own condition — read from a fact and added to `into`: a named condition
+ *  is its filters reached through the object it is about; a fact's own condition (`own`) that the fact does not reach is
+ *  passed over; a filter another fact alone can be kept to is left to that fact. Refuses, or undefined when applied. */
+function applyFilter(s: Schema, p: FactPlan, w: Filter, own: boolean, into: FactPlan['where'],
+                     x: { facts: string[]; choices: Array<{ target: string; fact: string; paths: string[] }>; notes: string[]; measure?: string }): Verdict | undefined {
+  const { facts, choices, notes } = x
+  const who = x.measure ? `${p.fact}.${x.measure}` : p.fact
+  if ('condition' in w) {
+    const def = s.conditions?.[w.condition]
+    if (!def) return refuse('A1', `"${w.condition}" is not a condition of the schema — its conditions are ${Object.keys(s.conditions ?? {}).join(', ') || 'none'}`)
+    let base: string[] = []
+    // A condition about another fact asked about is about that fact alone.
+    if (s.objects[def.on]?.kind === 'fact' && def.on !== p.fact) {
+      if (facts.includes(def.on) && !x.measure) return undefined
+      return refuse('C3', `the condition "${w.condition}" is about ${def.on}, and ${x.measure ? `${who} is not` : 'no measure asked about is from it'}`)
+    }
+    if (def.on !== p.fact) {
+      const r = reach(s, p.fact, { to: def.on, via: w.via }, facts)
+      if ('refuse' in r) return r.refuse
+      if ('none' in r) { if (own) return undefined; return refuse('C3', `${r.none}, so ${who} cannot be kept to ${w.condition}`) }
+      if ('choose' in r) { choices.push({ target: def.on, fact: p.fact, paths: r.choose }); return undefined }
+      base = (r.step as { path: string[] }).path
+    }
+    for (const cw of def.where as Filter[]) {
+      if ('condition' in cw) return refuse('Q', `the condition "${w.condition}" names another condition; a condition keeps to filters on ${def.on}`)
+      // Each filter of the condition is reached from its object, then from the fact through it.
+      const inner = reach(s, def.on, cw, [def.on])
+      if (!('step' in inner)) return refuse('Q', `the condition "${w.condition}": ${'refuse' in inner ? inner.refuse.ok ? '' : inner.refuse.reason : 'none' in inner ? inner.none : `${def.on} reaches ${targetText(cw)} by ${inner.choose.join(' or ')} — the condition must say which`}`)
+      const st = inner.step
+      const step: Step = 'attribute' in st ? (base.length || st.at ? { attribute: st.attribute, at: normalise(s, p.fact, [...base, ...(st.at ?? [])]) } : { attribute: st.attribute }) : { path: normalise(s, p.fact, [...base, ...st.path]) }
+      const bad = addFilter(s, p, step, cw, notes, into); if (bad) return bad
+    }
+    return undefined
+  }
+  const r = reach(s, p.fact, w, facts)
+  if ('refuse' in r) return r.refuse
+  if ('none' in r) {
+    const scoped = !x.measure && ('attribute' in w || facts.some((o) => o !== p.fact && Object.keys(s.objects[o].arrows ?? {}).some((role) => { const a = arrow(s, o, role)!; return a.kind === 'version' && a.to === (w as { to: string }).to })))
+    if (scoped) return undefined
+    return refuse('C3', `${r.none}, so ${who} cannot be kept to ${conditionText(w as Condition)}${x.measure ? '' : ' while the other measures are'}`)
+  }
+  if ('choose' in r) { choices.push({ target: targetText(w), fact: p.fact, paths: r.choose }); return undefined }
+  return addFilter(s, p, r.step, w, notes, into)
+}
+
+/** One filter, checked against what it is on, added to a fact's plan — or to a measure's own list. */
+function addFilter(s: Schema, p: FactPlan, step: Step, w: Filter, notes: string[], into: FactPlan['where'] = p.where): Verdict | undefined {
   const c = w as Condition & { under?: string }
   const kinds = (['in', 'notIn', 'none', 'contains', 'startsWith', 'range'] as const).filter((k) => k in c)
   if (kinds.length !== 1) return refuse('Q', `a filter keeps rows by one condition — in, notIn, none, contains, startsWith or range — and this one has ${kinds.length ? kinds.join(' and ') : 'none'}`)
@@ -588,7 +721,7 @@ function addFilter(s: Schema, p: FactPlan, step: Step, w: Filter, notes: string[
     }
   }
   const condition: Condition = 'in' in c ? { in: members! } : 'notIn' in c ? { notIn: members! } : 'none' in c ? { none: c.none } : 'range' in c ? { range: c.range } : 'contains' in c ? { contains: c.contains } : { startsWith: (c as { startsWith: string }).startsWith }
-  p.where.push({ ...step, ...condition, ...(c.under ? { under: c.under } : {}) })
+  into.push({ ...step, ...condition, ...(c.under ? { under: c.under } : {}) })
   if ('notIn' in c) notes.push(`${p.fact}: rows not in ${c.notIn.join(', ')} include those with nothing there`)
   return undefined
 }

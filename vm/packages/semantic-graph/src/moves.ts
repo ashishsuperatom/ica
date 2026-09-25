@@ -4,7 +4,7 @@
 // question is checked before it is kept; a refused move leaves the state as it was and says why. nextMoves() lists
 // the moves that are allowed from here, computed from the arrows, never guessed.
 
-import { check, type Filter, type Question, type Target, type Verdict } from './algebra.js'
+import { check, type CheckContext, type Filter, type Question, type Target, type Verdict } from './algebra.js'
 import { normalise } from './paths.js'
 import { arrows, type Schema } from './schema.js'
 
@@ -80,7 +80,7 @@ export function nextMoves(s: Schema, q: Question): Array<{ move: Move; reads: st
 
 /** One text for every question that means the same (§7.1): measures and targets in order of text, paths in normal
  *  form as the plan resolved them, filters sorted, members as keys. */
-export function canonical(s: Schema, q: Question, context: { today?: string } = {}): string | undefined {
+export function canonical(s: Schema, q: Question, context: CheckContext = {}): string | undefined {
   const v = check(s, q, context)
   if (!v.ok) return undefined
   const facts = [...v.plan.facts].sort((a, b) => a.fact.localeCompare(b.fact)).map((f) => ({
@@ -88,6 +88,8 @@ export function canonical(s: Schema, q: Question, context: { today?: string } = 
     by: f.by.map((b) => ('path' in b ? b.path.join('.') : `${b.at?.length ? b.at.join('.') + '.' : ''}@${b.attribute}`)).sort(),
     where: f.where.map((w) => `${'path' in w ? w.path.join('.') : `${w.at?.length ? w.at.join('.') + '.' : ''}@${w.attribute}`}${w.under ? `^${w.under}` : ''}${'in' in w ? `∈${[...w.in].sort().join('|')}` : 'notIn' in w ? `∉${[...w.notIn].sort().join('|')}` : 'none' in w ? (w.none ? '=∅' : '≠∅') : 'range' in w ? `∈[${w.range.from ?? ''},${w.range.to ?? ''})` : 'contains' in w ? `~*${w.contains.toLowerCase()}*` : `~${(w as { startsWith: string }).startsWith.toLowerCase()}*`}`).sort(),
     convert: f.convert,
+    // A measure's own condition with a setting resolved: the same question under another value is another question.
+    ...(f.kept ? { kept: f.kept } : {}),
   }))
-  return JSON.stringify({ outputs: v.plan.outputs.map((o) => o.name).sort(), facts, span: q.span ?? null, asOf: q.asOf ?? null, order: q.order ?? null, limit: q.limit ?? null, having: q.having ?? null, totals: q.totals ?? null, share: q.share ?? null, compare: q.compare ?? null, fill: q.fill ?? null, cumulative: q.cumulative ?? null, rolling: q.rolling ?? null, limitPer: q.limitPer ?? null })
+  return JSON.stringify({ outputs: v.plan.outputs.map((o) => o.name).sort(), facts, span: q.span ?? null, asOf: q.asOf ?? null, order: q.order ?? null, limit: q.limit ?? null, having: q.having ?? null, totals: q.totals ?? null, share: q.share ?? null, compare: q.compare ?? null, fill: q.fill ?? null, cumulative: q.cumulative ?? null, rolling: q.rolling ?? null, limitPer: q.limitPer ?? null, runs: q.runs ?? null })
 }

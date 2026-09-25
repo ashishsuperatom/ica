@@ -20,7 +20,7 @@
     "composer": {
       "harness": "pi",
       "provider": "opencode-go",
-      "model": "gpt-5.6-luna"
+      "model": "gpt-6-luna"
     },
     "narrator": {
       "harness": "pi",

@@ -5,10 +5,15 @@
 // a schema is data, and this file only says what a well-formed one is.
 
 import { calendarProblem, nests, type CalendarDef } from './calendar.js'
+import type { Filter } from './algebra.js'
 
 export type ArrowKind = 'grain' | 'belongs' | 'rollup' | 'as-of' | 'version' | 'self'
 export type MeasureKind = 'flow' | 'stock' | 'value-per-unit'
 export type Aggregate = 'sum' | 'count' | 'min' | 'max' | 'average' | 'median' | 'count distinct' | 'weighted average'
+export type CompareOp = '<' | '<=' | '>' | '>=' | '=' | '!='
+/** A measure's own condition on the row: another measure of the same fact stands in this relation to a number — or to
+ *  a SETTING, named rather than copied, resolved when the question is asked. Usable only in a measure's `where`. */
+export type MeasureFilter = { measure: string; op: CompareOp; value?: number; setting?: string }
 
 export interface Arrow { to: string; kind?: ArrowKind; partial?: boolean; synonyms?: string[] }
 
@@ -31,6 +36,12 @@ export interface Measure {
    *  Defined here, once, so that an idea like a shortfall is not worked out afresh, and differently, inside every
    *  program that needs it. It has no column of its own and is never read from a source. */
   expr?: string
+  /** With `expr`: worked out PER ROW, over the fact's own columns, before it is added up by `aggregate` — so that
+   *  `max(0, [Shift.target] - [Shift.worked])` is a shortfall row by row, which is not the shortfall of the sums. */
+  at?: 'row'
+  /** A MEASURE KEPT TO A CONDITION OF ITS OWN: it is added up only from the rows where these hold; a row that fails
+   *  contributes nothing — not zero. The filters a question may use, plus a comparison with another measure's value. */
+  where?: Array<Filter | MeasureFilter>
 }
 
 export interface ObjectDef {
@@ -145,10 +156,14 @@ export function schemaProblems(s: Schema): string[] {
       if (d.kind === 'value-per-unit' && !['min', 'max', 'median', 'weighted average'].includes(d.aggregate)) out.push(`${at} is a value per unit; it is combined by min, max, median or a weighted average, never by ${d.aggregate}`)
       if (d.kind === 'stock' && d.aggregate === 'count distinct') out.push(`${at}: a stock is a level, not a count of distinct things`)
       if (d.aggregate === 'weighted average' && (!d.weight || !o.measures?.[d.weight])) out.push(`${at}: a weighted average names the measure of ${name} it is weighted by`)
+      if (d.at && d.at !== 'row') out.push(`${at}: a measure is worked out at "row", or after its parts are added up (no "at")`)
+      if (d.at === 'row' && !d.expr) out.push(`${at} is worked out per row, so it needs an expression`)
+      if (d.at === 'row' && !['sum', 'min', 'max', 'average'].includes(d.aggregate)) out.push(`${at} is worked out per row and then added up by sum, min, max or average, never by ${d.aggregate}`)
       if (d.expr) {
         // What an expression is made of must be here, on this fact, and added up from rows — an expression over an
-        // expression is allowed nowhere, so that nothing can refer to itself by a detour. Its syntax is checked when
-        // it is asked, by the same reader every question goes through.
+        // expression is allowed nowhere, so that nothing can refer to itself by a detour. A measure worked out per row
+        // IS added up from rows, so an expression after aggregation may use it; a row expression is over columns only.
+        // Its syntax is checked when it is asked, by the same reader every question goes through.
         const rs = [...d.expr.matchAll(/\[([^\]]+)\]/g)].map((x) => x[1]!)
         if (!rs.length) out.push(`${at}: an expression names the measures it is made of, in brackets`)
         for (const r of rs) {
@@ -156,8 +171,18 @@ export function schemaProblems(s: Schema): string[] {
           const fact = r.slice(0, dot), m = r.slice(dot + 1)
           if (fact !== name) out.push(`${at}: an expression is over measures of ${name}, and ${r} is not one`)
           else if (!o.measures?.[m]) out.push(`${at}: ${name} has no measure "${m}"`)
-          else if (o.measures[m]!.expr) out.push(`${at}: ${r} is itself an expression; an expression is over measures added up from rows`)
+          else if (o.measures[m]!.expr && d.at === 'row') out.push(`${at}: ${r} is itself worked out from an expression; a row expression is over the columns of ${name}`)
+          else if (o.measures[m]!.expr && !o.measures[m]!.at) out.push(`${at}: ${r} is itself an expression; an expression is over measures added up from rows`)
         }
+      }
+      for (const w of d.where ?? []) {
+        if ('measure' in w) {
+          const other = o.measures?.[w.measure]
+          if (!other) out.push(`${at} keeps to rows by ${w.measure}, which is not a measure of ${name}`)
+          else if (other.expr && !other.at) out.push(`${at} keeps to rows by ${w.measure}, which is an expression after aggregation, not a value of the row`)
+          if (!['<', '<=', '>', '>=', '=', '!='].includes(w.op)) out.push(`${at}: "${w.op}" is not a comparison (<, <=, >, >=, =, !=)`)
+          if (typeof w.value !== 'number' && typeof w.setting !== 'string') out.push(`${at}: the comparison with ${w.measure} names a number (value) or a setting`)
+        } else out.push(...filterProblems(s, name, w as Record<string, unknown>, `${at}'s own condition`))
       }
       if (d.aggregate === 'count distinct' && (!d.of || !arrow(s, name, d.of))) out.push(`${at}: count distinct names an arrow of ${name}`)
       if (d.overTime && d.kind !== 'stock') out.push(`${at}: only a stock says how it goes over time`)
@@ -179,19 +204,7 @@ export function schemaProblems(s: Schema): string[] {
     if (!s.objects[c.on]) out.push(`the condition "${n}" is about ${c.on}, which is not an object of the schema`)
     if (!c.where?.length) out.push(`the condition "${n}" keeps to nothing`)
     if (!s.objects[c.on]) continue
-    for (const w of c.where ?? []) {
-      const via = Array.isArray(w.via) ? w.via : undefined
-      const end = via ? walk(s, c.on, via) : undefined
-      if (via && !end) { out.push(`the condition "${n}" goes via ${via.join('.')}, which is not a path from ${c.on}`); continue }
-      if ('condition' in w) { if (!s.conditions?.[w.condition as string]) out.push(`the condition "${n}" uses "${w.condition}", which is not a condition of the schema`) }
-      else if ('attribute' in w) {
-        const owner = (w.of as string | undefined) ?? end?.object ?? c.on
-        if (!s.objects[owner]?.attributes?.[w.attribute as string]) out.push(`the condition "${n}" keeps to ${owner}.${w.attribute}, which is not an attribute`)
-      } else if ('to' in w) {
-        if (!s.objects[w.to as string]) out.push(`the condition "${n}" keeps to ${w.to}, which is not an object of the schema`)
-        else if (end && end.object !== w.to) out.push(`the condition "${n}" goes via ${via!.join('.')} to ${end.object}, not ${w.to}`)
-      }
-    }
+    for (const w of c.where ?? []) out.push(...filterProblems(s, c.on, w, `the condition "${n}"`))
   }
   for (const e of s.equations ?? []) {
     const [a, b] = e.paths.map((p) => walk(s, e.on, p))
@@ -212,6 +225,23 @@ export function schemaProblems(s: Schema): string[] {
       if (s.objects[arrow(s, c.fact, c.day)?.to ?? '']?.level !== 'day' || s.objects[arrow(s, c.fact, c.day)!.to].fiscal || s.objects[arrow(s, c.fact, c.day)!.to].periods) out.push(`conversion: ${c.fact}.${c.day} leads to a day`)
       if (f.measures?.[c.rate]?.kind !== 'value-per-unit') out.push(`conversion: ${c.fact}.${c.rate} is a value per unit`)
     }
+  }
+  return out
+}
+
+/** What is wrong with one filter written against `on` — a condition's, or a measure's own — in the schema's terms. */
+function filterProblems(s: Schema, on: string, w: Record<string, unknown>, what: string): string[] {
+  const out: string[] = []
+  const via = Array.isArray(w.via) ? w.via as string[] : undefined
+  const end = via ? walk(s, on, via) : undefined
+  if (via && !end) return [`${what} goes via ${via.join('.')}, which is not a path from ${on}`]
+  if ('condition' in w) { if (!s.conditions?.[w.condition as string]) out.push(`${what} uses "${w.condition}", which is not a condition of the schema`) }
+  else if ('attribute' in w) {
+    const owner = (w.of as string | undefined) ?? end?.object ?? on
+    if (!s.objects[owner]?.attributes?.[w.attribute as string]) out.push(`${what} keeps to ${owner}.${w.attribute}, which is not an attribute`)
+  } else if ('to' in w) {
+    if (!s.objects[w.to as string]) out.push(`${what} keeps to ${w.to}, which is not an object of the schema`)
+    else if (end && end.object !== w.to) out.push(`${what} goes via ${via!.join('.')} to ${end.object}, not ${w.to}`)
   }
   return out
 }

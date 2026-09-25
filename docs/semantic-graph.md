@@ -89,7 +89,21 @@ A measure `m` of a fact `F` is a function `m: F → Q` into a **quantity type** 
 - **versions** — optionally, a `version` arrow the measure must be grouped or filtered on.
 
 A **derived measure** is an expression over measures (`revenue / budget`, `hours × rate`). It is evaluated after
-aggregation, at the question's grain — never aggregated itself.
+aggregation, at the question's grain — never aggregated itself. An expression is made of measures in brackets, numbers,
+`+ - * /`, and `max(a, b)` / `min(a, b)`; a number has no unit of its own and stands in the unit beside it.
+
+A **measure worked out per row** (`at: row`) is an expression over the fact's own columns, taken on each row BEFORE the
+rows are added up by its aggregate (sum, min, max or average): `max(0, [Shift.target] - [Shift.worked])` summed is the
+shortfall of each shift, which is not the shortfall of the sums. A row with a part missing gives nothing, and the fold
+skips it. It is a column of the answer like any other, so an expression after aggregation may use it; a row expression
+itself is over columns only, never over another expression.
+
+A **measure kept to a condition of its own** (`where`) is added up only from the rows where its filters hold — the
+filter forms a question uses (a path to members, an attribute, a named condition), plus a comparison of another measure
+of the row with a number, or with a **setting** named rather than copied and resolved when the question is asked. A row
+that fails contributes nothing: not zero — for a sum or count it is as if absent, for a weighted average it is out of
+both the numerator and the denominator. The measure keeps its unit, kind and aggregate laws: a conditional count is
+still a flow.
 
 A **computed fact** is a fact whose rows are defined from other facts (`SaleMargin` from `Sale` and the
 costs it names). Its definition is a `computed-from` edge in the dependency graph (§9), not an arrow of the schema.
@@ -131,7 +145,10 @@ A **question** is a pattern `Q = (M, G, W, T, C)`:
 - `W` — filters: a path to an object and a set of members, a condition on an attribute (of the fact, or of an object a
   path reaches — a set of values or a range), or a named condition;
 - `T` — a time span on the facts' time paths, and for stocks an instant or a roll-up;
-- `C` — coordinates applied to the result: order, limit, having, compare, cumulative, rolling, fill, totals, share.
+- `C` — coordinates applied to the result: order, limit, having, compare, cumulative, rolling, fill, totals, share,
+  runs (the longest run of consecutive periods of a calendar grouped by in which an output meets a comparison — a
+  period missing from the answer breaks it; one value per group, carried on each of its rows as `<output> longest run`,
+  in that calendar's periods).
 
 ### 4.1 Meaning
 
@@ -140,7 +157,8 @@ For one fact `F`, with grouping paths `p₁…pₙ` and filter paths `q₁…q�
     ρ_F(b₁…bₙ) = ⊕ { m(r) : r ∈ F, pᵢ(r) = bᵢ for all i, q_j(r) ∈ W_j for all j, r ∈ T }
 
 where `⊕` is the measure's aggregate. Because every arrow is a function, each row lands in exactly one group: the fold
-is a partition of `F`, so no row is counted twice (§5 rule A1).
+is a partition of `F`, so no row is counted twice (§5 rule A1). A measure kept to a condition of its own adds its own
+filters to `q_j` for that measure alone; a measure worked out per row replaces `m(r)` with its expression over the row.
 
 For several facts, each is aggregated separately to the common targets, and the results are joined on those targets —
 **drill-across**. Joining before aggregating is never done (the chasm trap).
@@ -209,7 +227,8 @@ Each rule is a consequence of §1, not a design choice.
   day the answer is given as of is known, so the rate used is the latest on or before the earlier of the two dates. A
   planned rate is not a rate of this fact; it is a version of its own.
 - **E3** — Multiplication and division form new units (`h × money/h = money`); a derived measure's unit is computed and
-  checked against its declaration.
+  checked against its declaration. `max` and `min` compare, so their arguments share a unit; a number takes the unit
+  beside it in `+ - max min` and is a plain scale in `* /`.
 
 **F. Versions**
 
@@ -356,7 +375,8 @@ an entity, a statement with one row per element and its arrows' columns, and a h
 
 A plan compiles to one SQL statement per fact, run through the datasource manager:
 
-    SELECT <the end of each grouping path>, <each measure folded>
+    SELECT <the end of each grouping path>, <each measure folded>     kept to its own condition: SUM(CASE WHEN <its predicates> THEN v END)
+                                                                       worked out per row: arithmetic over the row's columns, max/min as CASE
     FROM (<the fact's rows>) f
       LEFT JOIN (<an entity's rows>) …  ON key = <the path so far>                      each element once
       LEFT JOIN (<an arrow's history>) … ON key = … AND <row date> in [from, to)       each as-of arrow
@@ -368,7 +388,8 @@ of §4.1. Money is multiplied by its rate — the latest on or before its conver
 before it is added, and a missing rate is an error, never zero. Facts are aggregated apart and assembled by the same
 code as the reference evaluator (totals, shares, comparison, having, order, limit), which is the oracle every compiled
 question is tested against. A stock taken at an instant per group is aggregated by instant at the source and finished
-after. What differs between dialects is four functions: quoting, calendar keys, period ends, first-of-ordered.
+after. A setting a measure's own condition names is read for whoever asks before the question is checked, and the plan
+holds the number: no statement ever sees a setting's name. What differs between dialects is four functions: quoting, calendar keys, period ends, first-of-ordered.
 
 One statement reads one source: an entity held elsewhere than its fact is refused until reading across sources is built.
 

@@ -43,11 +43,11 @@ An accepted operation is written in one transaction with its change record.
 | `add-calendar <Name> --level <day\|week\|month\|quarter\|year>` | a calendar level |
 | `add-fact <Name>` | recorded events; `--history current` when the source keeps no earlier state |
 | `add-arrow <Owner.role> <Target>` | a link; `--kind grain\|belongs\|as-of\|version\|rollup\|self`, `--partial` |
-| `add-measure <Fact.name>` | `--unit`, `--kind flow\|stock\|value-per-unit`, `--aggregate`, `--currency <path>`, `--of`, `--weight`, `--versions`, `--over-time` |
+| `add-measure <Fact.name>` | `--unit`, `--kind flow\|stock\|value-per-unit`, `--aggregate`, `--currency <path>`, `--of`, `--weight`, `--versions`, `--over-time`; `--expr "[Fact.a] - [Fact.b]"` for one worked out from the fact's others (`--at row` to work it out per row, with `max(a, b)`, `min(a, b)` and numbers, before it is added up); `--where <json filters>` for one added up only from the rows where its own condition holds — the question's filter forms, plus `{"measure": "m", "op": "<", "value": 8}` or `"setting": "name"` |
 | `add-attribute <Owner.name> --type text\|date\|number\|flag` | a value; `--members` for listed text values |
 | `add-condition <name> --on <Object> --where <filters>` | a named condition |
 | `add-equation <Object> <path> <path>` | two paths that must agree |
-| `set <id> <property> <value>` | description, synonyms, members, names, defaults, kept-to, history, grain, unit, … |
+| `set <id> <property> <value>` | description, synonyms, members, names, defaults, kept-to, history, grain, unit, expr, at, where, … |
 | `rename <id> <new name>` | renames, and rewrites everything that refers to it |
 | `remove <id>` | refused while anything refers to it |
 | `promote-attribute <Owner.attr> <Entity>` | turns an attribute into an entity and an arrow to it, rewriting the conditions that used it |

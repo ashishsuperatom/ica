@@ -3,7 +3,7 @@
 // checked for the forms those databases need, and are not claimed to be verified.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { check, compileSql, duckdb, evaluate, mssql, oracle, runSql, type Question, type Schema } from '../src/index.js'
+import { check, compileSql, duckdb, evaluate, mssql, oracle, runSql, type Instance, type Question, type Schema } from '../src/index.js'
 import { instance as I, schema as base } from './fixtures/branches.js'
 import { duckdbInstalled, toDuckdb } from './fixtures/duckdb.js'
 import { toSqlite } from './fixtures/sqlite.js'
@@ -61,4 +61,29 @@ test('Oracle and SQL Server statements take the forms those databases need', () 
   assert.ok(under.ok)
   assert.throws(() => compileSql(s, sources, under.plan, mssql), /not compiled for mssql/)
   assert.match(compileSql(s, sources, under.plan, oracle)[0].sql, /START WITH .* IN \(.*\) CONNECT BY NOCYCLE PRIOR /)
+})
+
+test('a measure kept to its own condition, a row expression and a longest run take the same forms in every dialect', async () => {
+  const { schema: roster, instance: rows } = await import('./fixtures/shifts.js')
+  const s: Schema = structuredClone(roster)
+  Object.assign(s.objects.Shift.measures!, {
+    short: { unit: 'shifts', kind: 'flow', aggregate: 'count', where: [{ measure: 'worked', op: '<', value: 8 }, { attribute: 'site', in: ['north'] }] },
+    shortfall: { unit: 'h', kind: 'flow', aggregate: 'sum', expr: 'max(0, [Shift.target] - [Shift.worked])', at: 'row' },
+  })
+  const I: Instance = { ...rows, rows: { Shift: rows.rows.Shift.map((r) => ({ ...r, measures: { ...r.measures, short: 1 } })) } }
+  const q: Question = { measures: ['Shift.short', 'Shift.shortfall'], by: [{ to: 'Person' }, { to: 'Week' }], span: { from: '2026-01-05', to: '2026-02-23' }, runs: { output: 'Shift.shortfall', op: '=', value: 0, along: 'Week' } }
+  const v = check(s, q)
+  assert.ok(v.ok)
+  const { sources } = toSqlite(s, I)
+  for (const d of [oracle, mssql]) {
+    const [st] = compileSql(s, sources, v.plan, d)
+    assert.match(st.sql, /COUNT\(CASE WHEN .* < @p\d+ AND .* IN \(@p\d+\) THEN .* END\)/)
+    assert.match(st.sql, /SUM\(\(CASE WHEN \(0\) IS NULL OR \(.*\) IS NULL THEN NULL WHEN \(0\) >= \(.*\) THEN \(0\) ELSE \(.*\) END\)\)/)
+    assert.doesNotMatch(st.sql, /LIMIT|strftime|json_group_array/)
+  }
+  if (duckdbInstalled) {
+    const { query, sources: duck } = toDuckdb(s, I)
+    const got = await runSql(s, duck, v.plan, query, duckdb)
+    assert.deepEqual(got.rows, evaluate(s, I, v.plan).rows)
+  }
 })

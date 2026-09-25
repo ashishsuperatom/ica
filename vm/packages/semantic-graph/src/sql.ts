@@ -18,7 +18,7 @@
 // The results are assembled by the same code as the reference evaluator (evaluate.ts `assemble`), which is also what
 // the tests compare against: the same questions, the same data, in memory and in SQLite.
 
-import type { FactPlan, Plan, Step } from './algebra.js'
+import type { Expr, FactPlan, Kept, Plan, Step } from './algebra.js'
 import { assemble, median, plansOf, type Groups, type Result } from './evaluate.js'
 import { DataError, type Key } from './instance.js'
 import { arrow, baseUnits, timeArrow, walk, type Schema } from './schema.js'
@@ -225,35 +225,44 @@ function statement(s: Schema, src: Sources, plan: Plan, fp: FactPlan, dialects: 
   const stepExpr = (x: Step) => ('attribute' in x ? (x.at?.length ? attributeOf(x.at, x.attribute) : col('f', fs.attributes?.[x.attribute] ?? fail(`${fp.fact}.${x.attribute} has no column`))) : reach(x.path))
 
   const keys = fp.by.map(stepExpr)
-  const where: string[] = []
-  if (plan.span && timeCol && fs.timeZone) where.push(`${rawTime} >= ${d.date(param(addDays(plan.span.from, -1)))} AND ${rawTime} < ${d.date(param(addDays(plan.span.to, 1)))}`)
-  if (plan.span && timeCol) where.push(`${timeCol} >= ${d.date(param(plan.span.from))} AND ${timeCol} < ${d.date(param(plan.span.to))}`)
-  for (const w of fp.where) {
+  /** The predicates one filter is — the question's, or a measure's own — with the joins it needs added. */
+  const predicates = (w: Kept): string[] => {
+    if ('measure' in w) return [`${col('f', fs.measures[w.measure] ?? fail(`${fp.fact}.${w.measure} has no column`))} ${w.op === '!=' ? '<>' : w.op} ${param(w.value)}`]
     const expr = stepExpr(w)
-    if ('none' in w) { where.push(`${expr} IS ${w.none ? '' : 'NOT '}NULL`); continue }
-    if ('notIn' in w) { where.push(`(${expr} IS NULL OR ${expr} NOT IN (${w.notIn.map(param).join(', ')}))`); continue }
+    if ('none' in w) return [`${expr} IS ${w.none ? '' : 'NOT '}NULL`]
+    if ('notIn' in w) return [`(${expr} IS NULL OR ${expr} NOT IN (${w.notIn.map(param).join(', ')}))`]
     if ('range' in w) {
       // Date attributes are written by their sources as YYYY-MM-DD text, which compares in date order.
       const v = (x: string | number) => param(x)
-      if (w.range.from !== undefined) where.push(`${expr} >= ${v(w.range.from)}`)
-      if (w.range.to !== undefined) where.push(`${expr} < ${v(w.range.to)}`)
-      continue
+      return [...(w.range.from !== undefined ? [`${expr} >= ${v(w.range.from)}`] : []), ...(w.range.to !== undefined ? [`${expr} < ${v(w.range.to)}`] : [])]
     }
     if ('contains' in w || 'startsWith' in w) {
       const labelled = 'attribute' in w ? expr : labelOf(w.path)
       // LIKE without ESCAPE, which every source accepts: a % or _ typed in a name matches loosely.
       const pattern = ('contains' in w ? `%${w.contains}%` : `${w.startsWith}%`).toLowerCase()
-      where.push(`LOWER(${labelled}) LIKE ${param(pattern)}`)
-      continue
+      return [`LOWER(${labelled}) LIKE ${param(pattern)}`]
     }
     const list = (w as { in: string[] }).in.map(param).join(', ')
-    if (!w.under) { where.push(`${expr} IN (${list})`); continue }
+    if (!w.under) return [`${expr} IN (${list})`]
     const object = (w as { path: string[] }).path.reduce((o, r) => arrow(s, o, r)!.to, fp.fact)
     const es = src.entities[object] ?? fail(`${object} has no source`)
     if (arrow(s, object, w.under)!.kind === 'as-of') fail(`everything under ${(w as { in: string[] }).in.join(', ')} along ${w.under}, which changes over time, is not compiled`)
     take(es.params)
-    where.push(d.under(expr, es.sql ?? fail(`${object} is produced by a program that has not run`), es.key, es.arrows[w.under], list) ?? fail(`everything under a member along ${w.under} is not compiled for ${d.name}`))
+    return [d.under(expr, es.sql ?? fail(`${object} is produced by a program that has not run`), es.key, es.arrows[w.under], list) ?? fail(`everything under a member along ${w.under} is not compiled for ${d.name}`)]
   }
+  /** A row's value of an expression over its columns: a missing part makes it missing, which the fold then skips. */
+  const rowSql = (e: Expr): string => {
+    if ('ref' in e) return col('f', fs.measures[e.ref] ?? fail(`${fp.fact}.${e.ref} has no column`))
+    if ('num' in e) return String(e.num)
+    const [a, b] = e.args.map(rowSql)
+    if ('fn' in e) return `CASE WHEN (${a}) IS NULL OR (${b}) IS NULL THEN NULL WHEN (${a}) ${e.fn === 'max' ? '>=' : '<='} (${b}) THEN (${a}) ELSE (${b}) END`
+    if (e.op === '/') return `CASE WHEN (${b}) = 0 THEN NULL ELSE (${a}) * 1.0 / (${b}) END`
+    return `(${a} ${e.op} ${b})`
+  }
+  const where: string[] = []
+  if (plan.span && timeCol && fs.timeZone) where.push(`${rawTime} >= ${d.date(param(addDays(plan.span.from, -1)))} AND ${rawTime} < ${d.date(param(addDays(plan.span.to, 1)))}`)
+  if (plan.span && timeCol) where.push(`${timeCol} >= ${d.date(param(plan.span.from))} AND ${timeCol} < ${d.date(param(plan.span.to))}`)
+  for (const w of fp.where) where.push(...predicates(w))
 
   if (detail) {
     // The rows behind one group: every column of the fact's rows, those whose paths lead to the group.
@@ -271,20 +280,26 @@ function statement(s: Schema, src: Sources, plan: Plan, fp: FactPlan, dialects: 
   const def = s.objects[fp.fact]
   fp.measures.forEach((name, i) => {
     const m = def.measures![name]
-    const raw = col('f', fs.measures[name] ?? fail(`${fp.fact}.${name} has no column`))
+    const perRow = fp.perRow?.[name]
+    const raw = perRow ? `(${rowSql(perRow)})` : col('f', fs.measures[name] ?? fail(`${fp.fact}.${name} has no column`))
+    // A measure kept to a condition of its own: each row enters the fold only where its predicate holds — a row that
+    // fails is not zero, it is absent, so the fold is over the kept rows alone, for every aggregate alike.
+    const held = (fp.kept?.[name] ?? []).flatMap(predicates)
+    const only = held.length ? `${held.join(' AND ')} AND ` : ''
+    const kept = (x: string) => (held.length ? `CASE WHEN ${held.join(' AND ')} THEN ${x} END` : x)
     let v = raw
     if (fp.convert && m.currency && baseUnits(m.unit).money) {
       const known = rates?.get(rateKey(plan, fp))
       if (!known) take(src.facts[s.conversion!.fact]?.params)
       const rate = rateExpr(s, src, plan, fp, m.currency, d, param, reach, col, rowDate, known)
       v = `(${raw} * ${rate})`
-      selects.push(`SUM(CASE WHEN ${raw} IS NOT NULL AND ${rate} IS NULL THEN 1 ELSE 0 END) AS x${i}`)
+      selects.push(`SUM(CASE WHEN ${only}${raw} IS NOT NULL AND ${rate} IS NULL THEN 1 ELSE 0 END) AS x${i}`)
     }
     const w = m.weight ? col('f', fs.measures[m.weight]) : ''
     selects.push(`${
-      m.aggregate === 'sum' ? `SUM(${v})` : m.aggregate === 'count' ? `COUNT(${raw})` : m.aggregate === 'min' ? `MIN(${v})` : m.aggregate === 'max' ? `MAX(${v})`
-      : m.aggregate === 'average' ? `AVG(${v})` : m.aggregate === 'median' ? d.median(v).sql : m.aggregate === 'count distinct' ? `COUNT(DISTINCT ${col('f', fs.arrows[m.of!])})`
-      : `SUM(CASE WHEN ${v} IS NOT NULL AND ${w} <> 0 THEN ${v} * ${w} END) / SUM(CASE WHEN ${v} IS NOT NULL AND ${w} <> 0 THEN ${w} END)`
+      m.aggregate === 'sum' ? `SUM(${kept(v)})` : m.aggregate === 'count' ? `COUNT(${kept(raw)})` : m.aggregate === 'min' ? `MIN(${kept(v)})` : m.aggregate === 'max' ? `MAX(${kept(v)})`
+      : m.aggregate === 'average' ? `AVG(${kept(v)})` : m.aggregate === 'median' ? d.median(kept(v)).sql : m.aggregate === 'count distinct' ? `COUNT(DISTINCT ${kept(col('f', fs.arrows[m.of!]))})`
+      : `SUM(CASE WHEN ${only}${v} IS NOT NULL AND ${w} <> 0 THEN ${v} * ${w} END) / SUM(CASE WHEN ${only}${v} IS NOT NULL AND ${w} <> 0 THEN ${w} END)`
     } AS m${i}`)
   })
   const group = [...keys, ...(byInstant ? [timeCol!] : [])]

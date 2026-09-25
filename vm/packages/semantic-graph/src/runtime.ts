@@ -13,7 +13,7 @@
 // step it follows, checked before anything runs.
 
 import { createHash, randomUUID } from 'node:crypto'
-import { check, type Plan, type Question } from './algebra.js'
+import { check, settingsNamed, type Plan, type Question } from './algebra.js'
 import { pathsFrom } from './paths.js'
 import { plansOf, type Result } from './evaluate.js'
 import { addDays, endsPeriod, periodOf as calendarPeriod, shiftPeriods, startsPeriod } from './calendar.js'
@@ -266,13 +266,25 @@ export function createGraph(o: GraphOptions) {
         return { ...h, value: typeof v === 'number' ? v : undefined }
       }) }
     }
-    const verdict = check(m.schema, q, { today })
+    if (q.runs?.setting) {
+      const v = read(q.runs.setting)
+      if (typeof v === 'number') forReader.push(`A run is ${q.runs.output} ${q.runs.op} ${v}, from the setting "${q.runs.setting}"`)
+      q = { ...q, runs: { ...q.runs, value: typeof v === 'number' ? v : undefined } }
+    }
+    // A measure kept to a condition of its own may compare against a setting too: read here, for who asks, and given to
+    // check() as numbers, so the plan and every statement compiled from it hold values and never a setting's name.
+    const settings: Record<string, unknown> = {}
+    for (const { setting: name, about } of settingsNamed(m.schema, q)) {
+      const v = name in settings ? settings[name] : (settings[name] = read(name))
+      if (typeof v === 'number') forReader.push(`Kept to ${about} ${v}, from the setting "${name}"`)
+    }
+    const verdict = check(m.schema, q, { today, settings })
     if (!verdict.ok) {
       store.recordCall({ ...base, canonical: null, plan: null, output: null, refusal: { rule: verdict.rule, reason: verdict.reason }, error: null, caveats: said, nodes: [], ms: Date.now() - started })
       return { ok: false, callId: id, rule: verdict.rule, reason: verdict.reason, ...(verdict.choices ? { choices: verdict.choices } : {}) }
     }
     const plan = verdict.plan
-    const key = canonical(m.schema, q, { today })!
+    const key = canonical(m.schema, q, { today, settings })!
     const nodes = nodesOf(m.schema, plan)
     try {
       if (!m.sources) throw new Error(`the schema "${a.model}" has no sources, so nothing can be read`)
@@ -643,7 +655,7 @@ export function createGraph(o: GraphOptions) {
 
     type Part = { question: Question; group: Array<string | null>; output: string; callId: string; expectation: Expectation; parts: Part[] }
     const node = async (question: Question, group: Array<string | null>, output: string, depth: number): Promise<Part | null> => {
-      const asked = await ask({ ...question, span, compare: undefined, totals: undefined, share: undefined, order: undefined, limit: undefined, having: undefined }, { ...a, parentId: callId })
+      const asked = await ask({ ...question, span, compare: undefined, totals: undefined, share: undefined, order: undefined, limit: undefined, having: undefined, runs: undefined }, { ...a, parentId: callId })
       if (!asked.ok) return null
       const n = asked.plan.targets.length
       const col = n + asked.plan.outputs.findIndex((x) => x.name === output)
@@ -826,7 +838,7 @@ export function observationsOf(s: Schema, plan: Plan, q: Question, result: Resul
   if (time.length !== 1) return []
   const t = time[0]
   const level = walk(s, plan.facts[0].fact, (plan.facts[0].by[t] as { path: string[] }).path)!.object
-  const series = `${definitions}|${canonicalJson({ ...q, span: undefined, asOf: undefined, order: undefined, limit: undefined, limitPer: undefined, having: undefined, totals: undefined, share: undefined, compare: undefined, fill: undefined })}`
+  const series = `${definitions}|${canonicalJson({ ...q, span: undefined, asOf: undefined, order: undefined, limit: undefined, limitPer: undefined, having: undefined, totals: undefined, share: undefined, compare: undefined, fill: undefined, runs: undefined })}`
   const n = plan.targets.length
   return result.rows.flatMap((row) => plan.outputs.map((out, i) => ({
     callId, series, group: JSON.stringify(row.slice(0, n).filter((_, j) => j !== t)), level, period: String(row[t]), output: out.name,
@@ -845,7 +857,7 @@ export function withinLimit(observations: Observation[], limit: number): Observa
 }
 const total = (xs: Observation[]) => xs.reduce((a, x) => a + (x.value ?? 0), 0)
 
-const refsOf = (e: import('./algebra.js').Expr): string[] => ('ref' in e ? [e.ref] : [...refsOf(e.args[0]), ...refsOf(e.args[1])])
+const refsOf = (e: import('./algebra.js').Expr): string[] => ('ref' in e ? [e.ref] : 'num' in e ? [] : [...refsOf(e.args[0]), ...refsOf(e.args[1])])
 
 /** What a question is about, for rules: the members it keeps, by the object they are members of. */
 export function aboutOf(q: Pick<Question, "where">): Record<string, string[]> {

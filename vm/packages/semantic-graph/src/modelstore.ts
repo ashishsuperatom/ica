@@ -309,6 +309,10 @@ function references(st: ModelState, id: string): string[] {
     }
     for (const [m, d] of Object.entries(o.measures ?? {})) {
       if (r.kind === 'measure' && r.owner === name && d.weight === r.name) out.push(`${name}.${m} is weighted by it`)
+      if (r.kind === 'measure' && r.owner === name && d.expr?.includes(`[${name}.${r.name}]`)) out.push(`${name}.${m} is worked out from it`)
+      if (r.kind === 'measure' && r.owner === name && d.where?.some((w) => 'measure' in w && w.measure === r.name)) out.push(`${name}.${m} keeps to rows by it`)
+      if (r.kind !== 'object' && r.kind !== 'measure' && r.kind !== 'condition' && d.where && JSON.stringify(d.where).includes(JSON.stringify(r.name))) out.push(`${name}.${m}'s own condition may use it`)
+      if (r.kind === 'condition' && d.where?.some((w) => 'condition' in w && w.condition === r.name)) out.push(`${name}.${m} keeps to it`)
       if (r.kind === 'arrow' && r.owner === name && (d.of === r.name || d.versions === r.name || (Array.isArray(d.currency) && d.currency[0] === r.name))) out.push(`${name}.${m} names it`)
       if (r.kind === 'attribute' && r.owner === name && !Array.isArray(d.currency) && d.currency?.attribute === r.name) out.push(`${name}.${m} takes its currency from it`)
     }
@@ -388,7 +392,7 @@ function step(before: ModelState, op: Operation): { state: ModelState; notes: st
       const r = resolve(s, op.id)
       const allowed: Record<string, string[]> = {
         object: ['description', 'synonyms', 'members', 'names', 'level', 'fiscal', 'periods', 'grain', 'keptTo', 'history', 'defaults'],
-        measure: ['description', 'synonyms', 'unit', 'kind', 'aggregate', 'currency', 'overTime', 'of', 'weight', 'versions'],
+        measure: ['description', 'synonyms', 'unit', 'kind', 'aggregate', 'currency', 'overTime', 'of', 'weight', 'versions', 'expr', 'at', 'where'],
         attribute: ['description', 'synonyms', 'type', 'members'],
         arrow: ['kind', 'partial', 'synonyms'],
         condition: ['description', 'synonyms', 'where', 'on'],
@@ -503,6 +507,10 @@ function rename(st: ModelState, id: string, to: string) {
       if (c.on === r.name) c.on = to
       c.where = c.where.map((w: any) => ({ ...w, ...(w.to === r.name ? { to } : {}), ...(w.of === r.name ? { of: to } : {}) }))
     }
+    for (const [f, o] of Object.entries(s.objects)) for (const m of Object.values(o.measures ?? {})) {
+      if (m.where) m.where = m.where.map((w: any) => ({ ...w, ...(w.to === r.name ? { to } : {}), ...(w.of === r.name ? { of: to } : {}) }))
+      if (m.expr && f === r.name) m.expr = m.expr.replaceAll(`[${r.name}.`, `[${to}.`)
+    }
     for (const e of s.equations ?? []) if (e.on === r.name) e.on = to
     if (s.conversion?.fact === r.name) s.conversion.fact = to
     st.sources.facts = mapKey(st.sources.facts, r.name, to)!
@@ -513,7 +521,10 @@ function rename(st: ModelState, id: string, to: string) {
   if (r.kind === 'condition') {
     nameOk(to, 'a condition'); unique(s, [to], id)
     s.conditions = mapKey(s.conditions, r.name, to)
-    for (const o of Object.values(s.objects)) if (o.keptTo) o.keptTo = o.keptTo.map((c) => (c === r.name ? to : c))
+    for (const o of Object.values(s.objects)) {
+      if (o.keptTo) o.keptTo = o.keptTo.map((c) => (c === r.name ? to : c))
+      for (const m of Object.values(o.measures ?? {})) if (m.where) m.where = m.where.map((w: any) => (w.condition === r.name ? { ...w, condition: to } : w))
+    }
     return
   }
   if (r.kind === 'conversion' || r.kind === 'equation') refuse(`${id} has no name to change`)
@@ -523,12 +534,17 @@ function rename(st: ModelState, id: string, to: string) {
   const b: any = st.sources.facts[r.owner!] ?? st.sources.entities[r.owner!]
   if (r.kind === 'measure') {
     o.measures = mapKey(o.measures, r.name, to)
-    for (const m of Object.values(o.measures ?? {})) if (m.weight === r.name) m.weight = to
+    for (const m of Object.values(o.measures ?? {})) {
+      if (m.weight === r.name) m.weight = to
+      if (m.expr) m.expr = m.expr.replaceAll(`[${r.owner}.${r.name}]`, `[${r.owner}.${to}]`)
+      if (m.where) m.where = m.where.map((w: any) => (w.measure === r.name ? { ...w, measure: to } : w))
+    }
     if (b?.measures) b.measures = mapKey(b.measures, r.name, to)
   } else if (r.kind === 'attribute') {
     o.attributes = mapKey(o.attributes, r.name, to)
     for (const m of Object.values(o.measures ?? {})) if (!Array.isArray(m.currency) && m.currency?.attribute === r.name) m.currency = { attribute: to }
     for (const c of Object.values(s.conditions ?? {})) c.where = c.where.map((w: any) => (w.attribute === r.name && (w.of ?? c.on) === r.owner ? { ...w, attribute: to } : w))
+    for (const [f, x] of Object.entries(s.objects)) for (const m of Object.values(x.measures ?? {})) if (m.where) m.where = m.where.map((w: any) => (w.attribute === r.name && (w.of ?? f) === r.owner ? { ...w, attribute: to } : w))
     if (b?.attributes) b.attributes = mapKey(b.attributes, r.name, to)
   } else if (r.kind === 'arrow') {
     o.arrows = mapKey(o.arrows, r.name, to)
@@ -543,6 +559,7 @@ function rename(st: ModelState, id: string, to: string) {
     for (const e of s.equations ?? []) if (e.on === r.owner) e.paths = e.paths.map(swap) as [string[], string[]]
     if (s.conversion && s.conversion.fact === r.owner) for (const k of ['from', 'to', 'day'] as const) if (s.conversion[k] === r.name) s.conversion[k] = to
     for (const c of Object.values(s.conditions ?? {})) c.where = c.where.map((w: any) => (c.on === r.owner && Array.isArray(w.via) && w.via[0] === r.name ? { ...w, via: swap(w.via) } : w))
+    for (const m of Object.values(o.measures ?? {})) if (m.where) m.where = m.where.map((w: any) => (Array.isArray(w.via) && w.via[0] === r.name ? { ...w, via: swap(w.via) } : w))
     if (b?.arrows) b.arrows = mapKey(b.arrows, r.name, to)
   }
 }
@@ -564,7 +581,17 @@ export function operationsFor(files: { schema: Schema; sources?: Sources; settin
   }
   for (const [name, o] of Object.entries(s.objects)) {
     for (const [a, d] of Object.entries(o.attributes ?? {})) ops.push({ op: 'add-attribute', id: `${name}.${a}`, ...d })
-    for (const [m, d] of Object.entries(o.measures ?? {})) ops.push({ op: 'add-measure', id: `${name}.${m}`, ...d } as Operation)
+    // A measure that names another of its fact — its weight, what it is worked out from, what its own condition
+    // compares — is added after the one it names, whatever order the store holds them in.
+    const names = (d: Measure) => [...(d.weight ? [d.weight] : []), ...[...(d.expr ?? '').matchAll(/\[([^\]]+)\]/g)].map((x) => x[1]!.slice(x[1]!.indexOf('.') + 1)),
+      ...(d.where ?? []).flatMap((w) => ('measure' in w ? [w.measure] : []))]
+    const pending = Object.entries(o.measures ?? {}), added = new Set<string>()
+    while (pending.length) {
+      const i = pending.findIndex(([, d]) => names(d).every((n) => added.has(n) || !o.measures?.[n]))
+      const [m, d] = pending.splice(i < 0 ? 0 : i, 1)[0]
+      added.add(m)
+      ops.push({ op: 'add-measure', id: `${name}.${m}`, ...d } as Operation)
+    }
   }
   for (const [n, c] of Object.entries(s.conditions ?? {})) ops.push({ op: 'add-condition', name: n, ...c })
   for (const e of s.equations ?? []) ops.push({ op: 'add-equation', on: e.on, paths: e.paths })
