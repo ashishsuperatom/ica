@@ -1,9 +1,10 @@
 // THE COMPOSER — answers a conversation's questions from the semantic graph.
 //
 // One composer per conversation, in the conversation's own directory. It reads the question in the graph's terms and
-// answers with a program on the graph, run with ./run-program and given as the conversation's next step with ./commit — or hands the question
-// to the analyst with ./escalate when the graph does not hold what it needs. The turn ends when a step has been applied
-// (out/<qid>/built.json), the question has been escalated, or an explanation has been written.
+// answers with a program on the graph, run with ./run-program and given as the conversation's next step with ./commit.
+// When the graph does not hold what a question needs, it answers with what the graph does hold and says plainly what
+// differs; nothing is handed to another agent. The turn ends when a step has been applied (out/<qid>/built.json) or an
+// explanation has been written.
 
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -78,11 +79,11 @@ answer with confidence, with what is missing.
 
 Run the program, read its answer against the question as asked, correct it and run it again; when it answers the
 question, ./commit it as your final action. A refusal says what to change. When the graph does not hold what the
-question needs, answer what it does hold and say plainly what differs, or escalate with what is missing.
+question needs, answer what it does hold and say plainly what differs; there is nobody to hand it to.
 
 You work only in this folder. Write your program here and reach the graph and the data only through its tools. Never read, list, search or run anything outside this folder.
 
-Tools: ./match ./look ./ask ./intent ./run-program ./commit ./trace ./escalate — each explains itself with --help.
+Tools: ./match ./look ./ask ./intent ./run-program ./commit ./trace — each explains itself with --help.
 Each question comes with today's date and its qid.`
 
 /** The date a question is asked on, in the organisation's time zone (settings.json \`timezone\`), else UTC — never the
@@ -98,7 +99,6 @@ export const dayOf = (projectDir?: string) => dayIn(zoneOf(projectDir))
 
 export async function turnOutcome(dir: string): Promise<{ step?: number; escalate?: { reason: string }; explained?: true } | null> {
   try { const s = JSON.parse(await readFile(join(dir, 'built.json'), 'utf8')); if (typeof s.step === 'number') return { step: s.step } } catch { /* not yet */ }
-  try { const e = JSON.parse(await readFile(join(dir, 'escalate.json'), 'utf8')); return { escalate: { reason: String(e.reason ?? 'escalated') } } } catch { /* not yet */ }
   // An explain: turn reports on an answer and is done when its explanation is written.
   try { if ((await readFile(join(dir, 'explain.md'), 'utf8')).trim()) return { explained: true } } catch { /* not yet */ }
   return null
@@ -124,7 +124,7 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       await writeFile(join(cwd, '.agent'), 'composer')
       await session.run(`${question}\n\ntoday: ${todayIn(opts.projectDir)}\nqid: ${o.qid}`, { ...handlers, doneWhen: async () => (await turnOutcome(dir)) !== null })
       const outcome = await turnOutcome(dir)
-      return { ...(outcome ?? { escalate: { reason: 'the composer applied no step and did not escalate' } }), ms: Date.now() - t0 }
+      return { ...(outcome ?? { escalate: { reason: 'the composer applied no step' } }), ms: Date.now() - t0 }
     },
   }
 }

@@ -13,7 +13,6 @@
 //   the semantic graph   ./match ./look ./ask ./run-program ./commit ./trace   (conversation, analyst)
 //   the intent side      ./intent                                          (conversation, analyst)
 //   the data             ./sources ./query ./introspect ./find-schema ./resolve                            (analyst, connector, grounding)
-//   hand-off             ./escalate                                                                          (conversation)
 //
 // Which turn is live is in .turn, which data session this conversation is in .session — both written by the engine
 // before it asks. A turn's files are in out/<qid>/.
@@ -35,7 +34,7 @@ export interface WorkspaceSpec {
   projectDir?: string
   /** One conversation, one working directory: when given, the agent works in sessions/<sessionId>. */
   sessionId?: string
-  /** A conversation's directory has the semantic graph and ./escalate. The shared workspace — where the analyst, connector
+  /** A conversation's directory has the semantic graph. The shared workspace — where the analyst, connector
    *  and grounding agents all work, so one set of tools for all of them — has the semantic graph and the data. */
   tools?: 'conversation' | 'shared'
 }
@@ -291,7 +290,7 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
   }
   // A conversation has the semantic graph and hands off with ./escalate; the analyst has the graph and the data; the
   // connector and grounding agents have the data.
-  if (conversation) for (const name of Object.keys(drivers)) if (name !== 'escalate') delete drivers[name]
+  if (conversation) for (const name of Object.keys(drivers)) delete drivers[name]   // a conversation has no hand-off: there is no escalation
   for (const name of Object.keys(SEMANTIC_USAGE)) { drivers[name] = graphTool(name); usages[name] = SEMANTIC_USAGE[name] }
   drivers['intent'] = intentTool
   usages['intent'] = INTENT_USAGE

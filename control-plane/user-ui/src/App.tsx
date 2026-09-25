@@ -74,7 +74,71 @@ export function CloudGate() {
   return <App token={token} projectId={projectId} />
 }
 
-type View = 'chat' | 'analyst' | 'composer'   // the tabs: chat (answers) + the two agent-log views
+// The tabs: 'chat' (answers) + one log view per agent LANE, named by the lane the engine announced. A lane the
+// engine has not announced (and localStorage does not remember) falls back to chat.
+type View = 'chat' | (string & {})
+
+// ── Agent lanes ─────────────────────────────────────────────────────────────────────────────────────────────
+// The engine announces every agent with `agent:hello`; the UI hardcodes no agent. A lane's hello fields decide
+// how it is drawn (LaneView below), so a new agent appears here with zero UI changes.
+type LaneMeta = {
+  label: string; hue?: string; desc?: string
+  scope: 'session' | 'project'      // session: one per chat (frames carry the chat's sid); project: a singleton
+  harness?: string; provider?: string; model?: string
+  streamKind: 'events' | 'pty'; pty: boolean; interactive: boolean
+  controls: Array<'terminal' | 'compact' | 'new'>
+}
+type LaneState = LaneMeta & {
+  events: AgentEvent[]; busy: boolean; status: string
+  lastSeen: number                   // when its hello last arrived
+  logSid: string                     // session-scoped: which chat `events` belong to ('' for a project lane)
+}
+type Lanes = Record<string, LaneState>   // key order = first seen, which is the sidebar order
+const freshLane = (lane: string): LaneState =>
+  ({ label: lane, scope: 'project', streamKind: 'events', pty: false, interactive: false, controls: [], events: [], busy: false, status: '', lastSeen: 0, logSid: '' })
+// A hello MERGES into what is known — it never wipes the events already on screen. Unknown/absent fields keep
+// their current value, so a partial hello (the admin-side announce) does not reset a fuller one.
+function mergeHello(prev: LaneState | undefined, lane: string, h: any): LaneState {
+  const base = prev ?? freshLane(lane)
+  const str = (v: unknown, cur: string | undefined) => (typeof v === 'string' && v ? v : cur)
+  return {
+    ...base,
+    label: str(h?.label, base.label) ?? lane, hue: str(h?.hue, base.hue), desc: str(h?.desc, base.desc),
+    scope: h?.scope === 'session' || h?.scope === 'project' ? h.scope : base.scope,
+    harness: str(h?.harness, base.harness), provider: str(h?.provider, base.provider), model: str(h?.model, base.model),
+    streamKind: h?.streamKind === 'pty' || h?.streamKind === 'events' ? h.streamKind : base.streamKind,
+    pty: typeof h?.pty === 'boolean' ? h.pty : base.pty,
+    interactive: typeof h?.interactive === 'boolean' ? h.interactive : base.interactive,
+    controls: Array.isArray(h?.controls) ? h.controls.filter((c: unknown) => c === 'terminal' || c === 'compact' || c === 'new') : base.controls,
+    lastSeen: typeof h?.lastSeen === 'number' ? h.lastSeen : Date.now(),
+  }
+}
+const metaOf = (l: LaneState): LaneMeta => ({ label: l.label, hue: l.hue, desc: l.desc, scope: l.scope, harness: l.harness, provider: l.provider, model: l.model, streamKind: l.streamKind, pty: l.pty, interactive: l.interactive, controls: l.controls })
+// ── The two roles a lane can play, decided by its hello fields, never by its name ──
+// The CONSOLE lane: interactive with a raw terminal. It gets the xterm mount, the terminal toggle, the category
+// chip and the narrator's beats interleaved with its events.
+const isConsoleLane = (l: LaneMeta) => l.interactive && (l.pty || l.controls.includes('terminal'))
+// A lane that takes part in THIS CHAT's turn: a per-chat lane, or an interactive one the chat escalates to. These
+// get the question marker on ask and show the turn's spinner.
+const partOfTurn = (l: LaneMeta) => l.scope === 'session' || l.interactive
+// Storage keys: the LIST of known lanes (hello metadata, first-seen order) and each lane's recent log — per
+// project for a project lane, per chat for a session lane.
+const lanesKey = (projectId: string) => `sa-lanes:${projectId}`
+const laneLogKey = (projectId: string, lane: string, scope: LaneMeta['scope'], sid: string) => `sa-lane-log:${projectId}:${lane}${scope === 'session' ? `:${sid}` : ''}`
+function loadLaneLog(key: string): AgentEvent[] {
+  try { const saved = JSON.parse(localStorage.getItem(key) || '[]'); return Array.isArray(saved) ? saved : [] } catch { return [] }
+}
+function loadLanes(projectId: string, sid: string): Lanes {
+  const out: Lanes = {}
+  try {
+    for (const m of JSON.parse(localStorage.getItem(lanesKey(projectId)) || '[]') as any[]) {
+      if (!m || typeof m.lane !== 'string' || !m.lane) continue
+      const l = mergeHello(undefined, m.lane, m)
+      out[m.lane] = { ...l, events: loadLaneLog(laneLogKey(projectId, m.lane, l.scope, sid)), logSid: l.scope === 'session' ? sid : '' }
+    }
+  } catch { /* corrupt */ }
+  return out
+}
 type FeedItem =
   | { id: string; type: 'user-msg'; text: string }
   | { id: string; type: 'step'; text: string }
@@ -94,9 +158,8 @@ type FeedItem =
   | { id: string; type: 'followups'; items: string[]; qid?: string }   // suggested next questions — a DELAYED card below the answer; a chip FILLS the input (never auto-submits)
   | { id: string; type: 'error'; text: string }
 
-// A ROLLING localStorage copy of an agent-log (last 6 sessions, ≤400 events each) so a RELOAD restores it — the DO
-// deliberately doesn't store this heavy real-time log. Restore on mount only (never clobber live events). Shared by
-// every agent-log view (analyst / composer) so they persist identically.
+// A ROLLING localStorage copy of every agent-log (a few sessions, ≤LOG_CAP events each) so a RELOAD restores it — the
+// DO deliberately doesn't store this heavy real-time log. Restored on mount only (never clobbers live events).
 // ── localStorage, quota-safe ─────────────────────────────────────────────────────────────────────────────────
 // The browser gives us ~5MB and THROWS once it's full — an uncaught QuotaExceededError breaks the render, which
 // is how a long session took the UI down. Every write goes through here: on a quota failure we free space in
@@ -104,7 +167,7 @@ type FeedItem =
 //   1. agent LOGS of other sessions  — biggest by far, and replayable from the engine
 //   2. FEEDS of other sessions       — the answers you're not looking at
 // The current session's data is never evicted, so what's on screen survives.
-const LOG_PREFIXES = ['sa-anlog-', 'sa-colog-', 'sa-molog-']
+const LOG_PREFIXES = ['sa-lane-log:', 'sa-anlog-', 'sa-colog-', 'sa-molog-', 'sa-rdlog-']   // the last four: keys of earlier builds, evictable
 function safeSetItem(key: string, value: string, keepSuffix: string): boolean {
   const put = () => { try { localStorage.setItem(key, value); return true } catch { return false } }
   if (put()) return true
@@ -121,31 +184,39 @@ function safeSetItem(key: string, value: string, keepSuffix: string): boolean {
 // What gets PERSISTED is trimmed hard: command output is the bulk of a log and is only useful live, so keep a
 // head of it. This is what stops the quota being reached in the first place.
 const OUT_CAP = 1200
-const slimForStorage = (evs: AgentEvent[]) => evs.slice(-200).map(e =>
+const LOG_CAP = 500
+const slimForStorage = (evs: AgentEvent[]) => evs.slice(-LOG_CAP).map(e =>
   e.output && e.output.length > OUT_CAP ? { ...e, output: e.output.slice(0, OUT_CAP) + '\n… (truncated)' } : e)
 
-function usePersistLog(prefix: string, sessionId: string, events: AgentEvent[], setEvents: React.Dispatch<React.SetStateAction<AgentEvent[]>>) {
+// Persist the lane registry (metadata, in order) and every lane's recent log. A lane's log is written only when
+// its events array changed identity (streaming merges make a new array), debounced. A session lane's log is
+// keyed by the chat its events belong to (`logSid`, not the current sid) so a chat switch never writes one chat's
+// log under another's key; the last few chats per lane are kept, older ones dropped.
+function usePersistLanes(projectId: string, sessionId: string, lanes: Lanes) {
+  const written = useRef<Record<string, AgentEvent[]>>({})
+  const metaJson = JSON.stringify(Object.entries(lanes).map(([lane, l]) => ({ lane, ...metaOf(l), lastSeen: l.lastSeen })))
   useEffect(() => {
-    // Restore this session's saved log. Decide "is it empty?" from the CURRENT state inside the setter, not from
-    // the `events` captured when this effect was created — that stale closure is why a log sometimes stayed blank
-    // until you asked a question or reopened a chat (the effect saw a non-empty snapshot and bailed).
-    try {
-      const raw = localStorage.getItem(prefix + sessionId)
-      if (raw) { const saved = JSON.parse(raw) as AgentEvent[]; if (saved?.length) setEvents(cur => cur.length ? cur : saved) }
-    } catch { /* corrupt/oversized */ }
-  }, [sessionId])   // eslint-disable-line react-hooks/exhaustive-deps
+    if (metaJson === '[]') return
+    try { localStorage.setItem(lanesKey(projectId), metaJson) } catch { /* best-effort */ }
+  }, [metaJson, projectId])
   useEffect(() => {
-    if (!events.length) return
     const t = setTimeout(() => {
-      try {
-        safeSetItem(prefix + sessionId, JSON.stringify(slimForStorage(events)), sessionId)
-        const idx: string[] = [sessionId, ...(JSON.parse(localStorage.getItem(prefix + 'index') || '[]') as string[]).filter((s) => s !== sessionId)]
-        while (idx.length > 4) { const drop = idx.pop(); if (drop) localStorage.removeItem(prefix + drop) }
-        localStorage.setItem(prefix + 'index', JSON.stringify(idx))
-      } catch { /* localStorage full/blocked — best-effort */ }
+      for (const [lane, l] of Object.entries(lanes)) {
+        if (!l.events.length || written.current[lane] === l.events) continue
+        written.current[lane] = l.events
+        try {
+          safeSetItem(laneLogKey(projectId, lane, l.scope, l.logSid), JSON.stringify(slimForStorage(l.events)), sessionId)   // under quota pressure, the CURRENT chat's data is what is kept
+          if (l.scope === 'session') {
+            const idxKey = `${laneLogKey(projectId, lane, 'project', '')}:index`
+            const idx: string[] = [l.logSid, ...(JSON.parse(localStorage.getItem(idxKey) || '[]') as string[]).filter((s) => s !== l.logSid)]
+            while (idx.length > 4) { const drop = idx.pop(); if (drop) localStorage.removeItem(laneLogKey(projectId, lane, 'session', drop)) }
+            localStorage.setItem(idxKey, JSON.stringify(idx))
+          }
+        } catch { /* localStorage full/blocked — best-effort */ }
+      }
     }, 500)
     return () => clearTimeout(t)
-  }, [events, sessionId])   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [lanes, projectId, sessionId])
 }
 
 export function App({ token, projectId = 'default' }: { token?: string | null; projectId?: string } = {}) {
@@ -157,11 +228,13 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [logOpen, setLogOpen]   = useState(true)   // Claude live-output drawer open by default
   const [hasLog, setHasLog]     = useState(false)
   // The main view lives in the URL PATH at ROOT (the subdomain serves the user app for ANY path): a chat is
-  // /c/<id>, the other views are /analyst and /semantic. A reload / shared link lands on the same view.
-  // `navigate` pushes a history entry; popstate syncs it back.
+  // /c/<id>, an agent's log view is /<lane>. A reload / shared link lands on the same view. `navigate` pushes a
+  // history entry; popstate syncs it back. A lane segment is kept as typed: the view shows chat until that lane
+  // is known (see `shownView`), so a hello arriving after the load still opens it.
   const readView = (): View => {
+    if (/^\/c\//.test(location.pathname)) return 'chat'
     const seg = location.pathname.replace(/\/+$/, '').split('/').pop()
-    return seg === 'analyst' || seg === 'composer' ? seg : 'chat'
+    return seg && /^[A-Za-z0-9_-]+$/.test(seg) ? seg : 'chat'
   }
   const [view, setView] = useState<View>(readView)
   const navigate = useCallback((v: View) => {
@@ -173,19 +246,21 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
-  // Switching to CHAT → jump to the newest content (the page feed didn't move while you were away). The
-  // analyst/semantic logs own their own open/follow/nav behaviour separately — see useLogNav below.
+  // Switching to CHAT → jump to the newest content (the page feed didn't move while you were away). Each
+  // lane's log owns its own open/follow/nav behaviour separately — see useLogNav in LaneView.
   useEffect(() => { if (view === 'chat') scroll(true) }, [view])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Chat feed: Shift+Up/Down jump between questions, scrolling the PAGE (see questionNav.ts).
-  useQuestionNav(() => readView() === 'chat')
-  // Analyst tab — the QA agent (classify → claude-code answers from the semantic model + units).
-  const [anStatus, setAnStatus]     = useState('')
-  const [anCategory, setAnCategory] = useState('')
-  const [anQuestion, setAnQuestion] = useState('')
-  const [anAnswer, setAnAnswer]     = useState<any>(null)   // structured out/answer.json
-  const [anBusy, setAnBusy]         = useState(false)
-  const [anProgress, setAnProgress] = useState('')   // clean live narration from the agent (no tool calls)
+  const shownViewRef = useRef<View>('chat')
+  useQuestionNav(() => shownViewRef.current === 'chat')
+  // The TURN — the state of the question being answered in this chat, whichever agents take part. Driven by
+  // `agent:status` frames (any lane) and the tick heartbeat; shown in the chat's working card and the console lane.
+  const [turnStatus, setTurnStatus]     = useState('')
+  const [turnCategory, setTurnCategory] = useState('')
+  const [turnQuestion, setTurnQuestion] = useState('')
+  const [lastAnswer, setLastAnswer]     = useState<any>(null)   // structured out/answer.json
+  const [turnBusy, setTurnBusy]         = useState(false)
+  const [turnProgress, setTurnProgress] = useState('')   // clean live narration from the agent (no tool calls)
   const [narrationLog, setNarrationLog]     = useState<string[]>([])   // receptionist (narrator) beats for THIS question — ACCUMULATE (never overwrite)
   const narrationLogRef                 = useRef<string[]>([])     // latest beats, readable inside ws handlers (state is stale in closures)
   const narrationTimesRef               = useRef<number[]>([])     // arrival ms per beat — drives the per-step live timer (UI-only, nice-to-have)
@@ -196,17 +271,11 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // Which collapsed runs of program beats the reader has opened, keyed by the first beat in the run.
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set())
   const [nowMs, setNowMs]           = useState(0)              // ticks every 1s while busy so the CURRENT beat's timer counts up
-  // How to render the analyst's raw stream: 'pty' = a real terminal (claude-code) → xterm; 'events' =
-  // discrete agent events (codex/SDK) → a plain event log (a terminal emulator makes no sense for these).
-  const [anStreamKind, setAnStreamKind] = useState<'pty' | 'events'>('events')   // default = structured (claude via JSONL, codex); PTY is opt-in
-  const anStreamKindRef = useRef<'pty' | 'events'>('events')
-  const [anEvents, setAnEvents] = useState<AgentEvent[]>([])   // structured event log when kind === 'events' (codex)
-  const [anHasPty, setAnHasPty] = useState(false)       // claude-code: a raw PTY terminal is also available (show the toggle)
-  const [anTerminal, setAnTerminal] = useState(false)   // user opened the raw terminal → attach the PTY (lazily) and render xterm
-  const [coEvents, setCoEvents] = useState<AgentEvent[]>([])   // COMPOSER log (composer-log channel) — its own view, separate from the analyst
+  // The console lane's raw terminal: the user opened it → attach the PTY (lazily) and render xterm. How the lane's
+  // stream is drawn by default comes from its hello: streamKind 'pty' = a real terminal → xterm; 'events' =
+  // discrete agent events → the event log (a terminal emulator makes no sense for these).
+  const [terminalOpen, setTerminalOpen] = useState(false)
   const [askTick, setAskTick] = useState(0)                    // bumps on every new question → useLogNav jumps each log view to it
-  const anLogRef = useRef<HTMLDivElement>(null)
-  const coLogRef = useRef<HTMLDivElement>(null)
   const [role, setRole]         = useState<'user' | 'developer'>('developer')   // for now: everyone is developer (sees the agents)
   // Live as-you-type suggestions from the fast-router (optional; absent if not configured).
   const [liveSuggest, setLiveSuggest] = useState<{ items: any[]; intent?: any } | null>(null)
@@ -232,9 +301,9 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // The agent's RAW terminal stream is captured here for later use (debugging/telemetry) but is NEVER
   // rendered to the end user — the user-facing app shows only clean status, progress narration, and answers.
   const rawStreamRef = useRef('')
-  // Analyst agent panel — its OWN terminal (fixed 120-col claude PTY width).
-  const anTermRef   = useRef<HTMLDivElement>(null)
-  const anXtermRef  = useRef<Terminal | null>(null)
+  // The console lane's OWN terminal (fixed 120-col claude PTY width). The host div lives inside that lane's view.
+  const ptyTermRef   = useRef<HTMLDivElement>(null)
+  const ptyXtermRef  = useRef<Terminal | null>(null)
 
   // ── Chat sessions ──────────────────────────────────────────────────────────
   // Each chat is a session with id in the URL as /c/<id>. The engine stores nothing, so the chat LIST
@@ -262,6 +331,41 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [sessionId, setSessionId] = useState<string>(() => readSid() || loadSessions()[0]?.id || newId())
   const sidRef = useRef(sessionId); sidRef.current = sessionId
   const vtagCtr = useRef(0)
+
+  // ── The lane registry ──────────────────────────────────────────────────────
+  // Every agent the engine has announced (or this browser remembers), keyed by lane, in first-seen order, each
+  // with its recent log. Restored from localStorage so a reload shows the agents and their work before any hello.
+  const [lanes, setLanes] = useState<Lanes>(() => loadLanes(projectId, sessionId))
+  const laneNames = Object.keys(lanes)
+  // Each lane's scope, readable inside the ws handler the moment its hello lands (state lags a render, and a hello
+  // and the first frames of another chat's agent can arrive in one batch).
+  const laneScopeRef = useRef<Record<string, LaneMeta['scope']>>({})
+  for (const n of laneNames) laneScopeRef.current[n] = lanes[n].scope
+  const consoleLane = laneNames.find(n => isConsoleLane(lanes[n])) ?? ''
+  const consoleLaneRef = useRef(consoleLane); consoleLaneRef.current = consoleLane
+  // What is on screen: chat, or a lane we know. An address naming a lane we do not know (yet) shows chat.
+  const shownView: View = view === 'chat' || lanes[view] ? view : 'chat'
+  shownViewRef.current = shownView
+  // Update one lane, creating a minimal entry (label = lane) when a frame precedes its hello, so nothing is dropped.
+  const updateLane = (lane: string, fn: (l: LaneState) => LaneState) =>
+    setLanes(prev => ({ ...prev, [lane]: fn(prev[lane] ?? freshLane(lane)) }))
+  // LANE SCOPE. A session lane runs one per chat, so its frame belongs to exactly one chat: drop it unless it's
+  // this chat's, otherwise a second chat's agent streams into the view you're on. A project lane is a singleton
+  // and shows everything. A lane not yet announced is read as a project lane (nothing is dropped before a hello).
+  const belongsHere = (lane: string, sid: unknown) =>
+    !(laneScopeRef.current[lane] === 'session' && typeof sid === 'string' && sid && sid !== sidRef.current)
+  // Switching chats swaps every session lane's log for that chat's saved one (a project lane keeps its log).
+  useEffect(() => {
+    setLanes(prev => {
+      let changed = false; const next: Lanes = { ...prev }
+      for (const [name, l] of Object.entries(prev)) {
+        if (l.scope !== 'session' || l.logSid === sessionId) continue
+        next[name] = { ...l, events: loadLaneLog(laneLogKey(projectId, name, 'session', sessionId)), logSid: sessionId }; changed = true
+      }
+      return changed ? next : prev
+    })
+  }, [sessionId, projectId])
+  usePersistLanes(projectId, sessionId, lanes)
   // Make sure the CHAT view's URL carries the session id — but don't clobber /analyst or /semantic on load.
   useEffect(() => { if (!readSid() && readView() === 'chat') history.replaceState(null, '', `/c/${sessionId}${location.search}`) }, [])   // keep ?project=
   // Restore THIS chat's feed on mount (reload survives) and jump straight to the bottom.
@@ -319,25 +423,17 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     return () => { ro.disconnect(); term.dispose() }
   }, [])
 
-  // The analyst's claude-code terminal goes through the shared module — parameterized by `which` +
-  // `interactive`. Model-agnostic; codex/opencode would use their own view.
-  useClaudeTerminal(anTermRef, anXtermRef, { which: 'analyst', interactive: true, send, autoAttach: false })   // default = structured; PTY attaches only on the Terminal toggle
-
-  // The analyst + semantic logs each own their interactions SEPARATELY (open→bottom, follow-if-near-bottom,
-  // Shift+Arrow between questions) — see logNav.ts. contentKey = a number that grows as the log grows.
-  useLogNav(anLogRef,  view === 'analyst',  anEvents,  askTick)   // pass the ARRAY (new ref on every merge, incl. in-place streaming) — not .length; askTick = force-jump on a new question
-  useLogNav(coLogRef,  view === 'composer', coEvents,  askTick)
-
-  usePersistLog('sa-anlog-', sessionId, anEvents, setAnEvents)   // analyst + composer logs both survive a reload
-  usePersistLog('sa-colog-', sessionId, coEvents, setCoEvents)
+  // The console lane's terminal goes through the shared module — parameterized by `which` (the lane) +
+  // `interactive`. Bound to whichever lane announced itself as the console; none known → no terminal yet.
+  useClaudeTerminal(ptyTermRef, ptyXtermRef, { which: consoleLane, interactive: true, send, autoAttach: false })   // default = structured; PTY attaches only on the Terminal toggle
 
   // Per-step timer (UI-only, nice-to-have): tick every second while busy so the CURRENT analysis beat counts up.
   useEffect(() => {
-    if (!anBusy) return
+    if (!turnBusy) return
     setNowMs(Date.now())
     const iv = setInterval(() => setNowMs(Date.now()), 1000)
     return () => clearInterval(iv)
-  }, [anBusy])
+  }, [turnBusy])
 
   // WS connection — direct to code-engine (local) or via the worker hub (cloud).
   useEffect(() => {
@@ -350,7 +446,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
       ws.onopen = () => {
         setConnected(true)
         if (CLOUD) ws.send(JSON.stringify({ type: 'hello', token, role: 'runtime' }))
-        else { send({ t: 'analyst:sync' }); send({ t: 'sessions:list', projectId }); send({ t: 'session:load', sessionId: sidRef.current }); send({ t: 'suggestions:req', projectId }); send({ t: 'term:attach', which: 'analyst' }); attachLogs() }
+        else { send({ t: 'analyst:sync' }); send({ t: 'sessions:list', projectId }); send({ t: 'session:load', sessionId: sidRef.current }); send({ t: 'suggestions:req', projectId }); attachTerm(); attachLogs() }
       }
       // WHY IT CLOSED, said out loud. This dropped the code and reason and reconnected every 3s forever, so a
       // REJECTED connection — an expired token, or one with no access to this project — was indistinguishable
@@ -399,14 +495,14 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           // answering, the resync below re-sends analyst:status and the spinner comes back; we never keep a
           // stale one.
           if (busyRef.current) endTurn()
-          send({ t: 'analyst:sync' }); send({ t: 'sessions:list', projectId }); send({ t: 'session:load', sessionId: sidRef.current }); send({ t: 'suggestions:req', projectId }); send({ t: 'term:attach', which: 'analyst' })
+          send({ t: 'analyst:sync' }); send({ t: 'sessions:list', projectId }); send({ t: 'session:load', sessionId: sidRef.current }); send({ t: 'suggestions:req', projectId }); attachTerm()
           attachLogs()   // this console WATCHES the agents → subscribe to all agent-log channels for the whole session, so you never miss a question's log by attaching late
           send({ t: 'sync:req' })   // pull recent sessions + any answers we missed while offline, straight from the always-on DO (no engine wake)
           return
         }
         // Machine is being woken from suspend — that takes ~60s (wake + boot), so give the watchdog a long
         // window here so it doesn't false-fire before the engine even comes up.
-        if (msg.t === 'machine:waking') { setStatus('Starting the engine…'); setAnStatus('Starting the engine…'); if (busyRef.current) armWatchdog(120000); return }
+        if (msg.t === 'machine:waking') { setStatus('Starting the engine…'); setTurnStatus('Starting the engine…'); if (busyRef.current) armWatchdog(120000); return }
         if (msg.t === 'sessions:res') { if (msg.sessions?.length) setSessions(msg.sessions); return }   // engine stores none; keep our localStorage list
         // Durable recovery from the always-on DO: sessions we may not have locally + answers that landed while
         // we were offline (internet blip / machine asleep / app closed / another device). Merge (dedup by qid),
@@ -445,44 +541,52 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           // ── GENERIC AGENT-LANE PROTOCOL ─────────────────────────────────────────────────────────────────
           // ONE consumer for EVERY lane (composer / analyst / any future agent). `lane` is
           // the routing key. The engine owns the vocabulary (agent:hello|event|events|status); the UI hardcodes
-          // no agent name here — a new lane needs zero new handlers. (The raw-terminal byte stream keeps its own
-          // `analyst:chunk` type below; the answer/narration are a different, user-facing protocol.)
+          // no agent name here — a new lane needs zero new handlers. (The console lane's raw-terminal byte stream
+          // keeps its own `<lane>:chunk` type below; the answer/narration are a different, user-facing protocol.)
           const verb = msg.t.slice(6)
-          // LANE SCOPE. The composer is SESSION-scoped — the engine runs one per chat (composersBySession) — while
-          // the analyst is a PROJECT-scoped singleton. So a composer frame belongs to exactly one chat:
-          // drop it unless it's this chat's, otherwise a second chat's composer streams into the view you're on.
-          if (msg.lane === 'composer' && msg.sid && msg.sid !== sidRef.current) return
-          const setEvents = msg.lane === 'composer' ? setCoEvents : setAnEvents
+          const lane = typeof msg.lane === 'string' && msg.lane ? msg.lane : ''
+          if (!lane) return
+          if (verb === 'hello') {
+            // A lane announces what it IS: label, hue, scope, harness/provider/model, how its stream is drawn
+            // (streamKind/pty), whether it takes input (interactive) and which controls it offers. Merged, never
+            // replacing what is known; the events on screen stay. A session lane's log belongs to this chat.
+            if (msg.scope === 'session' || msg.scope === 'project') laneScopeRef.current[lane] = msg.scope
+            setLanes(prev => { const l = mergeHello(prev[lane], lane, msg); return { ...prev, [lane]: { ...l, logSid: l.scope === 'session' ? sidRef.current : '' } } })
+            return
+          }
+          if (!belongsHere(lane, msg.sid)) return
           if (verb === 'event') {
-            setEvents(evs => mergeEvent(evs, { ...msg.ev, agent: msg.lane }))   // merge by id → a streaming block updates in place
+            updateLane(lane, l => ({ ...l, events: mergeEvent(l.events, { ...msg.ev, agent: lane }) }))   // merge by id → a streaming block updates in place
           } else if (verb === 'events') {
             // Replay repopulates an EMPTY log after a reload — it must never overwrite a log we already have.
             // The replay carries the harness transcript, which has no question boundaries, so replacing a live
             // log would delete the UI-synthesized [data-qlog] dividers (and with them the Shift+Arrow anchors).
-            // The composer never gets a replay, which is why only the analyst lost its dividers.
-            setEvents(evs => evs.length ? evs : (msg.events ?? []))
-          } else if (verb === 'hello') {
-            // A lane announces its render capabilities. Only the analyst has a raw PTY terminal today → wire the
-            // Terminal toggle. (label/hue/interactive/controls ride along for a later fully-declarative sidebar.)
-            if (msg.lane === 'analyst') { const k = msg.streamKind === 'pty' ? 'pty' : 'events'; anStreamKindRef.current = k; setAnStreamKind(k); setAnHasPty(!!msg.pty) }
+            updateLane(lane, l => l.events.length ? l : { ...l, events: Array.isArray(msg.events) ? msg.events : [] })
+          } else if (verb === 'chunk') {
+            // Raw output for a lane without structured events: kept as one growing message so nothing is lost.
+            const text = typeof msg.text === 'string' ? msg.text : ''
+            updateLane(lane, l => { const id = `chunk:${lane}`; const cur = l.events.find(e => e.id === id); return { ...l, events: mergeEvent(l.events, { kind: 'message', id, agent: lane, done: false, text: ((msg.replace ? '' : cur?.text ?? '') + text).slice(-400000) }) } })
           } else if (verb === 'status') {
-            if (msg.state === 'done') {
-              setAnBusy(false); setAnStatus('Done ✓'); setAnProgress(''); setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []; narrationMetaRef.current = []; setExpandedGroups(new Set()); setBusy(false); busyRef.current = false; clearWatchdog()
+            const done = msg.state === 'done'
+            updateLane(lane, l => ({ ...l, busy: done ? false : msg.text ? true : l.busy, status: done ? 'Done ✓' : msg.text ? msg.text : msg.category ? `Answering — ${msg.category}…` : l.status }))
+            if (done) {
+              setTurnBusy(false); setTurnStatus('Done ✓'); setTurnProgress(''); setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []; narrationMetaRef.current = []; setExpandedGroups(new Set()); setBusy(false); busyRef.current = false; clearWatchdog()
             } else {
               // Live turn state — the spinner is driven by the tick heartbeat (armWatchdog), never a flag we must
               // remember to clear, so a replayed/stale "answering" self-clears if no ticks follow.
-              if (msg.question) setAnQuestion(msg.question)
-              if (msg.category) setAnCategory(msg.category)
-              if (msg.progress !== undefined) setAnProgress(msg.progress)   // clean prose narration → live progress line
-              if (msg.text) { setAnBusy(true); setBusy(true); busyRef.current = true; setAnStatus(msg.text); armWatchdog() }
-              else if (msg.category) setAnStatus(`Answering — ${msg.category}…`)
+              if (msg.question) setTurnQuestion(msg.question)
+              if (msg.category) setTurnCategory(msg.category)
+              if (msg.progress !== undefined) setTurnProgress(msg.progress)   // clean prose narration → live progress line
+              if (msg.text) { setTurnBusy(true); setBusy(true); busyRef.current = true; setTurnStatus(msg.text); armWatchdog() }
+              else if (msg.category) setTurnStatus(`Answering — ${msg.category}…`)
             }
           }
-        } else if (msg.t === 'analyst:chunk') {
-          // The agent's raw LIVE terminal (own byte stream, shared with the admin console — NOT a lane frame).
-          // `replace` = a full repaint: the buffer replay the engine sends on term:attach, or a fresh session.
-          if (msg.replace) anXtermRef.current?.clear()
-          anXtermRef.current?.write(msg.text ?? '')
+        } else if (consoleLaneRef.current && msg.t === `${consoleLaneRef.current}:chunk`) {
+          // The console lane's raw LIVE terminal (its own byte stream `<lane>:chunk`, shared with the admin console —
+          // NOT a lane frame). `replace` = a full repaint: the buffer replay the engine sends on term:attach, or a
+          // fresh session.
+          if (msg.replace) ptyXtermRef.current?.clear()
+          ptyXtermRef.current?.write(msg.text ?? '')
           rawStreamRef.current = msg.replace ? (msg.text ?? '') : (rawStreamRef.current + (msg.text ?? '')).slice(-400000)
         } else if (msg.t === 'followups') {
           // Suggested next questions — reveal as a card AFTER a delay, so the user reads the answer first.
@@ -498,13 +602,14 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           // Sent twice on purpose — once to this socket, once to the owner channel — so one of them survives a
           // reconnect. Keep the first arrival and ignore the echo.
           if (msg.text && !narrationLogRef.current.includes(msg.text)) { narrationLogRef.current = [...narrationLogRef.current, msg.text]; narrationTimesRef.current = [...narrationTimesRef.current, Date.now()]; narrationMetaRef.current = [...narrationMetaRef.current, { kind: 'narrator' }]; setNarrationLog(narrationLogRef.current); setNowMs(Date.now())   // append a beat + stamp its arrival (chat-view analysis card)
-            setAnEvents(evs => [...evs, { id: 'narr-' + narrationTimesRef.current.length, kind: 'narration', text: msg.text, agent: 'narrator', done: true }]) }   // ALSO drop it into the analyst-tab stream so it interleaves by time with the agent's events
+            const ev: AgentEvent = { id: 'narr-' + narrationTimesRef.current.length, kind: 'narration', text: msg.text, agent: 'narrator', done: true }
+            if (consoleLaneRef.current) updateLane(consoleLaneRef.current, l => ({ ...l, events: [...l.events, ev] })) }   // ALSO drop it into the console lane's stream so it interleaves by time with the agent's events
         } else if (msg.t === 'analyst:answer') {
           // NEVER surface the agent's raw terminal (lastLines) as an answer — that leaks internal logs.
           // The agent is expected to always produce an answer (incl. a plain-text reply for conversational
           // input); this neutral fallback only guards a true failure and is NOT a restriction on what it answers.
           const ans = msg.answer ?? { status: 'no_answer', answer: 'Something went wrong on that one — please try again.' }
-          setAnAnswer(ans)                                                     // Analyst tab (always reflects the latest)
+          setLastAnswer(ans)                                                   // always reflects the latest
           // A REPLAY (reconnect) is already in the saved feed — don't duplicate it. A fresh answer gets
           // appended to its OWN chat: the visible feed if it's current, else that chat's saved feed.
           if (!msg.replay) {
@@ -576,6 +681,9 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // reconnect. Beats used to travel only that second way, which is why a healthy turn could show an empty
   // analysis card for ten minutes.
 const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((channel) => send({ t: 'log:attach', channel }))
+  // The console lane's terminal stream, when this browser already knows which lane that is (restored from storage);
+  // otherwise it is attached when the terminal is first opened.
+  const attachTerm = () => { if (consoleLaneRef.current) send({ t: 'term:attach', which: consoleLaneRef.current }) }
 
   // Recover a full Q&A PAIR from the DO into the right session's feed. A qid is a pair, so we restore the
   // QUESTION card too — its id is the qid (matching how ask() writes it), so it dedups whether or not the
@@ -615,14 +723,14 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
   function newChat() {
     // New CHAT (fresh answer surface) — but NOT a new agent session: the analyst thread persists, so the
     // running session log stays (it clears only on "New session").
-    const id = newId(); sidRef.current = id; setSessionId(id); setFeed([]); setAnAnswer(null); setAnBusy(false)
+    const id = newId(); sidRef.current = id; setSessionId(id); setFeed([]); setLastAnswer(null); setTurnBusy(false)
     history.pushState(null, '', `/c/${id}${location.search}`)   // keep ?project=
     setView('chat')   // selecting/creating a chat returns to the chat view (e.g. from the analyst view)
     inputRef.current?.focus()
   }
   function openSession(id: string) {
     if (id === sidRef.current) return
-    sidRef.current = id; setSessionId(id); setFeed(loadFeed(id)); setAnAnswer(null)   // restore that chat's saved feed
+    sidRef.current = id; setSessionId(id); setFeed(loadFeed(id)); setLastAnswer(null)   // restore that chat's saved feed
     history.pushState(null, '', `/c/${id}${location.search}`)   // keep ?project=
     setView('chat')   // selecting a chat returns to the chat view
     scroll(true)   // jump straight to the bottom (instant) instead of landing at the top
@@ -664,7 +772,7 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
   function endTurn(note?: string) {
     clearWatchdog()
     busyRef.current = false; setBusy(false); setStatus('')
-    setAnBusy(false); setAnStatus(''); setAnProgress(''); setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []; narrationMetaRef.current = []; setExpandedGroups(new Set())
+    setTurnBusy(false); setTurnStatus(''); setTurnProgress(''); setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []; narrationMetaRef.current = []; setExpandedGroups(new Set())
     if (note) { setFeed(f => [...f, { id: crypto.randomUUID(), type: 'error', text: note }]); scroll() }
   }
   // Liveness: the engine ticks every ~8s while a turn runs; every incoming message re-arms this. If nothing
@@ -755,12 +863,13 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
     // card. The Analyst tab keeps the raw terminal for when you WANT to look under the hood.
     setFeed(f => [...f, { id: qid, type: 'user-msg', text }])
     scroll()   // pin the new (now last) question to the top of the viewport
-    setAnQuestion(text); setAnAnswer(null); setAnCategory(''); setAnStatus('Classifying…'); setAnBusy(true); setAnProgress(''); setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []; narrationMetaRef.current = []; setExpandedGroups(new Set())
-    anXtermRef.current?.clear()   // claude PTY: fresh TUI per question (harmless when the analyst is codex)
-    // QUESTION-boundary divider (+ Shift+Arrow anchor) — shown optimistically in BOTH agent-log views. Keyed by
-    // qid so the engine's authoritative boundary event (same id) MERGES with it rather than adding a second one.
+    setTurnQuestion(text); setLastAnswer(null); setTurnCategory(''); setTurnStatus('Classifying…'); setTurnBusy(true); setTurnProgress(''); setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []; narrationMetaRef.current = []; setExpandedGroups(new Set())
+    ptyXtermRef.current?.clear()   // claude PTY: fresh TUI per question (harmless when the console lane is codex)
+    // QUESTION-boundary divider (+ Shift+Arrow anchor) — shown optimistically in every lane that takes part in this
+    // chat's turn (partOfTurn). Keyed by qid so the engine's authoritative boundary event (same id) MERGES with it
+    // rather than adding a second one.
     const qMarker: AgentEvent = { kind: 'user', id: qid, text, done: true }
-    setAnEvents(l => [...l, qMarker]); setCoEvents(l => [...l, qMarker])
+    setLanes(prev => { const next: Lanes = { ...prev }; for (const [n, l] of Object.entries(prev)) if (partOfTurn(l)) next[n] = { ...l, events: [...l.events, qMarker] }; return next })
     setAskTick(t => t + 1)   // force each log view to jump to this newest question, even if it was scrolled up (see useLogNav jumpKey)
     setStatus('')
     setBusy(true); busyRef.current = true; armWatchdog()
@@ -786,14 +895,16 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
     scroll()
   }, [busy])
 
-  // Standard ICA session controls for the analyst: a completely fresh session, or compact (shrink context).
-  const sessionCtl = useCallback((action: 'new' | 'compact') => {
+  // Standard ICA session controls for a lane that offers them (hello `controls`): a completely fresh session, or
+  // compact (shrink context).
+  const sessionCtl = useCallback((lane: string, action: 'new' | 'compact') => {
     if (wsRef.current?.readyState !== 1) return
-    // The analyst's running session log resets ONLY here: a New session wipes it (a brand-new thread);
+    // The lane's running session log resets ONLY here: a New session wipes it (a brand-new thread);
     // a compaction is marked with a divider (the thread continues with summarized context below it).
-    setAnEvents(l => action === 'new' ? [] : [...l, { kind: 'turn' }])   // new: wipe; compact: a divider rule
-    send({ t: action === 'new' ? 'session:new' : 'session:compact', role: 'analyst', projectId })
-    setAnStatus(action === 'new' ? 'New session' : 'Compacting…')
+    const status = action === 'new' ? 'New session' : 'Compacting…'
+    updateLane(lane, l => ({ ...l, status, events: action === 'new' ? [] : [...l.events, { kind: 'turn' }] }))   // new: wipe; compact: a divider rule
+    send({ t: action === 'new' ? 'session:new' : 'session:compact', role: lane, projectId })
+    setTurnStatus(status)
   }, [projectId])
 
   // ── Composer (ChatGPT-style: auto-growing textarea, attach, send) ──
@@ -868,46 +979,10 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
     </div>
   ) : null
 
-  // Buildable-gap queue — questions the analyst couldn't answer because the model lacked a concept,
-  // now being (or already) modeled. Shown on BOTH the Analyst and Semantic-model views.
-
-  // ONE general agent view — composer and analyst are the SAME surface (header + a
-  // scrollable question-segmented event log with identical accordion + Shift-Arrow nav). Only the per-view
-  // extras differ (analyst adds a terminal toggle + input bar). Everything shared
-  // lives here so the two never drift; the differences ride in as `headerExtras` / `panels` / `footer` / `termRef`.
-  const agentLane = (cfg: {
-    key: Exclude<View, 'chat'>
-    label: string
-    desc: string
-    events: AgentEvent[]
-    logRef: React.RefObject<HTMLDivElement | null>
-    question?: string            // header context line; defaults to the live question
-    busy?: boolean
-    claude?: boolean
-    headerExtras?: React.ReactNode
-    panels?: React.ReactNode
-    termRef?: React.RefObject<HTMLDivElement | null>
-    showTerm?: boolean
-    footer?: React.ReactNode
-  }) => (
-    <div style={{ display: view === cfg.key ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-      <div style={s.semHeader}>
-        <button onClick={() => navigate('chat')} style={s.backBtn} title="Back to your chat">← Chat</button>
-        <span style={{ color: '#bcd0be', fontSize: 13, fontWeight: 600 }}>◇ {cfg.label}</span>
-        <span style={{ color: '#8a8276', fontSize: 13, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {(cfg.question ?? anQuestion) || cfg.desc}
-        </span>
-        {cfg.busy && <Spinner />}
-        {cfg.headerExtras}
-      </div>
-      {cfg.panels}
-      <div ref={cfg.logRef} style={{ flex: 1, overflow: 'auto', background: 'transparent', padding: 12, paddingBottom: 110 }}>
-        {cfg.termRef && <div ref={cfg.termRef} onMouseDown={() => anXtermRef.current?.focus()} style={{ display: cfg.showTerm ? 'block' : 'none' }} />}
-        {!cfg.showTerm && <CodexEventLog events={cfg.events} busy={cfg.busy} claude={cfg.claude} />}
-      </div>
-      {cfg.footer}
-    </div>
-  )
+  // The rail colour of each lane's events in every log, from the hellos.
+  const hues: Record<string, string> = {}
+  for (const n of laneNames) if (lanes[n].hue) hues[n] = lanes[n].hue!
+  const sessionTitle = sessions.find(se => se.id === sessionId)?.title || 'New chat'
 
   return (
     <div style={s.shell}>
@@ -918,20 +993,21 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
           {proj?.name || 'Superatom'}
         </div>
         <div style={s.navSection}>AGENT</div>
-        <div onClick={() => navigate('composer')}
-          style={{ ...s.sessionItem, ...(view === 'composer' ? s.sessionItemActive : {}) }}>
-          ◇ Composer
-        </div>
-        <div onClick={() => navigate('analyst')}
-          style={{ ...s.sessionItem, ...(view === 'analyst' ? s.sessionItemActive : {}) }}>
-          ◇ Analyst
-        </div>
+        {/* One entry per lane the engine has announced, in the order first seen. */}
+        {laneNames.map(n => (
+          <div key={n} onClick={() => navigate(n)} title={lanes[n].desc || lanes[n].label}
+            style={{ ...s.sessionItem, display: 'flex', alignItems: 'center', gap: 7, ...(shownView === n ? s.sessionItemActive : {}) }}>
+            <span style={{ color: lanes[n].hue || '#bcd0be' }}>◇</span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lanes[n].label}</span>
+          </div>
+        ))}
+        {laneNames.length === 0 && <div style={s.sessionEmpty}>No agents yet</div>}
         <button style={s.newChat} onClick={() => { navigate('chat'); newChat() }}>+ New chat</button>
         <div style={s.sessionList}>
           {sessions.map(se => (
             <div key={se.id} onClick={() => { navigate('chat'); openSession(se.id) }} title={se.title || 'New chat'}
               style={{ ...s.sessionItem, display: 'flex', alignItems: 'center', gap: 6, ...(view === 'chat' && se.id === sessionId ? s.sessionItemActive : {}) }}>
-              {anBusy && se.id === sessionId && <span title="running" style={{ flexShrink: 0 }}><Spinner /></span>}
+              {turnBusy && se.id === sessionId && <span title="running" style={{ flexShrink: 0 }}><Spinner /></span>}
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{se.title || 'New chat'}</span>
             </div>
           ))}
@@ -956,45 +1032,35 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
       </div>
       </div>
 
-      {/* Composer — reuse-or-compose (escalates to the analyst). Per-session; always mounted so its log persists. */}
-      {agentLane({
-        key: 'composer', label: 'Composer', events: coEvents, logRef: coLogRef, busy,
-        desc: 'The composer reuses a program or composes concepts — escalating to the analyst when needed.',
-        // SESSION-scoped lane: there's one composer per chat, so name the chat this log belongs to — without it
-        // the view silently changes meaning when you switch chats.
-        headerExtras: <span style={s.catChip} title="This composer belongs to this chat">{sessions.find(se => se.id === sessionId)?.title || 'New chat'}</span>,
-      })}
-
-      {/* Analyst — the from-scratch agent. Adds the category chip, live status, a raw-terminal toggle, session
-          controls, the buildable-gaps panel, the enriching banner, its PTY mount, and its own input bar. */}
-      {agentLane({
-        key: 'analyst', label: 'Analyst', events: anEvents, logRef: anLogRef, busy: anBusy, claude: anHasPty,
-        desc: 'Ask a question below — it classifies, then answers from the semantic model.',
-        termRef: anTermRef, showTerm: anTerminal || anStreamKind === 'pty',
-        headerExtras: (
-          <>
-            {anCategory && <span style={s.catChip}>{anCategory.replace('_', ' ')}</span>}
-            <span style={{ color: '#8a8276', fontSize: 12 }}>{anStatus}</span>
-            {anHasPty && (
-              <button
-                onClick={() => {
-                  const next = !anTerminal; setAnTerminal(next)
-                  if (next) { send({ t: 'ui:resize', which: 'analyst', cols: COLS, rows: ROWS }); send({ t: 'term:attach', which: 'analyst' }) }
-                  else send({ t: 'term:detach', which: 'analyst' })
-                }}
-                style={s.backBtn}
-                title={anTerminal ? 'Back to the structured view' : 'Open the raw claude-code terminal'}>
-                {anTerminal ? '≣ Structured' : '⌨ Terminal'}
-              </button>
-            )}
-            <button onClick={() => sessionCtl('compact')} style={s.backBtn} title="Compact the session's context">⇊ Compact</button>
-            <button onClick={() => sessionCtl('new')} style={s.backBtn} title="Start a completely fresh session">↻ New session</button>
-          </>
-        ),
+      {/* One view per lane — always mounted (hidden when not shown) so each log keeps its scroll and nav state. Each
+          lane is drawn from its hello fields alone: the console lane (interactive + terminal) also carries the
+          category chip, the terminal toggle and the PTY mount; a session lane names the chat it belongs to. */}
+      {laneNames.map(n => {
+        const l = lanes[n]
+        const console_ = n === consoleLane
+        return (
+          <LaneView key={n} name={n} lane={l} active={shownView === n} askTick={askTick} hues={hues}
+            busy={l.busy || (partOfTurn(l) && turnBusy)}
+            question={partOfTurn(l) ? turnQuestion : ''}
+            status={console_ ? (turnStatus || l.status) : l.status}
+            category={console_ ? turnCategory : ''}
+            sessionTitle={l.scope === 'session' ? sessionTitle : ''}
+            navigate={navigate}
+            terminal={console_ ? {
+              hostRef: ptyTermRef, xtermRef: ptyXtermRef,
+              open: terminalOpen || l.streamKind === 'pty',
+              toggle: () => {
+                const next = !terminalOpen; setTerminalOpen(next)
+                if (next) { send({ t: 'ui:resize', which: n, cols: COLS, rows: ROWS }); send({ t: 'term:attach', which: n }) }
+                else send({ t: 'term:detach', which: n })
+              },
+            } : undefined}
+            onCtl={(action) => sessionCtl(n, action)} />
+        )
       })}
 
       {/* Chat/answer view */}
-      {view === 'chat' && (feed.length === 0 && !busy ? (
+      {shownView === 'chat' && (feed.length === 0 && !busy ? (
         <div style={s.centerStage}>
           <div style={{ width: '100%', maxWidth: 720 }}>
             {composer()}
@@ -1011,15 +1077,15 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
               return feed.map(item => (item.type === 'followups' && !keepFu.has(item.id)) ? null : <FeedCard key={item.id} item={item} onPick={fillInput} />)
             })()}
             {/* Working indicator — no terminal; a details link goes to the Analyst tab. */}
-            {anBusy && (
+            {turnBusy && (
               <div className="sa-live">
                 <div className="sa-live-h">
                   {/* What is actually running, not a fixed word. The engine says so as soon as it knows — for a
                       verb turn that is immediately, for a question it is the agent's own judgement, arriving a
                       little later. Until then "Working" is honest, where "Analysis" was a guess that was often
                       simply wrong. */}
-                  <Spinner /><span>{anCategory ? anCategory.replace(/_/g, ' ') : 'Working'}</span>
-                  <span className="lnk" onClick={() => navigate('analyst')}>details ↗</span>
+                  <Spinner /><span>{turnCategory ? turnCategory.replace(/_/g, ' ') : 'Working'}</span>
+                  {consoleLane && <span className="lnk" onClick={() => navigate(consoleLane)}>details ↗</span>}
                 </div>
                 {narrationLog.length > 0 && (
                   <div className="sa-beats">
@@ -1041,13 +1107,13 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
                     ))}
                   </div>
                 )}
-                {narrationLog.length === 0 && <div style={{ marginTop: 8, fontSize: 13.5, color: '#8a8276' }}>{anProgress || anStatus || 'Working…'}</div>}
+                {narrationLog.length === 0 && <div style={{ marginTop: 8, fontSize: 13.5, color: '#8a8276' }}>{turnProgress || turnStatus || 'Working…'}</div>}
               </div>
             )}
             {/* STOP — BELOW the card, not inside it. The card is the work; this is an action taken against the
                 work, and putting it in there made it read like one more line of progress. Nothing is saved for
                 a stopped question. */}
-            {anBusy && (
+            {turnBusy && (
               <div className="sa-stop-row">
                 <button className="sa-stop" onClick={stopTurn} title="Stop this question">
                   <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden><rect width="10" height="10" rx="1.5" fill="currentColor" /></svg>
@@ -1068,6 +1134,61 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
         </>
       ))}
     </div>
+    </div>
+  )
+}
+
+// ONE general agent view — every lane is the SAME surface (header + a scrollable question-segmented event log with
+// identical accordion + Shift-Arrow nav), drawn from the lane's hello fields. The extras hang off those fields:
+//   terminal   — given only for the console lane (isConsoleLane): the PTY mount + the toggle (shown when `pty`, and
+//                when the lane lists 'terminal' among its controls if it lists any)
+//   controls   — 'compact' / 'new' buttons appear only when the hello lists them
+//   category   — the turn's category chip (the console lane)
+//   sessionTitle — a session-scoped lane names the chat its log belongs to, or the view silently changes meaning
+//                when you switch chats
+// A future agent-specific behaviour hooks in here by a hello field (streamKind, pty, interactive, controls, scope),
+// never by the lane's name.
+function LaneView({ name, lane, active, askTick, hues, busy, question, status, category, sessionTitle, navigate, terminal, onCtl }: {
+  name: string; lane: LaneState; active: boolean; askTick: number; hues: Record<string, string>
+  busy: boolean; question: string; status: string; category: string; sessionTitle: string
+  navigate: (v: View) => void
+  terminal?: { hostRef: React.RefObject<HTMLDivElement | null>; xtermRef: React.RefObject<Terminal | null>; open: boolean; toggle: () => void }
+  onCtl: (action: 'new' | 'compact') => void
+}) {
+  const logRef = useRef<HTMLDivElement>(null)
+  // The log owns its interactions (open→bottom, follow-if-near-bottom, Shift+Arrow between questions) — see
+  // logNav.ts. Pass the ARRAY (new ref on every merge, incl. in-place streaming), not .length; askTick = force-jump
+  // on a new question.
+  useLogNav(logRef, active, lane.events, askTick)
+  const profile = [lane.harness, lane.provider, lane.model].filter(Boolean).join(' · ')
+  const showToggle = lane.pty && (!lane.controls.length || lane.controls.includes('terminal'))
+  const showTerm = !!terminal?.open
+  return (
+    <div style={{ display: active ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+      <div style={s.semHeader}>
+        <button onClick={() => navigate('chat')} style={s.backBtn} title="Back to your chat">← Chat</button>
+        <span style={{ color: lane.hue || '#bcd0be', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' }} title={name}>◇ {lane.label}</span>
+        {profile && <span style={{ color: '#a49e93', fontSize: 11, whiteSpace: 'nowrap' }} title="harness · provider · model">{profile}</span>}
+        <span style={{ color: '#8a8276', fontSize: 13, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {question || lane.desc || ''}
+        </span>
+        {busy && <Spinner />}
+        {sessionTitle && <span style={s.catChip} title="This agent belongs to this chat">{sessionTitle}</span>}
+        {category && <span style={s.catChip}>{category.replace('_', ' ')}</span>}
+        {status && <span style={{ color: '#8a8276', fontSize: 12 }}>{status}</span>}
+        {terminal && showToggle && (
+          <button onClick={terminal.toggle} style={s.backBtn}
+            title={terminal.open ? 'Back to the structured view' : 'Open the raw terminal'}>
+            {terminal.open ? '≣ Structured' : '⌨ Terminal'}
+          </button>
+        )}
+        {lane.controls.includes('compact') && <button onClick={() => onCtl('compact')} style={s.backBtn} title="Compact the session's context">⇊ Compact</button>}
+        {lane.controls.includes('new') && <button onClick={() => onCtl('new')} style={s.backBtn} title="Start a completely fresh session">↻ New session</button>}
+      </div>
+      <div ref={logRef} style={{ flex: 1, overflow: 'auto', background: 'transparent', padding: 12, paddingBottom: 110 }}>
+        {terminal && <div ref={terminal.hostRef} onMouseDown={() => terminal.xtermRef.current?.focus()} style={{ display: showTerm ? 'block' : 'none' }} />}
+        {!showTerm && <CodexEventLog events={lane.events} busy={busy} claude={lane.pty} hues={hues} />}
+      </div>
     </div>
   )
 }

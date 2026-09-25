@@ -248,6 +248,12 @@ export default {
       // `setup` overwrites the project's API key. It's an INTERNAL provisioning primitive — only ever
       // called by handleCreateProject via a direct DO stub — so it must not be reachable publicly.
       if (subPath === 'setup') return new Response('not found', { status: 404 })
+      // `debug` returns the project's API key. It was reachable by any member as a plain GET; nothing outside the
+      // engine's own box has a use for it, so it is not served here at all.
+      if (subPath === 'debug') return new Response('not found', { status: 404 })
+      // The agent profile is the platform's to set: only a superadmin reads or writes it. (A later block meant to
+      // enforce this was never reached, because this branch forwards every sub-path first.)
+      if (subPath === 'profile' && acc.level !== 'superadmin') return new Response('forbidden', { status: 403 })
       // `org-admins` is the ORG writing into the project (who administers it). It is reached DO-to-DO only —
       // exposing it here would let a project admin mirror themselves in as one.
       if (subPath === 'org-admins') return new Response('not found', { status: 404 })
@@ -577,7 +583,10 @@ export default {
     }
 
     // ── Org routes (admin WS + REST API) ──────────────────────────────────────
-    if (path.startsWith('/api/') || (isWs && path === '/ws')) {
+    // The organisation's own WebSocket is not served: no surface opens it, and the object behind it took the
+    // caller's identity from query parameters. Every live socket goes through /_ws/<project>, which authenticates.
+    if (isWs && path === '/ws') return new Response('not found', { status: 404 })
+    if (path.startsWith('/api/')) {
       const orgId = request.headers.get('x-org-id') ?? 'default'
       // x-org-id comes from the CLIENT, so it is a request, not a fact: without this check anyone could name any
       // org and read or mutate it. Membership decides. Changing an org (users, assignments, projects) is for its

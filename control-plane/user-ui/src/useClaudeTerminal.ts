@@ -20,6 +20,7 @@ export function useClaudeTerminal(
 ) {
   const { which, interactive, send, autoAttach = true } = opts
   useEffect(() => {
+    if (!which) return   // no lane has announced a terminal yet — nothing to bind
     const term = new Terminal({
       // convertEol OFF — the PTY sends its own \r\n + control; converting them garbles the full-screen TUI.
       cols: COLS, rows: ROWS, cursorBlink: false, fontSize: 11, convertEol: false,

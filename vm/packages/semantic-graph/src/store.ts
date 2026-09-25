@@ -200,6 +200,12 @@ export class Store {
     return output
   }
 
+  /** The calls a session made since a moment, oldest first — what an answer written in prose stands on. */
+  callsSince(sessionId: string, at: number): Array<{ id: string; canonical: string | null; ms: number; at: number; refused: boolean; error: string | null }> {
+    return this.db.prepare('SELECT id, canonical, ms, at, refusal, error FROM call WHERE session_id = ? AND at >= ? ORDER BY at ASC').all(sessionId, at)
+      .map((r: any) => ({ id: r.id, canonical: r.canonical, ms: Number(r.ms), at: Number(r.at), refused: r.refusal != null, error: r.error ?? null }))
+  }
+
   getCall(id: string): CallRecord | null {
     const r: any = this.db.prepare('SELECT * FROM call WHERE id = ?').get(id)
     return r ? this.row(r) : null

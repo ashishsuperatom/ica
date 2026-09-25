@@ -6,7 +6,7 @@ import { renderInlineMd } from './format'
 // A UNIT boundary in the stream is a generic concept: `user` is one KIND of it (a question), `segment` is the
 // general one (a modeller consolidation batch, a concept, any agent's unit of work). Both open a navigable,
 // collapsible unit — that's what the accordion + Shift-Arrow nav operate on, NOT "questions" specifically.
-export type AgentEvent = { kind: 'command' | 'message' | 'reasoning' | 'file' | 'turn' | 'user' | 'segment' | 'narration'; id?: string; text?: string; command?: string; output?: string; status?: string; done?: boolean; at?: number; ms?: number; agent?: 'composer' | 'analyst' | 'narrator' }
+export type AgentEvent = { kind: 'command' | 'message' | 'reasoning' | 'file' | 'turn' | 'user' | 'segment' | 'narration'; id?: string; text?: string; command?: string; output?: string; status?: string; done?: boolean; at?: number; ms?: number; agent?: string }   // agent = the lane it came from ('narrator' for a beat)
 
 // Everything upstream measures in milliseconds; nobody reads milliseconds.
 export function fmtDur(ms: number): string {
@@ -165,7 +165,8 @@ function WaitingLine({ since, last }: { since: number; last?: string }) {
   )
 }
 
-export function CodexEventLog({ events, busy, claude }: { events: AgentEvent[]; busy?: boolean; claude?: boolean }) {
+// `hues` = rail colour per lane, from each lane's hello (the narrator's grey is the one fixed colour).
+export function CodexEventLog({ events, busy, claude, hues }: { events: AgentEvent[]; busy?: boolean; claude?: boolean; hues?: Record<string, string> }) {
   // ACCORDION: click a question to collapse everything under it (until the next question), so you can scan across
   // questions. State is the set of collapsed question ids.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
@@ -183,12 +184,12 @@ export function CodexEventLog({ events, busy, claude }: { events: AgentEvent[]; 
   if (sinceRef.current.n !== visibleCount) sinceRef.current = { n: visibleCount, at: Date.now() }
   if (!events.length && !waiting) return null
 
-  // A coloured left rail per agent — composer (blue), analyst (amber), narrator (grey). Walk the events tracking
-  // which QUESTION each belongs to; a collapsed question hides its steps.
+  // A coloured left rail per agent — each lane's hue, narrator grey. Walk the events tracking which QUESTION each
+  // belongs to; a collapsed question hides its steps.
   let curQ = ''                          // id of the question the following events belong to
   const rows: React.ReactElement[] = []
   events.forEach((e, i) => {
-    const c = e.agent === 'composer' ? '#4a90d9' : e.agent === 'analyst' ? '#c08a2b' : e.agent === 'narrator' ? '#a99f8c' : ''
+    const c = e.agent === 'narrator' ? '#a99f8c' : (e.agent && hues?.[e.agent]) || ''
     // A UNIT boundary (a question OR a generic segment) → anchor it for Shift+Arrow nav (data-qlog, distinct from
     // the chat feed's data-role="q") AND make it the accordion header (click to collapse/expand its steps).
     if (isUnitBoundary(e)) {
