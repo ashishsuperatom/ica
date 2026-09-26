@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, memo } from 'react'
 import { sender, receiver } from '../../../clients/transport'
+import { parcelStore, apiOfHub } from '../../../clients/parcels'
 import { renderInlineMd, renderAnswerBody, cellValue, cellText, cellId, cellEntity, colLabel, colSpec, formatNumber, isObj_display, buildBeatRows, type BeatMeta, type Cell, type Column, type ColumnSpec } from './format'
 import { CodexEventLog, mergeEvent, type AgentEvent } from './agentEventLog'
 import { useSession, SignIn, UserButton, useUser } from '@clerk/react'
@@ -476,7 +477,8 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
       ws.onerror = () => ws.close()
       // What the wire does with a large message — parts, parcels — is the transport's business: frames go in
       // here, whole messages come out below. Nothing past this line sees either.
-      const inbound = receiver({ deliver: (whole) => onWire(whole) })
+      // A parcel's body is fetched from the platform with the ticket in its pointer — only where a platform is.
+      const inbound = receiver({ deliver: (whole) => onWire(whole), parcels: CLOUD ? parcelStore({ api: apiOfHub(HUB!), projectId }) : undefined })
       wireIn.current = inbound
       ws.onmessage = (e) => {
         const raw = JSON.parse(e.data)

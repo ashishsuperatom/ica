@@ -11,6 +11,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { sender, receiver } from '../../../clients/transport'
+import { parcelStore, apiOfHub } from '../../../clients/parcels'
 
 const HUB = 'wss://superatom.site'
 /** How long a request waits before we call the engine unresponsive. Generous: a cold Fly machine
@@ -54,7 +55,7 @@ export function useProjectHub(projectId: string | undefined, token: string | nul
       }
       ws.onerror = () => ws.close()
       // Frames in through the transport (parts and parcels are its business), whole messages out to the handlers.
-      const inbound = receiver({ deliver: (whole) => onWire(whole) })
+      const inbound = receiver({ deliver: (whole) => onWire(whole), parcels: parcelStore({ api: apiOfHub(HUB), projectId: projectId! }) })
       ws.onmessage = (e) => { const raw = JSON.parse(e.data); const frame = raw.payload ?? raw; if (frame) void inbound.receive(frame) }
       const onWire = (m: any) => {
         if (m?.t === 'welcome') { setStatus('live'); setErr('') }

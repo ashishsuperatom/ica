@@ -20,6 +20,8 @@
 import { DurableObject } from 'cloudflare:workers'
 import { suspendMachine, stopMachine as flyStopMachine, startMachine as flyStartMachine, getMachineStatus, safeName, FLY_APP } from './fly.js'
 import { AnswerBuffer } from './answer-buffer.js'
+import { receiver } from '../../../clients/transport.js'
+import { bucketStore } from './parcels.js'
 
 
 // How long a question queued for a sleeping machine is still worth waking up for. Past this the person has
@@ -114,6 +116,24 @@ export class ProjectDO extends DurableObject<Env> {
   // SOURCE OF TRUTH for the name: it is WRITTEN here (setName) on create + rename, so the user-UI reads it
   // from THIS per-project DO on connect and we NEVER reverse-fetch / guess the org on the user hot path.
   private _pid = ''
+  // The channel consumer holds no socket, so what the engine addresses to it lands here — through the transport,
+  // like every other end: parts are joined and a parcel's body is read from the bucket, and the ChannelDO is
+  // handed a whole answer. One receiver, made on first use, since the engine is the only sender to a channel.
+  private _channelIn: ReturnType<typeof receiver> | null = null
+  private channelIn() {
+    if (!this._channelIn) this._channelIn = receiver({ deliver: (whole) => { void this.handToChatChannel(whole) }, parcels: bucketStore(this.env.PACKAGES, this._pid) })
+    return this._channelIn
+  }
+  private async handToChatChannel(p: any) {
+    const chan = this.env.CHANNEL.get(this.env.CHANNEL.idFromName(`chan:${this._pid}`))
+    // Live narration streams as tiny messages (→ /narration); the final answer is the rich card (→ /answer).
+    const narration = p?.t === 'channel:narration'
+    const path = narration ? 'https://do/narration' : 'https://do/answer'
+    const body = narration
+      ? { qid: p?.qid, channel: p?.channel, text: p?.text }
+      : { qid: p?.qid, channel: p?.channel, answer: p?.answer, category: p?.category, projectId: this._pid }
+    await chan.fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).catch(() => {})
+  }
   private _name: string | null = null
 
   // Read-only project name for the user-UI. Purely local — whatever setName last stored (null until written).
@@ -837,19 +857,9 @@ export class ProjectDO extends DurableObject<Env> {
     // ── Chat-channel answer delivery ──────────────────────────────────────────
     // The engine finished a channel-originated turn (Teams/…) and addresses the answer to type:'channel'.
     // The channel consumer holds no live socket, so we WAKE its ChannelDO (DO→DO) and hand it the answer to
-    // post. Generic across channels — the adapter inside the ChannelDO does the channel-specific rendering.
-    if ((msg.to as any)?.type === 'channel') {
-      const p = msg.payload as any
-      const chan = this.env.CHANNEL.get(this.env.CHANNEL.idFromName(`chan:${this._pid}`))
-      // Live narration streams as tiny messages (→ /narration); the final answer is the rich card (→ /answer).
-      const narration = p?.t === 'channel:narration'
-      const path = narration ? 'https://do/narration' : 'https://do/answer'
-      const body = narration
-        ? { qid: p?.qid, channel: p?.channel, text: p?.text }
-        : { qid: p?.qid, channel: p?.channel, answer: p?.answer, category: p?.category, projectId: this._pid }
-      await chan.fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).catch(() => {})
-      return
-    }
+    // post, once the transport has made it whole. Generic across channels — the adapter inside the ChannelDO does
+    // the channel-specific rendering.
+    if ((msg.to as any)?.type === 'channel') { await this.channelIn().receive(msg.payload); return }
     // A runtime (human client) sending a message is real activity → reset the idle clock.
     if (sender.type === 'runtime') this.markUserActivity()
 

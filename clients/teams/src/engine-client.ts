@@ -13,6 +13,7 @@
 
 import { WebSocket } from 'ws'
 import { sender, receiver } from '../../transport.js'
+import { parcelStore, apiOfHub } from '../../parcels.js'
 import { config } from './config.js'
 // The canonical wire protocol — one source of truth for every surface.
 import type { Answer, Hello, Analyse, Envelope, EnginePayload } from '../../protocol.js'
@@ -66,7 +67,7 @@ export function askEngine(opts: AskOpts): Promise<{ category?: string; answer: A
     })
 
     // Frames in through the transport (parts and parcels are its business); whole messages reach the switch.
-    const inbound = receiver({ deliver: (whole) => onWire(whole as EnginePayload & Record<string, any>) })
+    const inbound = receiver({ deliver: (whole) => onWire(whole as EnginePayload & Record<string, any>), parcels: parcelStore({ api: apiOfHub(config.hubWs), projectId: config.projectId }) })
     ws.on('message', (raw) => {
       let msg: any
       try { msg = JSON.parse(raw.toString()) } catch { return }
@@ -78,7 +79,7 @@ export function askEngine(opts: AskOpts): Promise<{ category?: string; answer: A
       switch (p?.t) {
         case 'tick': return                                  // liveness ping
         case 'machine:waking': onWaking?.(); return          // engine was suspended; it's coming up
-        case 'analyst:status': onStatus?.(p.text); return
+        case 'agent:status': if (p.lane === 'analyst' || p.lane === 'composer') onStatus?.(p.text); return
         case 'analyst:answer':
           return done(() => resolve({ category: p.category, answer: (p.answer ?? {}) as Answer }))
         case 'error':

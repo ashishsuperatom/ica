@@ -13,6 +13,8 @@
 // secrets (bot appId/secret). Set once at onboarding via /config.
 
 import { channelAdapter, type ChannelSecrets, type ConversationRef, type InboundMessage } from '../../../clients/messaging/index.js'
+import { receiver } from '../../../clients/transport.js'
+import { bucketStore } from './parcels.js'
 
 type Config = { serviceToken?: string; secrets?: Record<string, ChannelSecrets> }
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { 'content-type': 'application/json' } })
@@ -218,15 +220,21 @@ export class ChannelDO {
         // Ceiling well ABOVE any engine timeout, so we never give up before the engine does (the engine's own
         // timeout may be raised or made dynamic). A close/error before this fires is the cold-wake case (retried).
         const timer = setTimeout(() => done(() => reject(new Error('engine timed out'))), 15 * 60_000)
+        // Frames in through the transport (parts and parcels are its business; a parcel's body comes from the
+        // bucket, this being the platform); whole messages reach the switch.
+        const inbound = receiver({ deliver: (whole) => onWire(whole), parcels: bucketStore(this.env.PACKAGES, projectId) })
         ws.addEventListener('message', (evt: MessageEvent) => {
           let msg: any; try { msg = JSON.parse(evt.data as string) } catch { return }
-          const p = msg?.payload ?? msg
+          const frame = msg?.payload ?? msg
+          if (frame) void inbound.receive(frame)
+        })
+        const onWire = (p: any) => {
           switch (p?.t) {
-            case 'tick': case 'machine:waking': case 'analyst:status': onStatus?.(); return   // liveness / progress → keep typing alive
+            case 'tick': case 'machine:waking': case 'agent:status': onStatus?.(); return   // liveness / progress → keep typing alive
             case 'analyst:answer': return done(() => resolve({ category: p.category, answer: p.answer ?? {} }))
             case 'error': return done(() => reject(new Error(p.message ?? 'engine error')))
           }
-        })
+        }
         // A close/error before an answer is almost always the internal WS dropping during a ~30s cold machine
         // wake (the socket goes silent while the engine boots, and an intermediary cuts it). Mark these
         // RETRYABLE — the caller reconnects after the machine is up and gets a fast answer. A timeout is NOT

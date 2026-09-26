@@ -25,6 +25,7 @@ import { createMachine, stopMachine, FLY_APP } from './fly.js'
 // Auth: token primitives + Clerk→platform-token mint (./auth/tokens.ts) and the mobile browser-redirect
 // device flow (./auth/mobile.ts). worker.ts only routes to these; the rules live in the module.
 import { verifyJwt, signJwt, mintPlatformTokenFromClerk, type JwtClaims } from './auth/tokens.js'
+import { handleParcelRoute } from './parcels.js'
 import { mobileAuthPage, handleMobileCode, handleMobileExchange, handleMeProjects } from './auth/mobile.js'
 
 // ── Auth ────────────────────────────────────────────────────────────────────
@@ -229,6 +230,27 @@ export default {
       if (!message) return new Response('', { status: 200 })   // non-message event → ack, nothing to do
       ctx.waitUntil(chan.fetch('https://do/inbound', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ projectId, channel, message, authToken }) }))
       return new Response('', { status: 200 })   // ack the channel immediately; reply comes proactively
+    }
+
+    // ── Parcels: message bodies beside the wire (parcels.ts) ─────────────────────────────────────────────────
+    // A GET needs only the ticket in the pointer. A PUT is the engine with the project's key, or a member with
+    // their token — the two credentials the hub itself accepts, checked the same way.
+    const parcelMatch = path.match(/^\/api\/projects\/([^/]+)\/parcels\/([^/?]+)$/)
+    if (parcelMatch) {
+      const projectId = parcelMatch[1]
+      return handleParcelRoute({
+        request, bucket: env.PACKAGES, secret: env.JWT_SECRET, projectId, hash: parcelMatch[2], after: (p) => ctx.waitUntil(p),
+        authorize: async () => {
+          const bearer = (request.headers.get('authorization') || '').replace(/^bearer\s+/i, '')
+          if (!bearer) return false
+          if (bearer.startsWith('sk-proj-')) {
+            const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
+            const r = await stub.fetch('https://do/verify-conn', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: bearer }) })
+            return r.ok
+          }
+          return (await projectAccessOf(request, env, projectId)).ok
+        },
+      })
     }
 
     const projMatch = path.match(/^\/api\/projects\/([^/]+)\/(.+)/)

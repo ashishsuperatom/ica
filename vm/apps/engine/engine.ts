@@ -37,6 +37,7 @@ import { DataSourceIndex, dataSourceStats } from '@superatom/datasource-index'
 // import would break every deploy while working perfectly here.
 import type { EngineMsgType } from '../../../clients/protocol.js'
 import { createWire } from './wire.js'
+import { parcelStore, apiOfHub } from '../../../clients/parcels.js'
 import { createAppSeam } from './app-seam.js'
 import { randomUUID } from 'node:crypto'
 import { MODEL, modelVersion, openSemanticGraph } from './graph/semantic.js'
@@ -310,11 +311,16 @@ const MAX_OUTBOX = 1000
 // clients/protocol.ts calls itself the single canonical description of this wire, but nothing imported it, so it
 // drifted: it still described analyst:status/stream/category/progress/done long after those became agent:*.
 // A type-only import costs nothing at runtime and turns that drift into a compile error.
-const emit = (to: any, msg: { t: EngineMsgType; [k: string]: unknown }) => {
+// ONE FRAME ONTO THE SOCKET — the wire's business only. Everything the engine says goes through `emit`, which is
+// the wire: a message over the frame limit becomes a parcel (its body in the platform's bucket) or parts, and
+// nothing that calls emit knows or cares. Calling emitFrame directly would put a large message straight onto a
+// socket that drops it.
+const emitFrame = (to: any, msg: { t: EngineMsgType; [k: string]: unknown }) => {
   const frame = JSON.stringify({ to, payload: msg })
   if (hub?.readyState === WebSocket.OPEN) hub.send(frame)
   else { outbox.push(frame); if (outbox.length > MAX_OUTBOX) outbox.shift() }
 }
+const emit = (to: any, msg: { t: EngineMsgType; [k: string]: unknown }) => { wire.send(to, msg) }
 function flushOutbox() {
   if (!outbox.length || hub?.readyState !== WebSocket.OPEN) return
   const pending = outbox; outbox = []
@@ -716,7 +722,13 @@ function resyncAnalyst(from: any, full = false) {
 }
 
 // The wire (parts and parcels) and a project's own application live in their own modules; the engine only routes.
-const wire = createWire({ emit: (to, frame) => emit(to, frame as { t: EngineMsgType }), handle: (whole, from) => { void handle(whole, from) } })
+// The parcel store is the platform's parcel route, reached where the hub is, with this project's key; where the
+// route is not served (a hub with no platform behind it) a put fails and the wire sends parts instead.
+const wire = createWire({
+  emit: (to, frame) => emitFrame(to, frame as { t: EngineMsgType }),
+  handle: (whole, from) => { void handle(whole, from) },
+  parcels: parcelStore({ api: apiOfHub(HUB), projectId: PROJECT, credential: KEY }),
+})
 const appSeam = createAppSeam({ project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, getSemantic, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
 
 async function handle(payload: any, from: any) {
