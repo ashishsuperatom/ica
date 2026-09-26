@@ -116,10 +116,16 @@ export function createAppSeam(d: AppSeamDeps) {
       },
       sources: async () => { const r = await fetch(`${d.datasource}/sources`); const body: any = await r.json().catch(() => ({})); return body.sources ?? [] },
       say: (text: string, context: string, o: { qid: string; threadId: string }) => say(text, context, { ...o, reqId: payload.reqId, from }),
-      reply: (msg: Record<string, unknown>) => d.send(from, { ...msg, t: String(msg.t ?? 'app:res'), reqId: payload.reqId }),
+      reply: (msg: Record<string, unknown>) => {
+        const out = { ...msg, t: String(msg.t ?? 'app:res'), reqId: payload.reqId }
+        console.log(`[app] → ${out.t} ${payload.reqId ?? ''} ${JSON.stringify(out).length} bytes · ${Date.now() - t0} ms · to ${from?.id ?? '?'}`)
+        d.send(from, out)
+      },
     }
+    const t0 = Date.now()
+    console.log(`[app] ← ${payload.t} ${payload.reqId ?? ''}${payload.focus ? ` ${payload.focus}` : ''} from ${from?.id ?? '?'}`)
     try { await a.handle(payload, ctx) }
-    catch (e: any) { d.send(from, { t: 'app:error', error: e?.message ?? String(e), reqId: payload.reqId }) }
+    catch (e: any) { console.warn(`[app] ✗ ${payload.t} ${payload.reqId ?? ''}: ${e?.message ?? e}`); d.send(from, { t: 'app:error', error: e?.message ?? String(e), reqId: payload.reqId }) }
   }
 
   return { handle, present }

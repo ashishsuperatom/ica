@@ -22,7 +22,7 @@ export function createWire(o: { emit: (to: any, frame: any) => void; handle: (wh
   return {
     /** Send a whole message; the wire decides how it travels. */
     send: (to: any, msg: Record<string, unknown>) => {
-      void senderFor(to).send(msg).then((how) => { if (how !== 'whole') console.log(`[wire] ${String(msg.t)} went as ${how}`) })
+      senderFor(to).send(msg).then((how) => { if (how !== 'whole') console.log(`[wire] ${String(msg.t)} went as ${how}`) }, (e) => console.error(`[wire] ${String(msg.t)} was not sent: ${e?.message ?? e}`))
     },
     /** Whether this frame is the wire's own (a part, or a parcel pointer) and has been taken in. */
     receive: (frame: any, from: any): boolean => {
