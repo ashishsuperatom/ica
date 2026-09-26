@@ -38,9 +38,9 @@ export const isParcelled = (x: unknown): x is Parcelled => {
   return !!p && typeof p === 'object' && typeof p.hash === 'string' && typeof p.ticket === 'string'
 }
 
-/** What may travel through the hub in one frame. The hub's own ceiling is 1 MiB; this is lower by choice, so the
+/** What may travel through the hub in one frame. The hub's own ceiling is 1 MiB; this is lower by choice — a message a person reads, never a table — so the
  * Durable Object carries messages and never bulk: above it a body goes beside the wire as a parcel. */
-export const FRAME_LIMIT = 512_000
+export const FRAME_LIMIT = 128_000
 export const PART_BYTES = 480_000
 
 // Bytes of a string as UTF-8, counted without Node or the DOM: what the hub measures.

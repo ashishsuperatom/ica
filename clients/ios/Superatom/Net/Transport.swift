@@ -48,7 +48,7 @@ enum Transport {
 
     /// What may travel through the hub in one frame: lower than the hub's 1 MiB ceiling by choice, so the
     /// Durable Object carries messages and never bulk. The same number as clients/transport.ts.
-    static let frameLimit = 512_000
+    static let frameLimit = 128_000
     static let partBytes = 480_000
 
     /// Which fields of a large message still travel when its body goes as a parcel: the routing and the summary.
