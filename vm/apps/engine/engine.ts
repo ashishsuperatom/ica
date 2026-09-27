@@ -398,9 +398,10 @@ function readingAnswer(markdown: string, blocks: { marker: string; block: Record
     } else if (Array.isArray(block.series) && rows.length) {
       // A chart, for now as its numbers: the axis and one column per series.
       const series = (block.series as any[]).filter((x) => x && x.key)
+      const value = (r: any, key: string) => (r?.values && typeof r.values === 'object' ? r.values[key] : r?.[key])
       sections.push({ kind: 'table', title: typeof block.title === 'string' ? block.title : undefined,
-        columns: [String(block.axis ?? 'row'), ...series.map((x) => String(x.label ?? x.key))],
-        rows: rows.map((r) => [r?.label ?? r?.key ?? r?.[String(block.axis ?? '')], ...series.map((x) => r?.[x.key])]) })
+        columns: [String(block.axis ?? 'row'), ...series.map((x) => ({ label: String(x.label ?? x.key), ...(block.unit ? { unit: String(block.unit) } : {}) }))],
+        rows: rows.map((r) => [r?.label ?? r?.key ?? r?.[String(block.axis ?? '')], ...series.map((x) => value(r, x.key))]) })
     } else sections.push({ kind: 'text', body: `${b.marker}: a block of kind ${String(block.type ?? '?')} that this surface cannot draw yet` })
   }
   return { status: 'answered', category: 'reading', answer: prose, ...(sections.length ? { sections } : {}) }
@@ -471,7 +472,10 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     emitBeat(reply, 'Looking into your question…', qid, sid)
 
     narrator = createNarrator({ cwd: WORKSPACE })
-    narrationTimer = setInterval(async () => {
+    // A beat is worth sending the moment there is something to say: the first command lands, and the narrator is
+    // asked then rather than at the timer's next tick — the gap the person saw as seven silent seconds.
+    let firstWork = true
+    const narrateNow = async () => {
       if (stopped || narrating || !reply || narrationBuf.length === 0) return
       narrating = true
       const activity = narrationBuf.splice(0).join('\n')
@@ -483,7 +487,8 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
           if (channel) emit({ type: 'channel' }, { t: 'channel:narration', channel, qid, text: line })
         }
       } catch { /* narration is best-effort */ } finally { narrating = false }
-    }, 4000)
+    }
+    narrationTimer = setInterval(narrateNow, 4000)
 
     let currentAgent: 'composer' | 'analyst' = 'composer'
     const stepStarted = new Map<string, number>()
@@ -508,7 +513,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         if (ev.kind === 'message' && ev.text?.trim()) { const prose = stripCode(ev.text); if (prose) narrationBuf.push(prose.slice(0, 600)) }
         else if (ev.kind === 'command') {
           const cmd = ev.command?.trim().replace(/\s+/g, ' ')
-          if (cmd && cmd !== lastDoing) { lastDoing = cmd; narrationBuf.push(('DOING: ' + cmd).slice(0, 200)) }
+          if (cmd && cmd !== lastDoing) { lastDoing = cmd; narrationBuf.push(('DOING: ' + cmd).slice(0, 200)); if (firstWork) { firstWork = false; void narrateNow() } }
           if (ev.output?.trim() && isDataCall(ev.command)) narrationBuf.push(('RESULT: ' + capResultData(ev.output)).slice(0, 1800))
         }
       },
