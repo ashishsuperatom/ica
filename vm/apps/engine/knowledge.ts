@@ -32,6 +32,18 @@ export interface Domain {
 }
 export interface Knowledge { domain: string; text: string; files: string[] }
 
+/** How every answer is given, whatever the domain. */
+const ANSWERING = `# How every answer is given
+- The answer starts with a line \`:::answer\`. What you say before it is you working; what follows it is the answer.
+- The next line says the time the answer covers: \`:::period <when> · <what kind>\`.
+  - A span: \`:::period 7 Sep – 20 Sep 2026 · 2 complete weeks\`
+  - A moment, for data that holds only its current state: \`:::period As of 27 Sep 2026 · the state now\`
+  - All the data: \`:::period All data · 3 Jan 2022 – 26 Sep 2026\`, earliest to latest.
+  - A forecast: \`:::period 5 Oct – 11 Oct 2026 · forecast\`
+  - A comparison: one line per period, in the order compared.
+  - A period still running ends \`· to date\`.
+- Tables and charts are lines naming a file in this folder: \`:::table <name>.json\`, \`:::bar <name>.json\`, \`:::line <name>.json\`.`
+
 const dirOf = (name: string) => name.trim().toLowerCase().replace(/\s+/g, '-')
 
 /** The domains a project's knowledge index lists; none when there is no index. The TypeScript index wins. */
@@ -70,9 +82,10 @@ export async function compose(projectDir: string, domain: Domain): Promise<Knowl
   }
   const files = (domain.files ?? []).map((f) => join(dir, f)).filter((f) => existsSync(f))
   const named = files.length ? `\n\nIn your folder, from this domain: ${files.map((f) => basename(f)).join(', ')}.` : ''
-  // The identity is the first line of what the agent is, and it is the domain's.
+  // The identity is the first line of what the agent is, and it is the domain's. How every answer is given is the
+  // platform's, the same for every domain, and comes right after it.
   const identity = `You are Superatom's agent for ${domain.name} at this organisation.`
-  return { domain: domain.name, text: `${identity}\n\n${texts.join('\n\n')}${named}`, files }
+  return { domain: domain.name, text: `${identity}\n\n${ANSWERING}\n\n${texts.join('\n\n')}${named}`, files }
 }
 
 /** Put a domain's files into an agent's folder. */

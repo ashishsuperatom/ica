@@ -17,7 +17,7 @@ export function b64urlDecode(s: string): string {
 // people sign in through Clerk themselves), so a token without it cannot answer 'which orgs/projects is this
 // person in?'. `role` here is PLATFORM role only ('superadmin' | 'user'); org and project roles are stored
 // with the org and the project, never in the token, so revoking access takes effect immediately.
-export interface JwtClaims { userId: string; email?: string; role?: string; exp: number }
+export interface JwtClaims { userId: string; email?: string; /** The person's name as they gave it to Clerk, for surfaces to show. */ name?: string; role?: string; exp: number }
 
 export async function signJwt(payload: JwtClaims, secret: string): Promise<string> {
   const header = b64url(encoder.encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' })))
@@ -52,14 +52,20 @@ export const SUPERADMIN_EMAILS = ['ashish@superatom.ai']
 
 // Clerk user's primary email (the session object carries only user_id). '' on any failure → "not superadmin".
 export async function fetchClerkPrimaryEmail(userId: string, env: Env): Promise<string> {
+  return (await fetchClerkPerson(userId, env)).email
+}
+
+/** The Clerk user's primary email and name. '' for what it lacks or on any failure. */
+export async function fetchClerkPerson(userId: string, env: Env): Promise<{ email: string; name: string }> {
   try {
     const res = await fetch(`https://api.clerk.com/v1/users/${userId}`, { headers: { Authorization: `Bearer ${env.CLERK_SECRET_KEY}` } })
-    if (!res.ok) return ''
+    if (!res.ok) return { email: '', name: '' }
     const u = await res.json() as any
     const emails: any[] = u.email_addresses ?? []
     const primary = emails.find((e) => e.id === u.primary_email_address_id) ?? emails[0]
-    return primary?.email_address ?? ''
-  } catch { return '' }
+    const name = [u.first_name, u.last_name].filter((x: unknown) => typeof x === 'string' && x.trim()).join(' ').trim() || String(u.username ?? '').trim()
+    return { email: primary?.email_address ?? '', name }
+  } catch { return { email: '', name: '' } }
 }
 
 export type MintResult =
@@ -83,11 +89,12 @@ export async function mintPlatformTokenFromClerk(clerkToken: string | undefined,
   if (session.status !== 'active') return { ok: false, status: 401, error: 'session not active' }
   const userId = session.user_id
   if (!userId) return { ok: false, status: 401, error: 'no user in session' }
-  const primaryEmail = await fetchClerkPrimaryEmail(userId, env)
+  const person = await fetchClerkPerson(userId, env)
+  const primaryEmail = person.email
   const isSuperadmin = !!primaryEmail && SUPERADMIN_EMAILS.includes(primaryEmail.toLowerCase())
   const role = isSuperadmin ? 'superadmin' : 'user'
   const email = (primaryEmail || '').toLowerCase()
-  const token = await signJwt({ userId, email, role, exp: Math.floor(Date.now() / 1000) + 30 * 24 * 3600 }, env.JWT_SECRET)
+  const token = await signJwt({ userId, email, ...(person.name ? { name: person.name } : {}), role, exp: Math.floor(Date.now() / 1000) + 30 * 24 * 3600 }, env.JWT_SECRET)
   console.log(`[auth] issued ${role} token for ${email || userId}`)
   return { ok: true, token, userId, email, role }
 }

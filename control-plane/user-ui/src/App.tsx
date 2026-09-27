@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, memo } from 'react'
 import { sender, receiver } from '../../../clients/transport'
+import Sidebar, { T } from './Sidebar'
 import { parcelStore, apiOfHub } from '../../../clients/parcels'
 import { renderInlineMd, renderAnswerBody, cellValue, cellText, cellId, cellEntity, colLabel, colSpec, formatNumber, isObj_display, buildBeatRows, type BeatMeta, type Cell, type Column, type ColumnSpec } from './format'
 import { CodexEventLog, mergeEvent, type AgentEvent } from './agentEventLog'
@@ -238,6 +239,9 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     return seg && /^[A-Za-z0-9_-]+$/.test(seg) ? seg : 'chat'
   }
   const [view, setView] = useState<View>(readView)
+  // The sidebar folds to a rail of icons, as the dashboard's does; remembered for this viewer.
+  const [sideCollapsed, setSideCollapsed] = useState<boolean>(() => { try { return localStorage.getItem('sa-sidebar-collapsed') === '1' } catch { return false } })
+  const setSideCollapsedSaved = useCallback((c: boolean) => { setSideCollapsed(c); try { localStorage.setItem('sa-sidebar-collapsed', c ? '1' : '0') } catch { /* storage blocked */ } }, [])
   const navigate = useCallback((v: View) => {
     history.pushState(null, '', v === 'chat' ? `/c/${sidRef.current}${location.search}` : `/${v}`)
     setView(v)
@@ -264,6 +268,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [turnProgress, setTurnProgress] = useState('')   // clean live narration from the agent (no tool calls)
   const [narrationLog, setNarrationLog]     = useState<string[]>([])   // receptionist (narrator) beats for THIS question — ACCUMULATE (never overwrite)
   const [liveAnswer, setLiveAnswer]         = useState('')             // the answer as the agent says it (answer:part), shown under the beats until the answer card lands
+  const [liveSections, setLiveSections]     = useState<any[]>([])      // the blocks a part's marker lines named, resolved the moment they were said
   const liveQidRef                          = useRef('')               // which question the live answer belongs to
   const narrationLogRef                 = useRef<string[]>([])     // latest beats, readable inside ws handlers (state is stale in closures)
   const narrationTimesRef               = useRef<number[]>([])     // arrival ms per beat — drives the per-step live timer (UI-only, nice-to-have)
@@ -604,7 +609,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           }
         } else if (msg.t === 'answer:part') {
           // A piece of the answer, as the agent says it: shown at once under the beats; the answer card replaces it.
-          if (typeof msg.text === 'string' && msg.text && (!msg.qid || msg.qid === liveQidRef.current)) setLiveAnswer(a => (a ? `${a}\n${msg.text}` : msg.text))
+          if (typeof msg.text === 'string' && msg.text && (!msg.qid || msg.qid === liveQidRef.current)) { setLiveAnswer(a => (a ? `${a}\n${msg.text}` : msg.text)); if (Array.isArray(msg.blocks) && msg.blocks.length) setLiveSections(b => [...b, ...msg.blocks]) }
         } else if (msg.t === 'narration') {
           // Sent twice on purpose — once to this socket, once to the owner channel — so one of them survives a
           // reconnect. Keep the first arrival and ignore the echo.
@@ -616,7 +621,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           // The agent is expected to always produce an answer (incl. a plain-text reply for conversational
           // input); this neutral fallback only guards a true failure and is NOT a restriction on what it answers.
           const ans = msg.answer ?? { status: 'no_answer', answer: 'Something went wrong on that one — please try again.' }
-          setLiveAnswer('')                                                      // the card takes over from the pieces
+          setLiveAnswer(''); setLiveSections([])                                 // the card takes over from the pieces
           setLastAnswer(ans)                                                   // always reflects the latest
           // A REPLAY (reconnect) is already in the saved feed — don't duplicate it. A fresh answer gets
           // appended to its OWN chat: the visible feed if it's current, else that chat's saved feed.
@@ -871,7 +876,7 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
     // card. The Analyst tab keeps the raw terminal for when you WANT to look under the hood.
     setFeed(f => [...f, { id: qid, type: 'user-msg', text }])
     scroll()   // pin the new (now last) question to the top of the viewport
-    setTurnQuestion(text); setLastAnswer(null); setTurnCategory(''); setTurnStatus('Classifying…'); setTurnBusy(true); setTurnProgress(''); setLiveAnswer(''); liveQidRef.current = qid; setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []; narrationMetaRef.current = []; setExpandedGroups(new Set())
+    setTurnQuestion(text); setLastAnswer(null); setTurnCategory(''); setTurnStatus('Classifying…'); setTurnBusy(true); setTurnProgress(''); setLiveAnswer(''); setLiveSections([]); liveQidRef.current = qid; setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []; narrationMetaRef.current = []; setExpandedGroups(new Set())
     ptyXtermRef.current?.clear()   // claude PTY: fresh TUI per question (harmless when the console lane is codex)
     // QUESTION-boundary divider (+ Shift+Arrow anchor) — shown optimistically in every lane that takes part in this
     // chat's turn (partOfTurn). Keyed by qid so the engine's authoritative boundary event (same id) MERGES with it
@@ -993,42 +998,21 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
   const sessionTitle = sessions.find(se => se.id === sessionId)?.title || 'New chat'
 
   return (
-    <div style={s.shell}>
-      {/* Sidebar — sectioned menu (Model / Agent), like a product nav */}
-      <aside style={s.sidebar}>
-        <div style={{ padding: '10px 12px 6px', fontSize: 15, fontWeight: 700, color: '#cfe3d0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-             title={proj?.id || projectId}>
-          {proj?.name || 'Superatom'}
-        </div>
-        <div style={s.navSection}>AGENT</div>
-        {/* One entry per lane the engine has announced, in the order first seen. */}
-        {laneNames.map(n => (
-          <div key={n} onClick={() => navigate(n)} title={lanes[n].desc || lanes[n].label}
-            style={{ ...s.sessionItem, display: 'flex', alignItems: 'center', gap: 7, ...(shownView === n ? s.sessionItemActive : {}) }}>
-            <span style={{ color: lanes[n].hue || '#bcd0be' }}>◇</span>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lanes[n].label}</span>
-          </div>
-        ))}
-        {laneNames.length === 0 && <div style={s.sessionEmpty}>No agents yet</div>}
-        <button style={s.newChat} onClick={() => { navigate('chat'); newChat() }}>+ New chat</button>
-        <div style={s.sessionList}>
-          {sessions.map(se => (
-            <div key={se.id} onClick={() => { navigate('chat'); openSession(se.id) }} title={se.title || 'New chat'}
-              style={{ ...s.sessionItem, display: 'flex', alignItems: 'center', gap: 6, ...(view === 'chat' && se.id === sessionId ? s.sessionItemActive : {}) }}>
-              {turnBusy && se.id === sessionId && <span title="running" style={{ flexShrink: 0 }}><Spinner /></span>}
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{se.title || 'New chat'}</span>
-            </div>
-          ))}
-          {sessions.length === 0 && <div style={s.sessionEmpty}>No chats yet</div>}
-        </div>
-        {/* Account — real Clerk user, pinned to the sidebar bottom; click the avatar for the Clerk popup */}
-        {CLOUD ? <AccountSection /> : (
+    <div style={{ ...s.shell, ['--sa-side-w' as any]: `${sideCollapsed ? T.wCollapsed : T.w}px` }}>
+      <Sidebar
+        collapsed={sideCollapsed} onToggle={setSideCollapsedSaved}
+        project={proj?.name || 'Superatom'} projectTitle={proj?.id || projectId} connected={connected}
+        onNewChat={() => { navigate('chat'); newChat() }}
+        chats={sessions.map(se => ({ key: se.id, label: se.title || 'New chat', active: view === 'chat' && se.id === sessionId, busy: turnBusy && se.id === sessionId,
+          onClick: () => { navigate('chat'); openSession(se.id) } }))}
+        agents={laneNames.map(n => ({ key: n, label: lanes[n].label, title: lanes[n].desc || lanes[n].label, active: shownView === n, hue: lanes[n].hue, onClick: () => navigate(n) }))}
+        account={CLOUD ? <AccountSection /> : (
           <div style={s.acct}>
-            <div style={s.avatar}>D</div>
+            <div style={s.avatar}>L</div>
             <div style={{ flex: 1, minWidth: 0 }}><div style={s.acctName}>Local</div><div style={s.acctPlan}>dev</div></div>
           </div>
         )}
-      </aside>
+      />
 
     <div style={s.page}>
       {/* Sticky header: topbar + Claude live-output drawer pinned to the top */}
@@ -1119,6 +1103,7 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
                 {/* THE ANSWER AS IT COMES. Each piece the agent says after its answer marker lands here at once,
                     rendered as the answer will be; the answer card replaces it when the turn is over. */}
                 {liveAnswer && <div className="sa-prose" style={{ marginTop: 10 }} dangerouslySetInnerHTML={{ __html: renderAnswerBody(liveAnswer.split('\n').filter(l => !/^:::\S+\s+\S+/.test(l.trim())).join('\n')) }} />}
+                {liveSections.map((s: any, i: number) => <SectionBlock key={i} s={s} />)}
               </div>
             )}
             {/* STOP — BELOW the card, not inside it. The card is the work; this is an action taken against the
@@ -1947,7 +1932,7 @@ const s: Record<string, React.CSSProperties> = {
   step:        { fontSize: 12.5, color: '#9a9285', fontFamily: 'ui-monospace, monospace',
                  padding: '2px 6px', lineHeight: 1.5 },
   componentSlot: { minHeight: 60 },
-  promptBar:   { position: 'fixed', bottom: 0, left: 260, right: 0, padding: '12px 24px',
+  promptBar:   { position: 'fixed', bottom: 0, left: 'var(--sa-side-w, 240px)', right: 0, padding: '12px 24px',
                  background: '#fff', borderTop: '1px solid #e8e4de',
                  display: 'flex', gap: 10, flexShrink: 0 },
   input:       { flex: 1, background: '#f5f3ef', border: '1px solid #e8e4de', borderRadius: 8,
@@ -1960,17 +1945,16 @@ const s: Record<string, React.CSSProperties> = {
                    alignItems: 'center', gap: 10 },
 
   // Account section pinned to the bottom of the sidebar
-  acct:        { display: 'flex', alignItems: 'center', gap: 10, padding: 12, marginTop: 'auto',
-                 borderTop: '1px solid #e8e4de' },
-  avatar:      { width: 30, height: 30, borderRadius: '50%', background: '#e55a1f', color: '#fff',
+  acct:        { display: 'flex', alignItems: 'center', gap: 10 },
+  avatar:      { width: 30, height: 30, borderRadius: '50%', background: '#009193', color: '#fff',
                  fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  acctName:    { fontSize: 13, fontWeight: 600, color: '#2a2620', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-  acctPlan:    { fontSize: 11.5, color: '#9a9285' },
+  acctName:    { fontSize: 13, fontWeight: 500, color: '#1f2a37', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  acctPlan:    { fontSize: 11.5, color: '#7b8898', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
 
   // ChatGPT-style composer
   centerStage: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
                  justifyContent: 'center', padding: '0 24px 80px', width: '100%' },
-  bottomBar:   { position: 'fixed', bottom: 0, left: 260, right: 0, padding: '8px 24px 18px',
+  bottomBar:   { position: 'fixed', bottom: 0, left: 'var(--sa-side-w, 240px)', right: 0, padding: '8px 24px 18px',
                  display: 'flex', justifyContent: 'center', zIndex: 5,
                  background: 'linear-gradient(to top, #f5f3ef 62%, rgba(245,243,239,0))' },
   composer:    { width: '100%', background: '#fff', border: '1px solid #e6e1d8', borderRadius: 26,

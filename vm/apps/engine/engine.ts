@@ -383,7 +383,7 @@ const profileOf = (name: AgentName) => { try { const c = agentConfig(name); retu
 // Every surface renders `analyst:answer` (and a chat channel `channel:answer`); `session:step` carries the richer
 // form beside it. Next steps go as follow-up chips, which the person sends back as their next question.
 /** A reading as an Answer: the prose without its marker lines, and each block the markdown named as a section. */
-function readingAnswer(markdown: string, blocks: { marker: string; block: Record<string, unknown> | null; error?: string }[]): import('../../../clients/protocol.js').Answer {
+function readingAnswer(markdown: string, blocks: { marker: string; block: Record<string, unknown> | null; error?: string }[], periods: { label: string; detail?: string }[] = []): import('../../../clients/protocol.js').Answer {
   const prose = markdown.split('\n').filter((l) => !/^:::\S+\s+\S+/.test(l.trim())).join('\n').trim()
   const sections: NonNullable<import('../../../clients/protocol.js').Answer['sections']> = []
   for (const b of blocks) {
@@ -404,7 +404,8 @@ function readingAnswer(markdown: string, blocks: { marker: string; block: Record
         rows: rows.map((r) => [r?.label ?? r?.key ?? r?.[String(block.axis ?? '')], ...series.map((x) => value(r, x.key))]) })
     } else sections.push({ kind: 'text', body: `${b.marker}: a block of kind ${String(block.type ?? '?')} that this surface cannot draw yet` })
   }
-  return { status: 'answered', category: 'reading', answer: prose, ...(sections.length ? { sections } : {}) }
+  // The time the answer covers goes where every surface already shows an answer's time: its periods.
+  return { status: 'answered', category: 'reading', answer: prose, ...(periods.length ? { periods } : {}), ...(sections.length ? { sections } : {}) }
 }
 
 function tellSurfaces(reply: any, channel: string, sid: string, qid: string, timing: { ms: number }, answer: import('../../../clients/protocol.js').Answer, followups: string[] = []) {
@@ -543,11 +544,11 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // each block as a table section — so the surfaces change nothing.
     if (composersBySession.get(sid)?.domain) {
       workingAgent = 'composer'; stopSession = () => { try { (composer as any).session?.stop?.() } catch { /* best-effort */ } }
-      const said = await capped(composer.say(question, 'None: the question stands on its own.', handlers, { qid }), () => ({ markdown: null, blocks: [], queries: [], ms: Date.now() - t0 }))
+      const said = await capped(composer.say(question, 'None: the question stands on its own.', handlers, { qid }), () => ({ markdown: null, blocks: [], periods: [], queries: [], ms: Date.now() - t0 }))
       if (stopped) { console.log(`[ica] ${qid.slice(0, 8)} stopped after ${((Date.now() - t0) / 1000).toFixed(1)}s`); return }
       const timing = { ms: Date.now() - t0 }
       if (said.markdown == null) { tellSurfaces(reply, channel, sid, qid, timing, { status: 'cannot_answer', answer: 'No answer was written in time. Ask it another way, or narrower.' }); return }
-      tellSurfaces(reply, channel, sid, qid, timing, readingAnswer(said.markdown, said.blocks))
+      tellSurfaces(reply, channel, sid, qid, timing, readingAnswer(said.markdown, said.blocks, said.periods))
       console.log(`[ica] composer · read ${qid.slice(0, 8)} · ${(timing.ms / 1000).toFixed(1)}s · ${said.blocks.length} blocks`)
       return
     }

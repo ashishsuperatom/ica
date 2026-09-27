@@ -96,7 +96,7 @@ export type EnginePayload =
   | { t: 'turn:stop'; sessionId: string; reason?: string }
   | { t: 'turn:stopped'; sessionId: string; stopped: boolean }
   | { t: 'narration'; text: string; qid?: string; sid?: string }      // a business-language beat while work happens
-  | { t: 'answer:part'; text: string; qid: string; sid: string }     // a piece of the answer, as the agent says it
+  | { t: 'answer:part'; text: string; qid: string; sid: string; blocks?: unknown[] }     // a piece of the answer, as the agent says it, with the blocks its marker lines name
   | { t: 'followups'; items: string[]; qid?: string; sid?: string }
   | { t: 'agent:status'; lane: Lane; text?: string; category?: string; progress?: string; state?: 'done'; question?: string; sid?: string }
   | { t: 'agent:event'; lane: Lane; ev: unknown; qid?: string; sid?: string }
@@ -116,6 +116,7 @@ export interface Answer {
   category?: string
   answer?: string                                                    // prose
   period?: string
+  periods?: { label: string; detail?: string }[]                     // the time an answer covers; a comparison has one per period
   scope?: string
   figures?: { label: string; display: string; sub?: string; value?: unknown; neg?: boolean }[]
   table?: { columns: string[]; rows: unknown[][]; totalRows?: number; total?: unknown[] }

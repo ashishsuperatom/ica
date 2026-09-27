@@ -46,7 +46,18 @@ export interface TurnResult {
  *  belongs — the named file in the thread's folder, in the application's own block shape, so a table or a chart from
  *  an agent draws exactly as one from a capability. Each marker is resolved here; the marker lines stay in the
  *  markdown so the client can split at them. Only files the markdown names are ever read or sent. */
-export interface Said { markdown: string | null; blocks: SaidBlock[]; queries: QueryRecord[]; ms: number }
+export interface Said { markdown: string | null; blocks: SaidBlock[]; periods: Period[]; queries: QueryRecord[]; ms: number }
+/** The time an answer covers, from its `:::period <when> · <what kind>` lines, in order: a comparison has one per period. */
+export interface Period { label: string; detail?: string }
+export function periodsIn(markdown: string | null): Period[] {
+  const out: Period[] = []
+  for (const line of (markdown ?? '').split('\n')) {
+    const m = /^[ \t]*:::period[ \t]+(.+?)\s*$/.exec(line); if (!m) continue
+    const [label, ...rest] = m[1].split(/\s+·\s+/)
+    out.push({ label: label.trim(), ...(rest.length ? { detail: rest.join(' · ').trim() } : {}) })
+  }
+  return out
+}
 export interface SaidBlock { marker: string; block: Record<string, unknown> | null; error?: string }
 
 const MARKER = /^:::(table|bar|bars|line|kpis|figure|facts|text)\s+([\w.-]+\.json)\s*$/
@@ -221,7 +232,13 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       // from that line on is the answer, handed on piece by piece as each message arrives. An agent that writes
       // no marker is taken at its final message.
       let last = '', answer = '', begun = false
-      const take = (piece: string) => { if (!piece.trim()) return; answer = answer ? `${answer}\n${piece}` : piece; handlers?.onAnswer?.(piece) }
+      const take = (piece: string) => {
+        if (!piece.trim()) return
+        answer = answer ? `${answer}\n${piece}` : piece
+        // A marker line in the piece names a file the script has already written: resolved now, carried with the piece.
+        if (/^[ \t]*:::\S+[ \t]+\S+/m.test(piece)) void blocksNamedIn(piece, cwd).then((blocks) => handlers?.onAnswer?.(piece, blocks)).catch(() => handlers?.onAnswer?.(piece))
+        else handlers?.onAnswer?.(piece)
+      }
       const prompt = `What the person is looking at:\n${context}\n\nTheir question: ${text}\n\ntoday: ${todayIn(opts.projectDir)}\nqid: ${o.qid}`
       const r = await session.run(prompt, { ...handlers, onEvent: (ev) => {
         if (ev.kind === 'message' && ev.text?.trim()) {
@@ -234,7 +251,7 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       await noteHarness()
       const markdown = (begun ? answer.trim() : (last || r.lastLines?.trim() || '')) || null
       if (markdown) await writeFile(join(dir, 'said.md'), markdown).catch(() => {})
-      return { markdown, blocks: markdown ? await blocksNamedIn(markdown, cwd) : [], queries: await queriesOf(o.qid), ms: Date.now() - t0 }
+      return { markdown, blocks: markdown ? await blocksNamedIn(markdown, cwd) : [], periods: periodsIn(markdown), queries: await queriesOf(o.qid), ms: Date.now() - t0 }
     },
   }
 }

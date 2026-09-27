@@ -50,7 +50,7 @@ export interface RunHandlers {
   onNarration?: (text: string) => void
   // THE ANSWER AS IT COMES. An agent's answer starts with a line `:::answer`; each piece of what it says from
   // there on is handed here as it arrives, so a surface can show it before the turn is over.
-  onAnswer?: (text: string) => void
+  onAnswer?: (text: string, blocks?: unknown[]) => void
   // TODO(usage): the event form of the usage interface — EVERY ICA harness should call this as it learns its
   // token/cost numbers (a long turn may report incrementally, e.g. per assistant message), so the engine can
   // stream live cost to the UI just like onEvent streams activity. Not implemented by the harnesses yet.
