@@ -449,153 +449,234 @@ function IndexView({ hub }: ViewProps) {
   )
 }
 
-// ── Composition graph (what each domain's agent knows, and who changed it) ─────
-// Domains, each with its parts and files by name and hash; a node's content with every change to it (who, why, from
-// what); the composed system prompt, now or as of a moment; and each session that is a domain with what has moved
-// since it was made. Read-only: the graph is changed through its CLI, never here.
+// ── Composition graph (what each agent knows, and who changed it) ─────────────
+// An explorer: on the left, a tree of agents with their sections and programs, then the graph's changes, questions and
+// sessions; on the right, one pane for whatever is picked — an agent's overview, a node's content and history, an
+// agent's whole system prompt, or a list. Read-only: the graph is changed through its CLI, never here.
+type CompPick =
+  | { kind: 'agent'; name: string }
+  | { kind: 'node'; name: string }
+  | { kind: 'prompt'; domain: string }
+  | { kind: 'changes' } | { kind: 'questions' } | { kind: 'sessions' }
+
+const COMP_CSS = `
+.cg{display:grid;grid-template-columns:272px minmax(0,1fr);gap:12px;align-items:start}
+.cg>*{min-width:0}
+.cg .tree{padding:10px 8px}
+.cg .tree .t-sec{font-size:10.5px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;padding:10px 8px 4px}
+.cg .tree .t-item{display:flex;align-items:center;gap:7px;width:100%;border:0;background:none;text-align:left;cursor:pointer;
+ padding:6px 8px;border-radius:7px;font-size:13px;color:var(--ink);min-width:0}
+.cg .tree .t-item:hover{background:#f4f5f9}
+.cg .tree .t-item.on{background:#eef0ff;color:#3d3aa6;font-weight:600}
+.cg .tree .t-item .t-txt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.cg .tree .t-item .t-n{font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
+.cg .tree .t-child{padding-left:26px;font-size:12.5px;color:var(--sub)}
+.cg .tree .t-caret{width:12px;color:var(--faint);font-size:10px;flex-shrink:0}
+.cg .pane{padding:16px 18px;min-width:0}
+.cg .pane h3{margin:0;font-size:16px}
+.cg .pane .sub{color:var(--sub);font-size:12.5px;margin-top:3px}
+.cg table{table-layout:fixed;width:100%}
+.cg td,.cg th{overflow:hidden;text-overflow:ellipsis}
+.cg td .wrap{white-space:normal;word-break:break-word}
+.cg code.src{max-height:none;white-space:pre-wrap;word-break:break-word}
+.cg .toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0}
+`
+let compCss = false
+function useCompCss() { useEffect(() => { if (compCss) return; compCss = true; const el = document.createElement('style'); el.textContent = COMP_CSS; document.head.appendChild(el) }, []) }
+
+const short = (h?: string | null, n = 8) => (h ? String(h).slice(0, n) : '—')
+const isoOf = (local: string) => (local ? new Date(local).toISOString() : undefined)
+const HashMove = ({ from, to }: { from?: string | null; to?: string | null }) =>
+  <span style={{ whiteSpace: 'nowrap' }}><span className="chip">{short(from, 7)}</span> → <span className="chip">{to ? short(to, 7) : 'removed'}</span></span>
+
 function CompositionView({ hub }: ViewProps) {
+  useCompCss()
   const { data, err, loading, reload } = useInspect(hub, 'composition', {}, 'composition')
-  const [pick, setPick] = useState<{ kind: 'node'; name: string } | { kind: 'compose'; domain: string } | null>(null)
-  const [asOf, setAsOf] = useState('')
+  const [pick, setPick] = useState<CompPick | null>(null)
+  const [open, setOpen] = useState<Record<string, boolean>>({})
   if (err) return <Err msg={err} retry={reload} />
   if (!data) return <Loading on={loading} />
   if (data.exists === false) return <div className="card"><div className="empty">This project has no composition graph yet. Import one with <code>composition-graph import knowledge/index.mts</code>.</div></div>
   const domains: any[] = data.domains ?? []
-  const changes: any[] = data.changes ?? []
-  const sessions: any[] = data.sessions ?? []
+  const current: CompPick = pick ?? (domains[0] ? { kind: 'agent', name: domains[0].name } : { kind: 'changes' })
+  const is = (p: CompPick) => JSON.stringify(p) === JSON.stringify(current)
+  const questionsCount = domains.reduce((n, d) => n + (d.asked?.length ?? 0), 0)
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 1fr) minmax(420px, 1.5fr)', gap: 12, alignItems: 'start' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div className="card" style={{ padding: '14px 16px' }}>
-          <div className="bar" style={{ marginBottom: 10 }}>
-            <strong>Composition graph</strong>
-            <span className="muted" style={{ fontSize: 12.5 }}>{data.counts?.domain ?? 0} domains · {data.counts?.part ?? 0} parts · {data.counts?.file ?? 0} files</span>
-            <button className="btn sm ghost" style={{ marginLeft: 'auto' }} onClick={reload}>Refresh</button>
-          </div>
-          {domains.map(d => (
-            <div key={d.name} className="facet" style={{ marginBottom: 10 }}>
-              <div className="bar">
-                <strong>{d.name}</strong><span className="chip">{String(d.hash).slice(0, 10)}</span>
-                <button className="btn sm" style={{ marginLeft: 'auto' }} onClick={() => setPick({ kind: 'compose', domain: d.name })}>System prompt</button>
-              </div>
-              {d.description && <div style={{ fontSize: 12.5, margin: '6px 0 2px' }}>{d.description}</div>}
-              <div className="muted" style={{ fontSize: 12, margin: '4px 0 8px' }}>covers {d.capabilities.length} screens{d.tools ? ` · tools: ${d.tools.join(', ')}` : ''}</div>
-              {d.intents?.length > 0 && <div className="axes" style={{ margin: '0 0 8px' }}>{d.intents.map((t: string) => <span key={t} className="chip">{t}</span>)}</div>}
-              <table><tbody>
+    <div className="cg">
+      <div className="card tree">
+        <div className="bar" style={{ padding: '2px 8px 6px' }}>
+          <strong style={{ fontSize: 13.5 }}>Composition graph</strong>
+          <button className="btn sm ghost" style={{ marginLeft: 'auto' }} onClick={reload}>Refresh</button>
+        </div>
+        <div className="t-sec">Agents</div>
+        {domains.map(d => {
+          const expanded = open[d.name] ?? false
+          return (
+            <div key={d.name}>
+              <button className={`t-item${is({ kind: 'agent', name: d.name }) ? ' on' : ''}`} onClick={() => { setPick({ kind: 'agent', name: d.name }); setOpen(o => ({ ...o, [d.name]: true })) }}>
+                <span className="t-caret" onClick={e => { e.stopPropagation(); setOpen(o => ({ ...o, [d.name]: !expanded })) }}>{expanded ? '▾' : '▸'}</span>
+                <span className="t-txt">{d.name}</span><span className="t-n">{d.asked?.length ?? 0}</span>
+              </button>
+              {expanded && <>
+                <button className={`t-item t-child${is({ kind: 'prompt', domain: d.name }) ? ' on' : ''}`} onClick={() => setPick({ kind: 'prompt', domain: d.name })}><span className="t-txt">System prompt</span></button>
                 {d.parts.map((p: any) => (
-                  <tr key={p.name} className={pick?.kind === 'node' && pick.name === p.name ? 'on' : ''} onClick={() => setPick({ kind: 'node', name: p.name })}>
-                    <td><span className="trunc">{p.title ?? p.name}</span><span className="muted" style={{ fontSize: 11.5 }}>{p.name}</span></td>
-                    <td className="num muted">{p.form} · {p.lines}</td><td className="num"><span className="chip">{String(p.hash ?? 'missing').slice(0, 10)}</span></td>
-                  </tr>))}
+                  <button key={p.name} className={`t-item t-child${is({ kind: 'node', name: p.name }) ? ' on' : ''}`} onClick={() => setPick({ kind: 'node', name: p.name })} title={p.name}>
+                    <span className="t-txt">{p.title ?? p.name}</span><span className="t-n">{p.lines}</span>
+                  </button>))}
                 {d.files.map((f: any) => (
-                  <tr key={f.name} className={pick?.kind === 'node' && pick.name === f.name ? 'on' : ''} onClick={() => setPick({ kind: 'node', name: f.name })}>
-                    <td><span className="trunc">{f.file ?? f.name}</span><span className="muted" style={{ fontSize: 11.5 }}>{f.name}</span></td>
-                    <td className="num muted">program · {bytes(f.bytes)}</td><td className="num"><span className="chip">{String(f.hash ?? 'missing').slice(0, 10)}</span></td>
-                  </tr>))}
-              </tbody></table>
-              {d.asked?.length > 0 && <>
-                <div className="sect">Questions it got</div>
-                <table><tbody>{d.asked.map((q: any, i: number) => (
-                  <tr key={i} style={{ cursor: 'default' }}>
-                    <td className="muted" style={{ whiteSpace: 'nowrap' }}>{when(q.at)}</td>
-                    <td><span className="clamp">{q.question}</span>{q.decided.length > 0 && <span className="muted" style={{ fontSize: 11.5 }}>by {q.decided.join(', ')}</span>}</td>
-                    <td className="num"><span className="tag" style={{ background: q.how === 'routed' ? '#eef0ff' : '#f2f3f5', color: q.how === 'routed' ? '#4340a0' : 'var(--sub)' }}>{q.how === 'routed' ? 'routed' : 'in its chat'}</span></td>
-                  </tr>))}</tbody></table>
+                  <button key={f.name} className={`t-item t-child${is({ kind: 'node', name: f.name }) ? ' on' : ''}`} onClick={() => setPick({ kind: 'node', name: f.name })} title={f.name}>
+                    <span className="t-txt">{f.file ?? f.name}</span><span className="t-n">program</span>
+                  </button>))}
               </>}
-            </div>
-          ))}
-        </div>
-        <div className="card" style={{ padding: '14px 16px' }}>
-          <div className="sect">Changes</div>
-          <table><thead><tr><th>When</th><th>Node</th><th>Change</th><th>By · why</th></tr></thead><tbody>
-            {changes.map(c => (
-              <tr key={c.id} onClick={() => setPick({ kind: 'node', name: c.name })}>
-                <td className="muted" style={{ whiteSpace: 'nowrap' }}>{when(c.at)}</td>
-                <td><span className="trunc">{c.name}</span></td>
-                <td style={{ whiteSpace: 'nowrap' }}><span className="chip">{String(c.fromHash ?? '—').slice(0, 7)}</span> → <span className="chip">{c.toHash ? String(c.toHash).slice(0, 7) : 'removed'}</span></td>
-                <td><span className="clamp">{c.by}{c.reason ? ` · ${c.reason}` : ''}{c.from ? ` · from ${c.from}` : ''}</span></td>
-              </tr>))}
-          </tbody></table>
-        </div>
-        <div className="card" style={{ padding: '14px 16px' }}>
-          <div className="sect">Sessions made from the graph</div>
-          {!sessions.length && <div className="empty">No session is a domain yet.</div>}
-          {!!sessions.length && <table><thead><tr><th>Session</th><th>Domain</th><th>Made</th><th>Moved since</th></tr></thead><tbody>
-            {sessions.map(x => (
-              <tr key={x.id} style={{ cursor: 'default' }}>
-                <td><span className="chip">{String(x.id).slice(0, 8)}</span></td><td>{x.domain}</td>
-                <td className="muted">{x.at ? when(Date.parse(x.at)) : '—'}</td>
-                <td>{!x.used ? <span className="muted">made before hashes were noted</span> : x.moved.length ? <span style={{ color: 'var(--bad)' }}>{x.moved.join(', ')}</span> : <span style={{ color: 'var(--ok)' }}>nothing</span>}</td>
-              </tr>))}
-          </tbody></table>}
-        </div>
+            </div>)
+        })}
+        <div className="t-sec">Graph</div>
+        <button className={`t-item${is({ kind: 'changes' }) ? ' on' : ''}`} onClick={() => setPick({ kind: 'changes' })}><span className="t-txt">Changes</span><span className="t-n">{data.changes?.length ?? 0}</span></button>
+        <button className={`t-item${is({ kind: 'questions' }) ? ' on' : ''}`} onClick={() => setPick({ kind: 'questions' })}><span className="t-txt">Questions</span><span className="t-n">{questionsCount}</span></button>
+        <button className={`t-item${is({ kind: 'sessions' }) ? ' on' : ''}`} onClick={() => setPick({ kind: 'sessions' })}><span className="t-txt">Sessions</span><span className="t-n">{data.sessions?.length ?? 0}</span></button>
       </div>
-      <div className="card" style={{ padding: '14px 16px', position: 'sticky', top: 12 }}>
-        <div className="bar" style={{ marginBottom: 10 }}>
-          <span className="muted" style={{ fontSize: 12.5 }}>As of</span>
-          <input className="input" type="datetime-local" value={asOf} onChange={e => setAsOf(e.target.value)} style={{ fontSize: 13, padding: '4px 8px' }} />
-          {asOf && <button className="btn sm ghost" onClick={() => setAsOf('')}>Now</button>}
-        </div>
-        {!pick && <div className="empty">Pick a part, a program or a domain's system prompt.</div>}
-        {pick?.kind === 'node' && <CompositionNode hub={hub} name={pick.name} asOf={asOf} />}
-        {pick?.kind === 'compose' && <CompositionPrompt hub={hub} domain={pick.domain} asOf={asOf} />}
+      <div className="card pane">
+        {current.kind === 'agent' && <CompAgent d={domains.find(x => x.name === current.name)} go={setPick} />}
+        {current.kind === 'node' && <CompNode hub={hub} name={current.name} />}
+        {current.kind === 'prompt' && <CompPrompt hub={hub} domain={current.domain} />}
+        {current.kind === 'changes' && <CompChanges changes={data.changes ?? []} go={setPick} />}
+        {current.kind === 'questions' && <CompQuestions domains={domains} />}
+        {current.kind === 'sessions' && <CompSessions sessions={data.sessions ?? []} />}
       </div>
     </div>
   )
 }
 
-const isoOf = (local: string) => (local ? new Date(local).toISOString() : undefined)
+function CompAgent({ d, go }: { d: any; go: (p: CompPick) => void }) {
+  if (!d) return <div className="empty">This agent is no longer in the graph.</div>
+  return (
+    <div>
+      <div className="bar"><h3>{d.name}</h3><span className="chip">{short(d.hash, 12)}</span>
+        <button className="btn sm" style={{ marginLeft: 'auto' }} onClick={() => go({ kind: 'prompt', domain: d.name })}>System prompt</button></div>
+      {d.description && <div className="sub" style={{ fontSize: 13.5, color: 'var(--ink)', marginTop: 8 }}>{d.description}</div>}
+      <dl className="kv" style={{ marginTop: 12 }}>
+        <dt>Tools</dt><dd>{d.tools?.join(', ') || 'all'}</dd>
+        <dt>Screens</dt><dd>{d.capabilities.join(', ')}</dd>
+      </dl>
+      {d.intents?.length > 0 && <><div className="sect">Phrases it serves</div><div className="axes" style={{ marginTop: 0 }}>{d.intents.map((t: string) => <span key={t} className="chip">{t}</span>)}</div></>}
+      <div className="sect">Sections and programs</div>
+      <table><colgroup><col /><col style={{ width: 150 }} /><col style={{ width: 110 }} /></colgroup><tbody>
+        {d.parts.map((p: any) => (
+          <tr key={p.name} onClick={() => go({ kind: 'node', name: p.name })}>
+            <td><div className="wrap">{p.title ?? p.name}</div><div className="muted" style={{ fontSize: 11.5 }}>{p.name}</div></td>
+            <td className="muted">{p.form} · {p.lines} lines</td><td className="num"><span className="chip">{short(p.hash)}</span></td>
+          </tr>))}
+        {d.files.map((f: any) => (
+          <tr key={f.name} onClick={() => go({ kind: 'node', name: f.name })}>
+            <td><div className="wrap">{f.file ?? f.name}</div><div className="muted" style={{ fontSize: 11.5 }}>{f.name}</div></td>
+            <td className="muted">program · {bytes(f.bytes)}</td><td className="num"><span className="chip">{short(f.hash)}</span></td>
+          </tr>))}
+      </tbody></table>
+      <div className="sect">Questions it got</div>
+      {!d.asked?.length ? <div className="empty">None yet.</div> : <CompAskedTable rows={d.asked} />}
+    </div>
+  )
+}
 
-function CompositionNode({ hub, name, asOf }: { hub: Hub; name: string; asOf: string }) {
+function CompAskedTable({ rows, withAgent }: { rows: any[]; withAgent?: boolean }) {
+  return (
+    <table><colgroup><col style={{ width: 92 }} /><col />{withAgent && <col style={{ width: 150 }} />}<col style={{ width: 96 }} /></colgroup>
+      <thead><tr><th>When</th><th>Question</th>{withAgent && <th>Agent</th>}<th>How</th></tr></thead>
+      <tbody>{rows.map((q: any, i: number) => (
+        <tr key={i} style={{ cursor: 'default' }}>
+          <td className="muted">{when(q.at)}</td>
+          <td><div className="wrap">{q.question}</div>{q.decided?.length > 0 && <div className="muted" style={{ fontSize: 11.5 }}>decided by: {q.decided.join(', ')}</div>}</td>
+          {withAgent && <td className="wrap">{q.agent}</td>}
+          <td><span className="tag" style={{ background: q.how === 'routed' ? '#eef0ff' : '#f2f3f5', color: q.how === 'routed' ? '#4340a0' : 'var(--sub)' }}>{q.how === 'routed' ? 'routed' : 'in its chat'}</span></td>
+        </tr>))}</tbody>
+    </table>)
+}
+
+function CompQuestions({ domains }: { domains: any[] }) {
+  const rows = domains.flatMap(d => (d.asked ?? []).map((q: any) => ({ ...q, agent: d.name }))).sort((a, b) => b.at - a.at)
+  return (<div><h3>Questions</h3><div className="sub">Every question, the agent it went to, and whether its words routed it or it was asked in a chat already given an agent.</div>
+    <div style={{ marginTop: 12 }}>{rows.length ? <CompAskedTable rows={rows} withAgent /> : <div className="empty">None yet.</div>}</div></div>)
+}
+
+function CompChanges({ changes, go }: { changes: any[]; go: (p: CompPick) => void }) {
+  return (<div><h3>Changes</h3><div className="sub">Every edit to the graph: which node, from which version to which, by whom, why and from what.</div>
+    <table style={{ marginTop: 12 }}><colgroup><col style={{ width: 92 }} /><col style={{ width: '32%' }} /><col style={{ width: 170 }} /><col /></colgroup>
+      <thead><tr><th>When</th><th>Node</th><th>Version</th><th>By · why · from</th></tr></thead>
+      <tbody>{changes.map(c => (
+        <tr key={c.id} onClick={() => go({ kind: 'node', name: c.name })}>
+          <td className="muted">{when(c.at)}</td>
+          <td><div className="wrap">{c.name}</div><div className="muted" style={{ fontSize: 11.5 }}>{c.kind}</div></td>
+          <td><HashMove from={c.fromHash} to={c.toHash} /></td>
+          <td><div className="wrap"><strong style={{ fontWeight: 600 }}>{c.by}</strong>{c.reason ? ` · ${c.reason}` : ''}{c.from ? <span className="muted"> · from {c.from}</span> : null}</div></td>
+        </tr>))}</tbody>
+    </table></div>)
+}
+
+function CompSessions({ sessions }: { sessions: any[] }) {
+  return (<div><h3>Sessions</h3><div className="sub">Each chat made from the graph, the agent it is, and which of its pieces have changed in the graph since it was made.</div>
+    {!sessions.length ? <div className="empty">No chat has been given an agent yet.</div> :
+      <table style={{ marginTop: 12 }}><colgroup><col style={{ width: 100 }} /><col style={{ width: 180 }} /><col style={{ width: 92 }} /><col /></colgroup>
+        <thead><tr><th>Chat</th><th>Agent</th><th>Made</th><th>Changed since</th></tr></thead>
+        <tbody>{sessions.map(x => (
+          <tr key={x.id} style={{ cursor: 'default' }}>
+            <td><span className="chip">{String(x.id).slice(0, 8)}</span></td><td className="wrap">{x.domain}</td>
+            <td className="muted">{x.at ? when(Date.parse(x.at)) : '—'}</td>
+            <td><div className="wrap">{!x.used ? <span className="muted">made before versions were noted</span> : x.moved.length ? <span style={{ color: 'var(--bad)' }}>{x.moved.join(', ')}</span> : <span style={{ color: 'var(--ok)' }}>nothing</span>}</div></td>
+          </tr>))}</tbody>
+      </table>}
+  </div>)
+}
+
+function AsOf({ value, set }: { value: string; set: (v: string) => void }) {
+  return (<div className="toolbar"><span className="muted" style={{ fontSize: 12.5 }}>As of</span>
+    <input className="input" type="datetime-local" value={value} onChange={e => set(e.target.value)} style={{ fontSize: 13, padding: '4px 8px', width: 'auto' }} />
+    {value ? <button className="btn sm ghost" onClick={() => set('')}>Now</button> : <span className="muted" style={{ fontSize: 12 }}>now</span>}</div>)
+}
+
+function CompNode({ hub, name }: { hub: Hub; name: string }) {
+  const [asOf, setAsOf] = useState('')
   const { data, err, loading, reload } = useInspect(hub, 'compositionNode', { name, asOf: isoOf(asOf) }, `cnode|${name}|${asOf}`)
   if (err) return <Err msg={err} retry={reload} />
   if (!data) return <Loading on={loading} />
-  const n = data.node
-  const history: any[] = data.history ?? []
-  const body = n?.body
+  const n = data.node, body = n?.body
   const text = !body ? '' : n.kind === 'file' ? String(body.text ?? '')
     : body.form === 'text' ? String(body.text ?? '')
     : body.form === 'worked' ? (body.items ?? []).map((e: any) => `## ${e.question}\n${(e.steps ?? []).map((st: string, i: number) => `${i + 1}. ${st}`).join('\n')}`).join('\n\n')
     : (body.items ?? []).map((l: string, i: number) => body.form === 'numbered' ? `${i + 1}. ${l}` : `- ${l}`).join('\n')
+  const history: any[] = (data.history ?? []).slice().reverse()
   return (
     <div>
-      <div className="bar" style={{ marginBottom: 8 }}>
-        <strong>{body?.title ?? body?.name ?? name}</strong>
-        {n && <span className="chip">{String(n.hash).slice(0, 12)}</span>}
-        {n && <span className="muted" style={{ fontSize: 12 }}>{n.kind}{body?.form ? ` · ${body.form}` : ''}</span>}
-      </div>
-      <dl className="kv" style={{ marginBottom: 10 }}>
-        <dt>Name</dt><dd><code>{name}</code></dd>
-        <dt>Named by</dt><dd>{(data.usedBy ?? []).join(', ') || '—'}</dd>
-      </dl>
-      {!n && <div className="empty">{asOf ? 'This node did not exist at that moment.' : 'This node has been removed.'}</div>}
-      {n && <code className="src">{text}</code>}
+      <div className="bar"><h3 style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{body?.title ?? body?.name ?? name}</h3>{n && <span className="chip">{short(n.hash, 12)}</span>}</div>
+      <div className="sub">{name}{n ? ` · ${n.kind}${body?.form ? ` · ${body.form}` : ''}` : ''} · named by {(data.usedBy ?? []).join(', ') || 'nothing'}</div>
+      <AsOf value={asOf} set={setAsOf} />
+      {!n ? <div className="empty">{asOf ? 'This node did not exist at that moment.' : 'This node has been removed.'}</div> : <code className="src">{text}</code>}
       <div className="sect">History</div>
-      <table><thead><tr><th>When</th><th>Change</th><th>By</th><th>Why · from</th></tr></thead><tbody>
-        {history.slice().reverse().map(c => (
+      <table><colgroup><col style={{ width: 150 }} /><col style={{ width: 170 }} /><col style={{ width: 90 }} /><col /></colgroup>
+        <thead><tr><th>When</th><th>Version</th><th>By</th><th>Why · from</th></tr></thead>
+        <tbody>{history.map(c => (
           <tr key={c.id} style={{ cursor: 'default' }}>
-            <td className="muted" style={{ whiteSpace: 'nowrap' }}>{new Date(c.at).toLocaleString()}</td>
-            <td style={{ whiteSpace: 'nowrap' }}><span className="chip">{String(c.fromHash ?? '—').slice(0, 7)}</span> → <span className="chip">{c.toHash ? String(c.toHash).slice(0, 7) : 'removed'}</span></td>
-            <td>{c.by}</td><td><span className="clamp">{c.reason ?? '—'}{c.from ? ` · from ${c.from}` : ''}</span></td>
-          </tr>))}
-      </tbody></table>
+            <td className="muted">{new Date(c.at).toLocaleString()}</td><td><HashMove from={c.fromHash} to={c.toHash} /></td>
+            <td>{c.by}</td><td><div className="wrap">{c.reason ?? '—'}{c.from ? <span className="muted"> · from {c.from}</span> : null}</div></td>
+          </tr>))}</tbody>
+      </table>
     </div>
   )
 }
 
-function CompositionPrompt({ hub, domain, asOf }: { hub: Hub; domain: string; asOf: string }) {
+function CompPrompt({ hub, domain }: { hub: Hub; domain: string }) {
+  const [asOf, setAsOf] = useState('')
   const { data, err, loading, reload } = useInspect(hub, 'compositionCompose', { domain, asOf: isoOf(asOf) }, `ccompose|${domain}|${asOf}`)
   if (err) return <Err msg={err} retry={reload} />
   if (!data) return <Loading on={loading} />
   const used = Object.entries(data.used ?? {}) as [string, string][]
   return (
     <div>
-      <div className="bar" style={{ marginBottom: 8 }}>
-        <strong>{domain}</strong><span className="muted" style={{ fontSize: 12 }}>the system prompt its agent gets · {bytes(data.bytes)}{data.tools ? ` · plus the usage of: ${data.tools.join(', ')}` : ''}</span>
-      </div>
+      <div className="bar"><h3>{domain} · system prompt</h3></div>
+      <div className="sub">What this agent is given, {bytes(data.bytes)}{data.tools ? `, plus the usage of: ${data.tools.join(', ')}` : ''}.</div>
+      <AsOf value={asOf} set={setAsOf} />
       <code className="src">{data.text}</code>
       <div className="sect">Composed from</div>
-      <table><tbody>{used.map(([n, h]) => <tr key={n} style={{ cursor: 'default' }}><td><span className="trunc">{n}</span></td><td className="num"><span className="chip">{h.slice(0, 12)}</span></td></tr>)}</tbody></table>
+      <table><colgroup><col /><col style={{ width: 120 }} /></colgroup><tbody>{used.map(([n, h]) => <tr key={n} style={{ cursor: 'default' }}><td className="wrap">{n}</td><td className="num"><span className="chip">{short(h, 10)}</span></td></tr>)}</tbody></table>
     </div>
   )
 }
