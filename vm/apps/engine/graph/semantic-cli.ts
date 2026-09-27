@@ -36,6 +36,7 @@ const TOOLS: Record<string, string> = { match: 'match', look: 'look', ask: 'ask'
 const takeFlag = (name: string) => (argv.includes(name) ? (argv.splice(argv.indexOf(name), 1), true) : false)
 const asJson = takeFlag('--json') || process.env.SEMANTIC_TOOL_FORMAT === 'json'
 const asText = takeFlag('--text')
+const raw = takeFlag('--raw')
 const [tool, ...args] = argv
 const command = TOOLS[tool] ?? ''
 
@@ -260,8 +261,12 @@ if (command === 'match') {
   const started = Date.now()
   const a = await graph.ask(q, { model: MODEL, ...(sessionId ? { sessionId } : {}) })
   const took = { seconds: Math.round((Date.now() - started) / 100) / 10 }
+  // WHAT WAS SENT TO EACH SOURCE, when asked for: the call's statements, per fact, in the source's own language — a
+  // base an agent composes on when the graph stops short of a question, so what is known is reused and only the
+  // remainder is written anew.
+  const sent = raw ? (graph.store.getCall(a.callId)?.statements ?? []).map((st: any) => ({ fact: st.fact, source: st.source, sent: st.sql, params: st.params, rows: st.rows })) : undefined
   // Every row, whole: what a tool found is worth having; the tool wrapper keeps a long answer on disk and shows its start.
-  out(a.ok ? (({ columns, rows, notes }) => ({ columns, rows, total: rows.length, notes, took }))(tableOf(a.result))
+  out(a.ok ? (({ columns, rows, notes }) => ({ columns, rows, total: rows.length, notes, ...(sent ? { sent } : {}), took }))(tableOf(a.result))
     : { refused: { ...(a.rule ? { rule: a.rule } : {}), reason: a.reason, ...((a as any).choices ? { choices: (a as any).choices } : {}) }, took })
 } else if (command === 'program') {
   const [file = 'program.mjs', paramsText] = args

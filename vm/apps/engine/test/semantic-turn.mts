@@ -71,7 +71,7 @@ for (const [i, question] of questions.entries()) {
   const steps = g.store.steps(sid)
   const last = steps.filter((s) => s.callId).at(-1)
   const call = last?.callId ? g.store.getCall(last.callId) : null
-  console.log(`  ${r.escalate ? `escalated: ${r.escalate.reason}` : r.explained ? 'explained' : `step ${r.step}`} · ${((Date.now() - t0) / 1000).toFixed(0)}s`)
+  console.log(`  ${r.unanswered ? `unanswered: ${r.unanswered.reason}` : r.explained ? 'explained' : `step ${r.step}`} · ${((Date.now() - t0) / 1000).toFixed(0)}s`)
   if (r.explained) console.log((await import('node:fs')).readFileSync(join(composer.cwd, 'out', qid, 'explain.md'), 'utf8'))
   if (call) { console.log(`  question ${JSON.stringify(call.question)}`); const o = call.output as any; console.log(`  answer ${JSON.stringify(o?.narration ?? o?.rows)}`); if (o?.views) console.log(`  views ${JSON.stringify(o.views)} · next ${JSON.stringify(o.nextSteps)}`) }
   void MODEL

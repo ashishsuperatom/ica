@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { check } from '@superatom/semantic-graph'
 import { MODEL } from './graph/semantic.js'
-import { createReader, type Reader } from './agents/reader/index.js'
+import { createComposer, type Composer, type QueryRecord } from './agents/composer/index.js'
 import { createNarrator } from './agents/narrator/index.js'
 import type { AgentEvent } from './ica/session.js'
 
@@ -19,17 +19,24 @@ export interface AppSeamDeps {
   getSemantic: () => Promise<any>
   /** Reply on the wire: the wire decides how a large message travels. */
   send: (to: any, msg: Record<string, unknown>) => void
-  /** The workspace root the readers' thread directories live under. */
+  /** The workspace root the threads' directories live under. */
   workspaceRoot: string
   /** The shared workspace the narrator runs in — the same one the composer's narration uses. */
   narratorCwd: string
 }
 
-export interface Said { markdown: string | null; calls: Array<{ id: string; canonical: string | null; ms: number; at: number; refused: boolean; error: string | null }>; ms: number }
+export interface Said {
+  markdown: string | null
+  /** The graph calls the answer was read from. */
+  calls: Array<{ id: string; canonical: string | null; ms: number; at: number; refused: boolean; error: string | null }>
+  /** The queries the composer sent to sources itself, outside the graph: the parts that did not stand on the model. */
+  queries: QueryRecord[]
+  ms: number
+}
 
-/** A reader's turn is capped: a question that takes longer than this is not being answered, it is being wandered. */
+/** A turn is capped: a question that takes longer than this is not being answered, it is being wandered. */
 const MAX_SAY_MS = 5 * 60_000
-/** Readers idle this long are let go; the thread directory and its data session stay, so a later question resumes there. */
+/** Composers idle this long are let go; the thread directory and its data session stay, so a later question resumes there. */
 const IDLE_MS = 30 * 60_000
 
 export function createAppSeam(d: AppSeamDeps) {
@@ -43,35 +50,34 @@ export function createAppSeam(d: AppSeamDeps) {
   }
   if (present()) console.log(`[app] this project carries an application (${file}); app:* payloads go to it`)
 
-  // ONE READER PER THREAD, like the composer's one per conversation: the thread id is the reader's session, so a
-  // follow-up lands where the earlier question was answered. Idle readers are let go; their directories stay.
-  const readers = new Map<string, { reader: Promise<Reader>; lastUsed: number }>()
-  const readerFor = (sid: string) => {
-    let e = readers.get(sid)
-    if (!e) { e = { reader: createReader({ root: d.workspaceRoot, projectId: d.project, managerUrl: d.datasource, projectDir: d.projectDir, sessionId: sid }), lastUsed: Date.now() }; readers.set(sid, e) }
+  // ONE COMPOSER PER THREAD, as the chat has one per conversation: the thread id is its session, so a follow-up
+  // lands where the earlier question was answered. Idle composers are let go; their directories stay.
+  const composers = new Map<string, { composer: Promise<Composer>; lastUsed: number }>()
+  const composerFor = (sid: string) => {
+    let e = composers.get(sid)
+    if (!e) { e = { composer: createComposer({ root: d.workspaceRoot, projectId: d.project, managerUrl: d.datasource, projectDir: d.projectDir, sessionId: sid }), lastUsed: Date.now() }; composers.set(sid, e) }
     e.lastUsed = Date.now()
-    return e.reader
+    return e.composer
   }
-  setInterval(() => { const now = Date.now(); for (const [sid, e] of readers) if (now - e.lastUsed > IDLE_MS) { readers.delete(sid); e.reader.then((r) => { try { r.session.stop() } catch { /* gone */ } }).catch(() => {}) } }, 60_000).unref()
+  setInterval(() => { const now = Date.now(); for (const [sid, e] of composers) if (now - e.lastUsed > IDLE_MS) { composers.delete(sid); e.composer.then((c) => { try { c.session.stop() } catch { /* gone */ } }).catch(() => {}) } }, 60_000).unref()
 
-  /** A question in prose, asked from a screen of the application: the reader of that thread answers it. While it
+  /** A question in prose, asked from a screen of the application: the composer of that thread answers it. While it
    *  works, what it does goes back as beats — to the asking page, which shows the last line and keeps waiting, and to
-   *  the project's agent log as a `reader` lane, so the work can be watched where every agent's work is watched. */
+   *  the project's agent log on the composer's lane, so the work can be watched where every agent's work is watched. */
   async function say(text: string, context: string, o: { qid: string; threadId: string; reqId?: string; from?: any }): Promise<Said> {
     const t0 = Date.now()
-    const reader = await readerFor(o.threadId)
-    // PROGRESS GOES OUT EXACTLY AS THE COMPOSER'S DOES. The raw work — output and events — travels on the agent
-    // log channel under the `reader` lane, for whoever watches agents work. What a person reads while waiting is
+    const composer = await composerFor(o.threadId)
+    // PROGRESS GOES OUT EXACTLY AS A CHAT TURN'S DOES. The raw work — output and events — travels on the agent
+    // log channel under the composer's lane, for whoever watches agents work. What a person reads while waiting is
     // the narrator's: every few seconds it turns the activity since the last beat into one line, sent as
     // `narration` to the page that asked (with the request id, so the page knows which reading it belongs to) and
     // to the owner's narration channel, which survives a reconnect.
-    const log = (frame: Record<string, unknown>) => d.send({ type: 'log', channel: 'composer-log' }, { ...frame, lane: 'reader', qid: o.qid, sid: o.threadId, agent: 'reader' })
+    const log = (frame: Record<string, unknown>) => d.send({ type: 'log', channel: 'composer-log' }, { ...frame, lane: 'composer', qid: o.qid, sid: o.threadId, agent: 'composer' })
     const beat = (text: string) => {
       const frame = { t: 'narration', text, qid: o.qid, sid: o.threadId, reqId: o.reqId }
       if (o.from) d.send(o.from, frame)
       d.send({ type: 'log', channel: 'narration' }, frame)
     }
-    log({ t: 'agent:hello', label: 'Reader', hue: '#2f7d5b', streamKind: 'events', pty: false, interactive: false, controls: [], scope: 'project', harness: reader.session.kind === 'pty' ? 'claude-code-pty' : 'pi', desc: 'Answers questions typed in the project\'s application, in prose, from the graph alone.' })
     log({ t: 'agent:event', ev: { kind: 'user', id: o.qid, text, done: true } })
     beat('Looking into your question…')
     const narrator = createNarrator({ cwd: d.narratorCwd })
@@ -92,12 +98,12 @@ export function createAppSeam(d: AppSeamDeps) {
     }
     let timer: ReturnType<typeof setTimeout> | undefined
     const said = await Promise.race([
-      reader.say(text, context, handlers, { qid: o.qid }).finally(() => { clearInterval(narration); try { narrator.stop() } catch { /* best-effort */ } }),
-      new Promise<Said>((res) => { timer = setTimeout(() => { try { reader.session.stop() } catch { /* best effort */ }; res({ markdown: null, calls: [], ms: Date.now() - t0 }) }, MAX_SAY_MS) }),
+      composer.say(text, context, handlers, { qid: o.qid }).finally(() => { clearInterval(narration); try { narrator.stop() } catch { /* best-effort */ } }),
+      new Promise<Said>((res) => { timer = setTimeout(() => { try { composer.session.stop() } catch { /* best effort */ }; res({ markdown: null, calls: [], queries: [], ms: Date.now() - t0 }) }, MAX_SAY_MS) }),
     ])
     if (timer) clearTimeout(timer)
     const sg = await d.getSemantic()
-    return { markdown: said.markdown, calls: sg.store.callsSince(o.threadId, t0), ms: Date.now() - t0 }
+    return { markdown: said.markdown, calls: sg.store.callsSince(o.threadId, t0), queries: said.queries ?? [], ms: Date.now() - t0 }
   }
 
   async function handle(payload: any, from: any) {

@@ -1,7 +1,7 @@
 // THE ANALYST — takes the questions a conversation could not answer from the semantic graph.
 //
 // One analyst for the project, in the shared workspace, with the semantic graph's tools and the data sources'. A
-// question reaches it when the composer escalated. It answers with a program on the graph when the graph holds what the
+// question reaches it on its own timer, never from the composer. It answers with a program on the graph when the graph holds what the
 // question needs in a way the composer did not find; otherwise it says what the graph is missing and where that is in
 // the data, so it can be added. Programs read only the graph; the data tools are for understanding.
 

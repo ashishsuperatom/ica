@@ -51,8 +51,9 @@ const tool = async (name: string, ...args: string[]) => {
 
 const tools = execFileSync('ls', [cwd], { encoding: 'utf8' }).split('\n').filter(Boolean)
 console.log('tools:', tools.join(' '))
-assert.ok([...Object.keys({'match':1,'look':1,'ask':1,'run-program':1,'commit':1,'trace':1}), 'escalate'].every((t) => tools.includes(t)))
-assert.ok(!tools.includes('define') && !tools.includes('query'))
+assert.ok(['match', 'look', 'ask', 'run-program', 'commit', 'trace', 'find-schema', 'sources', 'query', 'introspect', 'resolve'].every((t) => tools.includes(t)))
+assert.ok(!tools.includes('escalate'))
+assert.ok(!tools.includes('define') && !tools.includes('semantic-graph'))
 const terms = await tool('match', 'How many hours did each branch work in September and October 2026?')
 console.log('resolve-terms:', terms.replace(/\s+/g, ' ').slice(0, 200))
 assert.match(terms, /september and october 2026\s+span\s+2026-09-01 to 2026-10-31\s+\{"span": \{"from": "2026-09-01", "through": "2026-10-31"\}\}/)

@@ -514,7 +514,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     }
     let done = await capped(composer.ask(asked, handlers, { qid, sessionId: sid }), () => {
       try { (composer as any).session?.reset?.() } catch { /* best-effort */ }
-      return { escalate: { reason: 'the composer did not finish in time' }, ms: Date.now() - t0 }
+      return { unanswered: { reason: 'the composer did not finish in time' }, ms: Date.now() - t0 }
     })
     // NO ESCALATION. The composer answers with what the graph holds or says plainly that it cannot; nothing is
     // handed to another agent behind the person's back. The analyst has its own work, on its own timer.
@@ -528,7 +528,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       return
     }
     if (!done.step) {
-      const why = done.escalate?.reason ?? 'no step was applied'
+      const why = done.unanswered?.reason ?? 'no step was applied'
       emit(reply, { t: 'session:step', sid, qid, error: `This question was not answered: ${why}`, timing })
       tellSurfaces(reply, channel, sid, qid, timing, { status: 'cannot_answer', answer: `This question was not answered: ${why}` })
       return

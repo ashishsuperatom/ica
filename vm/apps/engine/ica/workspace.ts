@@ -48,7 +48,7 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
   // it the way the engine does (ENGINE_PROJECT_DIR, else the project home) when its caller does not say.
   const projectDir = s.projectDir ?? process.env.ENGINE_PROJECT_DIR ?? projectHome
   const conversation = s.tools === 'conversation'
-  for (const sub of conversation ? ['', 'out', '.tools'] : ['', 'data', 'grounding', 'out', '.tools']) await mkdir(join(dir, sub), { recursive: true })
+  for (const sub of ['', 'data', 'grounding', 'out', '.tools']) await mkdir(join(dir, sub), { recursive: true })
   await mkdir(dbDir, { recursive: true })
 
   // @superatom/* must resolve from the project home for the data seams below. State lives outside the repository
@@ -90,7 +90,7 @@ rows — is given as JSON, and --json asks for that where both make sense. A lon
 its beginning shown, with where the rest is: take what you need from it with grep or jq rather than reading it all.
 `)
 
-  if (!conversation) await writeFile(join(dir, 'data', 'query.mjs'),
+  await writeFile(join(dir, 'data', 'query.mjs'),
 `// The data seam. You never see databases, ports, dialects, or credentials — you call
 // query(dataSourceId, query, params) — the manager runs the query against the source. There is ONE endpoint: the datasource-manager, which routes
 // by id to the right bridge; the bridge binds @name params in its own dialect and runs the query.
@@ -118,7 +118,7 @@ export async function sources() {   // list data sources + their kind/dialect
 }
 `)
 
-  if (!conversation) await writeFile(join(dir, 'data', 'introspect.mjs'),
+  await writeFile(join(dir, 'data', 'introspect.mjs'),
 `// Introspection helpers over the data seam — DIALECT-SPECIFIC, resolved per source automatically.
 // They hide the SQL, NEVER the DATA: every helper returns raw evidence (values, distributions,
 // mismatches, sample rows) so YOU can catch bad data — they never hand you a black-box verdict.
@@ -140,7 +140,7 @@ export async function forSource(id) {
 }
 `)
 
-  if (!conversation) await writeFile(join(dir, 'grounding', 'grounding.mjs'),
+  await writeFile(join(dir, 'grounding', 'grounding.mjs'),
 `// The GROUNDING seam. Grounding turns a fuzzy human reference — a name, a place, an id — into concrete
 // structured ids, using indexes built per-project FROM this project's OWN data (nothing dataset-specific is
 // assumed; entity types, hierarchies and value patterns are all discovered here and stored). The grounding
@@ -202,19 +202,6 @@ const r = spawnSync('tsx', [${JSON.stringify(fileURLToPath(new URL('../graph/int
 process.exit(r.status ?? 1)
 `
   const drivers: Record<string, string> = {
-    escalate: `// Hand this question to the analyst and stop.
-import { readFile, mkdir, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
-const HOME = ${JSON.stringify(dir)}
-const reason = process.argv.slice(2).join(' ').trim()
-if (!reason) { console.error('usage: ./escalate "<what is blocking you>"'); process.exit(1) }
-const qid = (await readFile(join(HOME, '.turn'), 'utf8').catch(() => '')).trim()
-if (!qid) { console.error('there is no turn in progress here'); process.exit(1) }
-await mkdir(join(HOME, 'out', qid), { recursive: true })
-await writeFile(join(HOME, 'out', qid, 'escalate.json'), JSON.stringify({ reason }, null, 2))
-console.log('escalated')
-`,
-
     'find-schema': `// Datasource index. "<term>" = matching fields across ALL sources (SOURCE.CONTAINER.FIELD : type). Search by field/table name, by type (date/number), or by what a column MEANS. --source <S> filters to one source; --full adds PK/nullable/references.
 import { DataSourceIndex, searchDataSource } from '@superatom/datasource-index'
 const store = new DataSourceIndex(${JSON.stringify(join(dbDir, 'datasource-index.sqlite'))})
@@ -227,12 +214,21 @@ const q = args.filter((a, i) => a !== '--full' && a !== '--source' && i !== skip
 if (!q) { console.log(JSON.stringify({ hint: 'find-schema "<term>" [--source <SOURCE>] [--full] — search every datasource for a field/table by name, type, or description' })); process.exit(0) }
 const r = searchDataSource(store, q, { source, limit: full ? 40 : 60 })
 const view = (e) => full ? e : (e.key + ' : ' + (e.type || '?') + (e.isKey ? ' [PK]' : '') + (e.references ? (' → ' + e.references) : ''))
+// THE SOURCES COME FIRST. A field is written against a source, in that source's own language, so the sources the
+// hits belong to are said before the hits: which they are, what kind, and what the manager says about each.
+const MANAGER = process.env.DATASOURCE_URL ?? ${JSON.stringify(managerUrl)}
+const known = await fetch(MANAGER + '/sources').then((x) => x.json()).then((b) => b.sources ?? []).catch(() => [])
+const sourcesMatched = Object.keys(r.bySource).map((id) => {
+  const k = known.find((x) => x.id === id) ?? {}
+  return { source: id, kind: k.kind, dialect: k.dialect, fields: r.bySource[id], about: k.description }
+})
 // SAY WHAT WAS NOT SHOWN. This returns a bounded slice, and a bare array of six fields reads as "there are
 // six". That is not hypothetical: a search for "customer" showed 6 fields of one source out of 324, and the
 // agent concluded that source held almost no customer data. The count and the per-source split make a slice
 // recognisable as one, and point at the flag that narrows it.
 const spread = Object.entries(r.bySource).map(([s, n]) => s + ':' + n).join(' · ')
 console.log(JSON.stringify({
+  sources: sourcesMatched,
   fields: r.entries.map(view),
   shown: r.shown,
   matched: r.matched,
@@ -247,10 +243,23 @@ import { sources } from ${JSON.stringify(join(dir, 'data', 'query.mjs'))}
 console.log(JSON.stringify(await sources(), null, 2))
 `,
     'query': `// Run a query against a source. Run: ./query "<source>" "<query>". Prints JSON rows.
+// What was sent is recorded with the turn (out/<qid>/queries.jsonl): a query of the agent's own is a part of the
+// answer that did not stand on the model, for the answer to say so and for the modeller to read later.
 import { query } from ${JSON.stringify(join(dir, 'data', 'query.mjs'))}
+import { readFile, appendFile, mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
+const HOME = ${JSON.stringify(dir)}
 const [src, ...rest] = process.argv.slice(2)
 if (!src || !rest.length) { console.error('usage: ./query "<source>" "<query>"  (list sources with ./sources)'); process.exit(1) }
-console.log(JSON.stringify(await query(src, rest.join(' ')), null, 2))
+const text = rest.join(' ')
+const qid = (await readFile(join(HOME, '.turn'), 'utf8').catch(() => '')).trim()
+const record = async (r) => { if (!qid) return; await mkdir(join(HOME, 'out', qid), { recursive: true }); await appendFile(join(HOME, 'out', qid, 'queries.jsonl'), JSON.stringify({ source: src, query: text, at: Date.now(), ...r }) + '\\n') }
+const t0 = Date.now()
+try {
+  const rows = await query(src, text)
+  await record({ rows: rows.length, ms: Date.now() - t0 })
+  console.log(JSON.stringify(rows, null, 2))
+} catch (e) { await record({ rows: 0, ms: Date.now() - t0, error: String(e && e.message || e) }); throw e }
 `,
     'introspect': `// Inspect data schema/evidence. Run ONE of:
 //   ./introspect "<source>" tables
@@ -279,18 +288,15 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
 `,
   }
   const usages: Record<string, string> = {
-    escalate: conversation
-      ? 'escalate "<what is blocking you>"   → hand this question to the analyst and stop.'
-      : 'escalate "<what the graph is missing>"   → stop, telling the person what the graph does not hold yet and where in the data it is.',
-    'find-schema':  'find-schema "<term>" [--source <SOURCE>] [--full]   → search ALL datasources for a field/table by name, type, or description (SOURCE.TABLE.COLUMN : type); --source filters to one; --full adds PK/nullable/references',
+    'find-schema':  'find-schema "<term>" [--source <SOURCE>] [--full]   → search ALL datasources for a field/table by name, type, or description: first the sources the hits belong to (kind, dialect, what each is), then the fields (SOURCE.TABLE.COLUMN : type); --source filters to one; --full adds PK/nullable/references',
     'sources':      'sources   → every data source with its kind + dialect (JSON)',
     'query':        'query "<source>" "<query>"   → run a query against a source → JSON rows   (list sources: ./sources)',
     'introspect':   'introspect "<source>" <cmd>   where <cmd> = tables | columns "<table>" | sample "<table>" [n] | profile "<table>" "<column>" | verify-join "<fromT>" "<fromCol>" "<toT>" "<toCol>"',
     'resolve':      'resolve "<text>"   → resolve a fuzzy name/value to concrete ids (JSON)',
   }
-  // A conversation has the semantic graph and hands off with ./escalate; the analyst has the graph and the data; the
-  // connector and grounding agents have the data.
-  if (conversation) for (const name of Object.keys(drivers)) delete drivers[name]   // a conversation has no hand-off: there is no escalation
+  // Every workspace has the graph and the data: a conversation's composer reaches the data when the graph does not
+  // hold what a question needs; the analyst, connector and grounding agents work in the data. Only building the model
+  // is the shared workspace's.
   for (const name of Object.keys(SEMANTIC_USAGE)) { drivers[name] = graphTool(name); usages[name] = SEMANTIC_USAGE[name] }
   drivers['intent'] = intentTool
   usages['intent'] = INTENT_USAGE
@@ -378,7 +384,7 @@ const SEMANTIC_USAGE: Record<string, string> = {
   match: `match '<the question, as asked>' [--json]   → the subgraphs the question could be. Give it minutes, not seconds: it tries the best few against the data. Its words are resolved to measures, dimensions, conditions and records (looked up by name at their sources); every route the graph holds is built; each is said back in the graph's own words with what is uncertain about it; the best few are asked against the data so it can separate them. Ends with what to change if the first one is not it.
   Read the sentence first and say what its parts are — you know what the words mean, and the graph does not: match '{"question":"<as asked>","parts":[{"text":"<the words>","is":"<the kind of thing they name, or measure/grouping/period/condition>"}]}'. Where a name begins and ends is yours to decide; what it means is the graph's, and a part it cannot place is reported rather than assumed`,
   look: `look [<node>] [<to>|<text>]   → the graph itself: nothing for every fact, dimension and calendar; a node for what it holds, what it links to, what links to it and what it is sliced by; two nodes for every way from one to the other (as the "via" they are written in — add --text to read them as sentences); a node and some text for which record that text means`,
-  ask: `ask '<question>' [--json]   → a question's answer, or the rule that refuses it and what to change — so asking is also how a question is checked. Give it minutes, not seconds: a fact a program builds reads a whole span before it groups.
+  ask: `ask '<question>' [--json] [--raw]   → a question's answer, or the rule that refuses it and what to change — so asking is also how a question is checked. --raw adds what was sent to each source for it, in that source's own language: the base to compose on when the graph stops short. Give it minutes, not seconds: a fact a program builds reads a whole span before it groups.
   A question is JSON: measures, grouped by dimensions, kept to records or conditions, over a span. Its parts and their shapes:
   measures  ["<Fact>.<measure>", "[<Fact>.<a>] / [<Fact>.<b>]"]   a measure by name, or an expression in brackets over measures (+ - * /, numbers) of facts that share the grouping; an expression is an output like any other
   by        [{"to":"<Dimension>","via":["<role>"]}, {"attribute":"<Object>.<attribute>"}]   the grouping; via when the fact reaches the dimension more than one way
@@ -420,16 +426,16 @@ const OWNED_IN: Record<string, Set<string>> = {
 }
 
 async function removeWhatIsNotOurs(dir: string, tools: string[], conversation = false) {
-  const owned = new Set([...OWNED, ...tools].filter((e) => !(conversation && ['data', 'grounding', 'CONTEXT.md'].includes(e))))
+  const owned = new Set([...OWNED, ...tools].filter((e) => !(conversation && e === 'CONTEXT.md')))
   const gone = (p: string) => rm(p, { recursive: true, force: true })
   for (const e of await readdir(dir)) if (!owned.has(e)) await gone(join(dir, e))
   for (const [sub, keep] of Object.entries(OWNED_IN))
     for (const e of await readdir(join(dir, sub)).catch(() => [] as string[])) if (!keep.has(e)) await gone(join(dir, sub, e))
   for (const e of await readdir(join(dir, '.tools'))) if (!tools.includes(e.replace(/\.mjs$/, ''))) await gone(join(dir, '.tools', e))
-  // A turn leaves what it answered with — built.json and the run.json it came from, and the program.mjs and params.json it ran — or escalate.json or
-  // explain.md, or nothing yet while it runs. The verbs read these after a restart, so they are kept; anything else in
+  // A turn leaves what it answered with — built.json and the run.json it came from, and the program.mjs and params.json it ran — or
+  // explain.md, or said.md with the queries.jsonl it sent itself, or nothing yet while it runs. The verbs read these after a restart, so they are kept; anything else in
   // out/ was written for an earlier engine.
-  const TURN_FILES = new Set(['built.json', 'run.json', 'escalate.json', 'program.mjs', 'params.json', 'explain.md'])
+  const TURN_FILES = new Set(['built.json', 'run.json', 'program.mjs', 'params.json', 'explain.md', 'said.md', 'queries.jsonl'])
   for (const e of await readdir(join(dir, 'out'))) {
     // An answer given before built.json was named step.json.
     if (existsSync(join(dir, 'out', e, 'step.json')) && !existsSync(join(dir, 'out', e, 'built.json'))) await rename(join(dir, 'out', e, 'step.json'), join(dir, 'out', e, 'built.json')).catch(() => {})

@@ -1,10 +1,13 @@
-// THE COMPOSER — answers a conversation's questions from the semantic graph.
+// THE COMPOSER — answers a conversation's questions: from the semantic graph first, and from the data behind it when
+// the graph does not hold what a question needs.
 //
-// One composer per conversation, in the conversation's own directory. It reads the question in the graph's terms and
-// answers with a program on the graph, run with ./run-program and given as the conversation's next step with ./commit.
-// When the graph does not hold what a question needs, it answers with what the graph does hold and says plainly what
-// differs; nothing is handed to another agent. The turn ends when a step has been applied (out/<qid>/built.json) or an
-// explanation has been written.
+// One composer per conversation, in the conversation's own directory, so follow-ups keep their memory there. Asked in
+// a chat, it answers with a program on the graph, run with ./run-program and given as the conversation's next step
+// with ./commit. Asked from a screen of the project's application, it answers in prose, written to out/<qid>/said.md.
+// It is a coding agent: what the graph gives it, it composes on in its own folder; what the graph refuses, it reaches
+// through the datasource index and the query tool, and the answer says which parts stood on the model. Nothing is
+// handed to another agent. The turn ends when a step has been applied (out/<qid>/built.json), an explanation has been
+// written, or the prose answer is on disk.
 
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -26,16 +29,25 @@ export interface ComposerOpts {
 export interface TurnResult {
   /** The data-session step the turn applied. */
   step?: number
-  escalate?: { reason: string }
+  /** Why no step was applied, when none was. */
+  unanswered?: { reason: string }
   /** An explain: turn wrote its explanation. */
   explained?: true
   ms: number
 }
 
+export interface Said { markdown: string | null; queries: QueryRecord[]; ms: number }
+/** A query the composer sent to a source itself, outside the graph: recorded with the turn, so the modeller can read
+ *  what the graph did not hold and the answer can say which parts did not stand on the model. */
+export interface QueryRecord { source: string; query: string; rows: number; ms: number; at: number; error?: string }
+
 export interface Composer {
   ask(question: string, handlers: RunHandlers | undefined, opts: { qid: string; sessionId: string }): Promise<TurnResult>
+  /** A question in prose, asked from a screen: the answer is markdown at out/<qid>/said.md. */
+  say(text: string, context: string, handlers: RunHandlers | undefined, opts: { qid: string }): Promise<Said>
   session: Session
   cwd: string
+  sessionId: string
 }
 
 const ROLE = `You answer a person's questions about their organisation's data as their conversation goes on.
@@ -52,6 +64,11 @@ turn costs nothing, so wait for them rather than cutting them short.
 Read the question into the graph with ./match: it resolves the words, finds every subgraph the question could be,
 says each back in the graph's own words and tries the best few against the data. ./look shows the graph itself when
 a reading needs settling, and ./ask evaluates a question to see what the data says.
+
+The graph comes first: what it holds is defined once, checked, and kept to the organisation's rules. When it refuses
+or does not hold what the question needs, ./ask --raw shows what the nearest ask sent to each source; take that as
+the base, and compose your own query for the remainder with ./find-schema, ./sources and ./query. Say in the answer
+which parts stood on the model and which did not.
 
 ./intent says what a person in this situation is deciding, what an answer must carry to serve that, and what was
 learned the last time this ground was covered. Point each requirement it names at the figure in your answer that
@@ -81,9 +98,17 @@ Run the program, read its answer against the question as asked, correct it and r
 question, ./commit it as your final action. A refusal says what to change. When the graph does not hold what the
 question needs, answer what it does hold and say plainly what differs; there is nobody to hand it to.
 
-You work only in this folder. Write your program here and reach the graph and the data only through its tools. Never read, list, search or run anything outside this folder.
+A question asked from a screen of the application comes with what the person is looking at: the question their
+screen is answering, what it showed, and the screens above it. Words like "this", "those", "the second one" or "same
+for October" mean that screen; "all", "every" or "overall" reach past it. Answer it in prose, as markdown written to
+the path given: the figures asked for, with the context they hold for — the span, the scope, an exclusion that
+changes how a number reads — and what the data cannot say, when it cannot. Short: what was asked, nothing that
+repeats the screen. Writing that file is the whole of the answer and ends the turn.
 
-Tools: ./match ./look ./ask ./intent ./run-program ./commit ./trace — each explains itself with --help.
+You work in this folder: your programs and scripts live here, and you reach the graph and the data through its tools.
+
+Tools: ./match ./look ./ask ./intent ./find-schema ./sources ./query ./introspect ./resolve ./run-program ./commit
+./trace — each explains itself with --help.
 Each question comes with today's date and its qid.`
 
 /** The date a question is asked on, in the organisation's time zone (settings.json \`timezone\`), else UTC — never the
@@ -97,7 +122,7 @@ const dayIn = (zone: string) => new Intl.DateTimeFormat('en-CA', { timeZone: zon
 /** The date alone, as a program's ctx.today reads it. */
 export const dayOf = (projectDir?: string) => dayIn(zoneOf(projectDir))
 
-export async function turnOutcome(dir: string): Promise<{ step?: number; escalate?: { reason: string }; explained?: true } | null> {
+export async function turnOutcome(dir: string): Promise<{ step?: number; unanswered?: { reason: string }; explained?: true } | null> {
   try { const s = JSON.parse(await readFile(join(dir, 'built.json'), 'utf8')); if (typeof s.step === 'number') return { step: s.step } } catch { /* not yet */ }
   // An explain: turn reports on an answer and is done when its explanation is written.
   try { if ((await readFile(join(dir, 'explain.md'), 'utf8')).trim()) return { explained: true } } catch { /* not yet */ }
@@ -112,8 +137,11 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
                                            systemReference: ROLE })
   if (session.referencePlacement !== 'in-context') console.warn(`[composer] harness "${harness}" cannot put the reference in the system prompt — use opencode/claude/codex`)
 
+  const queriesOf = async (qid: string): Promise<QueryRecord[]> => {
+    try { return (await readFile(join(cwd, 'out', qid, 'queries.jsonl'), 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l)) } catch { return [] }
+  }
   return {
-    cwd, session,
+    cwd, session, sessionId: opts.sessionId ?? '',
     async ask(question, handlers, o) {
       const t0 = Date.now()
       const dir = join(cwd, 'out', o.qid)
@@ -124,7 +152,21 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       await writeFile(join(cwd, '.agent'), 'composer')
       await session.run(`${question}\n\ntoday: ${todayIn(opts.projectDir)}\nqid: ${o.qid}`, { ...handlers, doneWhen: async () => (await turnOutcome(dir)) !== null })
       const outcome = await turnOutcome(dir)
-      return { ...(outcome ?? { escalate: { reason: 'the composer applied no step' } }), ms: Date.now() - t0 }
+      return { ...(outcome ?? { unanswered: { reason: 'the composer applied no step' } }), ms: Date.now() - t0 }
+    },
+    async say(text, context, handlers, o) {
+      const t0 = Date.now()
+      const dir = join(cwd, 'out', o.qid)
+      await rm(dir, { recursive: true, force: true }).catch(() => {})
+      await mkdir(dir, { recursive: true })
+      await writeFile(join(cwd, '.turn'), o.qid)
+      await writeFile(join(cwd, '.session'), opts.sessionId ?? '')
+      await writeFile(join(cwd, '.agent'), 'composer')
+      const answerFile = join(dir, 'said.md')
+      const read = async () => { try { const t = (await readFile(answerFile, 'utf8')).trim(); return t || null } catch { return null } }
+      const prompt = `What the person is looking at:\n${context}\n\nTheir question: ${text}\n\ntoday: ${todayIn(opts.projectDir)}\nqid: ${o.qid}\nWrite the answer to out/${o.qid}/said.md`
+      await session.run(prompt, { ...handlers, doneWhen: async () => (await read()) !== null })
+      return { markdown: await read(), queries: await queriesOf(o.qid), ms: Date.now() - t0 }
     },
   }
 }
