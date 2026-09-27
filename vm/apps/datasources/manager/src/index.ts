@@ -24,6 +24,8 @@ import { QueryCache, cacheKey } from './query-cache.js'
 // 1000 is the HARD ceiling, enforced here so it holds whatever a program asks for. The SOFT limit (100 rows
 // unless the question asks for more) lives in the authoring rule — the agent chooses that; this only backstops it.
 const MAX_ROWS = Number(process.env.ICA_MAX_ROWS ?? 5000)
+/** What a caller is told when a result reaches the row limit. */
+const AT_LIMIT = `${MAX_ROWS} rows is the row limit and this result reached it: there may be more rows than these. Aggregate in the query (COUNT, SUM, GROUP BY) for totals, or read in pages (ORDER BY a key, then key > the last one seen).`
 const MAX_BYTES = Number(process.env.ICA_MAX_BYTES ?? 8_000_000)
 
 // ── RETRYING A FLAKY SOURCE ─────────────────────────────────────────────────────────────────────────────────
@@ -231,7 +233,7 @@ const server = http.createServer(async (req, res) => {
       const passthrough = body.raw || bridge.kind !== 'sql'
       const rw = passthrough
         ? { sql: String(body.sql), cappedTo: null as number | null, readsClock: false }
-        : await rewriteSqlDetailed(String(body.sql), { sourceDialect: bridge.dialect, maxRows: MAX_ROWS + 1,
+        : await rewriteSqlDetailed(String(body.sql), { sourceDialect: bridge.dialect, maxRows: MAX_ROWS,
                                                         // ACCESS COMES WITH THE REQUEST. Which rows a person may read is decided by the
                                                         // system that knows who they are; this only applies it, to every table read.
                                                         policies: Array.isArray(body.policies) ? body.policies : [] })
@@ -240,8 +242,12 @@ const server = http.createServer(async (req, res) => {
       const key = cacheKey(String(body.id), sql, body.params)
       if (cacheable && !body.fresh) {
         const hit = cache.get(key)
-        if (hit) return send(res, 200, { rows: hit.rows, sql, ...(hit.cappedTo != null ? { cappedTo: hit.cappedTo } : {}),
-                                         ...(hit.notes ? { notes: hit.notes } : {}), cache: { hit: true, fetchedAt: new Date(hit.fetchedAt).toISOString() } })
+        if (hit) {
+          // A cached result that reached the limit says so, whatever was stored with it.
+          const atLimit = rw.cappedTo != null && hit.rows.length >= MAX_ROWS
+          return send(res, 200, { rows: hit.rows, sql, ...(atLimit ? { cappedTo: MAX_ROWS, notes: [AT_LIMIT] } : {}),
+                                  cache: { hit: true, fetchedAt: new Date(hit.fetchedAt).toISOString() } })
+        }
       }
       const fetchedAt = Date.now()
       // RETRIED HERE, not by the agent. A flaky source used to surface as a failed query, which the agent
@@ -262,11 +268,11 @@ const server = http.createServer(async (req, res) => {
       // we injected a row limit AND the result reached it, so these rows are a PREFIX, not the whole answer.
       // Without this the caller cannot tell a capped read from a complete one — the difference between a
       // partial list and a wrong total.
-      const truncated = rw.cappedTo != null && rows.length > MAX_ROWS   // the probe row came back ⇒ there IS more
-      const out = truncated ? rows.slice(0, MAX_ROWS) : rows            // never hand back the probe row
-      const notes = truncated
-        ? [`Row limit ${MAX_ROWS} was applied and there is more data beyond it: these are the FIRST ${MAX_ROWS} rows, not the full result. Aggregate in the query (COUNT/SUM/GROUP BY) for totals, or narrow it with a filter.`]
-        : undefined
+      // THE LIMIT IS ASKED FOR AS IT IS, never one row past it to probe for more: a result that reaches the limit may be
+      // the whole answer or the start of a longer one, and says so; fewer rows than the limit is a complete result.
+      const truncated = rw.cappedTo != null && rows.length >= MAX_ROWS
+      const out = rows
+      const notes = truncated ? [AT_LIMIT] : undefined
       if (cacheable) cache.put(key, String(body.id), sql, body.params, { rows: out, cappedTo: truncated ? MAX_ROWS : null, notes: notes ?? null, fetchedAt })
       return send(res, 200, { rows: out, sql, ...(truncated ? { cappedTo: MAX_ROWS } : {}), ...(notes ? { notes } : {}),
                               cache: { hit: false, fetchedAt: new Date(fetchedAt).toISOString(), stored: cacheable } })

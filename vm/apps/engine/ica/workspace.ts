@@ -95,7 +95,12 @@ export async function query(dataSourceId, sql, params = {}) {
     body: JSON.stringify({ id: dataSourceId, sql, params }) })
   if (!r.ok) throw new Error(r.status + ' ' + await r.text())
   const p = await r.json(); if (p?.error) throw new Error(p.error)
-  return p?.rows ?? []
+  const rows = p?.rows ?? []
+  // What the manager says about a result that changes how it must be read (a result that reached the row limit)
+  // goes to stderr, where whoever ran this sees it, and rides on the rows for a script that wants to check.
+  if (Array.isArray(p?.notes) && p.notes.length) { for (const n of p.notes) console.error('NOTE: ' + n); Object.defineProperty(rows, 'notes', { value: p.notes }) }
+  if (p?.cappedTo != null) Object.defineProperty(rows, 'cappedTo', { value: p.cappedTo })
+  return rows
 }
 // SYSTEM-only raw-SQL path (NOT for agent data queries): the introspect/grounding seams read catalogs and build
 // indexes in raw dialect SQL. This posts { raw:true } so the manager runs it as-is, skipping the agent query path.
