@@ -42,6 +42,11 @@ domain a composite of sections, higher ideas composites of domains; layers come 
 Duplicates: exact ones vanish by hash; same meaning in other words is consolidated offline (find alike, keep one,
 repoint every composite, record the merge); same name, different meaning is refused at write.
 
+Names are hyphenated phrases that say the meaning — `red-week`, `utilisation-threshold`, `placeholder-budget`,
+`worst-of-four-rag` — lowercase words joined by hyphens, never one bare word. Atoms carry no domain prefix, so they
+can be shared; a composite may say its place (`weekly-utilisation-definitions`). A name points at one node: a new
+meaning under a taken name is refused, with the existing node shown.
+
 Agents write the graph by a short guide the CLI enforces: one idea per atom; search before you write (writing
 existing content returns its name); name by meaning; composites carry no knowledge; every change says who, why,
 from what; an atom is edited only to correct it — a new meaning is a new atom, and composites move to it.
