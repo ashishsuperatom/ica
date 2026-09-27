@@ -17,11 +17,12 @@ import { useCallback, useEffect, useMemo, useState, type ReactElement, type Reac
 import type { Hub } from './hub'
 
 export type Section =
-  | 'summary' | 'programs' | 'calls' | 'sessions' | 'grounding' | 'index' | 'files' | 'db' | 'logs'
+  | 'summary' | 'composition' | 'programs' | 'calls' | 'sessions' | 'grounding' | 'index' | 'files' | 'db' | 'logs'
 
 // Grouped so the views read as a few coherent buckets, not one flat list.
 export const SECTIONS: { id: Section; label: string; group?: string }[] = [
   { id: 'summary',   label: 'Summary' },
+  { id: 'composition', label: 'Composition graph', group: 'Knowledge' },
   { id: 'programs',  label: 'Programs',         group: 'Graph' },
   { id: 'calls',     label: 'Calls',            group: 'Graph' },
   { id: 'sessions',  label: 'Data sessions',    group: 'Graph' },
@@ -172,7 +173,7 @@ export function Inspector({ hub, section }: { hub: Hub; section: Section }) {
   // A link to a section that no longer exists lands on the summary rather than a blank page.
   const Body = ({
     summary: SummaryView, programs: ProgramsView, calls: CallsView, sessions: SessionsView,
-    grounding: GroundingView, index: IndexView, files: FilesView, db: DbView, logs: LogsView,
+    grounding: GroundingView, index: IndexView, files: FilesView, db: DbView, logs: LogsView, composition: CompositionView,
   } as Record<string, (p: ViewProps) => ReactElement>)[section] ?? SummaryView
 
   return (
@@ -444,6 +445,146 @@ function IndexView({ hub }: ViewProps) {
           ))}
         </tbody>
       </table>}
+    </div>
+  )
+}
+
+// ── Composition graph (what each domain's agent knows, and who changed it) ─────
+// Domains, each with its parts and files by name and hash; a node's content with every change to it (who, why, from
+// what); the composed system prompt, now or as of a moment; and each session that is a domain with what has moved
+// since it was made. Read-only: the graph is changed through its CLI, never here.
+function CompositionView({ hub }: ViewProps) {
+  const { data, err, loading, reload } = useInspect(hub, 'composition', {}, 'composition')
+  const [pick, setPick] = useState<{ kind: 'node'; name: string } | { kind: 'compose'; domain: string } | null>(null)
+  const [asOf, setAsOf] = useState('')
+  if (err) return <Err msg={err} retry={reload} />
+  if (!data) return <Loading on={loading} />
+  if (data.exists === false) return <div className="card"><div className="empty">This project has no composition graph yet. Import one with <code>composition-graph import knowledge/index.mts</code>.</div></div>
+  const domains: any[] = data.domains ?? []
+  const changes: any[] = data.changes ?? []
+  const sessions: any[] = data.sessions ?? []
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 1fr) minmax(420px, 1.5fr)', gap: 12, alignItems: 'start' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className="card" style={{ padding: '14px 16px' }}>
+          <div className="bar" style={{ marginBottom: 10 }}>
+            <strong>Composition graph</strong>
+            <span className="muted" style={{ fontSize: 12.5 }}>{data.counts?.domain ?? 0} domains · {data.counts?.part ?? 0} parts · {data.counts?.file ?? 0} files</span>
+            <button className="btn sm ghost" style={{ marginLeft: 'auto' }} onClick={reload}>Refresh</button>
+          </div>
+          {domains.map(d => (
+            <div key={d.name} className="facet" style={{ marginBottom: 10 }}>
+              <div className="bar">
+                <strong>{d.name}</strong><span className="chip">{String(d.hash).slice(0, 10)}</span>
+                <button className="btn sm" style={{ marginLeft: 'auto' }} onClick={() => setPick({ kind: 'compose', domain: d.name })}>System prompt</button>
+              </div>
+              <div className="muted" style={{ fontSize: 12, margin: '6px 0 8px' }}>covers {d.capabilities.length} screens{d.tools ? ` · tools: ${d.tools.join(', ')}` : ''}</div>
+              <table><tbody>
+                {d.parts.map((p: any) => (
+                  <tr key={p.name} className={pick?.kind === 'node' && pick.name === p.name ? 'on' : ''} onClick={() => setPick({ kind: 'node', name: p.name })}>
+                    <td><span className="trunc">{p.title ?? p.name}</span><span className="muted" style={{ fontSize: 11.5 }}>{p.name}</span></td>
+                    <td className="num muted">{p.form} · {p.lines}</td><td className="num"><span className="chip">{String(p.hash ?? 'missing').slice(0, 10)}</span></td>
+                  </tr>))}
+                {d.files.map((f: any) => (
+                  <tr key={f.name} className={pick?.kind === 'node' && pick.name === f.name ? 'on' : ''} onClick={() => setPick({ kind: 'node', name: f.name })}>
+                    <td><span className="trunc">{f.file ?? f.name}</span><span className="muted" style={{ fontSize: 11.5 }}>{f.name}</span></td>
+                    <td className="num muted">program · {bytes(f.bytes)}</td><td className="num"><span className="chip">{String(f.hash ?? 'missing').slice(0, 10)}</span></td>
+                  </tr>))}
+              </tbody></table>
+            </div>
+          ))}
+        </div>
+        <div className="card" style={{ padding: '14px 16px' }}>
+          <div className="sect">Changes</div>
+          <table><thead><tr><th>When</th><th>Node</th><th>Change</th><th>By · why</th></tr></thead><tbody>
+            {changes.map(c => (
+              <tr key={c.id} onClick={() => setPick({ kind: 'node', name: c.name })}>
+                <td className="muted" style={{ whiteSpace: 'nowrap' }}>{when(c.at)}</td>
+                <td><span className="trunc">{c.name}</span></td>
+                <td style={{ whiteSpace: 'nowrap' }}><span className="chip">{String(c.fromHash ?? '—').slice(0, 7)}</span> → <span className="chip">{c.toHash ? String(c.toHash).slice(0, 7) : 'removed'}</span></td>
+                <td><span className="clamp">{c.by}{c.reason ? ` · ${c.reason}` : ''}{c.from ? ` · from ${c.from}` : ''}</span></td>
+              </tr>))}
+          </tbody></table>
+        </div>
+        <div className="card" style={{ padding: '14px 16px' }}>
+          <div className="sect">Sessions made from the graph</div>
+          {!sessions.length && <div className="empty">No session is a domain yet.</div>}
+          {!!sessions.length && <table><thead><tr><th>Session</th><th>Domain</th><th>Made</th><th>Moved since</th></tr></thead><tbody>
+            {sessions.map(x => (
+              <tr key={x.id} style={{ cursor: 'default' }}>
+                <td><span className="chip">{String(x.id).slice(0, 8)}</span></td><td>{x.domain}</td>
+                <td className="muted">{x.at ? when(Date.parse(x.at)) : '—'}</td>
+                <td>{!x.used ? <span className="muted">made before hashes were noted</span> : x.moved.length ? <span style={{ color: 'var(--bad)' }}>{x.moved.join(', ')}</span> : <span style={{ color: 'var(--ok)' }}>nothing</span>}</td>
+              </tr>))}
+          </tbody></table>}
+        </div>
+      </div>
+      <div className="card" style={{ padding: '14px 16px', position: 'sticky', top: 12 }}>
+        <div className="bar" style={{ marginBottom: 10 }}>
+          <span className="muted" style={{ fontSize: 12.5 }}>As of</span>
+          <input className="input" type="datetime-local" value={asOf} onChange={e => setAsOf(e.target.value)} style={{ fontSize: 13, padding: '4px 8px' }} />
+          {asOf && <button className="btn sm ghost" onClick={() => setAsOf('')}>Now</button>}
+        </div>
+        {!pick && <div className="empty">Pick a part, a program or a domain's system prompt.</div>}
+        {pick?.kind === 'node' && <CompositionNode hub={hub} name={pick.name} asOf={asOf} />}
+        {pick?.kind === 'compose' && <CompositionPrompt hub={hub} domain={pick.domain} asOf={asOf} />}
+      </div>
+    </div>
+  )
+}
+
+const isoOf = (local: string) => (local ? new Date(local).toISOString() : undefined)
+
+function CompositionNode({ hub, name, asOf }: { hub: Hub; name: string; asOf: string }) {
+  const { data, err, loading, reload } = useInspect(hub, 'compositionNode', { name, asOf: isoOf(asOf) }, `cnode|${name}|${asOf}`)
+  if (err) return <Err msg={err} retry={reload} />
+  if (!data) return <Loading on={loading} />
+  const n = data.node
+  const history: any[] = data.history ?? []
+  const body = n?.body
+  const text = !body ? '' : n.kind === 'file' ? String(body.text ?? '')
+    : body.form === 'text' ? String(body.text ?? '')
+    : body.form === 'worked' ? (body.items ?? []).map((e: any) => `## ${e.question}\n${(e.steps ?? []).map((st: string, i: number) => `${i + 1}. ${st}`).join('\n')}`).join('\n\n')
+    : (body.items ?? []).map((l: string, i: number) => body.form === 'numbered' ? `${i + 1}. ${l}` : `- ${l}`).join('\n')
+  return (
+    <div>
+      <div className="bar" style={{ marginBottom: 8 }}>
+        <strong>{body?.title ?? body?.name ?? name}</strong>
+        {n && <span className="chip">{String(n.hash).slice(0, 12)}</span>}
+        {n && <span className="muted" style={{ fontSize: 12 }}>{n.kind}{body?.form ? ` · ${body.form}` : ''}</span>}
+      </div>
+      <dl className="kv" style={{ marginBottom: 10 }}>
+        <dt>Name</dt><dd><code>{name}</code></dd>
+        <dt>Named by</dt><dd>{(data.usedBy ?? []).join(', ') || '—'}</dd>
+      </dl>
+      {!n && <div className="empty">{asOf ? 'This node did not exist at that moment.' : 'This node has been removed.'}</div>}
+      {n && <code className="src">{text}</code>}
+      <div className="sect">History</div>
+      <table><thead><tr><th>When</th><th>Change</th><th>By</th><th>Why · from</th></tr></thead><tbody>
+        {history.slice().reverse().map(c => (
+          <tr key={c.id} style={{ cursor: 'default' }}>
+            <td className="muted" style={{ whiteSpace: 'nowrap' }}>{new Date(c.at).toLocaleString()}</td>
+            <td style={{ whiteSpace: 'nowrap' }}><span className="chip">{String(c.fromHash ?? '—').slice(0, 7)}</span> → <span className="chip">{c.toHash ? String(c.toHash).slice(0, 7) : 'removed'}</span></td>
+            <td>{c.by}</td><td><span className="clamp">{c.reason ?? '—'}{c.from ? ` · from ${c.from}` : ''}</span></td>
+          </tr>))}
+      </tbody></table>
+    </div>
+  )
+}
+
+function CompositionPrompt({ hub, domain, asOf }: { hub: Hub; domain: string; asOf: string }) {
+  const { data, err, loading, reload } = useInspect(hub, 'compositionCompose', { domain, asOf: isoOf(asOf) }, `ccompose|${domain}|${asOf}`)
+  if (err) return <Err msg={err} retry={reload} />
+  if (!data) return <Loading on={loading} />
+  const used = Object.entries(data.used ?? {}) as [string, string][]
+  return (
+    <div>
+      <div className="bar" style={{ marginBottom: 8 }}>
+        <strong>{domain}</strong><span className="muted" style={{ fontSize: 12 }}>the system prompt its agent gets · {bytes(data.bytes)}{data.tools ? ` · plus the usage of: ${data.tools.join(', ')}` : ''}</span>
+      </div>
+      <code className="src">{data.text}</code>
+      <div className="sect">Composed from</div>
+      <table><tbody>{used.map(([n, h]) => <tr key={n} style={{ cursor: 'default' }}><td><span className="trunc">{n}</span></td><td className="num"><span className="chip">{h.slice(0, 12)}</span></td></tr>)}</tbody></table>
     </div>
   )
 }

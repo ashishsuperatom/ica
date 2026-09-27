@@ -8,6 +8,8 @@
 //   • datasource-index.sqlite — the fields each source has, as ./find-schema searches them
 //   • grounding.sqlite — what the grounding agent indexed
 //   • agent-sessions.sqlite — which harness session each agent resumes
+//   • composition.sqlite — the composition graph: domains, their parts and files by hash, every change, and which
+//     hashes each session was made from
 // …plus the agents' directories, browsable file by file.
 
 import { readFile, readdir } from 'node:fs/promises'
@@ -17,6 +19,7 @@ import { DatabaseSync } from 'node:sqlite'
 import type { CallRecord, createGraph } from '@superatom/semantic-graph'
 import { dataSourceStats, type DataSourceIndex } from '@superatom/datasource-index'
 import { GroundingStore } from '@superatom/grounding'   // the ONE loader/reader for the grounding store
+import { Store as CompositionStore, compose as composeDomain, domains as compositionDomains, drift as compositionDrift, type DomainBody, type PartBody, type FileBody } from '@superatom/composition-graph'
 import type { AgentSessions } from './agent-sessions.js'
 import { log } from './log.js'   // the central log/error channel — surfaced read-only here
 
@@ -212,7 +215,7 @@ export function createInspector(deps: InspectorDeps) {
       try { bytes = statSync(path).size } catch { /* wal-only moment */ }
       return { name, path, exists: true, bytes, tables }
     }
-    return { databases: ['semantic-graph.sqlite', 'datasource-index.sqlite', 'grounding.sqlite', 'agent-sessions.sqlite'].map(inspect) }
+    return { databases: ['composition.sqlite', 'semantic-graph.sqlite', 'datasource-index.sqlite', 'grounding.sqlite', 'agent-sessions.sqlite'].map(inspect) }
   }
 
   /** Everything the landing screen needs in ONE round-trip. */
@@ -238,8 +241,53 @@ export function createInspector(deps: InspectorDeps) {
     }
   }
 
+  // ── The composition graph: what each domain's agent knows, how it was composed, who changed it and why ─────────
+  const compositionFile = () => join(roots.db, 'composition.sqlite')
+  const withComposition = <T,>(fn: (store: CompositionStore) => T): T | { exists: false } => {
+    if (!existsSync(compositionFile())) return { exists: false }
+    const store = new CompositionStore(compositionFile())
+    try { return fn(store) } finally { store.close() }
+  }
+  /** Every domain with its parts and files, the latest changes, and every session that is a domain with what moved since. */
+  async function composition() {
+    const sessions: { id: string; domain: string; at: string | null; used: number; moved: string[] }[] = []
+    const notes: { id: string; note: any }[] = []
+    for (const id of await readdir(roots.sessions).catch(() => [] as string[])) {
+      try { notes.push({ id, note: JSON.parse(await readFile(join(roots.sessions, id, '.domain.json'), 'utf8')) }) } catch { /* not a domain session */ }
+    }
+    return withComposition((store) => {
+      const domains = compositionDomains(store).map((d) => {
+        const node = store.get<DomainBody>(d.name)!
+        const parts = node.body.parts.map((name) => { const n = store.get<PartBody>(name); return { name, hash: n?.hash ?? null, title: n?.body.title ?? null, form: n?.body.form ?? null,
+          lines: n ? (n.body.form === 'text' ? 1 : n.body.items.length) : 0 } })
+        const files = node.body.files.map((name) => { const n = store.get<FileBody>(name); return { name, hash: n?.hash ?? null, file: n?.body.name ?? null, bytes: n ? n.body.text.length : 0 } })
+        return { name: d.name, hash: node.hash, capabilities: node.body.capabilities, tools: node.body.tools ?? null, parts, files }
+      })
+      for (const { id, note } of notes) sessions.push({ id, domain: String(note.domain ?? ''), at: note.at ?? null, used: Object.keys(note.used ?? {}).length,
+        moved: note.used && Object.keys(note.used).length ? compositionDrift(store, note.used).map((x) => x.name) : [] })
+      sessions.sort((a, b) => String(b.at ?? '').localeCompare(String(a.at ?? '')))
+      return { exists: true, domains, changes: store.changes(60), counts: { domain: store.names('domain').length, part: store.names('part').length, file: store.names('file').length }, sessions: sessions.slice(0, MAX_ROWS) }
+    })
+  }
+  /** One node: its content as it is now or was at a moment, every change to it, and the domains that name it. */
+  async function compositionNode(a: { name?: string; asOf?: string }) {
+    const name = String(a.name ?? '')
+    const asOf = a.asOf ? Date.parse(a.asOf) : undefined
+    return withComposition((store) => {
+      const node = store.get(name, asOf)
+      const usedBy = store.names('domain').filter((d) => { const b = store.content<DomainBody>(d.hash); return b.parts.includes(name) || b.files.includes(name) }).map((d) => d.name)
+      return { exists: true, node, history: store.history(name), usedBy }
+    })
+  }
+  /** A domain composed — the whole system prompt its agent gets — as it is now or was at a moment, with the hashes it read. */
+  async function compositionCompose(a: { domain?: string; asOf?: string }) {
+    const asOf = a.asOf ? Date.parse(a.asOf) : undefined
+    return withComposition((store) => { const c = composeDomain(store, String(a.domain ?? ''), asOf); return { exists: true, domain: c.domain, text: c.text, used: c.used, bytes: c.text.length, tools: c.tools ?? null } })
+  }
+
   const VIEWS: Record<string, (a: any) => any> = {
     overview, programs, program, calls, call, sessions, session, file, dir, logs, index, grounding, db,
+    composition, compositionNode, compositionCompose,
   }
 
   return {
