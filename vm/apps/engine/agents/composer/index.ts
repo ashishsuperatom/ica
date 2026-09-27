@@ -41,9 +41,35 @@ export interface TurnResult {
   ms: number
 }
 
-/** What a turn said: prose, and the blocks its script wrote beside it (out/<qid>/blocks.json — the application's own
- *  block shapes, so a table or a chart from an agent draws exactly as one from a capability). */
-export interface Said { markdown: string | null; blocks: unknown[]; queries: QueryRecord[]; ms: number }
+/** What a turn said: markdown, in which a line `:::table <name>.json` (or `:::bar`, `:::line`) marks where a block
+ *  belongs — the named file in the thread's folder, in the application's own block shape, so a table or a chart from
+ *  an agent draws exactly as one from a capability. Each marker is resolved here; the marker lines stay in the
+ *  markdown so the client can split at them. Only files the markdown names are ever read or sent. */
+export interface Said { markdown: string | null; blocks: SaidBlock[]; queries: QueryRecord[]; ms: number }
+export interface SaidBlock { marker: string; block: Record<string, unknown> | null; error?: string }
+
+const MARKER = /^:::(table|bar|bars|line|kpis|figure|facts|text)\s+([\w.-]+\.json)\s*$/
+const KIND: Record<string, string> = { bar: 'bars', bars: 'bars', line: 'bars', table: 'table', kpis: 'kpis', figure: 'figure', facts: 'facts', text: 'text' }
+/** The blocks a markdown names, read from the thread folder: the marker's kind wins over the file's `type`; a line
+ *  series is bars with every series drawn as a line. A missing or malformed file is an error beside its marker. */
+async function blocksNamedIn(markdown: string, cwd: string): Promise<SaidBlock[]> {
+  const out: SaidBlock[] = []
+  for (const line of markdown.split('\n')) {
+    const m = MARKER.exec(line.trim()); if (!m) continue
+    const marker = line.trim(), kind = m[1], file = m[2]
+    try {
+      const v = JSON.parse(await readFile(join(cwd, file), 'utf8'))
+      if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('not a block object')
+      const b: Record<string, unknown> = { ...v, type: KIND[kind] ?? v.type }
+      if (kind === 'line' && Array.isArray(b.series)) b.series = (b.series as any[]).map((x) => ({ ...x, line: true }))
+      if (kind === 'line' && !b.series && Array.isArray(b.rows) && (b.rows as any[])[0]?.values) b.series = Object.keys((b.rows as any[])[0].values).map((k) => ({ key: k, label: k, line: true }))
+      if (b.type === 'bars' && !b.series && Array.isArray(b.rows) && (b.rows as any[])[0]?.values) b.series = Object.keys((b.rows as any[])[0].values).map((k) => ({ key: k, label: k }))
+      if (b.type === 'table' && !Array.isArray(b.rows)) throw new Error('a table has rows')
+      out.push({ marker, block: b })
+    } catch (e: any) { out.push({ marker, block: null, error: `${file}: ${e?.message ?? e}` }) }
+  }
+  return out
+}
 /** A query the composer sent to a source itself, outside the graph: recorded with the turn, so the modeller can read
  *  what the graph did not hold and the answer can say which parts did not stand on the model. */
 export interface QueryRecord { source: string; query: string; rows: number; ms: number; at: number; error?: string }
@@ -181,8 +207,8 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       const read = async () => { try { const t = (await readFile(answerFile, 'utf8')).trim(); return t || null } catch { return null } }
       const prompt = `What the person is looking at:\n${context}\n\nTheir question: ${text}\n\ntoday: ${todayIn(opts.projectDir)}\nqid: ${o.qid}\nWrite the answer to out/${o.qid}/said.md`
       await session.run(prompt, { ...handlers, doneWhen: async () => (await read()) !== null })
-      const blocks = await readFile(join(dir, 'blocks.json'), 'utf8').then((t) => { const v = JSON.parse(t); return Array.isArray(v) ? v : [] }).catch(() => [] as unknown[])
-      return { markdown: await read(), blocks, queries: await queriesOf(o.qid), ms: Date.now() - t0 }
+      const markdown = await read()
+      return { markdown, blocks: markdown ? await blocksNamedIn(markdown, cwd) : [], queries: await queriesOf(o.qid), ms: Date.now() - t0 }
     },
   }
 }

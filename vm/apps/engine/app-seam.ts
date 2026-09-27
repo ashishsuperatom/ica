@@ -28,7 +28,7 @@ export interface AppSeamDeps {
 
 export interface Said {
   markdown: string | null
-  /** Blocks the turn's script wrote beside its prose, in the application's own shapes. */
+  /** The blocks the markdown's marker lines name, resolved from the thread's folder. */
   blocks: unknown[]
   /** The graph calls the answer was read from. */
   calls: Array<{ id: string; canonical: string | null; ms: number; at: number; refused: boolean; error: string | null }>
