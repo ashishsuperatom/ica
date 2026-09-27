@@ -427,7 +427,8 @@ const sub = (q: Question, change: Partial<Question>): Question =>
 function extend(s: Schema, q: Question, plan: Plan, context: { today?: string }): Verdict {
   const { targets, outputs } = plan
   const named = (name: string) => targets.includes(name) || outputs.some((o) => o.name === name)
-  const subset = (names: string[], what: string): Verdict | undefined => {
+  const subset = (names: unknown, what: string): Verdict | undefined => {
+    if (!Array.isArray(names) || !names.every((n) => typeof n === 'string')) return refuse('Q', `${what} is a list of targets, like ${JSON.stringify(targets.slice(0, 1))}`)
     const unknown = names.filter((n) => !targets.includes(n))
     return unknown.length ? refuse('Q', `${what} ${unknown.join(', ')} is not one of the targets (${targets.join(', ') || 'none'})`) : undefined
   }
@@ -455,6 +456,7 @@ function extend(s: Schema, q: Question, plan: Plan, context: { today?: string })
 
   if (q.share) {
     const bad = subset(q.share.within, 'share within'); if (bad) return bad
+    if (!Array.isArray(q.share.outputs)) return refuse('Q', 'share: outputs is a list of the outputs to take as shares')
     for (const name of q.share.outputs) {
       const o = outputs.find((x) => x.name === name)
       if (!o) return refuse('Q', `share: the answer has no output ${name}`)
