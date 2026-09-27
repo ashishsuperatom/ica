@@ -92,6 +92,7 @@ export function createAppSeam(d: AppSeamDeps) {
     // to the owner's narration channel, which survives a reconnect.
     const log = (frame: Record<string, unknown>) => d.send({ type: 'log', channel: 'composer-log' }, { ...frame, lane: 'composer', qid: o.qid, sid: o.threadId, agent: 'composer' })
     const beat = (text: string) => {
+      console.log(`[beat] ${o.qid.slice(0, 8)} → ${o.from?.id ?? 'no page'}: ${text.replace(/\s+/g, ' ').slice(0, 160)}`)
       const frame = { t: 'narration', text, qid: o.qid, sid: o.threadId, reqId: o.reqId }
       if (o.from) d.send(o.from, frame)
       d.send({ type: 'log', channel: 'narration' }, frame)
@@ -108,7 +109,8 @@ export function createAppSeam(d: AppSeamDeps) {
       try {
         const line = await Promise.race([narrator.narrate(text, since, recent.slice(-3)), new Promise<null>((res) => setTimeout(() => res(null), 20_000))])
         if (line) { recent.push(line); beat(line) }
-      } catch { /* narration is best-effort */ } finally { narrating = false }
+        else console.log(`[beat] ${o.qid.slice(0, 8)}: the narrator said nothing for ${since.length} chars of activity`)
+      } catch (e: any) { console.log(`[beat] ${o.qid.slice(0, 8)}: the narrator failed — ${e?.message ?? e}`) } finally { narrating = false }
     }, 4000)
     const handlers = {
       onOutput: (chunk: string) => { activity.push(chunk); log({ t: 'agent:chunk', text: chunk }) },
