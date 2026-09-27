@@ -25,6 +25,8 @@ export interface ComposerOpts {
   /** The conversation this composer belongs to: its directory, and its data session. */
   sessionId?: string
   ica?: AgentOverride
+  /** What this composer is to know from the start, beside its role: the memory of a domain, given in, never read. */
+  reference?: string
 }
 
 export interface TurnResult {
@@ -136,7 +138,7 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
   const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl, projectDir: opts.projectDir, sessionId: opts.sessionId, tools: 'conversation' })
   const usage = await toolUsage(cwd)
   const session = createSession(harness, { cwd, model: opts.ica?.model ?? cfg.model, provider: opts.ica?.provider ?? cfg.provider, thinking: cfg.thinking, baseUrl: opts.ica?.baseUrl,
-                                           systemReference: usage ? `${ROLE}\n\nThe tools, each as it says of itself:\n${usage}` : ROLE })
+                                           systemReference: [ROLE, usage ? `The tools, each as it says of itself:\n${usage}` : '', opts.reference ?? ''].filter(Boolean).join('\n\n') })
   if (session.referencePlacement !== 'in-context') console.warn(`[composer] harness "${harness}" cannot put the reference in the system prompt — use opencode/claude/codex`)
 
   const queriesOf = async (qid: string): Promise<QueryRecord[]> => {
