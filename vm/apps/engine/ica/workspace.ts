@@ -430,6 +430,7 @@ const SEMANTIC_USAGE: Record<string, string> = {
 const OWNED = new Set([
   'CONTEXT.md', 'data', 'grounding', 'out', '.tools', '.runs',      // this file (.runs: work that outlived its call)
   '.turn', '.session', '.agent',                                    // agents/composer, agents/analyst: the turn in progress
+  '.domain.json', '.reference.md', '.harness-session', '.system-prompt.md',   // a session that is a domain: what it was made with (knowledge.ts, composer)
   'AGENTS.md', 'SYSTEM_REFERENCE.md', '.claude',                    // the harnesses (ica/pi.ts, ica/codex.ts, ica/claude.ts)
   'connector', 'templates',                                         // agents/connector
 ])
@@ -441,7 +442,11 @@ const OWNED_IN: Record<string, Set<string>> = {
 async function removeWhatIsNotOurs(dir: string, tools: string[], conversation = false) {
   const owned = new Set([...OWNED, ...tools].filter((e) => !(conversation && e === 'CONTEXT.md')))
   const gone = (p: string) => rm(p, { recursive: true, force: true })
-  for (const e of await readdir(dir)) if (!owned.has(e)) await gone(join(dir, e))
+  // A SESSION THAT IS A DOMAIN keeps everything its agent made — rows, scripts, the files its answers name, the
+  // question folders — because those are what its answers stand on, and what the analyst will read. Only the
+  // platform's own tool drivers are brought up to date below.
+  const domainSession = existsSync(join(dir, '.domain.json'))
+  if (!domainSession) for (const e of await readdir(dir)) if (!owned.has(e)) await gone(join(dir, e))
   for (const [sub, keep] of Object.entries(OWNED_IN))
     for (const e of await readdir(join(dir, sub)).catch(() => [] as string[])) if (!keep.has(e)) await gone(join(dir, sub, e))
   for (const e of await readdir(join(dir, '.tools'))) if (!tools.includes(e.replace(/\.mjs$/, ''))) await gone(join(dir, '.tools', e))
@@ -449,7 +454,7 @@ async function removeWhatIsNotOurs(dir: string, tools: string[], conversation = 
   // explain.md, or said.md with the queries.jsonl it sent itself, or nothing yet while it runs. The verbs read these after a restart, so they are kept; anything else in
   // out/ was written for an earlier engine.
   const TURN_FILES = new Set(['built.json', 'run.json', 'program.mjs', 'params.json', 'explain.md', 'said.md', 'queries.jsonl'])
-  for (const e of await readdir(join(dir, 'out'))) {
+  if (!domainSession) for (const e of await readdir(join(dir, 'out'))) {
     // An answer given before built.json was named step.json.
     if (existsSync(join(dir, 'out', e, 'step.json')) && !existsSync(join(dir, 'out', e, 'built.json'))) await rename(join(dir, 'out', e, 'step.json'), join(dir, 'out', e, 'built.json')).catch(() => {})
     const files = await readdir(join(dir, 'out', e)).catch(() => null)

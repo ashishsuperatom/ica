@@ -9,7 +9,7 @@
 // handed to another agent. The turn ends when a step has been applied (out/<qid>/built.json), an explanation has been
 // written, or the prose answer is on disk.
 
-import { readFile, writeFile, mkdir, rm } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, rm, copyFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
@@ -82,6 +82,16 @@ async function blocksNamedIn(markdown: string, cwd: string): Promise<SaidBlock[]
   }
   return out
 }
+/** The files an answer names, copied into its question folder: what the answer stands on cannot be changed by a
+ *  later question writing a file of the same name. Returns the folder to resolve the answer's blocks from. */
+async function keepNamed(markdown: string, cwd: string, qdir: string): Promise<string> {
+  for (const line of markdown.split('\n')) {
+    const m = MARKER.exec(line.trim()); if (!m) continue
+    await copyFile(join(cwd, m[2]), join(qdir, m[2])).catch(() => {})
+  }
+  return qdir
+}
+
 /** A query the composer sent to a source itself, outside the graph: recorded with the turn, so the modeller can read
  *  what the graph did not hold and the answer can say which parts did not stand on the model. */
 export interface QueryRecord { source: string; query: string; rows: number; ms: number; at: number; error?: string }
@@ -251,7 +261,7 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       await noteHarness()
       const markdown = (begun ? answer.trim() : (last || r.lastLines?.trim() || '')) || null
       if (markdown) await writeFile(join(dir, 'said.md'), markdown).catch(() => {})
-      return { markdown, blocks: markdown ? await blocksNamedIn(markdown, cwd) : [], periods: periodsIn(markdown), queries: await queriesOf(o.qid), ms: Date.now() - t0 }
+      return { markdown, blocks: markdown ? await blocksNamedIn(markdown, await keepNamed(markdown, cwd, dir)) : [], periods: periodsIn(markdown), queries: await queriesOf(o.qid), ms: Date.now() - t0 }
     },
   }
 }
