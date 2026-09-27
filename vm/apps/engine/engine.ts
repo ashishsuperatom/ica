@@ -459,6 +459,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   inflight.set(sid, { qid, stop: stopThisTurn })
 
   const narrationBuf: string[] = []
+  let answering = false
   let narrating = false
   let lastDoing = ''
   const saidBeats: string[] = []
@@ -498,7 +499,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     const handlers: RunHandlers = {
       onOutput: (chunk: string) => { if (!stopped) emitLog({ t: 'analyst:chunk', text: chunk }) },
       onNarration: (text: string) => { if (!stopped && reply) emitBeat(reply, text, qid, sid) },
-      onAnswer: (text: string) => { if (!stopped && reply) emit(reply, { t: 'answer:part', text, qid, sid }) },
+      onAnswer: (text: string, blocks?: unknown[]) => { if (!stopped && reply) emit(reply, { t: 'answer:part', text, qid, sid, ...(blocks?.length ? { blocks: readingAnswer('', blocks as any).sections ?? [] } : {}) }) },
       onEvent: (ev: AgentEvent) => {
         // STOPPED MEANS STOPPED. The agent may take a moment to notice — a tool it started still has to return —
         // but nothing more of it reaches the person: what they asked to end, ends on their screen at once.
@@ -511,7 +512,12 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
           } else if (!stepStarted.has(ev.id)) stepStarted.set(ev.id, ev.at)
         }
         emitLog(A('event', currentAgent, { ev }))
-        if (ev.kind === 'message' && ev.text?.trim()) { const prose = stripCode(ev.text); if (prose) narrationBuf.push(prose.slice(0, 600)) }
+        // The narrator tells what the agent is doing, never the answer: once `:::answer` is said, what follows is not work.
+        if (ev.kind === 'message' && ev.text?.trim() && !answering) {
+          const m = ev.text.match(/^[ \t]*:::answer[ \t]*$/m)
+          if (m) answering = true
+          const prose = stripCode(m ? ev.text.slice(0, m.index) : ev.text); if (prose) narrationBuf.push(prose.slice(0, 600))
+        }
         else if (ev.kind === 'command') {
           const cmd = ev.command?.trim().replace(/\s+/g, ' ')
           if (cmd && cmd !== lastDoing) { lastDoing = cmd; narrationBuf.push(('DOING: ' + cmd).slice(0, 200)); if (firstWork) { firstWork = false; void narrateNow() } }

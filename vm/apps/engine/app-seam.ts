@@ -100,7 +100,8 @@ export function createAppSeam(d: AppSeamDeps) {
     log({ t: 'agent:event', ev: { kind: 'user', id: o.qid, text, done: true } })
     beat('Looking into your question…')
     const narrator = createNarrator({ cwd: d.narratorCwd })
-    const activity: string[] = [], recent: string[] = []
+    const activity: string[] = []
+    let answering = false, recent: string[] = []
     let narrating = false
     const narration = setInterval(async () => {
       if (narrating || !activity.length) return
@@ -115,10 +116,16 @@ export function createAppSeam(d: AppSeamDeps) {
     const handlers = {
       onOutput: (chunk: string) => { activity.push(chunk); log({ t: 'agent:chunk', text: chunk }) },
       // A piece of the answer, as the agent says it, to the page that asked — before the whole reading lands.
-      onAnswer: (text: string) => { if (o.from) d.send(o.from, { t: 'app:said:part', text, qid: o.qid, sid: o.threadId, reqId: o.reqId }) },
+      onAnswer: (text: string, blocks?: unknown[]) => { if (o.from) d.send(o.from, { t: 'app:said:part', text, qid: o.qid, sid: o.threadId, reqId: o.reqId, ...(blocks?.length ? { blocks } : {}) }) },
       onEvent: (ev: AgentEvent) => {
         ev.at ??= Date.now()
-        if (ev.kind === 'command' || ev.kind === 'message') activity.push(String(ev.text ?? ev.command ?? ''))
+        // The narrator tells what the agent is doing, never the answer: once `:::answer` is said, what follows is not work.
+        if (ev.kind === 'command') activity.push(String(ev.command ?? ''))
+        else if (ev.kind === 'message' && !answering) {
+          const t = String(ev.text ?? ''), m = t.match(/^[ \t]*:::answer[ \t]*$/m)
+          if (m) answering = true
+          const before = (m ? t.slice(0, m.index) : t).trim(); if (before) activity.push(before)
+        }
         // What a data call RETURNED is what the narrator can say something with; a listing or a read is machinery.
         if (ev.kind === 'command' && ev.output?.trim() && isDataCall(ev.command)) activity.push(('RESULT: ' + capResultData(ev.output)).slice(0, 1800))
         log({ t: 'agent:event', ev })
