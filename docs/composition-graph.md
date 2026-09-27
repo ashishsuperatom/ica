@@ -47,6 +47,15 @@ Same inputs, same prompt, byte for byte. A session keeps what it was composed wi
 recomposes; the next session gets the graph as it is then. Today everything is composed up front and packaged
 into the session; knowledge loaded during a session, on demand, is a later addition to the same graph.
 
+## The answer contract
+
+An agent answers in its own reply. Everything it says before a line `:::answer` is working aloud, which the
+narrator turns into beats; everything after it is the answer, sent to the surface line by line as each line
+completes — a sentence, the scope line, a marker line, a table row — never token by token. Inside the answer,
+marker lines name files in the session folder (`:::table red-weeks.json`, `:::bar …`, later `:::dashboard …`,
+`:::report …`, `:::link …`), resolved after the fact: only what the answer names is sent. An agent that writes no
+`:::answer` line is taken at its final message, so nothing breaks while a domain's document teaches the marker.
+
 ## Versions, time and provenance
 
 Every node's content is stored by hash, as the semantic graph's store already does. A change is a row: which
