@@ -12,7 +12,7 @@
 //                          files?, tools? }; the project composes its sections from typed parts however it likes
 //   knowledge/index.json   the older shape: { "domains": [ { "name", "capabilities", "parts": [file…], "files", "tools" } ] }
 //                          with parts read from knowledge/<domain-dir>/<part>
-import { readFile, copyFile, mkdir } from 'node:fs/promises'
+import { readFile, copyFile, mkdir, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -79,4 +79,43 @@ export async function compose(projectDir: string, domain: Domain): Promise<Knowl
 export async function place(k: Knowledge, cwd: string): Promise<void> {
   await mkdir(cwd, { recursive: true })
   for (const f of k.files) await copyFile(f, join(cwd, basename(f)))
+}
+
+// ── A session is a domain ──────────────────────────────────────────────────────────────────────────────────────
+// The first question of a chat picks its domain; the session folder is then made self-contained — the reference,
+// the domain's files, and a note of which domain and tools — and is the truth from then on: a restart rebuilds the
+// composer from the folder, never from a recomposition, so a domain edited later reaches new sessions only.
+
+/** The domain a first question belongs to. One domain: that one. Several: the one whose words the question shares most. */
+export async function pick(projectDir: string, question: string): Promise<Domain | null> {
+  const domains = await domainsOf(projectDir)
+  if (!domains.length) return null
+  if (domains.length === 1) return domains[0]
+  const words = new Set(question.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2))
+  let best: { d: Domain; score: number } | null = null
+  for (const d of domains) {
+    const text = `${d.name} ${(await compose(projectDir, d)).text}`.toLowerCase()
+    const vocab = new Set(text.split(/[^a-z0-9]+/).filter((w) => w.length > 2))
+    let score = 0; for (const w of words) if (vocab.has(w)) score++
+    if (!best || score > best.score) best = { d, score }
+  }
+  return best?.d ?? domains[0]
+}
+
+const NOTE = '.domain.json', REFERENCE = '.reference.md'
+
+/** Write what a session folder needs to stand on its own: the reference and which domain and tools it has. */
+export async function remember(k: Knowledge, domain: Domain, cwd: string): Promise<void> {
+  await mkdir(cwd, { recursive: true })
+  await writeFile(join(cwd, REFERENCE), k.text)
+  await writeFile(join(cwd, NOTE), JSON.stringify({ domain: domain.name, tools: domain.tools ?? null, at: new Date().toISOString() }, null, 2))
+}
+
+/** What a session folder remembers, or null when it was never given a domain. */
+export async function recall(cwd: string): Promise<{ domain: string; tools?: string[]; text: string } | null> {
+  try {
+    const note = JSON.parse(await readFile(join(cwd, NOTE), 'utf8'))
+    const text = await readFile(join(cwd, REFERENCE), 'utf8')
+    return { domain: String(note.domain), ...(Array.isArray(note.tools) ? { tools: note.tools } : {}), text }
+  } catch { return null }
 }

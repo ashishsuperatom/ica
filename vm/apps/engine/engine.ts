@@ -37,6 +37,7 @@ import { DataSourceIndex, dataSourceStats } from '@superatom/datasource-index'
 // import would break every deploy while working perfectly here.
 import type { EngineMsgType } from '../../../clients/protocol.js'
 import { createWire } from './wire.js'
+import { pick, compose, place, remember, recall } from './knowledge.js'
 import { parcelStore, apiOfHub } from '../../../clients/parcels.js'
 import { createAppSeam } from './app-seam.js'
 import { randomUUID } from 'node:crypto'
@@ -254,9 +255,9 @@ const analystSlot  = makeAgentSlot('analyst',  analystPromptVersion,  (resumeId)
 // The COMPOSER (System 2), ONE PER SESSION: each chat session gets its own composer (a cheap opencode CLIENT
 // session on the shared server, so N sessions ≈ free). Created on the session's first question, reused for the
 // session; only the in-flight question needs memory. Idle sessions are disposed by the sweep below.
-const composersBySession = new Map<string, { composer: Promise<Composer>; lastUsed: number; builtWith: string }>()
+const composersBySession = new Map<string, { composer: Promise<Composer>; lastUsed: number; builtWith: string; domain: string | null }>()
 const composerStamp = () => { const c = agentConfig('composer'); return `${c.harness}/${c.provider}/${c.model}` }
-function getComposer(sid: string): Promise<Composer> {
+function getComposer(sid: string, question = ''): Promise<Composer> {
   let e = composersBySession.get(sid)
   // A composer built before a profile change is running the old harness and model. It is dropped at the next
   // question rather than the moment the change arrives, because the change can land mid-answer and killing a
@@ -271,8 +272,28 @@ function getComposer(sid: string): Promise<Composer> {
     e = undefined
   }
   if (!e) {
-    e = { composer: createComposer({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, projectDir: PROJECT_DIR, sessionId: sid, ica: { baseUrl: OC_URL } }),
-          lastUsed: Date.now(), builtWith: want }
+    // A SESSION IS A DOMAIN. A folder that remembers its domain is rebuilt from what it holds; a new session's first
+    // question picks the domain, and the folder is made self-contained (knowledge.ts). A project without domains
+    // gets the chat composer as before.
+    const cwd = join(SESSIONS, sid)
+    const made = (async () => {
+      const had = await recall(cwd)
+      if (had) {
+        const c = await createComposer({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, projectDir: PROJECT_DIR, sessionId: sid, ica: { baseUrl: OC_URL }, reference: had.text, tools: had.tools })
+        console.log(`[ica] composer: session ${sid.slice(0, 8)} recalled "${had.domain}" from its folder`)
+        return { c, domain: had.domain }
+      }
+      const domain = await pick(PROJECT_DIR, question)
+      if (!domain) return { c: await createComposer({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, projectDir: PROJECT_DIR, sessionId: sid, ica: { baseUrl: OC_URL } }), domain: null }
+      const k = await compose(PROJECT_DIR, domain)
+      const c = await createComposer({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, projectDir: PROJECT_DIR, sessionId: sid, ica: { baseUrl: OC_URL }, reference: k.text, tools: domain.tools })
+      await place(k, c.cwd); await remember(k, domain, c.cwd)
+      console.log(`[ica] composer: session ${sid.slice(0, 8)} is "${domain.name}" (${k.text.length} chars, ${k.files.length} files)`)
+      return { c, domain: domain.name }
+    })()
+    const entry = { composer: made.then((m) => m.c), lastUsed: Date.now(), builtWith: want, domain: null as string | null }
+    made.then((m) => { entry.domain = m.domain }).catch(() => {})
+    e = entry
     composersBySession.set(sid, e)
     console.log(`[ica] composer: new session ${sid.slice(0, 8)} (live composers: ${composersBySession.size})`)
   }
@@ -361,6 +382,30 @@ const profileOf = (name: AgentName) => { try { const c = agentConfig(name); retu
 
 // Every surface renders `analyst:answer` (and a chat channel `channel:answer`); `session:step` carries the richer
 // form beside it. Next steps go as follow-up chips, which the person sends back as their next question.
+/** A reading as an Answer: the prose without its marker lines, and each block the markdown named as a section. */
+function readingAnswer(markdown: string, blocks: { marker: string; block: Record<string, unknown> | null; error?: string }[]): import('../../../clients/protocol.js').Answer {
+  const prose = markdown.split('\n').filter((l) => !/^:::\S+\s+\S+/.test(l.trim())).join('\n').trim()
+  const sections: NonNullable<import('../../../clients/protocol.js').Answer['sections']> = []
+  for (const b of blocks) {
+    const block = b.block
+    if (!block) { sections.push({ kind: 'text', body: `${b.marker}: ${b.error ?? 'nothing to show'}` }); continue }
+    const cols = Array.isArray(block.columns) ? (block.columns as any[]).filter((c) => c && typeof c === 'object' && c.key) : []
+    const rows = Array.isArray(block.rows) ? (block.rows as any[]) : []
+    if (cols.length && rows.length) {
+      sections.push({ kind: 'table', title: typeof block.title === 'string' ? block.title : undefined,
+        columns: cols.map((c) => ({ label: String(c.label ?? c.key), ...(c.unit ? { unit: String(c.unit) } : {}) })),
+        rows: rows.map((r) => cols.map((c) => (r && typeof r === 'object' ? (r as any)[c.key] : r))) })
+    } else if (Array.isArray(block.series) && rows.length) {
+      // A chart, for now as its numbers: the axis and one column per series.
+      const series = (block.series as any[]).filter((x) => x && x.key)
+      sections.push({ kind: 'table', title: typeof block.title === 'string' ? block.title : undefined,
+        columns: [String(block.axis ?? 'row'), ...series.map((x) => String(x.label ?? x.key))],
+        rows: rows.map((r) => [r?.label ?? r?.key ?? r?.[String(block.axis ?? '')], ...series.map((x) => r?.[x.key])]) })
+    } else sections.push({ kind: 'text', body: `${b.marker}: a block of kind ${String(block.type ?? '?')} that this surface cannot draw yet` })
+  }
+  return { status: 'answered', category: 'reading', answer: prose, ...(sections.length ? { sections } : {}) }
+}
+
 function tellSurfaces(reply: any, channel: string, sid: string, qid: string, timing: { ms: number }, answer: import('../../../clients/protocol.js').Answer, followups: string[] = []) {
   const category = answer.status === 'answered' ? 'analysis' : answer.status
   emit(reply, { t: 'analyst:answer', category, answer: { category, ...answer }, timing, sid, qid })
@@ -480,7 +525,20 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       return r === TIMED_OUT ? onTimeout() : (r as T)
     }
 
-    const composer = await getComposer(sid)
+    const composer = await getComposer(sid, question)
+    // A SESSION WITH A DOMAIN answers in the domain's way: prose with markers, the blocks the markdown names, no
+    // program, no verbs. The answer travels in the shape every surface already renders — the prose as the text,
+    // each block as a table section — so the surfaces change nothing.
+    if (composersBySession.get(sid)?.domain) {
+      workingAgent = 'composer'; stopSession = () => { try { (composer as any).session?.stop?.() } catch { /* best-effort */ } }
+      const said = await capped(composer.say(question, 'None: the question stands on its own.', handlers, { qid }), () => ({ markdown: null, blocks: [], queries: [], ms: Date.now() - t0 }))
+      if (stopped) { console.log(`[ica] ${qid.slice(0, 8)} stopped after ${((Date.now() - t0) / 1000).toFixed(1)}s`); return }
+      const timing = { ms: Date.now() - t0 }
+      if (said.markdown == null) { tellSurfaces(reply, channel, sid, qid, timing, { status: 'cannot_answer', answer: 'No answer was written in time. Ask it another way, or narrower.' }); return }
+      tellSurfaces(reply, channel, sid, qid, timing, readingAnswer(said.markdown, said.blocks))
+      console.log(`[ica] composer · read ${qid.slice(0, 8)} · ${(timing.ms / 1000).toFixed(1)}s · ${said.blocks.length} blocks`)
+      return
+    }
     // A leading verb says what kind of turn this is: answered here when no model is needed, else the composer's with what to do.
     const verb = parseVerb(question)
     let verbTurn: { verb: VerbMatch['verb']; view?: ViewRef; explain?: string } | null = null
