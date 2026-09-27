@@ -42,7 +42,10 @@ export async function compose(projectDir: string, domain: Domain): Promise<Knowl
   }
   const files = (domain.files ?? []).map((f) => join(dir, f)).filter((f) => existsSync(f))
   const named = files.length ? `\n\nIn your folder, from this domain: ${files.map((f) => basename(f)).join(', ')}.` : ''
-  return { domain: domain.name, text: `${texts.join('\n\n')}${named}`, files }
+  // The identity is the first line of what the agent is, and it is the domain's: not a coding assistant with a note
+  // about the project, but this organisation's agent for this domain.
+  const identity = `You are Superatom's agent for ${domain.name} at this organisation. You answer questions in this domain from its data, as the person who owns it here would.`
+  return { domain: domain.name, text: `${identity}\n\n${texts.join('\n\n')}${named}`, files }
 }
 
 /** Put a domain's files into an agent's folder. */

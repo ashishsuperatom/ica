@@ -140,8 +140,14 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
   const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl, projectDir: opts.projectDir, sessionId: opts.sessionId, tools: 'conversation' })
   if (opts.tools) await keepOnlyTools(cwd, opts.tools)
   const usage = await toolUsage(cwd, opts.tools)
+  // A composer given a domain IS that domain's agent: its reference is the whole of the instructions, with the usage
+  // of the tools it was left. The chat composer's role, which names every tool, is for a composer without one.
+  const toolLines = usage ? `The tools, each as it says of itself — run them as bash commands in this folder:\n${usage}` : ''
+  const systemReference = opts.reference ? [opts.reference, toolLines].filter(Boolean).join('\n\n') : [ROLE, toolLines].filter(Boolean).join('\n\n')
   const session = createSession(harness, { cwd, model: opts.ica?.model ?? cfg.model, provider: opts.ica?.provider ?? cfg.provider, thinking: opts.ica?.thinking ?? cfg.thinking, baseUrl: opts.ica?.baseUrl,
-                                           systemReference: [ROLE, usage ? `The tools, each as it says of itself:\n${usage}` : '', opts.reference ?? ''].filter(Boolean).join('\n\n') })
+                                           systemReference })
+  await writeFile(join(cwd, '.system-prompt.md'), systemReference)   // what this agent was told, verbatim, for anyone to read
+  console.log(`[composer] ${opts.sessionId?.slice(0, 8) ?? '?'} prompt ${systemReference.length} chars · tools ${opts.tools ? opts.tools.join(', ') : 'all'} · first line: ${systemReference.split('\n')[0].slice(0, 90)}`)
   if (session.referencePlacement !== 'in-context') console.warn(`[composer] harness "${harness}" cannot put the reference in the system prompt — use opencode/claude/codex`)
 
   const queriesOf = async (qid: string): Promise<QueryRecord[]> => {
