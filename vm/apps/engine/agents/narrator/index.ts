@@ -47,6 +47,22 @@ SAY WHAT IS HAPPENING — NEVER THAT IT IS RIGHT
 // Cap the data we feed the narrator. Query results can be huge (long lists/tables, possibly NESTED — the array
 // may not be at the top). The narrator only needs a SAMPLE to summarise, so keep the first N items of every
 // array (recursively), or the first few lines of a plain-text dump. Big input → smaller + cheaper, same shape.
+/** Did this command go and GET something — run a query, a script, a program, an introspection — as opposed to
+ *  listing, reading, editing or asking for help? Only the first kind is worth narrating: it produces findings,
+ *  where reading a file produces machinery the narrator is meant to hide.
+ *
+ *  Matched on what the command DOES, never on how a harness or a domain spells it: an executable in the agent's
+ *  folder, an interpreter over a script, or one of the platform's reading verbs. `cd … && …` prefixes and a
+ *  `bash ` wrapper are looked through. */
+export function isDataCall(command?: string): boolean {
+  let c = String(command ?? '').trim().toLowerCase()
+  if (!c) return false
+  c = c.replace(/^bash\s+/, '').replace(/^(cd\s+\S+\s*(&&|;)\s*)+/, '').trim()
+  if (/(^|\s)(-h|--help)(\s|$)/.test(c)) return false
+  if (/^(read|ls|cat|head|tail|grep|rg|find|write|edit|mkdir|touch|rm|mv|cp|pwd|which|echo|wc|sed|awk|date|time)\b/.test(c)) return false
+  return /^(\.\/\S+|node|python3?|tsx|npx|deno|bun|sqlite3|curl|jq)\b/.test(c) || /\b(query|introspect|resolve|find-schema|sources|try|ask|members|catalog)\b/.test(c)
+}
+
 export function capResultData(s: string, n = 8): string {
   const t = (s ?? '').trim()
   if (!t) return t

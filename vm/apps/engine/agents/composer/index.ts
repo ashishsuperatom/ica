@@ -41,7 +41,9 @@ export interface TurnResult {
   ms: number
 }
 
-export interface Said { markdown: string | null; queries: QueryRecord[]; ms: number }
+/** What a turn said: prose, and the blocks its script wrote beside it (out/<qid>/blocks.json — the application's own
+ *  block shapes, so a table or a chart from an agent draws exactly as one from a capability). */
+export interface Said { markdown: string | null; blocks: unknown[]; queries: QueryRecord[]; ms: number }
 /** A query the composer sent to a source itself, outside the graph: recorded with the turn, so the modeller can read
  *  what the graph did not hold and the answer can say which parts did not stand on the model. */
 export interface QueryRecord { source: string; query: string; rows: number; ms: number; at: number; error?: string }
@@ -179,7 +181,8 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       const read = async () => { try { const t = (await readFile(answerFile, 'utf8')).trim(); return t || null } catch { return null } }
       const prompt = `What the person is looking at:\n${context}\n\nTheir question: ${text}\n\ntoday: ${todayIn(opts.projectDir)}\nqid: ${o.qid}\nWrite the answer to out/${o.qid}/said.md`
       await session.run(prompt, { ...handlers, doneWhen: async () => (await read()) !== null })
-      return { markdown: await read(), queries: await queriesOf(o.qid), ms: Date.now() - t0 }
+      const blocks = await readFile(join(dir, 'blocks.json'), 'utf8').then((t) => { const v = JSON.parse(t); return Array.isArray(v) ? v : [] }).catch(() => [] as unknown[])
+      return { markdown: await read(), blocks, queries: await queriesOf(o.qid), ms: Date.now() - t0 }
     },
   }
 }

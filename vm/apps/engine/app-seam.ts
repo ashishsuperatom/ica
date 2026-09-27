@@ -9,7 +9,7 @@ import { pathToFileURL } from 'node:url'
 import { check } from '@superatom/semantic-graph'
 import { MODEL } from './graph/semantic.js'
 import { createComposer, type Composer, type QueryRecord } from './agents/composer/index.js'
-import { createNarrator } from './agents/narrator/index.js'
+import { createNarrator, capResultData, isDataCall } from './agents/narrator/index.js'
 import { domainFor, compose, place } from './knowledge.js'
 import type { AgentEvent } from './ica/session.js'
 
@@ -28,6 +28,8 @@ export interface AppSeamDeps {
 
 export interface Said {
   markdown: string | null
+  /** Blocks the turn's script wrote beside its prose, in the application's own shapes. */
+  blocks: unknown[]
   /** The graph calls the answer was read from. */
   calls: Array<{ id: string; canonical: string | null; ms: number; at: number; refused: boolean; error: string | null }>
   /** The queries the composer sent to sources itself, outside the graph: the parts that did not stand on the model. */
@@ -110,16 +112,22 @@ export function createAppSeam(d: AppSeamDeps) {
     }, 4000)
     const handlers = {
       onOutput: (chunk: string) => { activity.push(chunk); log({ t: 'agent:chunk', text: chunk }) },
-      onEvent: (ev: AgentEvent) => { ev.at ??= Date.now(); if (ev.kind === 'command' || ev.kind === 'message') activity.push(String(ev.text ?? ev.command ?? '')); log({ t: 'agent:event', ev }) },
+      onEvent: (ev: AgentEvent) => {
+        ev.at ??= Date.now()
+        if (ev.kind === 'command' || ev.kind === 'message') activity.push(String(ev.text ?? ev.command ?? ''))
+        // What a data call RETURNED is what the narrator can say something with; a listing or a read is machinery.
+        if (ev.kind === 'command' && ev.output?.trim() && isDataCall(ev.command)) activity.push(('RESULT: ' + capResultData(ev.output)).slice(0, 1800))
+        log({ t: 'agent:event', ev })
+      },
     }
     let timer: ReturnType<typeof setTimeout> | undefined
     const said = await Promise.race([
       composer.say(text, context, handlers, { qid: o.qid }).finally(() => { clearInterval(narration); try { narrator.stop() } catch { /* best-effort */ } }),
-      new Promise<Said>((res) => { timer = setTimeout(() => { try { composer.session.stop() } catch { /* best effort */ }; res({ markdown: null, calls: [], queries: [], ms: Date.now() - t0 }) }, MAX_SAY_MS) }),
+      new Promise<Said>((res) => { timer = setTimeout(() => { try { composer.session.stop() } catch { /* best effort */ }; res({ markdown: null, blocks: [], calls: [], queries: [], ms: Date.now() - t0 }) }, MAX_SAY_MS) }),
     ])
     if (timer) clearTimeout(timer)
     const sg = await d.getSemantic()
-    return { markdown: said.markdown, calls: sg.store.callsSince(o.threadId, t0), queries: said.queries ?? [], ms: Date.now() - t0 }
+    return { markdown: said.markdown, blocks: said.blocks ?? [], calls: sg.store.callsSince(o.threadId, t0), queries: said.queries ?? [], ms: Date.now() - t0 }
   }
 
   async function handle(payload: any, from: any) {

@@ -23,7 +23,7 @@ import { homedir } from 'node:os'
 import { existsSync, mkdirSync, rmSync, readFileSync } from 'node:fs'
 import { createSession, prepareWorkspace, type Session, type Harness, type RunHandlers } from './ica/index.js'
 import { agentConfig, describeConfig, useCache, receive, applied, type AgentName } from './config/index.js'
-import { createNarrator, capResultData, stripCode, type Narrator } from './agents/narrator/index.js'
+import { createNarrator, capResultData, stripCode, isDataCall, type Narrator } from './agents/narrator/index.js'
 import { createAnalyst, promptVersion as analystPromptVersion } from './agents/analyst/index.js'
 import { promptVersion as composerPromptVersion, createComposer, dayOf, type Composer } from './agents/composer/index.js'
 import { createConnector, promptVersion as connectorPromptVersion } from './agents/connector/index.js'
@@ -343,23 +343,7 @@ const emitBeat = (reply: any, text: string, qid: string, sid: string) => {
   emit({ type: 'log', channel: 'narration' }, { t: 'narration', text, qid, sid })
 }
 
-/** Did this command go and GET something — a query, an introspection, a program run — as opposed to shuffling
- *  files about? Only the first kind is worth narrating: it produces findings, where reading a file produces
- *  machinery the narrator is meant to hide.
- *
- *  Matched on what the command DOES, never on how a harness spells it. The previous test was
- *  `/\b(tsx|node|run\.mjs|query\.mjs|program\.ts)\b/`, which described opencode's and claude's command lines.
- *  pi wraps everything as `bash ./query …` and `read …`, so nothing matched, the narrator was fed nothing, and
- *  a turn that was working produced no narration at all — a harness change silently removing a feature.
- *
- *  pi also emits assistant prose only when the turn ENDS, so on that harness these results are the only live
- *  signal there is. */
-export function isDataCall(command?: string): boolean {
-  const c = String(command ?? '').toLowerCase()
-  if (!c) return false
-  if (/^\s*(bash\s+)?(read|ls|cat|head|tail|grep|find|write|edit|mkdir|touch|rm|mv|cp)\b/.test(c)) return false
-  return /\b(query|introspect|resolve|find-schema|sources|try|ask|members|find|catalog)\b/.test(c)
-}
+export { isDataCall }
 
 // ── Agent-lane protocol ──────────────────────────────────────────────────────
 // ONE wire vocabulary for EVERY agent lane (composer, analyst — and any future autonomous agent). A lane is an
