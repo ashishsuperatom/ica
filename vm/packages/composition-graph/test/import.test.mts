@@ -36,3 +36,12 @@ test('importing again changes nothing; a shared part written two ways is refused
   const twoWays = [written[0], { ...written[1], parts: [{ ...shared, items: ['another text'] }] }]
   assert.throws(() => importDomains(new Store(':memory:'), twoWays, read, by), /written two ways/)
 })
+
+test('a file listed by its path is one node every domain that lists it shares, placed under its file name', () => {
+  const s = new Store(':memory:')
+  const withShared = [{ ...written[0], files: ['a.mjs', 'shared/rates.mjs'] }, { ...written[1], files: ['shared/rates.mjs'] }]
+  importDomains(s, withShared, (d, f) => (f.includes('/') ? `// ${f}` : `// ${d}/${f}`), by)
+  assert.deepEqual(s.names('file').map((n) => n.name), ['a/a.mjs', 'shared/rates.mjs'])
+  assert.deepEqual(compose(s, 'b').files.map((f) => f.name), ['rates.mjs'])
+  assert.match(compose(s, 'a').text, /In your folder, from this domain: a\.mjs, rates\.mjs\.$/)
+})

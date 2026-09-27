@@ -64,7 +64,7 @@ if (command === 'domains') {
   const file = resolve(rest[0] ?? fail('import <knowledge/index.mts>'))
   const mod = await import(pathToFileURL(file).href)
   const dir = file.replace(/\/[^/]+$/, '')
-  const read = (domain: string, f: string) => readFileSync(join(dir, domain.replace(/\s+/g, '-').toLowerCase(), f), 'utf8')
+  const read = (domain: string, f: string) => readFileSync(f.includes('/') ? join(dir, f) : join(dir, domain.replace(/\s+/g, '-').toLowerCase(), f), 'utf8')
   for (const r of importDomains(store, (mod.domains ?? []) as WrittenDomain[], read, ctx)) console.log(r.changed ? `${r.kind} ${r.name} → ${r.hash.slice(0, 12)}` : `${r.kind} ${r.name} unchanged`)
 } else {
   fail('commands: domains · show · history · changes · compose · put · remove · import   (every change: --by --reason --from)')
