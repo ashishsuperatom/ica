@@ -13,12 +13,17 @@ each trying to be from one side.
 |---|---|---|
 | `domain` | a bounded set of intents, with a name and the intents in plain phrases | weekly utilisation |
 | `part` | one section of a domain's knowledge, typed by its role | definitions · source · rule · process · answers · examples |
-| `function` | a script the agent runs, with its usage line and an `inspect` (how it works, loaded only on demand) | `weekly.mjs <from> <to>` |
+| `function` | a script the agent runs to read or compute, with its usage line and an `inspect` (how it works, loaded only on demand) | `weekly.mjs <from> <to>` |
+| `action` | a function that changes something outside — creates, sends, updates — with its usage, its inspect, what it changes, and whether it confirms first | `reassign.mjs <person> <project> <hours>` |
 | `tool` | a shell command the agent may run, with its usage line | `query` |
 | `setting` | a value a rule reads by name | utilisation threshold = −0.3 |
 | `rule` | a statement with a context it holds in (user, group, condition) | "hours on a utilisation screen means utilised hours" |
 | `representation` | how a unit, a dimension or a time is shown | hours to one decimal, weeks by their Monday |
 | `identity` | the first line of an agent | "You are Superatom's agent for … at this organisation" |
+
+**Names and hashes.** A node's content is stored by its hash; a name points at a hash, as the concept graph and the
+semantic graph did. Renaming moves the pointer; editing makes a new hash the name now points at; nothing that was
+ever composed can change under a session that holds it.
 
 **Edges** say what belongs to what and in what order: a domain *has* parts, functions, tools, settings; a rule
 *applies at* a domain, a part or a function; a representation *governs* a unit; a level *carries* nodes.
@@ -39,7 +44,8 @@ prompt, the more specific overriding the more general by name.
 6. the files to place in the folder: the functions' scripts.
 
 Same inputs, same prompt, byte for byte. A session keeps what it was composed with in its folder and never
-recomposes; the next session gets the graph as it is then.
+recomposes; the next session gets the graph as it is then. Today everything is composed up front and packaged
+into the session; knowledge loaded during a session, on demand, is a later addition to the same graph.
 
 ## Versions, time and provenance
 

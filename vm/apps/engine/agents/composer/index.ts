@@ -46,9 +46,6 @@ export interface TurnResult {
  *  belongs — the named file in the thread's folder, in the application's own block shape, so a table or a chart from
  *  an agent draws exactly as one from a capability. Each marker is resolved here; the marker lines stay in the
  *  markdown so the client can split at them. Only files the markdown names are ever read or sent. */
-/** Prose has words in it and is not a shell fragment left unexpanded. */
-const isProse = (t: string | null) => !!t && /[A-Za-z]{3,}/.test(t) && !/^\s*\$\(/.test(t) && !/^\s*`[^`]*`\s*$/.test(t)
-
 export interface Said { markdown: string | null; blocks: SaidBlock[]; queries: QueryRecord[]; ms: number }
 export interface SaidBlock { marker: string; block: Record<string, unknown> | null; error?: string }
 
@@ -216,20 +213,16 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       await writeFile(join(cwd, '.turn'), o.qid)
       await writeFile(join(cwd, '.session'), opts.sessionId ?? '')
       await writeFile(join(cwd, '.agent'), 'composer')
-      const answerFile = join(dir, 'said.md')
-      const read = async () => { try { const t = (await readFile(answerFile, 'utf8')).trim(); return t || null } catch { return null } }
-      const prompt = `What the person is looking at:\n${context}\n\nTheir question: ${text}\n\ntoday: ${todayIn(opts.projectDir)}\nqid: ${o.qid}\nWrite the answer to out/${o.qid}/said.md`
-      await session.run(prompt, { ...handlers, doneWhen: async () => (await read()) !== null })
+      // THE ANSWER IS THE AGENT'S FINAL MESSAGE. A model finishes by saying its answer, so that is what is taken —
+      // not a file it was asked to write, which invited shell and shipped the first slip. The turn ends when the
+      // agent ends it; the last message, with its marker lines, is the reading, and it is kept in the question's
+      // folder for the record.
+      let last = ''
+      const prompt = `What the person is looking at:\n${context}\n\nTheir question: ${text}\n\ntoday: ${todayIn(opts.projectDir)}\nqid: ${o.qid}`
+      const r = await session.run(prompt, { ...handlers, onEvent: (ev) => { if (ev.kind === 'message' && ev.text?.trim()) last = ev.text.trim(); handlers?.onEvent?.(ev) } })
       await noteHarness()
-      // AN ANSWER IS TEXT. The turn ends the moment the file exists, before the agent's next step could show it a
-      // slip — a heredoc that kept a `$(…)` unexpanded, an empty write. A file that is not prose is not shipped: it
-      // is removed and the agent is told, once, and writes the answer as text.
-      if (!isProse(await read())) {
-        await rm(answerFile, { force: true })
-        await session.run(`out/${o.qid}/said.md was not an answer: it held shell text or nothing. Write the answer itself, as text, to out/${o.qid}/said.md.`, { ...handlers, doneWhen: async () => (await read()) !== null })
-        await noteHarness()
-      }
-      const markdown = await read()
+      const markdown = (last || r.lastLines?.trim() || '') || null
+      if (markdown) await writeFile(join(dir, 'said.md'), markdown).catch(() => {})
       return { markdown, blocks: markdown ? await blocksNamedIn(markdown, cwd) : [], queries: await queriesOf(o.qid), ms: Date.now() - t0 }
     },
   }
