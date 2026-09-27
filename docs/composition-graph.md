@@ -55,6 +55,14 @@ Agents write the graph by a short guide the CLI enforces: one idea per atom; sea
 existing content returns its name); name by meaning; composites carry no knowledge; every change says who, why,
 from what; an atom is edited only to correct it — a new meaning is a new atom, and composites move to it.
 
+## Making an agent from a conversation (decided, not built)
+
+`:fork` in a chat, a verb like `:explain` and `:edit`: a writer agent reads the chat, its corrections and the scripts in
+its folder, and proposes a new agent — reusing existing nodes by name, new atoms only for new knowledge, the named
+scripts as programs — as a DRAFT with its lineage (the agent it came from, the chat, who forked it). Lifecycle: draft →
+trial (its author and testers) → production → retired, each promotion a recorded change with its reason. The writer is
+taught by the authoring guide above. Needs: a status on agents, a lineage link, a draft space.
+
 ## Composition
 
 `compose(domain, who)` → the system prompt and the files for a session:
