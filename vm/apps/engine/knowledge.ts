@@ -34,7 +34,7 @@ export interface Knowledge { domain: string; text: string; files: string[] }
 
 /** How every answer is given, whatever the domain. */
 const ANSWERING = `# How every answer is given
-- The answer starts with a line \`:::answer\`. What you say before it is you working; what follows it is the answer.
+- The answer starts with a line \`:::answer\`.
 - The next line says the time the answer covers: \`:::period <when> · <what kind>\`.
   - A span: \`:::period 7 Sep – 20 Sep 2026 · 2 complete weeks\`
   - A moment, for data that holds only its current state: \`:::period As of 27 Sep 2026 · the state now\`
