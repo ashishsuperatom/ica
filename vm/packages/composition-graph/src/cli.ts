@@ -16,7 +16,8 @@ import { readFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Store, type Kind } from './store.js'
-import { compose, domains, type DomainBody, type PartBody } from './compose.js'
+import { compose, domains } from './compose.js'
+import { importDomains, type WrittenDomain } from './import.js'
 
 const argv = process.argv.slice(2)
 const flags: Record<string, string | true> = {}
@@ -59,24 +60,12 @@ if (command === 'domains') {
 } else if (command === 'remove') {
   console.log(store.remove(rest[0] ?? fail('remove <name>'), ctx) ? `${rest[0]} removed` : `there is no "${rest[0]}"`)
 } else if (command === 'import') {
-  // A knowledge/index.mts: domains with parts in their forms and the files they bring. Each becomes nodes here;
-  // what is unchanged records nothing, so importing twice is harmless.
+  // A knowledge/index.mts: domains with parts in their forms and the files they bring (import.ts).
   const file = resolve(rest[0] ?? fail('import <knowledge/index.mts>'))
   const mod = await import(pathToFileURL(file).href)
-  const list = (mod.domains ?? []) as { name: string; capabilities: string[]; parts: PartBody[]; files?: string[]; tools?: string[] }[]
   const dir = file.replace(/\/[^/]+$/, '')
-  for (const d of list) {
-    const partNames = d.parts.map((p) => `${d.name}/${p.title.toLowerCase()}`)
-    d.parts.forEach((p, i) => { const r = store.put(partNames[i], 'part', p, ctx); console.log(r.changed ? `part ${partNames[i]} → ${r.hash.slice(0, 12)}` : `part ${partNames[i]} unchanged`) })
-    const fileNames = (d.files ?? []).map((f) => `${d.name}/${f}`)
-    for (const [i, f] of (d.files ?? []).entries()) {
-      const r = store.put(fileNames[i], 'file', { name: f, text: readFileSync(join(dir, d.name.replace(/\s+/g, '-').toLowerCase(), f), 'utf8') }, ctx)
-      console.log(r.changed ? `file ${fileNames[i]} → ${r.hash.slice(0, 12)}` : `file ${fileNames[i]} unchanged`)
-    }
-    const body: DomainBody = { capabilities: d.capabilities, parts: partNames, files: fileNames, ...(d.tools ? { tools: d.tools } : {}) }
-    const r = store.put(d.name, 'domain', body, ctx)
-    console.log(r.changed ? `domain ${d.name} → ${r.hash.slice(0, 12)}` : `domain ${d.name} unchanged`)
-  }
+  const read = (domain: string, f: string) => readFileSync(join(dir, domain.replace(/\s+/g, '-').toLowerCase(), f), 'utf8')
+  for (const r of importDomains(store, (mod.domains ?? []) as WrittenDomain[], read, ctx)) console.log(r.changed ? `${r.kind} ${r.name} → ${r.hash.slice(0, 12)}` : `${r.kind} ${r.name} unchanged`)
 } else {
   fail('commands: domains · show · history · changes · compose · put · remove · import   (every change: --by --reason --from)')
 }
