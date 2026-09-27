@@ -17,11 +17,10 @@
 // Which turn is live is in .turn, which data session this conversation is in .session — both written by the engine
 // before it asks. A turn's files are in out/<qid>/.
 
-import { mkdir, writeFile, chmod, symlink, readlink, rm, readdir, rename } from 'node:fs/promises'
+import { mkdir, writeFile, chmod, symlink, readlink, rm, readdir, rename, readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createRequire } from 'node:module'
 
 const semanticCli = fileURLToPath(new URL('../graph/semantic-cli.ts', import.meta.url))
 const modelCli = fileURLToPath(new URL('../../../packages/semantic-graph/src/cli.ts', import.meta.url))
@@ -44,6 +43,24 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
   const dir = s.sessionId ? join(projectHome, 'sessions', s.sessionId) : join(projectHome, 'workspace')
   const dbDir = join(projectHome, 'db')
   const managerUrl = s.managerUrl ?? 'http://localhost:4000'
+
+  // @superatom/* must resolve from the project home for the data seams below. State lives outside the repository
+  // (~/.superatom/state), where Node finds no node_modules by walking up, so the project home links to the engine's
+  // by absolute path — always checked, never assumed: a resolution test from inside the engine's process answers for
+  // the engine's environment (NODE_PATH under pm2), not for the tool's own process, which found nothing. A relative
+  // link breaks when the state directory moves, so it is replaced.
+  try {
+    const link = join(projectHome, 'node_modules')
+    const target = fileURLToPath(new URL('../node_modules', import.meta.url))   // apps/engine/node_modules
+    const current = await readlink(link).catch(() => null)
+    if (current !== target) {
+      if (current !== null) await rm(link, { force: true })
+      if (existsSync(target)) { await symlink(target, link, 'dir'); console.log(`[workspace] linked ${link} → ${target}`) }
+    }
+  } catch (e: any) {
+    // Not fatal on its own — but every data seam will fail, so say it rather than swallow it.
+    console.warn(`[workspace] @superatom/* does not resolve from ${projectHome} and the link failed — the data seams will not import: ${e?.message ?? e}`)
+  }
   // The project's home, where its model is. Every agent in the shared workspace writes the same tools, so each resolves
   // it the way the engine does (ENGINE_PROJECT_DIR, else the project home) when its caller does not say.
   const projectDir = s.projectDir ?? process.env.ENGINE_PROJECT_DIR ?? projectHome
@@ -51,29 +68,6 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
   for (const sub of ['', 'data', 'grounding', 'out', '.tools']) await mkdir(join(dir, sub), { recursive: true })
   await mkdir(dbDir, { recursive: true })
 
-  // @superatom/* must resolve from the project home for the data seams below. State lives outside the repository
-  // (~/.superatom/state), where Node finds no node_modules by walking up, so the project home links to the engine's
-  // by absolute path. A relative link breaks when the state directory moves, so it is replaced.
-  const resolvesAlready = (() => {
-    try { createRequire(join(projectHome, 'noop.js')).resolve('@superatom/introspect'); return true }
-    catch { return false }
-  })()
-
-  if (!resolvesAlready) {
-    try {
-      const link = join(projectHome, 'node_modules')
-      const target = fileURLToPath(new URL('../node_modules', import.meta.url))   // apps/engine/node_modules
-      const current = await readlink(link).catch(() => null)
-      if (current !== target) {
-        if (current !== null) await rm(link, { force: true })
-        if (existsSync(target)) await symlink(target, link, 'dir')
-      }
-      console.log(`[workspace] linked ${join(projectHome, 'node_modules')} → ${target}`)
-    } catch (e: any) {
-      // Not fatal on its own — but every data seam will fail, so say it rather than swallow it.
-      console.warn(`[workspace] @superatom/* does not resolve from ${projectHome} and the fallback link failed — the data seams will not import: ${e?.message ?? e}`)
-    }
-  }
 
 
   if (!conversation) await writeFile(join(dir, 'CONTEXT.md'),
@@ -366,8 +360,16 @@ if command -v tsx >/dev/null 2>&1; then exec tsx "$D" "$@"; else exec npx --yes 
     await chmod(join(dir, name), 0o755)
   }
 
+  // The tools' own usage lines, together, so an agent whose reference can hold them starts a thread knowing its
+  // tools rather than reading each one's help first.
+  await writeFile(join(dir, '.tools', 'USAGE.md'), Object.keys(drivers).filter((n) => usages[n]).map((n) => usages[n]).join('\n\n'))
   await removeWhatIsNotOurs(dir, Object.keys(drivers), conversation)
   return dir
+}
+
+/** The usage of every tool in a prepared workspace, as one text, for an agent's reference. */
+export async function toolUsage(dir: string): Promise<string> {
+  try { return await readFile(join(dir, '.tools', 'USAGE.md'), 'utf8') } catch { return '' }
 }
 
 /** Tools that only read: their work outlives the call, and asking the same thing twice in a turn costs nothing. */
