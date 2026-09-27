@@ -10,6 +10,7 @@ import { check } from '@superatom/semantic-graph'
 import { MODEL } from './graph/semantic.js'
 import { createComposer, type Composer, type QueryRecord } from './agents/composer/index.js'
 import { createNarrator } from './agents/narrator/index.js'
+import { domainFor, compose, place } from './knowledge.js'
 import type { AgentEvent } from './ica/session.js'
 
 export interface AppSeamDeps {
@@ -52,10 +53,22 @@ export function createAppSeam(d: AppSeamDeps) {
 
   // ONE COMPOSER PER THREAD, as the chat has one per conversation: the thread id is its session, so a follow-up
   // lands where the earlier question was answered. Idle composers are let go; their directories stay.
-  const composers = new Map<string, { composer: Promise<Composer>; lastUsed: number }>()
-  const composerFor = (sid: string) => {
+  const composers = new Map<string, { composer: Promise<Composer>; domain: string | null; lastUsed: number }>()
+  // The screen's capability picks the domain (knowledge.ts): the composer of a thread is made knowing that domain,
+  // and made again if a later question in the thread comes from a screen of another domain.
+  const composerFor = async (sid: string, focus?: string | null) => {
+    const domain = await domainFor(d.projectDir, focus)
     let e = composers.get(sid)
-    if (!e) { e = { composer: createComposer({ root: d.workspaceRoot, projectId: d.project, managerUrl: d.datasource, projectDir: d.projectDir, sessionId: sid }), lastUsed: Date.now() }; composers.set(sid, e) }
+    if (e && e.domain !== (domain?.name ?? null)) { composers.delete(sid); e.composer.then((c) => { try { c.session.stop() } catch { /* gone */ } }); e = undefined }
+    if (!e) {
+      const composer = (async () => {
+        const k = domain ? await compose(d.projectDir, domain) : null
+        const c = await createComposer({ root: d.workspaceRoot, projectId: d.project, managerUrl: d.datasource, projectDir: d.projectDir, sessionId: sid, reference: k?.text })
+        if (k) { await place(k, c.cwd); console.log(`[app] thread ${sid.slice(0, 8)} knows "${k.domain}" (${k.text.length} chars, ${k.files.length} files)`) }
+        return c
+      })()
+      e = { composer, domain: domain?.name ?? null, lastUsed: Date.now() }; composers.set(sid, e)
+    }
     e.lastUsed = Date.now()
     return e.composer
   }
@@ -64,9 +77,9 @@ export function createAppSeam(d: AppSeamDeps) {
   /** A question in prose, asked from a screen of the application: the composer of that thread answers it. While it
    *  works, what it does goes back as beats — to the asking page, which shows the last line and keeps waiting, and to
    *  the project's agent log on the composer's lane, so the work can be watched where every agent's work is watched. */
-  async function say(text: string, context: string, o: { qid: string; threadId: string; reqId?: string; from?: any }): Promise<Said> {
+  async function say(text: string, context: string, o: { qid: string; threadId: string; focus?: string | null; reqId?: string; from?: any }): Promise<Said> {
     const t0 = Date.now()
-    const composer = await composerFor(o.threadId)
+    const composer = await composerFor(o.threadId, o.focus)
     // PROGRESS GOES OUT EXACTLY AS A CHAT TURN'S DOES. The raw work — output and events — travels on the agent
     // log channel under the composer's lane, for whoever watches agents work. What a person reads while waiting is
     // the narrator's: every few seconds it turns the activity since the last beat into one line, sent as
@@ -121,7 +134,7 @@ export function createAppSeam(d: AppSeamDeps) {
         return { rows: body.rows ?? [], notes: body.notes ?? null }
       },
       sources: async () => { const r = await fetch(`${d.datasource}/sources`); const body: any = await r.json().catch(() => ({})); return body.sources ?? [] },
-      say: (text: string, context: string, o: { qid: string; threadId: string }) => say(text, context, { ...o, reqId: payload.reqId, from }),
+      say: (text: string, context: string, o: { qid: string; threadId: string; focus?: string | null }) => say(text, context, { ...o, reqId: payload.reqId, from }),
       reply: (msg: Record<string, unknown>) => {
         const out = { ...msg, t: String(msg.t ?? 'app:res'), reqId: payload.reqId }
         console.log(`[app] → ${out.t} ${payload.reqId ?? ''} ${JSON.stringify(out).length} bytes · ${Date.now() - t0} ms · to ${from?.id ?? '?'}`)
