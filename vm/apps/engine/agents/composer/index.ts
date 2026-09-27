@@ -46,6 +46,9 @@ export interface TurnResult {
  *  belongs — the named file in the thread's folder, in the application's own block shape, so a table or a chart from
  *  an agent draws exactly as one from a capability. Each marker is resolved here; the marker lines stay in the
  *  markdown so the client can split at them. Only files the markdown names are ever read or sent. */
+/** Prose has words in it and is not a shell fragment left unexpanded. */
+const isProse = (t: string | null) => !!t && /[A-Za-z]{3,}/.test(t) && !/^\s*\$\(/.test(t) && !/^\s*`[^`]*`\s*$/.test(t)
+
 export interface Said { markdown: string | null; blocks: SaidBlock[]; queries: QueryRecord[]; ms: number }
 export interface SaidBlock { marker: string; block: Record<string, unknown> | null; error?: string }
 
@@ -218,6 +221,14 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       const prompt = `What the person is looking at:\n${context}\n\nTheir question: ${text}\n\ntoday: ${todayIn(opts.projectDir)}\nqid: ${o.qid}\nWrite the answer to out/${o.qid}/said.md`
       await session.run(prompt, { ...handlers, doneWhen: async () => (await read()) !== null })
       await noteHarness()
+      // AN ANSWER IS TEXT. The turn ends the moment the file exists, before the agent's next step could show it a
+      // slip — a heredoc that kept a `$(…)` unexpanded, an empty write. A file that is not prose is not shipped: it
+      // is removed and the agent is told, once, and writes the answer as text.
+      if (!isProse(await read())) {
+        await rm(answerFile, { force: true })
+        await session.run(`out/${o.qid}/said.md was not an answer: it held shell text or nothing. Write the answer itself, as text, to out/${o.qid}/said.md.`, { ...handlers, doneWhen: async () => (await read()) !== null })
+        await noteHarness()
+      }
       const markdown = await read()
       return { markdown, blocks: markdown ? await blocksNamedIn(markdown, cwd) : [], queries: await queriesOf(o.qid), ms: Date.now() - t0 }
     },
