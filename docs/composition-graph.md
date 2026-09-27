@@ -32,6 +32,20 @@ ever composed can change under a session that holds it.
 outward and inward: the organisation's definitions, the user's rules, the global representations, all in one
 prompt, the more specific overriding the more general by name.
 
+## Atoms and composites (decided 2026-09-28, next to build)
+
+Two kinds of node only. An **atom** is one piece of knowledge — a definition, a rule, a threshold, a worked example,
+a query, a program — text or a file, never references. A **composite** holds no knowledge: it names its children in
+order (atoms or composites) and how to lay them out (bullets, numbered, worked). A section is a composite of atoms, a
+domain a composite of sections, higher ideas composites of domains; layers come from composites naming composites.
+
+Duplicates: exact ones vanish by hash; same meaning in other words is consolidated offline (find alike, keep one,
+repoint every composite, record the merge); same name, different meaning is refused at write.
+
+Agents write the graph by a short guide the CLI enforces: one idea per atom; search before you write (writing
+existing content returns its name); name by meaning; composites carry no knowledge; every change says who, why,
+from what; an atom is edited only to correct it — a new meaning is a new atom, and composites move to it.
+
 ## Composition
 
 `compose(domain, who)` → the system prompt and the files for a session:
