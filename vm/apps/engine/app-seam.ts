@@ -63,7 +63,7 @@ export function createAppSeam(d: AppSeamDeps) {
     if (!e) {
       const composer = (async () => {
         const k = domain ? await compose(d.projectDir, domain) : null
-        const c = await createComposer({ root: d.workspaceRoot, projectId: d.project, managerUrl: d.datasource, projectDir: d.projectDir, sessionId: sid, reference: k?.text })
+        const c = await createComposer({ root: d.workspaceRoot, projectId: d.project, managerUrl: d.datasource, projectDir: d.projectDir, sessionId: sid, reference: k?.text, tools: domain?.tools })
         if (k) { await place(k, c.cwd); console.log(`[app] thread ${sid.slice(0, 8)} knows "${k.domain}" (${k.text.length} chars, ${k.files.length} files)`) }
         return c
       })()

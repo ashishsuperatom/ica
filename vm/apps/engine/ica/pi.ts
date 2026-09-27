@@ -154,21 +154,13 @@ export function createPiSession(opts: PiSessionOpts): Session {
   const cred = codexCredential()
   const usingCodex = provider === 'openai-codex'
 
-  // THE AGENT'S INSTRUCTIONS. pi's DefaultResourceLoader reads AGENTS.md / CLAUDE.md / SYSTEM.md from cwd and
-  // folds them into the system prompt, so the reference goes in the same way codex takes it — as a file the
-  // harness loads itself, not as text prepended to the question.
-  //
-  // Without this, pi ran the composer with NO instructions at all: no canonicalisation, no route rules, no
-  // built.json contract. It still answered, which is the dangerous part — a turn that looks like it worked.
-  let refPlacement: 'in-context' | 'file' = 'file'
-  // NOT for a pure-text agent. AGENTS.md lives in the cwd, and the narrator shares the composer's workspace —
-  // writing there would overwrite the composer's instructions with narration rules. That exact collision, one
-  // file claimed by two roles, is what once handed the analyst the composer's prompt for a whole question.
-  // A no-tools agent has no workspace to describe anyway: its instructions ride on the prompt instead.
-  if (opts.systemReference?.trim() && !opts.noTools) {
-    try { writeFileSync(join(opts.cwd, 'AGENTS.md'), opts.systemReference); refPlacement = 'in-context' }
-    catch (e) { console.warn('[ica:pi] could not write AGENTS.md; instructions will be missing', e) }
-  }
+  // THE AGENT'S INSTRUCTIONS ARE THE SYSTEM PROMPT — the whole of it. pi would otherwise put its own identity first
+  // ("an expert coding assistant operating inside pi", its tool guidelines, its documentation) and fold ours in
+  // below as "project-specific instructions", which is how an agent given a complete domain still opened with
+  // `ls -la`. So the reference is handed to pi as the system prompt itself, no AGENTS.md is written or read, and
+  // pi contributes only its tool definitions. A no-tools agent (the narrator) has its instructions ride on the
+  // prompt as before.
+  const refPlacement: 'in-context' | 'file' = opts.systemReference?.trim() && !opts.noTools ? 'in-context' : 'file'
   let session: any = null
   let buf = ''
   let running = false
@@ -185,7 +177,10 @@ export function createPiSession(opts: PiSessionOpts): Session {
 
   async function ensure() {
     if (session) return session
-    const rl = new DefaultResourceLoader({ cwd: opts.cwd, agentDir: getAgentDir() } as any)
+    const rl = new DefaultResourceLoader({
+      cwd: opts.cwd, agentDir: getAgentDir(),
+      ...(refPlacement === 'in-context' ? { systemPrompt: opts.systemReference, noContextFiles: true, noSkills: true, noPromptTemplates: true } : {}),
+    } as any)
     await rl.reload()
 
     // ── ROUTE THROUGH OUR PROXY, when there is one and it can carry this provider ──────────────────────────

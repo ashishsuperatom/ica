@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { agentConfig, type AgentOverride } from '../../config/index.js'
 import { createSession, prepareWorkspace, type Harness, type Session, type RunHandlers } from '../../ica/index.js'
-import { toolUsage } from '../../ica/workspace.js'
+import { toolUsage, keepOnlyTools } from '../../ica/workspace.js'
 import { projectSettings } from '../../graph/semantic.js'
 
 export interface ComposerOpts {
@@ -27,6 +27,8 @@ export interface ComposerOpts {
   ica?: AgentOverride
   /** What this composer is to know from the start, beside its role: the memory of a domain, given in, never read. */
   reference?: string
+  /** The tools this composer is left with, by name; every tool when not said. */
+  tools?: string[]
 }
 
 export interface TurnResult {
@@ -136,8 +138,9 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
   const cfg = agentConfig('composer')
   const harness: Harness = opts.ica?.harness ?? cfg.harness
   const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl, projectDir: opts.projectDir, sessionId: opts.sessionId, tools: 'conversation' })
-  const usage = await toolUsage(cwd)
-  const session = createSession(harness, { cwd, model: opts.ica?.model ?? cfg.model, provider: opts.ica?.provider ?? cfg.provider, thinking: cfg.thinking, baseUrl: opts.ica?.baseUrl,
+  if (opts.tools) await keepOnlyTools(cwd, opts.tools)
+  const usage = await toolUsage(cwd, opts.tools)
+  const session = createSession(harness, { cwd, model: opts.ica?.model ?? cfg.model, provider: opts.ica?.provider ?? cfg.provider, thinking: opts.ica?.thinking ?? cfg.thinking, baseUrl: opts.ica?.baseUrl,
                                            systemReference: [ROLE, usage ? `The tools, each as it says of itself:\n${usage}` : '', opts.reference ?? ''].filter(Boolean).join('\n\n') })
   if (session.referencePlacement !== 'in-context') console.warn(`[composer] harness "${harness}" cannot put the reference in the system prompt — use opencode/claude/codex`)
 

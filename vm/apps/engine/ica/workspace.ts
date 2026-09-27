@@ -362,14 +362,25 @@ if command -v tsx >/dev/null 2>&1; then exec tsx "$D" "$@"; else exec npx --yes 
 
   // The tools' own usage lines, together, so an agent whose reference can hold them starts a thread knowing its
   // tools rather than reading each one's help first.
-  await writeFile(join(dir, '.tools', 'USAGE.md'), Object.keys(drivers).filter((n) => usages[n]).map((n) => usages[n]).join('\n\n'))
   await removeWhatIsNotOurs(dir, Object.keys(drivers), conversation)
+  await writeFile(join(dir, '.tools', 'USAGE.md'), Object.keys(drivers).filter((n) => usages[n]).map((n) => usages[n]).join('\n\n'))
   return dir
 }
 
-/** The usage of every tool in a prepared workspace, as one text, for an agent's reference. */
-export async function toolUsage(dir: string): Promise<string> {
-  try { return await readFile(join(dir, '.tools', 'USAGE.md'), 'utf8') } catch { return '' }
+/** The usage of the tools in a prepared workspace, as one text, for an agent's reference — all of them, or the named ones. */
+export async function toolUsage(dir: string, only?: string[]): Promise<string> {
+  let text = ''
+  try { text = await readFile(join(dir, '.tools', 'USAGE.md'), 'utf8') } catch { return '' }
+  if (!only) return text
+  return text.split('\n\n').filter((u) => only.includes(u.trim().split(/\s/)[0])).join('\n\n')
+}
+
+/** Leave an agent only the named tools: the others' wrappers and drivers go, and the seams a domain does not use. */
+export async function keepOnlyTools(dir: string, keep: string[]): Promise<void> {
+  const wrappers = (await readdir(join(dir, '.tools'))).filter((f) => f.endsWith('.mjs')).map((f) => f.replace(/\.mjs$/, ''))
+  for (const t of wrappers) if (!keep.includes(t)) { await rm(join(dir, t), { force: true }); await rm(join(dir, '.tools', `${t}.mjs`), { force: true }) }
+  if (!keep.includes('resolve')) await rm(join(dir, 'grounding'), { recursive: true, force: true })
+  if (!keep.includes('introspect')) await rm(join(dir, 'data', 'introspect.mjs'), { force: true })
 }
 
 /** Tools that only read: their work outlives the call, and asking the same thing twice in a turn costs nothing. */

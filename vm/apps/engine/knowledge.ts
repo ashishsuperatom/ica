@@ -7,13 +7,13 @@
 // deterministic: the same domain composes the same way for every thread, so a change to one part reaches every
 // later thread, which is where referential integrity lives for what is not in the semantic graph.
 //
-//   knowledge/index.json   { "domains": [ { "name", "capabilities": [focus…], "parts": [file…], "files": [file…] } ] }
+//   knowledge/index.json   { "domains": [ { "name", "capabilities": [focus…], "parts": [file…], "files": [file…], "tools": [name…] } ] }
 //   knowledge/<domain-dir>/<part>   the domain's directory is its name with spaces as dashes
 import { readFile, copyFile, mkdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, basename } from 'node:path'
 
-export interface Domain { name: string; capabilities: string[]; parts: string[]; files?: string[] }
+export interface Domain { name: string; capabilities: string[]; parts: string[]; files?: string[]; /** The tools a thread in this domain is left with; every tool when not said. */ tools?: string[] }
 export interface Knowledge { domain: string; text: string; files: string[] }
 
 const dirOf = (name: string) => name.trim().toLowerCase().replace(/\s+/g, '-')
