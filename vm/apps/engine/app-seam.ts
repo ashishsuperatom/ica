@@ -80,6 +80,9 @@ export function createAppSeam(d: AppSeamDeps) {
   async function say(text: string, context: string, o: { qid: string; threadId: string; focus?: string | null; reqId?: string; from?: any }): Promise<Said> {
     const t0 = Date.now()
     const composer = await composerFor(o.threadId, o.focus)
+    // A thread that knows a domain answers the question as asked, in the domain's own terms: the screen is not
+    // passed in, so its wording can neither help nor mislead. A thread without a domain is given the screen.
+    if (composers.get(o.threadId)?.domain) context = 'None: the question stands on its own.'
     // PROGRESS GOES OUT EXACTLY AS A CHAT TURN'S DOES. The raw work — output and events — travels on the agent
     // log channel under the composer's lane, for whoever watches agents work. What a person reads while waiting is
     // the narrator's: every few seconds it turns the activity since the last beat into one line, sent as
