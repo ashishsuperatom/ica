@@ -217,11 +217,22 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       // not a file it was asked to write, which invited shell and shipped the first slip. The turn ends when the
       // agent ends it; the last message, with its marker lines, is the reading, and it is kept in the question's
       // folder for the record.
-      let last = ''
+      // THE ANSWER STARTS WITH A LINE `:::answer`. What the agent says before it is working aloud; what it says
+      // from that line on is the answer, handed on piece by piece as each message arrives. An agent that writes
+      // no marker is taken at its final message.
+      let last = '', answer = '', begun = false
+      const take = (piece: string) => { if (!piece.trim()) return; answer = answer ? `${answer}\n${piece}` : piece; handlers?.onAnswer?.(piece) }
       const prompt = `What the person is looking at:\n${context}\n\nTheir question: ${text}\n\ntoday: ${todayIn(opts.projectDir)}\nqid: ${o.qid}`
-      const r = await session.run(prompt, { ...handlers, onEvent: (ev) => { if (ev.kind === 'message' && ev.text?.trim()) last = ev.text.trim(); handlers?.onEvent?.(ev) } })
+      const r = await session.run(prompt, { ...handlers, onEvent: (ev) => {
+        if (ev.kind === 'message' && ev.text?.trim()) {
+          last = ev.text.trim()
+          if (begun) take(last)
+          else { const m = last.match(/^[ \t]*:::answer[ \t]*$/m); if (m) { begun = true; take(last.slice(m.index! + m[0].length)) } }
+        }
+        handlers?.onEvent?.(ev)
+      } })
       await noteHarness()
-      const markdown = (last || r.lastLines?.trim() || '') || null
+      const markdown = (begun ? answer.trim() : (last || r.lastLines?.trim() || '')) || null
       if (markdown) await writeFile(join(dir, 'said.md'), markdown).catch(() => {})
       return { markdown, blocks: markdown ? await blocksNamedIn(markdown, cwd) : [], queries: await queriesOf(o.qid), ms: Date.now() - t0 }
     },

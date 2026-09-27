@@ -54,6 +54,7 @@ export type EngineMsgType =
   | 'tick' | 'welcome' | 'machine:waking' | 'error' | 'done'
   // THE ANSWER and its story — what every surface renders, however differently.
   | 'session:step' | 'analyst:answer' | 'narration' | 'followups'
+  | 'answer:part'                                                    // a piece of the answer as the agent says it, before analyst:answer
   // STOP — the client asks for the turn in a session to be abandoned; the engine confirms whether one was
   // running. A turn can span two agents and several minutes, so this is scoped to the SESSION, not a question:
   // by the time the message lands, the work may have moved from the composer to the analyst.
@@ -95,6 +96,7 @@ export type EnginePayload =
   | { t: 'turn:stop'; sessionId: string; reason?: string }
   | { t: 'turn:stopped'; sessionId: string; stopped: boolean }
   | { t: 'narration'; text: string; qid?: string; sid?: string }      // a business-language beat while work happens
+  | { t: 'answer:part'; text: string; qid: string; sid: string }     // a piece of the answer, as the agent says it
   | { t: 'followups'; items: string[]; qid?: string; sid?: string }
   | { t: 'agent:status'; lane: Lane; text?: string; category?: string; progress?: string; state?: 'done'; question?: string; sid?: string }
   | { t: 'agent:event'; lane: Lane; ev: unknown; qid?: string; sid?: string }

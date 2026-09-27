@@ -498,6 +498,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     const handlers: RunHandlers = {
       onOutput: (chunk: string) => { if (!stopped) emitLog({ t: 'analyst:chunk', text: chunk }) },
       onNarration: (text: string) => { if (!stopped && reply) emitBeat(reply, text, qid, sid) },
+      onAnswer: (text: string) => { if (!stopped && reply) emit(reply, { t: 'answer:part', text, qid, sid }) },
       onEvent: (ev: AgentEvent) => {
         // STOPPED MEANS STOPPED. The agent may take a moment to notice — a tool it started still has to return —
         // but nothing more of it reaches the person: what they asked to end, ends on their screen at once.

@@ -263,6 +263,8 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [turnBusy, setTurnBusy]         = useState(false)
   const [turnProgress, setTurnProgress] = useState('')   // clean live narration from the agent (no tool calls)
   const [narrationLog, setNarrationLog]     = useState<string[]>([])   // receptionist (narrator) beats for THIS question — ACCUMULATE (never overwrite)
+  const [liveAnswer, setLiveAnswer]         = useState('')             // the answer as the agent says it (answer:part), shown under the beats until the answer card lands
+  const liveQidRef                          = useRef('')               // which question the live answer belongs to
   const narrationLogRef                 = useRef<string[]>([])     // latest beats, readable inside ws handlers (state is stale in closures)
   const narrationTimesRef               = useRef<number[]>([])     // arrival ms per beat — drives the per-step live timer (UI-only, nice-to-have)
   // WHERE each beat came from. The narrator's beats are a story about the work; a program's are the work
@@ -600,6 +602,9 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
               setFeed(f => f.some(it => it.type === 'followups' && it.qid === fuQid) ? f : [...f, { id: crypto.randomUUID(), type: 'followups', items, qid: fuQid }])
             }, 3500)
           }
+        } else if (msg.t === 'answer:part') {
+          // A piece of the answer, as the agent says it: shown at once under the beats; the answer card replaces it.
+          if (typeof msg.text === 'string' && msg.text && (!msg.qid || msg.qid === liveQidRef.current)) setLiveAnswer(a => (a ? `${a}\n${msg.text}` : msg.text))
         } else if (msg.t === 'narration') {
           // Sent twice on purpose — once to this socket, once to the owner channel — so one of them survives a
           // reconnect. Keep the first arrival and ignore the echo.
@@ -611,6 +616,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           // The agent is expected to always produce an answer (incl. a plain-text reply for conversational
           // input); this neutral fallback only guards a true failure and is NOT a restriction on what it answers.
           const ans = msg.answer ?? { status: 'no_answer', answer: 'Something went wrong on that one — please try again.' }
+          setLiveAnswer('')                                                      // the card takes over from the pieces
           setLastAnswer(ans)                                                   // always reflects the latest
           // A REPLAY (reconnect) is already in the saved feed — don't duplicate it. A fresh answer gets
           // appended to its OWN chat: the visible feed if it's current, else that chat's saved feed.
@@ -865,7 +871,7 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
     // card. The Analyst tab keeps the raw terminal for when you WANT to look under the hood.
     setFeed(f => [...f, { id: qid, type: 'user-msg', text }])
     scroll()   // pin the new (now last) question to the top of the viewport
-    setTurnQuestion(text); setLastAnswer(null); setTurnCategory(''); setTurnStatus('Classifying…'); setTurnBusy(true); setTurnProgress(''); setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []; narrationMetaRef.current = []; setExpandedGroups(new Set())
+    setTurnQuestion(text); setLastAnswer(null); setTurnCategory(''); setTurnStatus('Classifying…'); setTurnBusy(true); setTurnProgress(''); setLiveAnswer(''); liveQidRef.current = qid; setNarrationLog([]); narrationLogRef.current = []; narrationTimesRef.current = []; narrationMetaRef.current = []; setExpandedGroups(new Set())
     ptyXtermRef.current?.clear()   // claude PTY: fresh TUI per question (harmless when the console lane is codex)
     // QUESTION-boundary divider (+ Shift+Arrow anchor) — shown optimistically in every lane that takes part in this
     // chat's turn (partOfTurn). Keyed by qid so the engine's authoritative boundary event (same id) MERGES with it
@@ -1109,7 +1115,10 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
                     ))}
                   </div>
                 )}
-                {narrationLog.length === 0 && <div style={{ marginTop: 8, fontSize: 13.5, color: '#8a8276' }}>{turnProgress || turnStatus || 'Working…'}</div>}
+                {narrationLog.length === 0 && !liveAnswer && <div style={{ marginTop: 8, fontSize: 13.5, color: '#8a8276' }}>{turnProgress || turnStatus || 'Working…'}</div>}
+                {/* THE ANSWER AS IT COMES. Each piece the agent says after its answer marker lands here at once,
+                    rendered as the answer will be; the answer card replaces it when the turn is over. */}
+                {liveAnswer && <div className="sa-prose" style={{ marginTop: 10 }} dangerouslySetInnerHTML={{ __html: renderAnswerBody(liveAnswer.split('\n').filter(l => !/^:::\S+\s+\S+/.test(l.trim())).join('\n')) }} />}
               </div>
             )}
             {/* STOP — BELOW the card, not inside it. The card is the work; this is an action taken against the

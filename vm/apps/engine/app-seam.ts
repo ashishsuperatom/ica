@@ -114,6 +114,8 @@ export function createAppSeam(d: AppSeamDeps) {
     }, 4000)
     const handlers = {
       onOutput: (chunk: string) => { activity.push(chunk); log({ t: 'agent:chunk', text: chunk }) },
+      // A piece of the answer, as the agent says it, to the page that asked — before the whole reading lands.
+      onAnswer: (text: string) => { if (o.from) d.send(o.from, { t: 'app:said:part', text, qid: o.qid, sid: o.threadId, reqId: o.reqId }) },
       onEvent: (ev: AgentEvent) => {
         ev.at ??= Date.now()
         if (ev.kind === 'command' || ev.kind === 'message') activity.push(String(ev.text ?? ev.command ?? ''))
