@@ -51,6 +51,9 @@ importers:
       '@opencode-ai/sdk':
         specifier: ^1.18.0
         version: 1.18.0
+      '@superatom/composition-graph':
+        specifier: workspace:*
+        version: link:../../packages/composition-graph
       '@superatom/datasource-index':
         specifier: workspace:*
         version: link:../../packages/datasource-index
@@ -93,6 +96,8 @@ importers:
         version: 5.9.3
 
   packages/agent-contract: {}
+
+  packages/composition-graph: {}
 
   packages/datasource-index:
     dependencies:

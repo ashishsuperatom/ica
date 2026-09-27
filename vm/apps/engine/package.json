@@ -15,6 +15,7 @@
     "@openai/codex": "^0.144.0",
     "@openai/codex-sdk": "^0.144.4",
     "@opencode-ai/sdk": "^1.18.0",
+    "@superatom/composition-graph": "workspace:*",
     "@superatom/datasource-index": "workspace:*",
     "@superatom/grounding": "workspace:*",
     "@superatom/introspect": "workspace:*",

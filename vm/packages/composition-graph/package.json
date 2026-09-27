@@ -1,0 +1,16 @@
+{
+  "name": "@superatom/composition-graph",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "What an agent knows from the start: domains composed from named parts, stored by hash, every change recorded with who, why and from what.",
+  "scripts": {
+    "test": "tsx --test test/*.test.mts"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "composition-graph": "./bin/composition-graph"
+  }
+}
