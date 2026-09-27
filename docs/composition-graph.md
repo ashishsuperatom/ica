@@ -49,8 +49,7 @@ into the session; knowledge loaded during a session, on demand, is a later addit
 
 ## The answer
 
-The agent says `:::answer` and what follows is the answer, sent on as it comes, event by event. Marker lines
-inside it name files in the session folder. No marker: the final message is the answer.
+The answer starts with a line `:::answer`.
 
 ## Versions, time and provenance
 
