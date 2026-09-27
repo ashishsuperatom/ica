@@ -379,9 +379,19 @@ const SEMANTIC_USAGE: Record<string, string> = {
   Read the sentence first and say what its parts are — you know what the words mean, and the graph does not: match '{"question":"<as asked>","parts":[{"text":"<the words>","is":"<the kind of thing they name, or measure/grouping/period/condition>"}]}'. Where a name begins and ends is yours to decide; what it means is the graph's, and a part it cannot place is reported rather than assumed`,
   look: `look [<node>] [<to>|<text>]   → the graph itself: nothing for every fact, dimension and calendar; a node for what it holds, what it links to, what links to it and what it is sliced by; two nodes for every way from one to the other (as the "via" they are written in — add --text to read them as sentences); a node and some text for which record that text means`,
   ask: `ask '<question>' [--json]   → a question's answer, or the rule that refuses it and what to change — so asking is also how a question is checked. Give it minutes, not seconds: a fact a program builds reads a whole span before it groups.
-  A question is measures, grouped by dimensions, kept to records or conditions, over a span:
-  {"measures":["<Fact>.<measure>"],"by":[{"to":"<Dimension>","via":["<role>"]}],"where":[{"to":"<Dimension>","via":["<role>"],"in":["<key>"]}],"span":{"from":"<first day>","through":"<last day>"}}
-  A grouping or filter may name an attribute instead, a filter may name a condition the graph holds, and a span may be said by period relative to today. Also: without, currency, order, limit, having, totals, share, compare, fill, cumulative, rolling, limitPer, and notIn/none/contains/startsWith. ./look says what this graph holds`,
+  A question is JSON: measures, grouped by dimensions, kept to records or conditions, over a span. Its parts and their shapes:
+  measures  ["<Fact>.<measure>", "[<Fact>.<a>] / [<Fact>.<b>]"]   a measure by name, or an expression in brackets over measures (+ - * /, numbers) of facts that share the grouping; an expression is an output like any other
+  by        [{"to":"<Dimension>","via":["<role>"]}, {"attribute":"<Object>.<attribute>"}]   the grouping; via when the fact reaches the dimension more than one way
+  where     [{"to":"<Dimension>","in":["<key>"]}, {"attribute":"<Object>.<attribute>","contains":"<text>"}, {"condition":"<name the graph holds>"}]   keeps rows by what they are: in, notIn, none, contains, startsWith, range {"from","to"}
+  having    [{"output":"<a measure or expression, as written in measures>","op":">","value":0.5}]   keeps groups by what they measure; op is < <= > >= = !=; value, or a setting by name
+  span      {"from":"<first day>","through":"<last day>"}   or a period said relative to today; left out, the whole of time
+  order     {"by":"<output>","desc":true}   limit <n>   limitPer ["<Dimension>"] keeps the top n within each
+  totals    [["<Dimension>"], []] answers also at coarser groupings, [] the grand total   share {"outputs":["<output>"],"within":["<Dimension>"]} each as a share of its total there
+  fill true · cumulative {"reset":"<Calendar>"} · rolling {"window":<n>,"average":true}   along a calendar grouped by
+  runs      {"output":"<output>","op":">","value":<n>,"along":"<Calendar>"}   the longest consecutive run of periods meeting the condition, per group
+  compare   {"back":{"months":1}} or {"span":{"from","through"}}   the same question over an earlier span, side by side with the change
+  currency  "<code>" reports money in one currency · without ["<condition>"] sets aside a condition a fact is always kept to
+  ./look says what this graph holds`,
   'run-program': `run-program [program.mjs] ['<params>']   → run the program in this folder and read its answer as the person would — headline, narration, tables with their row counts; run it as often as it takes, then ./commit. Allow it minutes: a fact a program builds reads a whole span before it groups.
   A program is named for its idea and takes the question's values — a span, a record, a judgement it turns on — as params with the default you chose:
   export const meta = { name, description, params: { <name>: '<what it means>' }, logic }

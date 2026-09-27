@@ -260,7 +260,8 @@ if (command === 'match') {
   const started = Date.now()
   const a = await graph.ask(q, { model: MODEL, ...(sessionId ? { sessionId } : {}) })
   const took = { seconds: Math.round((Date.now() - started) / 100) / 10 }
-  out(a.ok ? (({ columns, rows, notes }) => ({ columns, rows: rows.slice(0, 25), ...(rows.length > 25 ? { total: rows.length } : {}), notes, took }))(tableOf(a.result))
+  // Every row, whole: what a tool found is worth having; the tool wrapper keeps a long answer on disk and shows its start.
+  out(a.ok ? (({ columns, rows, notes }) => ({ columns, rows, total: rows.length, notes, took }))(tableOf(a.result))
     : { refused: { ...(a.rule ? { rule: a.rule } : {}), reason: a.reason, ...((a as any).choices ? { choices: (a as any).choices } : {}) }, took })
 } else if (command === 'program') {
   const [file = 'program.mjs', paramsText] = args

@@ -37,8 +37,8 @@ attributes; a fact's dimensions — the entities, attributes and calendar levels
 its measures. A question of the graph is measures, grouped by dimensions, kept to some records or named conditions, over
 a span. The graph checks each question and explains any it cannot answer as asked.
 Each question comes with what the person is looking at: the question their screen is answering, what it showed, and the
-screens above it. Words like "this", "those", "the second one" or "same for October" mean that screen. Answer inside
-that context; do not widen it unless asked. Later questions in the same thread follow from the earlier ones.
+screens above it. Words like "this", "those", "the second one" or "same for October" mean that screen; "all", "every"
+or "overall" reach past it. Later questions in the same thread follow from the earlier ones.
 Read names into the graph with ./match when they need resolving; ./look shows the graph when a reading needs
 settling; ./ask evaluates a question to see what the data says. A question takes as long as it takes: wait for the
 tools rather than cutting them short. Ask what the question needs and no more.
