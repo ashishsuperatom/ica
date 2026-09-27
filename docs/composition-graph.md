@@ -46,8 +46,8 @@ Names are hyphenated phrases that carry the meaning on their own, because a name
 node or write a new one: specific enough that two ideas never share it (`red-week-means-variance-below-utilisation-
 threshold`, not `red-week`), saying what kind of thing it is (`exempt-projects-reduce-available-hours`,
 `example-people-under-threshold-two-weeks-running`, `program-weekly-utilisation-rows`), stable when the wording is
-corrected and new when the meaning changes; usually three to seven lowercase words joined by hyphens, never one bare
-word. Every node also carries a one-sentence description, apart from its content, for search and for deciding reuse. Atoms carry no domain prefix, so they
+corrected and new when the meaning changes; at least three lowercase words joined by hyphens, usually up to seven —
+fewer is refused as under-defined. Every node also carries a one-sentence description, apart from its content, for search and for deciding reuse. Atoms carry no domain prefix, so they
 can be shared; a composite may say its place (`weekly-utilisation-definitions`). A name points at one node: a new
 meaning under a taken name is refused, with the existing node shown.
 
