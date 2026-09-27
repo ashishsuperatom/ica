@@ -13,6 +13,9 @@ import { dirname } from 'node:path'
 export type Kind = 'domain' | 'part' | 'file'
 export interface Node<B = unknown> { name: string; kind: Kind; hash: string; body: B }
 export interface ChangeContext { by: string; reason?: string; from?: string }
+/** A question and the agent it went to: routed by its own words (a session's first question) or asked in a session that
+ *  already was a domain. `ranked` is the router's scoring when it routed: every domain, its score, the terms that decided. */
+export interface Asked { id: number; at: number; session: string; qid: string | null; question: string; domain: string | null; domainHash: string | null; how: 'routed' | 'session'; ranked: unknown }
 export interface Change { id: number; at: number; name: string; kind: Kind; fromHash: string | null; toHash: string | null; by: string; reason: string | null; from: string | null }
 
 const TABLES = `
@@ -22,6 +25,11 @@ CREATE TABLE IF NOT EXISTS change (
   id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL,
   from_hash TEXT, to_hash TEXT, by TEXT NOT NULL, reason TEXT, evidence TEXT);
 CREATE INDEX IF NOT EXISTS change_name ON change(name, at);
+CREATE TABLE IF NOT EXISTS question (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, session TEXT NOT NULL, qid TEXT, question TEXT NOT NULL,
+  domain TEXT, domain_hash TEXT, how TEXT NOT NULL, ranked TEXT);
+CREATE INDEX IF NOT EXISTS question_domain ON question(domain, at);
+CREATE INDEX IF NOT EXISTS question_session ON question(session, at);
 `
 
 /** JSON with keys in a fixed order, so the same content always has the same hash. */
@@ -101,6 +109,20 @@ export class Store {
   history(name: string): Change[] {
     return (this.db.prepare('SELECT id, at, name, kind, from_hash, to_hash, by, reason, evidence FROM change WHERE name = ? ORDER BY at, id').all(name) as any[])
       .map((r) => ({ id: r.id, at: r.at, name: r.name, kind: r.kind, fromHash: r.from_hash, toHash: r.to_hash, by: r.by, reason: r.reason, from: r.evidence }))
+  }
+
+  /** Record a question and the agent it went to. */
+  recordQuestion(q: { session: string; qid?: string; question: string; domain: string | null; how: 'routed' | 'session'; ranked?: unknown }): void {
+    const domainHash = q.domain ? (this.get(q.domain)?.hash ?? null) : null
+    this.db.prepare('INSERT INTO question (at, session, qid, question, domain, domain_hash, how, ranked) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(Date.now(), q.session, q.qid ?? null, q.question, q.domain, domainHash, q.how, q.ranked === undefined ? null : JSON.stringify(q.ranked))
+  }
+
+  /** The questions asked, newest first — all of them, or one domain's. */
+  questions(limit = 100, domain?: string): Asked[] {
+    const rows = (domain ? this.db.prepare('SELECT * FROM question WHERE domain = ? ORDER BY at DESC, id DESC LIMIT ?').all(domain, limit)
+      : this.db.prepare('SELECT * FROM question ORDER BY at DESC, id DESC LIMIT ?').all(limit)) as any[]
+    return rows.map((r) => ({ id: r.id, at: r.at, session: r.session, qid: r.qid, question: r.question, domain: r.domain, domainHash: r.domain_hash, how: r.how, ranked: r.ranked ? JSON.parse(r.ranked) : null }))
   }
 
   /** The latest changes across the graph, newest first. */

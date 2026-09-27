@@ -57,3 +57,13 @@ test('a domain naming a part that is not there is refused, not composed without 
   s.remove('d/examples', by)
   assert.throws(() => compose(s, 'd'), /names part "d\/examples"/)
 })
+
+test('a question is recorded with the agent it went to and how, newest first, by domain', () => {
+  const s = graph()
+  s.recordQuestion({ session: 's1', qid: 'q1', question: 'first', domain: 'd', how: 'routed', ranked: [{ domain: 'd', score: 2, terms: ['x'] }] })
+  s.recordQuestion({ session: 's1', qid: 'q2', question: 'follow-up', domain: 'd', how: 'session' })
+  const qs = s.questions(10, 'd')
+  assert.deepEqual(qs.map((q) => [q.question, q.how]), [['follow-up', 'session'], ['first', 'routed']])
+  assert.equal(qs[1].domainHash, s.get('d')!.hash)
+  assert.deepEqual((qs[1].ranked as any)[0].terms, ['x'])
+})

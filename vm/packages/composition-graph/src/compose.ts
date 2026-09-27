@@ -7,7 +7,9 @@
 
 import type { Store } from './store.js'
 
-export interface DomainBody { capabilities: string[]; parts: string[]; files: string[]; tools?: string[] }
+/** The top of a composition: an agent. What it is for, the phrases it serves (routing reads them), the screens it covers,
+ *  its parts in order (its system prompt), the programs it brings and the tools it keeps. */
+export interface DomainBody { description?: string; intents?: string[]; capabilities: string[]; parts: string[]; files: string[]; tools?: string[] }
 export interface Example { question: string; steps: string[] }
 export type PartBody =
   | { title: string; form: 'bullets' | 'numbered'; items: string[] }

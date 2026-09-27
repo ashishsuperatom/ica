@@ -8,7 +8,7 @@
 import type { Store, ChangeContext } from './store.js'
 import type { DomainBody, PartBody } from './compose.js'
 
-export interface WrittenDomain { name: string; capabilities: string[]; parts: (PartBody & { name?: string })[]; files?: string[]; tools?: string[] }
+export interface WrittenDomain { name: string; description?: string; intents?: string[]; capabilities: string[]; parts: (PartBody & { name?: string })[]; files?: string[]; tools?: string[] }
 export interface Imported { name: string; kind: 'part' | 'file' | 'domain'; hash: string; changed: boolean }
 
 /** Put written domains into the graph. `readFile(domain, file)` gives a domain file's text. */
@@ -33,7 +33,7 @@ export function importDomains(store: Store, domains: WrittenDomain[], readFile: 
       out.push({ name: node, kind: 'file', ...store.put(node, 'file', { name: f, text: readFile(d.name, f) }, ctx) })
       fileNames.push(node)
     }
-    const body: DomainBody = { capabilities: d.capabilities, parts: partNames, files: fileNames, ...(d.tools ? { tools: d.tools } : {}) }
+    const body: DomainBody = { ...(d.description ? { description: d.description } : {}), ...(d.intents?.length ? { intents: d.intents } : {}), capabilities: d.capabilities, parts: partNames, files: fileNames, ...(d.tools ? { tools: d.tools } : {}) }
     out.push({ name: d.name, kind: 'domain', ...store.put(d.name, 'domain', body, ctx) })
   }
   return out

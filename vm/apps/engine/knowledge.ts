@@ -11,7 +11,7 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { Store, compose as composeFromGraph, domains as domainsInGraph, render, type PartBody, type FileBody } from '@superatom/composition-graph'
+import { Store, compose as composeFromGraph, domains as domainsInGraph, render, route, rank, indexOf, type PartBody, type FileBody, type Route } from '@superatom/composition-graph'
 
 export interface Domain { name: string; capabilities: string[]; tools?: string[] }
 export interface Knowledge { domain: string; text: string; files: FileBody[]; used: Record<string, string> }
@@ -23,7 +23,7 @@ const storeOf = (projectDir: string) => {
 }
 
 /** A domain as the project's index.mts states it, before the graph holds it. */
-interface Stated { name: string; capabilities: string[]; parts: PartBody[]; files?: string[]; tools?: string[] }
+interface Stated { name: string; intents?: string[]; capabilities: string[]; parts: PartBody[]; files?: string[]; tools?: string[] }
 async function stated(projectDir: string): Promise<Stated[]> {
   for (const name of ['index.mts', 'index.ts']) {
     const file = join(projectDir, 'knowledge', name)
@@ -78,29 +78,37 @@ export async function place(k: Knowledge, cwd: string): Promise<void> {
 // restart rebuilds the composer from the folder, never from a recomposition, so a domain edited later reaches new
 // sessions only, and the graph can say what changed since any session was made.
 
-/** The domain a first question belongs to. One domain: that one. Several: the one whose words the question shares most. */
-export async function pick(projectDir: string, question: string): Promise<Domain | null> {
-  const domains = await domainsOf(projectDir)
-  if (!domains.length) return null
-  if (domains.length === 1) return domains[0]
-  const words = new Set(question.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2))
-  let best: { d: Domain; score: number } | null = null
-  for (const d of domains) {
-    const text = `${d.name} ${(await compose(projectDir, d)).text}`.toLowerCase()
-    const vocab = new Set(text.split(/[^a-z0-9]+/).filter((w) => w.length > 2))
-    let score = 0; for (const w of words) if (vocab.has(w)) score++
-    if (!best || score > best.score) best = { d, score }
+/** The domain a first question belongs to, by the graph's reverse index over every domain's words and intents
+ *  (@superatom/composition-graph route): deterministic, instant, and explained — the ranking says which terms decided. */
+export async function pick(projectDir: string, question: string): Promise<{ domain: Domain | null; route: Route | null }> {
+  const all = await domainsOf(projectDir)
+  if (!all.length) return { domain: null, route: null }
+  const store = storeOf(projectDir)
+  let r: Route
+  if (store) { try { r = route(store, question) } finally { store.close() } }
+  else {
+    const docs = await Promise.all((await stated(projectDir)).map(async (d) => ({ name: d.name, text: `${d.name} ${(await compose(projectDir, d)).text}`, intents: d.intents ?? [] })))
+    r = rank(indexOf(docs), question)
   }
-  return best?.d ?? domains[0]
+  // A question no domain's words reach still goes somewhere: the first domain, and the route says it was not chosen.
+  const chosen = all.find((d) => d.name === r.domain) ?? all[0]
+  return { domain: chosen, route: r }
+}
+
+/** Record a question with the agent it went to — routed by its words, or asked in a session that already was a domain. */
+export function recordQuestion(projectDir: string, q: { session: string; qid?: string; question: string; domain: string | null; how: 'routed' | 'session'; ranked?: unknown }): void {
+  const store = storeOf(projectDir)
+  if (!store) return
+  try { store.recordQuestion(q) } catch (e: any) { console.warn(`[knowledge] question not recorded: ${e?.message ?? e}`) } finally { store.close() }
 }
 
 const NOTE = '.domain.json', REFERENCE = '.reference.md'
 
 /** Write what a session folder needs to stand on its own: the composition, which domain and tools, and what it was made from. */
-export async function remember(k: Knowledge, domain: Domain, cwd: string): Promise<void> {
+export async function remember(k: Knowledge, domain: Domain, cwd: string, routed?: Route | null): Promise<void> {
   await mkdir(cwd, { recursive: true })
   await writeFile(join(cwd, REFERENCE), k.text)
-  await writeFile(join(cwd, NOTE), JSON.stringify({ domain: domain.name, tools: domain.tools ?? null, used: k.used, at: new Date().toISOString() }, null, 2))
+  await writeFile(join(cwd, NOTE), JSON.stringify({ domain: domain.name, tools: domain.tools ?? null, used: k.used, ...(routed ? { routed } : {}), at: new Date().toISOString() }, null, 2))
 }
 
 /** What a session folder remembers, or null when it was never given a domain. */

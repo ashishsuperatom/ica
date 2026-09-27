@@ -478,7 +478,9 @@ function CompositionView({ hub }: ViewProps) {
                 <strong>{d.name}</strong><span className="chip">{String(d.hash).slice(0, 10)}</span>
                 <button className="btn sm" style={{ marginLeft: 'auto' }} onClick={() => setPick({ kind: 'compose', domain: d.name })}>System prompt</button>
               </div>
-              <div className="muted" style={{ fontSize: 12, margin: '6px 0 8px' }}>covers {d.capabilities.length} screens{d.tools ? ` · tools: ${d.tools.join(', ')}` : ''}</div>
+              {d.description && <div style={{ fontSize: 12.5, margin: '6px 0 2px' }}>{d.description}</div>}
+              <div className="muted" style={{ fontSize: 12, margin: '4px 0 8px' }}>covers {d.capabilities.length} screens{d.tools ? ` · tools: ${d.tools.join(', ')}` : ''}</div>
+              {d.intents?.length > 0 && <div className="axes" style={{ margin: '0 0 8px' }}>{d.intents.map((t: string) => <span key={t} className="chip">{t}</span>)}</div>}
               <table><tbody>
                 {d.parts.map((p: any) => (
                   <tr key={p.name} className={pick?.kind === 'node' && pick.name === p.name ? 'on' : ''} onClick={() => setPick({ kind: 'node', name: p.name })}>
@@ -491,6 +493,15 @@ function CompositionView({ hub }: ViewProps) {
                     <td className="num muted">program · {bytes(f.bytes)}</td><td className="num"><span className="chip">{String(f.hash ?? 'missing').slice(0, 10)}</span></td>
                   </tr>))}
               </tbody></table>
+              {d.asked?.length > 0 && <>
+                <div className="sect">Questions it got</div>
+                <table><tbody>{d.asked.map((q: any, i: number) => (
+                  <tr key={i} style={{ cursor: 'default' }}>
+                    <td className="muted" style={{ whiteSpace: 'nowrap' }}>{when(q.at)}</td>
+                    <td><span className="clamp">{q.question}</span>{q.decided.length > 0 && <span className="muted" style={{ fontSize: 11.5 }}>by {q.decided.join(', ')}</span>}</td>
+                    <td className="num"><span className="tag" style={{ background: q.how === 'routed' ? '#eef0ff' : '#f2f3f5', color: q.how === 'routed' ? '#4340a0' : 'var(--sub)' }}>{q.how === 'routed' ? 'routed' : 'in its chat'}</span></td>
+                  </tr>))}</tbody></table>
+              </>}
             </div>
           ))}
         </div>

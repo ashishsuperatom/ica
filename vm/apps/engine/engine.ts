@@ -37,7 +37,7 @@ import { DataSourceIndex, dataSourceStats } from '@superatom/datasource-index'
 // import would break every deploy while working perfectly here.
 import type { EngineMsgType } from '../../../clients/protocol.js'
 import { createWire } from './wire.js'
-import { pick, compose, place, remember, recall } from './knowledge.js'
+import { pick, compose, place, remember, recall, recordQuestion } from './knowledge.js'
 import { parcelStore, apiOfHub } from '../../../clients/parcels.js'
 import { createAppSeam } from './app-seam.js'
 import { randomUUID } from 'node:crypto'
@@ -255,7 +255,7 @@ const analystSlot  = makeAgentSlot('analyst',  analystPromptVersion,  (resumeId)
 // The COMPOSER (System 2), ONE PER SESSION: each chat session gets its own composer (a cheap opencode CLIENT
 // session on the shared server, so N sessions ≈ free). Created on the session's first question, reused for the
 // session; only the in-flight question needs memory. Idle sessions are disposed by the sweep below.
-const composersBySession = new Map<string, { composer: Promise<Composer>; lastUsed: number; builtWith: string; domain: string | null }>()
+const composersBySession = new Map<string, { composer: Promise<Composer>; lastUsed: number; builtWith: string; domain: string | null; routed?: import('@superatom/composition-graph').Route | null }>()
 const composerStamp = () => { const c = agentConfig('composer'); return `${c.harness}/${c.provider}/${c.model}` }
 function getComposer(sid: string, question = ''): Promise<Composer> {
   let e = composersBySession.get(sid)
@@ -276,6 +276,7 @@ function getComposer(sid: string, question = ''): Promise<Composer> {
     // question picks the domain, and the folder is made self-contained (knowledge.ts). A project without domains
     // gets the chat composer as before.
     const cwd = join(SESSIONS, sid)
+    const entry = { composer: null as unknown as Promise<Composer>, lastUsed: Date.now(), builtWith: want, domain: null as string | null, routed: undefined as import('@superatom/composition-graph').Route | null | undefined }
     const made = (async () => {
       const had = await recall(cwd)
       if (had) {
@@ -283,15 +284,17 @@ function getComposer(sid: string, question = ''): Promise<Composer> {
         console.log(`[ica] composer: session ${sid.slice(0, 8)} recalled "${had.domain}" from its folder`)
         return { c, domain: had.domain }
       }
-      const domain = await pick(PROJECT_DIR, question)
+      const { domain, route: routed } = await pick(PROJECT_DIR, question)
       if (!domain) return { c: await createComposer({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, projectDir: PROJECT_DIR, sessionId: sid, ica: { baseUrl: OC_URL } }), domain: null }
       const k = await compose(PROJECT_DIR, domain)
       const c = await createComposer({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, projectDir: PROJECT_DIR, sessionId: sid, ica: { baseUrl: OC_URL }, reference: k.text, tools: domain.tools })
-      await place(k, c.cwd); await remember(k, domain, c.cwd)
-      console.log(`[ica] composer: session ${sid.slice(0, 8)} is "${domain.name}" (${k.text.length} chars, ${k.files.length} files)`)
+      await place(k, c.cwd); await remember(k, domain, c.cwd, routed)
+      entry.routed = routed
+      const top = routed?.ranked.slice(0, 2).map((x) => `${x.domain} ${x.score}`).join(' · ')
+      console.log(`[ica] composer: session ${sid.slice(0, 8)} is "${domain.name}" (${k.text.length} chars, ${k.files.length} files) · routed ${top ?? '—'}${routed?.tie ? ' · TIE' : ''}`)
       return { c, domain: domain.name }
     })()
-    const entry = { composer: made.then((m) => m.c), lastUsed: Date.now(), builtWith: want, domain: null as string | null }
+    entry.composer = made.then((m) => m.c)
     made.then((m) => { entry.domain = m.domain }).catch(() => {})
     e = entry
     composersBySession.set(sid, e)
@@ -542,7 +545,12 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     // A SESSION WITH A DOMAIN answers in the domain's way: prose with markers, the blocks the markdown names, no
     // program, no verbs. The answer travels in the shape every surface already renders — the prose as the text,
     // each block as a table section — so the surfaces change nothing.
-    if (composersBySession.get(sid)?.domain) {
+    const inSession = composersBySession.get(sid)
+    if (inSession?.domain) {
+      // Every question is recorded with the agent it went to: the first by its words (the route), the rest by the session.
+      const routedNow = inSession.routed
+      recordQuestion(PROJECT_DIR, { session: sid, qid, question, domain: inSession.domain, how: routedNow ? 'routed' : 'session', ...(routedNow ? { ranked: routedNow.ranked } : {}) })
+      inSession.routed = undefined
       workingAgent = 'composer'; stopSession = () => { try { (composer as any).session?.stop?.() } catch { /* best-effort */ } }
       const said = await capped(composer.say(question, 'None: the question stands on its own.', handlers, { qid }), () => ({ markdown: null, blocks: [], periods: [], queries: [], ms: Date.now() - t0 }))
       if (stopped) { console.log(`[ica] ${qid.slice(0, 8)} stopped after ${((Date.now() - t0) / 1000).toFixed(1)}s`); return }

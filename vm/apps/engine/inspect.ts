@@ -261,7 +261,9 @@ export function createInspector(deps: InspectorDeps) {
         const parts = node.body.parts.map((name) => { const n = store.get<PartBody>(name); return { name, hash: n?.hash ?? null, title: n?.body.title ?? null, form: n?.body.form ?? null,
           lines: n ? (n.body.form === 'text' ? 1 : n.body.items.length) : 0 } })
         const files = node.body.files.map((name) => { const n = store.get<FileBody>(name); return { name, hash: n?.hash ?? null, file: n?.body.name ?? null, bytes: n ? n.body.text.length : 0 } })
-        return { name: d.name, hash: node.hash, capabilities: node.body.capabilities, tools: node.body.tools ?? null, parts, files }
+        const asked = store.questions(40, d.name).map((q) => ({ at: q.at, session: q.session, question: q.question, how: q.how, domainHash: q.domainHash,
+          decided: Array.isArray(q.ranked) ? ((q.ranked as any[])[0]?.terms ?? []).slice(0, 6) : [] }))
+        return { name: d.name, hash: node.hash, description: node.body.description ?? null, intents: node.body.intents ?? [], capabilities: node.body.capabilities, tools: node.body.tools ?? null, parts, files, asked }
       })
       for (const { id, note } of notes) sessions.push({ id, domain: String(note.domain ?? ''), at: note.at ?? null, used: Object.keys(note.used ?? {}).length,
         moved: note.used && Object.keys(note.used).length ? compositionDrift(store, note.used).map((x) => x.name) : [] })
