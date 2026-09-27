@@ -10,6 +10,7 @@
 // written, or the prose answer is on disk.
 
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { agentConfig, type AgentOverride } from '../../config/index.js'
@@ -172,8 +173,16 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
   // of the tools it was left. The chat composer's role, which names every tool, is for a composer without one.
   const toolLines = usage ? `The tools, each as it says of itself — run them as bash commands in this folder:\n${usage}` : ''
   const systemReference = opts.reference ? [opts.reference, toolLines].filter(Boolean).join('\n\n') : [ROLE, toolLines].filter(Boolean).join('\n\n')
+  // THE CONVERSATION OUTLIVES THE PROCESS. The harness session file is noted in the folder after every real turn
+  // (never before one: a session with no turn has no file to resume), and a composer rebuilt from the folder —
+  // after a restart, after an idle timeout — takes the conversation up where it was, not from nothing.
+  const HARNESS_NOTE = join(cwd, '.harness-session')
+  const noted = await readFile(HARNESS_NOTE, 'utf8').then((t) => t.trim()).catch(() => '')
+  const resumeId = opts.ica?.resumeId ?? (noted && existsSync(noted) ? noted : undefined)
   const session = createSession(harness, { cwd, model: opts.ica?.model ?? cfg.model, provider: opts.ica?.provider ?? cfg.provider, thinking: opts.ica?.thinking ?? cfg.thinking, baseUrl: opts.ica?.baseUrl,
-                                           systemReference })
+                                           resumeId, systemReference })
+  if (resumeId) console.log(`[composer] ${opts.sessionId?.slice(0, 8) ?? '?'} resumes its conversation`)
+  const noteHarness = async () => { try { const id = session.sessionId?.(); if (id) await writeFile(HARNESS_NOTE, id) } catch { /* best-effort */ } }
   await writeFile(join(cwd, '.system-prompt.md'), systemReference)   // what this agent was told, verbatim, for anyone to read
   console.log(`[composer] ${opts.sessionId?.slice(0, 8) ?? '?'} prompt ${systemReference.length} chars · tools ${opts.tools ? opts.tools.join(', ') : 'all'} · first line: ${systemReference.split('\n')[0].slice(0, 90)}`)
   if (session.referencePlacement !== 'in-context') console.warn(`[composer] harness "${harness}" cannot put the reference in the system prompt — use opencode/claude/codex`)
@@ -192,6 +201,7 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       await writeFile(join(cwd, '.session'), o.sessionId)
       await writeFile(join(cwd, '.agent'), 'composer')
       await session.run(`${question}\n\ntoday: ${todayIn(opts.projectDir)}\nqid: ${o.qid}`, { ...handlers, doneWhen: async () => (await turnOutcome(dir)) !== null })
+      await noteHarness()
       const outcome = await turnOutcome(dir)
       return { ...(outcome ?? { unanswered: { reason: 'the composer applied no step' } }), ms: Date.now() - t0 }
     },
@@ -207,6 +217,7 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       const read = async () => { try { const t = (await readFile(answerFile, 'utf8')).trim(); return t || null } catch { return null } }
       const prompt = `What the person is looking at:\n${context}\n\nTheir question: ${text}\n\ntoday: ${todayIn(opts.projectDir)}\nqid: ${o.qid}\nWrite the answer to out/${o.qid}/said.md`
       await session.run(prompt, { ...handlers, doneWhen: async () => (await read()) !== null })
+      await noteHarness()
       const markdown = await read()
       return { markdown, blocks: markdown ? await blocksNamedIn(markdown, cwd) : [], queries: await queriesOf(o.qid), ms: Date.now() - t0 }
     },
