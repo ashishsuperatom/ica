@@ -76,6 +76,14 @@ def enforce_cap(root, max_rows):
     how a truncated read becomes a confidently wrong total."""
     if not max_rows or max_rows <= 0:
         return root, None
+    # A UNION / INTERSECT / EXCEPT at the top is capped as a whole: a cap on its first SELECT limits that branch
+    # alone (and some sources refuse it there). Its own limit is kept when it asks for fewer.
+    if isinstance(root, exp.SetOperation):
+        n = _limit_value(root.args.get("limit"))
+        if n is not None and n <= max_rows:
+            return root, None
+        root.set("limit", None)
+        return exp.select("*").from_(root.subquery("capped")).limit(max_rows), max_rows
     select = root if isinstance(root, exp.Select) else root.find(exp.Select)
     if select is None:
         return root, None
