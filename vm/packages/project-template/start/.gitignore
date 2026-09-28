@@ -1,0 +1,19 @@
+# secrets and keys
+.env
+datasources/**/.env
+datasources/**/*.pem
+datasources/**/*.key
+# the graph store, memory, sessions, caches: data, not source
+db/
+sessions/
+workspace/
+checks/
+export/
+views/
+datasources/query-results.sqlite*
+# builds, dependencies, the dashboard's placed domains
+app/web/node_modules/
+app/web/dist/
+app/.domains/
+node_modules
+.DS_Store

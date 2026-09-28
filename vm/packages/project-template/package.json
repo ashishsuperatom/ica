@@ -1,0 +1,10 @@
+{
+  "name": "@superatom/project-template",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "What every project home's dashboard and knowledge helpers are made of: the shared files every project keeps in step with, and a new project's start.",
+  "bin": {
+    "project-template": "./cli.mjs"
+  }
+}

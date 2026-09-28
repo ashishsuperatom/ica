@@ -1,0 +1,160 @@
+/*
+ * LAYOUT — the app shell, the sidebar, the thread of blocks, the home page. Structure only; every value is a token.
+ */
+
+/* ── App shell ── */
+.sa-app { display: flex; height: 100vh; padding-top: var(--topbar-h); }
+.sa-app__main { display: flex; flex-direction: column; flex: 1; min-width: 0; position: relative; background: var(--surface); }
+.sa-app__page { flex: 1; min-height: 0; overflow-y: auto; }
+.sa-app__pill { position: absolute; top: var(--sp-2); right: var(--sp-3); z-index: var(--z-pill); }
+.sa-app__topbar { position: fixed; top: 0; left: 0; right: 0; height: var(--topbar-h); background: var(--surface); border-bottom-width: 1px; display: flex; align-items: center; padding: 0 var(--sp-4); z-index: var(--z-topbar); }
+.sa-app__topbar-title { margin-left: var(--sp-3); font-weight: var(--w-medium); color: var(--ink); }
+.sa-app__menu-btn { width: 36px; height: 36px; border-radius: var(--r-md); display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #14b8a6, var(--primary)); color: var(--on-accent); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1); }
+.sa-app__menu-btn > svg { width: 18px; height: 18px; }
+@media (min-width: 768px) {
+  .sa-app { padding-top: 0; }
+  .sa-app__topbar { display: none; }
+}
+
+/* A full-screen wait or failure, before the shell exists. */
+.sa-splash { position: fixed; inset: 0; z-index: var(--z-splash); display: flex; align-items: center; justify-content: center; background: var(--page); }
+.sa-splash__box { text-align: center; max-width: 24rem; display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); }
+.sa-splash__text { font-size: var(--t-sm); color: var(--muted); }
+.sa-splash__why { font-size: var(--t-xs); color: var(--faint); margin-bottom: var(--sp-4); }
+
+/* ── Sidebar: a column on a wide screen, a drawer on a small one ── */
+.sa-sidebar { position: fixed; top: 0; left: 0; height: 100%; width: var(--sidebar-w); z-index: var(--z-sidebar); display: flex; flex-direction: column; border-right-width: 1px; background: var(--sidebar); transition: transform var(--dur-2) var(--ease-out), width var(--dur-2) var(--ease-out); transform: translateX(0); }
+.sa-sidebar[data-collapsed='true'] { transform: translateX(-100%); }
+.sa-sidebar__scrim { position: fixed; inset: 0; background: var(--scrim); z-index: calc(var(--z-sidebar) - 1); }
+@media (min-width: 768px) {
+  .sa-sidebar { position: relative; z-index: auto; }
+  .sa-sidebar[data-collapsed='true'] { transform: none; width: var(--sidebar-w-collapsed); }
+  .sa-sidebar__scrim { display: none; }
+}
+.sa-sidebar__head { height: var(--topbar-h); padding: 0 var(--sp-3); display: flex; align-items: center; gap: var(--sp-1); flex-shrink: 0; }
+.sa-sidebar__head--centred { justify-content: center; padding: 0; }
+.sa-sidebar__brand { display: flex; align-items: center; gap: var(--sp-2h); min-width: 0; flex: 1; border-radius: var(--r-md); padding: var(--sp-1) var(--sp-1h); transition: background var(--dur-1) var(--ease); }
+.sa-sidebar__brand:hover { background: var(--panel); }
+.sa-sidebar__logo { width: 28px; height: 28px; border-radius: 7px; flex-shrink: 0; }
+.sa-sidebar__name { font-size: var(--t-base); font-weight: var(--w-medium); color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-sidebar__nav { flex: 1; min-height: 0; overflow-y: auto; padding: 0 var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-0); }
+.sa-sidebar__rail { display: flex; flex-direction: column; align-items: center; gap: var(--sp-1); padding: 0 var(--sp-2); }
+.sa-sidebar__foot { padding: var(--sp-3); border-top-width: 1px; }
+.sa-sidebar__foot--rail { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); padding: var(--sp-2); }
+.sa-sidebar__rule { width: 24px; height: 1px; background: var(--line); margin: var(--sp-1) 0; }
+.sa-nav-item { display: flex; align-items: center; gap: var(--sp-2h); width: 100%; height: 32px; padding: 0 var(--sp-2h); border-radius: var(--r-md); font-size: var(--t-base); color: var(--muted); text-align: left; transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
+.sa-nav-item:hover { background: var(--panel); color: var(--ink); }
+.sa-nav-item[data-active='true'] { background: var(--primary-wash); color: var(--primary-strong); font-weight: var(--w-medium); }
+.sa-nav-item > svg { width: 17px; height: 17px; flex-shrink: 0; }
+.sa-nav-item__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-nav-item--rail { width: 36px; height: 36px; padding: 0; justify-content: center; }
+.sa-profile { position: relative; }
+.sa-profile__btn { display: flex; align-items: center; gap: var(--sp-2h); border-radius: var(--r-md); padding: var(--sp-1); transition: background var(--dur-1) var(--ease); }
+.sa-profile__btn--wide { width: 100%; }
+.sa-profile__btn:hover { background: var(--panel); }
+.sa-profile__who { min-width: 0; flex: 1; text-align: left; }
+.sa-profile__name { display: block; font-size: var(--t-base); color: var(--ink); line-height: var(--lh-tight); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-profile__line { display: block; font-size: var(--t-xs); color: var(--faint); line-height: var(--lh-tight); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── The connection pill ── */
+.sa-status { display: inline-flex; align-items: center; gap: var(--sp-1h); height: 24px; max-width: 24rem; padding: 0 var(--sp-2h); border-radius: var(--r-full); border-width: 1px; background: var(--surface); font-size: var(--t-xs); color: var(--muted); box-shadow: var(--shadow-card); }
+.sa-status__detail { color: var(--faint); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Thread ── */
+.sa-thread { min-height: 100%; background: var(--page); }
+/* The column's side gutter is the block's own padding (paint room for rings and shadows under content-visibility)
+   plus the column's: 24 on a phone, 48 from md, 64 from lg. Nothing here has a negative margin. */
+.sa-thread__column { max-width: var(--column-w); margin: 0 auto; padding: var(--sp-6) 0 40vh; display: flex; flex-direction: column; gap: var(--sp-4); }
+@media (min-width: 768px) { .sa-thread__column { padding-left: var(--sp-6); padding-right: var(--sp-6); } }
+@media (min-width: 1024px) { .sa-thread__column { padding-left: var(--sp-10); padding-right: var(--sp-10); } }
+.sa-thread__item { min-width: 0; }
+/* Where one step ends and the next begins: a hairline with the time the next step was taken. */
+.sa-separator { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) 0; }
+.sa-separator__line { height: 1px; flex: 1; background: linear-gradient(to right, transparent, var(--line)); }
+.sa-separator__line--r { background: linear-gradient(to left, transparent, var(--line)); }
+.sa-separator__time { display: inline-flex; align-items: center; gap: var(--sp-1h); height: 20px; padding: 0 var(--sp-2h); border-radius: var(--r-full); border-width: 1px; background: var(--surface); font-size: var(--t-2xs); color: var(--faint); font-variant-numeric: tabular-nums; }
+.sa-separator__dot { width: 6px; height: 6px; border-radius: var(--r-full); background: var(--line); }
+/* The branches that fork from the block above. */
+.sa-branchbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1h); padding: var(--sp-1h) var(--sp-3); margin-bottom: var(--sp-2h); border-radius: var(--r-md); font-size: var(--t-sm); color: var(--muted); background: color-mix(in srgb, var(--series-2) 6%, var(--surface)); border: 1px dashed color-mix(in srgb, var(--series-2) 40%, var(--surface)); }
+.sa-branchbar > svg { width: 14px; height: 14px; }
+.sa-branchbar__word { font-size: var(--t-xs); }
+.sa-branch { padding: 3px var(--sp-2h); border-radius: var(--r-full); border-width: 1px; border-color: var(--line-strong); background: var(--surface); font-size: var(--t-sm); color: var(--muted); max-width: 22rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-branch[data-active='true'] { background: var(--series-2); border-color: var(--series-2); color: var(--on-accent); }
+
+/* A block: a slim header — step, what it is, what opened it — and the content beneath. Blocks off screen are not
+   painted until they come near, so a long thread scrolls and opens fast. */
+/* No content-visibility here: a chart initialised inside a skipped block measures a 0×0 canvas. Threads are short. */
+.sa-block { scroll-margin-top: var(--sp-4); padding: 0 var(--sp-6); min-width: 0; }
+.sa-block__head { display: flex; align-items: center; gap: var(--sp-3); margin: 0 calc(-1 * var(--sp-4)) var(--sp-2h); padding: var(--sp-1h) var(--sp-4); border-radius: 12px; cursor: pointer; user-select: none; transition: background var(--dur-1) var(--ease), box-shadow var(--dur-1) var(--ease); }
+.sa-block__head:hover { background: var(--surface); box-shadow: var(--shadow-card); }
+.sa-block__head:focus-visible { outline: 2px solid var(--primary); }
+.sa-block__heading { min-width: 0; flex: 1; }
+.sa-block__title-row { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
+.sa-block__kind { font-size: 10px; flex-shrink: 0; max-width: 10rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-block__title { font-size: var(--t-md); font-weight: var(--w-semibold); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-block__subtitle { font-size: var(--t-xs); color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-block__link { color: var(--muted); }
+.sa-block__link:not(:disabled):hover { text-decoration: underline; }
+.sa-block__end { display: flex; align-items: center; gap: var(--sp-1); flex-shrink: 0; }
+.sa-block__actions { display: flex; align-items: center; gap: var(--sp-1h); margin-right: var(--sp-1h); }
+/* The step's own tools appear when the header is hovered or focused (and stay while "copied" shows). */
+.sa-block__tools { display: flex; align-items: center; gap: var(--sp-0); opacity: 0; transition: opacity var(--dur-1) var(--ease); }
+.sa-block__head:hover .sa-block__tools, .sa-block__head:focus-within .sa-block__tools, .sa-block__tools[data-shown='true'] { opacity: 1; }
+@media (hover: none) { .sa-block__tools { opacity: 1; } }
+.sa-block__tools .sa-icon-btn > svg { width: 15px; height: 15px; }
+.sa-block__tools .sa-icon-btn--rotate > svg { transition: transform var(--dur-1) var(--ease); transform: rotate(180deg); }
+.sa-block__tools .sa-icon-btn--rotate[data-collapsed='true'] > svg { transform: none; }
+.sa-block__body { display: flex; flex-direction: column; gap: var(--sp-3h); }
+.sa-block__body[hidden] { display: none; }
+/* The question line above a block's content: chips and controls, on one quiet line. */
+.sa-question { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-top: calc(-1 * var(--sp-1)); }
+/* The next moves. */
+.sa-next { display: flex; flex-wrap: wrap; gap: var(--sp-1h); }
+/* The placeholder while a block asks. */
+.sa-skeleton-block { display: flex; flex-direction: column; gap: var(--sp-3h); }
+.sa-skeleton-block__tile { padding: 15px 18px; }
+.sa-skeleton-block__card { padding: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-2h); }
+/* Two charts in one row: a ring and its bars. */
+.sa-chart-pair { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); align-items: center; padding: var(--sp-3h) var(--sp-5) var(--sp-3); }
+.sa-chart-pair > * { min-width: 0; }
+@media (min-width: 1024px) {
+  .sa-chart-pair { grid-template-columns: 340px minmax(0, 1fr); }
+  /* A ring with its legend beside it needs the room: the pair gives it up to half the width. */
+  .sa-chart-pair[data-ring='column'] { grid-template-columns: minmax(580px, 50%) minmax(0, 1fr); }
+}
+
+/* ── Home ── */
+.sa-home { display: flex; flex-direction: column; gap: var(--sp-4); padding: 0 var(--sp-6); }
+.sa-home__hero { padding: 0 var(--sp-1); }
+.sa-home__title { font-size: var(--t-xl); font-weight: var(--w-semibold); color: var(--ink); letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.sa-home__lead { margin-top: var(--sp-1); font-size: var(--t-base); color: var(--muted); }
+.sa-home__group { padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
+.sa-home__problems { font-size: var(--t-xs); color: var(--loss-ink); }
+
+/* ── The ask bar: a typed question at the foot of the thread, stuck to the bottom of the page ── */
+.sa-askbar { position: sticky; bottom: 0; z-index: var(--z-pill); padding: var(--sp-2) var(--sp-5) var(--sp-3); background: linear-gradient(to bottom, transparent, var(--page) 35%); }
+.sa-askbar__form { max-width: var(--askbar-w); margin: 0 auto; display: flex; flex-direction: column; gap: var(--sp-1); }
+/* The field is the platform's own input: a pill the width of a chat column, a plus on the left, a dark round send. */
+.sa-askbar__field { display: flex; align-items: flex-end; gap: var(--sp-1h); padding: var(--sp-1h) var(--sp-1h) var(--sp-1h) var(--sp-2); border-radius: 26px; border-width: 1px; border-color: var(--line); background: var(--surface); box-shadow: 0 2px 14px rgba(16, 24, 40, 0.06); }
+.sa-askbar__field:focus-within { border-color: var(--line-strong); }
+.sa-askbar__plus { width: 36px; height: 36px; border-radius: var(--r-full); color: var(--muted); flex-shrink: 0; }
+.sa-askbar__plus > svg { width: 23px; height: 23px; }
+.sa-askbar__plus:disabled { opacity: 1; }
+.sa-askbar__input { flex: 1; min-width: 0; resize: none; border: 0; outline: none; background: transparent; padding: 7px var(--sp-1); font-size: 15.5px; line-height: var(--lh-normal); color: var(--ink); max-height: 200px; }
+.sa-askbar__send { width: 36px; height: 36px; border-radius: var(--r-full); background: var(--ink); color: var(--on-accent); flex-shrink: 0; }
+.sa-askbar__send > svg { width: 19px; height: 19px; }
+.sa-askbar__send:not(:disabled):hover { background: var(--ink); color: var(--on-accent); opacity: 0.85; }
+.sa-askbar__send:disabled { background: var(--line-strong); color: var(--on-accent); opacity: 1; }
+.sa-askbar__hint { font-size: var(--t-xs); color: var(--faint); padding: 0 var(--sp-2); }
+.sa-askbar__hint b { font-weight: var(--w-medium); color: var(--muted); }
+
+/* ── Beats: the narrator's lines as rows, each with the seconds it took ── */
+.sa-beats { display: flex; flex-direction: column; }
+/* At the end of a reading, like About under a capability: the line, then the rows in a quiet panel. */
+.sa-beats-panel { margin: var(--sp-2) 0 var(--sp-1); border-width: 1px; border-color: var(--line); border-radius: var(--r-md); background: var(--panel); }
+.sa-beat__text p { margin: 0; }
+.sa-beat { display: flex; gap: var(--sp-3); align-items: flex-start; padding: var(--sp-2) var(--sp-3); border-top-width: 1px; border-color: var(--line); font-size: var(--t-sm); line-height: var(--lh-relaxed); color: var(--ink); }
+.sa-beat:first-child { border-top-width: 0; }
+.sa-beat--past { color: var(--muted); }
+.sa-beat__secs { flex-shrink: 0; min-width: 2.5rem; text-align: right; font-variant-numeric: tabular-nums; color: var(--faint); font-size: var(--t-xs); padding-top: 2px; }
+.sa-beat__text { min-width: 0; overflow-wrap: anywhere; }

@@ -1,0 +1,141 @@
+/*
+ * TOKENS — the one layer of decisions. Every colour, size, radius, shadow, duration and layer on a decision screen
+ * comes from here; a component never invents its own. If something is missing, it is added here first, with what it
+ * means. Nothing in this file names a project, a domain or a screen.
+ *
+ * Colours are named for what they MEAN, not what they look like, so a shade is one edit and a colour can never be
+ * borrowed for a meaning it does not have. A second theme is a second `:root[data-theme=…]` block redefining the
+ * same names — nothing else changes.
+ */
+
+:root {
+  /* ── Colour · text: how much a line matters ───────────────────────────────────────────────────── */
+  --ink: #1f2a37; /* content: values, names, anything read to decide */
+  --muted: #5b6b7f; /* explanation: cases beside a value, notes, secondary figures */
+  --faint: #7b8898; /* labels and meta: column headers, timestamps, empty states */
+  --on-accent: #ffffff; /* text on a filled accent */
+
+  /* ── Colour · surfaces and structure ──────────────────────────────────────────────────────────── */
+  --surface: #ffffff; /* a card, a popover, an input */
+  --surface-subtle: #fbfcfe; /* a strip set just apart from the card: section heads, footers */
+  --panel: #eef2f6; /* a quiet fill: tracks, the active option, a group row, table heads */
+  --page: #f7f9fb; /* the page behind the cards */
+  --sidebar: #fbfcfd;
+  --line: #e4e9f0; /* borders and row dividers */
+  --line-strong: #cfd8e3; /* a border being pointed at */
+  --scrim: rgba(0, 0, 0, 0.4); /* behind a drawer on a small screen */
+
+  /* ── Colour · interaction: what can be DONE, never what a figure means ─────────────────────────── */
+  --primary: #009193;
+  --primary-strong: #007476;
+  --primary-wash: color-mix(in srgb, var(--primary) 10%, var(--surface)); /* selected option, active nav */
+  --primary-ring: color-mix(in srgb, var(--primary) 15%, transparent); /* the focus ring */
+  --hover-wash: color-mix(in srgb, var(--primary) 5%, var(--surface)); /* a row being pointed at */
+
+  /* ── Colour · series: what a figure is ABOUT, on a chart or a tile ─────────────────────────────── */
+  --series-1: #0e9488; /* the first series: what is, as it stands */
+  --series-2: #6d3bef; /* the second series: what is planned, compared, forked */
+  --series-3: #64748b;
+
+  /* ── Colour · meaning: a state, as one triple — ink for text, fill for a mark, wash for a background ── */
+  --loss: #b42318; /* red · critical · under · failed */
+  --loss-ink: #991b1b;
+  --loss-line: #fca5a5;
+  --loss-wash: #fef2f2;
+  --warn: #f59e0b; /* amber · warning · over · act on this */
+  --warn-ink: #b45309;
+  --warn-wash: #fffbeb;
+  --win: #15a34a; /* green · ok · on target · something went well */
+  --win-ink: #166534;
+  --win-wash: #f0fdf4;
+  --neutral: var(--muted); /* no particular meaning */
+  --neutral-wash: var(--panel);
+
+  /* ── Space: the scale. Layout uses these and nothing between them. ─────────────────────────────── */
+  --sp-0: 2px;
+  --sp-1: 4px;
+  --sp-1h: 6px;
+  --sp-2: 8px;
+  --sp-2h: 10px;
+  --sp-3: 12px;
+  --sp-3h: 14px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+
+  /* ── Radius: one scale ────────────────────────────────────────────────────────────────────────── */
+  --r-xs: 4px; /* a checkbox, a swatch */
+  --r-sm: 6px; /* a skeleton, a small tile, a kbd */
+  --r-md: 9px; /* buttons, inputs, nav items, icon tiles */
+  --r-lg: 14px; /* cards, popovers */
+  --r-full: 999px; /* pills, chips, avatars */
+
+  /* ── Elevation ────────────────────────────────────────────────────────────────────────────────── */
+  --shadow-card: 0 1px 3px rgba(16, 24, 40, 0.06);
+  --shadow-raised: 0 8px 24px rgba(16, 24, 40, 0.12); /* a card being pointed at */
+  --shadow-float: 0 12px 32px rgba(16, 24, 40, 0.14); /* a popover, a menu, a toast, a tooltip */
+
+  /* ── Type ─────────────────────────────────────────────────────────────────────────────────────── */
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-features: 'cv11', 'ss01';
+  --t-2xs: 10.5px; /* labels, column heads, kbd */
+  --t-xs: 11px; /* meta, hints, footnotes */
+  --t-sm: 12px; /* secondary text, chips, buttons */
+  --t-base: 13px; /* body */
+  --t-md: 14.5px; /* a block title */
+  --t-lg: 17px; /* a section heading */
+  --t-xl: 22px; /* a headline figure, a page title */
+  --t-2xl: 28px; /* the one figure a block is about */
+  --w-regular: 400;
+  --w-medium: 500;
+  --w-semibold: 600;
+  --lh-tight: 1.2;
+  --lh-snug: 1.35;
+  --lh-normal: 1.5;
+  --lh-relaxed: 1.6;
+  --track-label: 0.05em; /* uppercase labels */
+  --track-head: 0.03em; /* table heads */
+  --track-figure: -0.005em; /* a figure */
+  --track-headline: -0.015em; /* a headline figure */
+
+  /* ── Motion: one speed for a state change, one for a move ─────────────────────────────────────── */
+  --dur-1: 120ms; /* colour, opacity, a small transform */
+  --dur-2: 200ms; /* a drawer, a card lifting */
+  --dur-settle: 60ms; /* a card reaching its new height */
+  --ease: ease;
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+
+  /* ── Layers ───────────────────────────────────────────────────────────────────────────────────── */
+  --z-sticky: 1; /* a sticky table head */
+  --z-sticky-2: 2; /* a sticky first column */
+  --z-raised: 20; /* a menu inside a card */
+  --z-pill: 30; /* the connection pill over the page */
+  --z-topbar: 40; /* the phone header */
+  --z-sidebar: 41; /* the drawer above it */
+  --z-splash: 50; /* the loading screen */
+  --z-popover: 3000; /* a listbox, portalled to the body */
+  --z-toast: 5000;
+
+  /* ── Sizes ────────────────────────────────────────────────────────────────────────────────────── */
+  --sidebar-w: 240px;
+  --sidebar-w-collapsed: 56px;
+  --topbar-h: 56px;
+  --column-w: 1200px; /* the thread column */
+  --askbar-w: 720px; /* the ask bar: the platform chat input's width, narrower than the blocks */
+  --popover-w: 280px; /* the least a list under a trigger is wide */
+  --legend-w: 220px; /* the least a legend column is wide */
+  --legend-name: 140px; /* the least a legend item's name keeps before it truncates */
+  --control-h: 32px; /* a chip, a chip select, a filter control */
+  --control-h-sm: 28px; /* an icon button, a pill button */
+  --control-h-xs: 24px; /* a stepper button, a toggle button */
+  --tile: 28px; /* a step badge, an avatar */
+  --tile-lg: 40px; /* an action card's icon tile */
+  --tile-w: 190px; /* the least a KPI tile is wide: its widest count at --t-xl, plus padding */
+
+  /* ── Breakpoints (documentation: CSS variables cannot be used in @media) ─────────────────────── */
+  /* --bp-sm: 640px · --bp-md: 768px (sidebar becomes a drawer) · --bp-lg: 1024px (two-column grids) */
+}

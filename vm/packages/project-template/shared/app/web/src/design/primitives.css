@@ -1,0 +1,424 @@
+/*
+ * PRIMITIVES — one class family per thing, named for what it IS. Variants are modifiers (`sa-btn--primary`), parts
+ * are elements (`sa-btn__icon`), states are data attributes or ARIA (`[data-active]`, `[aria-selected]`).
+ * A component composes these; it never restates a value that lives in tokens.css.
+ */
+
+/* ── Button ───────────────────────────────────────────────────────────────────────────────────── */
+.sa-btn {
+  display: inline-flex; align-items: center; gap: var(--sp-1h); max-width: 100%; min-width: 0;
+  height: var(--control-h-sm); padding: 0 var(--sp-3);
+  border-radius: var(--r-md); border-width: 1px; border-color: var(--line);
+  background: var(--surface); color: var(--muted);
+  font-size: var(--t-sm); font-weight: var(--w-medium); white-space: nowrap;
+  transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease), box-shadow var(--dur-1) var(--ease);
+}
+.sa-btn:not(:disabled):hover { border-color: var(--line-strong); color: var(--ink); }
+.sa-btn:disabled { opacity: 0.5; }
+.sa-btn--primary { background: var(--primary); color: var(--on-accent); border-color: var(--primary); }
+.sa-btn--primary:not(:disabled):hover { background: var(--primary-strong); border-color: var(--primary-strong); color: var(--on-accent); }
+.sa-btn--pill { border-radius: var(--r-full); color: var(--ink); border-color: var(--line-strong); }
+.sa-btn--pill:not(:disabled):hover { border-color: var(--primary); color: var(--primary-strong); background: var(--hover-wash); }
+.sa-btn--link { height: auto; padding: 0 var(--sp-1); border: 0; background: none; color: var(--muted); font-weight: var(--w-regular); }
+.sa-btn--link:not(:disabled):hover { color: var(--ink); text-decoration: underline; }
+.sa-btn__icon { width: 14px; height: 14px; flex-shrink: 0; color: var(--faint); }
+.sa-btn__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* An icon-only button: a quiet square that shows its ground on hover. Sizes for a header tool, a chip's ×, a stepper. */
+.sa-icon-btn {
+  width: var(--control-h-sm); height: var(--control-h-sm); display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--r-md); color: var(--faint);
+  transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+.sa-icon-btn:not(:disabled):hover { background: var(--panel); color: var(--ink); }
+.sa-icon-btn--sm { width: var(--control-h-xs); height: var(--control-h-xs); }
+.sa-icon-btn--xs { width: 20px; height: 20px; border-radius: var(--r-sm); }
+.sa-icon-btn--framed { border-width: 1px; border-color: var(--line); background: var(--surface); }
+.sa-icon-btn--framed:not(:disabled):hover { background: var(--panel); }
+.sa-icon-btn--lg { width: 36px; height: 36px; }
+.sa-icon-btn[aria-pressed='true'] { color: var(--loss); }
+.sa-icon-btn > svg { width: 16px; height: 16px; }
+.sa-icon-btn--sm > svg, .sa-icon-btn--xs > svg { width: 13px; height: 13px; }
+.sa-icon-btn--lg > svg { width: 18px; height: 18px; }
+
+/* ── Chip: one filter on a question — the dimension quietly, the member in the accent, × to drop it ── */
+.sa-chip {
+  display: inline-flex; align-items: center; gap: var(--sp-1); max-width: 100%;
+  height: var(--control-h); padding: 0 var(--sp-1) 0 var(--sp-3);
+  border-radius: var(--r-full); border-width: 1px;
+  border-color: color-mix(in srgb, var(--series-1) 50%, var(--surface));
+  background: color-mix(in srgb, var(--series-1) 8%, var(--surface));
+  color: var(--series-1); font-size: var(--t-sm); font-weight: var(--w-medium); white-space: nowrap;
+}
+.sa-chip--not { border-color: color-mix(in srgb, var(--loss) 45%, var(--surface)); background: color-mix(in srgb, var(--loss) 7%, var(--surface)); color: var(--loss-ink); }
+.sa-chip { position: relative; }
+.sa-chip__dim { color: var(--faint); font-weight: var(--w-regular); }
+/* The chip's words are a button: they open the small menu that flips or removes the filter. */
+.sa-chip__btn { display: inline-flex; align-items: center; gap: var(--sp-1); min-width: 0; color: inherit; border-radius: var(--r-sm); }
+.sa-chip__btn:hover { text-decoration: underline; }
+.sa-chip__text { max-width: 14rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-chip .sa-icon-btn { color: inherit; opacity: 0.7; }
+.sa-chip .sa-icon-btn:hover { opacity: 1; background: rgba(0, 0, 0, 0.06); }
+
+/* ── Pill: a state word — red / amber / green, critical / warning / ok ── */
+.sa-pill { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; padding: 1px var(--sp-2); border-radius: var(--r-full); font-size: var(--t-xs); font-weight: var(--w-medium); white-space: nowrap; }
+.sa-pill[data-state='critical'] { background: var(--loss-wash); color: var(--loss); }
+.sa-pill[data-state='warning'] { background: var(--warn-wash); color: var(--warn-ink); }
+.sa-pill[data-state='ok'] { background: var(--win-wash); color: var(--win-ink); }
+
+/* ── Badge: a step number in its accent ── */
+.sa-badge {
+  width: var(--tile); height: var(--tile); border-radius: var(--r-md); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  color: var(--on-accent); font-size: 11.5px; font-weight: var(--w-semibold); font-variant-numeric: tabular-nums;
+  background: var(--neutral);
+}
+
+/* ── Dot: a status light ── */
+.sa-dot { width: 7px; height: 7px; border-radius: var(--r-full); flex-shrink: 0; display: inline-block; }
+.sa-dot--sm { width: 6px; height: 6px; }
+
+/* ── Avatar ── */
+.sa-avatar { width: var(--tile); height: var(--tile); border-radius: var(--r-full); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; background: var(--primary); color: var(--on-accent); font-size: var(--t-2xs); font-weight: var(--w-medium); }
+
+/* ── Input and stepper ── */
+.sa-input {
+  width: 100%; height: var(--control-h); padding: 0 var(--sp-2h);
+  border-width: 1px; border-color: var(--line); border-radius: var(--r-md); background: var(--surface);
+  font-size: var(--t-base); color: var(--ink);
+}
+.sa-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-ring); }
+.sa-input--sm { width: auto; font-size: var(--t-sm); }
+.sa-input--num { width: 5rem; text-align: right; font-variant-numeric: tabular-nums; }
+.sa-input--text { width: 8rem; }
+.sa-input--date { width: 9.5rem; font-variant-numeric: tabular-nums; }
+.sa-input:disabled { opacity: 0.6; }
+.sa-field { display: inline-flex; align-items: center; gap: var(--sp-1h); }
+.sa-field__label { font-size: var(--t-xs); color: var(--muted); max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-stepper { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.sa-stepper__label { font-size: var(--t-xs); color: var(--muted); white-space: nowrap; }
+.sa-stepper__value { font-variant-numeric: tabular-nums; font-size: var(--t-sm); min-width: 18px; text-align: center; }
+.sa-kbd { font-family: inherit; font-size: var(--t-2xs); line-height: 1; padding: 3px 5px; border-radius: 5px; border-width: 1px; border-color: var(--line); background: var(--surface); color: var(--faint); }
+
+/* ── Divider between control groups ── */
+.sa-divider { width: 1px; height: 20px; background: var(--line); margin: 0 var(--sp-1); flex-shrink: 0; }
+
+/* ── Toggle group: a radiogroup of icon buttons — how a card is drawn ── */
+.sa-toggle { display: inline-flex; align-items: center; border-radius: var(--r-md); border-width: 1px; border-color: var(--line); background: var(--surface); overflow: hidden; }
+.sa-toggle__btn { height: var(--control-h-sm); padding: 0 var(--sp-2); display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--t-sm); color: var(--muted); transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
+.sa-toggle__btn:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.sa-toggle__btn[data-on='true'], .sa-toggle__btn[aria-checked='true'] { background: var(--primary-wash); color: var(--primary); font-weight: var(--w-medium); }
+.sa-toggle__btn:not([data-on='true']):hover { background: var(--panel); }
+.sa-toggle__btn--text { height: var(--control-h-sm); }
+.sa-toggle__btn > svg { width: 16px; height: 16px; }
+.sa-toggle__caret { width: 12px; height: 12px; opacity: 0.6; }
+.sa-toggle { position: relative; }
+.sa-toggle__menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: var(--z-raised); min-width: 150px; border-radius: var(--r-md); border-width: 1px; border-color: var(--line); background: var(--surface); box-shadow: var(--shadow-raised); padding: var(--sp-1) 0; }
+.sa-toggle__item { width: 100%; text-align: left; padding: var(--sp-1h) var(--sp-2h); display: flex; align-items: center; gap: var(--sp-2); font-size: var(--t-base); color: var(--ink); }
+.sa-toggle__item:hover { background: var(--panel); }
+.sa-toggle__item[aria-checked='true'] { color: var(--primary); }
+.sa-toggle__item > svg { width: 16px; height: 16px; flex-shrink: 0; }
+.sa-toggle__item .sa-toggle__check { margin-left: auto; width: 14px; height: 14px; }
+.sa-toggle-wrap { position: relative; display: inline-flex; }
+
+/* ── Card and section ─────────────────────────────────────────────────────────────────────────── */
+.sa-card { background: var(--surface); border-width: 1px; border-color: var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-card); overflow: hidden; }
+.sa-card--lift { transition: transform var(--dur-1) var(--ease), box-shadow var(--dur-1) var(--ease); }
+.sa-card--lift:hover { transform: translateY(-2px); box-shadow: var(--shadow-raised); }
+
+/* A section: a card with a head. Quiet by default; `--tinted` gives it the accent band and a solid icon tile. */
+.sa-section { position: relative; }
+.sa-section__head { display: flex; align-items: center; gap: var(--sp-2h); flex-wrap: wrap; padding: 11px var(--sp-4); border-bottom-width: 1px; background: var(--surface-subtle); }
+.sa-section__head--tinted { padding: 15px var(--sp-5); gap: var(--sp-3); background: color-mix(in srgb, var(--accent, var(--series-1)) 7%, var(--surface)); }
+.sa-section__icon { width: 17px; height: 17px; flex-shrink: 0; color: var(--accent, var(--series-1)); }
+.sa-section__tile { width: 32px; height: 32px; border-radius: var(--r-md); display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: var(--accent, var(--series-1)); color: var(--on-accent); }
+.sa-section__tile--soft { background: color-mix(in srgb, var(--accent, var(--series-1)) 16%, var(--surface)); color: var(--accent, var(--series-1)); }
+.sa-section__tile > svg { width: 18px; height: 18px; }
+.sa-section__title { font-size: var(--t-base); font-weight: var(--w-medium); color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-section__head--tinted .sa-section__title { font-size: var(--t-md); font-weight: var(--w-semibold); }
+.sa-section__heading { flex: 1; min-width: 200px; }
+.sa-section__subtitle { font-size: var(--t-xs); color: var(--muted); flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-section__head--tinted .sa-section__subtitle { white-space: normal; }
+.sa-section__head--tinted .sa-section__subtitle { font-size: var(--t-sm); margin-top: 1px; }
+.sa-section__end { margin-left: auto; display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.sa-section__note { font-size: var(--t-xs); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 20rem; }
+/* Controls for the view itself appear when the card is hovered — there when wanted, out of the way when not. */
+.sa-section__hover { opacity: 0; transition: opacity var(--dur-1) var(--ease); }
+.sa-section:hover .sa-section__hover, .sa-section:focus-within .sa-section__hover { opacity: 1; }
+@media (hover: none) { .sa-section__hover { opacity: 1; } }
+.sa-section__foot { display: flex; align-items: center; gap: var(--sp-2h); flex-wrap: wrap; padding: 11px var(--sp-5); border-top-width: 1px; background: var(--surface-subtle); }
+.sa-section__body { padding: var(--sp-4) var(--sp-5); }
+.sa-section__chart { padding: var(--sp-3h) var(--sp-5) var(--sp-3); }
+.sa-section__text { padding: var(--sp-4) var(--sp-5); font-size: var(--t-base); line-height: var(--lh-relaxed); color: var(--ink); white-space: pre-wrap; }
+.sa-section__empty { padding: var(--sp-3) var(--sp-4); }
+.sa-section__footnote { padding: var(--sp-2h) var(--sp-4); border-top-width: 1px; font-size: var(--t-xs); color: var(--faint); display: flex; align-items: center; gap: var(--sp-1h); overflow-wrap: anywhere; }
+.sa-section__footnote > svg { width: 14px; height: 14px; }
+.sa-section__scroll { overflow-x: auto; }
+.sa-section__scroll--tall { max-height: 560px; overflow-y: auto; }
+
+/* A box that follows its content's height instead of snapping to it (the height is set by <Settle>). */
+.sa-settle { transition: height var(--dur-settle) var(--ease); }
+
+/* ── Definition rows: a quiet key / value list inside a section ── */
+.sa-dl__row { display: flex; align-items: baseline; gap: var(--sp-4); padding: var(--sp-2) var(--sp-4); border-top-width: 1px; }
+.sa-dl__row:first-child { border-top-width: 0; }
+.sa-dl--tight .sa-dl__row { padding: var(--sp-1h) var(--sp-4); }
+.sa-dl__key { width: 11rem; flex-shrink: 0; font-size: var(--t-sm); color: var(--faint); overflow-wrap: anywhere; }
+.sa-dl__value { min-width: 0; flex: 1; font-size: var(--t-base); color: var(--ink); overflow-wrap: anywhere; }
+.sa-dl--tight .sa-dl__value { font-size: var(--t-sm); }
+.sa-dl__value--strong { font-weight: var(--w-medium); }
+
+/* ── Words: a set of names as quiet tags ── */
+.sa-words { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.sa-word { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: var(--sp-0) var(--sp-2); border-radius: var(--r-full); background: var(--panel); font-size: var(--t-sm); color: var(--ink); }
+.sa-hash { font-size: var(--t-xs); color: var(--muted); background: var(--panel); border-radius: var(--r-xs); padding: var(--sp-0) var(--sp-1h); word-break: break-all; }
+
+/* ── KPI tile: label, the figure in its meaning's colour, a footnote ── */
+.sa-kpi { display: block; width: 100%; text-align: left; padding: 15px 18px; }
+.sa-kpi--click { cursor: pointer; }
+.sa-kpi__label { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.sa-kpi__label-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-kpi__label > svg { width: 14px; height: 14px; }
+.sa-kpi__value-row { margin-top: var(--sp-1); min-height: 30px; display: flex; align-items: center; }
+.sa-kpi__value { font-size: var(--t-xl); letter-spacing: var(--track-headline); color: var(--accent, var(--series-1)); white-space: nowrap; }
+.sa-kpi { min-width: 0; }
+.sa-kpi__foot { min-height: 16px; margin-top: var(--sp-1); font-size: 11.5px; color: var(--muted); line-height: var(--lh-snug); overflow-wrap: anywhere; }
+.sa-kpi__foot b { font-weight: var(--w-semibold); }
+/* Tiles take as many columns as fit at --tile-w and up: a number never truncates, so a tile is never narrower than
+   its widest formatted count ("1,090 projects" at --t-xl) plus its padding. Five across a 1000px column; one on a phone. */
+.sa-kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(var(--tile-w), 1fr)); gap: var(--sp-3); }
+.sa-kpi-grid--4 { grid-template-columns: repeat(auto-fit, minmax(var(--tile-w), 1fr)); }
+
+/* ── Headline figure: the one number a block is about, and why ── */
+.sa-headline { display: flex; flex-wrap: wrap; gap: var(--sp-8); align-items: flex-start; }
+.sa-headline__value { font-size: var(--t-2xl); letter-spacing: var(--track-headline); color: var(--accent, var(--series-2)); white-space: nowrap; }
+.sa-headline__because { padding-left: var(--sp-4); list-style: disc; font-size: var(--t-sm); color: var(--muted); line-height: var(--lh-relaxed); min-width: 0; flex: 1 1 240px; overflow-wrap: anywhere; }
+
+/* ── Facts: label / value pairs in two columns ── */
+.sa-facts { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: var(--sp-6); padding: var(--sp-1) var(--sp-4); }
+@media (min-width: 768px) { .sa-facts { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.sa-facts__row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-4); padding: var(--sp-2) 0; border-bottom-width: 1px; }
+.sa-facts__row:last-child { border-bottom-width: 0; }
+.sa-facts__key { font-size: var(--t-sm); color: var(--faint); flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.sa-facts__value { min-width: 0; flex: 1 1 auto; text-align: right; font-size: var(--t-base); color: var(--ink); font-weight: var(--w-medium); }
+
+/* ── Table ────────────────────────────────────────────────────────────────────────────────────── */
+table.sa-table { width: 100%; border-collapse: collapse; }
+.sa-table th {
+  text-align: right; font-size: var(--t-2xs); text-transform: uppercase; letter-spacing: var(--track-head); color: var(--faint); font-weight: var(--w-medium);
+  padding: 7px var(--sp-3h); background: var(--panel); border-bottom-width: 1px; white-space: nowrap; position: sticky; top: 0; z-index: var(--z-sticky);
+}
+.sa-table td {
+  padding: 7px var(--sp-3h); border-bottom-width: 1px; text-align: right; vertical-align: top; font-variant-numeric: tabular-nums; font-size: var(--t-base); color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px;
+}
+.sa-table td > * { overflow: hidden; text-overflow: ellipsis; }
+.sa-table th.l, .sa-table td.l { text-align: left; }
+.sa-table th.c, .sa-table td.c { text-align: center; }
+.sa-table td.wrap { white-space: normal; }
+.sa-table tbody tr:last-child td { border-bottom-width: 0; }
+.sa-table tr.clickable { cursor: pointer; }
+.sa-table tr.clickable:hover td { background: var(--hover-wash); }
+.sa-table tr.clickable td:first-child { box-shadow: inset 3px 0 0 transparent; transition: box-shadow var(--dur-1) var(--ease), background var(--dur-1) var(--ease); }
+.sa-table tr.clickable:hover td:first-child { box-shadow: inset 3px 0 0 var(--primary); }
+.sa-table .name { font-size: var(--t-base); font-weight: var(--w-medium); color: var(--ink); }
+/* A change: its sign, and its meaning — a loss reads red, a gain green, nothing stays quiet. */
+.sa-delta[data-state='critical'] { color: var(--loss); }
+.sa-delta[data-state='ok'] { color: var(--win-ink); }
+
+/* A row washed by its state: enough to find the rows by running an eye down the table, not enough to read as an
+   error on every one of them. Ok rows stay white; their pill says so. */
+.sa-table tr[data-state='critical'] > td { background: var(--loss-wash); }
+.sa-table tr[data-state='warning'] > td { background: var(--warn-wash); }
+/* A sortable head: the sort mark appears on hover, stays when it is the sort. */
+.sa-table th.is-sortable { cursor: pointer; user-select: none; }
+.sa-table__head { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.sa-table__head--figure { flex-direction: row-reverse; }
+.sa-table th[aria-sort='ascending'] .sa-table__head, .sa-table th[aria-sort='descending'] .sa-table__head { color: var(--ink); }
+.sa-table__sort { width: 12px; height: 12px; flex-shrink: 0; opacity: 0; transition: opacity var(--dur-1) var(--ease); }
+.sa-table th.is-sortable:hover .sa-table__sort { opacity: 0.6; }
+.sa-table th[aria-sort='ascending'] .sa-table__sort, .sa-table th[aria-sort='descending'] .sa-table__sort { opacity: 1; }
+/* The grid: one cell per period, coloured by its state. */
+.sa-table--grid td.cell { text-align: center; padding: var(--sp-1) var(--sp-1h); min-width: 56px; font-size: var(--t-sm); }
+.sa-table--grid td.cell[data-state='under'] { background: color-mix(in srgb, var(--loss) 14%, var(--surface)); color: var(--loss); }
+.sa-table--grid td.cell[data-state='over'] { background: color-mix(in srgb, var(--warn) 22%, var(--surface)); color: var(--warn-ink); }
+.sa-table--grid td.cell[data-state='ok'] { background: var(--surface-subtle); color: var(--muted); }
+.sa-table--grid td.cell[data-state='none'] { color: var(--line-strong); }
+.sa-table--grid td.sticky, .sa-table--grid th.sticky { position: sticky; left: 0; background: var(--surface); z-index: var(--z-sticky-2); }
+.sa-table--grid th.sticky { z-index: 3; background: var(--panel); }
+/* Pager */
+.sa-pager { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2h) var(--sp-4); border-top-width: 1px; background: var(--surface-subtle); }
+.sa-pager__count { font-size: var(--t-sm); color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+.sa-pager__nav { margin-left: auto; display: flex; align-items: center; gap: var(--sp-2); flex-shrink: 0; }
+.sa-pager__page { font-size: var(--t-sm); color: var(--faint); }
+
+/* ── Skeleton ── */
+@keyframes sa-shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+.sa-skeleton { display: block; border-radius: var(--r-sm); background: linear-gradient(90deg, var(--panel) 25%, var(--page) 37%, var(--panel) 63%); background-size: 400% 100%; animation: sa-shimmer 1.4s ease infinite; }
+.sa-skeleton--inline { display: inline-block; }
+.sa-skeleton + .sa-skeleton { margin-top: var(--sp-1h); }
+.sa-skeleton--end { margin-left: auto; }
+
+/* ── Spinner ── */
+@keyframes sa-spin { to { transform: rotate(360deg); } }
+.sa-spinner { width: 14px; height: 14px; border-radius: var(--r-full); border: 2px solid currentColor; border-right-color: transparent; animation: sa-spin 0.75s linear infinite; display: inline-block; flex-shrink: 0; }
+.sa-spinner--lg { width: 40px; height: 40px; border-width: 2px; border-color: transparent; border-bottom-color: var(--primary); }
+
+/* ── Empty state: a quiet mark, what is missing, where it would come from ── */
+.sa-empty { width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: var(--sp-2h); padding: var(--sp-10) var(--sp-6); }
+.sa-empty__mark { width: 44px; height: 44px; border-radius: var(--r-full); display: flex; align-items: center; justify-content: center; background: var(--panel); }
+.sa-empty__mark > svg { width: 20px; height: 20px; color: var(--faint); }
+.sa-empty__text { font-size: var(--t-base); color: var(--muted); max-width: 34rem; overflow-wrap: anywhere; }
+.sa-empty__hint { font-size: var(--t-sm); color: var(--faint); max-width: 34rem; }
+
+/* ── Alert: something did not happen ── */
+.sa-alert { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border-radius: var(--r-md); border-width: 1px; border-color: var(--loss-line); background: var(--loss-wash); color: var(--loss-ink); font-size: var(--t-sm); }
+.sa-alert > svg { width: 16px; height: 16px; flex-shrink: 0; }
+.sa-alert__text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+/* ── Toast ── */
+.sa-toast-stack { position: fixed; top: var(--sp-3); left: 50%; transform: translateX(-50%); z-index: var(--z-toast); display: flex; flex-direction: column; align-items: center; gap: var(--sp-1h); pointer-events: none; }
+.sa-toast { pointer-events: auto; max-width: 560px; display: flex; align-items: center; gap: var(--sp-2h); padding: var(--sp-2) var(--sp-3h); border-radius: var(--r-md); background: var(--surface); border-width: 1px; border-color: var(--line); box-shadow: var(--shadow-float); font-size: var(--t-sm); color: var(--ink); }
+.sa-toast__icon { width: 16px; height: 16px; flex-shrink: 0; }
+.sa-toast[data-kind='refused'] .sa-toast__icon { color: var(--warn); }
+.sa-toast[data-kind='error'] .sa-toast__icon { color: var(--loss); }
+.sa-toast[data-kind='note'] .sa-toast__icon { color: var(--primary); }
+.sa-toast__kind { font-size: 10px; flex-shrink: 0; }
+.sa-toast__text { min-width: 0; overflow-wrap: anywhere; }
+
+/* ── Combobox (Select / MultiSelect) ───────────────────────────────────────────────────────────── */
+.sa-select { position: relative; }
+.sa-combobox { display: flex; align-items: center; gap: var(--sp-2); text-align: left; }
+.sa-combobox--chip {
+  height: var(--control-h); padding-left: var(--sp-3); padding-right: var(--sp-2); gap: var(--sp-1h);
+  border-radius: var(--r-full); border-width: 1px; border-color: var(--line); background: var(--surface);
+  font-size: var(--t-sm); transition: border-color var(--dur-1) var(--ease);
+}
+.sa-combobox--chip:hover { border-color: var(--line-strong); }
+.sa-combobox--chip[data-set='true'] { border-color: color-mix(in srgb, var(--series-1) 50%, var(--surface)); background: color-mix(in srgb, var(--series-1) 8%, var(--surface)); }
+.sa-combobox--chip[data-set='true'] .sa-combobox__value { color: var(--series-1); font-weight: var(--w-medium); }
+.sa-combobox--cell { width: 100%; height: var(--control-h-sm); padding: 0 var(--sp-2); border-radius: var(--r-md); border-width: 1px; border-color: transparent; transition: border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease); }
+.sa-combobox--cell:hover, .sa-combobox--cell[aria-expanded='true'] { border-color: var(--line); background: var(--surface); }
+.sa-combobox--cell[aria-expanded='true'] { border-color: var(--primary); }
+.sa-combobox:disabled { opacity: 0.6; }
+.sa-combobox__label { color: var(--faint); flex-shrink: 0; }
+.sa-combobox { max-width: 100%; }
+.sa-combobox__value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-combobox--chip .sa-combobox__value { flex: 0 1 auto; max-width: 11rem; }
+.sa-combobox__value--empty { color: var(--faint); }
+.sa-combobox__lead { display: inline-flex; color: var(--faint); }
+.sa-combobox__lead > svg { width: 14px; height: 14px; }
+.sa-combobox__caret { width: 16px; height: 16px; color: var(--faint); flex-shrink: 0; transition: transform var(--dur-1) var(--ease); }
+.sa-combobox[aria-expanded='true'] .sa-combobox__caret { transform: rotate(180deg); }
+
+/* The list, portalled to the body and placed under its trigger. */
+/* The list under a trigger. The RULE: the search row holds one thing, the search box, with a short placeholder;
+   a selection count or a Clear lives in the foot; any text that can outgrow its track truncates with an ellipsis
+   and carries the full text in `title`; nothing in a popover ever clips mid-word. At least --popover-w wide, and
+   as wide as its trigger. */
+.sa-popover { position: fixed; z-index: var(--z-popover); min-width: var(--popover-w); background: var(--surface); border-radius: var(--r-lg); border-width: 1px; border-color: var(--line); box-shadow: var(--shadow-float); overflow: hidden; display: flex; flex-direction: column; }
+/* A modifier of the choice (is / is not) lives in the popover's head, inside the control it modifies. */
+.sa-popover__head { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-bottom-width: 1px; background: var(--surface-subtle); }
+.sa-popover__search { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-bottom-width: 1px; }
+.sa-popover__search > svg { width: 14px; height: 14px; color: var(--faint); flex-shrink: 0; }
+.sa-popover__input { flex: 1; min-width: 0; outline: none; background: transparent; font-size: var(--t-base); border: 0; text-overflow: ellipsis; }
+.sa-popover__foot { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1h) var(--sp-3); border-top-width: 1px; background: var(--surface-subtle); font-size: var(--t-sm); color: var(--muted); }
+.sa-popover__foot-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-listbox { flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-1) 0; }
+.sa-listbox__empty { padding: var(--sp-2h) var(--sp-3); font-size: var(--t-sm); color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-listbox__group-head { padding: var(--sp-2) var(--sp-3) var(--sp-1) 36px; margin-top: var(--sp-1); border-top-width: 1px; font-size: 9.8px; display: flex; align-items: baseline; gap: var(--sp-3); }
+.sa-listbox__group-head > span:first-child { flex: 1; }
+.sa-listbox__col { flex-shrink: 0; text-align: right; }
+.sa-option { width: 100%; display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-1h) var(--sp-3); text-align: left; font-size: var(--t-base); cursor: pointer; color: var(--ink); }
+.sa-option[data-active='true'] { background: var(--panel); }
+.sa-option[aria-selected='true'], .sa-option--selected { color: var(--series-1); }
+.sa-option__check { width: 14px; flex-shrink: 0; margin-top: var(--sp-0); display: inline-flex; }
+.sa-option__check > svg { width: 14px; height: 14px; }
+.sa-option__box { width: 16px; height: 16px; flex-shrink: 0; margin-top: var(--sp-0); border-radius: var(--r-xs); border-width: 1px; border-color: var(--line); display: flex; align-items: center; justify-content: center; }
+.sa-option__box > svg { width: 12px; height: 12px; }
+.sa-option__box[data-state='on'] { background: var(--primary); border-color: var(--primary); color: var(--on-accent); }
+.sa-option__box[data-state='part'] { border-color: var(--primary); color: var(--primary); }
+.sa-option__body { min-width: 0; flex: 1; }
+.sa-option__line { display: flex; align-items: baseline; gap: var(--sp-3); }
+.sa-option__label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.sa-option__label--selected { color: var(--series-1); }
+.sa-option__cell { flex-shrink: 0; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sa-option__note { display: block; font-size: var(--t-sm); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Dropdown: a few choices under a control (a chip's is / is not / remove) ── */
+.sa-dropdown { position: absolute; left: 0; top: calc(100% + 4px); z-index: var(--z-raised); min-width: 140px; border-radius: var(--r-md); border-width: 1px; border-color: var(--line); background: var(--surface); box-shadow: var(--shadow-raised); padding: var(--sp-1) 0; }
+.sa-dropdown__item { width: 100%; text-align: left; padding: var(--sp-1h) var(--sp-2h); display: flex; align-items: center; gap: var(--sp-2); font-size: var(--t-base); color: var(--ink); font-weight: var(--w-regular); white-space: nowrap; }
+.sa-dropdown__item:hover { background: var(--panel); }
+.sa-dropdown__item[aria-checked='true'] { color: var(--primary); }
+.sa-dropdown__item--danger { color: var(--loss-ink); }
+.sa-dropdown__item > svg { width: 14px; height: 14px; flex-shrink: 0; }
+
+/* ── Menu: a small list that drops from a trigger (a profile) ── */
+.sa-menu { position: absolute; left: 0; bottom: 100%; margin-bottom: var(--sp-2); width: 224px; background: var(--surface); border-radius: 12px; border-width: 1px; border-color: var(--line); box-shadow: var(--shadow-float); padding: var(--sp-1) 0; z-index: var(--z-popover); }
+.sa-menu__head { padding: var(--sp-2h) var(--sp-3h); }
+.sa-menu__eyebrow { font-size: var(--t-xs); color: var(--faint); }
+.sa-menu__title { font-size: var(--t-base); font-weight: var(--w-medium); color: var(--ink); margin-top: var(--sp-0); overflow-wrap: anywhere; }
+.sa-menu__line { font-size: var(--t-xs); color: var(--muted); overflow-wrap: anywhere; }
+.sa-menu__line--faint { color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Action card: a launcher — an icon tile, a title and a line, a call to action ── */
+.sa-action-card { display: flex; align-items: center; gap: var(--sp-3h); width: 100%; text-align: left; padding: var(--sp-4) var(--sp-5); }
+.sa-action-card__tile { width: var(--tile-lg); height: var(--tile-lg); border-radius: 11px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: color-mix(in srgb, var(--accent, var(--series-1)) 12%, var(--surface)); color: var(--accent, var(--series-1)); }
+.sa-action-card__tile > svg { width: 22px; height: 22px; }
+.sa-action-card__body { flex: 1; min-width: 0; }
+.sa-action-card__title { font-size: 13.5px; font-weight: var(--w-medium); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-action-card__text { font-size: var(--t-sm); color: var(--muted); margin-top: var(--sp-0); overflow-wrap: anywhere; }
+.sa-action-card__cta { display: flex; align-items: center; gap: var(--sp-1); font-size: var(--t-sm); font-weight: var(--w-medium); white-space: nowrap; color: var(--accent, var(--series-1)); }
+.sa-action-card__cta > svg { width: 16px; height: 16px; transition: transform var(--dur-1) var(--ease); }
+.sa-action-card:hover .sa-action-card__cta > svg { transform: translateX(2px); }
+/* A smaller launcher: a title and a line, in a grid. */
+.sa-sub-card { display: flex; flex-direction: column; gap: var(--sp-0); text-align: left; padding: var(--sp-3) var(--sp-3h); border-radius: var(--r-md); border-width: 1px; border-color: var(--line); background: var(--surface); transition: border-color var(--dur-1) var(--ease), box-shadow var(--dur-1) var(--ease); }
+.sa-sub-card:hover { border-color: var(--primary); box-shadow: var(--shadow-raised); }
+.sa-sub-card { min-width: 0; }
+.sa-sub-card__title { font-size: var(--t-base); font-weight: var(--w-medium); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-sub-card__text { font-size: var(--t-xs); color: var(--muted); line-height: var(--lh-snug); overflow-wrap: anywhere; }
+.sa-sub-grid { display: grid; grid-template-columns: 1fr; gap: var(--sp-2); }
+@media (min-width: 640px) { .sa-sub-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1024px) { .sa-sub-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+/* ── Disclosure: a quiet line that opens more ── */
+.sa-disclosure { border-top-width: 1px; padding-top: var(--sp-2); }
+.sa-disclosure__summary { display: flex; align-items: center; gap: var(--sp-2); }
+.sa-disclosure__summary:hover { color: var(--muted); }
+.sa-disclosure__summary > svg { width: 12px; height: 12px; transition: transform var(--dur-1) var(--ease); }
+.sa-disclosure__summary[aria-expanded='true'] > svg { transform: rotate(90deg); }
+.sa-disclosure__meta { text-transform: none; letter-spacing: normal; color: var(--faint); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-disclosure__panel { margin-top: var(--sp-2); }
+.sa-notes { padding: var(--sp-2h) var(--sp-4) var(--sp-2h) var(--sp-8); list-style: disc; font-size: var(--t-sm); color: var(--muted); line-height: var(--lh-relaxed); border-bottom-width: 1px; overflow-wrap: anywhere; }
+
+/* ── Stacks and rows: the two layouts a block body needs ── */
+.sa-stack { display: flex; flex-direction: column; gap: var(--sp-3h); }
+.sa-stack--3 { gap: var(--sp-3); }
+.sa-stack--4 { gap: var(--sp-4); }
+.sa-row { display: flex; align-items: center; gap: var(--sp-2); }
+.sa-row--wrap { flex-wrap: wrap; }
+.sa-row--tight { gap: var(--sp-1h); }
+.sa-grow { flex: 1; min-width: 0; }
+.sa-two-col { display: grid; grid-template-columns: 1fr; gap: var(--sp-3h); }
+@media (min-width: 1024px) { .sa-two-col { grid-template-columns: repeat(2, minmax(0, 1fr)); } .sa-two-col__span { grid-column: span 2; } }
+.sa-busy { opacity: 0.55; pointer-events: none; transition: opacity var(--dur-1) var(--ease); }
+
+/* ── Prose: what the reader wrote, in the page's type ── */
+.sa-prose { font-size: var(--t-base); line-height: var(--lh-relaxed); color: var(--ink); overflow-wrap: anywhere; }
+.sa-prose > * + * { margin-top: var(--sp-2h); }
+.sa-prose h1, .sa-prose h2, .sa-prose h3 { font-weight: var(--w-semibold); color: var(--ink); line-height: var(--lh-snug); }
+.sa-prose h1 { font-size: var(--t-lg); } .sa-prose h2 { font-size: var(--t-md); } .sa-prose h3 { font-size: var(--t-base); }
+.sa-prose ul { list-style: disc; padding-left: var(--sp-5); } .sa-prose ol { list-style: decimal; padding-left: var(--sp-5); }
+.sa-prose li + li { margin-top: var(--sp-0); }
+.sa-prose code { font-size: var(--t-sm); background: var(--panel); border-radius: var(--r-xs); padding: 0 var(--sp-1); }
+.sa-prose pre { background: var(--panel); border-radius: var(--r-md); padding: var(--sp-3); overflow-x: auto; font-size: var(--t-sm); }
+.sa-prose blockquote { border-left: 3px solid var(--line-strong); padding-left: var(--sp-3); color: var(--muted); }
+.sa-prose a { color: var(--primary-strong); text-decoration: underline; }
+.sa-prose table { width: auto; border-collapse: collapse; font-size: var(--t-sm); }
+.sa-prose th { text-align: left; font-size: var(--t-2xs); text-transform: uppercase; letter-spacing: var(--track-head); color: var(--faint); font-weight: var(--w-medium); padding: var(--sp-1h) var(--sp-3); background: var(--panel); border-bottom-width: 1px; }
+.sa-prose td { padding: var(--sp-1h) var(--sp-3); border-bottom-width: 1px; font-variant-numeric: tabular-nums; }
+.sa-prose strong { font-weight: var(--w-semibold); }
+/* A call the reading stands on, as a chip in the foot. */
+.sa-call { display: inline-flex; align-items: center; gap: var(--sp-1); max-width: 22rem; background: var(--panel); color: var(--muted); }
+.sa-call > svg { width: 12px; height: 12px; flex-shrink: 0; }
+.sa-call__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-call__ms { color: var(--faint); font-variant-numeric: tabular-nums; flex-shrink: 0; }

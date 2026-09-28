@@ -1,0 +1,41 @@
+/*
+ * CHARTS — what surrounds an ECharts canvas: the legend beside it, the pad it sits in. The chart's own colours,
+ * fonts and tooltip come from chart-theme.ts, which reads the same tokens.
+ */
+
+.sa-chart { width: 100%; }
+.sa-chart-legend { display: flex; align-items: center; gap: var(--sp-4); padding-bottom: var(--sp-1); }
+/* Many series: the legend takes as many rows as it needs rather than clipping. */
+.sa-chart-legend--wrap { flex-wrap: wrap; row-gap: var(--sp-1); }
+/* A ring and its legend, laid out by the size of the set (Donut): a row above, a column beside, or a scrolling list beneath. */
+.sa-ring { display: flex; flex-direction: column; }
+/* Medium: the ring is a square as tall as the legend's rows, so twelve rows give a large ring; the legend sits beside
+   it when there is room and wraps beneath it into columns when there is not. */
+.sa-ring[data-legend='column'] { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--sp-3); }
+.sa-ring[data-legend='column'] .sa-ring__canvas { flex: 0 1 auto; max-width: 100%; min-width: 0; }
+/* The legend column keeps at least --legend-w; when the row cannot hold ring + legend it wraps beneath the ring. */
+.sa-ring[data-legend='column'] .sa-ring__legend { flex: 1 1 var(--legend-w); min-width: var(--legend-w); display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--legend-w), 1fr)); max-width: none; container-type: inline-size; }
+.sa-ring__canvas { flex: 1; min-width: 0; }
+.sa-ring__legend { display: flex; flex-direction: column; gap: var(--sp-0); min-width: 150px; max-width: 220px; }
+.sa-ring[data-legend='scroll'] .sa-ring__legend { max-width: none; overflow-y: auto; padding: var(--sp-1) var(--sp-2) 0; border-top-width: 1px; margin-top: var(--sp-1); }
+.sa-ring__item { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-0) var(--sp-1h); border-radius: var(--r-sm); font-size: var(--t-sm); color: var(--ink); text-align: left; width: 100%; min-width: 0; transition: background var(--dur-1) var(--ease), opacity var(--dur-1) var(--ease); }
+.sa-ring__item:hover, .sa-ring__item[data-lit='true'] { background: var(--panel); }
+.sa-ring__item[data-off='true'] { color: var(--faint); text-decoration: line-through; }
+.sa-ring__item[data-off='true'] .sa-ring__swatch { opacity: 0.35; }
+.sa-ring__swatch { width: 8px; height: 8px; border-radius: 3px; flex-shrink: 0; }
+/* In a legend item the NAME is the primary text: it keeps at least --legend-name before it truncates. The value is
+   secondary and shrinks first — full when there is room, the share alone when tight, gone below that; the item's
+   title carries the whole "name · value". */
+.sa-ring__name { flex: 1 1 auto; min-width: min(var(--legend-name), 60%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-ring__value { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; flex-shrink: 0; }
+.sa-ring__value--short { display: none; }
+@container (max-width: 259px) { .sa-ring__value--full { display: none; } .sa-ring__value--short { display: inline; } }
+@container (max-width: 179px) { .sa-ring__value--short { display: none; } }
+
+.sa-chart-legend__item { display: flex; align-items: center; gap: var(--sp-1h); font-size: var(--t-sm); color: var(--muted); min-width: 0; max-width: 100%; }
+.sa-chart-legend__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-chart-legend__swatch { width: 8px; height: 8px; border-radius: 3px; flex-shrink: 0; }
+.sa-chart-legend__swatch--line { width: 2px; height: 12px; border-radius: 1px; }
+
+/* The tooltip ECharts appends to the body carries the app's font; its box is styled from chart-theme.ts. */
+.sa-chart-tooltip { font-family: var(--font); }

@@ -13,7 +13,10 @@ soft
 open
 rejected
 revenue
+# The traffic light is the design system's own: red, amber and green are how a state is shown, whatever model says it.
 green
+red
+amber
 legacy
 planned
 timesheet
