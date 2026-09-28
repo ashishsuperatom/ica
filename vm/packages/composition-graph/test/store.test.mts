@@ -67,3 +67,14 @@ test('a question is recorded with the agent it went to and how, newest first, by
   assert.equal(qs[1].domainHash, s.get('d')!.hash)
   assert.deepEqual((qs[1].ranked as any)[0].terms, ['x'])
 })
+
+test('a domain names its settings: their values come with the composition, and the prompt lists them', () => {
+  const s = graph()
+  s.put('utilisation-threshold-setting', 'setting', { value: -0.3, description: 'a week under this variance is red' }, by)
+  const d = s.get('d')!.body as any
+  s.put('d', 'domain', { ...d, settings: ['utilisation-threshold-setting'] }, by)
+  const c = compose(s, 'd')
+  assert.deepEqual(c.settings, { 'utilisation-threshold-setting': -0.3 })
+  assert.match(c.text, /# Settings \(in settings\.json; the programs read them there\)\n- utilisation-threshold-setting: -0\.3 — a week under this variance is red/)
+  assert.ok(c.used['utilisation-threshold-setting'])
+})

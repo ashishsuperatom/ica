@@ -9,7 +9,9 @@ import type { Store } from './store.js'
 
 /** The top of a composition: an agent. What it is for, the phrases it serves (routing reads them), the screens it covers,
  *  its parts in order (its system prompt), the programs it brings and the tools it keeps. */
-export interface DomainBody { description?: string; intents?: string[]; capabilities: string[]; parts: string[]; files: string[]; tools?: string[] }
+export interface DomainBody { description?: string; intents?: string[]; capabilities: string[]; parts: string[]; files: string[]; tools?: string[]; /** Settings its programs read, by name. */ settings?: string[] }
+/** A value the organisation decides — a threshold, a list, a currency — named once, read by name. */
+export interface SettingBody { value: unknown; description: string }
 export interface Example { question: string; steps: string[] }
 export type PartBody =
   | { title: string; form: 'bullets' | 'numbered'; items: string[] }
@@ -26,6 +28,8 @@ export interface Composition {
   capabilities: string[]
   /** Every node the composition read, by name, with the hash it read. */
   used: Record<string, string>
+  /** The settings the agent's programs read, by name: written into its folder as settings.json. */
+  settings: Record<string, unknown>
 }
 
 /** How every answer is given, whatever the domain: the platform's, first after the identity. */
@@ -55,9 +59,11 @@ export function renderPart(p: PartBody): string {
 }
 
 /** A domain's text from its pieces in memory. */
-export function render(domain: string, parts: PartBody[], files: { name: string }[]): string {
+export function render(domain: string, parts: PartBody[], files: { name: string }[], settings: { name: string; value: unknown; description: string }[] = []): string {
   const named = files.length ? `\n\nIn your folder, from this domain: ${files.map((f) => f.name).join(', ')}.` : ''
-  return `${identityOf(domain)}\n\n${ANSWERING}\n\n${parts.map(renderPart).join('\n\n')}${named}`
+  // The organisation's settings, with their values: the text names them, the programs read them from settings.json.
+  const set = settings.length ? `\n\n# Settings (in settings.json; the programs read them there)\n${settings.map((x) => `- ${x.name}: ${JSON.stringify(x.value)} — ${x.description}`).join('\n')}` : ''
+  return `${identityOf(domain)}\n\n${ANSWERING}\n\n${parts.map(renderPart).join('\n\n')}${set}${named}`
 }
 
 /** A domain composed from the store, as it is now or as it was at a moment. */
@@ -65,7 +71,7 @@ export function compose(store: Store, domain: string, asOf?: number): Compositio
   const d = store.get<DomainBody>(domain, asOf)
   if (!d || d.kind !== 'domain') throw new Error(`there is no domain "${domain}"${asOf ? ` as of ${new Date(asOf).toISOString()}` : ''}`)
   const used: Record<string, string> = { [domain]: d.hash }
-  const read = <B,>(name: string, kind: 'part' | 'file'): B => {
+  const read = <B,>(name: string, kind: 'part' | 'file' | 'setting'): B => {
     const n = store.get<B>(name, asOf)
     if (!n || n.kind !== kind) throw new Error(`domain "${domain}" names ${kind} "${name}", which there is not`)
     used[name] = n.hash
@@ -73,7 +79,9 @@ export function compose(store: Store, domain: string, asOf?: number): Compositio
   }
   const parts = d.body.parts.map((p) => read<PartBody>(p, 'part'))
   const files = d.body.files.map((f) => read<FileBody>(f, 'file'))
-  return { domain, text: render(domain, parts, files), files, ...(d.body.tools ? { tools: d.body.tools } : {}), capabilities: d.body.capabilities, used }
+  const settings = (d.body.settings ?? []).map((n) => ({ name: n, ...read<SettingBody>(n, 'setting') }))
+  return { domain, text: render(domain, parts, files, settings), files, settings: Object.fromEntries(settings.map((x) => [x.name, x.value])),
+    ...(d.body.tools ? { tools: d.body.tools } : {}), capabilities: d.body.capabilities, used }
 }
 
 /** The domains there are, with what each covers. */

@@ -14,7 +14,7 @@ import { pathToFileURL } from 'node:url'
 import { Store, compose as composeFromGraph, domains as domainsInGraph, render, route, rank, indexOf, type PartBody, type FileBody, type Route } from '@superatom/composition-graph'
 
 export interface Domain { name: string; capabilities: string[]; tools?: string[] }
-export interface Knowledge { domain: string; text: string; files: FileBody[]; used: Record<string, string> }
+export interface Knowledge { domain: string; text: string; files: FileBody[]; used: Record<string, string>; /** Written into the folder as settings.json. */ settings: Record<string, unknown> }
 
 /** The project's graph, when it has one. The caller closes it. */
 const storeOf = (projectDir: string) => {
@@ -55,7 +55,7 @@ export async function domainFor(projectDir: string, focus: string | null | undef
 export async function compose(projectDir: string, domain: Domain): Promise<Knowledge> {
   const store = storeOf(projectDir)
   if (store) {
-    try { const c = composeFromGraph(store, domain.name); return { domain: c.domain, text: c.text, files: c.files, used: c.used } }
+    try { const c = composeFromGraph(store, domain.name); return { domain: c.domain, text: c.text, files: c.files, used: c.used, settings: c.settings } }
     finally { store.close() }
   }
   const d = (await stated(projectDir)).find((x) => x.name === domain.name)
@@ -63,13 +63,15 @@ export async function compose(projectDir: string, domain: Domain): Promise<Knowl
   const dir = join(projectDir, 'knowledge', d.name.trim().toLowerCase().replace(/\s+/g, '-'))
   const files: FileBody[] = []
   for (const f of d.files ?? []) { try { files.push({ name: f, text: await readFile(join(dir, f), 'utf8') }) } catch { console.warn(`[knowledge] ${d.name}: file ${f} is missing`) } }
-  return { domain: d.name, text: render(d.name, d.parts, files), files, used: {} }
+  return { domain: d.name, text: render(d.name, d.parts, files), files, used: {}, settings: {} }
 }
 
-/** Put a domain's files into an agent's folder. */
+/** Put a domain's files and settings into an agent's folder. */
 export async function place(k: Knowledge, cwd: string): Promise<void> {
   await mkdir(cwd, { recursive: true })
   for (const f of k.files) await writeFile(join(cwd, f.name), f.text)
+  // The organisation's settings the agent's programs read — the values it was composed with, like its prompt.
+  await writeFile(join(cwd, 'settings.json'), JSON.stringify(k.settings ?? {}, null, 2))
 }
 
 // ── A session is a domain ──────────────────────────────────────────────────────────────────────────────────────

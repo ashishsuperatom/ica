@@ -8,12 +8,18 @@
 import type { Store, ChangeContext } from './store.js'
 import type { DomainBody, PartBody } from './compose.js'
 
-export interface WrittenDomain { name: string; description?: string; intents?: string[]; capabilities: string[]; parts: (PartBody & { name?: string })[]; files?: string[]; tools?: string[] }
-export interface Imported { name: string; kind: 'part' | 'file' | 'domain'; hash: string; changed: boolean }
+export interface WrittenDomain { name: string; description?: string; intents?: string[]; capabilities: string[]; parts: (PartBody & { name?: string })[]; files?: string[]; tools?: string[]; settings?: string[] }
+export interface WrittenSetting { name: string; value: unknown; description: string }
+export interface Imported { name: string; kind: 'part' | 'file' | 'domain' | 'setting'; hash: string; changed: boolean }
 
 /** Put written domains into the graph. `readFile(domain, file)` gives a file's text: a domain's own by its name, a shared one by its path. */
-export function importDomains(store: Store, domains: WrittenDomain[], readFile: (domain: string, file: string) => string, ctx: ChangeContext): Imported[] {
+export function importDomains(store: Store, domains: WrittenDomain[], readFile: (domain: string, file: string) => string, ctx: ChangeContext, settings: WrittenSetting[] = []): Imported[] {
   const out: Imported[] = []
+  // Settings first: a domain may name only a setting the graph holds.
+  for (const x of settings) {
+    if (!x.description?.trim()) throw new Error(`setting "${x.name}" says nothing about what it is`)
+    out.push({ name: x.name, kind: 'setting', ...store.put(x.name, 'setting', { value: x.value, description: x.description }, ctx) })
+  }
   const seen = new Map<string, string>()   // a shared part must be the same wherever it is listed
   for (const d of domains) {
     const partNames: string[] = []
@@ -36,7 +42,9 @@ export function importDomains(store: Store, domains: WrittenDomain[], readFile: 
       if (!out.some((x) => x.name === node)) out.push({ name: node, kind: 'file', ...r })
       fileNames.push(node)
     }
-    const body: DomainBody = { ...(d.description ? { description: d.description } : {}), ...(d.intents?.length ? { intents: d.intents } : {}), capabilities: d.capabilities, parts: partNames, files: fileNames, ...(d.tools ? { tools: d.tools } : {}) }
+    for (const n of d.settings ?? []) if (!store.get(n) || store.get(n)!.kind !== 'setting') throw new Error(`domain "${d.name}" names setting "${n}", which the graph does not hold`)
+    const body: DomainBody = { ...(d.description ? { description: d.description } : {}), ...(d.intents?.length ? { intents: d.intents } : {}), capabilities: d.capabilities, parts: partNames, files: fileNames,
+      ...(d.tools ? { tools: d.tools } : {}), ...(d.settings?.length ? { settings: d.settings } : {}) }
     out.push({ name: d.name, kind: 'domain', ...store.put(d.name, 'domain', body, ctx) })
   }
   return out

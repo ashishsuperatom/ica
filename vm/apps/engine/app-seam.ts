@@ -137,8 +137,7 @@ export function createAppSeam(d: AppSeamDeps) {
       new Promise<Said>((res) => { timer = setTimeout(() => { try { composer.session.stop() } catch { /* best effort */ }; res({ markdown: null, blocks: [], calls: [], queries: [], ms: Date.now() - t0 }) }, MAX_SAY_MS) }),
     ])
     if (timer) clearTimeout(timer)
-    const sg = await d.getSemantic()
-    return { markdown: said.markdown, blocks: said.blocks ?? [], calls: sg.store.callsSince(o.threadId, t0), queries: said.queries ?? [], ms: Date.now() - t0 }
+    return { markdown: said.markdown, blocks: said.blocks ?? [], calls: [], queries: said.queries ?? [], ms: Date.now() - t0 }
   }
 
   async function handle(payload: any, from: any) {

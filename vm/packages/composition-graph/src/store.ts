@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 
-export type Kind = 'domain' | 'part' | 'file'
+export type Kind = 'domain' | 'part' | 'file' | 'setting'
 export interface Node<B = unknown> { name: string; kind: Kind; hash: string; body: B }
 export interface ChangeContext { by: string; reason?: string; from?: string }
 /** A question and the agent it went to: routed by its own words (a session's first question) or asked in a session that

@@ -468,8 +468,6 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   let lastDoing = ''
   const saidBeats: string[] = []
   try {
-    // The person's data session is this conversation's: the same id as the harness session.
-    ;(await getSemantic()).openSession(from?.userId ? { id: from.userId } : null, null, sid)
 
     const analyst = await analystSlot.get()
     emit(reply, A('hello', 'composer', { label: 'Composer', hue: '#4a90d9', streamKind: 'events', pty: false, interactive: false, sid, scope: 'session', ...profileOf('composer'), desc: 'Reuses a program or composes one on the graph for this chat.' }))
