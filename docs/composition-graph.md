@@ -63,6 +63,31 @@ scripts as programs — as a DRAFT with its lineage (the agent it came from, the
 trial (its author and testers) → production → retired, each promotion a recorded change with its reason. The writer is
 taught by the authoring guide above. Needs: a status on agents, a lineage link, a draft space.
 
+## Settings (built 2026-09-28)
+
+A setting is a node: a value the organisation decides and a sentence saying what it is. An agent names the settings its
+programs read; composition lists them in its prompt and writes them into the chat's folder as `settings.json`, so a
+chat keeps the values it began with, like its prompt. A program reads `settings.json` and stops when a setting is
+missing — a default would change every answer without a word.
+
+## Screens: atoms, views, dashboards (decided 2026-09-28, the migration off the semantic graph)
+
+- **Atoms** — the platform's generic display pieces (table, bars, line, donut, grid, figures, facts, text, timeline),
+  each a data contract (the block shapes), shipped with the host once.
+- **Views** — a domain's screen: a program plus its parameters (window, filters, drill moves), run on the engine with
+  no model, reading rows through the domain's own programs and returning the same answer contract an agent returns
+  (prose, period, blocks). A view and an agent agree because they stand on the same program. A view may bring its own
+  component when atoms cannot express its use.
+- **Dashboards** — composites of views with a layout: one per agent, and one for the project.
+- **Components** — one ES module each, default export `{ blocks, params }`, compiled with React, ECharts and the design
+  tokens external, stored by hash in R2, registered as a graph node, loaded on first use and cached by hash; written,
+  compiled and proved by a builder agent, with the agents' lifecycle.
+
+Migration: settings into the graph (done) → the view contract and runner, and the dashboard's state machine as platform
+code → each of the 34 capabilities as a view on its domain's programs, checked figure for figure against the saved
+capability outputs → the dashboard on views → delete the semantic graph package, its store, the capabilities, the
+graph tools and the inspector's graph pages, together.
+
 ## Composition
 
 `compose(domain, who)` → the system prompt and the files for a session:
