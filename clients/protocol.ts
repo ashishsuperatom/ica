@@ -34,7 +34,7 @@ export type Incoming<P> = { from: { id: string; type: Role | 'hub' }; payload: P
 export type ClientMsgType =
   | 'analyse'
   | 'consolidate' | 'semantic:build'
-  | 'sessions:list' | 'session:load' | 'suggestions:req' | 'suggest'
+  | 'sessions:list' | 'session:load' | 'suggestions:req' | 'suggest' | 'agents:list' | 'agents:list:res'
   | 'term:attach' | 'term:input'
 
 export type Analyse = {
@@ -116,6 +116,7 @@ export interface Answer {
   category?: string
   answer?: string                                                    // prose
   period?: string
+  agent?: { name: string | null; how: 'routed' | 'chosen' | 'session'; terms?: string[] }   // which agent answered, and how the chat came to it
   periods?: { label: string; detail?: string }[]                     // the time an answer covers; a comparison has one per period
   scope?: string
   figures?: { label: string; display: string; sub?: string; value?: unknown; neg?: boolean }[]

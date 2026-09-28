@@ -15,7 +15,7 @@ export interface Node<B = unknown> { name: string; kind: Kind; hash: string; bod
 export interface ChangeContext { by: string; reason?: string; from?: string }
 /** A question and the agent it went to: routed by its own words (a session's first question) or asked in a session that
  *  already was a domain. `ranked` is the router's scoring when it routed: every domain, its score, the terms that decided. */
-export interface Asked { id: number; at: number; session: string; qid: string | null; question: string; domain: string | null; domainHash: string | null; how: 'routed' | 'session'; ranked: unknown }
+export interface Asked { id: number; at: number; session: string; qid: string | null; question: string; domain: string | null; domainHash: string | null; how: 'routed' | 'chosen' | 'session'; ranked: unknown }
 export interface Change { id: number; at: number; name: string; kind: Kind; fromHash: string | null; toHash: string | null; by: string; reason: string | null; from: string | null }
 
 const TABLES = `
@@ -112,7 +112,7 @@ export class Store {
   }
 
   /** Record a question and the agent it went to. */
-  recordQuestion(q: { session: string; qid?: string; question: string; domain: string | null; how: 'routed' | 'session'; ranked?: unknown }): void {
+  recordQuestion(q: { session: string; qid?: string; question: string; domain: string | null; how: 'routed' | 'chosen' | 'session'; ranked?: unknown }): void {
     const domainHash = q.domain ? (this.get(q.domain)?.hash ?? null) : null
     this.db.prepare('INSERT INTO question (at, session, qid, question, domain, domain_hash, how, ranked) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
       .run(Date.now(), q.session, q.qid ?? null, q.question, q.domain, domainHash, q.how, q.ranked === undefined ? null : JSON.stringify(q.ranked))

@@ -338,6 +338,11 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // session first, so a cold load on any tab lands on the chat you were actually in.
   const [sessionId, setSessionId] = useState<string>(() => readSid() || loadSessions()[0]?.id || newId())
   const sidRef = useRef(sessionId); sidRef.current = sessionId
+  // The agents a chat can be given, and the one chosen for a new chat ('' = the first question picks it).
+  const [agents, setAgents] = useState<{ name: string; description: string | null }[]>([])
+  const [chosen, setChosen] = useState('')
+  const chosenRef = useRef(chosen); chosenRef.current = chosen
+  const firstRef = useRef(true); firstRef.current = feed.length === 0
   const vtagCtr = useRef(0)
 
   // ── The lane registry ──────────────────────────────────────────────────────
@@ -454,7 +459,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
       ws.onopen = () => {
         setConnected(true)
         if (CLOUD) ws.send(JSON.stringify({ type: 'hello', token, role: 'runtime' }))
-        else { send({ t: 'analyst:sync' }); send({ t: 'sessions:list', projectId }); send({ t: 'session:load', sessionId: sidRef.current }); send({ t: 'suggestions:req', projectId }); attachTerm(); attachLogs() }
+        else { send({ t: 'analyst:sync' }); send({ t: 'sessions:list', projectId }); send({ t: 'session:load', sessionId: sidRef.current }); send({ t: 'suggestions:req', projectId }); send({ t: 'agents:list' }); attachTerm(); attachLogs() }
       }
       // WHY IT CLOSED, said out loud. This dropped the code and reason and reconnected every 3s forever, so a
       // REJECTED connection — an expired token, or one with no access to this project — was indistinguishable
@@ -504,7 +509,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           // answering, the resync below re-sends analyst:status and the spinner comes back; we never keep a
           // stale one.
           if (busyRef.current) endTurn()
-          send({ t: 'analyst:sync' }); send({ t: 'sessions:list', projectId }); send({ t: 'session:load', sessionId: sidRef.current }); send({ t: 'suggestions:req', projectId }); attachTerm()
+          send({ t: 'analyst:sync' }); send({ t: 'sessions:list', projectId }); send({ t: 'session:load', sessionId: sidRef.current }); send({ t: 'suggestions:req', projectId }); send({ t: 'agents:list' }); attachTerm()
           attachLogs()   // this console WATCHES the agents → subscribe to all agent-log channels for the whole session, so you never miss a question's log by attaching late
           send({ t: 'sync:req' })   // pull recent sessions + any answers we missed while offline, straight from the always-on DO (no engine wake)
           return
@@ -527,6 +532,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           if (msg.status === 'ready') { mergeRecovered(msg.qid, sidRef.current, msg.question, msg.answer, msg.followups); send({ t: 'answer:ack', qids: [msg.qid] }) }
           return
         }
+        if (msg.t === 'agents:list:res') { setAgents(Array.isArray(msg.agents) ? msg.agents : []); return }
         if (msg.t === 'suggestions:res') { if (msg.suggestions?.groups) setSuggestions(msg.suggestions); return }
         if (msg.t === 'suggestions') {   // fast-router (as-you-type) — drop stale + ignore other input boxes
           if (typeof msg.seq === 'number' && msg.seq < lastSuggestSeq.current) return
@@ -736,7 +742,7 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
   function newChat() {
     // New CHAT (fresh answer surface) — but NOT a new agent session: the analyst thread persists, so the
     // running session log stays (it clears only on "New session").
-    const id = newId(); sidRef.current = id; setSessionId(id); setFeed([]); setLastAnswer(null); setTurnBusy(false)
+    const id = newId(); sidRef.current = id; setSessionId(id); setFeed([]); setChosen(''); setLastAnswer(null); setTurnBusy(false)
     history.pushState(null, '', `/c/${id}${location.search}`)   // keep ?project=
     setView('chat')   // selecting/creating a chat returns to the chat view (e.g. from the analyst view)
     inputRef.current?.focus()
@@ -889,7 +895,9 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
     if (inputRef.current) { inputRef.current.value = ''; inputRef.current.style.height = 'auto' }
     setLiveSuggest(null); multilineRef.current = false; setMultiline(false)
     // userId is NOT sent — the hub stamps the authenticated userId onto `from` server-side (trusted).
-    send({ t: 'analyse', question: text, projectId, role, sessionId: sidRef.current, questionId: qid })
+    // The agent a person chose for a new chat goes with its first question; after that the chat is that agent's.
+    const agent = firstRef.current ? chosenRef.current : ''
+    send({ t: 'analyse', question: text, projectId, role, sessionId: sidRef.current, questionId: qid, ...(agent ? { agent } : {}) })
     scroll()
   }, [busy, role])
   submitRef.current = submit   // keep the delegated entity-click listener pointed at the live submit
@@ -1055,6 +1063,16 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
       {shownView === 'chat' && (feed.length === 0 && !busy ? (
         <div style={s.centerStage}>
           <div style={{ width: '100%', maxWidth: 720 }}>
+            {agents.length > 0 && (
+              <div style={s.agentPick}>
+                <label htmlFor="sa-agent" style={{ color: '#7a746c' }}>Agent</label>
+                <select id="sa-agent" value={chosen} onChange={e => setChosen(e.target.value)} style={s.agentSelect}
+                  title={agents.find(a => a.name === chosen)?.description ?? 'The first question picks the agent'}>
+                  <option value="">Pick for me from the question</option>
+                  {agents.map(a => <option key={a.name} value={a.name}>{a.name}</option>)}
+                </select>
+              </div>
+            )}
             {composer()}
             {liveSuggestBlock()}
           </div>
@@ -1826,6 +1844,11 @@ function AnswerCard({ answer: a, category, timing, qid, at }: { answer: any; cat
           not something to stringify. */}
       {(typeof a.answer === 'string' || Array.isArray(a.answer)) &&
         <div className="sa-prose" dangerouslySetInnerHTML={{ __html: renderAnswerBody(a.answer) }} />}
+      {a.agent?.name && (
+        <div className="sa-period"><span className="pk">Answered by</span><b>{asText(a.agent.name)}</b>
+          {' — '}{a.agent.how === 'chosen' ? 'chosen for this chat' : a.agent.how === 'routed' ? `picked from the question${a.agent.terms?.length ? ` (${a.agent.terms.map(asText).join(', ')})` : ''}` : 'this chat’s agent'}
+        </div>
+      )}
       {(a.periods?.length > 0 || a.period) && (
         <div className="sa-period"><span className="pk">Time filter</span>
           {a.periods?.length > 0
@@ -1883,6 +1906,8 @@ const s: Record<string, React.CSSProperties> = {
   sidebar:     { width: 260, flexShrink: 0, background: '#fbfaf8', color: '#1a1a1a',
                  borderRight: '1px solid #e8e4de', display: 'flex', flexDirection: 'column',
                  height: '100vh', position: 'sticky', top: 0 },
+  agentPick:   { display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 8px', fontSize: 13 },
+  agentSelect: { font: 'inherit', padding: '4px 8px', borderRadius: 6, border: '1px solid #e8e4de', background: '#fff' },
   newChat:     { margin: 12, padding: '9px 12px', borderRadius: 8, border: '1px solid #e8e4de',
                  background: '#fff', color: '#1a1a1a', fontSize: 13, fontWeight: 600, cursor: 'pointer', textAlign: 'left' },
   sessionList: { flex: 1, overflowY: 'auto', padding: '0 8px 12px' },

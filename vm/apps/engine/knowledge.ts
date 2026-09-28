@@ -45,6 +45,14 @@ export async function domainsOf(projectDir: string): Promise<Domain[]> {
   return (await stated(projectDir)).map((d) => ({ name: d.name, capabilities: d.capabilities, ...(d.tools ? { tools: d.tools } : {}) }))
 }
 
+/** The agents there are, with what each is for — for a person choosing one. */
+export async function agentsOf(projectDir: string): Promise<{ name: string; description: string | null }[]> {
+  const store = storeOf(projectDir)
+  if (!store) return (await domainsOf(projectDir)).map((d) => ({ name: d.name, description: null }))
+  try { return domainsInGraph(store).map((d) => ({ name: d.name, description: (store.get<any>(d.name)?.body?.description as string | undefined) ?? null })) }
+  finally { store.close() }
+}
+
 /** The domain a capability belongs to, or null. */
 export async function domainFor(projectDir: string, focus: string | null | undefined): Promise<Domain | null> {
   if (!focus) return null
@@ -98,7 +106,7 @@ export async function pick(projectDir: string, question: string): Promise<{ doma
 }
 
 /** Record a question with the agent it went to — routed by its words, or asked in a session that already was a domain. */
-export function recordQuestion(projectDir: string, q: { session: string; qid?: string; question: string; domain: string | null; how: 'routed' | 'session'; ranked?: unknown }): void {
+export function recordQuestion(projectDir: string, q: { session: string; qid?: string; question: string; domain: string | null; how: 'routed' | 'chosen' | 'session'; ranked?: unknown }): void {
   const store = storeOf(projectDir)
   if (!store) return
   try { store.recordQuestion(q) } catch (e: any) { console.warn(`[knowledge] question not recorded: ${e?.message ?? e}`) } finally { store.close() }

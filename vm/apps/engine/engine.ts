@@ -37,7 +37,7 @@ import { DataSourceIndex, dataSourceStats } from '@superatom/datasource-index'
 // import would break every deploy while working perfectly here.
 import type { EngineMsgType } from '../../../clients/protocol.js'
 import { createWire } from './wire.js'
-import { pick, compose, place, remember, recall, recordQuestion } from './knowledge.js'
+import { pick, compose, place, remember, recall, recordQuestion, domainsOf, agentsOf } from './knowledge.js'
 import { parcelStore, apiOfHub } from '../../../clients/parcels.js'
 import { createAppSeam } from './app-seam.js'
 import { randomUUID } from 'node:crypto'
@@ -255,9 +255,9 @@ const analystSlot  = makeAgentSlot('analyst',  analystPromptVersion,  (resumeId)
 // The COMPOSER (System 2), ONE PER SESSION: each chat session gets its own composer (a cheap opencode CLIENT
 // session on the shared server, so N sessions ≈ free). Created on the session's first question, reused for the
 // session; only the in-flight question needs memory. Idle sessions are disposed by the sweep below.
-const composersBySession = new Map<string, { composer: Promise<Composer>; lastUsed: number; builtWith: string; domain: string | null; routed?: import('@superatom/composition-graph').Route | null }>()
+const composersBySession = new Map<string, { composer: Promise<Composer>; lastUsed: number; builtWith: string; domain: string | null; routed?: import('@superatom/composition-graph').Route | null; chosen?: boolean }>()
 const composerStamp = () => { const c = agentConfig('composer'); return `${c.harness}/${c.provider}/${c.model}` }
-function getComposer(sid: string, question = ''): Promise<Composer> {
+function getComposer(sid: string, question = '', chosen = ''): Promise<Composer> {
   let e = composersBySession.get(sid)
   // A composer built before a profile change is running the old harness and model. It is dropped at the next
   // question rather than the moment the change arrives, because the change can land mid-answer and killing a
@@ -276,7 +276,7 @@ function getComposer(sid: string, question = ''): Promise<Composer> {
     // question picks the domain, and the folder is made self-contained (knowledge.ts). A project without domains
     // gets the chat composer as before.
     const cwd = join(SESSIONS, sid)
-    const entry = { composer: null as unknown as Promise<Composer>, lastUsed: Date.now(), builtWith: want, domain: null as string | null, routed: undefined as import('@superatom/composition-graph').Route | null | undefined }
+    const entry = { composer: null as unknown as Promise<Composer>, lastUsed: Date.now(), builtWith: want, domain: null as string | null, routed: undefined as import('@superatom/composition-graph').Route | null | undefined, chosen: false }
     const made = (async () => {
       const had = await recall(cwd)
       if (had) {
@@ -284,7 +284,10 @@ function getComposer(sid: string, question = ''): Promise<Composer> {
         console.log(`[ica] composer: session ${sid.slice(0, 8)} recalled "${had.domain}" from its folder`)
         return { c, domain: had.domain }
       }
-      const { domain, route: routed } = await pick(PROJECT_DIR, question)
+      // A person may choose the agent; otherwise the first question's words pick it.
+      const named = chosen ? (await domainsOf(PROJECT_DIR)).find((d) => d.name === chosen) ?? null : null
+      const { domain, route: routed } = named ? { domain: named, route: null } : await pick(PROJECT_DIR, question)
+      if (named) entry.chosen = true
       if (!domain) return { c: await createComposer({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, projectDir: PROJECT_DIR, sessionId: sid, ica: { baseUrl: OC_URL } }), domain: null }
       const k = await compose(PROJECT_DIR, domain)
       const c = await createComposer({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, projectDir: PROJECT_DIR, sessionId: sid, ica: { baseUrl: OC_URL }, reference: k.text, tools: domain.tools })
@@ -431,7 +434,7 @@ const { deliverSemanticStep, semanticVerb, keepView } = createSemanticTurns({
 // answer. A leading verb (edit:, run:, view: …) is handled first (graph/semantic-turns.ts). Otherwise the turn goes to
 // the composer, which answers with a program on the graph (./run-program, ./commit) or hands the question to the analyst with
 // The turn ends when a step has been applied (or the composer says it cannot), and the engine delivers that step.
-async function analyse(question: string, from: any, sid = '', qidIn = '', channel = '') {
+async function analyse(question: string, from: any, sid = '', qidIn = '', channel = '', chosenAgent = '') {
   if (busySessions.has(sid)) {
     emit(from, A('status', 'analyst', { text: 'Already answering a question in this chat — one at a time.', sid })); return
   }
@@ -539,22 +542,25 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       return r === TIMED_OUT ? onTimeout() : (r as T)
     }
 
-    const composer = await getComposer(sid, question)
+    const composer = await getComposer(sid, question, chosenAgent)
     // A SESSION WITH A DOMAIN answers in the domain's way: prose with markers, the blocks the markdown names, no
     // program, no verbs. The answer travels in the shape every surface already renders — the prose as the text,
     // each block as a table section — so the surfaces change nothing.
     const inSession = composersBySession.get(sid)
     if (inSession?.domain) {
       // Every question is recorded with the agent it went to: the first by its words (the route), the rest by the session.
-      const routedNow = inSession.routed
-      recordQuestion(PROJECT_DIR, { session: sid, qid, question, domain: inSession.domain, how: routedNow ? 'routed' : 'session', ...(routedNow ? { ranked: routedNow.ranked } : {}) })
-      inSession.routed = undefined
+      const routedNow = inSession.routed, chosenNow = inSession.chosen
+      const how = chosenNow ? 'chosen' as const : routedNow ? 'routed' as const : 'session' as const
+      recordQuestion(PROJECT_DIR, { session: sid, qid, question, domain: inSession.domain, how, ...(routedNow ? { ranked: routedNow.ranked } : {}) })
+      inSession.routed = undefined; inSession.chosen = false
+      // Who is answering, and how it came to: said with the answer, so the person always knows which agent this is.
+      const agentLine = { name: inSession.domain, how, ...(routedNow?.ranked?.[0]?.terms ? { terms: routedNow.ranked[0].terms.slice(0, 6) } : {}) }
       workingAgent = 'composer'; stopSession = () => { try { (composer as any).session?.stop?.() } catch { /* best-effort */ } }
       const said = await capped(composer.say(question, 'None: the question stands on its own.', handlers, { qid }), () => ({ markdown: null, blocks: [], periods: [], queries: [], ms: Date.now() - t0 }))
       if (stopped) { console.log(`[ica] ${qid.slice(0, 8)} stopped after ${((Date.now() - t0) / 1000).toFixed(1)}s`); return }
       const timing = { ms: Date.now() - t0 }
       if (said.markdown == null) { tellSurfaces(reply, channel, sid, qid, timing, { status: 'cannot_answer', answer: 'No answer was written in time. Ask it another way, or narrower.' }); return }
-      tellSurfaces(reply, channel, sid, qid, timing, readingAnswer(said.markdown, said.blocks, said.periods))
+      tellSurfaces(reply, channel, sid, qid, timing, { ...readingAnswer(said.markdown, said.blocks, said.periods), agent: agentLine })
       console.log(`[ica] composer · read ${qid.slice(0, 8)} · ${(timing.ms / 1000).toFixed(1)}s · ${said.blocks.length} blocks`)
       return
     }
@@ -795,7 +801,8 @@ const appSeam = createAppSeam({ project: PROJECT, projectDir: PROJECT_DIR, datas
 async function handle(payload: any, from: any) {
   if (wire.receive(payload, from)) return
   if (typeof payload?.t === 'string' && payload.t.startsWith('app:')) { void appSeam.handle(payload, from); return }
-  if (payload.t === 'analyse') { analyse(String(payload.question || ''), from, String(payload.sessionId || ''), String(payload.questionId || ''), String(payload.channel || '')) }   // UI supplies both ids; channel set for chat-channel turns
+  if (payload.t === 'analyse') { analyse(String(payload.question || ''), from, String(payload.sessionId || ''), String(payload.questionId || ''), String(payload.channel || ''), String(payload.agent || '')) }
+  else if (payload.t === 'agents:list') { agentsOf(PROJECT_DIR).then((agents) => emit(from, { t: 'agents:list:res', agents } as any)).catch(() => emit(from, { t: 'agents:list:res', agents: [] } as any)) }   // UI supplies both ids; channel set for chat-channel turns
   else if (payload.t === 'index:build') { handleIndexBuild(from, { rebuild: !!payload.rebuild, only: payload.only ? String(payload.only) : undefined }) }   // admin console → build/refresh the datasource index
   else if (payload.t === 'grounding:build') { handleGrounding(from, !!payload.rebuild) }        // admin console → grounding agent builds (rebuild:true = wipe first, else additive)
   else if (payload.t === 'connector:ask') { handleConnector(String(payload.text || ''), from) }   // admin console → connector agent (raw PTY back)

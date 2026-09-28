@@ -10,7 +10,7 @@ import { check } from '@superatom/semantic-graph'
 import { MODEL } from './graph/semantic.js'
 import { createComposer, type Composer, type QueryRecord } from './agents/composer/index.js'
 import { createNarrator, capResultData, isDataCall } from './agents/narrator/index.js'
-import { domainFor, compose, place } from './knowledge.js'
+import { pick, compose, place, recordQuestion } from './knowledge.js'
 import type { AgentEvent } from './ica/session.js'
 
 export interface AppSeamDeps {
@@ -35,6 +35,8 @@ export interface Said {
   /** The queries the composer sent to sources itself, outside the graph: the parts that did not stand on the model. */
   queries: QueryRecord[]
   ms: number
+  /** The agent that answered, and how the thread came to it. */
+  agent?: { name: string | null; how: string; terms?: string[] }
 }
 
 /** A turn is capped: a question that takes longer than this is not being answered, it is being wandered. */
@@ -55,24 +57,25 @@ export function createAppSeam(d: AppSeamDeps) {
 
   // ONE COMPOSER PER THREAD, as the chat has one per conversation: the thread id is its session, so a follow-up
   // lands where the earlier question was answered. Idle composers are let go; their directories stay.
-  const composers = new Map<string, { composer: Promise<Composer>; domain: string | null; lastUsed: number }>()
-  // The screen's capability picks the domain (knowledge.ts): the composer of a thread is made knowing that domain,
-  // and made again if a later question in the thread comes from a screen of another domain.
-  const composerFor = async (sid: string, focus?: string | null) => {
-    const domain = await domainFor(d.projectDir, focus)
+  const composers = new Map<string, { composer: Promise<Composer>; domain: string | null; lastUsed: number; routed?: unknown }>()
+  // The thread's FIRST question picks its agent by its words (knowledge.ts pick — the same router the chat uses), and
+  // the thread keeps that agent: what a person asks next follows from what they asked first, whatever screen it is
+  // typed on.
+  const composerFor = async (sid: string, question: string) => {
     let e = composers.get(sid)
-    if (e && e.domain !== (domain?.name ?? null)) { composers.delete(sid); e.composer.then((c) => { try { c.session.stop() } catch { /* gone */ } }); e = undefined }
     if (!e) {
+      const picked = await pick(d.projectDir, question)
+      const domain = picked.domain
       const composer = (async () => {
         const k = domain ? await compose(d.projectDir, domain) : null
         const c = await createComposer({ root: d.workspaceRoot, projectId: d.project, managerUrl: d.datasource, projectDir: d.projectDir, sessionId: sid, reference: k?.text, tools: domain?.tools })
-        if (k) { await place(k, c.cwd); console.log(`[app] thread ${sid.slice(0, 8)} knows "${k.domain}" (${k.text.length} chars, ${k.files.length} files)`) }
+        if (k) { await place(k, c.cwd); console.log(`[app] thread ${sid.slice(0, 8)} is "${k.domain}" (${k.text.length} chars) · routed ${picked.route?.ranked.slice(0, 2).map((x) => `${x.domain} ${x.score}`).join(' · ') ?? '—'}`) }
         return c
       })()
-      e = { composer, domain: domain?.name ?? null, lastUsed: Date.now() }; composers.set(sid, e)
+      e = { composer, domain: domain?.name ?? null, lastUsed: Date.now(), routed: picked.route }; composers.set(sid, e)
     }
     e.lastUsed = Date.now()
-    return e.composer
+    return e
   }
   setInterval(() => { const now = Date.now(); for (const [sid, e] of composers) if (now - e.lastUsed > IDLE_MS) { composers.delete(sid); e.composer.then((c) => { try { c.session.stop() } catch { /* gone */ } }).catch(() => {}) } }, 60_000).unref()
 
@@ -81,10 +84,15 @@ export function createAppSeam(d: AppSeamDeps) {
    *  the project's agent log on the composer's lane, so the work can be watched where every agent's work is watched. */
   async function say(text: string, context: string, o: { qid: string; threadId: string; focus?: string | null; reqId?: string; from?: any }): Promise<Said> {
     const t0 = Date.now()
-    const composer = await composerFor(o.threadId, o.focus)
+    const entry = await composerFor(o.threadId, text)
+    const composer = await entry.composer
+    const routedNow = entry.routed as { ranked: { domain: string; terms: string[] }[] } | undefined
+    recordQuestion(d.projectDir, { session: o.threadId, qid: o.qid, question: text, domain: entry.domain, how: routedNow ? 'routed' : 'session', ...(routedNow ? { ranked: routedNow.ranked } : {}) })
+    entry.routed = undefined
+    const agent = { name: entry.domain, how: routedNow ? 'routed' : 'session', ...(routedNow?.ranked?.[0]?.terms ? { terms: routedNow.ranked[0].terms.slice(0, 6) } : {}) }
     // A thread that knows a domain answers the question as asked, in the domain's own terms: the screen is not
     // passed in, so its wording can neither help nor mislead. A thread without a domain is given the screen.
-    if (composers.get(o.threadId)?.domain) context = 'None: the question stands on its own.'
+    if (entry.domain) context = 'None: the question stands on its own.'
     // PROGRESS GOES OUT EXACTLY AS A CHAT TURN'S DOES. The raw work — output and events — travels on the agent
     // log channel under the composer's lane, for whoever watches agents work. What a person reads while waiting is
     // the narrator's: every few seconds it turns the activity since the last beat into one line, sent as
@@ -137,7 +145,7 @@ export function createAppSeam(d: AppSeamDeps) {
       new Promise<Said>((res) => { timer = setTimeout(() => { try { composer.session.stop() } catch { /* best effort */ }; res({ markdown: null, blocks: [], calls: [], queries: [], ms: Date.now() - t0 }) }, MAX_SAY_MS) }),
     ])
     if (timer) clearTimeout(timer)
-    return { markdown: said.markdown, blocks: said.blocks ?? [], calls: [], queries: said.queries ?? [], ms: Date.now() - t0 }
+    return { markdown: said.markdown, blocks: said.blocks ?? [], calls: [], queries: said.queries ?? [], ms: Date.now() - t0, agent }
   }
 
   async function handle(payload: any, from: any) {
