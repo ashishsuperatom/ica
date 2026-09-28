@@ -8,6 +8,7 @@
 //   fields     every column a dimension or a view's members read is one the fact's program gives
 //   settings   every setting the application reads by name is one a domain gives
 //   programs   no view reads the semantic graph: every figure comes from a domain's program
+//   template   the files every project shares are the template's (vm/packages/project-template), not changed here
 //
 //   cd <repo>/vm/apps/engine && pnpm exec tsx <project>/app/server/verify.mjs
 
@@ -110,6 +111,11 @@ for (const file of files(HERE)) {
   for (const m of text.matchAll(/setting(?:Of)?\(\s*['"]([^'"]+)['"]/g)) if (!settingsInGraph.has(m[1])) fail('settings', where, `reads the setting "${m[1]}", which no domain gives`)
   if (/\bc\.ask\(|\bctx\.graph\b|semantic-graph|time-graph\.mjs/.test(text) && file.includes(`${join(HERE, 'capabilities')}/`)) fail('programs', where, 'reads the semantic graph, not a domain\'s program')
 }
+
+// ── template: the shared files are the platform's ──
+const template = join(process.cwd(), '..', '..', 'packages', 'project-template', 'cli.mjs')
+try { execFileSync(process.execPath, [template, 'check', PROJECT], { encoding: 'utf8' }) }
+catch (e) { for (const line of String(e.stdout ?? '').split('\n')) { const m = line.match(/^(differs|missing)\s+(.*)$/); if (m) fail('template', m[2], m[1] === 'differs' ? 'changed here: a shared file is changed in the template and synced to every project' : 'missing: `cli.mjs sync` writes it') } if (!String(e.stdout ?? '').trim()) fail('template', template, e.message) }
 
 for (const f of findings) console.log(`${f.level === 'fail' ? 'FAIL' : 'warn'}  ${f.check.padEnd(15)} ${f.subject} — ${f.says}`)
 const failed = findings.filter((f) => f.level === 'fail').length
