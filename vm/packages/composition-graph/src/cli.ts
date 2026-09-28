@@ -9,6 +9,7 @@
 //   composition-graph put <name> --kind part|file|domain --body <json|@file>     (a file: --kind file --text @<path>)
 //   composition-graph remove <name>
 //   composition-graph import <knowledge/index.mts>
+//   composition-graph verify [--against <knowledge/index.mts>]      the graph holds together, and holds what was written
 //
 // Where: --db <file>, else $COMPOSITION_GRAPH_DB, else <$ENGINE_PROJECT_DIR>/db/composition.sqlite.
 
@@ -18,6 +19,7 @@ import { pathToFileURL } from 'node:url'
 import { Store, type Kind } from './store.js'
 import { compose, domains } from './compose.js'
 import { importDomains, type WrittenDomain, type WrittenSetting } from './import.js'
+import { verifyGraph, verifyAgainst, type Finding } from './verify.js'
 
 const argv = process.argv.slice(2)
 const flags: Record<string, string | true> = {}
@@ -66,7 +68,20 @@ if (command === 'domains') {
   const dir = file.replace(/\/[^/]+$/, '')
   const read = (domain: string, f: string) => readFileSync(f.includes('/') ? join(dir, f) : join(dir, domain.replace(/\s+/g, '-').toLowerCase(), f), 'utf8')
   for (const r of importDomains(store, (mod.domains ?? []) as WrittenDomain[], read, ctx, (mod.settings ?? []) as WrittenSetting[])) console.log(r.changed ? `${r.kind} ${r.name} → ${r.hash.slice(0, 12)}` : `${r.kind} ${r.name} unchanged`)
+} else if (command === 'verify') {
+  const findings: Finding[] = verifyGraph(store)
+  if (typeof flags.against === 'string') {
+    const file = resolve(flags.against)
+    const mod = await import(pathToFileURL(file).href)
+    const dir = file.replace(/\/[^/]+$/, '')
+    const read = (domain: string, f: string) => readFileSync(f.includes('/') ? join(dir, f) : join(dir, domain.replace(/\s+/g, '-').toLowerCase(), f), 'utf8')
+    findings.push(...verifyAgainst(store, (mod.domains ?? []) as WrittenDomain[], read, (mod.settings ?? []) as WrittenSetting[]))
+  }
+  for (const f of findings) console.log(`${f.level === 'fail' ? 'FAIL' : 'warn'}  ${f.check.padEnd(9)} ${f.subject} — ${f.says}`)
+  const failed = findings.filter((f) => f.level === 'fail').length
+  console.log(failed ? `${failed} failed, ${findings.length - failed} warnings` : `the graph holds together${typeof flags.against === 'string' ? ' and holds what the knowledge writes' : ''}${findings.length ? ` (${findings.length} warnings)` : ''}`)
+  if (failed) process.exitCode = 1
 } else {
-  fail('commands: domains · show · history · changes · compose · put · remove · import   (every change: --by --reason --from)')
+  fail('commands: domains · show · history · changes · compose · put · remove · import · verify   (every change: --by --reason --from)')
 }
 store.close()
