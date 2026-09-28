@@ -25,6 +25,39 @@ import { fileURLToPath } from 'node:url'
 const semanticCli = fileURLToPath(new URL('../graph/semantic-cli.ts', import.meta.url))
 const modelCli = fileURLToPath(new URL('../../../packages/semantic-graph/src/cli.ts', import.meta.url))
 
+/** The data seam a program imports as data/query.mjs: every read goes through the datasource manager, never a source directly. */
+export const dataSeam = (managerUrl: string) => `// The data seam. You never see databases, ports, dialects, or credentials — you call
+// query(dataSourceId, query, params) — the manager runs the query against the source. There is ONE endpoint: the datasource-manager, which routes
+// by id to the right bridge; the bridge binds @name params in its own dialect and runs the query.
+// Ask the manager 'GET /sources' for each source's kind/dialect BEFORE writing queries.
+const MANAGER = process.env.DATASOURCE_URL ?? '${managerUrl}'
+export async function query(dataSourceId, sql, params = {}) {
+  const r = await fetch(MANAGER + '/query', { method:'POST', headers:{'content-type':'application/json'},
+    body: JSON.stringify({ id: dataSourceId, sql, params }) })
+  if (!r.ok) throw new Error(r.status + ' ' + await r.text())
+  const p = await r.json(); if (p?.error) throw new Error(p.error)
+  const rows = p?.rows ?? []
+  // What the manager says about a result that changes how it must be read (a result that reached the row limit)
+  // goes to stderr, where whoever ran this sees it, and rides on the rows for a script that wants to check.
+  if (Array.isArray(p?.notes) && p.notes.length) { for (const n of p.notes) console.error('NOTE: ' + n); Object.defineProperty(rows, 'notes', { value: p.notes }) }
+  if (p?.cappedTo != null) Object.defineProperty(rows, 'cappedTo', { value: p.cappedTo })
+  return rows
+}
+// SYSTEM-only raw-SQL path (NOT for agent data queries): the introspect/grounding seams read catalogs and build
+// indexes in raw dialect SQL. This posts { raw:true } so the manager runs it as-is, skipping the agent query path.
+// Agent queries must go through query() above — that is the access-control boundary.
+export async function rawQuery(dataSourceId, sql, params = {}) {
+  const r = await fetch(MANAGER + '/query', { method:'POST', headers:{'content-type':'application/json'},
+    body: JSON.stringify({ id: dataSourceId, sql, params, raw: true }) })
+  if (!r.ok) throw new Error(r.status + ' ' + await r.text())
+  const p = await r.json(); if (p?.error) throw new Error(p.error)
+  return p?.rows ?? []
+}
+export async function sources() {   // list data sources + their kind/dialect
+  const r = await fetch(MANAGER + '/sources'); return (await r.json()).sources
+}
+`
+
 export interface WorkspaceSpec {
   root: string
   projectId: string
@@ -84,38 +117,7 @@ rows — is given as JSON, and --json asks for that where both make sense. A lon
 its beginning shown, with where the rest is: take what you need from it with grep or jq rather than reading it all.
 `)
 
-  await writeFile(join(dir, 'data', 'query.mjs'),
-`// The data seam. You never see databases, ports, dialects, or credentials — you call
-// query(dataSourceId, query, params) — the manager runs the query against the source. There is ONE endpoint: the datasource-manager, which routes
-// by id to the right bridge; the bridge binds @name params in its own dialect and runs the query.
-// Ask the manager 'GET /sources' for each source's kind/dialect BEFORE writing queries.
-const MANAGER = process.env.DATASOURCE_URL ?? '${s.managerUrl ?? 'http://localhost:4000'}'
-export async function query(dataSourceId, sql, params = {}) {
-  const r = await fetch(MANAGER + '/query', { method:'POST', headers:{'content-type':'application/json'},
-    body: JSON.stringify({ id: dataSourceId, sql, params }) })
-  if (!r.ok) throw new Error(r.status + ' ' + await r.text())
-  const p = await r.json(); if (p?.error) throw new Error(p.error)
-  const rows = p?.rows ?? []
-  // What the manager says about a result that changes how it must be read (a result that reached the row limit)
-  // goes to stderr, where whoever ran this sees it, and rides on the rows for a script that wants to check.
-  if (Array.isArray(p?.notes) && p.notes.length) { for (const n of p.notes) console.error('NOTE: ' + n); Object.defineProperty(rows, 'notes', { value: p.notes }) }
-  if (p?.cappedTo != null) Object.defineProperty(rows, 'cappedTo', { value: p.cappedTo })
-  return rows
-}
-// SYSTEM-only raw-SQL path (NOT for agent data queries): the introspect/grounding seams read catalogs and build
-// indexes in raw dialect SQL. This posts { raw:true } so the manager runs it as-is, skipping the agent query path.
-// Agent queries must go through query() above — that is the access-control boundary.
-export async function rawQuery(dataSourceId, sql, params = {}) {
-  const r = await fetch(MANAGER + '/query', { method:'POST', headers:{'content-type':'application/json'},
-    body: JSON.stringify({ id: dataSourceId, sql, params, raw: true }) })
-  if (!r.ok) throw new Error(r.status + ' ' + await r.text())
-  const p = await r.json(); if (p?.error) throw new Error(p.error)
-  return p?.rows ?? []
-}
-export async function sources() {   // list data sources + their kind/dialect
-  const r = await fetch(MANAGER + '/sources'); return (await r.json()).sources
-}
-`)
+  await writeFile(join(dir, 'data', 'query.mjs'), dataSeam(s.managerUrl ?? 'http://localhost:4000'))
 
   await writeFile(join(dir, 'data', 'introspect.mjs'),
 `// Introspection helpers over the data seam — DIALECT-SPECIFIC, resolved per source automatically.

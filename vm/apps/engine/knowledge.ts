@@ -11,6 +11,7 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { dataSeam } from './ica/workspace.js'
 import { Store, compose as composeFromGraph, domains as domainsInGraph, render, route, rank, indexOf, type PartBody, type FileBody, type Route } from '@superatom/composition-graph'
 
 export interface Domain { name: string; capabilities: string[]; tools?: string[] }
@@ -110,6 +111,24 @@ export function recordQuestion(projectDir: string, q: { session: string; qid?: s
   const store = storeOf(projectDir)
   if (!store) return
   try { store.recordQuestion(q) } catch (e: any) { console.warn(`[knowledge] question not recorded: ${e?.message ?? e}`) } finally { store.close() }
+}
+
+/** A domain's programs, ready to run in a folder of their own — for a caller that runs them without an agent (a
+ *  project's application). The folder gets what a chat's folder gets: the files, settings.json and the data seam. It
+ *  follows the graph: placed again when the composition's hashes change, so it is always the domain as it is now. */
+export async function placeForRunning(projectDir: string, name: string, dir: string, managerUrl: string): Promise<{ dir: string; used: Record<string, string> }> {
+  const domain = (await domainsOf(projectDir)).find((d) => d.name === name)
+  if (!domain) throw new Error(`there is no domain "${name}"`)
+  const k = await compose(projectDir, domain)
+  const stamp = JSON.stringify(k.used)
+  const noted = await readFile(join(dir, '.used.json'), 'utf8').catch(() => null)
+  if (noted !== stamp) {
+    await place(k, dir)
+    await mkdir(join(dir, 'data'), { recursive: true })
+    await writeFile(join(dir, 'data', 'query.mjs'), dataSeam(managerUrl))
+    await writeFile(join(dir, '.used.json'), stamp)
+  }
+  return { dir, used: k.used }
 }
 
 const NOTE = '.domain.json', REFERENCE = '.reference.md'

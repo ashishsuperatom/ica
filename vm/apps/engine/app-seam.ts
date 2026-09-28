@@ -10,7 +10,7 @@ import { check } from '@superatom/semantic-graph'
 import { MODEL } from './graph/semantic.js'
 import { createComposer, type Composer, type QueryRecord } from './agents/composer/index.js'
 import { createNarrator, capResultData, isDataCall } from './agents/narrator/index.js'
-import { pick, compose, place, recordQuestion } from './knowledge.js'
+import { pick, compose, place, recordQuestion, placeForRunning } from './knowledge.js'
 import type { AgentEvent } from './ica/session.js'
 
 export interface AppSeamDeps {
@@ -162,6 +162,8 @@ export function createAppSeam(d: AppSeamDeps) {
         if (!r.ok || body.error) throw new Error(`${source}: ${body.error ?? `the manager answered ${r.status}`}`)
         return { rows: body.rows ?? [], notes: body.notes ?? null }
       },
+      /** A domain's programs, placed in the application's own folder and kept to the graph as it is now: { dir, used }. */
+      domain: (name: string) => placeForRunning(d.projectDir, name, join(d.projectDir, 'app', '.domains', name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')), d.datasource),
       sources: async () => { const r = await fetch(`${d.datasource}/sources`); const body: any = await r.json().catch(() => ({})); return body.sources ?? [] },
       say: (text: string, context: string, o: { qid: string; threadId: string; focus?: string | null }) => say(text, context, { ...o, reqId: payload.reqId, from }),
       reply: (msg: Record<string, unknown>) => {
