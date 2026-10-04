@@ -31,6 +31,11 @@ The agents that produce/maintain computation are named by thinking speed:
 - **Data only through the datasource manager**, so every call's record is complete.
 - **Correctness before efficiency.**
 
+## Checks
+
+`scripts/check-all.sh` runs every typecheck and test suite and stops at the first failure. Run it before every
+deploy and push.
+
 ## Where the design lives
 
 - **`docs/features.md`** — one line per major feature: what is built, and what is planned (partly done counts as planned).
