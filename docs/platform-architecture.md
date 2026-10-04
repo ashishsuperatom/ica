@@ -631,6 +631,33 @@ with a hierarchy in the ideas — not things plugged in at random. Just as the o
 platform itself should have an organisation of how things are built, and that index should be maintained — in the
 source code, or in the folder and module structure.
 
+## The rest of the scope (the user, 2026-10-05)
+
+**In the user's words:** build everything that was discussed first — it will be messy and some decisions will be wrong,
+and that is fine — so the whole scope is in place and known; then smooth it out and weed out the wrong decisions.
+Building one thing at a time risks discovering late that something was never thought about (how credit assignment
+works, how connectors work). Questions asked: did the user UI move onto the block system; is the STATE system there; can
+new agents be created, and how from the user UI; how do program templates (code + React) get built and deployed; when a
+dashboard is "a collection of programs in the user UI itself", are programs fetched from the engine or from R2 through
+the Worker; what is the contract a builder (agent or person) works to; is global/group/user scope applied everywhere it
+matters.
+
+**Connectors, in the user's words:** enterprises want to connect to their systems. Today's connector system works
+programmatically; there will also be hundreds of connectors to other services, and MCP connectors, beside connectors to
+other databases. Connecting looks like the SLOB application's block UI: "I want to connect to this" brings a UI for it.
+A connection can be **per user** (each user makes their own) or **organisation level** (an admin connects once and
+everyone uses it). The access key is stored securely: every use first decrypts it with a master key, then makes the call.
+
+**Choices made (2026-10-05):** the platform's own warehouse is Basin, and Analytics Engine is dropped (its 3-month,
+sampled metrics duplicate what the warehouse gives; minutes of lag are fine).
+
+**Order of building:** (1) drop Analytics Engine; (2) groups, and scope (global/group/user) wherever things are listed
+or read — knowledge, agents, programs, sessions, connections; (3) agents as first-class, created from the UI and CLI;
+(4) programs' React side served to the user UI from R2 through the Worker (the engine is not needed to draw a view);
+(5) the program template and the program contract; (6) connectors and credentials (encrypted with the platform's master
+key, per user or per organisation; MCP as a kind of connector); (7) credit assignment within an organisation (budgets for
+users and groups); (8) the user UI pages for all of it.
+
 ## The flow
 
 ```
