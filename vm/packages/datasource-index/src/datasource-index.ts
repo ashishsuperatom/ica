@@ -77,13 +77,6 @@ export const DATASOURCE_INDEX_SCHEMA = `
     END;
   `
 
-/** Still here because callers use it, and it costs nothing to call: every statement is IF NOT EXISTS and the
- *  store has already run the same DDL at open. The ALTER is the one migration this table has ever needed. */
-export function ensureDataSourceIndex(store: DataSourceIndex): void {
-  store.db.exec(DATASOURCE_INDEX_SCHEMA)
-  try { store.db.exec(`ALTER TABLE datasource_index ADD COLUMN rows INTEGER`) } catch { /* column already present */ }
-}
-
 /**
  * Record known row counts for a source's containers and AUTO-DISABLE the empty ones (so they never surface in
  * search — an empty table/column is pure distraction). CRITICAL: only pass counts you DEFINITIVELY got (a real
@@ -91,7 +84,6 @@ export function ensureDataSourceIndex(store: DataSourceIndex): void {
  * Never re-enables a manually-disabled non-empty table (only flips enabled for the containers passed in).
  */
 export function applyRowCounts(store: DataSourceIndex, source: string, counts: Record<string, number>): { disabled: number; enabled: number } {
-  ensureDataSourceIndex(store)
   let disabled = 0, enabled = 0
   const upd = store.db.prepare('UPDATE datasource_index SET rows=?, enabled=? WHERE source=? AND container=?')
   const tx = store.db.transaction((entries: [string, number][]) => {
@@ -111,7 +103,6 @@ export function dsiKey(source: string, container: string, field: string): string
 
 /** Upsert one entry (idempotent on key). The updater process calls this; readers never write. */
 export function putEntry(store: DataSourceIndex, e: DataSourceEntry): void {
-  ensureDataSourceIndex(store)
   store.db.prepare(`
     INSERT INTO datasource_index (key, source, container, field, type, desc_default, desc_ai, desc_human, is_optional, is_key, references_, rows, enabled)
     VALUES (@key, @source, @container, @field, @type, @descDefault, @descAi, @descHuman, @isOptional, @isKey, @references, @rows, @enabled)
@@ -129,7 +120,6 @@ export function putEntry(store: DataSourceIndex, e: DataSourceEntry): void {
 }
 
 export function putEntries(store: DataSourceIndex, entries: DataSourceEntry[]): number {
-  ensureDataSourceIndex(store)
   const tx = store.db.transaction((es: DataSourceEntry[]) => { for (const e of es) putEntry(store, e) })
   tx(entries)
   return entries.length
@@ -174,7 +164,6 @@ export interface DataSourceSearchResult {
  *
  *  3. IT SAYS WHAT IT DID NOT SHOW. See DataSourceSearchResult. */
 export function searchDataSource(store: DataSourceIndex, query: string, opts: { source?: string; limit?: number; includeDisabled?: boolean } = {}): DataSourceSearchResult {
-  ensureDataSourceIndex(store)
   const limit = Math.min(opts.limit ?? 50, 500)
   const where: string[] = []
   const bind: any[] = []
@@ -245,13 +234,11 @@ export function searchDataSource(store: DataSourceIndex, query: string, opts: { 
 
 /** Enable/disable by exact key, or a whole container/source via a LIKE pattern on the key (e.g. 'erp.employee.%'). */
 export function setEnabled(store: DataSourceIndex, keyOrPattern: string, enabled: boolean): number {
-  ensureDataSourceIndex(store)
   const op = keyOrPattern.includes('%') ? 'LIKE' : '='
   return store.db.prepare(`UPDATE datasource_index SET enabled=? WHERE key ${op} ?`).run(enabled ? 1 : 0, keyOrPattern).changes
 }
 
 export function dataSourceStats(store: DataSourceIndex): { source: string; containers: number; fields: number; disabled: number }[] {
-  ensureDataSourceIndex(store)
   return store.db.prepare(
     `SELECT source, COUNT(DISTINCT container) AS containers, COUNT(*) AS fields,
             SUM(CASE WHEN enabled=0 THEN 1 ELSE 0 END) AS disabled
@@ -266,7 +253,6 @@ export function getSchema(store: DataSourceIndex, source?: string, container?: s
   | { sources: { source: string; tables: number; fields: number }[] }
   | { source: string; tables: { table: string; rows: number | null; fields: number }[] }
   | { source: string; table: string; rows: number | null; fields: { field: string; type: string | null; key: boolean; optional: boolean; references: string | null; description: string }[] } {
-  ensureDataSourceIndex(store)
   const enabled = opts.includeDisabled ? '' : ' AND enabled = 1'
   if (!source) {
     const rows = store.db.prepare(`SELECT source, COUNT(DISTINCT container) AS tables, COUNT(*) AS fields FROM datasource_index WHERE 1=1${enabled} GROUP BY source ORDER BY source`).all() as any[]

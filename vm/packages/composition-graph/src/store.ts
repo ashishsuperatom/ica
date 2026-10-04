@@ -5,6 +5,8 @@
 // name, from which hash to which, by whom, why, from what evidence, when. So the graph as of any moment is the last
 // change to each name before it, and a session made from the graph can always be compared with it.
 
+import { migrateFile } from '@superatom/migrate/node'
+import type { Migration } from '@superatom/migrate'
 import { DatabaseSync } from 'node:sqlite'
 import { createHash } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
@@ -18,7 +20,9 @@ export interface ChangeContext { by: string; reason?: string; from?: string }
 export interface Asked { id: number; at: number; session: string; qid: string | null; question: string; domain: string | null; domainHash: string | null; how: 'routed' | 'chosen' | 'session'; ranked: unknown }
 export interface Change { id: number; at: number; name: string; kind: Kind; fromHash: string | null; toHash: string | null; by: string; reason: string | null; from: string | null }
 
-const TABLES = `
+/** The composition graph's migrations (@superatom/migrate): numbered, never edited once shipped — a change is a new one. */
+export const MIGRATIONS: Migration[] = [
+  { id: 1, name: 'baseline', up: `
 CREATE TABLE IF NOT EXISTS content (hash TEXT PRIMARY KEY, body TEXT NOT NULL, at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS name (name TEXT PRIMARY KEY, kind TEXT NOT NULL, hash TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS change (
@@ -30,7 +34,8 @@ CREATE TABLE IF NOT EXISTS question (
   domain TEXT, domain_hash TEXT, how TEXT NOT NULL, ranked TEXT);
 CREATE INDEX IF NOT EXISTS question_domain ON question(domain, at);
 CREATE INDEX IF NOT EXISTS question_session ON question(session, at);
-`
+` },
+]
 
 /** JSON with keys in a fixed order, so the same content always has the same hash. */
 export function canonical(v: unknown): string {
@@ -47,7 +52,7 @@ export class Store {
     this.db = new DatabaseSync(file)
     this.db.exec('PRAGMA busy_timeout = 15000')
     if (file !== ':memory:') this.db.exec('PRAGMA journal_mode = WAL')
-    this.db.exec(TABLES)
+    migrateFile(this.db, file, MIGRATIONS, 'composition.sqlite')
   }
   close() { this.db.close() }
 

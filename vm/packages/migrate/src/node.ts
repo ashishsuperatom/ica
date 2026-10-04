@@ -25,6 +25,8 @@ const KEEP = 3
 /** Apply a file database's migrations. Before pending migrations run on an existing database, a consistent copy is
  *  written to `backups/<file>.<time>.bak` beside it (VACUUM INTO), keeping the latest few. */
 export function migrateFile(db: NodeSqlite, file: string, migrations: Migration[], name = basename(file)): MigrateResult {
+  // Two processes may open one database at once (the engine and an agent's tool): wait for the other's lock.
+  db.exec('PRAGMA busy_timeout = 15000')
   return migrate(nodeDb(db), migrations, {
     name,
     backup: file === ':memory:' ? undefined : () => {

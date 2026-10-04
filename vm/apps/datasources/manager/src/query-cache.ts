@@ -14,6 +14,8 @@
 // Every hit reports when its rows were fetched. `fresh: true` on a request re-reads the source and replaces
 // the entry.
 
+import { migrateFile } from '@superatom/migrate/node'
+import type { Migration } from '@superatom/migrate'
 import { DatabaseSync } from 'node:sqlite'
 import { createHash } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
@@ -30,14 +32,9 @@ const canonical = (v: unknown): string => {
 export const cacheKey = (source: string, sql: string, params: unknown): string =>
   createHash('sha256').update(canonical({ source, sql, params: params ?? {} })).digest('hex')
 
-export class QueryCache {
-  private readonly db: DatabaseSync
-
-  constructor(file: string) {
-    mkdirSync(dirname(file), { recursive: true })
-    this.db = new DatabaseSync(file)
-    this.db.exec('PRAGMA journal_mode = WAL')
-    this.db.exec(`CREATE TABLE IF NOT EXISTS query_result (
+/** Migrations (@superatom/migrate): numbered, never edited once shipped — a change is a new one. */
+export const MIGRATIONS: Migration[] = [
+  { id: 1, name: 'baseline', up: `CREATE TABLE IF NOT EXISTS query_result (
       key        TEXT PRIMARY KEY,
       source     TEXT NOT NULL,
       sql        TEXT NOT NULL,
@@ -47,7 +44,17 @@ export class QueryCache {
       notes      TEXT,
       fetched_at INTEGER NOT NULL,
       hits       INTEGER NOT NULL DEFAULT 0
-    )`)
+    )` },
+]
+
+export class QueryCache {
+  private readonly db: DatabaseSync
+
+  constructor(file: string) {
+    mkdirSync(dirname(file), { recursive: true })
+    this.db = new DatabaseSync(file)
+    this.db.exec('PRAGMA journal_mode = WAL')
+    migrateFile(this.db, file, MIGRATIONS, 'query-results.sqlite')
   }
 
   get(key: string): Cached | null {

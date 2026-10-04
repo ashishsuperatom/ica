@@ -133,15 +133,19 @@ function migrateFully(db: MigrationDb, list: Migration[], opts: MigrateOptions):
   const applied: number[] = []
   for (const m of pending) {
     try {
+      let ran = false
       db.transaction(() => {
+        // Another process may have applied it while this one waited for the lock: inside the transaction, look again.
+        if (db.all(`SELECT 1 FROM ${TABLE} WHERE id = ?`, m.id).length) return
         if (typeof m.up === 'string') db.exec(m.up)
         else m.up(db)
         db.all(`INSERT INTO ${TABLE} (id, name, fingerprint, applied_at) VALUES (?, ?, ?, ?) RETURNING id`, m.id, m.name, fingerprint(m), now())
+        ran = true
       })
+      if (ran) applied.push(m.id)
     } catch (e: any) {
       throw new MigrationError(`${opts.name}: migration ${m.id} ("${m.name}") failed and was not applied: ${e?.message ?? e}`)
     }
-    applied.push(m.id)
   }
   return { applied, current: list.length }
 }

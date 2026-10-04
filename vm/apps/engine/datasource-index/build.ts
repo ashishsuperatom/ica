@@ -7,7 +7,7 @@
 //
 // Progress is reported through `log` rather than printed, so the same run can go to a terminal or to an admin's
 // screen without the builder knowing which.
-import { DataSourceIndex, putEntries, applyRowCounts, dataSourceStats, ensureDataSourceIndex } from '@superatom/datasource-index'
+import { DataSourceIndex, putEntries, applyRowCounts, dataSourceStats } from '@superatom/datasource-index'
 import { getIndexer } from './indexer.js'
 
 export interface BuildOpts {
@@ -46,7 +46,6 @@ export async function buildDatasourceIndex(opts: BuildOpts): Promise<BuildResult
   // database that has never held an index, the build died on its first act with "no such table:
   // datasource_index". Invisible for as long as every box happened to have an old table already; the first
   // genuinely fresh volume hit it immediately, which is what a fresh volume is for.
-  ensureDataSourceIndex(store)
 
   let sources: Array<{ id: string; dialect: string }> =
     await (await fetch(managerUrl + '/sources')).json().then((j: any) => j.sources || [])

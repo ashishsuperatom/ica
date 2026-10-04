@@ -145,3 +145,16 @@ test('a Durable Object storage migrates through its own transactions', async () 
   assert.equal(inTx, 2)
   assert.deepEqual(cols(db, 'people'), ['id', 'name', 'email'])
 })
+
+test('two processes opening one database: the second finds the work done and applies nothing', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'migrate-'))
+  const file = join(dir, 'shared.sqlite')
+  const a = new DatabaseSync(file), b = new DatabaseSync(file)
+  assert.deepEqual(migrateFile(a, file, v1).applied, [1, 2])
+  assert.deepEqual(migrateFile(b, file, v1).applied, [])
+  // b had already decided migration 3 was pending before a applied it: inside its transaction it looks again
+  const v3 = [...v1, { id: 3, name: 'teams', up: 'CREATE TABLE teams (id INTEGER PRIMARY KEY)' }]
+  migrateFile(a, file, v3)
+  const sneaky = { ...nodeDb(b), all: (q: string, ...p: unknown[]) => (/DESC LIMIT 1/.test(q) ? [] : nodeDb(b).all(q, ...p)) }   // b's fast check is stale
+  assert.deepEqual(migrate(sneaky, v3, { name: 'shared' }).applied, [])
+})

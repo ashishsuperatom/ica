@@ -12,5 +12,8 @@
   },
   "bin": {
     "composition-graph": "./bin/composition-graph"
+  },
+  "dependencies": {
+    "@superatom/migrate": "workspace:*"
   }
 }

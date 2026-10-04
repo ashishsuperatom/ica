@@ -26,6 +26,10 @@ importers:
         version: 5.9.3
 
   apps/datasources/manager:
+    dependencies:
+      '@superatom/migrate':
+        specifier: workspace:*
+        version: link:../../../packages/migrate
     devDependencies:
       tsx:
         specifier: ^4.19.2
@@ -60,6 +64,9 @@ importers:
       '@superatom/grounding':
         specifier: workspace:*
         version: link:../../packages/grounding
+      '@superatom/migrate':
+        specifier: workspace:*
+        version: link:../../packages/migrate
       '@xterm/addon-serialize':
         specifier: ^0.14.0
         version: 0.14.0
@@ -91,10 +98,17 @@ importers:
 
   packages/agent-contract: {}
 
-  packages/composition-graph: {}
+  packages/composition-graph:
+    dependencies:
+      '@superatom/migrate':
+        specifier: workspace:*
+        version: link:../migrate
 
   packages/datasource-index:
     dependencies:
+      '@superatom/migrate':
+        specifier: workspace:*
+        version: link:../migrate
       better-sqlite3:
         specifier: ^11.10.0
         version: 11.10.0
@@ -105,6 +119,9 @@ importers:
 
   packages/grounding:
     dependencies:
+      '@superatom/migrate':
+        specifier: workspace:*
+        version: link:../migrate
       better-sqlite3:
         specifier: ^11.10.0
         version: 11.10.0

@@ -9,5 +9,8 @@
   },
   "devDependencies": {
     "tsx": "^4.19.2"
+  },
+  "dependencies": {
+    "@superatom/migrate": "workspace:*"
   }
 }

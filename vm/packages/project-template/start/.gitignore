@@ -11,6 +11,7 @@ checks/
 export/
 views/
 datasources/query-results.sqlite*
+datasources/backups/
 # builds, dependencies, the dashboard's placed domains
 app/web/node_modules/
 app/web/dist/

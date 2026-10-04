@@ -6,6 +6,8 @@
 // execution, pattern learning) land in the next pieces.
 
 import Database from 'better-sqlite3'
+import { migrateFile } from '@superatom/migrate/node'
+import type { Migration } from '@superatom/migrate'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { fuzzyScore, normalize } from './fuzzy.js'
@@ -17,6 +19,16 @@ import type {
 export * from './types.js'
 export * from './fuzzy.js'
 export * from './build.js'
+
+/** Migrations (@superatom/migrate): numbered, never edited once shipped — a change is a new one. */
+export const MIGRATIONS: Migration[] = [
+  { id: 1, name: 'baseline', up: (db) => {
+    db.exec(SCHEMA)
+    // Trigram FTS over the values, for SCALE (resolveEntity generates candidates from it instead of scanning every
+    // row). Best-effort: a SQLite build without the trigram tokenizer runs without it and falls back to the scan.
+    try { db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS entity_fts USING fts5(entity_type UNINDEXED, entity_id UNINDEXED, value UNINDEXED, norm, tokenize='trigram')`) } catch { /* no trigram FTS — scan path */ }
+  } },
+]
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS entity_value (   -- one row per resolvable value (name) of an entity
@@ -79,11 +91,7 @@ export class GroundingStore implements GroundingResolver {
       if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true })
       this.db = new Database(path)
       this.db.pragma('journal_mode = WAL')
-      this.db.exec(SCHEMA)
-      // Trigram FTS over the values, for SCALE (resolveEntity generates candidates from it instead of
-      // scanning every row). Best-effort: if this SQLite build lacks the trigram tokenizer, we simply run
-      // without it and fall back to the full scan — the core store never fails to open over it.
-      try { this.db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS entity_fts USING fts5(entity_type UNINDEXED, entity_id UNINDEXED, value UNINDEXED, norm, tokenize='trigram')`) } catch { /* no trigram FTS — scan path */ }
+      migrateFile(this.db, path, MIGRATIONS, 'grounding.sqlite')
     }
     this.source = opts.source
   }
