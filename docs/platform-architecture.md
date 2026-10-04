@@ -278,6 +278,31 @@ is an **answer**. (Not "session state" — that would be confused with STATE.)
 **The `<Intent>` component** (`ops`, `to="new" | "current"`) is the one way a UI changes STATE; inside it every intent is
 logged and traced.
 
+### The answer component (kept, 2026-10-04)
+
+The user UI's answer card — the component that renders the JSON answer today, mostly black-and-white text rather than
+dashboard styling — is **kept, as one component: the answer component**. It has been built for a long time and has much
+that is good: tables with their caveats, the time period, different kinds of formatting, tables hidden until clicked
+to see more. When the block · card · thread system comes in, this is not discarded: it becomes the one answer
+component of the platform. Where it is used and how its CSS is migrated is decided later.
+
+### Migrations (every database, 2026-10-04)
+
+There are many databases: in the engine (composition graph, datasource index, grounding, agent sessions, …) and in the
+Durable Objects' SQLite (project, user, session, state DOs). Every one needs proper migrations, so changes never
+become hell to manage. **Proposed (to agree):**
+
+- **One migration runner** for every SQLite database — the same code for `node:sqlite` in the engine and for the
+  Durable Objects' SQLite (both are SQLite; we write plain SQL).
+- **Migrations are numbered files per database** (`<db>/migrations/0007-add-owner.sql` or `.ts` for a data change),
+  applied in order on open, each recorded in the database's own `_migrations` table (id, name, hash, applied at).
+- **Never edited once shipped**; a change is a new migration. No down-migrations: a backup is taken before pending
+  migrations run, and restoring the backup is the way back.
+- **A database written by newer code is refused** with a sentence, so an old engine never corrupts it.
+- **A test** opens an empty database and an old fixture of each, runs every migration, and checks the result.
+- The alternative is a standard tool (Drizzle's migrations work for both SQLite and Durable Objects, but bring an ORM
+  and its schema language); a small runner of our own over plain SQL is the recommendation.
+
 ### Answer format
 
 The agent answers in **markdown**; rich content is a marker line naming a file or a component:
