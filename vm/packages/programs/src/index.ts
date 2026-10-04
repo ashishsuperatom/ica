@@ -22,6 +22,8 @@ import { dirname, join, relative, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { checkProgram, PLATFORM_LIBRARIES, type ProgramManifest } from '@superatom/platform-types'
+import { BUNDLE_FORMAT, digestInput, verifyBundle, type ProgramBundle } from './bundle.ts'
+export * from './bundle.ts'
 
 /** What a program's author writes; the build adds hash and bundles. */
 export type ProgramSource = Omit<ProgramManifest, 'hash' | 'node' | 'ui'> & { node?: { runtime?: ('on-prem' | 'worker')[] }; ui: { blocks: string[] } }
@@ -80,15 +82,24 @@ function compileSide(srcDir: string, outDir: string, side: 'server' | 'web'): st
   return written
 }
 
-/** The hash of a built program: its manifest, its doc and every built file, by path, in order. */
-function hashBuilt(dir: string): string {
-  const h = createHash('sha256')
+/** A built program's files by path (not the store's own built.json). Program files are text; a file that is not
+ *  valid UTF-8 is refused, so the bundle carries exactly the bytes the hash was taken over. */
+function filesOf(dir: string): Record<string, string> {
+  const out: Record<string, string> = {}
   for (const f of files(dir)) {
     const rel = posix(relative(dir, f))
     if (rel === 'built.json') continue
-    h.update(`${rel}\n`); h.update(readFileSync(f)); h.update('\n')
+    const bytes = readFileSync(f)
+    const text = bytes.toString('utf8')
+    if (!Buffer.from(text, 'utf8').equals(bytes)) throw new ProgramError([`${rel} is not text: a program's files are text (code, JSON, Markdown)`])
+    out[rel] = text
   }
-  return h.digest('hex')
+  return out
+}
+
+/** The hash of a built program: its manifest, its doc and every built file — as bundle.ts defines it. */
+function hashBuilt(dir: string): string {
+  return createHash('sha256').update(digestInput(filesOf(dir))).digest('hex')
 }
 
 export interface Built { hash: string; dir: string; manifest: ProgramManifest }
@@ -165,6 +176,29 @@ export class ProgramStore {
   }
   /** Is a stored program what its hash says? (Its files were not changed after it was built.) */
   verify(hash: string): boolean { return hashBuilt(this.dirOf(hash)) === hash }
+}
+
+/** A stored program as one bundle, to send or keep elsewhere. Checked against its hash first. */
+export function toBundle(store: ProgramStore, hash: string): ProgramBundle {
+  if (!store.verify(hash)) throw new ProgramError([`program ${hash.slice(0, 12)} in the store does not match its hash`])
+  return { format: BUNDLE_FORMAT, hash, files: filesOf(store.dirOf(hash)) }
+}
+
+/** Keep a bundle in the store — refused unless its files are what its hash says. Keeping one already there is a no-op. */
+export async function fromBundle(store: ProgramStore, bundle: unknown): Promise<string> {
+  const bad = await verifyBundle(bundle)
+  if (bad.length) throw new ProgramError(bad)
+  const b = bundle as ProgramBundle
+  if (store.has(b.hash)) return b.hash
+  const staging = join(store.root, `.receiving-${process.pid}-${Date.now()}`)
+  try {
+    for (const [p, text] of Object.entries(b.files)) { const f = join(staging, p); mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, text) }
+    if (hashBuilt(staging) !== b.hash) throw new ProgramError(['the bundle did not survive being written'])
+    writeFileSync(join(staging, 'built.json'), JSON.stringify({ hash: b.hash, at: new Date().toISOString(), received: true }))
+    if (store.has(b.hash)) { rmSync(staging, { recursive: true, force: true }); return b.hash }
+    renameSync(staging, store.dirOf(b.hash))
+    return b.hash
+  } catch (e) { rmSync(staging, { recursive: true, force: true }); throw e }
 }
 
 /** Where a program's function lives — not its source, its place: the program by hash, the built file, the export. */
