@@ -26,7 +26,8 @@ import { PROJECT_MIGRATIONS, adoptProjectSchemaVersion } from './migrations.js'
 import { bucketStore } from './parcels.js'
 import { AuditLog } from './audit.js'
 import { AgentKeys, KeyRefusal } from './agent-keys.js'
-import { scopeAllows } from '../../shared/agent-scopes.js'
+import { scopeAllows, HUB_MESSAGES } from '../../shared/agent-scopes.js'
+import { ProgramCatalogue, CatalogueRefusal } from './program-catalogue.js'
 
 
 // How long a question queued for a sleeping machine is still worth waking up for. Past this the person has
@@ -176,12 +177,14 @@ export class ProjectDO extends DurableObject<Env> {
   private buffer: AnswerBuffer
   private audit: AuditLog
   private agentKeys: AgentKeys
+  private catalogue: ProgramCatalogue
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
     this.buffer = new AnswerBuffer(this.ctx.storage.sql, (e, d) => this.log(e, d))
     this.audit = new AuditLog(this.ctx.storage.sql as any, () => this._pid ?? '', { stream: (env as any).AUDIT, metrics: (env as any).METRICS, warn: (m) => this.log('audit:send_failed', { message: m }) })
     this.agentKeys = new AgentKeys(this.ctx.storage.sql as any, () => this._pid ?? '')
+    this.catalogue = new ProgramCatalogue(this.ctx.storage.sql as any, env.PACKAGES, () => this._pid ?? '')
     // KEEPALIVE, ANSWERED AT THE EDGE. A client that sits idle — the engine between questions — has its socket
     // closed by the edge, seen as a clean register followed by a 1006 every half-minute or so. The cure is a
     // periodic frame, and Cloudflare provides exactly this pair for it: a literal `ping` is answered `pong`
@@ -266,6 +269,7 @@ export class ProjectDO extends DurableObject<Env> {
     // ── Agent API keys and the audit history (the worker authorises the caller as the project's admin) ──
     if (path === '/agent-keys' || path.startsWith('/agent-keys/') || path === '/audit') return this.agentKeysAndAudit(request, path)
     if (request.method === 'POST' && path === '/agent-call') return this.agentCall(request)
+    if (path === '/engine/programs' || path.startsWith('/engine/programs/')) return this.enginePrograms(request, path)
 
     if (request.method === 'GET'  && path === '/debug')        return this.debugInfo()
     if (request.method === 'POST' && path === '/members')      return this.addMember(request)
@@ -710,6 +714,35 @@ export class ProjectDO extends DurableObject<Env> {
     })
   }
 
+  // ── Programs the engine builds and fetches (authenticated with the project's key) ──
+  private async enginePrograms(request: Request, path: string): Promise<Response> {
+    const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
+    const key = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
+    if (!key || !this.keyMatches(key)) return json({ error: 'only this project\'s engine' }, 401)
+    try {
+      if (path === '/engine/programs' && request.method === 'GET') {
+        const q = new URL(request.url).searchParams
+        return json({ programs: this.catalogue.list({ name: q.get('name') ?? undefined, published: q.has('published') ? q.get('published') === 'true' : undefined }) })
+      }
+      const hash = path.slice('/engine/programs/'.length)
+      if (!/^[0-9a-f]{64}$/.test(hash)) return json({ error: 'not a program hash' }, 400)
+      if (request.method === 'GET') return json(await this.catalogue.bundle(hash))
+      if (request.method === 'PUT') {
+        const by = request.headers.get('x-sa-by') ?? ''
+        if (!/^(user|agent):[^\s]+$/.test(by)) return json({ error: 'an upload says who asked for the build (x-sa-by)' }, 400)
+        const bundle: any = await request.json().catch(() => null)
+        if (bundle?.hash !== hash) return json({ error: 'the bundle is not the program this path names' }, 400)
+        const r = await this.catalogue.upload(bundle, by)
+        this.audit.record({ actor: { kind: by.startsWith('agent:') ? 'agent' : 'user', id: by }, via: 'engine', action: 'program.upload', target: hash, outcome: 'ok', detail: { name: r.entry.name, version: r.entry.version, added: r.added } })
+        return json(r, r.added ? 201 : 200)
+      }
+      return json({ error: 'not found' }, 404)
+    } catch (e: any) {
+      if (e instanceof CatalogueRefusal) return json({ error: e.message }, 400)
+      throw e
+    }
+  }
+
   // ── Sessions kept by the platform ──────────────────────────────────────────
   private sessionStub(session: string) {
     if (!/^[\w-]{1,80}$/.test(session)) throw new Error('not a session id')
@@ -811,14 +844,33 @@ export class ProjectDO extends DurableObject<Env> {
     // ── The audit history: everything a person or an agent sends, and every refusal ──
     if (sender.type === 'agent') {
       const toType = (msg.to as any)?.type
-      if (toType !== 'code-engine' || !scopeAllows(sender.scopes ?? [], String(pl.t ?? ''))) {
-        const reason = toType !== 'code-engine' ? 'an agent talks only to the engine' : `this key's scopes (${(sender.scopes ?? []).join(', ') || 'none'}) do not allow ${String(pl.t ?? '(no type)')}`
+      const hubServed = (HUB_MESSAGES as readonly string[]).includes(String(pl.t ?? ''))
+      if ((toType !== 'code-engine' && !hubServed) || !scopeAllows(sender.scopes ?? [], String(pl.t ?? ''))) {
+        const reason = toType !== 'code-engine' && !hubServed ? 'an agent talks only to the engine and the platform' : `this key's scopes (${(sender.scopes ?? []).join(', ') || 'none'}) do not allow ${String(pl.t ?? '(no type)')}`
         this.auditMessage(sender, pl, 'refused', reason)
         hubReply({ t: 'error', source: 'hub', reason, reqId: pl.reqId })
         return
       }
     }
     if (sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent') this.auditMessage(sender, pl, 'ok')
+    // ── The program catalogue (no engine needed) ──
+    if ((pl.t === 'program:list' || pl.t === 'program:publish') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
+      const who = this.principalOf(sender)
+      if (!who) { hubReply({ t: 'program:refused', reason: 'who is asking is not known', reqId: pl.reqId }); return }
+      const actor = sender.type === 'agent' ? { kind: 'agent' as const, id: who } : { kind: 'user' as const, id: who, ...(sender.email ? { email: sender.email } : {}) }
+      try {
+        if (pl.t === 'program:list') hubReply({ t: 'program:list', programs: this.catalogue.list({ name: pl.name, published: pl.published }), reqId: pl.reqId })
+        else {
+          const e = this.catalogue.publish(String(pl.hash ?? ''), { id: who, admin: !!sender.admin })
+          this.audit.record({ actor, via: sender.type === 'agent' ? 'agent' : sender.type === 'admin' ? 'admin' : 'ui', action: 'program.publish', target: e.hash, outcome: 'ok', detail: { name: e.name, version: e.version } })
+          hubReply({ t: 'program:published', program: e, reqId: pl.reqId })
+        }
+      } catch (e: any) {
+        if (pl.t === 'program:publish') this.audit.record({ actor, via: sender.type === 'agent' ? 'agent' : 'ui', action: 'program.publish', target: String(pl.hash ?? ''), outcome: 'refused', detail: { reason: e?.message ?? String(e) } })
+        hubReply({ t: 'program:refused', reason: e?.message ?? String(e), reqId: pl.reqId })
+      }
+      return
+    }
     // ── Sessions read from the platform's copy (no engine needed): only the person's own ──
     if ((pl.t === 'session:list' || pl.t === 'session:read') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
       const who = this.principalOf(sender)

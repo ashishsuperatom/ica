@@ -28,6 +28,9 @@ what is built and what is next.
   programs offer. The user UI shows it at `/s/<agent>` (`control-plane/user-ui/src/AgentSession.tsx`).
 - Sessions are kept by the platform: `session-sync.ts` pushes every append to the session's SessionDO
   (`session:sync` → `session:synced`, a watermark beside the log) and everything missing on reconnect.
+- `program-seam.ts`: `program:build` (source → build → upload to the platform as the asker's draft); sessions fetch a
+  program the store lacks from the platform (`platform.ts`, the project's key). `graph-seam.ts`: `graph:*` — the
+  composition graph read and changed under its governance. `identity.ts`: who is asking, for every seam.
 - First real program: Total Group `unsettled-trips` — completed trips not settled, by branch, with the balance left.
 
 ## Agents (`agents/`)

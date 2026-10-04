@@ -16,9 +16,9 @@ export interface ProgramBundle { format: typeof BUNDLE_FORMAT; hash: string; fil
 const enc = new TextEncoder()
 
 /** The bytes a program's hash is taken over, from its files (path → text). */
-export function digestInput(files: Record<string, string>): Uint8Array {
+export function digestInput(files: Record<string, string>): Uint8Array<ArrayBuffer> {
   const parts = Object.keys(files).sort().flatMap((p) => [enc.encode(`${p}\n`), enc.encode(files[p]), enc.encode('\n')])
-  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0))
+  const out = new Uint8Array(new ArrayBuffer(parts.reduce((n, p) => n + p.length, 0)))
   let at = 0
   for (const p of parts) { out.set(p, at); at += p.length }
   return out

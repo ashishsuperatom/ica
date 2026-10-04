@@ -394,6 +394,21 @@ program's React side is a component too.
 - **Transport:** our own WebSocket through the Durable Object (not a direct socket to the engine).
 - **R2** holds program bundles and artifacts.
 
+### Programs: from source to every engine (built 2026-10-04)
+
+1. **Source in, built once.** A person or agent sends a program's source (`program:build`); the engine — the one place
+   that compiles — builds it (TypeScript, per file) and sets the manifest's owner to whoever asked.
+2. **Kept by the platform.** The engine uploads the built program as one **bundle** (its files and hash) with the
+   project's key; the platform recomputes the hash with the same code (`programs/src/bundle.ts`, no file system), keeps
+   the bundle in R2 at `programs/<project>/<hash>.json` and records it in the project's **catalogue** (ProjectDO).
+3. **Draft, then published.** A new program is its builder's draft; its owner (or an admin) publishes it, once.
+   Uploads and publishing are in the audit history.
+4. **Run anywhere.** An engine runs only programs in its store; one it lacks it fetches from the platform — by hash, or by
+   name the newest published — and checks against the hash before keeping it. A damaged bundle never runs.
+
+*To agree:* the earlier design kept unpublished programs in the user's DO; drafts are in the project's catalogue instead
+(one place to check, publish and audit), with the owner on every row. The user DO can list a person's drafts from it.
+
 ### Decision state
 
 Not the session's STATE: the core of decision intelligence, to be expanded later. For now:

@@ -28,6 +28,9 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Platform types: the shapes of STATE, ops, intents, programs, answers, agents, sessions and the governance log, each with checks that answer in sentences.
 - STATE engine: every function gets the whole STATE frozen and can set only its own slice; it re-runs whatever reads a changed path, in dependency order.
 - Programs: a Node side and a React side built with TypeScript, identified by hash, kept immutable in a store, loaded into STATE, inspectable; with a CLI.
+- Program pipeline: source sent by a person or agent, built by the engine, uploaded as a hash-checked bundle to R2 and the project's catalogue, published by its owner, fetched and checked by any engine that runs it.
+- Governance in the composition graph: one owner per node, others suggest, the owner approves or rejects (stale suggestions refused), all append-only; the graph read and changed over the hub (`graph:*`).
+- Agents over HTTP: one route that sends an agent's message through the same path as its WebSocket.
 - Sessions: one user's blocks as a tree (each path through it a thread), current-view vs new-block intents, branching from earlier blocks, the answer history, stale runs dropped, an append-only log readable as of any moment.
 - Agent sessions on the engine: an agent defined in the project home runs its programs as sessions of blocks over the hub (`session:*`), each answer drawn as the answer card and each program's own view in its block.
 - UI library: `<Intent>` with one delegated listener and a list of every intent on screen, the thread view with branches, and loading a program's React side with the platform's own React.
@@ -76,7 +79,6 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 **Agents, CLI, audit**
 - The audit history flowing to the platform's own Basin (Pipelines → Catalog → SQL), with metrics in Analytics Engine and Workers Traces.
 - The engine's own audit events, through an ingest endpoint signed with the project key.
-- Agent HTTP API with the agent key: domains, concepts, suggestions, programs.
 - Organisation keys (creating projects through the CLI).
 - Installing the CLI and the engine with one command, from per-OS releases kept in R2 (latest and every version).
 - CLI extras: self-update, shell completion, OS keychain, `watch`, proxy support, standalone binaries.
@@ -84,7 +86,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 **Platform**
 - The state Durable Object (decision state), and platform → engine sync of domains and concepts.
 - The user DO's personalised view (what it keeps beyond sessions and personal state is still being decided).
-- Governance: owners, hierarchical admins, suggest/approve and a governance log.
+- Governance beyond the graph: hierarchical admins (program, group, global) and granting access.
 - Authorization and permissions enforced in one place.
 - Enterprise single sign-on.
 - Payment, credits and usage billing.

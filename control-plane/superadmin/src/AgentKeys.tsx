@@ -9,7 +9,7 @@ type Api = (p: string, i?: RequestInit) => Promise<Response>
 type Key = { id: string; name: string; prefix: string; scopes: string[]; created_by: string; created_at: string; expires_at: string | null; revoked_at: string | null; revoked_by: string | null; last_used_at: string | null }
 type Event = { id: string; at: string; actor: { kind: string; id: string; email?: string }; via: string; action: string; target?: string; outcome: string; detail?: Record<string, unknown> }
 
-const SCOPE_TEXT: Record<AgentScope, string> = { sessions: 'Agents and their sessions: open, change, read', ask: 'Ask questions in words', graph: 'Knowledge: read it, make and change its own concepts and domains, suggest changes' }
+const SCOPE_TEXT: Record<AgentScope, string> = { sessions: 'Agents and their sessions: open, change, read', ask: 'Ask questions in words', graph: 'Knowledge: read it, make and change its own concepts and domains, suggest changes', programs: 'Programs: build from source, list, publish its own' }
 const when = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : '—')
 const ERR = { color: '#b3261e', fontSize: 12.5, marginBottom: 10 }
 

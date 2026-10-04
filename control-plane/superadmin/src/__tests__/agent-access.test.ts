@@ -8,9 +8,10 @@ import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { fileURLToPath } from 'node:url'
 import { createHmac } from 'node:crypto'
-import { AGENT_SCOPES } from '../../../shared/agent-scopes'
+import { AGENT_SCOPES, HUB_MESSAGES } from '../../../shared/agent-scopes'
 import { SESSION_MESSAGES } from '../../../../vm/apps/engine/session-seam.ts'
 import { GRAPH_MESSAGES } from '../../../../vm/apps/engine/graph-seam.ts'
+import { PROGRAM_MESSAGES } from '../../../../vm/apps/engine/program-seam.ts'
 
 const here = fileURLToPath(new URL('.', import.meta.url))
 const PID = '11111111-2222-3333-4444-555555555555'
@@ -139,8 +140,11 @@ describe('agent keys, identities and the audit history, in the real ProjectDO', 
   })
 
   it("the hub's scopes name exactly the engine's messages (nothing an engine cannot answer, nothing it answers left out)", () => {
-    expect([...AGENT_SCOPES.sessions].sort()).toEqual([...SESSION_MESSAGES].sort())
-    expect([...AGENT_SCOPES.graph].sort()).toEqual([...GRAPH_MESSAGES].sort())
+    // each scope = the engine's messages of that area + the ones the hub answers itself
+    const area = (prefix: string, engine: Set<string>) => [...engine, ...HUB_MESSAGES.filter((t) => t.startsWith(prefix))].sort()
+    expect([...AGENT_SCOPES.sessions].sort()).toEqual(area('session:', SESSION_MESSAGES))
+    expect([...AGENT_SCOPES.graph].sort()).toEqual(area('graph:', GRAPH_MESSAGES))
+    expect([...AGENT_SCOPES.programs].sort()).toEqual(area('program:', PROGRAM_MESSAGES))
   })
 
   it('the audit history has it all, newest first; a malformed event is refused', async () => {

@@ -36,6 +36,8 @@ export interface SessionSeamDeps {
   send: (to: any, msg: Record<string, unknown>) => void
   /** The session log (default: a file per session; the engine passes one that also syncs to the platform). */
   log?: SessionLog
+  /** Find a program the store lacks (the engine fetches it from the platform); by default the store only. */
+  ensureProgram?: (ref: string) => Promise<string>
 }
 
 export class SessionSeamRefusal extends Error {}
@@ -72,9 +74,9 @@ export function createSessionSeam(d: SessionSeamDeps) {
   const runtimes = new Map<string, Promise<{ engine: StateEngine; sessions: ReturnType<typeof createSessions>; packages: Awaited<ReturnType<typeof loadPackage>>[] }>>()
   async function runtimeFor(agent: string, pinned?: Record<string, string>) {
     const spec = readAgent(agent)
-    const hashes = spec.programs.map((ref) => store.resolve(ref))
+    const ensure = d.ensureProgram ?? (async (ref: string) => store.resolve(ref))
     // A session already running names its packages' hashes in its STATE: those, not the newest builds.
-    const use = pinned && Object.keys(pinned).length ? Object.values(pinned) : hashes
+    const use = pinned && Object.keys(pinned).length ? await Promise.all(Object.values(pinned).map(ensure)) : await Promise.all(spec.programs.map(ensure))
     const key = `${agent}:${[...use].sort().join(',')}`
     if (!runtimes.has(key)) runtimes.set(key, (async () => {
       const packages = await Promise.all(use.map((h) => loadPackage(store, h)))

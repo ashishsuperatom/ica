@@ -121,6 +121,15 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     CREATE TRIGGER IF NOT EXISTS audit_log_no_update BEFORE UPDATE ON audit_log BEGIN SELECT RAISE(ABORT, 'the audit history is append-only'); END;
     CREATE TRIGGER IF NOT EXISTS audit_log_no_delete BEFORE DELETE ON audit_log BEGIN SELECT RAISE(ABORT, 'the audit history is append-only'); END;
   ` },
+  { id: 16, name: 'program catalogue', up: `
+    -- Built programs kept by the platform (their bundles in R2 at programs/<project>/<hash>.json): one row per hash,
+    -- never changed except that publishing stamps it once.
+    CREATE TABLE IF NOT EXISTS programs (
+      hash TEXT PRIMARY KEY, name TEXT NOT NULL, version INTEGER NOT NULL, scope TEXT NOT NULL, owner TEXT NOT NULL,
+      attaches_to TEXT, manifest TEXT NOT NULL, bytes INTEGER NOT NULL, built_by TEXT NOT NULL, uploaded_at TEXT NOT NULL,
+      published_at TEXT, published_by TEXT);
+    CREATE INDEX IF NOT EXISTS idx_programs_name ON programs(name, uploaded_at);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

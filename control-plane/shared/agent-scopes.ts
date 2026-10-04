@@ -1,12 +1,18 @@
 // What an agent key may do, by scope: the messages each scope lets through the hub to the engine. One table, read by
 // the hub (which enforces it) and the admin console (which offers it). A message no scope names is refused.
 
+/** Messages the hub answers itself, from the platform's own records (no engine needed). */
+export const HUB_MESSAGES = ['session:list', 'session:read', 'program:list', 'program:publish'] as const
+
 export const AGENT_SCOPES = {
-  /** Agents and their sessions: list agents, open a session, send intents, move between blocks, read it. */
-  sessions: ['session:agents', 'session:open', 'session:intent', 'session:goto', 'session:get', 'session:file'],
+  /** Agents and their sessions: list agents, open a session, send intents, move between blocks, read it — and read
+   *  their own sessions back from the platform. */
+  sessions: ['session:agents', 'session:open', 'session:intent', 'session:goto', 'session:get', 'session:file', 'session:list', 'session:read'],
   /** Ask a question in words, and stop it. */
   ask: ['analyse', 'turn:stop'],
   /** The composition graph: read it, make and change your own concepts and domains, suggest and decide changes. */
+  /** Programs: build one from its source (the engine builds and uploads it), list them, publish one it built. */
+  programs: ['program:build', 'program:list', 'program:publish'],
   graph: ['graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:concept', 'graph:domain', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide'],
 } as const
 

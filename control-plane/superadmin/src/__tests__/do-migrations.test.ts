@@ -7,6 +7,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { fileURLToPath } from 'node:url'
+import { PROJECT_MIGRATIONS } from '../migrations'
+
+// The ProjectDO's migrations, read from the list itself, so adding one does not mean editing every expectation.
+const ALL = PROJECT_MIGRATIONS.map((m) => m.id)
+const LAST = ALL[ALL.length - 1]
+const from = (n: number) => ALL.filter((id) => id > n)
 
 const here = fileURLToPath(new URL('.', import.meta.url))
 
@@ -68,30 +74,30 @@ beforeAll(async () => {
 afterAll(async () => { await mf?.dispose() })
 
 describe('Durable Object migrations, in real DO SQLite', () => {
-  it('a new ProjectDO gets all 15 migrations, the roles seeded', async () => {
-    expect(await ask({ do: 'fresh', step: 'migrate', kind: 'project' })).toEqual({ applied: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], current: 15 })
+  it('a new ProjectDO gets every migration, the roles seeded', async () => {
+    expect(await ask({ do: 'fresh', step: 'migrate', kind: 'project' })).toEqual({ applied: ALL, current: LAST })
     const look = await ask({ do: 'fresh', step: 'look' })
     expect(look.migrations.every(([, how]: any) => how === 'ran')).toBe(true)
     expect(look.roles).toEqual(['admin', 'member', 'viewer'])
-    for (const t of ['fly_machine', 'answer_buffer', 'access', 'dashboards', 'dashboard_builds', 'engine_running', 'profile', 'agent_keys', 'audit_log']) expect(look.tables).toContain(t)
+    for (const t of ['fly_machine', 'answer_buffer', 'access', 'dashboards', 'dashboard_builds', 'engine_running', 'profile', 'agent_keys', 'audit_log', 'programs']) expect(look.tables).toContain(t)
     expect(look.tables).not.toContain('dashboard_builds_v14')
   })
 
   it('a reopen with nothing pending applies nothing', async () => {
-    expect(await ask({ do: 'fresh', step: 'migrate', kind: 'project' })).toEqual({ applied: [], current: 15 })
+    expect(await ask({ do: 'fresh', step: 'migrate', kind: 'project' })).toEqual({ applied: [], current: LAST })
   })
 
-  it('a ProjectDO the old ladder left at version 6 is adopted there: only 7–15 run', async () => {
+  it('a ProjectDO the old ladder left at version 6 is adopted there: only the later ones run', async () => {
     await ask({ do: 'legacy6', step: 'legacy-project', n: 6 })
-    expect(await ask({ do: 'legacy6', step: 'migrate', kind: 'project' })).toEqual({ applied: [7, 8, 9, 10, 11, 12, 13, 14, 15], current: 15 })
+    expect(await ask({ do: 'legacy6', step: 'migrate', kind: 'project' })).toEqual({ applied: from(6), current: LAST })
     const look = await ask({ do: 'legacy6', step: 'look' })
     expect(look.migrations.slice(0, 6).every(([, how]: any) => how === 'adopted')).toBe(true)
     expect(look.migrations.slice(6).every(([, how]: any) => how === 'ran')).toBe(true)
   })
 
-  it('a ProjectDO the old ladder left at 14 is adopted whole: only 15 runs', async () => {
+  it('a ProjectDO the old ladder left at 14 (its last) is adopted whole: only the newer ones run', async () => {
     await ask({ do: 'legacy14', step: 'legacy-project', n: 14 })
-    expect(await ask({ do: 'legacy14', step: 'migrate', kind: 'project' })).toEqual({ applied: [15], current: 15 })
+    expect(await ask({ do: 'legacy14', step: 'migrate', kind: 'project' })).toEqual({ applied: from(14), current: LAST })
   })
 
   it('an OrgDO from before the deleted column is adopted: the column added, its rows kept', async () => {
