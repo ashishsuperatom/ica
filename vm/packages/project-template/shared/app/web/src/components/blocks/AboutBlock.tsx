@@ -3,9 +3,7 @@
 
 import { Icon } from '@iconify/react'
 import type { ReactNode } from 'react'
-import { Section } from '@/components/ui/Section'
-import { useBlockHeader } from '@/components/thread/header'
-import { date } from '@/lib/format'
+import { Section, useBlockHeader, date } from '@superatom/ui'
 import { useApp } from '@/lib/catalog'
 import type { About } from '@/lib/wire'
 

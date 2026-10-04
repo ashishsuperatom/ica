@@ -5,10 +5,9 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { renderToString } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { Blocks } from '@/components/blocks'
+import { Blocks, Draft, sameValue, Answer as SaidBlockView, ringAllowed, Donut, StackedBars } from '@superatom/ui'
 import About from '@/components/block/About'
 import { readAnswer, readBlock, readCatalog, readReply, type Block } from '@/lib/wire'
-import { Draft, sameValue } from '@/lib/draft'
 import { memberOptions, pushFor } from '@/components/block/FilterAdd'
 import { readFilter, sameMember } from '@/lib/wire'
 import { AnswerCache, LRU, reconcile } from '@/lib/cache'
@@ -16,12 +15,8 @@ import { Pending } from '@/lib/pending'
 import { timeoutFor } from '@/lib/client'
 import { isControlFrame } from '@/lib/wire'
 import { vi } from 'vitest'
-import SaidBlock from '@/components/blocks/SaidBlock'
 import { readSaid } from '@/lib/wire'
 import { isPart, receiver, sender } from '@superatom/transport'
-import { ringAllowed } from '@/components/blocks/Bars'
-import Donut from '@/components/ui/Donut'
-import StackedBars from '@/components/ui/StackedBars'
 import AboutBlock from '@/components/blocks/AboutBlock'
 import { AppProvider } from '@/lib/catalog'
 import { MockClient } from '@/lib/client'
@@ -304,7 +299,7 @@ describe('a reading (app:said)', () => {
   it('renders markdown with a table and a list, and never a script', () => {
     const said = readSaid({ text: 'q', qid: 'q', ms: 900, question: { focus: 'summary' }, calls: [{ id: 'a', canonical: 'projects by rag', ms: 12, at: 't' }, { id: 'b', canonical: 'budget', ms: 9, at: 't', error: 'boom' }],
       markdown: 'Some **prose** <script>alert(1)</script> and <img src=x onerror=alert(1)>\n\n- one\n- two\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n[ok](https://example.com) [bad](javascript:alert(1))' })
-    const html = renderToString(<SaidBlock said={said} beats={[]} />)
+    const html = renderToString(<SaidBlockView markdown={said.markdown} blocks={said.blocks} calls={said.calls} ms={said.ms} agent={said.agent} beats={[]} />)
     expect(html).toContain('<table')
     expect(html).toContain('<li>')
     expect(html).toContain('<strong>prose</strong>')
@@ -313,7 +308,7 @@ describe('a reading (app:said)', () => {
     const marked = readSaid({ text: 'q', qid: 'q', ms: 1, question: { focus: 'summary' }, calls: [],
       markdown: '49 people.\nweeks of 7 Sep and 14 Sep\n:::table red-weeks.json\n:::bar gone.json',
       blocks: [{ marker: ':::table red-weeks.json', block: { type: 'table', title: 'Under both weeks', columns: [{ key: 'name', label: 'Name' }], rows: [{ name: 'A' }, { name: 'B' }] } }, { marker: ':::bar gone.json', block: null, error: 'gone.json: ENOENT' }] })
-    const h2 = renderToString(<SaidBlock said={marked} beats={[{ text: 'Pulling the rows', at: 1 }, { text: 'Counting', at: 3000 }]} />)
+    const h2 = renderToString(<SaidBlockView markdown={marked.markdown} blocks={marked.blocks} calls={marked.calls} ms={marked.ms} agent={marked.agent} beats={[{ text: 'Pulling the rows', at: 1 }, { text: 'Counting', at: 3000 }]} />)
     expect(h2).toContain('Under both weeks')
     expect(h2).toContain('<table')
     expect(h2).not.toContain(':::table')

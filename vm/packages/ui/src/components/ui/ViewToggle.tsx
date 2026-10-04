@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Icon } from '@iconify/react'
-import { recall, remember } from '@/lib/remember'
+import { recall, remember } from '../../lib/remember'
 
 /** The reader's choice for one named section, remembered across visits. */
 export function useView<V extends string>(name: string, allowed: readonly V[], fallback: V) {

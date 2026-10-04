@@ -5,7 +5,7 @@
 
 import { useEffect, useState } from 'react'
 import { Icon } from '@iconify/react'
-import Select, { type Option } from '@/components/ui/Select'
+import { Select, type Option } from '@superatom/ui'
 import { dimensionOf, useApp } from '@/lib/catalog'
 import type { Answer, Capability, Member, MemberValue, Op } from '@/lib/wire'
 import { MembersCache } from '@/lib/cache'

@@ -15,7 +15,11 @@
     "jsx": "react-jsx",
     "paths": {
       "@/*": ["./src/*"],
-      "@superatom/transport": ["{{PLATFORM}}/clients/transport.ts"]
+      "@superatom/transport": ["{{PLATFORM}}/clients/transport.ts"],
+      "@superatom/ui": ["{{PLATFORM}}/vm/packages/ui/src/index.ts"],
+      "@superatom/platform-types": ["{{PLATFORM}}/vm/packages/platform-types/src/index.ts"],
+      "react": ["./node_modules/@types/react"],
+      "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime"]
     },
     "strict": true,
     "noUnusedLocals": true,

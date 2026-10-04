@@ -27,6 +27,8 @@ export interface IntentProps extends Omit<ScreenIntent, 'to'> {
   as?: 'button' | 'a' | 'div' | 'span' | 'li' | 'tr' | 'td'
   label?: string
   className?: string
+  /** A hint shown on hover (why one would take it). */
+  title?: string
   disabled?: boolean
   children?: ReactNode
 }
@@ -39,12 +41,12 @@ function problemsOf(i: ScreenIntent): string[] {
   return out
 }
 
-export function Intent({ ops, action, call, to = 'current', block, as = 'button', label, className, disabled, children }: IntentProps) {
+export function Intent({ ops, action, call, to = 'current', block, as = 'button', label, className, title, disabled, children }: IntentProps) {
   const intent: ScreenIntent = { ...(ops ? { ops } : {}), ...(action ? { action } : {}), ...(call ? { call } : {}), to, ...(block ? { block } : {}) }
   const bad = problemsOf(intent)
   // A broken intent is a bug in the program that wrote it: it is shown, not sent.
   if (bad.length) return createElement('span', { className: 'sa-intent-broken', role: 'alert' }, `This control is broken: ${bad.join('; ')}`)
-  const props: Record<string, unknown> = { [INTENT_ATTR]: JSON.stringify(intent), className, 'aria-label': label, 'aria-disabled': disabled || undefined }
+  const props: Record<string, unknown> = { [INTENT_ATTR]: JSON.stringify(intent), className, title, 'aria-label': label, 'aria-disabled': disabled || undefined }
   if (as === 'button') Object.assign(props, { type: 'button', disabled })
   else Object.assign(props, { role: 'button', tabIndex: disabled ? -1 : 0 })
   return createElement(as, props, children ?? label)

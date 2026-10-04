@@ -2,9 +2,9 @@
 // StackedBars). The chart's colours, fonts and tooltip come from the chart theme, which reads the tokens; a
 // `marker` series is drawn as a line across the row (a budget, a target) rather than a bar.
 
-import ReactECharts from '@/lib/echarts'
-import { chartTheme, read } from '@/design'
-import { setHighlight } from '@/lib/highlight'
+import ReactECharts from '../../lib/echarts'
+import { chartTheme, read } from '../../design/index'
+import { setHighlight } from '../../lib/highlight'
 import Nothing from './Nothing'
 import type { ReactNode } from 'react'
 

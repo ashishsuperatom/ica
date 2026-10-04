@@ -8,7 +8,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { Blocks } from '@/components/blocks'
+import { Blocks } from '@superatom/ui'
 import { readAnswer, readBlock } from '@/lib/wire'
 
 const MOCK = join(__dirname, '../../public/mock')

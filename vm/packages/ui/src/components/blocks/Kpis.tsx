@@ -1,9 +1,9 @@
 // Headline figures as Kpi tiles: the label, the figure in its state's colour, the hint beneath.
 
-import { Kpi } from '@/components/ui/Section'
-import { STATE_ACCENT } from '@/design'
-import { fmt } from '@/lib/format'
-import type { Block } from '@/lib/wire'
+import { Kpi } from '../ui/Section'
+import { STATE_ACCENT } from '../../design/index'
+import { fmt } from '../../lib/format'
+import type { Block } from '../../answer/blocks'
 
 export default function Kpis({ block }: { block: Extract<Block, { type: 'kpis' }> }) {
   if (!block.items.length) return null

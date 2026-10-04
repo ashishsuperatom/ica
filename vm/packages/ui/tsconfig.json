@@ -2,6 +2,6 @@
   // The UI library runs in the browser: the DOM's types and JSX, beside the workspace's own settings.
   "extends": "../../tsconfig.json",
   "compilerOptions": { "lib": ["ES2023", "DOM", "DOM.Iterable"], "jsx": "react-jsx" },
-  "include": ["src/**/*.ts", "test/**/*.tsx"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.tsx"],
   "exclude": ["node_modules"]
 }

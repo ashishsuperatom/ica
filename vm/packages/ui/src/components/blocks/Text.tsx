@@ -1,5 +1,5 @@
-import { Section } from '@/components/ui/Section'
-import type { Block } from '@/lib/wire'
+import { Section } from '../ui/Section'
+import type { Block } from '../../answer/blocks'
 
 export default function Text({ block }: { block: Extract<Block, { type: 'text' }> }) {
   return (

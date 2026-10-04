@@ -14,7 +14,7 @@
 // A change to a shared file is made here, then synced to every home — never in one home alone. `{{PLATFORM}}` in a
 // file is this repository's place on the machine the template is written on.
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -53,6 +53,12 @@ if (command === 'new') {
     console.log(`started  ${rel}`)
   }
 }
+
+// new and sync: files the template no longer ships (moved into the platform) go, so a home never keeps a stale copy.
+const RETIRED = JSON.parse(readFileSync(join(HERE, 'retired.json'), 'utf8'))
+for (const rel of RETIRED) if (existsSync(join(HOME, rel))) { rmSync(join(HOME, rel)); console.log(`retired  ${rel}`) }
+// …and the folders that held only those files.
+for (const dir of [...new Set(RETIRED.map((r) => dirname(r)))].sort((a, b) => b.length - a.length)) { const p = join(HOME, dir); if (existsSync(p) && !readdirSync(p).length) rmSync(p, { recursive: true }) }
 
 // new and sync: the shared files, as the template has them.
 let changed = 0

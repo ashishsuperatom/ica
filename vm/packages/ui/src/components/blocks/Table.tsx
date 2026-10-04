@@ -5,9 +5,9 @@
 
 import { useMemo, useState } from 'react'
 import { Icon } from '@iconify/react'
-import { Section, Pager } from '@/components/ui/Section'
-import { fmt, numeric, asNumber, month } from '@/lib/format'
-import type { Block, Column, Row, State } from '@/lib/wire'
+import { Section, Pager } from '../ui/Section'
+import { fmt, numeric, asNumber, month } from '../../lib/format'
+import type { Block, Column, Row, State } from '../../answer/blocks'
 import type { BlockCallbacks } from './index'
 
 const PAGE = 50

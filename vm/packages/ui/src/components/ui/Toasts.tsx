@@ -1,5 +1,5 @@
 import { Icon } from '@iconify/react'
-import { dismiss, useToasts } from '@/lib/toast'
+import { dismiss, useToasts } from '../../lib/toast'
 
 const LOOK = { refused: { icon: 'lucide:ban', word: 'Refused' }, error: { icon: 'lucide:alert-triangle', word: 'Error' }, note: { icon: 'lucide:info', word: 'Note' } } as const
 

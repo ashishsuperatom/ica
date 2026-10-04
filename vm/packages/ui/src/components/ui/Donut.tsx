@@ -11,11 +11,11 @@
 // clicking switches the slice off, remembered per browser.
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import ReactECharts from '@/lib/echarts'
-import { chartTheme } from '@/design'
+import ReactECharts from '../../lib/echarts'
+import { chartTheme } from '../../design/index'
 import Nothing from './Nothing'
-import { recall, remember } from '@/lib/remember'
-import { onHighlight, setHighlight, useHighlighted } from '@/lib/highlight'
+import { recall, remember } from '../../lib/remember'
+import { onHighlight, setHighlight, useHighlighted } from '../../lib/highlight'
 
 export interface Slice { name: string; value: number; color?: string; detail?: string }
 type Params = { name: string; value: number; percent: number }

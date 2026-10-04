@@ -21,7 +21,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Client } from '@/lib/client'
-import { notify } from '@/lib/toast'
+import { notify } from '@superatom/ui'
 import type { About, Answer, Filter, Headline, Op, Question, Request, Said, SaidBlock, SayContext } from '@/lib/wire'
 import { readSaidBlock } from '@/lib/wire'
 import { AnswerCache, reconcile } from '@/lib/cache'

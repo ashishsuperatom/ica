@@ -2,8 +2,7 @@
 // capability it holds, each saying when to use it — so from here a person can go anywhere.
 
 import { Icon } from '@iconify/react'
-import { Section } from '@/components/ui/Section'
-import { ACCENT, type Accent } from '@/design'
+import { Section, ACCENT, type Accent } from '@superatom/ui'
 import { scenarios, useApp } from '@/lib/catalog'
 import { useThread } from '@/runtime/thread'
 import type { Catalog } from '@/lib/wire'

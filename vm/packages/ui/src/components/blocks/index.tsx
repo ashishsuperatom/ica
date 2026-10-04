@@ -2,8 +2,8 @@
 // `Block` in lib/wire.ts (and a case in `readBlock`), write a renderer here on the design system's primitives,
 // and register it in RENDERERS. Renderers are pure: a block in, elements out, with two callbacks.
 
-import type { Block, Row, RowMove, WindowKind } from '@/lib/wire'
-import { Section } from '@/components/ui/Section'
+import type { Block, Row, RowMove, WindowKind } from '../../answer/blocks'
+import { Section } from '../ui/Section'
 import Kpis from './Kpis'
 import Figure from './Figure'
 import Bars from './Bars'

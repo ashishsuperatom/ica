@@ -1,6 +1,6 @@
-import { Section } from '@/components/ui/Section'
-import { text } from '@/lib/format'
-import type { Block } from '@/lib/wire'
+import { Section } from '../ui/Section'
+import { text } from '../../lib/format'
+import type { Block } from '../../answer/blocks'
 
 export default function Facts({ block }: { block: Extract<Block, { type: 'facts' }> }) {
   return (

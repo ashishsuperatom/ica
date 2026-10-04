@@ -2,10 +2,10 @@
 // The card's hover-only ViewToggle reads the same cells as a plain table — display only.
 
 import { useState } from 'react'
-import { Section, Pager } from '@/components/ui/Section'
-import ViewToggle, { useView, type ViewOption } from '@/components/ui/ViewToggle'
-import { fmt, short, shortDate, month } from '@/lib/format'
-import type { Block } from '@/lib/wire'
+import { Section, Pager } from '../ui/Section'
+import ViewToggle, { useView, type ViewOption } from '../ui/ViewToggle'
+import { fmt, short, shortDate, month } from '../../lib/format'
+import type { Block } from '../../answer/blocks'
 import type { BlockCallbacks } from './index'
 
 const PAGE = 40

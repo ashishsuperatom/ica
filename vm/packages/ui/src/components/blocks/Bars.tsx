@@ -3,13 +3,13 @@
 // hover-only ViewToggle switches between the charts and a table; display only, never sent to the server.
 
 import { useMemo } from 'react'
-import { Section } from '@/components/ui/Section'
-import ViewToggle, { useView, type ViewOption } from '@/components/ui/ViewToggle'
-import Donut, { legendLayout } from '@/components/ui/Donut'
-import StackedBars from '@/components/ui/StackedBars'
-import { ACCENT, ACTION_PALETTE, paint, ragAccent, STATE_ACCENT, type Accent } from '@/design'
-import { fmt, short, asNumber, month } from '@/lib/format'
-import type { Block, Series } from '@/lib/wire'
+import { Section } from '../ui/Section'
+import ViewToggle, { useView, type ViewOption } from '../ui/ViewToggle'
+import Donut, { legendLayout } from '../ui/Donut'
+import StackedBars from '../ui/StackedBars'
+import { ACCENT, ACTION_PALETTE, paint, ragAccent, STATE_ACCENT, type Accent } from '../../design/index'
+import { fmt, short, asNumber, month } from '../../lib/format'
+import type { Block, Series } from '../../answer/blocks'
 import type { BlockCallbacks } from './index'
 
 const SERIES_ACCENT: Accent[] = ['series-1', 'series-2', 'series-3']

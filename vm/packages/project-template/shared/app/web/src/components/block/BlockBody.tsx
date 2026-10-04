@@ -3,16 +3,12 @@
 // question — where the numbers come from — draws itself.
 
 import { Icon } from '@iconify/react'
-import SaidBlock from '@/components/blocks/SaidBlock'
 import Controls from './Controls'
 import About from './About'
-import { Blocks, BlockView } from '@/components/blocks'
+import { Answer, Blocks, BlockView, Skeleton, BeatRows, markdownToHtml } from '@superatom/ui'
 import AboutBlock from '@/components/blocks/AboutBlock'
-import { Skeleton } from '@/components/ui/Section'
 import { dimLabel, useApp } from '@/lib/catalog'
 import { useThread, type Node, type Beat } from '@/runtime/thread'
-import { BeatRows } from '@/components/blocks/Beats'
-import { markdownToHtml } from '@/lib/markdown'
 import type { Op, RowMove, Row, WindowKind, SaidBlock as NamedBlock } from '@/lib/wire'
 
 /** A reading on its way: the beats as they arrive, with the seconds each took; before the first, one spinner line. */
@@ -30,7 +26,7 @@ export default function BlockBody({ block }: { block: Node }) {
   const { open, edit } = useThread()
   const a = block.answer
 
-  if (block.kind === 'said') return block.said ? <SaidBlock said={block.said} beats={block.beats ?? []} /> : block.busy ? <Working beats={block.beats} partial={block.partial} blocks={block.partialBlocks} /> : <div className="sa-alert"><Icon icon="lucide:alert-triangle" /><span className="sa-alert__text">{block.error ?? 'No reading.'}</span></div>
+  if (block.kind === 'said') return block.said ? <Answer markdown={block.said.markdown} blocks={block.said.blocks} calls={block.said.calls} ms={block.said.ms} agent={block.said.agent} beats={block.beats ?? []} /> : block.busy ? <Working beats={block.beats} partial={block.partial} blocks={block.partialBlocks} /> : <div className="sa-alert"><Icon icon="lucide:alert-triangle" /><span className="sa-alert__text">{block.error ?? 'No reading.'}</span></div>
   if (block.about) return <AboutBlock about={block.about} />
   if (!a && block.busy) return (
     <div className="sa-skeleton-block" aria-busy="true" aria-label="Asking">

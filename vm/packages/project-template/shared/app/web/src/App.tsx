@@ -2,11 +2,10 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import AppShell from '@/components/layout/AppShell'
-import Toasts from '@/components/ui/Toasts'
+import { Toasts, configure } from '@superatom/ui'
 import { makeClient } from '@/lib/client'
 import { AppProvider } from '@/lib/catalog'
 import type { Catalog } from '@/lib/wire'
-import { configure } from '@/lib/format'
 import { ThreadProvider } from '@/runtime/thread'
 import ThreadView from '@/components/thread/ThreadView'
 import { useThread } from '@/runtime/thread'

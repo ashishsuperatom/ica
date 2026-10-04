@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Icon } from '@iconify/react'
-import { fmt } from '@/lib/format'
+import { fmt } from '@superatom/ui'
 import type { Answer } from '@/lib/wire'
 
 export default function About({ answer: a }: { answer: Answer }) {

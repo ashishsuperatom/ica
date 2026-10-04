@@ -2,9 +2,8 @@
 // whose parent has more than one child (the fork point), so the other branches are a click away.
 
 import { useThread } from '@/runtime/thread'
-import { useBlockKeys } from './navigation'
+import { useBlockKeys, BranchBar } from '@superatom/ui'
 import BlockFrame from './BlockFrame'
-import BranchBar from './BranchBar'
 import BlockBody from '@/components/block/BlockBody'
 import Home from './Home'
 import AskBar from './AskBar'

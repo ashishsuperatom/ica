@@ -3,18 +3,24 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "The platform's UI library, the same for every program and the user UI: <Intent> (the one way a screen changes STATE) with one delegated listener and a list of every intent on screen, the thread of blocks, and the loader that brings a program's React side in with the platform's own libraries.",
+  "description": "The platform's one UI framework: every surface (the user UI, a dashboard, the control plane, a program's view) is built from it \u2014 the design system (slob's, plain CSS), the shell (where to go, the thread, the artifacts), the thread's frames and branches, the one answer component and its block renderers, paths from here, <Intent> with one listener, and the loader that brings a program's React side in with the platform's own libraries.",
   "scripts": {
     "test": "tsx --test test/*.test.tsx"
   },
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./design.css": "./src/design/index.css"
   },
   "dependencies": {
     "@superatom/platform-types": "workspace:*"
   },
   "peerDependencies": {
-    "react": "^19.2.0"
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "@iconify/react": "6.0.2",
+    "echarts": "6.1.0",
+    "echarts-for-react": "3.0.6",
+    "marked": "^17.0.6"
   },
   "devDependencies": {
     "@superatom/programs": "workspace:*",
@@ -23,6 +29,10 @@
     "@types/react-dom": "^19.1.9",
     "jsdom": "^26.1.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "@iconify/react": "6.0.2",
+    "echarts": "6.1.0",
+    "echarts-for-react": "3.0.6",
+    "marked": "^17.0.6"
   }
 }

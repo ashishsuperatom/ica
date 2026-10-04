@@ -6,7 +6,8 @@
 // when it fails the app simply forgets, which is a smaller thing to go wrong than a screen that will not draw.
 
 // Kept per project, so two dashboards in one browser never read each other's preferences.
-const PREFIX = `sa.${(import.meta.env.VITE_PROJECT_ID as string | undefined) ?? 'local'}.`
+// The project is the page's (window.__PROJECT_ID__, set by the platform when it serves an app), else the build's.
+const PREFIX = `sa.${(globalThis as any).__PROJECT_ID__ ?? ((import.meta as any).env?.VITE_PROJECT_ID as string | undefined) ?? 'local'}.`
 const KEY = (name: string) => `${PREFIX}${name}`
 
 export function recall<T>(name: string, fallback: T): T {

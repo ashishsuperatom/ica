@@ -4,7 +4,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Icon } from '@iconify/react'
-import Select from '@/components/ui/Select'
+import { Select } from '@superatom/ui'
 import { capabilityOf, dimLabel, useApp } from '@/lib/catalog'
 import type { Node } from '@/runtime/thread'
 import { filterLabel, memberKeys, type Answer, type AssumeValue, type Filter, type Op } from '@/lib/wire'

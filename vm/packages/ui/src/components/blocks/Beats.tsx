@@ -4,8 +4,8 @@
 
 import { useEffect, useState } from 'react'
 import { Icon } from '@iconify/react'
-import type { Beat } from '@/runtime/thread'
-import { markdownToHtml } from '@/lib/markdown'
+import type { Beat } from '../../answer/blocks'
+import { markdownToHtml } from '../../lib/markdown'
 
 function useNow(ticking: boolean) {
   const [now, setNow] = useState(Date.now())

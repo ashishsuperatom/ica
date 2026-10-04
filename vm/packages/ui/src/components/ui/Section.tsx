@@ -3,7 +3,7 @@
 
 import { type ReactNode } from 'react'
 import { Icon } from '@iconify/react'
-import { ACCENT, type Accent } from '@/design'
+import { ACCENT, type Accent } from '../../design/index'
 import Settle from './Settle'
 
 /**
