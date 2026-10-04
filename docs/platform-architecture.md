@@ -86,6 +86,16 @@ started yet.)
 **Build and isolation.** We compile programs ourselves (TypeScript, `tsc`). They are not sandboxed now; when a
 sandbox is needed it is only ever the dynamic worker.
 
+### What the platform provides to programs
+
+- **The platform ships the common UI** — the table component, ECharts and the design system — and **every program
+  uses them**, including lazily loaded ones. A program's React bundle does not carry its own copy: React, the table,
+  the charts and the design tokens come from the platform (shared at load time), so all programs look and behave the
+  same and stay small.
+- **Anything else a program needs** (a map library, say) **goes inside that program's own bundle**, loaded lazily with
+  it. Whether a library becomes part of the platform is our decision; a map library, for example, stays in the
+  programs that use it, not in the platform.
+
 ### Org knowledge index
 
 A graph of how the organisation is organised: **entities → properties → connections**, and where every capability
