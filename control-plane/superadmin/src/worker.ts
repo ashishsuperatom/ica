@@ -187,7 +187,9 @@ export default {
       // after verify-conn breaks the WS upgrade on the same DO instance.
       const key = url.searchParams.get('key')
       const token = url.searchParams.get('token')
-      if (!key && !token) return new Response('authentication required', { status: 401 })
+      // An agent declares itself and sends its key only in its hello, never in a URL (URLs end up in logs).
+      const agent = url.searchParams.get('agent') === '1'
+      if (!key && !token && !agent) return new Response('authentication required', { status: 401 })
       const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${wsMatch[1]}`))
       return stub.fetch(request)
     }

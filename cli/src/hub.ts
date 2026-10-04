@@ -21,7 +21,8 @@ const CLOSE_REASONS: Record<number, number> = { 4001: 3, 4003: 3 }
 export async function connect(o: { key: string; hub: string; timeoutMs?: number; log?: (s: string) => void }): Promise<Hub> {
   const project = projectOfKey(o.key)
   if (!project) throw new CliError('that is not an agent key (sak_<project>_<secret>) — make one in the project\'s admin console', 3)
-  const url = `${o.hub.replace(/\/$/, '')}/_ws/${project}`
+  // The key goes in the hello, never in the URL; ?agent=1 tells the edge what kind of connection this is.
+  const url = `${o.hub.replace(/\/$/, '')}/_ws/${project}?agent=1`
   const ws = new WebSocket(url)
   const listeners = new Set<(m: any) => void>()
   const waiting = new Map<string, { resolve: (m: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>()
@@ -40,7 +41,7 @@ export async function connect(o: { key: string; hub: string; timeoutMs?: number;
       if (m.t === 'machine:waking') { o.log?.('the engine is starting — this can take a minute'); for (const w of waiting.values()) w.timer.refresh?.() }
       if (m.t === 'error' && !m.reqId && m.source === 'compute') fail(new CliError(m.message ?? 'the engine is offline', 4))
     },
-    parcels: parcelStore({ api: apiOfHub(url), projectId: project }),
+    parcels: parcelStore({ api: apiOfHub(url.replace(/\?.*$/, '')), projectId: project }),
   })
   ws.addEventListener('message', (e) => { try { const raw = JSON.parse(String(e.data)); if (raw?.payload) void inbound.receive(raw.payload) } catch { /* not ours */ } })
   ws.addEventListener('close', (e) => {

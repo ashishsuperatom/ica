@@ -3,6 +3,7 @@ import { loadToken, mintToken, dropToken, claimReauthOnce, tokenValid } from '..
 import { Credentials } from './Credentials'
 import { AgentsScreen } from './Models'
 import { DashboardsPanel } from './Dashboards'
+import { AgentKeysPanel, AuditPanel } from './AgentKeys'
 import { useProjectHub } from './hub'
 import { Inspector, SECTIONS, SECTION_LABEL, type Section } from './Inspector'
 import { ConnectorConsole } from './ConnectorConsole'
@@ -1004,6 +1005,8 @@ function ProjectDetailPage() {
     { id: 'events', label: 'Event log', icon: I.pulse },
     { id: 'subdomains', label: 'Subdomains', icon: I.globe },
     { id: 'dashboards', label: 'Dashboards', icon: I.globe },
+    { id: 'agent-keys', label: 'Agent keys', icon: I.term },
+    { id: 'audit', label: 'Audit history', icon: I.pulse },
     { id: 'agents', label: 'Agents', icon: I.term, children: [
       { id: 'agent', label: 'Connector' },
       { id: 'analyst', label: 'Analyst' },
@@ -1117,6 +1120,8 @@ function ProjectDetailPage() {
       )}
 
       {view === 'dashboards' && <DashboardsPanel api={api} token={token} projectId={projectId!} />}
+      {view === 'agent-keys' && <AgentKeysPanel api={api} projectId={projectId!} />}
+      {view === 'audit' && <AuditPanel api={api} projectId={projectId!} />}
       {view === 'subdomains' && (
         <div className="card">
           <strong>Subdomains</strong>
