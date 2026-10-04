@@ -359,7 +359,7 @@ function CompositionView({ hub }: ViewProps) {
               </button>
               {expanded && <>
                 <button className={`t-item t-child${is({ kind: 'prompt', domain: d.name }) ? ' on' : ''}`} onClick={() => setPick({ kind: 'prompt', domain: d.name })}><span className="t-txt">System prompt</span></button>
-                {d.parts.map((p: any) => (
+                {(d.concepts ?? d.parts ?? []).map((p: any) => (
                   <button key={p.name} className={`t-item t-child${is({ kind: 'node', name: p.name }) ? ' on' : ''}`} onClick={() => setPick({ kind: 'node', name: p.name })} title={p.name}>
                     <span className="t-txt">{p.title ?? p.name}</span><span className="t-n">{p.lines}</span>
                   </button>))}
@@ -399,9 +399,9 @@ function CompAgent({ d, go }: { d: any; go: (p: CompPick) => void }) {
         <dt>Screens</dt><dd>{d.capabilities.join(', ')}</dd>
       </dl>
       {d.intents?.length > 0 && <><div className="sect">Phrases it serves</div><div className="axes" style={{ marginTop: 0 }}>{d.intents.map((t: string) => <span key={t} className="chip">{t}</span>)}</div></>}
-      <div className="sect">Sections and programs</div>
+      <div className="sect">Concepts and programs</div>
       <table><colgroup><col /><col style={{ width: 150 }} /><col style={{ width: 110 }} /></colgroup><tbody>
-        {d.parts.map((p: any) => (
+        {(d.concepts ?? d.parts ?? []).map((p: any) => (
           <tr key={p.name} onClick={() => go({ kind: 'node', name: p.name })}>
             <td><div className="wrap">{p.title ?? p.name}</div><div className="muted" style={{ fontSize: 11.5 }}>{p.name}</div></td>
             <td className="muted">{p.form} · {p.lines} lines</td><td className="num"><span className="chip">{short(p.hash)}</span></td>

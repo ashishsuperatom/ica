@@ -17,7 +17,7 @@ import { join, resolve, sep, relative } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { dataSourceStats, type DataSourceIndex } from '@superatom/datasource-index'
 import { GroundingStore } from '@superatom/grounding'   // the ONE loader/reader for the grounding store
-import { Store as CompositionStore, compose as composeDomain, domains as compositionDomains, drift as compositionDrift, type DomainBody, type PartBody, type FileBody } from '@superatom/composition-graph'
+import { Store as CompositionStore, compose as composeDomain, conceptsOf, domains as compositionDomains, drift as compositionDrift, type DomainBody, type ConceptBody, type FileBody } from '@superatom/composition-graph'
 import type { AgentSessions } from './agent-sessions.js'
 import { log } from './log.js'   // the central log/error channel — surfaced read-only here
 
@@ -184,17 +184,17 @@ export function createInspector(deps: InspectorDeps) {
     return withComposition((store) => {
       const domains = compositionDomains(store).map((d) => {
         const node = store.get<DomainBody>(d.name)!
-        const parts = node.body.parts.map((name) => { const n = store.get<PartBody>(name); return { name, hash: n?.hash ?? null, title: n?.body.title ?? null, form: n?.body.form ?? null,
+        const concepts = conceptsOf(node.body).map((name) => { const n = store.get<ConceptBody>(name); return { name, hash: n?.hash ?? null, title: n?.body.title ?? null, form: n?.body.form ?? null,
           lines: n ? (n.body.form === 'text' ? 1 : n.body.items.length) : 0 } })
         const files = node.body.files.map((name) => { const n = store.get<FileBody>(name); return { name, hash: n?.hash ?? null, file: n?.body.name ?? null, bytes: n ? n.body.text.length : 0 } })
         const asked = store.questions(40, d.name).map((q) => ({ at: q.at, session: q.session, question: q.question, how: q.how, domainHash: q.domainHash,
           decided: Array.isArray(q.ranked) ? ((q.ranked as any[])[0]?.terms ?? []).slice(0, 6) : [] }))
-        return { name: d.name, hash: node.hash, description: node.body.description ?? null, intents: node.body.intents ?? [], capabilities: node.body.capabilities, tools: node.body.tools ?? null, parts, files, asked }
+        return { name: d.name, hash: node.hash, description: node.body.description ?? null, intents: node.body.intents ?? [], capabilities: node.body.capabilities, tools: node.body.tools ?? null, concepts, files, asked }
       })
       for (const { id, note } of notes) sessions.push({ id, domain: String(note.domain ?? ''), at: note.at ?? null, used: Object.keys(note.used ?? {}).length,
         moved: note.used && Object.keys(note.used).length ? compositionDrift(store, note.used).map((x) => x.name) : [] })
       sessions.sort((a, b) => String(b.at ?? '').localeCompare(String(a.at ?? '')))
-      return { exists: true, domains, changes: store.changes(60), counts: { domain: store.names('domain').length, part: store.names('part').length, file: store.names('file').length }, sessions: sessions.slice(0, MAX_ROWS) }
+      return { exists: true, domains, changes: store.changes(60), counts: { domain: store.names('domain').length, concept: store.names('concept').length, file: store.names('file').length }, sessions: sessions.slice(0, MAX_ROWS) }
     })
   }
   /** One node: its content as it is now or was at a moment, every change to it, and the domains that name it. */
@@ -203,7 +203,7 @@ export function createInspector(deps: InspectorDeps) {
     const asOf = a.asOf ? Date.parse(a.asOf) : undefined
     return withComposition((store) => {
       const node = store.get(name, asOf)
-      const usedBy = store.names('domain').filter((d) => { const b = store.content<DomainBody>(d.hash); return b.parts.includes(name) || b.files.includes(name) }).map((d) => d.name)
+      const usedBy = store.names('domain').filter((d) => { const b = store.content<DomainBody>(d.hash); return conceptsOf(b).includes(name) || b.files.includes(name) }).map((d) => d.name)
       return { exists: true, node, history: store.history(name), usedBy }
     })
   }

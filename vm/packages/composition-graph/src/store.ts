@@ -6,19 +6,26 @@
 // change to each name before it, and a session made from the graph can always be compared with it.
 
 import { migrateFile } from '@superatom/migrate/node'
-import type { Migration } from '@superatom/migrate'
+import { addColumnIfMissing, type Migration } from '@superatom/migrate'
 import { DatabaseSync } from 'node:sqlite'
 import { createHash } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 
-export type Kind = 'domain' | 'part' | 'file' | 'setting'
-export interface Node<B = unknown> { name: string; kind: Kind; hash: string; body: B }
+export type Kind = 'domain' | 'concept' | 'file' | 'setting'
+/** Who sees a node: everyone (global), a group's members (group:<name>), or one person (user:<id>). */
+export type Scope = string
+export interface Node<B = unknown> { name: string; kind: Kind; hash: string; body: B; scope: Scope; owner: string | null }
 export interface ChangeContext { by: string; reason?: string; from?: string }
+/** A node's scope and owner, when it is put. Left out: a new node is global with no owner; an existing one keeps its own. */
+export interface Placement { scope?: Scope; owner?: string | null }
+
+/** Is a node in this scope visible to someone who sees these scopes? Global is visible to all. */
+export const visibleTo = (scope: Scope, viewer: Scope[]) => scope === 'global' || viewer.includes(scope)
 /** A question and the agent it went to: routed by its own words (a session's first question) or asked in a session that
  *  already was a domain. `ranked` is the router's scoring when it routed: every domain, its score, the terms that decided. */
 export interface Asked { id: number; at: number; session: string; qid: string | null; question: string; domain: string | null; domainHash: string | null; how: 'routed' | 'chosen' | 'session'; ranked: unknown }
-export interface Change { id: number; at: number; name: string; kind: Kind; fromHash: string | null; toHash: string | null; by: string; reason: string | null; from: string | null }
+export interface Change { id: number; at: number; name: string; kind: Kind; fromHash: string | null; toHash: string | null; by: string; reason: string | null; from: string | null; scope: Scope | null }
 
 /** The composition graph's migrations (@superatom/migrate): numbered, never edited once shipped — a change is a new one. */
 export const MIGRATIONS: Migration[] = [
@@ -35,6 +42,18 @@ CREATE TABLE IF NOT EXISTS question (
 CREATE INDEX IF NOT EXISTS question_domain ON question(domain, at);
 CREATE INDEX IF NOT EXISTS question_session ON question(session, at);
 ` },
+  // What were parts are concepts: text composed, in order, into an agent's context.
+  { id: 2, name: 'parts are concepts', up: `
+UPDATE name SET kind = 'concept' WHERE kind = 'part';
+UPDATE change SET kind = 'concept' WHERE kind = 'part';
+` },
+  // Every node has a scope (global, group:<name>, user:<id>) and one owner; each change records the scope it set, so
+  // the graph can be read as it was, scopes included.
+  { id: 3, name: 'scope and owner', up: (db) => {
+    addColumnIfMissing(db, 'name', 'scope', "TEXT NOT NULL DEFAULT 'global'")
+    addColumnIfMissing(db, 'name', 'owner', 'TEXT')
+    addColumnIfMissing(db, 'change', 'scope', 'TEXT')
+  } },
 ]
 
 /** JSON with keys in a fixed order, so the same content always has the same hash. */
@@ -57,18 +76,22 @@ export class Store {
   close() { this.db.close() }
 
   /** Point a name at this content. Unchanged content is no change and records nothing. */
-  put<B>(name: string, kind: Kind, body: B, ctx: ChangeContext): { hash: string; changed: boolean } {
+  put<B>(name: string, kind: Kind, body: B, ctx: ChangeContext, place: Placement = {}): { hash: string; changed: boolean } {
     const hash = hashOf(body)
-    const cur = this.db.prepare('SELECT kind, hash FROM name WHERE name = ?').get(name) as { kind: string; hash: string } | undefined
+    const cur = this.db.prepare('SELECT kind, hash, scope, owner FROM name WHERE name = ?').get(name) as { kind: string; hash: string; scope: string; owner: string | null } | undefined
     if (cur && cur.kind !== kind) throw new Error(`"${name}" is a ${cur.kind}, not a ${kind}`)
-    if (cur?.hash === hash) return { hash, changed: false }
+    const scope = place.scope ?? cur?.scope ?? 'global'
+    const owner = place.owner !== undefined ? place.owner : (cur?.owner ?? null)
+    if (!/^(global|group:[^\s:]+|user:[^\s:]+)$/.test(scope)) throw new Error(`"${scope}" is not a scope: global, group:<name> or user:<id>`)
+    // Unchanged content, scope and owner records nothing; a new scope or owner alone is a change (same content).
+    if (cur?.hash === hash && cur.scope === scope && cur.owner === owner) return { hash, changed: false }
     const now = Date.now()
     this.db.exec('BEGIN')
     try {
       this.db.prepare('INSERT OR IGNORE INTO content (hash, body, at) VALUES (?, ?, ?)').run(hash, canonical(body), now)
-      this.db.prepare('INSERT INTO name (name, kind, hash) VALUES (?, ?, ?) ON CONFLICT(name) DO UPDATE SET hash = excluded.hash').run(name, kind, hash)
-      this.db.prepare('INSERT INTO change (at, name, kind, from_hash, to_hash, by, reason, evidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(now, name, kind, cur?.hash ?? null, hash, ctx.by, ctx.reason ?? null, ctx.from ?? null)
+      this.db.prepare('INSERT INTO name (name, kind, hash, scope, owner) VALUES (?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET hash = excluded.hash, scope = excluded.scope, owner = excluded.owner').run(name, kind, hash, scope, owner)
+      this.db.prepare('INSERT INTO change (at, name, kind, from_hash, to_hash, by, reason, evidence, scope) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(now, name, kind, cur?.hash ?? null, hash, ctx.by, ctx.reason ?? null, ctx.from ?? null, scope)
       this.db.exec('COMMIT')
     } catch (e) { this.db.exec('ROLLBACK'); throw e }
     return { hash, changed: true }
@@ -81,7 +104,7 @@ export class Store {
     this.db.exec('BEGIN')
     try {
       this.db.prepare('DELETE FROM name WHERE name = ?').run(name)
-      this.db.prepare('INSERT INTO change (at, name, kind, from_hash, to_hash, by, reason, evidence) VALUES (?, ?, ?, ?, NULL, ?, ?, ?)')
+      this.db.prepare('INSERT INTO change (at, name, kind, from_hash, to_hash, by, reason, evidence, scope) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, NULL)')
         .run(Date.now(), name, cur.kind, cur.hash, ctx.by, ctx.reason ?? null, ctx.from ?? null)
       this.db.exec('COMMIT')
     } catch (e) { this.db.exec('ROLLBACK'); throw e }
@@ -90,11 +113,11 @@ export class Store {
 
   /** A node as it is now, or as it was at a moment (ms since the epoch). */
   get<B = unknown>(name: string, asOf?: number): Node<B> | null {
-    let row: { kind: string; hash: string | null } | undefined
-    if (asOf === undefined) row = this.db.prepare('SELECT kind, hash FROM name WHERE name = ?').get(name) as any
-    else row = this.db.prepare('SELECT kind, to_hash AS hash FROM change WHERE name = ? AND at <= ? ORDER BY at DESC, id DESC LIMIT 1').get(name, asOf) as any
+    let row: { kind: string; hash: string | null; scope: string | null; owner: string | null } | undefined
+    if (asOf === undefined) row = this.db.prepare('SELECT kind, hash, scope, owner FROM name WHERE name = ?').get(name) as any
+    else row = this.db.prepare('SELECT kind, to_hash AS hash, scope, NULL AS owner FROM change WHERE name = ? AND at <= ? ORDER BY at DESC, id DESC LIMIT 1').get(name, asOf) as any
     if (!row?.hash) return null
-    return { name, kind: row.kind as Kind, hash: row.hash, body: this.content<B>(row.hash) }
+    return { name, kind: row.kind as Kind, hash: row.hash, body: this.content<B>(row.hash), scope: row.scope ?? 'global', owner: row.owner ?? null }
   }
 
   /** Content by its hash. */
@@ -104,16 +127,20 @@ export class Store {
     return JSON.parse(r.body) as B
   }
 
-  /** The names there are now, of one kind or all. */
-  names(kind?: Kind): { name: string; kind: Kind; hash: string }[] {
-    const rows = kind ? this.db.prepare('SELECT name, kind, hash FROM name WHERE kind = ? ORDER BY name').all(kind) : this.db.prepare('SELECT name, kind, hash FROM name ORDER BY name').all()
-    return rows as any
+  /** The names there are now (or were at a moment), of one kind or all, and only those a viewer's scopes see. */
+  names(kind?: Kind, opts: { asOf?: number; viewer?: Scope[] } = {}): { name: string; kind: Kind; hash: string; scope: Scope; owner: string | null }[] {
+    const rows = (opts.asOf === undefined
+      ? this.db.prepare('SELECT name, kind, hash, scope, owner FROM name ORDER BY name').all()
+      // As it was: each name's last change at or before the moment, if that change did not remove it.
+      : this.db.prepare(`SELECT c.name, c.kind, c.to_hash AS hash, COALESCE(c.scope, 'global') AS scope, NULL AS owner FROM change c
+          WHERE c.id = (SELECT c2.id FROM change c2 WHERE c2.name = c.name AND c2.at <= ? ORDER BY c2.at DESC, c2.id DESC LIMIT 1) AND c.to_hash IS NOT NULL ORDER BY c.name`).all(opts.asOf)) as any[]
+    return rows.filter((r) => (!kind || r.kind === kind) && (!opts.viewer || visibleTo(r.scope, opts.viewer)))
   }
 
   /** Every change to a name, oldest first. */
   history(name: string): Change[] {
-    return (this.db.prepare('SELECT id, at, name, kind, from_hash, to_hash, by, reason, evidence FROM change WHERE name = ? ORDER BY at, id').all(name) as any[])
-      .map((r) => ({ id: r.id, at: r.at, name: r.name, kind: r.kind, fromHash: r.from_hash, toHash: r.to_hash, by: r.by, reason: r.reason, from: r.evidence }))
+    return (this.db.prepare('SELECT id, at, name, kind, from_hash, to_hash, by, reason, evidence, scope FROM change WHERE name = ? ORDER BY at, id').all(name) as any[])
+      .map((r) => ({ id: r.id, at: r.at, name: r.name, kind: r.kind, fromHash: r.from_hash, toHash: r.to_hash, by: r.by, reason: r.reason, from: r.evidence, scope: r.scope ?? null }))
   }
 
   /** Record a question and the agent it went to. */
@@ -132,7 +159,7 @@ export class Store {
 
   /** The latest changes across the graph, newest first. */
   changes(limit = 50): Change[] {
-    return (this.db.prepare('SELECT id, at, name, kind, from_hash, to_hash, by, reason, evidence FROM change ORDER BY at DESC, id DESC LIMIT ?').all(limit) as any[])
-      .map((r) => ({ id: r.id, at: r.at, name: r.name, kind: r.kind, fromHash: r.from_hash, toHash: r.to_hash, by: r.by, reason: r.reason, from: r.evidence }))
+    return (this.db.prepare('SELECT id, at, name, kind, from_hash, to_hash, by, reason, evidence, scope FROM change ORDER BY at DESC, id DESC LIMIT ?').all(limit) as any[])
+      .map((r) => ({ id: r.id, at: r.at, name: r.name, kind: r.kind, fromHash: r.from_hash, toHash: r.to_hash, by: r.by, reason: r.reason, from: r.evidence, scope: r.scope ?? null }))
   }
 }

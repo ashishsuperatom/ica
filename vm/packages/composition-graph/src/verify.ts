@@ -1,7 +1,7 @@
 // ── Verify: the graph holds together, and holds what the project wrote ──────────────────────────────────────────
 //
 // What a graph must be for an agent composed from it to work, checked without running anything:
-//   · every domain names parts, files and settings the graph holds, of the right kind, and composes;
+//   · every domain names concepts, files and settings the graph holds, of the right kind, and composes;
 //   · every file a domain places imports only files placed beside it (or the data seam, data/…), and no two files a
 //     domain places share a name;
 //   · every setting a file reads is one its domain gives it (a program stops on a missing setting);
@@ -10,7 +10,7 @@
 // a node that differs, or one the knowledge no longer writes, is the graph and the files disagreeing.
 
 import { Store } from './store.js'
-import { compose, type DomainBody, type FileBody } from './compose.js'
+import { compose, conceptsOf, type DomainBody, type FileBody } from './compose.js'
 import { importDomains, type WrittenDomain, type WrittenSetting } from './import.js'
 
 export interface Finding { level: 'fail' | 'warn'; check: string; subject: string; says: string }
@@ -31,7 +31,7 @@ export function verifyGraph(store: Store): Finding[] {
     const body = store.get<DomainBody>(d.name)!.body
     if (!body.description?.trim()) warn('described', d.name, 'the domain says nothing about what it is for')
     if (!body.intents?.length) warn('routed', d.name, 'the domain has no intents: only its text can route a question to it')
-    for (const [list, kind] of [[body.parts ?? [], 'part'], [body.files ?? [], 'file'], [body.settings ?? [], 'setting']] as const) {
+    for (const [list, kind] of [[conceptsOf(body), 'concept'], [body.files ?? [], 'file'], [body.settings ?? [], 'setting']] as const) {
       for (const n of list) {
         used.add(n)
         if (!kindOf.has(n)) fail('links', d.name, `names ${kind} "${n}", which the graph does not hold`)

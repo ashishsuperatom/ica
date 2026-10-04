@@ -1,19 +1,24 @@
 // ── Composition: the pieces come together into what an agent knows from the start ──────────────────────────────
 //
-// A domain names its parts in order, the files it brings and the tools it keeps. Composing it renders each part by
+// A domain names its concepts in order, the files it brings and the tools it keeps. Composing it renders each concept by
 // its form and puts the platform's identity line and "how every answer is given" first. Same pieces, same text,
 // byte for byte; the composition says which hash of each piece it used, so a session made from it can be compared
 // with the graph at any later moment.
 
-import type { Store } from './store.js'
+import type { Store, ChangeContext, Scope } from './store.js'
+import { visibleTo } from './store.js'
 
 /** The top of a composition: an agent. What it is for, the phrases it serves (routing reads them), the screens it covers,
- *  its parts in order (its system prompt), the programs it brings and the tools it keeps. */
-export interface DomainBody { description?: string; intents?: string[]; capabilities: string[]; parts: string[]; files: string[]; tools?: string[]; /** Settings its programs read, by name. */ settings?: string[] }
+ *  its concepts in order (its system prompt), the programs it brings and the tools it keeps. A domain written before
+ *  concepts were named so lists them as `parts`; reading it still works, so the graph can be read as it was. */
+export interface DomainBody { description?: string; intents?: string[]; capabilities: string[]; concepts: string[]; parts?: string[]; files: string[]; tools?: string[]; /** Settings its programs read, by name. */ settings?: string[] }
+/** A domain's concepts, in order — from `concepts`, or `parts` in a domain written before the rename. */
+export const conceptsOf = (d: Pick<DomainBody, 'concepts' | 'parts'>): string[] => d.concepts ?? d.parts ?? []
 /** A value the organisation decides — a threshold, a list, a currency — named once, read by name. */
 export interface SettingBody { value: unknown; description: string }
 export interface Example { question: string; steps: string[] }
-export type PartBody =
+/** A concept: text, in one of a few forms, composed into an agent's context. */
+export type ConceptBody =
   | { title: string; form: 'bullets' | 'numbered'; items: string[] }
   | { title: string; form: 'worked'; items: Example[] }
   | { title: string; form: 'text'; text: string }
@@ -46,8 +51,8 @@ export const ANSWERING = `# How every answer is given
 
 export const identityOf = (domain: string) => `You are Superatom's agent for ${domain} at this organisation.`
 
-/** A part, rendered by its form. */
-export function renderPart(p: PartBody): string {
+/** A concept, rendered by its form. */
+export function renderConcept(p: ConceptBody): string {
   let body: string
   switch (p.form) {
     case 'bullets': body = p.items.map((l) => `- ${l}`).join('\n'); break
@@ -59,34 +64,60 @@ export function renderPart(p: PartBody): string {
 }
 
 /** A domain's text from its pieces in memory. */
-export function render(domain: string, parts: PartBody[], files: { name: string }[], settings: { name: string; value: unknown; description: string }[] = []): string {
+export function render(domain: string, concepts: ConceptBody[], files: { name: string }[], settings: { name: string; value: unknown; description: string }[] = []): string {
   const named = files.length ? `\n\nIn your folder, from this domain: ${files.map((f) => f.name).join(', ')}.` : ''
   // The organisation's settings, with their values: the text names them, the programs read them from settings.json.
   const set = settings.length ? `\n\n# Settings (in settings.json; the programs read them there)\n${settings.map((x) => `- ${x.name}: ${JSON.stringify(x.value)} — ${x.description}`).join('\n')}` : ''
-  return `${identityOf(domain)}\n\n${ANSWERING}\n\n${parts.map(renderPart).join('\n\n')}${set}${named}`
+  return `${identityOf(domain)}\n\n${ANSWERING}\n\n${concepts.map(renderConcept).join('\n\n')}${set}${named}`
 }
 
-/** A domain composed from the store, as it is now or as it was at a moment. */
-export function compose(store: Store, domain: string, asOf?: number): Composition {
+/** A domain composed from the store, as it is now or as it was at a moment. With a viewer's scopes, it holds only what
+ *  they see: a concept in a group or user scope they are not in is left out; a domain they do not see is refused. */
+export function compose(store: Store, domain: string, asOf?: number, opts: { viewer?: Scope[] } = {}): Composition {
   const d = store.get<DomainBody>(domain, asOf)
   if (!d || d.kind !== 'domain') throw new Error(`there is no domain "${domain}"${asOf ? ` as of ${new Date(asOf).toISOString()}` : ''}`)
+  if (opts.viewer && !visibleTo(d.scope, opts.viewer)) throw new Error(`there is no domain "${domain}" for this viewer`)
   const used: Record<string, string> = { [domain]: d.hash }
-  const read = <B,>(name: string, kind: 'part' | 'file' | 'setting'): B => {
+  const read = <B,>(name: string, kind: 'concept' | 'file' | 'setting'): B | null => {
     const n = store.get<B>(name, asOf)
     if (!n || n.kind !== kind) throw new Error(`domain "${domain}" names ${kind} "${name}", which there is not`)
+    if (opts.viewer && !visibleTo(n.scope, opts.viewer)) return null
     used[name] = n.hash
     return n.body
   }
-  const parts = d.body.parts.map((p) => read<PartBody>(p, 'part'))
-  const files = d.body.files.map((f) => read<FileBody>(f, 'file'))
-  const settings = (d.body.settings ?? []).map((n) => ({ name: n, ...read<SettingBody>(n, 'setting') }))
+  const parts = conceptsOf(d.body).map((p) => read<ConceptBody>(p, 'concept')).filter((x): x is ConceptBody => x !== null)
+  const files = d.body.files.map((f) => read<FileBody>(f, 'file')).filter((x): x is FileBody => x !== null)
+  const settings = (d.body.settings ?? []).map((n) => ({ name: n, ...read<SettingBody>(n, 'setting')! }))
   return { domain, text: render(domain, parts, files, settings), files, settings: Object.fromEntries(settings.map((x) => [x.name, x.value])),
     ...(d.body.tools ? { tools: d.body.tools } : {}), capabilities: d.body.capabilities, used }
 }
 
-/** The domains there are, with what each covers. */
-export function domains(store: Store): { name: string; capabilities: string[] }[] {
-  return store.names('domain').map((n) => ({ name: n.name, capabilities: store.content<DomainBody>(n.hash).capabilities }))
+/** The domains there are (or were at a moment), with what each covers — those a viewer's scopes see. */
+export function domains(store: Store, opts: { asOf?: number; viewer?: Scope[] } = {}): { name: string; capabilities: string[] }[] {
+  return store.names('domain', opts).map((n) => ({ name: n.name, capabilities: store.content<DomainBody>(n.hash).capabilities }))
+}
+
+/** Put a concept into a domain's composition, at a position (end by default). A concept already there is moved. */
+export function join(store: Store, domain: string, concept: string, ctx: ChangeContext, at?: number): { hash: string; changed: boolean } {
+  const d = store.get<DomainBody>(domain)
+  if (!d || d.kind !== 'domain') throw new Error(`there is no domain "${domain}"`)
+  const c = store.get(concept)
+  if (!c || c.kind !== 'concept') throw new Error(`there is no concept "${concept}" — add it first`)
+  const list = conceptsOf(d.body).filter((x) => x !== concept)
+  const pos = at === undefined ? list.length : Math.max(0, Math.min(list.length, Math.trunc(at)))
+  list.splice(pos, 0, concept)
+  const { parts: _old, ...rest } = d.body
+  return store.put(domain, 'domain', { ...rest, concepts: list }, ctx)
+}
+
+/** Take a concept out of a domain's composition. The concept itself stays in the graph. */
+export function leave(store: Store, domain: string, concept: string, ctx: ChangeContext): { hash: string; changed: boolean } {
+  const d = store.get<DomainBody>(domain)
+  if (!d || d.kind !== 'domain') throw new Error(`there is no domain "${domain}"`)
+  const list = conceptsOf(d.body)
+  if (!list.includes(concept)) throw new Error(`domain "${domain}" does not compose "${concept}"`)
+  const { parts: _old, ...rest } = d.body
+  return store.put(domain, 'domain', { ...rest, concepts: list.filter((x) => x !== concept) }, ctx)
 }
 
 /** What changed between a composition a session was made with and the graph now: the names whose hash moved. */

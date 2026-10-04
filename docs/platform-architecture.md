@@ -42,8 +42,12 @@ query, a worked example. Concepts differ by what they are about:
 | formatting | numbers, units, dates, wording for this project |
 | a query | an SQL statement or script the agent runs |
 
-Today's graph has `part` (text), `file` (code placed beside the agent), `setting` (a value) and `domain`. A part is a
-concept; the rename and any sub-kinds are part of the migration (below).
+The graph's node kinds are `concept` (text), `file` (code placed beside the agent), `setting` (a value) and `domain`
+(built 2026-10-04: what were `part`s are concepts). Every node has a **scope** (global, group:<name>, user:<id>) and
+one **owner**; composing a domain for a viewer leaves out what their scopes do not see. The CLI adds and edits concepts
+(`concept`), puts a concept into a domain's composition or takes it out (`join`, `leave`), lists nodes by viewer, and
+reads everything **as of any moment** (`--as-of`): content, compositions and scopes — every change, scope changes
+included, is in the change log.
 
 ### Program
 

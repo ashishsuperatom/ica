@@ -10,7 +10,7 @@ const texts: Record<string, string> = {
   'shared/helper.mjs': "export const setting = (n) => n",
 }
 const read = (d: string, f: string) => texts[f.includes('/') ? f : `${d.replace(/\s+/g, '-')}/${f}`] ?? `// ${f}`
-const good = [{ name: 'a', description: 'about a', intents: ['a'], capabilities: [], parts: [part('Definitions')], files: ['rule.mjs', 'shared/helper.mjs'], settings: ['reporting-currency-code'] }]
+const good = [{ name: 'a', description: 'about a', intents: ['a'], capabilities: [], concepts: [part('Definitions')], files: ['rule.mjs', 'shared/helper.mjs'], settings: ['reporting-currency-code'] }]
 const fails = (fs: ReturnType<typeof verifyGraph>) => fs.filter((f) => f.level === 'fail').map((f) => `${f.check}: ${f.says}`)
 
 test('a graph that holds together, and holds what was written, has no failures', () => {
@@ -38,15 +38,15 @@ test('a domain naming a node that is gone, or of another kind, fails', () => {
   const s = new Store(':memory:')
   importDomains(s, good, read, by, settings)
   s.remove('a/definitions', by)
-  assert.ok(fails(verifyGraph(s)).some((x) => /names part "a\/definitions", which the graph does not hold/.test(x)))
+  assert.ok(fails(verifyGraph(s)).some((x) => /names concept "a\/definitions", which the graph does not hold/.test(x)))
 })
 
 test('the graph and the written knowledge disagreeing fails, both ways', () => {
   const s = new Store(':memory:')
   importDomains(s, good, read, by, settings)
-  const changed = [{ ...good[0], parts: [{ title: 'Definitions', form: 'bullets' as const, items: ['a means something else now'] }] }]
+  const changed = [{ ...good[0], concepts: [{ title: 'Definitions', form: 'bullets' as const, items: ['a means something else now'] }] }]
   assert.ok(fails(verifyAgainst(s, changed, read, settings)).some((x) => /a\/definitions|differs|import the knowledge/.test(x)))
-  s.put('stray/part', 'part', part('Stray'), by)
+  s.put('stray/part', 'concept', part('Stray'), by)
   assert.ok(verifyAgainst(s, good, read, settings).some((f) => f.level === 'warn' && f.subject === 'stray/part'))
 })
 

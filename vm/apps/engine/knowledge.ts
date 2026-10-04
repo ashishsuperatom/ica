@@ -1,7 +1,7 @@
 // ── Knowledge: what an agent knows from the start, read from the project's composition graph ──────────────────
 //
 // The graph is @superatom/composition-graph, in the project's own store (<projectDir>/db/composition.sqlite): domains
-// composed from named parts, stored by hash, every change recorded. This module only reads it: which domains there
+// composed from named concepts, stored by hash, every change recorded. This module only reads it: which domains there
 // are, which one a session is, and the composition to give its agent — whose whole system prompt it is, never a file
 // to read — with the files placed in its folder and the hashes it was made from noted there.
 //
@@ -12,7 +12,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { dataSeam } from './ica/workspace.js'
-import { Store, compose as composeFromGraph, domains as domainsInGraph, render, route, rank, indexOf, type PartBody, type FileBody, type Route } from '@superatom/composition-graph'
+import { Store, compose as composeFromGraph, domains as domainsInGraph, render, route, rank, indexOf, type ConceptBody, type FileBody, type Route } from '@superatom/composition-graph'
 
 export interface Domain { name: string; capabilities: string[]; tools?: string[] }
 export interface Knowledge { domain: string; text: string; files: FileBody[]; used: Record<string, string>; /** Written into the folder as settings.json. */ settings: Record<string, unknown> }
@@ -24,7 +24,7 @@ const storeOf = (projectDir: string) => {
 }
 
 /** A domain as the project's index.mts states it, before the graph holds it. */
-interface Stated { name: string; intents?: string[]; capabilities: string[]; parts: PartBody[]; files?: string[]; tools?: string[] }
+interface Stated { name: string; intents?: string[]; capabilities: string[]; concepts?: ConceptBody[]; parts?: ConceptBody[]; files?: string[]; tools?: string[] }
 async function stated(projectDir: string): Promise<Stated[]> {
   for (const name of ['index.mts', 'index.ts']) {
     const file = join(projectDir, 'knowledge', name)
@@ -72,7 +72,7 @@ export async function compose(projectDir: string, domain: Domain): Promise<Knowl
   const dir = join(projectDir, 'knowledge', d.name.trim().toLowerCase().replace(/\s+/g, '-'))
   const files: FileBody[] = []
   for (const f of d.files ?? []) { try { files.push({ name: f, text: await readFile(join(dir, f), 'utf8') }) } catch { console.warn(`[knowledge] ${d.name}: file ${f} is missing`) } }
-  return { domain: d.name, text: render(d.name, d.parts, files), files, used: {}, settings: {} }
+  return { domain: d.name, text: render(d.name, d.concepts ?? d.parts ?? [], files), files, used: {}, settings: {} }
 }
 
 /** Put a domain's files and settings into an agent's folder. */
