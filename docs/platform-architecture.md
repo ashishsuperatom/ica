@@ -477,8 +477,12 @@ only.
 **In the user's words:** for our own system, a full data warehouse of everything that happens — in one place, so it can
 be queried, agents can be trained on it, and analysis done that is impossible while every Durable Object keeps its own
 data separately. One recorder in the platform's code, one stream (`platform_records`: kind, project, key, time, the
-record as JSON) fed by every DO — audit, usage, sessions, graph records, activities, programs, credits — into Iceberg
-tables in the platform's Basin Catalog, read with Basin SQL. One stream for all kinds stays far inside the 20 limit.
+record as JSON) fed by every DO — audit, usage, sessions, graph records, activities, programs, credits — and by the
+**agents' own work**: every turn of the composer (who asked what, which agent and domain answered, the steps it took
+with what each returned, the queries it ran, the answer, the time), sent by the engine to its project's DO, which
+records it — the one path. Into Iceberg tables in the platform's Basin Catalog, read with Basin SQL. One stream for all
+kinds stays far inside the 20 limit. **No backfill** (the user, 2026-10-05): what runs from now on is recorded; history
+can be thought about later if it is needed.
 
 ### Data warehouse — design proposal (2026-10-05, kept for reference)
 

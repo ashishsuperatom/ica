@@ -164,7 +164,7 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     CREATE INDEX IF NOT EXISTS idx_activities_owner ON activities(owner, updated_at);
   ` },
   { id: 21, name: 'sessions known', up: `
-    -- Every session the engine has synced through this hub, so the warehouse can be backfilled from their SessionDOs.
+    -- Every session the engine has synced through this hub: an index of the project's sessions.
     CREATE TABLE IF NOT EXISTS sessions_known (session TEXT PRIMARY KEY, first_seen TEXT NOT NULL);
   ` },
 ]

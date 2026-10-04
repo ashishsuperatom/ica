@@ -25,7 +25,7 @@ export function createRecorder(stream: Stream | undefined, project: () => string
   return function record(kind: string, key: string, data: unknown, at?: string): void {
     if (!stream) return
     const proj = project() || 'platform'
-    // The id says what the record is, so the live flow and a backfill can never give one thing two ids.
+    // The id says what the record is (kind/project/key), so the same thing sent twice is one record.
     const rec: PlatformRecord = { id: `${kind}/${proj}/${key}`, at: at ?? new Date().toISOString(), kind, project: proj, key: String(key), data: JSON.stringify(data ?? null) }
     stream.send([rec]).catch((e: any) => console.warn(`[records] ${kind} ${key} not sent to the warehouse: ${e?.message ?? e}`))
   }

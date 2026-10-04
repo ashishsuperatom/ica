@@ -47,6 +47,7 @@ import { createProgramSeam, PROGRAM_MESSAGES } from './program-seam.js'
 import { platformOf } from './platform.js'
 import { createGraphSync, graphFileOf } from './graph-sync.js'
 import { createAccess, readerFor } from './access.js'
+import { whoIs } from './identity.js'
 import { createActivities } from './activity.js'
 import { readingAnswer } from './answer-card.js'
 import { randomUUID } from 'node:crypto'
@@ -453,6 +454,14 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     const emitLog = (msg: any) => emit({ type: 'log', channel: currentAgent === 'composer' ? 'composer-log' : 'analyst-log' }, { ...msg, qid, sid, agent: currentAgent })
     for (const lane of ['composer-log', 'analyst-log'])
       emit({ type: 'log', channel: lane }, A('event', lane === 'composer-log' ? 'composer' : 'analyst', { ev: { kind: 'user', id: qid, text: question, done: true }, qid, sid }))
+    // The turn's steps, kept for the platform's warehouse (what the agent did, to learn from): commands with what
+    // they returned, and what it said — each capped, the whole bounded.
+    const turnSteps: Record<string, unknown>[] = []
+    const keepStep = (ev: AgentEvent) => {
+      if (turnSteps.length >= 200) return
+      if (ev.kind === 'command' && (ev.done || ev.status === 'completed' || ev.status === 'failed')) turnSteps.push({ kind: 'command', command: String(ev.command ?? '').slice(0, 2000), output: String(ev.output ?? '').slice(0, 4000), status: ev.status ?? null, ms: ev.ms ?? null, at: ev.at })
+      else if (ev.kind === 'message' && ev.text) turnSteps.push({ kind: 'message', text: String(ev.text).slice(0, 4000), at: ev.at })
+    }
     const handlers: RunHandlers = {
       onOutput: (chunk: string) => { if (!stopped) emitLog({ t: 'analyst:chunk', text: chunk }) },
       onNarration: (text: string) => { if (!stopped && reply) emitBeat(reply, text, qid, sid) },
@@ -462,6 +471,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
         // but nothing more of it reaches the person: what they asked to end, ends on their screen at once.
         if (stopped) return
         ev.at ??= Date.now()
+        keepStep(ev)
         if (ev.kind === 'command' && ev.id) {
           if (ev.done || ev.status === 'completed' || ev.status === 'failed') {
             const startedAt = stepStarted.get(ev.id)
@@ -513,6 +523,10 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       const timing = { ms: Date.now() - t0 }
       if (said.markdown == null) { tellSurfaces(reply, channel, sid, qid, timing, { status: 'cannot_answer', answer: 'No answer was written in time. Ask it another way, or narrower.' }); return }
       tellSurfaces(reply, channel, sid, qid, timing, { ...readingAnswer(said.markdown, said.blocks, said.periods), agent: agentLine })
+      // The whole turn to the platform's warehouse, through the project's DO (the one path): who asked what, which agent
+      // and domain answered, the steps it took, the queries it ran, the answer, and how long it took.
+      recordToPlatform('agent.turn', qid, { qid, session: sid, asker: (() => { try { return whoIs(from).id } catch { return null } })(), question, agent: 'composer', domain: inSession.domain, how,
+        steps: turnSteps, queries: said.queries, answer: said.markdown, blocks: said.blocks.length, ms: timing.ms })
       console.log(`[ica] composer · read ${qid.slice(0, 8)} · ${(timing.ms / 1000).toFixed(1)}s · ${said.blocks.length} blocks`)
       return
     }
@@ -721,11 +735,13 @@ const access = createAccess({ send: (msg) => { if (hub?.readyState !== WebSocket
 /** The asker of a chat turn's data access, for the agent's own tools. */
 const sourceIds = async () => ((await (await fetch(`${DATASOURCE}/sources`, { signal: AbortSignal.timeout(4000) })).json()) as { sources?: { id: string }[] }).sources?.map((x) => x.id) ?? []
 const turnReader = (from: any) => readerFor(access, from, sourceIds)
+/** Something the engine did, for the platform's warehouse: sent to the project's DO, which records it (one path). */
+const recordToPlatform = (kind: string, key: string, data: unknown) => { try { if (hub?.readyState === WebSocket.OPEN) hub.send(JSON.stringify({ type: 'record', kind, key, data })) } catch { /* the warehouse never breaks the work */ } }
 const sessionSeam = createSessionSeam({ projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities })
 // The composition graph is kept by the platform too: pushed after every change, rebuilt from it when this one is empty.
 const graphSync = createGraphSync({ file: graphFileOf(PROJECT_DIR), send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true }, log: (s) => console.warn(s) })
 const graphSeam = createGraphSeam({ projectDir: PROJECT_DIR, send: (to, msg) => { wire.send(to, msg); if (msg.t === 'graph:reply') graphSync.push() } })
-const appSeam = createAppSeam({ readerFor: turnReader, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
+const appSeam = createAppSeam({ readerFor: turnReader, record: recordToPlatform, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
 
 async function handle(payload: any, from: any) {
   if (wire.receive(payload, from)) return

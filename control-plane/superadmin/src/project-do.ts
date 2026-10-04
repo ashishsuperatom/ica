@@ -297,7 +297,6 @@ export class ProjectDO extends DurableObject<Env> {
     if (path === '/access-domains' || path.startsWith('/access-domains/')) return this.accessDomains(request, path)
     if (request.method === 'POST' && path === '/access/arrive') return this.arrive(request)
     if (path === '/usage') return request.method === 'POST' ? this.recordUsage(request) : this.usageSummary(new URL(request.url))
-    if (request.method === 'POST' && path === '/warehouse/backfill') return this.backfill()
 
     if (request.method === 'GET'  && path === '/debug')        return this.debugInfo()
     if (request.method === 'POST' && path === '/members')      return this.addMember(request)
@@ -467,6 +466,12 @@ export class ProjectDO extends DurableObject<Env> {
     //    of their sessions follows (UserDO), and the engine hears how far the platform has it. ──
     // ── The composition graph's records, replicated up by the engine (GraphDO); where the platform's copy ends; and
     //    batches back down to rebuild an engine whose graph is empty. ──
+    // ── What the engine did, for the platform's warehouse (an agent's turn, its steps and queries): recorded here, the
+    //    one path, never by the engine itself. Only the engine's own kinds. ──
+    if (msg.type === 'record' && sender.type === 'code-engine') {
+      if (typeof msg.kind === 'string' && /^agent\.[a-z][\w.-]*$/.test(msg.kind) && typeof msg.key === 'string' && msg.key) this.record(msg.kind, msg.key, msg.data ?? null)
+      return
+    }
     // ── Long work in the engine (an activity): its latest state kept, and sent to its owner and the admins ──
     if (msg.type === 'activity' && sender.type === 'code-engine') {
       const a = msg.activity ?? {}
@@ -806,26 +811,6 @@ export class ProjectDO extends DurableObject<Env> {
       if (e instanceof CatalogueRefusal) return json({ error: e.message }, 400)
       throw e
     }
-  }
-
-  // ── The platform's warehouse: everything this project holds, sent again (records.ts; the ids make it idempotent) ──
-  private async backfill(): Promise<Response> {
-    const sql = this.ctx.storage.sql
-    const n: Record<string, number> = {}
-    const each = (kind: string, rows: Iterable<any>, key: (r: any) => string, at: (r: any) => string | undefined) => { for (const r of rows) { this.record(kind, key(r), r, at(r)); n[kind] = (n[kind] ?? 0) + 1 } }
-    each('audit', sql.exec('SELECT * FROM audit_log ORDER BY seq'), (r) => r.id, (r) => r.at)
-    each('usage', sql.exec('SELECT * FROM usage_events ORDER BY seq'), (r) => String(r.seq), (r) => r.at)
-    each('activity', sql.exec('SELECT * FROM activities'), (r) => `${r.id}:${r.state}:${r.updated_at}`, (r) => r.updated_at)
-    each('program', sql.exec('SELECT hash, name, version, scope, owner, attaches_to, bytes, built_by, uploaded_at, published_at, published_by FROM programs'), (r) => r.hash, (r) => r.uploaded_at)
-    each('chat.answer', sql.exec('SELECT qid, user_id, session_id, question, payload_json, at, answered_at FROM answer_buffer WHERE payload_json IS NOT NULL'), (r) => r.qid, (r) => new Date(Number(r.answered_at ?? r.at)).toISOString())
-    const graph = (this.env as any).GRAPH?.get((this.env as any).GRAPH.idFromName(`graph:${this._pid}`))
-    if (graph) n.graph = Number(((await (await graph.fetch('http://do/backfill', { method: 'POST', body: JSON.stringify({ project: this._pid }) })).json()) as any).records ?? 0)
-    let entries = 0
-    for (const r of [...sql.exec('SELECT session FROM sessions_known')] as any[]) {
-      entries += Number(((await (await this.sessionStub(r.session).fetch('http://do/backfill', { method: 'POST', body: JSON.stringify({ project: this._pid, session: r.session }) })).json()) as any).entries ?? 0)
-    }
-    n['session.entry'] = entries
-    return this.j({ project: this._pid, sent: n })
   }
 
   // ── Usage and credits (metering.ts) ───────────────────────────────────────

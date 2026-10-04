@@ -21,6 +21,8 @@ export interface AppSeamDeps {
   workspaceRoot: string
   /** The shared workspace the narrator runs in — the same one the composer's narration uses. */
   narratorCwd: string
+  /** Something done, for the platform's warehouse (sent to the project's DO). */
+  record?: (kind: string, key: string, data: unknown) => void
   /** The asker's data access for the turn (access.ts readerFor). */
   readerFor?: (from: any) => Promise<import('./agents/composer/index.js').Reader>
 }
@@ -144,6 +146,9 @@ export function createAppSeam(d: AppSeamDeps) {
       new Promise<Said>((res) => { timer = setTimeout(() => { try { composer.session.stop() } catch { /* best effort */ }; res({ markdown: null, blocks: [], calls: [], queries: [], ms: Date.now() - t0 }) }, MAX_SAY_MS) }),
     ])
     if (timer) clearTimeout(timer)
+    // The turn to the platform's warehouse (through the project's DO): who asked what on which screen, the answer, the queries.
+    d.record?.('agent.turn', o.qid, { qid: o.qid, session: o.threadId, asker: o.from?.userId ?? null, question: text, context, agent: 'composer', via: 'app', domain: agent?.name ?? null,
+      queries: said.queries ?? [], answer: said.markdown, ms: Date.now() - t0 })
     return { markdown: said.markdown, blocks: said.blocks ?? [], calls: [], queries: said.queries ?? [], ms: Date.now() - t0, agent }
   }
 
