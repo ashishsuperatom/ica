@@ -21,7 +21,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, s
 import { dirname, join, relative, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
-import { checkProgram, type ProgramManifest } from '@superatom/platform-types'
+import { checkProgram, PLATFORM_LIBRARIES, type ProgramManifest } from '@superatom/platform-types'
 
 /** What a program's author writes; the build adds hash and bundles. */
 export type ProgramSource = Omit<ProgramManifest, 'hash' | 'node' | 'ui'> & { node?: { runtime?: ('on-prem' | 'worker')[] }; ui: { blocks: string[] } }
@@ -30,8 +30,7 @@ export class ProgramError extends Error {
   constructor(public problems: string[]) { super(problems.join('; ')) }
 }
 
-/** Libraries the platform supplies to every program at load time: a program imports them, never bundles them. */
-export const PLATFORM_LIBRARIES = ['react', 'react/jsx-runtime', 'react-dom', 'echarts', '@superatom/ui', '@superatom/design'] as const
+export { PLATFORM_LIBRARIES }
 
 const COMPILER: ts.CompilerOptions = {
   target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true,

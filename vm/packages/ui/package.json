@@ -1,0 +1,28 @@
+{
+  "name": "@superatom/ui",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "The platform's UI library, the same for every program and the user UI: <Intent> (the one way a screen changes STATE) with one delegated listener and a list of every intent on screen, the thread of blocks, and the loader that brings a program's React side in with the platform's own libraries.",
+  "scripts": {
+    "test": "tsx --test test/*.test.tsx"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@superatom/platform-types": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^19.2.0"
+  },
+  "devDependencies": {
+    "@superatom/programs": "workspace:*",
+    "@types/jsdom": "^21.1.7",
+    "@types/react": "^19.1.16",
+    "@types/react-dom": "^19.1.9",
+    "jsdom": "^26.1.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  }
+}
