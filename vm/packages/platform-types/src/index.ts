@@ -348,3 +348,36 @@ export function checkGovernanceEntry(v: unknown): Problems {
   if ((e.action === 'approve' || e.action === 'reject') && !Number.isInteger(e.decides)) out.push(`an ${e.action} names the suggestion it decides (decides: its seq)`)
   return out
 }
+
+// ── Audit history ─────────────────────────────────────────────────────────────────────────────────────────────────
+/** Who did something: a person, an agent key, the engine, or the platform itself. */
+export type AuditActor = { kind: 'user' | 'agent' | 'engine' | 'system'; id: string; email?: string }
+/** One thing that happened, whichever way it was done: who, through what, did what, to what, and how it ended.
+ *  Append-only; never changed or removed. */
+export interface AuditEvent {
+  id: string
+  at: string
+  project: string
+  actor: AuditActor
+  /** The way it came: the user UI, the admin console, the CLI, the engine, the platform's own API. */
+  via: 'ui' | 'admin' | 'cli' | 'engine' | 'api' | 'channel' | 'system'
+  /** What was done, `<thing>.<verb>`: `question.ask`, `session.intent`, `agent-key.create`, … */
+  action: string
+  target?: string
+  outcome: 'ok' | 'refused' | 'error'
+  /** What it was, as recorded: a question's words, an intent's ops, a refusal's reason. */
+  detail?: Record<string, unknown>
+}
+
+export function checkAuditEvent(v: unknown): Problems {
+  if (!v || typeof v !== 'object') return ['an audit event must be an object']
+  const o = v as Record<string, unknown>
+  const out: Problems = []
+  for (const k of ['id', 'at', 'project', 'action']) if (typeof o[k] !== 'string' || !o[k]) out.push(`audit.${k} is required`)
+  if (typeof o.action === 'string' && !/^[a-z][\w-]*(\.[a-z][\w-]*)+$/.test(o.action)) out.push(`audit.action is <thing>.<verb>, not ${show(o.action)}`)
+  const a = o.actor as Record<string, unknown> | undefined
+  if (!a || !['user', 'agent', 'engine', 'system'].includes(a.kind as string) || typeof a.id !== 'string' || !a.id) out.push('audit.actor names its kind (user, agent, engine, system) and id')
+  if (!['ui', 'admin', 'cli', 'engine', 'api', 'channel', 'system'].includes(o.via as string)) out.push(`audit.via must be ui, admin, cli, engine, api, channel or system, not ${show(o.via)}`)
+  if (!['ok', 'refused', 'error'].includes(o.outcome as string)) out.push(`audit.outcome must be ok, refused or error, not ${show(o.outcome)}`)
+  return out
+}

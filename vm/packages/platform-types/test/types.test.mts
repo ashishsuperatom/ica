@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isScope, checkSchema, checkValue, checkObject, checkOp, checkIntent, checkPackage, checkProgram, checkPackages, checkGovernanceEntry, type PackageSpec } from '../src/index.ts'
+import { isScope, checkSchema, checkValue, checkObject, checkOp, checkIntent, checkPackage, checkProgram, checkPackages, checkGovernanceEntry, checkAuditEvent, type PackageSpec } from '../src/index.ts'
 
 const trips: PackageSpec = {
   owns: 'trips',
@@ -82,4 +82,15 @@ test('governance entries', () => {
   assert.deepEqual(checkGovernanceEntry({ ...e, seq: 2, action: 'approve' }), ['an approve names the suggestion it decides (decides: its seq)'])
   assert.deepEqual(checkGovernanceEntry({ ...e, action: 'grant' }), ['a grant names its subject and permission'])
   assert.deepEqual(checkGovernanceEntry({ ...e, action: 'delete' }), ['entry.action "delete" is not one the log knows'])
+})
+
+test('an audit event', () => {
+  const e = { id: 'a1', at: '2026-10-04T10:00:00Z', project: 'p1', actor: { kind: 'agent', id: 'agent:k1' }, via: 'cli', action: 'session.intent', outcome: 'ok', detail: { ops: [] } }
+  assert.deepEqual(checkAuditEvent(e), [])
+  assert.deepEqual(checkAuditEvent({ ...e, action: 'Asked', via: 'phone', actor: { kind: 'bot' }, outcome: 'maybe' }), [
+    'audit.action is <thing>.<verb>, not "Asked"',
+    'audit.actor names its kind (user, agent, engine, system) and id',
+    'audit.via must be ui, admin, cli, engine, api, channel or system, not "phone"',
+    'audit.outcome must be ok, refused or error, not "maybe"',
+  ])
 })

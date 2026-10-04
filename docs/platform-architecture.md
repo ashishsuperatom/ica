@@ -434,6 +434,51 @@ Not every project needs one. When it does, one of two, never both at once:
 Sources land as dated raw snapshots; the warehouse is rebuilt beside the live one and swapped in whole; the app reads
 a fixed set of tables; definitions, lineage and coverage are declared once in code.
 
+### The Superatom CLI and agent API keys (2026-10-04)
+
+**In the user's words:** the engine no longer runs a local WebSocket, which is right — nothing will use one. Instead
+there is a **Superatom CLI** (`sacli`), so an agent can connect to our system. On the backend it has **its own
+WebSocket connection**, just as the engine, the data bridge, and the runtime (the user from the front end and from
+iOS) connect: another kind of connection, where an agent connects and we run commands through it. Codex or any coding
+agent — or any human — can run this CLI and do a lot on behalf of the **agent API key**. Agent API keys are generated
+from **the project admin, for each project**. Everything about creating keys and their security is taken care of.
+
+The CLI is for agents outside the Superatom platform: a person with their own agent uses the CLI to do things. We use
+it too: instead of connecting directly, our own agents launch the CLI as a package. It is a separate part of the
+system — a proper, production CLI with the features CLIs normally have — called the Superatom CLI, `sacli`.
+
+### Audit history and observability (2026-10-04)
+
+A separate concern from the CLI, and it covers **everything**. **In the user's words:** whether something is done
+through the CLI, from the user interface, or by the engine — every way — it is audited: a **full audit history of
+what has happened**, a list of who made what changes, and everything, **including who asked what question**.
+
+It is a huge piece of work. The audit history goes to a different place, a data warehouse. There are two kinds of data
+warehouse: one where users put their own data (project specific, above), and **the platform's and engine's own**, where
+we log everything and trace — for our own analytics, to see how things work and which agent did what. Some actions go
+through a Durable Object, which records them; some happen in the engine, which records them separately. Proper
+observability, **through Cloudflare only** — no third party: their recent products for observability, tracing, SQL over
+R2 (the data lake product), the analytics engine, and stream processing through Workers.
+
+**The design (researched 2026-10-04 — Cloudflare's data stack went GA as "Basin" that week):**
+
+| Purpose | Where |
+|---|---|
+| The audit history — every action, append-only, queryable by SQL for years | Basin Pipelines (a stream, schema-checked) → an Iceberg table in Basin Catalog (R2) → Basin SQL |
+| The project's own record, immediate | the project's Durable Object keeps every audit event in its SQLite, append-only (the stream reaches SQL after 1–5 minutes, and a failed send must not lose an event) |
+| Near-real-time metrics (latency, errors, per project) | Workers Analytics Engine (3 months) |
+| Traces and logs of the Worker and Durable Objects | Workers Traces and Logs (`observability` in wrangler.jsonc; a trace id in every audit event joins the two) |
+
+- **One event shape** (`AuditEvent` in platform-types): who (user, agent key, engine, system), via (ui, admin, cli,
+  engine, api, channel, system), action `<thing>.<verb>`, target, outcome (ok, refused, error), detail (a question's
+  words, an intent's ops, a refusal's reason).
+- **Recorded where it happens:** the ProjectDO records every message a person or agent sends and every change made
+  through the platform's API; the engine records what happens inside it.
+- **The engine's events come in through our own ingest endpoint**, signed with the project's key; the Worker stamps
+  which project and engine sent them (never trusting the body), checks them against the schema (a stream drops a bad
+  event silently), and writes them to the same stream. Engines buffer and retry; `id` makes a retry harmless.
+- Writers hold only the right to send; nothing at runtime can change or delete the history.
+
 ## The flow
 
 ```
@@ -570,6 +615,10 @@ In scope, beyond what is above:
 
 - **User authorization and the permission system** — users, groups, roles, scopes, owners and admins (above), enforced
   at one place.
+  **In the user's words (2026-10-04):** we need to know the user on everything — without that there is no authorization.
+  Every user has an authorization attached to them, and it is enforced on the data through the SQLGlot (Python)
+  system that already rewrites every query: a user's policy rewrites what their queries may read. So every message
+  reaching the engine names its user, stamped by the hub (never taken from the payload).
 - **Enterprise: single sign-on** — how an organisation adds its own identity provider (see `identity-and-access.md`).
 - **Payment, credits, usage** — a credit system and metering of who uses how much.
 - **The data protocol, fixed for everything** — including many users at once, and showing people what an agent is

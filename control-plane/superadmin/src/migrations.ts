@@ -107,6 +107,20 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     DROP TABLE dashboard_builds;
     ALTER TABLE dashboard_builds_v14 RENAME TO dashboard_builds;
   ` },
+  { id: 15, name: 'agent keys and the audit history', up: `
+    -- Agent API keys (agent-keys.ts): only the hash of a key is kept.
+    CREATE TABLE IF NOT EXISTS agent_keys (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, prefix TEXT NOT NULL, hash TEXT NOT NULL UNIQUE, scopes TEXT NOT NULL,
+      created_by TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT, revoked_at TEXT, revoked_by TEXT, last_used_at TEXT);
+    -- The audit history (audit.ts): append-only, never updated or deleted.
+    CREATE TABLE IF NOT EXISTS audit_log (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, at TEXT NOT NULL, actor_kind TEXT NOT NULL, actor_id TEXT NOT NULL,
+      actor_email TEXT, via TEXT NOT NULL, action TEXT NOT NULL, target TEXT, outcome TEXT NOT NULL, detail TEXT);
+    CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_log(at);
+    CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor_id, at);
+    CREATE TRIGGER IF NOT EXISTS audit_log_no_update BEFORE UPDATE ON audit_log BEGIN SELECT RAISE(ABORT, 'the audit history is append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS audit_log_no_delete BEFORE DELETE ON audit_log BEGIN SELECT RAISE(ABORT, 'the audit history is append-only'); END;
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

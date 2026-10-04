@@ -83,9 +83,11 @@ export function createSessionSeam(d: SessionSeamDeps) {
     return { ...(await r), spec }
   }
 
+  // Who is asking, as the hub stamped it: a person (user:<id>) or an agent key (agent:<keyId>, from the Superatom CLI).
   const userOf = (from: any): string => {
-    if (!from?.userId) throw new SessionSeamRefusal('the hub did not say who is asking')
-    return `user:${from.userId}`
+    const id = from?.userId
+    if (!id || typeof id !== 'string') throw new SessionSeamRefusal('the hub did not say who is asking')
+    return from.type === 'agent' && id.startsWith('agent:') ? id : `user:${id}`
   }
 
   async function sessionRuntime(session: string) {

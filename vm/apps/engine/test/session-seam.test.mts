@@ -84,6 +84,13 @@ test('refused with a sentence: another user, no user, no agent, a broken op, wor
   await ask({ t: 'session:open', session: 's2', agent: 'trips' })
   assert.deepEqual(await ask({ t: 'session:get', session: 's2' }, 'u2'), { t: 'session:refused', reason: 'session s2 is not yours', reqId: undefined })
   assert.equal((await ask({ t: 'session:get', session: 's2' }, null)).reason, 'the hub did not say who is asking')
+  // an agent key is its own identity: it neither sees a person's session nor passes for one
+  const agentOut: any[] = []
+  const agentSeam = createSessionSeam({ projectDir: home, datasource: url, send: (_t, m) => agentOut.push(m) })
+  await agentSeam.handle({ t: 'session:get', session: 's2' }, { type: 'agent', userId: 'agent:key_1' })
+  assert.equal(agentOut.at(-1).reason, 'session s2 is not yours')
+  await agentSeam.handle({ t: 'session:open', session: 'a1', agent: 'trips' }, { type: 'agent', userId: 'agent:key_1' })
+  assert.equal(agentOut.at(-1).view.user, 'agent:key_1')
   assert.equal((await ask({ t: 'session:open', session: 's3', agent: 'nobody' })).reason, 'there is no agent "nobody"')
   assert.match((await ask({ t: 'session:open', session: 's3', agent: 'broken' })).reason, /^agents\/broken.json: agent.name is required/)
   assert.match((await ask({ t: 'session:intent', session: 's2', ops: [{ op: 'set', path: 'trips.branch', value: 7 }], to: 'current' })).reason, /trips.branch/)

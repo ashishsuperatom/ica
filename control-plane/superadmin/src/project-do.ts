@@ -24,6 +24,9 @@ import { receiver } from '../../../clients/transport.js'
 import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
 import { PROJECT_MIGRATIONS, adoptProjectSchemaVersion } from './migrations.js'
 import { bucketStore } from './parcels.js'
+import { AuditLog } from './audit.js'
+import { AgentKeys, KeyRefusal } from './agent-keys.js'
+import { scopeAllows } from '../../shared/agent-scopes.js'
 
 
 // How long a question queued for a sleeping machine is still worth waking up for. Past this the person has
@@ -39,7 +42,9 @@ const STOP_AFTER_MS    = 24 * 60 * 60 * 1000   // 24 h idle → stop (release th
 interface ConnInfo {
   wsId: string
   type: string       // "code-engine" | "runtime" | "fast-router" | "admin"
-  userId?: string    // only for user connections
+  userId?: string    // only for user connections; an agent key's is `agent:<keyId>`
+  email?: string     // the person's address, from their token (for the audit history)
+  scopes?: string[]  // an agent key's scopes (shared/agent-scopes.ts)
   orgRole?: string   // "admin" | "member" — from JWT, used for persona enforcement
   instanceId?: string // singleton identity: which process this connection belongs to (stable per boot)
   epoch?: number     // singleton generation: the process boot time — a NEWER process has a higher epoch
@@ -48,7 +53,8 @@ interface ConnInfo {
 
 interface Envelope {
   to?: { id?: string; type: string; channel?: string }   // channel: agent-log fan-out (the engine LABELS, the DO fans to the owner's attached devices)
-  from: { id: string; type: string }
+  // userId: who sent it, stamped by the hub from the connection's credentials — never taken from the payload.
+  from: { id: string; type: string; userId?: string }
   payload: unknown
 }
 
@@ -167,10 +173,14 @@ export class ProjectDO extends DurableObject<Env> {
   // Durable per-user answer buffer + session snapshot — all storage logic lives in answer-buffer.ts; the DO
   // only wires it to transport (relay) and its migration ladder.
   private buffer: AnswerBuffer
+  private audit: AuditLog
+  private agentKeys: AgentKeys
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
     this.buffer = new AnswerBuffer(this.ctx.storage.sql, (e, d) => this.log(e, d))
+    this.audit = new AuditLog(this.ctx.storage.sql as any, () => this._pid ?? '', { stream: (env as any).AUDIT, metrics: (env as any).METRICS, warn: (m) => this.log('audit:send_failed', { message: m }) })
+    this.agentKeys = new AgentKeys(this.ctx.storage.sql as any, () => this._pid ?? '')
     // KEEPALIVE, ANSWERED AT THE EDGE. A client that sits idle — the engine between questions — has its socket
     // closed by the edge, seen as a clean register followed by a 1006 every half-minute or so. The cure is a
     // periodic frame, and Cloudflare provides exactly this pair for it: a literal `ping` is answered `pong`
@@ -219,6 +229,7 @@ export class ProjectDO extends DurableObject<Env> {
     const url  = new URL(request.url)
     const path = url.pathname
     const wsm = path.match(/^\/_ws\/([^/?]+)/); if (wsm) this._pid = decodeURIComponent(wsm[1])   // learn our project id
+    const hp = request.headers.get('x-sa-project'); if (hp && /^[0-9a-f-]{36}$/.test(hp)) this._pid = hp   // …or from the worker's forward
 
     // WebSocket upgrade — ALWAYS accept (return 101). A Durable Object cannot return a
     // non-101 status from a WS upgrade (Cloudflare fails the upgrade entirely and the
@@ -250,6 +261,9 @@ export class ProjectDO extends DurableObject<Env> {
       if (request.method === 'PUT')    return this.setDashboardBuild(id, request)
       if (request.method === 'DELETE') return this.deleteDashboard(id)
     }
+
+    // ── Agent API keys and the audit history (the worker authorises the caller as the project's admin) ──
+    if (path === '/agent-keys' || path.startsWith('/agent-keys/') || path === '/audit') return this.agentKeysAndAudit(request, path)
 
     if (request.method === 'GET'  && path === '/debug')        return this.debugInfo()
     if (request.method === 'POST' && path === '/members')      return this.addMember(request)
@@ -481,6 +495,19 @@ export class ProjectDO extends DurableObject<Env> {
       return
     }
 
+    // ── An agent (the Superatom CLI), with an agent API key made by the project's admin ──
+    if (role === 'agent') {
+      const v = key ? await this.agentKeys.verify(String(key)) : { ok: false as const, reason: 'no key' }
+      if (!v.ok) {
+        this.audit.record({ actor: { kind: 'agent', id: `key:${String(key ?? '').slice(0, 47) || 'none'}` }, via: 'cli', action: 'agent.connect', outcome: 'refused', detail: { reason: v.reason } })
+        ws.close(4001, `Invalid agent key: ${v.reason}`)
+        return
+      }
+      this.audit.record({ actor: { kind: 'agent', id: `agent:${v.key.id}` }, via: 'cli', action: 'agent.connect', outcome: 'ok', detail: { name: v.key.name, scopes: v.key.scopes } })
+      await this.register(ws, 'agent', `agent:${v.key.id}`, undefined, undefined, undefined, { scopes: v.key.scopes })
+      return
+    }
+
     // ── Auth: Our JWT (browser users, issued by Worker after Clerk login) ───
     if (token) {
       const secret = this.env.JWT_SECRET
@@ -501,7 +528,7 @@ export class ProjectDO extends DurableObject<Env> {
         // Inspector's inspect:req to the engine, and is NOT counted as user activity (watching ≠ using), so it never
         // bumps last_active / extends the idle countdown. It can still wake a suspended machine (see relay()).
         if (claims.role !== 'superadmin') { ws.close(4003, 'Admin surface requires superadmin'); return }
-        this.register(ws, 'admin', claims.userId, claims.role)
+        this.register(ws, 'admin', claims.userId, claims.role, undefined, undefined, { email: claims.email })
         return
       }
 
@@ -519,7 +546,7 @@ export class ProjectDO extends DurableObject<Env> {
       }
       this.markUserActivity()
       this.wakeMachine()
-      this.register(ws, 'runtime', claims.userId, claims.role)
+      this.register(ws, 'runtime', claims.userId, claims.role, undefined, undefined, { email: claims.email })
       return
     }
 
@@ -528,7 +555,7 @@ export class ProjectDO extends DurableObject<Env> {
 
   // Returns true if the connection was registered, false if it was FENCED (rejected — an older/stale
   // singleton connection that a newer instance already superseded). Callers skip post-register work on false.
-  private async register(ws: WebSocket, type: string, userId: string | undefined, orgRole: string | undefined, instanceId?: string, epoch?: number): Promise<boolean> {
+  private async register(ws: WebSocket, type: string, userId: string | undefined, orgRole: string | undefined, instanceId?: string, epoch?: number, extra: { email?: string; scopes?: string[] } = {}): Promise<boolean> {
 
     // Generate wsId
     const wsId = crypto.randomUUID().slice(0, 8)
@@ -563,7 +590,7 @@ export class ProjectDO extends DurableObject<Env> {
 
     // Register
     this.wsById.set(wsId, ws)
-    const conn: ConnInfo = { wsId, type, userId, orgRole, instanceId, epoch }
+    const conn: ConnInfo = { wsId, type, userId, orgRole, instanceId, epoch, ...(extra.email ? { email: extra.email } : {}), ...(extra.scopes ? { scopes: extra.scopes } : {}) }
     this.connByWs.set(ws, conn)
     ws.serializeAttachment(conn)   // survives hibernation → hydrate() rebuilds the Maps after a wake/deploy
     if (singleton) this.roleRegistry.set(type, wsId)
@@ -637,6 +664,67 @@ export class ProjectDO extends DurableObject<Env> {
     })
   }
 
+  // ── The audit history ──────────────────────────────────────────────────────
+  // What a message means, for the record: its action and what it carried. Liveness and screen bookkeeping are not
+  // actions (pings, resizes, keystrokes into a terminal, sync pulls); everything else is recorded.
+  private static NOT_ACTIONS = new Set(['tick', 'ping', 'ui:resize', 'term:input', 'term:detach', 'sync:req', 'answer:get', 'answer:ack', 'log:attach', 'log:detach', 'suggestions:req', 'suggest', 'sessions:list', 'analyst:sync', 'session:file'])
+  private auditMessage(sender: ConnInfo, pl: any, outcome: 'ok' | 'refused', reason?: string) {
+    const t = String(pl?.t ?? '')
+    if (outcome === 'ok' && ProjectDO.NOT_ACTIONS.has(t)) return
+    const actor = sender.type === 'agent'
+      ? { kind: 'agent' as const, id: sender.userId ?? 'agent:unknown' }
+      : { kind: 'user' as const, id: sender.userId ?? 'unknown', ...(sender.email ? { email: sender.email } : {}) }
+    const via = sender.type === 'agent' ? 'cli' as const : sender.type === 'admin' ? 'admin' as const : 'ui' as const
+    const action = t === 'analyse' ? 'question.ask' : t ? `message.${t.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}` : 'message.untyped'
+    const detail: Record<string, unknown> = {}
+    if (t === 'analyse') { detail.question = String(pl.question ?? '').slice(0, 4000); if (pl.sessionId) detail.session = String(pl.sessionId); if (pl.questionId) detail.qid = String(pl.questionId) }
+    else if (t.startsWith('session:')) { for (const k of ['session', 'agent', 'block', 'to', 'ops', 'action', 'call', 'asOf']) if (pl[k] !== undefined) detail[k] = pl[k] }
+    if (reason) detail.reason = reason
+    try { this.audit.record({ actor, via, action, ...(pl?.session || pl?.sessionId ? { target: String(pl.session ?? pl.sessionId) } : {}), outcome, ...(Object.keys(detail).length ? { detail } : {}) }) }
+    catch (e: any) { this.log('audit:refused', { message: e?.message ?? String(e) }) }
+  }
+
+  /** Agent keys (list, create, revoke) and the audit history (read; record what the worker did). The worker has
+   *  already checked the caller administers this project and says who they are (`by`). */
+  private async agentKeysAndAudit(request: Request, path: string): Promise<Response> {
+    const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
+    const body: any = request.method === 'GET' ? {} : await request.json().catch(() => ({}))
+    const by = String(body.by ?? new URL(request.url).searchParams.get('by') ?? '')
+    const admin = { kind: 'user' as const, id: by || 'unknown', ...(by.includes('@') ? { email: by } : {}) }
+    try {
+      if (path === '/audit' && request.method === 'GET') {
+        const q = new URL(request.url).searchParams
+        return json({ events: this.audit.list({ limit: Number(q.get('limit')) || undefined, before: q.get('before') ?? undefined, actor: q.get('actor') ?? undefined, action: q.get('action') ?? undefined }) })
+      }
+      if (path === '/audit' && request.method === 'POST') {
+        // What the worker did for someone through the platform's API (a change to the project), or an engine's event.
+        const e = this.audit.record({ actor: body.actor ?? admin, via: body.via ?? 'api', action: String(body.action ?? ''), ...(body.target ? { target: String(body.target) } : {}), outcome: body.outcome ?? 'ok', ...(body.detail ? { detail: body.detail } : {}), ...(body.id ? { id: String(body.id) } : {}), ...(body.at ? { at: String(body.at) } : {}) })
+        return json({ event: e }, 201)
+      }
+      if (path === '/agent-keys' && request.method === 'GET') return json({ keys: this.agentKeys.list() })
+      if (path === '/agent-keys' && request.method === 'POST') {
+        if (!by) return json({ error: 'who is creating the key?' }, 400)
+        const r = await this.agentKeys.create({ name: body.name, scopes: body.scopes, by, expiresAt: body.expiresAt ?? null })
+        this.audit.record({ actor: admin, via: 'admin', action: 'agent-key.create', target: r.record.id, outcome: 'ok', detail: { name: r.record.name, scopes: r.record.scopes, expires_at: r.record.expires_at } })
+        return json(r, 201)
+      }
+      const m = path.match(/^\/agent-keys\/([\w-]+)$/)
+      if (m && request.method === 'DELETE') {
+        if (!by) return json({ error: 'who is revoking the key?' }, 400)
+        const k = this.agentKeys.revoke(m[1], by)
+        this.audit.record({ actor: admin, via: 'admin', action: 'agent-key.revoke', target: k.id, outcome: 'ok', detail: { name: k.name } })
+        // A revoked key's open connections end now, not at their next reconnect.
+        for (const [ws, conn] of this.connByWs) if (conn.type === 'agent' && conn.userId === `agent:${k.id}`) { try { ws.close(4001, 'The agent key was revoked') } catch { /* closing */ } }
+        return json({ key: k })
+      }
+      return json({ error: 'not found' }, 404)
+    } catch (e: any) {
+      if (e instanceof KeyRefusal) return json({ error: e.message }, 400)
+      if (/audit event refused/.test(e?.message ?? '')) return json({ error: e.message }, 400)
+      throw e
+    }
+  }
+
   // ── Message relay ──────────────────────────────────────────────────────────
 
   private async relay(senderWs: WebSocket, sender: ConnInfo, msg: any) {
@@ -654,7 +742,18 @@ export class ProjectDO extends DurableObject<Env> {
     // they pass through so an offline client can recover them. All user-scoped by the runtime's JWT userId.
     const pl = msg.payload || {}
     const hubReply = (payload: any) => senderWs.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload }))
-    const envelope: Envelope = { from: { id: sender.wsId, type: sender.type }, payload: msg.payload }   // built once — reused by the base routing below AND the fan-out
+    const envelope: Envelope = { from: { id: sender.wsId, type: sender.type, ...(sender.userId ? { userId: sender.userId } : {}) }, payload: msg.payload }   // built once — reused by the base routing below AND the fan-out
+    // ── The audit history: everything a person or an agent sends, and every refusal ──
+    if (sender.type === 'agent') {
+      const toType = (msg.to as any)?.type
+      if (toType !== 'code-engine' || !scopeAllows(sender.scopes ?? [], String(pl.t ?? ''))) {
+        const reason = toType !== 'code-engine' ? 'an agent talks only to the engine' : `this key's scopes (${(sender.scopes ?? []).join(', ') || 'none'}) do not allow ${String(pl.t ?? '(no type)')}`
+        this.auditMessage(sender, pl, 'refused', reason)
+        hubReply({ t: 'error', source: 'hub', reason, reqId: pl.reqId })
+        return
+      }
+    }
+    if (sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent') this.auditMessage(sender, pl, 'ok')
     if (sender.type === 'runtime') {
       if (pl.t === 'sync:req')   { hubReply(this.buffer.sync(sender.userId || '')); return }
       if (pl.t === 'answer:get') { hubReply(this.buffer.get(sender.userId || '', pl.qid)); return }

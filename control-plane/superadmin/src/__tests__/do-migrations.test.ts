@@ -68,30 +68,30 @@ beforeAll(async () => {
 afterAll(async () => { await mf?.dispose() })
 
 describe('Durable Object migrations, in real DO SQLite', () => {
-  it('a new ProjectDO gets all 14 migrations, the roles seeded', async () => {
-    expect(await ask({ do: 'fresh', step: 'migrate', kind: 'project' })).toEqual({ applied: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], current: 14 })
+  it('a new ProjectDO gets all 15 migrations, the roles seeded', async () => {
+    expect(await ask({ do: 'fresh', step: 'migrate', kind: 'project' })).toEqual({ applied: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], current: 15 })
     const look = await ask({ do: 'fresh', step: 'look' })
     expect(look.migrations.every(([, how]: any) => how === 'ran')).toBe(true)
     expect(look.roles).toEqual(['admin', 'member', 'viewer'])
-    for (const t of ['fly_machine', 'answer_buffer', 'access', 'dashboards', 'dashboard_builds', 'engine_running', 'profile']) expect(look.tables).toContain(t)
+    for (const t of ['fly_machine', 'answer_buffer', 'access', 'dashboards', 'dashboard_builds', 'engine_running', 'profile', 'agent_keys', 'audit_log']) expect(look.tables).toContain(t)
     expect(look.tables).not.toContain('dashboard_builds_v14')
   })
 
   it('a reopen with nothing pending applies nothing', async () => {
-    expect(await ask({ do: 'fresh', step: 'migrate', kind: 'project' })).toEqual({ applied: [], current: 14 })
+    expect(await ask({ do: 'fresh', step: 'migrate', kind: 'project' })).toEqual({ applied: [], current: 15 })
   })
 
-  it('a ProjectDO the old ladder left at version 6 is adopted there: only 7–14 run', async () => {
+  it('a ProjectDO the old ladder left at version 6 is adopted there: only 7–15 run', async () => {
     await ask({ do: 'legacy6', step: 'legacy-project', n: 6 })
-    expect(await ask({ do: 'legacy6', step: 'migrate', kind: 'project' })).toEqual({ applied: [7, 8, 9, 10, 11, 12, 13, 14], current: 14 })
+    expect(await ask({ do: 'legacy6', step: 'migrate', kind: 'project' })).toEqual({ applied: [7, 8, 9, 10, 11, 12, 13, 14, 15], current: 15 })
     const look = await ask({ do: 'legacy6', step: 'look' })
     expect(look.migrations.slice(0, 6).every(([, how]: any) => how === 'adopted')).toBe(true)
     expect(look.migrations.slice(6).every(([, how]: any) => how === 'ran')).toBe(true)
   })
 
-  it('a ProjectDO already at version 14 is adopted whole: nothing runs', async () => {
+  it('a ProjectDO the old ladder left at 14 is adopted whole: only 15 runs', async () => {
     await ask({ do: 'legacy14', step: 'legacy-project', n: 14 })
-    expect(await ask({ do: 'legacy14', step: 'migrate', kind: 'project' })).toEqual({ applied: [], current: 14 })
+    expect(await ask({ do: 'legacy14', step: 'migrate', kind: 'project' })).toEqual({ applied: [15], current: 15 })
   })
 
   it('an OrgDO from before the deleted column is adopted: the column added, its rows kept', async () => {
