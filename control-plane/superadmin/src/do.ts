@@ -309,11 +309,42 @@ export class OrgDO extends DurableObject<Env> {
       createRecorder((this.env as any).RECORDS, () => 'platform')('credit', `grant:${at}`, { kind: 'grant', amount_micro: Math.round(amount * 1_000_000), note: b.note ?? null, by: b.by, org: this.ctx.id.toString() }, at)
       return Response.json({ ok: true }, { status: 201 })
     }
+    // Budgets: credits a person (email:<address>) or group (group:<name>) may spend in a period (month or total).
+    if (path === '/credits/budgets' && request.method === 'GET') {
+      const rows = [...sql.exec('SELECT b.* FROM budgets b WHERE b.seq = (SELECT MAX(seq) FROM budgets WHERE subject = b.subject) ORDER BY subject')] as any[]
+      return Response.json({ budgets: rows.filter((r) => r.credits_micro >= 0) })
+    }
+    if (path === '/credits/budgets' && request.method === 'POST') {
+      const subject = String(b?.subject ?? '').toLowerCase()
+      if (!/^(email:[^\s@]+@[^\s@]+|group:[a-z][a-z0-9-]*)$/.test(subject)) return Response.json({ error: 'a budget is for email:<address> or group:<name>' }, { status: 400 })
+      const credits = Number(b?.credits)
+      if (!Number.isFinite(credits) || (credits < 0 && credits !== -1)) return Response.json({ error: 'a budget is a number of credits, 0 or more (remove it with -1)' }, { status: 400 })
+      const period = b?.period === 'total' ? 'total' : 'month'
+      if (!b?.by) return Response.json({ error: 'who is setting the budget?' }, { status: 400 })
+      sql.exec('INSERT INTO budgets (subject, credits_micro, period, by, at) VALUES (?, ?, ?, ?, ?)', subject, credits === -1 ? -1 : Math.round(credits * 1_000_000), period, String(b.by), new Date().toISOString())
+      return Response.json({ ok: true }, { status: 201 })
+    }
+    // What a person may still spend: their own budget and each of their groups', against what is attributed to them.
+    if (path === '/credits/allowance' && request.method === 'POST') {
+      const subjects: string[] = [String(b?.email ? `email:${String(b.email).toLowerCase()}` : ''), ...((b?.groups ?? []) as string[]).map((g) => `group:${g}`)].filter(Boolean)
+      const month = new Date().toISOString().slice(0, 7)
+      const refusals: string[] = []
+      for (const subject of subjects) {
+        const [bud] = [...sql.exec('SELECT credits_micro, period FROM budgets WHERE subject = ? ORDER BY seq DESC LIMIT 1', subject)] as any[]
+        if (!bud || bud.credits_micro < 0) continue
+        const who = subject.startsWith('email:') ? [subject] : ((b?.members ?? {})[subject] ?? [])
+        if (!who.length) continue
+        const marks = who.map(() => '?').join(', ')
+        const spent = -Number(([...sql.exec(`SELECT COALESCE(SUM(amount_micro), 0) AS v FROM credit_ledger WHERE kind = 'usage' AND principal IN (${marks})${bud.period === 'month' ? ' AND substr(at, 1, 7) = ?' : ''}`, ...who, ...(bud.period === 'month' ? [month] : []))][0] as any)?.v ?? 0)
+        if (spent >= bud.credits_micro) refusals.push(`${subject.replace(/^email:/, '')} has used its ${bud.period === 'month' ? 'monthly ' : ''}budget of ${bud.credits_micro / 1_000_000} credits`)
+      }
+      return Response.json(refusals.length ? { ok: false, reason: refusals.join('; ') } : { ok: true })
+    }
     if (request.method === 'POST' && path === '/credits/usage') {
       const micro = Math.round(Number(b?.credits_micro))
       if (!(micro >= 0) || !b?.project) return Response.json({ error: 'usage names its project and its cost in micro-credits' }, { status: 400 })
       if (micro > 0) {
-        sql.exec("INSERT INTO credit_ledger (at, kind, amount_micro, project, by) VALUES (?, 'usage', ?, ?, ?)", b.at ?? new Date().toISOString(), -micro, String(b.project), `project:${b.project}`)
+        sql.exec("INSERT INTO credit_ledger (at, kind, amount_micro, project, by, principal) VALUES (?, 'usage', ?, ?, ?, ?)", b.at ?? new Date().toISOString(), -micro, String(b.project), `project:${b.project}`, b.principal ?? null)
         createRecorder((this.env as any).RECORDS, () => String(b.project))('credit', `usage:${b.at ?? Date.now()}`, { kind: 'usage', amount_micro: -micro, org: this.ctx.id.toString() }, b.at)
       }
       return Response.json({ ok: true })

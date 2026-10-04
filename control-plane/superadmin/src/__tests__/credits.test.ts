@@ -39,13 +39,13 @@ beforeAll(async () => {
 }, 60_000)
 afterAll(async () => { await mf?.dispose() })
 
-async function ask(token: string) {
+async function ask(token: string, sessionId?: string) {
   const r = await mf.dispatchFetch(`http://x/_ws/${PID}`, { headers: { upgrade: 'websocket' } })
   const ws = r.webSocket!; const got: any[] = []
   ws.addEventListener('message', (e: any) => got.push(JSON.parse(String(e.data)))); ws.accept()
   ws.send(JSON.stringify({ type: 'hello', role: 'runtime', token }))
   for (let i = 0; i < 100 && !got.some((m) => m.payload?.t === 'welcome'); i++) await new Promise((r) => setTimeout(r, 20))
-  ws.send(JSON.stringify({ to: { type: 'code-engine' }, payload: { t: 'analyse', question: 'q', reqId: 'r1' } }))
+  ws.send(JSON.stringify({ to: { type: 'code-engine' }, payload: { t: 'analyse', question: 'q', reqId: 'r1', ...(sessionId ? { sessionId } : {}) } }))
   for (let i = 0; i < 50 && !got.some((m) => m.payload?.reqId === 'r1' || m.payload?.source === 'compute'); i++) await new Promise((r) => setTimeout(r, 20))
   return got.find((m) => m.payload?.reqId === 'r1')?.payload ?? got.find((m) => m.payload?.source === 'compute')?.payload
 }
@@ -75,5 +75,22 @@ describe('usage and credits', () => {
     expect(events.find((e: any) => e.action === 'question.ask' && e.outcome === 'refused').detail.reason).toMatch(/used all its credits/)
     await at('/org/credits/grant', { method: 'POST', body: JSON.stringify({ credits: 10, by: 'root@x.io' }) })
     expect((await at('/org/credits')).body.balance_micro).toBe(9_000_000)
+  })
+})
+
+describe('credit assignment within the organisation', () => {
+  it('usage tagged with a session is attributed to its owner; a person over their budget is refused', async () => {
+    await at('/org/credits/grant', { method: 'POST', body: JSON.stringify({ credits: 1000, by: 'root@x.io' }) })   // the org has plenty
+    const lee = jwt({ userId: 'lee', email: 'lee@x.io', role: 'superadmin' })
+    await ask(lee, 'ses-lee')                                                                 // the hub learns ses-lee is lee's
+    const r = await at('/do/usage', { method: 'POST', body: JSON.stringify({ provider: 'opencode-go', model: 'm', in: 1_000_000, out: 0, session: 'ses-lee' }) })
+    expect(r.body.credits_micro).toBe(2_000_000)
+    expect((await at('/org/credits/budgets', { method: 'POST', body: JSON.stringify({ subject: 'email:lee@x.io', credits: 1, by: 'admin@x.io' }) })).status).toBe(201)
+    expect((await at('/org/credits/budgets')).body.budgets).toEqual([expect.objectContaining({ subject: 'email:lee@x.io', credits_micro: 1_000_000, period: 'month' })])
+    expect(await ask(lee, 'ses-lee')).toMatchObject({ source: 'credits', reason: 'lee@x.io has used its monthly budget of 1 credits' })
+    const kim = jwt({ userId: 'kim', email: 'kim@x.io', role: 'superadmin' })
+    expect((await ask(kim, 'ses-kim'))?.source).not.toBe('credits')                          // others are not affected
+    await at('/org/credits/budgets', { method: 'POST', body: JSON.stringify({ subject: 'email:lee@x.io', credits: -1, by: 'admin@x.io' }) })   // budget removed
+    expect((await ask(lee, 'ses-lee'))?.source).not.toBe('credits')
   })
 })

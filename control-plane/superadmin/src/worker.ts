@@ -673,7 +673,12 @@ export default {
       if (request.method !== 'GET' && oa.level === 'member') return new Response('forbidden', { status: 403 })
       // Credits are granted by the platform alone (an organisation granting itself credits would be free money), and
       // usage is posted only by its own projects' DOs.
-      if (path === '/api/credits/usage') return new Response('not found', { status: 404 })
+      if (path === '/api/credits/usage' || path === '/api/credits/allowance') return new Response('not found', { status: 404 })
+      // Budgets are the organisation admin's to set (assigning credits it was given); members may read them.
+      if (path === '/api/credits/budgets' && request.method === 'POST') {
+        const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by: oa.email ?? 'admin' })
+        return env.ORG.get(env.ORG.idFromName(orgId)).fetch(new Request('https://do/credits/budgets', { method: 'POST', headers: { 'content-type': 'application/json' }, body }))
+      }
       if (path === '/api/credits/grant') {
         const su = await requireSuperadmin(request, env)
         if (!su) return new Response('only the platform grants credits', { status: 403 })

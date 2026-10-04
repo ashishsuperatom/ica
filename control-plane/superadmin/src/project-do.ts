@@ -859,13 +859,16 @@ export class ProjectDO extends DurableObject<Env> {
     const price = priceFor(await this.priceList(), String(b.provider ?? ''), b.model ? String(b.model) : undefined)
     const micro = costOf(price, tin, tout)
     const at = new Date().toISOString()
-    this.ctx.storage.sql.exec('INSERT INTO usage_events (at, kind, provider, model, key_id, tokens_in, tokens_out, ms, credits_micro, priced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      at, 'model.tokens', b.provider ?? null, b.model ?? null, b.keyId ?? null, tin, tout, Number(b.ms) || null, micro, price ? 1 : 0)
+    // Who it was for, when the call said which session it served (the proxy path's session tag).
+    const owner = b.session ? ([...this.ctx.storage.sql.exec('SELECT principal, email FROM session_owners WHERE session = ?', String(b.session))][0] as any) : null
+    const principal = owner ? (owner.email ? `email:${String(owner.email).toLowerCase()}` : owner.principal) : null
+    this.ctx.storage.sql.exec('INSERT INTO usage_events (at, kind, provider, model, key_id, tokens_in, tokens_out, ms, credits_micro, priced, principal, session) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      at, 'model.tokens', b.provider ?? null, b.model ?? null, b.keyId ?? null, tin, tout, Number(b.ms) || null, micro, price ? 1 : 0, principal, b.session ?? null)
     const seq = Number(([...this.ctx.storage.sql.exec('SELECT last_insert_rowid() AS id')][0] as any)?.id ?? 0)
     this.record('usage', String(seq), { at, provider: b.provider ?? null, model: b.model ?? null, key_id: b.keyId ?? null, tokens_in: tin, tokens_out: tout, ms: Number(b.ms) || null, credits_micro: micro, priced: !!price }, at)
     const org = await this.orgId()
     if (org && micro > 0) {
-      await this.env.ORG.get(this.env.ORG.idFromName(org)).fetch('http://do/credits/usage', { method: 'POST', body: JSON.stringify({ project: this._pid, credits_micro: micro, at }) }).catch(() => {})
+      await this.env.ORG.get(this.env.ORG.idFromName(org)).fetch('http://do/credits/usage', { method: 'POST', body: JSON.stringify({ project: this._pid, credits_micro: micro, at, principal }) }).catch(() => {})
       if (this.creditCache) this.creditCache.balance -= micro
     }
     return this.j({ ok: true, credits_micro: micro, priced: !!price })
@@ -876,6 +879,17 @@ export class ProjectDO extends DurableObject<Env> {
       SUM(credits_micro) AS credits_micro, SUM(1 - priced) AS unpriced FROM usage_events WHERE at >= ? GROUP BY day, provider, model ORDER BY day DESC`, since)]
     return this.j({ since, usage: rows })
   }
+  /** May this person still spend? Their own budget and their groups', against the usage attributed to them. */
+  private async budgetLeft(c: ConnInfo): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const org = await this.orgId()
+    if (!org || !c.email) return { ok: true }
+    const groups = [...this.ctx.storage.sql.exec('SELECT grp FROM group_members WHERE member = ?', `email:${c.email.toLowerCase()}`)].map((r: any) => String(r.grp))
+    const members: Record<string, string[]> = {}
+    for (const g of groups) members[`group:${g}`] = [...this.ctx.storage.sql.exec("SELECT member FROM group_members WHERE grp = ? AND member LIKE 'email:%'", g)].map((r: any) => String(r.member))
+    try { return await (await this.env.ORG.get(this.env.ORG.idFromName(org)).fetch('http://do/credits/allowance', { method: 'POST', body: JSON.stringify({ email: c.email, groups, members }) })).json() as any }
+    catch { return { ok: true } }   // the ledger unreachable: do not stop work over a check that could not be made
+  }
+
   /** May this organisation still spend? Only an organisation on a credit plan (given credits) is ever limited. The
    *  balance is cached only while there are credits left (and decremented by each use recorded here); "no plan" and
    *  "used up" are always asked again, so a grant counts from the next piece of work. */
@@ -1231,8 +1245,16 @@ export class ProjectDO extends DurableObject<Env> {
         return
       }
     }
-    // Work that spends (a question, a session intent) needs credits left, for an organisation on a credit plan.
+    // Each session's owner, as their messages pass — so usage tagged with a session is attributed to them.
+    if ((pl.t === 'analyse' || pl.t?.startsWith?.('session:')) && (pl.sessionId || pl.session) && (sender.type === 'runtime' || sender.type === 'agent')) {
+      const who = this.principalOf(sender)
+      if (who) this.ctx.storage.sql.exec('INSERT OR IGNORE INTO session_owners (session, principal, email, first_seen) VALUES (?, ?, ?, ?)', String(pl.sessionId ?? pl.session), who, sender.email ?? null, new Date().toISOString())
+    }
+    // Work that spends (a question, a session intent) needs credits left, for an organisation on a credit plan — and,
+    // for a person with a budget (theirs or a group's), budget left.
     if ((pl.t === 'analyse' || pl.t === 'session:intent') && (sender.type === 'runtime' || sender.type === 'agent')) {
+      const b = await this.budgetLeft(sender)
+      if (!b.ok) { this.auditMessage(sender, pl, 'refused', b.reason); hubReply({ t: 'error', source: 'credits', reason: b.reason, reqId: pl.reqId }); return }
       const c = await this.creditsLeft()
       if (!c.ok) { this.auditMessage(sender, pl, 'refused', c.reason); hubReply({ t: 'error', source: 'credits', reason: c.reason, reqId: pl.reqId }); return }
     }

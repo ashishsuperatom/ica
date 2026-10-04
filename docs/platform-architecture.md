@@ -423,6 +423,13 @@ the platform is for that one engine when its machine is replaced (a new box, a l
 - **Credits per organisation:** an append-only ledger in its OrgDO — grants (+, by the platform only) and its projects'
   usage (−), in integer micro-credits. An organisation never given credits is not on a plan and is not limited; one
   that has used them all is refused new questions and session intents with a sentence, recorded in the audit history.
+- **Credit assignment (built 2026-10-05):** an organisation admin gives a person (`email:`) or a group (`group:`) a
+  budget of credits (per month or in total; every change kept). The hub records each session's owner as their messages
+  pass; usage tagged with a session is attributed to its owner in the project's usage and the organisation's ledger;
+  a person over their own or a group's budget is refused new questions and session intents, with a sentence.
+  *Next:* every model call tagged with the session it served — the proxy path `/p/<project>/s/<session>/<provider>/…`,
+  set per session by the engine for each harness — so all usage is attributed (today it is attributed only when the
+  session is named).
 - **Payment through Stripe (the user, 2026-10-05).** *Planned:* a Stripe checkout that adds credits (its webhook
   writing a grant to the organisation's ledger, recorded in the audit history), invoices, per-plan limits, and metering
   beyond model tokens (engine time, queries).

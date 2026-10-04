@@ -47,6 +47,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - The hub stamps who sent every message, so the engine always knows the user.
 - Audit history in each project's Durable Object, from one path only: every message through its relay and every HTTP call through its one gate, recorded once (specific event or the call itself); append-only.
 - Background work visible: program builds and session runs reported as activities (running, done, failed), kept by the hub and sent to their owner and admins; listed on reconnect and by `sacli activity`.
+- Credit assignment: budgets for people and groups within an organisation (monthly or total), usage attributed to a session's owner, people over budget refused new work.
 - Usage metering and credits: every model call's tokens kept per project and priced from the platform's price list (versions kept); an append-only credit ledger per organisation (grants by the platform, debits by usage); work refused, with a sentence, when an organisation on a plan has used its credits.
 - Enterprise sign-in provisioned on first arrival: a project lets a verified company domain in with a role (never admin, never a public mail domain), the grant audited; the identity provider itself is connected in Clerk.
 - Connections to other systems, one thing in two kinds — code connectors (our bridges in the engine) and API connectors (HTTP APIs, MCP servers): a registry of connectors with their forms; connections shared by the project (admins) or a person's own; secrets sealed with the platform's master key, never shown again, handed to the engine only when it runs them (a personal one only for its owner); the engine's own sources listed beside them; a Connections page in the user UI.
@@ -102,6 +103,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Sandboxing agents so their tools cannot bypass data access deliberately (dynamic workers).
 - Engine bridges for the SQL Server, Postgres and REST connectors run from a connection's settings; API and MCP connections in the data source index; organisation-level connections across projects; hundreds more connectors.
 - SCIM directory sync and deprovisioning from the identity provider.
+- Every model call tagged with the session it served (proxy path), so all usage is attributed to a person.
 - Payment through Stripe (a checkout whose webhook adds credits), invoices and per-plan limits; metering engine time and queries.
 - The data protocol for many users at once (fairness and queueing across users); activities in the user UI.
 - The platform's own data warehouse: every DO's records in one Basin, queryable with SQL (customer warehouses stopped: Pipelines' 20-per-account limit).

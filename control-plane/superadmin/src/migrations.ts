@@ -185,6 +185,13 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     -- listed beside the connections people add. Their secrets stay with the engine.
     CREATE TABLE IF NOT EXISTS engine_sources (id TEXT PRIMARY KEY, kind TEXT, dialect TEXT, description TEXT, ready INTEGER NOT NULL DEFAULT 0, reported_at TEXT NOT NULL);
   ` },
+  { id: 25, name: 'usage attributed', up: `
+    -- Who a metered use was for, when it is known (a session's owner); and which session asked.
+    ALTER TABLE usage_events ADD COLUMN principal TEXT;
+    ALTER TABLE usage_events ADD COLUMN session TEXT;
+    -- Each session's owner, as the hub relays their messages — so usage tagged with a session is someone's.
+    CREATE TABLE IF NOT EXISTS session_owners (session TEXT PRIMARY KEY, principal TEXT NOT NULL, email TEXT, first_seen TEXT NOT NULL);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */
@@ -222,6 +229,14 @@ export const ORG_MIGRATIONS: Migration[] = [
       amount_micro INTEGER NOT NULL, project TEXT, note TEXT, by TEXT NOT NULL);
     CREATE TRIGGER IF NOT EXISTS credit_no_update BEFORE UPDATE ON credit_ledger BEGIN SELECT RAISE(ABORT, 'the credit ledger is append-only'); END;
     CREATE TRIGGER IF NOT EXISTS credit_no_delete BEFORE DELETE ON credit_ledger BEGIN SELECT RAISE(ABORT, 'the credit ledger is append-only'); END;
+  ` },
+  { id: 3, name: 'budgets', up: `
+    -- Credit assignment within the organisation (metering.ts): how many credits a person or a group may spend in a
+    -- period. A budget is replaced by setting it again; every change is kept.
+    CREATE TABLE IF NOT EXISTS budgets (seq INTEGER PRIMARY KEY AUTOINCREMENT, subject TEXT NOT NULL, credits_micro INTEGER NOT NULL, period TEXT NOT NULL, by TEXT NOT NULL, at TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS idx_budgets_subject ON budgets(subject, seq);
+    -- Usage attributed to a person, when it is known (the usage ledger's debits carry who).
+    ALTER TABLE credit_ledger ADD COLUMN principal TEXT;
   ` },
 ]
 
