@@ -423,8 +423,9 @@ the platform is for that one engine when its machine is replaced (a new box, a l
 - **Credits per organisation:** an append-only ledger in its OrgDO — grants (+, by the platform only) and its projects'
   usage (−), in integer micro-credits. An organisation never given credits is not on a plan and is not limited; one
   that has used them all is refused new questions and session intents with a sentence, recorded in the audit history.
-- *Planned:* payment (a checkout that adds credits), invoices, per-plan limits, and metering beyond model tokens
-  (engine time, queries).
+- **Payment through Stripe (the user, 2026-10-05).** *Planned:* a Stripe checkout that adds credits (its webhook
+  writing a grant to the organisation's ledger, recorded in the audit history), invoices, per-plan limits, and metering
+  beyond model tokens (engine time, queries).
 
 ### Decision state
 

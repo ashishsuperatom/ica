@@ -94,7 +94,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Governance beyond the graph: hierarchical admins (program, group, global) and granting access.
 - Data access for the agents' own tools in a chat (a per-session token), and an admin console panel for policies.
 - SCIM directory sync and deprovisioning from the identity provider.
-- Payment (a checkout that adds credits), invoices and per-plan limits; metering engine time and queries.
+- Payment through Stripe (a checkout whose webhook adds credits), invoices and per-plan limits; metering engine time and queries.
 - The data protocol for many users at once, and for showing what agents are doing in the background.
 - A data warehouse like Fabric or Databricks, on both the engine and the Durable Object side (R2 SQL).
 - Data sources as templates copied per project, with dialect code moved out of the platform.
