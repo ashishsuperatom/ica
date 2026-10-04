@@ -7,6 +7,12 @@
   // (developers.cloudflare.com/workers/configuration/compatibility-flags) before moving it again.
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
+  // Workers Logs and Traces (Cloudflare's own observability): what the Worker and its Durable Objects log, and traces
+  // of their calls — sampled, kept by Cloudflare for days. The audit history is separate (the AUDIT pipeline).
+  "observability": {
+    "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": true },
+    "traces": { "enabled": true, "head_sampling_rate": 0.1 }
+  },
 
   "durable_objects": {
     "bindings": [
