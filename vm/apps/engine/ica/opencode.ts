@@ -196,6 +196,8 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
   }
   // Poll the session's messages → normalize the assistant parts → emit changed events. This is the live event
   // source (opencode's SSE part stream is broken since 1.14.42, #27966), polled every ~1s during a turn.
+  const stepsCounted = new Set<string>()
+  let turnStartedAt = Number.MAX_SAFE_INTEGER   // no turn yet: nothing is counted
   async function pollMessages(h?: RunHandlers) {
     try {
       const res: any = await client.session.messages({ path: { id: sessionId }, query: { directory: opts.cwd } })
@@ -205,6 +207,13 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
         // ONE opencode session multiplexes MANY questions (its history is the whole session). Attribute a message
         for (const part of (m.parts ?? info.parts ?? [])) {
           const ne = normPart(part); if (ne) emit(ne, h)
+          // EACH MODEL CALL'S TOKENS, as opencode reports them: one step-finish per call, counted once, and only for
+          // messages of the turn in flight (a resumed session's history is never counted again).
+          if (part?.type === 'step-finish' && part.id && !stepsCounted.has(part.id) && (info.time?.created ?? 0) >= turnStartedAt) {
+            stepsCounted.add(part.id)
+            const tk = part.tokens ?? {}
+            opts.onUsage?.({ input: tk.input ?? 0, output: tk.output ?? 0, cacheRead: tk.cache?.read ?? 0, cacheWrite: tk.cache?.write ?? 0, costUsd: part.cost, model: info.modelID ?? modelID })
+          }
         }
       }
     } catch { /* transient — next poll retries */ }
@@ -217,6 +226,7 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
     await ensure()
     activeHandler = h
     const t0 = Date.now()
+    turnStartedAt = t0 - 2_000   // the turn's own messages (allowing for a clock a moment apart)
     let answer = ''
     const poll = setInterval(() => { void pollMessages(h) }, 1000)      // live events via polling (SSE parts broken)
     // The turn ends when its work is done — see `endsWhenDone`. opencode can be told to stop, so it is.
@@ -240,7 +250,6 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
       try {
         const info: any = (res as any)?.data?.info ?? (res as any)?.info
         if (info) { const tk = info.tokens ?? {}
-          opts.onUsage?.({ input: tk.input ?? 0, output: tk.output ?? 0, cacheRead: tk.cache?.read ?? 0, cacheWrite: tk.cache?.write ?? 0, model: modelID })
           console.log(`[oc-usage] ${modelID} in=${tk.input ?? '?'} out=${tk.output ?? '?'} reason=${tk.reasoning ?? 0} cacheR=${tk.cache?.read ?? 0} cacheW=${tk.cache?.write ?? 0} cost=$${info.cost ?? '?'} · "${String(prompt).slice(0, 26).replace(/\s+/g, ' ')}…"`) }
       } catch { /* usage logging is best-effort */ }
     } catch (e: any) { if (!deliverable.arrived()) answer = `opencode error: ${e?.message ?? e}` }

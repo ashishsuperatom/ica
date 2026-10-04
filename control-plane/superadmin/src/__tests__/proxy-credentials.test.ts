@@ -240,6 +240,9 @@ describe('usage parsing', () => {
     expect(usageFrom({ usage: { prompt_tokens: 3, completion_tokens: 4 } })).toEqual({ in: 3, out: 4, cacheRead: 0, cacheWrite: 0 })
     expect(usageFrom({ usage: { input_tokens: 5, output_tokens: 6 } })).toEqual({ in: 5, out: 6, cacheRead: 0, cacheWrite: 0 })
     // cache tokens kept apart: inside prompt_tokens for OpenAI, beside input_tokens for Anthropic
+    // the Responses API: usage inside `response` (its response.completed event), cached tokens inside input_tokens
+    expect(usageFrom({ type: 'response.completed', response: { output: [], usage: { input_tokens: 1200, output_tokens: 90, input_tokens_details: { cached_tokens: 1000 } } } })).toEqual({ in: 200, out: 90, cacheRead: 1000, cacheWrite: 0 })
+    expect(usageFrom({ id: 'resp_1', object: 'response', usage: { input_tokens: 10, output_tokens: 2, input_tokens_details: { cached_tokens: 0 } } })).toEqual({ in: 10, out: 2, cacheRead: 0, cacheWrite: 0 })
     expect(usageFrom({ usage: { prompt_tokens: 100, completion_tokens: 4, prompt_tokens_details: { cached_tokens: 80 } } })).toEqual({ in: 20, out: 4, cacheRead: 80, cacheWrite: 0 })
     expect(usageFrom({ usage: { input_tokens: 5, output_tokens: 6, cache_read_input_tokens: 900, cache_creation_input_tokens: 40 } })).toEqual({ in: 5, out: 6, cacheRead: 900, cacheWrite: 40 })
   })
@@ -269,5 +272,20 @@ describe('openrouter — the one standard route for every harness', () => {
   })
   it('is on the relay route, so our key is attached and the call metered', () => {
     expect(providersOn('relay')).toContain('openrouter')
+  })
+})
+
+describe('teeForUsage — reading usage from a stream as it passes', () => {
+  it('finds usage in a final frame longer than any window, split across chunks, and passes the bytes through untouched', async () => {
+    const { teeForUsage } = await import('../proxy/index.js')
+    const long = 'x'.repeat(50_000)
+    const body = `data: {"type":"response.output_text.delta","delta":"hi"}\n\n` +
+      `data: {"type":"response.completed","response":{"output":[{"text":"${long}"}],"usage":{"input_tokens":700,"output_tokens":40,"input_tokens_details":{"cached_tokens":600}}}}\n\n`
+    const bytes = new TextEncoder().encode(body)
+    const src = new ReadableStream({ start(c) { for (let i = 0; i < bytes.length; i += 997) c.enqueue(bytes.slice(i, i + 997)); c.close() } })
+    let got: any = 'unset'
+    const out = await new Response(teeForUsage(src, (u) => { got = u })).text()
+    expect(out).toBe(body)
+    expect(got).toEqual({ in: 100, out: 40, cacheRead: 600, cacheWrite: 0 })
   })
 })

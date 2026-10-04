@@ -44,6 +44,17 @@ rollback() {
 say "smoke test"
 code="$(curl -s -o /dev/null -w '%{http_code}' "$SITE/u/")"
 [ "$code" = "200" ] || rollback "the user app answered $code"
+# Each screen's script must PARSE as served — a bundle the browser refuses is a white page that every other check misses
+# (an await the bundler moved into a non-async function shipped exactly that).
+for page in u admin; do
+  src="$(curl -s "$SITE/$page/" | grep -oE 'type="module"[^>]*src="[^"]+"' | grep -oE 'src="[^"]+"' | head -1 | cut -d'"' -f2)"
+  [ -n "$src" ] || rollback "the $page page names no script"
+  tmp="$(mktemp -t sa-bundle).mjs"
+  curl -s "$SITE$src" -o "$tmp"
+  node --check "$tmp" 2> /tmp/sa-bundle-check.log || { rm -f "$tmp"; rollback "the $page screen's script does not parse: $(head -c 300 /tmp/sa-bundle-check.log)"; }
+  rm -f "$tmp"
+  say "the $page screen's script parses"
+done
 fake() { printf 'sak_%s_%s' "$1" "$(printf 'z%.0s' $(seq 1 43))"; }
 for pid in $(grep -vE '^\s*(#|$)' "$ROOT/scripts/live-projects.txt"); do
   ok=""

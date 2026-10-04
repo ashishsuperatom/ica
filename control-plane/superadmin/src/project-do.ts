@@ -28,7 +28,7 @@ import { AuditLog, auditScope } from './audit.js'
 import { AgentKeys, KeyRefusal } from './agent-keys.js'
 import { scopeAllows, HUB_MESSAGES } from '../../shared/agent-scopes.js'
 import { ProgramCatalogue, CatalogueRefusal } from './program-catalogue.js'
-import { TAG, countedByProxy } from '../../../vm/packages/agent-contract/contract.mjs'
+import { TAG } from '../../../vm/packages/agent-contract/contract.mjs'
 import { checkPolicy, resolve as resolvePolicies, type AccessPolicy } from './access-policies.js'
 import { costOf, priceFor, type Price } from './metering.js'
 import { createRecorder, type Recorder } from './records.js'
@@ -311,7 +311,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (path === '/groups' || path.startsWith('/groups/')) return this.groupsAdmin(request, path)
     if (path === '/connections' || path.startsWith('/connections/') || path === '/connectors') return this.connectionsApi(request, path)
     if (request.method === 'POST' && path === '/access/arrive') return this.arrive(request)
-    if (path === '/usage') return request.method === 'POST' ? this.recordUsage(request) : this.usageSummary(new URL(request.url))
+    if (path === '/usage' && request.method === 'GET') return this.usageSummary(new URL(request.url))
 
     if (request.method === 'GET'  && path === '/debug')        return this.debugInfo()
     if (request.method === 'POST' && path === '/members')      return this.addMember(request)
@@ -487,18 +487,10 @@ export class ProjectDO extends DurableObject<Env> {
       if (typeof msg.kind === 'string' && /^agent\.[a-z][\w.-]*$/.test(msg.kind) && typeof msg.key === 'string' && msg.key) this.record(msg.kind, msg.key, msg.data ?? null)
       return
     }
-    // ── Usage per person: the engine says when each agent (by tag) starts and ends work for a session, so the proxy's
-    //    calls are attributed; and it reports the tokens of routes the proxy does not see (contract: countedByProxy). ──
-    if (msg.type === 'usage:turn' && sender.type === 'code-engine') {
-      const tag = String(msg.tag ?? ''), session = String(msg.session ?? ''), now = new Date().toISOString()
-      if (!TAG.test(tag)) return
-      const person = typeof msg.person === 'string' && /^(email|user|agent):\S+$/.test(msg.person) ? msg.person : null
-      if (msg.phase === 'start' && session) this.ctx.storage.sql.exec('INSERT INTO usage_turns (tag, session, principal, started_at) VALUES (?, ?, ?, ?)', tag, session, person, now)
-      if (msg.phase === 'end') this.ctx.storage.sql.exec('UPDATE usage_turns SET ended_at = ? WHERE tag = ? AND ended_at IS NULL' + (session ? ' AND session = ?' : ''), now, tag, ...(session ? [session] : []))
-      return
-    }
+    // ── Usage per person: what each harness reported for each model call, stamped by the engine with the turn's
+    //    session and person — the one path usage is recorded by, for every harness and account. ──
     if (msg.type === 'usage:report' && sender.type === 'code-engine') {
-      if (typeof msg.provider === 'string' && !countedByProxy(msg.provider)) await this.addUsage({ ...msg, tag: TAG.test(String(msg.tag ?? '')) ? msg.tag : null }, 'engine')
+      if (typeof msg.provider === 'string') await this.addUsage({ ...msg, tag: TAG.test(String(msg.tag ?? '')) ? msg.tag : null }, 'engine')
       return
     }
     // ── Long work in the engine (an activity): its latest state kept, and sent to its owner and the admins ──
@@ -732,8 +724,6 @@ export class ProjectDO extends DurableObject<Env> {
 
     // Welcome. The engine's copy carries this project's profile; every other connection gets the same message
     // without it.
-    // A newly connected engine has no turn in flight: any left open by the one before it are over.
-    if (type === 'code-engine') { try { this.ctx.storage.sql.exec('UPDATE usage_turns SET ended_at = ? WHERE ended_at IS NULL', new Date().toISOString()) } catch { /* before migration 26 */ } }
     const engineProfile = type === 'code-engine' ? this.profileForEngine() : null
     ws.send(JSON.stringify({
       from: { id: 'hub', type: 'hub' },
@@ -871,22 +861,8 @@ export class ProjectDO extends DurableObject<Env> {
     this.prices = { at: Date.now(), list }
     return list
   }
-  /** One metered use, from the model proxy: kept, priced now, and debited from the organisation's credits. */
-  private async recordUsage(request: Request): Promise<Response> {
-    return this.j(await this.addUsage(await request.json().catch(() => ({})) as any, 'proxy'))
-  }
-  /** The session an agent (by tag) was working for when a call started: the one turn of that tag open at that moment.
-   *  None, or more than one (agents sharing a tag at once), and the call stays the project's, unattributed. */
-  private turnOfTag(tag: string, at: string): { session: string; principal: string | null } | null {
-    const t = Date.parse(at) || Date.now()
-    const early = new Date(t + 2_000).toISOString()          // the turn's start may reach us a moment after its first call
-    const stale = new Date(t - 6 * 3_600_000).toISOString()  // a turn never closed (an engine gone) stops counting after 6 h
-    const rows = [...this.ctx.storage.sql.exec(`SELECT DISTINCT session, principal FROM usage_turns WHERE tag = ? AND started_at <= ? AND started_at >= ?
-      AND (ended_at IS NULL OR ended_at >= ?)`, tag, early, stale, new Date(t).toISOString())] as any[]
-    return rows.length === 1 ? { session: String(rows[0].session), principal: rows[0].principal ? String(rows[0].principal) : null } : null
-  }
-  private async addUsage(b: any, source: 'proxy' | 'engine'): Promise<{ ok: true; credits_micro: number; priced: boolean; session: string | null }> {
-    if (!b.session && b.tag) { const turn = this.turnOfTag(String(b.tag), String(b.startedAt ?? new Date().toISOString())); if (turn) { b.session = turn.session; b.person ??= turn.principal } }
+  /** One model call's usage as its harness reported it: kept, priced now, and debited from the organisation's credits. */
+  private async addUsage(b: any, source: 'engine'): Promise<{ ok: true; credits_micro: number; priced: boolean; session: string | null }> {
     const tin = Math.max(0, Math.round(Number(b.in) || 0)), tout = Math.max(0, Math.round(Number(b.out) || 0))
     const price = priceFor(await this.priceList(), String(b.provider ?? ''), b.model ? String(b.model) : undefined)
     const micro = costOf(price, tin, tout)

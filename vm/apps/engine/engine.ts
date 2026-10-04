@@ -737,13 +737,11 @@ const sourceIds = async () => ((await (await fetch(`${DATASOURCE}/sources`, { si
 const turnReader = (from: any) => readerFor(access, from, sourceIds)
 /** Something the engine did, for the platform's warehouse: sent to the project's DO, which records it (one path). */
 const recordToPlatform = (kind: string, key: string, data: unknown) => { try { if (hub?.readyState === WebSocket.OPEN) hub.send(JSON.stringify({ type: 'record', kind, key, data })) } catch { /* the warehouse never breaks the work */ } }
-// USAGE PER PERSON (ica/index.ts): each agent turn's session and person go to the platform as the turn starts and
-// ends, live — the platform times the proxy's calls against them. Tokens the proxy does not see are reported here, and
-// kept until they are sent: a report lost to a dropped socket is usage nobody pays for.
+// USAGE PER PERSON (ica/index.ts): what each harness reports for each model call, stamped with the turn's session and
+// person, sent to the platform — and kept until sent: a report lost to a dropped socket is usage nobody pays for.
 const usageQueue: unknown[] = []
 const flushUsage = () => { while (usageQueue.length && hub?.readyState === WebSocket.OPEN) { try { hub.send(JSON.stringify(usageQueue[0])); usageQueue.shift() } catch { return } } }
 setUsageSink({
-  turn: (tag, session, phase, person) => { try { if (hub?.readyState === WebSocket.OPEN) hub.send(JSON.stringify({ type: 'usage:turn', tag, session, phase, person })) } catch { /* attribution only */ } },
   report: (u) => { usageQueue.push({ type: 'usage:report', ...u }); if (usageQueue.length > 50_000) usageQueue.shift(); flushUsage() },
 })
 const sessionSeam = createSessionSeam({ projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, graphFile: graphFileOf(PROJECT_DIR) })

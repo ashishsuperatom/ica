@@ -11,7 +11,6 @@
 
 import type { Session, RunHandlers, RunResult, TokenUsage } from './session.js'
 import { randomBytes } from 'node:crypto'
-import { countedByProxy } from '../../../packages/agent-contract/contract.mjs'
 import { createClaudeSession } from './claude.js'
 import { createPiSession } from './pi.js'
 import { createOpencodeSession } from './opencode.js'
@@ -52,13 +51,11 @@ export const THINKING: Thinking[] = ['off', 'minimal', 'low', 'medium', 'high', 
 
 
 // ── USAGE PER PERSON ─────────────────────────────────────────────────────────────────────────────────────
-// Every session has a TAG, carried in the address of each model call it makes through the proxy
-// (/p/<project>/t/<tag>/<provider>/…). Around each turn the engine tells the platform which user session the tag is
-// working for (RunHandlers.forSession), so the proxy's count of each call is attributed to that session's owner.
-// Routes the proxy does not see (a box-side subscription, the tunnel) are counted from the harness's own report and
-// sent by the engine — exactly one place counts each call (contract: countedByProxy).
+// Every harness reports the tokens of each model call it makes (pi and opencode per call, Claude Code in its
+// transcript, codex in its session log); that report, as given, is the usage — for every harness and every account,
+// one path. The turn says who it is for (RunHandlers.forSession / forPerson), so each report is stamped with the
+// session and person. The session's tag (also in the address of its proxy calls) names which agent it was.
 export interface UsageSink {
-  turn(tag: string, session: string, phase: 'start' | 'end', person?: string): void
   report(u: { tag: string; session: string | null; person?: string; provider: string; model?: string; in: number; out: number; cacheRead?: number; cacheWrite?: number }): void
 }
 let usageSink: UsageSink | null = null
@@ -70,16 +67,15 @@ export function createSession(harness: Harness, opts: SessionOpts): Session {
   let forSession: string | null = null, forPerson: string | undefined
   const provider = opts.provider ?? ''
   const onUsage = (u: TokenUsage) => {
-    if (!usageSink || !provider || countedByProxy(provider)) return
+    if (!usageSink || !provider) return
     usageSink.report({ tag, session: forSession, person: forPerson, provider, model: u.model ?? opts.model, in: u.input ?? 0, out: u.output ?? 0, cacheRead: u.cacheRead, cacheWrite: u.cacheWrite })
   }
   const inner = make(harness, opts, tag, onUsage)
   const run = inner.run.bind(inner)
   inner.run = async (prompt, h) => {
     forSession = h?.forSession ?? null; forPerson = h?.forPerson
-    if (forSession) usageSink?.turn(tag, forSession, 'start', forPerson)
     try { return await run(prompt, h) }
-    finally { if (forSession) usageSink?.turn(tag, forSession, 'end'); forSession = null; forPerson = undefined }
+    finally { forSession = null; forPerson = undefined }
   }
   return inner
 }

@@ -66,5 +66,3 @@ export declare function nearModels(model: string, available: string[], n?: numbe
 export declare const TAG: RegExp
 /** The proxy base for an agent's calls: project, tag (when given), provider. */
 export declare function proxyBaseFor(platform: string, project: string, provider: string, tag?: string | null): string
-/** True when the proxy counts this provider's calls; otherwise the engine reports them. */
-export declare function countedByProxy(provider: string): boolean

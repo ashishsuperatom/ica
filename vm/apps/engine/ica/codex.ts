@@ -9,8 +9,9 @@
 //   ALL PERMISSIONS enabled: sandbox danger-full-access + approvals never (see ensure()).
 
 import { Codex, type Thread } from '@openai/codex-sdk'
-import { writeFileSync } from 'node:fs'
+import { writeFileSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { homedir } from 'node:os'
 import type { Session, RunHandlers, RunResult, AgentEvent } from './session.js'
 import { endsWhenDone } from './session.js'   // one definition of "the turn's work is done", for every harness
 import { modelFor } from './models.js'
@@ -74,6 +75,40 @@ function normEvent(ev: any): AgentEvent | null {
   }
 }
 
+// ── THE TOKENS CODEX REPORTS ─────────────────────────────────────────────────────────────────────────────
+// Codex writes every model call's running totals to its own session log (~/.codex/sessions/…/rollout-…-<thread>.jsonl,
+// `token_count` events). A turn's usage is the difference across it — read from there rather than from the SDK's
+// turn.completed, which never arrives for a turn we end early (see endsWhenDone).
+type CodexTotals = { input: number; cached: number; output: number }
+const rolloutPaths = new Map<string, string>()
+function rolloutOf(threadId: string): string | null {
+  const known = rolloutPaths.get(threadId)
+  if (known) return known
+  const root = join(homedir(), '.codex', 'sessions')
+  try {
+    for (const y of readdirSync(root).sort().reverse()) for (const m of readdirSync(join(root, y)).sort().reverse())
+      for (const d of readdirSync(join(root, y, m)).sort().reverse()) {
+        const f = readdirSync(join(root, y, m, d)).find((n) => n.endsWith(`${threadId}.jsonl`))
+        if (f) { const p = join(root, y, m, d, f); rolloutPaths.set(threadId, p); return p }
+      }
+  } catch { /* no sessions yet */ }
+  return null
+}
+export function codexTotals(threadId: string | null): CodexTotals {
+  const zero = { input: 0, cached: 0, output: 0 }
+  const p = threadId ? rolloutOf(threadId) : null
+  if (!p) return zero
+  try {
+    const lines = readFileSync(p, 'utf8').split('\n')
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (!lines[i].includes('"token_count"')) continue
+      const t = JSON.parse(lines[i])?.payload?.info?.total_token_usage
+      if (t) return { input: t.input_tokens ?? 0, cached: t.cached_input_tokens ?? 0, output: t.output_tokens ?? 0 }
+    }
+  } catch { /* unreadable: nothing to add */ }
+  return zero
+}
+
 export function createCodexSession(opts: CodexSessionOpts): Session {
   if (!opts.model) throw new Error('codex: no model given — the agent profile must name one')
   let model = opts.model
@@ -94,6 +129,7 @@ export function createCodexSession(opts: CodexSessionOpts): Session {
   let buf = ''
   const eventLog: AgentEvent[] = []                                // structured events (the 'events' view's buffer), capped
   let running = false
+  let counted: { thread: string | null; totals: CodexTotals } | null = null   // the session log's totals already reported
   const queue: { prompt: string; h?: RunHandlers; resolve: (r: RunResult) => void }[] = []
 
   const threadOpts = () => ({
@@ -129,6 +165,10 @@ export function createCodexSession(opts: CodexSessionOpts): Session {
     const t0 = Date.now()
     // The codex SDK gives no way to abort a turn in flight, so the turn is ended the only way it can be: the
     // stream is closed and whatever the model says next is not listened to. The deliverable is already written.
+    // Counted from where the last turn left off — a write that lands after a turn ends counts in the next one — or,
+    // for the first turn on a thread, from its totals so far (a resumed thread has some).
+    const countedThread = threadId
+    const before = counted && counted.thread === threadId ? counted.totals : codexTotals(threadId)
     let done = false
     const deliverable = endsWhenDone(h, () => { done = true; console.log('[ica:codex] the answer is in — ending the turn') })
     try {
@@ -136,10 +176,6 @@ export function createCodexSession(opts: CodexSessionOpts): Session {
       for await (const ev of streamed.events) {                     // generator ends when the turn completes → exact
         if (done) { try { await (streamed.events as any).return?.() } catch { /* already closed */ } break }
         if (ev.type === 'thread.started' && (ev as any).thread_id) threadId = (ev as any).thread_id
-        if (ev.type === 'turn.completed' && (ev as any).usage) {             // cached input is part of input_tokens
-          const u = (ev as any).usage
-          opts.onUsage?.({ input: Math.max(0, (u.input_tokens ?? 0) - (u.cached_input_tokens ?? 0)), output: u.output_tokens ?? 0, cacheRead: u.cached_input_tokens ?? 0, model })
-        }
         const norm = normEvent(ev)                                 // structured event for the UI event log
         if (norm) { eventLog.push(norm); if (eventLog.length > 600) eventLog.shift(); h?.onEvent?.(norm) }
         const chunk = fmtEvent(ev, seen)
@@ -159,7 +195,15 @@ export function createCodexSession(opts: CodexSessionOpts): Session {
         return pump()
       }
       if (!deliverable.arrived()) answer = `codex error: ${e?.message ?? e}`
-    } finally { deliverable.stop() }
+    } finally {
+      deliverable.stop()
+      // This turn's tokens: the session log's totals now, less before (cached input is inside input_tokens).
+      const after = codexTotals(threadId)
+      const base = countedThread === threadId ? before : { input: 0, cached: 0, output: 0 }   // a thread begun this turn starts at zero
+      const input = after.input - base.input, cached = after.cached - base.cached, output = after.output - base.output
+      counted = { thread: threadId, totals: after }
+      if (input > 0 || output > 0) opts.onUsage?.({ input: Math.max(0, input - cached), output: Math.max(0, output), cacheRead: Math.max(0, cached), model })
+    }
     running = false
     resolve({ lastLines: answer, ms: Date.now() - t0 })
     pump()

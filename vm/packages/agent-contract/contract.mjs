@@ -170,7 +170,7 @@ export const hostMatches = (host, list) => {
 
 /** Split `/p/<projectId>[/t/<tag>]/<provider>/<rest…>` into its parts. `service` is set for our own routes
  *  (_health, _whoami, _key, _diag), which are addressed the same way but handled before any forwarding. `tag` names
- *  the agent that made the call, so its usage is attributed to the session that agent is working for. */
+ *  the agent that made the call (shown in the proxy's log line). */
 /** What a tag may look like: short, plain, safe in a path. */
 export const TAG = /^[A-Za-z0-9_-]{1,64}$/
 
@@ -225,15 +225,19 @@ export function decide({ projectId, sentCredential, proven }) {
 
 /** Token counts, wherever a provider chose to put them. Shapes differ (OpenAI's `usage`, Anthropic's
  *  input/output names), so this reads the ones we know and reports nothing rather than a wrong number. */
-// `in` is FRESH input; prompt-cache reads and writes are kept apart, as both API shapes allow: OpenAI counts cached
-// tokens inside prompt_tokens (prompt_tokens_details.cached_tokens), Anthropic reports them beside input_tokens.
+// `in` is FRESH input; prompt-cache reads and writes are kept apart, as each API shape allows: OpenAI counts cached
+// tokens inside its input (chat: prompt_tokens_details.cached_tokens; responses: input_tokens_details.cached_tokens),
+// Anthropic reports them beside input_tokens. The Responses API puts usage inside `response` (its final
+// `response.completed` event, or the whole body), not at the top.
 export function usageFrom(obj) {
-  const u = obj?.usage
+  const responses = !obj?.usage && obj?.response?.usage
+  const u = obj?.usage ?? obj?.response?.usage
   if (!u) return null
   const i = u.prompt_tokens ?? u.input_tokens
   const o = u.completion_tokens ?? u.output_tokens
   if (typeof i !== 'number' && typeof o !== 'number') return null
-  const openaiCached = typeof u.prompt_tokens === 'number' ? (u.prompt_tokens_details?.cached_tokens ?? 0) : 0
+  const openaiCached = typeof u.prompt_tokens === 'number' ? (u.prompt_tokens_details?.cached_tokens ?? 0)
+    : (responses || u.input_tokens_details) ? (u.input_tokens_details?.cached_tokens ?? 0) : 0
   return { in: Math.max(0, (i ?? 0) - openaiCached), out: o ?? 0,
            cacheRead: openaiCached || (u.cache_read_input_tokens ?? 0), cacheWrite: u.cache_creation_input_tokens ?? 0 }
 }
@@ -278,8 +282,3 @@ export function nearModels(model, available, n = 5) {
   return plain.filter((a) => modelKey(a).startsWith(stem)).sort((a, b) => score(b) - score(a)).slice(0, n)
 }
 
-// ── WHERE A CALL'S TOKENS ARE COUNTED ────────────────────────────────────────────────────────────────────
-// Exactly one place counts each call, so nothing is counted twice or not at all: a relayed provider's calls pass
-// through the proxy, which reads the tokens from the response; every other route (a box-side subscription, the
-// tunnel) is counted by the engine from the harness's own report of the turn.
-export const countedByProxy = (provider) => PROVIDERS[provider]?.route === 'relay' && !PROVIDERS[provider]?.disabled

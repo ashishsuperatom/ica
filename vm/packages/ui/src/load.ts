@@ -61,5 +61,8 @@ export async function loadProgramUI(entry: string, opts: LoadOptions): Promise<R
     return done.get(url)!
   }
 
-  return import(/* @vite-ignore */ await load(new URL(entry).href, []))
+  // The URL is awaited on its own line: Vite wraps a dynamic import in a preload arrow, and an `await` inside the
+  // import's argument ends up in that (non-async) arrow — a syntax error that took the whole screen down.
+  const url = await load(new URL(entry).href, [])
+  return import(/* @vite-ignore */ url)
 }

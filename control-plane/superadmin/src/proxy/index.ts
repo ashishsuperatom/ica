@@ -125,38 +125,39 @@ const bearerOf = (h: Headers): string | null =>
 const usageFrom = sharedUsage
 type Usage = { in: number; out: number; cacheRead: number; cacheWrite: number }
 
-/** Record what a call cost. Deliberately fire-and-forget through ctx.waitUntil: metering must never be able to
- *  slow down or fail a model request — a proxy that breaks inference to write a counter is worse than no
- *  counter. Storage is the next decision (D1 / ProjectDO); the call site is already correct. */
+/** One line per call in the proxy's log: which project and agent (tag), which key, which model, the tokens the
+ *  response showed, how long. Never in the response path. */
 function meter(ctx: ExecutionContext, rec: { project: string; provider: string; keyId?: string | null; model?: string; in: number; out: number; ms: number; tag?: string | null; startedAt?: string; cacheRead?: number; cacheWrite?: number }, env?: ProxyEnv) {
   // The credential id is in the line because 'which key paid for this' is the question a bill raises.
   console.log(`[proxy] ${rec.project}${rec.tag ? ' t/' + rec.tag : ''} ${rec.provider}${rec.keyId ? '/' + rec.keyId : ''} ${rec.model ?? '?'} in=${rec.in} out=${rec.out} ${rec.ms}ms`)
-  if (!env?.PROJECT || !/^[0-9a-f-]{36}$/.test(rec.project)) return
-  // Kept by the project's DO (append-only, priced, debited from the organisation's credits) — never in the response path.
-  ctx.waitUntil(env.PROJECT.get(env.PROJECT.idFromName(`proj:${rec.project}`)).fetch(new Request('http://do/usage', { method: 'POST', headers: { 'x-sa-project': rec.project }, body: JSON.stringify(rec) })).catch(() => {}))
+  // A log line only. Usage is recorded from what the harness itself reports (engine → the project's DO), one path for
+  // every harness; this line is for following a call through the proxy.
 }
 
 /** Pass the body through untouched while watching it go by, so usage can be read from a STREAM without
  *  buffering it. Buffering would hold the whole response in memory and, worse, delay first-token latency —
  *  the one thing a user actually feels. */
-function teeForUsage(body: ReadableStream, onDone: (u: Usage | null) => void): ReadableStream {
-  let tail = ''
+export function teeForUsage(body: ReadableStream, onDone: (u: Usage | null) => void): ReadableStream {
+  // LINE BY LINE, not a window of the tail: the frame that carries usage can be long (the Responses API's
+  // `response.completed` repeats the whole answer), and a window that cut its start lost the count. Only the line
+  // being received is held; a complete line is parsed only when it mentions usage.
+  const dec = new TextDecoder()
+  let line = ''
   let found: Usage | null = null
+  const take = (l: string) => {
+    const d = l.startsWith('data:') ? l.slice(5).trim() : ''
+    if (!d || d === '[DONE]' || !d.includes('"usage"')) return
+    try { const u = usageFrom(JSON.parse(d)); if (u) found = u } catch { /* not JSON */ }
+  }
   return body.pipeThrough(new TransformStream({
     transform(chunk, controller) {
       controller.enqueue(chunk)
-      // Only the last part of the stream can hold the final usage block, so keep a bounded window rather than
-      // the whole response.
-      tail = (tail + new TextDecoder().decode(chunk, { stream: true })).slice(-8000)
+      line += dec.decode(chunk, { stream: true })
+      let nl: number
+      while ((nl = line.indexOf('\n')) >= 0) { take(line.slice(0, nl).trimEnd()); line = line.slice(nl + 1) }
+      if (line.length > 8_000_000) line = ''   // one line beyond any real frame: not ours to hold
     },
-    flush() {
-      for (const line of tail.split('\n')) {
-        const d = line.startsWith('data:') ? line.slice(5).trim() : ''
-        if (!d || d === '[DONE]') continue
-        try { const u = usageFrom(JSON.parse(d)); if (u) found = u } catch { /* a partial frame in the window */ }
-      }
-      onDone(found)
-    },
+    flush() { take((line + dec.decode()).trimEnd()); onDone(found) },
   }))
 }
 
