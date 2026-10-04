@@ -16,6 +16,8 @@ export interface SidebarProps {
   agents: SidebarItem[]
   /** Connections to other systems. */
   connections?: SidebarItem
+  /** Other pages: agents, activity. */
+  pages?: SidebarItem[]
   /** The project's agents, each opening a session. */
   sessionAgents?: SidebarItem[]
   account: ReactNode   // the foot: the signed-in person (App gives the Clerk-backed block, or the local one)
@@ -66,6 +68,7 @@ export default function Sidebar(p: SidebarProps) {
             {item({ key: 'new', label: 'New chat', active: false, onClick: p.onNewChat }, <Icon d={I.plus} />, false)}
             <div style={st.section}>Chats</div>
             {p.chats.length ? p.chats.map((c) => item(c, <Icon d={I.chat} />, false)) : <div style={st.empty}>No chats yet</div>}
+            {p.pages?.map((x) => item(x, <Icon d={I.agent} />, false))}
             {p.connections && item(p.connections, <Icon d={I.agent} />, false)}
             {!!p.sessionAgents?.length && <div style={st.section}>Agents</div>}
             {p.sessionAgents?.map((a) => item(a, <Icon d={I.agent} />, false))}

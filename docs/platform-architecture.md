@@ -661,6 +661,14 @@ to be the same thing: a connection; the only difference is that some are written
 API. Someone connecting their Outlook or a specific database is most likely user level, but an admin can add a
 connector too. Both kinds belong in the data source index.
 
+**Models in production, in the user's words (2026-10-05):** for each harness and each model, one primary way:
+**OpenRouter**. With 200 users we cannot have the trouble codex gave before — logging in, subscription-based logins;
+that should not be necessary. An option where an API key is set and everything passes through it — Claude Code, pi,
+codex, opencode, whatever runs — as the one standard way for production (the Claude Code subscription route stays as an
+option). One OpenRouter key for everything, and a key per organisation; limits, including monthly recurring limits, the
+way OpenRouter does them — in our own system too (it still goes through OpenRouter), so that each customer sees how
+much each of their users uses: the enterprise context.
+
 **Choices made (2026-10-05):** the platform's own warehouse is Basin, and Analytics Engine is dropped (its 3-month,
 sampled metrics duplicate what the warehouse gives; minutes of lag are fine).
 

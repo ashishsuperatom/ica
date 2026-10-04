@@ -5,6 +5,7 @@ import { AgentsScreen } from './Models'
 import { DashboardsPanel } from './Dashboards'
 import { AgentKeysPanel, AuditPanel } from './AgentKeys'
 import { AccessPoliciesPanel } from './AccessPolicies'
+import { GroupsPanel } from './Groups'
 import { useProjectHub } from './hub'
 import { Inspector, SECTIONS, SECTION_LABEL, type Section } from './Inspector'
 import { ConnectorConsole } from './ConnectorConsole'
@@ -1009,6 +1010,7 @@ function ProjectDetailPage() {
     { id: 'agent-keys', label: 'Agent keys', icon: I.term },
     { id: 'audit', label: 'Audit history', icon: I.pulse },
     { id: 'data-access', label: 'Data access', icon: I.grid },
+    { id: 'groups', label: 'Groups', icon: I.grid },
     { id: 'agents', label: 'Agents', icon: I.term, children: [
       { id: 'agent', label: 'Connector' },
       { id: 'analyst', label: 'Analyst' },
@@ -1125,6 +1127,7 @@ function ProjectDetailPage() {
       {view === 'agent-keys' && <AgentKeysPanel api={api} projectId={projectId!} />}
       {view === 'audit' && <AuditPanel api={api} projectId={projectId!} />}
       {view === 'data-access' && <AccessPoliciesPanel api={api} projectId={projectId!} />}
+      {view === 'groups' && <GroupsPanel api={api} projectId={projectId!} />}
       {view === 'subdomains' && (
         <div className="card">
           <strong>Subdomains</strong>

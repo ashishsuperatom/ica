@@ -12,6 +12,8 @@ import './design.css'   // BUNDLED (hashed, loaded atomically with the app) — 
 import { useClaudeTerminal } from './useClaudeTerminal'
 import AgentSession, { type SessionMsg } from './AgentSession'
 import Connections from './Connections'
+import Agents from './Agents'
+import Activity from './Activity'
 import { useQuestionNav } from './questionNav'
 import { useLogNav } from './logNav'
 import { ANSI, COLS, ROWS } from './termColors'
@@ -240,6 +242,8 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const readView = (): View => {
     if (/^\/c\//.test(location.pathname)) return 'chat'
     if (location.pathname.replace(/\/+$/, '') === '/connections') return 'connections'
+    if (location.pathname.replace(/\/+$/, '') === '/agents') return 'agents'
+    if (location.pathname.replace(/\/+$/, '') === '/activity') return 'activity'
     const agent = /^\/s\/([\w-]+)/.exec(location.pathname)
     if (agent) return `agent:${agent[1]}`
     const seg = location.pathname.replace(/\/+$/, '').split('/').pop()
@@ -250,6 +254,18 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [sessionAgents, setSessionAgents] = useState<{ id: string; name: string }[]>([])
   const sessionBus = useRef(new Set<(m: SessionMsg) => void>())
   const subscribeSession = useCallback((fn: (m: SessionMsg) => void) => { sessionBus.current.add(fn); return () => { sessionBus.current.delete(fn) } }, [])
+  // A request to the platform or the engine, answered by the reply that carries its reqId (pages use this; the chat keeps
+  // its own flow). Live messages any page may watch (activity) go to the same listeners.
+  const waiting = useRef(new Map<string, (m: any) => void>())
+  const liveBus = useRef(new Set<(m: any) => void>())
+  const request = useCallback((payload: Record<string, unknown>) => new Promise<any>((resolve) => {
+    const reqId = `ui-${Math.random().toString(36).slice(2, 10)}`
+    waiting.current.set(reqId, resolve)
+    setTimeout(() => { if (waiting.current.delete(reqId)) resolve({ t: 'error', reason: 'no answer in time' }) }, 120_000)
+    send({ ...payload, reqId })
+  }), [])   // eslint-disable-line react-hooks/exhaustive-deps
+  const subscribeLive = useCallback((fn: (m: any) => void) => { liveBus.current.add(fn); return () => { liveBus.current.delete(fn) } }, [])
+  const [myScopes, setMyScopes] = useState<string[]>([])
   // The sidebar folds to a rail of icons, as the dashboard's does; remembered for this viewer.
   const [sideCollapsed, setSideCollapsed] = useState<boolean>(() => { try { return localStorage.getItem('sa-sidebar-collapsed') === '1' } catch { return false } })
   const setSideCollapsedSaved = useCallback((c: boolean) => { setSideCollapsed(c); try { localStorage.setItem('sa-sidebar-collapsed', c ? '1' : '0') } catch { /* storage blocked */ } }, [])
@@ -368,7 +384,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const consoleLane = laneNames.find(n => isConsoleLane(lanes[n])) ?? ''
   const consoleLaneRef = useRef(consoleLane); consoleLaneRef.current = consoleLane
   // What is on screen: chat, or a lane we know. An address naming a lane we do not know (yet) shows chat.
-  const shownView: View = view === 'chat' || lanes[view] || view.startsWith('agent:') || view === 'connections' ? view : 'chat'
+  const shownView: View = view === 'chat' || lanes[view] || view.startsWith('agent:') || view === 'connections' || view === 'agents' || view === 'activity' ? view : 'chat'
   shownViewRef.current = shownView
   // Update one lane, creating a minimal entry (label = lane) when a frame precedes its hello, so nothing is dropped.
   const updateLane = (lane: string, fn: (l: LaneState) => LaneState) =>
@@ -513,6 +529,8 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
         if (!msg) return
         if (busyRef.current) armWatchdog()   // any message = engine alive → reset the watchdog
         if (msg.t === 'tick') return          // liveness ping only; nothing to render
+        if (msg.reqId && waiting.current.has(msg.reqId)) { const w = waiting.current.get(msg.reqId)!; waiting.current.delete(msg.reqId); w(msg); return }
+        if (msg.t === 'activity') { for (const fn of liveBus.current) fn(msg) }
         if (typeof msg.t === 'string' && msg.t.startsWith('session:') && SESSION_REPLIES.has(msg.t)) {
           if (msg.t === 'session:agents') { setSessionAgents(Array.isArray(msg.agents) ? msg.agents.filter((a: any) => a && typeof a.id === 'string').map((a: any) => ({ id: a.id, name: String(a.name ?? a.id) })) : []); return }
           for (const fn of sessionBus.current) fn(msg as SessionMsg)
@@ -521,6 +539,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
         if (msg.t === 'welcome') {
           // Read-only project info from THIS project's DO (never the org DO). Extensible: more fields later.
           if (msg.project) { setProj(msg.project); if (msg.project.name) document.title = msg.project.name }
+          if (Array.isArray(msg.scopes)) setMyScopes(msg.scopes)
           // A (re)connect means any in-flight turn is gone — end it. If the engine is genuinely still
           // answering, the resync below re-sends analyst:status and the spinner comes back; we never keep a
           // stale one.
@@ -1016,6 +1035,7 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
         chats={sessions.map(se => ({ key: se.id, label: se.title || 'New chat', active: view === 'chat' && se.id === sessionId, busy: turnBusy && se.id === sessionId,
           onClick: () => { navigate('chat'); openSession(se.id) } }))}
         connections={{ key: 'connections', label: 'Connections', active: shownView === 'connections', onClick: () => navigate('connections') }}
+        pages={[{ key: 'agents', label: 'Agents', active: shownView === 'agents', onClick: () => navigate('agents') }, { key: 'activity', label: 'Activity', active: shownView === 'activity', onClick: () => navigate('activity') }]}
         sessionAgents={sessionAgents.map(a => ({ key: a.id, label: a.name, active: shownView === `agent:${a.id}`, onClick: () => navigate(`agent:${a.id}`) }))}
         agents={laneNames.map(n => ({ key: n, label: lanes[n].label, title: lanes[n].desc || lanes[n].label, active: shownView === n, hue: lanes[n].hue, onClick: () => navigate(n) }))}
         account={CLOUD ? <AccountSection /> : (
@@ -1065,6 +1085,8 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
 
       {/* Chat/answer view */}
       {shownView === 'connections' && <Connections projectId={projectId} token={token ?? null} />}
+      {shownView === 'agents' && <Agents request={request} scopes={myScopes} onOpen={(id) => navigate(`agent:${id}`)} />}
+      {shownView === 'activity' && <Activity request={request} subscribe={subscribeLive} />}
       {shownView.startsWith('agent:') && (
         <AgentSession agent={shownView.slice(6)} agentName={sessionAgents.find(a => a.id === shownView.slice(6))?.name ?? shownView.slice(6)}
           send={send} subscribe={subscribeSession} renderAnswer={(card) => <AnswerCard answer={card} />} projectId={projectId} token={token} />

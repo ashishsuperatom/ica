@@ -725,7 +725,9 @@ export class ProjectDO extends DurableObject<Env> {
                  // THE PROFILE, at the moment the engine registers — so a box adopts its project's configuration
                  // before it builds a single agent, and a restarted box needs no second round trip. Absent means
                  // "nothing configured for this project"; the engine then keeps its baked default.
-                 ...(type === 'code-engine' ? { profile: engineProfile } : {}) },
+                 ...(type === 'code-engine' ? { profile: engineProfile } : {}),
+                 // what this person or agent sees with (their own scope and their groups'), for screens to offer
+                 ...(type === 'runtime' || type === 'agent' || type === 'admin' ? { scopes: this.scopesOf(conn) } : {}) },
     }))
 
     // Log
