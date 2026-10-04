@@ -78,6 +78,29 @@ export class SessionDO extends DurableObject<Env> {
       return v ? json({ view: v, upto: this.count() }) : json({ error: 'there is no such session' }, 404)
     }
     if (request.method === 'GET' && url.pathname === '/upto') return json({ upto: this.count() })
+    // ── Artifacts: what the session's work produced and decided — every version kept ──
+    if (request.method === 'POST' && url.pathname === '/artifact') {
+      const b = await request.json() as any
+      if (!b?.by || !b?.kind || !b?.title || !b?.status || !b?.body || typeof b.body !== 'object') return json({ error: 'an artifact names its kind, title, status, body and who' }, 400)
+      const prev = b.id ? [...this.ctx.storage.sql.exec('SELECT * FROM artifacts WHERE id = ? ORDER BY version DESC LIMIT 1', String(b.id))][0] as any : null
+      if (b.id && !prev) return json({ error: `there is no artifact ${b.id}` }, 404)
+      const id = prev ? String(prev.id) : `art_${crypto.randomUUID()}`
+      const version = prev ? Number(prev.version) + 1 : 1
+      const at = new Date().toISOString()
+      const row = { id, version, kind: prev ? String(prev.kind) : String(b.kind), title: String(b.title), status: String(b.status), block: b.block ?? prev?.block ?? null, body: b.body, by: String(b.by), at, note: b.note ?? null }
+      this.ctx.storage.sql.exec('INSERT INTO artifacts (id, version, kind, title, status, block, body, by, at, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', row.id, row.version, row.kind, row.title, row.status, row.block, JSON.stringify(row.body), row.by, row.at, row.note)
+      const meta = [...this.ctx.storage.sql.exec('SELECT session, project FROM meta')][0] as any
+      if (meta) createRecorder((this.env as any).RECORDS, () => String(meta.project))('session.artifact', `${meta.session}:${id}:${version}`, { session: meta.session, ...row }, at)
+      return json({ artifact: row })
+    }
+    if (request.method === 'GET' && url.pathname === '/artifacts') {
+      const rows = [...this.ctx.storage.sql.exec(`SELECT a.* FROM artifacts a JOIN (SELECT id, MAX(version) AS m FROM artifacts GROUP BY id) x ON x.id = a.id AND x.m = a.version ORDER BY a.at`)] as any[]
+      return json({ artifacts: rows.map((r) => ({ ...r, body: JSON.parse(r.body) })) })
+    }
+    if (request.method === 'GET' && url.pathname.startsWith('/artifact/')) {
+      const rows = [...this.ctx.storage.sql.exec('SELECT * FROM artifacts WHERE id = ? ORDER BY version', decodeURIComponent(url.pathname.slice('/artifact/'.length)))] as any[]
+      return rows.length ? json({ versions: rows.map((r) => ({ ...r, body: JSON.parse(r.body) })) }) : json({ error: 'there is no such artifact' }, 404)
+    }
     return json({ error: 'not found' }, 404)
   }
 }

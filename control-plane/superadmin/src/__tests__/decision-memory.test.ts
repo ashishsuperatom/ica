@@ -117,6 +117,25 @@ describe('decision memory', () => {
     u1.ws.close()
   })
 
+  it('a decision recorded is an artifact — what was decided, why, what it rested on — in the register, and the outcome of the steps that led to it', async () => {
+    const u1 = await socket(jwt({ userId: 'u1', email: 'u1@x.io', role: 'superadmin' }))
+    expect((await u1.ask({ t: 'artifact:record', session: 's-1', block: 'b1', kind: 'decision', body: { decision: 'Flag the overruns to the PMO' } })).reason).toMatch(/says why/)
+    const rec = await u1.ask({ t: 'artifact:record', session: 's-1', block: 'b1', kind: 'decision', approval: true,
+      body: { decision: 'Flag the overruns to the PMO', options: [{ label: 'Flag' }, { label: 'Wait a month' }], chosen: 'Flag', reasoning: 'two months over budget' } })
+    expect(rec.t).toBe('artifact:recorded')
+    expect(rec.artifact).toMatchObject({ kind: 'decision', status: 'pending', version: 1, block: 'b1', body: { restsOn: { block: 'b1', world: { overrun: 11 } } } })
+    expect((await u1.ask({ t: 'artifact:list', session: 's-1' })).artifacts.map((a: any) => a.title)).toEqual(['Flag the overruns to the PMO'])
+    const approved = await u1.ask({ t: 'artifact:decide', session: 's-1', id: rec.artifact.id, status: 'approved', note: 'agreed' })   // a superadmin may
+    expect(approved.artifact).toMatchObject({ status: 'approved', version: 2, body: { approvals: [{ status: 'approved', note: 'agreed' }] } })
+    expect((await u1.ask({ t: 'artifact:get', session: 's-1', id: rec.artifact.id })).versions.map((v: any) => v.status)).toEqual(['pending', 'approved'])
+    const reg = await u1.ask({ t: 'decision:register' })
+    expect(reg.decisions).toEqual([expect.objectContaining({ session: 's-1', title: 'Flag the overruns to the PMO', status: 'approved', version: 2, agent: 'portfolio' })])
+    // the decision memory heard how the step turned out
+    const e = (await at('/decision/experiences?session=s-1')).body.experiences[0]
+    expect(e.outcomes.map((o: any) => o.outcome)).toEqual(['succeeded'])
+    u1.ws.close()
+  })
+
   it('the states read as of any moment; nothing is erased', async () => {
     const before = new Date().toISOString()
     await new Promise((r) => setTimeout(r, 10))

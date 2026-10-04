@@ -204,6 +204,14 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     CREATE INDEX IF NOT EXISTS idx_usage_turns_tag ON usage_turns(tag, started_at);
     CREATE INDEX IF NOT EXISTS idx_usage_principal ON usage_events(principal, at);
   ` },
+  { id: 27, name: 'decision register', up: `
+    -- The project's decisions, as each session records and decides them: every version, append-only.
+    CREATE TABLE IF NOT EXISTS decision_register (seq INTEGER PRIMARY KEY AUTOINCREMENT, session TEXT NOT NULL, artifact TEXT NOT NULL, version INTEGER NOT NULL,
+      title TEXT NOT NULL, status TEXT NOT NULL, agent TEXT, by TEXT NOT NULL, at TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS idx_register_at ON decision_register(at);
+    CREATE TRIGGER IF NOT EXISTS register_no_update BEFORE UPDATE ON decision_register BEGIN SELECT RAISE(ABORT, 'the decision register is append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS register_no_delete BEFORE DELETE ON decision_register BEGIN SELECT RAISE(ABORT, 'the decision register is append-only'); END;
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */
@@ -292,6 +300,13 @@ export const SESSION_MIGRATIONS: Migration[] = [
     CREATE TABLE IF NOT EXISTS entries (seq INTEGER PRIMARY KEY, entry TEXT NOT NULL, at TEXT NOT NULL);
     CREATE TRIGGER IF NOT EXISTS entries_no_update BEFORE UPDATE ON entries BEGIN SELECT RAISE(ABORT, 'a session log is append-only'); END;
     CREATE TRIGGER IF NOT EXISTS entries_no_delete BEFORE DELETE ON entries BEGIN SELECT RAISE(ABORT, 'a session log is append-only'); END;
+  ` },
+  { id: 2, name: 'artifacts', up: `
+    -- What the session's work produced and decided (a decision record, a file, a report, a plan): every version kept.
+    CREATE TABLE IF NOT EXISTS artifacts (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL, version INTEGER NOT NULL, kind TEXT NOT NULL,
+      title TEXT NOT NULL, status TEXT NOT NULL, block TEXT, body TEXT NOT NULL, by TEXT NOT NULL, at TEXT NOT NULL, note TEXT, UNIQUE (id, version));
+    CREATE TRIGGER IF NOT EXISTS artifacts_no_update BEFORE UPDATE ON artifacts BEGIN SELECT RAISE(ABORT, 'artifacts are append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS artifacts_no_delete BEFORE DELETE ON artifacts BEGIN SELECT RAISE(ABORT, 'artifacts are append-only'); END;
   ` },
 ]
 

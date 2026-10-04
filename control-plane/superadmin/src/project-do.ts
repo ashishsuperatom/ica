@@ -1313,7 +1313,7 @@ export class ProjectDO extends DurableObject<Env> {
       return
     }
     // ── The decision memory (no engine needed): the paths from a step, how a step turned out, the decision states ──
-    if (typeof pl.t === 'string' && pl.t.startsWith('decision:') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
+    if (typeof pl.t === 'string' && pl.t.startsWith('decision:') && pl.t !== 'decision:register' && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
       const who = this.principalOf(sender)
       if (!who) { hubReply({ t: 'decision:refused', reason: 'who is asking is not known', reqId: pl.reqId }); return }
       const dec = this.decisionStub()
@@ -1351,6 +1351,69 @@ export class ProjectDO extends DurableObject<Env> {
           hubReply({ t: 'decision:changed', ...out, reqId: pl.reqId })
         } else throw new Error(`there is no ${pl.t}`)
       } catch (e: any) { hubReply({ t: 'decision:refused', reason: e?.message ?? String(e), reqId: pl.reqId }) }
+      return
+    }
+    // ── Artifacts of a session (a decision record, a file, a plan) and the project's decision register (no engine needed) ──
+    if (typeof pl.t === 'string' && (pl.t.startsWith('artifact:') || pl.t === 'decision:register') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
+      const who = this.principalOf(sender)
+      if (!who) { hubReply({ t: 'artifact:refused', reason: 'who is asking is not known', reqId: pl.reqId }); return }
+      const actor = { kind: (sender.type === 'agent' ? 'agent' : 'user') as 'agent' | 'user', id: who, ...(sender.email ? { email: sender.email } : {}) }
+      try {
+        if (pl.t === 'decision:register') {
+          const rows = [...this.ctx.storage.sql.exec(`SELECT r.* FROM decision_register r JOIN (SELECT artifact, MAX(version) AS m FROM decision_register ${pl.asOf ? 'WHERE at <= ?' : ''} GROUP BY artifact) x ON x.artifact = r.artifact AND x.m = r.version ORDER BY r.at DESC LIMIT 200`, ...(pl.asOf ? [String(pl.asOf)] : []))]
+          hubReply({ t: 'decision:register', decisions: rows, asOf: pl.asOf ?? null, reqId: pl.reqId }); return
+        }
+        const stub = this.sessionStub(String(pl.session ?? ''))
+        const viewRes = await stub.fetch('http://do/view'); const vb: any = await viewRes.json()
+        if (!viewRes.ok) throw new Error(vb.error ?? 'there is no such session')
+        const view = vb.view
+        const own = view.user === who
+        if (!own && !sender.admin) throw new Error(`session ${pl.session} is not yours`)
+        if (pl.t === 'artifact:list') { hubReply({ t: 'artifact:list', session: pl.session, ...(await (await stub.fetch('http://do/artifacts')).json() as any), reqId: pl.reqId }); return }
+        if (pl.t === 'artifact:get') { const r = await stub.fetch(`http://do/artifact/${encodeURIComponent(String(pl.id ?? ''))}`); const b: any = await r.json(); if (!r.ok) throw new Error(b.error); hubReply({ t: 'artifact:get', session: pl.session, ...b, reqId: pl.reqId }); return }
+        // The experiences on the path that led to a step: how they turned out is what this decision says.
+        const pathTo = (block: string) => { const out: string[] = []; for (let b: string | null = block; b; b = view.blocks.find((x: any) => x.id === b)?.parent ?? null) out.unshift(b); return out }
+        const outcome = async (block: string, o: 'succeeded' | 'failed' | 'reversed', artifact: string) => {
+          for (const b of pathTo(block)) await this.decisionStub().fetch('http://do/outcome', { method: 'POST', headers: { 'x-sa-project': this._pid }, body: JSON.stringify({ session: pl.session, block: b, outcome: o, by: who, artifact }) }).catch(() => {})
+        }
+        const register = (a: any) => this.ctx.storage.sql.exec('INSERT INTO decision_register (session, artifact, version, title, status, agent, by, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', String(pl.session), a.id, a.version, a.title, a.status, view.agent ?? null, who, a.at)
+        if (pl.t === 'artifact:record') {
+          // A command, not a STATE change: who → may they → recorded with what it rested on → the register → the audit.
+          if (!own) throw new Error('only the session\'s owner records its decisions')
+          const kind = String(pl.kind ?? 'decision')
+          const block = String(pl.block ?? view.leaf)
+          if (!view.blocks.some((b: any) => b.id === block)) throw new Error(`session ${pl.session} has no block ${block}`)
+          const body = { ...(pl.body ?? {}) }
+          if (kind === 'decision') {
+            if (!String(body.decision ?? '').trim()) throw new Error('a decision record says what was decided')
+            if (!String(body.reasoning ?? '').trim()) throw new Error('a decision record says why (reasoning)')
+            const step = stepOf(view, block)
+            const b = view.blocks.find((x: any) => x.id === block)
+            body.restsOn = { block, answer: b?.answer ?? null, stateHash: b?.stateHash ?? null, world: step?.world ?? {} }
+          }
+          const status = kind === 'decision' ? (pl.approval ? 'pending' : 'decided') : 'made'
+          const r = await stub.fetch('http://do/artifact', { method: 'POST', body: JSON.stringify({ kind, title: String(pl.title ?? body.decision ?? kind).slice(0, 200), status, block, body, by: who }) })
+          const out: any = await r.json(); if (!r.ok) throw new Error(out.error)
+          if (kind === 'decision') { register(out.artifact); await outcome(block, 'succeeded', out.artifact.id) }
+          this.audit.record({ actor, via: sender.type === 'agent' ? 'agent' : 'ui', action: `artifact.${kind}`, target: `${pl.session}/${out.artifact.id}`, outcome: 'ok', detail: { title: out.artifact.title, status } })
+          hubReply({ t: 'artifact:recorded', session: pl.session, artifact: out.artifact, reqId: pl.reqId }); return
+        }
+        if (pl.t === 'artifact:decide') {
+          const status = String(pl.status ?? '')
+          if (!['approved', 'rejected', 'reversed', 'superseded'].includes(status)) throw new Error('a decision is approved, rejected, reversed or superseded')
+          const r0 = await stub.fetch(`http://do/artifact/${encodeURIComponent(String(pl.id ?? ''))}`); const b0: any = await r0.json(); if (!r0.ok) throw new Error(b0.error)
+          const last = b0.versions[b0.versions.length - 1]
+          if (status === 'approved' && last.status !== 'pending') throw new Error('only a decision awaiting approval is approved')
+          if (status === 'approved' && own && !sender.admin) throw new Error('a decision is approved by someone other than who made it')
+          const body = status === 'approved' || status === 'rejected' ? { ...last.body, approvals: [...(last.body.approvals ?? []), { by: who, at: new Date().toISOString(), status, note: pl.note ?? null }] } : last.body
+          const r = await stub.fetch('http://do/artifact', { method: 'POST', body: JSON.stringify({ id: last.id, kind: last.kind, title: last.title, status, block: last.block, body, by: who, note: pl.note ?? null }) })
+          const out: any = await r.json(); if (!r.ok) throw new Error(out.error)
+          if (last.kind === 'decision') { register(out.artifact); if (status === 'reversed' || status === 'rejected') await outcome(last.block, status === 'reversed' ? 'reversed' : 'failed', last.id) }
+          this.audit.record({ actor, via: sender.type === 'agent' ? 'agent' : 'ui', action: `artifact.${status}`, target: `${pl.session}/${last.id}`, outcome: 'ok', detail: { note: pl.note ?? null } })
+          hubReply({ t: 'artifact:decided', session: pl.session, artifact: out.artifact, reqId: pl.reqId }); return
+        }
+        throw new Error(`there is no ${pl.t}`)
+      } catch (e: any) { hubReply({ t: 'artifact:refused', reason: e?.message ?? String(e), reqId: pl.reqId }) }
       return
     }
     // ── Sessions read from the platform's copy (no engine needed): only the person's own ──
