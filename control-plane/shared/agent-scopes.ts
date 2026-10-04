@@ -6,6 +6,8 @@ export const AGENT_SCOPES = {
   sessions: ['session:agents', 'session:open', 'session:intent', 'session:goto', 'session:get', 'session:file'],
   /** Ask a question in words, and stop it. */
   ask: ['analyse', 'turn:stop'],
+  /** The composition graph: read it, make and change your own concepts and domains, suggest and decide changes. */
+  graph: ['graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:concept', 'graph:domain', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide'],
 } as const
 
 export type AgentScope = keyof typeof AGENT_SCOPES

@@ -273,6 +273,16 @@ export default {
       })
     }
 
+    // ── An agent over HTTP: POST /api/agent/<projectId> with its key as the bearer, the message as the body. The
+    //    project's DO checks the key and sends it the same way as over the agent's WebSocket. ──
+    const agentCall = path.match(/^\/api\/agent\/([0-9a-f-]{36})$/)
+    if (agentCall) {
+      if (request.method !== 'POST') return new Response('method not allowed', { status: 405 })
+      const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${agentCall[1]}`))
+      const fwd = new Request(`http://do/agent-call${url.search}`, request)
+      fwd.headers.set('x-sa-project', agentCall[1])
+      return stub.fetch(fwd)
+    }
     const projMatch = path.match(/^\/api\/projects\/([^/]+)\/(.+)/)
     if (projMatch) return auditedProjectCall(request, env, projMatch[1], projMatch[2], async () => {
       const projectId = projMatch[1]

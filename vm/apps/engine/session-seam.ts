@@ -27,6 +27,7 @@ import { ProgramStore, ProgramError, loadPackage } from '@superatom/programs'
 import { createStateEngine, StateRefusal, type StateEngine } from '@superatom/state'
 import { createSessions, fileLog, history, replay, SessionRefusal, type SessionLog, type SessionView } from '@superatom/session'
 import { cardOf } from './answer-card.js'
+import { whoIs } from './identity.js'
 
 export interface SessionSeamDeps {
   projectDir: string
@@ -85,12 +86,10 @@ export function createSessionSeam(d: SessionSeamDeps) {
     return { ...(await r), spec }
   }
 
-  // Who is asking, as the hub stamped it: a person (user:<id>) or an agent key (agent:<keyId>, from the Superatom CLI).
   const userOf = (from: any): string => {
-    const id = from?.userId
-    if (!id || typeof id !== 'string') throw new SessionSeamRefusal('the hub did not say who is asking')
-    return from.type === 'agent' && id.startsWith('agent:') ? id : `user:${id}`
+    try { return whoIs(from).id } catch (e) { throw new SessionSeamRefusal((e as Error).message) }
   }
+
 
   async function sessionRuntime(session: string) {
     const v = replay(log.read(session))

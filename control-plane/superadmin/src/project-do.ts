@@ -45,6 +45,7 @@ interface ConnInfo {
   userId?: string    // only for user connections; an agent key's is `agent:<keyId>`
   email?: string     // the person's address, from their token (for the audit history)
   scopes?: string[]  // an agent key's scopes (shared/agent-scopes.ts)
+  admin?: boolean    // a person who administers this project (superadmin, org admin, or the project's admin role)
   orgRole?: string   // "admin" | "member" — from JWT, used for persona enforcement
   instanceId?: string // singleton identity: which process this connection belongs to (stable per boot)
   epoch?: number     // singleton generation: the process boot time — a NEWER process has a higher epoch
@@ -54,7 +55,7 @@ interface ConnInfo {
 interface Envelope {
   to?: { id?: string; type: string; channel?: string }   // channel: agent-log fan-out (the engine LABELS, the DO fans to the owner's attached devices)
   // userId: who sent it, stamped by the hub from the connection's credentials — never taken from the payload.
-  from: { id: string; type: string; userId?: string }
+  from: { id: string; type: string; userId?: string; admin?: boolean }
   payload: unknown
 }
 
@@ -264,6 +265,7 @@ export class ProjectDO extends DurableObject<Env> {
 
     // ── Agent API keys and the audit history (the worker authorises the caller as the project's admin) ──
     if (path === '/agent-keys' || path.startsWith('/agent-keys/') || path === '/audit') return this.agentKeysAndAudit(request, path)
+    if (request.method === 'POST' && path === '/agent-call') return this.agentCall(request)
 
     if (request.method === 'GET'  && path === '/debug')        return this.debugInfo()
     if (request.method === 'POST' && path === '/members')      return this.addMember(request)
@@ -536,7 +538,7 @@ export class ProjectDO extends DurableObject<Env> {
         // Inspector's inspect:req to the engine, and is NOT counted as user activity (watching ≠ using), so it never
         // bumps last_active / extends the idle countdown. It can still wake a suspended machine (see relay()).
         if (claims.role !== 'superadmin') { ws.close(4003, 'Admin surface requires superadmin'); return }
-        this.register(ws, 'admin', claims.userId, claims.role, undefined, undefined, { email: claims.email })
+        this.register(ws, 'admin', claims.userId, claims.role, undefined, undefined, { email: claims.email, admin: true })
         return
       }
 
@@ -546,15 +548,17 @@ export class ProjectDO extends DurableObject<Env> {
       // `members` remains for SERVICE identities — a bot has a userId and no address — so both are consulted,
       // in that order. Checking only `members`, as this did, meant assigning someone in the console did not
       // actually let them in: two lists, one of which nothing wrote to any more.
+      let admin = claims.role === 'superadmin'
       if (claims.role !== 'superadmin') {
         const email = String(claims.email || '').toLowerCase()
-        const byEmail = email ? [...this.ctx.storage.sql.exec('SELECT role_id FROM access WHERE email = ?', email)] : []
+        const byEmail = email ? [...this.ctx.storage.sql.exec('SELECT role_id, source FROM access WHERE email = ?', email)] : []
         const byUserId = byEmail.length ? [] : [...this.ctx.storage.sql.exec('SELECT role FROM members WHERE user_id = ?', claims.userId)]
         if (!byEmail.length && !byUserId.length) { ws.close(4003, 'No access to this project'); return }
+        admin = byEmail.some((r: any) => r.role_id === 'admin' || r.source === 'org-admin')
       }
       this.markUserActivity()
       this.wakeMachine()
-      this.register(ws, 'runtime', claims.userId, claims.role, undefined, undefined, { email: claims.email })
+      this.register(ws, 'runtime', claims.userId, claims.role, undefined, undefined, { email: claims.email, admin })
       return
     }
 
@@ -563,7 +567,7 @@ export class ProjectDO extends DurableObject<Env> {
 
   // Returns true if the connection was registered, false if it was FENCED (rejected — an older/stale
   // singleton connection that a newer instance already superseded). Callers skip post-register work on false.
-  private async register(ws: WebSocket, type: string, userId: string | undefined, orgRole: string | undefined, instanceId?: string, epoch?: number, extra: { email?: string; scopes?: string[] } = {}): Promise<boolean> {
+  private async register(ws: WebSocket, type: string, userId: string | undefined, orgRole: string | undefined, instanceId?: string, epoch?: number, extra: { email?: string; scopes?: string[]; admin?: boolean } = {}): Promise<boolean> {
 
     // Generate wsId
     const wsId = crypto.randomUUID().slice(0, 8)
@@ -598,7 +602,7 @@ export class ProjectDO extends DurableObject<Env> {
 
     // Register
     this.wsById.set(wsId, ws)
-    const conn: ConnInfo = { wsId, type, userId, orgRole, instanceId, epoch, ...(extra.email ? { email: extra.email } : {}), ...(extra.scopes ? { scopes: extra.scopes } : {}) }
+    const conn: ConnInfo = { wsId, type, userId, orgRole, instanceId, epoch, ...(extra.email ? { email: extra.email } : {}), ...(extra.scopes ? { scopes: extra.scopes } : {}), ...(extra.admin ? { admin: true } : {}) }
     this.connByWs.set(ws, conn)
     ws.serializeAttachment(conn)   // survives hibernation → hydrate() rebuilds the Maps after a wake/deploy
     if (singleton) this.roleRegistry.set(type, wsId)
@@ -672,6 +676,40 @@ export class ProjectDO extends DurableObject<Env> {
     })
   }
 
+  // ── An agent over HTTP ─────────────────────────────────────────────────────
+  // The same message an agent sends over its WebSocket, sent as one HTTP request instead. It is not a second
+  // implementation: the call becomes a short-lived agent connection and goes through relay() — the same scope check,
+  // the same audit, the same routing to the engine — and the reply addressed to it (made whole by the platform's
+  // transport, if it came in parts or as a parcel) is the response.
+  private async agentCall(request: Request): Promise<Response> {
+    const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
+    const key = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
+    const v = key ? await this.agentKeys.verify(key) : { ok: false as const, reason: 'no key' }
+    if (!v.ok) {
+      this.audit.record({ actor: { kind: 'agent', id: `key:${key.slice(0, 47) || 'none'}` }, via: 'agent', action: 'agent.call', outcome: 'refused', detail: { reason: v.reason } })
+      return json({ error: `Invalid agent key: ${v.reason}` }, 401)
+    }
+    const payload: any = await request.json().catch(() => null)
+    if (!payload || typeof payload.t !== 'string') return json({ error: 'the body is a message: { "t": "<type>", … }' }, 400)
+    payload.reqId ??= `http-${crypto.randomUUID()}`
+    const wsId = `http-${crypto.randomUUID().slice(0, 8)}`
+    const conn: ConnInfo = { wsId, type: 'agent', userId: `agent:${v.key.id}`, scopes: v.key.scopes }
+    const timeoutMs = Math.min(Math.max(Number(new URL(request.url).searchParams.get('timeout')) || 120, 1), 300) * 1000
+    return await new Promise<Response>((resolve) => {
+      let done = false
+      const finish = (r: Response) => { if (done) return; done = true; clearTimeout(timer); this.wsById.delete(wsId); this.connByWs.delete(fake); resolve(r) }
+      const inbound = receiver({ deliver: (m: any) => {
+        if (m?.reqId === payload.reqId) finish(json(m, m.t === 'error' ? 403 : 200))
+        else if (m?.t === 'error' && m.source === 'compute') finish(json(m, 503))
+      }, parcels: bucketStore(this.env.PACKAGES, this._pid) })
+      const fake = { send: (data: string) => { try { const env = JSON.parse(data); if (env?.payload) void inbound.receive(env.payload) } catch { /* not ours */ } }, close: () => {} } as unknown as WebSocket
+      const timer = setTimeout(() => finish(json({ error: `no reply to ${payload.t} in ${timeoutMs / 1000}s` }, 504)), timeoutMs)
+      this.wsById.set(wsId, fake)
+      this.connByWs.set(fake, conn)
+      this.relay(fake, conn, { to: { type: 'code-engine' }, payload }).catch((e) => finish(json({ error: e?.message ?? String(e) }, 500)))
+    })
+  }
+
   // ── Sessions kept by the platform ──────────────────────────────────────────
   private sessionStub(session: string) {
     if (!/^[\w-]{1,80}$/.test(session)) throw new Error('not a session id')
@@ -705,6 +743,7 @@ export class ProjectDO extends DurableObject<Env> {
     const detail: Record<string, unknown> = {}
     if (t === 'analyse') { detail.question = String(pl.question ?? '').slice(0, 4000); if (pl.sessionId) detail.session = String(pl.sessionId); if (pl.questionId) detail.qid = String(pl.questionId) }
     else if (t.startsWith('session:')) { for (const k of ['session', 'agent', 'block', 'to', 'ops', 'action', 'call', 'asOf']) if (pl[k] !== undefined) detail[k] = pl[k] }
+    else if (t.startsWith('graph:')) { for (const k of ['name', 'kind', 'domain', 'concept', 'at', 'id', 'verdict', 'reason', 'scope', 'status', 'asOf']) if (pl[k] !== undefined) detail[k] = pl[k] }
     if (reason) detail.reason = reason
     try { this.audit.record({ actor, via, action, ...(pl?.session || pl?.sessionId ? { target: String(pl.session ?? pl.sessionId) } : {}), outcome, ...(Object.keys(detail).length ? { detail } : {}) }) }
     catch (e: any) { this.log('audit:refused', { message: e?.message ?? String(e) }) }
@@ -768,7 +807,7 @@ export class ProjectDO extends DurableObject<Env> {
     // they pass through so an offline client can recover them. All user-scoped by the runtime's JWT userId.
     const pl = msg.payload || {}
     const hubReply = (payload: any) => senderWs.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload }))
-    const envelope: Envelope = { from: { id: sender.wsId, type: sender.type, ...(sender.userId ? { userId: sender.userId } : {}) }, payload: msg.payload }   // built once — reused by the base routing below AND the fan-out
+    const envelope: Envelope = { from: { id: sender.wsId, type: sender.type, ...(sender.userId ? { userId: sender.userId } : {}), ...(sender.admin ? { admin: true } : {}) }, payload: msg.payload }   // built once — reused by the base routing below AND the fan-out
     // ── The audit history: everything a person or an agent sends, and every refusal ──
     if (sender.type === 'agent') {
       const toType = (msg.to as any)?.type

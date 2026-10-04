@@ -54,6 +54,21 @@ UPDATE change SET kind = 'concept' WHERE kind = 'part';
     addColumnIfMissing(db, 'name', 'owner', 'TEXT')
     addColumnIfMissing(db, 'change', 'scope', 'TEXT')
   } },
+  // Governance (governance.ts): a suggestion to change a node, and the owner's decision on it — both append-only; a
+  // suggestion's status is read from its decision, never stored on it.
+  { id: 4, name: 'suggestions and decisions', up: `
+CREATE TABLE IF NOT EXISTS suggestion (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL, body_hash TEXT NOT NULL,
+  base_hash TEXT, scope TEXT, by TEXT NOT NULL, reason TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS suggestion_name ON suggestion(name, at);
+CREATE TABLE IF NOT EXISTS decision (
+  suggestion INTEGER PRIMARY KEY REFERENCES suggestion(id), at INTEGER NOT NULL, by TEXT NOT NULL,
+  verdict TEXT NOT NULL CHECK (verdict IN ('approved', 'rejected', 'withdrawn')), reason TEXT);
+CREATE TRIGGER IF NOT EXISTS suggestion_no_update BEFORE UPDATE ON suggestion BEGIN SELECT RAISE(ABORT, 'suggestions are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS suggestion_no_delete BEFORE DELETE ON suggestion BEGIN SELECT RAISE(ABORT, 'suggestions are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS decision_no_update BEFORE UPDATE ON decision BEGIN SELECT RAISE(ABORT, 'decisions are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS decision_no_delete BEFORE DELETE ON decision BEGIN SELECT RAISE(ABORT, 'decisions are append-only'); END;
+` },
 ]
 
 /** JSON with keys in a fixed order, so the same content always has the same hash. */
@@ -86,14 +101,14 @@ export class Store {
     // Unchanged content, scope and owner records nothing; a new scope or owner alone is a change (same content).
     if (cur?.hash === hash && cur.scope === scope && cur.owner === owner) return { hash, changed: false }
     const now = Date.now()
-    this.db.exec('BEGIN')
+    this.db.exec('SAVEPOINT cg_write')
     try {
       this.db.prepare('INSERT OR IGNORE INTO content (hash, body, at) VALUES (?, ?, ?)').run(hash, canonical(body), now)
       this.db.prepare('INSERT INTO name (name, kind, hash, scope, owner) VALUES (?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET hash = excluded.hash, scope = excluded.scope, owner = excluded.owner').run(name, kind, hash, scope, owner)
       this.db.prepare('INSERT INTO change (at, name, kind, from_hash, to_hash, by, reason, evidence, scope) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
         .run(now, name, kind, cur?.hash ?? null, hash, ctx.by, ctx.reason ?? null, ctx.from ?? null, scope)
-      this.db.exec('COMMIT')
-    } catch (e) { this.db.exec('ROLLBACK'); throw e }
+      this.db.exec('RELEASE cg_write')
+    } catch (e) { this.db.exec('ROLLBACK TO cg_write'); this.db.exec('RELEASE cg_write'); throw e }
     return { hash, changed: true }
   }
 
@@ -101,13 +116,13 @@ export class Store {
   remove(name: string, ctx: ChangeContext): boolean {
     const cur = this.db.prepare('SELECT kind, hash FROM name WHERE name = ?').get(name) as { kind: string; hash: string } | undefined
     if (!cur) return false
-    this.db.exec('BEGIN')
+    this.db.exec('SAVEPOINT cg_write')
     try {
       this.db.prepare('DELETE FROM name WHERE name = ?').run(name)
       this.db.prepare('INSERT INTO change (at, name, kind, from_hash, to_hash, by, reason, evidence, scope) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, NULL)')
         .run(Date.now(), name, cur.kind, cur.hash, ctx.by, ctx.reason ?? null, ctx.from ?? null)
-      this.db.exec('COMMIT')
-    } catch (e) { this.db.exec('ROLLBACK'); throw e }
+      this.db.exec('RELEASE cg_write')
+    } catch (e) { this.db.exec('ROLLBACK TO cg_write'); this.db.exec('RELEASE cg_write'); throw e }
     return true
   }
 

@@ -1,0 +1,136 @@
+// ── Governance — who may change what ─────────────────────────────────────────────────────────────────────────────────
+//
+// Every node has one owner. The owner (or an admin) changes it; anyone else suggests a change, which the owner approves
+// or rejects. A new node is made, not suggested, and whoever makes it owns it. A node with no owner (knowledge imported
+// before owners existed) is changed by an admin. Suggestions and decisions are append-only; a suggestion's status is
+// read from its decision. An approval applies the suggested content as a change by the approver, recorded with where
+// it came from — and is refused if the node changed after the suggestion was made, so nobody approves something other
+// than what they read.
+
+import { canonical, hashOf, type Kind, type Scope, type Store } from './store.js'
+import { conceptsOf, type ConceptBody, type DomainBody } from './compose.js'
+
+export class GovernanceRefusal extends Error {}
+
+/** Who is acting: a person (user:<id>) or an agent key (agent:<keyId>), and whether they administer the project. */
+export interface Actor { id: string; admin?: boolean }
+
+export type Status = 'open' | 'approved' | 'rejected' | 'withdrawn'
+export interface Suggestion { id: number; at: number; name: string; kind: Kind; body: unknown; baseHash: string | null; scope: Scope | null; by: string; reason: string; status: Status; decidedBy: string | null; decidedAt: number | null; decision: string | null }
+
+/** What a body of each writable kind must be. */
+export function checkBody(kind: Kind, body: unknown): string[] {
+  const b = body as any
+  if (!b || typeof b !== 'object' || Array.isArray(b)) return [`a ${kind} is an object`]
+  if (kind === 'concept') {
+    if (typeof b.title !== 'string' || !b.title.trim()) return ['a concept has a title']
+    if (b.form === 'text') return typeof b.text === 'string' && b.text.trim() ? [] : ['a text concept has its text']
+    if (b.form === 'bullets' || b.form === 'numbered') return Array.isArray(b.items) && b.items.length && b.items.every((x: unknown) => typeof x === 'string' && x.trim()) ? [] : [`a ${b.form} concept has its items, each text`]
+    if (b.form === 'worked') return Array.isArray(b.items) && b.items.every((x: any) => typeof x?.question === 'string' && Array.isArray(x.steps)) ? [] : ['a worked concept has examples, each a question and its steps']
+    return ['a concept\'s form is text, bullets, numbered or worked']
+  }
+  if (kind === 'domain') {
+    const lists = ['capabilities', 'concepts', 'files'] as const
+    const bad = lists.filter((k) => !Array.isArray(b[k]) || b[k].some((x: unknown) => typeof x !== 'string'))
+    return bad.length ? [`a domain lists its ${bad.join(', ')} (names)`] : []
+  }
+  return [`a ${kind} is not changed this way`]
+}
+
+const ownerOf = (store: Store, name: string) => store.get(name)
+
+/** May this actor change this node directly? Says why not. */
+function mayWrite(store: Store, actor: Actor, name: string): { ok: true } | { ok: false; why: string } {
+  const cur = ownerOf(store, name)
+  if (!cur) return { ok: true }
+  if (actor.admin) return { ok: true }
+  if (cur.owner === actor.id) return { ok: true }
+  return { ok: false, why: cur.owner ? `"${name}" is ${cur.owner}'s — suggest the change instead` : `"${name}" has no owner — an admin changes it; suggest the change instead` }
+}
+
+/** Make or change a node as this actor: a new node becomes theirs; an existing one only if they own it (or admin). */
+export function write(store: Store, actor: Actor, name: string, kind: Kind, body: unknown, ctx: { reason?: string; from?: string } = {}, place: { scope?: Scope } = {}) {
+  if (!/^[\w][\w.-]{0,119}$/.test(name)) throw new GovernanceRefusal(`"${name}" is not a name: letters, digits, dots, dashes and underscores`)
+  const bad = checkBody(kind, body)
+  if (bad.length) throw new GovernanceRefusal(bad.join('; '))
+  const may = mayWrite(store, actor, name)
+  if (!may.ok) throw new GovernanceRefusal(may.why)
+  const cur = ownerOf(store, name)
+  if (kind === 'domain') for (const c of conceptsOf(body as DomainBody)) if (!store.get(c)) throw new GovernanceRefusal(`the domain names a concept that does not exist: "${c}"`)
+  try {
+    return store.put(name, kind, body, { by: actor.id, reason: ctx.reason, from: ctx.from }, { ...(place.scope ? { scope: place.scope } : {}), ...(cur ? {} : { owner: actor.id }) })
+  } catch (e: any) { throw new GovernanceRefusal(e?.message ?? String(e)) }
+}
+
+/** Put a concept into a domain's composition (at a position), or take it out — a change to the domain. */
+export function compose(store: Store, actor: Actor, domain: string, concept: string, how: { leave?: boolean; at?: number }, reason?: string) {
+  const d = store.get<DomainBody>(domain)
+  if (!d || d.kind !== 'domain') throw new GovernanceRefusal(`there is no domain "${domain}"`)
+  const list = conceptsOf(d.body).filter((c) => c !== concept)
+  if (!how.leave) {
+    const c = store.get(concept)
+    if (!c || c.kind !== 'concept') throw new GovernanceRefusal(`there is no concept "${concept}"`)
+    list.splice(Math.max(0, Math.min(how.at ?? list.length, list.length)), 0, concept)
+  } else if (list.length === conceptsOf(d.body).length) throw new GovernanceRefusal(`"${concept}" is not in "${domain}"`)
+  const { parts: _legacy, ...rest } = d.body
+  return write(store, actor, domain, 'domain', { ...rest, concepts: list }, { reason: reason ?? `${how.leave ? 'leave' : 'join'} ${concept}` })
+}
+
+/** Suggest a change to a node someone else owns (or a node with no owner). */
+export function suggest(store: Store, actor: Actor, name: string, kind: Kind, body: unknown, reason: string): Suggestion {
+  if (!reason?.trim()) throw new GovernanceRefusal('a suggestion says why')
+  const bad = checkBody(kind, body)
+  if (bad.length) throw new GovernanceRefusal(bad.join('; '))
+  const cur = store.get(name)
+  if (!cur) throw new GovernanceRefusal(`there is no "${name}" — a new ${kind} is made, not suggested`)
+  if (cur.kind !== kind) throw new GovernanceRefusal(`"${name}" is a ${cur.kind}, not a ${kind}`)
+  if (cur.hash === hashOf(body)) throw new GovernanceRefusal(`that is what "${name}" already says`)
+  const hash = hashOf(body)
+  const now = Date.now()
+  store.db.prepare('INSERT OR IGNORE INTO content (hash, body, at) VALUES (?, ?, ?)').run(hash, canonical(body), now)
+  const r = store.db.prepare('INSERT INTO suggestion (at, name, kind, body_hash, base_hash, scope, by, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(now, name, kind, hash, cur.hash, null, actor.id, reason.trim())
+  return get(store, Number(r.lastInsertRowid))!
+}
+
+/** A suggestion, with its status. */
+export function get(store: Store, id: number): Suggestion | null {
+  const r = store.db.prepare('SELECT s.*, d.verdict, d.by AS d_by, d.at AS d_at, d.reason AS d_reason FROM suggestion s LEFT JOIN decision d ON d.suggestion = s.id WHERE s.id = ?').get(id) as any
+  return r ? row(store, r) : null
+}
+function row(store: Store, r: any): Suggestion {
+  return { id: r.id, at: r.at, name: r.name, kind: r.kind, body: store.content(r.body_hash), baseHash: r.base_hash, scope: r.scope, by: r.by, reason: r.reason,
+    status: (r.verdict ?? 'open') as Status, decidedBy: r.d_by ?? null, decidedAt: r.d_at ?? null, decision: r.d_reason ?? null }
+}
+
+/** Suggestions, newest first: by status, for a node, or by whom. */
+export function list(store: Store, q: { status?: Status; name?: string; by?: string; limit?: number } = {}): Suggestion[] {
+  const rows = store.db.prepare('SELECT s.*, d.verdict, d.by AS d_by, d.at AS d_at, d.reason AS d_reason FROM suggestion s LEFT JOIN decision d ON d.suggestion = s.id ORDER BY s.id DESC LIMIT ?').all(Math.min(q.limit ?? 100, 500)) as any[]
+  return rows.map((r) => row(store, r)).filter((s) => (!q.status || s.status === q.status) && (!q.name || s.name === q.name) && (!q.by || s.by === q.by))
+}
+
+/** The owner (or an admin) approves or rejects; the one who suggested may withdraw. */
+export function decide(store: Store, actor: Actor, id: number, verdict: 'approved' | 'rejected' | 'withdrawn', reason?: string): Suggestion {
+  const s = get(store, id)
+  if (!s) throw new GovernanceRefusal(`there is no suggestion ${id}`)
+  if (s.status !== 'open') throw new GovernanceRefusal(`suggestion ${id} was already ${s.status}`)
+  if (verdict === 'withdrawn') { if (s.by !== actor.id) throw new GovernanceRefusal('only the one who suggested it withdraws it') }
+  else {
+    const cur = store.get(s.name)
+    const may = mayWrite(store, actor, s.name)
+    if (!may.ok) throw new GovernanceRefusal(cur?.owner ? `only ${cur.owner} (the owner) or an admin decides on suggestion ${id}` : `"${s.name}" has no owner — an admin decides on suggestion ${id}`)
+    if (verdict === 'approved') {
+      if (!cur || cur.hash !== s.baseHash) throw new GovernanceRefusal(`"${s.name}" changed after suggestion ${id} was made — it cannot be approved as it is; ask for a new suggestion`)
+      if (s.kind === 'domain') for (const c of conceptsOf(s.body as DomainBody)) if (!store.get(c)) throw new GovernanceRefusal(`the suggested domain names a concept that does not exist: "${c}"`)
+    }
+  }
+  // One unit: the decision and, for an approval, the change it makes (a savepoint, so it nests with put's own).
+  store.db.exec('SAVEPOINT cg_decide')
+  try {
+    store.db.prepare('INSERT INTO decision (suggestion, at, by, verdict, reason) VALUES (?, ?, ?, ?, ?)').run(id, Date.now(), actor.id, verdict, reason ?? null)
+    if (verdict === 'approved') store.put(s.name, s.kind, s.body, { by: actor.id, reason: `approved suggestion ${id} by ${s.by}: ${s.reason}${reason ? ` — ${reason}` : ''}`, from: `suggestion:${id}` })
+    store.db.exec('RELEASE cg_decide')
+  } catch (e) { store.db.exec('ROLLBACK TO cg_decide'); store.db.exec('RELEASE cg_decide'); throw e }
+  return get(store, id)!
+}
+
+export type { ConceptBody }

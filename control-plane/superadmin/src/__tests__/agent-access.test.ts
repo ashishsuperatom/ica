@@ -8,6 +8,9 @@ import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { fileURLToPath } from 'node:url'
 import { createHmac } from 'node:crypto'
+import { AGENT_SCOPES } from '../../../shared/agent-scopes'
+import { SESSION_MESSAGES } from '../../../../vm/apps/engine/session-seam.ts'
+import { GRAPH_MESSAGES } from '../../../../vm/apps/engine/graph-seam.ts'
 
 const here = fileURLToPath(new URL('.', import.meta.url))
 const PID = '11111111-2222-3333-4444-555555555555'
@@ -109,10 +112,41 @@ describe('agent keys, identities and the audit history, in the real ProjectDO', 
     expect(atEngine.from).toMatchObject({ type: 'runtime', userId: 'user_42' })
   })
 
+  it('an agent over HTTP goes the same way as over its socket: scoped, audited, answered by the engine', async () => {
+    const made = await call('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'http bot', scopes: ['graph'], by: 'admin@test.io' }) })
+    const httpKey = made.body.key
+    // the engine answers whatever reaches it, addressed back to the sender
+    const answer = (e: any) => { const m = JSON.parse(String(e.data)); if (m.payload?.t === 'graph:domains') engine.ws.send(JSON.stringify({ to: { id: m.from.id, type: m.from.type }, payload: { t: 'graph:reply', domains: [{ name: 'trips' }], reqId: m.payload.reqId, who: m.from } })) }
+    engine.ws.addEventListener('message', answer)
+    const r = await mf.dispatchFetch('http://x/do/agent-call', { method: 'POST', headers: { authorization: `Bearer ${httpKey}` }, body: JSON.stringify({ t: 'graph:domains' }) })
+    expect(r.status).toBe(200)
+    const body: any = await r.json()
+    expect(body).toMatchObject({ t: 'graph:reply', domains: [{ name: 'trips' }], who: { type: 'agent', userId: `agent:${made.body.record.id}` } })
+    expect(body.who.admin).toBeUndefined()                           // an agent is never an admin
+    engine.ws.removeEventListener('message', answer)
+    const scoped = await mf.dispatchFetch('http://x/do/agent-call', { method: 'POST', headers: { authorization: `Bearer ${httpKey}` }, body: JSON.stringify({ t: 'session:agents' }) })
+    expect(scoped.status).toBe(403)
+    expect(((await scoped.json()) as any).reason).toBe("this key's scopes (graph) do not allow session:agents")
+    const bad = await mf.dispatchFetch('http://x/do/agent-call', { method: 'POST', headers: { authorization: 'Bearer nope' }, body: JSON.stringify({ t: 'graph:domains' }) })
+    expect(bad.status).toBe(401)
+  })
+
+  it('the hub tells the engine who administers the project', async () => {
+    const admin = await connect({ role: 'runtime', token: jwt({ userId: 'root', email: 'root@test.io', role: 'superadmin' }) })
+    await admin.until((m) => m.payload?.t === 'welcome')
+    admin.send({ to: { type: 'code-engine' }, payload: { t: 'graph:domains', reqId: 'adm' } })
+    expect((await engine.until((m) => m.payload?.reqId === 'adm')).from).toMatchObject({ type: 'runtime', userId: 'root', admin: true })
+  })
+
+  it("the hub's scopes name exactly the engine's messages (nothing an engine cannot answer, nothing it answers left out)", () => {
+    expect([...AGENT_SCOPES.sessions].sort()).toEqual([...SESSION_MESSAGES].sort())
+    expect([...AGENT_SCOPES.graph].sort()).toEqual([...GRAPH_MESSAGES].sort())
+  })
+
   it('the audit history has it all, newest first; a malformed event is refused', async () => {
     const events = (await call('/audit?limit=50')).body.events
     const line = (e: any) => `${e.actor.kind}:${e.actor.id.startsWith('agent:') ? 'agent' : e.actor.id.startsWith('key:') ? 'badkey' : e.actor.id} ${e.via} ${e.action} ${e.outcome}`
-    expect(events.map(line).reverse()).toEqual([
+    expect(events.map(line).reverse().slice(0, 8)).toEqual([
       'user:admin@test.io admin agent-key.create ok',
       'agent:badkey agent agent.connect refused',
       'agent:agent agent agent.connect ok',

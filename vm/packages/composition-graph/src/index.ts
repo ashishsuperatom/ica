@@ -3,3 +3,5 @@ export { compose, render, renderConcept, conceptsOf, join, leave, domains, drift
 export { importDomains, type WrittenDomain, type Imported } from './import.js'
 export { route, rank, indexOf, terms, stem, type Route, type Candidate } from './route.js'
 export { verifyGraph, verifyAgainst, type Finding } from './verify.js'
+export * as governance from './governance.js'
+export { GovernanceRefusal, type Actor, type Suggestion } from './governance.js'
