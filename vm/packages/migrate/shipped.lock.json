@@ -1,0 +1,58 @@
+{
+  "ProjectDO": {
+    "1": "cc9a93a2da2f7992",
+    "2": "478ee47390da96ee",
+    "3": "0881b48a51a356af",
+    "4": "7a92de2dd6605af9",
+    "5": "fb9b32d79cb2d1ea",
+    "6": "79e8c577a7dfb134",
+    "7": "3eba32bf14e3d25e",
+    "8": "a1a5aa6f9d744bd1",
+    "9": "ddba94b616fb23bd",
+    "10": "5a18b53f7390a58f",
+    "11": "3792f55f8e18a42f",
+    "12": "d9385f091b60b578",
+    "13": "734081b051b6d601",
+    "14": "c91db4c92ffa8ee2",
+    "15": "4836b9e8009c324b",
+    "16": "d6ec45337721723c",
+    "17": "468ce96259349c84",
+    "18": "5d35657b18343bb0",
+    "19": "17b3415362f8482c",
+    "20": "fe981388e278384f",
+    "21": "5266cb23ba05a586"
+  },
+  "OrgDO": {
+    "1": "07c5961c0df303cd",
+    "2": "d6815be34a09dd28"
+  },
+  "GlobalDO": {
+    "1": "07c5961c0df303cd",
+    "2": "67e7a3062bc04821"
+  },
+  "SessionDO": {
+    "1": "a63795f91f167825"
+  },
+  "UserDO": {
+    "1": "0f3e29fd337dec73"
+  },
+  "GraphDO": {
+    "1": "a1a8a05dbc6beed4"
+  },
+  "engine composition graph": {
+    "1": "bbcea13c87779246",
+    "2": "6b654c496f7108cd",
+    "3": "90d6bd31e732eea7",
+    "4": "e61259ccd0c4d591",
+    "5": "d44a72e8c2ecc2ef"
+  },
+  "engine datasource index": {
+    "1": "07c5961c0df303cd"
+  },
+  "engine agent sessions": {
+    "1": "ae74dcfde88bfeef"
+  },
+  "datasource manager query cache": {
+    "1": "d14e47394ff6fbe4"
+  }
+}

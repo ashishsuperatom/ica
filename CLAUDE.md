@@ -34,7 +34,10 @@ The agents that produce/maintain computation are named by thinking speed:
 ## Checks
 
 `scripts/check-all.sh` runs every typecheck and test suite and stops at the first failure. Run it before every
-deploy and push.
+push. The control plane is deployed only by `scripts/deploy-control-plane.sh` (`pnpm -C control-plane/superadmin run
+deploy`): committed code only, every check, then a production smoke test that every live project's DO starts, rolling
+back automatically if not. A shipped migration is never edited (`vm/packages/migrate/shipped.lock.json` enforces it;
+`pnpm -C vm/packages/migrate lock` adds new ones).
 
 ## Where the design lives
 
