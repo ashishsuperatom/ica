@@ -94,7 +94,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Borrowing knowledge from another agent within a session.
 
 **Agents, CLI, audit**
-- The audit history flowing to the platform's own Basin (Pipelines → Catalog → SQL), with metrics in Analytics Engine and Workers Traces.
+- The audit history flowing to the platform's own Basin (Pipelines → Catalog → R2 SQL); Analytics Engine dropped, Workers Logs and Traces on.
 - The engine's own audit events, through an ingest endpoint signed with the project key.
 - Organisation keys (creating projects through the CLI).
 - Installing the CLI and the engine with one command, from per-OS releases kept in R2 (latest and every version).
@@ -108,7 +108,6 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Sandboxing agents so their tools cannot bypass data access deliberately (dynamic workers).
 - Engine bridges for the SQL Server, Postgres and REST connectors run from a connection's settings; API and MCP connections in the data source index; organisation-level connections across projects; hundreds more connectors.
 - SCIM directory sync and deprovisioning from the identity provider.
-- Every model call tagged with the session it served (proxy path), so all usage is attributed to a person.
 - Payment through Stripe (a checkout whose webhook adds credits), invoices and per-plan limits; metering engine time and queries.
 - The data protocol for many users at once (fairness and queueing across users); activities in the user UI.
 - The platform's own data warehouse: every DO's records in one Basin, queryable with SQL (customer warehouses stopped: Pipelines' 20-per-account limit).
