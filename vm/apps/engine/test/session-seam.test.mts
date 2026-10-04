@@ -100,7 +100,7 @@ test('refused with a sentence: another user, no user, no agent, a broken op, wor
   assert.equal((await ask({ t: 'session:open', session: 's3', agent: 'nobody' })).reason, 'there is no agent "nobody"')
   assert.match((await ask({ t: 'session:open', session: 's3', agent: 'broken' })).reason, /^agents\/broken.json: agent.name is required/)
   assert.match((await ask({ t: 'session:intent', session: 's2', ops: [{ op: 'set', path: 'trips.branch', value: 7 }], to: 'current' })).reason, /trips.branch/)
-  assert.match((await ask({ t: 'session:intent', session: 's2', kind: 'language', text: 'hi', to: 'new' })).reason, /words are answered in the chat/)
+  assert.match((await ask({ t: 'session:intent', session: 's2', kind: 'language', text: 'hi', to: 'new' })).reason, /answers no words in sessions/)
   assert.equal((await ask({ t: 'session:nope', session: 's2' })).reason, 'there is no session:nope')
 })
 
@@ -124,4 +124,35 @@ test('an agent kept in the composition graph is listed (by its scope) and opens 
   assert.equal(out.at(-1).view.state.trips.branch, 'HYDERABAD')
   await s.handle({ t: 'session:intent', session: 'ga1', call: { package: 'trips', fn: 'run' }, to: 'current' }, { type: 'runtime', userId: 'u2', scopes: ['user:u2', 'group:ops'] })
   assert.equal(out.at(-1).result.answer.markdown.split('\n')[0], '1 trips at HYDERABAD are completed but not settled; 2160 to settle.')
+})
+
+test('words in a session: the agent is told the step and its programs; its :::intent line changes STATE (here) or opens a step (call)', async () => {
+  const out: any[] = []
+  const told: any[] = []
+  const answers = [
+    { markdown: 'Looking at Hyderabad instead.\n:::intent {"ops":[{"op":"set","path":"trips.branch","value":"HYDERABAD"}],"to":"current"}', blocks: [] },
+    { markdown: 'Every branch, in a new step.\n:::intent {"call":{"package":"trips","fn":"run"},"to":"new"}', blocks: [] },
+    { markdown: 'Just words: the trips are settled monthly.', blocks: [] },
+  ]
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), ask: async (o) => { told.push(o); return answers.shift()! } })
+  const ask = async (payload: any) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u7' }); return out.at(-1) }
+  const opened = await ask({ t: 'session:open', session: 'w1', agent: 'trips' })
+  const here = await ask({ t: 'session:intent', session: 'w1', kind: 'language', text: 'what about hyderabad?' })
+  assert.equal(told[0].domain, 'vendors-and-hire')
+  assert.match(told[0].context, /The step's STATE:\n\{.*"branch":"PUNE"/)
+  assert.match(told[0].context, /:::intent/)
+  assert.match(told[0].context, /## trips/)
+  assert.equal(here.result.opened, false)
+  assert.equal(here.view.state.trips.branch, 'HYDERABAD')
+  // the program reads trips.branch, so the change re-runs it: its answer follows the agent's words
+  assert.match(here.result.answer.markdown, /^Looking at Hyderabad instead\.\n\n1 trips at HYDERABAD/)
+  assert.doesNotMatch(here.result.answer.markdown, /:::intent/)
+  const next = await ask({ t: 'session:intent', session: 'w1', kind: 'language', text: 'run it in a new step' })
+  assert.equal(next.result.opened, true)
+  assert.match(next.result.answer.markdown, /^Every branch, in a new step\.\n\n1 trips at HYDERABAD/)
+  const words = await ask({ t: 'session:intent', session: 'w1', kind: 'language', text: 'how often are they settled?' })
+  assert.equal(words.result.opened, true)
+  assert.equal(words.result.answer.markdown, 'Just words: the trips are settled monthly.')
+  assert.equal(words.view.blocks.length, 3)
+  assert.equal(opened.view.leaf, words.view.blocks[0].id)
 })

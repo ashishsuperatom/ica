@@ -46,6 +46,28 @@ export interface SessionSeamDeps {
   activities?: ReturnType<typeof import('./activity.js').createActivities>
   /** The reader's data access policies for a source (access.ts); without it, reads carry none. */
   access?: { policiesFor(who: Who, source: string): Promise<unknown[]> }
+  /** Words answered by the session's agent (the composer on the agent's domain); without it, a session takes only controls. */
+  ask?: (o: { session: string; text: string; context: string; domain: string; from: any; reqId?: string }) => Promise<{ markdown: string | null; blocks: unknown[] }>
+}
+
+/** What the agent is told about the step it is answering from, and how its answer may change it. */
+export const INTENT_CONTRACT = `To change what this step shows, end your answer with one line:
+:::intent {"ops":[{"op":"set","path":"<package>.<field>","value":…}],"to":"current"}
+or call a program's function: :::intent {"call":{"package":"<package>","fn":"<function>","params":{…}},"to":"new"}.
+"current" changes this step; "new" opens a new step. Paths and functions are the programs' own, below.`
+
+/** The answer's own words, and the intent its last :::intent line asks for (taken out of what is shown). */
+export function intentOf(markdown: string): { markdown: string; intent: { ops?: any[]; call?: any; action?: any; to?: 'current' | 'new' } | null; problem?: string } {
+  const lines = String(markdown ?? '').split('\n')
+  let intent: any = null, problem: string | undefined
+  const kept = lines.filter((l) => {
+    const m = /^\s*:::intent\s+(\{.*\})\s*$/.exec(l)
+    if (!m) return true
+    try { const x = JSON.parse(m[1]); if (x && typeof x === 'object') intent = { ...(Array.isArray(x.ops) ? { ops: x.ops } : {}), ...(x.call ? { call: x.call } : {}), ...(x.action ? { action: x.action } : {}), ...(x.to === 'new' || x.to === 'current' ? { to: x.to } : {}) } }
+    catch (e: any) { problem = `the answer asked for a change that could not be read: ${e.message}` }
+    return false
+  })
+  return { markdown: kept.join('\n').trim(), intent: intent && (intent.ops || intent.call || intent.action) ? intent : null, ...(problem ? { problem } : {}) }
 }
 
 export class SessionSeamRefusal extends Error {}
@@ -186,13 +208,37 @@ export function createSessionSeam(d: SessionSeamDeps) {
       viewOf(view, user)
       if (t === 'session:goto') return reply(await present(sessions.goTo(session, String(payload.block ?? ''), user)))
       if (t === 'session:intent') {
-        if (payload.kind === 'language') throw new SessionSeamRefusal('words are answered in the chat for now: a session takes the controls\' intents')
+        const who = whoIs(from)
+        if (payload.kind === 'language') {
+          if (!d.ask) throw new SessionSeamRefusal('this engine answers no words in sessions')
+          const text = String(payload.text ?? '').trim()
+          if (!text) throw new SessionSeamRefusal('a question in words has words')
+          const { sessions: rtSessions, packages, spec } = await runtimeFor(view.agent, view.state.packages)
+          const from = payload.block ? String(payload.block) : view.leaf
+          const state = view.states[from]
+          if (!state) throw new SessionSeamRefusal(`session ${session} has no block ${from}`)
+          const shown = view.blocks.find((b) => b.id === from)?.answer
+          const answerNow = shown ? view.answers.find((a) => a.id === shown)?.markdown ?? '' : ''
+          const docs = packages.map((p) => `## ${p.name}\n${(() => { try { return store.doc(p.hash) } catch { return '(no doc)' } })()}`).join('\n\n')
+          const context = [`The step's STATE:\n${JSON.stringify(state)}`, answerNow ? `What the step shows now:\n${answerNow}` : '', INTENT_CONTRACT, docs ? `The programs:\n${docs}` : ''].filter(Boolean).join('\n\n')
+          const said = await asReader(who, () => d.ask!({ session, text, context, domain: spec.domain, from, reqId: payload.reqId }))
+          const { markdown, intent: asked, problem } = intentOf(said.markdown ?? '')
+          const blocks: Record<string, Record<string, unknown>> = {}
+          for (const b of (said.blocks ?? []) as any[]) if (b?.marker && b.block && typeof b.block === 'object') blocks[String(b.marker).trim()] = b.block
+          const li: Intent = {
+            id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'language', text,
+            result: { markdown: [markdown || (said.markdown ? '' : 'No answer came back.'), problem].filter(Boolean).join('\n\n'), files: [], ...(asked?.ops ? { ops: asked.ops } : {}), ...(Object.keys(blocks).length ? { blocks } : {}) } as any,
+            ...(asked?.call ? { call: asked.call } : {}), ...(asked?.action ? { action: asked.action } : {}),
+            to: asked?.to ?? (asked && !asked.call && !asked.action ? 'current' : 'new'), block: from, by: user, at: new Date().toISOString(),
+          }
+          const r = await asReader(who, () => rtSessions.intent(li))
+          return reply(await present(r.session, { result: { block: r.block, opened: r.opened, answer: r.answer, ...(r.stale ? { stale: true } : {}) } }))
+        }
         const intent: Intent = {
           id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'structured',
           ...(payload.ops ? { ops: payload.ops } : {}), ...(payload.action ? { action: payload.action } : {}), ...(payload.call ? { call: payload.call } : {}),
           to: payload.to, ...(payload.block ? { block: String(payload.block) } : {}), by: user, at: new Date().toISOString(),
         }
-        const who = whoIs(from)
         const work = () => asReader(who, () => sessions.intent(intent))
         const r = d.activities ? await d.activities.around(who.id, 'session.run', `Running ${intent.call ? `${intent.call.package}.${intent.call.fn}` : intent.action ? `${intent.action.package} · ${intent.action.id}` : 'a change'} in session ${session}`, work, (x) => x.answer ? x.answer.markdown.split('\n')[0].slice(0, 160) : 'done') : await work()
         return reply(await present(r.session, { result: { block: r.block, opened: r.opened, answer: r.answer, ...(r.stale ? { stale: true } : {}) } }))

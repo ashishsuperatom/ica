@@ -77,11 +77,11 @@ export function createSessions(opts: SessionsOptions) {
   }
 
   /** The answer a run gave: the runs' markdown in order, their files together. */
-  const answerOf = (ran: Ran[], extra?: { markdown?: string; files?: string[] }): { markdown: string; files: string[]; blocks?: Record<string, Record<string, unknown>> } | null => {
+  const answerOf = (ran: Ran[], extra?: { markdown?: string; files?: string[]; blocks?: Record<string, Record<string, unknown>> }): { markdown: string; files: string[]; blocks?: Record<string, Record<string, unknown>> } | null => {
     const parts = [extra?.markdown, ...ran.map((r) => r.answer?.markdown)].filter((m): m is string => !!m?.trim())
     if (!parts.length) return null
     const files = [...new Set([...(extra?.files ?? []), ...ran.flatMap((r) => r.answer?.files ?? [])])]
-    const blocks = Object.assign({}, ...ran.map((r) => r.answer?.blocks ?? {}))
+    const blocks = Object.assign({}, extra?.blocks ?? {}, ...ran.map((r) => r.answer?.blocks ?? {}))
     return { markdown: parts.join('\n\n'), files, ...(Object.keys(blocks).length ? { blocks } : {}) }
   }
 
@@ -132,7 +132,7 @@ export function createSessions(opts: SessionsOptions) {
     } else if (hash !== stateHash(base)) {
       opts.log.append(i.session, { t: 'state', at, block, state: out.state, stateHash: hash, intent: i.id })
     }
-    const said = answerOf(out.ran, i.kind === 'language' ? i.result : undefined)
+    const said = answerOf(out.ran, i.kind === 'language' ? i.result as { markdown?: string; files?: string[]; blocks?: Record<string, Record<string, unknown>> } : undefined)
     let answer: Answer | null = null
     if (said) {
       const previous = opening ? null : before.blocks.find((b) => b.id === from)?.answer ?? null

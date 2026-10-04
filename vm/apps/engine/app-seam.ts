@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createComposer, type Composer, type QueryRecord } from './agents/composer/index.js'
 import { createNarrator, capResultData, isDataCall } from './agents/narrator/index.js'
-import { pick, compose, place, recordQuestion, placeForRunning } from './knowledge.js'
+import { pick, compose, place, recordQuestion, placeForRunning, domainsOf } from './knowledge.js'
 import type { AgentEvent } from './ica/session.js'
 import { personOf } from './identity.js'
 
@@ -63,10 +63,12 @@ export function createAppSeam(d: AppSeamDeps) {
   // The thread's FIRST question picks its agent by its words (knowledge.ts pick — the same router the chat uses), and
   // the thread keeps that agent: what a person asks next follows from what they asked first, whatever screen it is
   // typed on.
-  const composerFor = async (sid: string, question: string) => {
+  const composerFor = async (sid: string, question: string, domainName?: string | null) => {
     let e = composers.get(sid)
     if (!e) {
-      const picked = await pick(d.projectDir, question)
+      // An agent's session is on its agent's domain; otherwise the thread's first question picks it.
+      const fixed = domainName ? (await domainsOf(d.projectDir)).find((x) => x.name === domainName) ?? null : null
+      const picked = fixed ? { domain: fixed, route: null } : await pick(d.projectDir, question)
       const domain = picked.domain
       const composer = (async () => {
         const k = domain ? await compose(d.projectDir, domain) : null
@@ -84,9 +86,9 @@ export function createAppSeam(d: AppSeamDeps) {
   /** A question in prose, asked from a screen of the application: the composer of that thread answers it. While it
    *  works, what it does goes back as beats — to the asking page, which shows the last line and keeps waiting, and to
    *  the project's agent log on the composer's lane, so the work can be watched where every agent's work is watched. */
-  async function say(text: string, context: string, o: { qid: string; threadId: string; focus?: string | null; reqId?: string; from?: any }): Promise<Said> {
+  async function say(text: string, context: string, o: { qid: string; threadId: string; focus?: string | null; reqId?: string; from?: any; domain?: string | null; keepContext?: boolean }): Promise<Said> {
     const t0 = Date.now()
-    const entry = await composerFor(o.threadId, text)
+    const entry = await composerFor(o.threadId, text, o.domain)
     const composer = await entry.composer
     const routedNow = entry.routed as { ranked: { domain: string; terms: string[] }[] } | undefined
     recordQuestion(d.projectDir, { session: o.threadId, qid: o.qid, question: text, domain: entry.domain, how: routedNow ? 'routed' : 'session', ...(routedNow ? { ranked: routedNow.ranked } : {}) })
@@ -94,7 +96,7 @@ export function createAppSeam(d: AppSeamDeps) {
     const agent = { name: entry.domain, how: routedNow ? 'routed' : 'session', ...(routedNow?.ranked?.[0]?.terms ? { terms: routedNow.ranked[0].terms.slice(0, 6) } : {}) }
     // A thread that knows a domain answers the question as asked, in the domain's own terms: the screen is not
     // passed in, so its wording can neither help nor mislead. A thread without a domain is given the screen.
-    if (entry.domain) context = 'None: the question stands on its own.'
+    if (entry.domain && !o.keepContext) context = 'None: the question stands on its own.'
     // PROGRESS GOES OUT EXACTLY AS A CHAT TURN'S DOES. The raw work — output and events — travels on the agent
     // log channel under the composer's lane, for whoever watches agents work. What a person reads while waiting is
     // the narrator's: every few seconds it turns the activity since the last beat into one line, sent as
@@ -181,5 +183,5 @@ export function createAppSeam(d: AppSeamDeps) {
     catch (e: any) { console.warn(`[app] ✗ ${payload.t} ${payload.reqId ?? ''}: ${e?.message ?? e}`); d.send(from, { t: 'app:error', error: e?.message ?? String(e), reqId: payload.reqId }) }
   }
 
-  return { handle, present }
+  return { handle, present, say }
 }
