@@ -41,6 +41,7 @@ import { pick, compose, place, remember, recall, recordQuestion, domainsOf, agen
 import { parcelStore, apiOfHub } from '../../../clients/parcels.js'
 import { createAppSeam } from './app-seam.js'
 import { createSessionSeam, SESSION_MESSAGES } from './session-seam.js'
+import { createSessionSync } from './session-sync.js'
 import { readingAnswer } from './answer-card.js'
 import { randomUUID } from 'node:crypto'
 import { buildDatasourceIndex } from './datasource-index/build.js'
@@ -701,7 +702,9 @@ const wire = createWire({
   handle: (whole, from) => { void handle(whole, from) },
   parcels: parcelStore({ api: apiOfHub(HUB), projectId: PROJECT, credential: KEY }),
 })
-const sessionSeam = createSessionSeam({ projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg) })
+// Sessions are kept by the platform: every append goes up to it (session-sync.ts), and everything missing on reconnect.
+const sessionSync = createSessionSync({ dir: join(PROJECT_DIR, 'sessions'), send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true }, log: (s) => console.warn(s) })
+const sessionSeam = createSessionSeam({ projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log })
 const appSeam = createAppSeam({ project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
 
 async function handle(payload: any, from: any) {
@@ -832,6 +835,7 @@ function connect() {
     if (t === 'welcome') {
       console.log(`[ica] registered (${m.payload.wsId}) — running self-check…`)
       flushOutbox()   // re-registered → deliver anything queued while the socket was flapping (answers, logs)
+      sessionSync.pushAll()   // and every session the platform does not have whole
       // THE PROJECT'S PROFILE, delivered with the welcome. Adopted before warm-up builds any agent, so a box
       // starts on its own configuration rather than adopting it a few seconds late and rebuilding.
       if (m.payload.profile) receive(m.payload.profile, 'project profile')
@@ -860,6 +864,7 @@ function connect() {
       reportConfig(ws)
       return
     }
+    if (t === 'session:synced') { sessionSync.onSynced(m.payload); return }
     if (t === 'fenced')     { console.log('[ica] fenced — a newer engine holds this role (obsolete instance)'); return }
     if (t === 'superseded') { console.log('[ica] superseded by our own reconnection'); return }
     if (t === 'evicted')    { console.log('[ica] evicted — a newer connection took the role'); return }

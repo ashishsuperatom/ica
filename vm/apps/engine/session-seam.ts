@@ -25,7 +25,7 @@ import { join } from 'node:path'
 import { checkAgent, type AgentSpec, type Intent } from '@superatom/platform-types'
 import { ProgramStore, ProgramError, loadPackage } from '@superatom/programs'
 import { createStateEngine, StateRefusal, type StateEngine } from '@superatom/state'
-import { createSessions, fileLog, history, replay, SessionRefusal, type SessionView } from '@superatom/session'
+import { createSessions, fileLog, history, replay, SessionRefusal, type SessionLog, type SessionView } from '@superatom/session'
 import { cardOf } from './answer-card.js'
 
 export interface SessionSeamDeps {
@@ -33,6 +33,8 @@ export interface SessionSeamDeps {
   /** The datasource manager's address. */
   datasource: string
   send: (to: any, msg: Record<string, unknown>) => void
+  /** The session log (default: a file per session; the engine passes one that also syncs to the platform). */
+  log?: SessionLog
 }
 
 export class SessionSeamRefusal extends Error {}
@@ -43,7 +45,7 @@ export const SESSION_MESSAGES = new Set(['session:agents', 'session:open', 'sess
 export function createSessionSeam(d: SessionSeamDeps) {
   const agentsDir = join(d.projectDir, 'agents')
   const store = new ProgramStore(join(d.projectDir, 'programs', 'store'))
-  const log = fileLog(join(d.projectDir, 'sessions'))
+  const log = d.log ?? fileLog(join(d.projectDir, 'sessions'))
 
   const query = async (id: string, sql: string, params: Record<string, unknown> = {}) => {
     const r = await fetch(d.datasource + '/query', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, sql, params }) })

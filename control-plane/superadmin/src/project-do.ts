@@ -429,6 +429,14 @@ export class ProjectDO extends DurableObject<Env> {
     // Sent by the engine after it resolves its profile — at boot, and again after adopting a pushed change.
     // This, not the last write, is what a UI should show: saving a profile and a box running it are two
     // different facts, and they differ whenever a machine is asleep, unreachable, or mid-question.
+    // ── A session's log, pushed up by the engine: the platform keeps the truth (SessionDO), the person's index
+    //    of their sessions follows (UserDO), and the engine hears how far the platform has it. ──
+    if (msg.type === 'session:sync' && sender.type === 'code-engine') {
+      const reply = (payload: Record<string, unknown>) => { try { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'session:synced', session: msg.session, ...payload } })) } catch { /* gone */ } }
+      try { reply(await this.syncSession(String(msg.session ?? ''), Number(msg.from), Array.isArray(msg.entries) ? msg.entries : [])) }
+      catch (e: any) { reply({ error: e?.message ?? String(e) }) }
+      return
+    }
     if (msg.type === 'config:applied') {
       if (sender.type === 'code-engine') {
         const version = Number(msg.version) || 0
@@ -664,10 +672,28 @@ export class ProjectDO extends DurableObject<Env> {
     })
   }
 
+  // ── Sessions kept by the platform ──────────────────────────────────────────
+  private sessionStub(session: string) {
+    if (!/^[\w-]{1,80}$/.test(session)) throw new Error('not a session id')
+    return (this.env as any).SESSION.get((this.env as any).SESSION.idFromName(`ses:${this._pid}:${session}`))
+  }
+  private userStub(principal: string) { return (this.env as any).USER.get((this.env as any).USER.idFromName(principal)) }
+  private async syncSession(session: string, from: number, entries: unknown[]) {
+    const r = await this.sessionStub(session).fetch('http://do/append', { method: 'POST', body: JSON.stringify({ project: this._pid, session, from, entries }) })
+    const body: any = await r.json()
+    if (r.status >= 400 && body.conflict === undefined) throw new Error(body.error ?? `the session could not be kept (${r.status})`)
+    if (body.summary?.user) {
+      await this.userStub(body.summary.user).fetch('http://do/sessions', { method: 'POST', body: JSON.stringify({ project: this._pid, session, agent: body.summary.agent, title: body.summary.title, blocks: body.summary.blocks, answers: body.summary.answers, created: body.summary.created, updated: body.summary.updated }) })
+    }
+    return { upto: body.upto, ...(body.gap ? { gap: true } : {}), ...(body.conflict !== undefined ? { conflict: body.conflict, error: body.error } : {}) }
+  }
+  /** The principal a connection acts as, as sessions name it. */
+  private principalOf(c: ConnInfo): string | null { return c.type === 'agent' ? c.userId ?? null : c.userId ? `user:${c.userId}` : null }
+
   // ── The audit history ──────────────────────────────────────────────────────
   // What a message means, for the record: its action and what it carried. Liveness and screen bookkeeping are not
   // actions (pings, resizes, keystrokes into a terminal, sync pulls); everything else is recorded.
-  private static NOT_ACTIONS = new Set(['tick', 'ping', 'ui:resize', 'term:input', 'term:detach', 'sync:req', 'answer:get', 'answer:ack', 'log:attach', 'log:detach', 'suggestions:req', 'suggest', 'sessions:list', 'analyst:sync', 'session:file'])
+  private static NOT_ACTIONS = new Set(['session:list', 'tick', 'ping', 'ui:resize', 'term:input', 'term:detach', 'sync:req', 'answer:get', 'answer:ack', 'log:attach', 'log:detach', 'suggestions:req', 'suggest', 'sessions:list', 'analyst:sync', 'session:file'])
   private auditMessage(sender: ConnInfo, pl: any, outcome: 'ok' | 'refused', reason?: string) {
     const t = String(pl?.t ?? '')
     if (outcome === 'ok' && ProjectDO.NOT_ACTIONS.has(t)) return
@@ -754,6 +780,24 @@ export class ProjectDO extends DurableObject<Env> {
       }
     }
     if (sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent') this.auditMessage(sender, pl, 'ok')
+    // ── Sessions read from the platform's copy (no engine needed): only the person's own ──
+    if ((pl.t === 'session:list' || pl.t === 'session:read') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
+      const who = this.principalOf(sender)
+      if (!who) { hubReply({ t: 'session:refused', reason: 'who is asking is not known', reqId: pl.reqId }); return }
+      try {
+        if (pl.t === 'session:list') {
+          const r: any = await (await this.userStub(who).fetch(`http://do/sessions?project=${encodeURIComponent(this._pid)}`)).json()
+          hubReply({ t: 'session:list', sessions: r.sessions ?? [], reqId: pl.reqId })
+        } else {
+          const r = await this.sessionStub(String(pl.session ?? '')).fetch(`http://do/view${pl.asOf ? `?asOf=${encodeURIComponent(String(pl.asOf))}` : ''}`)
+          const body: any = await r.json()
+          if (!r.ok) hubReply({ t: 'session:refused', reason: body.error ?? 'there is no such session', reqId: pl.reqId })
+          else if (body.view.user !== who) hubReply({ t: 'session:refused', reason: `session ${pl.session} is not yours`, reqId: pl.reqId })
+          else hubReply({ t: 'session:read', view: body.view, upto: body.upto, reqId: pl.reqId })
+        }
+      } catch (e: any) { hubReply({ t: 'session:refused', reason: e?.message ?? String(e), reqId: pl.reqId }) }
+      return
+    }
     if (sender.type === 'runtime') {
       if (pl.t === 'sync:req')   { hubReply(this.buffer.sync(sender.userId || '')); return }
       if (pl.t === 'answer:get') { hubReply(this.buffer.get(sender.userId || '', pl.qid)); return }

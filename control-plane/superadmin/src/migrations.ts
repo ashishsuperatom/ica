@@ -179,3 +179,24 @@ export const GLOBAL_MIGRATIONS: Migration[] = [
     addColumnIfMissing(db, 'organizations', 'deleted', 'INTEGER NOT NULL DEFAULT 0')
   } },
 ]
+
+// ── SessionDO and UserDO ─────────────────────────────────────────────────────────────────────────────────────────────
+
+export const SESSION_MIGRATIONS: Migration[] = [
+  { id: 1, name: 'baseline', up: `
+    CREATE TABLE IF NOT EXISTS meta (session TEXT NOT NULL, project TEXT NOT NULL, user TEXT NOT NULL, agent TEXT NOT NULL, created TEXT NOT NULL);
+    -- The session's log, in order: append-only.
+    CREATE TABLE IF NOT EXISTS entries (seq INTEGER PRIMARY KEY, entry TEXT NOT NULL, at TEXT NOT NULL);
+    CREATE TRIGGER IF NOT EXISTS entries_no_update BEFORE UPDATE ON entries BEGIN SELECT RAISE(ABORT, 'a session log is append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS entries_no_delete BEFORE DELETE ON entries BEGIN SELECT RAISE(ABORT, 'a session log is append-only'); END;
+  ` },
+]
+
+export const USER_MIGRATIONS: Migration[] = [
+  { id: 1, name: 'baseline', up: `
+    CREATE TABLE IF NOT EXISTS sessions (project TEXT NOT NULL, session TEXT NOT NULL, agent TEXT NOT NULL, title TEXT NOT NULL,
+      blocks INTEGER NOT NULL DEFAULT 0, answers INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL, updated TEXT NOT NULL, PRIMARY KEY (project, session));
+    CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated);
+    CREATE TABLE IF NOT EXISTS state (project TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, updated TEXT NOT NULL, PRIMARY KEY (project, key));
+  ` },
+]
