@@ -427,6 +427,14 @@ the platform is for that one engine when its machine is replaced (a new box, a l
   writing a grant to the organisation's ledger, recorded in the audit history), invoices, per-plan limits, and metering
   beyond model tokens (engine time, queries).
 
+### Work in the background, visible (built 2026-10-05)
+
+In the user's words, the data protocol must show people what an agent is doing in the background. Anything long the
+engine does — a program build, a session's run, later the builder agent's work — is an **activity**: what it is, whose
+it is, its state (running, done, failed) and progress. The hub keeps each activity's latest state and sends it to its
+owner's connections and the project's admins; anyone connecting in the middle asks `activity:list` (theirs; an admin's,
+everyone's). `sacli activity` shows it; the user UI is next.
+
 ### Decision state
 
 Not the session's STATE: the core of decision intelligence, to be expanded later. For now:

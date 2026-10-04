@@ -43,6 +43,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Agent connections to the hub: only to the engine, only within the key's scopes, the agent's identity stamped on every message.
 - The hub stamps who sent every message, so the engine always knows the user.
 - Audit history in each project's Durable Object, from one path only: every message through its relay and every HTTP call through its one gate, recorded once (specific event or the call itself); append-only.
+- Background work visible: program builds and session runs reported as activities (running, done, failed), kept by the hub and sent to their owner and admins; listed on reconnect and by `sacli activity`.
 - Usage metering and credits: every model call's tokens kept per project and priced from the platform's price list (versions kept); an append-only credit ledger per organisation (grants by the platform, debits by usage); work refused, with a sentence, when an organisation on a plan has used its credits.
 - Enterprise sign-in provisioned on first arrival: a project lets a verified company domain in with a role (never admin, never a public mail domain), the grant audited; the identity provider itself is connected in Clerk.
 - Data access per reader: row filters, denials and column masks per source and table, for everyone, a role, a person or an agent key, with per-reader attributes (fail closed); resolved by the platform, carried with each session intent, applied by the SQL rewrite to every table read.
@@ -95,7 +96,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Data access for the agents' own tools in a chat (a per-session token), and an admin console panel for policies.
 - SCIM directory sync and deprovisioning from the identity provider.
 - Payment through Stripe (a checkout whose webhook adds credits), invoices and per-plan limits; metering engine time and queries.
-- The data protocol for many users at once, and for showing what agents are doing in the background.
+- The data protocol for many users at once (fairness and queueing across users); activities in the user UI.
 - A data warehouse like Fabric or Databricks, on both the engine and the Durable Object side (R2 SQL).
 - Data sources as templates copied per project, with dialect code moved out of the platform.
 - Running without Docker (Windows, macOS, Linux, Electron) with a per-project port registry.

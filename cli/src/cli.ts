@@ -35,6 +35,7 @@ Commands:
   session intent   change a session: set/add/remove, call a function, take an action
   session goto     move a session to another block
   ask              ask the project a question in words
+  activity         what is running for you in the project (builds, runs), and what ran lately
   status           the background connection: up, since when, how long until it closes
   disconnect       close the background connection now
 
@@ -75,6 +76,7 @@ An intent to "current" (the default) replaces the current block's answer; "new" 
 earlier block (--block) branches the session into a new thread. Values are JSON; a bare word is a string.`,
   projects: `sacli projects      the saved profiles, their projects, and which one is in use here`,
   use: `sacli use <profile> [--here]   make <profile> the default, or (--here) write .sacli.json so this folder uses it`,
+  activity: `sacli activity         what is running for this key (program builds, session runs) and what ran in the last day`,
   status: `sacli status        whether the background connection for this key is up, and for how long`,
   disconnect: `sacli disconnect    closes the background connection for this key (the next command opens a new one)`,
   ask: `sacli ask <question> [--session <id>]   asks in words; prints the answer (needs the ask scope)`,
@@ -196,6 +198,12 @@ export async function run(argv: string[], io: Io): Promise<number> {
       const r = await hub!.request(payload, { timeoutMs })
       if (r.t === 'session:refused') throw new CliError(r.reason ?? 'refused')
       return r
+    }
+    if (cmd === 'activity') {
+      const r = await hub.request({ t: 'activity:list' }, { timeoutMs })
+      const rows = (r.activities ?? []) as any[]
+      out(rows.length ? table(['state', 'what', 'detail', 'updated'], rows.map((a) => [a.state, a.title, a.progress ?? a.detail ?? '', String(a.updated_at).slice(0, 19).replace('T', ' ')])) : 'nothing running or recent', rows)
+      return 0
     }
     if (cmd === 'agents') {
       const r = await ask({ t: 'session:agents' })

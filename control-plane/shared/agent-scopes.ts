@@ -2,7 +2,9 @@
 // the hub (which enforces it) and the admin console (which offers it). A message no scope names is refused.
 
 /** Messages the hub answers itself, from the platform's own records (no engine needed). */
-export const HUB_MESSAGES = ['session:list', 'session:read', 'program:list', 'program:publish'] as const
+export const HUB_MESSAGES = ['session:list', 'session:read', 'program:list', 'program:publish', 'activity:list'] as const
+/** Messages every agent key may send, whatever its scopes: its own activities. */
+export const ALWAYS_ALLOWED = ['activity:list'] as const
 
 export const AGENT_SCOPES = {
   /** Agents and their sessions: list agents, open a session, send intents, move between blocks, read it — and read
@@ -21,5 +23,6 @@ export const isAgentScope = (s: unknown): s is AgentScope => typeof s === 'strin
 
 /** Does a key with these scopes allow this message? */
 export function scopeAllows(scopes: readonly string[], t: string): boolean {
+  if ((ALWAYS_ALLOWED as readonly string[]).includes(t)) return true
   return scopes.some((s) => isAgentScope(s) && (AGENT_SCOPES[s] as readonly string[]).includes(t))
 }

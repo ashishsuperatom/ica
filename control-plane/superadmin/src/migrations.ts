@@ -156,6 +156,13 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     CREATE TRIGGER IF NOT EXISTS usage_no_update BEFORE UPDATE ON usage_events BEGIN SELECT RAISE(ABORT, 'usage is append-only'); END;
     CREATE TRIGGER IF NOT EXISTS usage_no_delete BEFORE DELETE ON usage_events BEGIN SELECT RAISE(ABORT, 'usage is append-only'); END;
   ` },
+  { id: 20, name: 'activities', up: `
+    -- Long work in the engine, visible (engine activity.ts): each activity's latest state, for its owner and admins.
+    CREATE TABLE IF NOT EXISTS activities (
+      id TEXT PRIMARY KEY, owner TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL, state TEXT NOT NULL,
+      progress TEXT, detail TEXT, started_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS idx_activities_owner ON activities(owner, updated_at);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

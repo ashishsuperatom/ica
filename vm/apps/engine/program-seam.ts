@@ -20,7 +20,7 @@ import type { Platform } from './platform.js'
 export const PROGRAM_MESSAGES = new Set(['program:build'])
 const MAX_SOURCE_BYTES = 2 * 1024 * 1024
 
-export function createProgramSeam(d: { projectDir: string; platform: Platform | null; send: (to: any, msg: Record<string, unknown>) => void }) {
+export function createProgramSeam(d: { projectDir: string; platform: Platform | null; send: (to: any, msg: Record<string, unknown>) => void; activities?: ReturnType<typeof import('./activity.js').createActivities> }) {
   const store = new ProgramStore(join(d.projectDir, 'programs', 'store'))
 
   /** A program by hash or name, from the store — or else from the platform (by name: its newest published build). */
@@ -57,8 +57,12 @@ export function createProgramSeam(d: { projectDir: string; platform: Platform | 
       for (const [p, text] of Object.entries({ ...files, 'manifest.json': JSON.stringify(manifest, null, 2) })) {
         const f = join(src, p); mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, text as string)
       }
-      const built = buildProgram(src, store)
-      const up = await d.platform.uploadProgram(toBundle(store, built.hash), who.id)
+      const run = async () => {
+        const built = buildProgram(src, store)
+        const up = await d.platform!.uploadProgram(toBundle(store, built.hash), who.id)
+        return { built, up }
+      }
+      const { built, up } = d.activities ? await d.activities.around(who.id, 'program.build', `Building ${manifest.name ?? 'a program'}`, run, (r) => `${r.built.manifest.name} ${r.built.hash.slice(0, 12)}${r.up.added ? '' : ' (already kept)'}`) : await run()
       return reply({ t: 'program:built', hash: built.hash, name: built.manifest.name, version: built.manifest.version, added: up.added })
     } catch (e: any) {
       if (e instanceof ProgramError || e instanceof IdentityRefusal) return reply({ t: 'program:refused', reason: e.message })

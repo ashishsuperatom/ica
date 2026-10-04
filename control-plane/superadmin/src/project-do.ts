@@ -463,6 +463,21 @@ export class ProjectDO extends DurableObject<Env> {
     //    of their sessions follows (UserDO), and the engine hears how far the platform has it. ──
     // ── The composition graph's records, replicated up by the engine (GraphDO); where the platform's copy ends; and
     //    batches back down to rebuild an engine whose graph is empty. ──
+    // ── Long work in the engine (an activity): its latest state kept, and sent to its owner and the admins ──
+    if (msg.type === 'activity' && sender.type === 'code-engine') {
+      const a = msg.activity ?? {}
+      if (typeof a.id === 'string' && /^(user|agent):\S+$/.test(String(a.owner ?? '')) && ['running', 'done', 'failed'].includes(a.state)) {
+        this.ctx.storage.sql.exec(`INSERT INTO activities (id, owner, kind, title, state, progress, detail, started_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (id) DO UPDATE SET state = excluded.state, progress = excluded.progress, detail = excluded.detail, updated_at = excluded.updated_at`,
+          a.id, a.owner, String(a.kind ?? ''), String(a.title ?? '').slice(0, 300), a.state, a.progress ?? null, a.detail ? String(a.detail).slice(0, 1000) : null, String(a.startedAt ?? new Date().toISOString()), String(a.updatedAt ?? new Date().toISOString()))
+        const envelope = { from: { id: 'hub', type: 'hub' }, payload: { t: 'activity', activity: a } }
+        for (const [cws, conn] of this.connByWs) {
+          if (conn.type === 'code-engine' || conn.wsId.startsWith('http-')) continue
+          if (this.principalOf(conn) === a.owner || conn.admin) this.deliverToConn(cws, conn, envelope as any)
+        }
+      }
+      return
+    }
     // ── The data access policies a reader is under, resolved for the engine to send with each of their queries ──
     if (msg.type === 'access:resolve' && sender.type === 'code-engine') {
       const reply = (payload: Record<string, unknown>) => { try { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'access:resolved', principal: msg.principal, source: msg.source, reqId: msg.reqId, ...payload } })) } catch { /* gone */ } }
@@ -975,7 +990,7 @@ export class ProjectDO extends DurableObject<Env> {
   // ── The audit history ──────────────────────────────────────────────────────
   // What a message means, for the record: its action and what it carried. Liveness and screen bookkeeping are not
   // actions (pings, resizes, keystrokes into a terminal, sync pulls); everything else is recorded.
-  private static NOT_ACTIONS = new Set(['session:list', 'tick', 'ping', 'ui:resize', 'term:input', 'term:detach', 'sync:req', 'answer:get', 'answer:ack', 'log:attach', 'log:detach', 'suggestions:req', 'suggest', 'sessions:list', 'analyst:sync', 'session:file'])
+  private static NOT_ACTIONS = new Set(['session:list', 'activity:list', 'tick', 'ping', 'ui:resize', 'term:input', 'term:detach', 'sync:req', 'answer:get', 'answer:ack', 'log:attach', 'log:detach', 'suggestions:req', 'suggest', 'sessions:list', 'analyst:sync', 'session:file'])
   private auditMessage(sender: ConnInfo, pl: any, outcome: 'ok' | 'refused', reason?: string) {
     const t = String(pl?.t ?? '')
     if (outcome === 'ok' && ProjectDO.NOT_ACTIONS.has(t)) return
@@ -1069,6 +1084,16 @@ export class ProjectDO extends DurableObject<Env> {
       if (!c.ok) { this.auditMessage(sender, pl, 'refused', c.reason); hubReply({ t: 'error', source: 'credits', reason: c.reason, reqId: pl.reqId }); return }
     }
     if (sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent') this.auditMessage(sender, pl, 'ok')
+    // ── Activities: what is running, or ran lately — one's own (an admin sees everyone's) ──
+    if (pl.t === 'activity:list' && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
+      const who = this.principalOf(sender)
+      const since = new Date(Date.now() - 24 * 3_600_000).toISOString()
+      const rows = sender.admin
+        ? [...this.ctx.storage.sql.exec("SELECT * FROM activities WHERE state = 'running' OR updated_at >= ? ORDER BY updated_at DESC LIMIT 100", since)]
+        : [...this.ctx.storage.sql.exec("SELECT * FROM activities WHERE owner = ? AND (state = 'running' OR updated_at >= ?) ORDER BY updated_at DESC LIMIT 100", who ?? '', since)]
+      hubReply({ t: 'activity:list', activities: rows, reqId: pl.reqId })
+      return
+    }
     // ── The program catalogue (no engine needed) ──
     if ((pl.t === 'program:list' || pl.t === 'program:publish') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
       const who = this.principalOf(sender)

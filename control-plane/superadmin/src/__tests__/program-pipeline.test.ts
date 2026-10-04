@@ -13,6 +13,7 @@ import { join, relative } from 'node:path'
 import { createProgramSeam } from '../../../../vm/apps/engine/program-seam.ts'
 import { createSessionSeam } from '../../../../vm/apps/engine/session-seam.ts'
 import { platformOf } from '../../../../vm/apps/engine/platform.ts'
+import { createActivities } from '../../../../vm/apps/engine/activity.ts'
 
 const here = fileURLToPath(new URL('.', import.meta.url))
 const PID = '11111111-2222-3333-4444-555555555555'
@@ -54,7 +55,8 @@ async function engine(home: string, instance: string) {
   const ws = await socket({ role: 'code-engine', key: 'engine-key', instanceId: instance, epoch: Date.now() })
   const platform = platformOf({ hub: `ws://x/_ws/${PID}?key=engine-key`, project: PID, key: 'engine-key', fetch: ((url: any, init: any) => mf.dispatchFetch(url, init)) as any })
   const send = (to: any, msg: any) => ws.ws.send(JSON.stringify({ to: { id: to.id, type: to.type }, payload: msg }))
-  const programs = createProgramSeam({ projectDir: home, platform, send })
+  const activities = createActivities({ send: (m) => { ws.ws.send(JSON.stringify(m)); return true } })
+  const programs = createProgramSeam({ projectDir: home, platform, send, activities })
   const sessions = createSessionSeam({ projectDir: home, datasource: `http://127.0.0.1:${(data.address() as any).port}`, send, ensureProgram: programs.ensure })
   ws.ws.addEventListener('message', (e: any) => {
     const m = JSON.parse(String(e.data)); const t = m.payload?.t
@@ -98,6 +100,19 @@ describe('programs: source → built → kept → published → running elsewher
     // the same source again is the same program: nothing new kept
     expect((await agent.ask({ t: 'program:build', files: src })).added).toBe(false)
     expect((await agent.ask({ t: 'program:build', files: { ...src, '../x.js': 'x' } })).reason).toMatch(/is not a file of a program's source/)
+  })
+
+  it('the build was visible while it ran: its owner saw it start and finish, and can list it; another agent cannot', async () => {
+    const owner = await socket({ role: 'agent', key: builderKey })
+    const src = sourceOf(fileURLToPath(new URL('../../../../vm/packages/programs/test/fixtures/unsettled-trips', import.meta.url)))
+    await owner.ask({ t: 'program:build', files: { ...src, 'doc.md': src['doc.md'] + '\nAgain, to watch it.\n' } })
+    await new Promise((r) => setTimeout(r, 100))
+    const seen = owner.got.filter((m) => m.payload?.t === 'activity').map((m) => m.payload.activity.state)
+    expect(seen).toEqual(['running', 'done'])
+    const list = await owner.ask({ t: 'activity:list' }, 'hub')
+    expect(list.activities[0]).toMatchObject({ kind: 'program.build', title: 'Building unsettled-trips', state: 'done' })
+    const other = await socket({ role: 'agent', key: otherKey })
+    expect((await other.ask({ t: 'activity:list' }, 'hub')).activities).toEqual([])
   })
 
   it('only its owner publishes it; both attempts are in the audit history', async () => {
