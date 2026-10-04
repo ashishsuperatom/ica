@@ -59,7 +59,7 @@ interface ConnInfo {
 interface Envelope {
   to?: { id?: string; type: string; channel?: string }   // channel: agent-log fan-out (the engine LABELS, the DO fans to the owner's attached devices)
   // userId: who sent it, stamped by the hub from the connection's credentials — never taken from the payload.
-  from: { id: string; type: string; userId?: string; email?: string; admin?: boolean }
+  from: { id: string; type: string; userId?: string; email?: string; admin?: boolean; scopes?: string[] }
   payload: unknown
 }
 
@@ -186,7 +186,7 @@ export class ProjectDO extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
     this.buffer = new AnswerBuffer(this.ctx.storage.sql, (e, d) => this.log(e, d))
-    this.audit = new AuditLog(this.ctx.storage.sql as any, () => this._pid ?? '', { stream: (env as any).AUDIT, metrics: (env as any).METRICS, records: createRecorder((env as any).RECORDS, () => this._pid ?? ''), warn: (m) => { this.log('audit:send_failed', { message: m }); console.warn(`[audit] ${m}`) } })
+    this.audit = new AuditLog(this.ctx.storage.sql as any, () => this._pid ?? '', { stream: (env as any).AUDIT, records: createRecorder((env as any).RECORDS, () => this._pid ?? ''), warn: (m) => { this.log('audit:send_failed', { message: m }); console.warn(`[audit] ${m}`) } })
     this.agentKeys = new AgentKeys(this.ctx.storage.sql as any, () => this._pid ?? '')
     this.catalogue = new ProgramCatalogue(this.ctx.storage.sql as any, env.PACKAGES, () => this._pid ?? '')
     this.record = createRecorder((env as any).RECORDS, () => this._pid ?? '')
@@ -295,6 +295,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (path === '/engine/programs' || path.startsWith('/engine/programs/')) return this.enginePrograms(request, path)
     if (path === '/access-policies' || path.startsWith('/access-policies/') || path === '/access-attributes') return this.accessAdmin(request, path)
     if (path === '/access-domains' || path.startsWith('/access-domains/')) return this.accessDomains(request, path)
+    if (path === '/groups' || path.startsWith('/groups/')) return this.groupsAdmin(request, path)
     if (request.method === 'POST' && path === '/access/arrive') return this.arrive(request)
     if (path === '/usage') return request.method === 'POST' ? this.recordUsage(request) : this.usageSummary(new URL(request.url))
 
@@ -923,7 +924,9 @@ export class ProjectDO extends DurableObject<Env> {
     const role = email ? ([...this.ctx.storage.sql.exec('SELECT role_id FROM access WHERE email = ?', email.toLowerCase())][0] as any)?.role_id ?? null : null
     const subject = principal.startsWith('agent:') ? principal : email ? `email:${email.toLowerCase()}` : null
     const attributes = Object.fromEntries(subject ? [...this.ctx.storage.sql.exec('SELECT key, value FROM access_attributes WHERE subject = ?', subject)].map((r: any) => [r.key, JSON.parse(r.value)]) : [])
-    return resolvePolicies(this.policies(), source, { principal, email, role, attributes })
+    const member = principal.startsWith('agent:') ? principal : email ? `email:${email.toLowerCase()}` : null
+    const groups = member ? [...this.ctx.storage.sql.exec('SELECT grp FROM group_members WHERE member = ?', member)].map((r: any) => String(r.grp)) : []
+    return resolvePolicies(this.policies(), source, { principal, email, role, groups, attributes })
   }
   /** Something changed: bump the version and tell the engine its resolved policies are stale. */
   private accessChanged() {
@@ -998,6 +1001,50 @@ export class ProjectDO extends DurableObject<Env> {
     }
     return { upto: body.upto, ...(body.gap ? { gap: true } : {}), ...(body.conflict !== undefined ? { conflict: body.conflict, error: body.error } : {}) }
   }
+  /** The scopes a connection sees with: its own (user:<id>, or the agent key's id) and its groups' — read each time, so
+   *  a change to a group applies at once. Stamped by the hub on every message; never taken from a payload. */
+  private scopesOf(c: ConnInfo): string[] {
+    const member = c.type === 'agent' ? c.userId : c.email ? `email:${c.email.toLowerCase()}` : null
+    const groups = member ? [...this.ctx.storage.sql.exec('SELECT grp FROM group_members WHERE member = ?', member)].map((r: any) => `group:${r.grp}`) : []
+    const own = c.type === 'agent' ? [] : c.userId ? [`user:${c.userId}`] : []
+    return [...own, ...groups]
+  }
+  private async groupsAdmin(request: Request, path: string): Promise<Response> {
+    const url = new URL(request.url)
+    const body: any = request.method === 'GET' ? {} : await request.json().catch(() => ({}))
+    const by = String(body.by ?? url.searchParams.get('by') ?? '')
+    const actor = { kind: 'user' as const, id: by || 'unknown', ...(by.includes('@') ? { email: by } : {}) }
+    const sql = this.ctx.storage.sql
+    if (request.method === 'GET' && path === '/groups') {
+      const groups = [...sql.exec('SELECT name, description, created_by, created_at FROM groups ORDER BY name')] as any[]
+      for (const g of groups) g.members = [...sql.exec('SELECT member FROM group_members WHERE grp = ? ORDER BY member', g.name)].map((r: any) => r.member)
+      return this.j({ groups })
+    }
+    if (!by) return this.j({ error: 'who is making the change?' }, 400)
+    const NAME = /^[a-z][a-z0-9-]{0,40}$/
+    if (request.method === 'POST' && path === '/groups') {
+      const name = String(body.name ?? '').trim().toLowerCase()
+      if (!NAME.test(name)) return this.j({ error: 'a group name is lower-case letters, digits and dashes, starting with a letter' }, 400)
+      if ([...sql.exec('SELECT 1 FROM groups WHERE name = ?', name)].length) return this.j({ error: `there is already a group ${name}` }, 400)
+      sql.exec('INSERT INTO groups (name, description, created_by, created_at) VALUES (?, ?, ?, ?)', name, body.description ?? null, by, new Date().toISOString())
+      this.audit.record({ actor, via: 'admin', action: 'group.create', target: name, outcome: 'ok' })
+      return this.j({ group: name }, 201)
+    }
+    const m = path.match(/^\/groups\/([a-z][a-z0-9-]{0,40})\/members$/)
+    if (m && (request.method === 'POST' || request.method === 'DELETE')) {
+      if (![...sql.exec('SELECT 1 FROM groups WHERE name = ?', m[1])].length) return this.j({ error: `there is no group ${m[1]}` }, 404)
+      const raw = String(body.member ?? url.searchParams.get('member') ?? '').trim()
+      const member = raw.startsWith('email:') ? raw.toLowerCase() : raw
+      if (!/^(email:[^\s@]+@[^\s@]+|agent:key_[\w-]+)$/.test(member)) return this.j({ error: 'a member is email:<address> or agent:<key id>' }, 400)
+      if (request.method === 'POST') sql.exec('INSERT OR IGNORE INTO group_members (grp, member, added_by, added_at) VALUES (?, ?, ?, ?)', m[1], member, by, new Date().toISOString())
+      else sql.exec('DELETE FROM group_members WHERE grp = ? AND member = ?', m[1], member)
+      this.audit.record({ actor, via: 'admin', action: request.method === 'POST' ? 'group.add-member' : 'group.remove-member', target: m[1], outcome: 'ok', detail: { member } })
+      this.accessChanged()   // a reader's groups can change what their policies resolve to
+      return this.j({ ok: true })
+    }
+    return this.j({ error: 'not found' }, 404)
+  }
+
   /** The principal a connection acts as, as sessions name it. */
   private principalOf(c: ConnInfo): string | null { return c.type === 'agent' ? c.userId ?? null : c.userId ? `user:${c.userId}` : null }
 
@@ -1080,7 +1127,8 @@ export class ProjectDO extends DurableObject<Env> {
     // they pass through so an offline client can recover them. All user-scoped by the runtime's JWT userId.
     const pl = msg.payload || {}
     const hubReply = (payload: any) => senderWs.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload }))
-    const envelope: Envelope = { from: { id: sender.wsId, type: sender.type, ...(sender.userId ? { userId: sender.userId } : {}), ...(sender.email ? { email: sender.email } : {}), ...(sender.admin ? { admin: true } : {}) }, payload: msg.payload }   // built once — reused by the base routing below AND the fan-out
+    const scopes = sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent' ? this.scopesOf(sender) : undefined
+    const envelope: Envelope = { from: { id: sender.wsId, type: sender.type, ...(sender.userId ? { userId: sender.userId } : {}), ...(sender.email ? { email: sender.email } : {}), ...(sender.admin ? { admin: true } : {}), ...(scopes ? { scopes } : {}) }, payload: msg.payload }   // built once — reused by the base routing below AND the fan-out
     // ── The audit history: everything a person or an agent sends, and every refusal ──
     if (sender.type === 'agent') {
       const toType = (msg.to as any)?.type
@@ -1114,7 +1162,11 @@ export class ProjectDO extends DurableObject<Env> {
       if (!who) { hubReply({ t: 'program:refused', reason: 'who is asking is not known', reqId: pl.reqId }); return }
       const actor = sender.type === 'agent' ? { kind: 'agent' as const, id: who } : { kind: 'user' as const, id: who, ...(sender.email ? { email: sender.email } : {}) }
       try {
-        if (pl.t === 'program:list') hubReply({ t: 'program:list', programs: this.catalogue.list({ name: pl.name, published: pl.published }), reqId: pl.reqId })
+        if (pl.t === 'program:list') {
+          // Only programs whose scope this asker sees (global, their own, their groups'); an admin sees all; one's own drafts always.
+          const sees = sender.admin ? null : new Set(['global', ...this.scopesOf(sender)])
+          hubReply({ t: 'program:list', programs: this.catalogue.list({ name: pl.name, published: pl.published }).filter((p) => !sees || sees.has(p.scope) || p.owner === who), reqId: pl.reqId })
+        }
         else {
           const e = this.catalogue.publish(String(pl.hash ?? ''), { id: who, admin: !!sender.admin })
           this.record('program', e.hash, { ...e, event: 'published' })

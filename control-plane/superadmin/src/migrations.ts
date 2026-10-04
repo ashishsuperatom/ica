@@ -167,6 +167,12 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     -- Every session the engine has synced through this hub, so the warehouse can be backfilled from their SessionDOs.
     CREATE TABLE IF NOT EXISTS sessions_known (session TEXT PRIMARY KEY, first_seen TEXT NOT NULL);
   ` },
+  { id: 22, name: 'groups', up: `
+    -- Groups within the project (scopes group:<name>): members are people by email or agent keys. An admin manages them.
+    CREATE TABLE IF NOT EXISTS groups (name TEXT PRIMARY KEY, description TEXT, created_by TEXT NOT NULL, created_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS group_members (grp TEXT NOT NULL, member TEXT NOT NULL, added_by TEXT NOT NULL, added_at TEXT NOT NULL, PRIMARY KEY (grp, member));
+    CREATE INDEX IF NOT EXISTS idx_group_members_member ON group_members(member);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

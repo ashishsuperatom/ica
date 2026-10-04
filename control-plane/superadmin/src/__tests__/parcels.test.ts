@@ -32,7 +32,9 @@ describe('tickets', () => {
     expect(await verifyTicket(SECRET, 'p1', 'h2', t)).toBe(false)
     expect(await verifyTicket('other', 'p1', 'h1', t)).toBe(false)
     expect(await verifyTicket(SECRET, 'p1', 'h1', t, exp + 1)).toBe(false)
-    expect(await verifyTicket(SECRET, 'p1', 'h1', t.replace(/\.(.)/, '.x'))).toBe(false)
+    // a tampered signature: the first character after the dot, always changed (replacing it with a fixed letter was a
+    // no-op whenever it already was that letter — about one run in 64)
+    expect(await verifyTicket(SECRET, 'p1', 'h1', t.replace(/\.(.)/, (_m, c) => '.' + (c === 'x' ? 'y' : 'x')))).toBe(false)
     expect(await verifyTicket(SECRET, 'p1', 'h1', '')).toBe(false)
   })
 })

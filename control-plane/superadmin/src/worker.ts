@@ -297,7 +297,7 @@ export default {
       }
       // Anything that changes the project — machine lifecycle, access, roles, datasources, keys, tokens — is for
       // whoever administers it. A member may look, not provision.
-      const PROVISIONING = /^(machine|service-token|access|roles|datasources|members|verify-conn|info|fly|suspend|resume|stop|delete|dashboards|agent-keys|audit)/
+      const PROVISIONING = /^(machine|service-token|access|roles|datasources|members|verify-conn|info|fly|suspend|resume|stop|delete|dashboards|agent-keys|audit|groups)/
       const isProvisioning = request.method !== 'GET' || PROVISIONING.test(subPath)
       if (isProvisioning && acc.level === 'member') return new Response('forbidden', { status: 403 })
       // `setup` overwrites the project's API key. It's an INTERNAL provisioning primitive — only ever
@@ -380,7 +380,7 @@ export default {
 
       const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
       // Agent keys are made and revoked by someone: the DO records who, from the caller the gate just checked.
-      if (/^(agent-keys|access-policies|access-attributes|access-domains)/.test(subPath) && request.method !== 'GET') {
+      if (/^(agent-keys|access-policies|access-attributes|access-domains|groups)/.test(subPath) && request.method !== 'GET') {
         const by = acc.email || (acc.level === 'superadmin' ? 'superadmin' : '')
         const body = request.method === 'POST' || request.method === 'PUT' ? JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by }) : undefined
         const fwd = new Request(`http://do/${subPath}${url.search ? url.search + '&' : '?'}by=${encodeURIComponent(by)}`, { method: request.method, headers: { 'content-type': 'application/json', 'x-sa-project': projectId }, body })

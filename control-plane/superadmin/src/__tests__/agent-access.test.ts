@@ -132,11 +132,26 @@ describe('agent keys, identities and the audit history, in the real ProjectDO', 
     expect(bad.status).toBe(401)
   })
 
+  it('groups: the hub stamps the groups a sender is in on every message, read each time', async () => {
+    const made = await call('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'grouped', scopes: ['graph'], by: 'admin@test.io' }) })
+    expect((await call('/groups', { method: 'POST', body: JSON.stringify({ name: 'finance', by: 'admin@test.io' }) })).status).toBe(201)
+    expect((await call('/groups', { method: 'POST', body: JSON.stringify({ name: 'Bad Name', by: 'admin@test.io' }) })).body.error).toMatch(/lower-case/)
+    const agent = await connect({ role: 'agent', key: made.body.key })
+    await agent.until((m) => m.payload?.t === 'welcome')
+    agent.send({ to: { type: 'code-engine' }, payload: { t: 'graph:domains', reqId: 'g1' } })
+    expect((await engine.until((m) => m.payload?.reqId === 'g1')).from.scopes).toEqual([])
+    await call('/groups/finance/members', { method: 'POST', body: JSON.stringify({ member: `agent:${made.body.record.id}`, by: 'admin@test.io' }) })
+    agent.send({ to: { type: 'code-engine' }, payload: { t: 'graph:domains', reqId: 'g2' } })
+    expect((await engine.until((m) => m.payload?.reqId === 'g2')).from.scopes).toEqual(['group:finance'])
+    const groups = (await call('/groups')).body.groups
+    expect(groups).toEqual([expect.objectContaining({ name: 'finance', members: [`agent:${made.body.record.id}`] })])
+  })
+
   it('the hub tells the engine who administers the project', async () => {
     const admin = await connect({ role: 'runtime', token: jwt({ userId: 'root', email: 'root@test.io', role: 'superadmin' }) })
     await admin.until((m) => m.payload?.t === 'welcome')
     admin.send({ to: { type: 'code-engine' }, payload: { t: 'graph:domains', reqId: 'adm' } })
-    expect((await engine.until((m) => m.payload?.reqId === 'adm')).from).toMatchObject({ type: 'runtime', userId: 'root', admin: true })
+    expect((await engine.until((m) => m.payload?.reqId === 'adm')).from).toMatchObject({ type: 'runtime', userId: 'root', admin: true, scopes: ['user:root'] })
   })
 
   it("the hub's scopes name exactly the engine's messages (nothing an engine cannot answer, nothing it answers left out)", () => {

@@ -11,7 +11,7 @@
 //
 // → graph:reply { … } or graph:refused { reason }. Who acts is the hub's word (identity.ts); the rules are the
 // composition graph's governance (owner changes, others suggest, owner decides). A person sees global nodes and their
-// own; an admin sees everything; an agent sees global nodes.
+// own and their groups'; an admin sees everything; an agent sees global nodes and its groups'.
 
 import { join } from 'node:path'
 import { Store, compose, domains, governance as g, GovernanceRefusal, type Kind } from '@superatom/composition-graph'
@@ -31,7 +31,7 @@ export function createGraphSeam(d: { projectDir: string; send: (to: any, msg: Re
     try {
       const who = whoIs(from)
       const s = open()
-      const viewer = who.admin ? undefined : who.id.startsWith('user:') ? [who.id] : []
+      const viewer = who.admin ? undefined : who.scopes
       const asOf = payload.asOf ? Date.parse(String(payload.asOf)) : undefined
       if (asOf !== undefined && Number.isNaN(asOf)) throw new GovernanceRefusal(`"${payload.asOf}" is not a time`)
       const ok = (data: Record<string, unknown>) => reply({ t: 'graph:reply', ...data })

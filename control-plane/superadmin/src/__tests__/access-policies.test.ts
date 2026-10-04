@@ -6,7 +6,7 @@ const P = (over: Partial<AccessPolicy>): AccessPolicy => ({ id: 'p', applies_to:
 describe('access policies', () => {
   it('are checked in sentences', () => {
     expect(checkPolicy(P({}))).toEqual([])
-    expect(checkPolicy(P({ applies_to: 'nobody' as any, predicate: 'branch = 1' }))).toEqual(['a policy applies to everyone, role:<role>, email:<address> or agent:<key id>', 'a row predicate names the table as {t} (so it applies however the query aliases it)'])
+    expect(checkPolicy(P({ applies_to: 'nobody' as any, predicate: 'branch = 1' }))).toEqual(['a policy applies to everyone, role:<role>, group:<group>, email:<address> or agent:<key id>', 'a row predicate names the table as {t} (so it applies however the query aliases it)'])
     expect(checkPolicy(P({ predicate: '{t}.a = 1; DROP TABLE x' }))).toEqual(['a row predicate is one boolean expression: no ";", no comments'])
     expect(checkPolicy(P({ kind: 'mask', column: '' }))).toEqual(['a mask policy names its column'])
     expect(checkPolicy(P({ table: 'a b' }))).toEqual(['a policy names its table (an identifier, optionally schema-qualified)'])
@@ -24,6 +24,7 @@ describe('access policies', () => {
       P({ id: '3', applies_to: 'email:Ana@X.io', table: 'salaries', kind: 'deny', predicate: null }),
       P({ id: '4', applies_to: 'agent:key_7', table: 'ledger', kind: 'deny', predicate: null }),
       P({ id: '5', source: 'OTHER', table: 'x', kind: 'deny', predicate: null }),
+      P({ id: '6', applies_to: 'group:finance', table: 'ledger', kind: 'mask', column: 'amount', predicate: null }),
     ]
     expect(resolve(policies, 'TG', { principal: 'user:u1', email: 'ana@x.io', role: 'viewer', attributes: { branches: ['HYDERABAD'] } })).toEqual([
       { table: 'trips', predicate: "{t}.branch IN ('HYDERABAD')" },
@@ -31,5 +32,6 @@ describe('access policies', () => {
       { table: 'salaries', deny: true },
     ])
     expect(resolve(policies, 'TG', { principal: 'agent:key_7', attributes: {} })).toEqual([{ table: 'trips', deny: true }, { table: 'ledger', deny: true }])
+    expect(resolve(policies, 'TG', { principal: 'user:u9', groups: ['finance'], attributes: { branches: ['X'] } })).toEqual([{ table: 'trips', predicate: "{t}.branch IN ('X')" }, { table: 'ledger', column: 'amount', mask: 'null' }])
   })
 })

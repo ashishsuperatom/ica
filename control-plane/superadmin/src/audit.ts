@@ -2,8 +2,7 @@
 //
 // Every action that passes through the project — a question, an intent, a change made in the admin console, an agent
 // connecting or being refused — is one AuditEvent (vm/packages/platform-types). It is written here first, append-only,
-// in the DO's SQLite (immediate, and kept if the stream fails), then sent to the platform's audit stream (Basin
-// Pipelines → an Iceberg table, read with Basin SQL) and counted in Analytics Engine, when those are bound.
+// in the DO's SQLite (immediate, and kept if the stream fails), then sent to the platform's warehouse (Basin), when it is bound.
 
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type { AuditEvent } from '../../../vm/packages/platform-types/src/index.js'
@@ -12,8 +11,6 @@ import { checkAuditEvent } from '../../../vm/packages/platform-types/src/index.j
 export interface AuditSinks {
   /** Basin Pipelines stream binding: `send(records)`. */
   stream?: { send(records: unknown[]): Promise<void> }
-  /** Analytics Engine dataset binding. */
-  metrics?: { writeDataPoint(p: { indexes?: string[]; blobs?: string[]; doubles?: number[] }): void }
   /** Somewhere to say a send failed (the event is already kept here). */
   warn?: (msg: string) => void
   /** The platform's warehouse (records.ts): every audit event, beside the project's other records. */
@@ -42,7 +39,6 @@ export class AuditLog {
       ...(event.actor.email ? { actor_email: event.actor.email } : {}), ...(event.target ? { target: event.target } : {}), ...(event.detail ? { detail: JSON.stringify(event.detail) } : {}) }
     this.sinks.records?.('audit', event.id, event, event.at)
     if (this.sinks.stream) this.sinks.stream.send([row]).catch((err) => this.sinks.warn?.(`audit stream send failed for ${event.id}: ${err?.message ?? err}`))
-    try { this.sinks.metrics?.writeDataPoint({ indexes: [event.project], blobs: [event.action, event.outcome, event.via, event.actor.kind], doubles: [1] }) } catch { /* metrics are best effort */ }
     return event
   }
 

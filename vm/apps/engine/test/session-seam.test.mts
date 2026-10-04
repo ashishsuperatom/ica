@@ -29,6 +29,7 @@ before(async () => {
   mkdirSync(join(home, 'agents'))
   writeFileSync(join(home, 'agents', 'trips.json'), JSON.stringify({ id: 'trips', name: 'Trips', scope: 'global', owner: 'user:builder', domain: 'vendors-and-hire', programs: ['unsettled-trips'], tools: [], start: { trips: { branch: 'PUNE' } }, ui: { start: 'web/Start.tsx' }, ica: 'composer' }))
   writeFileSync(join(home, 'agents', 'broken.json'), JSON.stringify({ id: 'broken' }))
+  writeFileSync(join(home, 'agents', 'finance.json'), JSON.stringify({ id: 'finance', name: 'Finance', scope: 'group:finance', owner: 'user:builder', domain: 'd', programs: ['unsettled-trips'], tools: [], ui: { start: 's' }, ica: 'composer' }))
 })
 after(() => server.close())
 
@@ -38,10 +39,15 @@ const seam = () => {
   return { out, ask: async (payload: any, userId: string | null = 'u1') => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId }); return out.at(-1) } }
 }
 
-test('the agents a project has; a broken agent file is left out', async () => {
-  const { ask } = seam()
-  const r = await ask({ t: 'session:agents', reqId: 'r1' })
-  assert.deepEqual(r, { t: 'session:agents', reqId: 'r1', agents: [{ id: 'trips', name: 'Trips', scope: 'global', ui: { start: 'web/Start.tsx' }, isDefault: false }] })
+test('the agents a project has, as far as the asker sees them; a broken agent file is left out', async () => {
+  const out: any[] = []
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg) })
+  const list = async (from: any) => { await s.handle({ t: 'session:agents', reqId: 'r1' }, from); return out.at(-1).agents.map((a: any) => a.id).sort() }
+  assert.deepEqual(await list({ type: 'runtime', userId: 'u1', scopes: ['user:u1'] }), ['trips'])
+  assert.deepEqual(await list({ type: 'runtime', userId: 'u2', scopes: ['user:u2', 'group:finance'] }), ['finance', 'trips'])
+  assert.deepEqual(await list({ type: 'runtime', userId: 'root', admin: true }), ['finance', 'trips'])
+  await s.handle({ t: 'session:open', session: 'fin1', agent: 'finance' }, { type: 'runtime', userId: 'u1', scopes: ['user:u1'] })
+  assert.equal(out.at(-1).reason, 'there is no agent "finance"')
 })
 
 test('open, intents to the current view and to a new block, go back, read as of a moment — data through the manager', async () => {

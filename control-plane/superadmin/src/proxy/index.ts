@@ -141,7 +141,6 @@ function meter(ctx: ExecutionContext, rec: { project: string; provider: string; 
   if (!env?.PROJECT || !/^[0-9a-f-]{36}$/.test(rec.project)) return
   // Kept by the project's DO (append-only, priced, debited from the organisation's credits) — never in the response path.
   ctx.waitUntil(env.PROJECT.get(env.PROJECT.idFromName(`proj:${rec.project}`)).fetch(new Request('http://do/usage', { method: 'POST', headers: { 'x-sa-project': rec.project }, body: JSON.stringify(rec) })).catch(() => {}))
-  try { (env as any).METRICS?.writeDataPoint({ indexes: [rec.project], blobs: ['model.tokens', rec.provider, rec.model ?? ''], doubles: [rec.in, rec.out, rec.ms] }) } catch { /* best effort */ }
 }
 
 /** Pass the body through untouched while watching it go by, so usage can be read from a STREAM without

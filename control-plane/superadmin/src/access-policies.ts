@@ -2,17 +2,17 @@
 //
 // A policy says, for one data source and table, what a principal may read: a ROW filter (a predicate every read of the
 // table gets), a DENY (the table cannot be read), or a column MASK (the column reads as null). It applies to everyone,
-// to a role (the project's access roles), to one person (by email) or to one agent key. A predicate may name the
+// to a role (the project's access roles), to a group, to one person (by email) or to one agent key. A predicate may name the
 // reader's ATTRIBUTES — `{t}.branch IN {attr.branches}` — so one policy serves everyone it applies to; the values are
 // rendered as SQL literals here, never pasted. A policy that names an attribute the reader does not have denies the
 // table: access fails closed. The rewrite (datasource manager, sqlrewrite/worker.py) applies the resolved policies to
 // every query, on every table read.
 
-export type AppliesTo = 'everyone' | `role:${string}` | `email:${string}` | `agent:${string}`
+export type AppliesTo = 'everyone' | `role:${string}` | `group:${string}` | `email:${string}` | `agent:${string}`
 export interface AccessPolicy { id: string; applies_to: AppliesTo; source: string; table: string; kind: 'row' | 'deny' | 'mask'; predicate?: string | null; column?: string | null; note?: string | null }
 /** What the rewrite takes (sqlrewrite/worker.py inject_policies). */
 export type Resolved = { table: string; predicate: string } | { table: string; deny: true } | { table: string; column: string; mask: 'null' }
-export interface Reader { principal: string; email?: string | null; role?: string | null; attributes: Record<string, unknown> }
+export interface Reader { principal: string; email?: string | null; role?: string | null; groups?: string[]; attributes: Record<string, unknown> }
 
 export class PolicyRefusal extends Error {}
 
@@ -22,7 +22,7 @@ const ATTR = /\{attr\.([\w-]+)\}/g
 /** What is wrong with a policy, in sentences. */
 export function checkPolicy(p: Partial<AccessPolicy>): string[] {
   const out: string[] = []
-  if (!p.applies_to || !/^(everyone|role:[\w-]+|email:[^\s@]+@[^\s@]+|agent:key_[\w-]+)$/.test(p.applies_to)) out.push('a policy applies to everyone, role:<role>, email:<address> or agent:<key id>')
+  if (!p.applies_to || !/^(everyone|role:[\w-]+|group:[a-z][a-z0-9-]*|email:[^\s@]+@[^\s@]+|agent:key_[\w-]+)$/.test(p.applies_to)) out.push('a policy applies to everyone, role:<role>, group:<group>, email:<address> or agent:<key id>')
   if (!p.source || !/^[\w-]+$/.test(p.source)) out.push('a policy names its data source')
   if (!p.table || !IDENT.test(p.table)) out.push('a policy names its table (an identifier, optionally schema-qualified)')
   if (p.kind === 'row') {
@@ -47,6 +47,7 @@ export function literal(v: unknown): string {
 const appliesTo = (p: AccessPolicy, r: Reader) =>
   p.applies_to === 'everyone' ||
   (p.applies_to.startsWith('role:') && r.role === p.applies_to.slice(5)) ||
+  (p.applies_to.startsWith('group:') && !!r.groups?.includes(p.applies_to.slice(6))) ||
   (p.applies_to.startsWith('email:') && !!r.email && r.email.toLowerCase() === p.applies_to.slice(6).toLowerCase()) ||
   (p.applies_to.startsWith('agent:') && r.principal === p.applies_to)
 

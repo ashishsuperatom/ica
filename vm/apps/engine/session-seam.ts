@@ -147,13 +147,16 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const t = String(payload.t)
     const reply = (msg: Record<string, unknown>) => d.send(from, { ...msg, reqId: payload.reqId })
     try {
-      if (t === 'session:agents') return reply({ t: 'session:agents', agents: agents() })
+      // Only the agents this asker sees (global, their own, their groups'); an admin sees all.
+      const visible = (scope: string) => { try { const w = whoIs(from); return w.admin || scope === 'global' || w.scopes.includes(scope) } catch { return scope === 'global' } }
+      if (t === 'session:agents') return reply({ t: 'session:agents', agents: agents().filter((a) => visible(a.scope)) })
       const user = userOf(from)
       if (t === 'session:file') { const hash = String(payload.hash ?? ''), path = String(payload.path ?? ''); return reply({ t: 'session:file', hash, path, text: programFile(hash, path) }) }
       const session = String(payload.session ?? '')
       if (!/^[\w-]{1,80}$/.test(session)) throw new SessionSeamRefusal('a session message names its session')
       if (t === 'session:open') {
         const { sessions, spec } = await runtimeFor(String(payload.agent ?? ''))
+        if (!visible(spec.scope)) throw new SessionSeamRefusal(`there is no agent "${spec.id}"`)
         return reply(await present(sessions.open({ session, user, agent: spec.id, start: spec.start })))
       }
       if (t === 'session:get') {

@@ -588,7 +588,6 @@ instant dashboards (the only overlap: counts the audit history could also give).
 |---|---|
 | The audit history — every action, append-only, queryable by SQL for years | Basin Pipelines (a stream, schema-checked) → an Iceberg table in Basin Catalog (R2) → Basin SQL |
 | The project's own record, immediate | the project's Durable Object keeps every audit event in its SQLite, append-only (the stream reaches SQL after 1–5 minutes, and a failed send must not lose an event) |
-| Near-real-time metrics (latency, errors, per project) | Workers Analytics Engine (3 months) |
 | Traces and logs of the Worker and Durable Objects | Workers Traces and Logs (`observability` in wrangler.jsonc) — written by Cloudflare automatically, never by us |
 
 - **One event shape** (`AuditEvent` in platform-types): who (user, agent key, engine, system), via (ui, admin, agent,
@@ -650,6 +649,12 @@ everyone uses it). The access key is stored securely: every use first decrypts i
 
 **Choices made (2026-10-05):** the platform's own warehouse is Basin, and Analytics Engine is dropped (its 3-month,
 sampled metrics duplicate what the warehouse gives; minutes of lag are fine).
+
+**Groups and scope (built 2026-10-05):** a project has groups (members by email or agent key, managed by admins,
+audited). The hub stamps every message with the sender's scopes — `user:<id>` and `group:<name>` for each group, read
+each time — never from a payload. Knowledge (the graph), agents (listing and opening) and programs (the catalogue)
+show only what those scopes see (global, one's own, one's groups'); an admin sees all; data access policies can apply to
+a group.
 
 **Order of building:** (1) drop Analytics Engine; (2) groups, and scope (global/group/user) wherever things are listed
 or read — knowledge, agents, programs, sessions, connections; (3) agents as first-class, created from the UI and CLI;
