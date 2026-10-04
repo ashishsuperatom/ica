@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { mkdtempSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { migrate, addColumnIfMissing, fingerprint, MigrationError, type Migration } from '../src/index.ts'
+import { migrate, verifyMigrations, addColumnIfMissing, fingerprint, MigrationError, type Migration } from '../src/index.ts'
 import { nodeDb, migrateFile } from '../src/node.ts'
 
 const v1: Migration[] = [
@@ -51,6 +51,23 @@ test('an edited migration is refused — a shipped migration is never changed', 
   assert.throws(() => migrate(nodeDb(db), edited, { name: 'test.db' }), (e: any) => e instanceof MigrationError && /migration 2 .* has changed/.test(e.message))
   const renamed = [v1[0], { ...v1[1], name: 'email' }]
   assert.throws(() => migrate(nodeDb(db), renamed, { name: 'test.db' }), /has changed/)
+  // an older migration edited: not the runtime's one-row check, but verifyMigrations (tests, CI) and any later pending run
+  const olderEdited = [{ ...v1[0], up: 'CREATE TABLE people (id INTEGER PRIMARY KEY)' }, v1[1]]
+  assert.throws(() => verifyMigrations(nodeDb(db), olderEdited, 'test.db'), /migration 1 .* has changed/)
+  assert.throws(() => migrate(nodeDb(db), [...olderEdited, { id: 3, name: 'x', up: 'CREATE TABLE x (id INTEGER)' }], { name: 'test.db' }), /migration 1 .* has changed/)
+})
+
+test('when nothing is pending, it reads one row and touches nothing else', () => {
+  const db = fresh()
+  migrate(nodeDb(db), v1, { name: 'test.db' })
+  const seen: string[] = []
+  const spy = nodeDb(db)
+  const counted = { exec: (q: string) => { seen.push(q); spy.exec(q) }, all: (q: string, ...p: unknown[]) => { seen.push(q); return spy.all(q, ...p) }, transaction: spy.transaction }
+  let backups = 0
+  assert.deepEqual(migrate(counted, v1, { name: 'test.db', backup: () => { backups++ } }), { applied: [], current: 2 })
+  assert.equal(seen.length, 1)
+  assert.match(seen[0], /ORDER BY id DESC LIMIT 1/)
+  assert.equal(backups, 0)
 })
 
 test('whitespace in SQL does not change the fingerprint', () => {

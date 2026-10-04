@@ -1,12 +1,14 @@
 // The engine's side: a node:sqlite database as a MigrationDb, and opening a database file with its migrations
 // applied and a backup taken beside it before any pending migration runs.
 
-import type { DatabaseSync } from 'node:sqlite'
 import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { migrate, type Migration, type MigrationDb, type MigrateResult } from './index.js'
 
-export function nodeDb(db: DatabaseSync): MigrationDb {
+/** A Node SQLite connection — node:sqlite's DatabaseSync or better-sqlite3's Database; both have exec and prepare().all. */
+export interface NodeSqlite { exec(sql: string): unknown; prepare(sql: string): { all(...params: any[]): unknown[] } }
+
+export function nodeDb(db: NodeSqlite): MigrationDb {
   return {
     exec: (sql) => { db.exec(sql) },
     all: (sql, ...params) => db.prepare(sql).all(...(params as any[])) as Record<string, unknown>[],
@@ -22,7 +24,7 @@ const KEEP = 3
 
 /** Apply a file database's migrations. Before pending migrations run on an existing database, a consistent copy is
  *  written to `backups/<file>.<time>.bak` beside it (VACUUM INTO), keeping the latest few. */
-export function migrateFile(db: DatabaseSync, file: string, migrations: Migration[], name = basename(file)): MigrateResult {
+export function migrateFile(db: NodeSqlite, file: string, migrations: Migration[], name = basename(file)): MigrateResult {
   return migrate(nodeDb(db), migrations, {
     name,
     backup: file === ':memory:' ? undefined : () => {

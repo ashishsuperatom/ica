@@ -13,6 +13,11 @@
 //
 // This file depends on nothing — the engine (node:sqlite) and the control plane (Durable Object SQL) both use it,
 // each through a small adapter that says how to run SQL and how to make a transaction.
+//
+// COST. Migrations run once per open, never per request: the engine migrates a database when it opens it; a Durable
+// Object migrates in its constructor, inside ctx.blockConcurrencyWhile, once each time it wakes. And when nothing is
+// pending, that once is a single-row read — the last applied migration's id and fingerprint against the code's last.
+// The full record is compared only when something is pending, and always by verifyMigrations in tests.
 
 export interface Migration {
   /** 1, 2, 3 … — the order, with no gaps. */
@@ -53,10 +58,10 @@ export class MigrationError extends Error {}
 
 const TABLE = '_migrations'
 
-/** A short fingerprint of a migration's SQL (or of a function migration's name): FNV-1a, 64 bits, as hex. Sync and
- *  dependency-free, because a Worker has no synchronous crypto. */
+/** A short fingerprint of a migration — its name, and its SQL (a function migration: its name only): FNV-1a, 64 bits,
+ *  as hex. Sync and dependency-free, because a Worker has no synchronous crypto. */
 export function fingerprint(m: Migration): string {
-  const text = typeof m.up === 'string' ? m.up.replace(/\s+/g, ' ').trim() : `fn:${m.name}`
+  const text = `${m.name}\n${typeof m.up === 'string' ? m.up.replace(/\s+/g, ' ').trim() : 'fn'}`
   let h1 = 0x811c9dc5, h2 = 0x01000193 ^ text.length
   for (let i = 0; i < text.length; i++) {
     const c = text.charCodeAt(i)
@@ -76,12 +81,35 @@ function checkList(name: string, migrations: Migration[]): Migration[] {
   return list
 }
 
-/** Bring a database up to the last migration. Refuses, with a sentence, a database it must not touch. */
+/** The last migration a database recorded, or null when it has no record yet (one indexed row). */
+function lastApplied(db: MigrationDb): { id: number; fingerprint: string } | null {
+  try {
+    const [r] = db.all(`SELECT id, fingerprint FROM ${TABLE} ORDER BY id DESC LIMIT 1`)
+    return r ? { id: Number(r.id), fingerprint: String(r.fingerprint) } : null
+  } catch { return null }   // no record table: a new database, or one made before migrations
+}
+
+/** Bring a database up to the last migration. Refuses, with a sentence, a database it must not touch. When nothing is
+ *  pending it costs one single-row read. */
 export function migrate(db: MigrationDb, migrations: Migration[], opts: MigrateOptions): MigrateResult {
   const list = checkList(opts.name, migrations)
-  const now = opts.now ?? (() => new Date().toISOString())
+  const last = list.at(-1)
+  const at = lastApplied(db)
+  if (last && at && at.id === last.id && at.fingerprint === fingerprint(last)) return { applied: [], current: last.id }
+  return migrateFully(db, list, opts)
+}
+
+/** Every recorded migration against the code — refuses an edited, renamed or unknown one. For tests and CI: the
+ *  runtime check is the last migration only, and the full one when something is pending. */
+export function verifyMigrations(db: MigrationDb, migrations: Migration[], name: string): void {
+  const list = checkList(name, migrations)
+  checkRecord(db, list, name)
+}
+
+function checkRecord(db: MigrationDb, list: Migration[], name: string) {
   db.exec(`CREATE TABLE IF NOT EXISTS ${TABLE} (id INTEGER PRIMARY KEY, name TEXT NOT NULL, fingerprint TEXT NOT NULL, applied_at TEXT NOT NULL)`)
   const done = db.all(`SELECT id, name, fingerprint FROM ${TABLE} ORDER BY id`).map((r) => ({ id: Number(r.id), name: String(r.name), fingerprint: String(r.fingerprint) }))
+  const opts = { name }
 
   // What the database has must be what the code says, in order.
   done.forEach((d, i) => {
@@ -91,7 +119,12 @@ export function migrate(db: MigrationDb, migrations: Migration[], opts: MigrateO
     if (m.name !== d.name || fingerprint(m) !== d.fingerprint)
       throw new MigrationError(`${opts.name}: migration ${d.id} ("${d.name}") has changed since it was applied. A shipped migration is never edited — put the change in a new migration.`)
   })
+  return done
+}
 
+function migrateFully(db: MigrationDb, list: Migration[], opts: MigrateOptions): MigrateResult {
+  const now = opts.now ?? (() => new Date().toISOString())
+  const done = checkRecord(db, list, opts.name)
   const pending = list.slice(done.length)
   if (!pending.length) return { applied: [], current: done.length }
   // A database that already has a shape is backed up first; a new one has nothing to lose.

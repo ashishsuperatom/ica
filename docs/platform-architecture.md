@@ -327,7 +327,7 @@ component of the platform. Where it is used and how its CSS is migrated is decid
 
 There are many databases: in the engine (composition graph, datasource index, grounding, agent sessions, …) and in the
 Durable Objects' SQLite (project, user, session, state DOs). Every one needs proper migrations, so changes never
-become hell to manage. **Proposed (to agree):**
+become hell to manage. **Agreed — a runner of our own over plain SQL:**
 
 - **One migration runner** for every SQLite database — the same code for `node:sqlite` in the engine and for the
   Durable Objects' SQLite (both are SQLite; we write plain SQL).
@@ -337,6 +337,10 @@ become hell to manage. **Proposed (to agree):**
   migrations run, and restoring the backup is the way back.
 - **A database written by newer code is refused** with a sentence, so an old engine never corrupts it.
 - **A test** opens an empty database and an old fixture of each, runs every migration, and checks the result.
+- **Never per request (built 2026-10-04, `@superatom/migrate`).** The engine migrates a database once, when it opens
+  it; a Durable Object migrates in its constructor inside `ctx.blockConcurrencyWhile`, once per wake. When nothing is
+  pending that once is a single-row read (the last applied migration's id and fingerprint against the code's last);
+  the full record is compared only when something is pending, and by `verifyMigrations` in tests.
 - The alternative is a standard tool (Drizzle's migrations work for both SQLite and Durable Objects, but bring an ORM
   and its schema language); a small runner of our own over plain SQL is the recommendation.
 
