@@ -46,13 +46,17 @@ code="$(curl -s -o /dev/null -w '%{http_code}' "$SITE/u/")"
 [ "$code" = "200" ] || rollback "the user app answered $code"
 # Each screen's script must PARSE as served — a bundle the browser refuses is a white page that every other check misses
 # (an await the bundler moved into a non-async function shipped exactly that).
+# Right after an upload the edge can still serve a page whose new script is not reachable yet (the page's fallback comes
+# back instead): asked again for up to a minute before it counts as broken.
 for page in u admin; do
-  src="$(curl -s "$SITE/$page/" | grep -oE 'type="module"[^>]*src="[^"]+"' | grep -oE 'src="[^"]+"' | head -1 | cut -d'"' -f2)"
-  [ -n "$src" ] || rollback "the $page page names no script"
-  tmp="$(mktemp -t sa-bundle).mjs"
-  curl -s "$SITE$src" -o "$tmp"
-  node --check "$tmp" 2> /tmp/sa-bundle-check.log || { rm -f "$tmp"; rollback "the $page screen's script does not parse: $(head -c 300 /tmp/sa-bundle-check.log)"; }
-  rm -f "$tmp"
+  ok=""
+  for attempt in 1 2 3 4 5 6; do
+    src="$(curl -s "$SITE/$page/" | grep -oE 'type="module"[^>]*src="[^"]+"' | grep -oE 'src="[^"]+"' | head -1 | cut -d'"' -f2)"
+    tmp="$(mktemp -t sa-bundle).mjs"
+    if [ -n "$src" ] && curl -s -o "$tmp" "$SITE$src" && node --check "$tmp" 2> /tmp/sa-bundle-check.log; then ok=1; rm -f "$tmp"; break; fi
+    rm -f "$tmp"; sleep 10
+  done
+  [ -n "$ok" ] || rollback "the $page screen's script does not parse: $(head -c 300 /tmp/sa-bundle-check.log 2>/dev/null)"
   say "the $page screen's script parses"
 done
 fake() { printf 'sak_%s_%s' "$1" "$(printf 'z%.0s' $(seq 1 43))"; }
