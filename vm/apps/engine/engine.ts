@@ -876,6 +876,8 @@ function connect() {
       sessionSync.pushAll()   // and every session the platform does not have whole
       graphSync.welcome()     // and the graph: pushed from where the platform's copy ends, or rebuilt from it
       void programSeam.syncUp((x) => console.warn(x)).catch((e) => console.warn(`[programs] sync failed: ${e?.message ?? e}`))   // and every program built here
+      // and the code connectors this engine runs (its datasource manager's sources), for the platform to list beside the rest
+      void fetch(`${DATASOURCE}/sources`, { signal: AbortSignal.timeout(4000) }).then((r) => r.json()).then((j: any) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'sources:report', sources: (j?.sources ?? []).map((x: any) => ({ id: x.id, kind: x.kind, dialect: x.dialect, description: x.description, ready: !!x.ready })) })) }).catch(() => {})
       // THE PROJECT'S PROFILE, delivered with the welcome. Adopted before warm-up builds any agent, so a box
       // starts on its own configuration rather than adopting it a few seconds late and rebuilding.
       if (m.payload.profile) receive(m.payload.profile, 'project profile')

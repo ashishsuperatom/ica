@@ -647,6 +647,13 @@ other databases. Connecting looks like the SLOB application's block UI: "I want 
 A connection can be **per user** (each user makes their own) or **organisation level** (an admin connects once and
 everyone uses it). The access key is stored securely: every use first decrypts it with a master key, then makes the call.
 
+**Two kinds of connector, one thing (the user, 2026-10-05):** some connectors are **base connectors whose code runs in
+the engine** — normally machine-to-machine, the whole engine has access; others have **no code of ours** — they live in
+the Cloudflare side or behind MCP, an HTTP API the agent can still use by writing a program against it. They are meant
+to be the same thing: a connection; the only difference is that some are written in code and some are just an HTTP
+API. Someone connecting their Outlook or a specific database is most likely user level, but an admin can add a
+connector too. Both kinds belong in the data source index.
+
 **Choices made (2026-10-05):** the platform's own warehouse is Basin, and Analytics Engine is dropped (its 3-month,
 sampled metrics duplicate what the warehouse gives; minutes of lag are fine).
 

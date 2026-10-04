@@ -49,6 +49,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Background work visible: program builds and session runs reported as activities (running, done, failed), kept by the hub and sent to their owner and admins; listed on reconnect and by `sacli activity`.
 - Usage metering and credits: every model call's tokens kept per project and priced from the platform's price list (versions kept); an append-only credit ledger per organisation (grants by the platform, debits by usage); work refused, with a sentence, when an organisation on a plan has used its credits.
 - Enterprise sign-in provisioned on first arrival: a project lets a verified company domain in with a role (never admin, never a public mail domain), the grant audited; the identity provider itself is connected in Clerk.
+- Connections to other systems, one thing in two kinds — code connectors (our bridges in the engine) and API connectors (HTTP APIs, MCP servers): a registry of connectors with their forms; connections shared by the project (admins) or a person's own; secrets sealed with the platform's master key, never shown again, handed to the engine only when it runs them (a personal one only for its owner); the engine's own sources listed beside them; a Connections page in the user UI.
 - Groups and scope everywhere it matters: groups per project; the hub stamps each sender's scopes on every message; knowledge, agents and programs show only what those scopes see; policies can apply to a group.
 - Agents' own data tools apply the asker's data access (written per turn; unresolvable means nothing is read).
 - Data access per reader: row filters, denials and column masks per source and table, for everyone, a role, a person or an agent key, with per-reader attributes (fail closed); resolved by the platform, carried with each session intent, applied by the SQL rewrite to every table read.
@@ -99,6 +100,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - The user DO's personalised view (what it keeps beyond sessions and personal state is still being decided).
 - Governance beyond the graph: hierarchical admins (program, group, global) and granting access.
 - Sandboxing agents so their tools cannot bypass data access deliberately (dynamic workers).
+- Engine bridges for the SQL Server, Postgres and REST connectors run from a connection's settings; API and MCP connections in the data source index; organisation-level connections across projects; hundreds more connectors.
 - SCIM directory sync and deprovisioning from the identity provider.
 - Payment through Stripe (a checkout whose webhook adds credits), invoices and per-plan limits; metering engine time and queries.
 - The data protocol for many users at once (fairness and queueing across users); activities in the user UI.

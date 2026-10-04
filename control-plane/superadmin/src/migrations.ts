@@ -173,6 +173,18 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     CREATE TABLE IF NOT EXISTS group_members (grp TEXT NOT NULL, member TEXT NOT NULL, added_by TEXT NOT NULL, added_at TEXT NOT NULL, PRIMARY KEY (grp, member));
     CREATE INDEX IF NOT EXISTS idx_group_members_member ON group_members(member);
   ` },
+  { id: 23, name: 'connections', up: `
+    -- Connections to other systems (shared/connectors.ts): shared by the project, or one person's own. Settings in the
+    -- clear; secret fields sealed with the platform's master key, never shown again. Removing stamps; nothing is deleted.
+    CREATE TABLE IF NOT EXISTS connections (
+      id TEXT PRIMARY KEY, connector TEXT NOT NULL, name TEXT NOT NULL, level TEXT NOT NULL CHECK (level IN ('project', 'user')), owner TEXT NOT NULL,
+      settings TEXT NOT NULL, secrets_sealed TEXT, created_by TEXT NOT NULL, created_at TEXT NOT NULL, removed_at TEXT, removed_by TEXT);
+  ` },
+  { id: 24, name: 'engine sources', up: `
+    -- The code connectors the engine runs (its datasource manager's sources), as it reports them on each connect —
+    -- listed beside the connections people add. Their secrets stay with the engine.
+    CREATE TABLE IF NOT EXISTS engine_sources (id TEXT PRIMARY KEY, kind TEXT, dialect TEXT, description TEXT, ready INTEGER NOT NULL DEFAULT 0, reported_at TEXT NOT NULL);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

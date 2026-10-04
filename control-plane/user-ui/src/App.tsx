@@ -11,6 +11,7 @@ import '@xterm/xterm/css/xterm.css'
 import './design.css'   // BUNDLED (hashed, loaded atomically with the app) — not a fragile separate <link href="/design.css">, which intermittently failed to attach and left the UI unstyled
 import { useClaudeTerminal } from './useClaudeTerminal'
 import AgentSession, { type SessionMsg } from './AgentSession'
+import Connections from './Connections'
 import { useQuestionNav } from './questionNav'
 import { useLogNav } from './logNav'
 import { ANSI, COLS, ROWS } from './termColors'
@@ -238,6 +239,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // is known (see `shownView`), so a hello arriving after the load still opens it.
   const readView = (): View => {
     if (/^\/c\//.test(location.pathname)) return 'chat'
+    if (location.pathname.replace(/\/+$/, '') === '/connections') return 'connections'
     const agent = /^\/s\/([\w-]+)/.exec(location.pathname)
     if (agent) return `agent:${agent[1]}`
     const seg = location.pathname.replace(/\/+$/, '').split('/').pop()
@@ -366,7 +368,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const consoleLane = laneNames.find(n => isConsoleLane(lanes[n])) ?? ''
   const consoleLaneRef = useRef(consoleLane); consoleLaneRef.current = consoleLane
   // What is on screen: chat, or a lane we know. An address naming a lane we do not know (yet) shows chat.
-  const shownView: View = view === 'chat' || lanes[view] || view.startsWith('agent:') ? view : 'chat'
+  const shownView: View = view === 'chat' || lanes[view] || view.startsWith('agent:') || view === 'connections' ? view : 'chat'
   shownViewRef.current = shownView
   // Update one lane, creating a minimal entry (label = lane) when a frame precedes its hello, so nothing is dropped.
   const updateLane = (lane: string, fn: (l: LaneState) => LaneState) =>
@@ -1013,6 +1015,7 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
         onNewChat={() => { navigate('chat'); newChat() }}
         chats={sessions.map(se => ({ key: se.id, label: se.title || 'New chat', active: view === 'chat' && se.id === sessionId, busy: turnBusy && se.id === sessionId,
           onClick: () => { navigate('chat'); openSession(se.id) } }))}
+        connections={{ key: 'connections', label: 'Connections', active: shownView === 'connections', onClick: () => navigate('connections') }}
         sessionAgents={sessionAgents.map(a => ({ key: a.id, label: a.name, active: shownView === `agent:${a.id}`, onClick: () => navigate(`agent:${a.id}`) }))}
         agents={laneNames.map(n => ({ key: n, label: lanes[n].label, title: lanes[n].desc || lanes[n].label, active: shownView === n, hue: lanes[n].hue, onClick: () => navigate(n) }))}
         account={CLOUD ? <AccountSection /> : (
@@ -1061,6 +1064,7 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
       })}
 
       {/* Chat/answer view */}
+      {shownView === 'connections' && <Connections projectId={projectId} token={token ?? null} />}
       {shownView.startsWith('agent:') && (
         <AgentSession agent={shownView.slice(6)} agentName={sessionAgents.find(a => a.id === shownView.slice(6))?.name ?? shownView.slice(6)}
           send={send} subscribe={subscribeSession} renderAnswer={(card) => <AnswerCard answer={card} />} projectId={projectId} token={token} />

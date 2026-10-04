@@ -31,6 +31,8 @@ import { ProgramCatalogue, CatalogueRefusal } from './program-catalogue.js'
 import { checkPolicy, resolve as resolvePolicies, type AccessPolicy } from './access-policies.js'
 import { costOf, priceFor, type Price } from './metering.js'
 import { createRecorder, type Recorder } from './records.js'
+import { connectorById, checkConnection, CONNECTORS } from '../../shared/connectors.js'
+import { seal, unseal } from './proxy/seal.js'
 
 
 // How long a question queued for a sleeping machine is still worth waking up for. Past this the person has
@@ -306,6 +308,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (path === '/access-policies' || path.startsWith('/access-policies/') || path === '/access-attributes') return this.accessAdmin(request, path)
     if (path === '/access-domains' || path.startsWith('/access-domains/')) return this.accessDomains(request, path)
     if (path === '/groups' || path.startsWith('/groups/')) return this.groupsAdmin(request, path)
+    if (path === '/connections' || path.startsWith('/connections/') || path === '/connectors') return this.connectionsApi(request, path)
     if (request.method === 'POST' && path === '/access/arrive') return this.arrive(request)
     if (path === '/usage') return request.method === 'POST' ? this.recordUsage(request) : this.usageSummary(new URL(request.url))
 
@@ -500,6 +503,22 @@ export class ProjectDO extends DurableObject<Env> {
       return
     }
     // ── The data access policies a reader is under, resolved for the engine to send with each of their queries ──
+    // The code connectors the engine runs, as it reports them (on each connect): the whole set, replacing the last.
+    if (msg.type === 'sources:report' && sender.type === 'code-engine') {
+      const list = Array.isArray(msg.sources) ? msg.sources.filter((x: any) => typeof x?.id === 'string') : []
+      const at = new Date().toISOString()
+      this.ctx.storage.transactionSync(() => {
+        this.ctx.storage.sql.exec('DELETE FROM engine_sources')
+        for (const x of list) this.ctx.storage.sql.exec('INSERT INTO engine_sources (id, kind, dialect, description, ready, reported_at) VALUES (?, ?, ?, ?, ?, ?)', x.id, x.kind ?? null, x.dialect ?? null, String(x.description ?? '').slice(0, 500), x.ready ? 1 : 0, at)
+      })
+      return
+    }
+    if (msg.type === 'connection:get' && sender.type === 'code-engine') {
+      const reply = (payload: Record<string, unknown>) => { try { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'connection:got', reqId: msg.reqId, ...payload } })) } catch { /* gone */ } }
+      try { reply({ connection: await this.connectionForEngine(String(msg.id ?? ''), msg.principal ? String(msg.principal) : null, msg.email ? String(msg.email) : null) }) }
+      catch (e: any) { reply({ error: e?.message ?? String(e) }) }
+      return
+    }
     if (msg.type === 'access:resolve' && sender.type === 'code-engine') {
       const reply = (payload: Record<string, unknown>) => { try { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'access:resolved', principal: msg.principal, source: msg.source, reqId: msg.reqId, ...payload } })) } catch { /* gone */ } }
       try { reply({ policies: this.policiesFor(String(msg.principal ?? ''), msg.email ? String(msg.email) : null, String(msg.source ?? '')), version: this.accessVersion() }) }
@@ -872,6 +891,68 @@ export class ProjectDO extends DurableObject<Env> {
     const balance = Number(c.balance_micro) || 0
     this.creditCache = balance > 0 ? { at: Date.now(), balance } : null
     return balance > 0 ? { ok: true } : { ok: false, reason: 'this organisation has used all its credits — an administrator can add more' }
+  }
+
+  // ── Connections to other systems (shared/connectors.ts) ────────────────────
+  /** Connections a person may see: the project's shared ones and their own; never a secret. An admin sees all. */
+  private connectionRows(who: string | null, admin: boolean) {
+    return ([...this.ctx.storage.sql.exec('SELECT id, connector, name, level, owner, settings, created_by, created_at FROM connections WHERE removed_at IS NULL ORDER BY created_at')] as any[])
+      .filter((r) => admin || r.level === 'project' || r.owner === who).map((r) => ({ ...r, settings: JSON.parse(r.settings), runs: connectorById(r.connector)?.runs ?? 'api', runnable: !!connectorById(r.connector)?.bridge || connectorById(r.connector)?.runs === 'api', origin: 'platform' }))
+      // and the code connectors the engine runs — the same thing, configured on the engine
+      .concat(([...this.ctx.storage.sql.exec('SELECT * FROM engine_sources ORDER BY id')] as any[]).map((e) => ({ id: `engine:${e.id}`, connector: e.dialect ?? e.kind ?? 'source', name: e.id, level: 'project', owner: 'project',
+        settings: { kind: e.kind, dialect: e.dialect, description: e.description }, created_by: 'engine', created_at: e.reported_at, runs: 'code', runnable: !!e.ready, origin: 'engine' })))
+  }
+  private async connectionsApi(request: Request, path: string): Promise<Response> {
+    const url = new URL(request.url)
+    const body: any = request.method === 'GET' ? {} : await request.json().catch(() => ({}))
+    let actorH: any = null
+    try { actorH = JSON.parse(request.headers.get('x-sa-actor') ?? 'null') } catch { /* none */ }
+    const email = String(actorH?.email ?? body.by ?? '').toLowerCase()
+    const who = email ? `email:${email}` : null
+    const admin = request.headers.get('x-sa-admin') === '1'
+    const actor = { kind: 'user' as const, id: email || 'unknown', ...(email ? { email } : {}) }
+    if (path === '/connectors' && request.method === 'GET') return this.j({ connectors: CONNECTORS })
+    if (path === '/connections' && request.method === 'GET') return this.j({ connections: this.connectionRows(who, admin) })
+    if (!who) return this.j({ error: 'who is making the change?' }, 400)
+    if (path === '/connections' && request.method === 'POST') {
+      const c = connectorById(String(body.connector ?? ''))
+      if (!c) return this.j({ error: `there is no connector ${body.connector}` }, 400)
+      const level = body.level === 'user' ? 'user' : 'project'
+      if (!c.levels.includes(level)) return this.j({ error: `${c.title} is connected ${c.levels.map((l) => l === 'project' ? 'for the whole project' : 'per person').join(' or ')}` }, 400)
+      if (level === 'project' && !admin) return this.j({ error: 'a connection shared by the project is made by an admin; connect your own instead' }, 403)
+      const name = String(body.name ?? '').trim()
+      if (!name || name.length > 80) return this.j({ error: 'a connection has a name of at most 80 characters' }, 400)
+      const { problems, settings, secrets } = checkConnection(c, body.values ?? {})
+      if (problems.length) return this.j({ error: problems.join('; ') }, 400)
+      const master = (this.env as any).CREDENTIALS_MASTER_KEY
+      if (Object.keys(secrets).length && !master) return this.j({ error: 'secrets cannot be kept: the platform has no master key' }, 503)
+      const id = `con_${crypto.randomUUID().slice(0, 12)}`
+      this.ctx.storage.sql.exec('INSERT INTO connections (id, connector, name, level, owner, settings, secrets_sealed, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        id, c.id, name, level, level === 'user' ? who : 'project', JSON.stringify(settings), Object.keys(secrets).length ? await seal(JSON.stringify(secrets), master) : null, email, new Date().toISOString())
+      this.audit.record({ actor, via: 'ui', action: 'connection.create', target: id, outcome: 'ok', detail: { connector: c.id, name, level, settings } })   // never the secrets
+      return this.j({ connection: { id, connector: c.id, name, level, settings, runnable: !!c.bridge } }, 201)
+    }
+    const m = path.match(/^\/connections\/(con_[\w-]+)$/)
+    if (m && request.method === 'DELETE') {
+      const [r] = [...this.ctx.storage.sql.exec('SELECT level, owner, removed_at FROM connections WHERE id = ?', m[1])] as any[]
+      if (!r || r.removed_at) return this.j({ error: `there is no connection ${m[1]}` }, 404)
+      if (!admin && r.owner !== who) return this.j({ error: 'only its owner or an admin removes a connection' }, 403)
+      this.ctx.storage.sql.exec('UPDATE connections SET removed_at = ?, removed_by = ? WHERE id = ?', new Date().toISOString(), email, m[1])
+      this.audit.record({ actor, via: 'ui', action: 'connection.remove', target: m[1], outcome: 'ok' })
+      return this.j({ removed: m[1] })
+    }
+    return this.j({ error: 'not found' }, 404)
+  }
+  /** For the engine, when it runs a connection: its settings and secrets — a shared one for anyone, a personal one only
+   *  for its owner. Over the engine's authenticated socket; never kept on the engine's disk. */
+  private async connectionForEngine(id: string, principal: string | null, email: string | null) {
+    const [r] = [...this.ctx.storage.sql.exec('SELECT * FROM connections WHERE id = ? AND removed_at IS NULL', id)] as any[]
+    if (!r) throw new Error(`there is no connection ${id}`)
+    if (r.level === 'user' && r.owner !== (email ? `email:${email.toLowerCase()}` : principal)) throw new Error(`connection ${id} is someone else's`)
+    const master = (this.env as any).CREDENTIALS_MASTER_KEY
+    const secrets = r.secrets_sealed ? JSON.parse(await unseal(r.secrets_sealed, master)) : {}
+    this.audit.record({ actor: { kind: 'engine', id: 'engine' }, via: 'engine', action: 'connection.open', target: id, outcome: 'ok', detail: { for: principal ?? 'the project' } })
+    return { id, connector: r.connector, name: r.name, level: r.level, settings: JSON.parse(r.settings), secrets }
   }
 
   // ── Access by verified email domain (enterprise sign-in, provisioned on first arrival) ──

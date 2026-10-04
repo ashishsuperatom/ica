@@ -293,12 +293,15 @@ export default {
       const toDO = (input: Request | string, init?: RequestInit) => {
         const req = new Request(input as any, init)
         req.headers.set('x-sa-actor', actor); req.headers.set('x-sa-project', projectId)
+        if (acc.level !== 'member') req.headers.set('x-sa-admin', '1')   // the DO decides what only an admin may do
         return env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`)).fetch(req)
       }
       // Anything that changes the project — machine lifecycle, access, roles, datasources, keys, tokens — is for
       // whoever administers it. A member may look, not provision.
       const PROVISIONING = /^(machine|service-token|access|roles|datasources|members|verify-conn|info|fly|suspend|resume|stop|delete|dashboards|agent-keys|audit|groups)/
-      const isProvisioning = request.method !== 'GET' || PROVISIONING.test(subPath)
+      // A person's own connection is theirs to make and remove; the DO checks shared ones are made by an admin.
+      const ownConnection = /^connections(\/con_[\w-]+)?$/.test(subPath)
+      const isProvisioning = !ownConnection && (request.method !== 'GET' || PROVISIONING.test(subPath))
       if (isProvisioning && acc.level === 'member') return new Response('forbidden', { status: 403 })
       // `setup` overwrites the project's API key. It's an INTERNAL provisioning primitive — only ever
       // called by handleCreateProject via a direct DO stub — so it must not be reachable publicly.
