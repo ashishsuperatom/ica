@@ -302,6 +302,137 @@ first, wording.
 rewriting what worked; handing over flows nobody clicked through; numbers without a source or that disagree; building
 more than asked; long silent work; answering a different question; fixing the symptom, not the cause.
 
+## Details from the discussion (kept so nothing is lost)
+
+**What STATE must be able to do — the four systems we have built:**
+- *Procurement (proc):* "what if we change the rate to 5% and run the optimisation again" — a STATE change that re-runs
+  a program.
+- *SLOB:* "filter SLOB by plan A for last month" — only a STATE change.
+- *Fusion5:* start from a STATE `{}`; a natural-language intent goes to the composer, which returns a new STATE and a
+  partial org state.
+- *Total Group:* ask questions, and also change STATE through the controls of a deterministic UI.
+
+**The organisation's state:** the organisation has one big state that keeps changing over time. Each user has a partial
+view of it; in a session, a smaller view still ("the top 10 customers by revenue" is one such slice). Partial org state
+appears after every intent — structured or in words — many times in a session.
+
+**The starting UI** is designed in advance for each agent; its controls are hard-coded structured intents
+(set / add / remove on STATE).
+
+**The ICA** (the composer) takes words, runs analysis or finds the answer, and replies with markdown (programs and
+components embedded) and a partial org state.
+
+**Same view or new block, in the user's words:** a structured intent sometimes does not make a new block — a filter
+changed inside a dashboard just modifies it, with no history; it replaces the previous partial org state. A question
+asked only to change a filter also stays in the view. A very different question, outside what the view shows,
+makes a new block — still within the same agent.
+
+**Agents and the user UI:**
+- From the user UI a person can add concept nodes and create agents; agents are used inside the user UI or a
+  dashboard.
+- A dashboard is something done more often, so it is a more specialised version of the user UI — maybe extra code and
+  UI, but the same application. Nothing is called a dashboard any more: it is an agent with a dashboard attached.
+- Dashboards can be built from the user UI and published.
+- Today's `app/server` and `app/web` must exist for each dashboard — and first for the main application, the user UI.
+- A project has global / group / user programs and many dashboards (agents), each scoped global / group / user too.
+  The composition graph is filtered by the same scopes.
+- Everything starts from an intent → pick a domain → that gives the domain's concepts and its programs, both filtered
+  by global / group / user. Starting from a dashboard, the domain is already picked; its contents and queries are
+  appended to the domain. A report, a file or any artifact is likewise a node in the domain's composition graph.
+
+**Programs, in the user's words:** a program attaches at a path of the org knowledge index — e.g. in procurement,
+`procurement.contract`, deeper as needed (always a tree). It provides "this part of the state", which can be verified,
+and "these functions you can call"; it produces data, does an action, or generates another view — a partial appended
+to the session. Groups (finance, marketing, any name the organisation gives) have a function that assigns users.
+
+**Governance, in the user's words:** there is an owner for each thing, and admins — one for each program, each group,
+and the global level — hierarchical, granting access to others; few dependencies. Even with several admins in a group
+or globally, each item is attached to exactly one person, so it is always known who may edit and who may grant;
+never a conflict over who approved or who created it. Others suggest; the owner approves or rejects. Everything can be
+time travelled: nothing removed, an immutable append-only log.
+
+**Storage, in the user's words:** today sessions are stored in the VM's file system, which is fine, but it will not
+scale: users who stop using it keep their sessions while new users run out of space. At some point (not now) local
+files can be deleted and synced back when needed. Sessions, conversations, programs and dashboards go engine →
+platform (they are made in the engine); domains and concepts go platform → engine (made in the platform). Programs also
+stay in the VM's file system, where they are made.
+
+**Running programs:** best is to run them in the VM, but with many users that hits the same limit — hence dynamic
+workers later, reaching data sources through the WebSocket datasource bridge, with running in the VM always an option.
+
+**Rules:** the rules taken from SLOB and procurement must be general. Units (crore with decimals) and whether zero cells
+show are per-project; and the builder must know what agents usually get wrong.
+
+## Operations today (inventory, 2026-10-04)
+
+What each built system lets a person do — the names as they are in the code.
+
+### SLOB (Dabur) — `app/server/src/model/state.ts`, `app/web/src/runtime/thread.tsx`
+
+*Question:* `{ focus, where: [{dim, op: is | is not, value}], by?, as?: table | ring | bars | tree }`.
+
+| Operation | Does |
+|---|---|
+| `push {dim, value, not?}` | add a filter (or "is not") |
+| `pop {dim}` | remove a dimension's filter |
+| `clear` | remove all filters |
+| `by {dim?}` | break down by a dimension (none = the whole) |
+| `as {lens}` | draw as table / ring / bars / tree |
+| `focus {on}` | look at something else, keeping the filters it honours |
+| `drill` | one level down what is broken down |
+| `up` | undo the innermost narrowing |
+
+*Thread:* `start(type, props)` · `open(fromId, type, props, cause)` (new block below) · `update(id, props)` (same block)
+· `become(id, type, props)` (block turns into another type) · `remove(id)` · `openAsked(question, ops, cause)` ·
+server `model.ask {question, ops}`. Rule: looking closer at the same thing stays in the block; moving to another thing
+or taking a decision opens a block. Linear thread (no branches).
+
+*Commands (writes):* `plans.create` · `plans.update` · `plans.setStatus` · `plans.review` · `plans.reply` ·
+`reasons.set` · `master.save` · `master.setActive` · `master.setting` · `master.assign` · `master.delete` · `users.save` ·
+`users.setActive` · `users.setPassword` · `sources.switch` · `pipeline.refresh` · `drops.apply` · `drops.setKey` ·
+`backups.now` · `system.upgrade` · `system.rollback`. *Reads:* `queries.run` · `model.ask` · `meta.get` ·
+`master.lists` · `master.settings` · `master.usage` · `users.list` · `users.planners` · `definitions.list` ·
+`pipeline.lineage` · `sources.list` · `backups.status` · `backups.read` · `system.status` · `drops.status` ·
+`explorer.catalog | rows | values | locate | profile | spread`.
+
+### Procurement (Tata Chemicals) — `data-system/src/model/state.ts`, `app/src/runtime/{thread,intent}.ts*`
+
+*Question and operations:* the same as SLOB (`push · pop · clear · by · as · focus · drill · up`).
+
+*Intent:* `drill(open, question, ops)` — the server picks the block that answers and opens it below · `refine(update,
+question, ops)` — change the current block in place · `nextActions(question)` (server `intent.next`) — the moves that
+advance the goal, shown under every block.
+
+*Thread:* `start` · `open` · `update` · `remove` · `switchBranch(childId)` — a tree: opening from an earlier block forks,
+the old branch kept as a sibling.
+
+*Optimizer transforms (STATE changes that re-run a program):*
+- award: `setWeights` · `capSupplier` · `uncapSupplier` · `floorSupplier` · `forceInclude` · `excludeSupplier` ·
+  `setMinSuppliers` · `setMaxSuppliers` · `setMaxHighRiskPct` · `overrideBid` · `setCapacity` · `setDemand` ·
+  `setCompliantOnly`
+- buy or defer: `setPriceForecast` · `setHoldingRate` · `setHorizon` · `setStockoutPenalty` · `setOrderQty`
+- then `optimizer.run(kind, params, actions)` replays the actions and runs; `options()` gives the next choices.
+
+*Commands:* through the governance kernel (`award.recommend` and others), each with permission, resource and effects.
+
+### Fusion5 and Total Group dashboards — `app/server/state.mjs`, `app/web/src/runtime/thread.tsx`
+
+*Question:* `{ focus, where, by?, as?, window?, assume?, pages? }`.
+
+| Operation | Does |
+|---|---|
+| `push · pop · clear · by · as · drill · up` | as SLOB |
+| `focus {on}` | another view, keeping the filters it honours; the window travels where it means the same (a drill keeps its time span) |
+| `window {window}` | the time the view is over (a parameter, not a filter): months, weeks, a financial year, a range, … |
+| `assume {name, value}` | a what-if, recorded with the answer |
+| `page {table, page, order}` | which page of a table, in which order |
+
+*Messages to the app:* `app:catalog` · `app:start` · `app:move` · `app:ask` · `app:members` · `app:about` · `app:say`
+(a question in words, answered by the thread's reader) · `app:reload`.
+
+*Thread:* `start(focus, where)` · `home()` · `open(fromId, ops, cause)` · `edit(id, ops)` (same block) · `say(text)` ·
+`openAbout()` · `remove(id)` · `switchBranch(childId)` · `siblingsOf(id)` — a tree, like procurement.
+
 ## Migration from today
 
 | Today | Becomes |
