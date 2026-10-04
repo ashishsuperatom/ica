@@ -463,6 +463,11 @@ a project. Install it the way people do: a `curl` to an install address on the d
 itself should install like that too — perhaps first the CLI, then the Superatom backend through it, configured for a
 project. The CLI is multi-purpose, primarily for AI agents.
 
+**Releases, in the user's words:** the R2 bucket holds several versions of the engine, with one always marked
+latest, so an install takes the latest by default; the CLI is there too, built separately for Windows, macOS and Linux.
+An install script at `install.superatom.site` or `superatom.site/install` is a shell script that downloads the right
+build for the machine; the engine is mostly Docker based, so that is what gets downloaded and installed.
+
 *Proposal (to agree):* `curl -fsSL https://superatom.site/install | sh` installs `sacli`; `sacli engine install`
 installs and configures the engine for a project. Creating a project is an organisation's act, so it needs a key
 above the project — an organisation key — which is still to design.

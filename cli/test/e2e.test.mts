@@ -6,7 +6,7 @@
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { cpSync, mkdirSync, mkdtempSync, statSync, writeFileSync, readFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, statSync, writeFileSync, readFileSync, readdirSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -23,8 +23,8 @@ const home = mkdtempSync(join(tmpdir(), 'sacli-'))
 let mf: Miniflare, hubUrl = '', data: Server, engineWs: WebSocket
 let key = '', narrowKey = ''
 
-const sacli = (args: string[], env: Record<string, string> = {}, input?: string) => new Promise<{ code: number; out: string; err: string }>((resolve) => {
-  const p = execFile(process.execPath, [bin, ...args], { env: { PATH: process.env.PATH!, SACLI_CONFIG: join(home, 'creds.json'), SACLI_HUB: hubUrl, ...env } }, (e, out, err) => resolve({ code: (e as any)?.code ?? 0, out, err }))
+const sacli = (args: string[], env: Record<string, string> = {}, input?: string, cwd = home): Promise<{ code: number; out: string; err: string }> => new Promise<{ code: number; out: string; err: string }>((resolve) => {
+  const p = execFile(process.execPath, [bin, ...args], { cwd, env: { PATH: process.env.PATH!, SACLI_CONFIG: join(home, 'creds.json'), SACLI_HUB: hubUrl, SACLI_IDLE_MS: '20000', ...env } }, (e, out, err) => resolve({ code: (e as any)?.code ?? 0, out, err }))
   if (input !== undefined) { p.stdin!.write(input); p.stdin!.end() }
 })
 const doCall = async (path: string, init?: RequestInit) => (await mf.dispatchFetch(`http://x/do${path}`, init)).json() as Promise<any>
@@ -58,7 +58,10 @@ export default { async fetch(req, env) { const u = new URL(req.url); const stub 
   key = (await doCall('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'codex', scopes: ['sessions'], by: 'admin@test.io' }) })).key
   narrowKey = (await doCall('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'asker', scopes: ['ask'], by: 'admin@test.io' }) })).key
 }, 120_000)
-after(async () => { engineWs?.close(); data?.close(); await mf?.dispose() })
+after(async () => {
+  await sacli(['disconnect']); await sacli(['disconnect', '--profile', 'other'])
+  engineWs?.close(); data?.close(); await mf?.dispose()
+})
 
 test('login reads the key from stdin, checks it with the hub, and saves it readable only by its owner', async () => {
   const r = await sacli(['login'], {}, key + '\n')
@@ -104,10 +107,63 @@ test('refusals have reasons and exit codes: bad usage 2, a refused key 3, a scop
 })
 
 test('the audit history recorded the CLI: connections, intents with their ops, refusals', async () => {
-  const events = (await doCall('/audit?limit=100')).events.reverse()
+  const events = (await doCall('/audit?limit=500')).events.reverse()
   const cli = events.filter((e: any) => e.via === 'agent')
   assert.ok(cli.some((e: any) => e.action === 'agent.connect' && e.outcome === 'refused' && e.detail.reason === 'unknown key'))
   assert.ok(cli.some((e: any) => e.action === 'message.session-intent' && e.target === 'cli-s1' && e.detail.ops?.[0]?.value === 'HYDERABAD'))
   assert.ok(cli.some((e: any) => e.action === 'message.session-agents' && e.outcome === 'refused'))
   assert.ok(events.some((e: any) => e.action === 'agent-key.create' && e.actor.email === 'admin@test.io'))
+})
+
+test('one background connection serves every command, reports itself, and disconnects on request', async () => {
+  const before = await sacli(['status', '--json'])
+  const st = JSON.parse(before.out)
+  assert.equal(st.connected, true)                       // the commands above went through it
+  assert.ok(st.idleLeftMs > 15_000)                      // each command resets the idle limit (20 s in tests, an hour in use)
+  const pid = st.pid
+  await sacli(['agents'])
+  assert.equal(JSON.parse((await sacli(['status', '--json'])).out).pid, pid)   // the same process, reused
+  assert.match((await sacli(['disconnect'])).out, /disconnected/)
+  assert.match((await sacli(['status'])).out, /no background connection/)
+  const direct = await sacli(['agents', '--no-daemon', '--json'])
+  assert.equal(direct.code, 0)
+  assert.match((await sacli(['status'])).out, /no background connection/)   // --no-daemon started none
+})
+
+test('two projects: a profile each, switched globally or per folder, each with its own connection', async () => {
+  // a second project's key, saved as a second profile (here a second key of the same test project stands in for it)
+  const second = (await doCall('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'second', scopes: ['sessions'], by: 'admin@test.io' }) })).key
+  assert.equal((await sacli(['login', '--profile', 'other'], {}, second + '\n')).code, 0)
+  const listed = JSON.parse((await sacli(['projects', '--json'])).out)
+  assert.deepEqual(listed.map((r: any) => [r.profile, r.inUse, r.isDefault]), [['default', true, true], ['other', false, false]])
+  const dir = mkdtempSync(join(tmpdir(), 'sacli-folder-'))
+  assert.match((await sacli(['use', 'other', '--here'], {}, undefined, dir)).out, /this folder now uses "other"/)
+  assert.equal(JSON.parse((await sacli(['projects', '--json'], {}, undefined, dir)).out).find((r: any) => r.inUse).profile, 'other')
+  assert.equal(JSON.parse((await sacli(['projects', '--json'])).out).find((r: any) => r.inUse).profile, 'default')   // elsewhere unchanged
+  // each profile its own background connection
+  await sacli(['agents'], {}, undefined, dir); await sacli(['agents'])
+  const a = JSON.parse((await sacli(['status', '--json'], {}, undefined, dir)).out).pid, b = JSON.parse((await sacli(['status', '--json'])).out).pid
+  assert.ok(a && b && a !== b)
+  assert.match((await sacli(['use', 'nobody'])).err, /there is no profile "nobody"/)
+})
+
+test('an idle background connection cleans up after itself: the process ends and its socket file is gone', async () => {
+  const cfg = join(mkdtempSync(join(tmpdir(), 'sacli-idle-')), 'creds.json')
+  const env = { SACLI_CONFIG: cfg, SACLI_KEY: key, SACLI_IDLE_MS: '1500' }
+  assert.equal((await sacli(['agents'], env)).code, 0)
+  const { pid } = JSON.parse((await sacli(['status', '--json'], env)).out)
+  const run = join(cfg, '..', 'run')
+  const sockets = () => readdirSync(run).filter((f) => f.endsWith('.sock'))
+  assert.equal(sockets().length, 1)
+  await new Promise((r) => setTimeout(r, 3500))
+  assert.throws(() => process.kill(pid, 0))                // the process is gone
+  assert.deepEqual(sockets(), [])                          // and so is its socket
+  // a socket left by a killed daemon is not mistaken for a live one
+  assert.equal((await sacli(['agents'], env)).code, 0)
+  const again = JSON.parse((await sacli(['status', '--json'], env)).out).pid
+  process.kill(again, 'SIGKILL')
+  await new Promise((r) => setTimeout(r, 200))
+  assert.equal(sockets().length, 1)                        // left behind by the kill
+  assert.equal((await sacli(['agents'], env)).code, 0)     // a fresh daemon takes its place
+  await sacli(['disconnect'], env)
 })

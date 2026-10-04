@@ -45,6 +45,7 @@ export async function connect(o: { key: string; hub: string; timeoutMs?: number;
   ws.addEventListener('message', (e) => { try { const raw = JSON.parse(String(e.data)); if (raw?.payload) void inbound.receive(raw.payload) } catch { /* not ours */ } })
   ws.addEventListener('close', (e) => {
     closed = { code: e.code, reason: e.reason }
+    for (const fn of listeners) fn({ t: '__closed', code: e.code, reason: e.reason })
     fail(new CliError(e.reason ? `the hub closed the connection: ${e.reason}` : `the connection closed (${e.code})`, CLOSE_REASONS[e.code] ?? 4))
   })
 

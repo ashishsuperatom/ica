@@ -35,6 +35,13 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - A per-project deterministic application behind the engine's `app:` seam (the Fusion5 and Total Group dashboards).
 - A guard that keeps platform code free of any one dataset's vocabulary.
 
+**Agents and the CLI**
+- Agent API keys per project: made by the project's admin, shown once and stored only as a hash, scoped, expiring and revocable (revoking ends open connections).
+- Agent connections to the hub: only to the engine, only within the key's scopes, the agent's identity stamped on every message.
+- The hub stamps who sent every message, so the engine always knows the user.
+- Audit history in each project's Durable Object: every question, intent, refusal, key change and project API change, append-only.
+- `sacli`, the Superatom CLI: login with profiles (one project each), agents, sessions, asking questions, JSON output, exit codes, and one background connection per project that cleans up after an hour idle.
+
 **Platform (Cloudflare)**
 - Control-plane Worker with Org, Project, Global and Channel Durable Objects, serving the admin console and each project's user UI on superatom.site.
 - Sign-in through Clerk to our own tokens, plus browser-redirect PKCE login for mobile.
@@ -63,6 +70,14 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - The org knowledge index that programs attach to.
 - Decision state: states with their outcomes, actions, paths and reasoning.
 - Borrowing knowledge from another agent within a session.
+
+**Agents, CLI, audit**
+- The audit history flowing to the platform's own Basin (Pipelines → Catalog → SQL), with metrics in Analytics Engine and Workers Traces.
+- The engine's own audit events, through an ingest endpoint signed with the project key.
+- Agent HTTP API with the agent key: domains, concepts, suggestions, programs.
+- Organisation keys (creating projects through the CLI).
+- Installing the CLI and the engine with one command, from per-OS releases kept in R2 (latest and every version).
+- CLI extras: self-update, shell completion, OS keychain, `watch`, proxy support, standalone binaries.
 
 **Platform**
 - User, session and state Durable Objects, with the platform as source of truth and engine↔platform sync.

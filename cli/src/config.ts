@@ -43,3 +43,14 @@ export const maskKey = (key: string) => `${key.slice(0, 47)}…${key.slice(-4)}`
 export class CliError extends Error {
   constructor(message: string, public code = 1) { super(message) }
 }
+
+/** The profile a folder names: the nearest .sacli.json going up from `dir` ({ "profile": "<name>" }), or null. */
+export function folderProfile(dir: string): { profile: string; file: string } | null {
+  for (let d = dir; ; d = dirname(d)) {
+    const f = join(d, '.sacli.json')
+    if (existsSync(f)) {
+      try { const c = JSON.parse(readFileSync(f, 'utf8')); if (typeof c.profile === 'string' && c.profile) return { profile: c.profile, file: f } } catch { /* ignored */ }
+    }
+    if (dirname(d) === d) return null
+  }
+}
