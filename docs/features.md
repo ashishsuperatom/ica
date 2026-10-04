@@ -45,6 +45,8 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 **Platform (Cloudflare)**
 - Control-plane Worker with Org, Project, Global and Channel Durable Objects, serving the admin console and each project's user UI on superatom.site.
 - Sign-in through Clerk to our own tokens, plus browser-redirect PKCE login for mobile.
+- Sessions kept by the platform: a SessionDO per session holds its log (append-only, ordered, conflicts refused), the engine syncs every append and catches up on reconnect, and a person reads their sessions back without the engine.
+- A UserDO per person: the index of their sessions across projects and their personal state.
 - Answer durability: the project's Durable Object buffers answers, and web and iOS pull the ones they missed.
 - Parcel transport: large bodies stored in R2 by hash with HMAC tickets.
 - Model proxy: provider keys held in a vault, per-project metering and throttling, and a tunnel for codex.
@@ -80,7 +82,8 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - CLI extras: self-update, shell completion, OS keychain, `watch`, proxy support, standalone binaries.
 
 **Platform**
-- User, session and state Durable Objects, with the platform as source of truth and engine↔platform sync.
+- The state Durable Object (decision state), and platform → engine sync of domains and concepts.
+- The user DO's personalised view (what it keeps beyond sessions and personal state is still being decided).
 - Governance: owners, hierarchical admins, suggest/approve and a governance log.
 - Authorization and permissions enforced in one place.
 - Enterprise single sign-on.

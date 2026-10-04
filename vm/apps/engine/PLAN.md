@@ -26,6 +26,8 @@ what is built and what is next.
   messages (`session:agents|open|intent|goto|get|file`) — open, intent (ops, action, call; to current or new; from any block), goto, get (as of a moment) — on the
   agent's programs; each view carries the answers as cards (`answer-card.ts`, shared with the chat) and the intents the
   programs offer. The user UI shows it at `/s/<agent>` (`control-plane/user-ui/src/AgentSession.tsx`).
+- Sessions are kept by the platform: `session-sync.ts` pushes every append to the session's SessionDO
+  (`session:sync` → `session:synced`, a watermark beside the log) and everything missing on reconnect.
 - First real program: Total Group `unsettled-trips` — completed trips not settled, by branch, with the balance left.
 
 ## Agents (`agents/`)
