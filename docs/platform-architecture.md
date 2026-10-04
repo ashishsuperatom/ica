@@ -9,7 +9,7 @@ a decision is still to be made.
 Everything a person uses is an **agent**. An agent is a domain of the composition graph (concepts, composed into its
 system prompt), the **programs** it may run, one **STATE**, a starting UI whose controls change that STATE, and an ICA
 (the composer) for questions in words. A person works in a **session** with an agent: one STATE that keeps changing,
-and a history of what they were shown (**partial org state**). The **user UI** is the one application every project
+and the **answer history** — every answer they were given, appended. The **user UI** is the one application every project
 starts from; what we called a dashboard is an agent with more programs attached, built by the **builder agent**.
 Everything is scoped global / group / user, has one owner, and is kept as an append-only log. It is stored in the
 platform first and synced to the engine; every part has a cloud build and an on-prem build.
@@ -56,7 +56,7 @@ A program is **always a Node.js bundle and a React bundle together** (Python run
 - **Attached to the org knowledge index** at a path in its tree (`procurement.contract`, deeper as needed), so it is
   known what each program serves and within what.
 - **Its contract:** it declares the **slice of STATE it provides** (which can be verified) and the **functions** that
-  can be called. A call produces data, takes an action, or produces another view — a partial appended to the session.
+  can be called. A call produces data, takes an action, or produces another view — an answer appended to the session.
 - **Scoped** global / group / user, with one owner.
 - Used by an agent through a concept that says how to use it.
 
@@ -120,16 +120,17 @@ A session belongs to **one user**. It has:
 3. **One STATE** — a mutable singleton JSON: the state of the **last block**. It holds everything needed to draw it and
    is not path dependent. Earlier blocks are never changed: changing something in an earlier block **creates a new
    branch** from it (the thread is a tree), and that branch's last block has the STATE.
-4. **Partial org state** — the **session output**: each turn's answer, appended. Each entry is a slice of the
+4. **Answer history** — the session's output: each turn's **answer**, appended (named for what it is; earlier called
+   "partial org state"). Each answer is a slice of the
    organisation's whole, ever-changing state (tables, JSON, markdown, artifacts: files, dashboards, reports).
-5. **Blocks** — the thread on screen, a tree; each block shows partial org state.
+5. **Blocks** — the thread on screen, a tree; each block shows an answer.
 
 ```jsonc
 // STATE (one per session; shape given by the agent's state schema)
 { "agent": "agt_vendors_hire", "branch": "HYDERABAD", "completed": true, "settled": false,
   "window": { "kind": "fy", "year": "FY 2026-27" }, "view": "unsettled-trips", "page": 1 }
 
-// partial org state entry
+// an answer (one entry of the answer history)
 { "id": "pos_17", "at": "2026-10-04T10:12:03Z", "block": "blk_4", "cause": "intent:int_9",
   "stateHash": "…",                                // the STATE it was made from
   "kind": "table", "ref": "data/unsettled-trips.json", "markdown": "365 trips … :::table data/unsettled-trips.json" }
@@ -142,7 +143,7 @@ A session belongs to **one user**. It has:
 | Kind | From | Does |
 |---|---|---|
 | structured | a control in the agent's UI | `set` / `add` / `remove` on STATE — deterministic, no model |
-| natural language | the user's words | the ICA reads STATE and the domain, answers with markdown (programs and components embedded by markers), and may return a STATE change and new partial org state |
+| natural language | the user's words | the ICA reads STATE and the domain, answers with markdown (programs and components embedded by markers), and may return a STATE change and a new answer |
 
 ```jsonc
 { "id": "int_9", "session": "ses_…", "kind": "structured", "ops": [{ "op": "set", "path": "branch", "value": "HYDERABAD" }] }
@@ -150,7 +151,7 @@ A session belongs to **one user**. It has:
 ```
 
 **Same view or new block.** If an intent stays within what the current block shows (a filter, a window, a page), it
-changes STATE and **replaces** that (last) block's partial org state — no new history entry. If it asks for something the
+changes STATE and **replaces** that (last) block's answer — no new entry in the answer history. If it asks for something the
 block does not show, it opens a **new block**. This holds for both kinds: a question can just change a filter, and a
 control can open a new block.
 
@@ -185,12 +186,16 @@ control can open a new block.
 | **STATE** | the last block's JSON: `{ packages: { <name>: <program hash> }, <name>: <slice>, … }` |
 | **package** | a program taking part in STATE |
 | **slice** | the part of STATE a package owns, at `STATE.<package>` |
-| **`run`** | a package's one function: `run(slice, reads, context) → { slice?, partial?, actions? }` |
+| **`run`** | a package's one function: `run(slice, reads, context) → { slice?, answer?, actions? }` |
 | **op** | `set` · `add` · `remove` on a path — the only way STATE changes |
 | **action** | a named list of ops a package suggests ("cap supplier", "go to this item"), shown as possible actions |
 | **command** | a write outside the session (approve, save a plan): goes through the governance path, not STATE |
-| **partial** | what a run shows: appended to the session (new block) or replacing the current block's |
+| **answer** | what a run or the ICA shows: appended to the answer history (new block) or replacing the current block's |
 | **`doc`** | a package's small documentation, injected into the agent |
+| **`inspect`** | on every package function: where its implementation is (`package.run.inspect()`) |
+| **answer history** | the session's answers, appended — the data from the sources attached to the session |
+| **`STATE.agent`** | the ICA's own slice: any keys it needs so STATE fully describes the view |
+| **`<Intent>`** | the UI's one way to change STATE: `ops` and `to="new" \| "current"`; logs and traces each intent |
 
 **What else is needed**
 
@@ -205,14 +210,14 @@ control can open a new block.
 3. **Commands are separate.** Writing something (approving, saving) is not a STATE change; it goes through the one
    write path (who → may they → approval → version → event → log). A package can offer commands beside its actions.
 4. **Validation.** Each slice has a schema; an op that breaks it is refused with a sentence, never guessed.
-5. **Same view or new block.** Every intent says where its result goes: `here` (replace the current block's partial)
+5. **Same view or new block.** Every intent says where its result goes: `current` (replace the current block's answer)
    or `new` (a new block). A control declares it; the ICA decides it for words.
 6. **Stale runs.** `run` can be slow; only the result for the latest STATE is applied, earlier ones are dropped; the
    block shows that it is running.
 7. **Versions.** STATE names each package by its program hash, so the same STATE always runs the same code.
 8. **The doc can be partly generated.** The slice schema, reads and actions are listed automatically into `doc`; the
    author adds only what they mean. It cannot drift from the code.
-9. **Intent markup.** A typed helper (`<Intent ops={…} to="new">`) renders the `sa-intent` attribute and is handled by
+9. **Intent markup.** A typed helper (`<Intent ops={…} to="new" | "current">`) renders the `sa-intent` attribute and is handled by
    one delegated listener: typed in TSX (no JSON in strings), keyboard accessible, and **every intent on screen can be
    listed** by an agent or a test — the advantage of declarative markup.
 
@@ -230,8 +235,28 @@ control can open a new block.
   "actions": [{ "id": "unsettled", "label": "Completed, not settled", "ops": [{ "op": "set", "path": "trips.settled", "value": false }] }],
   "commands": [{ "id": "settle", "label": "Settle trip" }] }
 // intent
-{ "ops": [{ "op": "set", "path": "scope.branch", "value": "PUNE" }], "to": "here" }
+{ "ops": [{ "op": "set", "path": "scope.branch", "value": "PUNE" }], "to": "current" }
 ```
+
+### Freedom beyond the vocabulary (2026-10-04)
+
+A fixed vocabulary of STATE and functions will meet questions it cannot express. Two ideas keep the user free:
+
+1. **`inspect`.** Every package function has an inspect: `package.run.inspect()` returns **where** its implementation
+   is (program hash, file, export) — not the source itself. The agent can read the implementation, and can write a new
+   implementation and run it for this session. When that happens often, System 4 (later) or a person notices and
+   makes it a variation of the package's actions or state.
+2. **The agent's own STATE keys.** The ICA may store any keys it wants in STATE, in its own slice (`STATE.agent`).
+   STATE is a singleton and the view itself, never dependent on the path that led to it; when the packages' keys cannot
+   express where the user is (what an answer said, what to follow up), the agent writes it there — from the
+   conversation and the answer history — so nothing is lost.
+
+**Naming, in the user's words:** what was called "partial" or "partial org state" is the data from the sources,
+attached to the session, and a history — not one item. It is named for what it is: the **answer history**; each entry
+is an **answer**. (Not "session state" — that would be confused with STATE.)
+
+**The `<Intent>` component** (`ops`, `to="new" | "current"`) is the one way a UI changes STATE; inside it every intent is
+logged and traced.
 
 ### Answer format
 
@@ -324,7 +349,7 @@ intent ──► agent (domain picked; from a dashboard it is already picked)
           session: STATE ◄── structured intent (set/add/remove)
              │        ◄── language intent → ICA → STATE change + markdown
              ▼
-          view: same block (replace) or new block ──► partial org state (history)
+          view: same block (replace) or new block ──► answer history
 ```
 
 ## Applications
@@ -386,22 +411,21 @@ more than asked; long silent work; answering a different question; fixing the sy
 **What STATE must be able to do** (the kinds of change seen across the systems built so far):
 - change a parameter and re-run a program (an optimisation with a new rate);
 - change a filter or a period, and the view follows;
-- start from an empty STATE; a question in words goes to the composer, which returns a new STATE and a partial org
-  state;
+- start from an empty STATE; a question in words goes to the composer, which returns a new STATE and an answer;
 - ask questions, and also change STATE through the controls of a deterministic UI.
 
 **The organisation's state:** the organisation has one big state that keeps changing over time. Each user has a partial
-view of it; in a session, a smaller view still ("the top 10 customers by revenue" is one such slice). Partial org state
+view of it; in a session, a smaller view still ("the top 10 customers by revenue" is one such slice). An answer
 appears after every intent — structured or in words — many times in a session.
 
 **The starting UI** is designed in advance for each agent; its controls are hard-coded structured intents
 (set / add / remove on STATE).
 
 **The ICA** (the composer) takes words, runs analysis or finds the answer, and replies with markdown (programs and
-components embedded) and a partial org state.
+components embedded) — an answer.
 
 **Same view or new block, in the user's words:** a structured intent sometimes does not make a new block — a filter
-changed inside a dashboard just modifies it, with no history; it replaces the previous partial org state. A question
+changed inside a dashboard just modifies it, with no history; it replaces the previous answer. A question
 asked only to change a filter also stays in the view. A very different question, outside what the view shows,
 makes a new block — still within the same agent.
 
@@ -420,7 +444,7 @@ makes a new block — still within the same agent.
 
 **Programs, in the user's words:** a program attaches at a path of the org knowledge index — e.g. in procurement,
 `procurement.contract`, deeper as needed (always a tree). It provides "this part of the state", which can be verified,
-and "these functions you can call"; it produces data, does an action, or generates another view — a partial appended
+and "these functions you can call"; it produces data, does an action, or generates another view — an answer appended
 to the session. Groups (finance, marketing, any name the organisation gives) have a function that assigns users.
 
 **Governance, in the user's words:** there is an owner for each thing, and admins — one for each program, each group,
@@ -457,7 +481,7 @@ builder must know what agents usually get wrong. Project-specific versions of an
 ## Order of work (proposed)
 
 1. Agree this document (the OPEN points).
-2. Define the JSON schemas: STATE operations, partial org state, program manifest, agent, governance log.
+2. Define the JSON schemas: STATE operations, the answer, program manifest, agent, governance log.
 3. The template: user UI with block · card · thread, our transport, plain CSS — lifting the generic parts of earlier
    builds.
 4. Move one existing agent onto it end to end.
