@@ -20,6 +20,7 @@ test('a build is compiled, checked and hashed; the same source builds to the sam
   const b = buildProgram(src, store)
   assert.equal(b.hash, a.hash)
   assert.equal(store.list().length, 1)
+  assert.equal(store.list()[0].hash, a.hash)
   // the React side keeps the platform's libraries as imports — supplied at load, never bundled
   const web = readFileSync(join(a.dir, 'web', 'index.js'), 'utf8')
   assert.match(web, /from "react\/jsx-runtime"/)

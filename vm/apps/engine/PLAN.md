@@ -15,6 +15,15 @@ what is built and what is next.
 - A conversation's domain is composed into its agent's system prompt; its files (programs, helpers) and
   `settings.json` are placed in the conversation's folder (`knowledge.ts`).
 
+## Programs (`vm/packages/programs`, `vm/packages/state`)
+
+- A program's source is a folder — `manifest.json`, `server/` (its Node side), `web/` (its React side), `doc.md` —
+  kept in the project home under `programs/src/`. `programs build` compiles both sides with TypeScript and keeps the
+  result in `programs/store/<hash>`: the same source, the same hash; any change, a new program beside the old one.
+- `programs run <name|hash> [--set path=json] [--call fn] [--act id]` loads its Node side into the STATE engine and
+  runs it against the project's data (only through the datasource-manager); `list`, `doc`, `inspect`, `verify`.
+- First real program: Total Group `unsettled-trips` — completed trips not settled, by branch, with the balance left.
+
 ## Agents (`agents/`)
 
 | agent | job |
@@ -39,6 +48,7 @@ the repository holds only the platform.
 
 - `.env` (hub, key, source credentials), `settings.json`, `secrets/`, `datasources/` (bridges, registry, index seeds),
   `knowledge/` (what the composition graph imports), `app/` (the project's application).
+- `programs/` — `src/` (program sources) and `store/` (built programs by hash).
 - `db/` — `composition.sqlite`, `datasource-index.sqlite` (read by `./find-schema`), `grounding.sqlite`,
   `agent-sessions.sqlite`. Outside every agent's cwd.
 - `workspace/` — the analyst, connector and grounding agents' directory.

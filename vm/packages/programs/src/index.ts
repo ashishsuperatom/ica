@@ -143,7 +143,8 @@ export class ProgramStore {
   has(hash: string): boolean { return existsSync(join(this.dirOf(hash), 'manifest.json')) }
   manifest(hash: string): ProgramManifest {
     if (!this.has(hash)) throw new ProgramError([`no program ${hash.slice(0, 12)} in the store`])
-    return JSON.parse(readFileSync(join(this.dirOf(hash), 'manifest.json'), 'utf8'))
+    // The hash is not inside the files it is the hash of: it is the folder's name.
+    return { ...JSON.parse(readFileSync(join(this.dirOf(hash), 'manifest.json'), 'utf8')), hash }
   }
   doc(hash: string): string { return readFileSync(join(this.dirOf(hash), 'doc.md'), 'utf8') }
   /** Every program in the store, newest build first. */

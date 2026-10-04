@@ -14,5 +14,8 @@
     "@superatom/platform-types": "workspace:*",
     "@superatom/state": "workspace:*",
     "typescript": "^5.6.0"
+  },
+  "bin": {
+    "programs": "./bin/programs"
   }
 }
