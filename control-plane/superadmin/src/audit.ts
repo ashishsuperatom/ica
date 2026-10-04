@@ -16,6 +16,8 @@ export interface AuditSinks {
   metrics?: { writeDataPoint(p: { indexes?: string[]; blobs?: string[]; doubles?: number[] }): void }
   /** Somewhere to say a send failed (the event is already kept here). */
   warn?: (msg: string) => void
+  /** The platform's warehouse (records.ts): every audit event, beside the project's other records. */
+  records?: (kind: string, key: string, data: unknown, at?: string) => void
 }
 
 type Sql = { exec(q: string, ...p: unknown[]): Iterable<Record<string, unknown>> }
@@ -38,6 +40,7 @@ export class AuditLog {
     // Exactly the stream's schema (a stream drops a record that does not match it): flat, strings, optional ones left out.
     const row = { id: event.id, at: event.at, project: event.project, actor_kind: event.actor.kind, actor_id: event.actor.id, via: event.via, action: event.action, outcome: event.outcome,
       ...(event.actor.email ? { actor_email: event.actor.email } : {}), ...(event.target ? { target: event.target } : {}), ...(event.detail ? { detail: JSON.stringify(event.detail) } : {}) }
+    this.sinks.records?.('audit', event.id, event, event.at)
     if (this.sinks.stream) this.sinks.stream.send([row]).catch((err) => this.sinks.warn?.(`audit stream send failed for ${event.id}: ${err?.message ?? err}`))
     try { this.sinks.metrics?.writeDataPoint({ indexes: [event.project], blobs: [event.action, event.outcome, event.via, event.actor.kind], doubles: [1] }) } catch { /* metrics are best effort */ }
     return event

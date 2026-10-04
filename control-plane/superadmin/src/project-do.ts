@@ -30,6 +30,7 @@ import { scopeAllows, HUB_MESSAGES } from '../../shared/agent-scopes.js'
 import { ProgramCatalogue, CatalogueRefusal } from './program-catalogue.js'
 import { checkPolicy, resolve as resolvePolicies, type AccessPolicy } from './access-policies.js'
 import { costOf, priceFor, type Price } from './metering.js'
+import { createRecorder, type Recorder } from './records.js'
 
 
 // How long a question queued for a sleeping machine is still worth waking up for. Past this the person has
@@ -180,13 +181,15 @@ export class ProjectDO extends DurableObject<Env> {
   private audit: AuditLog
   private agentKeys: AgentKeys
   private catalogue: ProgramCatalogue
+  private record: Recorder
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
     this.buffer = new AnswerBuffer(this.ctx.storage.sql, (e, d) => this.log(e, d))
-    this.audit = new AuditLog(this.ctx.storage.sql as any, () => this._pid ?? '', { stream: (env as any).AUDIT, metrics: (env as any).METRICS, warn: (m) => { this.log('audit:send_failed', { message: m }); console.warn(`[audit] ${m}`) } })
+    this.audit = new AuditLog(this.ctx.storage.sql as any, () => this._pid ?? '', { stream: (env as any).AUDIT, metrics: (env as any).METRICS, records: createRecorder((env as any).RECORDS, () => this._pid ?? ''), warn: (m) => { this.log('audit:send_failed', { message: m }); console.warn(`[audit] ${m}`) } })
     this.agentKeys = new AgentKeys(this.ctx.storage.sql as any, () => this._pid ?? '')
     this.catalogue = new ProgramCatalogue(this.ctx.storage.sql as any, env.PACKAGES, () => this._pid ?? '')
+    this.record = createRecorder((env as any).RECORDS, () => this._pid ?? '')
     // KEEPALIVE, ANSWERED AT THE EDGE. A client that sits idle — the engine between questions — has its socket
     // closed by the edge, seen as a clean register followed by a 1006 every half-minute or so. The cure is a
     // periodic frame, and Cloudflare provides exactly this pair for it: a literal `ping` is answered `pong`
@@ -470,6 +473,7 @@ export class ProjectDO extends DurableObject<Env> {
         this.ctx.storage.sql.exec(`INSERT INTO activities (id, owner, kind, title, state, progress, detail, started_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT (id) DO UPDATE SET state = excluded.state, progress = excluded.progress, detail = excluded.detail, updated_at = excluded.updated_at`,
           a.id, a.owner, String(a.kind ?? ''), String(a.title ?? '').slice(0, 300), a.state, a.progress ?? null, a.detail ? String(a.detail).slice(0, 1000) : null, String(a.startedAt ?? new Date().toISOString()), String(a.updatedAt ?? new Date().toISOString()))
+        this.record('activity', `${a.id}:${a.state}`, a)
         const envelope = { from: { id: 'hub', type: 'hub' }, payload: { t: 'activity', activity: a } }
         for (const [cws, conn] of this.connByWs) {
           if (conn.type === 'code-engine' || conn.wsId.startsWith('http-')) continue
@@ -490,7 +494,7 @@ export class ProjectDO extends DurableObject<Env> {
       const reply = (payload: Record<string, unknown>) => { try { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload })) } catch { /* gone */ } }
       try {
         if (msg.type === 'graph:cursor') reply({ t: 'graph:cursor', ...(await (await stub.fetch('http://do/cursor')).json() as object) })
-        else if (msg.type === 'graph:sync') reply({ t: 'graph:synced', ...(await (await stub.fetch('http://do/append', { method: 'POST', body: JSON.stringify(msg.batch ?? {}) })).json() as object) })
+        else if (msg.type === 'graph:sync') reply({ t: 'graph:synced', ...(await (await stub.fetch('http://do/append', { method: 'POST', body: JSON.stringify({ ...(msg.batch ?? {}), project: this._pid }) })).json() as object) })
         else { const c = msg.cursor ?? {}; reply({ t: 'graph:batch', batch: await (await stub.fetch(`http://do/pull?change=${Number(c.change) || 0}&suggestion=${Number(c.suggestion) || 0}&decisionAt=${Number(c.decisionAt) || 0}`)).json() }) }
       } catch (e: any) { reply({ t: msg.type === 'graph:cursor' ? 'graph:cursor' : msg.type === 'graph:sync' ? 'graph:synced' : 'graph:batch', error: e?.message ?? String(e) }) }
       return
@@ -792,6 +796,7 @@ export class ProjectDO extends DurableObject<Env> {
         const bundle: any = await request.json().catch(() => null)
         if (bundle?.hash !== hash) return json({ error: 'the bundle is not the program this path names' }, 400)
         const r = await this.catalogue.upload(bundle, by)
+        if (r.added) this.record('program', hash, { ...r.entry, event: 'uploaded' })
         this.audit.record({ actor: { kind: by.startsWith('agent:') ? 'agent' : 'user', id: by }, via: 'engine', action: 'program.upload', target: hash, outcome: 'ok', detail: { name: r.entry.name, version: r.entry.version, added: r.added } })
         return json(r, r.added ? 201 : 200)
       }
@@ -820,6 +825,7 @@ export class ProjectDO extends DurableObject<Env> {
     const at = new Date().toISOString()
     this.ctx.storage.sql.exec('INSERT INTO usage_events (at, kind, provider, model, key_id, tokens_in, tokens_out, ms, credits_micro, priced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       at, 'model.tokens', b.provider ?? null, b.model ?? null, b.keyId ?? null, tin, tout, Number(b.ms) || null, micro, price ? 1 : 0)
+    this.record('usage', `${at}:${b.provider ?? ''}`, { at, provider: b.provider ?? null, model: b.model ?? null, key_id: b.keyId ?? null, tokens_in: tin, tokens_out: tout, ms: Number(b.ms) || null, credits_micro: micro, priced: !!price }, at)
     const org = await this.orgId()
     if (org && micro > 0) {
       await this.env.ORG.get(this.env.ORG.idFromName(org)).fetch('http://do/credits/usage', { method: 'POST', body: JSON.stringify({ project: this._pid, credits_micro: micro, at }) }).catch(() => {})
@@ -1103,6 +1109,7 @@ export class ProjectDO extends DurableObject<Env> {
         if (pl.t === 'program:list') hubReply({ t: 'program:list', programs: this.catalogue.list({ name: pl.name, published: pl.published }), reqId: pl.reqId })
         else {
           const e = this.catalogue.publish(String(pl.hash ?? ''), { id: who, admin: !!sender.admin })
+          this.record('program', e.hash, { ...e, event: 'published' })
           this.audit.record({ actor, via: sender.type === 'agent' ? 'agent' : sender.type === 'admin' ? 'admin' : 'ui', action: 'program.publish', target: e.hash, outcome: 'ok', detail: { name: e.name, version: e.version } })
           hubReply({ t: 'program:published', program: e, reqId: pl.reqId })
         }
@@ -1149,7 +1156,7 @@ export class ProjectDO extends DurableObject<Env> {
       // record it for durable per-user recovery, and (b) — LAYER 1, separate from the base reply — fan it out to
       // the same user's OTHER devices. Keyed by the qid's OWNER, so it can reach ONLY that user (authz by
       // construction). Agent LOGS are a different layer (analyst-log/composer-log) and are never fanned out here.
-      if (pl.t === 'analyst:answer' && pl.qid && !pl.replay) this.buffer.recordAnswer(pl)
+      if (pl.t === 'analyst:answer' && pl.qid && !pl.replay) { this.buffer.recordAnswer(pl); this.record('chat.answer', String(pl.qid), { qid: pl.qid, sid: pl.sid ?? null, category: pl.category ?? null, answer: pl.answer ?? null, timing: pl.timing ?? null }) }
       else if (pl.t === 'followups' && pl.qid) this.buffer.recordFollowups(pl)
       if ((pl.t === 'analyst:answer' || pl.t === 'followups') && pl.qid && !pl.replay) {
         const owner = this.buffer.ownerOf(pl.qid)

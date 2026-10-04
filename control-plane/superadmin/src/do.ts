@@ -10,6 +10,7 @@
 import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
 import { ORG_MIGRATIONS } from './migrations.js'
 import { DurableObject } from 'cloudflare:workers'
+import { createRecorder } from './records.js'
 
 interface Session {
   ws:     WebSocket
@@ -303,13 +304,18 @@ export class OrgDO extends DurableObject<Env> {
       const amount = Number(b?.credits)
       if (!(amount > 0) || !Number.isFinite(amount)) return Response.json({ error: 'a grant is a number of credits, more than 0' }, { status: 400 })
       if (!b?.by) return Response.json({ error: 'who is granting?' }, { status: 400 })
-      sql.exec("INSERT INTO credit_ledger (at, kind, amount_micro, note, by) VALUES (?, 'grant', ?, ?, ?)", new Date().toISOString(), Math.round(amount * 1_000_000), b.note ?? null, String(b.by))
+      const at = new Date().toISOString()
+      sql.exec("INSERT INTO credit_ledger (at, kind, amount_micro, note, by) VALUES (?, 'grant', ?, ?, ?)", at, Math.round(amount * 1_000_000), b.note ?? null, String(b.by))
+      createRecorder((this.env as any).RECORDS, () => 'platform')('credit', `grant:${at}`, { kind: 'grant', amount_micro: Math.round(amount * 1_000_000), note: b.note ?? null, by: b.by, org: this.ctx.id.toString() }, at)
       return Response.json({ ok: true }, { status: 201 })
     }
     if (request.method === 'POST' && path === '/credits/usage') {
       const micro = Math.round(Number(b?.credits_micro))
       if (!(micro >= 0) || !b?.project) return Response.json({ error: 'usage names its project and its cost in micro-credits' }, { status: 400 })
-      if (micro > 0) sql.exec("INSERT INTO credit_ledger (at, kind, amount_micro, project, by) VALUES (?, 'usage', ?, ?, ?)", b.at ?? new Date().toISOString(), -micro, String(b.project), `project:${b.project}`)
+      if (micro > 0) {
+        sql.exec("INSERT INTO credit_ledger (at, kind, amount_micro, project, by) VALUES (?, 'usage', ?, ?, ?)", b.at ?? new Date().toISOString(), -micro, String(b.project), `project:${b.project}`)
+        createRecorder((this.env as any).RECORDS, () => String(b.project))('credit', `usage:${b.at ?? Date.now()}`, { kind: 'usage', amount_micro: -micro, org: this.ctx.id.toString() }, b.at)
+      }
       return Response.json({ ok: true })
     }
     return Response.json({ error: 'not found' }, { status: 404 })

@@ -9,6 +9,7 @@
 import { DurableObject } from 'cloudflare:workers'
 import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
 import { GRAPH_MIGRATIONS } from './migrations.js'
+import { createRecorder } from './records.js'
 
 type Row = Record<string, unknown>
 const KEY: Record<string, (r: Row) => string> = { change: (r) => String(r.id), suggestion: (r) => String(r.id), decision: (r) => String(r.suggestion) }
@@ -35,7 +36,8 @@ export class GraphDO extends DurableObject<Env> {
     const sql = this.ctx.storage.sql
     if (request.method === 'GET' && url.pathname === '/cursor') return json({ cursor: this.cursor() })
     if (request.method === 'POST' && url.pathname === '/append') {
-      const b = await request.json() as { changes?: Row[]; suggestions?: Row[]; decisions?: Row[]; contents?: Record<string, string> }
+      const b = await request.json() as { project?: string; changes?: Row[]; suggestions?: Row[]; decisions?: Row[]; contents?: Record<string, string> }
+      const record = createRecorder((this.env as any).RECORDS, () => String(b.project ?? ''))
       let added = 0
       try {
         this.ctx.storage.transactionSync(() => {
@@ -50,6 +52,7 @@ export class GraphDO extends DurableObject<Env> {
               const [have] = [...sql.exec('SELECT body FROM records WHERE kind = ? AND key = ?', kind, key)]
               if (have) { if (!same(JSON.parse(String(have.body)), r)) throw new Conflict(`${kind} ${key} differs from the one kept`); continue }
               sql.exec('INSERT INTO records (kind, key, at, body) VALUES (?, ?, ?, ?)', kind, key, Number(r.at ?? 0), JSON.stringify(r))
+              record(`graph.${kind}`, key, { ...r, ...(kind !== 'decision' && (r as any).to_hash && b.contents?.[(r as any).to_hash as string] ? { content: JSON.parse(b.contents[(r as any).to_hash as string]) } : {}) }, new Date(Number(r.at ?? 0) || Date.now()).toISOString())
               added++
             }
           }

@@ -10,6 +10,7 @@ import { DurableObject } from 'cloudflare:workers'
 import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
 import { replay, type Entry } from '../../../vm/packages/session/src/core.js'
 import { SESSION_MIGRATIONS } from './migrations.js'
+import { createRecorder } from './records.js'
 
 export class SessionDO extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -41,6 +42,7 @@ export class SessionDO extends DurableObject<Env> {
             return
           }
           this.ctx.storage.sql.exec('INSERT INTO entries (seq, entry, at) VALUES (?, ?, ?)', seq, text, (e as any).at ?? new Date().toISOString())
+          createRecorder((this.env as any).RECORDS, () => b.project)('session.entry', `${b.session}:${seq}`, { session: b.session, seq, entry: e }, (e as any).at)
           added++
         })
         if (!meta) {
