@@ -406,6 +406,10 @@ program's React side is a component too.
 4. **Run anywhere.** An engine runs only programs in its store; one it lacks it fetches from the platform — by hash, or by
    name the newest published — and checks against the hash before keeping it. A damaged bundle never runs.
 
+**One engine per project (the user, 2026-10-05):** a project has one engine, and programs are built inside it, because
+that is where the agent is. Building a program anywhere else is not designed for now. Fetching a program by hash from
+the platform is for that one engine when its machine is replaced (a new box, a lost disk), not for several engines.
+
 *To agree:* the earlier design kept unpublished programs in the user's DO; drafts are in the project's catalogue instead
 (one place to check, publish and audit), with the owner on every row. The user DO can list a person's drafts from it.
 
