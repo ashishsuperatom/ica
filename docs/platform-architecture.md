@@ -186,9 +186,9 @@ control can open a new block.
 | **STATE** | the last block's JSON: `{ packages: { <name>: <program hash> }, <name>: <slice>, … }` |
 | **package** | a program taking part in STATE |
 | **slice** | the part of STATE a package owns, at `STATE.<package>` |
-| **`run`** | the package's **default** function. A program may suggest other functions (its actions); each can do anything. Every one is called with **the package's state** (its slice): `fn(slice) → { slice?, answer?, actions? }` |
+| **`run`** | the package's **default** function. A program may suggest other functions (its actions); each can do anything. Every one is called with **the whole STATE, immutable**: `fn(STATE) → { slice?, answer?, actions? }`; it may change only its own part |
 | **op** | `set` · `add` · `remove` on a path — the only way STATE changes |
-| **action** | something a program suggests, shown in the session's possible actions: a function of the package (called with its state), or just ops |
+| **action** | something a program suggests, shown in the session's possible actions: a function of the package (called with the whole STATE), or just ops |
 | **command** | a write outside the session (approve, save a plan): goes through the governance path, not STATE |
 | **answer** | what a run or the ICA shows: appended to the answer history (new block) or replacing the current block's |
 | **`doc`** | a package's small documentation, injected into the agent |
@@ -199,15 +199,16 @@ control can open a new block.
 
 **What else is needed**
 
-1. **Reads.** A package's result often depends on another's slice (a filter package and an optimisation both depend on
-   the chosen period). Besides the slice it owns, a package declares the paths it **reads**. After ops, `run` is called
-   for every package whose owned or read paths changed, in dependency order; a cycle is refused when the package
-   loads. Without this, a filter change would not re-run the program that depends on it.
+1. **When a package runs again.** Its functions see the whole STATE, so nothing has to be passed. A package runs when
+   its own part changes or when one of its actions is invoked (a run button). *Suggestion, to agree:* a package may
+   also declare the paths it **reads**, so a change there (a global filter) re-runs it without a click — in
+   dependency order, a cycle refused when the package loads.
 2. **Actions (decided).** `run` is the default function, not the only one: a program suggests its actions, and an
-   action can be a function that does anything. Every function is called with **the package's state** — its slice —
-   and returns a new slice (which replaces `STATE.<package>`, nothing else), an answer, or more actions. An action can
-   also be plain ops followed by `run`. **OPEN:** whether a function also receives the paths it reads from other
-   packages, or only its own slice.
+   action can be a function that does anything. **Every function gets the whole STATE, immutable** (decided): it can
+   read everything — a global filter that is not part of the package still reaches it — but it can change only its
+   own part. It returns a new slice (which replaces `STATE.<package>`, nothing else), an answer, or more actions. An
+   action can also be plain ops followed by `run`. Example: a global filter is changed, then the program's run button
+   is clicked; the program reads the filter from STATE and runs.
 3. **Commands are separate.** Writing something (approving, saving) is not a STATE change; it goes through the one
    write path (who → may they → approval → version → event → log). A package can offer commands beside its actions.
 4. **Validation.** Each slice has a schema; an op that breaks it is refused with a sentence, never guessed.
