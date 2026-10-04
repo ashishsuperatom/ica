@@ -479,6 +479,27 @@ R2 (the data lake product), the analytics engine, and stream processing through 
   event silently), and writes them to the same stream. Engines buffer and retry; `id` makes a retry harmless.
 - Writers hold only the right to send; nothing at runtime can change or delete the history.
 
+**Where each record lives, in the user's words (2026-10-04):** the **session Durable Object** has SQLite and keeps
+everything that happens in that session. The **user Durable Object** keeps information about the user and what is
+theirs — a module they build, all their work — and, per user, the state and information needed to give **a very
+personalised view to that user**. "Something I have been dreaming of for some time but never implemented": the user DO
+is essential; what exactly it keeps is not decided yet, but it is going to be important. So much is already recorded
+where it happens (session, user, project). For **general-purpose analytics — not real time; five or ten minutes late
+does not matter** — everything also goes into **the Superatom platform's own Basin**. That is a different thing from
+the data warehouse each customer or project gets.
+
+**The customer's warehouse (to design):** perhaps at the **organisation** level, with each project taking what it needs
+from it. How to scope one Cloudflare Basin across many customers is the open question; if it is just a namespace in an
+R2 bucket, and R2 scales to any number of customers, that is fine. *Proposal (to agree):* one Basin Catalog namespace
+per organisation (tables per project inside it), every read and write through the platform's own API, which checks the
+caller's scope — no customer or agent ever holds a Cloudflare credential. A bucket per organisation is the stronger
+separation if a customer needs it.
+
+**Structure, in the user's words:** design everything so that it is structured and flows from high level to low level,
+with a hierarchy in the ideas — not things plugged in at random. Just as the organisation has its knowledge index, the
+platform itself should have an organisation of how things are built, and that index should be maintained — in the
+source code, or in the folder and module structure.
+
 ## The flow
 
 ```

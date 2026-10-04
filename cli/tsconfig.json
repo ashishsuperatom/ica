@@ -1,0 +1,7 @@
+{
+  "compilerOptions": {
+    "target": "ES2023", "lib": ["ES2023", "DOM"], "module": "ESNext", "moduleResolution": "bundler",
+    "strict": true, "noEmit": true, "skipLibCheck": true, "allowImportingTsExtensions": true, "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "../clients/transport.ts", "../clients/parcels.ts"]
+}
