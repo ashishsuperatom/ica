@@ -122,9 +122,11 @@ per-dialect helpers in `packages/introspect` move into the data sources of those
 - **Where it lives:** in the project (`datasources/<id>/`), registered and loaded dynamically by the datasource manager
   — a new source is added by writing (or generating, with the connector agent) its module into the project; no engine
   release.
-- **Reusable kinds:** a source of a kind seen before (SQL Server, SuiteQL, Postgres, a REST API…) starts from a shared
-  module of that kind, instantiated with the project's configuration and credentials. **OPEN:** whether shared kinds
-  are programs in the platform (global scope, by hash, like other programs) and how a project picks one up.
+- **Kinds are templates (decided).** A source of a kind seen before (SQL Server, SuiteQL, Postgres, a REST API…) is
+  made by **copying the template of that kind** into the project — an instance — and whatever is specific to that
+  system is encoded in the instance. Accepted cost: an improvement to a template does not reach instances already
+  copied. We cannot know in advance what is common and what is specific, so it stays clean: everything is a template,
+  copied and then used.
 - **For agents:** a source is read only through the datasource index (`find-schema`, `get-schema`) and `query`;
   introspection is the system's, not an agent tool.
 
