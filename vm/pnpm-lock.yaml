@@ -60,9 +60,6 @@ importers:
       '@superatom/grounding':
         specifier: workspace:*
         version: link:../../packages/grounding
-      '@superatom/introspect':
-        specifier: workspace:*
-        version: link:../../packages/introspect
       '@xterm/addon-serialize':
         specifier: ^0.14.0
         version: 0.14.0

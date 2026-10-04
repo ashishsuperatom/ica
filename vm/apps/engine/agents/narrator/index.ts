@@ -60,7 +60,7 @@ export function isDataCall(command?: string): boolean {
   c = c.replace(/^bash\s+/, '').replace(/^(cd\s+\S+\s*(&&|;)\s*)+/, '').trim()
   if (/(^|\s)(-h|--help)(\s|$)/.test(c)) return false
   if (/^(read|ls|cat|head|tail|grep|rg|find|write|edit|mkdir|touch|rm|mv|cp|pwd|which|echo|wc|sed|awk|date|time)\b/.test(c)) return false
-  return /^(\.\/\S+|node|python3?|tsx|npx|deno|bun|sqlite3|curl|jq)\b/.test(c) || /\b(query|introspect|resolve|find-schema|sources|try|ask|members|catalog)\b/.test(c)
+  return /^(\.\/\S+|node|python3?|tsx|npx|deno|bun|sqlite3|curl|jq)\b/.test(c) || /\b(query|get-schema|resolve|find-schema|sources|try|ask|members|catalog)\b/.test(c)
 }
 
 export function capResultData(s: string, n = 8): string {

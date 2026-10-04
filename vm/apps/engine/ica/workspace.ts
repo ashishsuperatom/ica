@@ -10,7 +10,7 @@
 //
 // In its directory an agent finds the tools for its part, generated here with the absolute paths they need:
 //
-//   the data             ./sources ./query ./introspect ./find-schema ./resolve
+//   the data             ./sources ./find-schema ./get-schema ./query ./resolve
 //
 // Which turn is live is in .turn, which data session this conversation is in .session — both written by the engine
 // before it asks. A turn's files are in out/<qid>/.
@@ -38,7 +38,7 @@ export async function query(dataSourceId, sql, params = {}) {
   if (p?.cappedTo != null) Object.defineProperty(rows, 'cappedTo', { value: p.cappedTo })
   return rows
 }
-// SYSTEM-only raw-SQL path (NOT for agent data queries): the introspect/grounding seams read catalogs and build
+// SYSTEM-only raw-SQL path (NOT for agent data queries): the grounding seam reads catalogs and builds
 // indexes in raw dialect SQL. This posts { raw:true } so the manager runs it as-is, skipping the agent query path.
 // Agent queries must go through query() above — that is the access-control boundary.
 export async function rawQuery(dataSourceId, sql, params = {}) {
@@ -101,8 +101,8 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
   if (!conversation) await writeFile(join(dir, 'CONTEXT.md'),
 `# Project ${s.projectId}
 
-The data sources: ./sources lists them, ./find-schema searches their fields, ./introspect and ./query read them, and
-./resolve turns a name into ids. data/query.mjs, data/introspect.mjs and grounding/grounding.mjs are the same seams to
+The data sources: ./sources lists them, ./find-schema searches their fields, ./get-schema shows a source's tables or a
+table's fields, ./query reads them, and ./resolve turns a name into ids. data/query.mjs and grounding/grounding.mjs are the seams to
 import.
 Every tool explains itself with --help.
 
@@ -113,28 +113,6 @@ its beginning shown, with where the rest is: take what you need from it with gre
 `)
 
   await writeFile(join(dir, 'data', 'query.mjs'), dataSeam(s.managerUrl ?? 'http://localhost:4000'))
-
-  await writeFile(join(dir, 'data', 'introspect.mjs'),
-`// Introspection helpers over the data seam — DIALECT-SPECIFIC, resolved per source automatically.
-// They hide the SQL, NEVER the DATA: every helper returns raw evidence (values, distributions,
-// mismatches, sample rows) so YOU can catch bad data — they never hand you a black-box verdict.
-// Prefer them over re-writing survey/profile SQL; drop to raw query() for anything they don't cover.
-//   const I = await forSource(id)
-//   await I.tables()                       → [{name, rows}] (all tables + row counts, fast)
-//   await I.columns(table)                 → [{name, type}]
-//   await I.sampleRows(table, n)           → real rows (LOOK at actual data)
-//   await I.profile(table, column)         → {total, distinct, nulls, nullRate, min, max, mean, mode, topValues}
-//   await I.verifyJoin(fromT, fromCol, toT, toCol) → {coverage, cardinality, unmatchedSamples, fromTopValues, hint}
-//                                            (unmatchedSamples reveals sentinels/orphans — YOU judge; hint is a soft aside)
-//   await I.checkRelation(table, expr)     → {total, violations, violationRate, sampleViolations} (conservation/arithmetic)
-import { getIntrospect } from '@superatom/introspect'
-import { rawQuery, sources } from './query.mjs'   // introspect reads catalogs in raw dialect SQL (trusted system path)
-export async function forSource(id) {
-  const s = (await sources()).find(x => x.id === id)
-  if (!s) throw new Error('unknown source: ' + id + ' (call sources() to list)')
-  return getIntrospect(s.dialect, rawQuery, id)
-}
-`)
 
   await writeFile(join(dir, 'grounding', 'grounding.mjs'),
 `// The GROUNDING seam. Grounding turns a fuzzy human reference — a name, a place, an id — into concrete
@@ -243,24 +221,12 @@ try {
   console.log(JSON.stringify(rows, null, 2))
 } catch (e) { await record({ rows: 0, ms: Date.now() - t0, error: String(e && e.message || e) }); throw e }
 `,
-    'introspect': `// Inspect data schema/evidence. Run ONE of:
-//   ./introspect "<source>" tables
-//   ./introspect "<source>" columns "<table>"
-//   ./introspect "<source>" sample "<table>" [n]
-//   ./introspect "<source>" profile "<table>" "<column>"
-//   ./introspect "<source>" verify-join "<fromT>" "<fromCol>" "<toT>" "<toCol>"
-import { forSource } from ${JSON.stringify(join(dir, 'data', 'introspect.mjs'))}
-const [src, cmd, ...a] = process.argv.slice(2)
-if (!src || !cmd) { console.error('usage: ./introspect "<source>" <tables|columns|sample|profile|verify-join> [args]'); process.exit(1) }
-const I = await forSource(src)
-let r
-if (cmd === 'tables') r = await I.tables()
-else if (cmd === 'columns') r = await I.columns(a[0])
-else if (cmd === 'sample') { const n = a.slice(1).map(Number).find(x => Number.isFinite(x) && x > 0); r = await I.sampleRows(a[0], n ?? 8) }
-else if (cmd === 'profile') r = await I.profile(a[0], a[1])
-else if (cmd === 'verify-join') r = await I.verifyJoin(a[0], a[1], a[2], a[3])
-else { console.error('unknown subcommand: ' + cmd); process.exit(1) }
-console.log(JSON.stringify(r, null, 2))
+    'get-schema': `// The datasource index, one level whole: ./get-schema (every source) · ./get-schema "<source>" (its tables, rows, field
+// counts) · ./get-schema "<source>" "<table>" (its fields: type, key, nullable, references, description). Prints JSON.
+import { DataSourceIndex, getSchema } from '@superatom/datasource-index'
+const store = new DataSourceIndex(${JSON.stringify(join(dbDir, 'datasource-index.sqlite'))})
+const [source, table] = process.argv.slice(2)
+console.log(JSON.stringify(getSchema(store, source, table), null, 2))
 `,
     'resolve': `// Resolve a fuzzy human reference (a name/value) to concrete ids. Run: ./resolve "<text>". Prints JSON.
 import { resolveEntity } from ${JSON.stringify(join(dir, 'grounding', 'grounding.mjs'))}
@@ -273,7 +239,7 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
     'find-schema':  'find-schema "<term>" [--source <SOURCE>] [--full]   → search ALL datasources for a field/table by name, type, or description: first the sources the hits belong to (kind, dialect, what each is), then the fields (SOURCE.TABLE.COLUMN : type); --source filters to one; --full adds PK/nullable/references',
     'sources':      'sources   → every data source with its kind + dialect (JSON)',
     'query':        'query "<source>" "<query in the source\'s own dialect>"   → JSON rows. e.g. query "<source>" "SELECT * FROM <table> FETCH FIRST 3 ROWS ONLY"',
-    'introspect':   'introspect "<source>" <cmd>   where <cmd> = tables | columns "<table>" | sample "<table>" [n] | profile "<table>" "<column>" | verify-join "<fromT>" "<fromCol>" "<toT>" "<toCol>"',
+    'get-schema':   'get-schema [<source>] [<table>]   → from the datasource index: every source; a source\'s tables with row and field counts; or a table\'s fields with type, key, nullable, references and description (JSON)',
     'resolve':      'resolve "<text>"   → resolve a fuzzy name/value to concrete ids (JSON)',
   }
   for (const [name, body] of Object.entries(drivers)) {
@@ -350,7 +316,6 @@ export async function keepOnlyTools(dir: string, keep: string[]): Promise<void> 
   const wrappers = (await readdir(join(dir, '.tools'))).filter((f) => f.endsWith('.mjs')).map((f) => f.replace(/\.mjs$/, ''))
   for (const t of wrappers) if (!keep.includes(t)) { await rm(join(dir, t), { force: true }); await rm(join(dir, '.tools', `${t}.mjs`), { force: true }) }
   if (!keep.includes('resolve')) await rm(join(dir, 'grounding'), { recursive: true, force: true })
-  if (!keep.includes('introspect')) await rm(join(dir, 'data', 'introspect.mjs'), { force: true })
 }
 
 /** Tools that only read: their work outlives the call, and asking the same thing twice in a turn costs nothing. */
@@ -368,7 +333,7 @@ const OWNED = new Set([
   'connector', 'templates',                                         // agents/connector
 ])
 const OWNED_IN: Record<string, Set<string>> = {
-  data: new Set(['query.mjs', 'introspect.mjs']),
+  data: new Set(['query.mjs']),
   grounding: new Set(['grounding.mjs', 'GROUNDING.md']),            // GROUNDING.md: agents/grounding
 }
 

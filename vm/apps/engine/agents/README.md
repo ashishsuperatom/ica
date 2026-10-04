@@ -9,7 +9,7 @@ Rules for every agent:
 - **ICA is passed in, harness + model separate.** Defaults per agent are in `config/default.json`; any harness
   (`claude-code` / `pi` / `opencode` / `codex`) and model can be swapped via `opts.ica`.
 - **Data only through the seams.** Agents reach data with the tools in their working directory (`./query`,
-  `./introspect`, …), which go through the datasource-manager — never a database directly.
+  `./find-schema`, `./get-schema`, …), which go through the datasource-manager — never a database directly.
 
 ## Agents
 

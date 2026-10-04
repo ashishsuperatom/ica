@@ -18,7 +18,6 @@
     "@superatom/composition-graph": "workspace:*",
     "@superatom/datasource-index": "workspace:*",
     "@superatom/grounding": "workspace:*",
-    "@superatom/introspect": "workspace:*",
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/headless": "^6.0.0",
     "node-pty": "^1.0.0",

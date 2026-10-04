@@ -30,7 +30,7 @@ Harness, provider and model per agent: `config/default.json`, overridable per pr
 ## Tools
 
 Generated into each working directory by `ica/workspace.ts`; each explains itself with `--help`:
-`./sources ./query ./introspect ./find-schema ./resolve`. A domain's own programs are placed beside them.
+`./sources ./find-schema ./get-schema ./query ./resolve`. A domain's own programs are placed beside them.
 
 ## State
 

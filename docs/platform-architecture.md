@@ -105,6 +105,12 @@ it — they go from an intent straight to an agent.
 The **datasource index** sits beside it: which sources exist, what each holds, its type and description, where each
 thing comes from.
 
+**How agents read the data's shape (2026-10-04).** The system builds the datasource index from each source's catalog
+(its bridge's `introspect()`), and agents use only the index: `find-schema` searches it (a field or table by name,
+type or meaning) and `get-schema` reads one level of it whole (every source; a source's tables with row and field
+counts; a table's fields with type, key, nullability, references and description). Introspection stays in the system
+— building the index, connecting a source — but is not a tool of the ICA agents.
+
 ### Agent
 
 ```jsonc

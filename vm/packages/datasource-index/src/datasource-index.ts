@@ -258,3 +258,29 @@ export function dataSourceStats(store: DataSourceIndex): { source: string; conta
      FROM datasource_index GROUP BY source ORDER BY source`
   ).all() as any[]
 }
+
+/** One level of the index, whole: every source (no arguments), a source's tables with their row counts and field
+ *  counts, or one table's fields with type, key, nullability, what each references and its description. Disabled
+ *  tables and fields are left out unless asked for. */
+export function getSchema(store: DataSourceIndex, source?: string, container?: string, opts: { includeDisabled?: boolean } = {}):
+  | { sources: { source: string; tables: number; fields: number }[] }
+  | { source: string; tables: { table: string; rows: number | null; fields: number }[] }
+  | { source: string; table: string; rows: number | null; fields: { field: string; type: string | null; key: boolean; optional: boolean; references: string | null; description: string }[] } {
+  ensureDataSourceIndex(store)
+  const enabled = opts.includeDisabled ? '' : ' AND enabled = 1'
+  if (!source) {
+    const rows = store.db.prepare(`SELECT source, COUNT(DISTINCT container) AS tables, COUNT(*) AS fields FROM datasource_index WHERE 1=1${enabled} GROUP BY source ORDER BY source`).all() as any[]
+    return { sources: rows.map((r) => ({ source: r.source, tables: Number(r.tables), fields: Number(r.fields) })) }
+  }
+  if (!container) {
+    const rows = store.db.prepare(`SELECT container, MAX(rows) AS rows, COUNT(*) AS fields FROM datasource_index WHERE source = ?${enabled} GROUP BY container ORDER BY container`).all(source) as any[]
+    if (!rows.length) throw new Error(`the index holds no tables for "${source}" — the sources it holds: ${(getSchema(store) as any).sources.map((s: any) => s.source).join(', ') || 'none'}`)
+    return { source, tables: rows.map((r) => ({ table: r.container, rows: r.rows == null ? null : Number(r.rows), fields: Number(r.fields) })) }
+  }
+  const rows = store.db.prepare(`SELECT * FROM datasource_index WHERE source = ? AND container = ?${enabled} ORDER BY rowid`).all(source, container) as any[]
+  if (!rows.length) throw new Error(`the index holds no table "${container}" in "${source}" — find it with find-schema`)
+  return { source, table: container, rows: rows[0].rows == null ? null : Number(rows[0].rows), fields: rows.map((r) => ({
+    field: r.field, type: r.type ?? null, key: !!r.is_key, optional: !!r.is_optional, references: r.references_ ?? null,
+    description: describeEntry({ descHuman: r.desc_human, descAi: r.desc_ai, descDefault: r.desc_default }),
+  })) }
+}

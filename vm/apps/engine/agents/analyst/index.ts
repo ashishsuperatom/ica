@@ -22,7 +22,7 @@ export interface Analyst {
 }
 
 const ROLE = `You explore the organisation's data with the person you are working with. Read it with ./sources,
-./find-schema, ./introspect and ./query; each explains itself with --help. Work only in this folder.`
+./find-schema, ./get-schema and ./query; each explains itself with --help. Work only in this folder.`
 
 export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
   const cfg = agentConfig('analyst')
