@@ -15,7 +15,11 @@ export function AccessPoliciesPanel({ api, projectId }: { api: Api; projectId: s
   const [attrs, setAttrs] = useState<Record<string, unknown> | null>(null)
   const [attr, setAttr] = useState({ key: '', value: '' })
   const [err, setErr] = useState('')
+  const [domains, setDomains] = useState<{ domain: string; role_id: string; added_by: string }[]>([])
+  const [dom, setDom] = useState({ domain: '', roleId: 'viewer' })
   const base = `/projects/${projectId}`
+  const loadDomains = useCallback(() => { api(`${base}/access-domains`).then((r) => (r.ok ? r.json() : { domains: [] })).then((d) => setDomains((d as { domains: typeof domains }).domains)).catch(() => {}) }, [api, base])
+  useEffect(loadDomains, [loadDomains])
   const load = useCallback(() => { api(`${base}/access-policies`).then((r) => (r.ok ? r.json() : { policies: [] })).then((d) => setList((d as { policies: Policy[] }).policies)).catch(() => {}) }, [api, base])
   useEffect(load, [load])
   const say = async (r: Response) => { if (!r.ok) setErr(((await r.json().catch(() => ({}))) as { error?: string }).error ?? `Refused (${r.status}).`); else setErr(''); return r.ok }
@@ -70,6 +74,15 @@ export function AccessPoliciesPanel({ api, projectId }: { api: Api; projectId: s
             </tr>))}</tbody>
         </table>
       )}
+      <strong style={{ fontSize: 13 }}>Sign-in by company domain</strong>
+      <div className="muted" style={{ fontSize: 12, margin: '2px 0 8px' }}>Anyone whose verified address is at the domain (their company's sign-in, connected in Clerk) is let in with the role on first sign-in.</div>
+      {domains.map((d) => <div key={d.domain} className="row" style={{ gap: 8, fontSize: 12.5, marginBottom: 4 }}><span className="mono">{d.domain}</span><span className="muted">→ {d.role_id} · added by {d.added_by}</span>
+        <button className="btn" onClick={async () => { if (await say(await api(`${base}/access-domains/${d.domain}`, { method: 'DELETE' }))) loadDomains() }}>Remove</button></div>)}
+      <div className="row" style={{ gap: 8, margin: '6px 0 16px' }}>
+        <input id="dom-name" className="input" style={{ maxWidth: 200 }} value={dom.domain} onChange={(e) => setDom({ ...dom, domain: e.target.value })} placeholder="acme.com" />
+        <select id="dom-role" className="input" style={{ maxWidth: 120 }} value={dom.roleId} onChange={(e) => setDom({ ...dom, roleId: e.target.value })}><option value="viewer">viewer</option><option value="member">member</option></select>
+        <button className="btn" disabled={!dom.domain.trim()} onClick={async () => { if (await say(await api(`${base}/access-domains`, { method: 'POST', body: JSON.stringify({ domain: dom.domain.trim(), roleId: dom.roleId }) }))) { setDom({ domain: '', roleId: 'viewer' }); loadDomains() } }}>Let in</button>
+      </div>
       <strong style={{ fontSize: 13 }}>A reader's attributes</strong>
       <div className="row" style={{ gap: 8, margin: '8px 0', flexWrap: 'wrap' }}>
         <input id="attr-subject" className="input" style={{ maxWidth: 280 }} value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="email:a@b.c or agent:key_…" />

@@ -1,4 +1,10 @@
-# Identity & Access — design (not implemented)
+# Identity & Access — design
+
+**Built (2026-10-05):** enterprise sign-in by verified domain (a project lets `acme.com` in with a role; the first
+sign-in is provisioned and audited — ProjectDO `access_domains`, `accessOnArrival`), data access policies per reader
+(see platform-architecture.md, "Data access per reader"), agent keys. The identity provider itself is connected as a
+Clerk enterprise connection (SAML/OIDC). The rest of this page is still design.
+
 
 Status: **design / thinking doc.** No code wired. Captures the protocol and data
 structures for logging users in, giving them access, and SSO — across every

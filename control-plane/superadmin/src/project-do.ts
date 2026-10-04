@@ -290,6 +290,8 @@ export class ProjectDO extends DurableObject<Env> {
     if (request.method === 'POST' && path === '/agent-call') return this.agentCall(request)
     if (path === '/engine/programs' || path.startsWith('/engine/programs/')) return this.enginePrograms(request, path)
     if (path === '/access-policies' || path.startsWith('/access-policies/') || path === '/access-attributes') return this.accessAdmin(request, path)
+    if (path === '/access-domains' || path.startsWith('/access-domains/')) return this.accessDomains(request, path)
+    if (request.method === 'POST' && path === '/access/arrive') return this.arrive(request)
 
     if (request.method === 'GET'  && path === '/debug')        return this.debugInfo()
     if (request.method === 'POST' && path === '/members')      return this.addMember(request)
@@ -594,7 +596,8 @@ export class ProjectDO extends DurableObject<Env> {
       let admin = claims.role === 'superadmin'
       if (claims.role !== 'superadmin') {
         const email = String(claims.email || '').toLowerCase()
-        const byEmail = email ? [...this.ctx.storage.sql.exec('SELECT role_id, source FROM access WHERE email = ?', email)] : []
+        const arrived = email ? this.accessOnArrival(email) : null
+        const byEmail = arrived ? [arrived] : []
         const byUserId = byEmail.length ? [] : [...this.ctx.storage.sql.exec('SELECT role FROM members WHERE user_id = ?', claims.userId)]
         if (!byEmail.length && !byUserId.length) { ws.close(4003, 'No access to this project'); return }
         admin = byEmail.some((r: any) => r.role_id === 'admin' || r.source === 'org-admin')
@@ -780,6 +783,54 @@ export class ProjectDO extends DurableObject<Env> {
       if (e instanceof CatalogueRefusal) return json({ error: e.message }, 400)
       throw e
     }
+  }
+
+  // ── Access by verified email domain (enterprise sign-in, provisioned on first arrival) ──
+  /** The access row for an address — granting it from a verified domain the first time that person arrives. */
+  private accessOnArrival(email: string): { role_id: string; source: string } | null {
+    const e = email.toLowerCase()
+    const [row] = [...this.ctx.storage.sql.exec('SELECT role_id, source FROM access WHERE email = ?', e)] as any[]
+    if (row) return row
+    const domain = e.split('@')[1]
+    if (!domain) return null
+    const [d] = [...this.ctx.storage.sql.exec('SELECT role_id FROM access_domains WHERE domain = ?', domain)] as any[]
+    if (!d) return null
+    this.ctx.storage.sql.exec("INSERT OR IGNORE INTO access (email, role_id, source, added_by) VALUES (?, ?, 'domain', ?)", e, d.role_id, `domain:${domain}`)
+    this.audit.record({ actor: { kind: 'system', id: 'platform' }, via: 'system', action: 'access.grant', target: e, outcome: 'ok', detail: { reason: `first sign-in from ${domain}`, role: d.role_id } })
+    return { role_id: d.role_id, source: 'domain' }
+  }
+  /** The worker asks, for someone not yet on the access list, whether their verified domain lets them in. */
+  private async arrive(request: Request): Promise<Response> {
+    const b = await request.json().catch(() => ({})) as any
+    const row = b?.email ? this.accessOnArrival(String(b.email)) : null
+    return this.j(row ? { access: row } : { access: null }, row ? 200 : 404)
+  }
+  private async accessDomains(request: Request, path: string): Promise<Response> {
+    const url = new URL(request.url)
+    const body: any = request.method === 'GET' ? {} : await request.json().catch(() => ({}))
+    const by = String(body.by ?? url.searchParams.get('by') ?? '')
+    const actor = { kind: 'user' as const, id: by || 'unknown', ...(by.includes('@') ? { email: by } : {}) }
+    if (request.method === 'GET') return this.j({ domains: [...this.ctx.storage.sql.exec('SELECT domain, role_id, added_by, added_at FROM access_domains ORDER BY domain')] })
+    if (!by) return this.j({ error: 'who is making the change?' }, 400)
+    if (request.method === 'POST' && path === '/access-domains') {
+      const domain = String(body.domain ?? '').trim().toLowerCase()
+      if (!/^([a-z0-9-]+\.)+[a-z]{2,}$/.test(domain)) return this.j({ error: 'a domain like acme.com' }, 400)
+      if (['gmail.com', 'outlook.com', 'hotmail.com', 'yahoo.com', 'icloud.com', 'proton.me'].includes(domain)) return this.j({ error: `${domain} is a public mail domain: anyone could sign in with it` }, 400)
+      const role = String(body.roleId ?? 'viewer')
+      if (![...this.ctx.storage.sql.exec('SELECT 1 FROM roles WHERE id = ?', role)].length) return this.j({ error: `there is no role ${role}` }, 400)
+      if (role === 'admin') return this.j({ error: 'a whole domain cannot be made admin: grant admins one by one' }, 400)
+      this.ctx.storage.sql.exec('INSERT INTO access_domains (domain, role_id, added_by, added_at) VALUES (?, ?, ?, ?) ON CONFLICT (domain) DO UPDATE SET role_id = excluded.role_id, added_by = excluded.added_by, added_at = excluded.added_at', domain, role, by, new Date().toISOString())
+      this.audit.record({ actor, via: 'admin', action: 'access-domain.add', target: domain, outcome: 'ok', detail: { role } })
+      return this.j({ domain, role_id: role }, 201)
+    }
+    const m = path.match(/^\/access-domains\/([a-z0-9.-]+)$/)
+    if (m && request.method === 'DELETE') {
+      if (![...this.ctx.storage.sql.exec('SELECT 1 FROM access_domains WHERE domain = ?', m[1])].length) return this.j({ error: `there is no domain ${m[1]}` }, 404)
+      this.ctx.storage.sql.exec('DELETE FROM access_domains WHERE domain = ?', m[1])
+      this.audit.record({ actor, via: 'admin', action: 'access-domain.remove', target: m[1], outcome: 'ok', detail: { note: 'people already let in keep their access until it is revoked' } })
+      return this.j({ removed: m[1] })
+    }
+    return this.j({ error: 'not found' }, 404)
   }
 
   // ── Data access policies ───────────────────────────────────────────────────

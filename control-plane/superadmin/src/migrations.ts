@@ -142,6 +142,11 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     CREATE TABLE IF NOT EXISTS access_version (version INTEGER NOT NULL);
     INSERT INTO access_version (version) SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM access_version);
   ` },
+  { id: 18, name: 'access by verified email domain', up: `
+    -- Enterprise sign-in: anyone whose verified address is at one of these domains (their company's identity provider,
+    -- federated through Clerk) gets this role on first arrival — recorded as an access row with source 'domain'.
+    CREATE TABLE IF NOT EXISTS access_domains (domain TEXT PRIMARY KEY, role_id TEXT NOT NULL, added_by TEXT NOT NULL, added_at TEXT NOT NULL);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

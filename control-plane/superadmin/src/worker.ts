@@ -94,7 +94,9 @@ async function projectAccessOf(request: Request, env: Env, projectId: string):
   if (!email) return { ok: false, level: 'none', email }
   const proj = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
   const acc: any = await proj.fetch('https://do/access').then(r => r.json()).catch(() => ({}))
-  const row = (acc?.access ?? []).find((a: any) => String(a.email || '').toLowerCase() === email)
+  let row = (acc?.access ?? []).find((a: any) => String(a.email || '').toLowerCase() === email)
+  // Not on the list yet: their verified domain may let them in (enterprise sign-in, provisioned on first arrival).
+  if (!row) row = (await proj.fetch('https://do/access/arrive', { method: 'POST', body: JSON.stringify({ email }) }).then((r) => (r.ok ? r.json() : null)).catch(() => null) as any)?.access
   if (!row) return { ok: false, level: 'none', email }
   // Only a row the ORG put here means org admin. A project's own 'admin' role administers THAT project — it
   // does not confer anything over the organisation, and must not be able to edit what the org owns.
@@ -304,6 +306,8 @@ export default {
       // `debug` returns the project's API key. It was reachable by any member as a plain GET; nothing outside the
       // engine's own box has a use for it, so it is not served here at all.
       if (subPath === 'debug') return new Response('not found', { status: 404 })
+      // `access/arrive` is the worker's own question to the DO (a verified domain on first sign-in), never a public call.
+      if (subPath.startsWith('access/arrive')) return new Response('not found', { status: 404 })
       // The agent profile is the platform's to set: only a superadmin reads or writes it. (A later block meant to
       // enforce this was never reached, because this branch forwards every sub-path first.)
       if (subPath === 'profile' && acc.level !== 'superadmin') return new Response('forbidden', { status: 403 })
@@ -374,7 +378,7 @@ export default {
 
       const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
       // Agent keys are made and revoked by someone: the DO records who, from the caller the gate just checked.
-      if (/^(agent-keys|access-policies|access-attributes)/.test(subPath) && request.method !== 'GET') {
+      if (/^(agent-keys|access-policies|access-attributes|access-domains)/.test(subPath) && request.method !== 'GET') {
         const by = acc.email || (acc.level === 'superadmin' ? 'superadmin' : '')
         const body = request.method === 'POST' || request.method === 'PUT' ? JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by }) : undefined
         const fwd = new Request(`http://do/${subPath}${url.search ? url.search + '&' : '?'}by=${encodeURIComponent(by)}`, { method: request.method, headers: { 'content-type': 'application/json', 'x-sa-project': projectId }, body })
