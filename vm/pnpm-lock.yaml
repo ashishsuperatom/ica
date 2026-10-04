@@ -115,6 +115,8 @@ importers:
 
   packages/introspect: {}
 
+  packages/migrate: {}
+
   packages/project-template: {}
 
 packages:
