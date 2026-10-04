@@ -5,3 +5,4 @@ export { route, rank, indexOf, terms, stem, type Route, type Candidate } from '.
 export { verifyGraph, verifyAgainst, type Finding } from './verify.js'
 export * as governance from './governance.js'
 export { GovernanceRefusal, type Actor, type Suggestion } from './governance.js'
+export { replicaSince, applyReplica, hasAfter, START, ReplicaConflict, type Cursor, type ReplicaBatch } from './replica.js'

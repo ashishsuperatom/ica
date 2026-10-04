@@ -45,6 +45,7 @@ import { createSessionSync } from './session-sync.js'
 import { createGraphSeam, GRAPH_MESSAGES } from './graph-seam.js'
 import { createProgramSeam, PROGRAM_MESSAGES } from './program-seam.js'
 import { platformOf } from './platform.js'
+import { createGraphSync, graphFileOf } from './graph-sync.js'
 import { readingAnswer } from './answer-card.js'
 import { randomUUID } from 'node:crypto'
 import { buildDatasourceIndex } from './datasource-index/build.js'
@@ -710,7 +711,9 @@ const sessionSync = createSessionSync({ dir: join(PROJECT_DIR, 'sessions'), send
 // Programs: built here, kept by the platform, fetched from it when a session needs one this engine lacks.
 const programSeam = createProgramSeam({ projectDir: PROJECT_DIR, platform: KEY && PROJECT ? platformOf({ hub: HUB, project: PROJECT, key: KEY }) : null, send: (to, msg) => wire.send(to, msg) })
 const sessionSeam = createSessionSeam({ projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure })
-const graphSeam = createGraphSeam({ projectDir: PROJECT_DIR, send: (to, msg) => wire.send(to, msg) })
+// The composition graph is kept by the platform too: pushed after every change, rebuilt from it when this one is empty.
+const graphSync = createGraphSync({ file: graphFileOf(PROJECT_DIR), send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true }, log: (s) => console.warn(s) })
+const graphSeam = createGraphSeam({ projectDir: PROJECT_DIR, send: (to, msg) => { wire.send(to, msg); if (msg.t === 'graph:reply') graphSync.push() } })
 const appSeam = createAppSeam({ project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
 
 async function handle(payload: any, from: any) {
@@ -844,6 +847,7 @@ function connect() {
       console.log(`[ica] registered (${m.payload.wsId}) — running self-check…`)
       flushOutbox()   // re-registered → deliver anything queued while the socket was flapping (answers, logs)
       sessionSync.pushAll()   // and every session the platform does not have whole
+      graphSync.welcome()     // and the graph: pushed from where the platform's copy ends, or rebuilt from it
       // THE PROJECT'S PROFILE, delivered with the welcome. Adopted before warm-up builds any agent, so a box
       // starts on its own configuration rather than adopting it a few seconds late and rebuilding.
       if (m.payload.profile) receive(m.payload.profile, 'project profile')
@@ -873,6 +877,7 @@ function connect() {
       return
     }
     if (t === 'session:synced') { sessionSync.onSynced(m.payload); return }
+    if (t === 'graph:cursor' || t === 'graph:synced' || t === 'graph:batch') { graphSync.onMessage(m.payload); return }
     if (t === 'fenced')     { console.log('[ica] fenced — a newer engine holds this role (obsolete instance)'); return }
     if (t === 'superseded') { console.log('[ica] superseded by our own reconnection'); return }
     if (t === 'evicted')    { console.log('[ica] evicted — a newer connection took the role'); return }

@@ -209,3 +209,16 @@ export const USER_MIGRATIONS: Migration[] = [
     CREATE TABLE IF NOT EXISTS state (project TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, updated TEXT NOT NULL, PRIMARY KEY (project, key));
   ` },
 ]
+
+// ── GraphDO ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+export const GRAPH_MIGRATIONS: Migration[] = [
+  { id: 1, name: 'baseline', up: `
+    -- The graph's records as the engine keeps them (change, suggestion, decision), each by its number: append-only.
+    CREATE TABLE IF NOT EXISTS records (kind TEXT NOT NULL, key TEXT NOT NULL, at INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY (kind, key));
+    CREATE INDEX IF NOT EXISTS idx_records_at ON records(kind, at);
+    CREATE TABLE IF NOT EXISTS content (hash TEXT PRIMARY KEY, body TEXT NOT NULL);
+    CREATE TRIGGER IF NOT EXISTS records_no_update BEFORE UPDATE ON records BEGIN SELECT RAISE(ABORT, 'the graph''s records are append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS records_no_delete BEFORE DELETE ON records BEGIN SELECT RAISE(ABORT, 'the graph''s records are append-only'); END;
+  ` },
+]

@@ -437,6 +437,18 @@ export class ProjectDO extends DurableObject<Env> {
     // different facts, and they differ whenever a machine is asleep, unreachable, or mid-question.
     // ── A session's log, pushed up by the engine: the platform keeps the truth (SessionDO), the person's index
     //    of their sessions follows (UserDO), and the engine hears how far the platform has it. ──
+    // ── The composition graph's records, replicated up by the engine (GraphDO); where the platform's copy ends; and
+    //    batches back down to rebuild an engine whose graph is empty. ──
+    if ((msg.type === 'graph:sync' || msg.type === 'graph:cursor' || msg.type === 'graph:pull') && sender.type === 'code-engine') {
+      const stub = (this.env as any).GRAPH.get((this.env as any).GRAPH.idFromName(`graph:${this._pid}`))
+      const reply = (payload: Record<string, unknown>) => { try { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload })) } catch { /* gone */ } }
+      try {
+        if (msg.type === 'graph:cursor') reply({ t: 'graph:cursor', ...(await (await stub.fetch('http://do/cursor')).json() as object) })
+        else if (msg.type === 'graph:sync') reply({ t: 'graph:synced', ...(await (await stub.fetch('http://do/append', { method: 'POST', body: JSON.stringify(msg.batch ?? {}) })).json() as object) })
+        else { const c = msg.cursor ?? {}; reply({ t: 'graph:batch', batch: await (await stub.fetch(`http://do/pull?change=${Number(c.change) || 0}&suggestion=${Number(c.suggestion) || 0}&decisionAt=${Number(c.decisionAt) || 0}`)).json() }) }
+      } catch (e: any) { reply({ t: msg.type === 'graph:cursor' ? 'graph:cursor' : msg.type === 'graph:sync' ? 'graph:synced' : 'graph:batch', error: e?.message ?? String(e) }) }
+      return
+    }
     if (msg.type === 'session:sync' && sender.type === 'code-engine') {
       const reply = (payload: Record<string, unknown>) => { try { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'session:synced', session: msg.session, ...payload } })) } catch { /* gone */ } }
       try { reply(await this.syncSession(String(msg.session ?? ''), Number(msg.from), Array.isArray(msg.entries) ? msg.entries : [])) }

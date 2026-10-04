@@ -15,7 +15,8 @@
       { "class_name": "GlobalDO", "name": "GLOBAL" },
       { "class_name": "ChannelDO", "name": "CHANNEL" },
       { "class_name": "SessionDO", "name": "SESSION" },
-      { "class_name": "UserDO", "name": "USER" }
+      { "class_name": "UserDO", "name": "USER" },
+      { "class_name": "GraphDO", "name": "GRAPH" }
     ]
   },
   // Cloudflare's own record of which classes exist (not our SQLite migrations, which are in src/migrations.ts).
@@ -24,7 +25,8 @@
     { "tag": "v2", "new_sqlite_classes": ["ProjectDO"] },
     { "tag": "v3", "new_sqlite_classes": ["GlobalDO"] },
     { "tag": "v4", "new_sqlite_classes": ["ChannelDO"] },
-    { "tag": "v5", "new_sqlite_classes": ["SessionDO", "UserDO"] }
+    { "tag": "v5", "new_sqlite_classes": ["SessionDO", "UserDO"] },
+    { "tag": "v6", "new_sqlite_classes": ["GraphDO"] }
   ],
 
   "vars": {

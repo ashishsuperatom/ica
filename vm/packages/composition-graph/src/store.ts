@@ -69,6 +69,8 @@ CREATE TRIGGER IF NOT EXISTS suggestion_no_delete BEFORE DELETE ON suggestion BE
 CREATE TRIGGER IF NOT EXISTS decision_no_update BEFORE UPDATE ON decision BEGIN SELECT RAISE(ABORT, 'decisions are append-only'); END;
 CREATE TRIGGER IF NOT EXISTS decision_no_delete BEFORE DELETE ON decision BEGIN SELECT RAISE(ABORT, 'decisions are append-only'); END;
 ` },
+  // Each change records the owner it left the node with, so the graph can be rebuilt from its log alone (replica.ts).
+  { id: 5, name: 'owner on each change', up: (db) => { addColumnIfMissing(db, 'change', 'owner', 'TEXT') } },
 ]
 
 /** JSON with keys in a fixed order, so the same content always has the same hash. */
@@ -105,8 +107,8 @@ export class Store {
     try {
       this.db.prepare('INSERT OR IGNORE INTO content (hash, body, at) VALUES (?, ?, ?)').run(hash, canonical(body), now)
       this.db.prepare('INSERT INTO name (name, kind, hash, scope, owner) VALUES (?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET hash = excluded.hash, scope = excluded.scope, owner = excluded.owner').run(name, kind, hash, scope, owner)
-      this.db.prepare('INSERT INTO change (at, name, kind, from_hash, to_hash, by, reason, evidence, scope) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(now, name, kind, cur?.hash ?? null, hash, ctx.by, ctx.reason ?? null, ctx.from ?? null, scope)
+      this.db.prepare('INSERT INTO change (at, name, kind, from_hash, to_hash, by, reason, evidence, scope, owner) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(now, name, kind, cur?.hash ?? null, hash, ctx.by, ctx.reason ?? null, ctx.from ?? null, scope, owner)
       this.db.exec('RELEASE cg_write')
     } catch (e) { this.db.exec('ROLLBACK TO cg_write'); this.db.exec('RELEASE cg_write'); throw e }
     return { hash, changed: true }
