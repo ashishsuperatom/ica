@@ -189,3 +189,12 @@
 .sa-paths__offered { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .sa-sidebar__group + .sa-sidebar__group { margin-top: var(--sp-3); }
 .sa-sidebar__group-label { padding: 0 var(--sp-3) var(--sp-1); }
+
+/* ── Recording a decision from a step; the work in flight above the ask bar ─────────────────────── */
+.sa-step__decide { margin-top: var(--sp-2); }
+.sa-decide { display: flex; flex-direction: column; gap: var(--sp-1); max-width: 640px; padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-subtle); }
+.sa-decide .sa-label { margin-top: var(--sp-2); }
+.sa-decide__check { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); color: var(--muted); font-size: var(--t-sm); }
+.sa-decide__actions { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-3); }
+.sa-askbar__working { max-width: var(--askbar-w); margin: 0 auto var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); display: flex; flex-direction: column; gap: 2px; }
+.sa-work { min-height: 100%; }

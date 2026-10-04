@@ -11,8 +11,12 @@ const vm = (p: string) => fileURLToPath(new URL(`../../vm/packages/${p}`, import
 export default defineConfig(({ command }) => ({
   plugins: [react()],
   resolve: {
-    alias: { '@superatom/ui': vm('ui/src/index.ts'), '@superatom/platform-types': vm('platform-types/src/index.ts') },
-    dedupe: ['react', 'react-dom'],
+    alias: [
+      { find: '@superatom/ui/design.css', replacement: vm('ui/src/design/index.css') },
+      { find: /^@superatom\/ui$/, replacement: vm('ui/src/index.ts') },
+      { find: '@superatom/platform-types', replacement: vm('platform-types/src/index.ts') },
+    ],
+    dedupe: ['react', 'react-dom', '@iconify/react', 'echarts', 'echarts-for-react', 'marked'],
   },
   base: command === 'build' ? '/u/' : '/',
   define: command === 'build'

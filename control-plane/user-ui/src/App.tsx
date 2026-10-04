@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, memo } from 'react'
+import { useState, useEffect, useRef, useCallback, memo, lazy, Suspense } from 'react'
 import { sender, receiver } from '../../../clients/transport'
 import Sidebar, { T } from './Sidebar'
 import { parcelStore, apiOfHub } from '../../../clients/parcels'
@@ -18,6 +18,7 @@ import { useQuestionNav } from './questionNav'
 import { useLogNav } from './logNav'
 import { ANSI, COLS, ROWS } from './termColors'
 import { loadToken, mintToken, dropToken, claimReauthOnce, tokenValid } from '../../shared/session-token'
+const Workspace = lazy(() => import('./Workspace'))
 
 // Cloud mode: VITE_HUB_URL set (e.g. wss://superatom.site). The page is served at
 // /u behind the worker; it logs in via Clerk, exchanges for our JWT, and connects to
@@ -240,6 +241,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // history entry; popstate syncs it back. A lane segment is kept as typed: the view shows chat until that lane
   // is known (see `shownView`), so a hello arriving after the load still opens it.
   const readView = (): View => {
+    if (/^\/w(\/|$)/.test(location.pathname)) return `work:${location.pathname.replace(/^\/w\/?/, '').replace(/\/+$/, '')}`
     if (/^\/c\//.test(location.pathname)) return 'chat'
     if (location.pathname.replace(/\/+$/, '') === '/connections') return 'connections'
     if (location.pathname.replace(/\/+$/, '') === '/agents') return 'agents'
@@ -257,11 +259,15 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // A request to the platform or the engine, answered by the reply that carries its reqId (pages use this; the chat keeps
   // its own flow). Live messages any page may watch (activity) go to the same listeners.
   const waiting = useRef(new Map<string, (m: any) => void>())
+  // Frames that report progress on a request (an agent's narration while it answers) — they keep it waiting.
+  const progress = useRef(new Map<string, (m: any) => void>())
   const liveBus = useRef(new Set<(m: any) => void>())
-  const request = useCallback((payload: Record<string, unknown>) => new Promise<any>((resolve) => {
+  const request = useCallback((payload: Record<string, unknown>, onProgress?: (m: any) => void) => new Promise<any>((resolve) => {
     const reqId = `ui-${Math.random().toString(36).slice(2, 10)}`
-    waiting.current.set(reqId, resolve)
-    setTimeout(() => { if (waiting.current.delete(reqId)) resolve({ t: 'error', reason: 'no answer in time' }) }, 120_000)
+    waiting.current.set(reqId, (m) => { progress.current.delete(reqId); resolve(m) })
+    if (onProgress) progress.current.set(reqId, onProgress)
+    // Words take an agent minutes; a control or a read, seconds.
+    setTimeout(() => { if (waiting.current.delete(reqId)) { progress.current.delete(reqId); resolve({ t: 'error', reason: 'no answer in time' }) } }, payload.kind === 'language' ? 600_000 : 120_000)
     send({ ...payload, reqId })
   }), [])   // eslint-disable-line react-hooks/exhaustive-deps
   const subscribeLive = useCallback((fn: (m: any) => void) => { liveBus.current.add(fn); return () => { liveBus.current.delete(fn) } }, [])
@@ -270,7 +276,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [sideCollapsed, setSideCollapsed] = useState<boolean>(() => { try { return localStorage.getItem('sa-sidebar-collapsed') === '1' } catch { return false } })
   const setSideCollapsedSaved = useCallback((c: boolean) => { setSideCollapsed(c); try { localStorage.setItem('sa-sidebar-collapsed', c ? '1' : '0') } catch { /* storage blocked */ } }, [])
   const navigate = useCallback((v: View) => {
-    history.pushState(null, '', v === 'chat' ? `/c/${sidRef.current}${location.search}` : v.startsWith('agent:') ? `/s/${v.slice(6)}` : `/${v}`)
+    history.pushState(null, '', v === 'chat' ? `/c/${sidRef.current}${location.search}` : v.startsWith('work:') ? `/w${v.slice(5) ? `/${v.slice(5)}` : ''}` : v.startsWith('agent:') ? `/s/${v.slice(6)}` : `/${v}`)
     setView(v)
   }, [])
   useEffect(() => {
@@ -384,7 +390,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const consoleLane = laneNames.find(n => isConsoleLane(lanes[n])) ?? ''
   const consoleLaneRef = useRef(consoleLane); consoleLaneRef.current = consoleLane
   // What is on screen: chat, or a lane we know. An address naming a lane we do not know (yet) shows chat.
-  const shownView: View = view === 'chat' || lanes[view] || view.startsWith('agent:') || view === 'connections' || view === 'agents' || view === 'activity' ? view : 'chat'
+  const shownView: View = view === 'chat' || lanes[view] || view.startsWith('agent:') || view.startsWith('work:') || view === 'connections' || view === 'agents' || view === 'activity' ? view : 'chat'
   shownViewRef.current = shownView
   // Update one lane, creating a minimal entry (label = lane) when a frame precedes its hello, so nothing is dropped.
   const updateLane = (lane: string, fn: (l: LaneState) => LaneState) =>
@@ -529,6 +535,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
         if (!msg) return
         if (busyRef.current) armWatchdog()   // any message = engine alive → reset the watchdog
         if (msg.t === 'tick') return          // liveness ping only; nothing to render
+        if (msg.reqId && (msg.t === 'narration' || msg.t === 'app:said:part') && progress.current.has(msg.reqId)) { progress.current.get(msg.reqId)!(msg); return }
         if (msg.reqId && waiting.current.has(msg.reqId)) { const w = waiting.current.get(msg.reqId)!; waiting.current.delete(msg.reqId); w(msg); return }
         if (msg.t === 'activity') { for (const fn of liveBus.current) fn(msg) }
         if (typeof msg.t === 'string' && msg.t.startsWith('session:') && SESSION_REPLIES.has(msg.t)) {
@@ -1026,6 +1033,22 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
   for (const n of laneNames) if (lanes[n].hue) hues[n] = lanes[n].hue!
   const sessionTitle = sessions.find(se => se.id === sessionId)?.title || 'New chat'
 
+  // THE WORKSPACE (/w): the user UI on the platform's framework — sessions as steps, paths from here, artifacts. Loaded
+  // only when visited, with its own design system; everything else stays as it is and is reachable from its sidebar.
+  if (shownView.startsWith('work:')) return (
+    <Suspense fallback={<div style={{ padding: 24, color: '#7a746c' }}>Opening the workspace…</div>}>
+      <Workspace request={request} projectId={projectId} token={token} projectName={proj?.name || 'Superatom'} connected={connected}
+        agents={sessionAgents} path={shownView.slice(5)} go={(p) => navigate(`work:${p}`)}
+        extraNav={[
+          { key: 'chat', label: 'Chat', icon: 'lucide:message-square', onClick: () => navigate('chat') },
+          { key: 'agents', label: 'Manage agents', icon: 'lucide:bot', onClick: () => navigate('agents') },
+          { key: 'activity', label: 'Activity', icon: 'lucide:activity', onClick: () => navigate('activity') },
+          { key: 'connections', label: 'Connections', icon: 'lucide:plug', onClick: () => navigate('connections') },
+          ...laneNames.map((n) => ({ key: `lane:${n}`, label: lanes[n].label, icon: 'lucide:terminal', onClick: () => navigate(n) })),
+        ]} />
+    </Suspense>
+  )
+
   return (
     <div style={{ ...s.shell, ['--sa-side-w' as any]: `${sideCollapsed ? T.wCollapsed : T.w}px` }}>
       <Sidebar
@@ -1035,7 +1058,7 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
         chats={sessions.map(se => ({ key: se.id, label: se.title || 'New chat', active: view === 'chat' && se.id === sessionId, busy: turnBusy && se.id === sessionId,
           onClick: () => { navigate('chat'); openSession(se.id) } }))}
         connections={{ key: 'connections', label: 'Connections', active: shownView === 'connections', onClick: () => navigate('connections') }}
-        pages={[{ key: 'agents', label: 'Agents', active: shownView === 'agents', onClick: () => navigate('agents') }, { key: 'activity', label: 'Activity', active: shownView === 'activity', onClick: () => navigate('activity') }]}
+        pages={[{ key: 'work', label: 'Workspace (new)', active: false, onClick: () => navigate('work:') }, { key: 'agents', label: 'Agents', active: shownView === 'agents', onClick: () => navigate('agents') }, { key: 'activity', label: 'Activity', active: shownView === 'activity', onClick: () => navigate('activity') }]}
         sessionAgents={sessionAgents.map(a => ({ key: a.id, label: a.name, active: shownView === `agent:${a.id}`, onClick: () => navigate(`agent:${a.id}`) }))}
         agents={laneNames.map(n => ({ key: n, label: lanes[n].label, title: lanes[n].desc || lanes[n].label, active: shownView === n, hue: lanes[n].hue, onClick: () => navigate(n) }))}
         account={CLOUD ? <AccountSection /> : (
