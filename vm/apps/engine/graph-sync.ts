@@ -57,9 +57,10 @@ export function createGraphSync(o: { file: string; send: (msg: Record<string, un
       if (state === 'anchoring') {
         const l = local()
         if (!ahead(l, platform) && (l.change < platform.change || l.suggestion < platform.suggestion || l.decisionAt < platform.decisionAt)) { o.log?.('[graph-sync] this engine is behind the platform — catching up'); pull(l); return }
-        state = 'idle'; push(); return
+        o.log?.(`[graph-sync] in step with the platform (its copy up to change ${platform.change}, here ${l.change})`)
+        state = 'pushing'; push(); return
       }
-      platform = p.cursor; state = 'idle'; push()
+      platform = p.cursor; push()   // still 'pushing': the next batch, or the word that the platform has it all
     } else if (p.t === 'graph:batch') {
       const b = p.batch
       const known = (d: any) => !!open().db.prepare('SELECT 1 FROM decision WHERE suggestion = ?').get(d.suggestion)

@@ -31,6 +31,8 @@ what is built and what is next.
 - `program-seam.ts`: `program:build` (source → build → upload to the platform as the asker's draft); sessions fetch a
   program the store lacks from the platform (`platform.ts`, the project's key). `graph-seam.ts`: `graph:*` — the
   composition graph read and changed under its governance. `identity.ts`: who is asking, for every seam.
+- The composition graph is kept by the platform: `graph-sync.ts` anchors on every welcome, pushes what the platform
+  lacks, catches up or rebuilds from it, and stops on a diverged history.
 - First real program: Total Group `unsettled-trips` — completed trips not settled, by branch, with the balance left.
 
 ## Agents (`agents/`)

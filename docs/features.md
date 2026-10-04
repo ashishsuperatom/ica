@@ -49,6 +49,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Control-plane Worker with Org, Project, Global and Channel Durable Objects, serving the admin console and each project's user UI on superatom.site.
 - Sign-in through Clerk to our own tokens, plus browser-redirect PKCE login for mobile.
 - Sessions kept by the platform: a SessionDO per session holds its log (append-only, ordered, conflicts refused), the engine syncs every append and catches up on reconnect, and a person reads their sessions back without the engine.
+- The composition graph kept by the platform: every change, suggestion and decision replicated to a GraphDO, anchored on each reconnect (diverged histories refused, a lagging engine catches up), an empty engine rebuilt from it.
 - A UserDO per person: the index of their sessions across projects and their personal state.
 - Answer durability: the project's Durable Object buffers answers, and web and iOS pull the ones they missed.
 - Parcel transport: large bodies stored in R2 by hash with HMAC tickets.
@@ -84,7 +85,8 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - CLI extras: self-update, shell completion, OS keychain, `watch`, proxy support, standalone binaries.
 
 **Platform**
-- The state Durable Object (decision state), and platform → engine sync of domains and concepts.
+- The state Durable Object (decision state).
+- Changing knowledge on the platform with the engine offline (today every change goes through an engine and is replicated up).
 - The user DO's personalised view (what it keeps beyond sessions and personal state is still being decided).
 - Governance beyond the graph: hierarchical admins (program, group, global) and granting access.
 - Authorization and permissions enforced in one place.

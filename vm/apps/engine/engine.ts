@@ -65,7 +65,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 process.on('unhandledRejection', (r: any) => log.error('engine', 'unhandledRejection (kept alive)', r))
 process.on('uncaughtException',  (e: any) => log.error('engine', 'uncaughtException (kept alive)', e))
 
-const HUB = process.env.ICA_HUB || 'ws://localhost:5174'
+// The hub's ORIGIN (wss://<host>), whatever form ICA_HUB is given in — some homes carry the whole socket URL, key and
+// all; taking only the origin keeps the key out of every URL built from it and out of the log.
+const HUB = (() => { const raw = process.env.ICA_HUB || 'ws://localhost:5174'; try { const u = new URL(raw); return `${u.protocol}//${u.host}` } catch { return raw } })()
 const PROJECT = process.env.ICA_PROJECT || ''
 // THE PROJECT'S HOME. Everything that belongs to one project — and nothing of the platform — lives under ONE root,
 // outside the repository, keyed by the project id:
