@@ -111,6 +111,26 @@ type or meaning) and `get-schema` reads one level of it whole (every source; a s
 counts; a table's fields with type, key, nullability, references and description). Introspection stays in the system
 — building the index, connecting a source — but is not a tool of the ICA agents.
 
+### Data sources (being agreed, 2026-10-04)
+
+There may be any number of data sources, of kinds the engine has never seen. So **a data source is a module, not
+engine code**: each one exports its functions — `query`, `introspect` (its catalog, from which the system builds the
+datasource index), and the rest of its contract (`ready`, its kind and dialect, how to tell a passing failure). That is
+the shape bridges already have; what changes is that **nothing dialect-specific stays in the platform** (today's
+per-dialect helpers in `packages/introspect` move into the data sources of those kinds).
+
+- **Where it lives:** in the project (`datasources/<id>/`), registered and loaded dynamically by the datasource manager
+  — a new source is added by writing (or generating, with the connector agent) its module into the project; no engine
+  release.
+- **Reusable kinds:** a source of a kind seen before (SQL Server, SuiteQL, Postgres, a REST API…) starts from a shared
+  module of that kind, instantiated with the project's configuration and credentials. **OPEN:** whether shared kinds
+  are programs in the platform (global scope, by hash, like other programs) and how a project picks one up.
+- **For agents:** a source is read only through the datasource index (`find-schema`, `get-schema`) and `query`;
+  introspection is the system's, not an agent tool.
+
+**Naming convention (system-wide): `find` searches, `get` fetches one thing whole.** `find-schema` / `get-schema` are
+the first pair; every new pair follows it.
+
 ### Agent
 
 ```jsonc
