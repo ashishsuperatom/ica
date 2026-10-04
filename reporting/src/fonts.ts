@@ -1,5 +1,5 @@
 // ── Fonts, bundled into the Worker ───────────────────────────────────────────
-// Inter 400/600/700 as `Data` modules (see wrangler.toml `rules`), so they arrive
+// Inter 400/600/700 as `Data` modules (see wrangler.jsonc `rules`), so they arrive
 // as ArrayBuffers with no fetch at request time.
 //
 // ~960KB total. That is fine bundled, but it is the first thing to move to R2 if

@@ -1,4 +1,4 @@
-// Binary modules bundled by Wrangler (see wrangler.toml `rules`).
+// Binary modules bundled by Wrangler (see wrangler.jsonc `rules`).
 declare module '*.ttf' {
   const data: ArrayBuffer
   export default data
