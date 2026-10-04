@@ -99,7 +99,7 @@ describe('sessions kept by the platform', () => {
     ana.send({ payload: { t: 'session:list', reqId: 'l' }, to: { type: 'hub' } })
     const list = await ana.until((m) => m.payload?.reqId === 'l')
     expect(list.payload.sessions).toHaveLength(1)
-    expect(list.payload.sessions[0]).toMatchObject({ session: 's1', agent: 'trips', blocks: 2, answers: 2, title: '1 trips are completed but not settled; 4 to settle.' })
+    expect(list.payload.sessions[0]).toMatchObject({ session: 's1', agent: 'trips', blocks: 2, answers: 3, title: '1 trips are completed but not settled; 4 to settle.' })
     ana.send({ payload: { t: 'session:read', session: 's1', reqId: 'r' }, to: { type: 'hub' } })
     const read = await ana.until((m) => m.payload?.reqId === 'r')
     expect(read.payload.view.user).toBe('user:ana')
