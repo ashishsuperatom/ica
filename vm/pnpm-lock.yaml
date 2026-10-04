@@ -150,6 +150,15 @@ importers:
 
   packages/project-template: {}
 
+  packages/session:
+    dependencies:
+      '@superatom/platform-types':
+        specifier: workspace:*
+        version: link:../platform-types
+      '@superatom/state':
+        specifier: workspace:*
+        version: link:../state
+
   packages/state:
     dependencies:
       '@superatom/platform-types':

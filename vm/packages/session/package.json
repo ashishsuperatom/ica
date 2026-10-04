@@ -1,0 +1,17 @@
+{
+  "name": "@superatom/session",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "A session: one user's thread of blocks (a tree), the last block's STATE and the answer history — every intent applied through the STATE engine and recorded in an append-only log that can be read as of any moment.",
+  "scripts": {
+    "test": "tsx --test test/*.test.mts"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@superatom/platform-types": "workspace:*",
+    "@superatom/state": "workspace:*"
+  }
+}

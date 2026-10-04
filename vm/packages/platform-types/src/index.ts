@@ -96,6 +96,12 @@ export interface Intent {
   to: Destination
   /** An action a package suggested, when the intent is one. */
   action?: { package: string; id: string }
+  /** A package function called with parameters (run is the default). */
+  call?: { package: string; fn: string; params?: Record<string, unknown> }
+  /** The block it was sent from; left out, the session's current block. An earlier block branches. */
+  block?: string
+  /** A language intent's outcome, from the ICA: the STATE change it read from the words, and its answer. */
+  result?: { ops?: Op[]; markdown?: string; files?: string[] }
   by: string
   at: string
 }
@@ -116,11 +122,20 @@ export function checkIntent(v: unknown): Problems {
   for (const k of ['id', 'session', 'by', 'at']) if (typeof o[k] !== 'string' || !o[k]) out.push(`intent.${k} is required`)
   if (o.kind !== 'structured' && o.kind !== 'language') out.push('intent.kind must be structured or language')
   if (o.to !== 'new' && o.to !== 'current') out.push('intent.to must be new or current')
-  if (o.kind === 'structured') {
-    if (!Array.isArray(o.ops) || !o.ops.length) out.push('a structured intent carries its ops')
+  if (o.kind === 'structured' && !(Array.isArray(o.ops) && o.ops.length) && !o.action && !o.call) out.push('a structured intent carries ops, an action or a call')
+  if (o.ops !== undefined) {
+    if (!Array.isArray(o.ops)) out.push('intent.ops must be a list')
     else o.ops.forEach((op, i) => out.push(...checkOp(op, `intent.ops[${i}]`)))
   }
-  if (o.kind === 'language' && (typeof o.text !== 'string' || !o.text.trim())) out.push('a language intent carries its text')
+  const a = o.action as Record<string, unknown> | undefined
+  if (a !== undefined && (typeof a?.package !== 'string' || typeof a?.id !== 'string')) out.push('intent.action names its package and id')
+  const c = o.call as Record<string, unknown> | undefined
+  if (c !== undefined && (typeof c?.package !== 'string' || typeof c?.fn !== 'string')) out.push('intent.call names its package and fn')
+  if (o.kind === 'language') {
+    if (typeof o.text !== 'string' || !o.text.trim()) out.push('a language intent carries its text')
+    const r = o.result as Record<string, unknown> | undefined
+    if (r?.ops !== undefined) (Array.isArray(r.ops) ? r.ops : [null]).forEach((op, i) => out.push(...checkOp(op, `intent.result.ops[${i}]`)))
+  }
   return out
 }
 
@@ -265,7 +280,7 @@ export interface Session {
   /** The last block's STATE. */
   state: State
   /** The blocks, a tree: changing an earlier block branches from it. */
-  blocks: { id: string; parent: string | null; answer: string | null }[]
+  blocks: { id: string; parent: string | null; answer: string | null; stateHash: string }[]
   /** The active leaf. */
   leaf: string
   created: string

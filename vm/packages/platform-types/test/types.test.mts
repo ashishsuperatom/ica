@@ -41,6 +41,10 @@ test('ops and intents', () => {
   assert.deepEqual(checkIntent(intent), [])
   assert.deepEqual(checkIntent({ ...intent, kind: 'language', ops: undefined }), ['a language intent carries its text'])
   assert.deepEqual(checkIntent({ ...intent, to: 'here' }), ['intent.to must be new or current'])
+  assert.deepEqual(checkIntent({ ...intent, ops: undefined }), ['a structured intent carries ops, an action or a call'])
+  assert.deepEqual(checkIntent({ ...intent, ops: undefined, call: { package: 'trips', fn: 'run' }, block: 'b2' }), [])
+  assert.deepEqual(checkIntent({ ...intent, ops: undefined, action: { package: 'trips' } }), ['intent.action names its package and id'])
+  assert.deepEqual(checkIntent({ ...intent, kind: 'language', text: 'only Pune', ops: undefined, result: { ops: [{ op: 'set', path: 'branch', value: 'PUNE' }] } }), ['intent.result.ops[0].path must be <slice>.<field>, not "branch"'])
 })
 
 test('a package', () => {
