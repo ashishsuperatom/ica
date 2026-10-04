@@ -182,3 +182,17 @@ test('an agent made from a session: forked with its lineage, on a domain of its 
   assert.deepEqual(g.get('hyderabad-trips-domain')!.body.concepts, ['hyderabad-trips-learned'])
   assert.deepEqual(g.get('hyderabad-trips-learned')!.body.items, [{ question: 'what about hyderabad?', steps: ['ran trips.run'] }])
 })
+
+test('a question from home, no agent picked: no domain\'s words reach it, so the default agent opens a session and answers, from whichever domain the words reach', async () => {
+  const out: any[] = []
+  const told: any[] = []
+  const s0 = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), ask: async (o) => { told.push(o); return { markdown: 'Nothing fits better; here is what I know.', blocks: [] } } })
+  const ask = async (payload: any) => { await s0.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u5', scopes: ['user:u5'] }); return out.at(-1) }
+  assert.match((await ask({ t: 'session:start', session: 'h0', text: 'anything at all?' })).reason, /no default agent/)
+  writeFileSync(join(home, 'agents', 'helper.json'), JSON.stringify({ id: 'helper', name: 'Ask anything', scope: 'global', owner: 'user:builder', domain: 'd', programs: [], tools: [], ui: { start: '' }, ica: 'composer', isDefault: true }))
+  const r = await ask({ t: 'session:start', session: 'h1', text: 'anything at all?' })
+  assert.deepEqual(r.routed, { agent: 'helper', name: 'Ask anything', how: 'default' })
+  assert.equal(told[0].domain, null)
+  assert.equal(r.result.answer.markdown, 'Nothing fits better; here is what I know.')
+  assert.equal(r.view.agent, 'helper')
+})

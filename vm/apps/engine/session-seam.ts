@@ -23,7 +23,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
-import { placeForRunning } from './knowledge.js'
+import { placeForRunning, pick } from './knowledge.js'
 import { checkAgent, type AgentSpec, type Intent } from '@superatom/platform-types'
 import { ProgramStore, ProgramError, loadPackage } from '@superatom/programs'
 import { createStateEngine, StateRefusal, type StateEngine } from '@superatom/state'
@@ -49,7 +49,7 @@ export interface SessionSeamDeps {
   /** The reader's data access policies for a source (access.ts); without it, reads carry none. */
   access?: { policiesFor(who: Who, source: string): Promise<unknown[]> }
   /** Words answered by the session's agent (the composer on the agent's domain); without it, a session takes only controls. */
-  ask?: (o: { session: string; text: string; context: string; domain: string; from: any; reqId?: string }) => Promise<{ markdown: string | null; blocks: unknown[] }>
+  ask?: (o: { session: string; text: string; context: string; domain: string | null; from: any; reqId?: string }) => Promise<{ markdown: string | null; blocks: unknown[] }>
 }
 
 /** What the agent is told about the step it is answering from, and how its answer may change it. */
@@ -79,7 +79,7 @@ const pathOfView = (v: SessionView, block: string) => { const out: string[] = []
 const describe = (i: Intent) => i.call ? `ran ${i.call.package}.${i.call.fn}` : i.action ? `took ${i.action.package} · ${i.action.id}` : (i.ops ?? []).map((o: any) => `${o.op} ${o.path}${'value' in o ? ` = ${JSON.stringify(o.value)}` : ''}`).join(', ') || 'a change'
 
 /** The messages this seam takes (session:new, session:load and session:compact are the chat's). */
-export const SESSION_MESSAGES = new Set(['session:agents', 'session:open', 'session:intent', 'session:goto', 'session:get', 'session:file', 'session:fork'])
+export const SESSION_MESSAGES = new Set(['session:agents', 'session:open', 'session:intent', 'session:goto', 'session:get', 'session:file', 'session:fork', 'session:start'])
 
 export function createSessionSeam(d: SessionSeamDeps) {
   const agentsDir = join(d.projectDir, 'agents')
@@ -218,6 +218,46 @@ export function createSessionSeam(d: SessionSeamDeps) {
     return readFileSync(file, 'utf8')
   }
 
+  /** Words in a session: the agent is told the step and its programs, answers, and its :::intent line is applied. */
+  async function answerWords(view: SessionView, session: string, words: string, block: string | null, from: any, user: string, reqId?: string) {
+    if (!d.ask) throw new SessionSeamRefusal('this engine answers no words in sessions')
+    const text = words.trim()
+    if (!text) throw new SessionSeamRefusal('a question in words has words')
+    const who = whoIs(from)
+    const { sessions: rtSessions, packages, spec } = await runtimeFor(view.agent, view.state.packages)
+    const at = block ?? view.leaf
+    const state = view.states[at]
+    if (!state) throw new SessionSeamRefusal(`session ${session} has no block ${at}`)
+    const shown = view.blocks.find((b) => b.id === at)?.answer
+    const answerNow = shown ? view.answers.find((a) => a.id === shown)?.markdown ?? '' : ''
+    const docs = packages.map((p) => `## ${p.name}\n${(() => { try { return store.doc(p.hash) } catch { return '(no doc)' } })()}`).join('\n\n')
+    const context = [`The step's STATE:\n${JSON.stringify(state)}`, answerNow ? `What the step shows now:\n${answerNow}` : '', INTENT_CONTRACT, docs ? `The programs:\n${docs}` : ''].filter(Boolean).join('\n\n')
+    // The default agent answers from whichever domain the words reach; any other agent from its own.
+    const said = await asReader(who, () => d.ask!({ session, text, context, domain: spec.isDefault ? null : spec.domain, from, reqId }))
+    const { markdown, intent: asked, problem } = intentOf(said.markdown ?? '')
+    const blocks: Record<string, Record<string, unknown>> = {}
+    for (const b of (said.blocks ?? []) as any[]) if (b?.marker && b.block && typeof b.block === 'object') blocks[String(b.marker).trim()] = b.block
+    const li: Intent = {
+      id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'language', text,
+      result: { markdown: [markdown || (said.markdown ? '' : 'No answer came back.'), problem].filter(Boolean).join('\n\n'), files: [], ...(asked?.ops ? { ops: asked.ops } : {}), ...(Object.keys(blocks).length ? { blocks } : {}) } as any,
+      ...(asked?.call ? { call: asked.call } : {}), ...(asked?.action ? { action: asked.action } : {}),
+      to: asked?.to ?? (asked && !asked.call && !asked.action ? 'current' : 'new'), block: at, by: user, at: new Date().toISOString(),
+    }
+    return asReader(who, () => rtSessions.intent(li))
+  }
+
+  /** The agent a question goes to when none was picked: the one whose domain its words reach, else the default agent. */
+  async function agentFor(text: string, visible: (scope: string) => boolean): Promise<{ agent: AgentSpec; how: 'routed' | 'default' }> {
+    const mine = [...graphAgents(), ...agents().map((a) => { try { return readAgent(a.id) } catch { return null } }).filter((a): a is AgentSpec => !!a)].filter((a, i, all) => visible(a.scope) && all.findIndex((x) => x.id === a.id) === i)
+    const picked = await pick(d.projectDir, text).catch(() => null)
+    const reached = picked?.route?.domain ?? null
+    const routed = reached ? mine.find((a) => !a.isDefault && a.domain === reached) : undefined
+    if (routed) return { agent: routed, how: 'routed' }
+    const fallback = mine.find((a) => a.isDefault)
+    if (fallback) return { agent: fallback, how: 'default' }
+    throw new SessionSeamRefusal('no agent fits this question and this project has no default agent — an administrator marks one')
+  }
+
   async function handle(payload: any, from: any): Promise<void> {
     const t = String(payload.t)
     const reply = (msg: Record<string, unknown>) => d.send(from, { ...msg, reqId: payload.reqId })
@@ -235,6 +275,14 @@ export function createSessionSeam(d: SessionSeamDeps) {
         // An agent opens on its starting screen: its programs run, as a dashboard opens with its data (unless asked not to).
         const run = payload.run === false ? [] : packages.map((p) => p.name)
         return reply(await present(await asReader(whoIs(from), () => sessions.openAndRun({ session, user, agent: spec.id, start: spec.start, run }))))
+      }
+      // A question from home, with no agent picked: the agent its words reach (else the default one) opens a session on it.
+      if (t === 'session:start') {
+        const { agent, how } = await agentFor(String(payload.text ?? ''), visible)
+        const { sessions: rt, packages } = await runtimeFor(agent.id)
+        const opened = await asReader(whoIs(from), () => rt.openAndRun({ session, user, agent: agent.id, start: agent.start, run: packages.map((p) => p.name) }))
+        const r = await answerWords(opened, session, String(payload.text ?? ''), null, from, user, payload.reqId)
+        return reply(await present(r.session, { routed: { agent: agent.id, name: agent.name, how }, result: { block: r.block, opened: r.opened, answer: r.answer } }))
       }
       if (t === 'session:get') {
         const v = replay(log.read(session), payload.asOf ? String(payload.asOf) : undefined)
@@ -278,28 +326,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       if (t === 'session:intent') {
         const who = whoIs(from)
         if (payload.kind === 'language') {
-          if (!d.ask) throw new SessionSeamRefusal('this engine answers no words in sessions')
-          const text = String(payload.text ?? '').trim()
-          if (!text) throw new SessionSeamRefusal('a question in words has words')
-          const { sessions: rtSessions, packages, spec } = await runtimeFor(view.agent, view.state.packages)
-          const from = payload.block ? String(payload.block) : view.leaf
-          const state = view.states[from]
-          if (!state) throw new SessionSeamRefusal(`session ${session} has no block ${from}`)
-          const shown = view.blocks.find((b) => b.id === from)?.answer
-          const answerNow = shown ? view.answers.find((a) => a.id === shown)?.markdown ?? '' : ''
-          const docs = packages.map((p) => `## ${p.name}\n${(() => { try { return store.doc(p.hash) } catch { return '(no doc)' } })()}`).join('\n\n')
-          const context = [`The step's STATE:\n${JSON.stringify(state)}`, answerNow ? `What the step shows now:\n${answerNow}` : '', INTENT_CONTRACT, docs ? `The programs:\n${docs}` : ''].filter(Boolean).join('\n\n')
-          const said = await asReader(who, () => d.ask!({ session, text, context, domain: spec.domain, from, reqId: payload.reqId }))
-          const { markdown, intent: asked, problem } = intentOf(said.markdown ?? '')
-          const blocks: Record<string, Record<string, unknown>> = {}
-          for (const b of (said.blocks ?? []) as any[]) if (b?.marker && b.block && typeof b.block === 'object') blocks[String(b.marker).trim()] = b.block
-          const li: Intent = {
-            id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'language', text,
-            result: { markdown: [markdown || (said.markdown ? '' : 'No answer came back.'), problem].filter(Boolean).join('\n\n'), files: [], ...(asked?.ops ? { ops: asked.ops } : {}), ...(Object.keys(blocks).length ? { blocks } : {}) } as any,
-            ...(asked?.call ? { call: asked.call } : {}), ...(asked?.action ? { action: asked.action } : {}),
-            to: asked?.to ?? (asked && !asked.call && !asked.action ? 'current' : 'new'), block: from, by: user, at: new Date().toISOString(),
-          }
-          const r = await asReader(who, () => rtSessions.intent(li))
+          const r = await answerWords(view, session, String(payload.text ?? ''), payload.block ? String(payload.block) : null, from, user, payload.reqId)
           return reply(await present(r.session, { result: { block: r.block, opened: r.opened, answer: r.answer, ...(r.stale ? { stale: true } : {}) } }))
         }
         const intent: Intent = {
