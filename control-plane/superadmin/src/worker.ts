@@ -308,6 +308,8 @@ export default {
       if (subPath === 'debug') return new Response('not found', { status: 404 })
       // `access/arrive` is the worker's own question to the DO (a verified domain on first sign-in), never a public call.
       if (subPath.startsWith('access/arrive')) return new Response('not found', { status: 404 })
+      // Usage is recorded by the model proxy, never posted from outside.
+      if (subPath === 'usage' && request.method !== 'GET') return new Response('not found', { status: 404 })
       // The agent profile is the platform's to set: only a superadmin reads or writes it. (A later block meant to
       // enforce this was never reached, because this branch forwards every sub-path first.)
       if (subPath === 'profile' && acc.level !== 'superadmin') return new Response('forbidden', { status: 403 })
@@ -489,6 +491,14 @@ export default {
     //
     // Here rather than in the engine image so that adding or removing a model is an edit, not a rebuild and a
     // roll of every box.
+    // The platform's price list (metering.ts): every version kept with who set it.
+    if (path === '/api/prices') {
+      if (!(await requireSuperadmin(request, env))) return new Response('unauthorized', { status: 401 })
+      const g = env.GLOBAL.get(env.GLOBAL.idFromName('global'))
+      if (request.method === 'GET') return g.fetch(new Request('http://do/prices'))
+      if (request.method === 'PUT') { const c = await claimsOf(request, env); return g.fetch(new Request('http://do/prices', { method: 'PUT', body: JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by: c?.email ?? 'superadmin' }) })) }
+      return Response.json({ error: 'use GET or PUT' }, { status: 405 })
+    }
     if (path === '/api/catalogue') {
       if (!(await requireSuperadmin(request, env))) return new Response('unauthorized', { status: 401 })
       const g = env.GLOBAL.get(env.GLOBAL.idFromName('global'))
@@ -658,6 +668,15 @@ export default {
       const oa = await orgAccessOf(request, env, orgId)
       if (!oa.ok) return new Response('unauthorized', { status: 401 })
       if (request.method !== 'GET' && oa.level === 'member') return new Response('forbidden', { status: 403 })
+      // Credits are granted by the platform alone (an organisation granting itself credits would be free money), and
+      // usage is posted only by its own projects' DOs.
+      if (path === '/api/credits/usage') return new Response('not found', { status: 404 })
+      if (path === '/api/credits/grant') {
+        const su = await requireSuperadmin(request, env)
+        if (!su) return new Response('only the platform grants credits', { status: 403 })
+        const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by: su.email ?? su.userId })
+        return env.ORG.get(env.ORG.idFromName(orgId)).fetch(new Request('https://do/credits/grant', { method: 'POST', headers: { 'content-type': 'application/json' }, body }))
+      }
       const doUrl = request.url.replace(/^(https?:\/\/[^/]+)\/api/, '$1')
       let doReq: Request
       if (request.method === 'GET' || request.method === 'HEAD') {

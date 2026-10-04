@@ -10,6 +10,7 @@
 import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
 import { GLOBAL_MIGRATIONS } from './migrations.js'
 import { DurableObject } from 'cloudflare:workers'
+import { checkPrices } from './metering.js'
 import { LoginCodeStore } from './auth/login-code-store.js'
 
 // ── THE CATALOGUE WE SHIP WITH ─────────────────────────────────────────────────────────────────────────────
@@ -129,6 +130,18 @@ export class GlobalDO extends DurableObject<Env> {
 
     // Domains (*.superatom.site subdomain → projectId)
     // The model catalogue: read by ProjectDO when it composes a profile, written from superadmin.
+    if (request.method === 'GET' && path === '/prices') {
+      const [row] = [...this.ctx.storage.sql.exec('SELECT json, by, at, seq FROM price_list ORDER BY seq DESC LIMIT 1')] as any[]
+      return Response.json(row ? { prices: JSON.parse(row.json), by: row.by, at: row.at, version: row.seq } : { prices: [], version: 0 })
+    }
+    if (request.method === 'PUT' && path === '/prices') {
+      const b = await request.json().catch(() => ({})) as any
+      const bad = checkPrices(b?.prices)
+      if (bad.length) return Response.json({ error: bad.join('; ') }, { status: 400 })
+      if (!b?.by) return Response.json({ error: 'who is setting the prices?' }, { status: 400 })
+      this.ctx.storage.sql.exec('INSERT INTO price_list (json, by, at) VALUES (?, ?, ?)', JSON.stringify(b.prices), String(b.by), new Date().toISOString())
+      return Response.json({ ok: true, prices: b.prices.length })
+    }
     if (request.method === 'GET' && path === '/catalogue') return this.getCatalogue()
     if (request.method === 'PUT' && path === '/catalogue') return this.putCatalogue(request)
 

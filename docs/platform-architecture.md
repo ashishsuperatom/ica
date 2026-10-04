@@ -413,6 +413,19 @@ the platform is for that one engine when its machine is replaced (a new box, a l
 *To agree:* the earlier design kept unpublished programs in the user's DO; drafts are in the project's catalogue instead
 (one place to check, publish and audit), with the owner on every row. The user DO can list a person's drafts from it.
 
+### Usage, credits and payment (built 2026-10-05, payment planned)
+
+- **Metered where it happens:** the model proxy reads every call's tokens (streamed or not) and the project's DO keeps
+  each as a usage event, append-only, priced at that moment.
+- **Prices are data:** the platform's price list (credits per million tokens, per provider and model, `*` for a
+  provider's other models) lives in the GlobalDO, every version kept with who set it; a superadmin edits it. A call
+  with no price is recorded at no cost and counted as unpriced, so the gap shows.
+- **Credits per organisation:** an append-only ledger in its OrgDO — grants (+, by the platform only) and its projects'
+  usage (−), in integer micro-credits. An organisation never given credits is not on a plan and is not limited; one
+  that has used them all is refused new questions and session intents with a sentence, recorded in the audit history.
+- *Planned:* payment (a checkout that adds credits), invoices, per-plan limits, and metering beyond model tokens
+  (engine time, queries).
+
 ### Decision state
 
 Not the session's STATE: the core of decision intelligence, to be expanded later. For now:

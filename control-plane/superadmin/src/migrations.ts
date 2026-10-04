@@ -147,6 +147,15 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     -- federated through Clerk) gets this role on first arrival — recorded as an access row with source 'domain'.
     CREATE TABLE IF NOT EXISTS access_domains (domain TEXT PRIMARY KEY, role_id TEXT NOT NULL, added_by TEXT NOT NULL, added_at TEXT NOT NULL);
   ` },
+  { id: 19, name: 'usage events', up: `
+    -- Every metered use (metering.ts), append-only: a model call's tokens, priced when recorded (micro-credits).
+    CREATE TABLE IF NOT EXISTS usage_events (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, kind TEXT NOT NULL, provider TEXT, model TEXT, key_id TEXT,
+      tokens_in INTEGER NOT NULL DEFAULT 0, tokens_out INTEGER NOT NULL DEFAULT 0, ms INTEGER, credits_micro INTEGER NOT NULL, priced INTEGER NOT NULL);
+    CREATE INDEX IF NOT EXISTS idx_usage_at ON usage_events(at);
+    CREATE TRIGGER IF NOT EXISTS usage_no_update BEFORE UPDATE ON usage_events BEGIN SELECT RAISE(ABORT, 'usage is append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS usage_no_delete BEFORE DELETE ON usage_events BEGIN SELECT RAISE(ABORT, 'usage is append-only'); END;
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */
@@ -177,6 +186,14 @@ export const ORG_MIGRATIONS: Migration[] = [
     `)
     addColumnIfMissing(db, 'projects', 'deleted', 'INTEGER NOT NULL DEFAULT 0')
   } },
+  { id: 2, name: 'credit ledger', up: `
+    -- The organisation's credits (metering.ts), append-only: grants (+) and its projects' usage (−), in micro-credits.
+    CREATE TABLE IF NOT EXISTS credit_ledger (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('grant', 'usage')),
+      amount_micro INTEGER NOT NULL, project TEXT, note TEXT, by TEXT NOT NULL);
+    CREATE TRIGGER IF NOT EXISTS credit_no_update BEFORE UPDATE ON credit_ledger BEGIN SELECT RAISE(ABORT, 'the credit ledger is append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS credit_no_delete BEFORE DELETE ON credit_ledger BEGIN SELECT RAISE(ABORT, 'the credit ledger is append-only'); END;
+  ` },
 ]
 
 // ── GlobalDO ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -204,6 +221,10 @@ export const GLOBAL_MIGRATIONS: Migration[] = [
     `)
     addColumnIfMissing(db, 'organizations', 'deleted', 'INTEGER NOT NULL DEFAULT 0')
   } },
+  { id: 2, name: 'price list versions', up: `
+    -- The platform's price list (metering.ts): every version kept, with who set it; the newest is in force.
+    CREATE TABLE IF NOT EXISTS price_list (seq INTEGER PRIMARY KEY AUTOINCREMENT, json TEXT NOT NULL, by TEXT NOT NULL, at TEXT NOT NULL);
+  ` },
 ]
 
 // ── SessionDO and UserDO ─────────────────────────────────────────────────────────────────────────────────────────────

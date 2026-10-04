@@ -135,9 +135,13 @@ function usageFrom(obj: any): { in: number; out: number } | null {
 /** Record what a call cost. Deliberately fire-and-forget through ctx.waitUntil: metering must never be able to
  *  slow down or fail a model request — a proxy that breaks inference to write a counter is worse than no
  *  counter. Storage is the next decision (D1 / ProjectDO); the call site is already correct. */
-function meter(ctx: ExecutionContext, rec: { project: string; provider: string; keyId?: string | null; model?: string; in: number; out: number; ms: number }) {
+function meter(ctx: ExecutionContext, rec: { project: string; provider: string; keyId?: string | null; model?: string; in: number; out: number; ms: number }, env?: ProxyEnv) {
   // The credential id is in the line because 'which key paid for this' is the question a bill raises.
   console.log(`[proxy] ${rec.project} ${rec.provider}${rec.keyId ? '/' + rec.keyId : ''} ${rec.model ?? '?'} in=${rec.in} out=${rec.out} ${rec.ms}ms`)
+  if (!env?.PROJECT || !/^[0-9a-f-]{36}$/.test(rec.project)) return
+  // Kept by the project's DO (append-only, priced, debited from the organisation's credits) — never in the response path.
+  ctx.waitUntil(env.PROJECT.get(env.PROJECT.idFromName(`proj:${rec.project}`)).fetch(new Request('http://do/usage', { method: 'POST', headers: { 'x-sa-project': rec.project }, body: JSON.stringify(rec) })).catch(() => {}))
+  try { (env as any).METRICS?.writeDataPoint({ indexes: [rec.project], blobs: ['model.tokens', rec.provider, rec.model ?? ''], doubles: [rec.in, rec.out, rec.ms] }) } catch { /* best effort */ }
 }
 
 /** Pass the body through untouched while watching it go by, so usage can be read from a STREAM without
@@ -398,7 +402,7 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
   const streaming = (res.headers.get('content-type') || '').includes('event-stream')
   if (streaming) {
     return new Response(teeForUsage(res.body, (u) => {
-      meter(ctx, { ...rec, ms: Date.now() - t0, in: u?.in ?? 0, out: u?.out ?? 0 })
+      meter(ctx, { ...rec, ms: Date.now() - t0, in: u?.in ?? 0, out: u?.out ?? 0 }, env)
     }), { status: res.status, headers: res.headers })
   }
 
@@ -406,7 +410,7 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
   ctx.waitUntil((async () => {
     try {
       const u = usageFrom(await new Response(b).json())
-      meter(ctx, { ...rec, ms: Date.now() - t0, in: u?.in ?? 0, out: u?.out ?? 0 })
+      meter(ctx, { ...rec, ms: Date.now() - t0, in: u?.in ?? 0, out: u?.out ?? 0 }, env)
     } catch { /* a body we cannot read is not a reason to disturb the response */ }
   })())
   return new Response(a, { status: res.status, headers: res.headers })

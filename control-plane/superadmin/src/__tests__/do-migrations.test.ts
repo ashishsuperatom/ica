@@ -7,12 +7,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { fileURLToPath } from 'node:url'
-import { PROJECT_MIGRATIONS } from '../migrations'
+import { PROJECT_MIGRATIONS, ORG_MIGRATIONS, GLOBAL_MIGRATIONS } from '../migrations'
 
 // The ProjectDO's migrations, read from the list itself, so adding one does not mean editing every expectation.
 const ALL = PROJECT_MIGRATIONS.map((m) => m.id)
 const LAST = ALL[ALL.length - 1]
 const from = (n: number) => ALL.filter((id) => id > n)
+const ids = (list: { id: number }[]) => list.map((m) => m.id)
 
 const here = fileURLToPath(new URL('.', import.meta.url))
 
@@ -102,15 +103,15 @@ describe('Durable Object migrations, in real DO SQLite', () => {
 
   it('an OrgDO from before the deleted column is adopted: the column added, its rows kept', async () => {
     await ask({ do: 'org-old', step: 'legacy-org' })
-    expect(await ask({ do: 'org-old', step: 'migrate', kind: 'org' })).toEqual({ applied: [1], current: 1 })
+    expect(await ask({ do: 'org-old', step: 'migrate', kind: 'org' })).toEqual({ applied: ids(ORG_MIGRATIONS), current: ids(ORG_MIGRATIONS).at(-1) })
     const look = await ask({ do: 'org-old', step: 'look' })
     expect(look.projectCols).toContain('deleted')
     expect(look.kept).toEqual(['kept'])
   })
 
   it('a new GlobalDO gets its tables, the login codes among them', async () => {
-    expect(await ask({ do: 'global', step: 'migrate', kind: 'global' })).toEqual({ applied: [1], current: 1 })
+    expect(await ask({ do: 'global', step: 'migrate', kind: 'global' })).toEqual({ applied: ids(GLOBAL_MIGRATIONS), current: ids(GLOBAL_MIGRATIONS).at(-1) })
     const look = await ask({ do: 'global', step: 'look' })
-    for (const t of ['superatom_users', 'organizations', 'domains', 'model_catalogue', 'mobile_login_code']) expect(look.tables).toContain(t)
+    for (const t of ['superatom_users', 'organizations', 'domains', 'model_catalogue', 'mobile_login_code', 'price_list']) expect(look.tables).toContain(t)
   })
 })

@@ -29,6 +29,7 @@ import { AgentKeys, KeyRefusal } from './agent-keys.js'
 import { scopeAllows, HUB_MESSAGES } from '../../shared/agent-scopes.js'
 import { ProgramCatalogue, CatalogueRefusal } from './program-catalogue.js'
 import { checkPolicy, resolve as resolvePolicies, type AccessPolicy } from './access-policies.js'
+import { costOf, priceFor, type Price } from './metering.js'
 
 
 // How long a question queued for a sleeping machine is still worth waking up for. Past this the person has
@@ -292,6 +293,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (path === '/access-policies' || path.startsWith('/access-policies/') || path === '/access-attributes') return this.accessAdmin(request, path)
     if (path === '/access-domains' || path.startsWith('/access-domains/')) return this.accessDomains(request, path)
     if (request.method === 'POST' && path === '/access/arrive') return this.arrive(request)
+    if (path === '/usage') return request.method === 'POST' ? this.recordUsage(request) : this.usageSummary(new URL(request.url))
 
     if (request.method === 'GET'  && path === '/debug')        return this.debugInfo()
     if (request.method === 'POST' && path === '/members')      return this.addMember(request)
@@ -785,6 +787,54 @@ export class ProjectDO extends DurableObject<Env> {
     }
   }
 
+  // ── Usage and credits (metering.ts) ───────────────────────────────────────
+  private prices: { at: number; list: Price[] } | null = null
+  private async priceList(): Promise<Price[]> {
+    if (this.prices && Date.now() - this.prices.at < 5 * 60_000) return this.prices.list
+    const g = this.env.GLOBAL.get(this.env.GLOBAL.idFromName('global'))
+    const list = ((await (await g.fetch('http://do/prices')).json()) as any).prices ?? []
+    this.prices = { at: Date.now(), list }
+    return list
+  }
+  /** One metered use, from the model proxy: kept, priced now, and debited from the organisation's credits. */
+  private async recordUsage(request: Request): Promise<Response> {
+    const b = await request.json().catch(() => ({})) as any
+    const tin = Math.max(0, Math.round(Number(b.in) || 0)), tout = Math.max(0, Math.round(Number(b.out) || 0))
+    const price = priceFor(await this.priceList(), String(b.provider ?? ''), b.model ? String(b.model) : undefined)
+    const micro = costOf(price, tin, tout)
+    const at = new Date().toISOString()
+    this.ctx.storage.sql.exec('INSERT INTO usage_events (at, kind, provider, model, key_id, tokens_in, tokens_out, ms, credits_micro, priced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      at, 'model.tokens', b.provider ?? null, b.model ?? null, b.keyId ?? null, tin, tout, Number(b.ms) || null, micro, price ? 1 : 0)
+    const org = await this.orgId()
+    if (org && micro > 0) {
+      await this.env.ORG.get(this.env.ORG.idFromName(org)).fetch('http://do/credits/usage', { method: 'POST', body: JSON.stringify({ project: this._pid, credits_micro: micro, at }) }).catch(() => {})
+      if (this.creditCache) this.creditCache.balance -= micro
+    }
+    return this.j({ ok: true, credits_micro: micro, priced: !!price })
+  }
+  private usageSummary(url: URL): Response {
+    const since = url.searchParams.get('since') ?? new Date(Date.now() - 30 * 86_400_000).toISOString()
+    const rows = [...this.ctx.storage.sql.exec(`SELECT substr(at, 1, 10) AS day, provider, model, COUNT(*) AS calls, SUM(tokens_in) AS tokens_in, SUM(tokens_out) AS tokens_out,
+      SUM(credits_micro) AS credits_micro, SUM(1 - priced) AS unpriced FROM usage_events WHERE at >= ? GROUP BY day, provider, model ORDER BY day DESC`, since)]
+    return this.j({ since, usage: rows })
+  }
+  /** May this organisation still spend? Only an organisation on a credit plan (given credits) is ever limited. The
+   *  balance is cached only while there are credits left (and decremented by each use recorded here); "no plan" and
+   *  "used up" are always asked again, so a grant counts from the next piece of work. */
+  private creditCache: { at: number; balance: number } | null = null
+  private async creditsLeft(): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const org = await this.orgId()
+    if (!org) return { ok: true }
+    if (this.creditCache && this.creditCache.balance > 0 && Date.now() - this.creditCache.at < 60_000) return { ok: true }
+    let c: any
+    try { c = await (await this.env.ORG.get(this.env.ORG.idFromName(org)).fetch('http://do/credits')).json() }
+    catch { return { ok: true } }   // the ledger unreachable: do not stop work over a check that could not be made
+    if (!c.plan) { this.creditCache = null; return { ok: true } }
+    const balance = Number(c.balance_micro) || 0
+    this.creditCache = balance > 0 ? { at: Date.now(), balance } : null
+    return balance > 0 ? { ok: true } : { ok: false, reason: 'this organisation has used all its credits — an administrator can add more' }
+  }
+
   // ── Access by verified email domain (enterprise sign-in, provisioned on first arrival) ──
   /** The access row for an address — granting it from a verified domain the first time that person arrives. */
   private accessOnArrival(email: string): { role_id: string; source: string } | null {
@@ -1012,6 +1062,11 @@ export class ProjectDO extends DurableObject<Env> {
         hubReply({ t: 'error', source: 'hub', reason, reqId: pl.reqId })
         return
       }
+    }
+    // Work that spends (a question, a session intent) needs credits left, for an organisation on a credit plan.
+    if ((pl.t === 'analyse' || pl.t === 'session:intent') && (sender.type === 'runtime' || sender.type === 'agent')) {
+      const c = await this.creditsLeft()
+      if (!c.ok) { this.auditMessage(sender, pl, 'refused', c.reason); hubReply({ t: 'error', source: 'credits', reason: c.reason, reqId: pl.reqId }); return }
     }
     if (sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent') this.auditMessage(sender, pl, 'ok')
     // ── The program catalogue (no engine needed) ──

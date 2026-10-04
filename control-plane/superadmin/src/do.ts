@@ -43,6 +43,7 @@ export class OrgDO extends DurableObject<Env> {
     }
 
     // REST API
+    if (path === '/credits' || path.startsWith('/credits/')) return this.credits(request, path)
     if (request.method === 'GET'  && path === '/projects')     return this.getProjects(url)
     if (request.method === 'POST' && path === '/projects')     return this.createProject(request)
     if (request.method === 'DELETE' && path === '/projects')   return this.deleteProject(request)
@@ -284,5 +285,33 @@ export class OrgDO extends DurableObject<Env> {
       id, conversationId, role, content
     )
     return Response.json({ id }, { status: 201 })
+  }
+
+  // ── Credits (metering.ts): grants by the platform, debits by this organisation's projects' usage ──
+  private async credits(request: Request, path: string): Promise<Response> {
+    const sql = this.ctx.storage.sql
+    const sum = (q: string) => Number(([...sql.exec(q)][0] as any)?.v ?? 0)
+    if (request.method === 'GET' && path === '/credits') {
+      const granted = sum("SELECT COALESCE(SUM(amount_micro), 0) AS v FROM credit_ledger WHERE kind = 'grant'")
+      const used = -sum("SELECT COALESCE(SUM(amount_micro), 0) AS v FROM credit_ledger WHERE kind = 'usage'")
+      const plan = sum("SELECT COUNT(*) AS v FROM credit_ledger WHERE kind = 'grant'") > 0
+      const recent = [...sql.exec("SELECT at, kind, amount_micro, project, note, by FROM credit_ledger WHERE kind = 'grant' ORDER BY seq DESC LIMIT 20")]
+      return Response.json({ plan, granted_micro: granted, used_micro: used, balance_micro: granted - used, grants: recent })
+    }
+    const b = await request.json().catch(() => ({})) as any
+    if (request.method === 'POST' && path === '/credits/grant') {
+      const amount = Number(b?.credits)
+      if (!(amount > 0) || !Number.isFinite(amount)) return Response.json({ error: 'a grant is a number of credits, more than 0' }, { status: 400 })
+      if (!b?.by) return Response.json({ error: 'who is granting?' }, { status: 400 })
+      sql.exec("INSERT INTO credit_ledger (at, kind, amount_micro, note, by) VALUES (?, 'grant', ?, ?, ?)", new Date().toISOString(), Math.round(amount * 1_000_000), b.note ?? null, String(b.by))
+      return Response.json({ ok: true }, { status: 201 })
+    }
+    if (request.method === 'POST' && path === '/credits/usage') {
+      const micro = Math.round(Number(b?.credits_micro))
+      if (!(micro >= 0) || !b?.project) return Response.json({ error: 'usage names its project and its cost in micro-credits' }, { status: 400 })
+      if (micro > 0) sql.exec("INSERT INTO credit_ledger (at, kind, amount_micro, project, by) VALUES (?, 'usage', ?, ?, ?)", b.at ?? new Date().toISOString(), -micro, String(b.project), `project:${b.project}`)
+      return Response.json({ ok: true })
+    }
+    return Response.json({ error: 'not found' }, { status: 404 })
   }
 }
