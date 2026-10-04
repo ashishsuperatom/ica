@@ -199,16 +199,19 @@ control can open a new block.
 
 **What else is needed**
 
-1. **When a package runs again.** Its functions see the whole STATE, so nothing has to be passed. A package runs when
-   its own part changes or when one of its actions is invoked (a run button). *Suggestion, to agree:* a package may
-   also declare the paths it **reads**, so a change there (a global filter) re-runs it without a click — in
-   dependency order, a cycle refused when the package loads.
+1. **When a package runs again (decided).** Its functions see the whole STATE, so nothing has to be passed. A package
+   runs when its own part changes or when one of its actions is invoked (a run button). **If the program's author
+   wants automatic runs**, the package declares the paths it **reads**; a change there (a global filter) re-runs it
+   without a click — in dependency order, a cycle refused when the package loads.
 2. **Actions (decided).** `run` is the default function, not the only one: a program suggests its actions, and an
    action can be a function that does anything. **Every function gets the whole STATE, immutable** (decided): it can
    read everything — a global filter that is not part of the package still reaches it — but it can change only its
    own part. It returns a new slice (which replaces `STATE.<package>`, nothing else), an answer, or more actions. An
    action can also be plain ops followed by `run`. Example: a global filter is changed, then the program's run button
    is clicked; the program reads the filter from STATE and runs.
+   **Like React's `setState`:** a package can set only its own part, never anything outside it. The **engine itself
+   enforces this** — a function is handed a frozen STATE and a setter scoped to `STATE.<package>`; any attempt to
+   change another part is refused. This is a property of the main engine code, not a convention.
 3. **Commands are separate.** Writing something (approving, saving) is not a STATE change; it goes through the one
    write path (who → may they → approval → version → event → log). A package can offer commands beside its actions.
 4. **Validation.** Each slice has a schema; an op that breaks it is refused with a sentence, never guessed.
