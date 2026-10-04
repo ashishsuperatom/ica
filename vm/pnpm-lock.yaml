@@ -136,6 +136,18 @@ importers:
 
   packages/platform-types: {}
 
+  packages/programs:
+    dependencies:
+      '@superatom/platform-types':
+        specifier: workspace:*
+        version: link:../platform-types
+      '@superatom/state':
+        specifier: workspace:*
+        version: link:../state
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+
   packages/project-template: {}
 
   packages/state:

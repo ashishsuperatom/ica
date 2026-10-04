@@ -1,0 +1,18 @@
+{
+  "name": "@superatom/programs",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Programs: a Node.js bundle and a React bundle built from source with TypeScript, identified by the hash of what was built, kept in a store by hash, loaded into the STATE engine as packages; platform libraries supplied at load, never bundled.",
+  "scripts": {
+    "test": "tsx --test test/*.test.mts"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@superatom/platform-types": "workspace:*",
+    "@superatom/state": "workspace:*",
+    "typescript": "^5.6.0"
+  }
+}

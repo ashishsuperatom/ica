@@ -27,6 +27,8 @@ export interface PackageContext {
   readonly slice: Readonly<Record<string, unknown>>
   /** Parameters the caller passed (an action's, a run button's). */
   readonly params: Readonly<Record<string, unknown>>
+  /** What the platform gives a program to work with — data through the datasource manager, and so on. */
+  readonly services: Readonly<Record<string, unknown>>
 }
 export interface FunctionResult {
   /** A whole new slice (replaces STATE.<package>, nothing else). */
@@ -108,7 +110,8 @@ export interface StateEngine {
 }
 
 /** Load packages into one STATE engine: each checked; one owner per slice; reads resolve; no cycles. */
-export function createStateEngine(packages: LoadedPackage[]): StateEngine {
+export function createStateEngine(packages: LoadedPackage[], opts: { services?: Record<string, unknown> } = {}): StateEngine {
+  const services = Object.freeze({ ...(opts.services ?? {}) })
   const problems: string[] = []
   for (const p of packages) {
     problems.push(...checkPackage(p.spec, `package "${p.name}"`))
@@ -232,6 +235,7 @@ export function createStateEngine(packages: LoadedPackage[]): StateEngine {
       },
       get slice() { return deepFreeze(clone(slice)) },
       params: deepFreeze(clone(params)),
+      services,
     }
     const out = (await f(frozen, ctx)) ?? {}
     if (out.slice !== undefined) {
