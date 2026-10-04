@@ -119,7 +119,7 @@ A session belongs to **one user**. It has:
 2. **The programs** it can use — the agent's, filtered by the user's scope.
 3. **One STATE** — a mutable singleton JSON: the state of the **last block**. It holds everything needed to draw it and
    is not path dependent. Earlier blocks are never changed: changing something in an earlier block **creates a new
-   branch** from it (the thread is a tree, as in the SLOB build), and that branch's last block has the STATE.
+   branch** from it (the thread is a tree), and that branch's last block has the STATE.
 4. **Partial org state** — the **session output**: each turn's answer, appended. Each entry is a slice of the
    organisation's whole, ever-changing state (tables, JSON, markdown, artifacts: files, dashboards, reports).
 5. **Blocks** — the thread on screen, a tree; each block shows partial org state.
@@ -153,6 +153,85 @@ A session belongs to **one user**. It has:
 changes STATE and **replaces** that (last) block's partial org state — no new history entry. If it asks for something the
 block does not show, it opens a **new block**. This holds for both kinds: a question can just change a filter, and a
 control can open a new block.
+
+## STATE, packages and intents (being agreed)
+
+### The user's design (2026-10-04)
+
+- Nothing about what a STATE change means may be hard coded: a fixed semantic model can run only one function, and a
+  program added later must be able to run its own when its part of STATE changes.
+- **The block's STATE holds a list of packages** (just names). Each package says which parts of STATE it controls and
+  which function to run for them.
+- **A path has exactly one package.** If a program contributes `package.action.stateA` (and `setStateA`), no other may.
+- **Each package has one function.** Whenever its part of STATE changes, that function runs. A package injected
+  lazily later (an optimisation model, say) works the same way: we know its states, a UI made for it changes them, or
+  the agent changes them from words; then the same function runs again.
+- **Vocabulary:** `set` / `add` / `remove` on a path, plus calling a package's function with parameters, which changes
+  the STATE or gives a new sub-state to set: `{ package: {...} }` replaces that package's part, nothing else.
+- **Actions a program suggests** (its custom operations) become the session's list of possible actions.
+- **Every package has a small doc module** (`package.doc`), injected into the agent's context; without it the agent
+  cannot use the package.
+- **Every idea gets a name**, so we can always point back to it.
+- **Intents in the UI** can be declarative — `<div sa-intent='{"op":"set","path":"pkg.sku","value":"…"}'>` with one
+  listener for every `sa-intent` — or an `onClick`; whichever is more reliable. The vocabulary must be enough for
+  everything, and for everything there is a function.
+
+### Proposed answers (to agree)
+
+**Names**
+
+| Name | Is |
+|---|---|
+| **STATE** | the last block's JSON: `{ packages: { <name>: <program hash> }, <name>: <slice>, … }` |
+| **package** | a program taking part in STATE |
+| **slice** | the part of STATE a package owns, at `STATE.<package>` |
+| **`run`** | a package's one function: `run(slice, reads, context) → { slice?, partial?, actions? }` |
+| **op** | `set` · `add` · `remove` on a path — the only way STATE changes |
+| **action** | a named list of ops a package suggests ("cap supplier", "go to this item"), shown as possible actions |
+| **command** | a write outside the session (approve, save a plan): goes through the governance path, not STATE |
+| **partial** | what a run shows: appended to the session (new block) or replacing the current block's |
+| **`doc`** | a package's small documentation, injected into the agent |
+
+**What else is needed**
+
+1. **Reads.** A package's result often depends on another's slice (a filter package and an optimisation both depend on
+   the chosen period). Besides the slice it owns, a package declares the paths it **reads**. After ops, `run` is called
+   for every package whose owned or read paths changed, in dependency order; a cycle is refused when the package
+   loads. Without this, a filter change would not re-run the program that depends on it.
+2. **Actions are data, not functions.** "Call a function with parameters" becomes: an action is ops (it sets the
+   package's parameters), then `run`. One code path per package stays one function; the agent and the UI use the same
+   ops; every action is replayable and logged. A function that returns "a new sub-state to set" is `run` returning
+   `slice`.
+3. **Commands are separate.** Writing something (approving, saving) is not a STATE change; it goes through the one
+   write path (who → may they → approval → version → event → log). A package can offer commands beside its actions.
+4. **Validation.** Each slice has a schema; an op that breaks it is refused with a sentence, never guessed.
+5. **Same view or new block.** Every intent says where its result goes: `here` (replace the current block's partial)
+   or `new` (a new block). A control declares it; the ICA decides it for words.
+6. **Stale runs.** `run` can be slow; only the result for the latest STATE is applied, earlier ones are dropped; the
+   block shows that it is running.
+7. **Versions.** STATE names each package by its program hash, so the same STATE always runs the same code.
+8. **The doc can be partly generated.** The slice schema, reads and actions are listed automatically into `doc`; the
+   author adds only what they mean. It cannot drift from the code.
+9. **Intent markup.** A typed helper (`<Intent ops={…} to="new">`) renders the `sa-intent` attribute and is handled by
+   one delegated listener: typed in TSX (no JSON in strings), keyboard accessible, and **every intent on screen can be
+   listed** by an agent or a test — the advantage of declarative markup.
+
+```jsonc
+// STATE of the last block
+{
+  "packages": { "scope": "sha:1a…", "trips": "sha:9c…" },
+  "scope": { "branch": "HYDERABAD", "window": { "kind": "fy", "year": 2026 } },
+  "trips": { "completed": true, "settled": false, "page": 1 }
+}
+// package manifest (part of the program manifest)
+{ "name": "trips", "owns": "trips", "reads": ["scope.branch", "scope.window"],
+  "schema": { "completed": "boolean", "settled": "boolean", "page": "number" },
+  "run": "node:run", "doc": "doc.md",
+  "actions": [{ "id": "unsettled", "label": "Completed, not settled", "ops": [{ "op": "set", "path": "trips.settled", "value": false }] }],
+  "commands": [{ "id": "settle", "label": "Settle trip" }] }
+// intent
+{ "ops": [{ "op": "set", "path": "scope.branch", "value": "PUNE" }], "to": "here" }
+```
 
 ### Answer format
 
@@ -251,7 +330,7 @@ intent ──► agent (domain picked; from a dashboard it is already picked)
 ## Applications
 
 - **User UI — the base application, the same for every project.** It gets everything the dashboard has today, plus
-  the block · card · thread system (from the SLOB build). From it a person adds concepts, creates agents, and builds
+  the block · card · thread system. From it a person adds concepts, creates agents, and builds
   and publishes dashboards (agents with UIs).
 - **Dashboards** extend the user UI with more programs (node + React), built by the builder agent. Same application,
   more specialised.
@@ -266,7 +345,7 @@ it extends rather than duplicates.
 
 ## The template (what every project starts with)
 
-Taken from what worked in the SLOB and procurement builds, on our transport and plain CSS:
+Taken from what worked in earlier builds, on our transport and plain CSS:
 
 **Backend**
 - one message channel (request / response / event); handlers named `collection.operation`
@@ -304,13 +383,12 @@ more than asked; long silent work; answering a different question; fixing the sy
 
 ## Details from the discussion (kept so nothing is lost)
 
-**What STATE must be able to do — the four systems we have built:**
-- *Procurement (proc):* "what if we change the rate to 5% and run the optimisation again" — a STATE change that re-runs
-  a program.
-- *SLOB:* "filter SLOB by plan A for last month" — only a STATE change.
-- *Fusion5:* start from a STATE `{}`; a natural-language intent goes to the composer, which returns a new STATE and a
-  partial org state.
-- *Total Group:* ask questions, and also change STATE through the controls of a deterministic UI.
+**What STATE must be able to do** (the kinds of change seen across the systems built so far):
+- change a parameter and re-run a program (an optimisation with a new rate);
+- change a filter or a period, and the view follows;
+- start from an empty STATE; a question in words goes to the composer, which returns a new STATE and a partial org
+  state;
+- ask questions, and also change STATE through the controls of a deterministic UI.
 
 **The organisation's state:** the organisation has one big state that keeps changing over time. Each user has a partial
 view of it; in a session, a smaller view still ("the top 10 customers by revenue" is one such slice). Partial org state
@@ -360,78 +438,8 @@ stay in the VM's file system, where they are made.
 **Running programs:** best is to run them in the VM, but with many users that hits the same limit — hence dynamic
 workers later, reaching data sources through the WebSocket datasource bridge, with running in the VM always an option.
 
-**Rules:** the rules taken from SLOB and procurement must be general. Units (crore with decimals) and whether zero cells
-show are per-project; and the builder must know what agents usually get wrong.
-
-## Operations today (inventory, 2026-10-04)
-
-What each built system lets a person do — the names as they are in the code.
-
-### SLOB (Dabur) — `app/server/src/model/state.ts`, `app/web/src/runtime/thread.tsx`
-
-*Question:* `{ focus, where: [{dim, op: is | is not, value}], by?, as?: table | ring | bars | tree }`.
-
-| Operation | Does |
-|---|---|
-| `push {dim, value, not?}` | add a filter (or "is not") |
-| `pop {dim}` | remove a dimension's filter |
-| `clear` | remove all filters |
-| `by {dim?}` | break down by a dimension (none = the whole) |
-| `as {lens}` | draw as table / ring / bars / tree |
-| `focus {on}` | look at something else, keeping the filters it honours |
-| `drill` | one level down what is broken down |
-| `up` | undo the innermost narrowing |
-
-*Thread:* `start(type, props)` · `open(fromId, type, props, cause)` (new block below) · `update(id, props)` (same block)
-· `become(id, type, props)` (block turns into another type) · `remove(id)` · `openAsked(question, ops, cause)` ·
-server `model.ask {question, ops}`. Rule: looking closer at the same thing stays in the block; moving to another thing
-or taking a decision opens a block. Linear thread (no branches).
-
-*Commands (writes):* `plans.create` · `plans.update` · `plans.setStatus` · `plans.review` · `plans.reply` ·
-`reasons.set` · `master.save` · `master.setActive` · `master.setting` · `master.assign` · `master.delete` · `users.save` ·
-`users.setActive` · `users.setPassword` · `sources.switch` · `pipeline.refresh` · `drops.apply` · `drops.setKey` ·
-`backups.now` · `system.upgrade` · `system.rollback`. *Reads:* `queries.run` · `model.ask` · `meta.get` ·
-`master.lists` · `master.settings` · `master.usage` · `users.list` · `users.planners` · `definitions.list` ·
-`pipeline.lineage` · `sources.list` · `backups.status` · `backups.read` · `system.status` · `drops.status` ·
-`explorer.catalog | rows | values | locate | profile | spread`.
-
-### Procurement (Tata Chemicals) — `data-system/src/model/state.ts`, `app/src/runtime/{thread,intent}.ts*`
-
-*Question and operations:* the same as SLOB (`push · pop · clear · by · as · focus · drill · up`).
-
-*Intent:* `drill(open, question, ops)` — the server picks the block that answers and opens it below · `refine(update,
-question, ops)` — change the current block in place · `nextActions(question)` (server `intent.next`) — the moves that
-advance the goal, shown under every block.
-
-*Thread:* `start` · `open` · `update` · `remove` · `switchBranch(childId)` — a tree: opening from an earlier block forks,
-the old branch kept as a sibling.
-
-*Optimizer transforms (STATE changes that re-run a program):*
-- award: `setWeights` · `capSupplier` · `uncapSupplier` · `floorSupplier` · `forceInclude` · `excludeSupplier` ·
-  `setMinSuppliers` · `setMaxSuppliers` · `setMaxHighRiskPct` · `overrideBid` · `setCapacity` · `setDemand` ·
-  `setCompliantOnly`
-- buy or defer: `setPriceForecast` · `setHoldingRate` · `setHorizon` · `setStockoutPenalty` · `setOrderQty`
-- then `optimizer.run(kind, params, actions)` replays the actions and runs; `options()` gives the next choices.
-
-*Commands:* through the governance kernel (`award.recommend` and others), each with permission, resource and effects.
-
-### Fusion5 and Total Group dashboards — `app/server/state.mjs`, `app/web/src/runtime/thread.tsx`
-
-*Question:* `{ focus, where, by?, as?, window?, assume?, pages? }`.
-
-| Operation | Does |
-|---|---|
-| `push · pop · clear · by · as · drill · up` | as SLOB |
-| `focus {on}` | another view, keeping the filters it honours; the window travels where it means the same (a drill keeps its time span) |
-| `window {window}` | the time the view is over (a parameter, not a filter): months, weeks, a financial year, a range, … |
-| `assume {name, value}` | a what-if, recorded with the answer |
-| `page {table, page, order}` | which page of a table, in which order |
-
-*Messages to the app:* `app:catalog` · `app:start` · `app:move` · `app:ask` · `app:members` · `app:about` · `app:say`
-(a question in words, answered by the thread's reader) · `app:reload`.
-
-*Thread:* `start(focus, where)` · `home()` · `open(fromId, ops, cause)` · `edit(id, ops)` (same block) · `say(text)` ·
-`openAbout()` · `remove(id)` · `switchBranch(childId)` · `siblingsOf(id)` — a tree, like procurement.
+**Rules:** the platform's rules are general. Units, scale and whether zero cells show are per-project settings; and the
+builder must know what agents usually get wrong. Project-specific versions of an idea do not belong in this document.
 
 ## Migration from today
 
@@ -450,9 +458,9 @@ the old branch kept as a sibling.
 
 1. Agree this document (the OPEN points).
 2. Define the JSON schemas: STATE operations, partial org state, program manifest, agent, governance log.
-3. The template: user UI with block · card · thread, our transport, plain CSS — lifting the generic parts of the SLOB
-   and procurement code.
-4. Move one agent (Total Group vendors and hire) onto it end to end.
+3. The template: user UI with block · card · thread, our transport, plain CSS — lifting the generic parts of earlier
+   builds.
+4. Move one existing agent onto it end to end.
 5. The builder agent; the org knowledge index; governance.
 6. The DO hierarchy (user, session, state) and engine ↔ platform sync; the optional warehouse.
 7. Project scoping on shared ports, so the system runs without Docker (Windows, macOS, Linux, Electron).
