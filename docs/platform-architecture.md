@@ -551,6 +551,23 @@ workers later, reaching data sources through the WebSocket datasource bridge, wi
 **Rules:** the platform's rules are general. Units, scale and whether zero cells show are per-project settings; and the
 builder must know what agents usually get wrong. Project-specific versions of an idea do not belong in this document.
 
+## The whole product, built deterministically (2026-10-04)
+
+The user, in their words: this time the entire platform is built properly, once and for all — every deterministic
+part — and only then the non-deterministic part (the agents, which depend on the model, the time, the concepts and
+the domain, and which already work) is tested. Each part gets quick, real tests; none needs an AI agent or a model.
+
+In scope, beyond what is above:
+
+- **User authorization and the permission system** — users, groups, roles, scopes, owners and admins (above), enforced
+  at one place.
+- **Enterprise: single sign-on** — how an organisation adds its own identity provider (see `identity-and-access.md`).
+- **Payment, credits, usage** — a credit system and metering of who uses how much.
+- **The data protocol, fixed for everything** — including many users at once, and showing people what an agent is
+  doing in the background.
+- **A data warehouse like Microsoft Fabric or Databricks** — on the engine side and on the Durable Object side, with
+  R2 SQL.
+
 ## Migration from today
 
 | Today | Becomes |
