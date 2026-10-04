@@ -1063,7 +1063,7 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
       {/* Chat/answer view */}
       {shownView.startsWith('agent:') && (
         <AgentSession agent={shownView.slice(6)} agentName={sessionAgents.find(a => a.id === shownView.slice(6))?.name ?? shownView.slice(6)}
-          send={send} subscribe={subscribeSession} renderAnswer={(card) => <AnswerCard answer={card} />} />
+          send={send} subscribe={subscribeSession} renderAnswer={(card) => <AnswerCard answer={card} />} projectId={projectId} token={token} />
       )}
       {shownView === 'chat' && (feed.length === 0 && !busy ? (
         <div style={s.centerStage}>

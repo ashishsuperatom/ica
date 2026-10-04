@@ -115,6 +115,14 @@ describe('programs: source → built → kept → published → running elsewher
     expect((await other.ask({ t: 'activity:list' }, 'hub')).activities).toEqual([])
   })
 
+  it('screens load its view from the platform (R2), file by file, without the engine', async () => {
+    const r = await mf.dispatchFetch(`http://x/do/programs/${hash}/web/index.js`)
+    expect(r.status).toBe(200)
+    expect(r.headers.get('cache-control')).toMatch(/immutable/)
+    expect(await r.text()).toMatch(/export function UnsettledTrips/)
+    expect((await mf.dispatchFetch(`http://x/do/programs/${hash}/node/index.js`)).status).toBe(404)   // only the React side
+  })
+
   it('only its owner publishes it; both attempts are in the audit history', async () => {
     const other = await socket({ role: 'agent', key: otherKey })
     expect((await other.ask({ t: 'program:publish', hash }, 'hub')).reason).toMatch(/its owner or an admin publishes it/)

@@ -293,6 +293,16 @@ export class ProjectDO extends DurableObject<Env> {
     if (path === '/agent-keys' || path.startsWith('/agent-keys/') || path === '/audit') return this.agentKeysAndAudit(request, path)
     if (request.method === 'POST' && path === '/agent-call') return this.agentCall(request)
     if (path === '/engine/programs' || path.startsWith('/engine/programs/')) return this.enginePrograms(request, path)
+    // A program's React side, file by file, for screens (the worker has checked the caller is in the project).
+    { const m = request.method === 'GET' ? path.match(/^\/programs\/([0-9a-f]{64})\/(web\/[\w./-]+\.js)$/) : null
+      if (m && !m[2].includes('..')) {
+        try {
+          const b = await this.catalogue.bundle(m[1])
+          const text = b.files[m[2]]
+          if (text === undefined) return this.j({ error: `program ${m[1].slice(0, 12)} has no ${m[2]}` }, 404)
+          return new Response(text, { headers: { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'private, max-age=31536000, immutable' } })
+        } catch (e: any) { return this.j({ error: e?.message ?? String(e) }, 404) }
+      } }
     if (path === '/access-policies' || path.startsWith('/access-policies/') || path === '/access-attributes') return this.accessAdmin(request, path)
     if (path === '/access-domains' || path.startsWith('/access-domains/')) return this.accessDomains(request, path)
     if (path === '/groups' || path.startsWith('/groups/')) return this.groupsAdmin(request, path)

@@ -875,6 +875,7 @@ function connect() {
       flushOutbox()   // re-registered → deliver anything queued while the socket was flapping (answers, logs)
       sessionSync.pushAll()   // and every session the platform does not have whole
       graphSync.welcome()     // and the graph: pushed from where the platform's copy ends, or rebuilt from it
+      void programSeam.syncUp((x) => console.warn(x)).catch((e) => console.warn(`[programs] sync failed: ${e?.message ?? e}`))   // and every program built here
       // THE PROJECT'S PROFILE, delivered with the welcome. Adopted before warm-up builds any agent, so a box
       // starts on its own configuration rather than adopting it a few seconds late and rebuilding.
       if (m.payload.profile) receive(m.payload.profile, 'project profile')

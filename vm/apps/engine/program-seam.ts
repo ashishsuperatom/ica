@@ -71,5 +71,20 @@ export function createProgramSeam(d: { projectDir: string; platform: Platform | 
     } finally { rmSync(src, { recursive: true, force: true }) }
   }
 
-  return { handle, ensure, store }
+  /** Every program built here that the platform does not keep yet, uploaded (on each connect): the platform's catalogue
+   *  is where screens load a program's view from, and where a replaced machine gets it back. */
+  async function syncUp(log?: (s: string) => void): Promise<number> {
+    if (!d.platform) return 0
+    const kept = new Set((await d.platform.listPrograms()).map((p) => p.hash))
+    let n = 0
+    for (const m of store.list()) {
+      if (kept.has(m.hash)) continue
+      const by = /^(user|agent):\S+$/.test(String(m.owner)) ? String(m.owner) : 'user:platform'
+      try { await d.platform.uploadProgram(toBundle(store, m.hash), by); n++ } catch (e: any) { log?.(`[programs] ${m.name} ${m.hash.slice(0, 12)} not uploaded: ${e?.message ?? e}`) }
+    }
+    if (n) log?.(`[programs] uploaded ${n} program(s) the platform did not keep yet`)
+    return n
+  }
+
+  return { handle, ensure, store, syncUp }
 }

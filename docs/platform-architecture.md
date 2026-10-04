@@ -656,6 +656,12 @@ each time — never from a payload. Knowledge (the graph), agents (listing and o
 show only what those scopes see (global, one's own, one's groups'); an admin sees all; data access policies can apply to
 a group.
 
+**Programs to screens, the template and the contract (built 2026-10-05):** the engine uploads every program it built
+to the platform's catalogue on each connect; screens load a program's view from the platform (R2, immutable by hash,
+cached) — the engine is not needed to draw it — falling back to the engine only for a program not yet uploaded. A
+dashboard is an agent whose programs' views are drawn together in its session. The contract every builder works to is
+`docs/program-contract.md`; the template is `project-template/start/programs/template/` (`programs init <name>`).
+
 **Order of building:** (1) drop Analytics Engine; (2) groups, and scope (global/group/user) wherever things are listed
 or read — knowledge, agents, programs, sessions, connections; (3) agents as first-class, created from the UI and CLI;
 (4) programs' React side served to the user UI from R2 through the Worker (the engine is not needed to draw a view);

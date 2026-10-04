@@ -26,6 +26,9 @@ export interface SessionMsg {
 }
 
 export interface AgentSessionProps {
+  /** The project and the person's token, to load programs' views from the platform. */
+  projectId?: string
+  token?: string | null
   agent: string
   agentName: string
   send: (payload: Record<string, unknown>) => void
@@ -40,7 +43,7 @@ const newId = () => `ses-${crypto.randomUUID()}`
 const readSaved = (agent: string) => { try { return localStorage.getItem(storeKey(agent)) } catch { return null } }
 const save = (agent: string, sid: string) => { try { localStorage.setItem(storeKey(agent), sid) } catch { /* storage blocked */ } }
 
-export default function AgentSession({ agent, agentName, send, subscribe, renderAnswer }: AgentSessionProps) {
+export default function AgentSession({ agent, agentName, send, subscribe, renderAnswer, projectId, token }: AgentSessionProps) {
   const [session, setSession] = useState<string>(() => readSaved(agent) ?? newId())
   const [msg, setMsg] = useState<SessionMsg | null>(null)
   const [refused, setRefused] = useState('')
@@ -61,11 +64,19 @@ export default function AgentSession({ agent, agentName, send, subscribe, render
   useEffect(() => { ask('get', { session }) }, [session, ask])
 
   // A program's file, asked over the hub; answered by reqId.
-  const fetchFile = useCallback((hash: string, path: string) => new Promise<string>((resolve, reject) => {
+  // A program's file: from the platform (R2, immutable by hash, the engine not needed), else from the engine over the hub.
+  const fromEngine = useCallback((hash: string, path: string) => new Promise<string>((resolve, reject) => {
     const reqId = `file-${Math.random().toString(36).slice(2, 10)}`
     files.current.set(reqId, { resolve, reject })
     send({ t: 'session:file', hash, path, reqId })
   }), [send])
+  const fetchFile = useCallback(async (hash: string, path: string) => {
+    if (projectId) {
+      const r = await fetch(`/api/projects/${encodeURIComponent(projectId)}/programs/${hash}/${path}`, { credentials: 'include', headers: token ? { authorization: `Bearer ${token}` } : {} }).catch(() => null)
+      if (r?.ok) return r.text()
+    }
+    return fromEngine(hash, path)
+  }, [projectId, token, fromEngine])
 
   useEffect(() => subscribe((m) => {
     const f = m.reqId ? files.current.get(m.reqId) : undefined

@@ -46,4 +46,5 @@ back automatically if not. A shipped migration is never edited (`vm/packages/mig
 - **`docs/platform-architecture.md`** — the platform: agents, concepts, programs, STATE and intents, sessions, the
   answer history, governance, storage (platform first, engine a replica), Durable Objects, the template, migrations.
 - **`docs/composition-graph.md`** — the composition graph's mechanics.
+- **`docs/program-contract.md`** — what every program is and what a builder must do (template: `programs init`).
 - **`vm/apps/engine/PLAN.md`** — what is built in the engine and what is next.

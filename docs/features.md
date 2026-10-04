@@ -28,6 +28,9 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Platform types: the shapes of STATE, ops, intents, programs, answers, agents, sessions and the governance log, each with checks that answer in sentences.
 - STATE engine: every function gets the whole STATE frozen and can set only its own slice; it re-runs whatever reads a changed path, in dependency order.
 - Programs: a Node side and a React side built with TypeScript, identified by hash, kept immutable in a store, loaded into STATE, inspectable; with a CLI.
+- Programs' views loaded by screens from the platform (R2, by hash) — the engine is not needed to draw them; the engine uploads every program it built on each connect.
+- The program contract (`docs/program-contract.md`) and template (`programs init`), the one standard every builder works to.
+- Agents as first-class nodes of the composition graph (owned, scoped, governed, versioned, kept by the platform), made with `graph:agent`.
 - Program pipeline: source sent by a person or agent, built by the engine, uploaded as a hash-checked bundle to R2 and the project's catalogue, published by its owner, fetched and checked by any engine that runs it.
 - Governance in the composition graph: one owner per node, others suggest, the owner approves or rejects (stale suggestions refused), all append-only; the graph read and changed over the hub (`graph:*`).
 - Agents over HTTP: one route that sends an agent's message through the same path as its WebSocket.

@@ -1,5 +1,6 @@
 // programs — build a program into the project's store, and run it in the STATE engine against the project's data.
 //
+//   programs init <name>                                a new program's source from the template (programs/src/<name>)
 //   programs build <source folder>                      compile, check, hash; prints the hash (the same source, the same hash)
 //   programs list                                       the programs in the store
 //   programs doc <hash|name>                            its documentation
@@ -12,7 +13,7 @@
 // Where: --store <dir>, else $PROGRAM_STORE, else <$ENGINE_PROJECT_DIR>/programs/store. Data goes through the
 // datasource-manager at $DATASOURCE_URL — the one way programs reach data.
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, cpSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { buildProgram, ProgramStore, ProgramError, inspect, loadPackage } from './index.js'
 import { createStateEngine, StateRefusal } from '@superatom/state'
@@ -62,6 +63,22 @@ async function main() {
   const [cmd, a, b] = pos
   if (!cmd || cmd === 'help') { console.log(readFileSync(new URL(import.meta.url), 'utf8').split('\n').filter((l: string) => l.startsWith('//')).map((l: string) => l.slice(3)).join('\n')); return }
   const store = new ProgramStore(storeDir())
+  if (cmd === 'init') {
+    const name = a
+    if (!name || !/^[a-z][a-z0-9-]{1,60}$/.test(name)) throw new ProgramError(['a program name is lower-case letters, digits and dashes'])
+    const home = process.env.ENGINE_PROJECT_DIR
+    if (!home) throw new ProgramError(['ENGINE_PROJECT_DIR names the project home the program is made in'])
+    const dest = join(home, 'programs', 'src', name)
+    if (existsSync(dest)) throw new ProgramError([`${dest} exists already`])
+    const template = new URL('../../project-template/start/programs/template/', import.meta.url)
+    cpSync(template, dest, { recursive: true })
+    const mf = join(dest, 'manifest.json')
+    const m = JSON.parse(readFileSync(mf, 'utf8'))
+    m.id = `prg_${name.replace(/-/g, '_')}`; m.name = name; m.ui.blocks = [name]; m.package.owns = name.replace(/-/g, '_')
+    writeFileSync(mf, JSON.stringify(m, null, 2) + '\n')
+    console.log(`${dest}\n(from the template — see docs/program-contract.md; rename the slice "example" in server/ and web/ to "${m.package.owns}")`)
+    return
+  }
   if (cmd === 'build') { const r = buildProgram(resolve(a ?? '.'), store); console.log(`${r.hash}  ${r.manifest.name}`); return }
   if (cmd === 'list') { for (const m of store.list()) console.log(`${m.hash.slice(0, 12)}  ${m.name}  v${m.version}  ${m.scope}  ${m.attachesTo ?? ''}  ${built(store, m.hash)}`); return }
   if (cmd === 'doc') { process.stdout.write(store.doc(resolveProgram(store, a))); return }
