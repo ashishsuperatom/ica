@@ -71,6 +71,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Admin console: analyst, connector and grounding terminals, models, credentials, dashboards and an inspector.
 - Models through OpenRouter with an API key for every harness (Claude Code, codex, pi, opencode): the proxy proves the project, attaches the vault key for the project's credential group (platform or organisation) and meters the call; subscription logins stay as options.
 - One model, many names: a profile names a model once; it is translated to each account's spelling, checked against the account's own list when saved (refused with the nearest names), and no harness ever substitutes another model.
+- Decision memory (DecisionDO, one per project, on the stable-attractor pattern): every intent in a session recorded as an experience (the step's cues and world, the path taken); decision states made and changed only through named operations (create, reinforce, weaken, merge, generalise, specialise, supersede, split, compete, invalidate), append-only and readable as of any moment; recognition of a step (learned · similar, learned · changed with what moved, not learned) with each path's reasoning and record; outcomes; hub messages decision:paths/outcome/states/state/change; agent-key scopes decisions and learn.
 - Usage per person for every harness: each model call's usage as the harness itself reports it (pi, opencode, Claude Code's transcript, codex's session log), stamped with the turn's session and person, kept append-only with cache tokens; organisation admins see usage per person per month across projects.
 - Reporting worker: renders an answer as HTML and PNG.
 - Cloudflare config on wrangler.jsonc with a current compatibility date and pinned tool versions.
@@ -90,7 +91,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - The default agent for questions no other agent fits.
 - The builder agent, which writes programs and the concepts that tell agents how to use them.
 - The org knowledge index that programs attach to.
-- Decision state: states with their outcomes, actions, paths and reasoning.
+- Decision state in the screens: paths from here on every step, the learning path (System 4) writing decision states, artifacts on the right.
 - Borrowing knowledge from another agent within a session.
 
 **Agents, CLI, audit**
@@ -101,7 +102,6 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - CLI extras: self-update, shell completion, OS keychain, `watch`, proxy support, standalone binaries.
 
 **Platform**
-- The state Durable Object (decision state).
 - Changing knowledge on the platform with the engine offline (today every change goes through an engine and is replicated up).
 - The user DO's personalised view (what it keeps beyond sessions and personal state is still being decided).
 - Governance beyond the graph: hierarchical admins (program, group, global) and granting access.

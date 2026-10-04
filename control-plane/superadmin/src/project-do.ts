@@ -29,6 +29,7 @@ import { AgentKeys, KeyRefusal } from './agent-keys.js'
 import { scopeAllows, HUB_MESSAGES } from '../../shared/agent-scopes.js'
 import { ProgramCatalogue, CatalogueRefusal } from './program-catalogue.js'
 import { TAG } from '../../../vm/packages/agent-contract/contract.mjs'
+import { stepOf } from '../../../vm/packages/decision/src/index.js'
 import { checkPolicy, resolve as resolvePolicies, type AccessPolicy } from './access-policies.js'
 import { costOf, priceFor, type Price } from './metering.js'
 import { createRecorder, type Recorder } from './records.js'
@@ -1109,6 +1110,7 @@ export class ProjectDO extends DurableObject<Env> {
   }
 
   // ── Sessions kept by the platform ──────────────────────────────────────────
+  private decisionStub() { return (this.env as any).DECISION.get((this.env as any).DECISION.idFromName(`dec:${this._pid}`)) }
   private sessionStub(session: string) {
     if (!/^[\w-]{1,80}$/.test(session)) throw new Error('not a session id')
     return (this.env as any).SESSION.get((this.env as any).SESSION.idFromName(`ses:${this._pid}:${session}`))
@@ -1308,6 +1310,47 @@ export class ProjectDO extends DurableObject<Env> {
         if (pl.t === 'program:publish') this.audit.record({ actor, via: sender.type === 'agent' ? 'agent' : 'ui', action: 'program.publish', target: String(pl.hash ?? ''), outcome: 'refused', detail: { reason: e?.message ?? String(e) } })
         hubReply({ t: 'program:refused', reason: e?.message ?? String(e), reqId: pl.reqId })
       }
+      return
+    }
+    // ── The decision memory (no engine needed): the paths from a step, how a step turned out, the decision states ──
+    if (typeof pl.t === 'string' && pl.t.startsWith('decision:') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
+      const who = this.principalOf(sender)
+      if (!who) { hubReply({ t: 'decision:refused', reason: 'who is asking is not known', reqId: pl.reqId }); return }
+      const dec = this.decisionStub()
+      const call = async (path: string, body?: unknown) => {
+        const r = await dec.fetch(`http://do${path}`, body === undefined ? { headers: { 'x-sa-project': this._pid } } : { method: 'POST', headers: { 'x-sa-project': this._pid }, body: JSON.stringify(body) })
+        const out: any = await r.json(); if (!r.ok) throw new Error(out.error ?? `the decision memory answered ${r.status}`); return out
+      }
+      try {
+        if (pl.t === 'decision:paths' || pl.t === 'decision:outcome') {
+          const r = await this.sessionStub(String(pl.session ?? '')).fetch('http://do/view')
+          const body: any = await r.json()
+          if (!r.ok) throw new Error(body.error ?? 'there is no such session')
+          if (body.view.user !== who && !sender.admin) throw new Error(`session ${pl.session} is not yours`)
+          const block = String(pl.block ?? body.view.leaf)
+          if (pl.t === 'decision:paths') {
+            const step = stepOf(body.view, block)
+            if (!step) throw new Error(`session ${pl.session} has no block ${block}`)
+            hubReply({ t: 'decision:paths', session: pl.session, block, ...(await call('/recognise', { cues: step.cues, world: step.world, scopes: this.scopesOf(sender) })), reqId: pl.reqId })
+          } else {
+            const out = await call('/outcome', { session: pl.session, block, outcome: pl.outcome, by: who, note: pl.note ?? null, artifact: pl.artifact ?? null })
+            this.audit.record({ actor: { kind: sender.type === 'agent' ? 'agent' : 'user', id: who, ...(sender.email ? { email: sender.email } : {}) }, via: sender.type === 'agent' ? 'agent' : 'ui', action: 'decision.outcome', target: `${pl.session}/${block}`, outcome: 'ok', detail: { outcome: pl.outcome } })
+            hubReply({ t: 'decision:outcome', ...out, reqId: pl.reqId })
+          }
+        } else if (pl.t === 'decision:states') {
+          const out = await call(`/states${pl.asOf ? `?asOf=${encodeURIComponent(String(pl.asOf))}` : ''}`)
+          const sees = sender.admin ? null : new Set(['global', ...this.scopesOf(sender)])
+          hubReply({ t: 'decision:states', asOf: out.asOf, states: out.states.filter((x: any) => !sees || sees.has(x.scope)), reqId: pl.reqId })
+        } else if (pl.t === 'decision:state') {
+          hubReply({ t: 'decision:state', ...(await call(`/state/${encodeURIComponent(String(pl.id ?? ''))}`)), reqId: pl.reqId })
+        } else if (pl.t === 'decision:change') {
+          // The learning path: an admin, or an agent key allowed to learn.
+          if (!sender.admin && sender.type !== 'agent') throw new Error('only an administrator or a learning agent changes the decision memory')
+          const out = await call('/change', { op: pl.op, by: who, why: String(pl.why ?? '') })
+          this.audit.record({ actor: { kind: sender.type === 'agent' ? 'agent' : 'user', id: who }, via: sender.type === 'agent' ? 'agent' : 'ui', action: `decision.${pl.op?.op ?? 'change'}`, target: out.written.map((w: any) => w.id).join(','), outcome: 'ok', detail: { why: pl.why ?? '' } })
+          hubReply({ t: 'decision:changed', ...out, reqId: pl.reqId })
+        } else throw new Error(`there is no ${pl.t}`)
+      } catch (e: any) { hubReply({ t: 'decision:refused', reason: e?.message ?? String(e), reqId: pl.reqId }) }
       return
     }
     // ── Sessions read from the platform's copy (no engine needed): only the person's own ──

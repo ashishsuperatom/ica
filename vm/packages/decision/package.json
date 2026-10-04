@@ -1,0 +1,16 @@
+{
+  "name": "@superatom/decision",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Decision memory on the stable-attractor pattern: experiences (each passage through a step), decision states recognised from them (cues, paths with reasoning and record, the world they were seen in), recognition by associative cues (learned · similar, learned · changed, not learned), and the named operations that alone change a decision state. Pure: runs in a Durable Object, the engine and tests alike.",
+  "scripts": {
+    "test": "tsx --test test/*.test.mts"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@superatom/platform-types": "workspace:*"
+  }
+}

@@ -21,6 +21,7 @@
       { "class_name": "GlobalDO", "name": "GLOBAL" },
       { "class_name": "ChannelDO", "name": "CHANNEL" },
       { "class_name": "SessionDO", "name": "SESSION" },
+      { "class_name": "DecisionDO", "name": "DECISION" },
       { "class_name": "UserDO", "name": "USER" },
       { "class_name": "GraphDO", "name": "GRAPH" }
     ]
@@ -32,7 +33,8 @@
     { "tag": "v3", "new_sqlite_classes": ["GlobalDO"] },
     { "tag": "v4", "new_sqlite_classes": ["ChannelDO"] },
     { "tag": "v5", "new_sqlite_classes": ["SessionDO", "UserDO"] },
-    { "tag": "v6", "new_sqlite_classes": ["GraphDO"] }
+    { "tag": "v6", "new_sqlite_classes": ["GraphDO"] },
+    { "tag": "v7", "new_sqlite_classes": ["DecisionDO"] }
   ],
 
   "vars": {

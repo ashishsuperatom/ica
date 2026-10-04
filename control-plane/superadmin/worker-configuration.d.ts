@@ -22,6 +22,7 @@ interface __BaseEnv_Env {
 	GLOBAL: DurableObjectNamespace<import("./src/worker").GlobalDO>;
 	CHANNEL: DurableObjectNamespace<import("./src/worker").ChannelDO>;
 	SESSION: DurableObjectNamespace<import("./src/worker").SessionDO>;
+	DECISION: DurableObjectNamespace<import("./src/worker").DecisionDO>;
 	USER: DurableObjectNamespace<import("./src/worker").UserDO>;
 	GRAPH: DurableObjectNamespace<import("./src/worker").GraphDO>;
 }

@@ -11,6 +11,7 @@ import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/
 import { replay, type Entry } from '../../../vm/packages/session/src/core.js'
 import { SESSION_MIGRATIONS } from './migrations.js'
 import { createRecorder } from './records.js'
+import { stepOf, takenOf, scopeOfUser } from '../../../vm/packages/decision/src/index.js'
 
 export class SessionDO extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -50,7 +51,26 @@ export class SessionDO extends DurableObject<Env> {
           if (open) this.ctx.storage.sql.exec('INSERT INTO meta (session, project, user, agent, created) VALUES (?, ?, ?, ?, ?)', b.session, b.project, open.user, open.agent, open.at)
         }
       }) } catch (e) { if (e instanceof Conflict) return json({ error: e.message, conflict: e.seq, upto: n }, 409); throw e }
-      const v = replay(this.entries())
+      const all = this.entries()
+      // Each intent that arrived is a passage through a step: what the step was (cues, world) and the path taken from it,
+      // for the project's decision memory. Recorded there; a failure never refuses the append.
+      if (added && (this.env as any).DECISION) {
+        const fresh = all.slice(all.length - added)
+        for (let k = 0; k < fresh.length; k++) {
+          const e = fresh[k]
+          if (e.t !== 'intent') continue
+          const before = replay(all.slice(0, all.length - added + k))
+          if (!before) continue
+          const from = e.intent.block ?? before.leaf
+          const step = stepOf(before as any, from)
+          if (!step) continue
+          const stub = (this.env as any).DECISION.get((this.env as any).DECISION.idFromName(`dec:${b.project}`))
+          await stub.fetch('http://do/experience', { method: 'POST', headers: { 'x-sa-project': b.project }, body: JSON.stringify({
+            session: b.session, block: from, agent: before.agent, scope: scopeOfUser(before.user), ...step, taken: takenOf(e.intent as any) }) })
+            .catch((err: any) => console.warn(`[session] experience for ${b.session}/${from} not recorded: ${err?.message ?? err}`))
+        }
+      }
+      const v = replay(all)
       return json({ upto: this.count(), added, summary: v ? { user: v.user, agent: v.agent, blocks: v.blocks.length, answers: v.answers.length, created: v.created, updated: v.updated, title: titleOf(v) } : null })
     }
     if (request.method === 'GET' && url.pathname === '/view') {

@@ -295,6 +295,33 @@ export const SESSION_MIGRATIONS: Migration[] = [
   ` },
 ]
 
+export const DECISION_MIGRATIONS: Migration[] = [
+  { id: 1, name: 'baseline', up: `
+    CREATE TABLE IF NOT EXISTS meta (project TEXT NOT NULL);
+    -- Each passage through a step: its cues, the world it showed, the path taken next, the state it was recognised as.
+    CREATE TABLE IF NOT EXISTS experiences (id TEXT PRIMARY KEY, at TEXT NOT NULL, session TEXT NOT NULL, block TEXT NOT NULL, agent TEXT NOT NULL,
+      scope TEXT NOT NULL, cues TEXT NOT NULL, world TEXT NOT NULL, state_hash TEXT NOT NULL, taken TEXT, recognised TEXT);
+    CREATE INDEX IF NOT EXISTS idx_exp_recognised ON experiences(recognised, at);
+    CREATE INDEX IF NOT EXISTS idx_exp_session ON experiences(session, block);
+    CREATE TRIGGER IF NOT EXISTS exp_no_update BEFORE UPDATE ON experiences BEGIN SELECT RAISE(ABORT, 'experiences are append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS exp_no_delete BEFORE DELETE ON experiences BEGIN SELECT RAISE(ABORT, 'experiences are append-only'); END;
+    -- How each experience turned out, as it becomes known (a decision recorded, approved, abandoned, reversed).
+    CREATE TABLE IF NOT EXISTS outcomes (seq INTEGER PRIMARY KEY AUTOINCREMENT, experience TEXT NOT NULL, at TEXT NOT NULL, outcome TEXT NOT NULL, by TEXT NOT NULL, note TEXT, artifact TEXT);
+    CREATE INDEX IF NOT EXISTS idx_outcome_exp ON outcomes(experience);
+    CREATE TRIGGER IF NOT EXISTS out_no_update BEFORE UPDATE ON outcomes BEGIN SELECT RAISE(ABORT, 'outcomes are append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS out_no_delete BEFORE DELETE ON outcomes BEGIN SELECT RAISE(ABORT, 'outcomes are append-only'); END;
+    -- Every version of every decision state, written only by a named operation: nothing is erased.
+    CREATE TABLE IF NOT EXISTS versions (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL, version INTEGER NOT NULL, at TEXT NOT NULL, by TEXT NOT NULL,
+      why TEXT NOT NULL, op TEXT NOT NULL, scope TEXT NOT NULL, status TEXT NOT NULL, body TEXT NOT NULL, supports TEXT NOT NULL, contradicts TEXT NOT NULL, UNIQUE (id, version));
+    CREATE TRIGGER IF NOT EXISTS ver_no_update BEFORE UPDATE ON versions BEGIN SELECT RAISE(ABORT, 'decision states are append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS ver_no_delete BEFORE DELETE ON versions BEGIN SELECT RAISE(ABORT, 'decision states are append-only'); END;
+    -- Derived: the cues of each state's current active version — the associative index. Rebuilt on every write.
+    CREATE TABLE IF NOT EXISTS cue_index (cue TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY (cue, id));
+    -- Parameters of recognition (thresholds): settings, not constants.
+    CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, by TEXT NOT NULL, at TEXT NOT NULL);
+  ` },
+]
+
 export const USER_MIGRATIONS: Migration[] = [
   { id: 1, name: 'baseline', up: `
     CREATE TABLE IF NOT EXISTS sessions (project TEXT NOT NULL, session TEXT NOT NULL, agent TEXT NOT NULL, title TEXT NOT NULL,
