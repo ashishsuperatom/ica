@@ -1,17 +1,11 @@
-// THE ANALYST — takes the questions a conversation could not answer from the semantic graph.
-//
-// One analyst for the project, in the shared workspace, with the semantic graph's tools and the data sources'. A
-// question reaches it on its own timer, never from the composer. It answers with a program on the graph when the graph holds what the
-// question needs in a way the composer did not find; otherwise it says what the graph is missing and where that is in
-// the data, so it can be added. Programs read only the graph; the data tools are for understanding.
+// THE ANALYST — one agent for the project, in the shared workspace, with the data tools: a terminal a person can
+// open and work in (and log in through). It answers nothing on its own; no question is handed to it.
 
-import { writeFile, mkdir, rm } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { agentConfig, type AgentOverride } from '../../config/index.js'
-import { createSession, prepareWorkspace, type Harness, type Session, type RunHandlers } from '../../ica/index.js'
-import { todayIn, turnOutcome, type TurnResult } from '../composer/index.js'
+import { createSession, prepareWorkspace, type Harness, type Session } from '../../ica/index.js'
 
 export interface AnalystOpts {
   root: string
@@ -23,35 +17,12 @@ export interface AnalystOpts {
 }
 
 export interface Analyst {
-  ask(question: string, handlers: RunHandlers | undefined, opts: { qid: string; sessionId: string; reason?: string }): Promise<TurnResult>
   session: Session
   cwd: string
 }
 
-const ROLE = `You take the questions a conversation could not answer from the organisation's semantic graph.
-
-Read the question into the graph with ./match, and the graph itself with ./look, and look into the data
-with ./sources, ./find-schema, ./introspect and ./query to understand what the question needs and whether the graph
-holds it in a way that was missed. When it does, answer with a program on the graph, program.mjs, run with ./run-program and given with ./commit:
-its data comes only from the graph questions it asks, and it answers with the headline figure, the tables that show it,
-and up to five points. The points are read first: the answer compressed, and how to read what follows. They say what the tables cannot: a figure computed across the rows — a share, a rate, a
-gap, a concentration; what changed, and where the change sits; what stands apart from the rest; an assumption or
-exclusion that changes how the numbers read; what this data cannot tell. A point that repeats a row is left out. When it does not, ./escalate with what the graph is missing and
-where it is in the data, which the person is told.
-
-The program answers this question now and again later, or for a variant of it. What the question varies — a period, a
-record, a limit — and each judgement the answer turns on — a threshold, a cutoff — are params with the default you
-chose; a window relative to today is worked out from the run date. When the question leaves one unsaid, run on the
-default and say what you took with ctx.caveat. An answer stands alone: the time it holds for comes with it from the
-graph questions it asks; it says its scope, how far to trust it, and the true total when a list is cut short; a slice
-the data covers is given as that slice; an empty or surprising figure is looked into before it is reported. When the
-data cannot answer, the program shows the gap from the data and returns status unknowable, or uncertain when it cannot
-answer with confidence, with what is missing. Run the program, read its answer against the question as asked, correct
-it and run it again; ./commit it when it answers the question.
-
-You work only in this folder. Write your program here and reach the graph and the data only through its tools. Never read, list, search or run anything outside this folder.
-
-Each question comes with today's date, its qid and why it was handed over; every tool explains itself with --help.`
+const ROLE = `You explore the organisation's data with the person you are working with. Read it with ./sources,
+./find-schema, ./introspect and ./query; each explains itself with --help. Work only in this folder.`
 
 export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
   const cfg = agentConfig('analyst')
@@ -60,23 +31,7 @@ export async function createAnalyst(opts: AnalystOpts): Promise<Analyst> {
   const context = (() => { try { return readFileSync(join(cwd, 'CONTEXT.md'), 'utf8') } catch { return '' } })()
   const session = createSession(harness, { cwd, model: opts.ica?.model ?? cfg.model, provider: opts.ica?.provider ?? cfg.provider, thinking: cfg.thinking, baseUrl: opts.ica?.baseUrl,
                                            resumeId: opts.ica?.resumeId, systemReference: [ROLE, context].join('\n\n') })
-
-  return {
-    cwd, session,
-    async ask(question, handlers, o) {
-      const t0 = Date.now()
-      const dir = join(cwd, 'out', o.qid)
-      await rm(dir, { recursive: true, force: true }).catch(() => {})
-      await mkdir(dir, { recursive: true })
-      await writeFile(join(cwd, '.turn'), o.qid)
-      await writeFile(join(cwd, '.session'), o.sessionId)
-      await writeFile(join(cwd, '.agent'), 'analyst')
-      const turn = `${question}\n\ntoday: ${todayIn(opts.projectDir)}\nqid: ${o.qid}${o.reason ? `\nhanded over because: ${o.reason}` : ''}`
-      await session.run(turn, { ...handlers, doneWhen: async () => (await turnOutcome(dir)) !== null })
-      const outcome = await turnOutcome(dir)
-      return { ...(outcome ?? { escalate: { reason: 'the analyst applied no step' } }), ms: Date.now() - t0 }
-    },
-  }
+  return { cwd, session }
 }
 
 export async function promptVersion(): Promise<string> {

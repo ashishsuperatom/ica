@@ -1,5 +1,5 @@
 // ── Grounding store (isolated) ────────────────────────────────────────────────
-// A per-project store, separate from the semantic model's project.sqlite, holding ONLY resolution indexes:
+// A per-project store of its own (db/grounding.sqlite), holding ONLY resolution indexes:
 // entity values (for fuzzy/semantic name→id), hierarchy specs (+ optional materialized edges), and learned
 // value patterns. The grounding AGENT writes it (build-time); the analyst reads it (query-time) through the
 // GroundingResolver interface. Skeleton: schema + builder/reader shells — the real resolvers (FTS/vec, edge

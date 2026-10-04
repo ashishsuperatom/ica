@@ -42,12 +42,13 @@ const SKIP = new Set(['node_modules', 'dist', 'build', '.git', 'coverage', '.ica
 // So values and phrases are leaks wherever they appear; a single ordinary word naming a kind of thing is not.
 // The line is drawn by WHERE the word came from, which the model itself says — not by a list anyone typed.
 
-/** Every word the models on this machine are made of: what they call their things, and what they hold as settings. */
+/** Every word the projects on this machine are made of: what their agents (domains) are called, and what they hold as
+ *  settings — read from each project's composition graph. */
 async function vocabulary(): Promise<Map<string, string>> {
   const found = new Map<string, string>()
   const projects = await readdir(STATE).catch(() => [])
   for (const p of projects) {
-    const file = join(STATE, p, 'db', 'semantic-graph.sqlite')
+    const file = join(STATE, p, 'db', 'composition.sqlite')
     if (!(await stat(file).catch(() => null))) continue
     const db = new DatabaseSync(file, { readOnly: true })
     const add = (word: unknown, what: string, is: 'data' | 'naming') => {
@@ -57,27 +58,18 @@ async function vocabulary(): Promise<Map<string, string>> {
       if (!found.has(w.toLowerCase())) found.set(w.toLowerCase(), what)
     }
     try {
-      for (const r of db.prepare('SELECT id, kind, body FROM g_node').all() as Array<Record<string, string>>) {
-        add(r.id, `a ${r.kind} of the model in ${p}`, 'naming')
-        const body = JSON.parse(r.body || '{}')
-        for (const m of Object.keys(body.measures ?? {})) add(m, `a measure of ${r.id}`, 'naming')
-        for (const [a, d] of Object.entries<any>(body.attributes ?? {})) {
-          add(a, `an attribute of ${r.id}`, 'naming')
-          for (const v of d?.members ?? []) add(v, `a value of ${r.id}.${a}`, 'data')
-        }
-        for (const l of Object.values(body.members ?? {})) add(l, `a member of ${r.id}`, 'data')
-        for (const n of Object.keys(body.names ?? {})) add(n, `a name people use for a ${r.id}`, 'data')
-        for (const role of Object.keys(body.arrows ?? {})) add(role, `an arrow of ${r.id}`, 'naming')
-      }
-      for (const r of db.prepare('SELECT key, value FROM g_setting').all() as Array<Record<string, string>>) {
-        add(r.key, `a setting of the model in ${p}`, 'naming')
+      const rows = db.prepare('SELECT n.name AS name, n.kind AS kind, c.body AS body FROM name n JOIN content c ON c.hash = n.hash').all() as Array<Record<string, string>>
+      for (const r of rows) {
+        if (r.kind === 'domain') add(r.name, `an agent of the project ${p}`, 'naming')
+        if (r.kind !== 'setting') continue
+        add(r.name, `a setting of the project ${p}`, 'naming')
         // A setting holds whatever it was given — a word, a number, a list of them — so every word in it counts.
         const inside = (v: unknown): void => {
-          if (typeof v === 'string') add(v, `the value of the setting "${r.key}"`, 'data')
+          if (typeof v === 'string') add(v, `the value of the setting "${r.name}"`, 'data')
           else if (Array.isArray(v)) v.forEach(inside)
           else if (v && typeof v === 'object') Object.values(v).forEach(inside)
         }
-        try { inside(JSON.parse(r.value)) } catch { add(r.value, `the value of the setting "${r.key}"`, 'data') }
+        try { inside(JSON.parse(r.body).value) } catch { /* not a setting body */ }
       }
     } finally { db.close() }
   }

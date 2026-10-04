@@ -18,17 +18,16 @@ using indexes over the project's actual data. Three resolvers, one interface:
 
 Search mode is **fuzzy/lexical-primary** (matching a specific value). Its store is its own: `db/grounding.sqlite`.
 
-What a concept means, where it lives and how it combines is not grounding's: that is the **semantic graph**
-(`docs/semantic-graph.md`) — its objects, arrows, measures, descriptions, synonyms, listed members and the names people
-use, read by `./resolve-terms` and `./find-record`.
+What a concept means, where it lives and how it combines is not grounding's: that is an agent's knowledge, in the
+**composition graph** (`docs/composition-graph.md`).
 
 ## Who uses it
 
 - **Grounding agent** (`vm/apps/engine/agents/grounding/`) — admin-facing, per project, **cold** (not warmed): on
   trigger it introspects the source(s) and builds the indexes, hierarchies and patterns, then goes away. It reports to
   its xterm on the admin side.
-- **Analyst** — resolves values with `./resolve` (or `grounding/grounding.mjs`) while it explores the data behind an
-  escalated question. The agent that built the index is not invoked per query.
+- **Agents** — resolve values with `./resolve` (or `grounding/grounding.mjs`) while they explore the data. The agent
+  that built the index is not invoked per query.
 - **Connector** — connects, tests and registers the data sources grounding reads.
 
 ## Open
@@ -37,5 +36,5 @@ use, read by `./resolve-terms` and `./find-record`.
 - Every resolution checked against live data, with provenance, confidence and temporal validity; an alias layer and a
   human correction path (admin xterm). Prior art: Master Data Management, entity resolution / record linkage, schema
   matching.
-- What the analyst learns about data quality ("this column is 69% covered; prefer the other path") belongs in the
-  semantic graph, recorded by the agent that extends it.
+- What an agent learns about data quality ("this column is 69% covered; prefer the other path") belongs in its
+  domain's concepts in the composition graph.

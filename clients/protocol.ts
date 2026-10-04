@@ -33,7 +33,6 @@ export type Incoming<P> = { from: { id: string; type: Role | 'hub' }; payload: P
 // surface; the rest are the web app's session/UI helpers (enumerated for the doc).
 export type ClientMsgType =
   | 'analyse'
-  | 'consolidate' | 'semantic:build'
   | 'sessions:list' | 'session:load' | 'suggestions:req' | 'suggest' | 'agents:list' | 'agents:list:res'
   | 'term:attach' | 'term:input'
 

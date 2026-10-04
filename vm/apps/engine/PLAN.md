@@ -1,31 +1,27 @@
 # Engine — plan (reference)
 
-The engine turns a person's question into an answer over their organisation's data. It runs one project, connects
-out to the hub over WebSocket, and drives coding agents (ICAs) that answer with **programs on the semantic graph**.
-The design is **`docs/semantic-graph.md`**. This file is what is built and what is next.
+The engine runs one project: it connects out to the hub (the project's Durable Object) over WebSocket and drives the
+coding agents (ICAs) that answer for it. A conversation is one **agent**: a domain of the composition graph, chosen by
+the person or picked by the first question's words. The design is **`docs/platform-architecture.md`**; this file is
+what is built and what is next.
 
 ---
 
-## The semantic graph (`vm/packages/semantic-graph`)
+## Knowledge (`vm/packages/composition-graph`, `knowledge.ts`)
 
-- A project's model lives in its graph store, `~/.superatom/state/<id>/db/semantic-graph.sqlite`, built and changed only
-  through the `semantic-graph` tool (`vm/packages/semantic-graph/MODELING.md`); `export` writes it as files for review. It
-  holds the schema (entities, calendars, facts, arrows,
-  measures), `sources.json` (where each object's rows are), `settings.json`, and producing programs.
-- A **question** — measures, grouped by where arrows lead, kept to records, over a span — is checked by the graph's
-  rules, compiled to the source's own SQL and run through the datasource manager.
-- Every answer is recorded: **memory**, **expectations**, **decisions**. Each conversation has a **data session**:
-  its steps, each with its answer.
-- An **answer program** (`programs.ts`) asks the graph with `ctx.ask` and returns headline, data, views, narration
-  citing cells, and next steps. Rows carry record ids beside their names.
+- A project's knowledge is written in its home's `knowledge/index.mts` (settings and domains: their parts, files and
+  settings) and imported into `db/composition.sqlite` with `composition-graph import`; `composition-graph verify
+  --against` checks the graph holds what the knowledge writes.
+- A conversation's domain is composed into its agent's system prompt; its files (programs, helpers) and
+  `settings.json` are placed in the conversation's folder (`knowledge.ts`).
 
 ## Agents (`agents/`)
 
 | agent | job |
 |---|---|
-| composer | one per conversation. Reads the question in the graph's terms, answers with a program (`./run-program`), or `./escalate`s |
-| analyst | takes escalated questions: explores the data, answers on the graph when it can, else says what the graph is missing |
+| composer | one per conversation: the domain's agent. Answers in markdown; marker lines (`:::table x.json`) name the blocks it wrote |
 | narrator | one line of live narration while work runs |
+| analyst | a terminal in the shared workspace with the data tools (and where a person logs the harness in) |
 | connector | the admin's agent for connecting a data source (writes, tests and registers a bridge) |
 | grounding | builds value → id resolution for a source |
 
@@ -33,44 +29,29 @@ Harness, provider and model per agent: `config/default.json`, overridable per pr
 
 ## Tools
 
-Generated into each working directory by `ica/workspace.ts`; each explains itself with `--help`.
-
-- the semantic graph — `./resolve-terms ./find-measure ./find-dimension ./find-record ./describe ./group-paths ./overview
-  ./check-question ./try-question ./run-program ./source-records ./trace-answer` (composer, analyst)
-- the data — `./sources ./query ./introspect ./find-schema ./resolve` (analyst, connector, grounding)
-- hand-off — `./escalate`
-
-## Verbs (`graph/semantic-verbs.ts`, `graph/semantic-turns.ts`)
-
-`view: <Entity> <id>` · `run: [qid]` · `check: [qid]` · `program: [qid]` · `explain:` · `edit: <change>` — on the
-answer on screen. Run, check, program and a kept view need no model.
+Generated into each working directory by `ica/workspace.ts`; each explains itself with `--help`:
+`./sources ./query ./introspect ./find-schema ./resolve`. A domain's own programs are placed beside them.
 
 ## State
 
 Everything that belongs to one project lives in its **home**, `~/.superatom/state/<projectId>/` (`ENGINE_STATE_DIR`);
-the repository holds only the platform. `~/.superatom/state/INDEX.md` lists this machine's projects.
+the repository holds only the platform.
 
-- `.env` (hub, key, source credentials; `PROJECT_NAME`, `DATASOURCE_PORT` for `ecosystem.config.cjs`), `settings.json`,
-  `secrets/`, `datasources/` (bridges, registry, index seeds), `checks/` (its live questions),
-  `clients/` (its Teams app), `fast-router/` (its test questions)
-
-- `db/` — `semantic-graph.sqlite` (definitions, memory, data sessions), `datasource-index.sqlite` (read by
-  `./find-schema`), `grounding.sqlite`, `agent-sessions.sqlite`. Outside every agent's cwd.
+- `.env` (hub, key, source credentials), `settings.json`, `secrets/`, `datasources/` (bridges, registry, index seeds),
+  `knowledge/` (what the composition graph imports), `app/` (the project's application).
+- `db/` — `composition.sqlite`, `datasource-index.sqlite` (read by `./find-schema`), `grounding.sqlite`,
+  `agent-sessions.sqlite`. Outside every agent's cwd.
 - `workspace/` — the analyst, connector and grounding agents' directory.
-- `sessions/<sessionId>/` — one conversation's directory, the composer's; a turn's files in `out/<qid>/`
-  (`built.json`, `run.json`, `program.mjs`, `params.json`, `explain.md`).
-- `views/` — the kept view programs, one per kind of record and lens.
+- `sessions/<sessionId>/` — one conversation's directory, the composer's; a turn's files in `out/<qid>/`.
 
 ## Surfaces
 
-The engine emits `session:step` to surfaces, and `analyst:answer` (converted from the step) beside it. Surfaces
+The engine emits `analyst:answer` (the answer in the shape every surface renders) and the live narration. Surfaces
 talk only to the project's Durable Object.
 
 ---
 
 ## Next
 
-1. **The conversation's state as coordinates** — each step records measures, groups, records, span and context,
-   taken from the program's graph questions; a follow-up or a click is a change to that state.
-2. **The graph builder** — an agent that extends the semantic graph from feedback and the data.
-3. **Budget on NetSuite** — the BudgetLine source, fast enough to load.
+The order of work is in `docs/platform-architecture.md`: schemas, the STATE engine, programs, the user UI shell,
+agents and sessions, one agent end to end, the platform side, the builder agent.

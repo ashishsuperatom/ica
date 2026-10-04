@@ -35,5 +35,6 @@
   },
   "include": ["apps/**/*.ts", "apps/**/*.mts", "packages/**/*.ts"],
   // Tests are exercised by running them.
-  "exclude": ["node_modules", "**/node_modules", "**/dist", ".state", "**/*.test.ts", "**/*.test.mts"]
+  // The project template's web client is a browser app with its own typecheck (in each project home).
+  "exclude": ["node_modules", "**/node_modules", "**/dist", ".state", "**/*.test.ts", "**/*.test.mts", "packages/project-template/**"]
 }

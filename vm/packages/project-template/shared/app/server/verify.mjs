@@ -7,7 +7,6 @@
 //              paged one names its columns (--columns)
 //   fields     every column a dimension or a view's members read is one the fact's program gives
 //   settings   every setting the application reads by name is one a domain gives
-//   programs   no view reads the semantic graph: every figure comes from a domain's program
 //   template   the files every project shares are the template's (vm/packages/project-template), not changed here
 //
 //   cd <repo>/vm/apps/engine && pnpm exec tsx <project>/app/server/verify.mjs
@@ -102,14 +101,13 @@ for (const dim of DIMENSIONS) {
   if (dim.members?.fact) column('fields', `${dim.key} members`, dim.members.fact, dim.members.value)
 }
 
-// ── settings and programs: read in the application's own files ──
+// ── settings: read in the application's own files ──
 const files = (dir) => readdirSync(dir).flatMap((n) => { const p = join(dir, n); return statSync(p).isDirectory() ? files(p) : p.endsWith('.mjs') ? [p] : [] })
 for (const file of files(HERE)) {
   if (file === fileURLToPath(import.meta.url)) continue
   const text = readFileSync(file, 'utf8')
   const where = relative(PROJECT, file)
   for (const m of text.matchAll(/setting(?:Of)?\(\s*['"]([^'"]+)['"]/g)) if (!settingsInGraph.has(m[1])) fail('settings', where, `reads the setting "${m[1]}", which no domain gives`)
-  if (/\bc\.ask\(|\bctx\.graph\b|semantic-graph|time-graph\.mjs/.test(text) && file.includes(`${join(HERE, 'capabilities')}/`)) fail('programs', where, 'reads the semantic graph, not a domain\'s program')
 }
 
 // ── template: the shared files are the platform's ──

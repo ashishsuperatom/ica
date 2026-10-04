@@ -24,3 +24,7 @@ not recorded
 # A currency code belongs to the world, not to whoever happens to keep books in it: tests and examples need one,
 # and every one of them is somebody's. What must not appear is a customer's own vocabulary around it.
 aud
+inr
+# The settings every project starts with (the project template reads them): the platform's names, not a customer's.
+reporting-currency-code
+financial-year-first-month

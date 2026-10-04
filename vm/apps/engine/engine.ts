@@ -25,11 +25,11 @@ import { createSession, prepareWorkspace, type Session, type Harness, type RunHa
 import { agentConfig, describeConfig, useCache, receive, applied, type AgentName } from './config/index.js'
 import { createNarrator, capResultData, stripCode, isDataCall, type Narrator } from './agents/narrator/index.js'
 import { createAnalyst, promptVersion as analystPromptVersion } from './agents/analyst/index.js'
-import { promptVersion as composerPromptVersion, createComposer, dayOf, type Composer } from './agents/composer/index.js'
+import { promptVersion as composerPromptVersion, createComposer, type Composer } from './agents/composer/index.js'
 import { createConnector, promptVersion as connectorPromptVersion } from './agents/connector/index.js'
 import { createGroundingAgent, promptVersion as groundingPromptVersion } from './agents/grounding/index.js'
 import { openAgentSessions } from './agent-sessions.js'
-import { log, readJsonSafe } from './log.js'
+import { log } from './log.js'
 import { createInspector } from './inspect.js'
 import { DataSourceIndex, dataSourceStats } from '@superatom/datasource-index'
 // TYPE-ONLY, and it must stay that way: the deploy bundles package vm/ alone, so this path does not exist in a
@@ -41,10 +41,6 @@ import { pick, compose, place, remember, recall, recordQuestion, domainsOf, agen
 import { parcelStore, apiOfHub } from '../../../clients/parcels.js'
 import { createAppSeam } from './app-seam.js'
 import { randomUUID } from 'node:crypto'
-import { MODEL, modelVersion, openSemanticGraph } from './graph/semantic.js'
-import { CATEGORY, explainAnswer, parseVerb, type VerbMatch, type ViewRef } from './graph/semantic-verbs.js'
-import { createSemanticTurns } from './graph/semantic-turns.js'
-import { readFile as readFileAsync } from 'node:fs/promises'
 import { buildDatasourceIndex } from './datasource-index/build.js'
 import type { AgentEvent } from './ica/session.js'
 
@@ -67,8 +63,8 @@ const PROJECT = process.env.ICA_PROJECT || ''
 // THE PROJECT'S HOME. Everything that belongs to one project — and nothing of the platform — lives under ONE root,
 // outside the repository, keyed by the project id:
 //   <STATE_ROOT>/<projectId>/  .env (its hub, key, source credentials) · settings.json · secrets/ · datasources/ (its
-//   bridges, registry, index seeds) · semantic/ (its model) · db/ (semantic-graph.sqlite · datasource-index.sqlite ·
-//   grounding.sqlite · agent-sessions.sqlite) · workspace/ · sessions/<id>/ · views/
+//   bridges, registry, index seeds) · knowledge/ (what the composition graph imports) · app/ · db/ (composition.sqlite ·
+//   datasource-index.sqlite · grounding.sqlite · agent-sessions.sqlite) · workspace/ · sessions/<id>/
 // The repository holds only the platform. Env-overridable so Fly points the root at the mounted volume.
 const VM_ROOT = join(__dirname, '..', '..')                              // apps/engine → the vm monorepo root
 // Outside the repository, so an agent working in its workspace is not one directory away from the engine's source.
@@ -154,26 +150,12 @@ for (const d of [WORKSPACE, DB_DIR]) {
 const agentSessions = openAgentSessions(join(DB_DIR, 'agent-sessions.sqlite'))
 const genId = () => 'q_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
 
-// ── THE PROJECT'S SEMANTIC GRAPH ──────────────────────────────────────────────────────────────────────────────
-// The project's semantic model (<project home>/semantic/, graph/semantic.ts); its memory and data sessions are
-// db/semantic-graph.sqlite. Opened on first use, because loading its sources checks them at the datasource manager,
-// which may come up after the engine.
-let semanticGraph: ReturnType<typeof openSemanticGraph> | null = null
-// The model is changed through the semantic-graph tool while the engine runs: a newer change opens it again.
-let semanticVersion = -1
-const getSemantic = () => {
-  const now = modelVersion(DB_DIR)
-  if (now !== semanticVersion) { semanticGraph = null; semanticVersion = now }
-  return (semanticGraph ??= openSemanticGraph({ dbDir: DB_DIR, projectDir: PROJECT_DIR, managerUrl: DATASOURCE })
-    .catch((e) => { semanticGraph = null; semanticVersion = -1; throw e }))
-}
-
 // The datasource index: every source's tables and columns, searchable by the agents' ./find-schema.
 const indexStore = new DataSourceIndex(join(DB_DIR, 'datasource-index.sqlite'))
 
 // READ-ONLY window into the engine for the admin console, answered over the hub (inspect:req). See inspect.ts.
 const inspector = createInspector({
-  graph: getSemantic, index: indexStore, agentSessions, projectId: PROJECT, datasourceUrl: DATASOURCE,
+  index: indexStore, agentSessions, projectId: PROJECT, datasourceUrl: DATASOURCE,
   roots: { workspace: WORKSPACE, sessions: SESSIONS, db: DB_DIR },
   runtime: () => ({
     agents: {
@@ -421,19 +403,11 @@ function tellSurfaces(reply: any, channel: string, sid: string, qid: string, tim
   if (followups.length && reply) emit(reply, { t: 'followups', items: followups, qid, sid })
 }
 
-// Semantic-graph steps delivered, and the verbs on the answer on screen (graph/semantic-turns.ts).
-const { deliverSemanticStep, semanticVerb, keepView } = createSemanticTurns({
-  graph: () => getSemantic(), emit: (to, msg) => emit(to, msg), tell: tellSurfaces,
-  viewsDir: join(WORKSPACE_ROOT, PROJECT, 'views'), today: () => dayOf(PROJECT_DIR),
-})
-
-// ── A QUESTION, ANSWERED AS A STEP OF THE PERSON'S DATA SESSION ─────────────────────────────────────────────
+// ── A QUESTION, ANSWERED BY THE CONVERSATION'S AGENT ──────────────────────────────────────────────────────────
 //
-// Each conversation has two sessions side by side: the agent's (the harness transcript, one per conversation) and
-// the data session in the semantic graph's memory — the steps the person's questions have become, each with its
-// answer. A leading verb (edit:, run:, view: …) is handled first (graph/semantic-turns.ts). Otherwise the turn goes to
-// the composer, which answers with a program on the graph (./run-program, ./commit) or hands the question to the analyst with
-// The turn ends when a step has been applied (or the composer says it cannot), and the engine delivers that step.
+// A conversation is one agent (a domain of the composition graph), chosen by the person or picked by the first
+// question's words. Its composer answers in markdown with marker lines naming the blocks it wrote. A question no agent
+// fits is told which agents there are.
 async function analyse(question: string, from: any, sid = '', qidIn = '', channel = '', chosenAgent = '') {
   if (busySessions.has(sid)) {
     emit(from, A('status', 'analyst', { text: 'Already answering a question in this chat — one at a time.', sid })); return
@@ -472,9 +446,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
   const saidBeats: string[] = []
   try {
 
-    const analyst = await analystSlot.get()
-    emit(reply, A('hello', 'composer', { label: 'Composer', hue: '#4a90d9', streamKind: 'events', pty: false, interactive: false, sid, scope: 'session', ...profileOf('composer'), desc: 'Reuses a program or composes one on the graph for this chat.' }))
-    emit(reply, A('hello', 'analyst', { label: 'Analyst', hue: '#c08a2b', streamKind: analyst.session.events ? 'events' : (analyst.session.kind ?? 'events'), pty: analyst.session.kind === 'pty', interactive: true, controls: ['terminal', 'compact', 'new'], sid, scope: 'project', ...profileOf('analyst'), desc: 'Explores the data from scratch when the graph does not hold what a question needs.' }))
+    emit(reply, A('hello', 'composer', { label: 'Composer', hue: '#4a90d9', streamKind: 'events', pty: false, interactive: false, sid, scope: 'session', ...profileOf('composer'), desc: 'The agent answering this chat.' }))
     emitBeat(reply, 'Looking into your question…', qid, sid)
 
     narrator = createNarrator({ cwd: WORKSPACE })
@@ -564,48 +536,11 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       console.log(`[ica] composer · read ${qid.slice(0, 8)} · ${(timing.ms / 1000).toFixed(1)}s · ${said.blocks.length} blocks`)
       return
     }
-    // A leading verb says what kind of turn this is: answered here when no model is needed, else the composer's with what to do.
-    const verb = parseVerb(question)
-    let verbTurn: { verb: VerbMatch['verb']; view?: ViewRef; explain?: string } | null = null
-    let asked = question
-    if (verb) {
-      const r = await semanticVerb(verb, { sid, qid, reply, channel, t0, cwd: composer.cwd, question })
-      if ('done' in r) return
-      verbTurn = { verb: r.verb.verb, view: r.view, explain: r.explain }
-      asked = r.prompt
-    }
-    // Abort first — that is what reaches a turn already running — then reset, which throws the conversation away.
-    workingAgent = 'composer'; stopSession = () => {
-      try { (composer as any).session?.stop?.() } catch { /* best-effort */ }
-      try { (composer as any).session?.reset?.() } catch { /* best-effort */ }
-    }
-    let done = await capped(composer.ask(asked, handlers, { qid, sessionId: sid }), () => {
-      try { (composer as any).session?.reset?.() } catch { /* best-effort */ }
-      return { unanswered: { reason: 'the composer did not finish in time' }, ms: Date.now() - t0 }
-    })
-    // NO ESCALATION. The composer answers with what the graph holds or says plainly that it cannot; nothing is
-    // handed to another agent behind the person's back. The analyst has its own work, on its own timer.
-    if (stopped) { console.log(`[ica] ${qid.slice(0, 8)} stopped after ${((Date.now() - t0) / 1000).toFixed(1)}s`); return }
-
-    const timing = { ms: Date.now() - t0 }
-    if (verbTurn?.explain && done.explained) {
-      const md = await readFileAsync(join(composer.cwd, 'out', qid, 'explain.md'), 'utf8').catch(() => '')
-      tellSurfaces(reply, channel, sid, qid, timing, explainAnswer(md, verbTurn.explain))
-      console.log(`[ica] composer · explained ${verbTurn.explain.slice(0, 8)} · ${(timing.ms / 1000).toFixed(1)}s`)
-      return
-    }
-    if (!done.step) {
-      const why = done.unanswered?.reason ?? 'no step was applied'
-      emit(reply, { t: 'session:step', sid, qid, error: `This question was not answered: ${why}`, timing })
-      tellSurfaces(reply, channel, sid, qid, timing, { status: 'cannot_answer', answer: `This question was not answered: ${why}` })
-      return
-    }
-    // THE STEP AS THE DATA SESSION HOLDS IT — never as the agent described it.
-    const cwd = workingAgent === 'analyst' ? analyst.cwd : composer.cwd
-    const held = await readJsonSafe(join(cwd, 'out', qid, 'built.json')) as any
-    // A view built for the first time is kept, so every later look at that kind of record runs it with no model.
-    if (verbTurn?.view && held?.kind === 'program') await keepView(verbTurn.view, join(cwd, 'out', qid, 'program.mjs'))
-    await deliverSemanticStep({ sid, qid, step: done.step, kind: held?.kind, reply, channel, timing, by: workingAgent, question, category: verbTurn ? CATEGORY[verbTurn.verb] : undefined })
+    // NO AGENT FITS. Every answer comes from an agent; say which agents there are, and let the next question pick again.
+    composersBySession.delete(sid)
+    const agents = await agentsOf(PROJECT_DIR).catch(() => [] as { name: string }[])
+    tellSurfaces(reply, channel, sid, qid, { ms: Date.now() - t0 }, { status: 'cannot_answer',
+      answer: agents.length ? `No agent here fits this question. The agents are: ${agents.map((a) => a.name).join(', ')}. Choose one, or ask in their terms.` : 'This project has no agents yet.' })
   } catch (e: any) {
     emit(reply, { t: 'session:step', sid, qid, error: `Failed: ${e?.message ?? e}`, timing: { ms: Date.now() - t0 } })
     tellSurfaces(reply, channel, sid, qid, { ms: Date.now() - t0 }, { status: 'error', answer: `Failed: ${e?.message ?? e}` })
@@ -615,7 +550,6 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     try { narrator?.stop() } catch { /* best-effort */ }
     curQuestion = ''
     emit(reply, A('status', 'analyst', { state: 'done', sid }))
-    analystSlot.persist()
     busySessions.delete(sid)
     if (inflight.get(sid)?.qid === qid) inflight.delete(sid)
   }
@@ -716,7 +650,7 @@ const normWhich = (w: any): Which => (w === 'connector' ? 'connector' : w === 'g
 const slotFor = (w: Which) => (w === 'connector' ? connectorSlot : w === 'grounding' ? groundingSlot : analystSlot)
 const termChunkT = (w: Which) => (w === 'connector' ? 'connector:chunk' : w === 'grounding' ? 'grounding:chunk' : 'analyst:chunk')
 
-// Standard streaming for the from-based agent flows (semantic/connector/grounding): forward BOTH the harness's
+// Standard streaming for the from-based agent flows (connector/grounding): forward BOTH the harness's
 // text chunks (the pty view) AND its structured events (the codex/events view) to the requester, tagged by agent.
 // The console renders per the kind we announce with `<w>:stream` — which is the SESSION's real kind, so a codex
 // agent gets the event view and a claude agent gets the terminal, with no per-flow hardcoding.
@@ -796,7 +730,7 @@ const wire = createWire({
   handle: (whole, from) => { void handle(whole, from) },
   parcels: parcelStore({ api: apiOfHub(HUB), projectId: PROJECT, credential: KEY }),
 })
-const appSeam = createAppSeam({ project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, getSemantic, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
+const appSeam = createAppSeam({ project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
 
 async function handle(payload: any, from: any) {
   if (wire.receive(payload, from)) return

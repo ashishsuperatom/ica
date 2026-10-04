@@ -1,7 +1,7 @@
 // ── Grounding Agent ───────────────────────────────────────────────────────────
 // ONE agent whose only job is to build this project's GROUNDING indexes — the maps that turn a fuzzy human
 // reference (a name, a place, an id) into concrete structured ids. It never answers user questions and never
-// touches the semantic model. It drives an ICA (default claude-code:sonnet-5, harness swappable) using the
+// touches an agent's knowledge. It drives an ICA (default claude-code:sonnet-5, harness swappable) using the
 // system prompt in ./SYSTEM.md, reaches data ONLY through the data seam (data/query.mjs → the datasource-manager),
 // and persists what it discovers by calling build(config) on the grounding seam (grounding/grounding.mjs). It is COLD:
 // spun up only when the admin triggers it, never warmed at boot. Its role file is copied in as ./grounding/GROUNDING.md

@@ -4,15 +4,13 @@
 //
 //   sessions/<id>/  one conversation's directory — the composer's cwd for that conversation
 //   workspace/      the shared directory — the analyst, grounding and connector agents work here
-//   db/             the ENGINE's private state: semantic-graph.sqlite (the model, memory, data sessions),
-//                   datasource-index.sqlite (./find-schema), grounding.sqlite, agent-sessions.sqlite. Outside every agent's
-//                   cwd, so an `ls` never surfaces it.
+//   db/             the ENGINE's private state: composition.sqlite (the agents' knowledge), datasource-index.sqlite
+//                   (./find-schema), grounding.sqlite, agent-sessions.sqlite. Outside every agent's cwd, so an `ls`
+//                   never surfaces it.
 //
 // In its directory an agent finds the tools for its part, generated here with the absolute paths they need:
 //
-//   the semantic graph   ./match ./look ./ask ./run-program ./commit ./trace   (conversation, analyst)
-//   the intent side      ./intent                                          (conversation, analyst)
-//   the data             ./sources ./query ./introspect ./find-schema ./resolve                            (analyst, connector, grounding)
+//   the data             ./sources ./query ./introspect ./find-schema ./resolve
 //
 // Which turn is live is in .turn, which data session this conversation is in .session — both written by the engine
 // before it asks. A turn's files are in out/<qid>/.
@@ -21,9 +19,6 @@ import { mkdir, writeFile, chmod, symlink, readlink, rm, readdir, rename, readFi
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-
-const semanticCli = fileURLToPath(new URL('../graph/semantic-cli.ts', import.meta.url))
-const modelCli = fileURLToPath(new URL('../../../packages/semantic-graph/src/cli.ts', import.meta.url))
 
 /** The data seam a program imports as data/query.mjs: every read goes through the datasource manager, never a source directly. */
 export const dataSeam = (managerUrl: string) => `// The data seam. You never see databases, ports, dialects, or credentials — you call
@@ -66,8 +61,8 @@ export interface WorkspaceSpec {
   projectDir?: string
   /** One conversation, one working directory: when given, the agent works in sessions/<sessionId>. */
   sessionId?: string
-  /** A conversation's directory has the semantic graph. The shared workspace — where the analyst, connector
-   *  and grounding agents all work, so one set of tools for all of them — has the semantic graph and the data. */
+  /** A conversation's directory, or the shared workspace where the analyst, connector and grounding agents work.
+   *  Both have the data tools. */
   tools?: 'conversation' | 'shared'
 }
 
@@ -108,7 +103,7 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
 
 The data sources: ./sources lists them, ./find-schema searches their fields, ./introspect and ./query read them, and
 ./resolve turns a name into ids. data/query.mjs, data/introspect.mjs and grounding/grounding.mjs are the same seams to
-import. The semantic graph: ./match reads a question into it and ./look reads the graph itself; a program on it answers with ./run-program.
+import.
 Every tool explains itself with --help.
 
 What a tool gives back is shaped by what it is for. Something to weigh — a node, the readings of a question, a
@@ -188,20 +183,6 @@ export const stats = () => store.stats()   // the ONE structural reader (defined
 export const raw = store
 `)
 
-  const graphTool = (command: string) => `// ${command} — the semantic graph. See apps/engine/graph/semantic-cli.ts.
-import { spawnSync } from 'node:child_process'
-const r = spawnSync('tsx', [${JSON.stringify(semanticCli)}, ${JSON.stringify(command)}, ...process.argv.slice(2),
-  '--db', ${JSON.stringify(dbDir)}, '--project', ${JSON.stringify(projectDir)},
-  '--manager', ${JSON.stringify(managerUrl)}, '--home', ${JSON.stringify(dir)}], { stdio: 'inherit', env: { ...process.env, NODE_NO_WARNINGS: '1' } })
-process.exit(r.status ?? 1)
-`
-  const intentTool = `// intent — what is being decided, and what we learned going this way. See apps/engine/graph/intent-cli.ts.
-import { spawnSync } from 'node:child_process'
-const r = spawnSync('tsx', [${JSON.stringify(fileURLToPath(new URL('../graph/intent-cli.ts', import.meta.url)))}, ...process.argv.slice(2),
-  '--db', ${JSON.stringify(dbDir)}, '--project', ${JSON.stringify(projectDir)},
-  '--manager', ${JSON.stringify(managerUrl)}, '--home', ${JSON.stringify(dir)}], { stdio: 'inherit', env: { ...process.env, NODE_NO_WARNINGS: '1' } })
-process.exit(r.status ?? 1)
-`
   const drivers: Record<string, string> = {
     'find-schema': `// Datasource index. "<term>" = matching fields across ALL sources (SOURCE.CONTAINER.FIELD : type). Search by field/table name, by type (date/number), or by what a column MEANS. --source <S> filters to one source; --full adds PK/nullable/references.
 import { DataSourceIndex, searchDataSource } from '@superatom/datasource-index'
@@ -295,25 +276,6 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
     'introspect':   'introspect "<source>" <cmd>   where <cmd> = tables | columns "<table>" | sample "<table>" [n] | profile "<table>" "<column>" | verify-join "<fromT>" "<fromCol>" "<toT>" "<toCol>"',
     'resolve':      'resolve "<text>"   → resolve a fuzzy name/value to concrete ids (JSON)',
   }
-  // Every workspace has the graph and the data: a conversation's composer reaches the data when the graph does not
-  // hold what a question needs; the analyst, connector and grounding agents work in the data. Only building the model
-  // is the shared workspace's.
-  for (const name of Object.keys(SEMANTIC_USAGE)) { drivers[name] = graphTool(name); usages[name] = SEMANTIC_USAGE[name] }
-  drivers['intent'] = intentTool
-  usages['intent'] = INTENT_USAGE
-  // Building the model: the one semantic-graph tool, on this project's store, with the agent at work as who changed it.
-  if (!conversation) {
-    drivers['semantic-graph'] = `// semantic-graph — the project's model, built and changed through checked, recorded operations. See packages/semantic-graph/MODELING.md.
-import { spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
-const agent = (() => { try { return readFileSync(${JSON.stringify(join(dir, '.agent'))}, 'utf8').trim() } catch { return 'agent' } })()
-const args = process.argv.slice(2).map((a) => (a === '-h' ? '--help' : a))
-const r = spawnSync('tsx', [${JSON.stringify(modelCli)}, ...args, '--db', ${JSON.stringify(join(dbDir, 'semantic-graph.sqlite'))}, '--model', 'model'],
-  { stdio: 'inherit', env: { ...process.env, NODE_NO_WARNINGS: '1', SEMANTIC_GRAPH_BY: agent } })
-process.exit(r.status ?? 1)
-`
-    usages['semantic-graph'] = 'semantic-graph help   → the commands that read and build the project\'s model; every change is checked and recorded with who made it and why'
-  }
   for (const [name, body] of Object.entries(drivers)) {
     // Prepend a --help guard. ESM hoists the body's imports above this, but they only OPEN cheap handles; the
     // guard still short-circuits before any query/search runs, printing usage and nothing else.
@@ -321,7 +283,8 @@ process.exit(r.status ?? 1)
     // line and exits 1 — the agent reads a clear reason, not a Node stack trace.
     const help = `process.on('unhandledRejection', (e) => { console.error(String(e && e.message || e)); process.exit(1) })
 process.on('uncaughtException', (e) => { console.error(String(e && e.message || e)); process.exit(1) })
-${name === 'semantic-graph' ? '' : `if (process.argv.slice(2).some(a => a === '-h' || a === '--help')) { console.log(${JSON.stringify(usages[name])}); process.exit(0) }\n`}`
+if (process.argv.slice(2).some(a => a === '-h' || a === '--help')) { console.log(${JSON.stringify(usages[name])}); process.exit(0) }
+`
     await writeFile(join(dir, '.tools', name + '.mjs'), help + body)
     // ── A QUESTION TAKES AS LONG AS IT TAKES ──────────────────────────────────────────────────────────────
     // A tool that is cut short teaches nothing: a query stopped at thirty seconds has not said the answer is
@@ -329,7 +292,7 @@ ${name === 'semantic-graph' ? '' : `if (process.argv.slice(2).some(a => a === '-
     // engine ends a turn that goes silent or runs too long — so the work here must outlive the call that started
     // it. Reading tools therefore run DETACHED and file their result under what was asked, within this turn: a
     // call that is killed leaves the work running, and asking again picks up the finished result instead of
-    // paying for it twice. Tools that change something (run-program, commit) are never reused this way.
+    // paying for it twice. Tools that change something are never reused this way.
     const detached = READ_ONLY.has(name)
     await writeFile(join(dir, name), detached
 ? `#!/usr/bin/env bash
@@ -391,44 +354,7 @@ export async function keepOnlyTools(dir: string, keep: string[]): Promise<void> 
 }
 
 /** Tools that only read: their work outlives the call, and asking the same thing twice in a turn costs nothing. */
-const READ_ONLY = new Set(['match', 'look', 'ask', 'trace'])
-
-const INTENT_USAGE = `intent '<the question, as asked>'   → what a person in this situation is deciding, what an answer must carry to serve it, and the situation in force for this conversation. The semantic graph says what is true; this says what is wanted. It never returns a number.
-  state · state push <id> · state drop <id>   the situation being answered inside — a slice of references, and a change to it is recorded
-  watch [<g1:Object[.measure]>]               what to watch for around a node, learned from going this way before
-  checks <intent id>                          what an answer must carry, to check your answer against before committing
-  judge [<turn>]                              reads the answer you built back against what the intent required, and names what is unmet
-  suggest '{"op":"…","target":"…","args":{…},"reason":"…"}'   what should be added to a graph — recorded, never applied; answer with what is held today and say what differs`
-
-const SEMANTIC_USAGE: Record<string, string> = {
-  match: `match '<the question, as asked>' [--json]   → the subgraphs the question could be. Give it minutes, not seconds: it tries the best few against the data. Its words are resolved to measures, dimensions, conditions and records (looked up by name at their sources); every route the graph holds is built; each is said back in the graph's own words with what is uncertain about it; the best few are asked against the data so it can separate them. Ends with what to change if the first one is not it.
-  Read the sentence first and say what its parts are — you know what the words mean, and the graph does not: match '{"question":"<as asked>","parts":[{"text":"<the words>","is":"<the kind of thing they name, or measure/grouping/period/condition>"}]}'. Where a name begins and ends is yours to decide; what it means is the graph's, and a part it cannot place is reported rather than assumed`,
-  look: `look [<node>] [<to>|<text>]   → the graph itself: nothing for every fact, dimension and calendar; a node for what it holds, what it links to, what links to it and what it is sliced by; two nodes for every way from one to the other (as the "via" they are written in — add --text to read them as sentences); a node and some text for which record that text means`,
-  ask: `ask '<question>' [--json] [--raw]   → a question's answer, or the rule that refuses it and what to change — so asking is also how a question is checked. --raw adds what was sent to each source for it, in that source's own language: the base to compose on when the graph stops short. Give it minutes, not seconds: a fact a program builds reads a whole span before it groups.
-  A question is JSON: measures, grouped by dimensions, kept to records or conditions, over a span. Its parts and their shapes:
-  measures  ["<Fact>.<measure>", "[<Fact>.<a>] / [<Fact>.<b>]"]   a measure by name, or an expression in brackets over measures (+ - * /, numbers) of facts that share the grouping; an expression is an output like any other
-  by        [{"to":"<Dimension>","via":["<role>"]}, {"attribute":"<Object>.<attribute>"}]   the grouping; via when the fact reaches the dimension more than one way
-  where     [{"to":"<Dimension>","in":["<key>"]}, {"attribute":"<Object>.<attribute>","contains":"<text>"}, {"condition":"<name the graph holds>"}]   keeps rows by what they are: in, notIn, none, contains, startsWith, range {"from","to"}
-  having    [{"output":"<a measure or expression, as written in measures>","op":">","value":0.5}]   keeps groups by what they measure; op is < <= > >= = !=; value, or a setting by name
-  span      {"from":"<first day>","through":"<last day>"}   or a period said relative to today; left out, the whole of time
-  order     {"by":"<output>","desc":true}   limit <n>   limitPer ["<Dimension>"] keeps the top n within each
-  totals    [["<Dimension>"], []] answers also at coarser groupings, [] the grand total   share {"outputs":["<output>"],"within":["<Dimension>"]} each as a share of its total there
-  fill true · cumulative {"reset":"<Calendar>"} · rolling {"window":<n>,"average":true}   along a calendar grouped by
-  runs      {"output":"<output>","op":">","value":<n>,"along":"<Calendar>"}   the longest consecutive run of periods meeting the condition, per group
-  compare   {"back":{"months":1}} or {"span":{"from","through"}}   the same question over an earlier span, side by side with the change
-  currency  "<code>" reports money in one currency · without ["<condition>"] sets aside a condition a fact is always kept to
-  ./look says what this graph holds`,
-  'run-program': `run-program [program.mjs] ['<params>']   → run the program in this folder and read its answer as the person would — headline, narration, tables with their row counts; run it as often as it takes, then ./commit. Allow it minutes: a fact a program builds reads a whole span before it groups.
-  A program is named for its idea and takes the question's values — a span, a record, a judgement it turns on — as params with the default you chose:
-  export const meta = { name, description, params: { <name>: '<what it means>' }, logic }
-  export default async (ctx, params) => ({ status, missing, scope, headline, data, views, narration, nextSteps })
-  status: 'answered'|'unknowable'|'uncertain' · missing: why, when not answered · scope · headline: { label, value } · data: { <key>: <table> } · views: [{ id, component: 'table'|'bar'|'line'|'kpi', data: '<key of data>', title, encode }] · narration: [{ text, cites: { <slot>: { data: '<key of data>', row, column } }, why }] · nextSteps: [{ label, why }].
-  Up to five sentences. Every number in a sentence is a {slot} named in that sentence's cites, and a cell names a KEY of data — so a figure you worked out is cited by putting it in a column of a table you return.
-  serves: { '<requirement id>': <cell> | { missing: '<why it cannot be met>' } } — point each requirement ./intent gave you at the figure in your answer that meets it, so ./intent judge can read it back.
-  ctx.ask(question, label) is the program's only data — a table of rows, each record by its id with its name beside it. ctx.transform, ctx.decide, ctx.decideAt, ctx.verify, ctx.caveat and ctx.explain record what the program did and why, so the answer can be read back`,
-  commit: `commit   → give the answer of the last ./run-program as this conversation's next step, and end the turn`,
-  trace: `trace ['<group>'] [<call>]   → what is under the answer on screen: the rows of one group (a group is JSON, e.g. '{"<Dimension>":"<key>"}'), or with no group, the steps and questions it was reached by`,
-}
+const READ_ONLY = new Set<string>()
 
 // ── THE WORKSPACE HOLDS WHAT THIS ENGINE WRITES, AND NOTHING ELSE ─────────────────────────────────────────────
 // A workspace outlives engine versions, and an agent reads whatever it finds: an earlier engine's tools, question

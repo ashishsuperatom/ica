@@ -1,6 +1,6 @@
 # The {{NAME}} dashboard
 
-Deterministic code on the domains' programs: no model and no semantic graph.
+Deterministic code on the domains' programs: no model.
 
 - `server/` — the application the engine hands every `app:` payload. The project's own files: `facts.mjs` (which program
   gives which rows), `dimensions.mjs` (what a question may be narrowed or broken down by, and the column carrying it on

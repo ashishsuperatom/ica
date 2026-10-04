@@ -2,30 +2,23 @@
 // The engine runs on a Fly VM with nothing listening, so everything here comes over the hub
 // relay (admin → ProjectDO → code-engine) as `inspect:req` / `inspect:res`. See vm/apps/engine/inspect.ts.
 //
-// A read-only window into the program graph (graph.sqlite) and the stores around it:
+// A read-only window into the project's stores:
 //
-//   programs        every program a name points at: contract, body, relation shape, version history
-//   calls           memory — every call, with its request, decisions, checks, caveats, queries and output
-//   data sessions   each session's steps: the message, the state it led to, and the call that answered it
+//   composition     the composition graph: what each agent knows, how it was composed, who changed it
 //   grounding       value→id resolution the grounding agent built
 //   index           the fields each data source has, as ./find-schema searches them
 //   files · db · logs   the agents' directories, the raw table inventory, the engine's log channel
-//
-// Everything links through: a program to its recent calls, a call to its children, a session step to its call.
 
 import { useCallback, useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react'
 import type { Hub } from './hub'
 
 export type Section =
-  | 'summary' | 'composition' | 'programs' | 'calls' | 'sessions' | 'grounding' | 'index' | 'files' | 'db' | 'logs'
+  | 'summary' | 'composition' | 'grounding' | 'index' | 'files' | 'db' | 'logs'
 
 // Grouped so the views read as a few coherent buckets, not one flat list.
 export const SECTIONS: { id: Section; label: string; group?: string }[] = [
   { id: 'summary',   label: 'Summary' },
   { id: 'composition', label: 'Composition graph', group: 'Knowledge' },
-  { id: 'programs',  label: 'Programs',         group: 'Graph' },
-  { id: 'calls',     label: 'Calls',            group: 'Graph' },
-  { id: 'sessions',  label: 'Data sessions',    group: 'Graph' },
   { id: 'grounding', label: 'Grounding',        group: 'Knowledge' },
   { id: 'index',     label: 'Datasource index', group: 'Knowledge' },
   { id: 'files',     label: 'Files',            group: 'Storage' },
@@ -141,14 +134,10 @@ function useInspect(hub: Hub, view: string, args: Record<string, unknown>, key: 
 
 // What the slide-over is currently showing.
 type Focus =
-  | { kind: 'program'; name?: string; hash?: string }
-  | { kind: 'call'; id: string }
-  | { kind: 'session'; id: string }
   | { kind: 'file'; path: string }
   | null
 
-const focusKey = (f: NonNullable<Focus>) =>
-  f.kind === 'program' ? `program|${f.hash ?? f.name}` : f.kind === 'file' ? `file|${f.path}` : `${f.kind}|${f.id}`
+const focusKey = (f: NonNullable<Focus>) => `file|${f.path}`
 
 // ── the shell ────────────────────────────────────────────────────────────────
 export function Inspector({ hub, section }: { hub: Hub; section: Section }) {
@@ -172,7 +161,7 @@ export function Inspector({ hub, section }: { hub: Hub; section: Section }) {
 
   // A link to a section that no longer exists lands on the summary rather than a blank page.
   const Body = ({
-    summary: SummaryView, programs: ProgramsView, calls: CallsView, sessions: SessionsView,
+    summary: SummaryView,
     grounding: GroundingView, index: IndexView, files: FilesView, db: DbView, logs: LogsView, composition: CompositionView,
   } as Record<string, (p: ViewProps) => ReactElement>)[section] ?? SummaryView
 
@@ -194,17 +183,12 @@ function SummaryView({ hub }: ViewProps) {
   if (err) return <Err msg={err} retry={reload} />
   if (!data) return <Loading on={loading} />
   const agents: Record<string, any> = data.runtime?.agents ?? {}
-  const g = data.graph
   const gr = data.grounding ?? {}
-  const tiles: [string, number | undefined, string?][] = g ? [
-    ['Programs', g.programs], ['Names', g.names], ['Calls', g.calls, g.failedCalls ? `${g.failedCalls} failed` : undefined],
-    ['Observations', g.observations], ['Data sessions', g.sessions], ['Steps', g.steps],
-  ] : []
+  const tiles: [string, number | undefined, string?][] = []
   return (
     <>
       <div className="bar"><div style={{ marginLeft: 'auto' }}><button className="btn sm ghost" onClick={reload}>Refresh</button></div></div>
 
-      {data.graphError && <Err msg={`graph unavailable — ${data.graphError}`} />}
       {!!tiles.length && <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(132px,1fr))' }}>
         {tiles.map(([k, v, note]) => (
           <div className="tile" key={k}>
@@ -271,150 +255,6 @@ function SummaryView({ hub }: ViewProps) {
         </div>
       </div>
     </>
-  )
-}
-
-// ── Programs ─────────────────────────────────────────────────────────────────
-function ProgramsView({ hub, open }: ViewProps) {
-  const { data, err, loading, reload } = useInspect(hub, 'programs', {}, 'programs')
-  const [q, setQ] = useState('')
-  if (err) return <Err msg={err} retry={reload} />
-  if (!data) return <Loading on={loading} />
-  const all: any[] = data.programs ?? []
-  const list = q ? all.filter(p => `${p.name} ${p.description}`.toLowerCase().includes(q.toLowerCase())) : all
-  return (
-    <div className="card" style={{ padding: '14px 16px' }}>
-      <div className="bar" style={{ marginBottom: 10 }}>
-        <strong>Programs</strong>
-        <span className="muted" style={{ fontSize: 12.5 }}>{all.length} named · what the agents' ./catalog sees</span>
-        <input className="input search" placeholder="Filter…" value={q} onChange={e => setQ(e.target.value)} style={{ marginLeft: 'auto', maxWidth: 240 }} />
-        <button className="btn sm ghost" onClick={reload}>Refresh</button>
-      </div>
-      {!list.length && <div className="empty">{all.length ? 'Nothing matches that filter.' : 'No programs defined yet.'}</div>}
-      {!!list.length && <table>
-        <thead><tr><th>Program</th><th>Kind</th><th>Returns</th><th className="num">Measures</th><th className="num">Dimensions</th><th className="num">Versions</th><th>Defined by</th></tr></thead>
-        <tbody>
-          {list.map(p => (
-            <tr key={p.name} onClick={() => open({ kind: 'program', name: p.name })}>
-              <td style={{ minWidth: 220 }}>
-                <strong>{p.name}</strong>
-                {p.description && <span className="clamp" style={{ fontSize: 12.5, marginTop: 2 }}>{p.description}</span>}
-              </td>
-              <td><span className="chip">{p.kind}</span></td>
-              <td><span className="chip">{p.returns}</span></td>
-              <td className="num">{p.relation ? count(p.relation.measures) : <span className="muted">—</span>}</td>
-              <td className="num">{p.relation ? count(p.relation.dimensions) : <span className="muted">—</span>}</td>
-              <td className="num muted">{p.versions}</td>
-              <td className="muted" style={{ fontSize: 12.5 }}>{p.definedBy ?? '—'} <span style={{ opacity: .7 }}>{when(p.definedAt)}</span></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>}
-    </div>
-  )
-}
-
-/** A table of slim calls — shared by the Calls view, a program's recent calls and a call's children. */
-function CallTable({ calls, open, showName = true }: { calls: any[]; open: (f: Focus) => void; showName?: boolean }) {
-  return (
-    <table>
-      <thead><tr><th style={{ width: 110 }}>When</th>{showName && <th>Program</th>}<th>Request</th><th className="num">ms</th><th className="num">Checks</th><th className="num">Queries</th><th>Result</th></tr></thead>
-      <tbody>
-        {calls.map((c: any) => (
-          <tr key={c.id} onClick={() => open({ kind: 'call', id: c.id })}>
-            <td className="num muted" style={{ fontSize: 12 }}>{when(c.at)}</td>
-            {showName && <td><strong>{c.name}</strong>{c.parentId && <span className="chip" style={{ marginLeft: 6 }}>nested</span>}</td>}
-            <td style={{ maxWidth: 320 }}><span className="trunc mono" style={{ fontSize: 11.5 }}>{oneLine(c.request)}</span></td>
-            <td className="num muted">{c.ms ?? '—'}</td>
-            <td className="num" style={{ color: c.failedVerifications ? 'var(--bad)' : undefined }} title={`${c.decisions} decisions · ${c.caveats} caveats`}>
-              {c.verifications ? `${c.verifications - c.failedVerifications}/${c.verifications}` : <span className="muted">—</span>}
-            </td>
-            <td className="num muted">{c.queries}</td>
-            <td>{c.error ? <span title={c.error}><Tag t="failed" /></span> : <Tag t="ok" />}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  )
-}
-
-// ── Calls (memory) ───────────────────────────────────────────────────────────
-function CallsView({ hub, open }: ViewProps) {
-  const [name, setName] = useState('')
-  const [failed, setFailed] = useState(false)
-  const [nested, setNested] = useState(false)
-  const [page, setPage] = useState(0)
-  const LIMIT = 100
-  useEffect(() => setPage(0), [name, failed, nested])
-  const { data, err, loading, reload } = useInspect(hub, 'calls', { name: name || undefined, failed, nested, limit: LIMIT, offset: page * LIMIT },
-    `calls|${name}|${failed}|${nested}|${page}`)
-  const programs = useInspect(hub, 'programs', {}, 'calls-programs')
-  const names: string[] = (programs.data?.programs ?? []).map((p: any) => p.name)
-  return (
-    <div className="card" style={{ padding: '14px 16px' }}>
-      <div className="bar" style={{ marginBottom: 10 }}>
-        <strong>Calls</strong>
-        <span className="muted" style={{ fontSize: 12.5 }}>{data ? `${data.total} ${failed ? 'failed' : ''}` : ''} · newest first</span>
-        <label className="row muted" style={{ fontSize: 12.5, cursor: 'pointer', marginLeft: 'auto' }}>
-          <input type="checkbox" checked={failed} onChange={e => setFailed(e.target.checked)} /> failed only
-        </label>
-        <label className="row muted" style={{ fontSize: 12.5, cursor: 'pointer' }}>
-          <input type="checkbox" checked={nested} onChange={e => setNested(e.target.checked)} /> include nested
-        </label>
-        <button className="btn sm ghost" onClick={reload}>Refresh</button>
-      </div>
-      {!!names.length && <div className="axes" style={{ margin: '0 0 12px' }}>
-        <span className={`chip${name ? ' link' : ''}`} onClick={() => setName('')}>all programs</span>
-        {names.map(n => <span key={n} className={`chip${n === name ? '' : ' link'}`} style={n === name ? { background: '#e7e9ff' } : undefined}
-          onClick={() => setName(n === name ? '' : n)}>{n}</span>)}
-      </div>}
-      {err && <Err msg={err} retry={reload} />}
-      {!data && !err && <Loading on={loading} />}
-      {data && !data.calls.length && <div className="empty">No calls{name || failed ? ' match these filters' : ' yet'}.</div>}
-      {data && !!data.calls.length && <>
-        <CallTable calls={data.calls} open={open} />
-        {data.total > LIMIT && (
-          <div className="row" style={{ gap: 8, marginTop: 12, justifyContent: 'flex-end' }}>
-            <button className="btn sm ghost" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Previous</button>
-            <span className="muted" style={{ fontSize: 12.5 }}>{page * LIMIT + 1}–{Math.min((page + 1) * LIMIT, data.total)} of {data.total}</span>
-            <button className="btn sm ghost" disabled={(page + 1) * LIMIT >= data.total} onClick={() => setPage(p => p + 1)}>Next</button>
-          </div>
-        )}
-      </>}
-    </div>
-  )
-}
-
-// ── Data sessions ────────────────────────────────────────────────────────────
-function SessionsView({ hub, open }: ViewProps) {
-  const { data, err, loading, reload } = useInspect(hub, 'sessions', {}, 'sessions')
-  if (err) return <Err msg={err} retry={reload} />
-  if (!data) return <Loading on={loading} />
-  const list: any[] = data.sessions ?? []
-  return (
-    <div className="card" style={{ padding: '14px 16px' }}>
-      <div className="bar" style={{ marginBottom: 10 }}>
-        <strong>Data sessions</strong>
-        <span className="muted" style={{ fontSize: 12.5 }}>{list.length} · each step is a message and the state it led to</span>
-        <button className="btn sm ghost" style={{ marginLeft: 'auto' }} onClick={reload}>Refresh</button>
-      </div>
-      {!list.length && <div className="empty">No data sessions yet.</div>}
-      {!!list.length && <table>
-        <thead><tr><th>Session</th><th>Who</th><th className="num">Steps</th><th className="num">Current</th><th className="num">Created</th><th className="num">Active</th></tr></thead>
-        <tbody>
-          {list.map(se => (
-            <tr key={se.id} onClick={() => open({ kind: 'session', id: se.id })}>
-              <td style={{ minWidth: 240 }}><strong>{se.title ?? 'Untitled'}</strong><code className="mono" style={{ display: 'block', fontSize: 11 }}>{se.id}</code></td>
-              <td style={{ maxWidth: 200 }}><span className="trunc mono" style={{ fontSize: 11 }}>{se.who ? JSON.stringify(se.who) : '—'}</span></td>
-              <td className="num">{se.steps}</td>
-              <td className="num muted">{se.currentStep ?? '—'}</td>
-              <td className="num muted">{when(se.createdAt)}</td>
-              <td className="num muted">{when(se.updatedAt)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>}
-    </div>
   )
 }
 
@@ -869,8 +709,7 @@ function DetailPanel({ hub, focus, open, close }: { hub: Hub; focus: NonNullable
     return () => window.removeEventListener('keydown', onKey)
   }, [close])
 
-  const args = focus.kind === 'program' ? (focus.hash ? { hash: focus.hash } : { name: focus.name })
-    : focus.kind === 'file' ? { path: focus.path } : { id: focus.id }
+  const args = { path: focus.path }
   const { data, err, loading } = useInspect(hub, focus.kind, args, focusKey(focus))
 
   return (
@@ -878,9 +717,6 @@ function DetailPanel({ hub, focus, open, close }: { hub: Hub; focus: NonNullable
       <div className="ins-panel" onClick={e => e.stopPropagation()}>
         {err && <><div className="ph"><strong>Error</strong><span className="x" onClick={close}>×</span></div><div className="pb"><Err msg={err} /></div></>}
         {!data && !err && <><div className="ph"><strong>Loading…</strong><span className="x" onClick={close}>×</span></div><div className="pb"><Loading on={loading} /></div></>}
-        {data && focus.kind === 'program' && <ProgramDetail program={data.program} open={open} close={close} />}
-        {data && focus.kind === 'call' && <CallDetail call={data.call} nested={data.children ?? []} open={open} close={close} />}
-        {data && focus.kind === 'session' && <SessionDetail session={data.session} open={open} close={close} />}
         {data && focus.kind === 'file' && <FileDetail file={data} close={close} />}
       </div>
     </div>
@@ -891,207 +727,6 @@ const Json = ({ v, max }: { v: unknown; max?: string }) =>
   <pre className="json" style={max ? { maxHeight: max } : undefined}>{JSON.stringify(v, null, 2)}</pre>
 const Muted = ({ children }: { children: ReactNode }) =>
   <span className="muted" style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>{children}</span>
-
-function ProgramDetail({ program: p, open, close }: { program: any; open: (f: Focus) => void; close: () => void }) {
-  const shape = p.contract?.shape
-  const measures = Object.entries(shape?.measures ?? {}) as [string, any][]
-  const dimensions = Object.entries(shape?.dimensions ?? {}) as [string, any][]
-  return (
-    <>
-      <div className="ph">
-        <div style={{ minWidth: 0 }}>
-          <div className="row" style={{ gap: 8 }}>
-            <span className="chip">{p.contract?.kind}</span><span className="chip">{p.contract?.returns}</span>
-            <strong style={{ fontSize: 15 }}>{p.name}</strong><Tag t={p.current ? 'current' : 'superseded'} />
-          </div>
-          <code className="mono" style={{ display: 'block', marginTop: 3 }}>{p.hash}</code>
-        </div>
-        <span className="x" onClick={close}>×</span>
-      </div>
-      <div className="pb">
-        {p.contract?.description && <p style={{ margin: '0 0 14px', fontSize: 13.5, lineHeight: 1.55, color: 'var(--sub)' }}>{p.contract.description}</p>}
-        <dl className="kv">
-          <dt>defined</dt><dd>{p.definedBy ?? '—'} · {p.definedAt ? new Date(p.definedAt).toLocaleString() : '—'}</dd>
-          <dt>calls</dt><dd>{p.calls}</dd>
-        </dl>
-
-        {(measures.length > 0 || dimensions.length > 0) && <>
-          <div className="sect">Relation shape</div>
-          <table><thead><tr><th>Column</th><th>Role</th><th>Detail</th><th>Description</th></tr></thead><tbody>
-            {measures.map(([m, v]) => (
-              <tr key={`m${m}`} style={{ cursor: 'default' }}>
-                <td><strong>{m}</strong></td><td><span className="chip">measure</span></td>
-                <td className="mono" style={{ fontSize: 11.5 }}>{[v.unit, v.kind, v.how].filter(Boolean).join(' · ')}</td>
-                <td className="muted" style={{ fontSize: 12.5 }}>{v.description ?? ''}</td>
-              </tr>
-            ))}
-            {dimensions.map(([d, v]) => (
-              <tr key={`d${d}`} style={{ cursor: 'default' }}>
-                <td><strong>{d}</strong></td><td><span className="chip">dimension</span></td>
-                <td className="mono" style={{ fontSize: 11.5 }}>{[v.entity, v.history, v.labelled ? 'labelled' : null].filter(Boolean).join(' · ')}</td>
-                <td className="muted" style={{ fontSize: 12.5 }}>{v.description ?? ''}</td>
-              </tr>
-            ))}
-          </tbody></table>
-        </>}
-
-        <div className="sect">Body <Muted>— {String(p.body ?? '').split('\n').length} lines, {bytes(String(p.body ?? '').length)}</Muted></div>
-        <Code text={p.body} full />
-
-        <div className="sect">Contract</div>
-        <Json v={p.contract} />
-
-        {!!p.history?.length && <>
-          <div className="sect">Version history</div>
-          <table><thead><tr><th>Version</th><th>From</th><th>To</th><th>By</th><th>Reason</th></tr></thead><tbody>
-            {p.history.map((h: any) => (
-              <tr key={`${h.hash}${h.from}`} onClick={() => h.hash !== p.hash && open({ kind: 'program', hash: h.hash })} style={h.hash === p.hash ? { cursor: 'default', background: '#f0f1ff' } : undefined}>
-                <td><code className="mono" style={{ fontSize: 11 }}>{String(h.hash).slice(0, 12)}</code></td>
-                <td className="muted" style={{ fontSize: 12 }}>{new Date(h.from).toLocaleString()}</td>
-                <td className="muted" style={{ fontSize: 12 }}>{h.to ? new Date(h.to).toLocaleString() : 'now'}</td>
-                <td>{h.by}</td>
-                <td className="muted" style={{ fontSize: 12.5 }}>{h.reason ?? '—'}</td>
-              </tr>
-            ))}
-          </tbody></table>
-        </>}
-
-        <div className="sect">Recent calls <Muted>— {p.recentCalls?.length ?? 0} of {p.calls}</Muted></div>
-        {p.recentCalls?.length ? <CallTable calls={p.recentCalls} open={open} showName={false} /> : <div className="muted" style={{ fontSize: 13 }}>Never called.</div>}
-      </div>
-    </>
-  )
-}
-
-function CallDetail({ call: c, nested, open, close }: { call: any; nested: any[]; open: (f: Focus) => void; close: () => void }) {
-  return (
-    <>
-      <div className="ph">
-        <div style={{ minWidth: 0 }}>
-          <div className="row" style={{ gap: 8 }}>
-            <strong style={{ fontSize: 15 }}>{c.name}</strong><Tag t={c.error ? 'failed' : 'ok'} />
-            <span className="muted" style={{ fontSize: 12.5 }}>{ms(c.ms)} · {when(c.at)}</span>
-          </div>
-          <code className="mono" style={{ display: 'block', marginTop: 3 }}>{c.id}</code>
-        </div>
-        <span className="x" onClick={close}>×</span>
-      </div>
-      <div className="pb">
-        <dl className="kv">
-          <dt>program</dt><dd><span className="chip link" onClick={() => open({ kind: 'program', hash: c.hash })}>{c.name} · {String(c.hash).slice(0, 12)}</span></dd>
-          {c.parentId && <><dt>called by</dt><dd><span className="chip link" onClick={() => open({ kind: 'call', id: c.parentId })}>{c.parentId}</span></dd></>}
-          <dt>at</dt><dd>{new Date(c.at).toLocaleString()} · today = {c.today ?? '—'}</dd>
-          <dt>who</dt><dd><code className="mono">{c.who ? JSON.stringify(c.who) : '—'}</code></dd>
-        </dl>
-
-        {c.error && <><div className="sect">Error</div><div className="card" style={{ borderColor: '#f3d0dc', background: '#fdeaee', color: 'var(--bad)', fontSize: 13, whiteSpace: 'pre-wrap' }}>{c.error}</div></>}
-
-        <div className="sect">Request</div>
-        <Json v={c.request} />
-
-        {!!c.decisions?.length && <>
-          <div className="sect">Decisions</div>
-          <table><tbody>
-            {c.decisions.map((d: any, i: number) => (
-              <tr key={i} style={{ cursor: 'default' }}>
-                <td style={{ width: 200 }}><strong>{d.label}</strong></td>
-                <td><span className="chip">{oneLine(d.took)}</span>{d.boundary != null && <span className="muted" style={{ fontSize: 12 }}> · boundary {oneLine(d.boundary)}</span>}
-                  {d.reason && <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>{d.reason}</div>}</td>
-              </tr>
-            ))}
-          </tbody></table>
-        </>}
-
-        {!!c.verifications?.length && <>
-          <div className="sect">Verifications</div>
-          <ul style={{ margin: '4px 0 12px', paddingLeft: 18, fontSize: 13, lineHeight: 1.6 }}>
-            {c.verifications.map((v: any, i: number) => (
-              <li key={i} style={{ color: v.held ? 'var(--sub)' : '#b02a37' }}>
-                {v.held ? '✓' : '✗'} {v.label}{v.detail ? <span className="muted"> — {oneLine(v.detail)}</span> : null}
-              </li>
-            ))}
-          </ul>
-        </>}
-
-        {!!c.caveats?.length && <>
-          <div className="sect">Caveats</div>
-          <ul style={{ margin: '4px 0 12px', paddingLeft: 18, fontSize: 13, lineHeight: 1.6, color: '#8a5a00' }}>
-            {c.caveats.map((t: string, i: number) => <li key={i}>{t}</li>)}
-          </ul>
-        </>}
-
-        {!!c.queries?.length && <>
-          <div className="sect">Queries <Muted>— {c.queries.length}</Muted></div>
-          {c.queries.map((q: any, i: number) => (
-            <div key={i} style={{ marginBottom: 12 }}>
-              <div className="row" style={{ gap: 8, marginBottom: 5, fontSize: 12.5 }}>
-                <span className="chip">{q.source}</span>
-                <span className="muted">{q.rows ?? '—'} rows · {ms(q.ms)}</span>
-                {q.params != null && count(q.params) > 0 && <span className="trunc mono muted" style={{ fontSize: 11, maxWidth: 420 }}>{JSON.stringify(q.params)}</span>}
-              </div>
-              {q.sql ? <Code text={q.sql} /> : <span className="muted" style={{ fontSize: 12.5 }}>SQL not kept for this call</span>}
-            </div>
-          ))}
-        </>}
-
-        <div className="sect">Output</div>
-        <details><summary style={{ cursor: 'pointer', fontSize: 13, color: 'var(--purple)' }}>Show output</summary>
-          <div style={{ marginTop: 8 }}><Json v={c.output} max="60vh" /></div></details>
-
-        {!!nested.length && <>
-          <div className="sect">Calls it made <Muted>— {nested.length}</Muted></div>
-          <CallTable calls={nested} open={open} />
-        </>}
-      </div>
-    </>
-  )
-}
-
-function SessionDetail({ session: se, open, close }: { session: any; open: (f: Focus) => void; close: () => void }) {
-  return (
-    <>
-      <div className="ph">
-        <div style={{ minWidth: 0 }}>
-          <strong style={{ fontSize: 15 }}>{se.title ?? 'Untitled session'}</strong>
-          <code className="mono" style={{ display: 'block', marginTop: 3 }}>{se.id}</code>
-        </div>
-        <span className="x" onClick={close}>×</span>
-      </div>
-      <div className="pb">
-        <dl className="kv">
-          <dt>who</dt><dd><code className="mono">{se.who ? JSON.stringify(se.who) : '—'}</code></dd>
-          <dt>current step</dt><dd>{se.currentStep ?? '—'}</dd>
-        </dl>
-        {!se.steps?.length && <div className="empty">No steps yet.</div>}
-        {(se.steps ?? []).map((t: any) => (
-          <div key={t.id} className="facet" style={{ marginTop: 12, borderColor: t.id === se.currentStep ? 'var(--purple)' : undefined }}>
-            <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-              <strong>Step {t.id}</strong>
-              {t.parent != null && <span className="muted" style={{ fontSize: 12 }}>after {t.parent}</span>}
-              {t.program && <span className="chip">{t.program}</span>}
-              <span className="muted" style={{ fontSize: 12 }}>{ms(t.ms)} · {when(t.at)}</span>
-              {t.callId && <span className="chip link" style={{ marginLeft: 'auto' }} onClick={() => open({ kind: 'call', id: t.callId })}>call ↗</span>}
-            </div>
-            {(t.error || t.callError) && <div style={{ color: 'var(--bad)', fontSize: 13, marginTop: 8, whiteSpace: 'pre-wrap' }}>{t.error ?? t.callError}</div>}
-            <div className="sect">Message</div>
-            <Json v={t.message} max="30vh" />
-            {!!t.narration?.length && <>
-              <div className="sect">Narration</div>
-              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.6 }}>{t.narration.map((n: string, i: number) => <li key={i}>{n}</li>)}</ul>
-            </>}
-            {!!t.caveats?.length && <>
-              <div className="sect">Caveats</div>
-              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.6, color: '#8a5a00' }}>{t.caveats.map((c: string, i: number) => <li key={i}>{c}</li>)}</ul>
-            </>}
-            <div className="sect">State <Muted>— {String(t.stateHash ?? '').slice(0, 12)}</Muted></div>
-            <details><summary style={{ cursor: 'pointer', fontSize: 13, color: 'var(--purple)' }}>Show state</summary>
-              <div style={{ marginTop: 8 }}><Json v={t.state} max="46vh" /></div></details>
-          </div>
-        ))}
-      </div>
-    </>
-  )
-}
 
 function FileDetail({ file, close }: { file: any; close: () => void }) {
   return (

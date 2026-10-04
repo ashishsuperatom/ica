@@ -1,5 +1,8 @@
 # The composition graph
 
+> The semantic graph, the strategy graph and the intent index were removed on 2026-10-04 (package, engine tools, stores,
+> docs). Mentions of them below are history. The current design is `platform-architecture.md`.
+
 One graph. Everything an agent knows at the start of a session is composed from it, deterministically, and
 nothing else teaches an agent anything. It is editable, viewable, versioned to the change, and every path says who
 changed it and why. It is what the semantic graph, the strategy graph, the intent index and the prompt files were

@@ -1,13 +1,11 @@
-// A PROJECT'S OWN APPLICATION. A project may carry an application of its own — a state machine over the graph, its
-// named queries, its blocks — at <project>/app/server/index.mjs. It is not part of the platform and the platform
+// A PROJECT'S OWN APPLICATION. A project may carry an application of its own — a state machine over its domains'
+// programs, its blocks — at <project>/app/server/index.mjs. It is not part of the platform and the platform
 // knows nothing of its vocabulary: every payload whose `t` begins with `app:` is handed to it whole, with the seams
-// it may use — the data manager, the graph, who is asking, the composer for a question in prose — and a way to reply
+// it may use — the data manager, a domain's programs, who is asking, the composer for a question in prose — and a way to reply
 // on the same envelope. Nothing else changes hands. A project without one gets the platform's default UI.
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { check } from '@superatom/semantic-graph'
-import { MODEL } from './graph/semantic.js'
 import { createComposer, type Composer, type QueryRecord } from './agents/composer/index.js'
 import { createNarrator, capResultData, isDataCall } from './agents/narrator/index.js'
 import { pick, compose, place, recordQuestion, placeForRunning } from './knowledge.js'
@@ -17,7 +15,6 @@ export interface AppSeamDeps {
   project: string
   projectDir: string
   datasource: string
-  getSemantic: () => Promise<any>
   /** Reply on the wire: the wire decides how a large message travels. */
   send: (to: any, msg: Record<string, unknown>) => void
   /** The workspace root the threads' directories live under. */
@@ -154,8 +151,6 @@ export function createAppSeam(d: AppSeamDeps) {
     if (!a) { d.send(from, { t: 'app:error', error: 'this project has no application', reqId: payload.reqId }); return }
     const ctx = {
       project: d.project, projectDir: d.projectDir, who: from?.userId ?? null,
-      graph: () => d.getSemantic(),
-      check: (q: any, today?: string) => d.getSemantic().then((g) => check(g.model(MODEL).schema, q, today ? { today } : {})),
       query: async (source: string, sql: string, params: Record<string, unknown> = {}) => {
         const r = await fetch(`${d.datasource}/query`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: source, sql, params }) })
         const body: any = await r.json().catch(() => ({}))

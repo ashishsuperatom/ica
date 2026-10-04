@@ -902,20 +902,6 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
   }, [busy, role])
   submitRef.current = submit   // keep the delegated entity-click listener pointed at the live submit
 
-  // Developer-only: trigger System-4 consolidation. Auto-opens the live-output drawer
-  // since the whole point is to watch Claude Code consolidate.
-  const consolidate = useCallback(() => {
-    if (busy || wsRef.current?.readyState !== 1) return
-    setFeed(f => [...f, { id: crypto.randomUUID(), type: 'user-msg', text: '⚙︎ Consolidate library (System 4)' }])
-    xtermRef.current?.clear()
-    setHasLog(true)
-    setLogOpen(true)
-    setStatus('Consolidating…')
-    setBusy(true); busyRef.current = true; armWatchdog()
-    send({ t: 'consolidate', role: 'developer' })
-    scroll()
-  }, [busy])
-
   // Standard ICA session controls for a lane that offers them (hello `controls`): a completely fresh session, or
   // compact (shrink context).
   const sessionCtl = useCallback((lane: string, action: 'new' | 'compact') => {
