@@ -739,6 +739,123 @@ intent ──► agent (domain picked; from a dashboard it is already picked)
           view: same block (replace) or new block ──► answer history
 ```
 
+## The decision system (2026-10-05)
+
+### The loop, in the user's words
+
+People ask questions; the agent answers. Later, on a slow path, we look at their questions and generate more
+dashboards and more systems, a richer version as more happens. While that happens, the modules, the concepts, the
+composition graph — everything — is immutable and in time: any point can be gone back to and seen, and everything is
+governed as an enterprise needs, so nothing is ever lost. Everything built in a decision-intelligence system has
+**steps**: we go through an agent, it does something, and step by step we progress, creating **artifacts** — and the
+artifacts of the decisions taken come on the **right-hand side**. (Nothing like this is in any dashboard or
+application yet.)
+
+The agents are assumed to work (the ICA answering, System 3 exploring, System 4 consolidating, learning): the system is
+built around what they produce and what they are given, not around how they work.
+
+### The screen: steps in the middle, artifacts on the right
+
+- **Left — where to go:** home, the agents (topics) a person sees, their sessions. A dashboard is an agent: opening it
+  opens a session already on its domain.
+- **Middle — the steps:** the session's thread of blocks, one step each (a question and its answer, a program's
+  view, a control's result). Going back to an earlier step and changing it branches (the thread is a tree); the
+  branch switcher sits at each fork. Each step ends in **paths from here** (below): never a dead end.
+- **Right — the artifacts:** what the work produced and decided: the **decision records** (the decision, the options
+  considered, the path chosen, the reasoning, the data it rested on, who approved), and the files, reports and plans
+  made along the way. Artifacts are immutable and versioned, linked to the steps that made them, and governed
+  (commands — approve, record — go through the one write path, never STATE). A session's artifacts are on the right;
+  a project's decisions are its **decision register**.
+
+### Decision memory — the decision state
+
+One **decision memory** per project, in its own Durable Object (DecisionDO): every decision state is collected there,
+because recognising a situation means searching all of them. It is not the session's STATE. Following the stable
+attractor pattern (`docs/stable-attractor-associative-memory-source.md`):
+
+- **Experience** — each passage through a step: its cues (language: the agent, the domain, the question, the STATE's
+  values as phrases), the **world** as it was (the figures the step showed — each program's answer can name them), the
+  STATE's hash, the **path taken** next (the intent: a control's ops, an action, a call, or words), and later its
+  **outcome** (a decision recorded, approved, abandoned, reversed). The memory of the data that passed through.
+- **Decision state** (an attractor) — a situation recognised from experiences: its description in language, its cues,
+  the **paths** possible from it with the **reasoning** for each and their record (taken, succeeded, failed), the range
+  of the world it was seen in, and its evidence (the experiences supporting or contradicting it). A decision state can
+  hold other decision states (specialisations: "revenue + finance" and, when evidence shows it differs,
+  "revenue + finance + 003"). Specificity is earned: one general state until evidence splits it.
+- **Recognition (the hot path, deterministic, no model):** a step's cues → the associative index (phrases 1–4 words,
+  BM25-like, user → group → global scope as a ranking factor, strength from the record) → the matching decision states
+  → is the world still like the one each was learned in (each figure within the range seen, or how far it moved)?
+- **What a state does:**
+  - **learned, world similar** — offer its paths first, with their reasoning and record, one click each; exploring
+    (asking the agent) is always still there;
+  - **learned, world changed** — offer its paths marked with what moved ("seen 12–18, now 31"), and suggest checking
+    with the agent before taking one;
+  - **not learned** (nothing matches well, or the evidence is thin or competing) — explore: the agent answers and the
+    programs' own actions are offered; the experience is recorded, so it can become memory.
+  Memory is advisory, never authoritative; contradictions are kept as competing states until evidence explains them.
+- **Learning is a separate path** (assumed working): it reads experiences and outcomes and changes decision states
+  only through named operations — create, reinforce, weaken, merge, generalise, specialise, supersede, split, compete,
+  invalidate — each recorded with who, when and why; nothing is erased; any decision state can be read as of any moment.
+
+### How it routes
+
+```
+step (block) ──► cues + world ──► decision memory: recognise
+                                   ├─ learned · similar  ──► its paths (one click) + explore
+                                   ├─ learned · changed  ──► its paths, flagged + "check with the agent"
+                                   └─ not learned        ──► explore: the agent, the programs' actions
+person takes a path ──► new step ──► experience recorded (cues, world, path)
+decision recorded / approved / abandoned ──► artifact (right) ──► outcome of the experiences that led to it
+slow path (System 3/4) ──► reads questions and experiences ──► proposes decision states, programs, dashboards
+                           (as suggestions: owners decide; published versions; lineage kept)
+```
+
+### One UI framework (2026-10-05, from slob, proc, the Fusion5/TotalGroup dashboards and the user UI)
+
+Today the same things exist several times: three thread implementations (the user UI's session screen, the
+dashboards' `runtime/thread.tsx`, the chat's flat feed), two answer formats (the chat's `sections[]`, the dashboards'
+`Block` types), three sidebars, three palettes, three WebSocket clients. The dashboards' web code — slob's design
+system in plain CSS, proc's tree — is the best of them, and is copied byte for byte into every project. There will be
+**one framework, a platform package** every surface is built from:
+
+- **Design system** — slob's, kept and refined (tokens by meaning; fixed scales; `sa-thing__part--variant`; hover
+  actions; value first; text fits its track; never null/undefined; ECharts' own charts; one table). Its rules are the
+  design system's document; every project gets the same, refined as projects add to it.
+- **Shell** — left: where to go (one line about the app; details open as a block); middle: the thread; right: the
+  artifacts. One user profile (name and email, never an id), one connection status.
+- **Thread** — a tree (proc): going back to a step and changing it starts a branch; a branch switcher at each fork;
+  each step a block with its frame (step badge, title, the cause that opened it linking to its parent, hover copy ·
+  collapse · remove), a separator with the time between steps, Shift+↑/↓. The thread is the platform's session (its
+  log, synced to SessionDO), not a browser's: the address names the session and its current block — absolute, never an
+  operation list.
+- **Blocks** — act in place when looking closer, open a new block when moving on or deciding; a decision is a block
+  whose form locks and whose receipt captures before and after; live blocks re-read, record blocks never do. A block
+  shows: the **answer** (markdown with marker lines, drawn by the one answer component — the chat's answer card and
+  the dashboards' block renderers made one: tables with caveats and paging, KPIs, figures, bars/ring, grid, facts,
+  files, the period), the **programs' views** its STATE names, and **paths from here** (the programs' actions, the
+  decision memory's learned paths, asking in words). While it works it shows the narration beats and the partial
+  answer.
+- **Data** — one client (the hub socket, request ids, a bounded cache shown at once and re-asked, refreshed by server
+  events); reads are named, writes are commands refused with a sentence.
+- **Intent** — `<Intent>` (ops · action · call, current or new) and one listener; a component owns its intent, the
+  engine owns whether it is coherent.
+
+**Three surfaces, one framework:** the **user UI** (admins and domain experts: work in sessions, build — programs,
+agents from a conversation, dashboards — and publish), **dashboards** (an agent opened on its starting screen: its
+programs' views; people ask on a topic from the left), and the **control plane** (organisation and platform
+governance: the same design system). A project's dashboard code stops being a copy: its capabilities become programs,
+its scenarios agents.
+
+### Creating and publishing
+
+- A person works in a session; when it holds knowledge worth keeping they **make an agent from it** (its domain's
+  concepts compacted from the conversation, as suggestions), forked from the agent they started with — lineage kept.
+- Programs are built (by a person or the builder agent) as drafts, tried in the session, **published** by their owner
+  or an admin; a dashboard is an agent whose programs' views are its starting screen, published the same way.
+- What the slow path proposes (new decision states, programs, dashboards, concepts) arrives as **suggestions**; the
+  owner decides; the decided version is published; everything keeps its history (time travel) and its scope
+  (global / group / user).
+
 ## Applications
 
 - **User UI — the base application, the same for every project.** It gets everything the dashboard has today, plus
