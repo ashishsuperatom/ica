@@ -41,6 +41,7 @@ import { pick, compose, place, remember, recall, recordQuestion, domainsOf, agen
 import { parcelStore, apiOfHub } from '../../../clients/parcels.js'
 import { createAppSeam } from './app-seam.js'
 import { createThreadSeam } from './thread-seam.js'
+import { readingAnswer } from './answer-card.js'
 import { randomUUID } from 'node:crypto'
 import { buildDatasourceIndex } from './datasource-index/build.js'
 import type { AgentEvent } from './ica/session.js'
@@ -366,32 +367,6 @@ const profileOf = (name: AgentName) => { try { const c = agentConfig(name); retu
 
 // Every surface renders `analyst:answer` (and a chat channel `channel:answer`); `session:step` carries the richer
 // form beside it. Next steps go as follow-up chips, which the person sends back as their next question.
-/** A reading as an Answer: the prose without its marker lines, and each block the markdown named as a section. */
-function readingAnswer(markdown: string, blocks: { marker: string; block: Record<string, unknown> | null; error?: string }[], periods: { label: string; detail?: string }[] = []): import('../../../clients/protocol.js').Answer {
-  const prose = markdown.split('\n').filter((l) => !/^:::\S+\s+\S+/.test(l.trim())).join('\n').trim()
-  const sections: NonNullable<import('../../../clients/protocol.js').Answer['sections']> = []
-  for (const b of blocks) {
-    const block = b.block
-    if (!block) { sections.push({ kind: 'text', body: `${b.marker}: ${b.error ?? 'nothing to show'}` }); continue }
-    const cols = Array.isArray(block.columns) ? (block.columns as any[]).filter((c) => c && typeof c === 'object' && c.key) : []
-    const rows = Array.isArray(block.rows) ? (block.rows as any[]) : []
-    if (cols.length && rows.length) {
-      sections.push({ kind: 'table', title: typeof block.title === 'string' ? block.title : undefined,
-        columns: cols.map((c) => ({ label: String(c.label ?? c.key), ...(c.unit ? { unit: String(c.unit) } : {}) })),
-        rows: rows.map((r) => cols.map((c) => (r && typeof r === 'object' ? (r as any)[c.key] : r))) })
-    } else if (Array.isArray(block.series) && rows.length) {
-      // A chart, for now as its numbers: the axis and one column per series.
-      const series = (block.series as any[]).filter((x) => x && x.key)
-      const value = (r: any, key: string) => (r?.values && typeof r.values === 'object' ? r.values[key] : r?.[key])
-      sections.push({ kind: 'table', title: typeof block.title === 'string' ? block.title : undefined,
-        columns: [String(block.axis ?? 'row'), ...series.map((x) => ({ label: String(x.label ?? x.key), ...(block.unit ? { unit: String(block.unit) } : {}) }))],
-        rows: rows.map((r) => [r?.label ?? r?.key ?? r?.[String(block.axis ?? '')], ...series.map((x) => value(r, x.key))]) })
-    } else sections.push({ kind: 'text', body: `${b.marker}: a block of kind ${String(block.type ?? '?')} that this surface cannot draw yet` })
-  }
-  // The time the answer covers goes where every surface already shows an answer's time: its periods.
-  return { status: 'answered', category: 'reading', answer: prose, ...(periods.length ? { periods } : {}), ...(sections.length ? { sections } : {}) }
-}
-
 function tellSurfaces(reply: any, channel: string, sid: string, qid: string, timing: { ms: number }, answer: import('../../../clients/protocol.js').Answer, followups: string[] = []) {
   const category = answer.status === 'answered' ? 'analysis' : answer.status
   emit(reply, { t: 'analyst:answer', category, answer: { category, ...answer }, timing, sid, qid })

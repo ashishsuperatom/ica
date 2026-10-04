@@ -7,6 +7,9 @@
 //   thread:goto   { session, block }               → thread:view     { view }
 //   thread:get    { session, asOf? }               → thread:view     { view }
 //
+// Every thread:view also carries `cards` (each answer in the history as the answer card every surface draws, by answer
+// id) and `actions` (what the agent's programs offer: run, and each action they suggest, as intents a screen can send).
+//
 // A refusal is thread:refused { reason } — a sentence, never a different answer. Who is asking is the hub's word
 // (`from.userId`), never the payload's: a session is one user's, and only they change it.
 //
@@ -19,7 +22,8 @@ import { join } from 'node:path'
 import { checkAgent, type AgentSpec, type Intent } from '@superatom/platform-types'
 import { ProgramStore, ProgramError, loadPackage } from '@superatom/programs'
 import { createStateEngine, StateRefusal, type StateEngine } from '@superatom/state'
-import { createSessions, fileLog, replay, SessionRefusal, type SessionView } from '@superatom/session'
+import { createSessions, fileLog, history, replay, SessionRefusal, type SessionView } from '@superatom/session'
+import { cardOf } from './answer-card.js'
 
 export interface ThreadSeamDeps {
   projectDir: string
@@ -56,7 +60,7 @@ export function createThreadSeam(d: ThreadSeamDeps) {
 
   // One runtime per agent and program set: the same programs (by hash) give the same engine; a new build of a program
   // makes a new one for sessions opened after it. A session keeps the hashes its STATE names.
-  const runtimes = new Map<string, Promise<{ engine: StateEngine; sessions: ReturnType<typeof createSessions> }>>()
+  const runtimes = new Map<string, Promise<{ engine: StateEngine; sessions: ReturnType<typeof createSessions>; packages: Awaited<ReturnType<typeof loadPackage>>[] }>>()
   async function runtimeFor(agent: string, pinned?: Record<string, string>) {
     const spec = readAgent(agent)
     const hashes = spec.programs.map((ref) => store.resolve(ref))
@@ -66,7 +70,7 @@ export function createThreadSeam(d: ThreadSeamDeps) {
     if (!runtimes.has(key)) runtimes.set(key, (async () => {
       const packages = await Promise.all(use.map((h) => loadPackage(store, h)))
       const engine = createStateEngine(packages as any, { services: { query } })
-      return { engine, sessions: createSessions({ log, engine }) }
+      return { engine, sessions: createSessions({ log, engine }), packages }
     })())
     const r = runtimes.get(key)!
     r.catch(() => runtimes.delete(key))
@@ -96,6 +100,18 @@ export function createThreadSeam(d: ThreadSeamDeps) {
     return v
   }
 
+  /** A view as a screen needs it: the session, its answers as cards, and the intents its programs offer. */
+  async function present(v: SessionView, extra: Record<string, unknown> = {}) {
+    const rt = await runtimeFor(v.agent, v.state.packages).catch(() => null)
+    const cards: Record<string, unknown> = {}
+    for (const a of history(v)) cards[a.id] = await cardOf(a)
+    const actions = (rt?.packages ?? []).flatMap((p) => [
+      { package: p.name, label: 'Run', intent: { call: { package: p.name, fn: 'run' }, to: 'current' } },
+      ...p.spec.actions.map((a) => ({ package: p.name, label: a.label, intent: { action: { package: p.name, id: a.id }, to: 'current' } })),
+    ])
+    return { t: 'thread:view', view: v, cards, actions, ...extra }
+  }
+
   async function handle(payload: any, from: any): Promise<void> {
     const t = String(payload.t)
     const reply = (msg: Record<string, unknown>) => d.send(from, { ...msg, reqId: payload.reqId })
@@ -106,16 +122,16 @@ export function createThreadSeam(d: ThreadSeamDeps) {
       if (!/^[\w-]{1,80}$/.test(session)) throw new ThreadRefusal('a thread message names its session')
       if (t === 'thread:open') {
         const { sessions, spec } = await runtimeFor(String(payload.agent ?? ''))
-        return reply({ t: 'thread:view', view: sessions.open({ session, user, agent: spec.id, start: spec.start }) })
+        return reply(await present(sessions.open({ session, user, agent: spec.id, start: spec.start })))
       }
       if (t === 'thread:get') {
         const v = replay(log.read(session), payload.asOf ? String(payload.asOf) : undefined)
         if (!v) throw new ThreadRefusal(`there is no session ${session}`)
-        return reply({ t: 'thread:view', view: viewOf(v, user) })
+        return reply(await present(viewOf(v, user)))
       }
       const { sessions, view } = await sessionRuntime(session)
       viewOf(view, user)
-      if (t === 'thread:goto') return reply({ t: 'thread:view', view: sessions.goTo(session, String(payload.block ?? ''), user) })
+      if (t === 'thread:goto') return reply(await present(sessions.goTo(session, String(payload.block ?? ''), user)))
       if (t === 'thread:intent') {
         if (payload.kind === 'language') throw new ThreadRefusal('words are answered in the chat for now: a thread takes the controls\' intents')
         const intent: Intent = {
@@ -124,7 +140,7 @@ export function createThreadSeam(d: ThreadSeamDeps) {
           to: payload.to, ...(payload.block ? { block: String(payload.block) } : {}), by: user, at: new Date().toISOString(),
         }
         const r = await sessions.intent(intent)
-        return reply({ t: 'thread:view', view: r.session, result: { block: r.block, opened: r.opened, answer: r.answer, ...(r.stale ? { stale: true } : {}) } })
+        return reply(await present(r.session, { result: { block: r.block, opened: r.opened, answer: r.answer, ...(r.stale ? { stale: true } : {}) } }))
       }
       throw new ThreadRefusal(`there is no ${t}`)
     } catch (e: any) {

@@ -33,8 +33,8 @@ export interface PackageContext {
 export interface FunctionResult {
   /** A whole new slice (replaces STATE.<package>, nothing else). */
   slice?: Record<string, unknown>
-  /** What it shows: markdown with marker lines, and the files the markers name. */
-  answer?: { markdown: string; files?: string[] }
+  /** What it shows: markdown with marker lines, and the files or blocks the markers name (`:::table rows.json`). */
+  answer?: { markdown: string; files?: string[]; blocks?: Record<string, Record<string, unknown>> }
   /** Actions it suggests now, shown among the session's possible actions. */
   actions?: ActionSpec[]
 }

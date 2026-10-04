@@ -42,29 +42,13 @@ export function periodsIn(markdown: string | null): Period[] {
   }
   return out
 }
-export interface SaidBlock { marker: string; block: Record<string, unknown> | null; error?: string }
+export type { SaidBlock } from '../../answer-card.js'
+import { blocksOf, MARKER, type SaidBlock } from '../../answer-card.js'
 
-const MARKER = /^:::(table|bar|bars|line|kpis|figure|facts|text)\s+([\w.-]+\.json)\s*$/
-const KIND: Record<string, string> = { bar: 'bars', bars: 'bars', line: 'bars', table: 'table', kpis: 'kpis', figure: 'figure', facts: 'facts', text: 'text' }
-/** The blocks a markdown names, read from the thread folder: the marker's kind wins over the file's `type`; a line
- *  series is bars with every series drawn as a line. A missing or malformed file is an error beside its marker. */
+/** The blocks a markdown names, read from the thread folder (answer-card.ts says what a marker means). A missing or
+ *  malformed file is an error beside its marker. */
 async function blocksNamedIn(markdown: string, cwd: string): Promise<SaidBlock[]> {
-  const out: SaidBlock[] = []
-  for (const line of markdown.split('\n')) {
-    const m = MARKER.exec(line.trim()); if (!m) continue
-    const marker = line.trim(), kind = m[1], file = m[2]
-    try {
-      const v = JSON.parse(await readFile(join(cwd, file), 'utf8'))
-      if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('not a block object')
-      const b: Record<string, unknown> = { ...v, type: KIND[kind] ?? v.type }
-      if (kind === 'line' && Array.isArray(b.series)) b.series = (b.series as any[]).map((x) => ({ ...x, line: true }))
-      if (kind === 'line' && !b.series && Array.isArray(b.rows) && (b.rows as any[])[0]?.values) b.series = Object.keys((b.rows as any[])[0].values).map((k) => ({ key: k, label: k, line: true }))
-      if (b.type === 'bars' && !b.series && Array.isArray(b.rows) && (b.rows as any[])[0]?.values) b.series = Object.keys((b.rows as any[])[0].values).map((k) => ({ key: k, label: k }))
-      if (b.type === 'table' && !Array.isArray(b.rows)) throw new Error('a table has rows')
-      out.push({ marker, block: b })
-    } catch (e: any) { out.push({ marker, block: null, error: `${file}: ${e?.message ?? e}` }) }
-  }
-  return out
+  return blocksOf(markdown, async (file) => JSON.parse(await readFile(join(cwd, file), 'utf8')))
 }
 /** The files an answer names, copied into its question folder: what the answer stands on cannot be changed by a
  *  later question writing a file of the same name. Returns the folder to resolve the answer's blocks from. */

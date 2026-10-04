@@ -252,6 +252,8 @@ export interface Answer {
   markdown: string
   /** Files the markers name, by path, as the session holds them. */
   files: string[]
+  /** Blocks the markers name, carried with the answer (a program's data, by the name its marker line gives). */
+  blocks?: Record<string, Record<string, unknown>>
   /** It replaced the block's previous answer (an intent to the current view) rather than opening the block. */
   replaced?: string
 }

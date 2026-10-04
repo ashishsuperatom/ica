@@ -7,7 +7,8 @@ export async function run(state: any, ctx: Ctx) {
   const rows = await ctx.services.query('TRIPS', sql, params)
   ctx.set({ count: rows.length })
   const total = rows.reduce((a, r) => a + Number(r.balance), 0)
-  return { answer: { markdown: `${rows.length} trips${state.trips.branch ? ` at ${state.trips.branch}` : ''} are completed but not settled; ${total} to settle.\n:::table data/unsettled-trips.json`, files: ['data/unsettled-trips.json'] } }
+  const table = { title: 'Unsettled trips', columns: [{ key: 'trip_no', label: 'Trip' }, { key: 'balance', label: 'Balance' }], rows }
+  return { answer: { markdown: `${rows.length} trips${state.trips.branch ? ` at ${state.trips.branch}` : ''} are completed but not settled; ${total} to settle.\n:::table unsettled.json`, blocks: { 'unsettled.json': table } } }
 }
 
 export function nextPage(state: any, ctx: Ctx) {

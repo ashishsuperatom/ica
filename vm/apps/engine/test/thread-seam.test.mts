@@ -54,6 +54,12 @@ test('open, intents to the current view and to a new block, go back, read as of 
   assert.equal(run.result.opened, false)
   assert.equal(run.result.answer.markdown.split('\n')[0], '2 trips at PUNE are completed but not settled; 3 to settle.')
   assert.equal(queries.at(-1).id, 'TRIPS')
+  // the answer as the card every surface draws: the prose, and the table its marker names
+  const card = run.cards[run.result.answer.id]
+  assert.equal(card.answer, '2 trips at PUNE are completed but not settled; 3 to settle.')
+  assert.deepEqual(card.sections, [{ kind: 'table', title: 'Unsettled trips', columns: [{ label: 'Trip' }, { label: 'Balance' }], rows: [['T1', 1], ['T2', 2]] }])
+  assert.deepEqual(run.actions.map((a: any) => a.label), ['Run', 'Every branch', 'Next page'])
+  assert.deepEqual(run.actions[1].intent, { action: { package: 'trips', id: 'all-branches' }, to: 'current' })
   const hyd = await ask({ t: 'thread:intent', session: 's1', ops: [{ op: 'set', path: 'trips.branch', value: 'HYDERABAD' }], to: 'new' })
   assert.equal(hyd.result.opened, true)
   assert.equal(hyd.view.blocks.length, 2)
