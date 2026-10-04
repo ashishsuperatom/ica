@@ -537,6 +537,11 @@ through a Durable Object, which records them; some happen in the engine, which r
 observability, **through Cloudflare only** — no third party: their recent products for observability, tracing, SQL over
 R2 (the data lake product), the analytics engine, and stream processing through Workers.
 
+**Three things, no duplication (asked 2026-10-05):** the audit history is the *meaning* — who did what — recorded once by
+the project's DO and kept for years; Workers Logs and Traces are the *mechanics* — each request's timing and errors —
+written by Cloudflare itself and kept for days, for debugging; Analytics Engine keeps *counts* of audit events for
+instant dashboards (the only overlap: counts the audit history could also give).
+
 **The design (researched 2026-10-04 — Cloudflare's data stack went GA as "Basin" that week):**
 
 | Purpose | Where |
@@ -544,7 +549,7 @@ R2 (the data lake product), the analytics engine, and stream processing through 
 | The audit history — every action, append-only, queryable by SQL for years | Basin Pipelines (a stream, schema-checked) → an Iceberg table in Basin Catalog (R2) → Basin SQL |
 | The project's own record, immediate | the project's Durable Object keeps every audit event in its SQLite, append-only (the stream reaches SQL after 1–5 minutes, and a failed send must not lose an event) |
 | Near-real-time metrics (latency, errors, per project) | Workers Analytics Engine (3 months) |
-| Traces and logs of the Worker and Durable Objects | Workers Traces and Logs (`observability` in wrangler.jsonc; a trace id in every audit event joins the two) |
+| Traces and logs of the Worker and Durable Objects | Workers Traces and Logs (`observability` in wrangler.jsonc) — written by Cloudflare automatically, never by us |
 
 - **One event shape** (`AuditEvent` in platform-types): who (user, agent key, engine, system), via (ui, admin, agent,
   engine, api, channel, system), action `<thing>.<verb>`, target, outcome (ok, refused, error), detail (a question's
