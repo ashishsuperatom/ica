@@ -29,6 +29,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - STATE engine: every function gets the whole STATE frozen and can set only its own slice; it re-runs whatever reads a changed path, in dependency order.
 - Programs: a Node side and a React side built with TypeScript, identified by hash, kept immutable in a store, loaded into STATE, inspectable; with a CLI.
 - Sessions: one user's thread of blocks as a tree, current-view vs new-block intents, branching from earlier blocks, the answer history, stale runs dropped, an append-only log readable as of any moment.
+- Threads on the engine: an agent defined in the project home (its programs) runs as sessions of blocks over the hub (`thread:*`), each answer drawn as the answer card.
 - UI library: `<Intent>` with one delegated listener and a list of every intent on screen, the thread view with branches, and loading a program's React side with the platform's own React.
 - Project homes under `~/.superatom/state/<projectId>`, and a project template (new, check, sync).
 - A per-project deterministic application behind the engine's `app:` seam (the Fusion5 and Total Group dashboards).

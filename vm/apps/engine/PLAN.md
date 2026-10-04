@@ -22,6 +22,10 @@ what is built and what is next.
   result in `programs/store/<hash>`: the same source, the same hash; any change, a new program beside the old one.
 - `programs run <name|hash> [--set path=json] [--call fn] [--act id]` loads its Node side into the STATE engine and
   runs it against the project's data (only through the datasource-manager); `list`, `doc`, `inspect`, `verify`.
+- Agents: `agents/<id>.json` in the project home (domain, programs, tools, start, ui). `thread-seam.ts` runs `thread:*`
+  messages — open, intent (ops, action, call; to current or new; from any block), goto, get (as of a moment) — on the
+  agent's programs; each view carries the answers as cards (`answer-card.ts`, shared with the chat) and the intents the
+  programs offer. The user UI shows it at `/t/<agent>` (`control-plane/user-ui/src/Threads.tsx`).
 - First real program: Total Group `unsettled-trips` — completed trips not settled, by branch, with the balance left.
 
 ## Agents (`agents/`)
@@ -48,7 +52,7 @@ the repository holds only the platform.
 
 - `.env` (hub, key, source credentials), `settings.json`, `secrets/`, `datasources/` (bridges, registry, index seeds),
   `knowledge/` (what the composition graph imports), `app/` (the project's application).
-- `programs/` — `src/` (program sources) and `store/` (built programs by hash).
+- `programs/` — `src/` (program sources) and `store/` (built programs by hash). `agents/` — the project's agents.
 - `db/` — `composition.sqlite`, `datasource-index.sqlite` (read by `./find-schema`), `grounding.sqlite`,
   `agent-sessions.sqlite`. Outside every agent's cwd.
 - `workspace/` — the analyst, connector and grounding agents' directory.

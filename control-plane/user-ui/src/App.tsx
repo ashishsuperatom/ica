@@ -10,6 +10,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import './design.css'   // BUNDLED (hashed, loaded atomically with the app) — not a fragile separate <link href="/design.css">, which intermittently failed to attach and left the UI unstyled
 import { useClaudeTerminal } from './useClaudeTerminal'
+import Threads, { type ThreadMsg } from './Threads'
 import { useQuestionNav } from './questionNav'
 import { useLogNav } from './logNav'
 import { ANSI, COLS, ROWS } from './termColors'
@@ -235,15 +236,21 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   // is known (see `shownView`), so a hello arriving after the load still opens it.
   const readView = (): View => {
     if (/^\/c\//.test(location.pathname)) return 'chat'
+    const thread = /^\/t\/([\w-]+)/.exec(location.pathname)
+    if (thread) return `thread:${thread[1]}`
     const seg = location.pathname.replace(/\/+$/, '').split('/').pop()
     return seg && /^[A-Za-z0-9_-]+$/.test(seg) ? seg : 'chat'
   }
   const [view, setView] = useState<View>(readView)
+  // The project's agents a person works with in threads (thread:agents), and the thread messages, passed to the view.
+  const [threadAgents, setThreadAgents] = useState<{ id: string; name: string }[]>([])
+  const threadBus = useRef(new Set<(m: ThreadMsg) => void>())
+  const subscribeThread = useCallback((fn: (m: ThreadMsg) => void) => { threadBus.current.add(fn); return () => { threadBus.current.delete(fn) } }, [])
   // The sidebar folds to a rail of icons, as the dashboard's does; remembered for this viewer.
   const [sideCollapsed, setSideCollapsed] = useState<boolean>(() => { try { return localStorage.getItem('sa-sidebar-collapsed') === '1' } catch { return false } })
   const setSideCollapsedSaved = useCallback((c: boolean) => { setSideCollapsed(c); try { localStorage.setItem('sa-sidebar-collapsed', c ? '1' : '0') } catch { /* storage blocked */ } }, [])
   const navigate = useCallback((v: View) => {
-    history.pushState(null, '', v === 'chat' ? `/c/${sidRef.current}${location.search}` : `/${v}`)
+    history.pushState(null, '', v === 'chat' ? `/c/${sidRef.current}${location.search}` : v.startsWith('thread:') ? `/t/${v.slice(7)}` : `/${v}`)
     setView(v)
   }, [])
   useEffect(() => {
@@ -357,7 +364,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const consoleLane = laneNames.find(n => isConsoleLane(lanes[n])) ?? ''
   const consoleLaneRef = useRef(consoleLane); consoleLaneRef.current = consoleLane
   // What is on screen: chat, or a lane we know. An address naming a lane we do not know (yet) shows chat.
-  const shownView: View = view === 'chat' || lanes[view] ? view : 'chat'
+  const shownView: View = view === 'chat' || lanes[view] || view.startsWith('thread:') ? view : 'chat'
   shownViewRef.current = shownView
   // Update one lane, creating a minimal entry (label = lane) when a frame precedes its hello, so nothing is dropped.
   const updateLane = (lane: string, fn: (l: LaneState) => LaneState) =>
@@ -459,7 +466,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
       ws.onopen = () => {
         setConnected(true)
         if (CLOUD) ws.send(JSON.stringify({ type: 'hello', token, role: 'runtime' }))
-        else { send({ t: 'analyst:sync' }); send({ t: 'sessions:list', projectId }); send({ t: 'session:load', sessionId: sidRef.current }); send({ t: 'suggestions:req', projectId }); send({ t: 'agents:list' }); attachTerm(); attachLogs() }
+        else { send({ t: 'analyst:sync' }); send({ t: 'sessions:list', projectId }); send({ t: 'session:load', sessionId: sidRef.current }); send({ t: 'suggestions:req', projectId }); send({ t: 'agents:list' }); send({ t: 'thread:agents' }); attachTerm(); attachLogs() }
       }
       // WHY IT CLOSED, said out loud. This dropped the code and reason and reconnected every 3s forever, so a
       // REJECTED connection — an expired token, or one with no access to this project — was indistinguishable
@@ -502,6 +509,11 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
         if (!msg) return
         if (busyRef.current) armWatchdog()   // any message = engine alive → reset the watchdog
         if (msg.t === 'tick') return          // liveness ping only; nothing to render
+        if (typeof msg.t === 'string' && msg.t.startsWith('thread:')) {
+          if (msg.t === 'thread:agents') { setThreadAgents(Array.isArray(msg.agents) ? msg.agents.filter((a: any) => a && typeof a.id === 'string').map((a: any) => ({ id: a.id, name: String(a.name ?? a.id) })) : []); return }
+          for (const fn of threadBus.current) fn(msg as ThreadMsg)
+          return
+        }
         if (msg.t === 'welcome') {
           // Read-only project info from THIS project's DO (never the org DO). Extensible: more fields later.
           if (msg.project) { setProj(msg.project); if (msg.project.name) document.title = msg.project.name }
@@ -509,7 +521,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           // answering, the resync below re-sends analyst:status and the spinner comes back; we never keep a
           // stale one.
           if (busyRef.current) endTurn()
-          send({ t: 'analyst:sync' }); send({ t: 'sessions:list', projectId }); send({ t: 'session:load', sessionId: sidRef.current }); send({ t: 'suggestions:req', projectId }); send({ t: 'agents:list' }); attachTerm()
+          send({ t: 'analyst:sync' }); send({ t: 'sessions:list', projectId }); send({ t: 'session:load', sessionId: sidRef.current }); send({ t: 'suggestions:req', projectId }); send({ t: 'agents:list' }); send({ t: 'thread:agents' }); attachTerm()
           attachLogs()   // this console WATCHES the agents → subscribe to all agent-log channels for the whole session, so you never miss a question's log by attaching late
           send({ t: 'sync:req' })   // pull recent sessions + any answers we missed while offline, straight from the always-on DO (no engine wake)
           return
@@ -999,6 +1011,7 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
         onNewChat={() => { navigate('chat'); newChat() }}
         chats={sessions.map(se => ({ key: se.id, label: se.title || 'New chat', active: view === 'chat' && se.id === sessionId, busy: turnBusy && se.id === sessionId,
           onClick: () => { navigate('chat'); openSession(se.id) } }))}
+        threads={threadAgents.map(a => ({ key: a.id, label: a.name, active: shownView === `thread:${a.id}`, onClick: () => navigate(`thread:${a.id}`) }))}
         agents={laneNames.map(n => ({ key: n, label: lanes[n].label, title: lanes[n].desc || lanes[n].label, active: shownView === n, hue: lanes[n].hue, onClick: () => navigate(n) }))}
         account={CLOUD ? <AccountSection /> : (
           <div style={s.acct}>
@@ -1046,6 +1059,10 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
       })}
 
       {/* Chat/answer view */}
+      {shownView.startsWith('thread:') && (
+        <Threads agent={shownView.slice(7)} agentName={threadAgents.find(a => a.id === shownView.slice(7))?.name ?? shownView.slice(7)}
+          send={send} subscribe={subscribeThread} renderAnswer={(card) => <AnswerCard answer={card} />} />
+      )}
       {shownView === 'chat' && (feed.length === 0 && !busy ? (
         <div style={s.centerStage}>
           <div style={{ width: '100%', maxWidth: 720 }}>
