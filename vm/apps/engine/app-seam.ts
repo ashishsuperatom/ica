@@ -21,6 +21,8 @@ export interface AppSeamDeps {
   workspaceRoot: string
   /** The shared workspace the narrator runs in — the same one the composer's narration uses. */
   narratorCwd: string
+  /** The asker's data access for the turn (access.ts readerFor). */
+  readerFor?: (from: any) => Promise<import('./agents/composer/index.js').Reader>
 }
 
 export interface Said {
@@ -138,7 +140,7 @@ export function createAppSeam(d: AppSeamDeps) {
     }
     let timer: ReturnType<typeof setTimeout> | undefined
     const said = await Promise.race([
-      composer.say(text, context, handlers, { qid: o.qid }).finally(() => { clearInterval(narration); try { narrator.stop() } catch { /* best-effort */ } }),
+      composer.say(text, context, handlers, { qid: o.qid, ...(d.readerFor ? { reader: await d.readerFor(o.from) } : {}) }).finally(() => { clearInterval(narration); try { narrator.stop() } catch { /* best-effort */ } }),
       new Promise<Said>((res) => { timer = setTimeout(() => { try { composer.session.stop() } catch { /* best effort */ }; res({ markdown: null, blocks: [], calls: [], queries: [], ms: Date.now() - t0 }) }, MAX_SAY_MS) }),
     ])
     if (timer) clearTimeout(timer)

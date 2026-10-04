@@ -25,10 +25,22 @@ export const dataSeam = (managerUrl: string) => `// The data seam. You never see
 // query(dataSourceId, query, params) — the manager runs the query against the source. There is ONE endpoint: the datasource-manager, which routes
 // by id to the right bridge; the bridge binds @name params in its own dialect and runs the query.
 // Ask the manager 'GET /sources' for each source's kind/dialect BEFORE writing queries.
+// THE ASKER'S DATA ACCESS comes with every query: the engine writes, at the start of each turn, the policies of whoever
+// asked (.reader.json beside this folder) and the manager applies them to every table read. If they could not be
+// checked, nothing is read.
+import { readFileSync } from 'node:fs'
 const MANAGER = process.env.DATASOURCE_URL ?? '${managerUrl}'
+const READER = new URL('../.reader.json', import.meta.url)
+function policiesFor(dataSourceId) {
+  let r = null
+  try { r = JSON.parse(readFileSync(READER, 'utf8')) } catch { return [] }   // no file: not a person's turn (the platform's own work)
+  if (r && r.unchecked) throw new Error('your data access could not be checked — nothing was read')
+  return (r && r.policies && r.policies[dataSourceId]) || []
+}
 export async function query(dataSourceId, sql, params = {}) {
+  const policies = policiesFor(dataSourceId)
   const r = await fetch(MANAGER + '/query', { method:'POST', headers:{'content-type':'application/json'},
-    body: JSON.stringify({ id: dataSourceId, sql, params }) })
+    body: JSON.stringify({ id: dataSourceId, sql, params, ...(policies.length ? { policies } : {}) }) })
   if (!r.ok) throw new Error(r.status + ' ' + await r.text())
   const p = await r.json(); if (p?.error) throw new Error(p.error)
   const rows = p?.rows ?? []
@@ -333,7 +345,7 @@ const READ_ONLY = new Set<string>()
 // engine does not put there. Each entry below names who writes it.
 const OWNED = new Set([
   'CONTEXT.md', 'data', 'grounding', 'out', '.tools', '.runs',      // this file (.runs: work that outlived its call)
-  '.turn', '.session', '.agent',                                    // agents/composer, agents/analyst: the turn in progress
+  '.turn', '.session', '.agent', '.reader.json',                    // agents/composer, agents/analyst: the turn in progress (and whose)
   '.domain.json', '.reference.md', '.harness-session', '.system-prompt.md',   // a session that is a domain: what it was made with (knowledge.ts, composer)
   'AGENTS.md', 'SYSTEM_REFERENCE.md', '.claude',                    // the harnesses (ica/pi.ts, ica/codex.ts, ica/claude.ts)
   'connector', 'templates',                                         // agents/connector

@@ -46,7 +46,7 @@ import { createGraphSeam, GRAPH_MESSAGES } from './graph-seam.js'
 import { createProgramSeam, PROGRAM_MESSAGES } from './program-seam.js'
 import { platformOf } from './platform.js'
 import { createGraphSync, graphFileOf } from './graph-sync.js'
-import { createAccess } from './access.js'
+import { createAccess, readerFor } from './access.js'
 import { createActivities } from './activity.js'
 import { readingAnswer } from './answer-card.js'
 import { randomUUID } from 'node:crypto'
@@ -508,7 +508,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       // Who is answering, and how it came to: said with the answer, so the person always knows which agent this is.
       const agentLine = { name: inSession.domain, how, ...(routedNow?.ranked?.[0]?.terms ? { terms: routedNow.ranked[0].terms.slice(0, 6) } : {}) }
       workingAgent = 'composer'; stopSession = () => { try { (composer as any).session?.stop?.() } catch { /* best-effort */ } }
-      const said = await capped(composer.say(question, 'None: the question stands on its own.', handlers, { qid }), () => ({ markdown: null, blocks: [], periods: [], queries: [], ms: Date.now() - t0 }))
+      const said = await capped(composer.say(question, 'None: the question stands on its own.', handlers, { qid, reader: await turnReader(from) }), () => ({ markdown: null, blocks: [], periods: [], queries: [], ms: Date.now() - t0 }))
       if (stopped) { console.log(`[ica] ${qid.slice(0, 8)} stopped after ${((Date.now() - t0) / 1000).toFixed(1)}s`); return }
       const timing = { ms: Date.now() - t0 }
       if (said.markdown == null) { tellSurfaces(reply, channel, sid, qid, timing, { status: 'cannot_answer', answer: 'No answer was written in time. Ask it another way, or narrower.' }); return }
@@ -718,11 +718,14 @@ const activities = createActivities({ send: (msg) => { if (hub?.readyState !== W
 const programSeam = createProgramSeam({ projectDir: PROJECT_DIR, platform: KEY && PROJECT ? platformOf({ hub: HUB, project: PROJECT, key: KEY }) : null, send: (to, msg) => wire.send(to, msg), activities })
 // Data access per reader: policies resolved by the platform, carried with each intent, applied by the manager.
 const access = createAccess({ send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true } })
+/** The asker of a chat turn's data access, for the agent's own tools. */
+const sourceIds = async () => ((await (await fetch(`${DATASOURCE}/sources`, { signal: AbortSignal.timeout(4000) })).json()) as { sources?: { id: string }[] }).sources?.map((x) => x.id) ?? []
+const turnReader = (from: any) => readerFor(access, from, sourceIds)
 const sessionSeam = createSessionSeam({ projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities })
 // The composition graph is kept by the platform too: pushed after every change, rebuilt from it when this one is empty.
 const graphSync = createGraphSync({ file: graphFileOf(PROJECT_DIR), send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true }, log: (s) => console.warn(s) })
 const graphSeam = createGraphSeam({ projectDir: PROJECT_DIR, send: (to, msg) => { wire.send(to, msg); if (msg.t === 'graph:reply') graphSync.push() } })
-const appSeam = createAppSeam({ project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
+const appSeam = createAppSeam({ readerFor: turnReader, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
 
 async function handle(payload: any, from: any) {
   if (wire.receive(payload, from)) return

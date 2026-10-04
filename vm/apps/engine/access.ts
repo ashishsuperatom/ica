@@ -5,7 +5,7 @@
 // be resolved, the read is refused — access fails closed.
 
 import { AsyncLocalStorage } from 'node:async_hooks'
-import type { Who } from './identity.js'
+import { whoIs, type Who } from './identity.js'
 
 export class AccessRefusal extends Error {}
 const context = new AsyncLocalStorage<Who>()
@@ -45,4 +45,17 @@ export function createAccess(o: { send: (msg: Record<string, unknown>) => boolea
     }
   }
   return { policiesFor, onMessage }
+}
+
+/** The policies of whoever asked a turn, per source, for an agent's tools to send with every query (the data seam reads
+ *  them). Unknown asker → none (the platform's own work); policies that cannot be resolved → unchecked (nothing read). */
+export async function readerFor(access: { policiesFor(who: Who, source: string): Promise<unknown[]> }, from: any, sources: () => Promise<string[]>):
+    Promise<{ principal: string; policies: Record<string, unknown[]> } | { unchecked: true }> {
+  let who: Who
+  try { who = whoIs(from) } catch { return { principal: 'platform', policies: {} } }
+  try {
+    const policies: Record<string, unknown[]> = {}
+    for (const id of await sources()) { const p = await access.policiesFor(who, id); if (p.length) policies[id] = p }
+    return { principal: who.id, policies }
+  } catch { return { unchecked: true } }
 }

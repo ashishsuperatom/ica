@@ -46,6 +46,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Background work visible: program builds and session runs reported as activities (running, done, failed), kept by the hub and sent to their owner and admins; listed on reconnect and by `sacli activity`.
 - Usage metering and credits: every model call's tokens kept per project and priced from the platform's price list (versions kept); an append-only credit ledger per organisation (grants by the platform, debits by usage); work refused, with a sentence, when an organisation on a plan has used its credits.
 - Enterprise sign-in provisioned on first arrival: a project lets a verified company domain in with a role (never admin, never a public mail domain), the grant audited; the identity provider itself is connected in Clerk.
+- Agents' own data tools apply the asker's data access (written per turn; unresolvable means nothing is read).
 - Data access per reader: row filters, denials and column masks per source and table, for everyone, a role, a person or an agent key, with per-reader attributes (fail closed); resolved by the platform, carried with each session intent, applied by the SQL rewrite to every table read.
 - `sacli`, the Superatom CLI: login with profiles (one project each), agents, sessions, asking questions, JSON output, exit codes, and one background connection per project that cleans up after an hour idle.
 
@@ -93,11 +94,11 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Changing knowledge on the platform with the engine offline (today every change goes through an engine and is replicated up).
 - The user DO's personalised view (what it keeps beyond sessions and personal state is still being decided).
 - Governance beyond the graph: hierarchical admins (program, group, global) and granting access.
-- Data access for the agents' own tools in a chat (a per-session token), and an admin console panel for policies.
+- Sandboxing agents so their tools cannot bypass data access deliberately (dynamic workers).
 - SCIM directory sync and deprovisioning from the identity provider.
 - Payment through Stripe (a checkout whose webhook adds credits), invoices and per-plan limits; metering engine time and queries.
 - The data protocol for many users at once (fairness and queueing across users); activities in the user UI.
-- A data warehouse like Fabric or Databricks, on both the engine and the Durable Object side (R2 SQL).
+- The platform's own data warehouse: every DO's records in one Basin, queryable with SQL (customer warehouses stopped: Pipelines' 20-per-account limit).
 - Data sources as templates copied per project, with dialect code moved out of the platform.
 - Running without Docker (Windows, macOS, Linux, Electron) with a per-project port registry.
 - Programs running in dynamic workers.
