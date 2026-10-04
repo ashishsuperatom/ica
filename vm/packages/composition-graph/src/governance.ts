@@ -34,6 +34,18 @@ export function checkBody(kind: Kind, body: unknown): string[] {
     const bad = lists.filter((k) => !Array.isArray(b[k]) || b[k].some((x: unknown) => typeof x !== 'string'))
     return bad.length ? [`a domain lists its ${bad.join(', ')} (names)`] : []
   }
+  if (kind === 'agent') {
+    // An agent: a domain of the graph (its concepts), the programs it may run, the tools it is given, where STATE starts,
+    // its starting UI, and the ICA that answers in words. Its scope and owner are the node's.
+    const out: string[] = []
+    if (typeof b.title !== 'string' || !b.title.trim()) out.push('an agent has a title')
+    if (typeof b.domain !== 'string' || !b.domain) out.push('an agent names its domain')
+    if (!Array.isArray(b.programs) || b.programs.some((x: unknown) => typeof x !== 'string' || !x)) out.push('an agent lists its programs (names or hashes)')
+    if (b.tools !== undefined && (!Array.isArray(b.tools) || b.tools.some((x: unknown) => typeof x !== 'string'))) out.push('an agent\'s tools are names')
+    if (b.start !== undefined && (typeof b.start !== 'object' || Array.isArray(b.start))) out.push('an agent\'s start is fields by slice')
+    if (b.ica !== undefined && typeof b.ica !== 'string') out.push('an agent\'s ica names the agent that answers in words')
+    return out
+  }
   return [`a ${kind} is not changed this way`]
 }
 
@@ -57,6 +69,7 @@ export function write(store: Store, actor: Actor, name: string, kind: Kind, body
   if (!may.ok) throw new GovernanceRefusal(may.why)
   const cur = ownerOf(store, name)
   if (kind === 'domain') for (const c of conceptsOf(body as DomainBody)) if (!store.get(c)) throw new GovernanceRefusal(`the domain names a concept that does not exist: "${c}"`)
+  if (kind === 'agent') { const d = store.get((body as any).domain); if (!d || d.kind !== 'domain') throw new GovernanceRefusal(`the agent names a domain that does not exist: "${(body as any).domain}"`) }
   try {
     return store.put(name, kind, body, { by: actor.id, reason: ctx.reason, from: ctx.from }, { ...(place.scope ? { scope: place.scope } : {}), ...(cur ? {} : { owner: actor.id }) })
   } catch (e: any) { throw new GovernanceRefusal(e?.message ?? String(e)) }

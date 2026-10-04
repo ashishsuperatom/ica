@@ -4,6 +4,7 @@
 //   graph:suggestions { status?, name? }
 //   graph:concept { name, body, reason?, scope? }      make a concept, or change one you own
 //   graph:domain  { name, body, reason?, scope? }      make a domain, or change one you own
+//   graph:agent   { name, body, reason?, scope? }      make an agent (a domain, its programs, tools, start, UI), or change one you own
 //   graph:join    { domain, concept, at?, reason? }    put a concept into a domain you own
 //   graph:leave   { domain, concept, reason? }
 //   graph:suggest { name, kind, body, reason }         suggest a change to someone else's node
@@ -17,13 +18,13 @@ import { join } from 'node:path'
 import { Store, compose, domains, governance as g, GovernanceRefusal, type Kind } from '@superatom/composition-graph'
 import { whoIs, IdentityRefusal } from './identity.js'
 
-export const GRAPH_MESSAGES = new Set(['graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:concept', 'graph:domain', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide'])
+export const GRAPH_MESSAGES = new Set(['graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide'])
 
 export function createGraphSeam(d: { projectDir: string; send: (to: any, msg: Record<string, unknown>) => void; file?: string }) {
   let store: Store | null = null
   const open = () => (store ??= new Store(d.file ?? join(d.projectDir, 'db', 'composition.sqlite')))
   const str = (v: unknown, what: string) => { if (typeof v !== 'string' || !v.trim()) throw new GovernanceRefusal(`${what} is required`); return v.trim() }
-  const kinds: Kind[] = ['domain', 'concept', 'file', 'setting']
+  const kinds: Kind[] = ['domain', 'concept', 'file', 'setting', 'agent']
 
   async function handle(payload: any, from: any): Promise<void> {
     const t = String(payload?.t ?? '')
@@ -47,8 +48,8 @@ export function createGraphSeam(d: { projectDir: string; send: (to: any, msg: Re
         case 'graph:history': { const name = str(payload.name, 'name'); if (!visible(name) && !s.history(name).length) throw new GovernanceRefusal(`there is no "${name}"`); return ok({ history: s.history(name) }) }
         case 'graph:compose': { const c = compose(s, str(payload.domain, 'domain'), asOf, { viewer }); return ok({ composition: c }) }
         case 'graph:suggestions': return ok({ suggestions: g.list(s, { status: payload.status, name: payload.name }) })
-        case 'graph:concept': case 'graph:domain': {
-          const kind = t === 'graph:concept' ? 'concept' : 'domain'
+        case 'graph:concept': case 'graph:domain': case 'graph:agent': {
+          const kind = t === 'graph:concept' ? 'concept' : t === 'graph:domain' ? 'domain' : 'agent'
           const r = g.write(s, who, str(payload.name, 'name'), kind, payload.body, { reason: payload.reason }, payload.scope ? { scope: String(payload.scope) } : {})
           return ok({ name: payload.name, ...r, node: s.get(payload.name) })
         }

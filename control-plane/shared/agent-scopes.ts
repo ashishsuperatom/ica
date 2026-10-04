@@ -15,7 +15,7 @@ export const AGENT_SCOPES = {
   /** The composition graph: read it, make and change your own concepts and domains, suggest and decide changes. */
   /** Programs: build one from its source (the engine builds and uploads it), list them, publish one it built. */
   programs: ['program:build', 'program:list', 'program:publish'],
-  graph: ['graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:concept', 'graph:domain', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide'],
+  graph: ['graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide'],
 } as const
 
 export type AgentScope = keyof typeof AGENT_SCOPES

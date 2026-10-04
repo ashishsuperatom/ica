@@ -87,3 +87,15 @@ test('a node with no owner (imported knowledge) is changed or decided only by an
   assert.throws(() => s.db.exec('DELETE FROM decision'), /decisions are append-only/)
   assert.throws(() => s.db.exec("UPDATE suggestion SET reason = 'x'"), /suggestions are append-only/)
 })
+
+test('an agent is a node like any other: checked, owned, governed, its domain must exist', () => {
+  const s = fresh()
+  g.write(s, ana, 'c1', 'concept', text('one'))
+  g.write(s, ana, 'trips', 'domain', { capabilities: [], concepts: ['c1'], files: [] })
+  assert.throws(() => g.write(s, ana, 'vehicle-trips', 'agent', { title: 'Vehicle trips', domain: 'nope', programs: [] }), /names a domain that does not exist: "nope"/)
+  assert.throws(() => g.write(s, ana, 'vehicle-trips', 'agent', { domain: 'trips', programs: [] }), /an agent has a title/)
+  g.write(s, ana, 'vehicle-trips', 'agent', { title: 'Vehicle trips', domain: 'trips', programs: ['unsettled-trips'], ica: 'composer' }, {}, { scope: 'group:ops' })
+  const a = s.get('vehicle-trips')!
+  assert.equal(a.kind, 'agent'); assert.equal(a.owner, 'user:ana'); assert.equal(a.scope, 'group:ops')
+  assert.throws(() => g.write(s, bo, 'vehicle-trips', 'agent', { title: 'mine', domain: 'trips', programs: [] }), /suggest the change instead/)
+})

@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 
-export type Kind = 'domain' | 'concept' | 'file' | 'setting'
+export type Kind = 'domain' | 'concept' | 'file' | 'setting' | 'agent'
 /** Who sees a node: everyone (global), a group's members (group:<name>), or one person (user:<id>). */
 export type Scope = string
 export interface Node<B = unknown> { name: string; kind: Kind; hash: string; body: B; scope: Scope; owner: string | null }

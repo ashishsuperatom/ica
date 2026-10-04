@@ -103,3 +103,25 @@ test('refused with a sentence: another user, no user, no agent, a broken op, wor
   assert.match((await ask({ t: 'session:intent', session: 's2', kind: 'language', text: 'hi', to: 'new' })).reason, /words are answered in the chat/)
   assert.equal((await ask({ t: 'session:nope', session: 's2' })).reason, 'there is no session:nope')
 })
+
+test('an agent kept in the composition graph is listed (by its scope) and opens a working session', async () => {
+  const { Store, governance } = await import('@superatom/composition-graph')
+  const graphFile = join(home, 'db', 'composition.sqlite')
+  mkdirSync(join(home, 'db'), { recursive: true })
+  const g = new Store(graphFile)
+  const ana = { id: 'user:ana' }
+  governance.write(g, ana, 'c1', 'concept', { title: 'Settled', form: 'text', text: 'A trip is settled when its settlement document exists.' })
+  governance.write(g, ana, 'trips-domain', 'domain', { capabilities: [], concepts: ['c1'], files: [] })
+  governance.write(g, ana, 'graph-trips', 'agent', { title: 'Trips (graph)', domain: 'trips-domain', programs: ['unsettled-trips'], start: { trips: { branch: 'HYDERABAD' } } }, {}, { scope: 'group:ops' })
+  g.close()
+  const out: any[] = []
+  const s = createSessionSeam({ projectDir: home, datasource: url, graphFile, send: (_to, msg) => out.push(msg) })
+  await s.handle({ t: 'session:agents' }, { type: 'runtime', userId: 'u1', scopes: ['user:u1'] })
+  assert.ok(!out.at(-1).agents.some((a: any) => a.id === 'graph-trips'))                  // not in group ops
+  await s.handle({ t: 'session:agents' }, { type: 'runtime', userId: 'u2', scopes: ['user:u2', 'group:ops'] })
+  assert.deepEqual(out.at(-1).agents.find((a: any) => a.id === 'graph-trips'), { id: 'graph-trips', name: 'Trips (graph)', scope: 'group:ops', ui: { start: '' }, isDefault: false })
+  await s.handle({ t: 'session:open', session: 'ga1', agent: 'graph-trips' }, { type: 'runtime', userId: 'u2', scopes: ['user:u2', 'group:ops'] })
+  assert.equal(out.at(-1).view.state.trips.branch, 'HYDERABAD')
+  await s.handle({ t: 'session:intent', session: 'ga1', call: { package: 'trips', fn: 'run' }, to: 'current' }, { type: 'runtime', userId: 'u2', scopes: ['user:u2', 'group:ops'] })
+  assert.equal(out.at(-1).result.answer.markdown.split('\n')[0], '1 trips at HYDERABAD are completed but not settled; 2160 to settle.')
+})

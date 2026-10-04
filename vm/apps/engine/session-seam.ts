@@ -26,6 +26,7 @@ import { checkAgent, type AgentSpec, type Intent } from '@superatom/platform-typ
 import { ProgramStore, ProgramError, loadPackage } from '@superatom/programs'
 import { createStateEngine, StateRefusal, type StateEngine } from '@superatom/state'
 import { createSessions, fileLog, history, replay, SessionRefusal, type SessionLog, type SessionView } from '@superatom/session'
+import { Store } from '@superatom/composition-graph'
 import { cardOf } from './answer-card.js'
 import { whoIs, type Who } from './identity.js'
 import { asReader, currentReader, AccessRefusal } from './access.js'
@@ -39,6 +40,8 @@ export interface SessionSeamDeps {
   log?: SessionLog
   /** Find a program the store lacks (the engine fetches it from the platform); by default the store only. */
   ensureProgram?: (ref: string) => Promise<string>
+  /** The composition graph, where agents are kept (kind "agent"); agents/<id>.json files are read only as a fallback. */
+  graphFile?: string
   /** Long work made visible (activity.ts); without it, nothing is reported. */
   activities?: ReturnType<typeof import('./activity.js').createActivities>
   /** The reader's data access policies for a source (access.ts); without it, reads carry none. */
@@ -65,8 +68,22 @@ export function createSessionSeam(d: SessionSeamDeps) {
     return p.rows ?? []
   }
 
+  // Agents are nodes of the composition graph (owned, scoped, governed, versioned, kept by the platform).
+  let graph: Store | null = null
+  const graphStore = () => { if (!d.graphFile || !existsSync(d.graphFile)) return null; return (graph ??= new Store(d.graphFile)) }
+  const fromNode = (n: { name: string; body: any; scope: string; owner: string | null }): AgentSpec => ({
+    id: n.name, name: String(n.body.title ?? n.name), scope: n.scope as AgentSpec['scope'], owner: n.owner ?? 'platform', domain: n.body.domain,
+    programs: n.body.programs ?? [], tools: n.body.tools ?? [], ...(n.body.start ? { start: n.body.start } : {}), ui: { start: n.body.ui?.start ?? '' }, ica: n.body.ica ?? 'composer', ...(n.body.isDefault ? { isDefault: true } : {}),
+  })
+  function graphAgents(): AgentSpec[] {
+    const s = graphStore(); if (!s) return []
+    return s.names('agent').map((x) => fromNode(s.get(x.name)!))
+  }
+
   function readAgent(id: string): AgentSpec {
     if (!/^[\w-]+$/.test(id)) throw new SessionSeamRefusal(`"${id}" is not an agent id`)
+    const node = graphStore()?.get(id)
+    if (node?.kind === 'agent') return fromNode(node)
     const file = join(agentsDir, `${id}.json`)
     if (!existsSync(file)) throw new SessionSeamRefusal(`there is no agent "${id}"`)
     let spec: AgentSpec
@@ -108,10 +125,11 @@ export function createSessionSeam(d: SessionSeamDeps) {
   }
 
   function agents() {
-    if (!existsSync(agentsDir)) return []
-    return readdirSync(agentsDir).filter((f) => f.endsWith('.json')).flatMap((f) => {
-      try { const a = readAgent(f.slice(0, -5)); return [{ id: a.id, name: a.name, scope: a.scope, ui: a.ui, isDefault: !!a.isDefault }] } catch { return [] }
-    })
+    const fromGraph = graphAgents()
+    const fromFiles = existsSync(agentsDir) ? readdirSync(agentsDir).filter((f) => f.endsWith('.json') && !fromGraph.some((a) => a.id === f.slice(0, -5))).flatMap((f) => {
+      try { return [readAgent(f.slice(0, -5))] } catch { return [] }
+    }) : []
+    return [...fromGraph, ...fromFiles].map((a) => ({ id: a.id, name: a.name, scope: a.scope, ui: a.ui, isDefault: !!a.isDefault }))
   }
 
   const viewOf = (v: SessionView, user: string) => {

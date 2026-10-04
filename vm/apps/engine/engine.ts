@@ -737,7 +737,7 @@ const sourceIds = async () => ((await (await fetch(`${DATASOURCE}/sources`, { si
 const turnReader = (from: any) => readerFor(access, from, sourceIds)
 /** Something the engine did, for the platform's warehouse: sent to the project's DO, which records it (one path). */
 const recordToPlatform = (kind: string, key: string, data: unknown) => { try { if (hub?.readyState === WebSocket.OPEN) hub.send(JSON.stringify({ type: 'record', kind, key, data })) } catch { /* the warehouse never breaks the work */ } }
-const sessionSeam = createSessionSeam({ projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities })
+const sessionSeam = createSessionSeam({ projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, graphFile: graphFileOf(PROJECT_DIR) })
 // The composition graph is kept by the platform too: pushed after every change, rebuilt from it when this one is empty.
 const graphSync = createGraphSync({ file: graphFileOf(PROJECT_DIR), send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true }, log: (s) => console.warn(s) })
 const graphSeam = createGraphSeam({ projectDir: PROJECT_DIR, send: (to, msg) => { wire.send(to, msg); if (msg.t === 'graph:reply') graphSync.push() } })

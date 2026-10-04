@@ -36,6 +36,7 @@ Commands:
   session goto     move a session to another block
   ask              ask the project a question in words
   activity         what is running for you in the project (builds, runs), and what ran lately
+  call             send any message the platform takes, with its fields as JSON (prints the reply as JSON)
   status           the background connection: up, since when, how long until it closes
   disconnect       close the background connection now
 
@@ -76,6 +77,7 @@ An intent to "current" (the default) replaces the current block's answer; "new" 
 earlier block (--block) branches the session into a new thread. Values are JSON; a bare word is a string.`,
   projects: `sacli projects      the saved profiles, their projects, and which one is in use here`,
   use: `sacli use <profile> [--here]   make <profile> the default, or (--here) write .sacli.json so this folder uses it`,
+  call: `sacli call <message> [--data '<json>']    e.g. sacli call graph:agent --data '{"name":"trips","body":{…}}'`,
   activity: `sacli activity         what is running for this key (program builds, session runs) and what ran in the last day`,
   status: `sacli status        whether the background connection for this key is up, and for how long`,
   disconnect: `sacli disconnect    closes the background connection for this key (the next command opens a new one)`,
@@ -111,7 +113,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
     const specific: ParseArgsConfig['options'] = cmd === 'session'
       ? { id: { type: 'string' }, 'as-of': { type: 'string' }, set: { type: 'string', multiple: true }, add: { type: 'string', multiple: true }, remove: { type: 'string', multiple: true },
           call: { type: 'string' }, param: { type: 'string', multiple: true }, act: { type: 'string' }, to: { type: 'string' }, block: { type: 'string' } }
-      : cmd === 'ask' ? { session: { type: 'string' } } : cmd === 'use' ? { here: { type: 'boolean' } } : {}
+      : cmd === 'ask' ? { session: { type: 'string' } } : cmd === 'use' ? { here: { type: 'boolean' } } : cmd === 'call' ? { data: { type: 'string' } } : {}
     let parsed
     try { parsed = parseArgs({ args: argv, options: { ...GLOBAL, ...specific }, allowPositionals: true, strict: true }) }
     catch (e: any) { throw new CliError(`${e.message.replace(/^Unknown option/, 'unknown option')} — see sacli ${cmd ?? ''} --help`.replace(/\s+—/, ' —'), 2) }
@@ -198,6 +200,16 @@ export async function run(argv: string[], io: Io): Promise<number> {
       const r = await hub!.request(payload, { timeoutMs })
       if (r.t === 'session:refused') throw new CliError(r.reason ?? 'refused')
       return r
+    }
+    if (cmd === 'call') {
+      const t = pos[1]
+      if (!t || !/^[a-z][\w-]*:[\w:-]+$/.test(t)) throw new CliError('which message? sacli call <message> [--data \'<json>\']', 2)
+      let data: Record<string, unknown> = {}
+      if (o.data) { try { data = JSON.parse(o.data) } catch { throw new CliError('--data is JSON', 2) } }
+      const r = await hub.request({ ...data, t }, { timeoutMs })
+      const { reqId: _r, ...rest } = r
+      say(JSON.stringify(rest, null, 2))
+      return /refused|error/.test(String(r.t)) ? 1 : 0
     }
     if (cmd === 'activity') {
       const r = await hub.request({ t: 'activity:list' }, { timeoutMs })
