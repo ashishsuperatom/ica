@@ -18,3 +18,4 @@
 .sa-thread-action:hover { background: var(--th-wash); border-color: var(--th-primary); }
 .sa-thread-action:focus-visible, .sa-branches button:focus-visible { outline: 2px solid var(--th-primary); outline-offset: 2px; }
 .sa-intent-broken { font-size: 12px; color: var(--th-alert); }
+.sa-program-error { font-size: 12px; color: var(--th-alert); margin: 0; }

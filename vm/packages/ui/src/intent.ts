@@ -65,9 +65,9 @@ export function listIntents(root: ParentNode): { intent: ScreenIntent; text: str
   })
 }
 
-/** The one listener: a click, or Enter / Space on a focused control, sends the nearest intent. Returns a function that
- *  removes it. `trace` sees every intent sent, and every one refused because its control is disabled. */
-export function listenIntents(root: HTMLElement | Document, send: (i: ScreenIntent) => void, trace?: (e: { intent: ScreenIntent; sent: boolean; at: string }) => void): () => void {
+/** The one listener: a click, or Enter / Space on a focused control, sends the nearest intent with its element (so a
+ *  screen can tell where it was, e.g. which block). Returns a function that removes it. `trace` sees every intent sent, and every one refused because its control is disabled. */
+export function listenIntents(root: HTMLElement | Document, send: (i: ScreenIntent, el: Element) => void, trace?: (e: { intent: ScreenIntent; sent: boolean; at: string }) => void): () => void {
   const fire = (target: EventTarget | null, ev: Event) => {
     const el = (target as Element | null)?.closest?.(`[${INTENT_ATTR}]`)
     if (!el) return
@@ -76,7 +76,7 @@ export function listenIntents(root: HTMLElement | Document, send: (i: ScreenInte
     ev.preventDefault()
     const disabled = el.getAttribute('aria-disabled') === 'true' || (el as HTMLButtonElement).disabled === true
     trace?.({ intent, sent: !disabled, at: new Date().toISOString() })
-    if (!disabled) send(intent)
+    if (!disabled) send(intent, el)
   }
   const onClick = (ev: Event) => fire(ev.target, ev)
   const onKey = (ev: Event) => {

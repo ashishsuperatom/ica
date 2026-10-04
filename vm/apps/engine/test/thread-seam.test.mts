@@ -60,6 +60,12 @@ test('open, intents to the current view and to a new block, go back, read as of 
   assert.deepEqual(card.sections, [{ kind: 'table', title: 'Unsettled trips', columns: [{ label: 'Trip' }, { label: 'Balance' }], rows: [['T1', 1], ['T2', 2]] }])
   assert.deepEqual(run.actions.map((a: any) => a.label), ['Run', 'Every branch', 'Next page'])
   assert.deepEqual(run.actions[1].intent, { action: { package: 'trips', id: 'all-branches' }, to: 'current' })
+  // the program's React side, named in the view and served file by file
+  assert.deepEqual(run.uis.map((u: any) => [u.package, u.entry, u.blocks]), [['trips', 'web/index.js', ['unsettled-trips']]])
+  const file = await ask({ t: 'thread:file', hash: run.uis[0].hash, path: 'web/index.js' })
+  assert.match(file.text, /export function UnsettledTrips/)
+  assert.match((await ask({ t: 'thread:file', hash: run.uis[0].hash, path: '../manifest.json' })).reason, /is not a file of a program's React side/)
+  assert.match((await ask({ t: 'thread:file', hash: run.uis[0].hash, path: 'node/index.js' })).reason, /is not a file of a program's React side/)
   const hyd = await ask({ t: 'thread:intent', session: 's1', ops: [{ op: 'set', path: 'trips.branch', value: 'HYDERABAD' }], to: 'new' })
   assert.equal(hyd.result.opened, true)
   assert.equal(hyd.view.blocks.length, 2)

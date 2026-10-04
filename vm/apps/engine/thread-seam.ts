@@ -6,9 +6,11 @@
 //                                                  → thread:view     { view, result: { block, opened, answer, stale? } }
 //   thread:goto   { session, block }               → thread:view     { view }
 //   thread:get    { session, asOf? }               → thread:view     { view }
+//   thread:file   { hash, path }                   → thread:file     { hash, path, text }   a program's React side, file by file
 //
 // Every thread:view also carries `cards` (each answer in the history as the answer card every surface draws, by answer
-// id) and `actions` (what the agent's programs offer: run, and each action they suggest, as intents a screen can send).
+// id), `actions` (what the agent's programs offer: run, and each action they suggest, as intents a screen can send) and
+// `uis` (each program's React side: its hash and the blocks it draws, loaded with thread:file).
 //
 // A refusal is thread:refused { reason } — a sentence, never a different answer. Who is asking is the hub's word
 // (`from.userId`), never the payload's: a session is one user's, and only they change it.
@@ -109,7 +111,19 @@ export function createThreadSeam(d: ThreadSeamDeps) {
       { package: p.name, label: 'Run', intent: { call: { package: p.name, fn: 'run' }, to: 'current' } },
       ...p.spec.actions.map((a) => ({ package: p.name, label: a.label, intent: { action: { package: p.name, id: a.id }, to: 'current' } })),
     ])
-    return { t: 'thread:view', view: v, cards, actions, ...extra }
+    const uis = (rt?.packages ?? []).map((p) => ({ package: p.name, hash: p.hash, entry: store.manifest(p.hash).ui.bundle, blocks: store.manifest(p.hash).ui.blocks }))
+    return { t: 'thread:view', view: v, cards, actions, uis, ...extra }
+  }
+
+  // A program's React side, file by file: only built programs' web/ files, each program checked against its hash once.
+  const verified = new Set<string>()
+  function programFile(hash: string, path: string): string {
+    if (!/^web\/[\w-]+(\/[\w-]+)*(\.[\w-]+)*\.js$/.test(path)) throw new ThreadRefusal(`"${path}" is not a file of a program's React side`)
+    if (!store.has(hash)) throw new ThreadRefusal(`there is no program ${hash.slice(0, 12)}`)
+    if (!verified.has(hash)) { if (!store.verify(hash)) throw new ThreadRefusal(`program ${hash.slice(0, 12)} does not match its hash`); verified.add(hash) }
+    const file = join(store.dirOf(hash), path)
+    if (!existsSync(file)) throw new ThreadRefusal(`program ${hash.slice(0, 12)} has no ${path}`)
+    return readFileSync(file, 'utf8')
   }
 
   async function handle(payload: any, from: any): Promise<void> {
@@ -118,6 +132,7 @@ export function createThreadSeam(d: ThreadSeamDeps) {
     try {
       if (t === 'thread:agents') return reply({ t: 'thread:agents', agents: agents() })
       const user = userOf(from)
+      if (t === 'thread:file') { const hash = String(payload.hash ?? ''), path = String(payload.path ?? ''); return reply({ t: 'thread:file', hash, path, text: programFile(hash, path) }) }
       const session = String(payload.session ?? '')
       if (!/^[\w-]{1,80}$/.test(session)) throw new ThreadRefusal('a thread message names its session')
       if (t === 'thread:open') {
