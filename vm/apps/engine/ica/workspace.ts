@@ -10,7 +10,7 @@
 //
 // In its directory an agent finds the tools for its part, generated here with the absolute paths they need:
 //
-//   the data             ./sources ./find-schema ./get-schema ./query ./resolve
+//   the data             ./sources ./find-schema ./get-schema ./query   (./resolve: kept, not given for now)
 //
 // Which turn is live is in .turn, which data session this conversation is in .session — both written by the engine
 // before it asks. A turn's files are in out/<qid>/.
@@ -102,7 +102,7 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
 `# Project ${s.projectId}
 
 The data sources: ./sources lists them, ./find-schema searches their fields, ./get-schema shows a source's tables or a
-table's fields, ./query reads them, and ./resolve turns a name into ids. data/query.mjs and grounding/grounding.mjs are the seams to
+table's fields, and ./query reads them. data/query.mjs and grounding/grounding.mjs are the seams to
 import.
 Every tool explains itself with --help.
 
@@ -242,6 +242,9 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
     'get-schema':   'get-schema [<source>] [<table>]   → from the datasource index: every source; a source\'s tables with row and field counts; or a table\'s fields with type, key, nullable, references and description (JSON)',
     'resolve':      'resolve "<text>"   → resolve a fuzzy name/value to concrete ids (JSON)',
   }
+  // Kept, but not given to agents for now (how a name becomes ids is being redesigned — perhaps by the data source
+  // itself). The driver and the grounding seam stay; the tool is simply not written.
+  for (const name of NOT_GIVEN) { delete drivers[name]; delete usages[name] }
   for (const [name, body] of Object.entries(drivers)) {
     // Prepend a --help guard. ESM hoists the body's imports above this, but they only OPEN cheap handles; the
     // guard still short-circuits before any query/search runs, printing usage and nothing else.
@@ -317,6 +320,9 @@ export async function keepOnlyTools(dir: string, keep: string[]): Promise<void> 
   for (const t of wrappers) if (!keep.includes(t)) { await rm(join(dir, t), { force: true }); await rm(join(dir, '.tools', `${t}.mjs`), { force: true }) }
   if (!keep.includes('resolve')) await rm(join(dir, 'grounding'), { recursive: true, force: true })
 }
+
+/** Tools that exist but are not given to agents for now. */
+const NOT_GIVEN = ['resolve']
 
 /** Tools that only read: their work outlives the call, and asking the same thing twice in a turn costs nothing. */
 const READ_ONLY = new Set<string>()

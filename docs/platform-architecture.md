@@ -128,6 +128,12 @@ per-dialect helpers in `packages/introspect` move into the data sources of those
 - **For agents:** a source is read only through the datasource index (`find-schema`, `get-schema`) and `query`;
   introspection is the system's, not an agent tool.
 
+**Agent tools (2026-10-04).** The tools (`sources`, `find-schema`, `get-schema`, `query`) are platform code: the
+engine generates them into an agent's folder, each with its usage line, and that usage is appended to the agent's
+system prompt. Which tools an agent gets is part of its domain in the composition graph (`tools: [...]`). `resolve`
+(a name to ids, via grounding) is kept in the code but not given to agents for now — how a name becomes ids is being
+rethought, perhaps by the data source itself.
+
 **Naming convention (system-wide): `find` searches, `get` fetches one thing whole.** `find-schema` / `get-schema` are
 the first pair; every new pair follows it.
 
