@@ -58,6 +58,13 @@ export class SessionDO extends DurableObject<Env> {
       return v ? json({ view: v, upto: this.count() }) : json({ error: 'there is no such session' }, 404)
     }
     if (request.method === 'GET' && url.pathname === '/upto') return json({ upto: this.count() })
+    if (request.method === 'POST' && url.pathname === '/backfill') {
+      const b = await request.json() as { project: string; session: string }
+      const record = createRecorder((this.env as any).RECORDS, () => b.project)
+      let n = 0
+      for (const r of [...this.ctx.storage.sql.exec('SELECT seq, entry, at FROM entries ORDER BY seq')] as any[]) { record('session.entry', `${b.session}:${r.seq}`, { session: b.session, seq: r.seq, entry: JSON.parse(r.entry) }, r.at); n++ }
+      return json({ entries: n })
+    }
     return json({ error: 'not found' }, 404)
   }
 }

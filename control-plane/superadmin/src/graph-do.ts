@@ -35,6 +35,17 @@ export class GraphDO extends DurableObject<Env> {
     const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
     const sql = this.ctx.storage.sql
     if (request.method === 'GET' && url.pathname === '/cursor') return json({ cursor: this.cursor() })
+    if (request.method === 'POST' && url.pathname === '/backfill') {
+      const b = await request.json() as { project: string }
+      const record = createRecorder((this.env as any).RECORDS, () => b.project)
+      let n = 0
+      for (const r of [...sql.exec('SELECT kind, key, at, body FROM records ORDER BY kind, CAST(key AS INTEGER)')] as any[]) {
+        const row = JSON.parse(r.body)
+        const content = r.kind !== 'decision' && row.to_hash ? ([...sql.exec('SELECT body FROM content WHERE hash = ?', row.to_hash)][0] as any)?.body : undefined
+        record(`graph.${r.kind}`, r.key, { ...row, ...(content ? { content: JSON.parse(content) } : {}) }, new Date(Number(r.at) || Date.now()).toISOString()); n++
+      }
+      return json({ records: n })
+    }
     if (request.method === 'POST' && url.pathname === '/append') {
       const b = await request.json() as { project?: string; changes?: Row[]; suggestions?: Row[]; decisions?: Row[]; contents?: Record<string, string> }
       const record = createRecorder((this.env as any).RECORDS, () => String(b.project ?? ''))

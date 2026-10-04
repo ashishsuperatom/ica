@@ -163,6 +163,10 @@ export const PROJECT_MIGRATIONS: Migration[] = [
       progress TEXT, detail TEXT, started_at TEXT NOT NULL, updated_at TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS idx_activities_owner ON activities(owner, updated_at);
   ` },
+  { id: 21, name: 'sessions known', up: `
+    -- Every session the engine has synced through this hub, so the warehouse can be backfilled from their SessionDOs.
+    CREATE TABLE IF NOT EXISTS sessions_known (session TEXT PRIMARY KEY, first_seen TEXT NOT NULL);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

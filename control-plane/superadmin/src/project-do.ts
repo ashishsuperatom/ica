@@ -297,6 +297,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (path === '/access-domains' || path.startsWith('/access-domains/')) return this.accessDomains(request, path)
     if (request.method === 'POST' && path === '/access/arrive') return this.arrive(request)
     if (path === '/usage') return request.method === 'POST' ? this.recordUsage(request) : this.usageSummary(new URL(request.url))
+    if (request.method === 'POST' && path === '/warehouse/backfill') return this.backfill()
 
     if (request.method === 'GET'  && path === '/debug')        return this.debugInfo()
     if (request.method === 'POST' && path === '/members')      return this.addMember(request)
@@ -473,7 +474,7 @@ export class ProjectDO extends DurableObject<Env> {
         this.ctx.storage.sql.exec(`INSERT INTO activities (id, owner, kind, title, state, progress, detail, started_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT (id) DO UPDATE SET state = excluded.state, progress = excluded.progress, detail = excluded.detail, updated_at = excluded.updated_at`,
           a.id, a.owner, String(a.kind ?? ''), String(a.title ?? '').slice(0, 300), a.state, a.progress ?? null, a.detail ? String(a.detail).slice(0, 1000) : null, String(a.startedAt ?? new Date().toISOString()), String(a.updatedAt ?? new Date().toISOString()))
-        this.record('activity', `${a.id}:${a.state}`, a)
+        this.record('activity', `${a.id}:${a.state}:${a.updatedAt}`, a)
         const envelope = { from: { id: 'hub', type: 'hub' }, payload: { t: 'activity', activity: a } }
         for (const [cws, conn] of this.connByWs) {
           if (conn.type === 'code-engine' || conn.wsId.startsWith('http-')) continue
@@ -807,6 +808,26 @@ export class ProjectDO extends DurableObject<Env> {
     }
   }
 
+  // ── The platform's warehouse: everything this project holds, sent again (records.ts; the ids make it idempotent) ──
+  private async backfill(): Promise<Response> {
+    const sql = this.ctx.storage.sql
+    const n: Record<string, number> = {}
+    const each = (kind: string, rows: Iterable<any>, key: (r: any) => string, at: (r: any) => string | undefined) => { for (const r of rows) { this.record(kind, key(r), r, at(r)); n[kind] = (n[kind] ?? 0) + 1 } }
+    each('audit', sql.exec('SELECT * FROM audit_log ORDER BY seq'), (r) => r.id, (r) => r.at)
+    each('usage', sql.exec('SELECT * FROM usage_events ORDER BY seq'), (r) => String(r.seq), (r) => r.at)
+    each('activity', sql.exec('SELECT * FROM activities'), (r) => `${r.id}:${r.state}:${r.updated_at}`, (r) => r.updated_at)
+    each('program', sql.exec('SELECT hash, name, version, scope, owner, attaches_to, bytes, built_by, uploaded_at, published_at, published_by FROM programs'), (r) => r.hash, (r) => r.uploaded_at)
+    each('chat.answer', sql.exec('SELECT qid, user_id, session_id, question, payload_json, at, answered_at FROM answer_buffer WHERE payload_json IS NOT NULL'), (r) => r.qid, (r) => new Date(Number(r.answered_at ?? r.at)).toISOString())
+    const graph = (this.env as any).GRAPH?.get((this.env as any).GRAPH.idFromName(`graph:${this._pid}`))
+    if (graph) n.graph = Number(((await (await graph.fetch('http://do/backfill', { method: 'POST', body: JSON.stringify({ project: this._pid }) })).json()) as any).records ?? 0)
+    let entries = 0
+    for (const r of [...sql.exec('SELECT session FROM sessions_known')] as any[]) {
+      entries += Number(((await (await this.sessionStub(r.session).fetch('http://do/backfill', { method: 'POST', body: JSON.stringify({ project: this._pid, session: r.session }) })).json()) as any).entries ?? 0)
+    }
+    n['session.entry'] = entries
+    return this.j({ project: this._pid, sent: n })
+  }
+
   // ── Usage and credits (metering.ts) ───────────────────────────────────────
   private prices: { at: number; list: Price[] } | null = null
   private async priceList(): Promise<Price[]> {
@@ -825,7 +846,8 @@ export class ProjectDO extends DurableObject<Env> {
     const at = new Date().toISOString()
     this.ctx.storage.sql.exec('INSERT INTO usage_events (at, kind, provider, model, key_id, tokens_in, tokens_out, ms, credits_micro, priced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       at, 'model.tokens', b.provider ?? null, b.model ?? null, b.keyId ?? null, tin, tout, Number(b.ms) || null, micro, price ? 1 : 0)
-    this.record('usage', `${at}:${b.provider ?? ''}`, { at, provider: b.provider ?? null, model: b.model ?? null, key_id: b.keyId ?? null, tokens_in: tin, tokens_out: tout, ms: Number(b.ms) || null, credits_micro: micro, priced: !!price }, at)
+    const seq = Number(([...this.ctx.storage.sql.exec('SELECT last_insert_rowid() AS id')][0] as any)?.id ?? 0)
+    this.record('usage', String(seq), { at, provider: b.provider ?? null, model: b.model ?? null, key_id: b.keyId ?? null, tokens_in: tin, tokens_out: tout, ms: Number(b.ms) || null, credits_micro: micro, priced: !!price }, at)
     const org = await this.orgId()
     if (org && micro > 0) {
       await this.env.ORG.get(this.env.ORG.idFromName(org)).fetch('http://do/credits/usage', { method: 'POST', body: JSON.stringify({ project: this._pid, credits_micro: micro, at }) }).catch(() => {})
@@ -982,6 +1004,7 @@ export class ProjectDO extends DurableObject<Env> {
   }
   private userStub(principal: string) { return (this.env as any).USER.get((this.env as any).USER.idFromName(principal)) }
   private async syncSession(session: string, from: number, entries: unknown[]) {
+    this.ctx.storage.sql.exec('INSERT OR IGNORE INTO sessions_known (session, first_seen) VALUES (?, ?)', session, new Date().toISOString())
     const r = await this.sessionStub(session).fetch('http://do/append', { method: 'POST', body: JSON.stringify({ project: this._pid, session, from, entries }) })
     const body: any = await r.json()
     if (r.status >= 400 && body.conflict === undefined) throw new Error(body.error ?? `the session could not be kept (${r.status})`)

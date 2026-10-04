@@ -309,6 +309,12 @@ export class OrgDO extends DurableObject<Env> {
       createRecorder((this.env as any).RECORDS, () => 'platform')('credit', `grant:${at}`, { kind: 'grant', amount_micro: Math.round(amount * 1_000_000), note: b.note ?? null, by: b.by, org: this.ctx.id.toString() }, at)
       return Response.json({ ok: true }, { status: 201 })
     }
+    if (request.method === 'POST' && path === '/credits/backfill') {
+      const record = createRecorder((this.env as any).RECORDS, () => 'platform')
+      let n = 0
+      for (const r of [...sql.exec('SELECT * FROM credit_ledger ORDER BY seq')] as any[]) { record('credit', `${r.kind}:${r.seq}`, { ...r, org: this.ctx.id.toString() }, r.at); n++ }
+      return Response.json({ credits: n })
+    }
     if (request.method === 'POST' && path === '/credits/usage') {
       const micro = Math.round(Number(b?.credits_micro))
       if (!(micro >= 0) || !b?.project) return Response.json({ error: 'usage names its project and its cost in micro-credits' }, { status: 400 })

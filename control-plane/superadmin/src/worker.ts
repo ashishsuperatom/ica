@@ -310,6 +310,7 @@ export default {
       if (subPath.startsWith('access/arrive')) return new Response('not found', { status: 404 })
       // Usage is recorded by the model proxy, never posted from outside.
       if (subPath === 'usage' && request.method !== 'GET') return new Response('not found', { status: 404 })
+      if (subPath.startsWith('warehouse')) return new Response('not found', { status: 404 })   // the platform's, through /api/warehouse
       // The agent profile is the platform's to set: only a superadmin reads or writes it. (A later block meant to
       // enforce this was never reached, because this branch forwards every sub-path first.)
       if (subPath === 'profile' && acc.level !== 'superadmin') return new Response('forbidden', { status: 403 })
@@ -491,6 +492,26 @@ export default {
     //
     // Here rather than in the engine image so that adding or removing a model is an edit, not a rebuild and a
     // roll of every box.
+    // The platform's warehouse (records.ts): send again everything every organisation and project holds — superadmin
+    // only; record ids make it safe to run twice.
+    if (path === '/api/warehouse/backfill' && request.method === 'POST') {
+      if (!(await requireSuperadmin(request, env))) return new Response('unauthorized', { status: 401 })
+      const g = env.GLOBAL.get(env.GLOBAL.idFromName('global'))
+      const orgs = ((await (await g.fetch(new Request('http://do/organizations'))).json()) as any[]) ?? []   // a bare list
+      const out: any[] = []
+      for (const o of orgs) {
+        const org = env.ORG.get(env.ORG.idFromName(o.do_name ?? o.id))
+        const credits = await (await org.fetch(new Request('https://do/credits/backfill', { method: 'POST' }))).json().catch(() => null)
+        const projects = ((await (await org.fetch(new Request('https://do/projects'))).json().catch(() => [])) as any[]) ?? []   // a bare list
+        for (const p of projects) {
+          if (p.deleted) continue
+          const r = await (await env.PROJECT.get(env.PROJECT.idFromName(`proj:${p.id}`)).fetch(new Request('http://do/warehouse/backfill', { method: 'POST', headers: { 'x-sa-project': p.id } }))).json().catch((e: any) => ({ error: String(e) }))
+          out.push({ org: o.name ?? o.id, project: p.name ?? p.id, ...r as object })
+        }
+        out.push({ org: o.name ?? o.id, credits })
+      }
+      return Response.json({ backfilled: out })
+    }
     // The platform's price list (metering.ts): every version kept with who set it.
     if (path === '/api/prices') {
       if (!(await requireSuperadmin(request, env))) return new Response('unauthorized', { status: 401 })
@@ -670,7 +691,7 @@ export default {
       if (request.method !== 'GET' && oa.level === 'member') return new Response('forbidden', { status: 403 })
       // Credits are granted by the platform alone (an organisation granting itself credits would be free money), and
       // usage is posted only by its own projects' DOs.
-      if (path === '/api/credits/usage') return new Response('not found', { status: 404 })
+      if (path === '/api/credits/usage' || path === '/api/credits/backfill') return new Response('not found', { status: 404 })
       if (path === '/api/credits/grant') {
         const su = await requireSuperadmin(request, env)
         if (!su) return new Response('only the platform grants credits', { status: 403 })
