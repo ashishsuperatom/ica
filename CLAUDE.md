@@ -33,6 +33,8 @@ The agents that produce/maintain computation are named by thinking speed:
 
 ## Where the design lives
 
+- **`docs/features.md`** — one line per major feature: what is built, and what is planned (partly done counts as planned).
+
 - **`docs/platform-architecture.md`** — the platform: agents, concepts, programs, STATE and intents, sessions, the
   answer history, governance, storage (platform first, engine a replica), Durable Objects, the template, migrations.
 - **`docs/composition-graph.md`** — the composition graph's mechanics.
