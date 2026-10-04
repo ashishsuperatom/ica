@@ -81,22 +81,6 @@ async function claimsOf(request: Request, env: Env): Promise<JwtClaims | null> {
   return token ? await verifyJwt(token, env.JWT_SECRET) : null
 }
 
-/** A call to a project's API, recorded in the project's audit history when it changes something: who, what, and how
- *  it ended. Agent keys are recorded by the DO itself (with more detail), and reading the history is not a change. */
-async function auditedProjectCall(request: Request, env: Env, projectId: string, subPath: string, run: () => Promise<Response>): Promise<Response> {
-  const res = await run()
-  if (request.method === 'GET' || /^(agent-keys|audit)/.test(subPath) || !/^[0-9a-f-]{36}$/.test(projectId)) return res
-  try {
-    const claims = await claimsOf(request, env)
-    const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
-    const outcome = res.ok ? 'ok' : res.status === 401 || res.status === 403 ? 'refused' : 'error'
-    await stub.fetch(new Request('http://do/audit', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-project': projectId },
-      body: JSON.stringify({ actor: { kind: 'user', id: claims?.userId ?? 'anonymous', ...(claims?.email ? { email: claims.email } : {}) }, via: 'api',
-        action: `api.${request.method.toLowerCase()}`, target: subPath.slice(0, 200), outcome, detail: { status: res.status } }) }))
-  } catch (e) { console.warn('[audit] the project API call could not be recorded:', (e as Error)?.message ?? e) }
-  return res
-}
-
 /** The caller's standing in ONE project. ONE read, of the PROJECT's own DO — never the org's.
  *  A project is asked about on every request, so it has to answer alone: its access table already holds
  *  everyone who may touch it, including the org's admins, mirrored in whenever that list changes. Reading the
@@ -293,7 +277,7 @@ export default {
       return stub.fetch(fwd)
     }
     const projMatch = path.match(/^\/api\/projects\/([^/]+)\/(.+)/)
-    if (projMatch) return auditedProjectCall(request, env, projMatch[1], projMatch[2], async () => {
+    if (projMatch) {
       const projectId = projMatch[1]
       const subPath   = projMatch[2]
       // Who is asking, and what may they do HERE? Superadmin and the owning org's admin get the provisioning
@@ -301,6 +285,14 @@ export default {
       // never what protects anything.
       const acc = await projectAccessOf(request, env, projectId)
       if (!acc.ok) return new Response('unauthorized', { status: 401 })
+      // Every call this makes to the project's DO says who the caller is (from the token checked above). The DO alone
+      // records the audit history — one path, whichever way a change arrives.
+      const actor = JSON.stringify({ kind: 'user', id: acc.email || acc.level, ...(acc.email ? { email: acc.email } : {}) })
+      const toDO = (input: Request | string, init?: RequestInit) => {
+        const req = new Request(input as any, init)
+        req.headers.set('x-sa-actor', actor); req.headers.set('x-sa-project', projectId)
+        return env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`)).fetch(req)
+      }
       // Anything that changes the project — machine lifecycle, access, roles, datasources, keys, tokens — is for
       // whoever administers it. A member may look, not provision.
       const PROVISIONING = /^(machine|service-token|access|roles|datasources|members|verify-conn|info|fly|suspend|resume|stop|delete|dashboards|agent-keys|audit)/
@@ -343,7 +335,7 @@ export default {
         const userId = `svc:${channel}`
         const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
         // Register the service member in this project's DO (idempotent — INSERT OR REPLACE).
-        const mr = await stub.fetch(new Request('http://do/members', {
+        const mr = await toDO(new Request('http://do/members', {
           method: 'POST', headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ userId, role: 'service' }),
         }))
@@ -369,7 +361,7 @@ export default {
       if (roll && request.method === 'PUT') {
         const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by: acc.email })
         const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
-        const r = await stub.fetch(new Request(`http://do/${subPath}`, { method: 'PUT', body }))
+        const r = await toDO(new Request(`http://do/${subPath}`, { method: 'PUT', body }))
         if (r.ok) { const b = JSON.parse(body || '{}'); if (b?.buildId) buildCache.set(`${projectId}/${roll[1]}`, { buildId: String(b.buildId), at: Date.now() }) }
         return r
       }
@@ -382,16 +374,16 @@ export default {
 
       const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
       // Agent keys are made and revoked by someone: the DO records who, from the caller the gate just checked.
-      if (/^agent-keys/.test(subPath) && request.method !== 'GET') {
+      if (/^(agent-keys|access-policies|access-attributes)/.test(subPath) && request.method !== 'GET') {
         const by = acc.email || (acc.level === 'superadmin' ? 'superadmin' : '')
-        const body = request.method === 'POST' ? JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by }) : undefined
+        const body = request.method === 'POST' || request.method === 'PUT' ? JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by }) : undefined
         const fwd = new Request(`http://do/${subPath}${url.search ? url.search + '&' : '?'}by=${encodeURIComponent(by)}`, { method: request.method, headers: { 'content-type': 'application/json', 'x-sa-project': projectId }, body })
-        return stub.fetch(fwd)
+        return toDO(fwd)
       }
       const fwd = new Request(`http://do/${subPath}${url.search}`, request)
       fwd.headers.set('x-sa-project', projectId)   // the DO learns its own id from every call, not only from a socket
-      return stub.fetch(fwd)
-    })
+      return toDO(fwd)
+    }
 
     // ── Auth: exchange Clerk session for our JWT ─────────────────────────────
     if (request.method === 'POST' && path === '/api/auth/token') {

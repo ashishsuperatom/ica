@@ -24,10 +24,11 @@ import { receiver } from '../../../clients/transport.js'
 import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
 import { PROJECT_MIGRATIONS, adoptProjectSchemaVersion } from './migrations.js'
 import { bucketStore } from './parcels.js'
-import { AuditLog } from './audit.js'
+import { AuditLog, auditScope } from './audit.js'
 import { AgentKeys, KeyRefusal } from './agent-keys.js'
 import { scopeAllows, HUB_MESSAGES } from '../../shared/agent-scopes.js'
 import { ProgramCatalogue, CatalogueRefusal } from './program-catalogue.js'
+import { checkPolicy, resolve as resolvePolicies, type AccessPolicy } from './access-policies.js'
 
 
 // How long a question queued for a sleeping machine is still worth waking up for. Past this the person has
@@ -56,7 +57,7 @@ interface ConnInfo {
 interface Envelope {
   to?: { id?: string; type: string; channel?: string }   // channel: agent-log fan-out (the engine LABELS, the DO fans to the owner's attached devices)
   // userId: who sent it, stamped by the hub from the connection's credentials — never taken from the payload.
-  from: { id: string; type: string; userId?: string; admin?: boolean }
+  from: { id: string; type: string; userId?: string; email?: string; admin?: boolean }
   payload: unknown
 }
 
@@ -228,7 +229,25 @@ export class ProjectDO extends DurableObject<Env> {
 
   // ── HTTP + WS entry point ───────────────────────────────────────────────────
 
+  /** Every HTTP call, through one gate for the audit history: a call that changes something is recorded once — by its
+   *  handler, with what it means (agent-key.create, …), or else here, as the call itself. Whatever way it came. */
   async fetch(request: Request): Promise<Response> {
+    if (request.method === 'GET' || request.method === 'HEAD' || request.headers.get('upgrade') === 'websocket') return this.handleFetch(request)
+    const mark = { recorded: false }
+    const res = await auditScope.run(mark, () => this.handleFetch(request))
+    if (!mark.recorded) {
+      const path = new URL(request.url).pathname
+      let actor: any = null
+      try { actor = JSON.parse(request.headers.get('x-sa-actor') ?? 'null') } catch { /* malformed: recorded as the platform */ }
+      try {
+        this.audit.record({ actor: actor?.kind && actor?.id ? actor : { kind: 'system', id: 'platform' }, via: actor ? 'api' : 'system', action: `api.${request.method.toLowerCase()}`,
+          target: path.slice(1, 200), outcome: res.ok ? 'ok' : res.status >= 500 ? 'error' : 'refused', detail: { status: res.status } })
+      } catch (e: any) { this.log('audit:refused', { message: e?.message ?? String(e) }) }
+    }
+    return res
+  }
+
+  private async handleFetch(request: Request): Promise<Response> {
     this.hydrate()   // rebuild conn Maps from hibernated sockets before any path reads them (state/connections)
     const url  = new URL(request.url)
     const path = url.pathname
@@ -270,6 +289,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (path === '/agent-keys' || path.startsWith('/agent-keys/') || path === '/audit') return this.agentKeysAndAudit(request, path)
     if (request.method === 'POST' && path === '/agent-call') return this.agentCall(request)
     if (path === '/engine/programs' || path.startsWith('/engine/programs/')) return this.enginePrograms(request, path)
+    if (path === '/access-policies' || path.startsWith('/access-policies/') || path === '/access-attributes') return this.accessAdmin(request, path)
 
     if (request.method === 'GET'  && path === '/debug')        return this.debugInfo()
     if (request.method === 'POST' && path === '/members')      return this.addMember(request)
@@ -439,6 +459,13 @@ export class ProjectDO extends DurableObject<Env> {
     //    of their sessions follows (UserDO), and the engine hears how far the platform has it. ──
     // ── The composition graph's records, replicated up by the engine (GraphDO); where the platform's copy ends; and
     //    batches back down to rebuild an engine whose graph is empty. ──
+    // ── The data access policies a reader is under, resolved for the engine to send with each of their queries ──
+    if (msg.type === 'access:resolve' && sender.type === 'code-engine') {
+      const reply = (payload: Record<string, unknown>) => { try { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'access:resolved', principal: msg.principal, source: msg.source, reqId: msg.reqId, ...payload } })) } catch { /* gone */ } }
+      try { reply({ policies: this.policiesFor(String(msg.principal ?? ''), msg.email ? String(msg.email) : null, String(msg.source ?? '')), version: this.accessVersion() }) }
+      catch (e: any) { reply({ error: e?.message ?? String(e) }) }
+      return
+    }
     if ((msg.type === 'graph:sync' || msg.type === 'graph:cursor' || msg.type === 'graph:pull') && sender.type === 'code-engine') {
       const stub = (this.env as any).GRAPH.get((this.env as any).GRAPH.idFromName(`graph:${this._pid}`))
       const reply = (payload: Record<string, unknown>) => { try { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload })) } catch { /* gone */ } }
@@ -755,6 +782,77 @@ export class ProjectDO extends DurableObject<Env> {
     }
   }
 
+  // ── Data access policies ───────────────────────────────────────────────────
+  private accessVersion(): number { return Number([...this.ctx.storage.sql.exec('SELECT version FROM access_version')][0]?.version ?? 0) }
+  private policies(): AccessPolicy[] {
+    return [...this.ctx.storage.sql.exec('SELECT id, applies_to, source, table_name, kind, predicate, column_name, note FROM access_policies WHERE removed_at IS NULL ORDER BY created_at')]
+      .map((r: any) => ({ id: r.id, applies_to: r.applies_to, source: r.source, table: r.table_name, kind: r.kind, predicate: r.predicate, column: r.column_name, note: r.note }))
+  }
+  /** A reader's policies for one source: their role from the project's access list, their attributes, every policy that applies. */
+  private policiesFor(principal: string, email: string | null, source: string) {
+    if (!/^(user|agent):\S+$/.test(principal)) throw new Error('who is reading is not known')
+    const role = email ? ([...this.ctx.storage.sql.exec('SELECT role_id FROM access WHERE email = ?', email.toLowerCase())][0] as any)?.role_id ?? null : null
+    const subject = principal.startsWith('agent:') ? principal : email ? `email:${email.toLowerCase()}` : null
+    const attributes = Object.fromEntries(subject ? [...this.ctx.storage.sql.exec('SELECT key, value FROM access_attributes WHERE subject = ?', subject)].map((r: any) => [r.key, JSON.parse(r.value)]) : [])
+    return resolvePolicies(this.policies(), source, { principal, email, role, attributes })
+  }
+  /** Something changed: bump the version and tell the engine its resolved policies are stale. */
+  private accessChanged() {
+    this.ctx.storage.sql.exec('UPDATE access_version SET version = version + 1')
+    const id = this.roleRegistry.get('code-engine'); const ws = id ? this.wsById.get(id) : undefined
+    try { ws?.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'access:changed', version: this.accessVersion() } })) } catch { /* the engine asks again on its next query */ }
+  }
+  private async accessAdmin(request: Request, path: string): Promise<Response> {
+    const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
+    const url = new URL(request.url)
+    const body: any = request.method === 'GET' ? {} : await request.json().catch(() => ({}))
+    const by = String(body.by ?? url.searchParams.get('by') ?? '')
+    const actor = { kind: 'user' as const, id: by || 'unknown', ...(by.includes('@') ? { email: by } : {}) }
+    if (path === '/access-policies' && request.method === 'GET') return json({ policies: this.policies(), version: this.accessVersion() })
+    if (request.method !== 'GET' && !by) return json({ error: 'who is making the change?' }, 400)
+    if (path === '/access-policies' && request.method === 'POST') {
+      const p = { applies_to: body.applies_to, source: body.source, table: body.table, kind: body.kind, predicate: body.predicate ?? null, column: body.column ?? null, note: body.note ?? null }
+      const bad = checkPolicy(p)
+      if (bad.length) return json({ error: bad.join('; ') }, 400)
+      const id = `pol_${crypto.randomUUID().slice(0, 12)}`
+      this.ctx.storage.sql.exec('INSERT INTO access_policies (id, applies_to, source, table_name, kind, predicate, column_name, note, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        id, p.applies_to, p.source, p.table, p.kind, p.predicate, p.column, p.note, by, new Date().toISOString())
+      this.audit.record({ actor, via: 'admin', action: 'access-policy.create', target: id, outcome: 'ok', detail: p })
+      this.accessChanged()
+      return json({ policy: { id, ...p } }, 201)
+    }
+    const m = path.match(/^\/access-policies\/(pol_[\w-]+)$/)
+    if (m && request.method === 'DELETE') {
+      const [r] = [...this.ctx.storage.sql.exec('SELECT removed_at FROM access_policies WHERE id = ?', m[1])] as any[]
+      if (!r) return json({ error: `there is no policy ${m[1]}` }, 404)
+      if (r.removed_at) return json({ error: `policy ${m[1]} was already removed` }, 400)
+      this.ctx.storage.sql.exec('UPDATE access_policies SET removed_at = ?, removed_by = ? WHERE id = ?', new Date().toISOString(), by, m[1])
+      this.audit.record({ actor, via: 'admin', action: 'access-policy.remove', target: m[1], outcome: 'ok' })
+      this.accessChanged()
+      return json({ removed: m[1] })
+    }
+    if (path === '/access-attributes') {
+      // An email is matched without case; an agent key's id is case-sensitive and kept as it is.
+      const raw = String(body.subject ?? url.searchParams.get('subject') ?? '')
+      const subject = raw.startsWith('email:') ? raw.toLowerCase() : raw
+      if (!/^(email:[^\s@]+@[^\s@]+|agent:key_[\w-]+)$/.test(subject)) return json({ error: 'attributes belong to email:<address> or agent:<key id>' }, 400)
+      if (request.method === 'GET') return json({ subject, attributes: Object.fromEntries([...this.ctx.storage.sql.exec('SELECT key, value FROM access_attributes WHERE subject = ?', subject)].map((r: any) => [r.key, JSON.parse(r.value)])) })
+      if (request.method === 'PUT') {
+        if (!/^[\w-]{1,60}$/.test(String(body.key ?? ''))) return json({ error: 'an attribute key is letters, digits, dashes or underscores' }, 400)
+        if (body.value === null || body.value === undefined) {
+          this.ctx.storage.sql.exec('DELETE FROM access_attributes WHERE subject = ? AND key = ?', subject, body.key)
+        } else {
+          this.ctx.storage.sql.exec('INSERT INTO access_attributes (subject, key, value, updated_by, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (subject, key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = excluded.updated_at',
+            subject, body.key, JSON.stringify(body.value), by, new Date().toISOString())
+        }
+        this.audit.record({ actor, via: 'admin', action: 'access-attribute.set', target: subject, outcome: 'ok', detail: { key: body.key, value: body.value ?? null } })
+        this.accessChanged()
+        return json({ ok: true })
+      }
+    }
+    return json({ error: 'not found' }, 404)
+  }
+
   // ── Sessions kept by the platform ──────────────────────────────────────────
   private sessionStub(session: string) {
     if (!/^[\w-]{1,80}$/.test(session)) throw new Error('not a session id')
@@ -852,7 +950,7 @@ export class ProjectDO extends DurableObject<Env> {
     // they pass through so an offline client can recover them. All user-scoped by the runtime's JWT userId.
     const pl = msg.payload || {}
     const hubReply = (payload: any) => senderWs.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload }))
-    const envelope: Envelope = { from: { id: sender.wsId, type: sender.type, ...(sender.userId ? { userId: sender.userId } : {}), ...(sender.admin ? { admin: true } : {}) }, payload: msg.payload }   // built once — reused by the base routing below AND the fan-out
+    const envelope: Envelope = { from: { id: sender.wsId, type: sender.type, ...(sender.userId ? { userId: sender.userId } : {}), ...(sender.email ? { email: sender.email } : {}), ...(sender.admin ? { admin: true } : {}) }, payload: msg.payload }   // built once — reused by the base routing below AND the fan-out
     // ── The audit history: everything a person or an agent sends, and every refusal ──
     if (sender.type === 'agent') {
       const toType = (msg.to as any)?.type

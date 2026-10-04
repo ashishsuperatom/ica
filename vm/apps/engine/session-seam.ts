@@ -27,7 +27,8 @@ import { ProgramStore, ProgramError, loadPackage } from '@superatom/programs'
 import { createStateEngine, StateRefusal, type StateEngine } from '@superatom/state'
 import { createSessions, fileLog, history, replay, SessionRefusal, type SessionLog, type SessionView } from '@superatom/session'
 import { cardOf } from './answer-card.js'
-import { whoIs } from './identity.js'
+import { whoIs, type Who } from './identity.js'
+import { asReader, currentReader, AccessRefusal } from './access.js'
 
 export interface SessionSeamDeps {
   projectDir: string
@@ -38,6 +39,8 @@ export interface SessionSeamDeps {
   log?: SessionLog
   /** Find a program the store lacks (the engine fetches it from the platform); by default the store only. */
   ensureProgram?: (ref: string) => Promise<string>
+  /** The reader's data access policies for a source (access.ts); without it, reads carry none. */
+  access?: { policiesFor(who: Who, source: string): Promise<unknown[]> }
 }
 
 export class SessionSeamRefusal extends Error {}
@@ -50,8 +53,11 @@ export function createSessionSeam(d: SessionSeamDeps) {
   const store = new ProgramStore(join(d.projectDir, 'programs', 'store'))
   const log = d.log ?? fileLog(join(d.projectDir, 'sessions'))
 
+  // Every read on someone's behalf carries their data access policies; the manager's rewrite applies them.
   const query = async (id: string, sql: string, params: Record<string, unknown> = {}) => {
-    const r = await fetch(d.datasource + '/query', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, sql, params }) })
+    const reader = currentReader()
+    const policies = reader && d.access ? await d.access.policiesFor(reader, id) : []
+    const r = await fetch(d.datasource + '/query', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, sql, params, ...(policies.length ? { policies } : {}) }) })
     const p: any = await r.json().catch(() => ({ error: `${r.status} ${r.statusText}` }))
     if (!r.ok || p?.error) throw new Error(p?.error ?? `${r.status}`)
     return p.rows ?? []
@@ -163,12 +169,12 @@ export function createSessionSeam(d: SessionSeamDeps) {
           ...(payload.ops ? { ops: payload.ops } : {}), ...(payload.action ? { action: payload.action } : {}), ...(payload.call ? { call: payload.call } : {}),
           to: payload.to, ...(payload.block ? { block: String(payload.block) } : {}), by: user, at: new Date().toISOString(),
         }
-        const r = await sessions.intent(intent)
+        const r = await asReader(whoIs(from), () => sessions.intent(intent))
         return reply(await present(r.session, { result: { block: r.block, opened: r.opened, answer: r.answer, ...(r.stale ? { stale: true } : {}) } }))
       }
       throw new SessionSeamRefusal(`there is no ${t}`)
     } catch (e: any) {
-      if (e instanceof SessionSeamRefusal || e instanceof SessionRefusal || e instanceof ProgramError || e instanceof StateRefusal) return reply({ t: 'session:refused', reason: e.message })
+      if (e instanceof SessionSeamRefusal || e instanceof SessionRefusal || e instanceof ProgramError || e instanceof StateRefusal || e instanceof AccessRefusal) return reply({ t: 'session:refused', reason: e.message })
       console.error('[session]', e?.stack ?? e)
       return reply({ t: 'session:refused', reason: `the session could not do that: ${e?.message ?? e}` })
     }

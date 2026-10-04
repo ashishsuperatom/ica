@@ -68,7 +68,7 @@ const ask = async (q: Record<string, string | number>) => {
 }
 
 beforeAll(async () => {
-  const out = await build({ stdin: { contents: harness, resolveDir: here, loader: 'js' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers'] })
+  const out = await build({ stdin: { contents: harness, resolveDir: here, loader: 'js' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers', 'node:*'] })
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', durableObjects: { T: { className: 'TestDO', useSQLite: true } } })
 }, 60_000)
 afterAll(async () => { await mf?.dispose() })

@@ -130,6 +130,18 @@ export const PROJECT_MIGRATIONS: Migration[] = [
       published_at TEXT, published_by TEXT);
     CREATE INDEX IF NOT EXISTS idx_programs_name ON programs(name, uploaded_at);
   ` },
+  { id: 17, name: 'data access policies and attributes', up: `
+    -- What each person or agent may read (access-policies.ts). A policy is never deleted: removing it stamps it.
+    CREATE TABLE IF NOT EXISTS access_policies (
+      id TEXT PRIMARY KEY, applies_to TEXT NOT NULL, source TEXT NOT NULL, table_name TEXT NOT NULL, kind TEXT NOT NULL,
+      predicate TEXT, column_name TEXT, note TEXT, created_by TEXT NOT NULL, created_at TEXT NOT NULL, removed_at TEXT, removed_by TEXT);
+    -- A reader's attributes, named in row predicates as {attr.<key>}: subject is email:<address> or agent:<key id>.
+    CREATE TABLE IF NOT EXISTS access_attributes (
+      subject TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, updated_by TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (subject, key));
+    -- Bumped on every change, so an engine holding resolved policies knows they are stale.
+    CREATE TABLE IF NOT EXISTS access_version (version INTEGER NOT NULL);
+    INSERT INTO access_version (version) SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM access_version);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

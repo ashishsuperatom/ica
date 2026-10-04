@@ -58,7 +58,7 @@ async function connect(hello: Record<string, unknown>) {
 }
 
 beforeAll(async () => {
-  const out = await build({ stdin: { contents: harness, resolveDir: here, loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers'], conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'] })
+  const out = await build({ stdin: { contents: harness, resolveDir: here, loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'] })
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
     durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: SECRET } })
   await call('/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'engine-key', provider: 'external', name: 'Test project' }) })
@@ -150,7 +150,10 @@ describe('agent keys, identities and the audit history, in the real ProjectDO', 
   it('the audit history has it all, newest first; a malformed event is refused', async () => {
     const events = (await call('/audit?limit=50')).body.events
     const line = (e: any) => `${e.actor.kind}:${e.actor.id.startsWith('agent:') ? 'agent' : e.actor.id.startsWith('key:') ? 'badkey' : e.actor.id} ${e.via} ${e.action} ${e.outcome}`
-    expect(events.map(line).reverse().slice(0, 8)).toEqual([
+    expect(events.map(line).reverse().slice(0, 11)).toEqual([
+      'system:platform system api.post ok',                   // the project set up
+      'system:platform system api.post refused',              // a key with no scope, refused
+      'system:platform system api.post refused',              // a key with an unknown scope, refused
       'user:admin@test.io admin agent-key.create ok',
       'agent:badkey agent agent.connect refused',
       'agent:agent agent agent.connect ok',

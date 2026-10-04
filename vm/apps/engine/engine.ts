@@ -46,6 +46,7 @@ import { createGraphSeam, GRAPH_MESSAGES } from './graph-seam.js'
 import { createProgramSeam, PROGRAM_MESSAGES } from './program-seam.js'
 import { platformOf } from './platform.js'
 import { createGraphSync, graphFileOf } from './graph-sync.js'
+import { createAccess } from './access.js'
 import { readingAnswer } from './answer-card.js'
 import { randomUUID } from 'node:crypto'
 import { buildDatasourceIndex } from './datasource-index/build.js'
@@ -712,7 +713,9 @@ const wire = createWire({
 const sessionSync = createSessionSync({ dir: join(PROJECT_DIR, 'sessions'), send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true }, log: (s) => console.warn(s) })
 // Programs: built here, kept by the platform, fetched from it when a session needs one this engine lacks.
 const programSeam = createProgramSeam({ projectDir: PROJECT_DIR, platform: KEY && PROJECT ? platformOf({ hub: HUB, project: PROJECT, key: KEY }) : null, send: (to, msg) => wire.send(to, msg) })
-const sessionSeam = createSessionSeam({ projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure })
+// Data access per reader: policies resolved by the platform, carried with each intent, applied by the manager.
+const access = createAccess({ send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true } })
+const sessionSeam = createSessionSeam({ projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access })
 // The composition graph is kept by the platform too: pushed after every change, rebuilt from it when this one is empty.
 const graphSync = createGraphSync({ file: graphFileOf(PROJECT_DIR), send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true }, log: (s) => console.warn(s) })
 const graphSeam = createGraphSeam({ projectDir: PROJECT_DIR, send: (to, msg) => { wire.send(to, msg); if (msg.t === 'graph:reply') graphSync.push() } })
@@ -880,6 +883,7 @@ function connect() {
     }
     if (t === 'session:synced') { sessionSync.onSynced(m.payload); return }
     if (t === 'graph:cursor' || t === 'graph:synced' || t === 'graph:batch') { graphSync.onMessage(m.payload); return }
+    if (t === 'access:resolved' || t === 'access:changed') { access.onMessage(m.payload); return }
     if (t === 'fenced')     { console.log('[ica] fenced — a newer engine holds this role (obsolete instance)'); return }
     if (t === 'superseded') { console.log('[ica] superseded by our own reconnection'); return }
     if (t === 'evicted')    { console.log('[ica] evicted — a newer connection took the role'); return }

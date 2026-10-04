@@ -466,6 +466,17 @@ The CLI is for agents outside the Superatom platform: a person with their own ag
 it too: instead of connecting directly, our own agents launch the CLI as a package. It is a separate part of the
 system — a proper, production CLI with the features CLIs normally have — called the Superatom CLI, `sacli`.
 
+### Data access per reader (built 2026-10-05)
+
+In the user's words: we need to know the user, or there is no authorization; every user has an authorization attached,
+enforced through the SQLGlot system. **Policies** live in the project's DO: for one source and table, a **row** filter
+(a predicate with `{t}` for the table), a **deny**, or a column **mask**; each applies to everyone, a role, one person
+(by email) or one agent key. A predicate may name the reader's **attributes** (`{t}.branch IN {attr.branches}`),
+rendered as SQL literals; a missing attribute denies the table (fail closed). The engine carries the reader with each
+session intent (an async context), resolves their policies through the hub (cached until the platform says they
+changed), and sends them with every query; the datasource manager's rewrite applies them to every table read.
+*Next:* the agents' own data tools in a chat (they need a per-session token so the agent cannot change its policy).
+
 **Agents, not the CLI, in the user's words:** the CLI's details belong nowhere in the backend — not in the Worker or the
 Durable Objects. The backend knows only **agent keys** and the **agent** connection, in one place; any system can use
 them, and the CLI is our version, which people install to connect to Superatom and make their changes. Some things go
@@ -516,8 +527,12 @@ R2 (the data lake product), the analytics engine, and stream processing through 
 - **One event shape** (`AuditEvent` in platform-types): who (user, agent key, engine, system), via (ui, admin, agent,
   engine, api, channel, system), action `<thing>.<verb>`, target, outcome (ok, refused, error), detail (a question's
   words, an intent's ops, a refusal's reason).
-- **Recorded where it happens:** the ProjectDO records every message a person or agent sends and every change made
-  through the platform's API; the engine records what happens inside it.
+- **One path, in the user's words (2026-10-05):** all audit comes from the same place, never from two — however a
+  change is made and by whichever method, there is one path. That place is the **project's Durable Object**: every
+  message a person or agent sends passes its relay, and every HTTP call passes its one gate, which records a call that
+  changes something exactly once — the handler's own event when it has one (`agent-key.create`, `program.publish`, …),
+  else the call itself. The Worker only says who the caller is (`x-sa-actor`, from the token it checked); it records
+  nothing.
 - **The engine's events come in through our own ingest endpoint**, signed with the project's key; the Worker stamps
   which project and engine sent them (never trusting the body), checks them against the schema (a stream drops a bad
   event silently), and writes them to the same stream. Engines buffer and retry; `id` makes a retry harmless.

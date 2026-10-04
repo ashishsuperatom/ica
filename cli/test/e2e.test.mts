@@ -43,7 +43,7 @@ before(async () => {
 export default { async fetch(req, env) { const u = new URL(req.url); const stub = env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}'))
   if (u.pathname.startsWith('/_ws/')) return stub.fetch(req)
   const fwd = new Request('http://do' + u.pathname.slice(3) + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return stub.fetch(fwd) } }`
-  const out = await build({ stdin: { contents: harness, resolveDir: join(root, 'control-plane/superadmin/src/__tests__'), loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers'], conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'] })
+  const out = await build({ stdin: { contents: harness, resolveDir: join(root, 'control-plane/superadmin/src/__tests__'), loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'] })
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'], host: '127.0.0.1', port: 0,
     durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: 'x' } })
   hubUrl = (await mf.ready).href.replace(/^http/, 'ws').replace(/\/$/, '')

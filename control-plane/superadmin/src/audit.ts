@@ -5,6 +5,7 @@
 // in the DO's SQLite (immediate, and kept if the stream fails), then sent to the platform's audit stream (Basin
 // Pipelines → an Iceberg table, read with Basin SQL) and counted in Analytics Engine, when those are bound.
 
+import { AsyncLocalStorage } from 'node:async_hooks'
 import type { AuditEvent } from '../../../vm/packages/platform-types/src/index.js'
 import { checkAuditEvent } from '../../../vm/packages/platform-types/src/index.js'
 
@@ -19,6 +20,9 @@ export interface AuditSinks {
 
 type Sql = { exec(q: string, ...p: unknown[]): Iterable<Record<string, unknown>> }
 
+/** The request being handled, so the DO's one gate knows whether a handler already recorded what the call meant. */
+export const auditScope = new AsyncLocalStorage<{ recorded: boolean }>()
+
 export class AuditLog {
   constructor(private sql: Sql, private project: () => string, private sinks: AuditSinks = {}) {}
 
@@ -27,6 +31,8 @@ export class AuditLog {
     const event: AuditEvent = { id: e.id ?? crypto.randomUUID(), at: e.at ?? new Date().toISOString(), project: this.project(), actor: e.actor, via: e.via, action: e.action, ...(e.target ? { target: e.target } : {}), outcome: e.outcome, ...(e.detail ? { detail: e.detail } : {}) }
     const bad = checkAuditEvent(event)
     if (bad.length) throw new Error(`audit event refused: ${bad.join('; ')}`)
+    const scope = auditScope.getStore()
+    if (scope) scope.recorded = true
     this.sql.exec('INSERT OR IGNORE INTO audit_log (id, at, actor_kind, actor_id, actor_email, via, action, target, outcome, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       event.id, event.at, event.actor.kind, event.actor.id, event.actor.email ?? null, event.via, event.action, event.target ?? null, event.outcome, event.detail ? JSON.stringify(event.detail) : null)
     const row = { ...event, actor_kind: event.actor.kind, actor_id: event.actor.id, actor_email: event.actor.email ?? null, detail: event.detail ? JSON.stringify(event.detail) : null }

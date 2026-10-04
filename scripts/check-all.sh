@@ -15,6 +15,9 @@ for p in migrate platform-types state programs session ui composition-graph; do
   step "vm/packages/$p tests"     "vm/packages/$p"            pnpm -s test
 done
 step "engine tests"                vm/apps/engine              pnpm -s test
+for t in vm/apps/datasources/manager/sqlrewrite/test_*.py; do
+  step "SQL rewrite $(basename "$t")"  vm/apps/datasources/manager  python3 "sqlrewrite/$(basename "$t")"
+done
 step "control plane typecheck"    control-plane/superadmin    pnpm -s typecheck
 step "user UI typecheck"          control-plane/user-ui       npx tsc --noEmit -p tsconfig.json
 step "control plane tests"        control-plane/superadmin    npx vitest run

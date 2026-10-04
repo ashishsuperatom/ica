@@ -42,7 +42,8 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Agent API keys per project: made by the project's admin, shown once and stored only as a hash, scoped, expiring and revocable (revoking ends open connections).
 - Agent connections to the hub: only to the engine, only within the key's scopes, the agent's identity stamped on every message.
 - The hub stamps who sent every message, so the engine always knows the user.
-- Audit history in each project's Durable Object: every question, intent, refusal, key change and project API change, append-only.
+- Audit history in each project's Durable Object, from one path only: every message through its relay and every HTTP call through its one gate, recorded once (specific event or the call itself); append-only.
+- Data access per reader: row filters, denials and column masks per source and table, for everyone, a role, a person or an agent key, with per-reader attributes (fail closed); resolved by the platform, carried with each session intent, applied by the SQL rewrite to every table read.
 - `sacli`, the Superatom CLI: login with profiles (one project each), agents, sessions, asking questions, JSON output, exit codes, and one background connection per project that cleans up after an hour idle.
 
 **Platform (Cloudflare)**
@@ -89,7 +90,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Changing knowledge on the platform with the engine offline (today every change goes through an engine and is replicated up).
 - The user DO's personalised view (what it keeps beyond sessions and personal state is still being decided).
 - Governance beyond the graph: hierarchical admins (program, group, global) and granting access.
-- Authorization and permissions enforced in one place.
+- Data access for the agents' own tools in a chat (a per-session token), and an admin console panel for policies.
 - Enterprise single sign-on.
 - Payment, credits and usage billing.
 - The data protocol for many users at once, and for showing what agents are doing in the background.
