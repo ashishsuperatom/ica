@@ -447,6 +447,26 @@ The CLI is for agents outside the Superatom platform: a person with their own ag
 it too: instead of connecting directly, our own agents launch the CLI as a package. It is a separate part of the
 system — a proper, production CLI with the features CLIs normally have — called the Superatom CLI, `sacli`.
 
+**Agents, not the CLI, in the user's words:** the CLI's details belong nowhere in the backend — not in the Worker or the
+Durable Objects. The backend knows only **agent keys** and the **agent** connection, in one place; any system can use
+them, and the CLI is our version, which people install to connect to Superatom and make their changes. Some things go
+over the agent's WebSocket; others are plain HTTP with the agent key — creating and editing domains and concepts,
+making suggestions, creating and uploading programs, and more that usage will show is missing.
+
+**The CLI keeps its connection:** a command does not connect and disconnect each time. The first command connects, and
+the connection stays ready for about an hour, each command resetting the timer (never forever); `sacli disconnect`
+ends it, which is useful for testing. To its user it is a normal CLI, though everything goes over the WebSocket inside.
+
+**What the CLI is for, in the user's words:** once the product is built, the user builds it alone and gives team
+members the CLI: "use your own agent, do whatever you want to do" — create concepts, create things, including create
+a project. Install it the way people do: a `curl` to an install address on the domain installs the package. The engine
+itself should install like that too — perhaps first the CLI, then the Superatom backend through it, configured for a
+project. The CLI is multi-purpose, primarily for AI agents.
+
+*Proposal (to agree):* `curl -fsSL https://superatom.site/install | sh` installs `sacli`; `sacli engine install`
+installs and configures the engine for a project. Creating a project is an organisation's act, so it needs a key
+above the project — an organisation key — which is still to design.
+
 ### Audit history and observability (2026-10-04)
 
 A separate concern from the CLI, and it covers **everything**. **In the user's words:** whether something is done
@@ -469,7 +489,7 @@ R2 (the data lake product), the analytics engine, and stream processing through 
 | Near-real-time metrics (latency, errors, per project) | Workers Analytics Engine (3 months) |
 | Traces and logs of the Worker and Durable Objects | Workers Traces and Logs (`observability` in wrangler.jsonc; a trace id in every audit event joins the two) |
 
-- **One event shape** (`AuditEvent` in platform-types): who (user, agent key, engine, system), via (ui, admin, cli,
+- **One event shape** (`AuditEvent` in platform-types): who (user, agent key, engine, system), via (ui, admin, agent,
   engine, api, channel, system), action `<thing>.<verb>`, target, outcome (ok, refused, error), detail (a question's
   words, an intent's ops, a refusal's reason).
 - **Recorded where it happens:** the ProjectDO records every message a person or agent sends and every change made

@@ -495,15 +495,15 @@ export class ProjectDO extends DurableObject<Env> {
       return
     }
 
-    // ── An agent (the Superatom CLI), with an agent API key made by the project's admin ──
+    // ── An agent (any system acting with an agent key the project's admin made) ──
     if (role === 'agent') {
       const v = key ? await this.agentKeys.verify(String(key)) : { ok: false as const, reason: 'no key' }
       if (!v.ok) {
-        this.audit.record({ actor: { kind: 'agent', id: `key:${String(key ?? '').slice(0, 47) || 'none'}` }, via: 'cli', action: 'agent.connect', outcome: 'refused', detail: { reason: v.reason } })
+        this.audit.record({ actor: { kind: 'agent', id: `key:${String(key ?? '').slice(0, 47) || 'none'}` }, via: 'agent', action: 'agent.connect', outcome: 'refused', detail: { reason: v.reason } })
         ws.close(4001, `Invalid agent key: ${v.reason}`)
         return
       }
-      this.audit.record({ actor: { kind: 'agent', id: `agent:${v.key.id}` }, via: 'cli', action: 'agent.connect', outcome: 'ok', detail: { name: v.key.name, scopes: v.key.scopes } })
+      this.audit.record({ actor: { kind: 'agent', id: `agent:${v.key.id}` }, via: 'agent', action: 'agent.connect', outcome: 'ok', detail: { name: v.key.name, scopes: v.key.scopes } })
       await this.register(ws, 'agent', `agent:${v.key.id}`, undefined, undefined, undefined, { scopes: v.key.scopes })
       return
     }
@@ -674,7 +674,7 @@ export class ProjectDO extends DurableObject<Env> {
     const actor = sender.type === 'agent'
       ? { kind: 'agent' as const, id: sender.userId ?? 'agent:unknown' }
       : { kind: 'user' as const, id: sender.userId ?? 'unknown', ...(sender.email ? { email: sender.email } : {}) }
-    const via = sender.type === 'agent' ? 'cli' as const : sender.type === 'admin' ? 'admin' as const : 'ui' as const
+    const via = sender.type === 'agent' ? 'agent' as const : sender.type === 'admin' ? 'admin' as const : 'ui' as const
     const action = t === 'analyse' ? 'question.ask' : t ? `message.${t.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}` : 'message.untyped'
     const detail: Record<string, unknown> = {}
     if (t === 'analyse') { detail.question = String(pl.question ?? '').slice(0, 4000); if (pl.sessionId) detail.session = String(pl.sessionId); if (pl.questionId) detail.qid = String(pl.questionId) }

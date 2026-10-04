@@ -1,9 +1,9 @@
 // ── Agent API keys ───────────────────────────────────────────────────────────────────────────────────────────────────
 //
-// A project's admin creates a key for an agent (the Superatom CLI, `sacli`, connects with it). The key is shown once:
+// A project's admin creates a key for an agent — any system that works with the project on its own behalf. The key is shown once:
 // only its SHA-256 is kept, with a short prefix to recognise it by. A key has a name, scopes (control-plane/shared/
 // agent-scopes.ts), who made it, an optional expiry, and can be revoked; revoking is final. The key names its project,
-// so a CLI needs nothing else to connect:   sak_<projectId>_<43 random characters>
+// so an agent needs nothing else to connect:   sak_<projectId>_<43 random characters>
 
 import { isAgentScope, type AgentScope } from '../../shared/agent-scopes.js'
 

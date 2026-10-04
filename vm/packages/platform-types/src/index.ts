@@ -359,8 +359,8 @@ export interface AuditEvent {
   at: string
   project: string
   actor: AuditActor
-  /** The way it came: the user UI, the admin console, the CLI, the engine, the platform's own API. */
-  via: 'ui' | 'admin' | 'cli' | 'engine' | 'api' | 'channel' | 'system'
+  /** The way it came: the user UI, the admin console, an agent (with an agent key), the engine, the platform's API. */
+  via: 'ui' | 'admin' | 'agent' | 'engine' | 'api' | 'channel' | 'system'
   /** What was done, `<thing>.<verb>`: `question.ask`, `session.intent`, `agent-key.create`, … */
   action: string
   target?: string
@@ -377,7 +377,7 @@ export function checkAuditEvent(v: unknown): Problems {
   if (typeof o.action === 'string' && !/^[a-z][\w-]*(\.[a-z][\w-]*)+$/.test(o.action)) out.push(`audit.action is <thing>.<verb>, not ${show(o.action)}`)
   const a = o.actor as Record<string, unknown> | undefined
   if (!a || !['user', 'agent', 'engine', 'system'].includes(a.kind as string) || typeof a.id !== 'string' || !a.id) out.push('audit.actor names its kind (user, agent, engine, system) and id')
-  if (!['ui', 'admin', 'cli', 'engine', 'api', 'channel', 'system'].includes(o.via as string)) out.push(`audit.via must be ui, admin, cli, engine, api, channel or system, not ${show(o.via)}`)
+  if (!['ui', 'admin', 'agent', 'engine', 'api', 'channel', 'system'].includes(o.via as string)) out.push(`audit.via must be ui, admin, agent, engine, api, channel or system, not ${show(o.via)}`)
   if (!['ok', 'refused', 'error'].includes(o.outcome as string)) out.push(`audit.outcome must be ok, refused or error, not ${show(o.outcome)}`)
   return out
 }

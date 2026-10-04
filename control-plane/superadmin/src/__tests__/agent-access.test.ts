@@ -114,12 +114,12 @@ describe('agent keys, identities and the audit history, in the real ProjectDO', 
     const line = (e: any) => `${e.actor.kind}:${e.actor.id.startsWith('agent:') ? 'agent' : e.actor.id.startsWith('key:') ? 'badkey' : e.actor.id} ${e.via} ${e.action} ${e.outcome}`
     expect(events.map(line).reverse()).toEqual([
       'user:admin@test.io admin agent-key.create ok',
-      'agent:badkey cli agent.connect refused',
-      'agent:agent cli agent.connect ok',
-      'agent:agent cli message.session-agents ok',
-      'agent:agent cli question.ask refused',
+      'agent:badkey agent agent.connect refused',
+      'agent:agent agent agent.connect ok',
+      'agent:agent agent message.session-agents ok',
+      'agent:agent agent question.ask refused',
       'user:admin@test.io admin agent-key.revoke ok',
-      'agent:badkey cli agent.connect refused',
+      'agent:badkey agent agent.connect refused',
       'user:user_42 ui question.ask ok',
     ])
     const asked = events.find((e: any) => e.action === 'question.ask' && e.outcome === 'ok')

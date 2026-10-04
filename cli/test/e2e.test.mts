@@ -105,7 +105,7 @@ test('refusals have reasons and exit codes: bad usage 2, a refused key 3, a scop
 
 test('the audit history recorded the CLI: connections, intents with their ops, refusals', async () => {
   const events = (await doCall('/audit?limit=100')).events.reverse()
-  const cli = events.filter((e: any) => e.via === 'cli')
+  const cli = events.filter((e: any) => e.via === 'agent')
   assert.ok(cli.some((e: any) => e.action === 'agent.connect' && e.outcome === 'refused' && e.detail.reason === 'unknown key'))
   assert.ok(cli.some((e: any) => e.action === 'message.session-intent' && e.target === 'cli-s1' && e.detail.ops?.[0]?.value === 'HYDERABAD'))
   assert.ok(cli.some((e: any) => e.action === 'message.session-agents' && e.outcome === 'refused'))
