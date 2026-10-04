@@ -268,13 +268,26 @@ export interface AgentSpec {
   programs: string[]
   /** The tools it is given (platform code), by name. */
   tools: string[]
-  /** STATE when a session starts. */
-  start: State
+  /** STATE when a session starts: fields over each package's initial slice, by slice. */
+  start?: Record<string, Record<string, unknown>>
   /** The pre-designed starting UI and the structured intents its controls send. */
   ui: { start: string }
   ica: string
   /** The one agent a question no other agent fits goes to. */
   isDefault?: boolean
+}
+
+export function checkAgent(v: unknown): Problems {
+  if (!v || typeof v !== 'object') return ['an agent must be an object']
+  const o = v as Record<string, unknown>
+  const out: Problems = []
+  for (const k of ['id', 'name', 'owner', 'domain', 'ica']) if (typeof o[k] !== 'string' || !o[k]) out.push(`agent.${k} is required`)
+  if (typeof o.scope !== 'string' || !/^(global|group:.+|user:.+)$/.test(o.scope)) out.push('agent.scope must be global, group:<name> or user:<id>')
+  if (!Array.isArray(o.programs) || o.programs.some((p) => typeof p !== 'string' || !p)) out.push('agent.programs must be a list of program names or hashes')
+  if (!Array.isArray(o.tools) || o.tools.some((t) => typeof t !== 'string')) out.push('agent.tools must be a list of tool names')
+  const ui = o.ui as Record<string, unknown> | undefined
+  if (!ui || typeof ui.start !== 'string') out.push('agent.ui.start names its starting UI')
+  return out
 }
 
 export interface Session {

@@ -34,16 +34,11 @@ function storeDir(): string {
   throw new ProgramError(['no store: pass --store <dir>, or set PROGRAM_STORE or ENGINE_PROJECT_DIR'])
 }
 
-/** A hash, a hash prefix of 8+ characters, or a name (its newest build). */
-function resolveProgram(store: ProgramStore, ref: string | undefined): string {
+const resolveProgram = (store: ProgramStore, ref: string | undefined): string => {
   if (!ref) throw new ProgramError(['which program? give its hash or name'])
-  const all = store.list()
-  const hits = /^[0-9a-f]{8,64}$/.test(ref) ? all.filter((m) => m.hash.startsWith(ref)) : all.filter((m) => m.name === ref)
-  if (!hits.length) throw new ProgramError([`no program "${ref}" in the store`])
-  if (hits.length > 1 && /^[0-9a-f]+$/.test(ref)) throw new ProgramError([`"${ref}" names ${hits.length} programs: give more of the hash`])
-  return hits.sort((a, b) => built(store, b.hash).localeCompare(built(store, a.hash)))[0].hash
+  return store.resolve(ref)
 }
-const built = (store: ProgramStore, hash: string): string => { try { return JSON.parse(readFileSync(join(store.dirOf(hash), 'built.json'), 'utf8')).at } catch { return '' } }
+const built = (store: ProgramStore, hash: string): string => store.builtAt(hash)
 
 async function query(id: string, sql: string, params: Record<string, unknown> = {}) {
   const url = process.env.DATASOURCE_URL

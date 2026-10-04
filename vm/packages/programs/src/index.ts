@@ -150,6 +150,19 @@ export class ProgramStore {
   list(): ProgramManifest[] {
     return readdirSync(this.root).filter((n) => /^[0-9a-f]{64}$/.test(n) && this.has(n)).map((n) => this.manifest(n))
   }
+  /** When a program was built (from its built.json). */
+  builtAt(hash: string): string {
+    try { return JSON.parse(readFileSync(join(this.dirOf(hash), 'built.json'), 'utf8')).at ?? '' } catch { return '' }
+  }
+  /** A program by hash, by a hash prefix of 8 or more characters, or by name (its newest build). */
+  resolve(ref: string): string {
+    const all = this.list()
+    const byHash = /^[0-9a-f]{8,64}$/.test(ref)
+    const hits = byHash ? all.filter((m) => m.hash.startsWith(ref)) : all.filter((m) => m.name === ref)
+    if (!hits.length) throw new ProgramError([`no program "${ref}" in the store`])
+    if (byHash && hits.length > 1) throw new ProgramError([`"${ref}" names ${hits.length} programs: give more of the hash`])
+    return hits.sort((a, b) => this.builtAt(b.hash).localeCompare(this.builtAt(a.hash)))[0].hash
+  }
   /** Is a stored program what its hash says? (Its files were not changed after it was built.) */
   verify(hash: string): boolean { return hashBuilt(this.dirOf(hash)) === hash }
 }

@@ -67,6 +67,18 @@ importers:
       '@superatom/migrate':
         specifier: workspace:*
         version: link:../../packages/migrate
+      '@superatom/platform-types':
+        specifier: workspace:*
+        version: link:../../packages/platform-types
+      '@superatom/programs':
+        specifier: workspace:*
+        version: link:../../packages/programs
+      '@superatom/session':
+        specifier: workspace:*
+        version: link:../../packages/session
+      '@superatom/state':
+        specifier: workspace:*
+        version: link:../../packages/state
       '@xterm/addon-serialize':
         specifier: ^0.14.0
         version: 0.14.0
