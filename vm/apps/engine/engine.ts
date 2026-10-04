@@ -66,7 +66,6 @@ const PROJECT = process.env.ICA_PROJECT || ''
 //   bridges, registry, index seeds) · knowledge/ (what the composition graph imports) · app/ · db/ (composition.sqlite ·
 //   datasource-index.sqlite · grounding.sqlite · agent-sessions.sqlite) · workspace/ · sessions/<id>/
 // The repository holds only the platform. Env-overridable so Fly points the root at the mounted volume.
-const VM_ROOT = join(__dirname, '..', '..')                              // apps/engine → the vm monorepo root
 // Outside the repository, so an agent working in its workspace is not one directory away from the engine's source.
 const STATE_ROOT = process.env.ENGINE_STATE_DIR ?? join(homedir(), '.superatom', 'state')
 const WORKSPACE_ROOT = process.env.ENGINE_WORKSPACE_DIR ?? STATE_ROOT
@@ -81,12 +80,8 @@ const WORKSPACE = join(WORKSPACE_ROOT, PROJECT, 'workspace')   // the shared age
 // A conversation's composer works in sessions/<id>/ (ica/workspace.ts).
 const SESSIONS = join(WORKSPACE_ROOT, PROJECT, 'sessions')
 const DB_DIR    = join(WORKSPACE_ROOT, PROJECT, 'db')          // ENGINE-private DBs — a sibling, NOT under WORKSPACE
-// The project's home. A box set up before homes moved out of the repository still has <repo>/projects/<id>/ — read
-// there until it is moved, and say so.
-const LEGACY_PROJECT_DIR = join(VM_ROOT, 'projects', PROJECT)
-const PROJECT_DIR = process.env.ENGINE_PROJECT_DIR
-  ?? (!existsSync(join(STATE_ROOT, PROJECT, '.env')) && existsSync(LEGACY_PROJECT_DIR) ? LEGACY_PROJECT_DIR : join(STATE_ROOT, PROJECT))
-if (PROJECT_DIR === LEGACY_PROJECT_DIR) console.warn(`[ica] the project's home is still in the repository (${LEGACY_PROJECT_DIR}); move it to ${join(STATE_ROOT, PROJECT)}`)
+// The project's home: always under the state root (~/.superatom/state/<projectId>), never in the repository.
+const PROJECT_DIR = process.env.ENGINE_PROJECT_DIR ?? join(STATE_ROOT, PROJECT)
 const KEY = process.env.ICA_KEY || ''
 // ONE fleet switch for the WORK agents (analyst/connector/grounding): ICA_AGENT_HARNESS =
 // claude-code | codex | opencode picks the brain for ALL of them, and each agent's MODEL is INHERITED from

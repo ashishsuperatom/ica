@@ -118,6 +118,9 @@ thing comes from.
 }
 ```
 
+**The default agent (to design).** Every project has one default agent: a question no other agent fits goes to it.
+Its concepts are designed like any other agent's.
+
 A **dashboard is an agent** with more programs and a richer starting UI. A report, a file, a dashboard's contents and
 queries are nodes of that agent's domain. Starting from a dashboard means the domain is already picked.
 
@@ -521,6 +524,7 @@ builder must know what agents usually get wrong. Project-specific versions of an
 | user UI chat | the user UI with the block · card · thread system |
 | `vm/packages/project-template` | replaced by the template above |
 | engine as the store | platform is the truth, the engine a replica; sessions and programs synced up, domains and concepts synced down |
+| project homes only under `~/.superatom/state/<projectId>` (the old in-repository `vm/projects` is gone) | — |
 | a port per project (data source manager, engine) | one set of ports, every request scoped by project |
 
 ## Order of work (proposed)
