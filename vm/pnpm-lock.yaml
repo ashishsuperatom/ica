@@ -138,6 +138,12 @@ importers:
 
   packages/project-template: {}
 
+  packages/state:
+    dependencies:
+      '@superatom/platform-types':
+        specifier: workspace:*
+        version: link:../platform-types
+
 packages:
 
   '@anthropic-ai/sdk@0.123.0':

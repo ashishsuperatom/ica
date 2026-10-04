@@ -1,0 +1,16 @@
+{
+  "name": "@superatom/state",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "The STATE engine: ops checked against slice schemas, each package able to set only its own slice (frozen STATE, scoped setter), re-runs on declared reads in dependency order, stale runs dropped. Pure — engine and Worker alike.",
+  "scripts": {
+    "test": "tsx --test test/*.test.mts"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@superatom/platform-types": "workspace:*"
+  }
+}
