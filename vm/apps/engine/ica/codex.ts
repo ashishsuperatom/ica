@@ -15,6 +15,8 @@ import type { Session, RunHandlers, RunResult, AgentEvent } from './session.js'
 import { endsWhenDone } from './session.js'   // one definition of "the turn's work is done", for every harness
 
 export interface CodexSessionOpts {
+  /** 'openrouter': through our proxy and OpenRouter with an API key (the production route); else the ChatGPT login. */
+  provider?: string
   cwd: string
   model?: string                                                     // default: profile harnessModel.codex
   reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'  // default 'medium'
@@ -101,7 +103,12 @@ export function createCodexSession(opts: CodexSessionOpts): Session {
   })
   function ensure() {
     if (thread) return
-    codex = new Codex()                                             // logged-in ChatGPT subscription (no apiKey)
+    if (opts.provider === 'openrouter') {
+      // Through OpenRouter with an API key — our proxy with the project's key; no ChatGPT login on the box.
+      const platform = process.env.SUPERATOM_PLATFORM, project = process.env.ICA_PROJECT, key = process.env.ICA_KEY
+      if (!platform || !project || !key) throw new Error('codex through openrouter needs SUPERATOM_PLATFORM, ICA_PROJECT and ICA_KEY')
+      codex = new Codex({ baseUrl: `https://proxy.${platform}/p/${project}/openrouter`, apiKey: key })
+    } else codex = new Codex()                                      // logged-in ChatGPT subscription (no apiKey)
     // RESUME the prior thread when we have its id (threads persist in ~/.codex/sessions), else start fresh.
     thread = resumeId ? codex.resumeThread(resumeId, threadOpts()) : codex.startThread(threadOpts())
   }

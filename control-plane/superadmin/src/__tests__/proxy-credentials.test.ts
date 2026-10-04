@@ -11,7 +11,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { decide, providersOn, hostsOn, allHosts, boxSide, hostMatches, parsePath, bearerOf, isProjectKey,
-         usageFrom, usageFromSseTail, isDisabled, disabledReason, PROVIDERS } from '../../../../vm/packages/agent-contract/contract.mjs'
+         usageFrom, usageFromSseTail, isDisabled, disabledReason, PROVIDERS, upstreamUrl, providersForHarness } from '../../../../vm/packages/agent-contract/contract.mjs'
 import { candidates, usable, groupOf, markSpent, tidy, expiryOf, redact, type Vault } from '../proxy/vault.js'
 import { seal, unseal, sealKeygen, isSealed } from '../proxy/seal.js'
 
@@ -203,13 +203,8 @@ describe('routing derivations — the fact that used to live in four places', ()
 })
 
 describe('disabled providers — a decision both proxies enforce', () => {
-  it('marks openrouter off, with a reason', () => {
-    expect(isDisabled('openrouter')).toBe(true)
-    expect(disabledReason('openrouter')).toBeTruthy()
-  })
-
-  it('leaves the providers we actually use enabled', () => {
-    for (const p of ['opencode-go', 'openai-codex', 'claude-code']) expect(isDisabled(p)).toBe(false)
+  it('leaves the providers we actually use enabled — openrouter, the standard route, among them', () => {
+    for (const p of ['openrouter', 'opencode-go', 'openai-codex', 'claude-code']) expect(isDisabled(p)).toBe(false)
   })
 
   it('says nothing is disabled for an unknown provider rather than throwing', () => {
@@ -248,5 +243,24 @@ describe('usage parsing', () => {
   it('takes the last usage frame from an SSE tail and survives a partial frame', () => {
     const tail = 'data: {"usage":{"input_tokens":1,"output_tokens":1}}\ndata: {"usage":{"input_tokens":9,"output_tokens":2}}\ndata: {"par'
     expect(usageFromSseTail(tail)).toEqual({ in: 9, out: 2 })
+  })
+})
+
+describe('openrouter — the one standard route for every harness', () => {
+  it('maps both the OpenAI path and the Anthropic path onto OpenRouter', () => {
+    expect(upstreamUrl('openrouter', 'chat/completions')).toBe('https://openrouter.ai/api/v1/chat/completions')
+    expect(upstreamUrl('openrouter', 'v1/messages')).toBe('https://openrouter.ai/api/v1/messages')
+    expect(upstreamUrl('openrouter', 'responses')).toBe('https://openrouter.ai/api/v1/responses')
+  })
+  it('keeps base + path for a provider without its own mapping', () => {
+    const other = Object.keys(PROVIDERS).find(p => p !== 'openrouter' && !(PROVIDERS as any)[p].upstream && (PROVIDERS as any)[p].base)
+    if (other) expect(upstreamUrl(other, 'x/y')).toBe(`${(PROVIDERS as any)[other].base}/x/y`)
+  })
+  it('lets claude-code and codex choose openrouter beside their own login', () => {
+    expect(providersForHarness('claude-code-pty')).toContain('openrouter')
+    expect(providersForHarness('codex')).toContain('openrouter')
+  })
+  it('is on the relay route, so our key is attached and the call metered', () => {
+    expect(providersOn('relay')).toContain('openrouter')
   })
 })

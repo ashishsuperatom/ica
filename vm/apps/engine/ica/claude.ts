@@ -69,6 +69,8 @@ function seedFirstRunGates(cwd: string): void {
 }
 
 export interface ClaudeSessionOpts {
+  /** 'openrouter': through our proxy and OpenRouter with an API key (the production route); else the box's own login. */
+  provider?: string
   cwd: string                 // working directory the agent runs in
   model?: string              // required: named by the agent's profile
   bin?: string                // default $CLAUDE_BIN || 'claude'
@@ -206,6 +208,16 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
     const KEEP = new Set(['CLAUDE_CODE_OAUTH_TOKEN'])
     const childEnv: Record<string, any> = { ...process.env, TERM: 'xterm-256color' }
     for (const k of Object.keys(childEnv)) if (k.startsWith('CLAUDE_CODE_') && !KEEP.has(k)) delete childEnv[k]
+    // THROUGH OPENROUTER (the standard production route): no subscription login — Claude Code speaks to our proxy as
+    // an Anthropic-compatible endpoint with the project's key, and the proxy attaches the OpenRouter key and meters it.
+    if (opts.provider === 'openrouter') {
+      const platform = process.env.SUPERATOM_PLATFORM, project = process.env.ICA_PROJECT, key = process.env.ICA_KEY
+      if (!platform || !project || !key) throw new Error('claude-code through openrouter needs SUPERATOM_PLATFORM, ICA_PROJECT and ICA_KEY')
+      childEnv.ANTHROPIC_BASE_URL = `https://proxy.${platform}/p/${project}/openrouter`
+      childEnv.ANTHROPIC_AUTH_TOKEN = key
+      childEnv.ANTHROPIC_API_KEY = ''
+      delete childEnv.CLAUDE_CODE_OAUTH_TOKEN
+    }
     pty = m.spawn(bin, ['--model', model, '--dangerously-skip-permissions', ...(opts.thinking ? ['--effort', ['off', 'minimal'].includes(opts.thinking) ? 'low' : opts.thinking] : []), ...sysRefFlag, ...sessionArgs()],
       { name: 'xterm-256color', cols, rows, cwd: opts.cwd, env: childEnv as any })
     lastDataAt = Date.now()

@@ -60,14 +60,14 @@ export const PROJECT_HEADER = 'x-superatom-project-id'   // for our own tooling,
 export const PROVIDERS = {
   openrouter: {
     route: 'relay',
-    // DISABLED, deliberately. Not "unused" — turned off, and the proxy refuses to relay it at all. It was
-    // reached once by a forwarding path that fell back to an env var and spent a key kept for something else
-    // entirely, which is the exact failure a disabled flag prevents: a stray config cannot quietly start
-    // costing money on a provider nobody chose. Declared here so the refusal, the admin screen and the box
-    // diagnostic all read the same decision instead of three guesses at it.
-    disabled: 'not in use — every model is routed to a subscription instead',
+    // THE STANDARD PRODUCTION ROUTE (the user, 2026-10-05): every harness and model reaches its model through OpenRouter
+    // with an API key — no subscription logins on boxes. The key is the vault's (the platform's, or an organisation's,
+    // by the credential group the project is in); the proxy attaches it and meters every call. One base, both API
+    // shapes: OpenAI-style clients (pi, opencode, codex) send `chat/completions`, `responses`…; Claude Code sends
+    // `v1/messages` (OpenRouter's Anthropic-compatible endpoint). `upstream` maps either to the right address.
     hosts: ['openrouter.ai'],
     base: 'https://openrouter.ai/api/v1',
+    upstream: (rest) => rest.startsWith('v1/') ? `https://openrouter.ai/api/${rest}` : `https://openrouter.ai/api/v1/${rest}`,
     header: (key) => ({ authorization: `Bearer ${key}` }),
     envKey: 'OPENROUTER_API_KEY',
   },
@@ -98,7 +98,9 @@ export const PROVIDERS = {
   },
 }
 
-/** Back-compat name for the relay table. The Worker reads `.base`/`.header` off these. */
+/** Back-compat name for the relay table. The Worker reads `.base`/`.header` (and `.upstream`, when a provider maps paths) off these. */
+/** The address a relayed request goes to: the provider's own mapping, else its base and the rest of the path. */
+export const upstreamUrl = (provider, rest) => (PROVIDERS[provider]?.upstream ? PROVIDERS[provider].upstream(rest) : `${PROVIDERS[provider]?.base}/${rest}`)
 export const UPSTREAMS = PROVIDERS
 
 // ── DERIVED: nobody restates any of this ─────────────────────────────────────────────────────────────────
@@ -137,8 +139,11 @@ export const allHosts = () =>
 // edit — the failure this file exists to prevent.
 const BOX_HARNESS = { 'claude-code-pty': 'claude-code', codex: 'openai-codex' }
 
+// Claude Code and codex can also take an API key and a base URL — through OpenRouter, the standard route.
+const KEYED = { 'claude-code-pty': ['openrouter'], codex: ['openrouter'] }
+
 export const providersForHarness = (harness) => {
-  if (harness in BOX_HARNESS) return [BOX_HARNESS[harness]]
+  if (harness in BOX_HARNESS) return [BOX_HARNESS[harness], ...(KEYED[harness] ?? [])]
   if (harness === 'pi') return [...providersOn('relay'), ...providersOn('tunnel')]
   if (harness === 'opencode') return providersOn('relay')
   return []

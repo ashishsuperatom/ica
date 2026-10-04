@@ -8,6 +8,8 @@ export interface Provider {
   route: Route
   hosts?: string[]
   base?: string
+  /** maps the path after the provider segment to the upstream URL, when it is not simply base + path */
+  upstream?: (rest: string) => string
   header?: (key: string) => Record<string, string>
   envKey?: string
   envVar?: string
@@ -19,6 +21,8 @@ export declare const PATH_PREFIX: string
 export declare const PROJECT_HEADER: string
 export declare const PROVIDERS: Record<string, Provider>
 export declare const UPSTREAMS: Record<string, Provider>
+/** The upstream URL for a provider and the path after its segment. */
+export declare function upstreamUrl(provider: string, rest: string): string
 
 export declare function isDisabled(name: string): boolean
 export declare function disabledReason(name: string): string | null

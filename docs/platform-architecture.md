@@ -669,6 +669,14 @@ option). One OpenRouter key for everything, and a key per organisation; limits, 
 way OpenRouter does them — in our own system too (it still goes through OpenRouter), so that each customer sees how
 much each of their users uses: the enterprise context.
 
+**The OpenRouter route (built 2026-10-05):** every harness can reach its model through OpenRouter with an API key and
+no login on the box. pi and opencode already could; Claude Code is pointed at our proxy as an Anthropic-compatible
+endpoint (`ANTHROPIC_BASE_URL=…/p/<project>/openrouter`, the project's key as its token, the subscription token
+dropped), and codex at the same base as an OpenAI-compatible one. The proxy proves the project, attaches the vault's
+OpenRouter key and meters the call — the same path for all four. The key is chosen by the project's credential group:
+one platform key, or one group (and key) per organisation. A profile chooses it with `provider: 'openrouter'`; the
+subscription routes stay as options. Limits are the credit budgets (a person or a group, monthly or in total).
+
 **Choices made (2026-10-05):** the platform's own warehouse is Basin, and Analytics Engine is dropped (its 3-month,
 sampled metrics duplicate what the warehouse gives; minutes of lag are fine).
 

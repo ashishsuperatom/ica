@@ -69,6 +69,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Speech-to-text endpoint.
 - Dashboard publishing: a built app is uploaded to R2 and served per project, with versioned builds and rollback.
 - Admin console: analyst, connector and grounding terminals, models, credentials, dashboards and an inspector.
+- Models through OpenRouter with an API key for every harness (Claude Code, codex, pi, opencode): the proxy proves the project, attaches the vault key for the project's credential group (platform or organisation) and meters the call; subscription logins stay as options.
 - Reporting worker: renders an answer as HTML and PNG.
 - Cloudflare config on wrangler.jsonc with a current compatibility date and pinned tool versions.
 

@@ -29,7 +29,7 @@ export const PROXY_SUBDOMAIN = 'proxy'
 // shape, the upstream table, the auth decision and the usage parsing live in ONE file that both import.
 // esbuild follows the relative path when the Worker is bundled.
 import { UPSTREAMS as CONTRACT, PATH_PREFIX as SHARED_PREFIX, PROJECT_HEADER as SHARED_HEADER,
-         parsePath, bearerOf as sharedBearer, decide, usageFrom as sharedUsage, usageFromSseTail } from '../../../../vm/packages/agent-contract/contract.mjs'
+         parsePath, bearerOf as sharedBearer, decide, usageFrom as sharedUsage, usageFromSseTail, upstreamUrl as sharedUpstream } from '../../../../vm/packages/agent-contract/contract.mjs'
 
 import type { KV } from './vault.js'
 import { readVault, writeVault, candidates, groupOf, markSpent, tidy, expiring, type Vault } from './vault.js'
@@ -389,7 +389,7 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
 
   // The client's own path is forwarded as-is: it built a request for a real API and we are standing in
   // for that API, so rewriting its path would change the call it meant to make.
-  const target = up.base + '/' + seg.slice(1).join('/') + url.search
+  const target = sharedUpstream(name, seg.slice(1).join('/')) + url.search   // the provider's own path mapping, if it has one
   const t0 = Date.now()
   const res = await fetch(target, { method: request.method, headers, body: request.body, redirect: 'manual' })
 

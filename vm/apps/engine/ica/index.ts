@@ -29,7 +29,7 @@ export type Harness = 'opencode' | 'pi' | 'claude-code-pty' | 'codex' | 'mock'
 export interface SessionOpts {
   cwd: string           // working directory the agent operates in — REQUIRED (see workspace.ts)
   model?: string        // bare model id; per-harness default if omitted
-  provider?: string     // for pi/opencode (e.g. 'openrouter' | 'opencode-go')
+  provider?: string     // whose account pays: pi/opencode any relayed provider; claude-code and codex their own login, or 'openrouter'
   baseUrl?: string      // opencode only: connect to a standalone `opencode serve` instead of spawning
   bin?: string          // claude-code only: the claude binary
   resumeId?: string     // resume a prior harness session (per project/agent) — harness-specific
@@ -53,8 +53,8 @@ export function createSession(harness: Harness, opts: SessionOpts): Session {
   switch (harness) {
     case 'opencode':    return createOpencodeSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model, baseUrl: opts.baseUrl, noTools: opts.noTools, system: opts.system, systemReference: opts.systemReference, resumeId: opts.resumeId, thinking: opts.thinking })
     case 'pi':          return createPiSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model, systemReference: opts.systemReference, noTools: opts.noTools, system: opts.system, resumeId: opts.resumeId, thinking: opts.thinking })
-    case 'claude-code-pty': return createClaudeSession({ cwd: opts.cwd, model: opts.model, bin: opts.bin, resumeId: opts.resumeId, systemReference: opts.systemReference, thinking: opts.thinking })
-    case 'codex':       return createCodexSession({ cwd: opts.cwd, model: opts.model, resumeId: opts.resumeId, systemReference: opts.systemReference, ...(opts.thinking ? { reasoningEffort: ({ off: 'minimal', max: 'xhigh' } as const)[opts.thinking as 'off' | 'max'] ?? opts.thinking as 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' } : {}) })
+    case 'claude-code-pty': return createClaudeSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model, bin: opts.bin, resumeId: opts.resumeId, systemReference: opts.systemReference, thinking: opts.thinking })
+    case 'codex':       return createCodexSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model, resumeId: opts.resumeId, systemReference: opts.systemReference, ...(opts.thinking ? { reasoningEffort: ({ off: 'minimal', max: 'xhigh' } as const)[opts.thinking as 'off' | 'max'] ?? opts.thinking as 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' } : {}) })
     case 'mock':        return createMockSession(opts)
     default:            throw new Error(`unknown harness: ${harness}`)
   }
