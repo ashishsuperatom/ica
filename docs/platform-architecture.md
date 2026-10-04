@@ -174,7 +174,12 @@ A session belongs to **one user**. It has:
 4. **Answer history** — the session's output: each turn's **answer**, appended (named for what it is; earlier called
    "partial org state"). Each answer is a slice of the
    organisation's whole, ever-changing state (tables, JSON, markdown, artifacts: files, dashboards, reports).
-5. **Blocks** — the thread on screen, a tree; each block shows an answer.
+5. **Blocks** — a tree; each block shows an answer.
+
+**Session and thread (the user's naming, 2026-10-04).** Everything is called a **session**. A **thread** is a sub-part
+of a session: one path through its tree of blocks. Going another way from an earlier block makes another thread in the
+same session. How a session is cloned, or another path taken as a session of its own, is not designed yet — be careful
+with the two words: the session is the thing; a thread is one path in it.
 
 ```jsonc
 // STATE (one per session; shape given by the agent's state schema)

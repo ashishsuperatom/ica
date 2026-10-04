@@ -1,16 +1,17 @@
-// THREADS — a session of blocks on one agent's programs, drawn from the engine's thread:view. Each block shows its
+// AN AGENT'S SESSION — its blocks on the agent's programs, drawn from the engine's session:view. A session's blocks are
+// a tree; the screen shows one thread of it (the path down to the current block). Each block shows its
 // answer with the one answer component (handed in) and the intents the agent's programs offer; a control is an
-// <Intent>, and one listener sends whichever is pressed as thread:intent. Changing an earlier block branches the
-// thread (the engine decides; this only names the block a control is in). The session id is kept per agent in this
-// browser, so a reload lands on the same thread.
+// <Intent>, and one listener sends whichever is pressed as session:intent. Changing an earlier block branches the
+// session into another thread (the engine decides; this only names the block a control is in). The session id is kept
+// per agent in this browser, so a reload lands on the same session.
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Intent, listenIntents, Thread, type ScreenIntent } from '@superatom/ui'
 import ProgramBlock, { type ProgramUI } from './ProgramBlock'
-import './threads.css'
+import './session.css'
 
-/** What the engine sends for a thread (vm/apps/engine/thread-seam.ts). */
-export interface ThreadMsg {
+/** What the engine sends for a session (vm/apps/engine/session-seam.ts). */
+export interface SessionMsg {
   t: string
   reqId?: string
   reason?: string
@@ -24,24 +25,24 @@ export interface ThreadMsg {
   result?: { block: string; opened: boolean; stale?: boolean }
 }
 
-export interface ThreadsProps {
+export interface AgentSessionProps {
   agent: string
   agentName: string
   send: (payload: Record<string, unknown>) => void
   /** Thread messages as they arrive; returns a function that stops listening. */
-  subscribe: (fn: (m: ThreadMsg) => void) => () => void
+  subscribe: (fn: (m: SessionMsg) => void) => () => void
   /** The answer component. */
   renderAnswer: (card: unknown) => ReactNode
 }
 
-const storeKey = (agent: string) => `sa-thread:${location.host}:${agent}`
-const newId = () => `thr-${crypto.randomUUID()}`
+const storeKey = (agent: string) => `sa-session:${location.host}:${agent}`
+const newId = () => `ses-${crypto.randomUUID()}`
 const readSaved = (agent: string) => { try { return localStorage.getItem(storeKey(agent)) } catch { return null } }
 const save = (agent: string, sid: string) => { try { localStorage.setItem(storeKey(agent), sid) } catch { /* storage blocked */ } }
 
-export default function Threads({ agent, agentName, send, subscribe, renderAnswer }: ThreadsProps) {
+export default function AgentSession({ agent, agentName, send, subscribe, renderAnswer }: AgentSessionProps) {
   const [session, setSession] = useState<string>(() => readSaved(agent) ?? newId())
-  const [msg, setMsg] = useState<ThreadMsg | null>(null)
+  const [msg, setMsg] = useState<SessionMsg | null>(null)
   const [refused, setRefused] = useState('')
   const [busy, setBusy] = useState(false)
   const pending = useRef(new Map<string, 'get' | 'open' | 'intent' | 'goto'>())
@@ -52,10 +53,10 @@ export default function Threads({ agent, agentName, send, subscribe, renderAnswe
     const reqId = `${kind}-${Math.random().toString(36).slice(2, 10)}`
     pending.current.set(reqId, kind)
     setBusy(kind !== 'get')
-    send({ t: `thread:${kind}`, ...payload, reqId })
+    send({ t: `session:${kind}`, ...payload, reqId })
   }, [send])
 
-  // A different agent: its own saved thread, or a new one.
+  // A different agent: its own saved session, or a new one.
   useEffect(() => { const sid = readSaved(agent) ?? newId(); setSession(sid); setMsg(null); setRefused('') }, [agent])
   useEffect(() => { ask('get', { session }) }, [session, ask])
 
@@ -63,7 +64,7 @@ export default function Threads({ agent, agentName, send, subscribe, renderAnswe
   const fetchFile = useCallback((hash: string, path: string) => new Promise<string>((resolve, reject) => {
     const reqId = `file-${Math.random().toString(36).slice(2, 10)}`
     files.current.set(reqId, { resolve, reject })
-    send({ t: 'thread:file', hash, path, reqId })
+    send({ t: 'session:file', hash, path, reqId })
   }), [send])
 
   useEffect(() => subscribe((m) => {
@@ -73,13 +74,13 @@ export default function Threads({ agent, agentName, send, subscribe, renderAnswe
     if (!kind) return
     pending.current.delete(m.reqId!)
     setBusy(false)
-    if (m.t === 'thread:refused') {
-      // A thread this browser remembered but the engine does not have (or a new id): start it.
+    if (m.t === 'session:refused') {
+      // A session this browser remembered but the engine does not have (or a new id): start it.
       if (kind === 'get' && /^there is no session/.test(m.reason ?? '')) { ask('open', { session, agent }); return }
       setRefused(m.reason ?? 'The engine refused that.')
       return
     }
-    if (m.t === 'thread:view' && m.view?.id === session) {
+    if (m.t === 'session:view' && m.view?.id === session) {
       setRefused('')
       if (m.result?.stale) return   // a newer intent's answer is on its way
       setMsg(m)
@@ -87,7 +88,7 @@ export default function Threads({ agent, agentName, send, subscribe, renderAnswe
     }
   }), [subscribe, session, agent, ask])
 
-  // The one listener for every control on this thread.
+  // The one listener for every control in this session.
   useEffect(() => {
     const el = root.current
     if (!el) return
@@ -100,14 +101,14 @@ export default function Threads({ agent, agentName, send, subscribe, renderAnswe
     const block = view?.blocks.find((b) => b.id === id)
     const card = block?.answer ? msg?.cards?.[block.answer] : undefined
     return (
-      <div className="sa-thread-block">
-        {card ? renderAnswer(card) : <p className="sa-thread-empty">Nothing shown yet. Run it to see the answer.</p>}
+      <div className="sa-session-block">
+        {card ? renderAnswer(card) : <p className="sa-session-empty">Nothing shown yet. Run it to see the answer.</p>}
         {msg?.uis?.filter((u) => u.blocks.length).map((u) => (
           <ProgramBlock key={u.hash} program={u} slice={view?.states?.[id]?.[u.package]} state={view?.states?.[id]} fetchFile={fetchFile} />
         ))}
         {!!msg?.actions?.length && (
-          <div className="sa-thread-actions">
-            {msg.actions.map((a, n) => <Intent key={n} {...a.intent} block={id} className="sa-thread-action">{a.label}</Intent>)}
+          <div className="sa-session-actions">
+            {msg.actions.map((a, n) => <Intent key={n} {...a.intent} block={id} className="sa-session-action">{a.label}</Intent>)}
           </div>
         )}
       </div>
@@ -115,15 +116,15 @@ export default function Threads({ agent, agentName, send, subscribe, renderAnswe
   }
 
   return (
-    <div className="sa-threads" ref={root}>
-      <header className="sa-threads-head">
+    <div className="sa-session" ref={root}>
+      <header className="sa-session-head">
         <h1>{agentName}</h1>
-        {busy && <span className="sa-threads-busy" role="status">Working…</span>}
-        <button type="button" className="sa-thread-action" onClick={() => { const sid = newId(); setMsg(null); setSession(sid) }}>New thread</button>
+        {busy && <span className="sa-session-busy" role="status">Working…</span>}
+        <button type="button" className="sa-session-action" onClick={() => { const sid = newId(); setMsg(null); setSession(sid) }}>New session</button>
       </header>
-      {refused && <p className="sa-threads-refused" role="alert">{refused}</p>}
+      {refused && <p className="sa-session-refused" role="alert">{refused}</p>}
       {view ? <Thread session={view} renderBlock={renderBlock} onGoTo={(block) => ask('goto', { session, block })} />
-        : !refused && <p className="sa-thread-empty">Opening the thread…</p>}
+        : !refused && <p className="sa-session-empty">Opening the session…</p>}
     </div>
   )
 }

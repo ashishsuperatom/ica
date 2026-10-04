@@ -22,10 +22,10 @@ what is built and what is next.
   result in `programs/store/<hash>`: the same source, the same hash; any change, a new program beside the old one.
 - `programs run <name|hash> [--set path=json] [--call fn] [--act id]` loads its Node side into the STATE engine and
   runs it against the project's data (only through the datasource-manager); `list`, `doc`, `inspect`, `verify`.
-- Agents: `agents/<id>.json` in the project home (domain, programs, tools, start, ui). `thread-seam.ts` runs `thread:*`
-  messages — open, intent (ops, action, call; to current or new; from any block), goto, get (as of a moment) — on the
+- Agents: `agents/<id>.json` in the project home (domain, programs, tools, start, ui). `session-seam.ts` runs the agent-session
+  messages (`session:agents|open|intent|goto|get|file`) — open, intent (ops, action, call; to current or new; from any block), goto, get (as of a moment) — on the
   agent's programs; each view carries the answers as cards (`answer-card.ts`, shared with the chat) and the intents the
-  programs offer. The user UI shows it at `/t/<agent>` (`control-plane/user-ui/src/Threads.tsx`).
+  programs offer. The user UI shows it at `/s/<agent>` (`control-plane/user-ui/src/AgentSession.tsx`).
 - First real program: Total Group `unsettled-trips` — completed trips not settled, by branch, with the balance left.
 
 ## Agents (`agents/`)

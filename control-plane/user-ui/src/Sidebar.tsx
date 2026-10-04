@@ -14,8 +14,8 @@ export interface SidebarProps {
   onNewChat: () => void
   chats: SidebarItem[]
   agents: SidebarItem[]
-  /** The project's agents, each opening a thread. */
-  threads?: SidebarItem[]
+  /** The project's agents, each opening a session. */
+  sessionAgents?: SidebarItem[]
   account: ReactNode   // the foot: the signed-in person (App gives the Clerk-backed block, or the local one)
 }
 
@@ -64,8 +64,8 @@ export default function Sidebar(p: SidebarProps) {
             {item({ key: 'new', label: 'New chat', active: false, onClick: p.onNewChat }, <Icon d={I.plus} />, false)}
             <div style={st.section}>Chats</div>
             {p.chats.length ? p.chats.map((c) => item(c, <Icon d={I.chat} />, false)) : <div style={st.empty}>No chats yet</div>}
-            {!!p.threads?.length && <div style={st.section}>Agents</div>}
-            {p.threads?.map((a) => item(a, <Icon d={I.agent} />, false))}
+            {!!p.sessionAgents?.length && <div style={st.section}>Agents</div>}
+            {p.sessionAgents?.map((a) => item(a, <Icon d={I.agent} />, false))}
             {p.agents.length > 0 && <div style={st.section}>Consoles</div>}
             {p.agents.map((a) => item(a, <Icon d={I.agent} />, false))}
           </div>
@@ -78,7 +78,7 @@ export default function Sidebar(p: SidebarProps) {
           </div>
           <div style={st.rail}>
             {item({ key: 'new', label: 'New chat', active: false, onClick: p.onNewChat }, <Icon d={I.plus} />, true)}
-            {p.threads?.map((a) => item(a, <Icon d={I.agent} />, true))}
+            {p.sessionAgents?.map((a) => item(a, <Icon d={I.agent} />, true))}
             {p.agents.map((a) => item(a, <Icon d={I.agent} />, true))}
           </div>
           <div style={{ ...st.foot, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: 8, marginTop: 'auto' }}>{dot}</div>

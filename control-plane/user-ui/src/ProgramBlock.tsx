@@ -1,7 +1,7 @@
-// A PROGRAM'S OWN VIEW inside a block: its React side, loaded file by file over the hub (thread:file) and run with this
+// A PROGRAM'S OWN VIEW inside a block: its React side, loaded file by file over the hub (session:file) and run with this
 // page's React and platform libraries (one copy for every program). Each ui block the program declares is the export
 // named for it in PascalCase (`unsettled-trips` → UnsettledTrips), drawn with { slice, state }: its part of the block's
-// STATE and the whole. Its controls are <Intent>s, caught by the thread's one listener. A program that fails to load or
+// STATE and the whole. Its controls are <Intent>s, caught by the session's one listener. A program that fails to load or
 // throws while drawing says so in its place; the rest of the page is untouched.
 
 import * as React from 'react'

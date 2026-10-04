@@ -1,18 +1,19 @@
-// THREADS — sessions of blocks, run on an agent's programs. Every payload whose `t` begins with `thread:` comes here:
+// SESSIONS — an agent's sessions of blocks, run on its programs. These payloads come here (the other session:* messages
+// belong to the chat):
 //
-//   thread:agents                                  → thread:agents   { agents: [{ id, name, ui }] }
-//   thread:open   { session, agent }               → thread:view     { view }
-//   thread:intent { session, ops?|action?|call?, to, block? }
-//                                                  → thread:view     { view, result: { block, opened, answer, stale? } }
-//   thread:goto   { session, block }               → thread:view     { view }
-//   thread:get    { session, asOf? }               → thread:view     { view }
-//   thread:file   { hash, path }                   → thread:file     { hash, path, text }   a program's React side, file by file
+//   session:agents                                  → session:agents   { agents: [{ id, name, ui }] }
+//   session:open   { session, agent }               → session:view     { view }
+//   session:intent { session, ops?|action?|call?, to, block? }
+//                                                  → session:view     { view, result: { block, opened, answer, stale? } }
+//   session:goto   { session, block }               → session:view     { view }
+//   session:get    { session, asOf? }               → session:view     { view }
+//   session:file   { hash, path }                   → session:file     { hash, path, text }   a program's React side, file by file
 //
-// Every thread:view also carries `cards` (each answer in the history as the answer card every surface draws, by answer
+// Every session:view also carries `cards` (each answer in the history as the answer card every surface draws, by answer
 // id), `actions` (what the agent's programs offer: run, and each action they suggest, as intents a screen can send) and
-// `uis` (each program's React side: its hash and the blocks it draws, loaded with thread:file).
+// `uis` (each program's React side: its hash and the blocks it draws, loaded with session:file).
 //
-// A refusal is thread:refused { reason } — a sentence, never a different answer. Who is asking is the hub's word
+// A refusal is session:refused { reason } — a sentence, never a different answer. Who is asking is the hub's word
 // (`from.userId`), never the payload's: a session is one user's, and only they change it.
 //
 // An agent is a file in the project home, agents/<id>.json (platform-types AgentSpec); its programs are names or
@@ -27,16 +28,19 @@ import { createStateEngine, StateRefusal, type StateEngine } from '@superatom/st
 import { createSessions, fileLog, history, replay, SessionRefusal, type SessionView } from '@superatom/session'
 import { cardOf } from './answer-card.js'
 
-export interface ThreadSeamDeps {
+export interface SessionSeamDeps {
   projectDir: string
   /** The datasource manager's address. */
   datasource: string
   send: (to: any, msg: Record<string, unknown>) => void
 }
 
-export class ThreadRefusal extends Error {}
+export class SessionSeamRefusal extends Error {}
 
-export function createThreadSeam(d: ThreadSeamDeps) {
+/** The messages this seam takes (session:new, session:load and session:compact are the chat's). */
+export const SESSION_MESSAGES = new Set(['session:agents', 'session:open', 'session:intent', 'session:goto', 'session:get', 'session:file'])
+
+export function createSessionSeam(d: SessionSeamDeps) {
   const agentsDir = join(d.projectDir, 'agents')
   const store = new ProgramStore(join(d.projectDir, 'programs', 'store'))
   const log = fileLog(join(d.projectDir, 'sessions'))
@@ -49,14 +53,14 @@ export function createThreadSeam(d: ThreadSeamDeps) {
   }
 
   function readAgent(id: string): AgentSpec {
-    if (!/^[\w-]+$/.test(id)) throw new ThreadRefusal(`"${id}" is not an agent id`)
+    if (!/^[\w-]+$/.test(id)) throw new SessionSeamRefusal(`"${id}" is not an agent id`)
     const file = join(agentsDir, `${id}.json`)
-    if (!existsSync(file)) throw new ThreadRefusal(`there is no agent "${id}"`)
+    if (!existsSync(file)) throw new SessionSeamRefusal(`there is no agent "${id}"`)
     let spec: AgentSpec
-    try { spec = JSON.parse(readFileSync(file, 'utf8')) } catch (e: any) { throw new ThreadRefusal(`agents/${id}.json is not JSON: ${e.message}`) }
+    try { spec = JSON.parse(readFileSync(file, 'utf8')) } catch (e: any) { throw new SessionSeamRefusal(`agents/${id}.json is not JSON: ${e.message}`) }
     const bad = checkAgent(spec)
-    if (bad.length) throw new ThreadRefusal(`agents/${id}.json: ${bad.join('; ')}`)
-    if (spec.id !== id) throw new ThreadRefusal(`agents/${id}.json calls itself "${spec.id}"`)
+    if (bad.length) throw new SessionSeamRefusal(`agents/${id}.json: ${bad.join('; ')}`)
+    if (spec.id !== id) throw new SessionSeamRefusal(`agents/${id}.json calls itself "${spec.id}"`)
     return spec
   }
 
@@ -80,13 +84,13 @@ export function createThreadSeam(d: ThreadSeamDeps) {
   }
 
   const userOf = (from: any): string => {
-    if (!from?.userId) throw new ThreadRefusal('the hub did not say who is asking')
+    if (!from?.userId) throw new SessionSeamRefusal('the hub did not say who is asking')
     return `user:${from.userId}`
   }
 
   async function sessionRuntime(session: string) {
     const v = replay(log.read(session))
-    if (!v) throw new ThreadRefusal(`there is no session ${session}`)
+    if (!v) throw new SessionSeamRefusal(`there is no session ${session}`)
     return { view: v, ...(await runtimeFor(v.agent, v.state.packages)) }
   }
 
@@ -98,7 +102,7 @@ export function createThreadSeam(d: ThreadSeamDeps) {
   }
 
   const viewOf = (v: SessionView, user: string) => {
-    if (v.user !== user) throw new ThreadRefusal(`session ${v.id} is not yours`)
+    if (v.user !== user) throw new SessionSeamRefusal(`session ${v.id} is not yours`)
     return v
   }
 
@@ -112,17 +116,17 @@ export function createThreadSeam(d: ThreadSeamDeps) {
       ...p.spec.actions.map((a) => ({ package: p.name, label: a.label, intent: { action: { package: p.name, id: a.id }, to: 'current' } })),
     ])
     const uis = (rt?.packages ?? []).map((p) => ({ package: p.name, hash: p.hash, entry: store.manifest(p.hash).ui.bundle, blocks: store.manifest(p.hash).ui.blocks }))
-    return { t: 'thread:view', view: v, cards, actions, uis, ...extra }
+    return { t: 'session:view', view: v, cards, actions, uis, ...extra }
   }
 
   // A program's React side, file by file: only built programs' web/ files, each program checked against its hash once.
   const verified = new Set<string>()
   function programFile(hash: string, path: string): string {
-    if (!/^web\/[\w-]+(\/[\w-]+)*(\.[\w-]+)*\.js$/.test(path)) throw new ThreadRefusal(`"${path}" is not a file of a program's React side`)
-    if (!store.has(hash)) throw new ThreadRefusal(`there is no program ${hash.slice(0, 12)}`)
-    if (!verified.has(hash)) { if (!store.verify(hash)) throw new ThreadRefusal(`program ${hash.slice(0, 12)} does not match its hash`); verified.add(hash) }
+    if (!/^web\/[\w-]+(\/[\w-]+)*(\.[\w-]+)*\.js$/.test(path)) throw new SessionSeamRefusal(`"${path}" is not a file of a program's React side`)
+    if (!store.has(hash)) throw new SessionSeamRefusal(`there is no program ${hash.slice(0, 12)}`)
+    if (!verified.has(hash)) { if (!store.verify(hash)) throw new SessionSeamRefusal(`program ${hash.slice(0, 12)} does not match its hash`); verified.add(hash) }
     const file = join(store.dirOf(hash), path)
-    if (!existsSync(file)) throw new ThreadRefusal(`program ${hash.slice(0, 12)} has no ${path}`)
+    if (!existsSync(file)) throw new SessionSeamRefusal(`program ${hash.slice(0, 12)} has no ${path}`)
     return readFileSync(file, 'utf8')
   }
 
@@ -130,25 +134,25 @@ export function createThreadSeam(d: ThreadSeamDeps) {
     const t = String(payload.t)
     const reply = (msg: Record<string, unknown>) => d.send(from, { ...msg, reqId: payload.reqId })
     try {
-      if (t === 'thread:agents') return reply({ t: 'thread:agents', agents: agents() })
+      if (t === 'session:agents') return reply({ t: 'session:agents', agents: agents() })
       const user = userOf(from)
-      if (t === 'thread:file') { const hash = String(payload.hash ?? ''), path = String(payload.path ?? ''); return reply({ t: 'thread:file', hash, path, text: programFile(hash, path) }) }
+      if (t === 'session:file') { const hash = String(payload.hash ?? ''), path = String(payload.path ?? ''); return reply({ t: 'session:file', hash, path, text: programFile(hash, path) }) }
       const session = String(payload.session ?? '')
-      if (!/^[\w-]{1,80}$/.test(session)) throw new ThreadRefusal('a thread message names its session')
-      if (t === 'thread:open') {
+      if (!/^[\w-]{1,80}$/.test(session)) throw new SessionSeamRefusal('a session message names its session')
+      if (t === 'session:open') {
         const { sessions, spec } = await runtimeFor(String(payload.agent ?? ''))
         return reply(await present(sessions.open({ session, user, agent: spec.id, start: spec.start })))
       }
-      if (t === 'thread:get') {
+      if (t === 'session:get') {
         const v = replay(log.read(session), payload.asOf ? String(payload.asOf) : undefined)
-        if (!v) throw new ThreadRefusal(`there is no session ${session}`)
+        if (!v) throw new SessionSeamRefusal(`there is no session ${session}`)
         return reply(await present(viewOf(v, user)))
       }
       const { sessions, view } = await sessionRuntime(session)
       viewOf(view, user)
-      if (t === 'thread:goto') return reply(await present(sessions.goTo(session, String(payload.block ?? ''), user)))
-      if (t === 'thread:intent') {
-        if (payload.kind === 'language') throw new ThreadRefusal('words are answered in the chat for now: a thread takes the controls\' intents')
+      if (t === 'session:goto') return reply(await present(sessions.goTo(session, String(payload.block ?? ''), user)))
+      if (t === 'session:intent') {
+        if (payload.kind === 'language') throw new SessionSeamRefusal('words are answered in the chat for now: a session takes the controls\' intents')
         const intent: Intent = {
           id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'structured',
           ...(payload.ops ? { ops: payload.ops } : {}), ...(payload.action ? { action: payload.action } : {}), ...(payload.call ? { call: payload.call } : {}),
@@ -157,11 +161,11 @@ export function createThreadSeam(d: ThreadSeamDeps) {
         const r = await sessions.intent(intent)
         return reply(await present(r.session, { result: { block: r.block, opened: r.opened, answer: r.answer, ...(r.stale ? { stale: true } : {}) } }))
       }
-      throw new ThreadRefusal(`there is no ${t}`)
+      throw new SessionSeamRefusal(`there is no ${t}`)
     } catch (e: any) {
-      if (e instanceof ThreadRefusal || e instanceof SessionRefusal || e instanceof ProgramError || e instanceof StateRefusal) return reply({ t: 'thread:refused', reason: e.message })
-      console.error('[thread]', e?.stack ?? e)
-      return reply({ t: 'thread:refused', reason: `the thread could not do that: ${e?.message ?? e}` })
+      if (e instanceof SessionSeamRefusal || e instanceof SessionRefusal || e instanceof ProgramError || e instanceof StateRefusal) return reply({ t: 'session:refused', reason: e.message })
+      console.error('[session]', e?.stack ?? e)
+      return reply({ t: 'session:refused', reason: `the session could not do that: ${e?.message ?? e}` })
     }
   }
 

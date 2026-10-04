@@ -40,7 +40,7 @@ import { createWire } from './wire.js'
 import { pick, compose, place, remember, recall, recordQuestion, domainsOf, agentsOf } from './knowledge.js'
 import { parcelStore, apiOfHub } from '../../../clients/parcels.js'
 import { createAppSeam } from './app-seam.js'
-import { createThreadSeam } from './thread-seam.js'
+import { createSessionSeam, SESSION_MESSAGES } from './session-seam.js'
 import { readingAnswer } from './answer-card.js'
 import { randomUUID } from 'node:crypto'
 import { buildDatasourceIndex } from './datasource-index/build.js'
@@ -701,13 +701,13 @@ const wire = createWire({
   handle: (whole, from) => { void handle(whole, from) },
   parcels: parcelStore({ api: apiOfHub(HUB), projectId: PROJECT, credential: KEY }),
 })
-const threadSeam = createThreadSeam({ projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg) })
+const sessionSeam = createSessionSeam({ projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg) })
 const appSeam = createAppSeam({ project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
 
 async function handle(payload: any, from: any) {
   if (wire.receive(payload, from)) return
   if (typeof payload?.t === 'string' && payload.t.startsWith('app:')) { void appSeam.handle(payload, from); return }
-  if (typeof payload?.t === 'string' && payload.t.startsWith('thread:')) { void threadSeam.handle(payload, from); return }
+  if (SESSION_MESSAGES.has(payload?.t)) { void sessionSeam.handle(payload, from); return }
   if (payload.t === 'analyse') { analyse(String(payload.question || ''), from, String(payload.sessionId || ''), String(payload.questionId || ''), String(payload.channel || ''), String(payload.agent || '')) }
   else if (payload.t === 'agents:list') { agentsOf(PROJECT_DIR).then((agents) => emit(from, { t: 'agents:list:res', agents } as any)).catch(() => emit(from, { t: 'agents:list:res', agents: [] } as any)) }   // UI supplies both ids; channel set for chat-channel turns
   else if (payload.t === 'index:build') { handleIndexBuild(from, { rebuild: !!payload.rebuild, only: payload.only ? String(payload.only) : undefined }) }   // admin console → build/refresh the datasource index
