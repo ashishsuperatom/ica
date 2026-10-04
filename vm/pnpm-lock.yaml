@@ -134,6 +134,8 @@ importers:
 
   packages/migrate: {}
 
+  packages/platform-types: {}
+
   packages/project-template: {}
 
 packages:

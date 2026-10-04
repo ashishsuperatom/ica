@@ -1,0 +1,13 @@
+{
+  "name": "@superatom/platform-types",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "The platform's shapes, one definition for engine, Workers and browser: scope, STATE and slices, ops and intents, programs and their packages, answers, agents, sessions, the decision state, the governance log — each with a check that answers in sentences.",
+  "scripts": {
+    "test": "tsx --test test/*.test.mts"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}
