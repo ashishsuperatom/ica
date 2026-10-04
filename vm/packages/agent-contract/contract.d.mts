@@ -34,6 +34,7 @@ export declare function hostMatches(host: string, list: string[]): boolean
 
 export declare function parsePath(pathname: string): {
   projectId: string | null
+  tag: string | null
   service: string | null
   provider: string | null
   rest: string
@@ -47,8 +48,8 @@ export declare function decide(a: { projectId: string | null; sentCredential: st
   | { ok: false; status: number; error: string }
   | { ok: true; attachKey: boolean; project: string | null }
 
-export declare function usageFrom(obj: any): { in: number; out: number } | null
-export declare function usageFromSseTail(tail: string): { in: number; out: number } | null
+export declare function usageFrom(obj: any): { in: number; out: number; cacheRead: number; cacheWrite: number } | null
+export declare function usageFromSseTail(tail: string): { in: number; out: number; cacheRead: number; cacheWrite: number } | null
 
 export declare const HARNESSES: Record<string, { providers: string[] }>
 export declare function providersForHarness(harness: string): string[]
@@ -60,3 +61,10 @@ export declare function modelKey(id: string): string
 export declare function modelOn(model: string | undefined | null, available: string[]): string | null
 /** Ids in `available` that look like `model`, best first. */
 export declare function nearModels(model: string, available: string[], n?: number): string[]
+
+/** What a usage tag may look like. */
+export declare const TAG: RegExp
+/** The proxy base for an agent's calls: project, tag (when given), provider. */
+export declare function proxyBaseFor(platform: string, project: string, provider: string, tag?: string | null): string
+/** True when the proxy counts this provider's calls; otherwise the engine reports them. */
+export declare function countedByProxy(provider: string): boolean

@@ -54,7 +54,7 @@ describe('usage and credits', () => {
   it('the platform sets prices (every version kept); a call is recorded, priced and debited from the organisation', async () => {
     expect((await at('/global/prices', { method: 'PUT', body: JSON.stringify({ prices: [{ provider: 'opencode-go', model: '*', in_per_million: 2, out_per_million: 8 }], by: 'root@x.io' }) })).status).toBe(200)
     const r = await at('/do/usage', { method: 'POST', body: JSON.stringify({ provider: 'opencode-go', model: 'gpt-6-luna', in: 1_000_000, out: 500_000, ms: 900 }) })
-    expect(r.body).toEqual({ ok: true, credits_micro: 6_000_000, priced: true })
+    expect(r.body).toMatchObject({ ok: true, credits_micro: 6_000_000, priced: true })
     const unpriced = await at('/do/usage', { method: 'POST', body: JSON.stringify({ provider: 'anthropic', model: 'x', in: 10, out: 10 }) })
     expect(unpriced.body.priced).toBe(false)
     const summary = (await at('/do/usage')).body.usage
@@ -92,5 +92,54 @@ describe('credit assignment within the organisation', () => {
     expect((await ask(kim, 'ses-kim'))?.source).not.toBe('credits')                          // others are not affected
     await at('/org/credits/budgets', { method: 'POST', body: JSON.stringify({ subject: 'email:lee@x.io', credits: -1, by: 'admin@x.io' }) })   // budget removed
     expect((await ask(lee, 'ses-lee'))?.source).not.toBe('credits')
+  })
+})
+
+describe('usage per person', () => {
+  const engine = async () => {
+    const r = await mf.dispatchFetch(`http://x/_ws/${PID}`, { headers: { upgrade: 'websocket' } })
+    const ws = r.webSocket!; const got: any[] = []
+    ws.addEventListener('message', (e: any) => got.push(JSON.parse(String(e.data)))); ws.accept()
+    ws.send(JSON.stringify({ type: 'hello', role: 'code-engine', key: 'ek', instanceId: `e${Math.random()}`, epoch: Date.now() }))
+    for (let i = 0; i < 100 && !got.some((m) => m.payload?.t === 'welcome'); i++) await new Promise((r) => setTimeout(r, 20))
+    return ws
+  }
+  const people = async () => (await at('/do/usage?by=person')).body.people as any[]
+  const settle = () => new Promise((r) => setTimeout(r, 150))
+
+  it("a proxied call is attributed to the person the agent's turn was for, by its tag and time", async () => {
+    const ws = await engine()
+    ws.send(JSON.stringify({ type: 'usage:turn', tag: 'pi-aa11', session: 's-ann', phase: 'start', person: 'email:ann@x.io' }))
+    await settle()
+    await at('/do/usage', { method: 'POST', body: JSON.stringify({ provider: 'opencode-go', model: 'm', in: 100, out: 10, tag: 'pi-aa11', startedAt: new Date().toISOString() }) })
+    ws.send(JSON.stringify({ type: 'usage:turn', tag: 'pi-aa11', session: 's-ann', phase: 'end' }))
+    await settle()
+    // after the turn ended, the same tag's call belongs to no one
+    await at('/do/usage', { method: 'POST', body: JSON.stringify({ provider: 'opencode-go', model: 'm', in: 7, out: 1, tag: 'pi-aa11', startedAt: new Date(Date.now() + 5000).toISOString() }) })
+    const ann = (await people()).find((p) => p.person === 'email:ann@x.io')
+    expect(ann).toMatchObject({ calls: 1, tokens_in: 100, tokens_out: 10 })
+    expect((await people()).find((p) => p.person === 'unattributed')?.tokens_in).toBeGreaterThanOrEqual(7)
+    ws.close()
+  })
+
+  it('two sessions at once on one tag are not guessed between', async () => {
+    const ws = await engine()
+    ws.send(JSON.stringify({ type: 'usage:turn', tag: 'oc-shared', session: 's-1', phase: 'start', person: 'email:bo@x.io' }))
+    ws.send(JSON.stringify({ type: 'usage:turn', tag: 'oc-shared', session: 's-2', phase: 'start', person: 'email:cy@x.io' }))
+    await settle()
+    await at('/do/usage', { method: 'POST', body: JSON.stringify({ provider: 'opencode-go', model: 'm', in: 50, out: 5, tag: 'oc-shared', startedAt: new Date().toISOString() }) })
+    const ps = await people()
+    expect(ps.find((p) => p.person === 'email:bo@x.io')).toBeUndefined()
+    expect(ps.find((p) => p.person === 'email:cy@x.io')).toBeUndefined()
+    ws.close()
+  })
+
+  it('the engine reports routes the proxy does not see, and only those', async () => {
+    const ws = await engine()
+    ws.send(JSON.stringify({ type: 'usage:report', tag: 'cc-1', session: 's-dee', person: 'email:dee@x.io', provider: 'claude-code', model: 'claude-sonnet-5', in: 30, out: 3, cacheRead: 9000, cacheWrite: 400 }))
+    ws.send(JSON.stringify({ type: 'usage:report', tag: 'pi-2', session: 's-dee', person: 'email:dee@x.io', provider: 'opencode-go', model: 'm', in: 999, out: 9 }))   // the proxy counts these: ignored
+    await settle()
+    expect((await people()).find((p) => p.person === 'email:dee@x.io')).toMatchObject({ calls: 1, tokens_in: 30, tokens_out: 3, tokens_cache_read: 9000, tokens_cache_write: 400 })
+    ws.close()
   })
 })

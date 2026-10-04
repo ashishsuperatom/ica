@@ -168,15 +168,25 @@ export const hostMatches = (host, list) => {
   return list.some((d) => h === d || h.endsWith('.' + d))
 }
 
-/** Split `/p/<projectId>/<provider>/<rest…>` into its parts. `service` is set for our own routes (_health,
- *  _whoami, _key, _diag), which are addressed the same way but handled before any forwarding. */
+/** Split `/p/<projectId>[/t/<tag>]/<provider>/<rest…>` into its parts. `service` is set for our own routes
+ *  (_health, _whoami, _key, _diag), which are addressed the same way but handled before any forwarding. `tag` names
+ *  the agent that made the call, so its usage is attributed to the session that agent is working for. */
+/** What a tag may look like: short, plain, safe in a path. */
+export const TAG = /^[A-Za-z0-9_-]{1,64}$/
+
+/** The proxy base an agent's calls go to: the project, the agent's tag, then the provider. */
+export const proxyBaseFor = (platform, project, provider, tag) =>
+  `https://proxy.${platform}/${PATH_PREFIX}/${project}${tag && TAG.test(tag) ? `/t/${tag}` : ''}/${provider}`
+
 export function parsePath(pathname) {
   let seg = String(pathname).replace(/^\/+/, '').split('/')
-  let projectId = null
+  let projectId = null, tag = null
   if (seg[0] === PATH_PREFIX && seg.length > 1) { projectId = seg[1]; seg = seg.slice(2) }
+  if (seg[0] === 't' && seg.length > 2 && TAG.test(seg[1])) { tag = seg[1]; seg = seg.slice(2) }
   const head = seg[0] ?? ''
   return {
     projectId,
+    tag,
     service: head.startsWith('_') ? head : null,
     provider: head.startsWith('_') ? null : head,
     rest: seg.slice(1).join('/'),
@@ -215,12 +225,17 @@ export function decide({ projectId, sentCredential, proven }) {
 
 /** Token counts, wherever a provider chose to put them. Shapes differ (OpenAI's `usage`, Anthropic's
  *  input/output names), so this reads the ones we know and reports nothing rather than a wrong number. */
+// `in` is FRESH input; prompt-cache reads and writes are kept apart, as both API shapes allow: OpenAI counts cached
+// tokens inside prompt_tokens (prompt_tokens_details.cached_tokens), Anthropic reports them beside input_tokens.
 export function usageFrom(obj) {
   const u = obj?.usage
   if (!u) return null
   const i = u.prompt_tokens ?? u.input_tokens
   const o = u.completion_tokens ?? u.output_tokens
-  return (typeof i === 'number' || typeof o === 'number') ? { in: i ?? 0, out: o ?? 0 } : null
+  if (typeof i !== 'number' && typeof o !== 'number') return null
+  const openaiCached = typeof u.prompt_tokens === 'number' ? (u.prompt_tokens_details?.cached_tokens ?? 0) : 0
+  return { in: Math.max(0, (i ?? 0) - openaiCached), out: o ?? 0,
+           cacheRead: openaiCached || (u.cache_read_input_tokens ?? 0), cacheWrite: u.cache_creation_input_tokens ?? 0 }
 }
 
 /** Usage from the tail of an SSE stream — the final frame carries it. Given a bounded tail, not the whole
@@ -262,3 +277,9 @@ export function nearModels(model, available, n = 5) {
   const score = (a) => { const b = modelKey(a); let i = 0; while (i < b.length && b[i] === k[i]) i++; return i }
   return plain.filter((a) => modelKey(a).startsWith(stem)).sort((a, b) => score(b) - score(a)).slice(0, n)
 }
+
+// ── WHERE A CALL'S TOKENS ARE COUNTED ────────────────────────────────────────────────────────────────────
+// Exactly one place counts each call, so nothing is counted twice or not at all: a relayed provider's calls pass
+// through the proxy, which reads the tokens from the response; every other route (a box-side subscription, the
+// tunnel) is counted by the engine from the harness's own report of the turn.
+export const countedByProxy = (provider) => PROVIDERS[provider]?.route === 'relay' && !PROVIDERS[provider]?.disabled

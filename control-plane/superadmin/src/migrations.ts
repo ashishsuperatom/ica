@@ -192,6 +192,18 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     -- Each session's owner, as the hub relays their messages — so usage tagged with a session is someone's.
     CREATE TABLE IF NOT EXISTS session_owners (session TEXT PRIMARY KEY, principal TEXT NOT NULL, email TEXT, first_seen TEXT NOT NULL);
   ` },
+  { id: 26, name: 'usage by agent turn', up: `
+    -- Which agent made a metered call (its tag) and who counted it: the proxy, or the engine for routes that bypass it.
+    ALTER TABLE usage_events ADD COLUMN tag TEXT;
+    ALTER TABLE usage_events ADD COLUMN source TEXT;
+    -- Prompt-cache tokens, kept apart: they are priced differently from fresh input.
+    ALTER TABLE usage_events ADD COLUMN tokens_cache_read INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE usage_events ADD COLUMN tokens_cache_write INTEGER NOT NULL DEFAULT 0;
+    -- When each agent (by tag) worked for which session, as the engine reports its turns — how a call is attributed.
+    CREATE TABLE IF NOT EXISTS usage_turns (id INTEGER PRIMARY KEY AUTOINCREMENT, tag TEXT NOT NULL, session TEXT NOT NULL, principal TEXT, started_at TEXT NOT NULL, ended_at TEXT);
+    CREATE INDEX IF NOT EXISTS idx_usage_turns_tag ON usage_turns(tag, started_at);
+    CREATE INDEX IF NOT EXISTS idx_usage_principal ON usage_events(principal, at);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

@@ -686,6 +686,26 @@ model the account does not serve is refused with a sentence naming the nearest m
 the account changes. Every harness translates again at start for anything that reached the engine another way, and none
 ever runs a different model in place of the one named.
 
+**Usage per person, for every harness (built 2026-10-05):** every model call is counted in exactly one place and
+attributed to the person it was for.
+- *Where it is counted* (contract `countedByProxy`): a relayed provider's calls pass through the proxy, which reads the
+  tokens from the response (fresh input, output, prompt-cache reads and writes kept apart). Routes the proxy does not
+  see — a box-side subscription (Claude Code's own login) or the tunnel (codex's ChatGPT login) — are counted by the
+  engine from the harness's own report (Claude Code's transcript, codex's turn totals, pi's and opencode's per-answer
+  usage) and sent to the platform, queued until sent.
+- *Who it was for*: every agent session has a tag, carried in the address of each call it makes through the proxy
+  (`/p/<project>/t/<tag>/<provider>/…`). Around each turn the engine tells the platform which session and person the
+  tag is working for (`usage:turn`); the project's DO attributes each call to the one turn of its tag open when it
+  started. No turn, or two at once on one tag (a shared opencode server serving two people), and the call stays the
+  project's, shown as unattributed — never guessed. Engine reports carry the session and person directly.
+- *Where it is kept*: the project's DO, append-only (`usage_events`: person, session, tag, who counted it, tokens,
+  cache tokens, credits), priced from the platform's price list, debited from the organisation's credits with the
+  person named; a copy of each row goes to the platform's warehouse stream.
+- *Who sees it*: the organisation's admin, per person across all its projects, month by month (admin console →
+  organisation → Usage); a member sees their own.
+- Open: prices for prompt-cache tokens (counted, not yet priced); opencode attributes per person only with one server
+  per agent.
+
 **Choices made (2026-10-05):** the platform's own warehouse is Basin, and Analytics Engine is dropped (its 3-month,
 sampled metrics duplicate what the warehouse gives; minutes of lag are fine).
 

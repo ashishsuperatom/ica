@@ -30,6 +30,8 @@ export interface PiSessionOpts {
   cwd: string
   provider?: string   // default: codex when `codex login` has been done, else openrouter
   model?: string
+  tag?: string                                   // usage tag: carried in the proxy address (ica/index.ts)
+  onUsage?: (u: import('./session.js').TokenUsage) => void   // tokens of each answer, as pi reports them
   systemReference?: string   // the authoring reference → AGENTS.md, which pi's resource loader reads from cwd
   noTools?: boolean          // a PURE TEXT agent (the narrator): no tools at all
   system?: string            // REPLACES the coding prompt — for an agent that only writes prose
@@ -196,7 +198,7 @@ export function createPiSession(opts: PiSessionOpts): Session {
     const TUNNELLED = new Set(providersOn('tunnel'))
     const platform = process.env.SUPERATOM_PLATFORM
     const proxyBase = platform && process.env.ICA_PROJECT && !TUNNELLED.has(provider)
-      ? `https://proxy.${platform}/p/${process.env.ICA_PROJECT}` : undefined
+      ? `https://proxy.${platform}/p/${process.env.ICA_PROJECT}${opts.tag ? `/t/${opts.tag}` : ''}` : undefined
 
     // ── WHICH LIST TO PICK THE MODEL FROM ─────────────────────────────────────────────────────────────────
     // Two different questions, and asking the wrong one cost us every proxied box.
@@ -292,6 +294,8 @@ export function createPiSession(opts: PiSessionOpts): Session {
       if (ev.type === 'message_end' && ev.message?.role === 'assistant') {
         const t = (ev.message.content || []).filter((c: any) => c?.type === 'text').map((c: any) => c.text).join(' ').trim()
         if (t) activeAnswer = t                                          // last assistant message = the answer
+        const u = ev.message.usage
+        if (u) opts.onUsage?.({ input: u.input ?? 0, output: u.output ?? 0, cacheRead: u.cacheRead ?? 0, cacheWrite: u.cacheWrite ?? 0, model: ev.message.model })
       }
     })
     return session

@@ -9,6 +9,11 @@ export class IdentityRefusal extends Error {}
 
 export interface Who { id: string; admin: boolean; email?: string; /** What they see with: their own scope and their groups' (the hub's stamp). */ scopes: string[] }
 
+/** Who a turn is for, as usage is attributed: their email when known (`email:…`, what budgets name), else their id. */
+export function personOf(from: any): string | undefined {
+  try { const w = whoIs(from); return w.email ? `email:${w.email.toLowerCase()}` : w.id } catch { return undefined }
+}
+
 export function whoIs(from: any): Who {
   const id = from?.userId
   if (!id || typeof id !== 'string') throw new IdentityRefusal('the hub did not say who is asking')

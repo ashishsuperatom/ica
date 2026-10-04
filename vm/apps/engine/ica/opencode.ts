@@ -20,6 +20,7 @@ export interface OpencodeSessionOpts {
   cwd: string
   provider?: string   // default 'opencode-go'
   model?: string      // default: the profile's harnessModel.opencode
+  onUsage?: (u: import('./session.js').TokenUsage) => void   // the turn's tokens, as opencode reports them
   // Connect to a STANDALONE `opencode serve` (recommended): one ~370MB server for the whole box,
   // shared by every engine — this harness then spawns nothing (client-only, ~0 extra RAM).
   // Set via opts.baseUrl or ICA_OC_URL (e.g. http://127.0.0.1:4096). If unset, spawns a private
@@ -239,6 +240,7 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
       try {
         const info: any = (res as any)?.data?.info ?? (res as any)?.info
         if (info) { const tk = info.tokens ?? {}
+          opts.onUsage?.({ input: tk.input ?? 0, output: tk.output ?? 0, cacheRead: tk.cache?.read ?? 0, cacheWrite: tk.cache?.write ?? 0, model: modelID })
           console.log(`[oc-usage] ${modelID} in=${tk.input ?? '?'} out=${tk.output ?? '?'} reason=${tk.reasoning ?? 0} cacheR=${tk.cache?.read ?? 0} cacheW=${tk.cache?.write ?? 0} cost=$${info.cost ?? '?'} · "${String(prompt).slice(0, 26).replace(/\s+/g, ' ')}…"`) }
       } catch { /* usage logging is best-effort */ }
     } catch (e: any) { if (!deliverable.arrived()) answer = `opencode error: ${e?.message ?? e}` }

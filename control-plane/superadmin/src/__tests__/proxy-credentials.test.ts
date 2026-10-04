@@ -215,6 +215,10 @@ describe('disabled providers — a decision both proxies enforce', () => {
 
 describe('parsePath / bearerOf', () => {
   it('splits a provider call', () => {
+    expect(parsePath('/p/proj-1/t/pi-0a1b2c/opencode-go/chat/completions')).toMatchObject({
+      projectId: 'proj-1', tag: 'pi-0a1b2c', provider: 'opencode-go', rest: 'chat/completions',
+    })
+    expect(parsePath('/p/proj-1/opencode-go/chat/completions')).toMatchObject({ tag: null })
     expect(parsePath('/p/proj-1/opencode-go/chat/completions')).toMatchObject({
       projectId: 'proj-1', provider: 'opencode-go', rest: 'chat/completions', service: null,
     })
@@ -233,8 +237,11 @@ describe('parsePath / bearerOf', () => {
 
 describe('usage parsing', () => {
   it('reads both provider spellings', () => {
-    expect(usageFrom({ usage: { prompt_tokens: 3, completion_tokens: 4 } })).toEqual({ in: 3, out: 4 })
-    expect(usageFrom({ usage: { input_tokens: 5, output_tokens: 6 } })).toEqual({ in: 5, out: 6 })
+    expect(usageFrom({ usage: { prompt_tokens: 3, completion_tokens: 4 } })).toEqual({ in: 3, out: 4, cacheRead: 0, cacheWrite: 0 })
+    expect(usageFrom({ usage: { input_tokens: 5, output_tokens: 6 } })).toEqual({ in: 5, out: 6, cacheRead: 0, cacheWrite: 0 })
+    // cache tokens kept apart: inside prompt_tokens for OpenAI, beside input_tokens for Anthropic
+    expect(usageFrom({ usage: { prompt_tokens: 100, completion_tokens: 4, prompt_tokens_details: { cached_tokens: 80 } } })).toEqual({ in: 20, out: 4, cacheRead: 80, cacheWrite: 0 })
+    expect(usageFrom({ usage: { input_tokens: 5, output_tokens: 6, cache_read_input_tokens: 900, cache_creation_input_tokens: 40 } })).toEqual({ in: 5, out: 6, cacheRead: 900, cacheWrite: 40 })
   })
   it('reports nothing rather than a wrong number', () => {
     expect(usageFrom({})).toBe(null)
@@ -242,7 +249,7 @@ describe('usage parsing', () => {
   })
   it('takes the last usage frame from an SSE tail and survives a partial frame', () => {
     const tail = 'data: {"usage":{"input_tokens":1,"output_tokens":1}}\ndata: {"usage":{"input_tokens":9,"output_tokens":2}}\ndata: {"par'
-    expect(usageFromSseTail(tail)).toEqual({ in: 9, out: 2 })
+    expect(usageFromSseTail(tail)).toEqual({ in: 9, out: 2, cacheRead: 0, cacheWrite: 0 })
   })
 })
 

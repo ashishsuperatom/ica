@@ -15,6 +15,7 @@ import { homedir } from 'node:os'
 import { makeClaudeEventLog, transcriptPath } from './claude-events.js'
 import { boxCredentialsReady } from './box-credentials.js'
 import { modelFor } from './models.js'
+import { proxyBaseFor } from '../../../packages/agent-contract/contract.mjs'
 
 // ── FIRST-RUN GATES ──────────────────────────────────────────────────────────────────────────────────────
 // A freshly provisioned box has a credential but no history, and claude-code asks three questions before it
@@ -74,6 +75,8 @@ export interface ClaudeSessionOpts {
   provider?: string
   cwd: string                 // working directory the agent runs in
   model?: string              // required: named by the agent's profile
+  tag?: string                // usage tag: carried in the proxy address (ica/index.ts)
+  onUsage?: (u: import('./session.js').TokenUsage) => void   // tokens of each answer, read from the transcript
   bin?: string                // default $CLAUDE_BIN || 'claude'
   idleMs?: number             // silence that means "done" (default 6000; measured max working gap ≈ 3.7s)
   firstGraceMs?: number       // long grace for the FIRST output after submit (default 60000)
@@ -156,6 +159,7 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
   const eventLog = makeClaudeEventLog()
   let tailTimer: ReturnType<typeof setInterval> | null = null
   let tailPath = '', tailOffset = 0, tailBuf = ''
+  const usageSeen = new Set<string>()
   function pollTranscript() {
     const path = transcriptPath(homedir(), opts.cwd, sid)   // sid can change (a failed --resume re-spawns fresh)
     if (path !== tailPath) { tailPath = path; tailOffset = 0; tailBuf = '' }
@@ -171,6 +175,12 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
       const line = tailBuf.slice(0, nl); tailBuf = tailBuf.slice(nl + 1)
       if (!line.trim()) continue
       let o: any; try { o = JSON.parse(line) } catch { continue }
+      // Each answer's tokens, once: the transcript repeats an answer's usage on every content block it splits into.
+      const mu = o?.type === 'assistant' ? o.message?.usage : null
+      if (mu && o.message?.id && !usageSeen.has(o.message.id)) {
+        usageSeen.add(o.message.id)
+        opts.onUsage?.({ input: mu.input_tokens ?? 0, output: mu.output_tokens ?? 0, cacheRead: mu.cache_read_input_tokens ?? 0, cacheWrite: mu.cache_creation_input_tokens ?? 0, model: o.message.model })
+      }
       for (const ev of eventLog.handleEntry(o)) {
         current?.h?.onEvent?.(ev)                                          // live to the active run; events() has the full log for replay
       }
@@ -214,7 +224,7 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
     if (opts.provider === 'openrouter') {
       const platform = process.env.SUPERATOM_PLATFORM, project = process.env.ICA_PROJECT, key = process.env.ICA_KEY
       if (!platform || !project || !key) throw new Error('claude-code through openrouter needs SUPERATOM_PLATFORM, ICA_PROJECT and ICA_KEY')
-      childEnv.ANTHROPIC_BASE_URL = `https://proxy.${platform}/p/${project}/openrouter`
+      childEnv.ANTHROPIC_BASE_URL = proxyBaseFor(platform, project, 'openrouter', opts.tag)
       childEnv.ANTHROPIC_AUTH_TOKEN = key
       childEnv.ANTHROPIC_API_KEY = ''
       delete childEnv.CLAUDE_CODE_OAUTH_TOKEN

@@ -10,6 +10,7 @@ import { createComposer, type Composer, type QueryRecord } from './agents/compos
 import { createNarrator, capResultData, isDataCall } from './agents/narrator/index.js'
 import { pick, compose, place, recordQuestion, placeForRunning } from './knowledge.js'
 import type { AgentEvent } from './ica/session.js'
+import { personOf } from './identity.js'
 
 export interface AppSeamDeps {
   project: string
@@ -117,7 +118,7 @@ export function createAppSeam(d: AppSeamDeps) {
       narrating = true
       const since = activity.splice(0).join('\n')
       try {
-        const line = await Promise.race([narrator.narrate(text, since, recent.slice(-3)), new Promise<null>((res) => setTimeout(() => res(null), 20_000))])
+        const line = await Promise.race([narrator.narrate(text, since, recent.slice(-3), { session: o.threadId, person: personOf(o.from) }), new Promise<null>((res) => setTimeout(() => res(null), 20_000))])
         if (line) { recent.push(line); beat(line) }
         else console.log(`[beat] ${o.qid.slice(0, 8)}: the narrator said nothing for ${since.length} chars of activity`)
       } catch (e: any) { console.log(`[beat] ${o.qid.slice(0, 8)}: the narrator failed — ${e?.message ?? e}`) } finally { narrating = false }
@@ -142,7 +143,7 @@ export function createAppSeam(d: AppSeamDeps) {
     }
     let timer: ReturnType<typeof setTimeout> | undefined
     const said = await Promise.race([
-      composer.say(text, context, handlers, { qid: o.qid, ...(d.readerFor ? { reader: await d.readerFor(o.from) } : {}) }).finally(() => { clearInterval(narration); try { narrator.stop() } catch { /* best-effort */ } }),
+      composer.say(text, context, handlers, { qid: o.qid, person: personOf(o.from), ...(d.readerFor ? { reader: await d.readerFor(o.from) } : {}) }).finally(() => { clearInterval(narration); try { narrator.stop() } catch { /* best-effort */ } }),
       new Promise<Said>((res) => { timer = setTimeout(() => { try { composer.session.stop() } catch { /* best effort */ }; res({ markdown: null, blocks: [], calls: [], queries: [], ms: Date.now() - t0 }) }, MAX_SAY_MS) }),
     ])
     if (timer) clearTimeout(timer)

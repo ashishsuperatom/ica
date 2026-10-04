@@ -14,12 +14,15 @@ import { join } from 'node:path'
 import type { Session, RunHandlers, RunResult, AgentEvent } from './session.js'
 import { endsWhenDone } from './session.js'   // one definition of "the turn's work is done", for every harness
 import { modelFor } from './models.js'
+import { proxyBaseFor } from '../../../packages/agent-contract/contract.mjs'
 
 export interface CodexSessionOpts {
   /** 'openrouter': through our proxy and OpenRouter with an API key (the production route); else the ChatGPT login. */
   provider?: string
   cwd: string
   model?: string                                                     // default: profile harnessModel.codex
+  tag?: string                                                       // usage tag: carried in the proxy address (ica/index.ts)
+  onUsage?: (u: import('./session.js').TokenUsage) => void           // the turn's tokens, from turn.completed
   reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'  // default 'medium'
   resumeId?: string                                                  // resume a prior thread (persisted in ~/.codex/sessions)
   systemReference?: string    // authoritative authoring reference → written to AGENTS.md (codex auto-loads it from cwd)
@@ -109,7 +112,7 @@ export function createCodexSession(opts: CodexSessionOpts): Session {
       // Through OpenRouter with an API key — our proxy with the project's key; no ChatGPT login on the box.
       const platform = process.env.SUPERATOM_PLATFORM, project = process.env.ICA_PROJECT, key = process.env.ICA_KEY
       if (!platform || !project || !key) throw new Error('codex through openrouter needs SUPERATOM_PLATFORM, ICA_PROJECT and ICA_KEY')
-      codex = new Codex({ baseUrl: `https://proxy.${platform}/p/${project}/openrouter`, apiKey: key })
+      codex = new Codex({ baseUrl: proxyBaseFor(platform, project, 'openrouter', opts.tag), apiKey: key })
     } else codex = new Codex()                                      // logged-in ChatGPT subscription (no apiKey)
     // RESUME the prior thread when we have its id (threads persist in ~/.codex/sessions), else start fresh.
     thread = resumeId ? codex.resumeThread(resumeId, threadOpts()) : codex.startThread(threadOpts())
@@ -133,6 +136,10 @@ export function createCodexSession(opts: CodexSessionOpts): Session {
       for await (const ev of streamed.events) {                     // generator ends when the turn completes → exact
         if (done) { try { await (streamed.events as any).return?.() } catch { /* already closed */ } break }
         if (ev.type === 'thread.started' && (ev as any).thread_id) threadId = (ev as any).thread_id
+        if (ev.type === 'turn.completed' && (ev as any).usage) {             // cached input is part of input_tokens
+          const u = (ev as any).usage
+          opts.onUsage?.({ input: Math.max(0, (u.input_tokens ?? 0) - (u.cached_input_tokens ?? 0)), output: u.output_tokens ?? 0, cacheRead: u.cached_input_tokens ?? 0, model })
+        }
         const norm = normEvent(ev)                                 // structured event for the UI event log
         if (norm) { eventLog.push(norm); if (eventLog.length > 600) eventLog.shift(); h?.onEvent?.(norm) }
         const chunk = fmtEvent(ev, seen)

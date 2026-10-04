@@ -9,13 +9,15 @@
 //   codex       — OpenAI Codex SDK on the ChatGPT subscription. Model gpt-5.6-terra, effort medium.
 //   mock        — canned answer; no external agent (for smoke tests).
 
-import type { Session, RunHandlers, RunResult } from './session.js'
+import type { Session, RunHandlers, RunResult, TokenUsage } from './session.js'
+import { randomBytes } from 'node:crypto'
+import { countedByProxy } from '../../../packages/agent-contract/contract.mjs'
 import { createClaudeSession } from './claude.js'
 import { createPiSession } from './pi.js'
 import { createOpencodeSession } from './opencode.js'
 import { createCodexSession } from './codex.js'
 
-export type { Session, RunHandlers, RunResult } from './session.js'
+export type { Session, RunHandlers, RunResult, TokenUsage } from './session.js'
 export { prepareWorkspace } from './workspace.js'
 export { opencodeAuthStatus, login as opencodeLogin, ensureOpencodeServer } from './opencode.js'
 export { codexAuthStatus, login as codexLogin } from './codex.js'
@@ -49,12 +51,45 @@ export type Thinking = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' |
 export const THINKING: Thinking[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 
 
+// ── USAGE PER PERSON ─────────────────────────────────────────────────────────────────────────────────────
+// Every session has a TAG, carried in the address of each model call it makes through the proxy
+// (/p/<project>/t/<tag>/<provider>/…). Around each turn the engine tells the platform which user session the tag is
+// working for (RunHandlers.forSession), so the proxy's count of each call is attributed to that session's owner.
+// Routes the proxy does not see (a box-side subscription, the tunnel) are counted from the harness's own report and
+// sent by the engine — exactly one place counts each call (contract: countedByProxy).
+export interface UsageSink {
+  turn(tag: string, session: string, phase: 'start' | 'end', person?: string): void
+  report(u: { tag: string; session: string | null; person?: string; provider: string; model?: string; in: number; out: number; cacheRead?: number; cacheWrite?: number }): void
+}
+let usageSink: UsageSink | null = null
+/** Set once by the engine: where turns and usage are told to the platform. */
+export function setUsageSink(sink: UsageSink | null) { usageSink = sink }
+
 export function createSession(harness: Harness, opts: SessionOpts): Session {
+  const tag = `${harness === 'claude-code-pty' ? 'cc' : harness}-${randomBytes(6).toString('hex')}`
+  let forSession: string | null = null, forPerson: string | undefined
+  const provider = opts.provider ?? ''
+  const onUsage = (u: TokenUsage) => {
+    if (!usageSink || !provider || countedByProxy(provider)) return
+    usageSink.report({ tag, session: forSession, person: forPerson, provider, model: u.model ?? opts.model, in: u.input ?? 0, out: u.output ?? 0, cacheRead: u.cacheRead, cacheWrite: u.cacheWrite })
+  }
+  const inner = make(harness, opts, tag, onUsage)
+  const run = inner.run.bind(inner)
+  inner.run = async (prompt, h) => {
+    forSession = h?.forSession ?? null; forPerson = h?.forPerson
+    if (forSession) usageSink?.turn(tag, forSession, 'start', forPerson)
+    try { return await run(prompt, h) }
+    finally { if (forSession) usageSink?.turn(tag, forSession, 'end'); forSession = null; forPerson = undefined }
+  }
+  return inner
+}
+
+function make(harness: Harness, opts: SessionOpts, tag: string, onUsage: (u: TokenUsage) => void): Session {
   switch (harness) {
-    case 'opencode':    return createOpencodeSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model, baseUrl: opts.baseUrl, noTools: opts.noTools, system: opts.system, systemReference: opts.systemReference, resumeId: opts.resumeId, thinking: opts.thinking })
-    case 'pi':          return createPiSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model, systemReference: opts.systemReference, noTools: opts.noTools, system: opts.system, resumeId: opts.resumeId, thinking: opts.thinking })
-    case 'claude-code-pty': return createClaudeSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model, bin: opts.bin, resumeId: opts.resumeId, systemReference: opts.systemReference, thinking: opts.thinking })
-    case 'codex':       return createCodexSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model, resumeId: opts.resumeId, systemReference: opts.systemReference, ...(opts.thinking ? { reasoningEffort: ({ off: 'minimal', max: 'xhigh' } as const)[opts.thinking as 'off' | 'max'] ?? opts.thinking as 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' } : {}) })
+    case 'opencode':    return createOpencodeSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model, baseUrl: opts.baseUrl, noTools: opts.noTools, system: opts.system, systemReference: opts.systemReference, resumeId: opts.resumeId, thinking: opts.thinking, onUsage })
+    case 'pi':          return createPiSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model, systemReference: opts.systemReference, noTools: opts.noTools, system: opts.system, resumeId: opts.resumeId, thinking: opts.thinking, tag, onUsage })
+    case 'claude-code-pty': return createClaudeSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model, bin: opts.bin, resumeId: opts.resumeId, systemReference: opts.systemReference, thinking: opts.thinking, tag, onUsage })
+    case 'codex':       return createCodexSession({ cwd: opts.cwd, provider: opts.provider, model: opts.model, resumeId: opts.resumeId, systemReference: opts.systemReference, tag, onUsage, ...(opts.thinking ? { reasoningEffort: ({ off: 'minimal', max: 'xhigh' } as const)[opts.thinking as 'off' | 'max'] ?? opts.thinking as 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' } : {}) })
     case 'mock':        return createMockSession(opts)
     default:            throw new Error(`unknown harness: ${harness}`)
   }

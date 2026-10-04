@@ -695,6 +695,31 @@ export default {
         const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by: su.email ?? su.userId })
         return env.ORG.get(env.ORG.idFromName(orgId)).fetch(new Request('https://do/credits/grant', { method: 'POST', headers: { 'content-type': 'application/json' }, body }))
       }
+      // USAGE PER PERSON across the organisation's projects: what each of its people used (tokens, cache, credits), and
+      // what no turn named ('unattributed'). An admin sees everyone; a member sees themselves.
+      if (path === '/api/usage/people' && request.method === 'GET') {
+        const q = new URL(request.url).searchParams
+        const params = new URLSearchParams({ by: 'person', ...(q.get('since') ? { since: q.get('since')! } : {}), ...(q.get('until') ? { until: q.get('until')! } : {}) })
+        const projects = await (await env.ORG.get(env.ORG.idFromName(orgId)).fetch(new Request('http://do/projects'))).json() as any[]
+        const got = await Promise.allSettled((Array.isArray(projects) ? projects : []).map(async (pr: any) => {
+          const d = await (await env.PROJECT.get(env.PROJECT.idFromName(`proj:${pr.id}`)).fetch(new Request(`http://do/usage?${params}`, { headers: { 'x-sa-project': pr.id } }))).json() as any
+          return { project: { id: pr.id, name: pr.name }, people: (d?.people ?? []) as any[] }
+        }))
+        const N = ['calls', 'tokens_in', 'tokens_out', 'tokens_cache_read', 'tokens_cache_write', 'credits_micro', 'unpriced'] as const
+        const byPerson = new Map<string, any>()
+        for (const r of got) {
+          if (r.status !== 'fulfilled') continue
+          for (const p of r.value.people) {
+            const row = byPerson.get(p.person) ?? { person: p.person, ...Object.fromEntries(N.map((k) => [k, 0])), projects: [] as any[] }
+            for (const k of N) row[k] += Number(p[k]) || 0
+            row.projects.push({ ...r.value.project, ...Object.fromEntries(N.map((k) => [k, Number(p[k]) || 0])) })
+            byPerson.set(p.person, row)
+          }
+        }
+        const mine = `email:${oa.email}`
+        const people = [...byPerson.values()].filter((p) => oa.level !== 'member' || p.person === mine).sort((a, b) => b.credits_micro - a.credits_micro || b.tokens_in - a.tokens_in)
+        return Response.json({ since: params.get('since'), until: params.get('until'), people, failed: got.filter((r) => r.status === 'rejected').length })
+      }
       const doUrl = request.url.replace(/^(https?:\/\/[^/]+)\/api/, '$1')
       let doReq: Request
       if (request.method === 'GET' || request.method === 'HEAD') {

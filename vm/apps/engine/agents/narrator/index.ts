@@ -161,7 +161,7 @@ const STRATEGIES: Record<NarratorContext, ContextStrategy> = {
  *  removes a whole class of confusion at the call site. */
 export interface Narrator {
   context: NarratorContext
-  narrate(question: string, activity: string, recent?: string[]): Promise<string>
+  narrate(question: string, activity: string, recent?: string[], forWhom?: { session?: string; person?: string }): Promise<string>
   stop(): void
 }
 
@@ -187,12 +187,12 @@ export function createNarrator(opts: NarratorOpts): Narrator {
     context,
     /** Translate a batch of raw system activity into ONE business-language line for the user. Best-effort.
      *  `recent` = the last few beats already shown (used by the stateless strategy). */
-    async narrate(question: string, activity: string, recent: string[] = []): Promise<string> {
+    async narrate(question: string, activity: string, recent: string[] = [], forWhom?: { session?: string; person?: string }): Promise<string> {
       // noTools + system=NARRATE → a PURE text completion: no coding-agent scaffolding, no tool schemas, no tool
       // calls. The instructions live in the (well-cached) system prompt; only the per-turn activity travels here.
       session ??= createSession(harness, { cwd: opts.cwd, model, provider, thinking: cfg.thinking, baseUrl: opts.ica?.baseUrl, noTools: true, system: NARRATE })
       strategy.prepare(session)
-      const { lastLines } = await session.run(strategy.prompt(question, activity, recent))
+      const { lastLines } = await session.run(strategy.prompt(question, activity, recent), { forSession: forWhom?.session, forPerson: forWhom?.person })
       // Keep the full update (may be a couple of sentences when there's a real finding). Strip any stray
       // wrapping quotes / markdown the model adds, and collapse blank lines.
       // The narrator's OWN output, through the same filter. A model with no tools still writes tool-call syntax

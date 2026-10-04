@@ -71,6 +71,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Admin console: analyst, connector and grounding terminals, models, credentials, dashboards and an inspector.
 - Models through OpenRouter with an API key for every harness (Claude Code, codex, pi, opencode): the proxy proves the project, attaches the vault key for the project's credential group (platform or organisation) and meters the call; subscription logins stay as options.
 - One model, many names: a profile names a model once; it is translated to each account's spelling, checked against the account's own list when saved (refused with the nearest names), and no harness ever substitutes another model.
+- Usage per person for every harness: each call counted once (proxy for relayed providers, the engine from the harness's own report for subscriptions), attributed by the agent's tag to the turn's session and person, kept append-only with cache tokens; organisation admins see usage per person per month across projects.
 - Reporting worker: renders an answer as HTML and PNG.
 - Cloudflare config on wrangler.jsonc with a current compatibility date and pinned tool versions.
 
@@ -79,6 +80,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - iOS voice-first client.
 
 ## Planned (not built)
+- Prices for prompt-cache tokens (counted per call, not yet priced); per-person attribution for opencode needs one server per agent.
 
 **Product**
 - The user UI rebuilt on blocks, cards and the thread, using the session runtime and `<Intent>`.

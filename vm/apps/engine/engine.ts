@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { existsSync, mkdirSync, rmSync, readFileSync } from 'node:fs'
-import { createSession, prepareWorkspace, type Session, type Harness, type RunHandlers } from './ica/index.js'
+import { createSession, prepareWorkspace, setUsageSink, type Session, type Harness, type RunHandlers } from './ica/index.js'
 import { agentConfig, describeConfig, useCache, receive, applied, type AgentName } from './config/index.js'
 import { createNarrator, capResultData, stripCode, isDataCall, type Narrator } from './agents/narrator/index.js'
 import { createAnalyst, promptVersion as analystPromptVersion } from './agents/analyst/index.js'
@@ -47,7 +47,7 @@ import { createProgramSeam, PROGRAM_MESSAGES } from './program-seam.js'
 import { platformOf } from './platform.js'
 import { createGraphSync, graphFileOf } from './graph-sync.js'
 import { createAccess, readerFor } from './access.js'
-import { whoIs } from './identity.js'
+import { whoIs, personOf } from './identity.js'
 import { createActivities } from './activity.js'
 import { readingAnswer } from './answer-card.js'
 import { randomUUID } from 'node:crypto'
@@ -439,7 +439,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       narrating = true
       const activity = narrationBuf.splice(0).join('\n')
       try {
-        const line = await Promise.race([narrator!.narrate(question, activity, saidBeats.slice(-3)), new Promise<null>((res) => setTimeout(() => res(null), 20000))])
+        const line = await Promise.race([narrator!.narrate(question, activity, saidBeats.slice(-3), { session: sid, person: personOf(from) }), new Promise<null>((res) => setTimeout(() => res(null), 20000))])
         if (line) {
           saidBeats.push(line)
           emitBeat(reply, line, qid, sid)
@@ -518,7 +518,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
       // Who is answering, and how it came to: said with the answer, so the person always knows which agent this is.
       const agentLine = { name: inSession.domain, how, ...(routedNow?.ranked?.[0]?.terms ? { terms: routedNow.ranked[0].terms.slice(0, 6) } : {}) }
       workingAgent = 'composer'; stopSession = () => { try { (composer as any).session?.stop?.() } catch { /* best-effort */ } }
-      const said = await capped(composer.say(question, 'None: the question stands on its own.', handlers, { qid, reader: await turnReader(from) }), () => ({ markdown: null, blocks: [], periods: [], queries: [], ms: Date.now() - t0 }))
+      const said = await capped(composer.say(question, 'None: the question stands on its own.', handlers, { qid, person: personOf(from), reader: await turnReader(from) }), () => ({ markdown: null, blocks: [], periods: [], queries: [], ms: Date.now() - t0 }))
       if (stopped) { console.log(`[ica] ${qid.slice(0, 8)} stopped after ${((Date.now() - t0) / 1000).toFixed(1)}s`); return }
       const timing = { ms: Date.now() - t0 }
       if (said.markdown == null) { tellSurfaces(reply, channel, sid, qid, timing, { status: 'cannot_answer', answer: 'No answer was written in time. Ask it another way, or narrower.' }); return }
@@ -737,6 +737,15 @@ const sourceIds = async () => ((await (await fetch(`${DATASOURCE}/sources`, { si
 const turnReader = (from: any) => readerFor(access, from, sourceIds)
 /** Something the engine did, for the platform's warehouse: sent to the project's DO, which records it (one path). */
 const recordToPlatform = (kind: string, key: string, data: unknown) => { try { if (hub?.readyState === WebSocket.OPEN) hub.send(JSON.stringify({ type: 'record', kind, key, data })) } catch { /* the warehouse never breaks the work */ } }
+// USAGE PER PERSON (ica/index.ts): each agent turn's session and person go to the platform as the turn starts and
+// ends, live — the platform times the proxy's calls against them. Tokens the proxy does not see are reported here, and
+// kept until they are sent: a report lost to a dropped socket is usage nobody pays for.
+const usageQueue: unknown[] = []
+const flushUsage = () => { while (usageQueue.length && hub?.readyState === WebSocket.OPEN) { try { hub.send(JSON.stringify(usageQueue[0])); usageQueue.shift() } catch { return } } }
+setUsageSink({
+  turn: (tag, session, phase, person) => { try { if (hub?.readyState === WebSocket.OPEN) hub.send(JSON.stringify({ type: 'usage:turn', tag, session, phase, person })) } catch { /* attribution only */ } },
+  report: (u) => { usageQueue.push({ type: 'usage:report', ...u }); if (usageQueue.length > 50_000) usageQueue.shift(); flushUsage() },
+})
 const sessionSeam = createSessionSeam({ projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, graphFile: graphFileOf(PROJECT_DIR) })
 // The composition graph is kept by the platform too: pushed after every change, rebuilt from it when this one is empty.
 const graphSync = createGraphSync({ file: graphFileOf(PROJECT_DIR), send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true }, log: (s) => console.warn(s) })
@@ -875,6 +884,7 @@ function connect() {
       flushOutbox()   // re-registered → deliver anything queued while the socket was flapping (answers, logs)
       sessionSync.pushAll()   // and every session the platform does not have whole
       graphSync.welcome()     // and the graph: pushed from where the platform's copy ends, or rebuilt from it
+      flushUsage()   // usage reported while the platform was out of reach
       void programSeam.syncUp((x) => console.warn(x)).catch((e) => console.warn(`[programs] sync failed: ${e?.message ?? e}`))   // and every program built here
       // and the code connectors this engine runs (its datasource manager's sources), for the platform to list beside the rest
       void fetch(`${DATASOURCE}/sources`, { signal: AbortSignal.timeout(4000) }).then((r) => r.json()).then((j: any) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'sources:report', sources: (j?.sources ?? []).map((x: any) => ({ id: x.id, kind: x.kind, dialect: x.dialect, description: x.description, ready: !!x.ready })) })) }).catch(() => {})

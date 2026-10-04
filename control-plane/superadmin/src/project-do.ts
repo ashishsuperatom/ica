@@ -28,6 +28,7 @@ import { AuditLog, auditScope } from './audit.js'
 import { AgentKeys, KeyRefusal } from './agent-keys.js'
 import { scopeAllows, HUB_MESSAGES } from '../../shared/agent-scopes.js'
 import { ProgramCatalogue, CatalogueRefusal } from './program-catalogue.js'
+import { TAG, countedByProxy } from '../../../vm/packages/agent-contract/contract.mjs'
 import { checkPolicy, resolve as resolvePolicies, type AccessPolicy } from './access-policies.js'
 import { costOf, priceFor, type Price } from './metering.js'
 import { createRecorder, type Recorder } from './records.js'
@@ -486,6 +487,20 @@ export class ProjectDO extends DurableObject<Env> {
       if (typeof msg.kind === 'string' && /^agent\.[a-z][\w.-]*$/.test(msg.kind) && typeof msg.key === 'string' && msg.key) this.record(msg.kind, msg.key, msg.data ?? null)
       return
     }
+    // ── Usage per person: the engine says when each agent (by tag) starts and ends work for a session, so the proxy's
+    //    calls are attributed; and it reports the tokens of routes the proxy does not see (contract: countedByProxy). ──
+    if (msg.type === 'usage:turn' && sender.type === 'code-engine') {
+      const tag = String(msg.tag ?? ''), session = String(msg.session ?? ''), now = new Date().toISOString()
+      if (!TAG.test(tag)) return
+      const person = typeof msg.person === 'string' && /^(email|user|agent):\S+$/.test(msg.person) ? msg.person : null
+      if (msg.phase === 'start' && session) this.ctx.storage.sql.exec('INSERT INTO usage_turns (tag, session, principal, started_at) VALUES (?, ?, ?, ?)', tag, session, person, now)
+      if (msg.phase === 'end') this.ctx.storage.sql.exec('UPDATE usage_turns SET ended_at = ? WHERE tag = ? AND ended_at IS NULL' + (session ? ' AND session = ?' : ''), now, tag, ...(session ? [session] : []))
+      return
+    }
+    if (msg.type === 'usage:report' && sender.type === 'code-engine') {
+      if (typeof msg.provider === 'string' && !countedByProxy(msg.provider)) await this.addUsage({ ...msg, tag: TAG.test(String(msg.tag ?? '')) ? msg.tag : null }, 'engine')
+      return
+    }
     // ── Long work in the engine (an activity): its latest state kept, and sent to its owner and the admins ──
     if (msg.type === 'activity' && sender.type === 'code-engine') {
       const a = msg.activity ?? {}
@@ -717,6 +732,8 @@ export class ProjectDO extends DurableObject<Env> {
 
     // Welcome. The engine's copy carries this project's profile; every other connection gets the same message
     // without it.
+    // A newly connected engine has no turn in flight: any left open by the one before it are over.
+    if (type === 'code-engine') { try { this.ctx.storage.sql.exec('UPDATE usage_turns SET ended_at = ? WHERE ended_at IS NULL', new Date().toISOString()) } catch { /* before migration 26 */ } }
     const engineProfile = type === 'code-engine' ? this.profileForEngine() : null
     ws.send(JSON.stringify({
       from: { id: 'hub', type: 'hub' },
@@ -856,27 +873,50 @@ export class ProjectDO extends DurableObject<Env> {
   }
   /** One metered use, from the model proxy: kept, priced now, and debited from the organisation's credits. */
   private async recordUsage(request: Request): Promise<Response> {
-    const b = await request.json().catch(() => ({})) as any
+    return this.j(await this.addUsage(await request.json().catch(() => ({})) as any, 'proxy'))
+  }
+  /** The session an agent (by tag) was working for when a call started: the one turn of that tag open at that moment.
+   *  None, or more than one (agents sharing a tag at once), and the call stays the project's, unattributed. */
+  private turnOfTag(tag: string, at: string): { session: string; principal: string | null } | null {
+    const t = Date.parse(at) || Date.now()
+    const early = new Date(t + 2_000).toISOString()          // the turn's start may reach us a moment after its first call
+    const stale = new Date(t - 6 * 3_600_000).toISOString()  // a turn never closed (an engine gone) stops counting after 6 h
+    const rows = [...this.ctx.storage.sql.exec(`SELECT DISTINCT session, principal FROM usage_turns WHERE tag = ? AND started_at <= ? AND started_at >= ?
+      AND (ended_at IS NULL OR ended_at >= ?)`, tag, early, stale, new Date(t).toISOString())] as any[]
+    return rows.length === 1 ? { session: String(rows[0].session), principal: rows[0].principal ? String(rows[0].principal) : null } : null
+  }
+  private async addUsage(b: any, source: 'proxy' | 'engine'): Promise<{ ok: true; credits_micro: number; priced: boolean; session: string | null }> {
+    if (!b.session && b.tag) { const turn = this.turnOfTag(String(b.tag), String(b.startedAt ?? new Date().toISOString())); if (turn) { b.session = turn.session; b.person ??= turn.principal } }
     const tin = Math.max(0, Math.round(Number(b.in) || 0)), tout = Math.max(0, Math.round(Number(b.out) || 0))
     const price = priceFor(await this.priceList(), String(b.provider ?? ''), b.model ? String(b.model) : undefined)
     const micro = costOf(price, tin, tout)
     const at = new Date().toISOString()
     // Who it was for, when the call said which session it served (the proxy path's session tag).
     const owner = b.session ? ([...this.ctx.storage.sql.exec('SELECT principal, email FROM session_owners WHERE session = ?', String(b.session))][0] as any) : null
-    const principal = owner ? (owner.email ? `email:${String(owner.email).toLowerCase()}` : owner.principal) : null
-    this.ctx.storage.sql.exec('INSERT INTO usage_events (at, kind, provider, model, key_id, tokens_in, tokens_out, ms, credits_micro, priced, principal, session) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      at, 'model.tokens', b.provider ?? null, b.model ?? null, b.keyId ?? null, tin, tout, Number(b.ms) || null, micro, price ? 1 : 0, principal, b.session ?? null)
+    // The person the turn named (the engine knows who asked), else the session's owner as the hub saw them.
+    const principal = (typeof b.person === 'string' && /^(email|user|agent):\S+$/.test(b.person) ? b.person : null) ?? (owner ? (owner.email ? `email:${String(owner.email).toLowerCase()}` : owner.principal) : null)
+    const cacheR = Math.max(0, Math.round(Number(b.cacheRead) || 0)), cacheW = Math.max(0, Math.round(Number(b.cacheWrite) || 0))
+    this.ctx.storage.sql.exec('INSERT INTO usage_events (at, kind, provider, model, key_id, tokens_in, tokens_out, ms, credits_micro, priced, principal, session, tag, source, tokens_cache_read, tokens_cache_write) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      at, 'model.tokens', b.provider ?? null, b.model ?? null, b.keyId ?? null, tin, tout, Number(b.ms) || null, micro, price ? 1 : 0, principal, b.session ?? null, b.tag ?? null, source, cacheR, cacheW)
     const seq = Number(([...this.ctx.storage.sql.exec('SELECT last_insert_rowid() AS id')][0] as any)?.id ?? 0)
-    this.record('usage', String(seq), { at, provider: b.provider ?? null, model: b.model ?? null, key_id: b.keyId ?? null, tokens_in: tin, tokens_out: tout, ms: Number(b.ms) || null, credits_micro: micro, priced: !!price }, at)
+    this.record('usage', String(seq), { at, provider: b.provider ?? null, model: b.model ?? null, key_id: b.keyId ?? null, tokens_in: tin, tokens_out: tout, ms: Number(b.ms) || null, credits_micro: micro, priced: !!price, principal, session: b.session ?? null, tag: b.tag ?? null, source, tokens_cache_read: cacheR, tokens_cache_write: cacheW }, at)
     const org = await this.orgId()
     if (org && micro > 0) {
       await this.env.ORG.get(this.env.ORG.idFromName(org)).fetch('http://do/credits/usage', { method: 'POST', body: JSON.stringify({ project: this._pid, credits_micro: micro, at, principal }) }).catch(() => {})
       if (this.creditCache) this.creditCache.balance -= micro
     }
-    return this.j({ ok: true, credits_micro: micro, priced: !!price })
+    return { ok: true, credits_micro: micro, priced: !!price, session: b.session ?? null }
   }
   private usageSummary(url: URL): Response {
     const since = url.searchParams.get('since') ?? new Date(Date.now() - 30 * 86_400_000).toISOString()
+    // PER PERSON: who used what — every call counted, those no turn named kept as the project's own ('unattributed').
+    if (url.searchParams.get('by') === 'person') {
+      const until = url.searchParams.get('until') ?? '9999'
+      const people = [...this.ctx.storage.sql.exec(`SELECT COALESCE(principal, 'unattributed') AS person, COUNT(*) AS calls, SUM(tokens_in) AS tokens_in, SUM(tokens_out) AS tokens_out,
+        SUM(tokens_cache_read) AS tokens_cache_read, SUM(tokens_cache_write) AS tokens_cache_write, SUM(credits_micro) AS credits_micro, SUM(1 - priced) AS unpriced,
+        MIN(at) AS first_at, MAX(at) AS last_at FROM usage_events WHERE at >= ? AND at < ? GROUP BY person ORDER BY credits_micro DESC, tokens_in DESC`, since, until)]
+      return this.j({ since, until, people })
+    }
     const rows = [...this.ctx.storage.sql.exec(`SELECT substr(at, 1, 10) AS day, provider, model, COUNT(*) AS calls, SUM(tokens_in) AS tokens_in, SUM(tokens_out) AS tokens_out,
       SUM(credits_micro) AS credits_micro, SUM(1 - priced) AS unpriced FROM usage_events WHERE at >= ? GROUP BY day, provider, model ORDER BY day DESC`, since)]
     return this.j({ since, usage: rows })

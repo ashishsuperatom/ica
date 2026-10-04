@@ -6,6 +6,7 @@ import { DashboardsPanel } from './Dashboards'
 import { AgentKeysPanel, AuditPanel } from './AgentKeys'
 import { AccessPoliciesPanel } from './AccessPolicies'
 import { GroupsPanel } from './Groups'
+import { UsagePanel } from './Usage'
 import { useProjectHub } from './hub'
 import { Inspector, SECTIONS, SECTION_LABEL, type Section } from './Inspector'
 import { ConnectorConsole } from './ConnectorConsole'
@@ -419,7 +420,7 @@ function CredentialsPage() {
 function OrgDetailPage() {
   const token = useAuth(); const { orgId } = useParams<{ orgId: string }>(); const api = useApi(token, orgId)
   const [search, setSearch] = useSearchParams()
-  const tab = (search.get('tab') as 'projects' | 'users' | 'settings') || 'projects'
+  const tab = (search.get('tab') as 'projects' | 'users' | 'usage' | 'settings') || 'projects'
   const [projects, setProjects] = useState<any[]>([]); const [users, setUsers] = useState<any[]>([])
   const [showDeleted, setShowDeleted] = useState(false); const nav = useNavigate()
   const [conn, setConn] = useState<{ id: string; apiKey: string; wsUrl: string } | null>(null)   // external-project connection info (copyable panel)
@@ -504,7 +505,7 @@ function OrgDetailPage() {
         )
       })()}
       <div className="row" style={{ gap: 8, marginBottom: 18 }}>
-        {(['projects', 'users', 'settings'] as const).map(t => (
+        {(['projects', 'users', 'usage', 'settings'] as const).map(t => (
           <button key={t} className={`btn ghost ${tab === t ? 'on' : ''}`} onClick={() => setSearch({ tab: t })} style={{ textTransform: 'capitalize' }}>{t}</button>
         ))}
         <label className="row muted" style={{ marginLeft: 'auto', fontSize: 13, cursor: 'pointer' }}>
@@ -538,6 +539,7 @@ function OrgDetailPage() {
         {projects.length === 0 && <div className="empty">No projects yet.</div>}
       </>}
 
+      {tab === 'usage' && <UsagePanel api={api} />}
       {tab === 'users' && <>
         <form onSubmit={createUser} className="row" style={{ marginBottom: 18 }}>
           <input name="email" type="email" placeholder="Email" required className="input" style={{ flex: 2 }} />

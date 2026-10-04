@@ -32,6 +32,7 @@ export interface TokenUsage {
   cacheRead?: number    // prompt-cache HITS (cheap)
   cacheWrite?: number   // prompt-cache writes
   costUsd?: number      // this turn's $ cost, when the backend reports it
+  model?: string        // the model that used them, as the account named it
 }
 
 export interface RunHandlers {
@@ -51,10 +52,11 @@ export interface RunHandlers {
   // THE ANSWER AS IT COMES. An agent's answer starts with a line `:::answer`; each piece of what it says from
   // there on is handed here as it arrives, so a surface can show it before the turn is over.
   onAnswer?: (text: string, blocks?: unknown[]) => void
-  // TODO(usage): the event form of the usage interface — EVERY ICA harness should call this as it learns its
-  // token/cost numbers (a long turn may report incrementally, e.g. per assistant message), so the engine can
-  // stream live cost to the UI just like onEvent streams activity. Not implemented by the harnesses yet.
   onUsage?: (u: TokenUsage) => void
+  // WHO THE TURN IS FOR: the user session it serves. Its model calls are attributed to that session's owner
+  // (see ica/index.ts — usage per person). Unset: the project's own work.
+  forSession?: string
+  forPerson?: string   // and the person asking (`email:…` or their id), when known
 }
 
 // TODO(usage): `usage` — the finished turn's token/cost TOTALS. Every ICA harness should populate it when the
