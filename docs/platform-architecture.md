@@ -83,7 +83,8 @@ user DO marks it published. Programs are created in the engine, so they are also
 sources through our WebSocket datasource bridge. Running locally in the VM stays an option. (The dynamic worker is not
 started yet.)
 
-**OPEN:** who compiles a program and how it is sandboxed.
+**Build and isolation.** We compile programs ourselves (TypeScript, `tsc`). They are not sandboxed now; when a
+sandbox is needed it is only ever the dynamic worker.
 
 ### Org knowledge index
 
@@ -187,20 +188,42 @@ program's React side is a component too.
   | project DO | the project's published things: domains, concepts, program metadata, agents, governance log |
   | user DO | everything of one user: their sessions (a list of every one), their agents and programs not yet published. An admin promotes them to the project/org. |
   | session DO | one per session: every intent, output and log, in DO SQLite |
-  | state DO | the **decision state**: a collection of states with the history of everything that passed through them — part of the decision node. It is not the session's STATE; to be expanded, as the core of decision intelligence. |
+  | state DO | the **decision state** (below) |
 
 - **Two builds of everything:** **cloud** (Cloudflare Worker + Durable Object) and **on-prem** (a Linux, Windows or Mac
   machine, as the engine runs today).
 - **Transport:** our own WebSocket through the Durable Object (not a direct socket to the engine).
 - **R2** holds program bundles and artifacts.
 
+### Decision state
+
+Not the session's STATE: the core of decision intelligence, to be expanded later. For now:
+
+- A state keeps a **memory of the data that has passed through it**.
+- A state is a **collection of other states** that can be part of it (what we first thought of as selectable programs
+  are really states).
+- For each, it holds the **possible outcomes, functions, actions or paths** the user can take, and the **reasoning**
+  behind each.
+
 ### Running it: with and without Docker
 
 - **Primary:** a Linux machine running Docker.
 - **Also:** without Docker, on Windows, macOS or Linux, and inside an Electron application.
-- Without Docker the projects are not isolated by containers, so **every project uses the same ports** (one data source
-  manager, one engine port, …) and requests carry the project they belong to — a **scoping mechanism** instead of a
-  port per project. Docker deployments use the same scoping.
+- In Docker nothing changes: the container isolates the project, and the project id is all there is.
+- Without Docker, projects share one machine, so the **engine side** gives each project its own addresses — nothing
+  changes on the platform. The rule is consistency and safety:
+  - **Allocate on create/start:** every service a project needs (engine, data source manager, a Postgres, …) gets an
+    address from a **registry** of allocations on the machine.
+  - **Never collide:** before using an address, check nothing is listening there (and it is not allocated); otherwise
+    take the next one.
+  - **Release on shutdown:** stopping the project frees its addresses in the registry.
+  - **No hand-picked ports:** nobody opens or changes a port per project by hand.
+- Two ways to give addresses, both acceptable:
+  - **A loopback IP per project** with default ports: `127.0.0.2:4001`, `127.0.0.3:4001`, Postgres at `127.0.0.3:5432`.
+    Nothing conflicts with default installs. Works on Windows and Linux (all of `127.0.0.0/8` is loopback); **macOS only
+    answers on `127.0.0.1` unless each alias is added (`ifconfig lo0 alias`, needs admin).**
+  - **Ports from the registry** on `127.0.0.1` (project 1's data source manager at `127.0.0.1:4008`, …). Works everywhere
+    without admin rights. *Recommended for that reason.*
 
 ### Data warehouse (optional)
 
