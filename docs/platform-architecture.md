@@ -677,6 +677,15 @@ OpenRouter key and meters the call — the same path for all four. The key is ch
 one platform key, or one group (and key) per organisation. A profile chooses it with `provider: 'openrouter'`; the
 subscription routes stay as options. Limits are the credit budgets (a person or a group, monthly or in total).
 
+**One model, many names (built 2026-10-05):** switching the account an agent runs through never means retyping its
+model. The same model is spelled differently by each account (`claude-haiku-4-5` to the Claude Code subscription,
+`anthropic/claude-haiku-4.5` to OpenRouter); a model is matched by its name without vendor prefix or variant, with `.`
+and `-` as one, against the list the account itself publishes (OpenRouter's live list; the catalogue for the others),
+and translated. A profile is checked when it is saved: an account the harness cannot use, a turned-off account, or a
+model the account does not serve is refused with a sentence naming the nearest models; the editor keeps the model when
+the account changes. Every harness translates again at start for anything that reached the engine another way, and none
+ever runs a different model in place of the one named.
+
 **Choices made (2026-10-05):** the platform's own warehouse is Basin, and Analytics Engine is dropped (its 3-month,
 sampled metrics duplicate what the warehouse gives; minutes of lag are fine).
 

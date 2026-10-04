@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import { createAgentSession, DefaultResourceLoader, getAgentDir, SessionManager, SettingsManager, ModelRuntime } from '@earendil-works/pi-coding-agent'
 import type { Session, RunHandlers, RunResult, AgentEvent } from './session.js'   // the shared session interface
 import { endsWhenDone } from './session.js'   // one definition of "the turn's work is done", for every harness
-import { providersOn } from '../../../packages/agent-contract/contract.mjs'
+import { providersOn, modelOn, nearModels } from '../../../packages/agent-contract/contract.mjs'
 
 /** The ChatGPT credential `codex login` already wrote. pi-ai ships an `openai-codex-responses` provider that
  *  wants a Bearer token, and codex keeps a live one — so the two only need introducing, not a second login.
@@ -214,13 +214,20 @@ export function createPiSession(opts: PiSessionOpts): Session {
     // and keep the authorised list where it means something — a laptop, where a local login IS the payer.
     const runtime = await modelRuntime()
     const listed: any[] = proxyBase ? [...runtime.getModels(provider)] : [...await runtime.getAvailable(provider)]
-    const model: any = listed.find((m) => m?.id === modelId) ?? listed[0]
-    if (!model) {
+    if (!listed.length) {
       throw new Error(proxyBase
         ? `pi: provider "${provider}" has no models in the catalog — the model list could not be fetched`
         : `pi: no model available from "${provider}" — authorise one with \`pi\` → /login`)
     }
-    if (model.id !== modelId) console.warn(`[ica:pi] ${modelId} not in ${provider}'s list; using ${model.id}`)
+    // The profile's model in this account's own spelling — never a different model in its place.
+    const ids = listed.map((m) => String(m?.id ?? ''))
+    const same = modelOn(modelId, ids)
+    if (!same) {
+      const near = nearModels(modelId, ids)
+      throw new Error(`pi: ${provider} does not serve ${modelId}${near.length ? ` — did you mean ${near.join(', ')}?` : ''}`)
+    }
+    const model: any = listed.find((m) => m?.id === same)
+    if (same !== modelId) console.log(`[ica:pi] ${modelId} → ${same} (${provider}'s spelling)`)
 
     if (proxyBase) {
       model.baseUrl = `${proxyBase}/${provider}`

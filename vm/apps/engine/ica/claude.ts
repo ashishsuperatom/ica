@@ -14,6 +14,7 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { makeClaudeEventLog, transcriptPath } from './claude-events.js'
 import { boxCredentialsReady } from './box-credentials.js'
+import { modelFor } from './models.js'
 
 // ── FIRST-RUN GATES ──────────────────────────────────────────────────────────────────────────────────────
 // A freshly provisioned box has a credential but no history, and claude-code asks three questions before it
@@ -88,7 +89,7 @@ const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 export function createClaudeSession(opts: ClaudeSessionOpts): Session {
   if (!opts.model) throw new Error('claude-code: no model given — the agent profile must name one')
-  const model = opts.model
+  let model = opts.model
   const bin = opts.bin ?? process.env.CLAUDE_BIN ?? 'claude'
   // Authoritative authoring reference → the REAL system prompt via --append-system-prompt-file (a spawn arg, so
   // no fragile PTY typing; it survives compaction, unlike a file the agent must remember to re-read). Written
@@ -218,6 +219,7 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
       childEnv.ANTHROPIC_API_KEY = ''
       delete childEnv.CLAUDE_CODE_OAUTH_TOKEN
     }
+    model = await modelFor(opts.provider, model)   // in the account's own spelling
     pty = m.spawn(bin, ['--model', model, '--dangerously-skip-permissions', ...(opts.thinking ? ['--effort', ['off', 'minimal'].includes(opts.thinking) ? 'low' : opts.thinking] : []), ...sysRefFlag, ...sessionArgs()],
       { name: 'xterm-256color', cols, rows, cwd: opts.cwd, env: childEnv as any })
     lastDataAt = Date.now()

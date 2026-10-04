@@ -53,3 +53,10 @@ export declare function usageFromSseTail(tail: string): { in: number; out: numbe
 export declare const HARNESSES: Record<string, { providers: string[] }>
 export declare function providersForHarness(harness: string): string[]
 export declare function harnessCanUse(harness: string, provider: string): boolean
+
+/** A model's name without vendor prefix or variant, with `.`, `-`, `_` as one — what "the same model" means. */
+export declare function modelKey(id: string): string
+/** The id `available` uses for `model`; null when it has none or more than one. */
+export declare function modelOn(model: string | undefined | null, available: string[]): string | null
+/** Ids in `available` that look like `model`, best first. */
+export declare function nearModels(model: string, available: string[], n?: number): string[]

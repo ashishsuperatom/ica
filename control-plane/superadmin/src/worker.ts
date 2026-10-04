@@ -24,6 +24,7 @@ import { channelAdapter } from '../../../clients/messaging/index.js'
 import { handleTranscribe } from './transcription/index.js'
 // proxy.superatom.site — self-contained. Delete src/proxy/ and these two lines and nothing else changes.
 import { handleProxyHost, PROXY_SUBDOMAIN } from './proxy/index.js'
+import { checkProfile, modelLists } from './model-lists.js'
 import { createMachine, stopMachine, FLY_APP } from './fly.js'
 // Auth: token primitives + Clerk→platform-token mint (./auth/tokens.ts) and the mobile browser-redirect
 // device flow (./auth/mobile.ts). worker.ts only routes to these; the rules live in the module.
@@ -512,6 +513,8 @@ export default {
         const { UPSTREAMS, isDisabled, disabledReason, HARNESSES } = await import('../../../vm/packages/agent-contract/contract.mjs')
         const r = await g.fetch(new Request('http://do/catalogue'))
         const body = await r.json() as any
+        // OpenRouter's models are its own published list, never one typed here.
+        body.models = await modelLists(body.models ?? {})
         // WITH THEIR ROUTE AND WHETHER THEY ARE TURNED OFF. A disabled provider still belongs in the catalogue
         // — it is a real account whose models we know, and switching it back on should not mean re-entering
         // them — but assigning a project to one is a choice that cannot work, and a plain list of names cannot
@@ -572,8 +575,15 @@ export default {
       const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
       if (request.method === 'GET') return stub.fetch(new Request('http://do/profile'))
       if (request.method === 'PUT') {
+        // CHECKED ON SAVE, and each model put in its account's own spelling — see model-lists.ts.
+        const body = await request.json().catch(() => null) as any
+        if (!body?.profile || typeof body.profile !== 'object') return Response.json({ error: 'body must be { profile }' }, { status: 400 })
+        const g = env.GLOBAL.get(env.GLOBAL.idFromName('global'))
+        const catalogue = ((await (await g.fetch(new Request('http://do/catalogue'))).json()) as any)?.models ?? {}
+        const { profile, problems } = checkProfile(body.profile, await modelLists(catalogue))
+        if (problems.length) return Response.json({ error: problems.join('; '), problems }, { status: 400 })
         return stub.fetch(new Request('http://do/profile', {
-          method: 'PUT', headers: { 'content-type': 'application/json' }, body: await request.text(),
+          method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, profile }),
         }))
       }
       return Response.json({ error: 'use GET or PUT' }, { status: 405 })

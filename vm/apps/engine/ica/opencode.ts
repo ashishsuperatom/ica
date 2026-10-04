@@ -13,6 +13,7 @@ import type { AgentEvent } from './session.js'
 import type { Session, RunHandlers, RunResult } from './session.js'   // the shared session interface
 import { endsWhenDone } from './session.js'   // one definition of "the turn's work is done", for every harness
 import { providersOn, isDisabled } from '../../../packages/agent-contract/contract.mjs'
+import { modelFor } from './models.js'
 
 export interface OpencodeSessionOpts {
   thinking?: string   // the model's variant (low, high, max…); off sends none, the model's default
@@ -107,7 +108,7 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
   if (!opts.provider) throw new Error('opencode: no provider given — the agent profile must name one')
   const providerID = opts.provider
   if (!opts.model) throw new Error('opencode: no model given — the agent profile must name one')
-  const modelID = opts.model
+  let modelID = opts.model
   // The system prompt sent per turn: an explicit `system` (pure-LLM agents) plus the authoritative authoring
   // reference (coding agents). Both fold into opencode's `system` field (which REPLACES its default coding prompt).
   const effSystem = [opts.system, opts.systemReference].filter(Boolean).join('\n\n') || undefined
@@ -223,6 +224,7 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
       try { void client.session.abort({ path: { id: sessionId }, query: { directory: opts.cwd } }) } catch { /* already over */ }
     })
     try {
+      modelID = await modelFor(providerID, modelID)                       // in the account's own spelling
       const res = await client.session.prompt({                         // resolves when the turn is DONE (exact completion)
         path: { id: sessionId },
         query: { directory: opts.cwd },

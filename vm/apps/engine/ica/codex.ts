@@ -13,6 +13,7 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Session, RunHandlers, RunResult, AgentEvent } from './session.js'
 import { endsWhenDone } from './session.js'   // one definition of "the turn's work is done", for every harness
+import { modelFor } from './models.js'
 
 export interface CodexSessionOpts {
   /** 'openrouter': through our proxy and OpenRouter with an API key (the production route); else the ChatGPT login. */
@@ -72,7 +73,7 @@ function normEvent(ev: any): AgentEvent | null {
 
 export function createCodexSession(opts: CodexSessionOpts): Session {
   if (!opts.model) throw new Error('codex: no model given — the agent profile must name one')
-  const model = opts.model
+  let model = opts.model
   const effort = (opts.reasoningEffort ?? process.env.ICA_CODEX_EFFORT ?? 'medium') as CodexSessionOpts['reasoningEffort']
   // Authoritative authoring reference → AGENTS.md, which codex auto-loads from the working directory (its
   // equivalent of CLAUDE.md). So the reference is always in-context with no read-instruction. Written once here.
@@ -101,8 +102,9 @@ export function createCodexSession(opts: CodexSessionOpts): Session {
     networkAccessEnabled: true,
     skipGitRepoCheck: true,                                        // don't refuse outside a git repo
   })
-  function ensure() {
+  async function ensure() {
     if (thread) return
+    model = await modelFor(opts.provider, model)                    // in the account's own spelling
     if (opts.provider === 'openrouter') {
       // Through OpenRouter with an API key — our proxy with the project's key; no ChatGPT login on the box.
       const platform = process.env.SUPERATOM_PLATFORM, project = process.env.ICA_PROJECT, key = process.env.ICA_KEY
@@ -117,7 +119,8 @@ export function createCodexSession(opts: CodexSessionOpts): Session {
     if (running || !queue.length) return
     running = true
     const { prompt, h, resolve } = queue.shift()!
-    ensure()
+    try { await ensure() }
+    catch (e: any) { running = false; resolve({ lastLines: `codex error: ${e?.message ?? e}`, ms: 0 }); return pump() }
     const seen = new Map<string, number>()
     let answer = ''
     const t0 = Date.now()

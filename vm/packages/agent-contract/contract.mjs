@@ -234,3 +234,31 @@ export function usageFromSseTail(tail) {
   }
   return found
 }
+
+// ── ONE MODEL, MANY NAMES ────────────────────────────────────────────────────────────────────────────────
+// The same model is spelled differently by each account that serves it: `claude-haiku-4-5` to the Claude Code
+// subscription, `anthropic/claude-haiku-4.5` to OpenRouter. Which account pays must never make anyone retype the
+// model, so a model is matched by its KEY — the name without the vendor prefix or a `:variant`, with `.`, `-` and
+// `_` treated as one — and translated into the exact id the target account lists. Nothing here knows any vendor or
+// model; it only compares names against a list the account itself provides.
+export const modelKey = (id) =>
+  String(id ?? '').toLowerCase().replace(/^~/, '').replace(/^.*\//, '').replace(/:.*$/, '').replace(/[._-]/g, '-')
+
+/** The id `available` uses for `model`, or null when it has none — or more than one, which is refused rather
+ *  than guessed. Aliases (`~…`) and variants (`…:batch`) are never chosen for a plain name. */
+export function modelOn(model, available) {
+  if (!model || !Array.isArray(available)) return null
+  if (available.includes(model)) return model
+  const k = modelKey(model)
+  const hits = available.filter((a) => !a.startsWith('~') && !a.includes(':') && modelKey(a) === k)
+  return hits.length === 1 ? hits[0] : null
+}
+
+/** A few ids from `available` that look like `model`, for a refusal that says what was meant. */
+export function nearModels(model, available, n = 5) {
+  const k = modelKey(model)
+  const stem = k.split('-')[0]
+  const plain = (available ?? []).filter((a) => !a.startsWith('~') && !a.includes(':'))
+  const score = (a) => { const b = modelKey(a); let i = 0; while (i < b.length && b[i] === k[i]) i++; return i }
+  return plain.filter((a) => modelKey(a).startsWith(stem)).sort((a, b) => score(b) - score(a)).slice(0, n)
+}

@@ -13,6 +13,7 @@ import { GroundingConsole } from './GroundingConsole'
 import { AnalystConsole } from './AnalystConsole'
 import { useSession, SignIn, UserButton } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useSearchParams } from 'react-router-dom'
+import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
 
 // ── COPY, AND SAY SO ─────────────────────────────────────────────────────────
 // Four copy buttons did their work in total silence. Copying a credential is the one moment you MUST know it
@@ -1199,14 +1200,23 @@ function ProjectDetailPage() {
               setDraft(d => {
                 const cur = d ?? { agents: {} }
                 const row: any = { ...(cur.agents?.[a] ?? {}), [k]: v || undefined }
+                // THE MODEL STAYS when the account changes: it is translated into the new account's spelling
+                // (claude-haiku-4-5 ↔ anthropic/claude-haiku-4.5). Cleared, and said so, only when the new
+                // account does not serve it at all.
+                const carry = (provider: string | undefined) => {
+                  if (!row.model || !provider) return
+                  const same = modelOn(row.model, cat?.models?.[provider] ?? [])
+                  if (!same) setProfMsg(`${a}: ${provider} does not serve ${row.model} — choose a model`)
+                  row.model = same ?? undefined
+                }
                 if (k === 'harness') {
                   const can = cat?.harnesses?.[v]?.providers ?? []
                   if (!row.provider || !can.includes(row.provider)) {
                     row.provider = can.length === 1 ? can[0] : undefined
-                    row.model = undefined
+                    if (row.provider) carry(row.provider); else row.model = undefined
                   }
                 }
-                if (k === 'provider' && row.model && !(cat?.models?.[v] ?? []).includes(row.model)) row.model = undefined
+                if (k === 'provider') carry(v)
                 return { ...cur, agents: { ...cur.agents, [a]: row } }
               })
             return (
