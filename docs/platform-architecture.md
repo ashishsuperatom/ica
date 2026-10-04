@@ -47,12 +47,16 @@ concept; the rename and any sub-kinds are part of the migration (below).
 
 ### Program
 
-A program is **always a Node.js module and a React module together** (Python runs through a Node wrapper).
+A program is **always a Node.js bundle and a React bundle together** (Python runs through a Node wrapper). Programs are
+**immutable**: every version is linked by its hash, never edited in place.
 
 - **Node side:** functions that can do more than the agent can — read sources, compute, write, call other services.
   It runs on the engine (on-prem) or in a Worker (cloud).
-- **React side:** a `.tsx` component loaded lazily into the user UI when a block or card needs it.
-- **Attached to the org knowledge index** at the place it serves, so the builder knows what exists.
+- **React side:** loaded lazily; it gives the UI **one or more blocks**.
+- **Attached to the org knowledge index** at a path in its tree (`procurement.contract`, deeper as needed), so it is
+  known what each program serves and within what.
+- **Its contract:** it declares the **slice of STATE it provides** (which can be verified) and the **functions** that
+  can be called. A call produces data, takes an action, or produces another view — a partial appended to the session.
 - **Scoped** global / group / user, with one owner.
 - Used by an agent through a concept that says how to use it.
 
@@ -61,15 +65,25 @@ A program is **always a Node.js module and a React module together** (Python run
 {
   "id": "prg_trips_settlement", "name": "trips-settlement",
   "scope": "group:operations", "owner": "user:ashish",
-  "attachesTo": "org:operations/vehicle-trips",          // node of the org knowledge index
-  "node":  { "entry": "server/index.mjs", "exports": ["trips", "settle"], "runtime": ["on-prem", "cloud"] },
-  "ui":    { "entry": "web/TripsCard.tsx", "blocks": ["unsettled-trips"] },
+  "attachesTo": "operations.vehicle-trips",              // path in the org knowledge index tree
+  "state": { "provides": { "branch": "string", "completed": "boolean", "settled": "boolean" } },  // its slice of STATE
+  "functions": [{ "name": "trips", "returns": "data" }, { "name": "settle", "returns": "action" }, { "name": "openTrip", "returns": "view" }],
+  "node":  { "bundle": "r2://programs/<hash>/node.mjs", "runtime": ["on-prem", "worker"] },
+  "ui":    { "bundle": "r2://programs/<hash>/web.js", "blocks": ["unsettled-trips", "trip"] },
   "reads": ["datasource:TOTALGROUP/trip"],               // datasource index nodes
   "version": 3, "hash": "…"
 }
 ```
 
-**OPEN:** who compiles a program, where its node side runs in each build, how it is sandboxed (to be discussed).
+**Where programs live.** The bundles are in **R2**; their metadata is in the **project DO**. A program a user made and
+has not published lives only in their **user DO**; once submitted and accepted it is added to the project DO, and the
+user DO marks it published. Programs are created in the engine, so they are also in its file system.
+
+**Where programs run.** Now: in the engine on the VM. Later, as users grow: in a **dynamic worker**, reaching data
+sources through our WebSocket datasource bridge. Running locally in the VM stays an option. (The dynamic worker is not
+started yet.)
+
+**OPEN:** who compiles a program and how it is sandboxed.
 
 ### Org knowledge index
 
@@ -102,11 +116,12 @@ A session belongs to **one user**. It has:
 
 1. **An agent** to start with. It mostly stays there; it can hop to, or borrow knowledge from, another agent.
 2. **The programs** it can use — the agent's, filtered by the user's scope.
-3. **One STATE** — a mutable singleton JSON. It holds everything needed to draw what the user sees now. It is not path
-   dependent: the same STATE always draws the same view.
-4. **Partial org state** — the history of what the user was shown: tables, JSON, markdown, artifacts (files,
-   dashboards, reports). Each entry is a slice of the organisation's whole, ever-changing state.
-5. **Blocks** — the thread on screen; each block shows partial org state.
+3. **One STATE** — a mutable singleton JSON: the state of the **last block**. It holds everything needed to draw it and
+   is not path dependent. Earlier blocks are never changed: changing something in an earlier block **creates a new
+   branch** from it (the thread is a tree, as in the SLOB build), and that branch's last block has the STATE.
+4. **Partial org state** — the **session output**: each turn's answer, appended. Each entry is a slice of the
+   organisation's whole, ever-changing state (tables, JSON, markdown, artifacts: files, dashboards, reports).
+5. **Blocks** — the thread on screen, a tree; each block shows partial org state.
 
 ```jsonc
 // STATE (one per session; shape given by the agent's state schema)
@@ -119,12 +134,7 @@ A session belongs to **one user**. It has:
   "kind": "table", "ref": "data/unsettled-trips.json", "markdown": "365 trips … :::table data/unsettled-trips.json" }
 ```
 
-**OPEN:** with several blocks on screen, does STATE hold each block's sub-state (`state.blocks[id]`, only the active
-one changing), or describe only the latest view while older blocks are frozen partial org state? *Best guess: STATE
-holds `blocks[id]` so any block can still be changed in place; history lives only in partial org state.*
-
-**OPEN:** when a session borrows from another agent, does that agent's STATE shape join the session's STATE, or only
-its knowledge? *Best guess: knowledge only; hopping starts a new agent's STATE inside the same session.*
+**Later:** borrowing from another agent — details to surface after the base version.
 
 ### Intent
 
@@ -139,7 +149,7 @@ its knowledge? *Best guess: knowledge only; hopping starts a new agent's STATE i
 ```
 
 **Same view or new block.** If an intent stays within what the current block shows (a filter, a window, a page), it
-changes STATE and **replaces** that block's partial org state — no new history entry. If it asks for something the
+changes STATE and **replaces** that (last) block's partial org state — no new history entry. If it asks for something the
 block does not show, it opens a **new block**. This holds for both kinds: a question can just change a filter, and a
 control can open a new block.
 
@@ -164,13 +174,33 @@ program's React side is a component too.
 
 ### Storage and builds
 
-- **Platform first.** The composition graph, its concepts, programs, agents and governance log live in the platform
-  and are synced to the engine; when the engine is connected both hold them.
+- **The platform is the source of truth; the engine is a replica.** Sync runs immediately whenever the engine is
+  connected, and everything important is always synced to the local system as well.
+  - **Engine → platform** (made in the engine): sessions and conversations, programs, dashboards.
+  - **Platform → engine** (made in the platform): domains and their concepts.
+  - Later, local copies may be evicted (long-unused users' sessions) and synced back when needed. Not now.
+- **Durable Objects, in a hierarchy: org → project → user.**
+
+  | DO | Holds |
+  |---|---|
+  | org DO | the organisation |
+  | project DO | the project's published things: domains, concepts, program metadata, agents, governance log |
+  | user DO | everything of one user: their sessions (a list of every one), their agents and programs not yet published. An admin promotes them to the project/org. |
+  | session DO | one per session: every intent, output and log, in DO SQLite |
+  | state DO | the **decision state**: a collection of states with the history of everything that passed through them — part of the decision node. It is not the session's STATE; to be expanded, as the core of decision intelligence. |
+
 - **Two builds of everything:** **cloud** (Cloudflare Worker + Durable Object) and **on-prem** (a Linux, Windows or Mac
   machine, as the engine runs today).
 - **Transport:** our own WebSocket through the Durable Object (not a direct socket to the engine).
-- **OPEN:** "platform" as system of record = Durable Object storage / D1 / R2? *Best guess: DO storage for logs and
-  graph, R2 for program bundles and artifacts.*
+- **R2** holds program bundles and artifacts.
+
+### Running it: with and without Docker
+
+- **Primary:** a Linux machine running Docker.
+- **Also:** without Docker, on Windows, macOS or Linux, and inside an Electron application.
+- Without Docker the projects are not isolated by containers, so **every project uses the same ports** (one data source
+  manager, one engine port, …) and requests carry the project they belong to — a **scoping mechanism** instead of a
+  port per project. Docker deployments use the same scoping.
 
 ### Data warehouse (optional)
 
@@ -259,7 +289,8 @@ more than asked; long silent work; answering a different question; fixing the sy
 | dashboard (separate app) | an agent with a dashboard attached |
 | user UI chat | the user UI with the block · card · thread system |
 | `vm/packages/project-template` | replaced by the template above |
-| engine as the store | platform first, synced to the engine |
+| engine as the store | platform is the truth, the engine a replica; sessions and programs synced up, domains and concepts synced down |
+| a port per project (data source manager, engine) | one set of ports, every request scoped by project |
 
 ## Order of work (proposed)
 
@@ -269,4 +300,6 @@ more than asked; long silent work; answering a different question; fixing the sy
    and procurement code.
 4. Move one agent (Total Group vendors and hire) onto it end to end.
 5. The builder agent; the org knowledge index; governance.
-6. Platform-first storage and the cloud build; the optional warehouse.
+6. The DO hierarchy (user, session, state) and engine ↔ platform sync; the optional warehouse.
+7. Project scoping on shared ports, so the system runs without Docker (Windows, macOS, Linux, Electron).
+8. Programs in dynamic workers (later).
