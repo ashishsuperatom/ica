@@ -200,8 +200,10 @@ control can open a new block.
 **What else is needed**
 
 1. **When a package runs again (decided).** Its functions see the whole STATE, so nothing has to be passed. A package
-   runs when its own part changes or when one of its actions is invoked (a run button). **If the program's author
-   wants automatic runs**, the package declares the paths it **reads**; a change there (a global filter) re-runs it
+   runs when its own part changes or when one of its actions is invoked (a run button). **Who calls `run`:** every
+   program comes with its own UI, which knows its program and keeps calling `run` as its part changes; where an agent
+   drives it instead, the agent knows from the package's `doc` to call `run` after changing STATE. **If the program's
+   author wants automatic runs**, the package declares the paths it **reads**; a change there (a global filter) re-runs it
    without a click — in dependency order, a cycle refused when the package loads.
 2. **Actions (decided).** `run` is the default function, not the only one: a program suggests its actions, and an
    action can be a function that does anything. **Every function gets the whole STATE, immutable** (decided): it can
