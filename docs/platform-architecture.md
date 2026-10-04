@@ -186,15 +186,15 @@ control can open a new block.
 | **STATE** | the last block's JSON: `{ packages: { <name>: <program hash> }, <name>: <slice>, … }` |
 | **package** | a program taking part in STATE |
 | **slice** | the part of STATE a package owns, at `STATE.<package>` |
-| **`run`** | a package's one function: `run(slice, reads, context) → { slice?, answer?, actions? }` |
+| **`run`** | the package's **default** function. A program may suggest other functions (its actions); each can do anything. Every one is called with **the package's state** (its slice): `fn(slice) → { slice?, answer?, actions? }` |
 | **op** | `set` · `add` · `remove` on a path — the only way STATE changes |
-| **action** | a named list of ops a package suggests ("cap supplier", "go to this item"), shown as possible actions |
+| **action** | something a program suggests, shown in the session's possible actions: a function of the package (called with its state), or just ops |
 | **command** | a write outside the session (approve, save a plan): goes through the governance path, not STATE |
 | **answer** | what a run or the ICA shows: appended to the answer history (new block) or replacing the current block's |
 | **`doc`** | a package's small documentation, injected into the agent |
 | **`inspect`** | on every package function: where its implementation is (`package.run.inspect()`) |
 | **answer history** | the session's answers, appended — the data from the sources attached to the session |
-| **`STATE.agent`** | the ICA's own slice: any keys it needs so STATE fully describes the view |
+| **`STATE.agent`** | the ICA's own slice: mostly `question` (the canonical question for this STATE) and `seeing` (what the answer history shows), plus any keys it needs |
 | **`<Intent>`** | the UI's one way to change STATE: `ops` and `to="new" \| "current"`; logs and traces each intent |
 
 **What else is needed**
@@ -203,10 +203,11 @@ control can open a new block.
    the chosen period). Besides the slice it owns, a package declares the paths it **reads**. After ops, `run` is called
    for every package whose owned or read paths changed, in dependency order; a cycle is refused when the package
    loads. Without this, a filter change would not re-run the program that depends on it.
-2. **Actions are data, not functions.** "Call a function with parameters" becomes: an action is ops (it sets the
-   package's parameters), then `run`. One code path per package stays one function; the agent and the UI use the same
-   ops; every action is replayable and logged. A function that returns "a new sub-state to set" is `run` returning
-   `slice`.
+2. **Actions (decided).** `run` is the default function, not the only one: a program suggests its actions, and an
+   action can be a function that does anything. Every function is called with **the package's state** — its slice —
+   and returns a new slice (which replaces `STATE.<package>`, nothing else), an answer, or more actions. An action can
+   also be plain ops followed by `run`. **OPEN:** whether a function also receives the paths it reads from other
+   packages, or only its own slice.
 3. **Commands are separate.** Writing something (approving, saving) is not a STATE change; it goes through the one
    write path (who → may they → approval → version → event → log). A package can offer commands beside its actions.
 4. **Validation.** Each slice has a schema; an op that breaks it is refused with a sentence, never guessed.
@@ -247,6 +248,9 @@ A fixed vocabulary of STATE and functions will meet questions it cannot express.
    implementation and run it for this session. When that happens often, System 4 (later) or a person notices and
    makes it a variation of the package's actions or state.
 2. **The agent's own STATE keys.** The ICA may store any keys it wants in STATE, in its own slice (`STATE.agent`).
+   Mostly two:
+   - `question` — a **canonical question** that represents the current STATE;
+   - `seeing` — a **description of what is in the current answer history**, what the user is looking at.
    STATE is a singleton and the view itself, never dependent on the path that led to it; when the packages' keys cannot
    express where the user is (what an answer said, what to follow up), the agent writes it there — from the
    conversation and the answer history — so nothing is lost.
