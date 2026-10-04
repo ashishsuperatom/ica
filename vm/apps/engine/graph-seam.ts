@@ -9,6 +9,7 @@
 //   graph:leave   { domain, concept, reason? }
 //   graph:suggest { name, kind, body, reason }         suggest a change to someone else's node
 //   graph:decide  { id, verdict: approved|rejected|withdrawn, reason? }
+//   graph:publish { name, scope, reason }             suggest a node be seen more widely (a group, everyone); an admin decides
 //
 // → graph:reply { … } or graph:refused { reason }. Who acts is the hub's word (identity.ts); the rules are the
 // composition graph's governance (owner changes, others suggest, owner decides). A person sees global nodes and their
@@ -18,7 +19,7 @@ import { join } from 'node:path'
 import { Store, compose, domains, governance as g, GovernanceRefusal, type Kind } from '@superatom/composition-graph'
 import { whoIs, IdentityRefusal } from './identity.js'
 
-export const GRAPH_MESSAGES = new Set(['graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide'])
+export const GRAPH_MESSAGES = new Set(['graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish'])
 
 export function createGraphSeam(d: { projectDir: string; send: (to: any, msg: Record<string, unknown>) => void; file?: string }) {
   let store: Store | null = null
@@ -58,6 +59,7 @@ export function createGraphSeam(d: { projectDir: string; send: (to: any, msg: Re
           return ok({ ...r, node: s.get(payload.domain) })
         }
         case 'graph:suggest': return ok({ suggestion: g.suggest(s, who, str(payload.name, 'name'), str(payload.kind, 'kind') as Kind, payload.body, String(payload.reason ?? '')) })
+        case 'graph:publish': return ok({ suggestion: g.publish(s, who, str(payload.name, 'name'), str(payload.scope, 'scope') as any, String(payload.reason ?? '')) })
         case 'graph:decide': {
           const verdict = String(payload.verdict ?? '')
           if (!['approved', 'rejected', 'withdrawn'].includes(verdict)) throw new GovernanceRefusal('a verdict is approved, rejected or withdrawn')

@@ -55,6 +55,10 @@ export default function Agents({ request, onOpen, scopes }: { request: Request; 
       {agents.map((a) => (
         <div key={a.id} className="sa-block" style={{ display: 'flex', gap: 12, alignItems: 'baseline' }}>
           <strong style={{ flex: 1 }}>{a.name}</strong><span className="sa-session-empty">{a.scope === 'global' ? 'everyone' : a.scope}</span>
+          {a.scope !== 'global' && <button type="button" className="sa-session-action" title="Ask an administrator to make it seen by everyone in the project" onClick={async () => {
+            const r = await request({ t: 'graph:publish', name: a.id, scope: 'global', reason: 'ready for everyone in the project' })
+            setErr(r.t === 'graph:reply' ? `Asked to publish ${a.name} — an administrator decides.` : r.reason ?? 'Could not ask to publish it.')
+          }}>Publish to everyone</button>}
           <button type="button" className="sa-session-action" onClick={() => onOpen(a.id)}>Open</button>
         </div>
       ))}

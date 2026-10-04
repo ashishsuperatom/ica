@@ -68,11 +68,30 @@ export function write(store: Store, actor: Actor, name: string, kind: Kind, body
   const may = mayWrite(store, actor, name)
   if (!may.ok) throw new GovernanceRefusal(may.why)
   const cur = ownerOf(store, name)
+  // PUBLISHING IS DECIDED: making a node seen more widely (a person's → a group's → everyone's) is suggested, and an admin
+  // decides (publish below); only an admin widens one directly.
+  if (cur && place.scope && !actor.admin && reach(place.scope) > reach(cur.scope)) throw new GovernanceRefusal(`making "${name}" seen by ${place.scope === 'global' ? 'everyone' : place.scope} is decided by an admin — suggest it (publish)`)
   if (kind === 'domain') for (const c of conceptsOf(body as DomainBody)) if (!store.get(c)) throw new GovernanceRefusal(`the domain names a concept that does not exist: "${c}"`)
   if (kind === 'agent') { const d = store.get((body as any).domain); if (!d || d.kind !== 'domain') throw new GovernanceRefusal(`the agent names a domain that does not exist: "${(body as any).domain}"`) }
   try {
     return store.put(name, kind, body, { by: actor.id, reason: ctx.reason, from: ctx.from }, { ...(place.scope ? { scope: place.scope } : {}), ...(cur ? {} : { owner: actor.id }) })
   } catch (e: any) { throw new GovernanceRefusal(e?.message ?? String(e)) }
+}
+
+/** How widely a scope is seen: a person's, a group's, everyone's. */
+const reach = (s: string | null | undefined) => (s === 'global' ? 2 : String(s ?? '').startsWith('group:') ? 1 : 0)
+
+/** Suggest that a node be seen more widely (published to a group, or to everyone). An admin decides; approving it changes
+ *  the node's scope, nothing else. */
+export function publish(store: Store, actor: Actor, name: string, scope: Scope, reason: string): Suggestion {
+  if (!reason?.trim()) throw new GovernanceRefusal('publishing says why')
+  const cur = store.get(name)
+  if (!cur) throw new GovernanceRefusal(`there is no "${name}"`)
+  if (!/^(global|group:[\w.-]+|user:[\w.:@-]+)$/.test(String(scope))) throw new GovernanceRefusal(`"${scope}" is not a scope`)
+  if (reach(scope) <= reach(cur.scope)) throw new GovernanceRefusal(`"${name}" is already seen at least that widely (${cur.scope})`)
+  if (cur.owner !== actor.id && !actor.admin) throw new GovernanceRefusal(`only ${cur.owner ?? 'its owner'} or an admin publishes "${name}"`)
+  const r = store.db.prepare('INSERT INTO suggestion (at, name, kind, body_hash, base_hash, scope, by, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(Date.now(), name, cur.kind, cur.hash, cur.hash, scope, actor.id, reason.trim())
+  return get(store, Number(r.lastInsertRowid))!
 }
 
 /** Put a concept into a domain's composition (at a position), or take it out — a change to the domain. */
@@ -131,6 +150,7 @@ export function decide(store: Store, actor: Actor, id: number, verdict: 'approve
     const cur = store.get(s.name)
     const may = mayWrite(store, actor, s.name)
     if (!may.ok) throw new GovernanceRefusal(cur?.owner ? `only ${cur.owner} (the owner) or an admin decides on suggestion ${id}` : `"${s.name}" has no owner — an admin decides on suggestion ${id}`)
+    if (s.scope && !actor.admin) throw new GovernanceRefusal(`publishing "${s.name}" is decided by an admin`)
     if (verdict === 'approved') {
       if (!cur || cur.hash !== s.baseHash) throw new GovernanceRefusal(`"${s.name}" changed after suggestion ${id} was made — it cannot be approved as it is; ask for a new suggestion`)
       if (s.kind === 'domain') for (const c of conceptsOf(s.body as DomainBody)) if (!store.get(c)) throw new GovernanceRefusal(`the suggested domain names a concept that does not exist: "${c}"`)
@@ -140,7 +160,7 @@ export function decide(store: Store, actor: Actor, id: number, verdict: 'approve
   store.db.exec('SAVEPOINT cg_decide')
   try {
     store.db.prepare('INSERT INTO decision (suggestion, at, by, verdict, reason) VALUES (?, ?, ?, ?, ?)').run(id, Date.now(), actor.id, verdict, reason ?? null)
-    if (verdict === 'approved') store.put(s.name, s.kind, s.body, { by: actor.id, reason: `approved suggestion ${id} by ${s.by}: ${s.reason}${reason ? ` — ${reason}` : ''}`, from: `suggestion:${id}` })
+    if (verdict === 'approved') store.put(s.name, s.kind, s.body, { by: actor.id, reason: `approved suggestion ${id} by ${s.by}: ${s.reason}${reason ? ` — ${reason}` : ''}`, from: `suggestion:${id}` }, s.scope ? { scope: s.scope } : {})
     store.db.exec('RELEASE cg_decide')
   } catch (e) { store.db.exec('ROLLBACK TO cg_decide'); store.db.exec('RELEASE cg_decide'); throw e }
   return get(store, id)!

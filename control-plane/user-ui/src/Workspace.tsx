@@ -210,9 +210,26 @@ function SessionSteps({ session, request, projectId, token, agentName, onArtifac
     })
   }, [view, msg, paths, busy, deciding, agentName, fetchFile, request, session, loadArtifacts])   // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [forking, setForking] = useState(false)
+  const fork = async (title: string) => {
+    const m = await request({ t: 'session:fork', session, name: title, title })
+    if (m?.t === 'session:forked') { notify(`${title} made — yours until it is published`, 'note'); setForking(false) }
+    else notify(m?.reason ?? 'The agent could not be made', 'refused')
+  }
   return (
     <div ref={root} className="sa-work">
       {refused && <p className="sa-alert" role="alert"><span className="sa-alert__text">{refused}</span></p>}
+      {view && view.blocks.length > 1 && (
+        <div className="sa-work__tools">
+          {forking
+            ? <form className="sa-work__fork" onSubmit={(e) => { e.preventDefault(); const f = e.currentTarget.elements.namedItem('title') as HTMLInputElement; if (f.value.trim()) void fork(f.value.trim()) }}>
+                <input id="sa-fork-title" name="title" className="sa-input" placeholder="The new agent's title" autoFocus />
+                <button className="sa-btn sa-btn--primary">Make the agent</button>
+                <button type="button" className="sa-btn" onClick={() => setForking(false)}>Cancel</button>
+              </form>
+            : <button className="sa-btn sa-btn--link" title="An agent that knows what this session learned: the questions asked and the steps taken" onClick={() => setForking(true)}>Make an agent from this session</button>}
+        </div>
+      )}
       <Steps items={items} onSwitch={(b) => void request({ t: 'session:goto', session, block: b }).then(take)}
         empty={!refused && <p className="sa-note">Opening the session…</p>}
         after={

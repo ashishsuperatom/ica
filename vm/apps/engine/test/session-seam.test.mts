@@ -156,3 +156,29 @@ test('words in a session: the agent is told the step and its programs; its :::in
   assert.equal(words.view.blocks.length, 3)
   assert.equal(opened.view.leaf, words.view.blocks[0].id)
 })
+
+test('an agent made from a session: forked with its lineage, on a domain of its own with what the session learned as worked examples, the person\'s own', async () => {
+  const { Store, governance } = await import('@superatom/composition-graph')
+  const file = join(home, 'db-fork.sqlite')
+  const store = new Store(file)
+  governance.write(store, { id: 'user:builder', admin: true, scopes: [] } as any, 'vendors-and-hire', 'domain', { capabilities: [], concepts: [], files: [] }, { reason: 'seed' })
+  store.close?.()
+  const out: any[] = []
+  const answers = [{ markdown: 'Hyderabad it is.\n:::intent {"ops":[{"op":"set","path":"trips.branch","value":"HYDERABAD"}],"to":"current"}', blocks: [] }]
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), graphFile: file, ask: async () => answers.shift()! })
+  const from = { id: 'ws1', type: 'runtime', userId: 'u9', scopes: ['user:u9'] }
+  const ask = async (payload: any) => { await s.handle(payload, from); return out.at(-1) }
+  await ask({ t: 'session:open', session: 'f1', agent: 'trips' })
+  await ask({ t: 'session:intent', session: 'f1', kind: 'language', text: 'what about hyderabad?' })
+  await ask({ t: 'session:intent', session: 'f1', call: { package: 'trips', fn: 'run' }, to: 'new' })
+  assert.match((await ask({ t: 'session:fork', session: 'f1', name: '', title: '' })).reason, /a name and a title/)
+  const forked = await ask({ t: 'session:fork', session: 'f1', name: 'Hyderabad trips', title: 'Hyderabad trips' })
+  assert.equal(forked.t, 'session:forked')
+  assert.deepEqual([forked.agent, forked.domain, forked.concept, forked.scope], ['hyderabad-trips', 'hyderabad-trips-domain', 'hyderabad-trips-learned', 'user:u9'])
+  const g = new Store(file)
+  const agent = g.get('hyderabad-trips')!
+  assert.equal(agent.kind, 'agent'); assert.equal(agent.scope, 'user:u9')
+  assert.deepEqual([agent.body.forkedFrom, agent.body.fromSession, agent.body.domain, agent.body.programs], ['trips', 'f1', 'hyderabad-trips-domain', ['unsettled-trips']])
+  assert.deepEqual(g.get('hyderabad-trips-domain')!.body.concepts, ['hyderabad-trips-learned'])
+  assert.deepEqual(g.get('hyderabad-trips-learned')!.body.items, [{ question: 'what about hyderabad?', steps: ['ran trips.run'] }])
+})

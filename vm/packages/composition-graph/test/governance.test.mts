@@ -99,3 +99,19 @@ test('an agent is a node like any other: checked, owned, governed, its domain mu
   assert.equal(a.kind, 'agent'); assert.equal(a.owner, 'user:ana'); assert.equal(a.scope, 'group:ops')
   assert.throws(() => g.write(s, bo, 'vehicle-trips', 'agent', { title: 'mine', domain: 'trips', programs: [] }), /suggest the change instead/)
 })
+
+test('publishing is decided: a person cannot widen their own node; they suggest it, an admin approves, the scope changes and nothing else', () => {
+  const s = fresh()
+  g.write(s, ana, 'mine', 'concept', text('Ana\'s way of reading settlement.'), {}, { scope: 'user:ana' })
+  assert.throws(() => g.write(s, ana, 'mine', 'concept', text('Ana\'s way of reading settlement.'), {}, { scope: 'global' }), /is decided by an admin — suggest it \(publish\)/)
+  assert.throws(() => g.publish(s, bo, 'mine', 'global', 'it is good'), /only user:ana or an admin publishes/)
+  assert.throws(() => g.publish(s, ana, 'mine', 'user:ana', 'same'), /already seen at least that widely/)
+  const sug = g.publish(s, ana, 'mine', 'group:finance', 'finance should read it this way')
+  assert.equal(sug.scope, 'group:finance')
+  assert.throws(() => g.decide(s, ana, sug.id, 'approved'), /publishing "mine" is decided by an admin/)
+  const before = s.get('mine')!.hash
+  g.decide(s, admin, sug.id, 'approved', 'agreed')
+  assert.equal(s.get('mine')!.scope, 'group:finance')
+  assert.equal(s.get('mine')!.hash, before)
+  assert.equal(g.write(s, admin, 'mine', 'concept', text('Ana\'s way of reading settlement.'), {}, { scope: 'global' }).changed !== undefined, true)   // an admin may widen directly
+})

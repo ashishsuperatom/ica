@@ -28,7 +28,7 @@ import { checkAgent, type AgentSpec, type Intent } from '@superatom/platform-typ
 import { ProgramStore, ProgramError, loadPackage } from '@superatom/programs'
 import { createStateEngine, StateRefusal, type StateEngine } from '@superatom/state'
 import { createSessions, fileLog, history, replay, SessionRefusal, type SessionLog, type SessionView } from '@superatom/session'
-import { Store } from '@superatom/composition-graph'
+import { Store, governance as g, GovernanceRefusal } from '@superatom/composition-graph'
 import { cardOf } from './answer-card.js'
 import { whoIs, type Who } from './identity.js'
 import { asReader, currentReader, AccessRefusal } from './access.js'
@@ -74,8 +74,12 @@ export function intentOf(markdown: string): { markdown: string; intent: { ops?: 
 
 export class SessionSeamRefusal extends Error {}
 
+const pathOfView = (v: SessionView, block: string) => { const out: string[] = []; for (let b: string | null = block; b; b = v.blocks.find((x) => x.id === b)?.parent ?? null) out.unshift(b); return out }
+/** A step's intent in words: what was run, taken or set. */
+const describe = (i: Intent) => i.call ? `ran ${i.call.package}.${i.call.fn}` : i.action ? `took ${i.action.package} · ${i.action.id}` : (i.ops ?? []).map((o: any) => `${o.op} ${o.path}${'value' in o ? ` = ${JSON.stringify(o.value)}` : ''}`).join(', ') || 'a change'
+
 /** The messages this seam takes (session:new, session:load and session:compact are the chat's). */
-export const SESSION_MESSAGES = new Set(['session:agents', 'session:open', 'session:intent', 'session:goto', 'session:get', 'session:file'])
+export const SESSION_MESSAGES = new Set(['session:agents', 'session:open', 'session:intent', 'session:goto', 'session:get', 'session:file', 'session:fork'])
 
 export function createSessionSeam(d: SessionSeamDeps) {
   const agentsDir = join(d.projectDir, 'agents')
@@ -226,9 +230,11 @@ export function createSessionSeam(d: SessionSeamDeps) {
       const session = String(payload.session ?? '')
       if (!/^[\w-]{1,80}$/.test(session)) throw new SessionSeamRefusal('a session message names its session')
       if (t === 'session:open') {
-        const { sessions, spec } = await runtimeFor(String(payload.agent ?? ''))
+        const { sessions, spec, packages } = await runtimeFor(String(payload.agent ?? ''))
         if (!visible(spec.scope)) throw new SessionSeamRefusal(`there is no agent "${spec.id}"`)
-        return reply(await present(sessions.open({ session, user, agent: spec.id, start: spec.start })))
+        // An agent opens on its starting screen: its programs run, as a dashboard opens with its data (unless asked not to).
+        const run = payload.run === false ? [] : packages.map((p) => p.name)
+        return reply(await present(await asReader(whoIs(from), () => sessions.openAndRun({ session, user, agent: spec.id, start: spec.start, run }))))
       }
       if (t === 'session:get') {
         const v = replay(log.read(session), payload.asOf ? String(payload.asOf) : undefined)
@@ -238,6 +244,37 @@ export function createSessionSeam(d: SessionSeamDeps) {
       const { sessions, view } = await sessionRuntime(session)
       viewOf(view, user)
       if (t === 'session:goto') return reply(await present(sessions.goTo(session, String(payload.block ?? ''), user)))
+      // MAKE AN AGENT FROM THIS SESSION: forked from the session's agent (lineage kept), on a domain of its own — the
+      // agent's domain and what this session learned, as worked examples (each question and the steps taken after it).
+      // The person's own until it is published; every node written through the graph's governance.
+      if (t === 'session:fork') {
+        const s = graphStore()
+        if (!s) throw new SessionSeamRefusal('this project keeps no composition graph to make an agent in')
+        const name = String(payload.name ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+        const title = String(payload.title ?? '').trim()
+        if (!name || !title) throw new SessionSeamRefusal('a new agent has a name and a title')
+        const spec = readAgent(view.agent)
+        const base = s.get(spec.domain)
+        if (!base || base.kind !== 'domain') throw new SessionSeamRefusal(`the agent's domain "${spec.domain}" is not in the graph`)
+        const items: { question: string; steps: string[] }[] = []
+        for (const id of pathOfView(view, view.leaf)) {
+          const b = view.blocks.find((x) => x.id === id)!
+          const a = b.answer ? view.answers.find((x) => x.id === b.answer) : undefined
+          const i = a ? view.intents.find((x) => x.id === a.cause) : undefined
+          if (!i) continue
+          if (i.kind === 'language') items.push({ question: String(i.text ?? ''), steps: [] })
+          else (items.at(-1) ?? (items.push({ question: `Starting from ${spec.name}`, steps: [] }), items.at(-1)!)).steps.push(describe(i))
+        }
+        if (!items.length) throw new SessionSeamRefusal('this session has no steps to learn from yet')
+        const who = whoIs(from)
+        const scope = `user:${String(who.id).replace(/^user:/, '')}`
+        const concept = `${name}-learned`, domain = `${name}-domain`
+        const why = `made from session ${session} of ${spec.id}`
+        g.write(s, who, concept, 'concept', { title: `What was learned in "${title}"`, form: 'worked', items }, { reason: why }, { scope: scope as any })
+        g.write(s, who, domain, 'domain', { ...(base.body as any), concepts: [...((base.body as any).concepts ?? []), concept], forkedFrom: spec.domain }, { reason: why }, { scope: scope as any })
+        const r = g.write(s, who, name, 'agent', { title, domain, programs: spec.programs, tools: spec.tools ?? [], ica: spec.ica, ...(spec.start ? { start: spec.start } : {}), ui: spec.ui, forkedFrom: spec.id, fromSession: session }, { reason: why }, { scope: scope as any })
+        return reply({ t: 'session:forked', agent: name, concept, domain, scope, node: r })
+      }
       if (t === 'session:intent') {
         const who = whoIs(from)
         if (payload.kind === 'language') {
@@ -276,7 +313,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       }
       throw new SessionSeamRefusal(`there is no ${t}`)
     } catch (e: any) {
-      if (e instanceof SessionSeamRefusal || e instanceof SessionRefusal || e instanceof ProgramError || e instanceof StateRefusal || e instanceof AccessRefusal) return reply({ t: 'session:refused', reason: e.message })
+      if (e instanceof SessionSeamRefusal || e instanceof SessionRefusal || e instanceof ProgramError || e instanceof StateRefusal || e instanceof AccessRefusal || e instanceof GovernanceRefusal) return reply({ t: 'session:refused', reason: e.message })
       console.error('[session]', e?.stack ?? e)
       return reply({ t: 'session:refused', reason: `the session could not do that: ${e?.message ?? e}` })
     }

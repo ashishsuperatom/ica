@@ -143,6 +143,25 @@ export function createSessions(opts: SessionsOptions) {
     return { session: read(i.session), block, opened: opening, answer, changed: out.changed, ran: out.ran }
   }
 
+  /** Open a session and run its programs at once, so its first step shows what the agent's programs show — a dashboard
+   *  opens with its data. Each package's run sees the STATE the one before it left; their answers are one answer. */
+  async function openAndRun(o: Parameters<typeof open>[0] & { run: string[] }): Promise<SessionView> {
+    const v = open(o)
+    if (!o.run.length) return v
+    let out: Outcome = { state: v.state, changed: [], ran: [] }
+    try {
+      for (const pkg of o.run) { const r = await opts.engine.call(out.state, pkg, 'run'); out = { state: r.state, changed: [...out.changed, ...r.changed], ran: [...out.ran, ...r.ran] } }
+    } catch (e) {
+      if (e instanceof StateRefusal) throw new SessionRefusal(e.problems ?? [e.message])
+      throw e
+    }
+    const at = now(), block = v.leaf, hash = stateHash(out.state)
+    if (hash !== stateHash(v.state)) opts.log.append(o.session, { t: 'state', at, block, state: out.state, stateHash: hash, intent: 'open' })
+    const said = answerOf(out.ran)
+    if (said) opts.log.append(o.session, { t: 'answer', at, answer: { id: id('ans'), session: o.session, block, cause: 'open', stateHash: hash, at, markdown: said.markdown, files: said.files, ...(said.blocks ? { blocks: said.blocks } : {}), ...(said.world ? { world: said.world } : {}) } })
+    return read(o.session)
+  }
+
   /** Make another block the current one (a person went back to it). Nothing else changes. */
   function goTo(session: string, block: string, by: string): SessionView {
     const v = read(session)
@@ -152,5 +171,5 @@ export function createSessions(opts: SessionsOptions) {
     return read(session)
   }
 
-  return { open, intent, goTo, read }
+  return { open, openAndRun, intent, goTo, read }
 }
