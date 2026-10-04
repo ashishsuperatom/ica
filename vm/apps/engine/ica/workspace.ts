@@ -33,7 +33,9 @@ const MANAGER = process.env.DATASOURCE_URL ?? '${managerUrl}'
 const READER = new URL('../.reader.json', import.meta.url)
 function policiesFor(dataSourceId) {
   let r = null
-  try { r = JSON.parse(readFileSync(READER, 'utf8')) } catch { return [] }   // no file: not a person's turn (the platform's own work)
+  // The platform running a program for someone hands their access in SA_READER; an agent's turn writes it beside the folder.
+  if (process.env.SA_READER) { try { r = JSON.parse(process.env.SA_READER) } catch { throw new Error('your data access could not be read — nothing was read') } }
+  else try { r = JSON.parse(readFileSync(READER, 'utf8')) } catch { return [] }   // no file: not a person's turn (the platform's own work)
   if (r && r.unchecked) throw new Error('your data access could not be checked — nothing was read')
   return (r && r.policies && r.policies[dataSourceId]) || []
 }

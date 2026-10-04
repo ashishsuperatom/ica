@@ -22,6 +22,8 @@
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { execFile } from 'node:child_process'
+import { placeForRunning } from './knowledge.js'
 import { checkAgent, type AgentSpec, type Intent } from '@superatom/platform-types'
 import { ProgramStore, ProgramError, loadPackage } from '@superatom/programs'
 import { createStateEngine, StateRefusal, type StateEngine } from '@superatom/state'
@@ -80,6 +82,35 @@ export function createSessionSeam(d: SessionSeamDeps) {
   const store = new ProgramStore(join(d.projectDir, 'programs', 'store'))
   const log = d.log ?? fileLog(join(d.projectDir, 'sessions'))
 
+  // A domain's programs (the composition graph's), run where the platform places them, for whoever asked: their access
+  // goes with the run (SA_READER), their output (totals, a page) comes back as JSON. The same run within five minutes
+  // is read once. Programs reach a domain's logic this way instead of copying it.
+  const placed = new Map<string, Promise<{ dir: string; used: Record<string, string> }>>()
+  const runs = new Map<string, { at: number; p: Promise<unknown> }>()
+  let sourceIds: string[] | null = null
+  const program = async (domain: string, file: string, args: (string | number)[] = []) => {
+    if (!/^[\w.-]+\.m?js$/.test(file)) throw new Error(`"${file}" is not a domain's program`)
+    const dir = join(d.projectDir, '.programs-run', domain.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-'))
+    const at = await (placed.get(domain) ?? placed.set(domain, placeForRunning(d.projectDir, domain, dir, d.datasource)).get(domain)!).catch((e) => { placed.delete(domain); throw e })
+    const reader = currentReader()
+    let readerJson = ''
+    if (reader && d.access) {
+      sourceIds ??= ((await (await fetch(d.datasource + '/sources')).json().catch(() => ({}))) as any).sources?.map((s: any) => String(s.id)) ?? []
+      const policies: Record<string, unknown[]> = {}
+      for (const id of sourceIds!) policies[id] = await d.access.policiesFor(reader, id)
+      readerJson = JSON.stringify({ principal: reader.id, policies })
+    }
+    const key = `${JSON.stringify(at.used)}|${file}|${args.join(' ')}|${readerJson}`
+    const hit = runs.get(key)
+    if (hit && Date.now() - hit.at < 5 * 60_000) return hit.p
+    const p = new Promise<unknown>((resolve, reject) => execFile(process.execPath, [file, ...args.map(String)], { cwd: at.dir, maxBuffer: 256 * 1024 * 1024, env: { ...process.env, NODE_NO_WARNINGS: '1', ...(readerJson ? { SA_READER: readerJson } : {}) } }, (err, stdout, stderr) => {
+      if (err) return reject(new Error(`${domain}/${file} failed: ${String(stderr || err.message).trim().split('\n').slice(-2).join(' ')}`))
+      try { resolve(JSON.parse(String(stdout))) } catch (e: any) { reject(new Error(`${domain}/${file} did not print JSON: ${e.message}`)) }
+    }))
+    runs.set(key, { at: Date.now(), p }); p.catch(() => runs.delete(key))
+    return p
+  }
+
   // Every read on someone's behalf carries their data access policies; the manager's rewrite applies them.
   const query = async (id: string, sql: string, params: Record<string, unknown> = {}) => {
     const reader = currentReader()
@@ -127,7 +158,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const key = `${agent}:${[...use].sort().join(',')}`
     if (!runtimes.has(key)) runtimes.set(key, (async () => {
       const packages = await Promise.all(use.map((h) => loadPackage(store, h)))
-      const engine = createStateEngine(packages as any, { services: { query } })
+      const engine = createStateEngine(packages as any, { services: { query, program } })
       return { engine, sessions: createSessions({ log, engine }), packages }
     })())
     const r = runtimes.get(key)!

@@ -77,12 +77,13 @@ export function createSessions(opts: SessionsOptions) {
   }
 
   /** The answer a run gave: the runs' markdown in order, their files together. */
-  const answerOf = (ran: Ran[], extra?: { markdown?: string; files?: string[]; blocks?: Record<string, Record<string, unknown>> }): { markdown: string; files: string[]; blocks?: Record<string, Record<string, unknown>> } | null => {
+  const answerOf = (ran: Ran[], extra?: { markdown?: string; files?: string[]; blocks?: Record<string, Record<string, unknown>> }): { markdown: string; files: string[]; blocks?: Record<string, Record<string, unknown>>; world?: Record<string, number> } | null => {
     const parts = [extra?.markdown, ...ran.map((r) => r.answer?.markdown)].filter((m): m is string => !!m?.trim())
     if (!parts.length) return null
     const files = [...new Set([...(extra?.files ?? []), ...ran.flatMap((r) => r.answer?.files ?? [])])]
     const blocks = Object.assign({}, extra?.blocks ?? {}, ...ran.map((r) => r.answer?.blocks ?? {}))
-    return { markdown: parts.join('\n\n'), files, ...(Object.keys(blocks).length ? { blocks } : {}) }
+    const world = Object.assign({}, ...ran.map((r) => r.answer?.world ?? {}))
+    return { markdown: parts.join('\n\n'), files, ...(Object.keys(blocks).length ? { blocks } : {}), ...(Object.keys(world).length ? { world } : {}) }
   }
 
   function open(o: { session: string; user: string; agent: string; start?: Parameters<StateEngine['start']>[0]; agentKeys?: Record<string, unknown> }): SessionView {
@@ -136,7 +137,7 @@ export function createSessions(opts: SessionsOptions) {
     let answer: Answer | null = null
     if (said) {
       const previous = opening ? null : before.blocks.find((b) => b.id === from)?.answer ?? null
-      answer = { id: id('ans'), session: i.session, block, cause: i.id, stateHash: hash, at, markdown: said.markdown, files: said.files, ...(said.blocks ? { blocks: said.blocks } : {}), ...(previous ? { replaced: previous } : {}) }
+      answer = { id: id('ans'), session: i.session, block, cause: i.id, stateHash: hash, at, markdown: said.markdown, files: said.files, ...(said.blocks ? { blocks: said.blocks } : {}), ...(said.world ? { world: said.world } : {}), ...(previous ? { replaced: previous } : {}) }
       opts.log.append(i.session, { t: 'answer', at, answer })
     }
     return { session: read(i.session), block, opened: opening, answer, changed: out.changed, ran: out.ran }

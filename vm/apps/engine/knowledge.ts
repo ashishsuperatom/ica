@@ -13,6 +13,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { dataSeam } from './ica/workspace.js'
 import { Store, compose as composeFromGraph, domains as domainsInGraph, render, route, rank, indexOf, type ConceptBody, type FileBody, type Route } from '@superatom/composition-graph'
+import { createHash } from 'node:crypto'
 
 export interface Domain { name: string; capabilities: string[]; tools?: string[] }
 export interface Knowledge { domain: string; text: string; files: FileBody[]; used: Record<string, string>; /** Written into the folder as settings.json. */ settings: Record<string, unknown> }
@@ -120,7 +121,8 @@ export async function placeForRunning(projectDir: string, name: string, dir: str
   const domain = (await domainsOf(projectDir)).find((d) => d.name === name)
   if (!domain) throw new Error(`there is no domain "${name}"`)
   const k = await compose(projectDir, domain)
-  const stamp = JSON.stringify(k.used)
+  // The seam's own version is part of the stamp, so a changed seam is placed again even when the knowledge is not.
+  const stamp = JSON.stringify({ used: k.used, seam: createHash('sha256').update(dataSeam(managerUrl)).digest('hex').slice(0, 12) })
   const noted = await readFile(join(dir, '.used.json'), 'utf8').catch(() => null)
   if (noted !== stamp) {
     await place(k, dir)

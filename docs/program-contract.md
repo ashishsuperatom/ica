@@ -50,8 +50,15 @@ export async function run(state, ctx) { … }
 - `ctx.params` are the parameters of the call (an action's, a run button's).
 - `ctx.services.query(source, sql, params)` is **the only way to data**. It goes through the datasource manager: the
   reader's data access policies are applied to every table read, the query is read-only, and it is recorded.
-- It returns `{ answer?: { markdown, blocks? }, actions? }`. The answer is markdown; a marker line
-  (`:::table name.json`) names a block the answer carries in `blocks` (`{ title, columns: [{ key, label, unit? }], rows }`).
+- `ctx.services.program(domain, file, args)` runs one of a **domain's programs** (the composition graph's — the
+  domain's logic in one place, such as the query every view of a topic stands on) where the platform places them, for
+  whoever asked (their data access goes with the run), and returns the JSON it prints — totals and pages, never every
+  row. A program reaches a domain's logic this way instead of copying it.
+- It returns `{ answer?: { markdown, blocks?, world? }, actions? }`. The answer is markdown; a marker line
+  (`:::table name.json`, `:::kpis summary`) names a block the answer carries in `blocks` (`{ title, columns: [{ key,
+  label, unit? }], rows }`, or with its `type`: kpis, figure, bars, grid, table, facts, text). `world` names the
+  headline figures the step showed (`{ red: 12, remaining: 5214260 }`): the decision memory compares a later step's
+  world with them to say whether the situation has moved.
 
 ## Data rules
 
