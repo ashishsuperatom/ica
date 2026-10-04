@@ -16,11 +16,6 @@ export interface LoginCode { code: string; token: string; userId: string; role: 
 export class LoginCodeStore {
   constructor(private sql: Sql) {}
 
-  static migrate(sql: Sql) {
-    sql.exec(`CREATE TABLE IF NOT EXISTS mobile_login_code (
-      code TEXT PRIMARY KEY, token TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'user',
-      code_challenge TEXT NOT NULL, expires_at INTEGER NOT NULL)`)
-  }
 
   private sweep() { try { this.sql.exec('DELETE FROM mobile_login_code WHERE expires_at < ?', Date.now()) } catch {} }
 

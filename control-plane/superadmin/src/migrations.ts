@@ -1,0 +1,167 @@
+// Every Durable Object's SQLite changes shape only through these migrations (@superatom/migrate): numbered, never
+// edited once shipped — a change is a new migration at the end of its list. Each DO runs its list once per wake, in
+// its constructor under blockConcurrencyWhile; with nothing pending that is a single-row read.
+
+import { addColumnIfMissing, type Migration, type MigrationDb } from '../../../vm/packages/migrate/src/index.js'
+
+// ── ProjectDO ────────────────────────────────────────────────────────────────────────────────────────────────────
+// Migrations 1–14 are the ProjectDO's earlier ladder (its _schema_version 1–14), carried over unchanged in meaning.
+
+export const PROJECT_MIGRATIONS: Migration[] = [
+  { id: 1, name: 'initial tables', up: `
+    CREATE TABLE IF NOT EXISTS fly_machine (machine_id TEXT, status TEXT NOT NULL DEFAULT 'creating');
+    CREATE TABLE IF NOT EXISTS api_key ( key TEXT NOT NULL );
+    CREATE TABLE IF NOT EXISTS members (user_id TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'member', PRIMARY KEY (user_id));
+    CREATE TABLE IF NOT EXISTS datasources (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, tables TEXT, uploaded_by TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+    CREATE TABLE IF NOT EXISTS conversations (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, question TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+    CREATE TABLE IF NOT EXISTS logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, event TEXT NOT NULL, detail TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+  ` },
+  // Idle detection: heartbeat and suspend.
+  { id: 2, name: 'idle detection columns', up: (db) => {
+    addColumnIfMissing(db, 'fly_machine', 'last_heartbeat', 'INTEGER NOT NULL DEFAULT 0')
+    addColumnIfMissing(db, 'fly_machine', 'idle_phase', "TEXT NOT NULL DEFAULT 'active'")
+  } },
+  // Wake-on-message delivery.
+  { id: 3, name: 'message queue', up: `
+    CREATE TABLE IF NOT EXISTS message_queue (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, msg_json TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()))
+  ` },
+  // Idle suspend/stop on REAL activity, not connection events; seeded from the heartbeat.
+  { id: 4, name: 'last active', up: (db) => {
+    addColumnIfMissing(db, 'fly_machine', 'last_active', 'INTEGER NOT NULL DEFAULT 0')
+    db.exec('UPDATE fly_machine SET last_active = last_heartbeat WHERE last_active = 0')
+  } },
+  // 'fly' (managed lifecycle) or 'external' (a user-managed box that connects out).
+  { id: 5, name: 'machine provider', up: (db) => {
+    addColumnIfMissing(db, 'fly_machine', 'provider', "TEXT NOT NULL DEFAULT 'fly'")
+  } },
+  // Durable per-user answer buffer and recent-session snapshot (answer-buffer.ts).
+  { id: 6, name: 'answer buffer', up: `
+    CREATE TABLE IF NOT EXISTS answer_buffer (
+      qid TEXT PRIMARY KEY, user_id TEXT NOT NULL DEFAULT '', session_id TEXT, question TEXT,
+      payload_json TEXT, followups_json TEXT,
+      at INTEGER NOT NULL, answered_at INTEGER, acked INTEGER NOT NULL DEFAULT 0);
+    CREATE INDEX IF NOT EXISTS idx_ab_user ON answer_buffer(user_id, at);
+    CREATE TABLE IF NOT EXISTS session_snapshot (
+      session_id TEXT NOT NULL, user_id TEXT NOT NULL DEFAULT '', title TEXT, last_at INTEGER NOT NULL,
+      PRIMARY KEY (session_id, user_id));
+  ` },
+  // Access lives with the project, keyed by email; roles are per project, with three seeded defaults.
+  { id: 7, name: 'access and roles', up: (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS roles (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, permissions TEXT NOT NULL DEFAULT '[]',
+        builtin INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+      CREATE TABLE IF NOT EXISTS access (
+        email TEXT PRIMARY KEY, role_id TEXT, source TEXT NOT NULL DEFAULT 'direct', added_by TEXT,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+    `)
+    const seed: Array<[string, string, string[]]> = [
+      ['admin', 'Admin', ['project.manage', 'access.manage', 'data.manage', 'ask']],
+      ['member', 'Member', ['ask']],
+      ['viewer', 'Viewer', ['read']],
+    ]
+    for (const [id, name, perms] of seed)
+      db.all('INSERT OR IGNORE INTO roles (id, name, permissions, builtin) VALUES (?, ?, ?, 1) RETURNING id', id, name, JSON.stringify(perms))
+  } },
+  // Dashboards: bytes in R2, this table finds them and knows the current build.
+  { id: 8, name: 'dashboards', up: `
+    CREATE TABLE IF NOT EXISTS dashboards (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, build_id TEXT, files INTEGER NOT NULL DEFAULT 0,
+      bytes INTEGER NOT NULL DEFAULT 0, uploaded_by TEXT, uploaded_at INTEGER, created_at INTEGER NOT NULL DEFAULT (unixepoch()))
+  ` },
+  // The engine profile (harness/provider/model per agent); never credentials.
+  { id: 9, name: 'engine profile', up: `
+    CREATE TABLE IF NOT EXISTS profile (
+      json TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, updated_by TEXT, updated_at INTEGER NOT NULL DEFAULT (unixepoch()))
+  ` },
+  // Only rows the engine's seeder wrote are dropped; a person's choice is never touched.
+  { id: 10, name: 'remove seeded profiles', up: "DELETE FROM profile WHERE updated_by = 'engine (baked default)'" },
+  // What the engine reported, on disk (an in-memory field was lost on hibernation).
+  { id: 11, name: 'engine running', up: `
+    CREATE TABLE IF NOT EXISTS engine_running (json TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 0, at INTEGER NOT NULL DEFAULT 0)
+  ` },
+  // Every build a dashboard has had, numbered; today's build becomes version 1.
+  { id: 12, name: 'dashboard builds ledger', up: `
+    CREATE TABLE IF NOT EXISTS dashboard_builds (
+      dash_id TEXT NOT NULL, build_id TEXT NOT NULL, n INTEGER NOT NULL, files INTEGER NOT NULL DEFAULT 0,
+      bytes INTEGER NOT NULL DEFAULT 0, uploaded_by TEXT, uploaded_at INTEGER NOT NULL, PRIMARY KEY (dash_id, n));
+    INSERT OR IGNORE INTO dashboard_builds (dash_id, build_id, n, files, bytes, uploaded_by, uploaded_at)
+      SELECT id, build_id, 1, files, bytes, uploaded_by, COALESCE(uploaded_at, created_at * 1000) FROM dashboards WHERE build_id IS NOT NULL;
+  ` },
+  // A hash over a build's files: the same build uploaded twice is one version.
+  { id: 13, name: 'build content hash', up: (db) => {
+    addColumnIfMissing(db, 'dashboard_builds', 'content_hash', 'TEXT')
+  } },
+  // The ledger is append-only; the key moves to (dash_id, n).
+  { id: 14, name: 'append-only build ledger', up: `
+    CREATE TABLE IF NOT EXISTS dashboard_builds_v14 (
+      dash_id TEXT NOT NULL, build_id TEXT NOT NULL, n INTEGER NOT NULL, files INTEGER NOT NULL DEFAULT 0, bytes INTEGER NOT NULL DEFAULT 0,
+      uploaded_by TEXT, uploaded_at INTEGER NOT NULL, content_hash TEXT, kind TEXT NOT NULL DEFAULT 'publish', from_n INTEGER, pruned_at INTEGER,
+      PRIMARY KEY (dash_id, n));
+    INSERT OR IGNORE INTO dashboard_builds_v14 (dash_id, build_id, n, files, bytes, uploaded_by, uploaded_at, content_hash)
+      SELECT dash_id, build_id, n, files, bytes, uploaded_by, uploaded_at, content_hash FROM dashboard_builds;
+    DROP TABLE dashboard_builds;
+    ALTER TABLE dashboard_builds_v14 RENAME TO dashboard_builds;
+  ` },
+]
+
+/** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */
+export function adoptProjectSchemaVersion(db: MigrationDb): number {
+  try { return Number(db.all('SELECT MAX(version) AS v FROM _schema_version')[0]?.v ?? 0) } catch { return 0 }
+}
+
+// ── OrgDO ────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+export const ORG_MIGRATIONS: Migration[] = [
+  { id: 1, name: 'baseline', up: (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, clerk_id TEXT UNIQUE, name TEXT,
+        role TEXT NOT NULL DEFAULT 'user', created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+      CREATE TABLE IF NOT EXISTS projects (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, created_by TEXT NOT NULL,
+        deleted INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+      CREATE TABLE IF NOT EXISTS datasources (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL, name TEXT NOT NULL, type TEXT NOT NULL, config TEXT NOT NULL,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch()), FOREIGN KEY (project_id) REFERENCES projects(id));
+      CREATE TABLE IF NOT EXISTS conversations (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL, user_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch()), FOREIGN KEY (project_id) REFERENCES projects(id));
+      CREATE TABLE IF NOT EXISTS messages (
+        id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch()), FOREIGN KEY (conversation_id) REFERENCES conversations(id));
+    `)
+    addColumnIfMissing(db, 'projects', 'deleted', 'INTEGER NOT NULL DEFAULT 0')
+  } },
+]
+
+// ── GlobalDO ─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+export const GLOBAL_MIGRATIONS: Migration[] = [
+  { id: 1, name: 'baseline', up: (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS superatom_users (
+        id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, clerk_id TEXT UNIQUE,
+        role TEXT NOT NULL DEFAULT 'superadmin', created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+      CREATE TABLE IF NOT EXISTS organizations (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, do_name TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active',
+        deleted INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+      -- *.superatom.site: subdomain → projectId (KV is a hot-read cache in front of this).
+      CREATE TABLE IF NOT EXISTS domains (
+        subdomain TEXT PRIMARY KEY, project_id TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+      CREATE INDEX IF NOT EXISTS idx_domains_project ON domains(project_id);
+      -- Which models each provider may be asked for: platform-wide, held once.
+      CREATE TABLE IF NOT EXISTS model_catalogue (
+        json TEXT NOT NULL, updated_by TEXT, updated_at INTEGER NOT NULL DEFAULT (unixepoch()));
+      -- Mobile login codes (auth/login-code-store.ts).
+      CREATE TABLE IF NOT EXISTS mobile_login_code (
+        code TEXT PRIMARY KEY, token TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'user',
+        code_challenge TEXT NOT NULL, expires_at INTEGER NOT NULL);
+    `)
+    addColumnIfMissing(db, 'organizations', 'deleted', 'INTEGER NOT NULL DEFAULT 0')
+  } },
+]

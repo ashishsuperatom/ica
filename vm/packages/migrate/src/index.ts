@@ -45,6 +45,10 @@ export interface MigrateOptions {
   backup?: () => void
   /** The clock (tests). */
   now?: () => string
+  /** A database whose shape was kept by an earlier scheme (a version counter of its own): how many of these
+   *  migrations it already has. Asked only when the database has no migration record yet; those are recorded as
+   *  applied, without running, and the rest run. */
+  adopt?: (db: MigrationDb) => number
 }
 
 export interface MigrateResult {
@@ -124,7 +128,15 @@ function checkRecord(db: MigrationDb, list: Migration[], name: string) {
 
 function migrateFully(db: MigrationDb, list: Migration[], opts: MigrateOptions): MigrateResult {
   const now = opts.now ?? (() => new Date().toISOString())
-  const done = checkRecord(db, list, opts.name)
+  let done = checkRecord(db, list, opts.name)
+  if (!done.length && opts.adopt) {
+    const had = opts.adopt(db)
+    if (!Number.isInteger(had) || had < 0 || had > list.length) throw new MigrationError(`${opts.name}: an earlier scheme says it has ${had} migrations; this code knows ${list.length}. Update the code.`)
+    if (had > 0) {
+      db.transaction(() => { for (const m of list.slice(0, had)) db.all(`INSERT INTO ${TABLE} (id, name, fingerprint, applied_at) VALUES (?, ?, ?, ?) RETURNING id`, m.id, m.name, fingerprint(m), `adopted ${now()}`) })
+      done = checkRecord(db, list, opts.name)
+    }
+  }
   const pending = list.slice(done.length)
   if (!pending.length) return { applied: [], current: done.length }
   // A database that already has a shape is backed up first; a new one has nothing to lose.
@@ -152,8 +164,13 @@ function migrateFully(db: MigrationDb, list: Migration[], opts: MigrateOptions):
 
 /** For a first migration that adopts a database made before migrations existed: add a column only when it is missing. */
 export function addColumnIfMissing(db: MigrationDb, table: string, column: string, definition: string): void {
-  const has = db.all(`SELECT name FROM pragma_table_info(?)`, table).some((r) => r.name === column)
-  if (!has) db.exec(`ALTER TABLE "${table}" ADD COLUMN "${column}" ${definition}`)
+  // Where the table's columns can be read, read them; a Durable Object's SQLite may refuse pragma_table_info, and
+  // then the ALTER itself answers — "duplicate column" means it is already there, anything else is a real failure.
+  let has: boolean | null = null
+  try { has = db.all(`SELECT name FROM pragma_table_info(?)`, table).some((r) => r.name === column) } catch { has = null }
+  if (has) return
+  try { db.exec(`ALTER TABLE "${table}" ADD COLUMN "${column}" ${definition}`) }
+  catch (e: any) { if (has === null && /duplicate column/i.test(String(e?.message ?? e))) return; throw e }
 }
 
 /** A Durable Object's SQLite (`ctx.storage`): its own transactions, since BEGIN is not allowed there. */

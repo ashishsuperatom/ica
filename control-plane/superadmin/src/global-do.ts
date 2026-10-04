@@ -7,6 +7,8 @@
 //
 // Identified by name "global" — only one instance per Worker.
 
+import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
+import { GLOBAL_MIGRATIONS } from './migrations.js'
 import { DurableObject } from 'cloudflare:workers'
 import { LoginCodeStore } from './auth/login-code-store.js'
 
@@ -51,50 +53,7 @@ export class GlobalDO extends DurableObject<Env> {
   }
 
   private async migrate() {
-    this.ctx.storage.sql.exec(`
-      CREATE TABLE IF NOT EXISTS superatom_users (
-        id         TEXT PRIMARY KEY,
-        email      TEXT UNIQUE NOT NULL,
-        clerk_id   TEXT UNIQUE,
-        role       TEXT NOT NULL DEFAULT 'superadmin',
-        created_at INTEGER NOT NULL DEFAULT (unixepoch())
-      );
-
-      CREATE TABLE IF NOT EXISTS organizations (
-        id         TEXT PRIMARY KEY,
-        name       TEXT NOT NULL,
-        do_name    TEXT NOT NULL,
-        status     TEXT NOT NULL DEFAULT 'active',
-        deleted    INTEGER NOT NULL DEFAULT 0,       -- 0=active, 1=soft-deleted
-        created_at INTEGER NOT NULL DEFAULT (unixepoch())
-      );
-
-      -- Reverse index for *.superatom.site: subdomain → projectId. Authoritative
-      -- source of truth; KV is a hot-read cache in front of this (see worker.ts).
-      -- Claims are rare writes, so this single DO is never on the hot path.
-      CREATE TABLE IF NOT EXISTS domains (
-        subdomain  TEXT PRIMARY KEY,                 -- lowercase, validated
-        project_id TEXT NOT NULL,
-        created_at INTEGER NOT NULL DEFAULT (unixepoch())
-      );
-      CREATE INDEX IF NOT EXISTS idx_domains_project ON domains(project_id);
-
-      -- WHICH MODELS EACH PROVIDER MAY BE ASKED FOR. Platform-wide and held ONCE: "opencode-go carries
-      -- kimi-k3" is true for every project, so storing it per project would mean editing it N times and
-      -- letting the copies drift. Merged into each project's profile when that profile is delivered, so an
-      -- engine still receives one document over one path.
-      --
-      -- Here rather than in the engine image because adding or removing a model must not require a rebuild
-      -- and a roll of every box — the whole point of configuration living in the control plane.
-      CREATE TABLE IF NOT EXISTS model_catalogue (
-        json       TEXT NOT NULL,
-        updated_by TEXT,
-        updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-      );
-    `)
-    // Migration: add column if missing (existing DOs from before this change)
-    try { this.ctx.storage.sql.exec('ALTER TABLE organizations ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0') } catch {}
-    LoginCodeStore.migrate(this.ctx.storage.sql)
+    runMigrations(durableObjectDb(this.ctx.storage), GLOBAL_MIGRATIONS, { name: 'GlobalDO' })
   }
 
   /** The live catalogue, or null when none has been set — in which case every engine uses the fallback copy

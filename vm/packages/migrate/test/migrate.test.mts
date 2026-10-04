@@ -158,3 +158,28 @@ test('two processes opening one database: the second finds the work done and app
   const sneaky = { ...nodeDb(b), all: (q: string, ...p: unknown[]) => (/DESC LIMIT 1/.test(q) ? [] : nodeDb(b).all(q, ...p)) }   // b's fast check is stale
   assert.deepEqual(migrate(sneaky, v3, { name: 'shared' }).applied, [])
 })
+
+test('a database kept by an earlier version counter is adopted at its version: nothing it had re-runs', () => {
+  const db = fresh()
+  db.exec('CREATE TABLE people (id INTEGER PRIMARY KEY, name TEXT NOT NULL); ALTER TABLE people ADD COLUMN email TEXT')   // its v2
+  db.exec('CREATE TABLE _schema_version (version INTEGER); INSERT INTO _schema_version VALUES (2)')
+  const v3 = [...v1, { id: 3, name: 'teams', up: 'CREATE TABLE teams (id INTEGER PRIMARY KEY)' }]
+  const adopt = (m: any) => Number(m.all('SELECT MAX(version) AS v FROM _schema_version')[0]?.v ?? 0)
+  assert.deepEqual(migrate(nodeDb(db), v3, { name: 'project-do', adopt }), { applied: [3], current: 3 })   // 1 and 2 recorded, not run (re-running 2 would fail)
+  assert.deepEqual((db.prepare('SELECT id FROM _migrations ORDER BY id').all() as any[]).map((r) => r.id), [1, 2, 3])
+  // a brand-new one: the counter says 0, everything runs
+  assert.deepEqual(migrate(nodeDb(fresh()), v3, { name: 'project-do', adopt: () => 0 }).applied, [1, 2, 3])
+  // a counter beyond what the code knows is refused
+  assert.throws(() => migrate(nodeDb(fresh()), v1, { name: 'project-do', adopt: () => 5 }), /says it has 5 migrations/)
+})
+
+test('addColumnIfMissing works where pragma_table_info is refused (Durable Objects)', () => {
+  const db = fresh()
+  db.exec('CREATE TABLE t (a INTEGER)')
+  const real = nodeDb(db)
+  const noPragma = { ...real, all: (q: string, ...p: unknown[]) => { if (/pragma_table_info/.test(q)) throw new Error('not authorized'); return real.all(q, ...p) } }
+  addColumnIfMissing(noPragma, 't', 'b', 'TEXT')
+  addColumnIfMissing(noPragma, 't', 'b', 'TEXT')          // already there: quietly nothing
+  assert.deepEqual(cols(db, 't'), ['a', 'b'])
+  assert.throws(() => addColumnIfMissing(noPragma, 'missing_table', 'b', 'TEXT'), /no such table/)
+})

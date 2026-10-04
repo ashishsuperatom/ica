@@ -7,6 +7,8 @@
 // The DO holds no AI, no tools, no agent logic.
 // All analysis runs on the VM. The DO is the persistence and WS hub.
 
+import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
+import { ORG_MIGRATIONS } from './migrations.js'
 import { DurableObject } from 'cloudflare:workers'
 
 interface Session {
@@ -26,54 +28,7 @@ export class OrgDO extends DurableObject<Env> {
   // ── Schema migrations ───────────────────────────────────────────────────────
 
   private async migrate() {
-    this.ctx.storage.sql.exec(`
-      CREATE TABLE IF NOT EXISTS users (
-        id         TEXT PRIMARY KEY,
-        email      TEXT UNIQUE NOT NULL,
-        clerk_id   TEXT UNIQUE,
-        name       TEXT,
-        role       TEXT NOT NULL DEFAULT 'user',
-        created_at INTEGER NOT NULL DEFAULT (unixepoch())
-      );
-
-      CREATE TABLE IF NOT EXISTS projects (
-        id          TEXT PRIMARY KEY,
-        name        TEXT NOT NULL,
-        description TEXT,
-        created_by  TEXT NOT NULL,
-        deleted     INTEGER NOT NULL DEFAULT 0,       -- 0=active, 1=soft-deleted
-        created_at  INTEGER NOT NULL DEFAULT (unixepoch())
-      );
-
-      CREATE TABLE IF NOT EXISTS datasources (
-        id         TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL,
-        name       TEXT NOT NULL,
-        type       TEXT NOT NULL,
-        config     TEXT NOT NULL,
-        created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-        FOREIGN KEY (project_id) REFERENCES projects(id)
-      );
-
-      CREATE TABLE IF NOT EXISTS conversations (
-        id         TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL,
-        user_id    TEXT NOT NULL,
-        created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-        FOREIGN KEY (project_id) REFERENCES projects(id)
-      );
-
-      CREATE TABLE IF NOT EXISTS messages (
-        id              TEXT PRIMARY KEY,
-        conversation_id TEXT NOT NULL,
-        role            TEXT NOT NULL,
-        content         TEXT NOT NULL,
-        created_at      INTEGER NOT NULL DEFAULT (unixepoch()),
-        FOREIGN KEY (conversation_id) REFERENCES conversations(id)
-      );
-    `)
-    // Migration: add deleted column to existing DOs
-    try { this.ctx.storage.sql.exec('ALTER TABLE projects ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0') } catch {}
+    runMigrations(durableObjectDb(this.ctx.storage), ORG_MIGRATIONS, { name: `OrgDO ${this.ctx.id.toString().slice(0, 8)}` })
   }
 
   // ── HTTP + WS entrypoint ────────────────────────────────────────────────────

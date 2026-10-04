@@ -19,17 +19,6 @@ export class AnswerBuffer {
 
   constructor(private sql: Sql, private log: (event: string, detail?: Record<string, unknown>) => void = () => {}) {}
 
-  // Called ONCE from the DO's migration ladder (its own version gate decides when).
-  static migrate(sql: Sql) {
-    sql.exec(`CREATE TABLE IF NOT EXISTS answer_buffer (
-      qid TEXT PRIMARY KEY, user_id TEXT NOT NULL DEFAULT '', session_id TEXT, question TEXT,
-      payload_json TEXT, followups_json TEXT,
-      at INTEGER NOT NULL, answered_at INTEGER, acked INTEGER NOT NULL DEFAULT 0)`)
-    sql.exec('CREATE INDEX IF NOT EXISTS idx_ab_user ON answer_buffer(user_id, at)')
-    sql.exec(`CREATE TABLE IF NOT EXISTS session_snapshot (
-      session_id TEXT NOT NULL, user_id TEXT NOT NULL DEFAULT '', title TEXT, last_at INTEGER NOT NULL,
-      PRIMARY KEY (session_id, user_id))`)
-  }
 
   // A runtime asked a question → PENDING row (user-attributed even if its socket later dies) + bump the
   // recent-session snapshot. Filled in by recordAnswer when the engine replies.
