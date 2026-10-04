@@ -35,7 +35,9 @@ export class AuditLog {
     if (scope) scope.recorded = true
     this.sql.exec('INSERT OR IGNORE INTO audit_log (id, at, actor_kind, actor_id, actor_email, via, action, target, outcome, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       event.id, event.at, event.actor.kind, event.actor.id, event.actor.email ?? null, event.via, event.action, event.target ?? null, event.outcome, event.detail ? JSON.stringify(event.detail) : null)
-    const row = { ...event, actor_kind: event.actor.kind, actor_id: event.actor.id, actor_email: event.actor.email ?? null, detail: event.detail ? JSON.stringify(event.detail) : null }
+    // Exactly the stream's schema (a stream drops a record that does not match it): flat, strings, optional ones left out.
+    const row = { id: event.id, at: event.at, project: event.project, actor_kind: event.actor.kind, actor_id: event.actor.id, via: event.via, action: event.action, outcome: event.outcome,
+      ...(event.actor.email ? { actor_email: event.actor.email } : {}), ...(event.target ? { target: event.target } : {}), ...(event.detail ? { detail: JSON.stringify(event.detail) } : {}) }
     if (this.sinks.stream) this.sinks.stream.send([row]).catch((err) => this.sinks.warn?.(`audit stream send failed for ${event.id}: ${err?.message ?? err}`))
     try { this.sinks.metrics?.writeDataPoint({ indexes: [event.project], blobs: [event.action, event.outcome, event.via, event.actor.kind], doubles: [1] }) } catch { /* metrics are best effort */ }
     return event

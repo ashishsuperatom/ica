@@ -75,6 +75,16 @@
 
   // Built dashboards and program bundles: the bucket is shared; the prefix keeps projects apart, and a build id in the
   // path makes rollback a metadata change rather than a re-upload.
+  // The audit history, to the platform's own Basin: the audit_events stream (schema-checked) → the "audit" pipeline →
+  // Parquet in R2 (superatom-platform/audit/events/year=/month=/day=). Each project's DO also keeps every event itself.
+  "pipelines": [
+    { "binding": "AUDIT", "stream": "deffa5578eda490d973c001bbd381baa" }
+  ],
+  // Counts of audit events by project, action, outcome, way and actor kind, for operational dashboards (3 months).
+  "analytics_engine_datasets": [
+    { "binding": "METRICS", "dataset": "superatom_audit" }
+  ],
+
   "r2_buckets": [
     { "binding": "PACKAGES", "bucket_name": "frontend-packages" }
   ]

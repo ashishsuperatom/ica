@@ -537,6 +537,11 @@ R2 (the data lake product), the analytics engine, and stream processing through 
   which project and engine sent them (never trusting the body), checks them against the schema (a stream drops a bad
   event silently), and writes them to the same stream. Engines buffer and retry; `id` makes a retry harmless.
 - Writers hold only the right to send; nothing at runtime can change or delete the history.
+- **Built (2026-10-05):** in the platform's own Cloudflare account — stream `audit_events` (schema-checked) → pipeline
+  `audit` → sink `audit_r2`: Parquet in R2 bucket `superatom-platform` at `audit/events/year=/month=/day=`, every project's
+  events in one stream, each tagged with its project. It is the **platform's** Basin, never a customer's warehouse.
+  Bound to the Worker as `AUDIT` (with Analytics Engine `METRICS`). *Next:* an Iceberg table in Basin Catalog for Basin
+  SQL — it needs a catalog API token made once in the dashboard.
 
 **Where each record lives, in the user's words (2026-10-04):** the **session Durable Object** has SQLite and keeps
 everything that happens in that session. The **user Durable Object** keeps information about the user and what is
