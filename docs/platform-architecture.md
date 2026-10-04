@@ -465,6 +465,23 @@ Not the session's STATE: the core of decision intelligence, to be expanded later
   - **Ports from the registry** on `127.0.0.1` (project 1's data source manager at `127.0.0.1:4008`, …). Works everywhere
     without admin rights. *Recommended for that reason.*
 
+### Data warehouse — design proposal (2026-10-05, to agree)
+
+- **Engine side first:** a per-project warehouse (DuckDB, columnar) that materialises source queries into tables — fast,
+  and available when a source is slow or down. It is a **data source template** copied into the project home
+  (`datasources/warehouse/bridge.mjs`), so it is queried through the datasource manager like any source: the same SQL
+  rewrite, data access policies and audit.
+- **Lineage and policies, fail closed:** every warehouse table records the source and query it came from. A reader with
+  any policy on that source cannot read the copy unless the warehouse table has policies of its own — otherwise a copy
+  would be a way around a row filter.
+- **Size:** agent reads stay capped (≤ 100 shown, the manager's 5,000 cap); materialising reads the source in pages
+  through the checked path (SELECT-only), never the uncapped system path with someone's SQL.
+- **Who refreshes:** a project admin or an agent key with a `warehouse` scope; each refresh is an activity and audited.
+- **Platform side (Basin):** one Basin Catalog namespace per organisation, Iceberg tables per project; the engine's
+  DuckDB writes them (Iceberg extension) and the platform reads them with Basin SQL. Needs a Basin Catalog API token
+  (made once in the dashboard); and since an account has at most 20 Pipelines streams, tables are written directly, not
+  through a stream per customer.
+
 ### Data warehouse (optional)
 
 Not every project needs one. When it does, one of two, never both at once:
