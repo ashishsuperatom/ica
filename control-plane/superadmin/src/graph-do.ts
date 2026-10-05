@@ -64,6 +64,13 @@ export class GraphDO extends DurableObject<Env> {
       }
       return json({ added, cursor: this.cursor() })
     }
+    // What awaits a decision: suggestions no decision has answered yet (to change a node, or to publish one).
+    if (request.method === 'GET' && url.pathname === '/open') {
+      const decided = new Set([...sql.exec("SELECT key FROM records WHERE kind = 'decision'")].map((r) => String(r.key)))
+      const open = [...sql.exec("SELECT key, body FROM records WHERE kind = 'suggestion' ORDER BY CAST(key AS INTEGER) DESC LIMIT 200")]
+        .filter((r) => !decided.has(String(r.key))).map((r) => { const b = JSON.parse(String(r.body)); return { id: b.id, at: b.at, name: b.name, kind: b.kind, by: b.by, reason: b.reason, scope: b.scope ?? null } })
+      return json({ open })
+    }
     if (request.method === 'GET' && url.pathname === '/pull') {
       // A batch in the replica's own shape, after a cursor — for rebuilding an engine's graph.
       const q = url.searchParams, limit = Math.min(Number(q.get('limit')) || 200, 1000)

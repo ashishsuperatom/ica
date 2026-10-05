@@ -856,6 +856,27 @@ thread is the platform's (the engine's log); a surface without a session (the ad
 its thread in the browser (the address and history), with the same frames, blocks and design system. Agents can be
 asked on every surface.
 
+**The admin UI, rethought (the user, 2026-10-05).** "The admin or super admin system is very clumsy, so many things are
+just put there on the left hand side. Organise it so that we can work much better — rethink the whole admin UI. […]
+The admin UI was built without much thought; given how we want decision intelligence to happen, even on our admin UI the
+decision intelligence and the UI structure should reflect it." And: "whenever we do this UI, create a design system — a
+more semantic version — so that for everything we have a system; do not simply add ad-hoc CSS."
+
+- **Home is what needs a decision**, not a list of panels: approvals waiting (decisions recorded for approval), suggestions
+  to decide (knowledge, agents to publish), engines offline, credentials expiring or spent, budgets nearly used, work that
+  failed. Each is a step: it opens a block with its context and its paths (approve, reject, fix, open the place), and
+  what is done is a receipt — kept in the audit history like any other decision.
+- **Navigation by purpose**, in the order the work happens, for the scope chosen (the platform, an organisation, a
+  project): **Attention** · **Knowledge** (domains, agents, programs, decision memory) · **Data** (connections, sources,
+  index) · **Agents at work** (models per agent, the consoles) · **People and access** (members, groups, data access,
+  agent keys) · **Usage and credits** · **Operations** (engine, events, activity, audit, settings) · **Platform**
+  (organisations, credentials, models, prices — superadmin).
+- **The same structure as everywhere**: a thread of blocks, forms that lock into receipts, paths at the end of each step,
+  agents askable on the page.
+- **A semantic design system**: components named for what they are — a form and its fields, a receipt, a list of records,
+  a status, an attention item, an action bar, a figure — each owning its styles on the tokens; a screen composes them and
+  writes no CSS of its own. Theming is a handful of token overrides (`:root[data-theme=…]`).
+
 **Moving a project's views onto programs (2026-10-05).** A project's existing views (its application's capabilities,
 on its domains' programs) reach sessions through one generic program, `app-views` (in the template, the same for every
 project): its slice is the question the application understands; `run` asks the application, `move` applies its next

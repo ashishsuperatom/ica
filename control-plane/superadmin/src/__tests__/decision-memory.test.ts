@@ -125,11 +125,15 @@ describe('decision memory', () => {
     expect(rec.t).toBe('artifact:recorded')
     expect(rec.artifact).toMatchObject({ kind: 'decision', status: 'pending', version: 1, block: 'b1', body: { restsOn: { block: 'b1', world: { overrun: 11 } } } })
     expect((await u1.ask({ t: 'artifact:list', session: 's-1' })).artifacts.map((a: any) => a.title)).toEqual(['Flag the overruns to the PMO'])
+    // it waits in the project's Attention, as an approval with where it is
+    const att = (await at('/do/attention')).body.items
+    expect(att).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'approval', state: 'attention', title: 'Approve: Flag the overruns to the PMO', session: 's-1', artifact: rec.artifact.id }), expect.objectContaining({ kind: 'engine', state: 'critical' })]))
     const approved = await u1.ask({ t: 'artifact:decide', session: 's-1', id: rec.artifact.id, status: 'approved', note: 'agreed' })   // a superadmin may
     expect(approved.artifact).toMatchObject({ status: 'approved', version: 2, body: { approvals: [{ status: 'approved', note: 'agreed' }] } })
     expect((await u1.ask({ t: 'artifact:get', session: 's-1', id: rec.artifact.id })).versions.map((v: any) => v.status)).toEqual(['pending', 'approved'])
     const reg = await u1.ask({ t: 'decision:register' })
     expect(reg.decisions).toEqual([expect.objectContaining({ session: 's-1', title: 'Flag the overruns to the PMO', status: 'approved', version: 2, agent: 'portfolio' })])
+    expect((await at('/do/attention')).body.items.some((i: any) => i.kind === 'approval')).toBe(false)   // decided: no longer waiting
     // the decision memory heard how the step turned out
     const e = (await at('/decision/experiences?session=s-1')).body.experiences[0]
     expect(e.outcomes.map((o: any) => o.outcome)).toEqual(['succeeded'])

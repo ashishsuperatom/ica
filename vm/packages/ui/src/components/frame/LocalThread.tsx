@@ -59,7 +59,7 @@ function activePath(t: Tree): LocalBlock[] {
   return out
 }
 
-export default function LocalThread({ blocks, home, empty: emptyView, after, onRoot }: {
+export default function LocalThread({ blocks, home, empty: emptyView, after, onRoot, address }: {
   blocks: Registry
   /** The block a fresh thread starts from, when there is none (else the empty view). */
   home?: { type: string; props?: Record<string, unknown> }
@@ -67,15 +67,20 @@ export default function LocalThread({ blocks, home, empty: emptyView, after, onR
   after?: ReactNode
   /** The type the current thread started from (the sidebar marks it, and keeps it whatever is opened below). */
   onRoot?: (type: string | null) => void
+  /** The address that names a block (the current one goes in the address bar, so a reload or a link lands on it). */
+  address?: (block: LocalBlock) => string | null
 }) {
   const [tree, setTree] = useState<Tree>(() => (history.state?.[KEY] as Tree | undefined) ?? empty)
   const treeRef = useRef(tree); treeRef.current = tree
+  const addressRef = useRef(address); addressRef.current = address
   // Every change is a history entry (opening, starting) or replaces the current one (changing in place, branching back).
   const commit = useCallback((next: Tree, push: boolean) => {
     const t = { ...next, rev: next.rev + 1 }
     setTree(t)
     const state = { ...(history.state ?? {}), [KEY]: t }
-    if (push) history.pushState(state, ''); else history.replaceState(state, '')
+    const leaf = t.leaf ? t.nodes[t.leaf] : null
+    const url = leaf && addressRef.current ? addressRef.current(leaf) ?? undefined : undefined
+    if (push) history.pushState(state, '', url); else history.replaceState(state, '', url)
   }, [])
   useEffect(() => {
     const onPop = (e: PopStateEvent) => { const t = e.state?.[KEY] as Tree | undefined; setTree(t ?? empty) }
@@ -122,7 +127,9 @@ export default function LocalThread({ blocks, home, empty: emptyView, after, onR
     const t = treeRef.current
     const b = t.nodes[id]
     if (!b?.parent) return
-    commit({ ...t, nodes: { ...t.nodes, [b.parent]: { ...t.nodes[b.parent], active: id } } }, true)
+    const nodes = { ...t.nodes, [b.parent]: { ...t.nodes[b.parent], active: id } }
+    let leaf = id; while (nodes[leaf]?.active) leaf = nodes[leaf].active!
+    commit({ ...t, nodes, leaf }, true)
   }, [commit])
 
   const path = useMemo(() => activePath(tree), [tree])

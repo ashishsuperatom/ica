@@ -126,6 +126,7 @@
   --topbar-h: 56px;
   --column-w: 1200px; /* the thread column */
   --artifacts-w: 320px; /* the artifacts pane on the right */
+  --form-w: 640px; /* a form in a block */
   --askbar-w: 720px; /* the ask bar: the platform chat input's width, narrower than the blocks */
   --popover-w: 280px; /* the least a list under a trigger is wide */
   --legend-w: 220px; /* the least a legend column is wide */

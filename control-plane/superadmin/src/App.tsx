@@ -17,6 +17,7 @@ import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useSearchPa
 import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
 import { AppShell, Sidebar, LocalThread, Toasts, useThread, startThread, type Registry } from '@superatom/ui'
 import '@superatom/ui/design.css'
+import { AdminContext, ADMIN_OWN_BLOCKS } from './AdminBlocks'
 
 // ── COPY, AND SAY SO ─────────────────────────────────────────────────────────
 // Four copy buttons did their work in total silence. Copying a credential is the one moment you MUST know it
@@ -330,9 +331,20 @@ function MoveWatcher({ home, onMove }: { home: string; onMove: (to: string) => v
   return null
 }
 
+/** The scope a screen is in (an organisation, a project), for the sidebar's places. */
+const ScopeReport = createContext<(path: string) => void>(() => {})
+const scopeOf = (path: string): { org?: string; project?: string } => {
+  const pro = /^\/(?:org\/([^/?]+)\/projects|pro)\/([^/?]+)/.exec(path)
+  if (pro) return { ...(pro[1] ? { org: pro[1] } : {}), project: pro[2] }
+  const org = /^\/org\/([^/?]+)/.exec(path)
+  return org ? { org: org[1] } : {}
+}
+
 function ScreenBlock() {
   const { props, open } = useThread()
   const path = String(props.path ?? '/')
+  const report = useContext(ScopeReport)
+  useEffect(() => { report(path) }, [path, report])
   return (
     <ShellMode.Provider value="block">
       <MemoryRouter initialEntries={[path]}>
@@ -351,16 +363,64 @@ const ADMIN_BLOCKS: Registry = {
   },
 }
 
+/** The places of a project, by purpose — the order the work happens in. */
+function purposesOf(pid: string) {
+  const P = (v: string) => `/pro/${pid}${v ? `/${v}` : ''}`
+  return [
+    { key: 'knowledge', title: 'Knowledge', icon: 'lucide:library', says: 'What the agents know, versioned and governed.', places: [
+      { label: 'Composition graph', path: P('inspector/composition'), says: 'Domains, concepts, agents — every change kept, suggestions decided.' }] },
+    { key: 'data', title: 'Data', icon: 'lucide:database', says: 'Where the data comes from and how it is found.', places: [
+      { label: 'Data index', path: P('index'), says: 'Every source, its tables and fields.' },
+      { label: 'Grounding', path: P('inspector/grounding'), says: 'Names people use, matched to the records they mean.' }] },
+    { key: 'agents', title: 'Agents at work', icon: 'lucide:bot', says: 'Which model each agent runs on, and the agents\' consoles.', places: [
+      { label: 'Agents and models', path: P('agents'), says: 'The harness, account and model each agent runs.' },
+      { label: 'Connector', path: P('agent'), says: 'Connect a data source with the connector agent.' },
+      { label: 'Analyst', path: P('analyst'), says: 'Explore the data with the analyst.' },
+      { label: 'Grounding agent', path: P('grounding'), says: 'Build the grounding.' }] },
+    { key: 'people', title: 'People and access', icon: 'lucide:users', says: 'Who may do what, and see which data.', places: [
+      { label: 'Who has access', path: P('access'), says: 'Members of the project and their roles.' },
+      { label: 'Groups', path: P('groups'), says: 'Groups, their members and budgets.' },
+      { label: 'Data access', path: P('data-access'), says: 'Rows, columns and denials per person, role, group or key.' },
+      { label: 'Agent keys', path: P('agent-keys'), says: 'Keys agents and scripts use, and their scopes.' }] },
+    { key: 'operations', title: 'Operations', icon: 'lucide:settings-2', says: 'The engine, what happened, and settings.', places: [
+      { label: 'Overview', path: P(''), says: 'The engine: compute, state, connections.' },
+      { label: 'Event log', path: P('events'), says: 'What the project did.' },
+      { label: 'Audit history', path: P('audit'), says: 'Who did what, and how it ended.' },
+      { label: 'Dashboards', path: P('dashboards'), says: 'Published dashboards and their builds.' },
+      { label: 'Subdomains', path: P('subdomains'), says: 'The project\'s addresses.' },
+      { label: 'Channels', path: P('channels'), says: 'Teams and other channels.' },
+      { label: 'Settings', path: P('settings'), says: 'Keys, the agent profile, the danger zone.' }] },
+  ]
+}
+
 function AdminWorkspace() {
   // Where the address points (an org, a project and its view, the platform pages) is the block the thread starts from.
   const first = useMemo(() => { const p = location.pathname.slice(ROUTER_BASE.length).replace(/^\/w(?=\/|$)/, '') || '/'; return { type: 'screen', props: { path: p + location.search.replace(/[?&]classic(=[^&]*)?/, '') } } }, [])
   const go = (path: string) => startThread('screen', { path })
+  const token = useAuth()
+  const api = useApi(token, null)
+  const [scope, setScope] = useState<{ org?: string; project?: string }>(() => scopeOf(String(first.props.path)))
+  const report = useCallback((path: string) => { const s = scopeOf(path); if (s.project || s.org) setScope((cur) => ({ ...cur, ...s, ...(s.org && !s.project && s.org !== cur.org ? { project: undefined } : {}) })) }, [])
+  const env = useMemo(() => ({ api, token, superadmin: HOST_SCOPE === 'superadmin', openScreen: go }), [api, token])
+  // THE PLACES, BY PURPOSE, for the scope in view: what needs a decision first, then the work in the order it happens.
   const groups = [
-    { items: [{ key: 'orgs', label: HOST_SCOPE === 'admin' ? 'Your organisation' : 'Organisations', icon: 'lucide:building-2', onClick: () => go('/') }] },
-    ...(HOST_SCOPE === 'superadmin' ? [{ label: 'Platform', items: [
-      { key: 'credentials', label: 'Credentials', icon: 'lucide:key-round', onClick: () => go('/credentials') },
-      { key: 'agents', label: 'Models and agents', icon: 'lucide:cpu', onClick: () => go('/agents') },
+    ...(scope.project ? [{ label: `Project ${scope.project.slice(0, 8)}`, items: [
+      { key: 'p-attention', label: 'Attention', icon: 'lucide:bell', onClick: () => startThread('attention', { projectId: scope.project }) },
+      ...purposesOf(scope.project).map((p) => ({ key: `p-${p.key}`, label: p.title, icon: p.icon, onClick: () => startThread('purpose', { title: p.title, says: p.says, places: p.places }) })),
     ] }] : []),
+    ...(scope.org ? [{ label: `Organisation ${scope.org.slice(0, 8)}`, items: [
+      { key: 'o-projects', label: 'Projects', icon: 'lucide:folder-kanban', onClick: () => go(`/org/${scope.org}`) },
+      { key: 'o-members', label: 'Members', icon: 'lucide:users', onClick: () => go(`/org/${scope.org}?tab=users`) },
+      { key: 'o-usage', label: 'Usage and credits', icon: 'lucide:gauge', onClick: () => go(`/org/${scope.org}?tab=usage`) },
+    ] }] : []),
+    { label: HOST_SCOPE === 'superadmin' ? 'Platform' : 'Organisations', items: [
+      ...(HOST_SCOPE === 'superadmin' ? [{ key: 'attention', label: 'Attention', icon: 'lucide:bell', onClick: () => startThread('attention', {}) }] : []),
+      { key: 'orgs', label: HOST_SCOPE === 'admin' ? 'Your organisation' : 'Organisations', icon: 'lucide:building-2', onClick: () => go('/') },
+      ...(HOST_SCOPE === 'superadmin' ? [
+        { key: 'credentials', label: 'Credentials', icon: 'lucide:key-round', onClick: () => go('/credentials') },
+        { key: 'agents', label: 'Models and agents', icon: 'lucide:cpu', onClick: () => go('/agents') },
+      ] : []),
+    ] },
     { label: 'More', items: [{ key: 'classic', label: 'Classic console', icon: 'lucide:layout-template', onClick: () => { location.search = '?classic=1' } }] },
   ]
   return (
@@ -368,7 +428,11 @@ function AdminWorkspace() {
       <AppShell sidebar={(collapsed, toggle) => (
         <Sidebar name="Superatom admin" connected groups={groups} collapsed={collapsed} onToggle={toggle} foot={() => <UserButton />} />
       )}>
-        <LocalThread blocks={ADMIN_BLOCKS} home={first} />
+        <AdminContext.Provider value={env}>
+          <ScopeReport.Provider value={report}>
+            <LocalThread blocks={{ ...ADMIN_BLOCKS, ...ADMIN_OWN_BLOCKS }} home={first} address={(b) => (b.type === 'screen' ? `${ROUTER_BASE}${String(b.props.path ?? '/')}` : null)} />
+          </ScopeReport.Provider>
+        </AdminContext.Provider>
       </AppShell>
       <Toasts />
     </>

@@ -27,6 +27,8 @@ export type Hub = {
   subscribe: (fn: (m: any) => void) => () => void   // every (unwrapped) message; returns an unsubscribe
   /** Correlated inspector round-trip: request('nodes', { kind: 'unit' }) → the engine's reply payload. */
   request: (view: string, args?: Record<string, unknown>) => Promise<any>
+  /** Any message to the engine or the hub, answered by its reply. */
+  call: (payload: Record<string, unknown>) => Promise<any>
 }
 
 export function useProjectHub(projectId: string | undefined, token: string | null): Hub {
@@ -62,8 +64,8 @@ export function useProjectHub(projectId: string | undefined, token: string | nul
         else if (m?.t === 'machine:waking') setWaking(true)
         else if (m?.t === 'engine:ready') setWaking(false)
         else if (m?.t === 'error') setErr(m.message ?? m.reason ?? 'hub error')
-        // Resolve a waiting inspector request.
-        if (m?.t === 'inspect:res' && m.reqId) {
+        // Resolve a waiting request (an inspector view, or any message sent with call()).
+        if (m?.reqId && pending.current.has(m.reqId)) {
           const p = pending.current.get(m.reqId)
           if (p) { clearTimeout(p.timer); pending.current.delete(m.reqId); setWaking(false); p.resolve(m) }
         }
@@ -92,10 +94,22 @@ export function useProjectHub(projectId: string | undefined, token: string | nul
     })
   }, [])
 
+  /** Any message to the engine or the hub, answered by the reply that carries its request id. */
+  const call = useCallback((payload: Record<string, unknown>) => {
+    return new Promise<any>((resolve, reject) => {
+      const ws = wsRef.current
+      if (ws?.readyState !== 1) { reject(new Error('not connected to the project hub')); return }
+      const reqId = Math.random().toString(36).slice(2)
+      const timer = window.setTimeout(() => { pending.current.delete(reqId); reject(new Error('no answer in time')) }, REQUEST_TIMEOUT_MS)
+      pending.current.set(reqId, { resolve, reject, timer })
+      void sender({ send: (frame) => ws.send(JSON.stringify({ to: { type: 'code-engine' }, payload: frame })) }).send({ ...payload, reqId })
+    })
+  }, [])
+
   const subscribe = useCallback((fn: (m: any) => void) => {
     subscribers.current.add(fn)
     return () => { subscribers.current.delete(fn) }
   }, [])
 
-  return { status, err, waking, send, subscribe, request }
+  return { status, err, waking, send, subscribe, request, call }
 }

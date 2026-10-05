@@ -273,6 +273,7 @@ export class ProjectDO extends DurableObject<Env> {
 
     // REST API
     if (request.method === 'GET'  && path === '/status')       return this.getStatus()
+    if (request.method === 'GET'  && path === '/attention')    return this.attention()
     if (request.method === 'POST' && path === '/setup')        return this.setup(request)
     if (request.method === 'POST' && path === '/keys/add')     return this.addKey(request)
     if (request.method === 'POST' && path === '/keys/prune')   return this.pruneKeys(request)
@@ -1110,6 +1111,25 @@ export class ProjectDO extends DurableObject<Env> {
   }
 
   // ── Sessions kept by the platform ──────────────────────────────────────────
+  /** What in this project awaits a decision, worst first: its engine away, work that failed, decisions to approve,
+   *  suggestions to decide (knowledge, agents to publish). Each item says where it is, so a screen can open its step. */
+  private async attention(): Promise<Response> {
+    const items: Record<string, unknown>[] = []
+    const engineHere = [...this.connByWs.values()].some((c) => c.type === 'code-engine')
+    if (!engineHere) items.push({ id: 'engine', kind: 'engine', state: 'critical', title: 'The engine is not connected', detail: 'Questions, sessions and programs wait until it is back.' })
+    const since = new Date(Date.now() - 86_400_000).toISOString()
+    for (const a of [...this.ctx.storage.sql.exec("SELECT id, title, detail, updated_at FROM activities WHERE state = 'failed' AND updated_at >= ? ORDER BY updated_at DESC LIMIT 20", since)] as any[])
+      items.push({ id: `failed:${a.id}`, kind: 'failed', state: 'critical', title: `Failed: ${a.title}`, detail: a.detail ?? undefined, at: a.updated_at })
+    for (const d of [...this.ctx.storage.sql.exec(`SELECT r.* FROM decision_register r JOIN (SELECT artifact, MAX(version) AS m FROM decision_register GROUP BY artifact) x ON x.artifact = r.artifact AND x.m = r.version WHERE r.status = 'pending' ORDER BY r.at`)] as any[])
+      items.push({ id: `approval:${d.artifact}`, kind: 'approval', state: 'attention', title: `Approve: ${d.title}`, detail: `Recorded by ${String(d.by).replace(/^(email|user):/, '')}${d.agent ? ` with ${d.agent}` : ''}`, session: d.session, artifact: d.artifact, at: d.at })
+    try {
+      const g = (this.env as any).GRAPH.get((this.env as any).GRAPH.idFromName(`graph:${this._pid}`))
+      const open: any = await (await g.fetch('http://do/open')).json()
+      for (const s of open.open ?? []) items.push({ id: `suggestion:${s.id}`, kind: 'suggestion', state: 'attention', title: s.scope ? `Publish ${s.name} to ${s.scope === 'global' ? 'everyone' : s.scope}` : `Change suggested to ${s.name}`, detail: `${String(s.by).replace(/^(email|user|agent):/, '')}: ${s.reason}`, suggestion: s.id, name: s.name, at: s.at })
+    } catch { /* the graph replica unreachable: its suggestions are not listed */ }
+    return this.j({ items })
+  }
+
   private decisionStub() { return (this.env as any).DECISION.get((this.env as any).DECISION.idFromName(`dec:${this._pid}`)) }
   private sessionStub(session: string) {
     if (!/^[\w-]{1,80}$/.test(session)) throw new Error('not a session id')

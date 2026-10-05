@@ -190,31 +190,13 @@
 .sa-sidebar__group + .sa-sidebar__group { margin-top: var(--sp-3); }
 .sa-sidebar__group-label { padding: 0 var(--sp-3) var(--sp-1); }
 
-/* ── Recording a decision from a step; the work in flight above the ask bar ─────────────────────── */
+/* ── The work in flight above the ask bar ─────────────────────────────────────────────────────────── */
 .sa-step__decide { margin-top: var(--sp-2); }
-.sa-decide { display: flex; flex-direction: column; gap: var(--sp-1); max-width: 640px; padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-subtle); }
-.sa-decide .sa-label { margin-top: var(--sp-2); }
-.sa-decide__check { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); color: var(--muted); font-size: var(--t-sm); }
-.sa-decide__actions { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-3); }
 .sa-askbar__working { max-width: var(--askbar-w); margin: 0 auto var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); display: flex; flex-direction: column; gap: 2px; }
 .sa-work { min-height: 100%; }
 .sa-work__tools { max-width: var(--column-w); margin: 0 auto; padding: var(--sp-3) var(--sp-10) 0; display: flex; justify-content: flex-start; }
 .sa-work__fork { display: flex; gap: var(--sp-2); align-items: center; }
 
-/* ── A form in a block: fields stacked, its actions at the foot; a sent form locks (it became a record) ── */
-.sa-form { display: grid; gap: var(--sp-3); max-width: 640px; padding: var(--sp-4); }
-.sa-form__field { display: grid; gap: var(--sp-1); }
-.sa-form__field > span:first-child { font-size: var(--t-sm); color: var(--muted); font-weight: var(--w-medium); }
-.sa-form__help { font-size: var(--t-xs); color: var(--faint); overflow-wrap: anywhere; }
-.sa-form__choices { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
-.sa-form__choices label { display: inline-flex; align-items: center; gap: var(--sp-1h); font-size: var(--t-sm); color: var(--ink); }
-.sa-form__actions { display: flex; gap: var(--sp-2); justify-content: flex-end; }
-.sa-form[data-locked='true'] { opacity: 0.75; }
-.sa-form__error { color: var(--loss-ink); font-size: var(--t-sm); overflow-wrap: anywhere; }
-.sa-receipt { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--sp-1) var(--sp-4); padding: var(--sp-4); font-size: var(--t-base); }
-.sa-receipt dt { color: var(--muted); }
-.sa-receipt dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
-.sa-block-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); }
 /* A step takes the thread's width; a block's grid of cards and its ask field sit inside it with the section's padding. */
 .sa-thread__column { width: 100%; }
 .sa-thread__item { width: 100%; }

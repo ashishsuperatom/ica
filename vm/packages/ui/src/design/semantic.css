@@ -1,0 +1,56 @@
+/*
+ * THE SEMANTIC COMPONENTS' STYLES (components/semantic): each block of rules belongs to one component and uses only
+ * tokens. A screen never adds CSS of its own; what it needs that is missing is added here, to the component it belongs to.
+ */
+
+/* Form · Field · Choices */
+.sa-form { display: grid; gap: var(--sp-3); max-width: var(--form-w); padding: var(--sp-4) var(--sp-5); }
+.sa-form__fields { display: grid; gap: var(--sp-3); border: 0; padding: 0; margin: 0; min-width: 0; }
+.sa-form[data-locked='true'] .sa-form__fields { opacity: 0.8; }
+.sa-form__actions { display: flex; gap: var(--sp-2); justify-content: flex-end; }
+.sa-form__error { color: var(--loss-ink); font-size: var(--t-sm); overflow-wrap: anywhere; margin: 0; }
+.sa-field-row { display: grid; gap: var(--sp-1); min-width: 0; }
+.sa-field-row__label { font-size: var(--t-sm); color: var(--muted); font-weight: var(--w-medium); }
+.sa-field-row__help { font-size: var(--t-xs); color: var(--faint); overflow-wrap: anywhere; }
+.sa-choices { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
+.sa-choices label { display: inline-flex; align-items: center; gap: var(--sp-1h); font-size: var(--t-sm); color: var(--ink); }
+
+/* Receipt */
+.sa-receipt { display: grid; gap: var(--sp-1); padding: var(--sp-4) var(--sp-5); margin: 0; }
+.sa-receipt__row { display: grid; grid-template-columns: minmax(8rem, max-content) minmax(0, 1fr); gap: var(--sp-4); font-size: var(--t-base); }
+.sa-receipt dt { color: var(--muted); }
+.sa-receipt dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+
+/* RecordList */
+.sa-records { overflow-x: auto; }
+.sa-records__table { width: 100%; border-collapse: collapse; font-size: var(--t-base); }
+.sa-records__table th { text-align: start; font-size: var(--t-2xs); font-weight: var(--w-semibold); text-transform: uppercase; letter-spacing: 0.04em; color: var(--faint); background: var(--panel); padding: var(--sp-2) var(--sp-4); white-space: nowrap; }
+.sa-records__table td { padding: var(--sp-2) var(--sp-4); border-top: 1px solid var(--line); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 28rem; }
+.sa-records__table td[data-wrap='true'] { white-space: normal; overflow-wrap: anywhere; }
+.sa-records__table [data-align='end'] { text-align: end; font-variant-numeric: tabular-nums; }
+.sa-records__table tr[data-opens='true'] { cursor: pointer; }
+.sa-records__table tr[data-opens='true']:hover td { background: var(--primary-wash); }
+
+/* Status */
+.sa-status-word { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--t-xs); font-weight: var(--w-semibold); padding: 1px var(--sp-2); border-radius: var(--r-full); background: var(--panel); color: var(--muted); white-space: nowrap; }
+.sa-status-word[data-state='ok'] { background: var(--win-wash); color: var(--win-ink); }
+.sa-status-word[data-state='attention'] { background: var(--warn-wash); color: var(--warn-ink); }
+.sa-status-word[data-state='critical'] { background: var(--loss-wash); color: var(--loss-ink); }
+.sa-status-word[data-state='running'] { background: var(--primary-wash); color: var(--primary-strong); }
+
+/* AttentionList */
+.sa-attention { list-style: none; margin: 0; padding: var(--sp-2) 0; display: grid; }
+.sa-attention__item { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--sp-4); padding: var(--sp-2) var(--sp-5); border-left: 3px solid var(--line); }
+.sa-attention__item + .sa-attention__item { border-top: 1px solid var(--line); }
+.sa-attention__item[data-state='critical'] { border-left-color: var(--loss); }
+.sa-attention__item[data-state='attention'] { border-left-color: var(--warn); }
+.sa-attention__item[data-state='running'] { border-left-color: var(--primary); }
+.sa-attention__main { display: grid; gap: 2px; text-align: start; min-width: 0; color: var(--ink); }
+.sa-attention__title { font-weight: var(--w-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-attention__detail { color: var(--muted); font-size: var(--t-sm); overflow-wrap: anywhere; }
+.sa-attention__where { color: var(--faint); font-size: var(--t-xs); white-space: nowrap; }
+.sa-attention__action { color: var(--primary); font-size: var(--t-sm); display: inline-flex; align-items: center; gap: var(--sp-1); white-space: nowrap; }
+
+/* ActionBar · Empty */
+.sa-actionbar { display: flex; flex-wrap: wrap; gap: var(--sp-2); padding: var(--sp-3) var(--sp-5); }
+.sa-empty { display: flex; align-items: center; gap: var(--sp-2); color: var(--faint); font-size: var(--t-sm); padding: var(--sp-4) var(--sp-5); margin: 0; }

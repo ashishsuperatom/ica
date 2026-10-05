@@ -300,7 +300,7 @@ export default {
       }
       // Anything that changes the project — machine lifecycle, access, roles, datasources, keys, tokens — is for
       // whoever administers it. A member may look, not provision.
-      const PROVISIONING = /^(machine|service-token|access|roles|datasources|members|verify-conn|info|fly|suspend|resume|stop|delete|dashboards|agent-keys|audit|groups)/
+      const PROVISIONING = /^(machine|service-token|access|roles|datasources|members|verify-conn|info|fly|suspend|resume|stop|delete|dashboards|agent-keys|audit|groups|attention)/
       // A person's own connection is theirs to make and remove; the DO checks shared ones are made by an admin.
       const ownConnection = /^connections(\/con_[\w-]+)?$/.test(subPath)
       const isProvisioning = !ownConnection && (request.method !== 'GET' || PROVISIONING.test(subPath))

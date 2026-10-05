@@ -16,7 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '@superatom/ui/design.css'
 import {
   AppShell, Sidebar, UserProfile, ConnectionStatus, Steps, BlockFrame, Answer, Paths, Artifacts, Toasts, LocalThread,
-  listenIntents, pathOf, siblingsOf, revealBlock, notify, startThread, type Recognised, type Artifact, type StepItem,
+  listenIntents, pathOf, siblingsOf, revealBlock, notify, startThread, Form, Field, Choices, type Recognised, type Artifact, type StepItem,
 } from '@superatom/ui'
 import { PAGE_BLOCKS, PagesContext } from './pageBlocks'
 import ProgramBlock, { type ProgramUI } from './ProgramBlock'
@@ -64,7 +64,7 @@ export default function Workspace({ request, subscribeLive, scopes, projectId, t
   // A page of the user UI is a block: from a session it opens a fresh thread starting there; on the pages, a new thread.
   const [root, setRoot] = useState<string | null>(null)
   // A page can be linked to (/w?page=agents): the thread starts there.
-  const [pending, setPending] = useState<{ type: string } | null>(() => { const p = new URLSearchParams(location.search).get('page'); return p && PAGE_BLOCKS[p] ? { type: p } : null })
+  const [pending, setPending] = useState<{ type: string } | null>(() => { const p = new URLSearchParams(location.search).get('page'); return p && ['agents', 'activity', 'connections'].includes(p) ? { type: p } : null })
   const page = (type: string) => { if (sessionId || startAgent) { setPending({ type }); go('') } else startThread(type) }
   const onPages = !sessionId && !startAgent
   const nav = [{
@@ -100,7 +100,7 @@ export default function Workspace({ request, subscribeLive, scopes, projectId, t
         {sessionId
           ? <SessionSteps key={sessionId} session={sessionId} request={request} projectId={projectId} token={token} agentName={agentName} onArtifacts={setArtifacts} />
           : <PagesContext.Provider value={pagesEnv}>
-              <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} />
+              <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} address={(b) => (b.type === 'home' ? '/w' : ['agents', 'activity', 'connections'].includes(b.type) ? `/w?page=${b.type}` : null)} />
             </PagesContext.Provider>}
       </AppShell>
       <Toasts />
@@ -265,18 +265,12 @@ function DecisionForm({ onRecord, onCancel }: { onRecord: (body: Record<string, 
   const [options, setOptions] = useState('')
   const [approval, setApproval] = useState(false)
   return (
-    <form className="sa-decide" onSubmit={(e) => { e.preventDefault(); onRecord({ decision, reasoning, options: options.split('\n').map((o) => o.trim()).filter(Boolean).map((label) => ({ label })), chosen: decision }, approval) }}>
-      <label className="sa-label" htmlFor="sa-decision">What was decided</label>
-      <input id="sa-decision" className="sa-input" value={decision} onChange={(e) => setDecision(e.target.value)} required />
-      <label className="sa-label" htmlFor="sa-options">Options weighed (one per line)</label>
-      <textarea id="sa-options" className="sa-input" rows={3} value={options} onChange={(e) => setOptions(e.target.value)} />
-      <label className="sa-label" htmlFor="sa-reasoning">Why</label>
-      <textarea id="sa-reasoning" className="sa-input" rows={3} value={reasoning} onChange={(e) => setReasoning(e.target.value)} required />
-      <label className="sa-decide__check"><input id="sa-approval" type="checkbox" checked={approval} onChange={(e) => setApproval(e.target.checked)} /> Needs approval by someone else</label>
-      <div className="sa-decide__actions">
-        <button type="button" className="sa-btn" onClick={onCancel}>Cancel</button>
-        <button className="sa-btn sa-btn--primary">Record the decision</button>
-      </div>
-    </form>
+    <Form onSubmit={() => onRecord({ decision, reasoning, options: options.split('\n').map((o) => o.trim()).filter(Boolean).map((label) => ({ label })), chosen: decision }, approval)}
+      actions={<><button type="button" className="sa-btn" onClick={onCancel}>Cancel</button><button className="sa-btn sa-btn--primary">Record the decision</button></>}>
+      <Field label="What was decided"><input id="sa-decision" className="sa-input" value={decision} onChange={(e) => setDecision(e.target.value)} required /></Field>
+      <Field label="Options weighed (one per line)"><textarea id="sa-options" className="sa-input" rows={3} value={options} onChange={(e) => setOptions(e.target.value)} /></Field>
+      <Field label="Why"><textarea id="sa-reasoning" className="sa-input" rows={3} value={reasoning} onChange={(e) => setReasoning(e.target.value)} required /></Field>
+      <Choices label="Approval"><label><input id="sa-approval" type="checkbox" checked={approval} onChange={(e) => setApproval(e.target.checked)} /> Needs approval by someone else</label></Choices>
+    </Form>
   )
 }

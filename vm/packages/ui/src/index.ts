@@ -34,6 +34,9 @@ export { default as Sidebar, type NavItem, type NavGroup } from './components/la
 export { default as UserProfile } from './components/layout/UserProfile.tsx'
 export { default as ConnectionStatus, type Connection } from './components/layout/ConnectionStatus.tsx'
 
+// the semantic components: what a screen composes
+export { Form, Field, Choices, Receipt, RecordList, Status, AttentionList, ActionBar, Empty, type Column, type Attention, type State as StatusState } from './components/semantic/index.tsx'
+
 // primitives
 export * from './components/ui/Section.tsx'
 export { default as Select, Popover, type Option } from './components/ui/Select.tsx'

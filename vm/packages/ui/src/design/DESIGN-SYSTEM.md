@@ -279,3 +279,22 @@ Breakpoints (documented, not variables): 640 / 768 / 1024.
 - No `content-visibility: auto` on blocks (a chart initialised in a skipped block measured 0×0); no negative margins.
 - Rules 8–15 are new: text fits its track, commit on close, popover rule, display-only lens, ring for wholes,
   legend by size, placeholder-then-query.
+
+
+## The semantic components (components/semantic, design/semantic.css)
+
+A screen composes these and writes **no CSS of its own**; what it needs that is missing is added to the component it
+belongs to, on the tokens. Each is named for what it is:
+
+| Component | Is |
+|---|---|
+| `Form`, `Field`, `Choices` | a form in a block: fields stacked, its actions at the foot; a sent form **locks** (it became a record) |
+| `Receipt` | what a sent form, a decision or a change became: its facts as pairs |
+| `RecordList` | records in rows: columns declared once (`align: 'end'` for figures, `wrap` for prose); a row may open the next step |
+| `Status` | the state of a thing in one word: ok · attention · critical · running · neutral |
+| `AttentionList` | what needs a decision, worst first; each item opens its step |
+| `ActionBar` | the paths at the end of a block |
+| `Empty` | nothing here yet, said plainly, with what will appear |
+
+Theming is token overrides only: a `:root[data-theme="…"]` block redefining the colour, radius and type tokens; no
+component changes.

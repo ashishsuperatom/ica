@@ -3,7 +3,7 @@
 // Each click opens a block below; each block is drawn in the platform's frame with the design system's primitives.
 
 import { createContext, useContext, useEffect, useState } from 'react'
-import { Section, notify, useThread, type Registry } from '@superatom/ui'
+import { Section, notify, useThread, Form, Field, Choices, Receipt, RecordList, Status, ActionBar, Empty, type Registry } from '@superatom/ui'
 import type { Connector } from '../../shared/connectors'
 
 type Request = (payload: Record<string, unknown>, onProgress?: (m: any) => void) => Promise<any>
@@ -47,7 +47,7 @@ function Home() {
     {asking && <div className="sa-askbar__working"><span className="sa-label">Working on: {asking}</span>{beats.slice(-3).map((b, i) => <div key={i} className="sa-note">{b}</div>)}</div>}
     <Section icon="lucide:bot" title="Agents" subtitle="Each knows one part of the organisation and the programs that work on it."
       actions={<button className="sa-btn" onClick={() => open('agents', {}, 'Looked at the agents')}>Manage</button>}>
-      {env.agents.length === 0 ? <p className="sa-note sa-section__empty">No agents you can see yet.</p> : (
+      {env.agents.length === 0 ? <Empty>No agents you can see yet.</Empty> : (
         <div className="sa-sub-grid">{env.agents.map((a) => <button key={a.id} className="sa-sub-card" onClick={() => env.go(`s/${a.id}`)}><span className="sa-sub-card__title">{a.name}</span><span className="sa-sub-card__text">Start a session</span></button>)}</div>
       )}
     </Section>
@@ -71,21 +71,11 @@ function AgentsBlock() {
   return (
     <Section icon="lucide:bot" title={`${agents.length} agents you can see`} subtitle="Open one to start a session, or make a new one."
       actions={<button className="sa-btn sa-btn--primary" onClick={() => open('agent-new', {}, 'Making an agent')}>New agent</button>}>
-      {agents.length === 0 ? <p className="sa-note sa-section__empty">No agents you can see yet.</p> : (
-        <table className="sa-table">
-          <thead><tr><th className="l">Agent</th><th className="l">Who sees it</th><th /></tr></thead>
-          <tbody>{agents.map((a) => (
-            <tr key={a.id}>
-              <td className="l">{a.name}{a.isDefault ? <span className="sa-pill" style={{ marginLeft: 8 }}>default</span> : null}</td>
-              <td className="l">{!a.scope || a.scope === 'global' ? 'Everyone in the project' : a.scope.startsWith('group:') ? `The ${a.scope.slice(6)} group` : 'Only its owner'}</td>
-              <td>
-                {a.scope && a.scope !== 'global' && <button className="sa-btn sa-btn--link" onClick={() => void publish(a)}>Publish to everyone</button>}
-                <button className="sa-btn" onClick={() => env.go(`s/${a.id}`)}>Open</button>
-              </td>
-            </tr>
-          ))}</tbody>
-        </table>
-      )}
+      <RecordList rows={agents} keyOf={(a) => a.id} empty="No agents you can see yet." onRow={(a) => env.go(`s/${a.id}`)} columns={[
+        { key: 'name', label: 'Agent', render: (a) => <>{a.name}{a.isDefault ? <> <Status state="neutral">default</Status></> : null}</> },
+        { key: 'scope', label: 'Who sees it', render: (a) => (!a.scope || a.scope === 'global' ? 'Everyone in the project' : a.scope.startsWith('group:') ? `The ${a.scope.slice(6)} group` : 'Only its owner') },
+        { key: 'publish', label: '', align: 'end', render: (a) => (a.scope && a.scope !== 'global' ? <button className="sa-btn sa-btn--link" onClick={(e) => { e.stopPropagation(); void publish(a) }}>Publish to everyone</button> : null) },
+      ]} />
     </Section>
   )
 }
@@ -112,26 +102,20 @@ function AgentNew() {
     open('agent-made', { id: name, title: f.title.trim(), domain: f.domain, programs: f.programs, scope: f.scope }, `Made ${f.title.trim()}`)
   }
   return (
-    <form className="sa-form" data-locked={sent} onSubmit={(e) => { e.preventDefault(); void send() }}>
-      <label className="sa-form__field"><span>Title</span><input id="ag-title" className="sa-input" value={f.title} disabled={sent} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="Unsettled trips" required /></label>
-      <label className="sa-form__field"><span>Answers from (its domain of knowledge)</span>
-        <select id="ag-domain" className="sa-input" value={f.domain} disabled={sent} onChange={(e) => setF({ ...f, domain: e.target.value })} required><option value="" />{domains.map((d) => <option key={d}>{d}</option>)}</select></label>
-      <div className="sa-form__field"><span>Programs it may run</span>
-        <div className="sa-form__choices">
-          {!programs.length && <span className="sa-form__help">No programs yet.</span>}
-          {programs.map((p) => <label key={p.name}><input type="checkbox" disabled={sent} checked={f.programs.includes(p.name)} onChange={(e) => setF({ ...f, programs: e.target.checked ? [...f.programs, p.name] : f.programs.filter((x) => x !== p.name) })} /> {p.name}{p.published_at ? '' : ' (draft)'}</label>)}
-        </div>
-      </div>
-      <label className="sa-form__field"><span>Who sees it</span>
-        <select id="ag-scope" className="sa-input" value={f.scope} disabled={sent} onChange={(e) => setF({ ...f, scope: e.target.value })}>
+    <Form onSubmit={() => void send()} locked={sent} error={err} actions={<button className="sa-btn sa-btn--primary" disabled={!f.title.trim() || !f.domain}>Make the agent</button>}>
+      <Field label="Title"><input id="ag-title" className="sa-input" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="Unsettled trips" required /></Field>
+      <Field label="Answers from (its domain of knowledge)">
+        <select id="ag-domain" className="sa-input" value={f.domain} onChange={(e) => setF({ ...f, domain: e.target.value })} required><option value="" />{domains.map((d) => <option key={d}>{d}</option>)}</select></Field>
+      <Choices label="Programs it may run" help={programs.length ? undefined : 'No programs yet.'}>
+        {programs.map((p) => <label key={p.name}><input type="checkbox" checked={f.programs.includes(p.name)} onChange={(e) => setF({ ...f, programs: e.target.checked ? [...f.programs, p.name] : f.programs.filter((x) => x !== p.name) })} /> {p.name}{p.published_at ? '' : ' (draft)'}</label>)}
+      </Choices>
+      <Field label="Who sees it" help="Everyone else asks for it to be published; an administrator decides.">
+        <select id="ag-scope" className="sa-input" value={f.scope} onChange={(e) => setF({ ...f, scope: e.target.value })}>
           <option value="global">Everyone in the project</option>
           {env.scopes.filter((x) => x.startsWith('group:')).map((g) => <option key={g} value={g}>The {g.slice(6)} group</option>)}
           {env.scopes.filter((x) => x.startsWith('user:')).map((u) => <option key={u} value={u}>Only me</option>)}
-        </select>
-        <span className="sa-form__help">Everyone else asks for it to be published; an administrator decides.</span></label>
-      {err && <p className="sa-form__error" role="alert">{err}</p>}
-      {!sent && <div className="sa-form__actions"><button className="sa-btn sa-btn--primary" disabled={!f.title.trim() || !f.domain}>Make the agent</button></div>}
-    </form>
+        </select></Field>
+    </Form>
   )
 }
 
@@ -139,13 +123,8 @@ function AgentMade() {
   const env = useEnv()
   const { props } = useThread()
   return (<>
-    <dl className="sa-receipt">
-      <dt>Agent</dt><dd>{String(props.title)}</dd>
-      <dt>Answers from</dt><dd>{String(props.domain)}</dd>
-      <dt>Programs</dt><dd>{((props.programs as string[]) ?? []).join(', ') || 'none — it answers in words'}</dd>
-      <dt>Who sees it</dt><dd>{props.scope === 'global' ? 'Everyone in the project' : String(props.scope)}</dd>
-    </dl>
-    <div className="sa-block-actions"><button className="sa-btn sa-btn--primary" onClick={() => env.go(`s/${String(props.id)}`)}>Start a session with it</button></div>
+    <Receipt items={[['Agent', String(props.title)], ['Answers from', String(props.domain)], ['Programs', ((props.programs as string[]) ?? []).join(', ') || 'none — it answers in words'], ['Who sees it', props.scope === 'global' ? 'Everyone in the project' : String(props.scope)]]} />
+    <ActionBar><button className="sa-btn sa-btn--primary" onClick={() => env.go(`s/${String(props.id)}`)}>Start a session with it</button></ActionBar>
   </>)
 }
 
@@ -156,16 +135,11 @@ function ActivityBlock() {
   useEffect(() => env.subscribeLive((m) => { if (m.t === 'activity' && m.activity?.id) setRows((prev) => [m.activity, ...prev.filter((x) => x.id !== m.activity.id)].slice(0, 100)) }), [env.subscribeLive])
   return (
     <Section icon="lucide:activity" title="Running for you, and lately" subtitle="Program builds and session runs; kept current as they change.">
-      {!rows.length ? <p className="sa-note sa-section__empty">Nothing running, and nothing in the last day.</p> : (
-        <table className="sa-table">
-          <thead><tr><th className="l">State</th><th className="l">What</th><th>When</th></tr></thead>
-          <tbody>{rows.map((a) => (
-            <tr key={a.id}><td className="l"><span className="sa-pill" data-state={a.state === 'failed' ? 'critical' : a.state === 'running' ? 'warning' : 'ok'}>{a.state}</span></td>
-              <td className="l wrap">{a.title}{a.progress || a.detail ? <span className="sa-note"> — {a.progress ?? a.detail}</span> : null}</td>
-              <td>{when(a.updated_at ?? a.updatedAt)}</td></tr>
-          ))}</tbody>
-        </table>
-      )}
+      <RecordList rows={rows} keyOf={(a) => a.id} empty="Nothing running, and nothing in the last day." columns={[
+        { key: 'state', label: 'State', render: (a) => <Status state={a.state === 'failed' ? 'critical' : a.state === 'running' ? 'running' : 'ok'}>{a.state}</Status> },
+        { key: 'title', label: 'What', wrap: true, render: (a) => <>{a.title}{a.progress || a.detail ? ` — ${a.progress ?? a.detail}` : ''}</> },
+        { key: 'when', label: 'When', align: 'end', render: (a) => when(a.updated_at ?? a.updatedAt) },
+      ]} />
     </Section>
   )
 }
@@ -189,20 +163,16 @@ function ConnectionsBlock() {
   const remove = async (id: string) => { const r = await api(`/connections/${id}`, { method: 'DELETE' }); if (!r.ok) notify(((await r.json().catch(() => ({}))) as any).error ?? 'Refused', 'refused'); load() }
   return (<>
     <Section icon="lucide:plug" title={`${list.length} connections`} subtitle="Yours and the project's shared ones. A secret is sent once, sealed, and never shown again.">
-      {!list.length ? <p className="sa-note sa-section__empty">No connections yet.</p> : (
-        <table className="sa-table">
-          <thead><tr><th className="l">Name</th><th className="l">What</th><th className="l">Who uses it</th><th /></tr></thead>
-          <tbody>{list.map((c) => (
-            <tr key={c.id}><td className="l">{c.name}</td>
-              <td className="l">{connectors.find((x) => x.id === c.connector)?.title ?? c.connector} · {c.runs === 'code' ? 'code' : 'API'}{c.origin === 'engine' ? ' (on the engine)' : ''}{c.runnable ? '' : ' · not runnable yet'}</td>
-              <td className="l">{c.level === 'project' ? 'the project' : 'you'}</td>
-              <td>{c.origin === 'platform' && <button className="sa-btn sa-btn--link" onClick={() => void remove(c.id)}>Remove</button>}</td></tr>
-          ))}</tbody>
-        </table>
-      )}
+      <RecordList rows={list} keyOf={(c) => c.id} empty="No connections yet." columns={[
+        { key: 'name', label: 'Name' },
+        { key: 'what', label: 'What', render: (c) => `${connectors.find((x) => x.id === c.connector)?.title ?? c.connector} · ${c.runs === 'code' ? 'code' : 'API'}${c.origin === 'engine' ? ' (on the engine)' : ''}` },
+        { key: 'state', label: 'State', render: (c) => <Status state={c.runnable ? 'ok' : 'attention'}>{c.runnable ? 'connected' : 'not runnable yet'}</Status> },
+        { key: 'level', label: 'Who uses it', render: (c) => (c.level === 'project' ? 'the project' : 'you') },
+        { key: 'remove', label: '', align: 'end', render: (c) => (c.origin === 'platform' ? <button className="sa-btn sa-btn--link" onClick={() => void remove(c.id)}>Remove</button> : null) },
+      ]} />
     </Section>
     <Section icon="lucide:plus" title="Connect" subtitle="Pick what to connect.">
-      <div className="sa-block-actions">{connectors.map((c) => <button key={c.id} className="sa-btn" title={c.description} onClick={() => open('connection-new', { connector: c.id }, `Connecting ${c.title}`)}>{c.title}</button>)}</div>
+      <ActionBar>{connectors.map((c) => <button key={c.id} className="sa-btn" title={c.description} onClick={() => open('connection-new', { connector: c.id }, `Connecting ${c.title}`)}>{c.title}</button>)}</ActionBar>
     </Section>
   </>)
 }
@@ -217,7 +187,7 @@ function ConnectionNew() {
   const [values, setValues] = useState<Record<string, string>>({})
   const [err, setErr] = useState('')
   useEffect(() => { api('/connectors').then((r) => r.json()).then((d: any) => { const x = (d.connectors ?? []).find((k: Connector) => k.id === props.connector) ?? null; setC(x); if (x && !name) { setName(x.title); setLevel(x.levels.includes('user') ? 'user' : 'project') } }).catch(() => {}) }, [])   // eslint-disable-line react-hooks/exhaustive-deps
-  if (!c) return <p className="sa-note sa-section__empty">Reading the connector…</p>
+  if (!c) return <Empty>Reading the connector…</Empty>
   const connect = async () => {
     const r = await api('/connections', { method: 'POST', body: JSON.stringify({ connector: c.id, name, level, values }) })
     const d = await r.json().catch(() => ({})) as { error?: string; connection?: { id: string } }
@@ -226,37 +196,27 @@ function ConnectionNew() {
     open('connection-made', { title: c.title, name, level }, `Connected ${name}`)
   }
   return (
-    <form className="sa-form" data-locked={sent} onSubmit={(e) => { e.preventDefault(); void connect() }}>
-      <p className="sa-form__help">{c.description}</p>
-      <label className="sa-form__field"><span>Name</span><input id="con-name" className="sa-input" value={name} disabled={sent} onChange={(e) => setName(e.target.value)} /></label>
-      {c.levels.length > 1 && <label className="sa-form__field"><span>Who uses it</span>
-        <select id="con-level" className="sa-input" value={level} disabled={sent} onChange={(e) => setLevel(e.target.value as 'project' | 'user')}><option value="user">Only me</option><option value="project">Everyone in the project (admins)</option></select></label>}
+    <Form onSubmit={() => void connect()} locked={sent} error={err} actions={<button className="sa-btn sa-btn--primary">Connect</button>}>
+      <Field label="What" help={c.description}><span>{c.title}</span></Field>
+      <Field label="Name"><input id="con-name" className="sa-input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
+      {c.levels.length > 1 && <Field label="Who uses it">
+        <select id="con-level" className="sa-input" value={level} onChange={(e) => setLevel(e.target.value as 'project' | 'user')}><option value="user">Only me</option><option value="project">Everyone in the project (admins)</option></select></Field>}
       {!sent && c.fields.map((fd) => (
-        <label key={fd.name} className="sa-form__field"><span>{fd.label}{fd.required ? ' *' : ''}</span>
+        <Field key={fd.name} label={`${fd.label}${fd.required ? ' *' : ''}`} help={fd.help}>
           {fd.type === 'select'
             ? <select id={`con-${fd.name}`} className="sa-input" value={values[fd.name] ?? ''} onChange={(e) => setValues({ ...values, [fd.name]: e.target.value })}><option value="" />{fd.options?.map((o) => <option key={o}>{o}</option>)}</select>
             : fd.type === 'textarea' || (fd.type === 'secret' && /key/i.test(fd.label))
               ? <textarea id={`con-${fd.name}`} className="sa-input" rows={4} value={values[fd.name] ?? ''} onChange={(e) => setValues({ ...values, [fd.name]: e.target.value })} />
               : <input id={`con-${fd.name}`} className="sa-input" type={fd.type === 'secret' ? 'password' : fd.type === 'number' ? 'number' : 'text'} placeholder={fd.placeholder} value={values[fd.name] ?? ''} onChange={(e) => setValues({ ...values, [fd.name]: e.target.value })} />}
-          {fd.help && <span className="sa-form__help">{fd.help}</span>}
-        </label>
+        </Field>
       ))}
-      {err && <p className="sa-form__error" role="alert">{err}</p>}
-      {!sent && <div className="sa-form__actions"><button className="sa-btn sa-btn--primary">Connect</button></div>}
-    </form>
+    </Form>
   )
 }
 
 function ConnectionMade() {
   const { props } = useThread()
-  return (
-    <dl className="sa-receipt">
-      <dt>Connected</dt><dd>{String(props.name)}</dd>
-      <dt>What</dt><dd>{String(props.title)}</dd>
-      <dt>Who uses it</dt><dd>{props.level === 'project' ? 'Everyone in the project' : 'Only you'}</dd>
-      <dt>Its secrets</dt><dd>Sealed with the platform's key; never shown again.</dd>
-    </dl>
-  )
+  return <Receipt items={[['Connected', String(props.name)], ['What', String(props.title)], ['Who uses it', props.level === 'project' ? 'Everyone in the project' : 'Only you'], ['Its secrets', "Sealed with the platform's key; never shown again."]]} />
 }
 
 export const PAGE_BLOCKS: Registry = {
