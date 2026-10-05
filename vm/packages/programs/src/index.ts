@@ -26,7 +26,7 @@ import { BUNDLE_FORMAT, digestInput, verifyBundle, type ProgramBundle } from './
 export * from './bundle.ts'
 
 /** What a program's author writes; the build adds hash and bundles. */
-export type ProgramSource = Omit<ProgramManifest, 'hash' | 'node' | 'ui'> & { node?: { runtime?: ('on-prem' | 'worker')[] }; ui: { blocks: string[] } }
+export type ProgramSource = Omit<ProgramManifest, 'hash' | 'node' | 'ui'> & { node?: { runtime?: ('on-prem' | 'worker')[] }; ui: { blocks: string[]; head?: string[] } }
 
 export class ProgramError extends Error {
   constructor(public problems: string[]) { super(problems.join('; ')) }
@@ -127,7 +127,7 @@ export function buildProgram(srcDir: string, store: ProgramStore): Built {
     const built: Omit<ProgramManifest, 'hash'> = {
       ...source,
       node: { bundle: 'node/index.js', runtime: source.node?.runtime ?? ['on-prem'] },
-      ui: { bundle: 'web/index.js', blocks: source.ui?.blocks ?? [] },
+      ui: { bundle: 'web/index.js', blocks: source.ui?.blocks ?? [], ...(source.ui?.head?.length ? { head: source.ui.head } : {}) },
       ...(source.package ? { package: { ...source.package, doc: 'doc.md' } } : {}),
     }
     writeFileSync(join(staging, 'manifest.json'), JSON.stringify(built, null, 2))

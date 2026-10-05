@@ -161,9 +161,13 @@
 
 /* ── The artifacts pane (right): what the work produced and decided ─────────────────────────────── */
 .sa-artifacts { width: var(--artifacts-w); flex: none; border-left: 1px solid var(--line); background: var(--sidebar); display: flex; flex-direction: column; min-height: 0; }
-.sa-artifacts__head { display: flex; align-items: center; justify-content: space-between; padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--line); }
+.sa-artifacts__head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); min-height: 52px; padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--line); }
+.sa-artifacts__toggle { margin-left: auto; }
+.sa-artifacts--rail { width: 52px; }
+.sa-artifacts--rail .sa-artifacts__head { padding: var(--sp-3) var(--sp-2); justify-content: center; }
+.sa-artifacts--rail .sa-artifacts__toggle { margin: 0; }
+.sa-artifacts__count { margin: var(--sp-2) auto 0; min-width: 24px; height: 24px; padding: 0 var(--sp-1h); border-radius: var(--r-full); background: var(--panel); color: var(--muted); font-size: var(--t-xs); font-variant-numeric: tabular-nums; }
 .sa-artifacts__body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-3) var(--sp-4); }
-.sa-artifacts__open { position: fixed; right: var(--sp-3); bottom: var(--sp-3); z-index: var(--z-pill); background: var(--surface); border: 1px solid var(--line); }
 .sa-artifacts__empty { padding: var(--sp-2) 0; }
 .sa-artifacts__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
 .sa-artifact { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); padding: var(--sp-2) var(--sp-3); min-width: 0; }
@@ -203,3 +207,10 @@
 .sa-block__body > .sa-askbar__form, .sa-block__body > .sa-askbar__working { margin: var(--sp-3) var(--sp-4); width: auto; max-width: none; }
 .sa-section > .sa-sub-grid, .sa-card > .sa-sub-grid { padding: var(--sp-3) var(--sp-5) var(--sp-4); }
 @media (min-width: 720px) { .sa-section > .sa-sub-grid, .sa-card > .sa-sub-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); } }
+
+.sa-spin { animation: sa-spin 0.9s linear infinite; }
+/* Home inside a block: the block gives the gutter; its ask bar sits in the page, not stuck to the bottom. */
+.sa-block .sa-home { padding: 0; }
+.sa-home__ask .sa-askbar { position: static; padding: 0; background: none; }
+.sa-home__ask .sa-askbar__form { max-width: none; }
+.sa-artifacts__make { margin-top: var(--sp-3); }

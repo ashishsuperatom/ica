@@ -4,19 +4,29 @@
 // programs): nothing is copied here. Each answer's blocks are drawn by the platform's answer component.
 
 type Ctx = { set(patch: Record<string, unknown>): void; params: Record<string, unknown>; services: { app(payload: Record<string, unknown>): Promise<any> } }
-type Slice = { question: Record<string, unknown> | null; title: string; next: unknown[] }
+type Slice = { question: Record<string, unknown> | null; title: string; next: unknown[]; about?: Record<string, unknown> | null }
 
 function show(reply: any, ctx: Ctx) {
   if (reply?.t === 'app:refused') return { answer: { markdown: String(reply.reason ?? 'The application refused that.') } }
   if (reply?.t !== 'app:answer') return { answer: { markdown: `The application did not answer: ${reply?.error ?? reply?.reason ?? reply?.t ?? 'nothing came back'}` } }
   const a = reply.answer ?? reply   // the answer's fields come on the reply itself
-  ctx.set({ question: a.question ?? null, title: String(a.title ?? ''), next: Array.isArray(a.next) ? a.next : [] })
+  // What the view's controls and its footer need: the question (filters, breakdown, window), the next moves, and what
+  // the numbers stand on (the window and span used, settings, assumptions, the reads, the notes, the time it took).
+  // The values each column of the answer's tables takes (an attribute filter offers them).
+  const seen: Record<string, string[]> = {}
+  for (const b of a.blocks ?? []) if (b?.type === 'table') for (const r of b.rows ?? []) for (const [k, v] of Object.entries(r ?? {})) {
+    if (typeof v !== 'string' || !v.trim()) continue
+    const list = (seen[k] ??= [])
+    if (list.length < 100 && !list.includes(v)) list.push(v)
+  }
+  const about = { seen, used: a.used ?? null, notes: Array.isArray(a.notes) ? a.notes : [], asked: Array.isArray(a.asked) ? a.asked : [], ms: Number(a.ms ?? 0), today: String(a.today ?? ''), dropped: Array.isArray(a.dropped) ? a.dropped : [] }
+  ctx.set({ question: a.question ?? null, title: String(a.title ?? ''), next: Array.isArray(a.next) ? a.next : [], about })
   const blocks: Record<string, unknown> = {}
   const markers: string[] = []
   ;(a.blocks ?? []).forEach((b: any, i: number) => { const name = `b${i}`; blocks[name] = b; markers.push(`:::${b?.type ?? 'text'} ${name}`) })
-  const lead = [a.title ? `**${a.title}**` : '', a.words ?? '', a.said ? `_${a.said}_` : ''].filter(Boolean).join(' — ')
-  const notes = (a.notes ?? []).map((n: string) => `> ${n}`)
-  return { answer: { markdown: [lead, ...notes, ...markers].filter(Boolean).join('\n'), blocks } }
+  // The first line names the step (its title, and what was done); the question itself shows in the view's controls.
+  const lead = [a.title ? `**${a.title}**` : '', a.said ? `_${a.said}_` : ''].filter(Boolean).join(' — ')
+  return { answer: { markdown: [lead, ...markers].filter(Boolean).join('\n'), blocks } }
 }
 
 export async function run(state: { view: Slice }, ctx: Ctx) {

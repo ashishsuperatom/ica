@@ -82,6 +82,7 @@ function DonutChart({ slices, height = 280, onSelect, remembers, channel, empty 
     const radius = layout === 'row' ? ['40%', '70%'] : ['44%', '78%']
     const center = layout === 'row' ? ['50%', '55%'] : ['50%', '50%']
     return {
+      animation: false,
       tooltip: { trigger: 'item', ...t.tooltip, formatter: (p: Params) => `${p.name}<br/><b>${format(p.value)}</b> · ${p.percent}% of the total${detail.get(p.name) ? `<br/><span style="color:${t.muted}">${detail.get(p.name)}</span>` : ''}` },
       legend: { show: legend && !html, top: '5%', left: 'center', ...t.legend, ...(selected && Object.keys(selected).length ? { selected } : {}) },
       series: [{

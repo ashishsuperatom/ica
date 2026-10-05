@@ -40,7 +40,7 @@ export default function StackedBars({ rows, labelKey, series, rowHeight = 30, on
   const n = (r: Record<string, unknown>, k: string) => (typeof r[k] === 'number' && Number.isFinite(r[k]) ? (r[k] as number) : 0)
 
   const option = {
-    animationDuration: 300,
+    animation: false,
     grid: { left: 4, right: 72, top: 8, bottom: 8, containLabel: true },
     legend: { show: false },
     tooltip: {

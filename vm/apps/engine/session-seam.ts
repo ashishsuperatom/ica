@@ -1,8 +1,8 @@
 // SESSIONS — an agent's sessions of blocks, run on its programs. These payloads come here (the other session:* messages
 // belong to the chat):
 //
-//   session:agents                                  → session:agents   { agents: [{ id, name, ui }] }
-//   session:open   { session, agent }               → session:view     { view }
+//   session:agents                                  → session:agents   { agents: [{ id, name, ui, look, starts }] }
+//   session:open   { session, agent, startAt? }     → session:view     { view }   startAt: one of the agent's starting points
 //   session:intent { session, ops?|action?|call?, to, block? }
 //                                                  → session:view     { view, result: { block, opened, answer, stale? } }
 //   session:goto   { session, block }               → session:view     { view }
@@ -83,6 +83,10 @@ const describe = (i: Intent) => i.call ? `ran ${i.call.package}.${i.call.fn}` : 
 /** The messages this seam takes (session:new, session:load and session:compact are the chat's). */
 export const SESSION_MESSAGES = new Set(['session:agents', 'session:open', 'session:intent', 'session:goto', 'session:get', 'session:file', 'session:fork', 'session:start'])
 
+/** A starting point's fields over the agent's start, slice by slice. */
+export const mergeStart = (base: Record<string, Record<string, unknown>>, over: Record<string, Record<string, unknown>>) =>
+  Object.fromEntries([...new Set([...Object.keys(base), ...Object.keys(over)])].map((k) => [k, { ...(base[k] ?? {}), ...(over[k] ?? {}) }]))
+
 export function createSessionSeam(d: SessionSeamDeps) {
   const agentsDir = join(d.projectDir, 'agents')
   const store = new ProgramStore(join(d.projectDir, 'programs', 'store'))
@@ -133,6 +137,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
   const fromNode = (n: { name: string; body: any; scope: string; owner: string | null }): AgentSpec => ({
     id: n.name, name: String(n.body.title ?? n.name), scope: n.scope as AgentSpec['scope'], owner: n.owner ?? 'platform', domain: n.body.domain,
     programs: n.body.programs ?? [], tools: n.body.tools ?? [], ...(n.body.start ? { start: n.body.start } : {}), ui: { start: n.body.ui?.start ?? '' }, ica: n.body.ica ?? 'composer', ...(n.body.isDefault ? { isDefault: true } : {}),
+    look: { ...(n.body.icon ? { icon: n.body.icon } : {}), ...(n.body.accent ? { accent: n.body.accent } : {}), ...(n.body.says ? { says: n.body.says } : {}) }, starts: Array.isArray(n.body.starts) ? n.body.starts : [],
   })
   function graphAgents(): AgentSpec[] {
     const s = graphStore(); if (!s) return []
@@ -194,7 +199,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const fromFiles = existsSync(agentsDir) ? readdirSync(agentsDir).filter((f) => f.endsWith('.json') && !fromGraph.some((a) => a.id === f.slice(0, -5))).flatMap((f) => {
       try { return [readAgent(f.slice(0, -5))] } catch { return [] }
     }) : []
-    return [...fromGraph, ...fromFiles].map((a) => ({ id: a.id, name: a.name, scope: a.scope, ui: a.ui, isDefault: !!a.isDefault }))
+    return [...fromGraph, ...fromFiles].map((a) => ({ id: a.id, name: a.name, scope: a.scope, ui: a.ui, isDefault: !!a.isDefault, look: a.look ?? {}, starts: (a.starts ?? []).map((x) => ({ key: x.key, label: x.label, says: x.says ?? '' })) }))
   }
 
   const viewOf = (v: SessionView, user: string) => {
@@ -211,7 +216,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       { package: p.name, label: 'Run', intent: { call: { package: p.name, fn: 'run' }, to: 'current' } },
       ...p.spec.actions.map((a) => ({ package: p.name, label: a.label, intent: { action: { package: p.name, id: a.id }, to: 'current' } })),
     ])
-    const uis = (rt?.packages ?? []).map((p) => ({ package: p.name, hash: p.hash, entry: store.manifest(p.hash).ui.bundle, blocks: store.manifest(p.hash).ui.blocks }))
+    const uis = (rt?.packages ?? []).map((p) => ({ package: p.name, hash: p.hash, entry: store.manifest(p.hash).ui.bundle, blocks: store.manifest(p.hash).ui.blocks, head: store.manifest(p.hash).ui.head ?? [] }))
     // The functions each package offers, so a screen knows where a row click or a control may go.
     const functions = Object.fromEntries((rt?.packages ?? []).map((p) => [p.name, (p.spec.functions ?? []).map((f: any) => f.name)]))
     return { t: 'session:view', view: v, cards, actions, uis, functions, ...extra }
@@ -284,7 +289,11 @@ export function createSessionSeam(d: SessionSeamDeps) {
         if (!visible(spec.scope)) throw new SessionSeamRefusal(`there is no agent "${spec.id}"`)
         // An agent opens on its starting screen: its programs run, as a dashboard opens with its data (unless asked not to).
         const run = payload.run === false ? [] : packages.map((p) => p.name)
-        return reply(await present(await asReader(whoIs(from), () => sessions.openAndRun({ session, user, agent: spec.id, start: spec.start, run }))))
+        // A starting point the agent declares opens on its own STATE (its fields over the agent's start, slice by slice).
+        const at = payload.startAt ? (spec.starts ?? []).find((x) => x.key === String(payload.startAt)) : undefined
+        if (payload.startAt && !at) throw new SessionSeamRefusal(`${spec.name} has no starting point "${String(payload.startAt)}"`)
+        const start = at ? mergeStart(spec.start ?? {}, at.start) : spec.start
+        return reply(await present(await asReader(whoIs(from), () => sessions.openAndRun({ session, user, agent: spec.id, start, run }))))
       }
       // A question from home, with no agent picked: the agent its words reach (else the default one) opens a session on it.
       if (t === 'session:start') {

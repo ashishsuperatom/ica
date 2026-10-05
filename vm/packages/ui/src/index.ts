@@ -3,7 +3,7 @@
 // imported once by the app.
 
 // intents, programs, the thread's shape
-export { Intent, INTENT_ATTR, readIntent, listIntents, listenIntents, type ScreenIntent, type IntentProps } from './intent.ts'
+export { Intent, INTENT_ATTR, readIntent, listIntents, listenIntents, sendIntent, type ScreenIntent, type IntentProps } from './intent.ts'
 export { loadProgramUI, ProgramLoadError, type LoadOptions } from './load.ts'
 export { Thread, pathOf, latestUnder, siblingsOf, type ThreadProps } from './thread.ts'
 
@@ -29,10 +29,20 @@ export { blockToText } from './components/frame/copy.ts'
 export { useBlockKeys, revealBlock } from './components/frame/navigation.ts'
 
 // the shell
+export { Icon } from '@iconify/react'
 export { default as AppShell } from './components/layout/AppShell.tsx'
+export { default as AskBar } from './components/frame/AskBar.tsx'
+export { default as StepSkeleton } from './components/frame/StepSkeleton.tsx'
+export { ProgramEnvContext, useProgramEnv, type ProgramEnv } from './components/frame/programEnv.ts'
 export { default as Sidebar, type NavItem, type NavGroup } from './components/layout/Sidebar.tsx'
 export { default as UserProfile } from './components/layout/UserProfile.tsx'
 export { default as ConnectionStatus, type Connection } from './components/layout/ConnectionStatus.tsx'
+
+// a view's question and what it stands on: the controls, the next moves, about these numbers
+export { default as QuestionControls, memberKeys, type QuestionOp, type QuestionCatalog, type QuestionMember } from './components/question/QuestionControls.tsx'
+export { default as WindowControl } from './components/question/WindowControl.tsx'
+export { default as NextMoves, MovePill } from './components/question/NextMoves.tsx'
+export { default as AboutNumbers, type AboutFacts } from './components/question/AboutNumbers.tsx'
 
 // the semantic components: what a screen composes
 export { Form, Field, Choices, Receipt, RecordList, Status, AttentionList, ActionBar, Empty, type Column, type Attention, type State as StatusState } from './components/semantic/index.tsx'

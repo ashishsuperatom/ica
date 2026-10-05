@@ -87,7 +87,26 @@ export function listenIntents(root: HTMLElement | Document, send: (i: ScreenInte
     // A real button already turns Enter and Space into a click.
     if ((k === 'Enter' || k === ' ') && el && el.tagName !== 'BUTTON') fire(el, ev)
   }
+  // A control that commits on change (a select, a stepper, a draft closed) sends its intent from its element.
+  const onSend = (ev: Event) => {
+    const intent = (ev as CustomEvent<ScreenIntent>).detail
+    if (!intent || problemsOf(intent).length) return
+    trace?.({ intent, sent: true, at: new Date().toISOString() })
+    send(intent, ev.target as Element)
+  }
   root.addEventListener('click', onClick)
   root.addEventListener('keydown', onKey)
-  return () => { root.removeEventListener('click', onClick); root.removeEventListener('keydown', onKey) }
+  root.addEventListener(SEND_EVENT, onSend)
+  return () => { root.removeEventListener('click', onClick); root.removeEventListener('keydown', onKey); root.removeEventListener(SEND_EVENT, onSend) }
+}
+
+const SEND_EVENT = 'sa-intent'
+/** Send an intent from a control that commits on change rather than on a click (a select, a stepper): it bubbles from
+ *  the element to the screen's one listener, which knows the block the element is in. A broken intent is not sent. */
+export function sendIntent(from: Element, intent: Omit<ScreenIntent, 'to'> & { to?: Destination }): boolean {
+  const i: ScreenIntent = { to: 'current', ...intent }
+  const bad = problemsOf(i)
+  if (bad.length) { console.warn(`[intent] not sent: ${bad.join('; ')}`); return false }
+  from.dispatchEvent(new CustomEvent(SEND_EVENT, { detail: i, bubbles: true }))
+  return true
 }

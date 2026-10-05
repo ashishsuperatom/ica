@@ -5,9 +5,9 @@
 .sa-session-head h1 { font-size: 18px; font-weight: 600; margin: 0; flex: 1; text-wrap: balance; }
 .sa-session-busy { font-size: 12px; color: var(--th-muted); }
 .sa-session-refused { padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--th-alert) 30%, transparent); border-radius: 8px; color: var(--th-alert); font-size: 13px; }
-.sa-thread { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 20px; }
-.sa-block { border-top: 1px solid var(--th-line); padding-top: 16px; }
-.sa-block:first-child { border-top: none; padding-top: 0; }
+.sa-session .sa-thread { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 20px; }
+.sa-session .sa-block { border-top: 1px solid var(--th-line); padding-top: 16px; }
+.sa-session .sa-block:first-child { border-top: none; padding-top: 0; }
 .sa-branches { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--th-muted); margin-bottom: 8px; font-variant-numeric: tabular-nums; }
 .sa-branches button { border: 1px solid var(--th-line); background: transparent; border-radius: 6px; width: 24px; height: 24px; cursor: pointer; color: var(--th-ink); }
 .sa-branches button:disabled { opacity: .4; cursor: default; }

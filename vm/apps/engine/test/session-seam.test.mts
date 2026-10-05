@@ -112,14 +112,21 @@ test('an agent kept in the composition graph is listed (by its scope) and opens 
   const ana = { id: 'user:ana' }
   governance.write(g, ana, 'c1', 'concept', { title: 'Settled', form: 'text', text: 'A trip is settled when its settlement document exists.' })
   governance.write(g, ana, 'trips-domain', 'domain', { capabilities: [], concepts: ['c1'], files: [] })
-  governance.write(g, ana, 'graph-trips', 'agent', { title: 'Trips (graph)', domain: 'trips-domain', programs: ['unsettled-trips'], start: { trips: { branch: 'HYDERABAD' } } }, {}, { scope: 'group:ops' })
+  governance.write(g, ana, 'graph-trips', 'agent', { title: 'Trips (graph)', domain: 'trips-domain', programs: ['unsettled-trips'], start: { trips: { branch: 'HYDERABAD' } },
+    icon: 'lucide:truck', accent: 'series-1', says: 'Trips not yet settled.', starts: [{ key: 'pune', label: 'Pune', says: 'The Pune branch', start: { trips: { branch: 'PUNE' } } }] }, {}, { scope: 'group:ops' })
   g.close()
   const out: any[] = []
   const s = createSessionSeam({ projectDir: home, datasource: url, graphFile, send: (_to, msg) => out.push(msg) })
   await s.handle({ t: 'session:agents' }, { type: 'runtime', userId: 'u1', scopes: ['user:u1'] })
   assert.ok(!out.at(-1).agents.some((a: any) => a.id === 'graph-trips'))                  // not in group ops
   await s.handle({ t: 'session:agents' }, { type: 'runtime', userId: 'u2', scopes: ['user:u2', 'group:ops'] })
-  assert.deepEqual(out.at(-1).agents.find((a: any) => a.id === 'graph-trips'), { id: 'graph-trips', name: 'Trips (graph)', scope: 'group:ops', ui: { start: '' }, isDefault: false })
+  assert.deepEqual(out.at(-1).agents.find((a: any) => a.id === 'graph-trips'), { id: 'graph-trips', name: 'Trips (graph)', scope: 'group:ops', ui: { start: '' }, isDefault: false,
+    look: { icon: 'lucide:truck', accent: 'series-1', says: 'Trips not yet settled.' }, starts: [{ key: 'pune', label: 'Pune', says: 'The Pune branch' }] })
+  // a starting point opens on its own STATE; one the agent does not declare is refused
+  await s.handle({ t: 'session:open', session: 'ga0', agent: 'graph-trips', startAt: 'pune', run: false }, { type: 'runtime', userId: 'u2', scopes: ['user:u2', 'group:ops'] })
+  assert.equal(out.at(-1).view.state.trips.branch, 'PUNE')
+  await s.handle({ t: 'session:open', session: 'ga9', agent: 'graph-trips', startAt: 'mars', run: false }, { type: 'runtime', userId: 'u2', scopes: ['user:u2', 'group:ops'] })
+  assert.match(out.at(-1).reason, /no starting point "mars"/)
   await s.handle({ t: 'session:open', session: 'ga1', agent: 'graph-trips' }, { type: 'runtime', userId: 'u2', scopes: ['user:u2', 'group:ops'] })
   assert.equal(out.at(-1).view.state.trips.branch, 'HYDERABAD')
   await s.handle({ t: 'session:intent', session: 'ga1', call: { package: 'trips', fn: 'run' }, to: 'current' }, { type: 'runtime', userId: 'u2', scopes: ['user:u2', 'group:ops'] })

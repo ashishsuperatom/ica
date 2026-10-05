@@ -9,6 +9,7 @@
 
 import { Icon } from '@iconify/react'
 import { Intent, type ScreenIntent } from '../../intent'
+import { MovePill } from '../question/NextMoves'
 
 export interface LearnedPath { id: string; label: string; reasoning: string; intent: ScreenIntent & { text?: string }; record?: { taken: number; succeeded: number; failed: number } }
 export interface Recognised {
@@ -40,8 +41,8 @@ export default function Paths({ block, recognised, offered, onAsk }: { block: st
         </div>
       )}
       {offered.length > 0 && (
-        <div className="sa-paths__offered">
-          {offered.map((a, i) => <Intent key={i} {...a.intent} block={block} className="sa-btn">{a.label}</Intent>)}
+        <div className="sa-next" aria-label="Next moves">
+          {offered.map((a, i) => <Intent key={i} {...a.intent} block={block} className="sa-btn sa-btn--pill" title={a.label}><MovePill label={a.label} /></Intent>)}
         </div>
       )}
     </div>

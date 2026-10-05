@@ -19,6 +19,7 @@ import { useLogNav } from './logNav'
 import { ANSI, COLS, ROWS } from './termColors'
 import { loadToken, mintToken, dropToken, claimReauthOnce, tokenValid } from '../../shared/session-token'
 const Workspace = lazy(() => import('./Workspace'))
+import type { WorkAgent } from './Workspace'
 
 // Cloud mode: VITE_HUB_URL set (e.g. wss://superatom.site). The page is served at
 // /u behind the worker; it logs in via Clerk, exchanges for our JWT, and connects to
@@ -253,7 +254,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   }
   const [view, setView] = useState<View>(readView)
   // The project's agents a person starts sessions with (session:agents), and the session messages, passed to the view.
-  const [sessionAgents, setSessionAgents] = useState<{ id: string; name: string }[]>([])
+  const [sessionAgents, setSessionAgents] = useState<WorkAgent[]>([])
   const sessionBus = useRef(new Set<(m: SessionMsg) => void>())
   const subscribeSession = useCallback((fn: (m: SessionMsg) => void) => { sessionBus.current.add(fn); return () => { sessionBus.current.delete(fn) } }, [])
   // A request to the platform or the engine, answered by the reply that carries its reqId (pages use this; the chat keeps
@@ -546,7 +547,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
         if (msg.reqId && waiting.current.has(msg.reqId)) { const w = waiting.current.get(msg.reqId)!; waiting.current.delete(msg.reqId); w(msg); return }
         if (msg.t === 'activity') { for (const fn of liveBus.current) fn(msg) }
         if (typeof msg.t === 'string' && msg.t.startsWith('session:') && SESSION_REPLIES.has(msg.t)) {
-          if (msg.t === 'session:agents') { setSessionAgents(Array.isArray(msg.agents) ? msg.agents.filter((a: any) => a && typeof a.id === 'string').map((a: any) => ({ id: a.id, name: String(a.name ?? a.id) })) : []); return }
+          if (msg.t === 'session:agents') { setSessionAgents(Array.isArray(msg.agents) ? msg.agents.filter((a: any) => a && typeof a.id === 'string').map((a: any): WorkAgent => ({ id: a.id, name: String(a.name ?? a.id), isDefault: !!a.isDefault, look: { icon: typeof a.look?.icon === 'string' ? a.look.icon : undefined, accent: typeof a.look?.accent === 'string' ? a.look.accent : undefined, says: typeof a.look?.says === 'string' ? a.look.says : undefined }, starts: Array.isArray(a.starts) ? a.starts.filter((x: any) => x && typeof x.key === 'string' && typeof x.label === 'string').map((x: any) => ({ key: x.key, label: x.label, says: String(x.says ?? '') })) : [] })) : []); return }
           for (const fn of sessionBus.current) fn(msg as SessionMsg)
           return
         }

@@ -15,13 +15,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '@superatom/ui/design.css'
 import {
-  AppShell, Sidebar, UserProfile, ConnectionStatus, Steps, BlockFrame, Answer, Paths, Artifacts, Toasts, LocalThread,
-  listenIntents, pathOf, siblingsOf, revealBlock, notify, startThread, Form, Field, Choices, type Recognised, type Artifact, type StepItem,
+  AppShell, Sidebar, UserProfile, ConnectionStatus, Steps, BlockFrame, Answer, Paths, Artifacts, Toasts, LocalThread, AskBar, StepSkeleton,
+  BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, notify, startThread, Form, Field, Choices,
+  type Recognised, type Artifact, type StepItem,
 } from '@superatom/ui'
 import { PAGE_BLOCKS, PagesContext } from './pageBlocks'
-import ProgramBlock, { type ProgramUI } from './ProgramBlock'
+import { accentOf } from './agentLook'
+import ProgramBlock, { preloadProgram, type ProgramUI } from './ProgramBlock'
 
 type Request = (payload: Record<string, unknown>, onProgress?: (m: any) => void) => Promise<any>
+type FetchFile = (hash: string, path: string) => Promise<string>
 interface Answer_ { id: string; block: string; cause: string; markdown: string; blocks?: Record<string, unknown>; at: string }
 interface Intent_ { id: string; kind: 'structured' | 'language'; text?: string; ops?: any[]; call?: any; action?: any; to?: string; block?: string; at: string }
 interface View {
@@ -30,16 +33,39 @@ interface View {
   states: Record<string, Record<string, unknown>>; answers: Answer_[]; intents: Intent_[]
 }
 interface SessionMsg { t: string; reason?: string; view?: View; uis?: ProgramUI[]; actions?: { package: string; label: string; intent: any }[]; functions?: Record<string, string[]>; result?: { block: string; opened: boolean; stale?: boolean } }
+/** An agent as the workspace lists it: its look (an iconify icon, an accent, one line) and its starting points. */
+export interface WorkAgent { id: string; name: string; isDefault?: boolean; look: { icon?: string; accent?: string; says?: string }; starts: { key: string; label: string; says: string }[] }
 
 const newId = () => `ses-${crypto.randomUUID()}`
-const firstLine = (md: string) => (md ?? '').split('\n').map((l) => l.trim()).find((l) => l && !l.startsWith(':::'))?.replace(/[*_`#>]/g, '').slice(0, 120) ?? ''
+const plain = (s: string) => s.replace(/\*\*|__|`|^#+\s*|^>\s*/g, '').replace(/(^|\s)_([^_]+)_(?=\s|$)/g, '$1$2').trim()
+const firstLine = (md: string) => plain((md ?? '').split('\n').map((l) => l.trim()).find((l) => l && !l.startsWith(':::')) ?? '').slice(0, 120)
 const intentWords = (i?: Intent_) => !i ? '' : i.kind === 'language' ? `Asked: ${i.text ?? ''}` : i.call ? `Ran ${i.call.package} · ${i.call.fn}` : i.action ? `Took ${i.action.package} · ${i.action.id}` : (i.ops ?? []).map((o: any) => `${o.op} ${o.path}${'value' in o ? ` = ${JSON.stringify(o.value)}` : ''}`).join(', ') || 'A change'
 const who = () => { try { const t = localStorage.getItem('sa-token') ?? ''; const p = JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); return { name: String(p.name ?? p.email ?? 'Signed in'), email: p.email ? String(p.email) : undefined } } catch { return { name: 'Signed in', email: undefined } } }
+/** A step's first line names it: "**title** — _what was done_". The rest is the answer's prose and blocks. */
+function leadOf(md: string): { title?: string; said?: string; rest: string } {
+  const lines = String(md ?? '').split('\n')
+  const i = lines.findIndex((l) => l.trim())
+  const m = /^\*\*(.+?)\*\*(?:\s+—\s+_(.+)_)?\s*$/.exec(lines[i]?.trim() ?? '')
+  return m ? { title: m[1], said: m[2], rest: lines.filter((_, j) => j !== i).join('\n') } : { rest: md }
+}
+
+/** Views opened by this page and ready to show (their programs' views loaded): a session opens from here without asking again. */
+const opened = new Map<string, SessionMsg>()
+/** A view made ready to show whole: its programs' React sides loaded, and the paths from its current step, waited for a
+ *  moment at most — so a step appears once, complete, instead of in pieces. */
+async function ready(m: SessionMsg, fetchFile: FetchFile, request: Request, session: string): Promise<Recognised | null | undefined> {
+  if (m?.t !== 'session:view' || !m.view) return undefined
+  let recognised: Recognised | null | undefined
+  const paths = request({ t: 'decision:paths', session, block: m.view.leaf }).then((r) => { recognised = r?.t === 'decision:paths' ? r : null }, () => { recognised = null })
+  const programs = Promise.all((m.uis ?? []).filter((u) => u.blocks.length).map((u) => preloadProgram(u, fetchFile).catch(() => null)))
+  await Promise.race([Promise.all([paths, programs]), new Promise((r) => setTimeout(r, 2500))])
+  return recognised
+}
 
 export default function Workspace({ request, subscribeLive, scopes, projectId, token, projectName, connected, agents, path, go, extraNav }: {
   request: Request; subscribeLive: (fn: (m: any) => void) => () => void; scopes: string[]; projectId: string; token?: string | null; projectName: string; connected: boolean
-  agents: { id: string; name: string }[]
-  /** The workspace's address: '' (home), '<session>' or 's/<agent>' (start a session with an agent). */
+  agents: WorkAgent[]
+  /** The workspace's address: '' (home), '<session>' or 's/<agent>[/<start>]' (start a session with an agent). */
   path: string; go: (path: string) => void
   /** The rest of the user UI (the chat, pages, consoles), kept reachable. */
   extraNav: { key: string; label: string; icon: string; onClick: () => void }[]
@@ -47,34 +73,53 @@ export default function Workspace({ request, subscribeLive, scopes, projectId, t
   const me = useMemo(who, [])
   const [sessions, setSessions] = useState<{ session: string; agent: string; title: string; updated?: string }[]>([])
   useEffect(() => { void request({ t: 'session:list' }).then((m) => setSessions(Array.isArray(m?.sessions) ? m.sessions : [])) }, [request, path])
-  const agentName = (id: string) => agents.find((a) => a.id === id)?.name ?? id
+  const agentOf = useCallback((id: string): WorkAgent => agents.find((a) => a.id === id) ?? { id, name: id, look: {}, starts: [] }, [agents])
   const sessionId = /^[\w-]+$/.test(path) ? path : null
-  const startAgent = /^s\/([\w-]+)/.exec(path)?.[1] ?? null
+  const startMatch = /^s\/([\w-]+)(?:\/([\w-]+))?/.exec(path)
+  const startAgent = startMatch?.[1] ?? null
+  const startKey = startMatch?.[2] ?? null
 
-  // Opening an agent starts a session with it.
+  // A program's React side: from the platform (immutable, by hash), else from the engine.
+  const fetchFile = useCallback<FetchFile>(async (hash, file) => {
+    const r = await fetch(`/api/projects/${encodeURIComponent(projectId)}/programs/${hash}/${file}`, { credentials: 'include', headers: token ? { authorization: `Bearer ${token}` } : {} }).catch(() => null)
+    if (r?.ok) return r.text()
+    const m = await request({ t: 'session:file', hash, path: file })
+    if (typeof m?.text === 'string') return m.text
+    throw new Error(m?.reason ?? 'the file did not come')
+  }, [projectId, token, request])
+
+  // Opening an agent (or one of its starting points) starts a session with it; the step shows at once, as a skeleton,
+  // and the session replaces it whole when it is ready.
+  const live = useRef({ request, go, fetchFile }); live.current = { request, go, fetchFile }
+  const openingPath = useRef<string | null>(null)
   useEffect(() => {
-    if (!startAgent) return
+    if (!startAgent) { openingPath.current = null; return }
+    if (openingPath.current === path) return   // once per address (React runs effects twice in development)
+    openingPath.current = path
     const sid = newId()
-    void request({ t: 'session:open', session: sid, agent: startAgent }).then((m) => {
-      if (m?.t === 'session:view') go(sid)
-      else notify(m?.reason ?? 'The session could not be opened', 'refused')
+    const { request: rq, go: to, fetchFile: ff } = live.current
+    void rq({ t: 'session:open', session: sid, agent: startAgent, ...(startKey ? { startAt: startKey } : {}) }).then(async (m: SessionMsg) => {
+      if (m?.t !== 'session:view') { notify(m?.reason ?? 'The session could not be opened', 'refused'); live.current.go(''); return }
+      await ready(m, ff, rq, sid)
+      opened.set(sid, m)
+      to(sid)
     })
-  }, [startAgent, request, go])
+  }, [startAgent, startKey])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // A page of the user UI is a block: from a session it opens a fresh thread starting there; on the pages, a new thread.
   const [root, setRoot] = useState<string | null>(null)
-  // A page can be linked to (/w?page=agents): the thread starts there.
   const [pending, setPending] = useState<{ type: string } | null>(() => { const p = new URLSearchParams(location.search).get('page'); return p && ['agents', 'activity', 'connections'].includes(p) ? { type: p } : null })
   const page = (type: string) => { if (sessionId || startAgent) { setPending({ type }); go('') } else startThread(type) }
   const onPages = !sessionId && !startAgent
+  const current = sessionId ? sessions.find((s) => s.session === sessionId)?.agent ?? null : startAgent
   const nav = [{
-    items: [{ key: 'home', label: 'Home', icon: 'lucide:home', active: onPages && root === 'home', onClick: () => page('home') }],
+    items: [{ key: 'home', label: 'Home', icon: 'lucide:house', active: onPages && root === 'home', onClick: () => page('home') }],
   }, {
     label: 'Agents',
-    items: agents.map((a) => ({ key: `a:${a.id}`, label: a.name, icon: 'lucide:bot', onClick: () => go(`s/${a.id}`) })),
+    items: agents.filter((a) => !a.isDefault).map((a) => ({ key: `a:${a.id}`, label: a.name, icon: a.look.icon ?? 'lucide:bot', title: a.look.says, active: !onPages && current === a.id, onClick: () => go(`s/${a.id}`) })),
   }, {
     label: 'Your sessions',
-    items: sessions.slice(0, 12).map((s) => ({ key: `s:${s.session}`, label: s.title || agentName(s.agent), icon: 'lucide:messages-square', active: s.session === sessionId, onClick: () => go(s.session) })),
+    items: sessions.slice(0, 10).map((s) => ({ key: `s:${s.session}`, label: plain(s.title || agentOf(s.agent).name), icon: agentOf(s.agent).look.icon ?? 'lucide:messages-square', active: s.session === sessionId, onClick: () => go(s.session) })),
   }, {
     label: 'More',
     items: [
@@ -86,8 +131,11 @@ export default function Workspace({ request, subscribeLive, scopes, projectId, t
   }]
 
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
-  // One environment for the page blocks, kept while nothing in it changes (their reads depend on it).
+  const [artifactsTick, setArtifactsTick] = useState(0)
+  useEffect(() => { setArtifacts([]) }, [sessionId])
   const pagesEnv = useMemo(() => ({ request, subscribeLive, projectId, token, scopes, agents, sessions, go }), [request, subscribeLive, projectId, token, scopes, agents, sessions, go])
+  const programEnv = useMemo(() => ({ request }), [request])
+  const opening = startAgent ? agentOf(startAgent) : null
   return (
     <>
       <AppShell
@@ -96,163 +144,200 @@ export default function Workspace({ request, subscribeLive, scopes, projectId, t
             foot={(rail) => <UserProfile name={me.name} email={me.email} context={projectName} showName={!rail} />} />
         )}
         status={<ConnectionStatus status={connected ? 'open' : 'reconnecting'} />}
-        artifacts={sessionId ? <Artifacts items={artifacts} onReveal={(b) => revealBlock(b)} /> : undefined}>
-        {sessionId
-          ? <SessionSteps key={sessionId} session={sessionId} request={request} projectId={projectId} token={token} agentName={agentName} onArtifacts={setArtifacts} />
-          : <PagesContext.Provider value={pagesEnv}>
-              <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} address={(b) => (b.type === 'home' ? '/w' : ['agents', 'activity', 'connections'].includes(b.type) ? `/w?page=${b.type}` : null)} />
-            </PagesContext.Provider>}
+        artifacts={sessionId ? <>
+          <Artifacts items={artifacts} onReveal={(b) => revealBlock(b)} />
+          <ForkAgent session={sessionId} request={request} onMade={() => setArtifactsTick((n) => n + 1)} />
+        </> : undefined}
+        artifactsCount={artifacts.length}>
+        <ProgramEnvContext.Provider value={programEnv}>
+          {opening
+            ? <div className="sa-work"><Steps onSwitch={() => {}} items={[{ id: 'opening', at: new Date().toISOString(), node: (
+                <BlockFrame id="opening" step={1} label={opening.name} title={(startKey && opening.starts.find((x) => x.key === startKey)?.label) || opening.name} subtitle="Opening…" busy
+                  icon={opening.look.icon} accent={accentOf(opening.look.accent)}><StepSkeleton label="Opening" /></BlockFrame>
+              ) }]} /></div>
+            : sessionId
+            ? <SessionSteps key={sessionId} session={sessionId} request={request} fetchFile={fetchFile} agentOf={agentOf} onArtifacts={setArtifacts} artifactsTick={artifactsTick} />
+            : <PagesContext.Provider value={pagesEnv}>
+                <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} address={(b) => (b.type === 'home' ? '/w' : ['agents', 'activity', 'connections'].includes(b.type) ? `/w?page=${b.type}` : null)} />
+              </PagesContext.Provider>}
+        </ProgramEnvContext.Provider>
       </AppShell>
       <Toasts />
     </>
   )
 }
 
-function SessionSteps({ session, request, projectId, token, agentName, onArtifacts }: { session: string; request: Request; projectId: string; token?: string | null; agentName: (id: string) => string; onArtifacts: (a: Artifact[]) => void }) {
-  const [msg, setMsg] = useState<SessionMsg | null>(null)
+/** Making an agent from a session: what the work learned (its questions and the steps taken) becomes an agent, and the
+ *  agent an artifact of the session. */
+function ForkAgent({ session, request, onMade }: { session: string; request: Request; onMade: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [title, setTitle] = useState('')
+  const fork = async () => {
+    const t = title.trim(); if (!t) return
+    const m = await request({ t: 'session:fork', session, name: t, title: t })
+    if (m?.t !== 'session:forked') { notify(m?.reason ?? 'The agent could not be made', 'refused'); return }
+    await request({ t: 'artifact:record', session, kind: 'agent', title: `Agent: ${t}`, body: { agent: m.agent, domain: m.domain, concept: m.concept, scope: m.scope, reasoning: 'made from this session: its questions and the steps taken' } })
+    notify(`${t} made — yours until it is published`, 'note'); setOpen(false); setTitle(''); onMade()
+  }
+  if (!open) return <button className="sa-btn sa-btn--link sa-artifacts__make" title="An agent that knows what this session learned: the questions asked and the steps taken" onClick={() => setOpen(true)}>Make an agent from this session</button>
+  return (
+    <Form onSubmit={() => void fork()} actions={<><button type="button" className="sa-btn" onClick={() => setOpen(false)}>Cancel</button><button className="sa-btn sa-btn--primary">Make the agent</button></>}>
+      <Field label="The new agent's title"><input id="sa-fork-title" className="sa-input" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus required /></Field>
+    </Form>
+  )
+}
+
+type Pending = { kind: 'new'; from: string | null; label: string; beats?: { text: string; at: number }[] } | { kind: 'edit'; block: string }
+
+function SessionSteps({ session, request, fetchFile, agentOf, onArtifacts, artifactsTick }: { session: string; request: Request; fetchFile: FetchFile; agentOf: (id: string) => WorkAgent; onArtifacts: (a: Artifact[]) => void; artifactsTick: number }) {
+  const [msg, setMsg] = useState<SessionMsg | null>(() => opened.get(session) ?? null)
   const [refused, setRefused] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [beats, setBeats] = useState<{ text: string; at: number }[]>([])
-  const [asking, setAsking] = useState('')
+  const [pending, setPending] = useState<Pending | null>(null)
   const [paths, setPaths] = useState<Record<string, Recognised | null>>({})
   const [deciding, setDeciding] = useState<string | null>(null)
   const root = useRef<HTMLDivElement>(null)
+  const seq = useRef(0)
   const view = msg?.view
+  const agent = agentOf(view?.agent ?? '')
 
-  const take = useCallback((m: SessionMsg) => {
-    if (m?.t === 'session:view' && m.view) { setRefused(''); if (!m.result?.stale) setMsg(m) }
-    else if (m?.t === 'session:refused') setRefused(m.reason ?? 'The engine refused that.')
-  }, [])
-  const loadArtifacts = useCallback(() => request({ t: 'artifact:list', session }).then((m) => {
-    const blocks = msg?.view?.blocks ?? []
-    onArtifacts((Array.isArray(m?.artifacts) ? m.artifacts : []).map((a: any) => ({ id: a.id, kind: a.kind, title: a.title, at: a.at, by: a.by, version: a.version, status: a.status,
-      summary: a.body?.reasoning ? `${a.body.reasoning}` : undefined, step: a.block ? { block: a.block, step: pathOf(blocks as any, msg?.view?.leaf ?? '').indexOf(a.block) + 1 || 0 } : undefined })))
-  }), [request, session, onArtifacts, msg])
+  // A reply is shown once it is ready to show whole; a later reply wins over an earlier one still getting ready.
+  const accept = useCallback(async (m: SessionMsg) => {
+    const n = ++seq.current
+    if (m?.t === 'session:refused') { setRefused(m.reason ?? 'The engine refused that.'); return }
+    if (m?.t !== 'session:view' || !m.view || m.result?.stale) return
+    const recognised = await ready(m, fetchFile, request, session)
+    if (n !== seq.current) return
+    setRefused(''); setMsg(m)
+    if (recognised !== undefined) setPaths((p) => ({ ...p, [m.view!.leaf]: recognised }))
+  }, [fetchFile, request, session])
 
-  useEffect(() => { setBusy(true); void request({ t: 'session:get', session }).then((m) => { setBusy(false); take(m) }) }, [session, request, take])
-  useEffect(() => { if (view) void loadArtifacts() }, [view?.leaf, view?.answers.length])   // eslint-disable-line react-hooks/exhaustive-deps
-  // Paths from the current step: what the decision memory recognises here.
+  useEffect(() => {
+    const had = opened.get(session)
+    if (had) { opened.delete(session); return }
+    void request({ t: 'session:get', session }).then(accept)
+  }, [session, request, accept])
+  // Paths from a step reached without them (going back to a step, a branch).
   useEffect(() => {
     if (!view?.leaf || view.leaf in paths) return
-    void request({ t: 'decision:paths', session, block: view.leaf }).then((m) => setPaths((p) => ({ ...p, [view.leaf]: m?.t === 'decision:paths' ? m : null })))
+    const leaf = view.leaf
+    void request({ t: 'decision:paths', session, block: leaf }).then((m) => setPaths((p) => ({ ...p, [leaf]: m?.t === 'decision:paths' ? m : null })))
   }, [view?.leaf, request, session, paths])
 
-  const intent = useCallback(async (payload: Record<string, unknown>) => {
-    setBusy(true)
-    take(await request({ t: 'session:intent', session, ...payload }))
-    setBusy(false)
-  }, [request, session, take])
+  const loadArtifacts = useCallback(() => request({ t: 'artifact:list', session }).then((m) => {
+    const blocks = view?.blocks ?? []
+    onArtifacts((Array.isArray(m?.artifacts) ? m.artifacts : []).map((a: any) => ({ id: a.id, kind: a.kind, title: a.title, at: a.at, by: a.by, version: a.version, status: a.status,
+      summary: a.body?.reasoning ? `${a.body.reasoning}` : undefined, step: a.block ? { block: a.block, step: pathOf(blocks as any, view?.leaf ?? '').indexOf(a.block) + 1 || 0 } : undefined })))
+  }), [request, session, onArtifacts, view])
+  useEffect(() => { if (view) void loadArtifacts() }, [view?.id, view?.blocks.length, artifactsTick])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // An intent: from the current step and to it, the step changes in place (dimmed while it works); otherwise a new step
+  // appears at once where it will stand, as a skeleton, and the answer fills it.
+  const intent = useCallback(async (payload: Record<string, unknown>, label: string) => {
+    if (pending || !view) return
+    const block = String(payload.block ?? view.leaf)
+    const opens = payload.to === 'new' || block !== view.leaf
+    setPending(opens ? { kind: 'new', from: block, label } : { kind: 'edit', block })
+    if (opens) setTimeout(() => revealBlock('pending'), 30)
+    const m = await request({ t: 'session:intent', session, ...payload })
+    await accept(m)
+    setPending(null)
+    if (opens && m?.view?.leaf) setTimeout(() => revealBlock(m.view.leaf), 30)
+  }, [pending, view, request, session, accept])
+  const intentRef = useRef(intent); intentRef.current = intent
   useEffect(() => {
     const el = root.current
     if (!el) return
-    return listenIntents(el, (i, at) => void intent({ ...i, block: i.block ?? at.closest('[data-block]')?.getAttribute('data-block') ?? undefined }))
-  }, [intent])
+    return listenIntents(el, (i, at) => {
+      const words = at.hasAttribute('data-sa-intent') ? (at.getAttribute('title') || at.textContent || '').trim().slice(0, 120) : ''
+      void intentRef.current({ ...i, block: i.block ?? at.closest('[data-block]')?.getAttribute('data-block') ?? undefined }, words)
+    })
+  }, [])
 
   const ask = async (text: string, block?: string) => {
-    const t = text.trim(); if (!t || busy) return
-    setAsking(t); setBeats([{ text: 'Looking into your question…', at: Date.now() }]); setBusy(true)
-    const m = await request({ t: 'session:intent', session, kind: 'language', text: t, ...(block ? { block } : {}) }, (p) => { if (p?.t === 'narration' && p.text) setBeats((b) => [...b, { text: String(p.text), at: Date.now() }]) })
-    setBusy(false); setAsking(''); setBeats([])
-    take(m)
+    const t = text.trim(); if (!t || pending || !view) return
+    setPending({ kind: 'new', from: block ?? view.leaf, label: t, beats: [{ text: 'Looking into your question…', at: Date.now() }] })
+    setTimeout(() => revealBlock('pending'), 30)
+    const m = await request({ t: 'session:intent', session, kind: 'language', text: t, ...(block ? { block } : {}) }, (p) => {
+      if (p?.t === 'narration' && p.text) setPending((x) => (x?.kind === 'new' ? { ...x, beats: [...(x.beats ?? []), { text: String(p.text), at: Date.now() }] } : x))
+    })
+    await accept(m)
+    setPending(null)
+    if (m?.view?.leaf) setTimeout(() => revealBlock(m.view.leaf), 30)
   }
-
-  // A program's React side: from the platform (immutable, by hash), else from the engine.
-  const fetchFile = useCallback(async (hash: string, path: string) => {
-    const r = await fetch(`/api/projects/${encodeURIComponent(projectId)}/programs/${hash}/${path}`, { credentials: 'include', headers: token ? { authorization: `Bearer ${token}` } : {} }).catch(() => null)
-    if (r?.ok) return r.text()
-    const m = await request({ t: 'session:file', hash, path })
-    if (typeof m?.text === 'string') return m.text
-    throw new Error(m?.reason ?? 'the file did not come')
-  }, [projectId, token, request])
 
   // The program a clicked row goes to: one in the step's STATE that offers row() (the session's programs say so).
   const rowPackage = (block: string) => Object.keys((view?.states[block]?.packages ?? {}) as Record<string, string>).find((p) => msg?.functions?.[p]?.includes('row'))
+  // What the programs offer beyond opening (their actions), as next moves; running again is what opening already did.
+  const offered = (msg?.actions ?? []).filter((a) => a.intent?.call?.fn !== 'run').map((a) => ({ label: a.label, intent: a.intent }))
+  const uis = (msg?.uis ?? []).filter((u) => u.blocks.length)
   const items: StepItem[] = useMemo(() => {
     if (!view) return []
-    const path = pathOf(view.blocks as any, view.leaf)
-    return path.map((id, i) => {
+    const full = pathOf(view.blocks as any, view.leaf) as string[]
+    // A new step from an earlier one stands under it: the path down to it, then the step on its way.
+    const cut = pending?.kind === 'new' && pending.from ? full.indexOf(pending.from) : -1
+    const path = cut >= 0 ? full.slice(0, cut + 1) : full
+    const steps: StepItem[] = path.map((id, i) => {
       const block = view.blocks.find((b) => b.id === id)!
       const answer = block.answer ? view.answers.find((a) => a.id === block.answer) : undefined
       const cause = answer ? view.intents.find((x) => x.id === answer.cause) : undefined
+      const asked = cause?.kind === 'language'
+      const lead = asked ? { rest: answer?.markdown ?? '' } : leadOf(answer?.markdown ?? '')
       const parentIdx = block.parent ? path.indexOf(block.parent) : -1
       const siblings = block.parent ? siblingsOf(view.blocks as any, id).map((sid: string) => {
         const s = view.blocks.find((b) => b.id === sid)!
         const a = s.answer ? view.answers.find((x) => x.id === s.answer) : undefined
         const c = a ? view.intents.find((x) => x.id === a.cause) : undefined
-        return { id: s.id, label: c?.kind === 'language' ? c.text ?? 'A question' : firstLine(a?.markdown ?? '') || 'A step', cause: c?.kind === 'language' ? undefined : intentWords(c), active: s.id === id }
+        return { id: s.id, label: c?.kind === 'language' ? c.text ?? 'A question' : leadOf(a?.markdown ?? '').said ?? (firstLine(a?.markdown ?? '') || 'A step'), active: s.id === id }
       }) : undefined
-      const isLeaf = id === view.leaf
-      const title = cause?.kind === 'language' ? cause.text ?? '' : firstLine(answer?.markdown ?? '') || (i === 0 ? agentName(view.agent) : 'A step')
+      const editing = pending?.kind === 'edit' && pending.block === id
+      const isLeaf = id === view.leaf && !(pending?.kind === 'new')
+      const title = asked ? cause?.text ?? '' : lead.title ?? (firstLine(answer?.markdown ?? '') || agent.name)
+      const said = asked ? undefined : lead.said
       return {
         id, at: answer?.at ?? view.created, siblings,
         node: (
-          <BlockFrame id={id} step={i + 1} label={i === 0 ? agentName(view.agent) : cause?.kind === 'language' ? 'Question' : 'Step'}
-            title={title} cause={i > 0 ? intentWords(cause) : undefined}
+          <BlockFrame id={id} step={i + 1} label={asked ? 'Question' : agent.name} title={title}
+            cause={i > 0 ? (said ?? intentWords(cause)) : undefined} subtitle={i === 0 ? said ?? `opened ${agent.name.toLowerCase()}` : undefined}
             from={parentIdx >= 0 ? { id: block.parent!, step: parentIdx + 1, onPath: true } : undefined} onReveal={revealBlock}
-            busy={busy && isLeaf} icon={cause?.kind === 'language' ? 'lucide:message-circle-question' : undefined}>
-            {answer ? <Answer markdown={answer.markdown} blocks={answer.blocks}
-              onRow={rowPackage(id) ? (move, row) => void intent({ call: { package: rowPackage(id)!, fn: 'row', params: { move, row } }, to: 'new', block: id }) : undefined} />
-              : <p className="sa-note sa-section__empty">Nothing shown yet. Run a program below, or ask.</p>}
-            {msg?.uis?.filter((u) => u.blocks.length).map((u) => (
-              <ProgramBlock key={u.hash} program={u} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} />
-            ))}
-            <Paths block={id} recognised={paths[id] ?? null} offered={(msg?.actions ?? []).map((a) => ({ label: a.label, intent: a.intent }))} onAsk={(t) => ask(t, id)} />
-            <div className="sa-step__decide">
-              {deciding === id
+            busy={editing} icon={asked ? 'lucide:message-circle-question' : agent.look.icon} accent={asked ? 'var(--series-2)' : accentOf(agent.look.accent)}>
+            {uis.filter((u) => u.head?.length).map((u) => <ProgramBlock key={`h:${u.hash}`} program={u} only={u.head} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} />)}
+            <div className={`sa-stack${editing ? ' sa-busy' : ''}`}>
+              {answer ? <Answer markdown={lead.rest} blocks={answer.blocks}
+                onRow={rowPackage(id) ? (move, row) => void intent({ call: { package: rowPackage(id)!, fn: 'row', params: { move, row } }, to: 'new', block: id }, String(row[(move as any).label] ?? '')) : undefined} />
+                : <p className="sa-note sa-section__empty">Nothing shown yet. Ask below.</p>}
+              <Paths block={id} recognised={paths[id] ?? null} offered={isLeaf ? offered : []} onAsk={(t) => ask(t, id)} />
+              {uis.map((u) => { const body = u.blocks.filter((b) => !u.head?.includes(b)); return body.length ? <ProgramBlock key={`b:${u.hash}`} program={u} only={body} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} /> : null })}
+              {isLeaf && (deciding === id
                 ? <DecisionForm onCancel={() => setDeciding(null)} onRecord={async (body, approval) => {
                     const m = await request({ t: 'artifact:record', session, block: id, kind: 'decision', body, approval })
                     if (m?.t === 'artifact:recorded') { notify('Decision recorded', 'note'); setDeciding(null); void loadArtifacts() } else notify(m?.reason ?? 'The decision was not recorded', 'refused')
                   }} />
-                : <button className="sa-btn sa-btn--link" onClick={() => setDeciding(id)}>Record a decision from this step</button>}
+                : <div className="sa-step__decide"><button className="sa-btn sa-btn--link" onClick={() => setDeciding(id)}>Record a decision from this step</button></div>)}
             </div>
           </BlockFrame>
         ),
       }
     })
-  }, [view, msg, paths, busy, deciding, agentName, fetchFile, request, session, loadArtifacts])   // eslint-disable-line react-hooks/exhaustive-deps
-
-  const [forking, setForking] = useState(false)
-  const fork = async (title: string) => {
-    const m = await request({ t: 'session:fork', session, name: title, title })
-    if (m?.t === 'session:forked') {
-      // What the work made is an artifact of it, on the right: the agent, its domain and what it learned.
-      await request({ t: 'artifact:record', session, kind: 'agent', title: `Agent: ${title}`, body: { agent: m.agent, domain: m.domain, concept: m.concept, scope: m.scope, reasoning: 'made from this session: its questions and the steps taken' } })
-      notify(`${title} made — yours until it is published`, 'note'); setForking(false); void loadArtifacts()
+    if (pending?.kind === 'new') {
+      const fromIdx = pending.from ? path.indexOf(pending.from) : path.length - 1
+      steps.push({ id: 'pending', at: new Date().toISOString(), node: (
+        <BlockFrame id="pending" step={path.length + 1} label={pending.beats ? 'Question' : agent.name} title={pending.label || 'The next step'} busy
+          cause={pending.beats ? undefined : 'Opening'} from={fromIdx >= 0 ? { id: path[fromIdx], step: fromIdx + 1, onPath: true } : undefined} onReveal={revealBlock}
+          icon={pending.beats ? 'lucide:message-circle-question' : agent.look.icon} accent={pending.beats ? 'var(--series-2)' : accentOf(agent.look.accent)}>
+          {pending.beats ? <div className="sa-card" aria-busy="true" aria-live="polite"><BeatRows beats={pending.beats} live /></div> : <StepSkeleton />}
+        </BlockFrame>
+      ) })
     }
-    else notify(m?.reason ?? 'The agent could not be made', 'refused')
-  }
+    return steps
+  }, [view, msg, paths, pending, deciding, agent, fetchFile, request, session, loadArtifacts, intent])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const leafLead = view ? leadOf(view.answers.find((a) => a.id === view.blocks.find((b) => b.id === view.leaf)?.answer)?.markdown ?? '') : null
   return (
     <div ref={root} className="sa-work">
       {refused && <p className="sa-alert" role="alert"><span className="sa-alert__text">{refused}</span></p>}
-      {view && view.blocks.length > 1 && (
-        <div className="sa-work__tools">
-          {forking
-            ? <form className="sa-work__fork" onSubmit={(e) => { e.preventDefault(); const f = e.currentTarget.elements.namedItem('title') as HTMLInputElement; if (f.value.trim()) void fork(f.value.trim()) }}>
-                <input id="sa-fork-title" name="title" className="sa-input" placeholder="The new agent's title" autoFocus />
-                <button className="sa-btn sa-btn--primary">Make the agent</button>
-                <button type="button" className="sa-btn" onClick={() => setForking(false)}>Cancel</button>
-              </form>
-            : <button className="sa-btn sa-btn--link" title="An agent that knows what this session learned: the questions asked and the steps taken" onClick={() => setForking(true)}>Make an agent from this session</button>}
-        </div>
-      )}
-      <Steps items={items} onSwitch={(b) => void request({ t: 'session:goto', session, block: b }).then(take)}
-        empty={!refused && <p className="sa-note">Opening the session…</p>}
-        after={
-          <div className="sa-askbar">
-            {asking && (
-              <div className="sa-askbar__working">
-                <span className="sa-label">Working on: {asking}</span>
-                {beats.slice(-3).map((b, i) => <div key={i} className="sa-note">{b.text}</div>)}
-              </div>
-            )}
-            <form className="sa-askbar__form" onSubmit={(e) => { e.preventDefault(); const f = e.currentTarget.elements.namedItem('q') as HTMLInputElement; void ask(f.value); f.value = '' }}>
-              <div className="sa-askbar__field">
-                <input id="sa-ask" name="q" className="sa-askbar__input" placeholder={busy ? 'Working…' : 'Ask about this step, or what to do next…'} disabled={busy} autoComplete="off" />
-                <button className="sa-btn sa-btn--primary" disabled={busy}>Ask</button>
-              </div>
-            </form>
-          </div>
-        } />
+      <Steps items={items} onSwitch={(b) => void request({ t: 'session:goto', session, block: b }).then(accept)}
+        empty={!refused && <StepSkeleton label="Opening the session" />}
+        after={view && <AskBar onAsk={(t) => void ask(t)} busy={!!pending} placeholder="Ask about these numbers…" from={leafLead?.title ?? agent.name} />} />
     </div>
   )
 }

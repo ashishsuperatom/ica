@@ -181,7 +181,7 @@ export interface ProgramManifest {
   attachesTo: string
   node: { bundle: string; runtime: ('on-prem' | 'worker')[] }
   /** The React side: one or more blocks it gives the UI. */
-  ui: { bundle: string; blocks: string[] }
+  ui: { bundle: string; blocks: string[]; /** Blocks drawn above the step's answer (its controls). */ head?: string[] }
   /** Datasource index nodes it reads. */
   reads: string[]
   /** Its part in STATE, when it takes part. */
@@ -279,7 +279,13 @@ export interface AgentSpec {
   ica: string
   /** The one agent a question no other agent fits goes to. */
   isDefault?: boolean
+  /** How it is shown wherever it is listed: an iconify icon, an accent (a token name), one line on what it is for. */
+  look?: AgentLook
+  /** Its starting points: each opens a session on a STATE of its own (fields by slice over the agent's start). */
+  starts?: AgentStart[]
 }
+export interface AgentLook { icon?: string; accent?: string; says?: string }
+export interface AgentStart { key: string; label: string; says?: string; start: Record<string, Record<string, unknown>> }
 
 export function checkAgent(v: unknown): Problems {
   if (!v || typeof v !== 'object') return ['an agent must be an object']

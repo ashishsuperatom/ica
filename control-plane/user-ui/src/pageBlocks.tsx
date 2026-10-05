@@ -3,7 +3,9 @@
 // Each click opens a block below; each block is drawn in the platform's frame with the design system's primitives.
 
 import { createContext, useContext, useEffect, useState } from 'react'
-import { Section, notify, useThread, Form, Field, Choices, Receipt, RecordList, Status, ActionBar, Empty, type Registry } from '@superatom/ui'
+import { Section, notify, useThread, Form, Field, Choices, Receipt, RecordList, Status, ActionBar, Empty, AskBar, BeatRows, Icon, ACCENT, type Accent, type Registry } from '@superatom/ui'
+import type { WorkAgent } from './Workspace'
+import { accentOf } from './agentLook'
 import type { Connector } from '../../shared/connectors'
 
 type Request = (payload: Record<string, unknown>, onProgress?: (m: any) => void) => Promise<any>
@@ -13,7 +15,7 @@ export interface PagesEnv {
   projectId: string
   token?: string | null
   scopes: string[]
-  agents: { id: string; name: string }[]
+  agents: WorkAgent[]
   sessions: { session: string; agent: string; title: string; updated?: string }[]
   /** Go to a session, or start one with an agent (s/<agent>). */
   go: (path: string) => void
@@ -21,42 +23,70 @@ export interface PagesEnv {
 export const PagesContext = createContext<PagesEnv | null>(null)
 const useEnv = () => { const e = useContext(PagesContext); if (!e) throw new Error('page blocks need their environment'); return e }
 const newId = () => `ses-${crypto.randomUUID()}`
+const plainTitle = (s: string) => (s ?? '').replace(/\*\*|__|`/g, '').replace(/(^|\s)_([^_]+)_(?=\s|$)/g, '$1$2').trim()
 const when = (iso?: string) => (iso ? new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '')
 
 function Home() {
   const env = useEnv()
   const { open } = useThread()
   const [asking, setAsking] = useState('')
-  const [beats, setBeats] = useState<string[]>([])
-  const agentName = (id: string) => env.agents.find((a) => a.id === id)?.name ?? id
+  const [beats, setBeats] = useState<{ text: string; at: number }[]>([])
+  const agentOf = (id: string) => env.agents.find((a) => a.id === id)
   const ask = async (text: string) => {
     const t = text.trim(); if (!t || asking) return
     const sid = newId()
-    setAsking(t); setBeats(['Finding the agent for this question…'])
-    const m = await env.request({ t: 'session:start', session: sid, text: t, kind: 'language' }, (p) => { if (p?.t === 'narration' && p.text) setBeats((b) => [...b, String(p.text)]) })
+    setAsking(t); setBeats([{ text: 'Finding the agent for this question…', at: Date.now() }])
+    const m = await env.request({ t: 'session:start', session: sid, text: t, kind: 'language' }, (p) => { if (p?.t === 'narration' && p.text) setBeats((b) => [...b, { text: String(p.text), at: Date.now() }]) })
     setAsking(''); setBeats([])
     if (m?.t === 'session:view') env.go(sid); else notify(m?.reason ?? 'The question could not be asked', 'refused')
   }
-  return (<>
-    <form className="sa-askbar__form" onSubmit={(e) => { e.preventDefault(); const f = e.currentTarget.elements.namedItem('q') as HTMLInputElement; void ask(f.value) }}>
-      <div className="sa-askbar__field">
-        <input id="sa-ask-anything" name="q" className="sa-askbar__input" placeholder={asking ? 'Working…' : 'Ask anything — the agent that knows answers'} disabled={!!asking} autoComplete="off" />
-        <button className="sa-btn sa-btn--primary" disabled={!!asking}>Ask</button>
+  const named = env.agents.filter((a) => !a.isDefault)
+  return (
+    <div className="sa-home">
+      <div className="sa-home__ask">
+        <AskBar onAsk={(t) => void ask(t)} busy={!!asking} placeholder="Ask anything — the agent that knows answers"
+          working={<><span className="sa-label">Working on: {asking}</span><BeatRows beats={beats.slice(-3)} live /></>} />
       </div>
-    </form>
-    {asking && <div className="sa-askbar__working"><span className="sa-label">Working on: {asking}</span>{beats.slice(-3).map((b, i) => <div key={i} className="sa-note">{b}</div>)}</div>}
-    <Section icon="lucide:bot" title="Agents" subtitle="Each knows one part of the organisation and the programs that work on it."
-      actions={<button className="sa-btn" onClick={() => open('agents', {}, 'Looked at the agents')}>Manage</button>}>
-      {env.agents.length === 0 ? <Empty>No agents you can see yet.</Empty> : (
-        <div className="sa-sub-grid">{env.agents.map((a) => <button key={a.id} className="sa-sub-card" onClick={() => env.go(`s/${a.id}`)}><span className="sa-sub-card__title">{a.name}</span><span className="sa-sub-card__text">Start a session</span></button>)}</div>
+      {named.map((a) => {
+        const accent = accentOf(a.look.accent)
+        const icon = a.look.icon ?? 'lucide:bot'
+        return (
+          <Section key={a.id} tinted icon={icon} accent={(a.look.accent && a.look.accent in ACCENT ? a.look.accent : 'series-1') as Accent} title={a.name} subtitle={a.look.says}>
+            <div className="sa-home__group">
+              <button type="button" onClick={() => env.go(`s/${a.id}`)} className="sa-card sa-card--lift sa-action-card" style={{ '--accent': accent } as React.CSSProperties} title={a.look.says}>
+                <span className="sa-action-card__tile"><Icon icon={icon} /></span>
+                <div className="sa-action-card__body">
+                  <p className="sa-action-card__title">{a.name}</p>
+                  <p className="sa-action-card__text">{a.look.says || 'Start a session'}</p>
+                </div>
+                <span className="sa-action-card__cta">Open <Icon icon="mdi:arrow-right" /></span>
+              </button>
+              {a.starts.length > 0 && (
+                <div className="sa-sub-grid">
+                  {a.starts.map((x) => (
+                    <button key={x.key} type="button" className="sa-sub-card" title={x.says} onClick={() => env.go(`s/${a.id}/${x.key}`)}>
+                      <span className="sa-sub-card__title">{x.label}</span>
+                      <span className="sa-sub-card__text">{x.says}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </Section>
+        )
+      })}
+      {named.length === 0 && <Empty icon="lucide:bot">No agents you can see yet. <button className="sa-btn sa-btn--link" onClick={() => open('agents', {}, 'Looked at the agents')}>Manage agents</button></Empty>}
+      {env.sessions.length > 0 && (
+        <Section icon="lucide:history" title="Your sessions" subtitle="Pick up where you left off.">
+          <RecordList rows={env.sessions.slice(0, 8)} keyOf={(s) => s.session} onRow={(s) => env.go(s.session)} columns={[
+            { key: 'title', label: 'Session', render: (s) => <span className="sa-row sa-row--tight"><Icon icon={agentOf(s.agent)?.look.icon ?? 'lucide:messages-square'} />{plainTitle(s.title) || agentOf(s.agent)?.name || s.agent}</span> },
+            { key: 'agent', label: 'Agent', render: (s) => agentOf(s.agent)?.name ?? s.agent },
+            { key: 'updated', label: 'Last step', align: 'end', render: (s) => when(s.updated) },
+          ]} />
+        </Section>
       )}
-    </Section>
-    {env.sessions.length > 0 && (
-      <Section icon="lucide:history" title="Your sessions" subtitle="Pick up where you left off.">
-        <div className="sa-sub-grid">{env.sessions.slice(0, 12).map((s) => <button key={s.session} className="sa-sub-card" onClick={() => env.go(s.session)}><span className="sa-sub-card__title">{s.title || agentName(s.agent)}</span><span className="sa-sub-card__text">{agentName(s.agent)}{s.updated ? ` · ${when(s.updated)}` : ''}</span></button>)}</div>
-      </Section>
-    )}
-  </>)
+    </div>
+  )
 }
 
 function AgentsBlock() {
@@ -220,7 +250,7 @@ function ConnectionMade() {
 }
 
 export const PAGE_BLOCKS: Registry = {
-  home: { label: 'Home', icon: 'lucide:home', accent: 'var(--primary)', title: () => 'Where do you want to start?', render: () => <Home /> },
+  home: { label: 'Home', icon: 'lucide:house', accent: 'var(--primary)', title: () => 'Where do you want to start?', subtitle: () => 'Open an agent, then narrow, break down and follow the next moves — or ask in your own words.', render: () => <Home /> },
   agents: { label: 'Agents', icon: 'lucide:bot', accent: 'var(--series-1)', render: () => <AgentsBlock /> },
   'agent-new': { label: 'New agent', icon: 'lucide:plus', accent: 'var(--series-1)', title: (p) => (p.sent ? `Agent: ${String(p.title)}` : 'Make an agent'), subtitle: (p) => (p.sent ? 'Sent — kept as it was made' : 'A title, the knowledge it answers from, the programs it may run, who sees it'), render: () => <AgentNew /> },
   'agent-made': { label: 'Made', icon: 'lucide:check', accent: 'var(--win)', title: (p) => `${String(p.title)} is made`, subtitle: () => 'A node of the knowledge graph: owned, versioned, governed', render: () => <AgentMade /> },

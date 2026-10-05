@@ -44,6 +44,9 @@ export function checkBody(kind: Kind, body: unknown): string[] {
     if (b.tools !== undefined && (!Array.isArray(b.tools) || b.tools.some((x: unknown) => typeof x !== 'string'))) out.push('an agent\'s tools are names')
     if (b.start !== undefined && (typeof b.start !== 'object' || Array.isArray(b.start))) out.push('an agent\'s start is fields by slice')
     if (b.ica !== undefined && typeof b.ica !== 'string') out.push('an agent\'s ica names the agent that answers in words')
+    for (const k of ['icon', 'accent', 'says'] as const) if (b[k] !== undefined && typeof b[k] !== 'string') out.push(`an agent's ${k} is text`)
+    if (b.starts !== undefined && (!Array.isArray(b.starts) || b.starts.some((x: any) => !x || typeof x.key !== 'string' || !x.key || typeof x.label !== 'string' || !x.label || typeof x.start !== 'object' || Array.isArray(x.start) || (x.says !== undefined && typeof x.says !== 'string'))))
+      out.push('an agent\'s starts are each a key, a label, an optional line, and a start (fields by slice)')
     return out
   }
   return [`a ${kind} is not changed this way`]
