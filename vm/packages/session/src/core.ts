@@ -21,28 +21,8 @@ export type Entry =
 export interface SessionLog {
   append(session: string, entry: Entry): void
   read(session: string): Entry[]
-  /** Hold a session just opened: its entries stay in memory, written nowhere, until it is first used (commit). */
-  hold?(session: string): void
-  /** Write a held session's entries and keep writing it from now on (nothing to do for one already written). */
-  commit?(session: string): void
 }
 
-/**
- * A session nobody has used is not kept. Opening an agent shows its starting view, but until the person does something
- * in it — a change, a move, a question, going back to a step — its entries are held in memory and written nowhere (not
- * to the log, not to the platform); the first use writes them all, in order, and the session exists from then on. An
- * unused session simply goes (the oldest first past `max`, or with the process).
- */
-export function deferringLog(inner: SessionLog, max = 500): SessionLog & { held(session: string): boolean } {
-  const held = new Map<string, Entry[]>()
-  return {
-    hold(s) { held.set(s, []); while (held.size > max) held.delete(held.keys().next().value!) },
-    commit(s) { const es = held.get(s); if (!es) return; held.delete(s); for (const e of es) inner.append(s, e) },
-    held: (s) => held.has(s),
-    append(s, e) { const es = held.get(s); if (es) es.push(e); else inner.append(s, e) },
-    read: (s) => held.get(s)?.slice() ?? inner.read(s),
-  }
-}
 
 /** The log in memory (tests, and a session not kept). */
 export function memoryLog(): SessionLog {

@@ -1,8 +1,8 @@
 // The session seam end to end, without an agent: an agent file and a built program in a project home, a datasource
 // manager answering over HTTP, and thread:* payloads in, replies out.
-import { test, before, after } from 'node:test'
+import { readdirSync, test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -90,9 +90,7 @@ test('refused with a sentence: another user, no user, no agent, a broken op, wor
   await ask({ t: 'session:open', session: 's2', agent: 'trips' })
   assert.deepEqual(await ask({ t: 'session:get', session: 's2' }, 'u2'), { t: 'session:refused', reason: 'session s2 is not yours', reqId: undefined })
   assert.equal((await ask({ t: 'session:get', session: 's2' }, null)).reason, 'the hub did not say who is asking')
-  // an agent key is its own identity: it neither sees a person's session nor passes for one (a session only looked at is
-  // held by the process that opened it; kept, any process reads it)
-  await ask({ t: 'session:keep', session: 's2' })
+  // an agent key is its own identity: it neither sees a person's session nor passes for one
   const agentOut: any[] = []
   const agentSeam = createSessionSeam({ projectDir: home, datasource: url, send: (_t, m) => agentOut.push(m) })
   await agentSeam.handle({ t: 'session:get', session: 's2' }, { type: 'agent', userId: 'agent:key_1' })
@@ -204,4 +202,27 @@ test('a question from home, no agent picked: no domain\'s words reach it, so the
   assert.equal(told[0].domain, null)
   assert.equal(r.result.answer.markdown, 'Nothing fits better; here is what I know.')
   assert.equal(r.view.agent, 'helper')
+})
+
+test('views: an agent browsed without a session — nothing written; a step computed from the STATE given; kept at need by replaying the path', async () => {
+  const out: any[] = []
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg) })
+  const ask = async (payload: any) => { await s.handle(payload, { id: 'ws9', type: 'runtime', userId: 'u9' }); return out.at(-1) }
+  const before = existsSync(join(home, 'sessions')) ? readdirSync(join(home, 'sessions')).length : 0
+  const opened = await ask({ t: 'view:open', agent: 'trips' })
+  assert.equal(opened.t, 'view:view')
+  assert.ok(opened.view.answers.length >= 1)
+  const root = opened.view.states[opened.view.leaf]
+  const moved = await ask({ t: 'view:intent', agent: 'trips', state: root, ops: [{ op: 'set', path: 'trips.branch', value: 'HYDERABAD' }] })
+  assert.equal(moved.t, 'view:view')
+  assert.equal(moved.view.state.trips.branch, 'HYDERABAD')
+  const after = existsSync(join(home, 'sessions')) ? readdirSync(join(home, 'sessions')).length : 0
+  assert.equal(after, before)                                       // browsing wrote nothing
+  // the question: the path is written as the session's first steps, replayed here
+  const kept = await ask({ t: 'session:keep', session: 'k1', agent: 'trips', path: [{ open: {}, edits: [] }, { intent: { ops: [{ op: 'set', path: 'trips.branch', value: 'HYDERABAD' }] }, edits: [] }] })
+  assert.equal(kept.t, 'session:view')
+  assert.equal(kept.view.blocks.length, 2)
+  assert.equal(kept.view.state.trips.branch, 'HYDERABAD')
+  assert.ok(existsSync(join(home, 'sessions', 'k1', 'session.jsonl')))
+  assert.match((await ask({ t: 'session:keep', session: 'k2', agent: 'trips', path: [] })).reason, /names the path/)
 })

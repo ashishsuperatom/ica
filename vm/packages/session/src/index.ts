@@ -19,7 +19,7 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { Answer, Intent, Op } from '@superatom/platform-types'
+import type { Answer, Intent, Op, State } from '@superatom/platform-types'
 import { checkIntent } from '@superatom/platform-types'
 import { stateHash, StateRefusal, type Outcome, type Ran, type StateEngine } from '@superatom/state'
 
@@ -86,11 +86,12 @@ export function createSessions(opts: SessionsOptions) {
     return { markdown: parts.join('\n\n'), files, ...(Object.keys(blocks).length ? { blocks } : {}), ...(Object.keys(world).length ? { world } : {}) }
   }
 
-  function open(o: { session: string; user: string; agent: string; start?: Parameters<StateEngine['start']>[0]; agentKeys?: Record<string, unknown> }): SessionView {
+  /** Open a session: on the agent's start (its fields over every package's initial slice), or on a whole STATE a view
+   *  was already at (a browsed view becoming a session, or a view computed in a throwaway session). */
+  function open(o: { session: string; user: string; agent: string; start?: Parameters<StateEngine['start']>[0]; agentKeys?: Record<string, unknown>; state?: State }): SessionView {
     if (opts.log.read(o.session).length) throw new SessionRefusal([`session ${o.session} already exists`])
     const at = now()
-    const state = opts.engine.start(o.start, o.agentKeys)
-    opts.log.hold?.(o.session)   // kept only once it is used (deferringLog)
+    const state = o.state ?? opts.engine.start(o.start, o.agentKeys)
     opts.log.append(o.session, { t: 'open', at, session: o.session, user: o.user, agent: o.agent })
     opts.log.append(o.session, { t: 'block', at, id: id('blk'), parent: null, state, stateHash: stateHash(state), intent: null })
     return read(o.session)
@@ -101,7 +102,6 @@ export function createSessions(opts: SessionsOptions) {
     if (bad.length) throw new SessionRefusal(bad)
     const before = read(i.session)
     if (i.by !== before.user) throw new SessionRefusal([`session ${i.session} is ${before.user}'s; ${i.by} cannot change it`])
-    opts.log.commit?.(i.session)   // the first use: the session is kept from here
     const from = i.block ?? before.leaf
     const base = before.states[from]
     if (!base) throw new SessionRefusal([`session ${i.session} has no block ${from}`])
@@ -169,7 +169,6 @@ export function createSessions(opts: SessionsOptions) {
     const v = read(session)
     if (by !== v.user) throw new SessionRefusal([`session ${session} is ${v.user}'s; ${by} cannot change it`])
     if (!v.states[block]) throw new SessionRefusal([`session ${session} has no block ${block}`])
-    opts.log.commit?.(session)
     if (v.leaf !== block) opts.log.append(session, { t: 'current', at: now(), block })
     return read(session)
   }

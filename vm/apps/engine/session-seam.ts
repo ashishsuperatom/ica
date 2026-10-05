@@ -27,7 +27,7 @@ import { placeForRunning, pick } from './knowledge.js'
 import { checkAgent, type AgentSpec, type Intent } from '@superatom/platform-types'
 import { ProgramStore, ProgramError, loadPackage } from '@superatom/programs'
 import { createStateEngine, StateRefusal, type StateEngine } from '@superatom/state'
-import { createSessions, deferringLog, fileLog, history, replay, SessionRefusal, type SessionLog, type SessionView } from '@superatom/session'
+import { createSessions, memoryLog, fileLog, history, replay, SessionRefusal, type SessionLog, type SessionView } from '@superatom/session'
 import { Store, governance as g, GovernanceRefusal } from '@superatom/composition-graph'
 import { cardOf } from './answer-card.js'
 import { whoIs, type Who } from './identity.js'
@@ -81,17 +81,33 @@ const pathOfView = (v: SessionView, block: string) => { const out: string[] = []
 const describe = (i: Intent) => i.call ? `ran ${i.call.package}.${i.call.fn}` : i.action ? `took ${i.action.package} · ${i.action.id}` : (i.ops ?? []).map((o: any) => `${o.op} ${o.path}${'value' in o ? ` = ${JSON.stringify(o.value)}` : ''}`).join(', ') || 'a change'
 
 /** The messages this seam takes (session:new, session:load and session:compact are the chat's). */
-export const SESSION_MESSAGES = new Set(['session:keep', 'session:agents', 'session:open', 'session:intent', 'session:goto', 'session:get', 'session:file', 'session:fork', 'session:start'])
+export const SESSION_MESSAGES = new Set(['view:open', 'view:intent', 'session:keep', 'session:agents', 'session:open', 'session:intent', 'session:goto', 'session:get', 'session:file', 'session:fork', 'session:start'])
 
 /** A starting point's fields over the agent's start, slice by slice. */
 export const mergeStart = (base: Record<string, Record<string, unknown>>, over: Record<string, Record<string, unknown>>) =>
   Object.fromEntries([...new Set([...Object.keys(base), ...Object.keys(over)])].map((k) => [k, { ...(base[k] ?? {}), ...(over[k] ?? {}) }]))
 
+/** Where an agent starts: its start, or one of its starting points (refused when it declares no such point). */
+function startOf(spec: AgentSpec, startAt: unknown) {
+  if (!startAt) return spec.start
+  const at = (spec.starts ?? []).find((x) => x.key === String(startAt))
+  if (!at) throw new SessionSeamRefusal(`${spec.name} has no starting point "${String(startAt)}"`)
+  return mergeStart(spec.start ?? {}, at.start)
+}
+
+/** A structured intent from a screen's payload (ops, an action or a call), for a session or a view. */
+function structured(p: any, session: string, by: string, to: 'current' | 'new'): Intent {
+  return {
+    id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'structured',
+    ...(p?.ops ? { ops: p.ops } : {}), ...(p?.action ? { action: p.action } : {}), ...(p?.call ? { call: p.call } : {}),
+    to, ...(p?.block ? { block: String(p.block) } : {}), by, at: new Date().toISOString(),
+  }
+}
+
 export function createSessionSeam(d: SessionSeamDeps) {
   const agentsDir = join(d.projectDir, 'agents')
   const store = new ProgramStore(join(d.projectDir, 'programs', 'store'))
-  // A session opened and only looked at is held, not kept; its first use writes it (deferringLog).
-  const log = deferringLog(d.log ?? fileLog(join(d.projectDir, 'sessions')))
+  const log = d.log ?? fileLog(join(d.projectDir, 'sessions'))
 
   // A domain's programs (the composition graph's), run where the platform places them, for whoever asked: their access
   // goes with the run (SA_READER), their output (totals, a page) comes back as JSON. The same run within five minutes
@@ -283,17 +299,51 @@ export function createSessionSeam(d: SessionSeamDeps) {
       if (t === 'session:agents') return reply({ t: 'session:agents', agents: agents().filter((a) => visible(a.scope)) })
       const user = userOf(from)
       if (t === 'session:file') { const hash = String(payload.hash ?? ''), path = String(payload.path ?? ''); return reply({ t: 'session:file', hash, path, text: programFile(hash, path) }) }
+      // ── VIEWS: an agent browsed without a session ("Views and sessions — one thread, two homes"). The browser keeps the
+      //    thread; each step is computed here from the STATE it is given, in a throwaway session (the same code as a
+      //    session's, so the same meaning), and nothing is kept.
+      if (t === 'view:open' || t === 'view:intent') {
+        const state = payload.state && typeof payload.state === 'object' ? payload.state as SessionView['state'] : undefined
+        const { engine, spec, packages } = await runtimeFor(String(payload.agent ?? ''), state?.packages)
+        if (!visible(spec.scope)) throw new SessionSeamRefusal(`there is no agent "${spec.id}"`)
+        const tmp = createSessions({ log: memoryLog(), engine })
+        const who = whoIs(from)
+        const run = packages.map((p) => p.name)
+        let v: SessionView
+        if (t === 'view:open') v = await asReader(who, () => tmp.openAndRun({ session: 'view', user, agent: spec.id, ...(state ? { state } : { start: startOf(spec, payload.startAt) }), run }))
+        else {
+          if (!state) throw new SessionSeamRefusal('a view step starts from the STATE it is at')
+          tmp.open({ session: 'view', user, agent: spec.id, state })
+          v = (await asReader(who, () => tmp.intent(structured(payload, 'view', user, 'current')))).session
+        }
+        return reply(await present(v, { t: 'view:view' }))
+      }
       const session = String(payload.session ?? '')
       if (!/^[\w-]{1,80}$/.test(session)) throw new SessionSeamRefusal('a session message names its session')
+      // A browsed view becoming a session (a question, a decision, an agent made from it): its path written as the
+      // session's first steps by replaying exactly what was done — the opening, each step's intent, each change made in
+      // place — so every STATE and answer in the history is this engine's own, not the browser's word.
+      if (t === 'session:keep') {
+        const path = Array.isArray(payload.path) ? payload.path as any[] : []
+        if (!path.length || path.length > 50) throw new SessionSeamRefusal('a kept view names the path to its step (at most 50 steps)')
+        const root = path[0]?.open ?? {}
+        const { sessions: rt, spec, packages } = await runtimeFor(String(payload.agent ?? ''), root.state?.packages)
+        if (!visible(spec.scope)) throw new SessionSeamRefusal(`there is no agent "${spec.id}"`)
+        const who = whoIs(from)
+        let v = await asReader(who, () => rt.openAndRun({ session, user, agent: spec.id, ...(root.state ? { state: root.state } : { start: startOf(spec, root.startAt) }), run: packages.map((p) => p.name) }))
+        for (const [i, step] of path.entries()) {
+          if (i > 0) v = (await asReader(who, () => rt.intent(structured({ ...step.intent, block: v.leaf }, session, user, 'new')))).session
+          for (const e of Array.isArray(step.edits) ? step.edits : []) v = (await asReader(who, () => rt.intent(structured({ ...e, block: v.leaf }, session, user, 'current')))).session
+        }
+        return reply(await present(v))
+      }
       if (t === 'session:open') {
         const { sessions, spec, packages } = await runtimeFor(String(payload.agent ?? ''))
         if (!visible(spec.scope)) throw new SessionSeamRefusal(`there is no agent "${spec.id}"`)
         // An agent opens on its starting screen: its programs run, as a dashboard opens with its data (unless asked not to).
         const run = payload.run === false ? [] : packages.map((p) => p.name)
         // A starting point the agent declares opens on its own STATE (its fields over the agent's start, slice by slice).
-        const at = payload.startAt ? (spec.starts ?? []).find((x) => x.key === String(payload.startAt)) : undefined
-        if (payload.startAt && !at) throw new SessionSeamRefusal(`${spec.name} has no starting point "${String(payload.startAt)}"`)
-        const start = at ? mergeStart(spec.start ?? {}, at.start) : spec.start
+        const start = startOf(spec, payload.startAt)
         return reply(await present(await asReader(whoIs(from), () => sessions.openAndRun({ session, user, agent: spec.id, start, run }))))
       }
       // A question from home, with no agent picked: the agent its words reach (else the default one) opens a session on it.
@@ -303,13 +353,6 @@ export function createSessionSeam(d: SessionSeamDeps) {
         const opened = await asReader(whoIs(from), () => rt.openAndRun({ session, user, agent: agent.id, start: agent.start, run: packages.map((p) => p.name) }))
         const r = await answerWords(opened, session, String(payload.text ?? ''), null, from, user, payload.reqId)
         return reply(await present(r.session, { routed: { agent: agent.id, name: agent.name, how }, result: { block: r.block, opened: r.opened, answer: r.answer } }))
-      }
-      // Keep a session that was only looked at (something is about to be recorded on it: a decision, an agent from it).
-      if (t === 'session:keep') {
-        const v = replay(log.read(session))
-        if (!v) throw new SessionSeamRefusal(`there is no session ${session}`)
-        viewOf(v, user); log.commit?.(session)
-        return reply({ t: 'session:kept', session })
       }
       if (t === 'session:get') {
         const v = replay(log.read(session), payload.asOf ? String(payload.asOf) : undefined)
@@ -323,7 +366,6 @@ export function createSessionSeam(d: SessionSeamDeps) {
       // agent's domain and what this session learned, as worked examples (each question and the steps taken after it).
       // The person's own until it is published; every node written through the graph's governance.
       if (t === 'session:fork') {
-        log.commit?.(session)   // making an agent from it is a use
         const s = graphStore()
         if (!s) throw new SessionSeamRefusal('this project keeps no composition graph to make an agent in')
         const name = String(payload.name ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')

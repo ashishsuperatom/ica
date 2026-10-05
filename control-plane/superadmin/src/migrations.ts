@@ -234,6 +234,15 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     CREATE TABLE IF NOT EXISTS connector_schemas (seq INTEGER PRIMARY KEY AUTOINCREMENT, connection TEXT NOT NULL, entities TEXT NOT NULL, actions TEXT NOT NULL, at TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS idx_connector_schemas ON connector_schemas(connection, seq);
   ` },
+  { id: 30, name: 'view events', up: `
+    -- What people do in an agent's views without a session ("Views and sessions — one thread, two homes"): one small
+    -- row per action — who, which agent, opened or changed, which control — never the STATE or an answer. For defaults
+    -- learned from usage and the decision memory's sense of common paths. Append-only.
+    CREATE TABLE IF NOT EXISTS view_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, who TEXT, agent TEXT, kind TEXT NOT NULL, detail TEXT);
+    CREATE INDEX IF NOT EXISTS idx_view_events_at ON view_events(at);
+    CREATE TRIGGER IF NOT EXISTS view_events_no_update BEFORE UPDATE ON view_events BEGIN SELECT RAISE(ABORT, 'view events are append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS view_events_no_delete BEFORE DELETE ON view_events BEGIN SELECT RAISE(ABORT, 'view events are append-only'); END;
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

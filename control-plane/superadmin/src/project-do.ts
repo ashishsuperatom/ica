@@ -1293,7 +1293,7 @@ export class ProjectDO extends DurableObject<Env> {
   // ── The audit history ──────────────────────────────────────────────────────
   // What a message means, for the record: its action and what it carried. Liveness and screen bookkeeping are not
   // actions (pings, resizes, keystrokes into a terminal, sync pulls); everything else is recorded.
-  private static NOT_ACTIONS = new Set(['session:list', 'activity:list', 'tick', 'ping', 'ui:resize', 'term:input', 'term:detach', 'sync:req', 'answer:get', 'answer:ack', 'log:attach', 'log:detach', 'suggestions:req', 'suggest', 'sessions:list', 'analyst:sync', 'session:file'])
+  private static NOT_ACTIONS = new Set(['session:list', 'activity:list', 'tick', 'ping', 'ui:resize', 'term:input', 'term:detach', 'sync:req', 'answer:get', 'answer:ack', 'log:attach', 'log:detach', 'suggestions:req', 'suggest', 'sessions:list', 'analyst:sync', 'session:file', 'view:open', 'view:intent'])
   private auditMessage(sender: ConnInfo, pl: any, outcome: 'ok' | 'refused', reason?: string) {
     const t = String(pl?.t ?? '')
     if (outcome === 'ok' && ProjectDO.NOT_ACTIONS.has(t)) return
@@ -1396,6 +1396,12 @@ export class ProjectDO extends DurableObject<Env> {
       if (!c.ok) { this.auditMessage(sender, pl, 'refused', c.reason); hubReply({ t: 'error', source: 'credits', reason: c.reason, reqId: pl.reqId }); return }
     }
     if (sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent') this.auditMessage(sender, pl, 'ok')
+    // Browsing an agent's views: one small usage row each (never the STATE), then on to the engine as any message.
+    if ((pl.t === 'view:open' || pl.t === 'view:intent') && (sender.type === 'runtime' || sender.type === 'agent')) {
+      const control = pl.t === 'view:open' ? (pl.startAt ? `start ${String(pl.startAt)}` : pl.state ? 'reopened' : 'opened')
+        : pl.call ? `${pl.call.package}.${pl.call.fn}${Array.isArray(pl.call.params?.ops) ? ` ${pl.call.params.ops.map((o: any) => o?.op).join(',')}` : ''}` : pl.action ? `${pl.action.package}·${pl.action.id}` : Array.isArray(pl.ops) ? pl.ops.map((o: any) => `${o?.op} ${o?.path ?? ''}`).join(',') : 'a change'
+      this.ctx.storage.sql.exec('INSERT INTO view_events (at, who, agent, kind, detail) VALUES (?, ?, ?, ?, ?)', new Date().toISOString(), this.principalOf(sender), String(pl.agent ?? ''), pl.t === 'view:open' ? 'open' : 'step', control.slice(0, 200))
+    }
     // ── Activities: what is running, or ran lately — one's own (an admin sees everyone's) ──
     if (pl.t === 'activity:list' && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
       const who = this.principalOf(sender)
@@ -1468,7 +1474,13 @@ export class ProjectDO extends DurableObject<Env> {
         const out: any = await r.json(); if (!r.ok) throw new Error(out.error ?? `the decision memory answered ${r.status}`); return out
       }
       try {
-        if (pl.t === 'decision:paths' || pl.t === 'decision:outcome') {
+        if (pl.t === 'decision:paths' && !pl.session && pl.view && typeof pl.view === 'object') {
+          // A view browsed without a session: its step, as the browser holds it (an agent, a STATE, what it showed).
+          const v: any = pl.view
+          const step = stepOf({ agent: String(v.agent ?? ''), states: { b: v.state ?? {} }, blocks: [{ id: 'b', answer: v.answer ? 'a' : null, stateHash: String(v.stateHash ?? '') }], answers: v.answer ? [{ ...v.answer, id: 'a' }] : [] } as any, 'b')
+          if (!step) throw new Error('the view has no step to recognise')
+          hubReply({ t: 'decision:paths', block: null, ...(await call('/recognise', { cues: step.cues, world: step.world, scopes: this.scopesOf(sender) })), reqId: pl.reqId })
+        } else if (pl.t === 'decision:paths' || pl.t === 'decision:outcome') {
           const r = await this.sessionStub(String(pl.session ?? '')).fetch('http://do/view')
           const body: any = await r.json()
           if (!r.ok) throw new Error(body.error ?? 'there is no such session')

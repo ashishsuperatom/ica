@@ -21,18 +21,10 @@ import {
 } from '@superatom/ui'
 import { PAGE_BLOCKS, PagesContext } from './pageBlocks'
 import { accentOf } from './agentLook'
-import ProgramBlock, { preloadProgram, type ProgramUI } from './ProgramBlock'
+import ProgramBlock, { preloadProgram } from './ProgramBlock'
+import { sessionSource, viewSource, viewFromHistory, type Request, type SessionMsg, type ThreadSource, type Intent_, type View } from './threadSource'
 
-type Request = (payload: Record<string, unknown>, onProgress?: (m: any) => void) => Promise<any>
 type FetchFile = (hash: string, path: string) => Promise<string>
-interface Answer_ { id: string; block: string; cause: string; markdown: string; blocks?: Record<string, unknown>; at: string }
-interface Intent_ { id: string; kind: 'structured' | 'language'; text?: string; ops?: any[]; call?: any; action?: any; to?: string; block?: string; at: string }
-interface View {
-  id: string; agent: string; user: string; leaf: string; created: string
-  blocks: { id: string; parent: string | null; answer: string | null; stateHash: string }[]
-  states: Record<string, Record<string, unknown>>; answers: Answer_[]; intents: Intent_[]
-}
-interface SessionMsg { t: string; reason?: string; view?: View; uis?: ProgramUI[]; actions?: { package: string; label: string; intent: any }[]; functions?: Record<string, string[]>; result?: { block: string; opened: boolean; stale?: boolean } }
 /** An agent as the workspace lists it: its look (an iconify icon, an accent, one line) and its starting points. */
 export interface WorkAgent { id: string; name: string; isDefault?: boolean; look: { icon?: string; accent?: string; says?: string; main?: { label: string; says?: string } }; starts: { key: string; label: string; says: string }[] }
 
@@ -49,10 +41,9 @@ function leadOf(md: string): { title?: string; said?: string; rest: string } {
   return m ? { title: m[1], said: m[2], rest: lines.filter((_, j) => j !== i).join('\n') } : { rest: md }
 }
 
-/** Record something on a session (a decision, what it made): the session is kept first — one only looked at is not —
- *  and the record waits a moment for the platform to have it. */
+/** Record something on a session (a decision, what it made), waiting a moment for the platform to have a session just
+ *  kept from a view. */
 async function recordKept(request: Request, session: string, payload: Record<string, unknown>) {
-  await request({ t: 'session:keep', session })
   let m: any
   for (let i = 0; i < 5; i++) {
     m = await request(payload)
@@ -66,10 +57,10 @@ async function recordKept(request: Request, session: string, payload: Record<str
 const opened = new Map<string, SessionMsg>()
 /** A view made ready to show whole: its programs' React sides loaded, and the paths from its current step, waited for a
  *  moment at most — so a step appears once, complete, instead of in pieces. */
-async function ready(m: SessionMsg, fetchFile: FetchFile, request: Request, session: string): Promise<Recognised | null | undefined> {
+async function ready(m: SessionMsg, fetchFile: FetchFile, source: ThreadSource): Promise<Recognised | null | undefined> {
   if (m?.t !== 'session:view' || !m.view) return undefined
   let recognised: Recognised | null | undefined
-  const paths = request({ t: 'decision:paths', session, block: m.view.leaf }).then((r) => { recognised = r?.t === 'decision:paths' ? r : null }, () => { recognised = null })
+  const paths = source.paths(m.view, m.view.leaf).then((r) => { recognised = r?.t === 'decision:paths' ? r : null }, () => { recognised = null })
   const programs = Promise.all((m.uis ?? []).filter((u) => u.blocks.length).map((u) => preloadProgram(u, fetchFile).catch(() => null)))
   await Promise.race([Promise.all([paths, programs]), new Promise((r) => setTimeout(r, 2500))])
   return recognised
@@ -104,23 +95,10 @@ export default function Workspace({ request, subscribeLive, scopes, projectId, t
     throw new Error(m?.reason ?? 'the file did not come')
   }, [projectId, token, request])
 
-  // Opening an agent (or one of its starting points) starts a session with it; the step shows at once, as a skeleton,
-  // and the session replaces it whole when it is ready.
-  const live = useRef({ request, go, fetchFile }); live.current = { request, go, fetchFile }
-  const openingPath = useRef<string | null>(null)
-  useEffect(() => {
-    if (!startAgent) { openingPath.current = null; return }
-    if (openingPath.current === path) return   // once per address (React runs effects twice in development)
-    openingPath.current = path
-    const sid = newId()
-    const { request: rq, go: to, fetchFile: ff } = live.current
-    void rq({ t: 'session:open', session: sid, agent: startAgent, ...(startKey ? { startAt: startKey } : {}) }).then(async (m: SessionMsg) => {
-      if (m?.t !== 'session:view') { notify(m?.reason ?? 'The session could not be opened', 'refused'); live.current.go(''); return }
-      await ready(m, ff, rq, sid)
-      opened.set(sid, m)
-      to(sid)
-    })
-  }, [startAgent, startKey])   // eslint-disable-line react-hooks/exhaustive-deps
+  // A session's thread is the platform's; an agent's views are this browser's until something must be kept.
+  const source = useMemo(() => (sessionId ? sessionSource(request, sessionId) : startAgent ? viewSource(request, startAgent, startKey) : null), [request, sessionId, startAgent, startKey])
+  // A view became a session (a question, a decision): go to it, with what was just shown.
+  const onKept = useCallback((session: string, msg: SessionMsg) => { opened.set(session, msg); setListTick((n) => n + 1); go(session) }, [go])
 
   // A page of the user UI is a block: from a session it opens a fresh thread starting there; on the pages, a new thread.
   const [root, setRoot] = useState<string | null>(null)
@@ -151,7 +129,6 @@ export default function Workspace({ request, subscribeLive, scopes, projectId, t
   useEffect(() => { setArtifacts([]) }, [sessionId])
   const pagesEnv = useMemo(() => ({ request, subscribeLive, projectId, token, scopes, agents, sessions, go }), [request, subscribeLive, projectId, token, scopes, agents, sessions, go])
   const programEnv = useMemo(() => ({ request }), [request])
-  const opening = startAgent ? agentOf(startAgent) : null
   return (
     <>
       <AppShell
@@ -166,13 +143,9 @@ export default function Workspace({ request, subscribeLive, scopes, projectId, t
         </> : undefined}
         artifactsCount={artifacts.length}>
         <ProgramEnvContext.Provider value={programEnv}>
-          {opening
-            ? <div className="sa-work"><Steps onSwitch={() => {}} items={[{ id: 'opening', at: new Date().toISOString(), node: (
-                <BlockFrame id="opening" step={1} label={opening.name} title={(startKey && opening.starts.find((x) => x.key === startKey)?.label) || opening.name} subtitle={opening.look.says} busy
-                  icon={opening.look.icon} accent={accentOf(opening.look.accent)}><StepSkeleton label="Opening" /></BlockFrame>
-              ) }]} /></div>
-            : sessionId
-            ? <SessionSteps key={sessionId} session={sessionId} request={request} fetchFile={fetchFile} agentOf={agentOf} onArtifacts={setArtifacts} artifactsTick={artifactsTick} onUsed={onUsed} />
+          {source
+            ? <ThreadSteps key={sessionId ?? `view:${path}`} source={source} session={sessionId} request={request} fetchFile={fetchFile} agentOf={agentOf} viewAgent={startAgent} viewStart={startKey}
+                onArtifacts={setArtifacts} artifactsTick={artifactsTick} onUsed={onUsed} onKept={onKept} />
             : <PagesContext.Provider value={pagesEnv}>
                 <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} address={(b) => (b.type === 'home' ? '/w' : ['agents', 'activity', 'connections'].includes(b.type) ? `/w?page=${b.type}` : null)} />
               </PagesContext.Provider>}
@@ -205,8 +178,13 @@ function ForkAgent({ session, request, onMade }: { session: string; request: Req
 
 type Pending = { kind: 'new'; from: string | null; label: string; beats?: { text: string; at: number }[] } | { kind: 'edit'; block: string }
 
-function SessionSteps({ session, request, fetchFile, agentOf, onArtifacts, artifactsTick, onUsed }: { session: string; request: Request; fetchFile: FetchFile; agentOf: (id: string) => WorkAgent; onArtifacts: (a: Artifact[]) => void; artifactsTick: number; onUsed: () => void }) {
-  const [msg, setMsg] = useState<SessionMsg | null>(() => opened.get(session) ?? null)
+/** A thread of steps, whichever home it has: a session (the platform's) or an agent's view (this browser's). */
+function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, viewStart, onArtifacts, artifactsTick, onUsed, onKept }: {
+  source: ThreadSource; session: string | null; request: Request; fetchFile: FetchFile; agentOf: (id: string) => WorkAgent
+  viewAgent: string | null; viewStart: string | null
+  onArtifacts: (a: Artifact[]) => void; artifactsTick: number; onUsed: () => void; onKept: (session: string, msg: SessionMsg) => void
+}) {
+  const [msg, setMsg] = useState<SessionMsg | null>(() => (session ? opened.get(session) ?? null : null))
   const [refused, setRefused] = useState('')
   const [pending, setPending] = useState<Pending | null>(null)
   const [paths, setPaths] = useState<Record<string, Recognised | null>>({})
@@ -214,36 +192,42 @@ function SessionSteps({ session, request, fetchFile, agentOf, onArtifacts, artif
   const root = useRef<HTMLDivElement>(null)
   const seq = useRef(0)
   const view = msg?.view
-  const agent = agentOf(view?.agent ?? '')
+  const agent = agentOf(view?.agent ?? viewAgent ?? '')
 
   // A reply is shown once it is ready to show whole; a later reply wins over an earlier one still getting ready.
   const accept = useCallback(async (m: SessionMsg) => {
     const n = ++seq.current
     if (m?.t === 'session:refused') { setRefused(m.reason ?? 'The engine refused that.'); return }
     if (m?.t !== 'session:view' || !m.view || m.result?.stale) return
-    const recognised = await ready(m, fetchFile, request, session)
+    const recognised = await ready(m, fetchFile, source)
     if (n !== seq.current) return
     setRefused(''); setMsg(m)
     if (recognised !== undefined) setPaths((p) => ({ ...p, [m.view!.leaf]: recognised }))
-  }, [fetchFile, request, session])
+  }, [fetchFile, source])
 
   useEffect(() => {
-    const had = opened.get(session)
-    if (had) { opened.delete(session); return }
-    void request({ t: 'session:get', session }).then(accept)
-  }, [session, request, accept])
+    if (session && opened.get(session)) { opened.delete(session); return }
+    void source.load().then(accept)
+  }, [session, source, accept])
+  // A view's steps are in the history: Back and Forward bring its thread back as it was there.
+  useEffect(() => {
+    if (source.kind !== 'view') return
+    const on = (e: PopStateEvent) => { if (viewFromHistory(e.state)) void source.load().then(accept) }
+    window.addEventListener('popstate', on)
+    return () => window.removeEventListener('popstate', on)
+  }, [source, accept])
   // Paths from a step reached without them (going back to a step, a branch).
   useEffect(() => {
     if (!view?.leaf || view.leaf in paths) return
     const leaf = view.leaf
-    void request({ t: 'decision:paths', session, block: leaf }).then((m) => setPaths((p) => ({ ...p, [leaf]: m?.t === 'decision:paths' ? m : null })))
-  }, [view?.leaf, request, session, paths])
+    void source.paths(view, leaf).then((m) => setPaths((p) => ({ ...p, [leaf]: m?.t === 'decision:paths' ? m : null })), () => setPaths((p) => ({ ...p, [leaf]: null })))
+  }, [view, source, paths])
 
-  const loadArtifacts = useCallback(() => request({ t: 'artifact:list', session }).then((m) => {
+  const loadArtifacts = useCallback(() => (!session ? Promise.resolve(onArtifacts([])) : request({ t: 'artifact:list', session }).then((m) => {
     const blocks = view?.blocks ?? []
     onArtifacts((Array.isArray(m?.artifacts) ? m.artifacts : []).map((a: any) => ({ id: a.id, kind: a.kind, title: a.title, at: a.at, by: a.by, version: a.version, status: a.status,
       summary: a.body?.reasoning ? `${a.body.reasoning}` : undefined, step: a.block ? { block: a.block, step: pathOf(blocks as any, view?.leaf ?? '').indexOf(a.block) + 1 || 0 } : undefined })))
-  }), [request, session, onArtifacts, view])
+  })), [request, session, onArtifacts, view])
   useEffect(() => { if (view) void loadArtifacts() }, [view?.id, view?.blocks.length, artifactsTick])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // An intent: from the current step and to it, the step changes in place (dimmed while it works); otherwise a new step
@@ -254,12 +238,12 @@ function SessionSteps({ session, request, fetchFile, agentOf, onArtifacts, artif
     const opens = payload.to === 'new' || block !== view.leaf
     setPending(opens ? { kind: 'new', from: block, label } : { kind: 'edit', block })
     if (opens) setTimeout(() => revealBlock('pending'), 30)
-    const m = await request({ t: 'session:intent', session, ...payload })
+    const m = await source.intent(payload)
     await accept(m)
     setPending(null)
-    if (m?.t === 'session:view') onUsed()
-    if (opens && m?.view?.leaf) setTimeout(() => revealBlock(m.view.leaf), 30)
-  }, [pending, view, request, session, accept, onUsed])
+    if (m?.t === 'session:view' && session) onUsed()
+    if (opens && m?.view?.leaf) setTimeout(() => revealBlock(m.view!.leaf), 30)
+  }, [pending, view, source, session, accept, onUsed])
   const intentRef = useRef(intent); intentRef.current = intent
   useEffect(() => {
     const el = root.current
@@ -274,13 +258,15 @@ function SessionSteps({ session, request, fetchFile, agentOf, onArtifacts, artif
     const t = text.trim(); if (!t || pending || !view) return
     setPending({ kind: 'new', from: block ?? view.leaf, label: t, beats: [{ text: 'Looking into your question…', at: Date.now() }] })
     setTimeout(() => revealBlock('pending'), 30)
-    const m = await request({ t: 'session:intent', session, kind: 'language', text: t, ...(block ? { block } : {}) }, (p) => {
+    // Asking the agent is talking to it: a view is kept as a session first (its path replayed), then asked.
+    const { msg: m, session: kept } = await source.ask(t, block, (p) => {
       if (p?.t === 'narration' && p.text) setPending((x) => (x?.kind === 'new' ? { ...x, beats: [...(x.beats ?? []), { text: String(p.text), at: Date.now() }] } : x))
     })
+    if (kept && m?.t === 'session:view') { onKept(kept, m); return }
     await accept(m)
     setPending(null)
     if (m?.t === 'session:view') onUsed()
-    if (m?.view?.leaf) setTimeout(() => revealBlock(m.view.leaf), 30)
+    if (m?.view?.leaf) setTimeout(() => revealBlock(m.view!.leaf), 30)
   }
 
   // The program a clicked row goes to: one in the step's STATE that offers row() (the session's programs say so).
@@ -327,8 +313,13 @@ function SessionSteps({ session, request, fetchFile, agentOf, onArtifacts, artif
               {uis.map((u) => { const body = u.blocks.filter((b) => !u.head?.includes(b)); return body.length ? <ProgramBlock key={`b:${u.hash}`} program={u} only={body} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} /> : null })}
               {isLeaf && (deciding === id
                 ? <DecisionForm onCancel={() => setDeciding(null)} onRecord={async (body, approval) => {
-                    const m = await recordKept(request, session, { t: 'artifact:record', session, block: id, kind: 'decision', body, approval })
-                    if (m?.t === 'artifact:recorded') { notify('Decision recorded', 'note'); setDeciding(null); void loadArtifacts() } else notify(m?.reason ?? 'The decision was not recorded', 'refused')
+                    // A decision rests on a kept step: a view is kept as a session first, and the decision recorded there.
+                    const k = session ? { session, leaf: id, msg: null as SessionMsg | null } : await source.keep()
+                    if (!session && k.msg?.t !== 'session:view') { notify(k.msg?.reason ?? 'The view could not be kept', 'refused'); return }
+                    const m = await recordKept(request, k.session, { t: 'artifact:record', session: k.session, block: k.leaf, kind: 'decision', body, approval })
+                    if (m?.t !== 'artifact:recorded') { notify(m?.reason ?? 'The decision was not recorded', 'refused'); return }
+                    notify('Decision recorded', 'note'); setDeciding(null)
+                    if (!session && k.msg) onKept(k.session, k.msg); else void loadArtifacts()
                   }} />
                 : <div className="sa-step__decide"><button className="sa-btn sa-btn--link" onClick={() => setDeciding(id)}>Record a decision from this step</button></div>)}
             </div>
@@ -353,8 +344,11 @@ function SessionSteps({ session, request, fetchFile, agentOf, onArtifacts, artif
   return (
     <div ref={root} className="sa-work">
       {refused && <p className="sa-alert" role="alert"><span className="sa-alert__text">{refused}</span></p>}
-      <Steps items={items} onSwitch={(b) => void request({ t: 'session:goto', session, block: b }).then(accept)}
-        empty={!refused && <StepSkeleton label="Opening the session" />}
+      <Steps items={items} onSwitch={(b) => void source.goto(b).then(accept)}
+        empty={!refused && (session ? <StepSkeleton label="Opening the session" /> : (
+          <BlockFrame id="opening" step={1} label={agent.name} title={(viewStart && agent.starts.find((x) => x.key === viewStart)?.label) || agent.look.main?.label || agent.name}
+            subtitle={agent.look.says} busy icon={agent.look.icon} accent={accentOf(agent.look.accent)}><StepSkeleton label="Opening" /></BlockFrame>
+        ))}
         after={view && <AskBar onAsk={(t) => void ask(t)} busy={!!pending} placeholder="Ask about these numbers…" from={leafLead?.title ?? agent.name} />} />
     </div>
   )

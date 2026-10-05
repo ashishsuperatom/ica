@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createStateEngine } from '@superatom/state'
 import type { Intent } from '@superatom/platform-types'
-import { createSessions, deferringLog, memoryLog, fileLog, history, pathTo, replay, SessionRefusal } from '../src/index.ts'
+import { createSessions, memoryLog, fileLog, history, pathTo, replay, SessionRefusal } from '../src/index.ts'
 
 // Two packages: a scope everyone reads, and trips, which re-runs when the scope changes.
 const scope = {
@@ -141,21 +141,11 @@ test('the log rebuilds the session, can be read as of any moment, and survives a
   assert.equal(setup(fileLog(dir)).sessions.read('s1').answers.length, later.answers.length)
 })
 
-test('a session nobody has used is not kept: held in memory while it is only looked at, written whole at its first use', async () => {
-  const inner = memoryLog()
-  const log = deferringLog(inner)
-  const { sessions } = setup(log)
-  const v = sessions.open({ session: 's1', user: 'user:u1', agent: 'agt_trips' })
-  assert.equal(inner.read('s1').length, 0)                    // opened and looked at: nothing written
-  assert.equal(log.held('s1'), true)
-  assert.equal(sessions.read('s1').leaf, v.leaf)              // yet it reads as any session does
-  const r = await sessions.intent(setBranch('PUNE'))          // the first use
-  assert.equal(log.held('s1'), false)
-  const written = inner.read('s1').map((e) => e.t)
-  assert.deepEqual(written.slice(0, 2), ['open', 'block'])   // everything, in order, from its opening
-  assert.ok(written.includes('intent'))
-  assert.equal(r.session.state.scope.branch, 'PUNE')
-  sessions.open({ session: 's2', user: 'user:u1', agent: 'agt_trips' })
-  sessions.goTo('s2', sessions.read('s2').leaf, 'user:u1')    // going back to a step is a use too
-  assert.ok(inner.read('s2').length > 0)
+test('a session opens on a whole STATE a view was at: the same STATE, nothing reset', async () => {
+  const { sessions } = setup()
+  const first = sessions.open({ session: 'v1', user: 'user:u1', agent: 'agt_trips' })
+  const moved = await sessions.intent(setBranch('PUNE', { session: 'v1' }))
+  const again = sessions.open({ session: 'v2', user: 'user:u1', agent: 'agt_trips', state: moved.session.state })
+  assert.deepEqual(again.state, moved.session.state)
+  assert.notDeepEqual(first.state, again.state)
 })
