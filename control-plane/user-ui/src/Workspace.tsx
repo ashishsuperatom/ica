@@ -98,7 +98,7 @@ export default function Workspace({ request, subscribeLive, scopes, projectId, t
   // A session's thread is the platform's; an agent's views are this browser's until something must be kept.
   const source = useMemo(() => (sessionId ? sessionSource(request, sessionId) : startAgent ? viewSource(request, startAgent, startKey) : null), [request, sessionId, startAgent, startKey])
   // A view became a session (a question, a decision): go to it, with what was just shown.
-  const onKept = useCallback((session: string, msg: SessionMsg) => { opened.set(session, msg); setListTick((n) => n + 1); go(session) }, [go])
+  const onKept = useCallback((session: string, msg: SessionMsg | null) => { if (msg) opened.set(session, msg); setListTick((n) => n + 1); go(session) }, [go])
 
   // A page of the user UI is a block: from a session it opens a fresh thread starting there; on the pages, a new thread.
   const [root, setRoot] = useState<string | null>(null)
@@ -182,7 +182,7 @@ type Pending = { kind: 'new'; from: string | null; label: string; beats?: { text
 function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, viewStart, onArtifacts, artifactsTick, onUsed, onKept }: {
   source: ThreadSource; session: string | null; request: Request; fetchFile: FetchFile; agentOf: (id: string) => WorkAgent
   viewAgent: string | null; viewStart: string | null
-  onArtifacts: (a: Artifact[]) => void; artifactsTick: number; onUsed: () => void; onKept: (session: string, msg: SessionMsg) => void
+  onArtifacts: (a: Artifact[]) => void; artifactsTick: number; onUsed: () => void; onKept: (session: string, msg: SessionMsg | null) => void
 }) {
   const [msg, setMsg] = useState<SessionMsg | null>(() => (session ? opened.get(session) ?? null : null))
   const [refused, setRefused] = useState('')
@@ -260,14 +260,20 @@ function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, 
     setPending({ kind: 'new', from: block ?? view.leaf, label: t, beats: [{ text: 'Looking into your question…', at: Date.now() }] })
     setTimeout(() => revealBlock('pending'), 30)
     // Asking the agent is talking to it: a view is kept as a session first (its path replayed), then asked.
-    const { msg: m, session: kept } = await source.ask(t, block, (p) => {
-      if (p?.t === 'narration' && p.text) setPending((x) => (x?.kind === 'new' ? { ...x, beats: [...(x.beats ?? []), { text: String(p.text), at: Date.now() }] } : x))
-    })
-    if (kept && m?.t === 'session:view') { onKept(kept, m); return }
+    let m: SessionMsg | null = null, kept: string | undefined
+    try {
+      const r = await source.ask(t, block, (p) => {
+        if (p?.t === 'narration' && p.text) setPending((x) => (x?.kind === 'new' ? { ...x, beats: [...(x.beats ?? []), { text: String(p.text), at: Date.now() }] } : x))
+      })
+      m = r.msg; kept = r.session
+    } catch (e: any) { setRefused(e?.message ?? String(e)) }
+    finally { setPending(null) }
+    // Kept as a session: go to it — answered or not, the session is where the question now lives.
+    if (kept) { if (m?.t === 'session:view') onKept(kept, m); else { notify(m?.reason ?? 'The question was not answered; it is kept in its session', 'refused'); onKept(kept, null) }; return }
+    if (!m) return
     await accept(m)
-    setPending(null)
     if (m?.t === 'session:view') onUsed()
-    if (m?.view?.leaf) setTimeout(() => revealBlock(m.view!.leaf), 30)
+    if (m.view?.leaf) setTimeout(() => revealBlock(m!.view!.leaf), 30)
   }
 
   // The program a clicked row goes to: one in the step's STATE that offers row() (the session's programs say so).

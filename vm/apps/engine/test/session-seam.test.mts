@@ -225,4 +225,12 @@ test('views: an agent browsed without a session — nothing written; a step comp
   assert.equal(kept.view.state.trips.branch, 'HYDERABAD')
   assert.ok(existsSync(join(home, 'sessions', 'k1', 'session.jsonl')))
   assert.match((await ask({ t: 'session:keep', session: 'k2', agent: 'trips', path: [] })).reason, /names the path/)
+  // the browser's STATE is never trusted as it comes: its pinned builds are ignored, foreign slices dropped, a slice that
+  // does not fit its schema refused
+  const forged = await ask({ t: 'view:intent', agent: 'trips', state: { ...root, packages: { trips: 'f'.repeat(64) }, evil: { x: 1 } }, ops: [{ op: 'set', path: 'trips.branch', value: 'PUNE' }] })
+  assert.equal(forged.t, 'view:view')
+  assert.notEqual(forged.view.state.packages.trips, 'f'.repeat(64))
+  assert.equal(forged.view.state.evil, undefined)
+  const bad = await ask({ t: 'view:intent', agent: 'trips', state: { ...root, trips: { ...root.trips, branch: 42 } }, ops: [{ op: 'set', path: 'trips.branch', value: 'PUNE' }] })
+  assert.match(bad.reason, /does not fit trips/)
 })

@@ -315,6 +315,8 @@ export default {
       // A project's warehouse grant is the ORGANISATION's to set (/api/warehouse/grants); connector call records and
       // operations are the platform's own (the gateway, the hub) — none of them is a public call on a project.
       if (subPath.startsWith('warehouse') || subPath.startsWith('connector-')) return new Response('not found', { status: 404 })
+      // The audit history is written by the platform as things happen — read here, never written from outside.
+      if (subPath === 'audit' && request.method !== 'GET') return new Response('not found', { status: 404 })
       // `access/arrive` is the worker's own question to the DO (a verified domain on first sign-in), never a public call.
       if (subPath.startsWith('access/arrive')) return new Response('not found', { status: 404 })
       // Usage is recorded by the model proxy, never posted from outside.
@@ -719,7 +721,7 @@ export default {
         }
         if (request.method === 'GET') return org.fetch(new Request(`http://do${sub}`, { headers }))
         const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by: oa.email ?? 'admin', ...(sub === '/warehouse/query' ? { grant: 'all' } : {}) })
-        return org.fetch(new Request(`http://do${sub}`, { method: 'POST', headers, body }))
+        return org.fetch(new Request(`http://do${sub}`, { method: request.method, headers, body }))
       }
       // USAGE PER PERSON across the organisation's projects: what each of its people used (tokens, cache, credits), and
       // what no turn named ('unattributed'). An admin sees everyone; a member sees themselves.

@@ -29,7 +29,7 @@ export interface ThreadSource {
   /** Words to the agent: on a view, the view is kept first; `session` names the session the thread now is. */
   ask(text: string, block: string | undefined, onProgress: (m: any) => void): Promise<{ msg: SessionMsg; session?: string }>
   /** Keep the thread as a session (to record on it): the session and its current step. A session is kept already. */
-  keep(): Promise<{ session: string; leaf: string; msg: SessionMsg }>
+  keep(block?: string): Promise<{ session: string; leaf: string; msg: SessionMsg }>
   /** What the decision memory has learned from a step like this one. */
   paths(view: View, block: string): Promise<any>
 }
@@ -149,17 +149,17 @@ export function viewSource(request: Request, agent: string, startAt: string | nu
       return msgOf(local)
     },
     async ask(text, block, onProgress) {
-      const k = await this.keep()
+      const k = await this.keep(block)   // asked from a step: the path down to THAT step is kept
       if (k.msg?.t !== 'session:view') return { msg: k.msg }
       const msg = await request({ t: 'session:intent', session: k.session, kind: 'language', text, block: k.leaf }, onProgress)
       return { msg, session: k.session }
     },
-    async keep() {
+    async keep(block) {
       if (!local) throw new Error('the view is not open')
       const v = local.view
-      // The path down to the current step, each with what made it.
+      // The path down to the step (the current one unless said), each with what made it.
       const path: string[] = []
-      for (let id: string | null = v.leaf; id; id = v.blocks.find((b) => b.id === id)?.parent ?? null) path.unshift(id)
+      for (let id: string | null = block && v.states[block] ? block : v.leaf; id; id = v.blocks.find((b) => b.id === id)?.parent ?? null) path.unshift(id)
       const steps = path.map((id, i) => (i === 0 ? { open: local!.made[id]?.open ?? {}, edits: local!.made[id]?.edits ?? [] } : { intent: local!.made[id]?.intent ?? {}, edits: local!.made[id]?.edits ?? [] }))
       const session = newSessionId()
       const msg: SessionMsg = await request({ t: 'session:keep', session, agent, path: steps })

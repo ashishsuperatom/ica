@@ -134,6 +134,9 @@ export class ProjectDO extends DurableObject<Env> {
   // SOURCE OF TRUTH for the name: it is WRITTEN here (setName) on create + rename, so the user-UI reads it
   // from THIS per-project DO on connect and we NEVER reverse-fetch / guess the org on the user hot path.
   private _pid = ''
+  /** Connector calls made so far by each code-mode program (by its run id). */
+  private codeRuns = new Map<string, number>()
+  private static CODE_RUN_CALLS = 200
   // The channel consumer holds no socket, so what the engine addresses to it lands here — through the transport,
   // like every other end: parts are joined and a parcel's body is read from the bucket, and the ChannelDO is
   // handed a whole answer. One receiver, made on first use, since the engine is the only sender to a channel.
@@ -281,6 +284,11 @@ export class ProjectDO extends DurableObject<Env> {
     if (request.method === 'POST' && path === '/connector-calls') return this.connectorCalls(request)
     if (request.method === 'POST' && path === '/connector-op') {
       const b: any = await request.json().catch(() => ({}))
+      // One code-mode program may make so many connector calls, and no more.
+      const run = String(b.run ?? '')
+      const n = (this.codeRuns.get(run) ?? 0) + 1; this.codeRuns.set(run, n)
+      if (this.codeRuns.size > 500) this.codeRuns.delete(this.codeRuns.keys().next().value!)
+      if (n > ProjectDO.CODE_RUN_CALLS) return this.j({ error: `a program may make at most ${ProjectDO.CODE_RUN_CALLS} connector calls` }, 429)
       try { return this.j(await this.connectorOp(b.sender as ConnInfo, String(b.op), b.payload ?? {})) } catch (e: any) { return this.j({ error: e?.message ?? String(e) }, 400) }
     }
     if (request.method === 'POST' && path === '/setup')        return this.setup(request)
@@ -932,8 +940,10 @@ export class ProjectDO extends DurableObject<Env> {
       const code = String(pl.code ?? '')
       if (!code.trim() || code.length > 100_000) throw new Error('code mode runs a program of at most 100,000 characters')
       const t0 = Date.now()
-      const r = await runCode(this.env, exportsObj, this._pid, { type: sender.type, userId: sender.userId, email: sender.email, admin: !!sender.admin, scopes: sender.scopes ?? [] }, code)
-      this.recordCall({ op: 'run', target: `${code.length} characters`, by: who, ok: r.ok, ms: Date.now() - t0, error: r.error ?? null })
+      let r: Awaited<ReturnType<typeof runCode>> = { ok: false, error: 'the program did not run', logs: [] }
+      try { r = await runCode(this.env, exportsObj, this._pid, { type: sender.type, userId: sender.userId, email: sender.email, admin: !!sender.admin, scopes: sender.scopes ?? [] }, code) }
+      catch (e: any) { r = { ok: false, error: e?.message ?? String(e), logs: [] } }
+      finally { this.recordCall({ op: 'run', target: `${code.length} characters`, by: who, ok: r.ok, ms: Date.now() - t0, error: r.error ?? null }) }
       return r as unknown as Record<string, unknown>
     }
     const c = await this.connectionToRun(String(pl.connection ?? ''), sender)

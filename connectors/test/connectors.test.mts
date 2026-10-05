@@ -121,3 +121,15 @@ test('mcp-server: a Streamable HTTP server — tools become actions by their hin
   const none = await runOp(mcpServer, 'act', settings, { action: 'nope', input: {} }, gw)
   assert.match(none.error!, /no action "nope"/)
 })
+
+test('the gateway: a host a person names must be a public name — no IP, port, local name, the platform, or a label that escapes its domain', () => {
+  const m = manifest('rest-json')
+  const at = (baseUrl: string) => allowedHosts(m, { baseUrl }, { refuse: ['superatom.site'] })
+  assert.deepEqual(at('https://api.shop.example/v1'), ['api.shop.example'])
+  for (const bad of ['http://169.254.169.254/latest', 'https://10.0.0.1', 'https://[::1]/', 'https://api.shop.example:8443', 'https://localhost', 'https://db.internal', 'https://intranet', 'https://admin.superatom.site', 'https://superatom.site'])
+    assert.deepEqual(at(bad), [], bad)
+  const partial = { ...m, hosts: ['{account}.vendor.example'], fields: [{ key: 'account', label: 'Account', type: 'text' as const }] }
+  assert.deepEqual(allowedHosts(partial, { account: 'acme' }), ['acme.vendor.example'])
+  for (const bad of ['evil.example/x', 'a@evil.example', 'evil.example#', 'x.evil'])
+    assert.deepEqual(allowedHosts(partial, { account: bad }), [], bad)
+})

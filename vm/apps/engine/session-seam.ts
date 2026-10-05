@@ -24,7 +24,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { placeForRunning, pick } from './knowledge.js'
-import { checkAgent, type AgentSpec, type Intent } from '@superatom/platform-types'
+import { checkAgent, checkObject, type AgentSpec, type Intent } from '@superatom/platform-types'
 import { ProgramStore, ProgramError, loadPackage } from '@superatom/programs'
 import { createStateEngine, StateRefusal, type StateEngine } from '@superatom/state'
 import { createSessions, memoryLog, fileLog, history, replay, SessionRefusal, type SessionLog, type SessionView } from '@superatom/session'
@@ -93,6 +93,20 @@ function startOf(spec: AgentSpec, startAt: unknown) {
   const at = (spec.starts ?? []).find((x) => x.key === String(startAt))
   if (!at) throw new SessionSeamRefusal(`${spec.name} has no starting point "${String(startAt)}"`)
   return mergeStart(spec.start ?? {}, at.start)
+}
+
+/** A STATE a browser sends, made the engine's own: the agent's current packages only (their builds, not the browser's
+ *  pins), each slice checked against its package's schema, everything else dropped. */
+function ownState(given: any, engine: { start(over?: Record<string, Record<string, unknown>>): SessionView['state'] }, packages: { name: string; spec: { schema: any } }[]): SessionView['state'] {
+  const over: Record<string, Record<string, unknown>> = {}
+  for (const p of packages) {
+    const slice = given?.[p.name]
+    if (slice === undefined) continue
+    const bad = checkObject(p.spec.schema, slice, p.name)
+    if (bad.length) throw new SessionSeamRefusal(`the view's STATE does not fit ${p.name}: ${bad.slice(0, 3).join('; ')}`)
+    over[p.name] = slice
+  }
+  return engine.start(over)
 }
 
 /** A structured intent from a screen's payload (ops, an action or a call), for a session or a view. */
@@ -303,9 +317,10 @@ export function createSessionSeam(d: SessionSeamDeps) {
       //    thread; each step is computed here from the STATE it is given, in a throwaway session (the same code as a
       //    session's, so the same meaning), and nothing is kept.
       if (t === 'view:open' || t === 'view:intent') {
-        const state = payload.state && typeof payload.state === 'object' ? payload.state as SessionView['state'] : undefined
-        const { engine, spec, packages } = await runtimeFor(String(payload.agent ?? ''), state?.packages)
+        // The agent's current program builds — never the browser's pins — and the browser's STATE made the engine's own.
+        const { engine, spec, packages } = await runtimeFor(String(payload.agent ?? ''))
         if (!visible(spec.scope)) throw new SessionSeamRefusal(`there is no agent "${spec.id}"`)
+        const state = payload.state && typeof payload.state === 'object' ? ownState(payload.state, engine, packages) : undefined
         const tmp = createSessions({ log: memoryLog(), engine })
         const who = whoIs(from)
         const run = packages.map((p) => p.name)
@@ -327,10 +342,11 @@ export function createSessionSeam(d: SessionSeamDeps) {
         const path = Array.isArray(payload.path) ? payload.path as any[] : []
         if (!path.length || path.length > 50) throw new SessionSeamRefusal('a kept view names the path to its step (at most 50 steps)')
         const root = path[0]?.open ?? {}
-        const { sessions: rt, spec, packages } = await runtimeFor(String(payload.agent ?? ''), root.state?.packages)
+        const { sessions: rt, engine, spec, packages } = await runtimeFor(String(payload.agent ?? ''))
         if (!visible(spec.scope)) throw new SessionSeamRefusal(`there is no agent "${spec.id}"`)
         const who = whoIs(from)
-        let v = await asReader(who, () => rt.openAndRun({ session, user, agent: spec.id, ...(root.state ? { state: root.state } : { start: startOf(spec, root.startAt) }), run: packages.map((p) => p.name) }))
+        const rootState = root.state && typeof root.state === 'object' ? ownState(root.state, engine, packages) : undefined
+        let v = await asReader(who, () => rt.openAndRun({ session, user, agent: spec.id, ...(rootState ? { state: rootState } : { start: startOf(spec, root.startAt) }), run: packages.map((p) => p.name) }))
         for (const [i, step] of path.entries()) {
           if (i > 0) v = (await asReader(who, () => rt.intent(structured({ ...step.intent, block: v.leaf }, session, user, 'new')))).session
           for (const e of Array.isArray(step.edits) ? step.edits : []) v = (await asReader(who, () => rt.intent(structured({ ...e, block: v.leaf }, session, user, 'current')))).session

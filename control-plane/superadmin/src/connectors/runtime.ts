@@ -25,7 +25,8 @@ export class ConnectorGateway extends WorkerEntrypoint<Env, GatewayProps> {
     const manifest = manifestOf(p.connector)
     if (!manifest) return new Response('this connector is not known to the platform', { status: 502 })
     const calls: CallRecord[] = []
-    const g = gatewayFetch({ manifest, settings: p.settings, secrets: p.secrets, record: (c) => calls.push(c) })
+    const domain = String((this.env as any).PLATFORM_DOMAIN ?? 'superatom.site')
+    const g = gatewayFetch({ manifest, settings: p.settings, secrets: p.secrets, record: (c) => calls.push(c), rules: { refuse: [domain, 'workers.dev', 'cloudflare.com', 'cloudflarestorage.com'] } })
     try { return await g(request) }
     catch (e: any) { return new Response(String(e?.message ?? e), { status: 403 }) }
     finally {
@@ -60,13 +61,13 @@ export async function runConnector(env: Env, exports: any, projectId: string, c:
 //    proxy that runs each operation as the person (or agent) who asked — the same checks, the same record, an action
 //    that changes something still waiting for a person. Many reads and steps in one program instead of many turns.
 
-interface ProxyProps { projectId: string; sender: { type: string; userId?: string; email?: string; admin: boolean; scopes: string[] } }
+interface ProxyProps { projectId: string; run: string; sender: { type: string; userId?: string; email?: string; admin: boolean; scopes: string[] } }
 
 /** What the program's `connectors` reaches: the project's connections, as the caller may use them. */
 export class ConnectorProxy extends WorkerEntrypoint<Env, ProxyProps> {
   private async op(op: string, payload: Record<string, unknown>) {
     const p = this.ctx.props
-    const r = await this.env.PROJECT.get(this.env.PROJECT.idFromName(`proj:${p.projectId}`)).fetch('http://do/connector-op', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-project': p.projectId }, body: JSON.stringify({ sender: { wsId: 'code-mode', ...p.sender }, op, payload }) })
+    const r = await this.env.PROJECT.get(this.env.PROJECT.idFromName(`proj:${p.projectId}`)).fetch('http://do/connector-op', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-project': p.projectId }, body: JSON.stringify({ sender: { wsId: 'code-mode', ...p.sender }, op, payload, run: p.run }) })
     const out: any = await r.json()
     if (!r.ok) throw new Error(out.error ?? `the connector answered ${r.status}`)
     return out.result
@@ -96,7 +97,7 @@ ${body}
 }`
 
 /** Run a program in code mode: no network, the caller's connections through the proxy, at most 30 s of CPU. */
-export async function runCode(env: Env, exports: any, projectId: string, sender: ProxyProps['sender'], body: string): Promise<{ ok: boolean; result?: unknown; error?: string; logs: string[] }> {
+export async function runCode(env: Env, exports: any, projectId: string, sender: ProxyProps['sender'], body: string, run = crypto.randomUUID()): Promise<{ ok: boolean; result?: unknown; error?: string; logs: string[] }> {
   const loader = (env as any).LOADER as WorkerLoader | undefined
   if (!loader) throw new Error('code mode cannot run on this platform yet (no Worker Loader binding)')
   if (!exports?.ConnectorProxy) throw new Error('the connector proxy is not exported by this Worker')
@@ -104,10 +105,12 @@ export async function runCode(env: Env, exports: any, projectId: string, sender:
     compatibilityDate: SANDBOX_DATE,
     mainModule: 'program.js',
     modules: { 'program.js': programModule(body) },
-    env: { CONNECTORS: exports.ConnectorProxy({ props: { projectId, sender } satisfies ProxyProps }) },
+    env: { CONNECTORS: exports.ConnectorProxy({ props: { projectId, sender, run } satisfies ProxyProps }) },
     globalOutbound: null,
     limits: { cpuMs: 30_000 },
   })
   const res = await worker.getEntrypoint().fetch('https://program.invalid/', { method: 'POST' })
-  return await res.json() as { ok: boolean; result?: unknown; error?: string; logs: string[] }
+  // A program that ran out of time or memory answers with no JSON: say so instead of failing.
+  try { return await res.json() as { ok: boolean; result?: unknown; error?: string; logs: string[] } }
+  catch { return { ok: false, error: `the program stopped before it answered (${res.status})`, logs: [] } }
 }

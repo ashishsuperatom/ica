@@ -9,10 +9,31 @@ export interface CallRecord { at: string; method: string; host: string; path: st
 
 const hostOf = (v: string) => { try { return new URL(/^[a-z]+:\/\//i.test(v) ? v : `https://${v}`).host.toLowerCase() } catch { return '' } }
 const fill = (template: string, values: Record<string, unknown>) => template.replace(/\{(\w+)\}/g, (_, k) => String(values[k] ?? ''))
+const LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i
 
-/** The hosts a connection may call: the manifest's, with {field} replaced by the host of that setting. */
-export function allowedHosts(m: Manifest, settings: Record<string, unknown>): string[] {
-  return m.hosts.map((h) => hostOf(/\{\w+\}/.test(h) ? fill(h, settings) : h)).filter(Boolean)
+export interface HostRules { /** Domains a connection may never point at (the platform's own), matched with their subdomains. */ refuse?: string[]; /** Plain http to localhost (tests only). */ allowLocal?: boolean }
+
+/** A host a person gave (a connection's setting) may be called only if it is a public name: no IP literal, no port, not
+ *  localhost or an internal name, not one of the refused domains. */
+function publicHost(host: string, rules: HostRules): string | null {
+  if (!host || host.includes(':') || host.startsWith('[')) return null                                   // a port, or IPv6
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || /^\d+$/.test(host)) return null                           // an IPv4 literal
+  if (host === 'localhost' || /\.(local|internal|localhost|lan|home|corp)$/.test(host) || !host.includes('.')) return null
+  if ((rules.refuse ?? []).some((d) => host === d || host.endsWith(`.${d}`))) return null
+  return host
+}
+
+/** The hosts a connection may call: the manifest's fixed ones, and those it names from a setting — a whole setting
+ *  ({baseUrl}) must be a public host; a value inside a name ({account}.vendor.com) must be one plain label. */
+export function allowedHosts(m: Manifest, settings: Record<string, unknown>, rules: HostRules = {}): string[] {
+  return m.hosts.flatMap((h) => {
+    if (!/\{\w+\}/.test(h)) return [hostOf(h)].filter(Boolean)
+    if (/^\{\w+\}$/.test(h)) { const host = publicHost(hostOf(String(settings[h.slice(1, -1)] ?? '')), rules); return host ? [host] : [] }
+    const refs = (h.match(/\{(\w+)\}/g) ?? []).map((r) => r.slice(1, -1))
+    if (!refs.every((k) => LABEL.test(String(settings[k] ?? '')))) return []
+    const host = publicHost(hostOf(fill(h, settings)), rules)
+    return host ? [host] : []
+  })
 }
 
 /** The request with the connection's credentials added, as the manifest's auth says; nothing added when a secret it
@@ -30,14 +51,14 @@ export function authorize(m: Manifest, settings: Record<string, unknown>, secret
 export class GatewayRefusal extends Error {}
 
 /** fetch as a connector sees it: hosts checked, credentials added, each call recorded. */
-export function gatewayFetch(o: { manifest: Manifest; settings: Record<string, unknown>; secrets: Record<string, string>; record: (c: CallRecord) => void; fetcher?: typeof fetch; oauthToken?: string | null }): typeof fetch {
-  const allowed = new Set(allowedHosts(o.manifest, o.settings))
+export function gatewayFetch(o: { manifest: Manifest; settings: Record<string, unknown>; secrets: Record<string, string>; record: (c: CallRecord) => void; fetcher?: typeof fetch; oauthToken?: string | null; rules?: HostRules }): typeof fetch {
+  const allowed = new Set(allowedHosts(o.manifest, o.settings, o.rules))
   const out: typeof fetch = o.fetcher ?? ((input, init) => fetch(input, init))
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
     const req = new Request(input as any, init)
     const url = new URL(req.url)
     const at = new Date().toISOString(), t0 = Date.now()
-    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(url.host))) {
+    if (url.protocol !== 'https:' && !(o.rules?.allowLocal && url.protocol === 'http:' && /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(url.host))) {
       o.record({ at, method: req.method, host: url.host, path: url.pathname, status: 0, ms: 0, bytes: 0, refused: 'not https' }); throw new GatewayRefusal(`${url.host}: only https is allowed`)
     }
     if (!allowed.has(url.host.toLowerCase())) {

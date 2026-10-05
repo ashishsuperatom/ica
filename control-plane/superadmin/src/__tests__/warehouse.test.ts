@@ -26,6 +26,27 @@ describe('the warehouse access check (fails closed)', () => {
     expect(() => checkQuery('SELECT id FROM other_ns.orders', [orders], null, 'n')).toThrow(/plainly/)
     expect(() => checkQuery('SELECT id FROM nowhere', [orders], null, 'n')).toThrow(/no table "nowhere"/)
   })
+  it('no alias can stand in for what is held back: aliasing, qualifying, subqueries, alias names like columns or tables', () => {
+    const g = { orders: ['id', 'amount'] }
+    const sch = [orders, people]
+    const refused = (sql: string, why: RegExp) => expect(() => checkQuery(sql, sch, g, 'n'), sql).toThrow(why)
+    refused('SELECT margin AS margin FROM orders', /"margin"/)
+    refused('SELECT o.margin FROM orders o', /column "margin"/)
+    refused('SELECT id FROM orders margin', /alias "margin" is the name of a column/)
+    refused('SELECT amount AS people FROM orders', /alias "people" is the name of a table/)
+    refused('SELECT amount AS margin FROM orders WHERE margin > 0', /alias "margin" is the name of a column/)
+    refused('SELECT x FROM (SELECT margin AS x FROM orders) sub', /column "margin"/)
+    refused('WITH people AS (SELECT id FROM orders) SELECT id FROM people', /CTE "people" like a table/)
+    refused('WITH x AS (SELECT id FROM orders) SELECT salary FROM people', /may not read the table "people"/)
+    refused(`SELECT id FROM orders WHERE customer = E'\\x'`, /escaped string/)
+    refused(`SELECT id FROM orders WHERE amount > 1 OR 'a\\' = 'b'`, /backslash/)
+    refused('SELECT o.* FROM orders o', /select the columns by name/)
+    const dated = { name: 'events', columns: [{ name: 'id', type: 'long' as const }, { name: 'date', type: 'date' as const }] }
+    expect(() => checkQuery('SELECT date FROM events', [dated], { events: ['id'] }, 'n')).toThrow(/column "date"/)
+    // what is granted still reads, with aliases of its own
+    expect(checkQuery('SELECT amount AS total FROM orders o WHERE o.amount > 1 ORDER BY total DESC', sch, g, 'n').sql).toBe('SELECT amount AS total FROM n.orders o WHERE o.amount > 1 ORDER BY total DESC')
+    expect(checkQuery('SELECT t FROM (SELECT amount AS t FROM orders) sub', sch, g, 'n').sql).toBe('SELECT t FROM (SELECT amount AS t FROM n.orders) sub')
+  })
   it('an administrator reads everything; CTEs and joins are placed too', () => {
     const r = checkQuery('WITH big AS (SELECT id, amount FROM orders WHERE amount > 5) SELECT b.id, p.salary FROM big b JOIN people p ON p.id = b.id', [orders, people], null, 'org_x')
     expect(r.sql).toContain('FROM org_x.orders')

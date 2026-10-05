@@ -52,6 +52,8 @@
     // rendered card image + full-report URL for chat channels. Presence of this var ENABLES that path; unset ⇒ the
     // ChannelDO falls back to the plain Adaptive Card. Public URL (the returned png/html are public too).
     "REPORTING_URL": "https://reports.superatom.site",
+    // The platform's own domain: a connector may never be pointed at it (connectors/src/gateway.ts).
+    "PLATFORM_DOMAIN": "superatom.site",
     // Speech-to-text model for POST /api/transcribe (module: src/transcription/). Any audio-capable OpenRouter model;
     // changing it needs no code edit or redeploy of the module.
     "TRANSCRIBE_MODEL": "google/gemini-2.5-flash-lite"
