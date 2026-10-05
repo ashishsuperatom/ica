@@ -28,7 +28,7 @@ interface View {
   blocks: { id: string; parent: string | null; answer: string | null; stateHash: string }[]
   states: Record<string, Record<string, unknown>>; answers: Answer_[]; intents: Intent_[]
 }
-interface SessionMsg { t: string; reason?: string; view?: View; uis?: ProgramUI[]; actions?: { package: string; label: string; intent: any }[]; result?: { block: string; opened: boolean; stale?: boolean } }
+interface SessionMsg { t: string; reason?: string; view?: View; uis?: ProgramUI[]; actions?: { package: string; label: string; intent: any }[]; functions?: Record<string, string[]>; result?: { block: string; opened: boolean; stale?: boolean } }
 
 const newId = () => `ses-${crypto.randomUUID()}`
 const firstLine = (md: string) => (md ?? '').split('\n').map((l) => l.trim()).find((l) => l && !l.startsWith(':::'))?.replace(/[*_`#>]/g, '').slice(0, 120) ?? ''
@@ -186,6 +186,8 @@ function SessionSteps({ session, request, projectId, token, agentName, onArtifac
     throw new Error(m?.reason ?? 'the file did not come')
   }, [projectId, token, request])
 
+  // The program a clicked row goes to: one in the step's STATE that offers row() (the session's programs say so).
+  const rowPackage = (block: string) => Object.keys((view?.states[block]?.packages ?? {}) as Record<string, string>).find((p) => msg?.functions?.[p]?.includes('row'))
   const items: StepItem[] = useMemo(() => {
     if (!view) return []
     const path = pathOf(view.blocks as any, view.leaf)
@@ -209,7 +211,9 @@ function SessionSteps({ session, request, projectId, token, agentName, onArtifac
             title={title} cause={i > 0 ? intentWords(cause) : undefined}
             from={parentIdx >= 0 ? { id: block.parent!, step: parentIdx + 1, onPath: true } : undefined} onReveal={revealBlock}
             busy={busy && isLeaf} icon={cause?.kind === 'language' ? 'lucide:message-circle-question' : undefined}>
-            {answer ? <Answer markdown={answer.markdown} blocks={answer.blocks} /> : <p className="sa-note sa-section__empty">Nothing shown yet. Run a program below, or ask.</p>}
+            {answer ? <Answer markdown={answer.markdown} blocks={answer.blocks}
+              onRow={rowPackage(id) ? (move, row) => void intent({ call: { package: rowPackage(id)!, fn: 'row', params: { move, row } }, to: 'new', block: id }) : undefined} />
+              : <p className="sa-note sa-section__empty">Nothing shown yet. Run a program below, or ask.</p>}
             {msg?.uis?.filter((u) => u.blocks.length).map((u) => (
               <ProgramBlock key={u.hash} program={u} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} />
             ))}

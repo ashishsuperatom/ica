@@ -155,10 +155,10 @@ export function createAppSeam(d: AppSeamDeps) {
     return { markdown: said.markdown, blocks: said.blocks ?? [], calls: [], queries: said.queries ?? [], ms: Date.now() - t0, agent }
   }
 
-  async function handle(payload: any, from: any) {
-    if (payload.t === 'app:reload') { app = load(true); const a = await app; d.send(from, { t: 'app:reloaded', ok: !!a }); return }
+  async function handle(payload: any, from: any, deliver: (msg: Record<string, unknown>) => void = (msg) => d.send(from, msg)) {
+    if (payload.t === 'app:reload') { app = load(true); const a = await app; deliver({ t: 'app:reloaded', ok: !!a }); return }
     const a = await (app ??= load())
-    if (!a) { d.send(from, { t: 'app:error', error: 'this project has no application', reqId: payload.reqId }); return }
+    if (!a) { deliver({ t: 'app:error', error: 'this project has no application', reqId: payload.reqId }); return }
     const ctx = {
       project: d.project, projectDir: d.projectDir, who: from?.userId ?? null,
       query: async (source: string, sql: string, params: Record<string, unknown> = {}) => {
@@ -174,14 +174,19 @@ export function createAppSeam(d: AppSeamDeps) {
       reply: (msg: Record<string, unknown>) => {
         const out = { ...msg, t: String(msg.t ?? 'app:res'), reqId: payload.reqId }
         console.log(`[app] → ${out.t} ${payload.reqId ?? ''} ${JSON.stringify(out).length} bytes · ${Date.now() - t0} ms · to ${from?.id ?? '?'}`)
-        d.send(from, out)
+        deliver(out)
       },
     }
     const t0 = Date.now()
     console.log(`[app] ← ${payload.t} ${payload.reqId ?? ''}${payload.focus ? ` ${payload.focus}` : ''} from ${from?.id ?? '?'}`)
     try { await a.handle(payload, ctx) }
-    catch (e: any) { console.warn(`[app] ✗ ${payload.t} ${payload.reqId ?? ''}: ${e?.message ?? e}`); d.send(from, { t: 'app:error', error: e?.message ?? String(e), reqId: payload.reqId }) }
+    catch (e: any) { console.warn(`[app] ✗ ${payload.t} ${payload.reqId ?? ''}: ${e?.message ?? e}`); deliver({ t: 'app:error', error: e?.message ?? String(e), reqId: payload.reqId }) }
   }
 
-  return { handle, present, say }
+  /** The application's reply to one payload, as a value — how a program asks the project's application (services.app). */
+  function call(payload: Record<string, unknown>, from: any): Promise<any> {
+    return new Promise((resolve) => { let done = false; void handle(payload, from, (m) => { if (!done) { done = true; resolve(m) } }).then(() => { if (!done) resolve({ t: 'app:error', error: 'the application did not answer' }) }) })
+  }
+
+  return { handle, present, say, call }
 }

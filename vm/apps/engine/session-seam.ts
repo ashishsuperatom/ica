@@ -48,6 +48,8 @@ export interface SessionSeamDeps {
   activities?: ReturnType<typeof import('./activity.js').createActivities>
   /** The reader's data access policies for a source (access.ts); without it, reads carry none. */
   access?: { policiesFor(who: Who, source: string): Promise<unknown[]> }
+  /** The project's own application (app/server), for a program that stands on its views (services.app); without it, none. */
+  app?: (payload: Record<string, unknown>, from: any) => Promise<any>
   /** Words answered by the session's agent (the composer on the agent's domain); without it, a session takes only controls. */
   ask?: (o: { session: string; text: string; context: string; domain: string | null; from: any; reqId?: string }) => Promise<{ markdown: string | null; blocks: unknown[] }>
 }
@@ -162,7 +164,13 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const key = `${agent}:${[...use].sort().join(',')}`
     if (!runtimes.has(key)) runtimes.set(key, (async () => {
       const packages = await Promise.all(use.map((h) => loadPackage(store, h)))
-      const engine = createStateEngine(packages as any, { services: { query, program } })
+      // The project's application, asked as the reader: a program standing on the project's existing views (its question in its slice).
+      const app = async (payload: Record<string, unknown>) => {
+        if (!d.app) throw new Error('this project has no application')
+        const r = currentReader()
+        return d.app(payload, { id: 'program', type: 'runtime', userId: r ? String(r.id).replace(/^user:/, '') : null, email: (r as any)?.email })
+      }
+      const engine = createStateEngine(packages as any, { services: { query, program, app } })
       return { engine, sessions: createSessions({ log, engine }), packages }
     })())
     const r = runtimes.get(key)!
@@ -204,7 +212,9 @@ export function createSessionSeam(d: SessionSeamDeps) {
       ...p.spec.actions.map((a) => ({ package: p.name, label: a.label, intent: { action: { package: p.name, id: a.id }, to: 'current' } })),
     ])
     const uis = (rt?.packages ?? []).map((p) => ({ package: p.name, hash: p.hash, entry: store.manifest(p.hash).ui.bundle, blocks: store.manifest(p.hash).ui.blocks }))
-    return { t: 'session:view', view: v, cards, actions, uis, ...extra }
+    // The functions each package offers, so a screen knows where a row click or a control may go.
+    const functions = Object.fromEntries((rt?.packages ?? []).map((p) => [p.name, (p.spec.functions ?? []).map((f: any) => f.name)]))
+    return { t: 'session:view', view: v, cards, actions, uis, functions, ...extra }
   }
 
   // A program's React side, file by file: only built programs' web/ files, each program checked against its hash once.

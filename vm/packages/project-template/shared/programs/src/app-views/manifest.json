@@ -1,0 +1,21 @@
+{
+  "id": "prg_app_views",
+  "name": "app-views",
+  "version": 1,
+  "scope": "global",
+  "owner": "platform",
+  "attachesTo": "project.views",
+  "reads": [],
+  "published": true,
+  "ui": { "blocks": ["next-moves"] },
+  "package": {
+    "owns": "view",
+    "schema": { "question": { "nullable": "json" }, "title": "string", "next": { "list": "json" } },
+    "initial": { "question": null, "title": "", "next": [] },
+    "reads": [],
+    "functions": [{ "name": "run", "produces": "view" }, { "name": "move", "produces": "view" }, { "name": "row", "produces": "view" }],
+    "actions": [],
+    "commands": [],
+    "doc": "doc.md"
+  }
+}

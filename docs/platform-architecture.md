@@ -840,6 +840,14 @@ system in plain CSS, proc's tree — is the best of them, and is copied byte for
 - **Intent** — `<Intent>` (ops · action · call, current or new) and one listener; a component owns its intent, the
   engine owns whether it is coherent.
 
+**Moving a project's views onto programs (2026-10-05).** A project's existing views (its application's capabilities,
+on its domains' programs) reach sessions through one generic program, `app-views` (in the template, the same for every
+project): its slice is the question the application understands; `run` asks the application, `move` applies its next
+moves, `row` follows a row clicked in a block (`ctx.services.app` — the engine hands the payload to the project's
+application and returns its reply). Each scenario is an agent on it, starting from its root view, so every scenario is
+in the workspace at once with nothing copied. A view is moved into a program of its own (as PMO health was) when it is
+worth it; the bridge is the transition, not the destination.
+
 **Three surfaces, one framework:** the **user UI** (admins and domain experts: work in sessions, build — programs,
 agents from a conversation, dashboards — and publish), **dashboards** (an agent opened on its starting screen: its
 programs' views; people ask on a topic from the left), and the **control plane** (organisation and platform

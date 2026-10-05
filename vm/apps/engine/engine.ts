@@ -746,6 +746,7 @@ setUsageSink({
 })
 const sessionSeam = createSessionSeam({ projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, graphFile: graphFileOf(PROJECT_DIR),
   // Words in a session: the composer on the agent's domain, told the step's STATE, what it shows and the programs' docs.
+  app: (payload, from) => appSeam.call(payload, from),
   ask: (o) => appSeam.say(o.text, o.context, { qid: `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, threadId: o.session, from: o.from, reqId: o.reqId, domain: o.domain, keepContext: true }) })
 // The composition graph is kept by the platform too: pushed after every change, rebuilt from it when this one is empty.
 const graphSync = createGraphSync({ file: graphFileOf(PROJECT_DIR), send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true }, log: (s) => console.warn(s) })
