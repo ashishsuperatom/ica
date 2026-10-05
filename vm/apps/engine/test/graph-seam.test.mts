@@ -17,7 +17,8 @@ legacy.close()
 const out: any[] = []
 const seam = createGraphSeam({ projectDir: dir, file, send: (_to, m) => out.push(m) })
 const as = (from: any) => async (payload: any) => { await seam.handle(payload, from); return out.at(-1) }
-const bot = as({ type: 'agent', userId: 'agent:key_1' }), ana = as({ type: 'runtime', userId: 'ana' }), root = as({ type: 'runtime', userId: 'root', admin: true })
+// bot: a key with the publish scope (the hub says admin); reader: a key without it, whose new nodes start as its own.
+const bot = as({ type: 'agent', userId: 'agent:key_1', admin: true }), reader = as({ type: 'agent', userId: 'agent:key_2' }), ana = as({ type: 'runtime', userId: 'ana' }), root = as({ type: 'runtime', userId: 'root', admin: true })
 const concept = (text: string) => ({ title: 'Settlement', form: 'text', text })
 
 test('an agent makes a concept and a domain, joins them, and reads them back; the history says who', async () => {
@@ -37,12 +38,18 @@ test('a person suggests a change to the agent\'s concept; the agent approves it'
   assert.equal((await ana({ t: 'graph:show', name: 'settlement' })).node.body.text, 'Settled: a settlement document exists for the trip.')
 })
 
-test('scopes: a person sees their own nodes and global ones, an agent only global, an admin all', async () => {
+test('scopes: a person sees their own nodes and global ones, an agent only global and its own, an admin all', async () => {
   const names = async (ask: any) => (await ask({ t: 'graph:names', kind: 'concept' })).names.map((n: any) => n.name).sort()
   assert.deepEqual(await names(ana), ['imported', 'private-note', 'settlement'])
-  assert.deepEqual(await names(bot), ['imported', 'settlement'])
+  assert.deepEqual(await names(reader), ['imported', 'settlement'])
   assert.deepEqual(await names(root), ['imported', 'private-note', 'settlement'])
-  assert.equal((await bot({ t: 'graph:show', name: 'private-note' })).reason, 'there is no "private-note"')
+  assert.equal((await reader({ t: 'graph:show', name: 'private-note' })).reason, 'there is no "private-note"')
+  assert.equal((await reader({ t: 'graph:history', name: 'private-note' })).reason, 'there is no "private-note"')   // nor its history
+  // a key that may not publish makes nodes that start as its own: it sees them, others do not until published
+  assert.equal((await reader({ t: 'graph:concept', name: 'draft', body: concept('a draft') })).node.scope, 'user:key_2')
+  assert.equal((await reader({ t: 'graph:concept', name: 'wide', body: concept('x'), scope: 'global' })).reason, 'a new "wide" starts as yours (user:key_2) — then suggest it for everyone (publish)')
+  assert.deepEqual(await names(reader), ['draft', 'imported', 'settlement'])
+  assert.deepEqual(await names(ana), ['imported', 'private-note', 'settlement'])
 })
 
 test('imported knowledge with no owner: only an admin changes it; refusals are sentences', async () => {

@@ -7,6 +7,7 @@ import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { fileURLToPath } from 'node:url'
 import { sealKeygen } from '../proxy/seal'
+import { PROJECT_ROLES } from '../../../shared/permissions'
 
 const here = fileURLToPath(new URL('.', import.meta.url))
 const PID = '11111111-2222-3333-4444-555555555555'
@@ -18,8 +19,9 @@ export default { async fetch(req, env) {
   const fwd = new Request('http://do' + u.pathname.slice(3) + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return stub.fetch(fwd)
 } }`
 let mf: Miniflare
+// As the worker calls the DO: who, and what their role holds (shared/permissions.ts).
 const as = (email: string, admin = false) => async (path: string, method = 'GET', body?: unknown) => {
-  const r = await mf.dispatchFetch(`http://x/do${path}`, { method, headers: { 'x-sa-actor': JSON.stringify({ kind: 'user', id: email, email }), ...(admin ? { 'x-sa-admin': '1' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) })
+  const r = await mf.dispatchFetch(`http://x/do${path}`, { method, headers: { 'x-sa-actor': JSON.stringify({ kind: 'user', id: email, email }), 'x-sa-caps': JSON.stringify((admin ? PROJECT_ROLES.admin : PROJECT_ROLES.member).capabilities) }, ...(body ? { body: JSON.stringify(body) } : {}) })
   return { status: r.status, body: await r.json() as any }
 }
 const admin = as('admin@x.io', true), ana = as('ana@x.io'), bo = as('bo@x.io')

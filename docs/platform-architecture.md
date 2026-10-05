@@ -372,6 +372,74 @@ program's React side is a component too.
   "from": "hash:a1…", "to": "hash:b7…", "reason": "add broker column", "decidedBy": null }
 ```
 
+### Permissions — who may do what (being built, 2026-10-05)
+
+**In the user's words:** we have a hierarchy. There is an **organisation**; the organisation has a **super admin of the
+organisation** and **admins**, and the organisation creates **projects**. The organisation can have **users who have
+special access to the data warehouse**, and inside that there is more — **who can create what**. If this permission
+system is not built, build it: rethink the whole permission system of the entire platform — who is given access to do
+what. **A solid permission system for everything** — and only then the ability to create warehouse tables and do things
+through the CLI.
+
+**What was there (surveyed 2026-10-05):** four role ideas that did not line up — the platform's `superadmin`, the
+organisation's `admin|user`, the project's `admin|member|viewer` (whose permissions were stored and never checked), and
+one `admin` flag every check collapsed into; agent-key scopes beside them; principals named three ways. Holes it left:
+a viewer could ask; any member read the organisation's people, conversations, credits and warehouse queries, and every
+person's usage in a project; a new concept could be made `global` without anyone publishing it; history and
+suggestions of hidden concepts were readable; a project's admin could let in people the organisation never added
+(members, unverified domains); releasing a domain took any project's address.
+
+**The model.** Three levels, one vocabulary of **capabilities**, roles as named sets of them:
+
+| Level | Who | Built-in roles |
+|---|---|---|
+| Platform | the platform's superadmin | — (holds everything; alone: credentials, prices, credit grants, organisations, engine profiles, service tokens) |
+| Organisation | its people (the org list decides who exists) | **owner** (everything in the org, alone may make owners and define roles) · **admin** (everything but that) · **member** (nothing org-wide; works in the projects they are given) · custom roles (any org capabilities but `org.roles` — e.g. *data engineer* = query + write the warehouse) |
+| Project | people of its organisation, given a project role | **admin** (everything in the project) · **member** (view, ask, approve others' decisions, own connections, use the project's warehouse grant) · **viewer** (view only) · custom roles |
+
+Organisation capabilities: `org.people` (add and remove people, give them projects and roles), `org.roles` (define
+roles, make owners), `org.projects` (create, delete, restore projects), `org.billing` (credits, budgets, everyone's
+usage), `org.keys` (organisation keys), `org.audit` (the organisation's records), `warehouse.manage` (make tables;
+grant tables — read, and write — to projects), `warehouse.write` (append rows to any table), `warehouse.query` (read
+every table, the tables' list and the warehouse's record).
+
+Project capabilities: `project.view` (open it, browse its agents and views, read what its scopes show), `project.ask`
+(ask in words, keep sessions, record decisions — what spends credits), `project.approve` (approve someone else's
+decision), `project.connect` (one's own connections), `project.publish` (widen knowledge: publish concepts, programs,
+change the decision memory), `project.data` (shared connections, data access policies and attributes, data sources),
+`project.people` (project roles for the organisation's people, groups, custom project roles), `project.keys` (agent
+keys), `project.audit` (the audit history, logs, everyone's usage and sessions), `project.manage` (engine, settings,
+dashboards, domains), `warehouse.use` (read what the project was granted), `warehouse.append` (append to the tables
+its grant makes writable).
+
+**The rules, everywhere:**
+
+1. **One check.** `control-plane/shared/permissions.ts` holds the vocabulary, the built-in roles, which capability each
+   route and each hub message needs, and `can()`. The Worker, the Durable Objects and the admin console read it; no
+   other place decides.
+2. **Fail closed.** Without the capability, refused; a route or message nobody named needs the strongest one; an
+   unknown capability is an error, never ignored.
+3. **No one gives more than they hold** — a role given, a custom role defined, a key made. Only an owner makes owners;
+   an organisation always has one.
+4. **A key acts for its maker.** Its scopes must be within the maker's capabilities when made, and are cut to the
+   maker's capabilities at every use — a maker who leaves or is demoted takes the key's power with them. Project keys
+   (`sak_<project>_…`) for project work; **organisation keys** (`sak_org_<org>_…`, made by someone with `org.keys`) for
+   the organisation's own work — the warehouse today, creating projects later.
+5. **The organisation decides who exists; the project decides what they do there.** A project gives roles only to the
+   organisation's people; domain sign-in is an organisation decision (`org.people`) and admits at most a member.
+   Organisation owners and admins administer every project (mirrored into each, so a project answers alone).
+6. **Who sees** stays the scopes (`global`, `group:`, `user:`): a capability says what a person may *do*, a scope what
+   they *see*. Making or widening anything beyond one's own scope is publishing (`project.publish`).
+7. **Every grant, role and key change is in the audit history.**
+
+**The warehouse under it:** `warehouse.manage` makes tables and sets each project's grant — per table, the columns it
+may read and whether it may write. A project's people and keys read with `warehouse.use` and append with
+`warehouse.append` (key scopes `warehouse`, `warehouse-write`), only within that grant; the organisation's people query
+and append with `warehouse.query` / `warehouse.write`; `sacli warehouse` does each, with whichever key it holds.
+
+*Later (planned):* one principal name for a person everywhere (today `email:`, `user:<clerk id>`, `agent:`);
+revocable sign-in tokens; service tokens bound to one project; the fast-router key per project.
+
 ### Storage and builds
 
 - **The platform is the source of truth; the engine is a replica.** Sync runs immediately whenever the engine is

@@ -243,6 +243,22 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     CREATE TRIGGER IF NOT EXISTS view_events_no_update BEFORE UPDATE ON view_events BEGIN SELECT RAISE(ABORT, 'view events are append-only'); END;
     CREATE TRIGGER IF NOT EXISTS view_events_no_delete BEFORE DELETE ON view_events BEGIN SELECT RAISE(ABORT, 'view events are append-only'); END;
   ` },
+  { id: 31, name: 'permissions: capabilities and warehouse writes', up: (db) => {
+    // Roles hold capabilities (shared/permissions.ts). The built-in roles' capabilities are the code's; the stored copy is
+    // brought up to date for anyone reading the table. A custom role's old permissions are carried to their nearest.
+    const NEW: Record<string, string[]> = {
+      admin: ['project.view', 'project.ask', 'project.approve', 'project.connect', 'project.publish', 'project.data', 'project.people', 'project.keys', 'project.audit', 'project.manage', 'warehouse.use', 'warehouse.append'],
+      member: ['project.view', 'project.ask', 'project.approve', 'project.connect', 'warehouse.use'],
+      viewer: ['project.view'],
+    }
+    const OLD: Record<string, string[]> = { 'project.manage': ['project.manage', 'project.keys', 'project.audit', 'project.publish'], 'access.manage': ['project.people'], 'data.manage': ['project.data'], ask: ['project.view', 'project.ask'], read: ['project.view'] }
+    for (const r of db.all('SELECT id, permissions, builtin FROM roles') as { id: string; permissions: string; builtin: number }[]) {
+      const caps = r.builtin && NEW[r.id] ? NEW[r.id] : [...new Set((JSON.parse(r.permissions || '[]') as string[]).flatMap((p) => OLD[p] ?? (p.includes('.') ? [p] : [])))]
+      db.all('UPDATE roles SET permissions = ? WHERE id = ? RETURNING id', JSON.stringify(caps), r.id)
+    }
+    // A project may be granted writing a warehouse table (appending to it), as well as reading it.
+    addColumnIfMissing(db, 'warehouse_grants', 'write', 'INTEGER NOT NULL DEFAULT 0')
+  } },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */
@@ -298,6 +314,25 @@ export const ORG_MIGRATIONS: Migration[] = [
     CREATE TRIGGER IF NOT EXISTS wh_ops_no_update BEFORE UPDATE ON warehouse_ops BEGIN SELECT RAISE(ABORT, 'warehouse operations are append-only'); END;
     CREATE TRIGGER IF NOT EXISTS wh_ops_no_delete BEFORE DELETE ON warehouse_ops BEGIN SELECT RAISE(ABORT, 'warehouse operations are append-only'); END;
   ` },
+  { id: 5, name: 'roles and organisation keys', up: (db) => {
+    // People hold an organisation role (shared/permissions.ts): owner, admin, member, or one the owners define.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS org_roles (id TEXT PRIMARY KEY, name TEXT NOT NULL, capabilities TEXT NOT NULL, by TEXT NOT NULL, at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS org_keys (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, prefix TEXT NOT NULL, hash TEXT NOT NULL UNIQUE, scopes TEXT NOT NULL,
+        created_by TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT, revoked_at TEXT, revoked_by TEXT, last_used_at TEXT);
+      UPDATE users SET role = 'member' WHERE role NOT IN ('owner', 'admin');
+      -- Who changed who may do what (people, roles, keys): append-only.
+      CREATE TABLE IF NOT EXISTS org_audit (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, op TEXT NOT NULL, target TEXT, by TEXT NOT NULL, detail TEXT);
+      CREATE TRIGGER IF NOT EXISTS org_audit_no_update BEFORE UPDATE ON org_audit BEGIN SELECT RAISE(ABORT, 'the organisation record is append-only'); END;
+      CREATE TRIGGER IF NOT EXISTS org_audit_no_delete BEFORE DELETE ON org_audit BEGIN SELECT RAISE(ABORT, 'the organisation record is append-only'); END;
+    `)
+    // An organisation always has an owner: its first administrator, where it has none.
+    if (!db.all("SELECT 1 FROM users WHERE role = 'owner'").length) {
+      const [first] = db.all("SELECT id FROM users WHERE role = 'admin' ORDER BY created_at, email LIMIT 1")
+      if (first) db.all("UPDATE users SET role = 'owner' WHERE id = ? RETURNING id", first.id)
+    }
+  } },
 ]
 
 // ── GlobalDO ─────────────────────────────────────────────────────────────────────────────────────────────────────

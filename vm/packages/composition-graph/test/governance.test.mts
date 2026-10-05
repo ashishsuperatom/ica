@@ -94,9 +94,13 @@ test('an agent is a node like any other: checked, owned, governed, its domain mu
   g.write(s, ana, 'trips', 'domain', { capabilities: [], concepts: ['c1'], files: [] })
   assert.throws(() => g.write(s, ana, 'vehicle-trips', 'agent', { title: 'Vehicle trips', domain: 'nope', programs: [] }), /names a domain that does not exist: "nope"/)
   assert.throws(() => g.write(s, ana, 'vehicle-trips', 'agent', { domain: 'trips', programs: [] }), /an agent has a title/)
-  g.write(s, ana, 'vehicle-trips', 'agent', { title: 'Vehicle trips', domain: 'trips', programs: ['unsettled-trips'], ica: 'composer' }, {}, { scope: 'group:ops' })
+  // A new node starts as its maker's; placing it in a group or for everyone is publishing (an admin decides).
+  assert.throws(() => g.write(s, ana, 'vehicle-trips', 'agent', { title: 'Vehicle trips', domain: 'trips', programs: ['unsettled-trips'], ica: 'composer' }, {}, { scope: 'group:ops' }), /starts as yours \(user:ana\)/)
+  g.write(s, ana, 'vehicle-trips', 'agent', { title: 'Vehicle trips', domain: 'trips', programs: ['unsettled-trips'], ica: 'composer' })
   const a = s.get('vehicle-trips')!
-  assert.equal(a.kind, 'agent'); assert.equal(a.owner, 'user:ana'); assert.equal(a.scope, 'group:ops')
+  assert.equal(a.kind, 'agent'); assert.equal(a.owner, 'user:ana'); assert.equal(a.scope, 'user:ana')
+  g.write(s, admin, 'ops-trips', 'agent', { title: 'Ops trips', domain: 'trips', programs: [] }, {}, { scope: 'group:ops' })
+  assert.equal(s.get('ops-trips')!.scope, 'group:ops')
   assert.throws(() => g.write(s, bo, 'vehicle-trips', 'agent', { title: 'mine', domain: 'trips', programs: [] }), /suggest the change instead/)
 })
 

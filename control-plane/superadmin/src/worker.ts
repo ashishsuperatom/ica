@@ -33,6 +33,8 @@ import { createMachine, stopMachine, FLY_APP } from './fly.js'
 import { verifyJwt, signJwt, mintPlatformTokenFromClerk, type JwtClaims } from './auth/tokens.js'
 import { handleParcelRoute } from './parcels.js'
 import { mobileAuthPage, handleMobileCode, handleMobileExchange, handleMeProjects } from './auth/mobile.js'
+import { can, capabilitiesOf, orgRouteNeeds, projectRouteNeeds, beyond, builtinRole, type Capability, type RouteNeed } from '../../shared/permissions.js'
+import { orgOfKey } from './agent-keys.js'
 
 // ── Auth ────────────────────────────────────────────────────────────────────
 // Token primitives, the Clerk→platform-token mint, and SUPERADMIN_EMAILS live in ./auth/tokens.ts (imported
@@ -84,43 +86,53 @@ async function claimsOf(request: Request, env: Env): Promise<JwtClaims | null> {
   return token ? await verifyJwt(token, env.JWT_SECRET) : null
 }
 
-/** The caller's standing in ONE project. ONE read, of the PROJECT's own DO — never the org's.
- *  A project is asked about on every request, so it has to answer alone: its access table already holds
- *  everyone who may touch it, including the org's admins, mirrored in whenever that list changes. Reading the
- *  org here would put every project's traffic through a single organisation object. */
+/** The caller's standing in ONE project, and what they hold there (shared/permissions.ts). ONE read, of the PROJECT's
+ *  own DO — never the org's. A project is asked about on every request, so it has to answer alone: its access table
+ *  already holds everyone who may touch it, including the org's owners and admins, mirrored in whenever that changes. */
 async function projectAccessOf(request: Request, env: Env, projectId: string):
-    Promise<{ ok: boolean; level: 'superadmin' | 'org-admin' | 'project-admin' | 'member' | 'none'; email: string; roleId?: string; permissions?: string[] }> {
+    Promise<{ ok: boolean; level: 'superadmin' | 'org-admin' | 'project-admin' | 'member' | 'none'; email: string; roleId?: string; caps: Capability[] }> {
   const claims = await claimsOf(request, env)
   const email = (claims?.email || '').toLowerCase()
-  if (!claims) return { ok: false, level: 'none', email: '' }
-  if (claims.role === 'superadmin') return { ok: true, level: 'superadmin', email }   // token alone; no DO at all
-  if (!email) return { ok: false, level: 'none', email }
+  if (!claims) return { ok: false, level: 'none', email: '', caps: [] }
+  if (claims.role === 'superadmin') return { ok: true, level: 'superadmin', email, caps: [...capabilitiesOf('project')] }   // token alone; no DO at all
+  if (!email) return { ok: false, level: 'none', email, caps: [] }
   const proj = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
   const acc: any = await proj.fetch('https://do/access').then(r => r.json()).catch(() => ({}))
   let row = (acc?.access ?? []).find((a: any) => String(a.email || '').toLowerCase() === email)
   // Not on the list yet: their verified domain may let them in (enterprise sign-in, provisioned on first arrival).
-  if (!row) row = (await proj.fetch('https://do/access/arrive', { method: 'POST', body: JSON.stringify({ email }) }).then((r) => (r.ok ? r.json() : null)).catch(() => null) as any)?.access
-  if (!row) return { ok: false, level: 'none', email }
+  if (!row) {
+    const arrived = (await proj.fetch('https://do/access/arrive', { method: 'POST', body: JSON.stringify({ email }) }).then((r) => (r.ok ? r.json() : null)).catch(() => null) as any)?.access
+    if (arrived) row = ((await proj.fetch('https://do/access').then(r => r.json()).catch(() => ({}))) as any)?.access?.find((a: any) => String(a.email || '').toLowerCase() === email)
+  }
+  if (!row) return { ok: false, level: 'none', email, caps: [] }
   // Only a row the ORG put here means org admin. A project's own 'admin' role administers THAT project — it
   // does not confer anything over the organisation, and must not be able to edit what the org owns.
   const level = row.source === 'org-admin' ? 'org-admin' : row.role_id === 'admin' ? 'project-admin' : 'member'
-  return { ok: true, level, email, roleId: row.role_id, permissions: row.permissions ?? [] }
+  return { ok: true, level, email, roleId: row.role_id, caps: Array.isArray(row.capabilities) ? row.capabilities : [] }
 }
 
-/** The caller's standing in ONE org: superadmin, its admin, or a member of at least one of its projects. */
+/** The caller's standing in ONE org: their role there and what it holds (the platform's superadmin everything). */
 async function orgAccessOf(request: Request, env: Env, orgId: string):
-    Promise<{ ok: boolean; level: 'superadmin' | 'org-admin' | 'member' | 'none'; email: string }> {
+    Promise<{ ok: boolean; level: 'superadmin' | 'org-admin' | 'member' | 'none'; email: string; role: string | null; caps: Capability[] }> {
   const claims = await claimsOf(request, env)
   const email = (claims?.email || '').toLowerCase()
-  if (!claims) return { ok: false, level: 'none', email: '' }
-  if (claims.role === 'superadmin') return { ok: true, level: 'superadmin', email }
-  if (!email) return { ok: false, level: 'none', email }
+  if (!claims) return { ok: false, level: 'none', email: '', role: null, caps: [] }
+  if (claims.role === 'superadmin') return { ok: true, level: 'superadmin', email, role: 'superadmin', caps: [...capabilitiesOf('org')] }
+  if (!email) return { ok: false, level: 'none', email, role: null, caps: [] }
   const org = env.ORG.get(env.ORG.idFromName(orgId))
-  const users: any = await org.fetch('https://do/users').then(r => r.json()).catch(() => ({}))
-  const me = (users?.users ?? users ?? []).find?.((u: any) => String(u.email || '').toLowerCase() === email)
-  if (me?.role === 'admin') return { ok: true, level: 'org-admin', email }
-  if (me) return { ok: true, level: 'member', email }
-  return { ok: false, level: 'none', email }
+  const me: any = await org.fetch(`https://do/me?email=${encodeURIComponent(email)}`).then(r => r.json()).catch(() => ({}))
+  if (!me?.member) return { ok: false, level: 'none', email, role: null, caps: [] }
+  const caps: Capability[] = Array.isArray(me.capabilities) ? me.capabilities : []
+  return { ok: true, level: me.role === 'owner' || me.role === 'admin' ? 'org-admin' : 'member', email, role: String(me.role), caps }
+}
+
+/** Does this standing meet what a route needs? */
+function meets(need: RouteNeed, level: string, caps: readonly Capability[]): boolean {
+  if (need === 'any') return true
+  if (need === 'internal') return false
+  if (need === 'platform') return level === 'superadmin'
+  if (need === 'org-people') return level === 'superadmin' || level === 'org-admin'
+  return can(caps, need)
 }
 
 // ── Token exchange: Clerk session → our JWT ─────────────────────────────────
@@ -290,47 +302,23 @@ export default {
       // never what protects anything.
       const acc = await projectAccessOf(request, env, projectId)
       if (!acc.ok) return new Response('unauthorized', { status: 401 })
+      // What the caller holds here, and what they are: asked of the shared table, not of the SPA.
+      if (subPath === 'me') return Response.json({ project: projectId, level: acc.level, role: acc.roleId ?? (acc.level === 'superadmin' ? 'superadmin' : null), capabilities: acc.caps })
       // Every call this makes to the project's DO says who the caller is (from the token checked above). The DO alone
       // records the audit history — one path, whichever way a change arrives.
       const actor = JSON.stringify({ kind: 'user', id: acc.email || acc.level, ...(acc.email ? { email: acc.email } : {}) })
       const toDO = (input: Request | string, init?: RequestInit) => {
         const req = new Request(input as any, init)
         req.headers.set('x-sa-actor', actor); req.headers.set('x-sa-project', projectId)
-        if (acc.level !== 'member') req.headers.set('x-sa-admin', '1')   // the DO decides what only an admin may do
+        req.headers.set('x-sa-caps', JSON.stringify(acc.caps))   // what they hold; the DO applies it, the table above decided it
         return env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`)).fetch(req)
       }
-      // Anything that changes the project — machine lifecycle, access, roles, datasources, keys, tokens — is for
-      // whoever administers it. A member may look, not provision.
-      const PROVISIONING = /^(machine|service-token|access|roles|datasources|members|verify-conn|info|fly|suspend|resume|stop|delete|dashboards|agent-keys|audit|groups|attention)/
-      // A person's own connection is theirs to make and remove; the DO checks shared ones are made by an admin.
-      const ownConnection = /^connections(\/con_[\w-]+)?$/.test(subPath)
-      const isProvisioning = !ownConnection && (request.method !== 'GET' || PROVISIONING.test(subPath))
-      if (isProvisioning && acc.level === 'member') return new Response('forbidden', { status: 403 })
-      // `setup` overwrites the project's API key. It's an INTERNAL provisioning primitive — only ever
-      // called by handleCreateProject via a direct DO stub — so it must not be reachable publicly.
-      if (subPath === 'setup') return new Response('not found', { status: 404 })
-      // `debug` returns the project's API key. It was reachable by any member as a plain GET; nothing outside the
-      // engine's own box has a use for it, so it is not served here at all.
-      if (subPath === 'debug') return new Response('not found', { status: 404 })
-      // A project's warehouse grant is the ORGANISATION's to set (/api/warehouse/grants); connector call records and
-      // operations are the platform's own (the gateway, the hub) — none of them is a public call on a project.
-      if (subPath.startsWith('warehouse') || subPath.startsWith('connector-')) return new Response('not found', { status: 404 })
-      // The audit history is written by the platform as things happen — read here, never written from outside.
-      if (subPath === 'audit' && request.method !== 'GET') return new Response('not found', { status: 404 })
-      // `access/arrive` is the worker's own question to the DO (a verified domain on first sign-in), never a public call.
-      if (subPath.startsWith('access/arrive')) return new Response('not found', { status: 404 })
-      // Usage is recorded by the model proxy, never posted from outside.
-      if (subPath === 'usage' && request.method !== 'GET') return new Response('not found', { status: 404 })
-      // The agent profile is the platform's to set: only a superadmin reads or writes it. (A later block meant to
-      // enforce this was never reached, because this branch forwards every sub-path first.)
-      if (subPath === 'profile' && acc.level !== 'superadmin') return new Response('forbidden', { status: 403 })
-      // `org-admins` is the ORG writing into the project (who administers it). It is reached DO-to-DO only —
-      // exposing it here would let a project admin mirror themselves in as one.
-      if (subPath === 'org-admins') return new Response('not found', { status: 404 })
-      // Granting or revoking someone's access goes through the ORG (POST /api/assignments), which checks they are
-      // a member of it first — a project may not invent its own users. Reading the list here is fine.
-      if (subPath === 'access' && request.method !== 'GET')
-        return new Response('use /api/assignments — access is granted by the organisation', { status: 405 })
+      // WHAT THIS CALL NEEDS (shared/permissions.ts): a capability of the caller's role here, the platform, the
+      // organisation's people decision, or never public (the platform's own calls into the project: setup, the API key,
+      // warehouse grants, connector records, the audit's writing, domain arrival, org admins, service members).
+      const need = projectRouteNeeds(request.method, subPath)
+      if (need === 'internal') return new Response(subPath === 'access' ? 'use /api/assignments — access is granted by the organisation' : 'not found', { status: subPath === 'access' ? 405 : 404 })
+      if (!meets(need, acc.level, acc.caps)) return Response.json({ error: `this needs ${need}, which your role here does not hold` }, { status: 403 })
       // status: ONE generalized machine view — the backend fills it per provider
       // (Fly state for managed, hub-connection liveness for local/EC2). No separate
       // provider-specific endpoint; the frontend just renders status.machine.
@@ -391,7 +379,7 @@ export default {
 
       const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
       // Agent keys are made and revoked by someone: the DO records who, from the caller the gate just checked.
-      if (/^(agent-keys|access-policies|access-attributes|access-domains|groups)/.test(subPath) && request.method !== 'GET') {
+      if (/^(agent-keys|access-policies|access-attributes|access-domains|groups|roles)/.test(subPath) && request.method !== 'GET') {
         const by = acc.email || (acc.level === 'superadmin' ? 'superadmin' : '')
         const body = request.method === 'POST' || request.method === 'PUT' ? JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by }) : undefined
         const fwd = new Request(`http://do/${subPath}${url.search ? url.search + '&' : '?'}by=${encodeURIComponent(by)}`, { method: request.method, headers: { 'content-type': 'application/json', 'x-sa-project': projectId }, body })
@@ -598,10 +586,10 @@ export default {
 
     // ── Project creation (with Fly Machine provisioning) ────────────────────
     if (request.method === 'POST' && path === '/api/projects') {
-      // An organisation runs its own projects — its admin creates them. Superadmin may act anywhere.
+      // An organisation runs its own projects — whoever holds org.projects creates them. Superadmin may act anywhere.
       const oa = await orgAccessOf(request, env, request.headers.get('x-org-id') ?? 'default')
       if (!oa.ok) return new Response('unauthorized', { status: 401 })
-      if (oa.level === 'member') return new Response('forbidden', { status: 403 })
+      if (!can(oa.caps, 'org.projects')) return Response.json({ error: 'creating a project needs org.projects' }, { status: 403 })
       return handleCreateProject(request, env, url, ctx)
     }
 
@@ -613,11 +601,14 @@ export default {
       // engine by naming its project.
       const target = String(((await request.clone().json().catch(() => ({}))) as any)?.id ?? '')
       if (!target) return new Response('id required', { status: 400 })
-      const acc = await projectAccessOf(request, env, target)
-      if (!acc.ok) return new Response('unauthorized', { status: 401 })
-      // Removing a project from the organisation is the ORGANISATION's act. Someone who administers the project
-      // runs it; they do not get to delete it out from under the org.
-      if (acc.level !== 'superadmin' && acc.level !== 'org-admin') return new Response('forbidden', { status: 403 })
+      // Removing a project from the organisation is the ORGANISATION's act (org.projects), and only of a project that is
+      // the organisation's. Someone who administers the project runs it; they do not get to delete it out from under it.
+      const orgId = request.headers.get('x-org-id') ?? 'default'
+      const oa = await orgAccessOf(request, env, orgId)
+      if (!oa.ok) return new Response('unauthorized', { status: 401 })
+      if (!can(oa.caps, 'org.projects')) return Response.json({ error: 'removing a project needs org.projects' }, { status: 403 })
+      const theirs = await (await env.ORG.get(env.ORG.idFromName(orgId)).fetch(new Request(`http://do/projects${request.method === 'PUT' ? '?deleted=1' : ''}`))).json().catch(() => []) as any[]
+      if (!(Array.isArray(theirs) ? theirs : []).some((p: any) => p.id === target)) return Response.json({ error: 'that project is not in this organisation' }, { status: 404 })
       return handleProjectMutate(request, env, ctx)
     }
 
@@ -646,7 +637,7 @@ export default {
         if (!target) return new Response('projectId required', { status: 400 })
         const acc = await projectAccessOf(request, env, target)
         if (!acc.ok) return new Response('unauthorized', { status: 401 })
-        if (acc.level === 'member') return new Response('forbidden', { status: 403 })
+        if (!can(acc.caps, 'project.manage')) return Response.json({ error: 'a project\'s address needs project.manage' }, { status: 403 })
       }
       return handleDomainsApi(request, env, url)
     }
@@ -680,47 +671,95 @@ export default {
     // The organisation's own WebSocket is not served: no surface opens it, and the object behind it took the
     // caller's identity from query parameters. Every live socket goes through /_ws/<project>, which authenticates.
     if (isWs && path === '/ws') return new Response('not found', { status: 404 })
+    // ── An organisation key (sak_org_<org>_…): an agent working for the organisation. The key names its organisation;
+    //    the OrgDO verifies it and cuts it to what its maker holds now. No session involved.
+    if (path === '/api/org-agent') {
+      if (request.method !== 'POST') return new Response('method not allowed', { status: 405 })
+      const key = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
+      const org = orgOfKey(key)
+      if (!org) return Response.json({ error: 'an organisation key is required (sak_org_…)' }, { status: 401 })
+      return env.ORG.get(env.ORG.idFromName(org)).fetch(new Request('http://do/agent', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${key}`, 'x-sa-org': org }, body: await request.text() }))
+    }
+
     if (path.startsWith('/api/')) {
       const orgId = request.headers.get('x-org-id') ?? 'default'
       // x-org-id comes from the CLIENT, so it is a request, not a fact: without this check anyone could name any
-      // org and read or mutate it. Membership decides. Changing an org (users, assignments, projects) is for its
-      // admin; a plain member may read.
+      // org and read or mutate it. Membership decides; what the call needs is the shared table's (shared/permissions.ts).
       const oa = await orgAccessOf(request, env, orgId)
       if (!oa.ok) return new Response('unauthorized', { status: 401 })
-      if (request.method !== 'GET' && oa.level === 'member') return new Response('forbidden', { status: 403 })
-      // Credits are granted by the platform alone (an organisation granting itself credits would be free money), and
-      // usage is posted only by its own projects' DOs.
-      if (path === '/api/credits/usage' || path === '/api/credits/allowance') return new Response('not found', { status: 404 })
-      // Budgets are the organisation admin's to set (assigning credits it was given); members may read them.
-      if (path === '/api/credits/budgets' && request.method === 'POST') {
-        const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by: oa.email ?? 'admin' })
-        return env.ORG.get(env.ORG.idFromName(orgId)).fetch(new Request('https://do/credits/budgets', { method: 'POST', headers: { 'content-type': 'application/json' }, body }))
+      const sub = path.slice('/api'.length)
+      const need = orgRouteNeeds(request.method, sub)
+      // Assigning someone to a project is the organisation's people decision — or that project's own (project.people).
+      const assigning = sub === '/assignments'
+      if (need === 'internal') return new Response('not found', { status: 404 })
+      if (!assigning && !meets(need, oa.level, oa.caps)) return Response.json({ error: `this needs ${need === 'platform' ? 'the platform' : need}, which your role in this organisation does not hold` }, { status: 403 })
+      const org = env.ORG.get(env.ORG.idFromName(orgId))
+      const by = oa.email || 'superadmin'
+      const orgHeaders = { 'content-type': 'application/json', 'x-sa-org': orgId, 'x-sa-actor': JSON.stringify({ kind: 'user', id: by, email: oa.email }), 'x-sa-caps': JSON.stringify(oa.caps) }
+      const projectsOfOrg = async (): Promise<any[]> => { const r = await (await org.fetch(new Request('http://do/projects'))).json().catch(() => []); return Array.isArray(r) ? r : [] }
+      if (sub === '/me') return Response.json({ org: orgId, level: oa.level, role: oa.role, capabilities: oa.caps })
+      // Budgets are set by whoever holds org.billing (assigning credits the organisation was given).
+      if (sub === '/credits/budgets' && request.method === 'POST') {
+        const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by })
+        return org.fetch(new Request('https://do/credits/budgets', { method: 'POST', headers: { 'content-type': 'application/json' }, body }))
       }
-      if (path === '/api/credits/grant') {
-        const su = await requireSuperadmin(request, env)
-        if (!su) return new Response('only the platform grants credits', { status: 403 })
-        const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by: su.email ?? su.userId })
-        return env.ORG.get(env.ORG.idFromName(orgId)).fetch(new Request('https://do/credits/grant', { method: 'POST', headers: { 'content-type': 'application/json' }, body }))
+      if (sub === '/credits/grant') {
+        const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by })
+        return org.fetch(new Request('https://do/credits/grant', { method: 'POST', headers: { 'content-type': 'application/json' }, body }))
       }
-      // THE ORGANISATION'S WAREHOUSE (warehouse/): its tables, made and appended to by its administrators (or what they
-      // run), queried by them over everything; a project's grant — the tables and columns it may read — is set here too,
-      // by the organisation's administrator, and kept by the project.
-      if (path === '/api/warehouse' || path.startsWith('/api/warehouse/')) {
-        const sub = path.slice('/api'.length)
-        const org = env.ORG.get(env.ORG.idFromName(orgId))
+      // A member sees the projects they are in; org.projects / org.people see them all.
+      if (sub === '/projects' && request.method === 'GET' && !can(oa.caps, 'org.projects') && !can(oa.caps, 'org.people')) {
+        const all = await projectsOfOrg()
+        const mine = await Promise.all(all.map(async (p: any) => ((await projectAccessOf(request, env, p.id)).ok ? p : null)))
+        return Response.json(mine.filter(Boolean))
+      }
+      // Giving someone a project role: the organisation's people decision, or that project's (project.people); either way
+      // only to the organisation's people, and never a role holding more than the giver holds in that project.
+      if (assigning) {
+        const q = new URL(request.url).searchParams
+        const body: any = request.method === 'GET' ? {} : await request.clone().json().catch(() => ({}))
+        const projectId = String(q.get('projectId') ?? body.projectId ?? '')
+        if (!(await projectsOfOrg()).some((p: any) => p.id === projectId)) return Response.json({ error: 'that project is not in this organisation' }, { status: 404 })
+        const pa = await projectAccessOf(request, env, projectId)
+        if (!can(oa.caps, 'org.people') && !can(pa.caps, 'project.people')) return Response.json({ error: 'this needs org.people, or project.people in that project' }, { status: 403 })
+        if (request.method === 'POST') {
+          const roleId = String(body.roleId ?? 'member')
+          const roles: any = await env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`)).fetch(new Request('http://do/roles', { headers: { 'x-sa-project': projectId } })).then((r) => r.json()).catch(() => ({}))
+          const role = (roles?.roles ?? []).find((r: any) => r.id === roleId)
+          if (!role) return Response.json({ error: `there is no role "${roleId}" in that project` }, { status: 400 })
+          const held = oa.level === 'superadmin' || oa.level === 'org-admin' ? [...capabilitiesOf('project')] : pa.caps
+          const over = beyond(role.capabilities ?? [], held)
+          if (over.length) return Response.json({ error: `you cannot give what you do not hold there: ${over.join(', ')}` }, { status: 403 })
+        }
+        if (request.method === 'DELETE') {
+          // Taking someone's project role away needs holding at least what they hold there.
+          const acc: any = await env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`)).fetch(new Request('http://do/access', { headers: { 'x-sa-project': projectId } })).then((r) => r.json()).catch(() => ({}))
+          const theirs = (acc?.access ?? []).find((a: any) => a.email === String(body.email ?? '').toLowerCase())
+          const held = oa.level === 'superadmin' || oa.level === 'org-admin' ? [...capabilitiesOf('project')] : pa.caps
+          if (theirs && beyond(theirs.capabilities ?? [], held).length) return Response.json({ error: 'they hold more there than you do' }, { status: 403 })
+        }
+      }
+      // THE ORGANISATION'S WAREHOUSE (warehouse/): tables made by warehouse.manage, appended to by warehouse.write,
+      // read by warehouse.query; a project's grant — what it may read, and write — set by warehouse.manage and kept by
+      // the project. Listing shows what the caller's warehouse capabilities let them see.
+      if (sub === '/warehouse' || sub.startsWith('/warehouse/')) {
         const headers = { 'content-type': 'application/json', 'x-sa-org': orgId }
         if (sub === '/warehouse/grants') {
           const project = new URL(request.url).searchParams.get('project') ?? ''
-          const projects = await (await org.fetch(new Request('http://do/projects'))).json() as { id: string }[]
-          if (!projects.some((p) => p.id === project)) return Response.json({ error: 'that project is not in this organisation' }, { status: 404 })
+          if (!(await projectsOfOrg()).some((p) => p.id === project)) return Response.json({ error: 'that project is not in this organisation' }, { status: 404 })
           const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${project}`))
           const ph = { 'content-type': 'application/json', 'x-sa-project': project }
           if (request.method === 'GET') return stub.fetch(new Request('http://do/warehouse/grants', { headers: ph }))
-          const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by: oa.email ?? 'admin' })
+          const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by })
           return stub.fetch(new Request('http://do/warehouse/grants', { method: request.method, headers: ph, body }))
         }
+        if (request.method === 'GET' && sub === '/warehouse') {
+          const r: any = await (await org.fetch(new Request('http://do/warehouse', { headers }))).json()
+          const sees = ['warehouse.query', 'warehouse.write', 'warehouse.manage'].some((c) => can(oa.caps, c as Capability))
+          return Response.json({ configured: r.configured, org: r.org, tables: sees ? r.tables : [], ops: can(oa.caps, 'warehouse.query') || can(oa.caps, 'warehouse.manage') ? r.ops : [], capabilities: oa.caps.filter((c) => c.startsWith('warehouse.')) })
+        }
         if (request.method === 'GET') return org.fetch(new Request(`http://do${sub}`, { headers }))
-        const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by: oa.email ?? 'admin', ...(sub === '/warehouse/query' ? { grant: 'all' } : {}) })
+        const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by, ...(sub === '/warehouse/query' ? { grant: 'all' } : {}) })
         return org.fetch(new Request(`http://do${sub}`, { method: request.method, headers, body }))
       }
       // USAGE PER PERSON across the organisation's projects: what each of its people used (tokens, cache, credits), and
@@ -728,7 +767,7 @@ export default {
       if (path === '/api/usage/people' && request.method === 'GET') {
         const q = new URL(request.url).searchParams
         const params = new URLSearchParams({ by: 'person', ...(q.get('since') ? { since: q.get('since')! } : {}), ...(q.get('until') ? { until: q.get('until')! } : {}) })
-        const projects = await (await env.ORG.get(env.ORG.idFromName(orgId)).fetch(new Request('http://do/projects'))).json() as any[]
+        const projects = await projectsOfOrg()
         const got = await Promise.allSettled((Array.isArray(projects) ? projects : []).map(async (pr: any) => {
           const d = await (await env.PROJECT.get(env.PROJECT.idFromName(`proj:${pr.id}`)).fetch(new Request(`http://do/usage?${params}`, { headers: { 'x-sa-project': pr.id } }))).json() as any
           return { project: { id: pr.id, name: pr.name }, people: (d?.people ?? []) as any[] }
@@ -745,23 +784,19 @@ export default {
           }
         }
         const mine = `email:${oa.email}`
-        const people = [...byPerson.values()].filter((p) => oa.level !== 'member' || p.person === mine).sort((a, b) => b.credits_micro - a.credits_micro || b.tokens_in - a.tokens_in)
+        const people = [...byPerson.values()].filter((p) => can(oa.caps, 'org.billing') || p.person === mine).sort((a, b) => b.credits_micro - a.credits_micro || b.tokens_in - a.tokens_in)
         return Response.json({ since: params.get('since'), until: params.get('until'), people, failed: got.filter((r) => r.status === 'rejected').length })
       }
       const doUrl = request.url.replace(/^(https?:\/\/[^/]+)\/api/, '$1')
       let doReq: Request
       if (request.method === 'GET' || request.method === 'HEAD') {
-        doReq = new Request(doUrl, { method: request.method, headers: request.headers })
+        doReq = new Request(doUrl, { method: request.method, headers: orgHeaders })
       } else {
         // Clone before reading body — DO fetch needs a fresh body
         const body = await request.clone().text()
-        doReq = new Request(doUrl, {
-          method: request.method,
-          headers: { 'content-type': 'application/json' },
-          body,
-        })
+        doReq = new Request(doUrl, { method: request.method, headers: orgHeaders, body })
       }
-      return env.ORG.get(env.ORG.idFromName(orgId)).fetch(doReq)
+      return org.fetch(doReq)
     }
 
     // ── Any other WS ──────────────────────────────────────────────────────────

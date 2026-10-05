@@ -75,6 +75,11 @@ export function write(store: Store, actor: Actor, name: string, kind: Kind, body
   // PUBLISHING IS DECIDED: making a node seen more widely (a person's → a group's → everyone's) is suggested, and an admin
   // decides (publish below); only an admin widens one directly.
   if (cur && place.scope && !actor.admin && reach(place.scope) > reach(cur.scope)) throw new GovernanceRefusal(`making "${name}" seen by ${place.scope === 'global' ? 'everyone' : place.scope} is decided by an admin — suggest it (publish)`)
+  // A NEW node starts where its maker may put it: someone who may publish, anywhere (everyone's by default); anyone else,
+  // in their own scope — then they suggest it more widely (publish).
+  const own = `user:${actor.id.replace(/^(user|agent):/, '')}`
+  if (!cur && place.scope && !actor.admin && place.scope !== own) throw new GovernanceRefusal(`a new "${name}" starts as yours (${own}) — then suggest it for ${place.scope === 'global' ? 'everyone' : place.scope} (publish)`)
+  if (!cur && !place.scope && !actor.admin) place = { ...place, scope: own }
   if (kind === 'domain') for (const c of conceptsOf(body as DomainBody)) if (!store.get(c)) throw new GovernanceRefusal(`the domain names a concept that does not exist: "${c}"`)
   if (kind === 'agent') { const d = store.get((body as any).domain); if (!d || d.kind !== 'domain') throw new GovernanceRefusal(`the agent names a domain that does not exist: "${(body as any).domain}"`) }
   try {

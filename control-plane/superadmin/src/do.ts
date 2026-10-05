@@ -12,6 +12,9 @@ import { ORG_MIGRATIONS } from './migrations.js'
 import { DurableObject } from 'cloudflare:workers'
 import { createRecorder } from './records.js'
 import { warehouse, WarehouseRefusal, type Grant } from './warehouse/index.js'
+import { AgentKeys, KeyRefusal, ORG_KEYS } from './agent-keys.js'
+import { beyond, builtinRole, checkRole, isCapability, orgMessageAllowed, ORG_ADMINISTERS_PROJECTS, ORG_ROLES, type Capability } from '../../shared/permissions.js'
+import { SUPERADMIN_EMAILS } from './auth/tokens.js'
 
 interface Session {
   ws:     WebSocket
@@ -51,6 +54,11 @@ export class OrgDO extends DurableObject<Env> {
     if (request.method === 'POST' && path === '/projects')     return this.createProject(request)
     if (request.method === 'DELETE' && path === '/projects')   return this.deleteProject(request)
     if (request.method === 'PUT'  && path === '/projects')     return this.restoreProject(request)
+    if (request.method === 'GET'  && path === '/me')           return this.me(url)
+    if (request.method === 'GET'  && path === '/audit')        return Response.json({ events: [...this.ctx.storage.sql.exec('SELECT * FROM org_audit ORDER BY seq DESC LIMIT 200')] })
+    if (path === '/roles')                                     return this.roles(request)
+    if (path === '/keys' || path.startsWith('/keys/'))         return this.keys(request, path)
+    if (request.method === 'POST' && path === '/agent')        return this.agent(request)
     if (request.method === 'GET'  && path === '/users')        return this.getUsers()
     if (request.method === 'POST' && path === '/users')        return this.createUser(request)
     if (request.method === 'POST' && path === '/user-by-clerk-id') return this.userByClerkId(request)
@@ -219,30 +227,68 @@ export class OrgDO extends DurableObject<Env> {
   // ── Users ───────────────────────────────────────────────────────────────────
 
   private getUsers(): Response {
-    const rows = [...this.ctx.storage.sql.exec('SELECT id, email, name, role, created_at FROM users')]
-    return Response.json(rows)
+    const rows = [...this.ctx.storage.sql.exec('SELECT id, email, name, role, created_at FROM users ORDER BY email')] as any[]
+    return Response.json(rows.map((r) => ({ ...r, capabilities: this.roleCaps(r.role) })))
   }
 
+  // ── Who may do what in this organisation (shared/permissions.ts) ─────────────────────────────────────────────────
+  /** What an organisation role holds: a built-in one the code's, a custom one as the owners defined it. */
+  private roleCaps(roleId: string | null | undefined): Capability[] {
+    if (!roleId) return []
+    const b = builtinRole('org', roleId)
+    if (b) return b.capabilities
+    const [r] = [...this.ctx.storage.sql.exec('SELECT capabilities FROM org_roles WHERE id = ?', roleId)] as any[]
+    try { return r ? (JSON.parse(String(r.capabilities)) as unknown[]).filter((c): c is Capability => isCapability('org', c) && c !== 'org.roles') : [] } catch { return [] }
+  }
+  private roleExists(id: string) { return !!builtinRole('org', id) || [...this.ctx.storage.sql.exec('SELECT 1 FROM org_roles WHERE id = ?', id)].length > 0 }
+  /** What a person holds here now (the platform's superadmin everything). */
+  private capsOfEmail(email: string | null | undefined): { role: string | null; capabilities: Capability[] } {
+    const e = String(email ?? '').toLowerCase()
+    if (e && SUPERADMIN_EMAILS.includes(e)) return { role: 'superadmin', capabilities: [...ORG_ROLES.owner.capabilities] }
+    const [u] = e ? [...this.ctx.storage.sql.exec('SELECT role FROM users WHERE email = ?', e)] as any[] : []
+    return u ? { role: String(u.role), capabilities: this.roleCaps(u.role) } : { role: null, capabilities: [] }
+  }
+  private me(url: URL): Response {
+    const r = this.capsOfEmail(url.searchParams.get('email'))
+    return Response.json({ member: r.role !== null, ...r })
+  }
+  /** The caller, as the worker checked them: their address and what they hold. */
+  private callerOf(req: Request): { email: string; caps: Capability[] } {
+    let a: any = null, c: unknown = []
+    try { a = JSON.parse(req.headers.get('x-sa-actor') ?? 'null') } catch { /* none */ }
+    try { c = JSON.parse(req.headers.get('x-sa-caps') ?? '[]') } catch { /* none */ }
+    return { email: String(a?.email ?? a?.id ?? '').toLowerCase(), caps: (Array.isArray(c) ? c : []).filter((x): x is Capability => isCapability('org', x)) }
+  }
+  private owners(): number { return Number(([...this.ctx.storage.sql.exec("SELECT COUNT(*) AS n FROM users WHERE role = 'owner'")][0] as any)?.n ?? 0) }
+
+  /** Give a person a role here (adding them if new). No one gives more than they hold — nor changes someone who holds
+   *  more than they do; only owners make owners; the organisation keeps an owner. */
   private async createUser(req: Request): Promise<Response> {
     const { email, name, role } = await req.json() as any
     const addr = String(email ?? '').trim().toLowerCase()
-    if (!addr) return Response.json({ error: 'email required' }, { status: 400 })
-    // Lower-cased on the way in: this address IS the identity every later check matches on.
-    const [existing] = [...this.ctx.storage.sql.exec('SELECT id FROM users WHERE email = ?', addr)]
+    if (!addr || !/^[^\s@]+@[^\s@]+$/.test(addr)) return Response.json({ error: 'an email address is required' }, { status: 400 })
+    const caller = this.callerOf(req)
+    const roleId = role ? String(role) : null
+    if (roleId && !this.roleExists(roleId)) return Response.json({ error: `there is no role "${roleId}"` }, { status: 400 })
+    const [existing] = [...this.ctx.storage.sql.exec('SELECT id, role FROM users WHERE email = ?', addr)] as any[]
+    const target = roleId ?? (existing ? String(existing.role) : 'member')
+    const over = beyond(this.roleCaps(target), caller.caps)
+    if (over.length) return Response.json({ error: `you cannot give what you do not hold: ${over.join(', ')}` }, { status: 403 })
     if (existing) {
-      if (role) {
-        this.ctx.storage.sql.exec('UPDATE users SET role = ? WHERE id = ?', role, existing.id)
-        await this.syncOrgAdminsToProjects()   // promoted or demoted → every project's mirror follows
-      }
-      return Response.json({ id: existing.id, existed: true })
+      if (!roleId || roleId === existing.role) return Response.json({ id: existing.id, existed: true })
+      const above = beyond(this.roleCaps(existing.role), caller.caps)
+      if (above.length) return Response.json({ error: `${addr} holds more than you do (${above.join(', ')})` }, { status: 403 })
+      if (existing.role === 'owner' && this.owners() <= 1) return Response.json({ error: 'the organisation must keep an owner — make another owner first' }, { status: 400 })
+      this.ctx.storage.sql.exec('UPDATE users SET role = ? WHERE id = ?', roleId, existing.id)
+      this.record('person.role', addr, caller.email, { from: existing.role, to: roleId })
+      await this.syncOrgAdminsToProjects()   // promoted or demoted → every project's mirror follows
+      return Response.json({ id: existing.id, existed: true, role: roleId })
     }
     const id = crypto.randomUUID()
-    this.ctx.storage.sql.exec(
-      'INSERT INTO users (id, email, name, role) VALUES (?, ?, ?, ?)',
-      id, addr, name ?? '', role ?? 'user'
-    )
-    if ((role ?? 'user') === 'admin') await this.syncOrgAdminsToProjects()
-    return Response.json({ id }, { status: 201 })
+    this.ctx.storage.sql.exec('INSERT INTO users (id, email, name, role) VALUES (?, ?, ?, ?)', id, addr, name ?? '', target)
+    this.record('person.add', addr, caller.email, { role: target })
+    if ((ORG_ADMINISTERS_PROJECTS as readonly string[]).includes(target)) await this.syncOrgAdminsToProjects()
+    return Response.json({ id, role: target }, { status: 201 })
   }
 
   // Removing someone from the ORG removes them from every project in it — otherwise a revoked person keeps
@@ -251,11 +297,108 @@ export class OrgDO extends DurableObject<Env> {
     const { email } = await req.json() as any
     const addr = String(email ?? '').trim().toLowerCase()
     if (!addr) return Response.json({ error: 'email required' }, { status: 400 })
+    const caller = this.callerOf(req)
+    const [u] = [...this.ctx.storage.sql.exec('SELECT role FROM users WHERE email = ?', addr)] as any[]
+    if (!u) return Response.json({ error: `${addr} is not in this organisation` }, { status: 404 })
+    const above = beyond(this.roleCaps(u.role), caller.caps)
+    if (above.length) return Response.json({ error: `${addr} holds more than you do (${above.join(', ')})` }, { status: 403 })
+    if (u.role === 'owner' && this.owners() <= 1) return Response.json({ error: 'the organisation must keep an owner — make another owner first' }, { status: 400 })
     const projects = [...this.ctx.storage.sql.exec('SELECT id FROM projects WHERE deleted = 0')] as any[]
     for (const p of projects) await this.projectAccess(p.id, 'DELETE', { email: addr })
     this.ctx.storage.sql.exec('DELETE FROM users WHERE email = ?', addr)
+    this.record('person.remove', addr, caller.email, { role: u.role })
     await this.syncOrgAdminsToProjects()   // if they were an admin, drop the mirrored rows too
     return Response.json({ ok: true, email: addr, removedFromProjects: projects.length })
+  }
+
+  /** The organisation's roles: built-in and the owners' own. Defining one is an owner's (org.roles). */
+  private async roles(req: Request): Promise<Response> {
+    const sql = this.ctx.storage.sql
+    if (req.method === 'GET') {
+      const custom = ([...sql.exec('SELECT id, name FROM org_roles ORDER BY name')] as any[]).map((r) => ({ id: r.id, name: r.name, capabilities: this.roleCaps(r.id), builtin: false }))
+      return Response.json({ roles: [...Object.values(ORG_ROLES), ...custom] })
+    }
+    const b = await req.json().catch(() => ({})) as any
+    const caller = this.callerOf(req)
+    if (req.method === 'POST') {
+      const { role, problems } = checkRole('org', b)
+      if (!role) return Response.json({ error: problems.join('; ') }, { status: 400 })
+      sql.exec('INSERT INTO org_roles (id, name, capabilities, by, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET name = excluded.name, capabilities = excluded.capabilities, by = excluded.by, at = excluded.at',
+        role.id, role.name, JSON.stringify(role.capabilities), caller.email, new Date().toISOString())
+      this.record('role.set', role.id, caller.email, { name: role.name, capabilities: role.capabilities })
+      return Response.json({ role }, { status: 201 })
+    }
+    if (req.method === 'DELETE') {
+      const id = String(b.id ?? '')
+      if (builtinRole('org', id)) return Response.json({ error: 'built-in roles cannot be removed' }, { status: 400 })
+      const n = Number(([...sql.exec('SELECT COUNT(*) AS n FROM users WHERE role = ?', id)][0] as any)?.n ?? 0)
+      if (n) return Response.json({ error: `${n} ${n === 1 ? 'person holds' : 'people hold'} this role — give them another first` }, { status: 400 })
+      sql.exec('DELETE FROM org_roles WHERE id = ?', id)
+      this.record('role.remove', id, caller.email, {})
+      return Response.json({ ok: true })
+    }
+    return Response.json({ error: 'not found' }, { status: 404 })
+  }
+
+  /** Who changed who may do what here (org_audit, append-only). */
+  private record(op: string, target: string, by: string, detail: unknown) {
+    this.ctx.storage.sql.exec('INSERT INTO org_audit (at, op, target, by, detail) VALUES (?, ?, ?, ?, ?)', new Date().toISOString(), op, target, by || 'platform', JSON.stringify(detail))
+  }
+
+  // ── Organisation keys (sak_org_<org>_…): an agent working for the organisation, as its maker, cut to their scopes ──
+  private orgName(req: Request) { return req.headers.get('x-sa-org') ?? this.ctx.id.name ?? 'default' }
+  private orgKeys(req: Request) { const org = this.orgName(req); return new AgentKeys(this.ctx.storage.sql as any, () => org, ORG_KEYS) }
+  private async keys(req: Request, path: string): Promise<Response> {
+    const caller = this.callerOf(req)
+    const keys = this.orgKeys(req)
+    try {
+      if (req.method === 'GET' && path === '/keys') return Response.json({ keys: keys.list() })
+      const b = await req.json().catch(() => ({})) as any
+      if (req.method === 'POST' && path === '/keys') {
+        if (!caller.email) return Response.json({ error: 'who is creating the key?' }, { status: 400 })
+        const over = beyond(Array.isArray(b.scopes) ? b.scopes.map(String) : [], caller.caps)
+        if (over.length) return Response.json({ error: `you cannot give a key what you do not hold: ${over.join(', ')}` }, { status: 403 })
+        const r = await keys.create({ name: b.name, scopes: b.scopes, by: caller.email, expiresAt: b.expiresAt ?? null })
+        this.record('key.create', r.record.id, caller.email, { name: r.record.name, scopes: r.record.scopes })
+        return Response.json(r, { status: 201 })
+      }
+      const m = path.match(/^\/keys\/([\w-]+)$/)
+      if (m && req.method === 'DELETE') {
+        const k = keys.revoke(m[1], caller.email || 'admin')
+        this.record('key.revoke', k.id, caller.email, { name: k.name })
+        return Response.json({ key: k })
+      }
+      return Response.json({ error: 'not found' }, { status: 404 })
+    } catch (e: any) {
+      if (e instanceof KeyRefusal) return Response.json({ error: e.message }, { status: 400 })
+      throw e
+    }
+  }
+
+  /** One call from an organisation key: verified, cut to what its maker holds now and to its scopes, then done as any. */
+  private async agent(req: Request): Promise<Response> {
+    const key = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
+    const v = await this.orgKeys(req).verify(key)
+    if (!v.ok) return Response.json({ error: `the key was refused: ${v.reason}` }, { status: 401 })
+    const held = this.capsOfEmail(v.key.created_by).capabilities.filter((c) => v.key.scopes.includes(c))
+    const b = await req.json().catch(() => ({})) as any
+    const t = String(b.t ?? '')
+    if (!orgMessageAllowed(held, t)) return Response.json({ error: `this key may not ${t || 'do that'} (scopes ${v.key.scopes.join(', ')}; its maker must still hold them)` }, { status: 403 })
+    const by = `key:${v.key.name} (${v.key.created_by})`
+    const org = this.orgName(req)
+    const headers = { 'content-type': 'application/json', 'x-sa-org': org }
+    const call = (path: string, body?: unknown) => this.warehouse(new Request(`http://do${path}`, body === undefined ? { headers } : { method: 'POST', headers, body: JSON.stringify({ ...(body as object), by }) }), path)
+    if (t === 'warehouse:tables') return call('/warehouse')
+    if (t === 'warehouse:query') return call('/warehouse/query', { sql: b.sql, limit: b.limit, grant: 'all' })
+    if (t === 'warehouse:append') return call('/warehouse/append', { table: b.table, rows: b.rows })
+    if (t === 'warehouse:create') return call('/warehouse/tables', { name: b.name, columns: b.columns })
+    // A project's grant: the project must be this organisation's.
+    const project = String(b.project ?? '')
+    if (![...this.ctx.storage.sql.exec('SELECT 1 FROM projects WHERE id = ? AND deleted = 0', project)].length) return Response.json({ error: 'that project is not in this organisation' }, { status: 404 })
+    const stub = this.env.PROJECT.get(this.env.PROJECT.idFromName(`proj:${project}`))
+    const ph = { 'content-type': 'application/json', 'x-sa-project': project }
+    if (t === 'warehouse:grants') return stub.fetch(new Request('http://do/warehouse/grants', { headers: ph }))
+    return stub.fetch(new Request('http://do/warehouse/grants', { method: t === 'warehouse:revoke' ? 'DELETE' : 'POST', headers: ph, body: JSON.stringify({ table: b.table, columns: b.columns ?? null, write: b.write === true, by }) }))
   }
 
   // ── Assignment: org user → project ─────────────────────────────────────────
@@ -274,7 +417,7 @@ export class OrgDO extends DurableObject<Env> {
    *  project is created, so each project can authorise on its own. Duplicated on purpose: the copy is what keeps
    *  a project's traffic off this object. */
   private async syncOrgAdminsToProjects(projectIds?: string[]): Promise<number> {
-    const admins = [...this.ctx.storage.sql.exec("SELECT email FROM users WHERE role = 'admin'")] as any[]
+    const admins = [...this.ctx.storage.sql.exec(`SELECT email FROM users WHERE role IN (${ORG_ADMINISTERS_PROJECTS.map((r) => `'${r}'`).join(', ')})`)] as any[]
     const emails = admins.map(a => String(a.email || '').toLowerCase()).filter(Boolean)
     const ids = projectIds ?? ([...this.ctx.storage.sql.exec('SELECT id FROM projects WHERE deleted = 0')] as any[]).map(p => p.id)
     for (const pid of ids) {

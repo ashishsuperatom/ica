@@ -46,9 +46,9 @@ export function createGraphSeam(d: { projectDir: string; send: (to: any, msg: Re
           return ok({ names: s.names(kind, { asOf, viewer }) })
         }
         case 'graph:show': { const n = visible(str(payload.name, 'name')); if (!n) throw new GovernanceRefusal(`there is no "${payload.name}"`); return ok({ node: n }) }
-        case 'graph:history': { const name = str(payload.name, 'name'); if (!visible(name) && !s.history(name).length) throw new GovernanceRefusal(`there is no "${name}"`); return ok({ history: s.history(name) }) }
+        case 'graph:history': { const name = str(payload.name, 'name'); if (!visible(name)) throw new GovernanceRefusal(`there is no "${name}"`); return ok({ history: s.history(name) }) }
         case 'graph:compose': { const c = compose(s, str(payload.domain, 'domain'), asOf, { viewer }); return ok({ composition: c }) }
-        case 'graph:suggestions': return ok({ suggestions: g.list(s, { status: payload.status, name: payload.name }) })
+        case 'graph:suggestions': return ok({ suggestions: g.list(s, { status: payload.status, name: payload.name }).filter((x) => visible(x.name) || x.by === who.id) })
         case 'graph:concept': case 'graph:domain': case 'graph:agent': {
           const kind = t === 'graph:concept' ? 'concept' : t === 'graph:domain' ? 'domain' : 'agent'
           const r = g.write(s, who, str(payload.name, 'name'), kind, payload.body, { reason: payload.reason }, payload.scope ? { scope: String(payload.scope) } : {})

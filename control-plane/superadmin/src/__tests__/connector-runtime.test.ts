@@ -3,6 +3,7 @@
 // request recorded; an action that changes something waits for a person; code mode reads through the proxy with no
 // network of its own.
 
+import { PROJECT_ROLES } from '../../../shared/permissions'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
@@ -21,7 +22,7 @@ export default { async fetch(req, env) {
 let mf: Miniflare
 const outbound: { url: string; auth: string | null }[] = []
 const call = async (path: string, method = 'GET', body?: unknown, admin = true) => {
-  const r = await mf.dispatchFetch(`http://x/do${path}`, { method, headers: { 'x-sa-actor': JSON.stringify({ kind: 'user', id: 'admin@x.io', email: 'admin@x.io' }), ...(admin ? { 'x-sa-admin': '1' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) })
+  const r = await mf.dispatchFetch(`http://x/do${path}`, { method, headers: { 'x-sa-actor': JSON.stringify({ kind: 'user', id: 'admin@x.io', email: 'admin@x.io' }), 'x-sa-caps': JSON.stringify((admin ? PROJECT_ROLES.admin : PROJECT_ROLES.member).capabilities) }, ...(body ? { body: JSON.stringify(body) } : {}) })
   return { status: r.status, body: await r.json() as any }
 }
 const op = (op: string, payload: Record<string, unknown>, sender: Record<string, unknown> = { type: 'runtime', email: 'admin@x.io', admin: true }) => call('/connector-op', 'POST', { sender: { wsId: 't', ...sender }, op, payload })

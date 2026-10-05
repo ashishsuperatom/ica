@@ -16,12 +16,12 @@ import { Miniflare } from 'miniflare'
 import { buildProgram, ProgramStore } from '../../vm/packages/programs/src/index.ts'
 import { createSessionSeam } from '../../vm/apps/engine/session-seam.ts'
 
-const PID = '11111111-2222-3333-4444-555555555555'
+const PID = '11111111-2222-3333-4444-555555555555', ORG = 'org-e2e'
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const bin = join(root, 'cli/dist/sacli.mjs')
 const home = mkdtempSync(join(tmpdir(), 'sacli-'))
 let mf: Miniflare, hubUrl = '', data: Server, engineWs: WebSocket
-let key = '', narrowKey = ''
+let key = '', narrowKey = '', whKey = '', orgKey = '', otherProject = ''
 
 const sacli = (args: string[], env: Record<string, string> = {}, input?: string, cwd = home): Promise<{ code: number; out: string; err: string }> => new Promise<{ code: number; out: string; err: string }>((resolve) => {
   const p = execFile(process.execPath, [bin, ...args], { cwd, env: { PATH: process.env.PATH!, SACLI_CONFIG: join(home, 'creds.json'), SACLI_HUB: hubUrl, SACLI_IDLE_MS: '20000', ...env } }, (e, out, err) => resolve({ code: (e as any)?.code ?? 0, out, err }))
@@ -40,14 +40,19 @@ before(async () => {
   writeFileSync(join(home, 'project', 'agents', 'trips.json'), JSON.stringify({ id: 'trips', name: 'Trips', scope: 'global', owner: 'user:builder', domain: 'd', programs: ['unsettled-trips'], tools: [], ui: { start: 'web/Start.tsx' }, ica: 'composer' }))
   // the real ProjectDO, listening
   const harness = `export { ProjectDO } from '../project-do.ts'
+export { OrgDO } from '../do.ts'
 export default { async fetch(req, env) { const u = new URL(req.url); const stub = env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}'))
+  // as the worker: an organisation key names its organisation; the OrgDO verifies it
+  if (u.pathname === '/api/org-agent') { const key = (req.headers.get('authorization') || '').replace(/^Bearer\\s+/i, ''); const org = (/^sak_org_([0-9a-z-]{1,64})_/.exec(key) || [])[1]; if (!org) return new Response('{}', { status: 401 })
+    return env.ORG.get(env.ORG.idFromName(org)).fetch(new Request('http://do/agent', { method: 'POST', headers: { authorization: 'Bearer ' + key, 'x-sa-org': org }, body: await req.text() })) }
+  if (u.pathname.startsWith('/org/')) return env.ORG.get(env.ORG.idFromName('${ORG}')).fetch(new Request('http://do' + u.pathname.slice(4) + u.search, req))
   if (u.pathname.startsWith('/_ws/')) return stub.fetch(req)
   const fwd = new Request('http://do' + u.pathname.slice(3) + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return stub.fetch(fwd) } }`
   const out = await build({ stdin: { contents: harness, resolveDir: join(root, 'control-plane/superadmin/src/__tests__'), loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'] })
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'], host: '127.0.0.1', port: 0,
-    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: 'x' } })
+    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, ORG: { className: 'OrgDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: 'x' } })
   hubUrl = (await mf.ready).href.replace(/^http/, 'ws').replace(/\/$/, '')
-  await doCall('/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'engine-key', provider: 'external', name: 'E2E project' }) })
+  await doCall('/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'engine-key', provider: 'external', name: 'E2E project', orgId: ORG }) })
   // the engine: the real session seam behind a hub connection
   const seam = createSessionSeam({ projectDir: join(home, 'project'), datasource: `http://127.0.0.1:${(data.address() as any).port}`, send: (to, msg) => engineWs.send(JSON.stringify({ to: { id: to.id, type: to.type }, payload: msg })) })
   engineWs = new WebSocket(`${hubUrl}/_ws/${PID}`)
@@ -55,8 +60,15 @@ export default { async fetch(req, env) { const u = new URL(req.url); const stub 
   engineWs.addEventListener('message', (e) => { const m = JSON.parse(String(e.data)); if (typeof m.payload?.t === 'string' && m.payload.t.startsWith('session:')) void seam.handle(m.payload, m.from) })
   engineWs.send(JSON.stringify({ type: 'hello', role: 'code-engine', key: 'engine-key', instanceId: 'e1', epoch: 1 }))
   await new Promise((r) => setTimeout(r, 300))
+  await doCall('/access', { method: 'POST', body: JSON.stringify({ email: 'admin@test.io', roleId: 'admin' }) })   // the keys' maker administers the project
   key = (await doCall('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'codex', scopes: ['sessions'], by: 'admin@test.io' }) })).key
   narrowKey = (await doCall('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'asker', scopes: ['ask'], by: 'admin@test.io' }) })).key
+  whKey = (await doCall('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'loader', scopes: ['warehouse', 'warehouse-write'], by: 'admin@test.io' }) })).key
+  // the organisation: an owner, a project, and a key that manages and reads its warehouse
+  const owner = { 'content-type': 'application/json', 'x-sa-actor': JSON.stringify({ kind: 'user', id: 'olga@x.io', email: 'olga@x.io' }), 'x-sa-caps': JSON.stringify(['org.people', 'org.roles', 'org.projects', 'org.billing', 'org.keys', 'org.audit', 'warehouse.manage', 'warehouse.write', 'warehouse.query']), 'x-sa-org': ORG }
+  await mf.dispatchFetch('http://x/org/users', { method: 'POST', headers: owner, body: JSON.stringify({ email: 'olga@x.io', role: 'owner' }) })
+  otherProject = ((await (await mf.dispatchFetch('http://x/org/projects', { method: 'POST', headers: owner, body: JSON.stringify({ name: 'Loads' }) })).json()) as any).id
+  orgKey = ((await (await mf.dispatchFetch('http://x/org/keys', { method: 'POST', headers: owner, body: JSON.stringify({ name: 'warehouse bot', scopes: ['warehouse.manage', 'warehouse.query'] }) })).json()) as any).key
 }, 120_000)
 after(async () => {
   await sacli(['disconnect']); await sacli(['disconnect', '--profile', 'other'])
@@ -145,6 +157,26 @@ test('two projects: a profile each, switched globally or per folder, each with i
   const a = JSON.parse((await sacli(['status', '--json'], {}, undefined, dir)).out).pid, b = JSON.parse((await sacli(['status', '--json'])).out).pid
   assert.ok(a && b && a !== b)
   assert.match((await sacli(['use', 'nobody'])).err, /there is no profile "nobody"/)
+})
+
+test('the warehouse: a project key appends only where its organisation granted writing; an organisation key grants', async () => {
+  const p = await sacli(['warehouse', 'append', 'trips', '--rows', '[{"id":1}]', '--key', whKey, '--no-daemon'])
+  assert.equal(p.code, 1); assert.match(p.err, /may not write trips — the organisation grants writing/)
+  assert.equal((await sacli(['warehouse', 'append', 'trips', '--rows', 'nope', '--key', whKey, '--no-daemon'])).code, 2)
+  assert.match((await sacli(['warehouse', 'create', 't', '--key', whKey, '--no-daemon'])).err, /use an organisation key/)
+  // the organisation's key: its tables (none here: no warehouse behind this test), its grants
+  const login = await sacli(['login', '--profile', 'org'], {}, orgKey + '\n')
+  assert.equal(login.code, 0, login.err); assert.match(login.out, new RegExp(`logged in to organisation ${ORG}`))
+  assert.match((await sacli(['warehouse', 'tables', '--profile', 'org'])).out, /the warehouse is not set up/)
+  const g = await sacli(['warehouse', 'grant', 'trips', '--project', otherProject, '--write', '--profile', 'org'])
+  assert.equal(g.code, 0, g.err); assert.match(g.out, /may read trips and append to it/)
+  const listed = await sacli(['warehouse', 'grants', '--project', otherProject, '--profile', 'org', '--json'])
+  assert.deepEqual(JSON.parse(listed.out).writable, ['trips'])
+  assert.match((await sacli(['warehouse', 'grant', 'trips', '--project', 'nope', '--profile', 'org'])).err, /not in this organisation/)
+  const scoped = await sacli(['warehouse', 'append', 'trips', '--rows', '[{"id":1}]', '--profile', 'org'])
+  assert.equal(scoped.code, 1); assert.match(scoped.err, /may not warehouse:append/)              // not its scope
+  assert.match((await sacli(['agents', '--profile', 'org'])).err, /works with sacli warehouse/)
+  assert.equal((await sacli(['warehouse', 'tables', '--key', `sak_org_${ORG}_${'x'.repeat(43)}`])).code, 3)   // a refused key
 })
 
 test('an idle background connection cleans up after itself: the process ends and its socket file is gone', async () => {

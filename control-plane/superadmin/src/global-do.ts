@@ -212,9 +212,12 @@ export class GlobalDO extends DurableObject<Env> {
   }
 
   private async releaseDomain(req: Request): Promise<Response> {
-    const { subdomain } = await req.json() as any
+    const { subdomain, projectId } = await req.json() as any
     const sub = (subdomain ?? '').toLowerCase().trim()
-    this.ctx.storage.sql.exec('DELETE FROM domains WHERE subdomain = ?', sub)
+    // Only the project that holds an address releases it (the worker checked the caller may act on that project).
+    const [held] = [...this.ctx.storage.sql.exec('SELECT project_id FROM domains WHERE subdomain = ?', sub)] as any[]
+    if (held && held.project_id !== projectId) return Response.json({ error: `${sub} is another project's address` }, { status: 403 })
+    this.ctx.storage.sql.exec('DELETE FROM domains WHERE subdomain = ? AND project_id = ?', sub, projectId)
     return Response.json({ ok: true })
   }
 

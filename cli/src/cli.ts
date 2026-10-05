@@ -4,8 +4,8 @@
 
 import { parseArgs, type ParseArgsConfig } from 'node:util'
 import { createInterface } from 'node:readline'
-import { CliError, DEFAULT_HUB, maskKey, projectOfKey, readCredentials, writeCredentials, configPath, folderProfile } from './config.ts'
-import { writeFileSync } from 'node:fs'
+import { CliError, DEFAULT_HUB, maskKey, orgOfKey, projectOfKey, readCredentials, writeCredentials, configPath, folderProfile } from './config.ts'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { connect, type Hub } from './hub.ts'
 import { viaDaemon, stopDaemon, daemonStatus, serveDaemon, type Conn } from './daemon.ts'
@@ -36,6 +36,7 @@ Commands:
   session goto     move a session to another block
   ask              ask the project a question in words
   activity         what is running for you in the project (builds, runs), and what ran lately
+  warehouse        the organisation's warehouse: tables, query, append — and, with an organisation key, create and grant
   call             send any message the platform takes, with its fields as JSON (prints the reply as JSON)
   status           the background connection: up, since when, how long until it closes
   disconnect       close the background connection now
@@ -50,7 +51,8 @@ Global options:
   -h, --help         help for a command
   -V, --version      the version
 
-A key belongs to one project, and a profile holds one key: each profile is one project. The profile in use is
+A key belongs to one project (sak_<project>_…) or one organisation (sak_org_<org>_…, for the warehouse), and a
+profile holds one key: each profile is one project or organisation. The profile in use is
 --profile, else $SACLI_PROFILE, else the nearest .sacli.json in this folder or above, else the default.
 Commands share one background connection per project, kept for an hour after the last command.
 
@@ -82,6 +84,22 @@ earlier block (--block) branches the session into a new thread. Values are JSON;
   status: `sacli status        whether the background connection for this key is up, and for how long`,
   disconnect: `sacli disconnect    closes the background connection for this key (the next command opens a new one)`,
   ask: `sacli ask <question> [--session <id>]   asks in words; prints the answer (needs the ask scope)`,
+  warehouse: `sacli warehouse <tables|query|append|create|grants|grant|revoke> …
+
+  sacli warehouse tables                               the tables you may see, and their columns
+  sacli warehouse query "<sql>" [--limit <n>]          SQL over them (read-only; a project key reads its grant only)
+  sacli warehouse append <table> [--rows '<json>' | --file <rows.json>]   rows (a JSON list; stdin when neither)
+With an organisation key (sak_org_…) made by someone who may manage the warehouse:
+  sacli warehouse create <table> --column <name>:<type>[!] …   types: string long int double float boolean date
+                                                              timestamp timestamptz; a ! makes the column required
+  sacli warehouse grants --project <id>                what a project may read and write
+  sacli warehouse grant <table> --project <id> [--columns a,b] [--write]   let a project read (all or some columns)
+                                                              — and, with --write, append (all columns)
+  sacli warehouse revoke <table> --project <id>
+
+A project key needs the warehouse scope to read and warehouse-write to append, and appends only to tables the
+organisation granted the project to write. An organisation key holds what its maker holds of its scopes
+(warehouse.query, warehouse.write, warehouse.manage).`,
 }
 
 const GLOBAL: ParseArgsConfig['options'] = {
@@ -108,11 +126,12 @@ export async function run(argv: string[], io: Io): Promise<number> {
   let hub: Hub | Conn | null = null
   try {
     // The command words come first; options may be anywhere.
-    const words = argv.filter((a, i) => !a.startsWith('-') && !(i > 0 && /^--(profile|key|hub|timeout|id|as-of|set|add|remove|call|param|act|to|block|session)$/.test(argv[i - 1])))
+    const words = argv.filter((a, i) => !a.startsWith('-') && !(i > 0 && /^--(profile|key|hub|timeout|id|as-of|set|add|remove|call|param|act|to|block|session|rows|file|limit|column|project|columns|data)$/.test(argv[i - 1])))
     const [cmd, sub] = words
     const specific: ParseArgsConfig['options'] = cmd === 'session'
       ? { id: { type: 'string' }, 'as-of': { type: 'string' }, set: { type: 'string', multiple: true }, add: { type: 'string', multiple: true }, remove: { type: 'string', multiple: true },
           call: { type: 'string' }, param: { type: 'string', multiple: true }, act: { type: 'string' }, to: { type: 'string' }, block: { type: 'string' } }
+      : cmd === 'warehouse' ? { rows: { type: 'string' }, file: { type: 'string' }, limit: { type: 'string' }, column: { type: 'string', multiple: true }, project: { type: 'string' }, columns: { type: 'string' }, write: { type: 'boolean' } }
       : cmd === 'ask' ? { session: { type: 'string' } } : cmd === 'use' ? { here: { type: 'boolean' } } : cmd === 'call' ? { data: { type: 'string' } } : {}
     let parsed
     try { parsed = parseArgs({ args: argv, options: { ...GLOBAL, ...specific }, allowPositionals: true, strict: true }) }
@@ -137,7 +156,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
     if (cmd === 'projects') {
       const names = Object.keys(creds.profiles)
       if (!names.length) { out('no saved profiles — run sacli login', []); return 0 }
-      const rows = names.map((n) => ({ profile: n, project: projectOfKey(creds.profiles[n].key), hub: creds.profiles[n].hub, inUse: n === profileName, isDefault: n === creds.default }))
+      const rows = names.map((n) => ({ profile: n, project: projectOfKey(creds.profiles[n].key) ?? `organisation ${orgOfKey(creds.profiles[n].key)}`, hub: creds.profiles[n].hub, inUse: n === profileName, isDefault: n === creds.default }))
       out(table(['', 'profile', 'project', 'hub'], rows.map((r) => [r.inUse ? '*' : '', r.profile + (r.isDefault ? ' (default)' : ''), r.project, r.hub])) + (folder ? `\n(this folder uses "${folder.profile}" — ${folder.file})` : ''), rows)
       return 0
     }
@@ -168,7 +187,57 @@ export async function run(argv: string[], io: Io): Promise<number> {
     }
     key ??= saved?.key
     if (!key) throw new CliError(`no agent key — run 'sacli login' (profile "${profileName}"), or pass --key or $SACLI_KEY`, 3)
-    if (!projectOfKey(key)) throw new CliError('that is not an agent key (sak_<project>_<secret>) — make one in the project\'s admin console', 3)
+    const org = orgOfKey(key)
+    if (!projectOfKey(key) && !org) throw new CliError('that is not an agent key (sak_<project>_<secret>, or sak_org_<org>_<secret>) — make one in the admin console', 3)
+    const rowsGiven = async (): Promise<unknown[]> => {
+      let text = o.rows as string | undefined
+      if (!text && o.file) { try { text = readFileSync(String(o.file), 'utf8') } catch (e: any) { throw new CliError(`cannot read ${o.file}: ${e.message}`, 2) } }
+      if (!text && io.stdin) text = await io.stdin()
+      let rows: unknown
+      try { rows = JSON.parse(String(text ?? '')) } catch { throw new CliError('rows are a JSON list of objects (--rows, --file, or stdin)', 2) }
+      if (!Array.isArray(rows) || !rows.length) throw new CliError('rows are a JSON list of objects, at least one', 2)
+      return rows
+    }
+    const showTables = (tables: any[]) => tables.length ? tables.map((t) => `${t.name}${t.writable ? '  (this project may append)' : ''}\n${table(['column', 'type', ''], (t.columns ?? []).map((c: any) => [c.name, c.type, c.required ? 'required' : '']))}`).join('\n\n') : 'no tables you may see'
+    const showResult = (r: any) => r.rows?.length ? table(r.columns ?? Object.keys(r.rows[0]), r.rows.map((x: any) => (r.columns ?? Object.keys(x)).map((c: string) => x[c] === null || x[c] === undefined ? '' : String(x[c])))) + (r.truncated ? '\n(more rows: narrow the query or raise --limit)' : '') : 'no rows'
+
+    // ── An organisation key: the warehouse over plain HTTP (no project, no socket) ──
+    if (org) {
+      const call = async (body: Record<string, unknown>) => {
+        let r: Response
+        try { r = await fetch(`${hubUrl.replace(/^ws/, 'http')}/api/org-agent`, { method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs) }) }
+        catch (e: any) { throw new CliError(`the hub could not be reached: ${e.message}`, 4) }
+        const b: any = await r.json().catch(() => ({}))
+        if (!r.ok) throw new CliError(b.error ?? `the hub answered ${r.status}`, r.status === 401 ? 3 : 1)
+        return b
+      }
+      if (cmd === 'login') {
+        await call({ t: 'warehouse:tables' })
+        creds.profiles[profileName] = { key, hub: hubUrl, savedAt: new Date().toISOString() }
+        creds.default ??= profileName
+        const file = writeCredentials(creds, io.env)
+        out(`logged in to organisation ${org} as profile "${profileName}" (saved in ${file})`, { ok: true, profile: profileName, org, file })
+        return 0
+      }
+      if (cmd === 'whoami') { await call({ t: 'warehouse:tables' }); out(`key           ${maskKey(key)}\norganisation  ${org}\nhub           ${hubUrl}\nprofile       ${o.key || io.env.SACLI_KEY ? '(from --key / $SACLI_KEY)' : profileName}`, { key: maskKey(key), org, hub: hubUrl, profile: profileName }); return 0 }
+      if (cmd !== 'warehouse') throw new CliError(`an organisation key works with sacli warehouse (and login, whoami) — ${cmd} needs a project's key`, 2)
+      const table_ = pos[2]
+      const need = (what: string) => { if (!table_) throw new CliError(`which table? sacli warehouse ${sub} <table>${what}`, 2); return table_ }
+      const project = () => { if (!o.project) throw new CliError(`which project? --project <id>`, 2); return String(o.project) }
+      if (sub === 'tables') { const r = await call({ t: 'warehouse:tables' }); out(r.configured === false ? 'the warehouse is not set up' : showTables(r.tables ?? []), r); return 0 }
+      if (sub === 'query') { const sql = pos.slice(2).join(' ').trim(); if (!sql) throw new CliError('which SQL? sacli warehouse query "<sql>"', 2); const r = await call({ t: 'warehouse:query', sql, limit: o.limit ? Number(o.limit) : undefined }); out(showResult(r), r); return 0 }
+      if (sub === 'append') { const t = need(' --rows …'); const r = await call({ t: 'warehouse:append', table: t, rows: await rowsGiven() }); out(`appended ${r.rows} rows to ${t} (snapshot ${r.snapshot})`, r); return 0 }
+      if (sub === 'create') {
+        const t = need(' --column <name>:<type> …')
+        const columns = ((o.column ?? []) as string[]).map((c) => { const m = /^([a-z_][a-z0-9_]*):([a-z]+)(!?)$/.exec(c); if (!m) throw new CliError(`--column ${c}: write <name>:<type>, with ! when required`, 2); return { name: m[1], type: m[2], ...(m[3] ? { required: true } : {}) } })
+        if (!columns.length) throw new CliError('a table needs columns: --column <name>:<type> …', 2)
+        const r = await call({ t: 'warehouse:create', name: t, columns }); out(`made ${t} (${columns.map((c) => `${c.name} ${c.type}`).join(', ')})`, r); return 0
+      }
+      if (sub === 'grants') { const r = await call({ t: 'warehouse:grants', project: project() }); out(Object.keys(r.grant ?? {}).length ? table(['table', 'columns', 'write'], Object.entries(r.grant).map(([t, c]: [string, any]) => [t, c === null ? 'all' : c.join(', '), (r.writable ?? []).includes(t) ? 'yes' : ''])) : 'this project was granted nothing', r); return 0 }
+      if (sub === 'grant') { const t = need(' --project <id>'); const columns = o.columns ? String(o.columns).split(',').map((c) => c.trim()).filter(Boolean) : null; const r = await call({ t: 'warehouse:grant', project: project(), table: t, columns, write: !!o.write }); if (r.error) throw new CliError(r.error); out(`project ${o.project} may read ${columns ? columns.join(', ') + ' of ' : ''}${t}${o.write ? ' and append to it' : ''}`, r); return 0 }
+      if (sub === 'revoke') { const t = need(' --project <id>'); const r = await call({ t: 'warehouse:revoke', project: project(), table: t }); out(`project ${o.project} may no longer read ${t}`, r); return 0 }
+      throw new CliError(`there is no 'warehouse ${sub ?? ''}' — tables, query, append, create, grants, grant or revoke`, 2)
+    }
 
     if (cmd === 'status') {
       const st = await daemonStatus(key, hubUrl, io.env)
@@ -255,6 +324,14 @@ export async function run(argv: string[], io: Io): Promise<number> {
         return 0
       }
       throw new CliError(`there is no 'session ${sub ?? ''}' — open, get, intent or goto`, 2)
+    }
+    if (cmd === 'warehouse') {
+      const wh = async (payload: Record<string, unknown>) => { const r = await hub!.request(payload, { timeoutMs }); if (r.t === 'warehouse:refused' || r.t === 'error') throw new CliError(r.reason ?? 'refused'); return r }
+      if (sub === 'tables') { const r = await wh({ t: 'warehouse:tables' }); out(r.configured === false ? 'the warehouse is not set up' : showTables(r.tables ?? []), r); return 0 }
+      if (sub === 'query') { const sql = pos.slice(2).join(' ').trim(); if (!sql) throw new CliError('which SQL? sacli warehouse query "<sql>"', 2); const r = await wh({ t: 'warehouse:query', sql, limit: o.limit ? Number(o.limit) : undefined }); out(showResult(r), r); return 0 }
+      if (sub === 'append') { const t = pos[2]; if (!t) throw new CliError('which table? sacli warehouse append <table> --rows …', 2); const r = await wh({ t: 'warehouse:append', table: t, rows: await rowsGiven() }); out(`appended ${r.rows} rows to ${t} (snapshot ${r.snapshot})`, r); return 0 }
+      if (['create', 'grants', 'grant', 'revoke'].includes(String(sub))) throw new CliError(`warehouse ${sub} is the organisation's: use an organisation key (sak_org_…), made in the admin console's Warehouse`, 2)
+      throw new CliError(`there is no 'warehouse ${sub ?? ''}' — tables, query or append (create and grant with an organisation key)`, 2)
     }
     if (cmd === 'ask') {
       const question = pos.slice(1).join(' ').trim()

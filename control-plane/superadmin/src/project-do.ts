@@ -26,7 +26,9 @@ import { PROJECT_MIGRATIONS, adoptProjectSchemaVersion } from './migrations.js'
 import { bucketStore } from './parcels.js'
 import { AuditLog, auditScope } from './audit.js'
 import { AgentKeys, KeyRefusal } from './agent-keys.js'
-import { scopeAllows, HUB_MESSAGES } from '../../shared/agent-scopes.js'
+import { isAgentScope, keyAllows, keyCapabilities, scopesGivable, HUB_MESSAGES } from '../../shared/agent-scopes.js'
+import { can, beyond, builtinRole, capabilitiesOf, checkRole, isCapability, messageNeeds, PROJECT_ROLES, type Capability } from '../../shared/permissions.js'
+import { SUPERADMIN_EMAILS } from './auth/tokens.js'
 import { ProgramCatalogue, CatalogueRefusal } from './program-catalogue.js'
 import { TAG } from '../../../vm/packages/agent-contract/contract.mjs'
 import { stepOf } from '../../../vm/packages/decision/src/index.js'
@@ -54,6 +56,7 @@ interface ConnInfo {
   userId?: string    // only for user connections; an agent key's is `agent:<keyId>`
   email?: string     // the person's address, from their token (for the audit history)
   scopes?: string[]  // an agent key's scopes (shared/agent-scopes.ts)
+  maker?: string     // who made an agent key: the key acts for them, cut to what they hold now
   admin?: boolean    // a person who administers this project (superadmin, org admin, or the project's admin role)
   orgRole?: string   // "admin" | "member" — from JWT, used for persona enforcement
   instanceId?: string // singleton identity: which process this connection belongs to (stable per boot)
@@ -642,7 +645,7 @@ export class ProjectDO extends DurableObject<Env> {
         return
       }
       this.audit.record({ actor: { kind: 'agent', id: `agent:${v.key.id}` }, via: 'agent', action: 'agent.connect', outcome: 'ok', detail: { name: v.key.name, scopes: v.key.scopes } })
-      await this.register(ws, 'agent', `agent:${v.key.id}`, undefined, undefined, undefined, { scopes: v.key.scopes })
+      await this.register(ws, 'agent', `agent:${v.key.id}`, undefined, undefined, undefined, { scopes: v.key.scopes, maker: v.key.created_by })
       return
     }
 
@@ -683,7 +686,7 @@ export class ProjectDO extends DurableObject<Env> {
         const byEmail = arrived ? [arrived] : []
         const byUserId = byEmail.length ? [] : [...this.ctx.storage.sql.exec('SELECT role FROM members WHERE user_id = ?', claims.userId)]
         if (!byEmail.length && !byUserId.length) { ws.close(4003, 'No access to this project'); return }
-        admin = byEmail.some((r: any) => r.role_id === 'admin' || r.source === 'org-admin')
+        admin = !!email && can(this.capabilitiesOfEmail(email), 'project.audit')
       }
       this.markUserActivity()
       this.wakeMachine()
@@ -696,7 +699,7 @@ export class ProjectDO extends DurableObject<Env> {
 
   // Returns true if the connection was registered, false if it was FENCED (rejected — an older/stale
   // singleton connection that a newer instance already superseded). Callers skip post-register work on false.
-  private async register(ws: WebSocket, type: string, userId: string | undefined, orgRole: string | undefined, instanceId?: string, epoch?: number, extra: { email?: string; scopes?: string[]; admin?: boolean } = {}): Promise<boolean> {
+  private async register(ws: WebSocket, type: string, userId: string | undefined, orgRole: string | undefined, instanceId?: string, epoch?: number, extra: { email?: string; scopes?: string[]; admin?: boolean; maker?: string } = {}): Promise<boolean> {
 
     // Generate wsId
     const wsId = crypto.randomUUID().slice(0, 8)
@@ -731,7 +734,7 @@ export class ProjectDO extends DurableObject<Env> {
 
     // Register
     this.wsById.set(wsId, ws)
-    const conn: ConnInfo = { wsId, type, userId, orgRole, instanceId, epoch, ...(extra.email ? { email: extra.email } : {}), ...(extra.scopes ? { scopes: extra.scopes } : {}), ...(extra.admin ? { admin: true } : {}) }
+    const conn: ConnInfo = { wsId, type, userId, orgRole, instanceId, epoch, ...(extra.email ? { email: extra.email } : {}), ...(extra.scopes ? { scopes: extra.scopes } : {}), ...(extra.maker ? { maker: extra.maker } : {}), ...(extra.admin ? { admin: true } : {}) }
     this.connByWs.set(ws, conn)
     ws.serializeAttachment(conn)   // survives hibernation → hydrate() rebuilds the Maps after a wake/deploy
     if (singleton) this.roleRegistry.set(type, wsId)
@@ -824,7 +827,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (!payload || typeof payload.t !== 'string') return json({ error: 'the body is a message: { "t": "<type>", … }' }, 400)
     payload.reqId ??= `http-${crypto.randomUUID()}`
     const wsId = `http-${crypto.randomUUID().slice(0, 8)}`
-    const conn: ConnInfo = { wsId, type: 'agent', userId: `agent:${v.key.id}`, scopes: v.key.scopes }
+    const conn: ConnInfo = { wsId, type: 'agent', userId: `agent:${v.key.id}`, scopes: v.key.scopes, maker: v.key.created_by }
     const timeoutMs = Math.min(Math.max(Number(new URL(request.url).searchParams.get('timeout')) || 120, 1), 300) * 1000
     return await new Promise<Response>((resolve) => {
       let done = false
@@ -903,13 +906,13 @@ export class ProjectDO extends DurableObject<Env> {
     return { ok: true, credits_micro: micro, priced: !!price, session: b.session ?? null }
   }
   // ── Cloud connectors (connectors/): a connection's connector run in its sandbox, governed here ──
-  /** A connection as someone may run it: a shared one for anyone in the project, a personal one for its owner (or an
-   *  admin); its secrets unsealed for the gateway alone. */
+  /** A connection as someone may run it: a shared one for anyone in the project, a personal one for its owner alone
+   *  (no one runs with another person's credentials); its secrets unsealed for the gateway alone. */
   private async connectionToRun(id: string, sender: ConnInfo) {
     const [r] = [...this.ctx.storage.sql.exec('SELECT * FROM connections WHERE id = ? AND removed_at IS NULL', id)] as any[]
     if (!r) throw new Error(`there is no connection ${id}`)
     const me = sender.email ? `email:${sender.email.toLowerCase()}` : this.principalOf(sender)
-    if (r.level === 'user' && r.owner !== me && !sender.admin) throw new Error(`connection ${id} is someone else's`)
+    if (r.level === 'user' && r.owner !== me) throw new Error(`connection ${id} is someone else's`)
     if (!manifestOf(r.connector)) throw new Error(`${r.name} is not a cloud connector; the engine runs it`)
     const master = (this.env as any).CREDENTIALS_MASTER_KEY
     const secrets = r.secrets_sealed ? JSON.parse(await unseal(r.secrets_sealed, master)) : {}
@@ -941,7 +944,7 @@ export class ProjectDO extends DurableObject<Env> {
       if (!code.trim() || code.length > 100_000) throw new Error('code mode runs a program of at most 100,000 characters')
       const t0 = Date.now()
       let r: Awaited<ReturnType<typeof runCode>> = { ok: false, error: 'the program did not run', logs: [] }
-      try { r = await runCode(this.env, exportsObj, this._pid, { type: sender.type, userId: sender.userId, email: sender.email, admin: !!sender.admin, scopes: sender.scopes ?? [] }, code) }
+      try { r = await runCode(this.env, exportsObj, this._pid, { type: sender.type, userId: sender.userId, email: sender.email, admin: can(this.capsOf(sender), 'project.data'), scopes: sender.scopes ?? [] }, code) }
       catch (e: any) { r = { ok: false, error: e?.message ?? String(e), logs: [] } }
       finally { this.recordCall({ op: 'run', target: `${code.length} characters`, by: who, ok: r.ok, ms: Date.now() - t0, error: r.error ?? null }) }
       return r as unknown as Record<string, unknown>
@@ -969,16 +972,18 @@ export class ProjectDO extends DurableObject<Env> {
     return { connection: c.id, op, result: r.result, logs: r.logs }
   }
 
-  /** What this project may read of its organisation's warehouse: each table's latest grant, unless revoked. */
-  private grantInForce(): Record<string, string[] | null> {
-    const out: Record<string, string[] | null> = {}
-    for (const r of this.ctx.storage.sql.exec('SELECT g.tbl, g.columns, g.revoked FROM warehouse_grants g JOIN (SELECT tbl, MAX(seq) AS m FROM warehouse_grants GROUP BY tbl) x ON x.m = g.seq') as Iterable<any>)
-      if (!r.revoked) out[String(r.tbl)] = r.columns === null ? null : JSON.parse(String(r.columns))
-    return out
+  /** Each table's latest grant, unless revoked. */
+  private grantRows(): { tbl: string; columns: string[] | null; write: boolean }[] {
+    return ([...this.ctx.storage.sql.exec('SELECT g.tbl, g.columns, g.revoked, g.write FROM warehouse_grants g JOIN (SELECT tbl, MAX(seq) AS m FROM warehouse_grants GROUP BY tbl) x ON x.m = g.seq')] as any[])
+      .filter((r) => !r.revoked).map((r) => ({ tbl: String(r.tbl), columns: r.columns === null ? null : JSON.parse(String(r.columns)), write: !!r.write }))
   }
+  /** What this project may read of its organisation's warehouse: a table, and its columns or all of them. */
+  private grantInForce(): Record<string, string[] | null> { return Object.fromEntries(this.grantRows().map((r) => [r.tbl, r.columns])) }
+  /** The tables this project may append to. */
+  private writableInForce(): string[] { return this.grantRows().filter((r) => r.write).map((r) => r.tbl) }
   /** The grants, set by the organisation's administrator through the worker (never from a hub message). */
   private async warehouseGrants(request: Request): Promise<Response> {
-    if (request.method === 'GET') return Response.json({ grant: this.grantInForce(), history: [...this.ctx.storage.sql.exec('SELECT * FROM warehouse_grants ORDER BY seq DESC LIMIT 100')] })
+    if (request.method === 'GET') return Response.json({ grant: this.grantInForce(), writable: this.writableInForce(), history: [...this.ctx.storage.sql.exec('SELECT * FROM warehouse_grants ORDER BY seq DESC LIMIT 100')] })
     const b: any = await request.json().catch(() => ({}))
     const tbl = String(b.table ?? '')
     if (!/^[a-z][a-z0-9_]{0,62}$/.test(tbl)) return Response.json({ error: 'name the table' }, { status: 400 })
@@ -987,10 +992,12 @@ export class ProjectDO extends DurableObject<Env> {
     else {
       const cols = b.columns === null || b.columns === undefined ? null : Array.isArray(b.columns) && b.columns.every((c: unknown) => typeof c === 'string' && /^[a-z_][a-z0-9_]{0,62}$/.test(c)) ? b.columns : undefined
       if (cols === undefined) return Response.json({ error: 'columns are a list of column names, or null for all of them' }, { status: 400 })
-      this.ctx.storage.sql.exec('INSERT INTO warehouse_grants (tbl, columns, revoked, by, at) VALUES (?, ?, 0, ?, ?)', tbl, cols === null ? null : JSON.stringify(cols), by, at)
+      // Writing is the whole table or nothing: an append carries every column, so a write grant is all columns too.
+      if (b.write === true && cols !== null) return Response.json({ error: 'a project that may write a table reads all of it — leave columns empty' }, { status: 400 })
+      this.ctx.storage.sql.exec('INSERT INTO warehouse_grants (tbl, columns, revoked, by, at, write) VALUES (?, ?, 0, ?, ?, ?)', tbl, cols === null ? null : JSON.stringify(cols), by, at, b.write === true ? 1 : 0)
     }
-    this.audit.record({ actor: { kind: 'user', id: by }, via: 'ui', action: request.method === 'DELETE' ? 'warehouse.revoke' : 'warehouse.grant', target: tbl, outcome: 'ok', detail: { columns: b.columns ?? null } })
-    return Response.json({ grant: this.grantInForce() })
+    this.audit.record({ actor: { kind: 'user', id: by }, via: 'ui', action: request.method === 'DELETE' ? 'warehouse.revoke' : 'warehouse.grant', target: tbl, outcome: 'ok', detail: { columns: b.columns ?? null, write: b.write === true } })
+    return Response.json({ grant: this.grantInForce(), writable: this.writableInForce() })
   }
   private usageSummary(url: URL): Response {
     const since = url.searchParams.get('since') ?? new Date(Date.now() - 30 * 86_400_000).toISOString()
@@ -1050,7 +1057,7 @@ export class ProjectDO extends DurableObject<Env> {
     try { actorH = JSON.parse(request.headers.get('x-sa-actor') ?? 'null') } catch { /* none */ }
     const email = String(actorH?.email ?? body.by ?? '').toLowerCase()
     const who = email ? `email:${email}` : null
-    const admin = request.headers.get('x-sa-admin') === '1'
+    const admin = can(this.capsOfRequest(request), 'project.data')
     const actor = { kind: 'user' as const, id: email || 'unknown', ...(email ? { email } : {}) }
     if (path === '/connectors' && request.method === 'GET') return this.j({ connectors: CONNECTORS })
     if (path === '/connections' && request.method === 'GET') return this.j({ connections: this.connectionRows(who, admin) })
@@ -1060,7 +1067,7 @@ export class ProjectDO extends DurableObject<Env> {
       if (!c) return this.j({ error: `there is no connector ${body.connector}` }, 400)
       const level = body.level === 'user' ? 'user' : 'project'
       if (!c.levels.includes(level)) return this.j({ error: `${c.title} is connected ${c.levels.map((l) => l === 'project' ? 'for the whole project' : 'per person').join(' or ')}` }, 400)
-      if (level === 'project' && !admin) return this.j({ error: 'a connection shared by the project is made by an admin; connect your own instead' }, 403)
+      if (level === 'project' && !admin) return this.j({ error: 'a connection shared by the project needs project.data; connect your own instead' }, 403)
       const name = String(body.name ?? '').trim()
       if (!name || name.length > 80) return this.j({ error: 'a connection has a name of at most 80 characters' }, 400)
       const { problems, settings, secrets } = checkConnection(c, body.values ?? {})
@@ -1077,7 +1084,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (m && request.method === 'DELETE') {
       const [r] = [...this.ctx.storage.sql.exec('SELECT level, owner, removed_at FROM connections WHERE id = ?', m[1])] as any[]
       if (!r || r.removed_at) return this.j({ error: `there is no connection ${m[1]}` }, 404)
-      if (!admin && r.owner !== who) return this.j({ error: 'only its owner or an admin removes a connection' }, 403)
+      if (!admin && r.owner !== who) return this.j({ error: 'only its owner, or someone with project.data, removes a connection' }, 403)
       this.ctx.storage.sql.exec('UPDATE connections SET removed_at = ?, removed_by = ? WHERE id = ?', new Date().toISOString(), email, m[1])
       this.audit.record({ actor, via: 'ui', action: 'connection.remove', target: m[1], outcome: 'ok' })
       return this.j({ removed: m[1] })
@@ -1128,8 +1135,8 @@ export class ProjectDO extends DurableObject<Env> {
       if (!/^([a-z0-9-]+\.)+[a-z]{2,}$/.test(domain)) return this.j({ error: 'a domain like acme.com' }, 400)
       if (['gmail.com', 'outlook.com', 'hotmail.com', 'yahoo.com', 'icloud.com', 'proton.me'].includes(domain)) return this.j({ error: `${domain} is a public mail domain: anyone could sign in with it` }, 400)
       const role = String(body.roleId ?? 'viewer')
-      if (![...this.ctx.storage.sql.exec('SELECT 1 FROM roles WHERE id = ?', role)].length) return this.j({ error: `there is no role ${role}` }, 400)
-      if (role === 'admin') return this.j({ error: 'a whole domain cannot be made admin: grant admins one by one' }, 400)
+      if (!builtinRole('project', role) && ![...this.ctx.storage.sql.exec('SELECT 1 FROM roles WHERE id = ? AND builtin = 0', role)].length) return this.j({ error: `there is no role ${role}` }, 400)
+      if (beyond(this.roleCapabilities(role), PROJECT_ROLES.member.capabilities).length) return this.j({ error: 'a whole domain is admitted as a member at most: give more one by one' }, 400)
       this.ctx.storage.sql.exec('INSERT INTO access_domains (domain, role_id, added_by, added_at) VALUES (?, ?, ?, ?) ON CONFLICT (domain) DO UPDATE SET role_id = excluded.role_id, added_by = excluded.added_by, added_at = excluded.added_at', domain, role, by, new Date().toISOString())
       this.audit.record({ actor, via: 'admin', action: 'access-domain.add', target: domain, outcome: 'ok', detail: { role } })
       return this.j({ domain, role_id: role }, 201)
@@ -1253,12 +1260,50 @@ export class ProjectDO extends DurableObject<Env> {
     }
     return { upto: body.upto, ...(body.gap ? { gap: true } : {}), ...(body.conflict !== undefined ? { conflict: body.conflict, error: body.error } : {}) }
   }
+  // ── Who may do what (shared/permissions.ts) ──────────────────────────────────────────────────────────────────────
+  /** What a project role holds: a built-in role's capabilities are the code's, always; a custom role's as stored. */
+  private roleCapabilities(roleId: string | null | undefined): Capability[] {
+    if (!roleId) return []
+    const b = builtinRole('project', roleId)
+    if (b) return b.capabilities
+    const [r] = [...this.ctx.storage.sql.exec('SELECT permissions FROM roles WHERE id = ?', roleId)] as any[]
+    if (!r) return []
+    try { return (JSON.parse(String(r.permissions)) as unknown[]).filter((c): c is Capability => isCapability('project', c)) } catch { return [] }
+  }
+  /** What a person holds in this project now: the platform's superadmin everything; the organisation's owners and admins
+   *  (mirrored here) the admin role; anyone else their role; someone not here nothing. */
+  private capabilitiesOfEmail(email: string | null | undefined): Capability[] {
+    const e = String(email ?? '').toLowerCase()
+    if (!e) return []
+    if (e === 'superadmin' || SUPERADMIN_EMAILS.includes(e)) return [...capabilitiesOf('project')]
+    const [row] = [...this.ctx.storage.sql.exec('SELECT role_id, source FROM access WHERE email = ?', e)] as any[]
+    if (!row) return []
+    return row.source === 'org-admin' ? [...PROJECT_ROLES.admin.capabilities] : this.roleCapabilities(row.role_id)
+  }
+  /** What a connection holds now, read each time so a change of role applies at once: a person their role's; a service
+   *  member (a chat channel) a member's; an agent key its maker's (its scopes cut it further); the console everything. */
+  private capsOf(c: ConnInfo): Capability[] {
+    if (c.type === 'admin' || c.orgRole === 'superadmin') return [...capabilitiesOf('project')]
+    if (c.type === 'agent') return keyCapabilities(c.scopes ?? [], this.capabilitiesOfEmail(c.maker))
+    if (c.type !== 'runtime' || !c.userId) return []
+    if (c.email) return this.capabilitiesOfEmail(c.email)
+    const [m] = [...this.ctx.storage.sql.exec('SELECT role FROM members WHERE user_id = ?', c.userId)] as any[]
+    return m ? [...PROJECT_ROLES.member.capabilities] : []
+  }
+  /** The capabilities the worker checked for a REST call (it read them from the shared table; the DO only applies them). */
+  private capsOfRequest(request: Request): Capability[] {
+    try { const v = JSON.parse(request.headers.get('x-sa-caps') ?? '[]'); return Array.isArray(v) ? v.filter((c: unknown): c is Capability => isCapability('project', c)) : [] } catch { return [] }
+  }
+  /** Large messages arrive in parts; the hub holds them until whole, so what is inside is checked like any message. */
+  private partsHeld = new Map<string, { frames: any[]; at: number }>()
+  private partsChecked = new WeakSet<object>()
+
   /** The scopes a connection sees with: its own (user:<id>, or the agent key's id) and its groups' — read each time, so
    *  a change to a group applies at once. Stamped by the hub on every message; never taken from a payload. */
   private scopesOf(c: ConnInfo): string[] {
     const member = c.type === 'agent' ? c.userId : c.email ? `email:${c.email.toLowerCase()}` : null
     const groups = member ? [...this.ctx.storage.sql.exec('SELECT grp FROM group_members WHERE member = ?', member)].map((r: any) => `group:${r.grp}`) : []
-    const own = c.type === 'agent' ? [] : c.userId ? [`user:${c.userId}`] : []
+    const own = c.userId ? [`user:${c.userId.replace(/^agent:/, '')}`] : []   // an agent key's own scope is user:<key id>
     return [...own, ...groups]
   }
   private async groupsAdmin(request: Request, path: string): Promise<Response> {
@@ -1341,6 +1386,9 @@ export class ProjectDO extends DurableObject<Env> {
       if (path === '/agent-keys' && request.method === 'GET') return json({ keys: this.agentKeys.list() })
       if (path === '/agent-keys' && request.method === 'POST') {
         if (!by) return json({ error: 'who is creating the key?' }, 400)
+        const givable = scopesGivable(this.capabilitiesOfEmail(by))
+        const over = (Array.isArray(body.scopes) ? body.scopes : []).filter((x: unknown) => isAgentScope(x) && !givable.includes(x))
+        if (over.length) return json({ error: `you cannot give a key what you do not hold: ${over.join(', ')}` }, 403)
         const r = await this.agentKeys.create({ name: body.name, scopes: body.scopes, by, expiresAt: body.expiresAt ?? null })
         this.audit.record({ actor: admin, via: 'admin', action: 'agent-key.create', target: r.record.id, outcome: 'ok', detail: { name: r.record.name, scopes: r.record.scopes, expires_at: r.record.expires_at } })
         return json(r, 201)
@@ -1381,17 +1429,52 @@ export class ProjectDO extends DurableObject<Env> {
     const hubReply = (payload: any) => senderWs.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload }))
     const scopes = sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent' ? this.scopesOf(sender) : undefined
     const envelope: Envelope = { from: { id: sender.wsId, type: sender.type, ...(sender.userId ? { userId: sender.userId } : {}), ...(sender.email ? { email: sender.email } : {}), ...(sender.admin ? { admin: true } : {}), ...(scopes ? { scopes } : {}) }, payload: msg.payload }   // built once — reused by the base routing below AND the fan-out
-    // ── The audit history: everything a person or an agent sends, and every refusal ──
-    if (sender.type === 'agent') {
+    // ── Who may send this: everything a person or an agent sends is checked against what they hold now ──
+    const caps = sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent' ? this.capsOf(sender) : null
+    if (caps) {
       const toType = (msg.to as any)?.type
-      const hubServed = (HUB_MESSAGES as readonly string[]).includes(String(pl.t ?? ''))
-      if ((toType !== 'code-engine' && !hubServed) || !scopeAllows(sender.scopes ?? [], String(pl.t ?? ''))) {
-        const reason = toType !== 'code-engine' && !hubServed ? 'an agent talks only to the engine and the platform' : `this key's scopes (${(sender.scopes ?? []).join(', ') || 'none'}) do not allow ${String(pl.t ?? '(no type)')}`
-        this.auditMessage(sender, pl, 'refused', reason)
-        hubReply({ t: 'error', source: 'hub', reason, reqId: pl.reqId })
+      // A runtime with no person behind it (a code-engine joined with the fast-router key) only reaches the fast-router.
+      if (sender.type === 'runtime' && !sender.userId && toType !== 'fast-router') { hubReply({ t: 'error', source: 'hub', reason: 'who is asking is not known', reqId: pl.reqId }); return }
+      if (sender.userId && pl.t === 'part' && !this.partsChecked.has(msg)) {
+        // Held until whole; then the whole is checked and the parts go on in order.
+        const k = `${sender.wsId}:${String(pl.id)}`
+        const held = this.partsHeld.get(k) ?? { frames: [], at: Date.now() }
+        held.frames.push(msg); this.partsHeld.set(k, held)
+        for (const [hk, h] of this.partsHeld) if (Date.now() - h.at > 10 * 60_000) this.partsHeld.delete(hk)
+        if (held.frames.length < Number(pl.of)) return
+        this.partsHeld.delete(k)
+        let inner: any = null
+        try { inner = JSON.parse(held.frames.map((f) => f.payload).sort((a: any, b: any) => a.part - b.part).map((p: any) => p.data).join('')) } catch { /* not a message */ }
+        const t = String(inner?.t ?? '')
+        const ok = sender.type === 'agent' ? keyAllows(sender.scopes ?? [], caps, t) : can(caps, messageNeeds(t))
+        if (!ok) { this.auditMessage(sender, inner ?? {}, 'refused', `${t || 'this message'} is not allowed for you here`); hubReply({ t: 'error', source: 'hub', reason: `${t || 'this message'} is not allowed for you here`, reqId: inner?.reqId }); return }
+        for (const f of held.frames.sort((a: any, b: any) => a.payload.part - b.payload.part)) { this.partsChecked.add(f); await this.relay(senderWs, sender, f) }
         return
       }
+      if (sender.userId && !(pl.t === 'part' && this.partsChecked.has(msg))) {
+        const t = String(pl.t ?? '')
+        if (sender.type === 'agent') {
+          const hubServed = (HUB_MESSAGES as readonly string[]).includes(t)
+          if ((toType !== 'code-engine' && !hubServed) || !keyAllows(sender.scopes ?? [], caps, t)) {
+            const reason = toType !== 'code-engine' && !hubServed ? 'an agent talks only to the engine and the platform'
+              : !keyAllows(sender.scopes ?? [], [...capabilitiesOf('project')], t) ? `this key's scopes (${(sender.scopes ?? []).join(', ') || 'none'}) do not allow ${t || '(no type)'}`
+              : `the key's maker no longer holds ${messageNeeds(t)}, which ${t} needs`
+            this.auditMessage(sender, pl, 'refused', reason)
+            hubReply({ t: 'error', source: 'hub', reason, reqId: pl.reqId })
+            return
+          }
+        } else if (!can(caps, messageNeeds(t))) {
+          const reason = `${t || 'this message'} needs ${messageNeeds(t)}, which your role here does not hold`
+          this.auditMessage(sender, pl, 'refused', reason)
+          hubReply({ t: 'error', source: 'hub', reason, reqId: pl.reqId })
+          return
+        }
+      }
     }
+    // What the engine is told about the sender's standing: `admin` = may publish (widen what others see) — a person by
+    // their role, an agent key only with the publish scope from a maker who may.
+    if (caps) envelope.from.admin = can(caps, 'project.publish') || undefined
+    if (!envelope.from.admin) delete envelope.from.admin
     // Each session's owner, as their messages pass — so usage tagged with a session is attributed to them.
     if ((pl.t === 'analyse' || pl.t?.startsWith?.('session:')) && (pl.sessionId || pl.session) && (sender.type === 'runtime' || sender.type === 'agent')) {
       const who = this.principalOf(sender)
@@ -1416,7 +1499,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (pl.t === 'activity:list' && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
       const who = this.principalOf(sender)
       const since = new Date(Date.now() - 24 * 3_600_000).toISOString()
-      const rows = sender.admin
+      const rows = can(caps, 'project.audit')
         ? [...this.ctx.storage.sql.exec("SELECT * FROM activities WHERE state = 'running' OR updated_at >= ? ORDER BY updated_at DESC LIMIT 100", since)]
         : [...this.ctx.storage.sql.exec("SELECT * FROM activities WHERE owner = ? AND (state = 'running' OR updated_at >= ?) ORDER BY updated_at DESC LIMIT 100", who ?? '', since)]
       hubReply({ t: 'activity:list', activities: rows, reqId: pl.reqId })
@@ -1430,11 +1513,11 @@ export class ProjectDO extends DurableObject<Env> {
       try {
         if (pl.t === 'program:list') {
           // Only programs whose scope this asker sees (global, their own, their groups'); an admin sees all; one's own drafts always.
-          const sees = sender.admin ? null : new Set(['global', ...this.scopesOf(sender)])
+          const sees = can(caps, 'project.audit') ? null : new Set(['global', ...this.scopesOf(sender)])
           hubReply({ t: 'program:list', programs: this.catalogue.list({ name: pl.name, published: pl.published }).filter((p) => !sees || sees.has(p.scope) || p.owner === who), reqId: pl.reqId })
         }
         else {
-          const e = this.catalogue.publish(String(pl.hash ?? ''), { id: who, admin: !!sender.admin })
+          const e = this.catalogue.publish(String(pl.hash ?? ''), { id: who, admin: can(caps, 'project.publish') })
           this.record('program', e.hash, { ...e, event: 'published' })
           this.audit.record({ actor, via: sender.type === 'agent' ? 'agent' : sender.type === 'admin' ? 'admin' : 'ui', action: 'program.publish', target: e.hash, outcome: 'ok', detail: { name: e.name, version: e.version } })
           hubReply({ t: 'program:published', program: e, reqId: pl.reqId })
@@ -1453,7 +1536,7 @@ export class ProjectDO extends DurableObject<Env> {
       return
     }
     // ── The organisation's warehouse, as far as this project was granted (no engine needed) ──
-    if ((pl.t === 'warehouse:tables' || pl.t === 'warehouse:query') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
+    if ((pl.t === 'warehouse:tables' || pl.t === 'warehouse:query' || pl.t === 'warehouse:append') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
       const who = this.principalOf(sender)
       try {
         if (!who) throw new Error('who is asking is not known')
@@ -1463,8 +1546,18 @@ export class ProjectDO extends DurableObject<Env> {
         const orgDo = this.env.ORG.get(this.env.ORG.idFromName(org))
         if (pl.t === 'warehouse:tables') {
           const r: any = await (await orgDo.fetch(new Request('http://do/warehouse', { headers: { 'x-sa-org': org } }))).json()
-          const tables = (r.tables ?? []).filter((t: any) => t.name in grant).map((t: any) => ({ ...t, columns: grant[t.name] === null ? t.columns : t.columns.filter((c: any) => grant[t.name]!.includes(c.name)) }))
+          const writable = this.writableInForce()
+          const tables = (r.tables ?? []).filter((t: any) => t.name in grant).map((t: any) => ({ ...t, columns: grant[t.name] === null ? t.columns : t.columns.filter((c: any) => grant[t.name]!.includes(c.name)), writable: writable.includes(t.name) }))
           hubReply({ t: 'warehouse:tables', configured: !!r.configured, tables, reqId: pl.reqId })
+        } else if (pl.t === 'warehouse:append') {
+          // Only a table this project's grant makes writable (the organisation's word), by someone who may append here.
+          const table = String(pl.table ?? '')
+          if (!this.writableInForce().includes(table)) throw new Error(`this project may not write ${table || 'that table'} — the organisation grants writing`)
+          const res = await orgDo.fetch(new Request('http://do/warehouse/append', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-org': org }, body: JSON.stringify({ table, rows: pl.rows, project: this._pid, by: who }) }))
+          const out: any = await res.json()
+          if (!res.ok) throw new Error(out.error ?? `the warehouse answered ${res.status}`)
+          this.audit.record({ actor: { kind: sender.type === 'agent' ? 'agent' : 'user', id: who, ...(sender.email ? { email: sender.email } : {}) }, via: sender.type === 'agent' ? 'agent' : 'ui', action: 'warehouse.append', target: table, outcome: 'ok', detail: { rows: out.rows ?? 0 } })
+          hubReply({ t: 'warehouse:appended', ...out, reqId: pl.reqId })
         } else {
           const res = await orgDo.fetch(new Request('http://do/warehouse/query', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-org': org }, body: JSON.stringify({ sql: pl.sql, limit: pl.limit, grant, project: this._pid, by: who }) }))
           const out: any = await res.json()
@@ -1494,7 +1587,7 @@ export class ProjectDO extends DurableObject<Env> {
           const r = await this.sessionStub(String(pl.session ?? '')).fetch('http://do/view')
           const body: any = await r.json()
           if (!r.ok) throw new Error(body.error ?? 'there is no such session')
-          if (body.view.user !== who && !sender.admin) throw new Error(`session ${pl.session} is not yours`)
+          if (body.view.user !== who && !can(caps, 'project.audit')) throw new Error(`session ${pl.session} is not yours`)
           const block = String(pl.block ?? body.view.leaf)
           if (pl.t === 'decision:paths') {
             const step = stepOf(body.view, block)
@@ -1507,16 +1600,19 @@ export class ProjectDO extends DurableObject<Env> {
           }
         } else if (pl.t === 'decision:states') {
           const out = await call(`/states${pl.asOf ? `?asOf=${encodeURIComponent(String(pl.asOf))}` : ''}`)
-          const sees = sender.admin ? null : new Set(['global', ...this.scopesOf(sender)])
+          const sees = can(caps, 'project.audit') ? null : new Set(['global', ...this.scopesOf(sender)])
           hubReply({ t: 'decision:states', asOf: out.asOf, states: out.states.filter((x: any) => !sees || sees.has(x.scope)), reqId: pl.reqId })
         } else if (pl.t === 'decision:state') {
-          hubReply({ t: 'decision:state', ...(await call(`/state/${encodeURIComponent(String(pl.id ?? ''))}`)), reqId: pl.reqId })
+          const one = await call(`/state/${encodeURIComponent(String(pl.id ?? ''))}`)
+          const sees = can(caps, 'project.audit') ? null : new Set(['global', ...this.scopesOf(sender)])
+          if (sees && one?.state && !sees.has(one.state.scope ?? 'global')) throw new Error(`there is no decision state ${pl.id}`)
+          hubReply({ t: 'decision:state', ...one, reqId: pl.reqId })
         } else if (pl.t === 'decision:learn') {
-          if (!sender.admin && sender.type !== 'agent') throw new Error('only an administrator or a learning agent runs the learner')
+          if (!can(caps, 'project.publish')) throw new Error('running the learner needs project.publish')
           hubReply({ t: 'decision:learned', ...(await call('/learn', {})), reqId: pl.reqId })
         } else if (pl.t === 'decision:change') {
-          // The learning path: an admin, or an agent key allowed to learn.
-          if (!sender.admin && sender.type !== 'agent') throw new Error('only an administrator or a learning agent changes the decision memory')
+          // The learning path: someone who may publish, or an agent key allowed to learn made by one.
+          if (!can(caps, 'project.publish')) throw new Error('changing the decision memory needs project.publish')
           const out = await call('/change', { op: pl.op, by: who, why: String(pl.why ?? '') })
           this.audit.record({ actor: { kind: sender.type === 'agent' ? 'agent' : 'user', id: who }, via: sender.type === 'agent' ? 'agent' : 'ui', action: `decision.${pl.op?.op ?? 'change'}`, target: out.written.map((w: any) => w.id).join(','), outcome: 'ok', detail: { why: pl.why ?? '' } })
           hubReply({ t: 'decision:changed', ...out, reqId: pl.reqId })
@@ -1539,7 +1635,7 @@ export class ProjectDO extends DurableObject<Env> {
         if (!viewRes.ok) throw new Error(vb.error ?? 'there is no such session')
         const view = vb.view
         const own = view.user === who
-        if (!own && !sender.admin) throw new Error(`session ${pl.session} is not yours`)
+        if (!own && !can(caps, 'project.audit')) throw new Error(`session ${pl.session} is not yours`)
         if (pl.t === 'artifact:list') { hubReply({ t: 'artifact:list', session: pl.session, ...(await (await stub.fetch('http://do/artifacts')).json() as any), reqId: pl.reqId }); return }
         if (pl.t === 'artifact:get') { const r = await stub.fetch(`http://do/artifact/${encodeURIComponent(String(pl.id ?? ''))}`); const b: any = await r.json(); if (!r.ok) throw new Error(b.error); hubReply({ t: 'artifact:get', session: pl.session, ...b, reqId: pl.reqId }); return }
         // The experiences on the path that led to a step: how they turned out is what this decision says.
@@ -1575,7 +1671,8 @@ export class ProjectDO extends DurableObject<Env> {
           const r0 = await stub.fetch(`http://do/artifact/${encodeURIComponent(String(pl.id ?? ''))}`); const b0: any = await r0.json(); if (!r0.ok) throw new Error(b0.error)
           const last = b0.versions[b0.versions.length - 1]
           if (status === 'approved' && last.status !== 'pending') throw new Error('only a decision awaiting approval is approved')
-          if (status === 'approved' && own && !sender.admin) throw new Error('a decision is approved by someone other than who made it')
+          if (status === 'approved' && own && !can(caps, 'project.manage')) throw new Error('a decision is approved by someone other than who made it')
+          if ((status === 'approved' || status === 'rejected') && !own && !can(caps, 'project.approve')) throw new Error('approving a decision needs project.approve')
           const body = status === 'approved' || status === 'rejected' ? { ...last.body, approvals: [...(last.body.approvals ?? []), { by: who, at: new Date().toISOString(), status, note: pl.note ?? null }] } : last.body
           const r = await stub.fetch('http://do/artifact', { method: 'POST', body: JSON.stringify({ id: last.id, kind: last.kind, title: last.title, status, block: last.block, body, by: who, note: pl.note ?? null }) })
           const out: any = await r.json(); if (!r.ok) throw new Error(out.error)
@@ -1844,7 +1941,7 @@ export class ProjectDO extends DurableObject<Env> {
     const rows = [...this.ctx.storage.sql.exec(
       `SELECT a.email, a.role_id, a.source, a.created_at, r.name AS role_name, r.permissions
          FROM access a LEFT JOIN roles r ON r.id = a.role_id ORDER BY a.email`)] as any[]
-    return this.j({ access: rows.map(r => ({ ...r, permissions: JSON.parse(r.permissions ?? '[]') })) })
+    return this.j({ access: rows.map(r => ({ ...r, capabilities: r.source === 'org-admin' ? PROJECT_ROLES.admin.capabilities : this.roleCapabilities(r.role_id) })) })
   }
 
   private async grantAccess(request: Request): Promise<Response> {
@@ -1853,7 +1950,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (!email) return this.j({ error: 'email required' }, 400)
     const roleId = b.roleId ? String(b.roleId) : 'member'
     // 'org-admin' is set ONLY by the org's own sync (POST /org-admins), never by a grant arriving here.
-    const exists = [...this.ctx.storage.sql.exec('SELECT 1 FROM roles WHERE id = ?', roleId)].length
+    const exists = !!builtinRole('project', roleId) || [...this.ctx.storage.sql.exec('SELECT 1 FROM roles WHERE id = ? AND builtin = 0', roleId)].length > 0
     if (!exists) return this.j({ error: `unknown role "${roleId}"` }, 400)
     this.ctx.storage.sql.exec(
       "INSERT INTO access (email, role_id, source, added_by) VALUES (?, ?, 'direct', ?) " +
@@ -1886,33 +1983,46 @@ export class ProjectDO extends DurableObject<Env> {
     return this.j({ ok: true, orgAdmins: emails.length })
   }
 
+  /** The roles a person may be given here: the built-in ones (their capabilities the code's) and the project's own. */
   private listRoles(): Response {
-    const rows = [...this.ctx.storage.sql.exec('SELECT id, name, permissions, builtin FROM roles ORDER BY builtin DESC, name')] as any[]
-    return this.j({ roles: rows.map(r => ({ ...r, permissions: JSON.parse(r.permissions ?? '[]'), builtin: !!r.builtin })) })
+    const custom = ([...this.ctx.storage.sql.exec('SELECT id, name FROM roles WHERE builtin = 0 ORDER BY name')] as any[]).map((r) => ({ id: r.id, name: r.name, capabilities: this.roleCapabilities(r.id), builtin: false }))
+    return this.j({ roles: [...Object.values(PROJECT_ROLES), ...custom] })
   }
 
+  /** A custom role, made or changed by someone with project.people — never with a capability they do not hold. */
   private async upsertRole(request: Request): Promise<Response> {
     const b = await request.json().catch(() => ({})) as any
-    const id = String(b.id ?? '').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-')
-    const name = String(b.name ?? '').trim()
-    if (!id || !name) return this.j({ error: 'id and name required' }, 400)
-    const perms = Array.isArray(b.permissions) ? b.permissions.map(String) : []
+    const held = this.capsOfRequest(request)
+    const { role, problems } = checkRole('project', { id: b.id, name: b.name, capabilities: b.capabilities ?? b.permissions })
+    if (!role) return this.j({ error: problems.join('; ') }, 400)
+    const over = beyond(role.capabilities, held)
+    if (over.length) return this.j({ error: `you cannot give what you do not hold: ${over.join(', ')}` }, 403)
     this.ctx.storage.sql.exec(
       'INSERT INTO roles (id, name, permissions) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, permissions = excluded.permissions',
-      id, name, JSON.stringify(perms))
-    return this.j({ ok: true, id, name, permissions: perms })
+      role.id, role.name, JSON.stringify(role.capabilities))
+    this.audit.record({ actor: this.actorOf(request, b), via: 'admin', action: 'role.set', target: role.id, outcome: 'ok', detail: { name: role.name, capabilities: role.capabilities } })
+    return this.j({ ok: true, role })
   }
 
   private async deleteRole(request: Request): Promise<Response> {
     const b = await request.json().catch(() => ({})) as any
     const id = String(b.id ?? '')
-    const [row] = [...this.ctx.storage.sql.exec('SELECT builtin FROM roles WHERE id = ?', id)]
+    if (builtinRole('project', id)) return this.j({ error: 'built-in roles cannot be deleted' }, 400)
+    const [row] = [...this.ctx.storage.sql.exec('SELECT 1 FROM roles WHERE id = ?', id)]
     if (!row) return this.j({ error: 'no such role' }, 404)
-    if (row.builtin) return this.j({ error: 'built-in roles cannot be deleted' }, 400)
-    // Holders fall back to the default rather than losing access mid-session.
-    this.ctx.storage.sql.exec("UPDATE access SET role_id = 'member' WHERE role_id = ?", id)
+    const holders = [...this.ctx.storage.sql.exec('SELECT COUNT(*) AS n FROM access WHERE role_id = ?', id)][0] as any
+    if (Number(holders?.n) > 0) return this.j({ error: `${holders.n} ${Number(holders.n) === 1 ? 'person holds' : 'people hold'} this role — give them another first` }, 400)
     this.ctx.storage.sql.exec('DELETE FROM roles WHERE id = ?', id)
+    this.audit.record({ actor: this.actorOf(request, b), via: 'admin', action: 'role.remove', target: id, outcome: 'ok' })
     return this.j({ ok: true, id })
+  }
+
+  /** Who a REST call is from (the worker stamps it). */
+  private actorOf(request: Request, body?: any): { kind: 'user'; id: string; email?: string } {
+    let a: any = null
+    try { a = JSON.parse(request.headers.get('x-sa-actor') ?? 'null') } catch { /* none */ }
+    const email = String(a?.email ?? body?.by ?? '').toLowerCase()
+    return { kind: 'user', id: email || String(a?.id ?? 'unknown'), ...(email.includes('@') ? { email } : {}) }
   }
 
   private async addMember(req: Request): Promise<Response> {

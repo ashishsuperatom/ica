@@ -37,8 +37,10 @@ export function writeCredentials(c: Credentials, env: NodeJS.ProcessEnv = proces
 
 /** The project a key names, or null. */
 export const projectOfKey = (key: string): string | null => /^sak_([0-9a-f-]{36})_[A-Za-z0-9_-]{43}$/.exec(key)?.[1] ?? null
+/** The organisation an organisation key names (sak_org_<org>_<secret>), or null. */
+export const orgOfKey = (key: string): string | null => /^sak_org_([0-9a-z-]{1,64})_[A-Za-z0-9_-]{43}$/.exec(key)?.[1] ?? null
 /** A key as it may be shown: its prefix and the last four characters. */
-export const maskKey = (key: string) => `${key.slice(0, 47)}…${key.slice(-4)}`
+export const maskKey = (key: string) => `${key.slice(0, key.length - 43 + 6)}…${key.slice(-4)}`
 
 export class CliError extends Error {
   constructor(message: string, public code = 1) { super(message) }

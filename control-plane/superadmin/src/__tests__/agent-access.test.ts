@@ -62,6 +62,8 @@ beforeAll(async () => {
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
     durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: SECRET } })
   await call('/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'engine-key', provider: 'external', name: 'Test project' }) })
+  // The keys' maker administers the project (a key acts for its maker, cut to what they hold).
+  await call('/access', { method: 'POST', body: JSON.stringify({ email: 'admin@test.io', roleId: 'admin' }) })
 }, 60_000)
 afterAll(async () => { await mf?.dispose() })
 
@@ -139,10 +141,10 @@ describe('agent keys, identities and the audit history, in the real ProjectDO', 
     const agent = await connect({ role: 'agent', key: made.body.key })
     await agent.until((m) => m.payload?.t === 'welcome')
     agent.send({ to: { type: 'code-engine' }, payload: { t: 'graph:domains', reqId: 'g1' } })
-    expect((await engine.until((m) => m.payload?.reqId === 'g1')).from.scopes).toEqual([])
+    expect((await engine.until((m) => m.payload?.reqId === 'g1')).from.scopes).toEqual([`user:${made.body.record.id}`])   // its own
     await call('/groups/finance/members', { method: 'POST', body: JSON.stringify({ member: `agent:${made.body.record.id}`, by: 'admin@test.io' }) })
     agent.send({ to: { type: 'code-engine' }, payload: { t: 'graph:domains', reqId: 'g2' } })
-    expect((await engine.until((m) => m.payload?.reqId === 'g2')).from.scopes).toEqual(['group:finance'])
+    expect((await engine.until((m) => m.payload?.reqId === 'g2')).from.scopes).toEqual([`user:${made.body.record.id}`, 'group:finance'])
     const groups = (await call('/groups')).body.groups
     expect(groups).toEqual([expect.objectContaining({ name: 'finance', members: [`agent:${made.body.record.id}`] })])
   })
@@ -165,8 +167,9 @@ describe('agent keys, identities and the audit history, in the real ProjectDO', 
   it('the audit history has it all, newest first; a malformed event is refused', async () => {
     const events = (await call('/audit?limit=50')).body.events
     const line = (e: any) => `${e.actor.kind}:${e.actor.id.startsWith('agent:') ? 'agent' : e.actor.id.startsWith('key:') ? 'badkey' : e.actor.id} ${e.via} ${e.action} ${e.outcome}`
-    expect(events.map(line).reverse().slice(0, 11)).toEqual([
+    expect(events.map(line).reverse().slice(0, 12)).toEqual([
       'system:platform system api.post ok',                   // the project set up
+      'system:platform system api.post ok',                   // the keys' maker given the admin role
       'system:platform system api.post refused',              // a key with no scope, refused
       'system:platform system api.post refused',              // a key with an unknown scope, refused
       'user:admin@test.io admin agent-key.create ok',

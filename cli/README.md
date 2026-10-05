@@ -36,6 +36,9 @@ sacli disconnect
 - `login` (key from `--key`, `$SACLI_KEY` or stdin, checked before it is saved), `logout`, `whoami` (masked key)
 - profiles, one project each: `projects`, `use [--here]`, a per-folder `.sacli.json`
 - `agents`; `session open | get [--as-of] | intent | goto`; `ask` (with live narration on stderr)
+- `warehouse tables | query | append` with a project key (its grant; appending needs `warehouse-write` and a table the
+  organisation granted writing); with an organisation key (`sak_org_…`) also `create`, `grants`, `grant [--write]`, `revoke`
+- organisation keys: a profile may hold one (the warehouse over HTTP, no background connection)
 - the background connection: idle limit, lifetime limit, `status`, `disconnect`, cleanup on every way out
 - `--json` on every command; help on every command; exit codes 0 done · 1 refused · 2 usage · 3 key refused · 4 network
 - credentials kept mode 600, with a warning if others can read them; a key passed to the background process only
@@ -48,7 +51,7 @@ sacli disconnect
 - `sacli engine install | upgrade | status`: installs and configures the Superatom engine for a project (Docker first)
 - the agent HTTP API, with the key: domains and concepts (create, edit, suggest), programs (build, upload, publish), and
   what usage shows is missing
-- organisation keys, for org-level acts such as creating a project
+- organisation keys for creating projects
 - `sacli update` (self-update), and a notice when a newer version exists
 - shell completion (bash, zsh, fish, PowerShell), and a man page
 - the key in the OS keychain (macOS Keychain, Windows Credential Manager, libsecret), with the file as the fallback

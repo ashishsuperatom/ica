@@ -55,7 +55,9 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Groups and scope everywhere it matters: groups per project; the hub stamps each sender's scopes on every message; knowledge, agents and programs show only what those scopes see; policies can apply to a group.
 - Agents' own data tools apply the asker's data access (written per turn; unresolvable means nothing is read).
 - Data access per reader: row filters, denials and column masks per source and table (SQL sources; other sources are not filtered yet), for everyone, a role, a person or an agent key, with per-reader attributes (fail closed); resolved by the platform, carried with each session intent, applied by the SQL rewrite to every table read.
-- `sacli`, the Superatom CLI: login with profiles (one project each), agents, sessions, asking questions, JSON output, exit codes, and one background connection per project that cleans up after an hour idle.
+- Permissions, one system for everything (shared/permissions.ts): capabilities in one vocabulary; organisation roles (owner, admin, member, custom — e.g. a data engineer who queries and writes the warehouse) and project roles (admin, member, viewer, custom) as sets of them; every project route, organisation route and hub message names what it needs (unnamed: the strongest); no one gives a role, custom role or key more than they hold; an organisation keeps an owner; a viewer never asks; a message sent in parts is checked whole; a key holds its maker's capabilities cut to its scopes, at every use; publishing (widening what others see) is a capability and a key scope; a new graph node starts in its maker's own scope; graph history and suggestions only for what one sees; members no longer read others' usage, logs or sessions; a domain is released only by its project; the organisation's own record of people, roles and keys.
+- Organisation keys (`sak_org_<org>_…`) for the warehouse; warehouse grants that also allow writing (whole tables); `warehouse:append` from a project within its grant (key scope `warehouse-write`).
+- `sacli`, the Superatom CLI: login with profiles (one project or organisation each), the warehouse (tables, query, append; create and grant with an organisation key), agents, sessions, asking questions, JSON output, exit codes, and one background connection per project that cleans up after an hour idle.
 
 **Platform (Cloudflare)**
 - Control-plane Worker with Org, Project, Global and Channel Durable Objects, serving the admin console and each project's user UI on superatom.site.
@@ -122,14 +124,14 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 **Agents, CLI, audit**
 - The audit history flowing to the platform's own Basin (Pipelines → Catalog → R2 SQL); Analytics Engine dropped, Workers Logs and Traces on.
 - The engine's own audit events, through an ingest endpoint signed with the project key.
-- Organisation keys (creating projects through the CLI).
+- Organisation keys creating projects through the CLI.
+- Permissions still to do: one principal name for a person everywhere; revocable sign-in tokens; service tokens bound to one project; the fast-router key per project; the consoles showing only what one's capabilities allow (the server already refuses); roles and organisation keys in the console.
 - Installing the CLI and the engine with one command, from per-OS releases kept in R2 (latest and every version).
 - CLI extras: self-update, shell completion, OS keychain, `watch`, proxy support, standalone binaries.
 
 **Platform**
 - Changing knowledge on the platform with the engine offline (today every change goes through an engine and is replicated up).
 - The user DO's personalised view (what it keeps beyond sessions and personal state is still being decided).
-- Governance beyond the graph: hierarchical admins (program, group, global) and granting access.
 - Sandboxing agents so their tools cannot bypass data access deliberately (dynamic workers).
 - Engine bridges for the SQL Server, Postgres and REST connectors run from a connection's settings; API and MCP connections in the data source index; organisation-level connections across projects; hundreds more connectors.
 - SCIM directory sync and deprovisioning from the identity provider.

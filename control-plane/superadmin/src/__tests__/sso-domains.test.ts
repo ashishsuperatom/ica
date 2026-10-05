@@ -48,7 +48,7 @@ afterAll(async () => { await mf?.dispose() })
 describe('enterprise sign-in by verified domain', () => {
   it('an admin lets a domain in with a role — not a public mail domain, not as admin', async () => {
     expect((await call('/access-domains', { method: 'POST', body: JSON.stringify({ domain: 'gmail.com', by: 'admin@acme.com' }) })).body.error).toMatch(/public mail domain/)
-    expect((await call('/access-domains', { method: 'POST', body: JSON.stringify({ domain: 'acme.com', roleId: 'admin', by: 'admin@acme.com' }) })).body.error).toMatch(/cannot be made admin/)
+    expect((await call('/access-domains', { method: 'POST', body: JSON.stringify({ domain: 'acme.com', roleId: 'admin', by: 'admin@acme.com' }) })).body.error).toMatch(/as a member at most/)
     expect((await call('/access-domains', { method: 'POST', body: JSON.stringify({ domain: 'acme.com', roleId: 'viewer', by: 'admin@acme.com' }) })).status).toBe(201)
   })
   it('someone from the domain is let in on first arrival with its role, and the grant is recorded; others are refused', async () => {

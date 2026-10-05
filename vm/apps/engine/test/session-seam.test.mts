@@ -109,7 +109,7 @@ test('an agent kept in the composition graph is listed (by its scope) and opens 
   const graphFile = join(home, 'db', 'composition.sqlite')
   mkdirSync(join(home, 'db'), { recursive: true })
   const g = new Store(graphFile)
-  const ana = { id: 'user:ana' }
+  const ana = { id: 'user:ana', admin: true }   // may publish: places the agent in group ops
   governance.write(g, ana, 'c1', 'concept', { title: 'Settled', form: 'text', text: 'A trip is settled when its settlement document exists.' })
   governance.write(g, ana, 'trips-domain', 'domain', { capabilities: [], concepts: ['c1'], files: [] })
   governance.write(g, ana, 'graph-trips', 'agent', { title: 'Trips (graph)', domain: 'trips-domain', programs: ['unsettled-trips'], start: { trips: { branch: 'HYDERABAD' } },
