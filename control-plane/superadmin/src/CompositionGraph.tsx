@@ -6,7 +6,7 @@
 // Drawn only with the semantic components (@superatom/ui).
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Columns, ColumnsSearch, Dialog, Form, Field, Notice, Receipt, Code, Empty, Icon, notify, type ColumnItem, type ColumnSpec } from '@superatom/ui'
+import { Columns, ColumnsSearch, Dialog, markdownToHtml, Form, Field, Notice, Receipt, Code, Empty, Icon, notify, type ColumnItem, type ColumnSpec } from '@superatom/ui'
 import { useProjectHub } from './hub'
 import { cached, keep } from './cache'
 
@@ -15,28 +15,14 @@ interface Node { name: string; title: string; line: string; scope: string; owner
 interface Graph { domains: Node[]; intermediate: Node[]; atomic: Node[] }
 type Focus = { kind: 'domain' | 'intermediate' | 'atomic'; name: string } | null
 
-const FORMS: [string, string][] = [['text', 'Text'], ['bullets', 'Bullet list'], ['numbered', 'Numbered list'], ['worked', 'Worked examples']]
-/** An atomic concept's content as one editable text, and back. */
+/** A concept's content as Markdown — a list or worked examples written before concepts were Markdown read as their Markdown. */
 const toText = (b: Body): string => b.form === 'text' ? String(b.text ?? '')
   : b.form === 'worked' ? (b.items ?? []).map((e: any) => `## ${e.question}\n${(e.steps ?? []).map((s: string, i: number) => `${i + 1}. ${s}`).join('\n')}`).join('\n\n')
-  : (b.items ?? []).join('\n')
+  : b.form === 'numbered' ? (b.items ?? []).map((l: string, i: number) => `${i + 1}. ${l}`).join('\n')
+  : (b.items ?? []).map((l: string) => `- ${l}`).join('\n')
 /** How an intermediate concept is composed: its title, its line, then each atomic concept beneath it — the sum of its parts. */
 const composedText = (title: string, line: string, parts: Node[]) =>
   [`# ${title}${line.trim() ? `\n${line.trim()}` : ''}`, ...parts.map((p) => `## ${p.body.title ?? p.title}\n${toText(p.body).trim()}`)].join('\n\n')
-function fromText(form: string, title: string, text: string): Body {
-  if (form === 'text') return { title, form, text }
-  if (form === 'worked') {
-    const items: { question: string; steps: string[] }[] = []
-    for (const line of text.split('\n')) {
-      const q = /^##\s+(.+)/.exec(line)
-      if (q) { items.push({ question: q[1].trim(), steps: [] }); continue }
-      const s = line.replace(/^\s*\d+[.)]\s*/, '').trim()
-      if (s && items.length) items[items.length - 1].steps.push(s)
-    }
-    return { title, form, items }
-  }
-  return { title, form, items: text.split('\n').map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter(Boolean) }
-}
 
 export function CompositionGraph({ projectId, token }: { projectId: string; token: string | null }) {
   const hub = useProjectHub(projectId, token)
@@ -108,14 +94,14 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   const columns: ColumnSpec[] = [
     { key: 'domains', title: 'Domains', icon: 'lucide:bot', items: graph.domains.filter(hit).map(item), selected: dom, onSelect: (k) => select('domain', k), empty: needle ? 'No domain matches.' : 'No domains yet.' },
     {
-      key: 'intermediate', title: 'Intermediate concepts', icon: 'lucide:layers', caption: needle ? 'Matching the search' : 'Every intermediate concept',
+      key: 'intermediate', title: 'Intermediate concepts', icon: 'lucide:layers',
       items: graph.intermediate.filter(hit).map(item), selected: mid, onSelect: (k) => select('intermediate', k),
       ...(d ? { linked: d.concepts.filter(isMid), linkedTo: d.title, onAttach: (k: string) => void change('graph:join', d.name, k), onDetach: (k: string) => void change('graph:leave', d.name, k) } : {}),
       onNew: () => setMaking({ kind: 'intermediate', into: d?.name ?? null }),
       empty: needle ? 'No intermediate concept matches.' : 'No intermediate concepts yet — make one from atomic concepts.',
     },
     {
-      key: 'atomic', title: 'Atomic concepts', icon: 'lucide:atom', caption: needle ? 'Matching the search' : 'Every atomic concept',
+      key: 'atomic', title: 'Atomic concepts', icon: 'lucide:atom',
       items: graph.atomic.filter(hit).map(item), selected: atom, onSelect: (k) => select('atomic', k),
       ...(atomTarget ? { linked: m ? m.concepts : reach(d!), linkedTo: atomTarget.title, onAttach: (k: string) => void change('graph:join', atomTarget.name, k), onDetach: detachAtom } : {}),
       onNew: () => setMaking({ kind: 'atomic', into: atomTarget?.name ?? null }),
@@ -228,25 +214,24 @@ function useSave(hub: ReturnType<typeof useProjectHub>, name: string, reload: ()
 function AtomicDetail({ hub, node, reload, meta, links }: { hub: ReturnType<typeof useProjectHub>; node: Node; reload: () => Promise<void>; meta: ReactNode; links: ReactNode }) {
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(String(node.body.title ?? ''))
-  const [form, setForm] = useState(String(node.body.form ?? 'text'))
+  // One Markdown text: a concept written in another form (a list, worked examples) opens as its Markdown and is kept so.
   const [text, setText] = useState(toText(node.body))
   const [reason, setReason] = useState('')
   const s = useSave(hub, node.name, reload)
-  const body = fromText(form, title.trim(), text)
+  const body = { title: title.trim(), form: 'text', text }
   return (
     <div className="sa-graphpage__detail">
-      <header className="sa-graphpage__head"><Icon icon="lucide:atom" /><div><h2>{node.title}</h2><p className="sa-note">An atomic concept · {FORMS.find(([f]) => f === node.body.form)?.[1] ?? node.body.form}</p></div>
+      <header className="sa-graphpage__head"><Icon icon="lucide:atom" /><div><h2>{node.title}</h2><p className="sa-note">An atomic concept</p></div>
         {!editing && <button className="sa-btn" onClick={() => setEditing(true)}><Icon icon="lucide:pencil" className="sa-btn__icon" />Edit</button>}</header>
-      {!editing ? <div className="sa-graphpage__text">{toText(node.body) || <span className="sa-note">Empty.</span>}</div> : (
+      {!editing ? (toText(node.body).trim() ? <div className="sa-graphpage__md sa-prose" dangerouslySetInnerHTML={{ __html: markdownToHtml(toText(node.body)) }} /> : <p className="sa-note">Empty.</p>) : (
         <Form onSubmit={() => void s.save(body, reason).then((ok) => ok && setEditing(false))} error={s.err}
           actions={<>{s.suggestable && <button type="button" className="sa-btn" onClick={() => void s.suggest(body, reason).then((ok) => ok && setEditing(false))}>Suggest this change</button>}
             <button type="button" className="sa-btn" onClick={() => setEditing(false)}>Cancel</button><button className="sa-btn sa-btn--primary" disabled={!title.trim() || !text.trim() || s.saving}>Save</button></>}>
-          <Field label="Title"><input id="ac-title" className="sa-input" value={title} onChange={(e) => setTitle(e.target.value)} /></Field>
-          <Field label="Form"><select id="ac-form" className="sa-input" value={form} onChange={(e) => setForm(e.target.value)}>{FORMS.map(([f, l]) => <option key={f} value={f}>{l}</option>)}</select></Field>
-          <Field label="What the agent should know" help={form === 'text' ? 'Plain text; it is composed into the agent\'s context as written.' : form === 'worked' ? 'Each example: a line "## The question", then its steps, one per line.' : 'One item per line.'}>
-            <textarea id="ac-text" className="sa-input sa-graphpage__editor" rows={16} value={text} onChange={(e) => setText(e.target.value)} />
+          <Field label="Title"><input id="ac-title" className="sa-input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="A short name for what it covers" /></Field>
+          <Field label="What the agent should know" help="Markdown — composed into the agent's context as written.">
+            <textarea id="ac-text" className="sa-input sa-graphpage__editor" rows={18} value={text} onChange={(e) => setText(e.target.value)} placeholder="Write it in Markdown: paragraphs, lists, headings, examples." />
           </Field>
-          <Field label="Why (kept in its history)"><input id="ac-why" className="sa-input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="What changed and from what evidence" /></Field>
+          <Field label="Why (kept in its history)"><input id="ac-why" className="sa-input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="What changed, and from what evidence" /></Field>
         </Form>
       )}
       {links}
@@ -299,8 +284,8 @@ function NewIntermediate({ hub, atomic, preset, into, onClose, onMade }: { hub: 
     <Dialog title="New intermediate concept" onClose={onClose}>
       <div className="sa-newmid">
         <Form onSubmit={() => void make()} error={err} actions={<><button type="button" className="sa-btn" onClick={onClose}>Cancel</button><button className="sa-btn sa-btn--primary" disabled={!name || chosen.length < 2}>{into ? `Make and attach to ${into}` : 'Make'}</button></>}>
-          <Field label="Title" help={name ? <>Named <Code>{name}</Code></> : undefined}><input id="nm-title" className="sa-input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Project health" /></Field>
-          <Field label="A line of its own (optional)"><input id="nm-line" className="sa-input" value={line} onChange={(e) => setLine(e.target.value)} placeholder="How a project is judged" /></Field>
+          <Field label="Title" help={name ? <>Named <Code>{name}</Code></> : undefined}><input id="nm-title" className="sa-input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="A short name for what these concepts make together" /></Field>
+          <Field label="A line of its own (optional)"><input id="nm-line" className="sa-input" value={line} onChange={(e) => setLine(e.target.value)} placeholder="One line on what it is, composed above its atomic concepts" /></Field>
           <div className="sa-newmid__pick">
             <div className="sa-newmid__side">
               <h3 className="sa-label">Atomic concepts <span className="sa-col__count">{chosen.length} chosen — at least two</span></h3>
@@ -340,22 +325,20 @@ function SystemPrompt({ hub, domain }: { hub: ReturnType<typeof useProjectHub>; 
 }
 
 /** Make an atomic concept (its content), attached to what is selected, if anything. */
-function NewConcept({ hub, kind, into, onClose, onMade }: { hub: ReturnType<typeof useProjectHub>; kind: 'intermediate' | 'atomic'; into: string | null; onClose: () => void; onMade: (name: string) => void }) {
-  const [title, setTitle] = useState(''), [form, setForm] = useState('text'), [text, setText] = useState(''), [err, setErr] = useState('')
+function NewConcept({ hub, into, onClose, onMade }: { hub: ReturnType<typeof useProjectHub>; kind: 'atomic'; into: string | null; onClose: () => void; onMade: (name: string) => void }) {
+  const [title, setTitle] = useState(''), [text, setText] = useState(''), [err, setErr] = useState('')
   const name = title.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
   const make = async () => {
-    const body = kind === 'intermediate' ? { title: title.trim(), form: 'composed', ...(text.trim() ? { text: text.trim() } : {}), concepts: [] } : fromText(form, title.trim(), text)
-    const r = await hub.call({ t: 'graph:concept', name, body, reason: 'made in the console' }).catch((e) => ({ reason: String(e?.message ?? e) }))
+    const r = await hub.call({ t: 'graph:concept', name, body: { title: title.trim(), form: 'text', text }, reason: 'made in the console' }).catch((e) => ({ reason: String(e?.message ?? e) }))
     if (r?.t !== 'graph:reply') { setErr(r?.reason ?? 'It was not made'); return }
     notify(`Made ${title.trim()}`, 'note'); onMade(name)
   }
   return (
-    <Dialog title={kind === 'intermediate' ? 'New intermediate concept' : 'New atomic concept'} onClose={onClose}>
-      <Form onSubmit={() => void make()} error={err} actions={<><button type="button" className="sa-btn" onClick={onClose}>Cancel</button><button className="sa-btn sa-btn--primary" disabled={!name || (kind === 'atomic' && !text.trim())}>{into ? `Make and attach to ${into}` : 'Make'}</button></>}>
-        <Field label="Title" help={name ? <>Named <Code>{name}</Code></> : undefined}><input id="nc-title" className="sa-input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder={kind === 'intermediate' ? 'Project health' : 'RAG status'} /></Field>
-        {kind === 'atomic' && <Field label="Form"><select id="nc-form" className="sa-input" value={form} onChange={(e) => setForm(e.target.value)}>{FORMS.map(([f, l]) => <option key={f} value={f}>{l}</option>)}</select></Field>}
-        <Field label={kind === 'intermediate' ? 'A line of its own (optional)' : 'What the agent should know'} help={kind === 'atomic' && form !== 'text' ? (form === 'worked' ? 'Each example: "## The question", then its steps, one per line.' : 'One item per line.') : undefined}>
-          <textarea id="nc-text" className="sa-input" rows={kind === 'intermediate' ? 3 : 10} value={text} onChange={(e) => setText(e.target.value)} />
+    <Dialog title="New atomic concept" onClose={onClose}>
+      <Form onSubmit={() => void make()} error={err} actions={<><button type="button" className="sa-btn" onClick={onClose}>Cancel</button><button className="sa-btn sa-btn--primary" disabled={!name || !text.trim()}>{into ? `Make and attach to ${into}` : 'Make'}</button></>}>
+        <Field label="Title" help={name ? <>Named <Code>{name}</Code></> : undefined}><input id="nc-title" className="sa-input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="A short name for what it covers" /></Field>
+        <Field label="What the agent should know" help="Markdown — composed into the agent's context as written.">
+          <textarea id="nc-text" className="sa-input sa-graphpage__editor" rows={12} value={text} onChange={(e) => setText(e.target.value)} placeholder="Write it in Markdown: paragraphs, lists, headings, examples." />
         </Field>
       </Form>
     </Dialog>

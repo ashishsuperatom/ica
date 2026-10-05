@@ -101,7 +101,7 @@ export function Columns({ columns, detail, keep = 'columns' }: { columns: Column
   return (
     <div className="sa-cols" style={{ gridTemplateColumns: names.map((k, i) => (i === names.length - 1 ? `minmax(${width(k)}px, 1fr)` : `${width(k)}px`)).join(' ') }}>
       {columns.map((c) => <div key={c.key} className="sa-cols__cell"><Column col={c} />{handle(c.key)}</div>)}
-      {detail && <div className="sa-cols__cell"><section className="sa-col sa-col--detail" aria-label="Selected">{detail}</section></div>}
+      {detail && <div className="sa-cols__cell"><section className="sa-col sa-col--detail" aria-label="Selected">{detail}</section>{handle('detail')}</div>}
     </div>
   )
 }
