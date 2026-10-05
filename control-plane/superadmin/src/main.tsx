@@ -2,6 +2,8 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ClerkProvider } from '@clerk/react'
 import { App } from './App.js'
+// The platform's design tokens (colours, type, radii) — the console's own names are bound to them (App.tsx CSS).
+import '../../../vm/packages/ui/src/design/tokens.css'
 
 const PUBLISHABLE_KEY = 'pk_test_YXB0LWFsaWVuLTIxLmNsZXJrLmFjY291bnRzLmRldiQ'
 
