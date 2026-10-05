@@ -1052,6 +1052,28 @@ programs' views; people ask on a topic from the left), and the **control plane**
 governance: the same design system). A project's dashboard code stops being a copy: its capabilities become programs,
 its scenarios agents.
 
+### A canvas beside the blocks — the composition graph (proposed, 2026-10-05)
+
+**In the user's words:** some things do not make sense in the block view. The composition graph needs white space to
+see everything properly and think about it, and a system that is more like a graph — a graph-like structure, because it
+is a composition graph, and it is hard to represent it in blocks. Not everything has to be a block; some things can be
+an exception. How to do it, and how to mix the two, is a hard thing to think about.
+
+*Proposal (to agree):* a second kind of step, the **canvas**. A block is read top to bottom inside the thread's column; a
+canvas takes the whole page (no column, no frame), because what it shows is a space, not a document.
+- **Opening one:** it is still a step of the thread — it has a title, sits in the history, Back returns to the block it
+  was opened from — but while it is the current step the thread steps aside: the column is replaced by the canvas, with
+  the steps above it collapsed into a thin strip at the top (click one to go back to the thread).
+- **The composition graph on it:** domains, agents, concepts and programs as nodes; edges are what the graph already
+  says — an agent → its domain and its programs, a domain → its concepts *in order* (the order is the composition).
+  Scope shows as the node's tint (global, a group's, one's own); a pending suggestion as a mark on its node. Laid out
+  left to right (agents → domains → concepts), zoom and pan, filter by domain or scope.
+- **Mixing:** selecting a node opens its detail as an ordinary block in a panel at the right — the same block the thread
+  would show (what it is, the system prompt it composes to, its history, suggestions to decide). Acting in the panel
+  (approve, publish, join a concept) is a structured change like any other, and the canvas redraws. So the canvas is
+  for seeing the shape; blocks stay the place where things are read and decided.
+- **Other canvases later:** the data index (sources → tables → fields), a program's provenance, decision paths.
+
 ### Creating and publishing
 
 - A person works in a session; when it holds knowledge worth keeping they **make an agent from it** (its domain's
