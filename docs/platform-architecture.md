@@ -1089,6 +1089,48 @@ and every reader reads again. Keys are who · organisation · path; least recent
 organisation; reads that change by the second (status, logs, attention) are never cached; a read that changes on every
 ask stops causing re-reads.
 
+### Named versions of the composition graph (proposed, 2026-10-06)
+
+**In the user's words:** is versioning possible in the composition graph? Every change to a node is saved at once — that is
+time travel — but there is no commit-like system: in git we make several changes and commit them. We need a version we
+can name — B1, B2, B3 — and move between. It is not much different really: a name at some point. And a diagram or graph
+of the versions: click one and view the graph as that named version.
+
+*Proposal:* keep saving every change at once (nothing is lost between versions — the change log is the truth); a
+**version** is a name and a message given to one moment of that log (`version` table: name, message, the change it
+stands at, who, when — append-only, like a git tag over the log). On the graph page: **Name this version** (the changes
+since the last version are listed, like a commit's diff); a **versions strip** — a line of named points with the
+changes between them counted; clicking one shows the whole graph as of that version (read-only, the time travel the
+store already has); **Make this the current graph** writes the changes that bring today's graph back to it (new
+changes in the log; history never rewritten). Engine-side in the composition-graph package and its CLI; replicated to
+the platform like every change.
+
+### The warehouse explorer (proposed, 2026-10-06)
+
+**In the user's words:** the warehouse view in the organisation is going to be a big one. Today there is a table list,
+make a table, what was done, and organisation keys. Look at slob's data section — a proper data warehousing UI: all the
+data, search it, the columns and their information on the right. Bring it and make a better version: slob's is view-only;
+here we create tables and do other things. The same viewer is used by a project's admin to view their data — with the
+permission system applied (they cannot see everything); an organisation's admin sees all of it. Missing in slob: an
+ownership mechanism — who owns a table. It is a semantic warehouse: several versions of the same data, virtual views,
+transformations — we do not always work on raw data — but at the very least we see the actual raw data and manage it
+properly. Plan it well, waste no space, show the data properly.
+
+*Proposal (slob's explorer, three panes, the whole page):* **left** — the organisation's tables (raw, and later views)
+with search over table and column names, grouped by owner/kind, row counts; **middle** — the chosen table's rows: search
+across every column, value filters as chips, sort by a header, pages (50/100/250/500), click a cell to copy it,
+shift-click a row; **right** — the table in figures (rows, columns, % null, owner, made, last appended), then every column
+profiled (type glyph, distinct, null %, a sparkline) — a column opens to its spread (histogram, quartiles; dates over
+time) and its commonest values, each a filter. Above the rows: the table's actions for those who may (append rows,
+grant to projects, describe/owner, make a table, later views and versions). **Ownership:** each table has an owner (a
+person or a project) and a description, kept by the organisation (a `warehouse_tables` record beside the catalog). **One
+viewer, two places:** the organisation's Warehouse page (everything, for warehouse.query) and a project's Data → Warehouse
+(only its grant — tables and columns — through the same access check as every project query). The explorer's reads are
+structured (rows, values, profile, spread), turned into SQL by the platform from checked names only, then checked again
+by the warehouse's access check before Basin SQL runs them — never raw SQL from the page.
+*To verify first:* what Basin SQL accepts (subqueries, OFFSET, COUNT DISTINCT, quantiles, ILIKE, GROUP BY) — the
+explorer's reads are shaped by it — with a real table and sample rows.
+
 ### The composition graph in columns (built 2026-10-06)
 
 **In the user's words (2026-10-05):** some things do not make sense in the block view; the composition graph needs white
