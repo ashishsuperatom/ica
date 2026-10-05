@@ -244,11 +244,12 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const readView = (): View => {
     if (/^\/w(\/|$)/.test(location.pathname)) return `work:${location.pathname.replace(/^\/w\/?/, '').replace(/\/+$/, '')}`
     if (/^\/c\//.test(location.pathname)) return 'chat'
-    if (location.pathname.replace(/\/+$/, '') === '/connections') return 'connections'
-    if (location.pathname.replace(/\/+$/, '') === '/agents') return 'agents'
-    if (location.pathname.replace(/\/+$/, '') === '/activity') return 'activity'
+    // One UI: the workspace. The earlier pages and agent views land in it (their old addresses keep working).
+    const bare = location.pathname.replace(/\/+$/, '')
+    if (bare === '') { history.replaceState(null, '', '/w'); return 'work:' }
+    if (bare === '/connections' || bare === '/agents' || bare === '/activity') { history.replaceState(null, '', `/w?page=${bare.slice(1)}`); return 'work:' }
     const agent = /^\/s\/([\w-]+)/.exec(location.pathname)
-    if (agent) return `agent:${agent[1]}`
+    if (agent) { history.replaceState(null, '', `/w/s/${agent[1]}`); return `work:s/${agent[1]}` }
     const seg = location.pathname.replace(/\/+$/, '').split('/').pop()
     return seg && /^[A-Za-z0-9_-]+$/.test(seg) ? seg : 'chat'
   }
@@ -281,6 +282,9 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [sideCollapsed, setSideCollapsed] = useState<boolean>(() => { try { return localStorage.getItem('sa-sidebar-collapsed') === '1' } catch { return false } })
   const setSideCollapsedSaved = useCallback((c: boolean) => { setSideCollapsed(c); try { localStorage.setItem('sa-sidebar-collapsed', c ? '1' : '0') } catch { /* storage blocked */ } }, [])
   const navigate = useCallback((v: View) => {
+    // The earlier agent view and pages open in the workspace.
+    if (v.startsWith('agent:')) v = `work:s/${v.slice(6)}`
+    if (v === 'agents' || v === 'activity' || v === 'connections') { history.pushState(null, '', `/w?page=${v}`); setView('work:'); return }
     history.pushState(null, '', v === 'chat' ? `/c/${sidRef.current}${location.search}` : v.startsWith('work:') ? `/w${v.slice(5) ? `/${v.slice(5)}` : ''}` : v.startsWith('agent:') ? `/s/${v.slice(6)}` : `/${v}`)
     setView(v)
   }, [])
