@@ -23,6 +23,7 @@ export { default as Artifacts, type Artifact } from './components/answer/Artifac
 export { default as BlockFrame, type FrameProps } from './components/frame/BlockFrame.tsx'
 export { default as BranchBar, type Sibling } from './components/frame/BranchBar.tsx'
 export { default as Steps, Separator, type StepItem } from './components/frame/Steps.tsx'
+export { default as LocalThread, useThread, startThread, type BlockApi, type BlockDef, type Registry, type LocalBlock } from './components/frame/LocalThread.tsx'
 export { useBlockHeader, useBlockCopy, type Header, type CopyText } from './components/frame/header.tsx'
 export { blockToText } from './components/frame/copy.ts'
 export { useBlockKeys, revealBlock } from './components/frame/navigation.ts'

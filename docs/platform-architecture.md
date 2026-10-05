@@ -843,6 +843,19 @@ system in plain CSS, proc's tree — is the best of them, and is copied byte for
 - **Intent** — `<Intent>` (ops · action · call, current or new) and one listener; a component owns its intent, the
   engine owns whether it is coherent.
 
+**Every surface is a thread of blocks (the user, 2026-10-05).** "Make an agent and the other things also need to follow
+the same UI and structure — as we built the SLOB UI as block UI — same principle, UI and styles in the user UI, the
+dashboard and even the admin UI. The admin UI also needs the exact same thing — everywhere we bring uniformity.
+[…] We have to re-architect the front end a lot, but finally we should be able to use the same system in our dashboard,
+user agent, the control panel, admin UI and everywhere, so that there is uniformity everywhere and we can use agents in
+every place, and they are basically the same design in terms of the UI — they might just have different functionality."
+So: a page is not a page. Every surface — the workspace, a dashboard, the admin console — is a thread of blocks:
+starting from the sidebar or home, each click opens a block below (or changes the block in place when looking closer),
+a form is a block that locks when sent and leaves a receipt block, going back to an earlier block branches. A session's
+thread is the platform's (the engine's log); a surface without a session (the admin console, the user UI's pages) keeps
+its thread in the browser (the address and history), with the same frames, blocks and design system. Agents can be
+asked on every surface.
+
 **Moving a project's views onto programs (2026-10-05).** A project's existing views (its application's capabilities,
 on its domains' programs) reach sessions through one generic program, `app-views` (in the template, the same for every
 project): its slice is the question the application understands; `run` asks the application, `move` applies its next

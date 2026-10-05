@@ -15,9 +15,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '@superatom/ui/design.css'
 import {
-  AppShell, Sidebar, UserProfile, ConnectionStatus, Steps, BlockFrame, Answer, Paths, Artifacts, Section, Toasts,
-  listenIntents, pathOf, siblingsOf, revealBlock, notify, type Recognised, type Artifact, type StepItem,
+  AppShell, Sidebar, UserProfile, ConnectionStatus, Steps, BlockFrame, Answer, Paths, Artifacts, Toasts, LocalThread,
+  listenIntents, pathOf, siblingsOf, revealBlock, notify, startThread, type Recognised, type Artifact, type StepItem,
 } from '@superatom/ui'
+import { PAGE_BLOCKS, PagesContext } from './pageBlocks'
 import ProgramBlock, { type ProgramUI } from './ProgramBlock'
 
 type Request = (payload: Record<string, unknown>, onProgress?: (m: any) => void) => Promise<any>
@@ -35,8 +36,8 @@ const firstLine = (md: string) => (md ?? '').split('\n').map((l) => l.trim()).fi
 const intentWords = (i?: Intent_) => !i ? '' : i.kind === 'language' ? `Asked: ${i.text ?? ''}` : i.call ? `Ran ${i.call.package} · ${i.call.fn}` : i.action ? `Took ${i.action.package} · ${i.action.id}` : (i.ops ?? []).map((o: any) => `${o.op} ${o.path}${'value' in o ? ` = ${JSON.stringify(o.value)}` : ''}`).join(', ') || 'A change'
 const who = () => { try { const t = localStorage.getItem('sa-token') ?? ''; const p = JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); return { name: String(p.name ?? p.email ?? 'Signed in'), email: p.email ? String(p.email) : undefined } } catch { return { name: 'Signed in', email: undefined } } }
 
-export default function Workspace({ request, projectId, token, projectName, connected, agents, path, go, extraNav }: {
-  request: Request; projectId: string; token?: string | null; projectName: string; connected: boolean
+export default function Workspace({ request, subscribeLive, scopes, projectId, token, projectName, connected, agents, path, go, extraNav }: {
+  request: Request; subscribeLive: (fn: (m: any) => void) => () => void; scopes: string[]; projectId: string; token?: string | null; projectName: string; connected: boolean
   agents: { id: string; name: string }[]
   /** The workspace's address: '' (home), '<session>' or 's/<agent>' (start a session with an agent). */
   path: string; go: (path: string) => void
@@ -60,17 +61,33 @@ export default function Workspace({ request, projectId, token, projectName, conn
     })
   }, [startAgent, request, go])
 
+  // A page of the user UI is a block: from a session it opens a fresh thread starting there; on the pages, a new thread.
+  const [root, setRoot] = useState<string | null>(null)
+  // A page can be linked to (/w?page=agents): the thread starts there.
+  const [pending, setPending] = useState<{ type: string } | null>(() => { const p = new URLSearchParams(location.search).get('page'); return p && PAGE_BLOCKS[p] ? { type: p } : null })
+  const page = (type: string) => { if (sessionId || startAgent) { setPending({ type }); go('') } else startThread(type) }
+  const onPages = !sessionId && !startAgent
   const nav = [{
-    items: [{ key: 'home', label: 'Home', icon: 'lucide:home', active: !sessionId && !startAgent, onClick: () => go('') }],
+    items: [{ key: 'home', label: 'Home', icon: 'lucide:home', active: onPages && root === 'home', onClick: () => page('home') }],
   }, {
     label: 'Agents',
     items: agents.map((a) => ({ key: `a:${a.id}`, label: a.name, icon: 'lucide:bot', onClick: () => go(`s/${a.id}`) })),
   }, {
     label: 'Your sessions',
     items: sessions.slice(0, 12).map((s) => ({ key: `s:${s.session}`, label: s.title || agentName(s.agent), icon: 'lucide:messages-square', active: s.session === sessionId, onClick: () => go(s.session) })),
-  }, { label: 'More', items: extraNav }]
+  }, {
+    label: 'More',
+    items: [
+      { key: 'agents', label: 'Manage agents', icon: 'lucide:bot', active: onPages && root === 'agents', onClick: () => page('agents') },
+      { key: 'activity', label: 'Activity', icon: 'lucide:activity', active: onPages && root === 'activity', onClick: () => page('activity') },
+      { key: 'connections', label: 'Connections', icon: 'lucide:plug', active: onPages && root === 'connections', onClick: () => page('connections') },
+      ...extraNav,
+    ],
+  }]
 
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
+  // One environment for the page blocks, kept while nothing in it changes (their reads depend on it).
+  const pagesEnv = useMemo(() => ({ request, subscribeLive, projectId, token, scopes, agents, sessions, go }), [request, subscribeLive, projectId, token, scopes, agents, sessions, go])
   return (
     <>
       <AppShell
@@ -82,50 +99,12 @@ export default function Workspace({ request, projectId, token, projectName, conn
         artifacts={sessionId ? <Artifacts items={artifacts} onReveal={(b) => revealBlock(b)} /> : undefined}>
         {sessionId
           ? <SessionSteps key={sessionId} session={sessionId} request={request} projectId={projectId} token={token} agentName={agentName} onArtifacts={setArtifacts} />
-          : <Home agents={agents} sessions={sessions} agentName={agentName} go={go} request={request} />}
+          : <PagesContext.Provider value={pagesEnv}>
+              <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} />
+            </PagesContext.Provider>}
       </AppShell>
       <Toasts />
     </>
-  )
-}
-
-function Home({ agents, sessions, agentName, go, request }: { agents: { id: string; name: string }[]; sessions: { session: string; agent: string; title: string; updated?: string }[]; agentName: (id: string) => string; go: (p: string) => void; request: Request }) {
-  // A question with no agent picked: the agent its words reach answers it (else the project's default agent).
-  const [asking, setAsking] = useState('')
-  const [beats, setBeats] = useState<string[]>([])
-  const askAnything = async (text: string) => {
-    const t = text.trim(); if (!t || asking) return
-    const sid = newId()
-    setAsking(t); setBeats(['Finding the agent for this question…'])
-    const m = await request({ t: 'session:start', session: sid, text: t, kind: 'language' }, (p) => { if (p?.t === 'narration' && p.text) setBeats((b) => [...b, String(p.text)]) })
-    setAsking(''); setBeats([])
-    if (m?.t === 'session:view') go(sid); else notify(m?.reason ?? 'The question could not be asked', 'refused')
-  }
-  return (
-    <div className="sa-thread"><div className="sa-thread__column">
-      <div className="sa-home__hero"><h1 className="sa-home__title">Where do you want to start?</h1></div>
-      <form className="sa-askbar__form" onSubmit={(e) => { e.preventDefault(); const f = e.currentTarget.elements.namedItem('q') as HTMLInputElement; void askAnything(f.value) }}>
-        <div className="sa-askbar__field">
-          <input id="sa-ask-anything" name="q" className="sa-askbar__input" placeholder={asking ? 'Working…' : 'Ask anything — the agent that knows answers'} disabled={!!asking} autoComplete="off" />
-          <button className="sa-btn sa-btn--primary" disabled={!!asking}>Ask</button>
-        </div>
-      </form>
-      {asking && <div className="sa-askbar__working"><span className="sa-label">Working on: {asking}</span>{beats.slice(-3).map((b, i) => <div key={i} className="sa-note">{b}</div>)}</div>}
-      <Section icon="lucide:bot" title="Agents" subtitle="Each knows one part of the organisation and the programs that work on it. A session with one is a thread of steps you can go back to and branch from.">
-        {agents.length === 0 ? <p className="sa-note sa-section__empty">No agents you can see yet.</p> : (
-          <div className="sa-sub-grid">
-            {agents.map((a) => <button key={a.id} className="sa-sub-card" onClick={() => go(`s/${a.id}`)}><span className="sa-sub-card__title">{a.name}</span><span className="sa-sub-card__text">Start a session</span></button>)}
-          </div>
-        )}
-      </Section>
-      {sessions.length > 0 && (
-        <Section icon="lucide:history" title="Your sessions" subtitle="Pick up where you left off.">
-          <div className="sa-sub-grid">
-            {sessions.slice(0, 12).map((s) => <button key={s.session} className="sa-sub-card" onClick={() => go(s.session)}><span className="sa-sub-card__title">{s.title || agentName(s.agent)}</span><span className="sa-sub-card__text">{agentName(s.agent)}{s.updated ? ` · ${new Date(s.updated).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}</span></button>)}
-          </div>
-        </Section>
-      )}
-    </div></div>
   )
 }
 
@@ -235,7 +214,11 @@ function SessionSteps({ session, request, projectId, token, agentName, onArtifac
   const [forking, setForking] = useState(false)
   const fork = async (title: string) => {
     const m = await request({ t: 'session:fork', session, name: title, title })
-    if (m?.t === 'session:forked') { notify(`${title} made — yours until it is published`, 'note'); setForking(false) }
+    if (m?.t === 'session:forked') {
+      // What the work made is an artifact of it, on the right: the agent, its domain and what it learned.
+      await request({ t: 'artifact:record', session, kind: 'agent', title: `Agent: ${title}`, body: { agent: m.agent, domain: m.domain, concept: m.concept, scope: m.scope, reasoning: 'made from this session: its questions and the steps taken' } })
+      notify(`${title} made — yours until it is published`, 'note'); setForking(false); void loadArtifacts()
+    }
     else notify(m?.reason ?? 'The agent could not be made', 'refused')
   }
   return (

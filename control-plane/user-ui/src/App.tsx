@@ -1047,13 +1047,10 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
   // only when visited, with its own design system; everything else stays as it is and is reachable from its sidebar.
   if (shownView.startsWith('work:')) return (
     <Suspense fallback={<div style={{ padding: 24, color: '#7a746c' }}>Opening the workspace…</div>}>
-      <Workspace request={request} projectId={projectId} token={token} projectName={proj?.name || 'Superatom'} connected={connected}
+      <Workspace request={request} subscribeLive={subscribeLive} scopes={myScopes} projectId={projectId} token={token} projectName={proj?.name || 'Superatom'} connected={connected}
         agents={sessionAgents} path={shownView.slice(5)} go={(p) => navigate(`work:${p}`)}
         extraNav={[
-          { key: 'chat', label: 'Chat', icon: 'lucide:message-square', onClick: () => navigate('chat') },
-          { key: 'agents', label: 'Manage agents', icon: 'lucide:bot', onClick: () => navigate('agents') },
-          { key: 'activity', label: 'Activity', icon: 'lucide:activity', onClick: () => navigate('activity') },
-          { key: 'connections', label: 'Connections', icon: 'lucide:plug', onClick: () => navigate('connections') },
+          { key: 'chat', label: 'Chat (earlier)', icon: 'lucide:message-square', onClick: () => navigate('chat') },
           ...laneNames.map((n) => ({ key: `lane:${n}`, label: lanes[n].label, icon: 'lucide:terminal', onClick: () => navigate(n) })),
         ]} />
     </Suspense>
