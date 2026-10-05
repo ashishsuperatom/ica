@@ -4,7 +4,7 @@
 
 /* ── App shell ── */
 .sa-app { display: flex; height: 100vh; padding-top: var(--topbar-h); }
-.sa-app__main { display: flex; flex-direction: column; flex: 1; min-width: 0; position: relative; background: var(--surface); }
+.sa-app__main { display: flex; flex-direction: column; flex: 1; min-width: 0; position: relative; background: var(--page); }
 .sa-app__page { flex: 1; min-height: 0; overflow-y: auto; }
 .sa-app__pill { position: absolute; top: var(--sp-2); right: var(--sp-3); z-index: var(--z-pill); }
 .sa-app__topbar { position: fixed; top: 0; left: 0; right: 0; height: var(--topbar-h); background: var(--surface); border-bottom-width: 1px; display: flex; align-items: center; padding: 0 var(--sp-4); z-index: var(--z-topbar); }
@@ -163,10 +163,6 @@
 .sa-artifacts { width: var(--artifacts-w); flex: none; border-left: 1px solid var(--line); background: var(--sidebar); display: flex; flex-direction: column; min-height: 0; }
 .sa-artifacts__head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); min-height: 52px; padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--line); }
 .sa-artifacts__toggle { margin-left: auto; }
-.sa-artifacts--rail { width: 52px; }
-.sa-artifacts--rail .sa-artifacts__head { padding: var(--sp-3) var(--sp-2); justify-content: center; }
-.sa-artifacts--rail .sa-artifacts__toggle { margin: 0; }
-.sa-artifacts__count { margin: var(--sp-2) auto 0; min-width: 24px; height: 24px; padding: 0 var(--sp-1h); border-radius: var(--r-full); background: var(--panel); color: var(--muted); font-size: var(--t-xs); font-variant-numeric: tabular-nums; }
 .sa-artifacts__body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-3) var(--sp-4); }
 .sa-artifacts__empty { padding: var(--sp-2) 0; }
 .sa-artifacts__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
@@ -214,3 +210,11 @@
 .sa-home__ask .sa-askbar { position: static; padding: 0; background: none; }
 .sa-home__ask .sa-askbar__form { max-width: none; }
 .sa-artifacts__make { margin-top: var(--sp-3); }
+
+/* The artifacts pane, closed: a small square in the top-right corner (under the connection pill), with a badge */
+.sa-artifacts__fab { position: fixed; top: 44px; right: var(--sp-3); z-index: var(--z-pill); width: 36px; height: 36px; display: grid; place-items: center; border-radius: 11px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); box-shadow: var(--shadow-card); transition: color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), transform var(--dur-1) var(--ease); }
+.sa-artifacts__fab > svg { width: 17px; height: 17px; }
+.sa-artifacts__fab:hover { color: var(--primary-strong); border-color: var(--primary); transform: translateY(-1px); }
+.sa-artifacts__fab[data-has='true'] { color: var(--primary-strong); }
+.sa-artifacts__badge { position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--r-full); background: var(--primary); color: var(--on-accent); font-size: 10.5px; font-weight: var(--w-semibold); line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--page); animation: sa-arrive var(--dur-arrive) var(--ease-out-arrive) both; }
+@media (max-width: 1100px) { .sa-artifacts__fab { display: none; } }

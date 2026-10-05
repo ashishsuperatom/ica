@@ -115,3 +115,5 @@
 .sa-dialog__frame { width: min(41rem, 100%); max-height: calc(100vh - 2 * var(--sp-4)); overflow: auto; }
 /* Inside a block the frame already names the screen: the page header keeps its line and its actions */
 .sa-block .sa-pagehead__title { display: none; }
+/* An action bar inside a section's body sits on the body's gutter, not a second one */
+.sa-section__body .sa-actionbar, .sa-form .sa-actionbar { padding: 0; }

@@ -158,7 +158,9 @@ describe('seal / unseal', () => {
   it('refuses tampered ciphertext (GCM authentication)', async () => {
     const master = sealKeygen()
     const [v, iv, ct] = (await seal('secret', master)).split('.')
-    const flipped = ct.slice(0, -2) + (ct.slice(-2) === 'AA' ? 'AB' : 'AA')
+    // A character in the middle (the last one may carry only padding bits, which decode to the same bytes).
+    const i = Math.floor(ct.length / 2)
+    const flipped = ct.slice(0, i) + (ct[i] === 'A' ? 'B' : 'A') + ct.slice(i + 1)
     await expect(unseal([v, iv, flipped].join('.'), master)).rejects.toThrow()
   })
 })

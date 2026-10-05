@@ -9,6 +9,9 @@
  */
 
 :root {
+  /* An arrival: how long a new item or card takes to appear (motion.css); 50–100 ms, never more. */
+  --dur-arrive: 80ms;
+  --ease-out-arrive: cubic-bezier(0.2, 0.7, 0.3, 1);
   /* ── Colour · text: how much a line matters ───────────────────────────────────────────────────── */
   --ink: #1f2a37; /* content: values, names, anything read to decide */
   --muted: #5b6b7f; /* explanation: cases beside a value, notes, secondary figures */

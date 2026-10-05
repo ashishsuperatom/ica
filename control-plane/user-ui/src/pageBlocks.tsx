@@ -56,8 +56,8 @@ function Home() {
               <button type="button" onClick={() => env.go(`s/${a.id}`)} className="sa-card sa-card--lift sa-action-card" style={{ '--accent': accent } as React.CSSProperties} title={a.look.says}>
                 <span className="sa-action-card__tile"><Icon icon={icon} /></span>
                 <div className="sa-action-card__body">
-                  <p className="sa-action-card__title">{a.name}</p>
-                  <p className="sa-action-card__text">{a.look.says || 'Start a session'}</p>
+                  <p className="sa-action-card__title">{a.look.main?.label ?? a.name}</p>
+                  <p className="sa-action-card__text">{a.look.main?.says ?? (a.look.says || 'Start a session')}</p>
                 </div>
                 <span className="sa-action-card__cta">Open <Icon icon="mdi:arrow-right" /></span>
               </button>
@@ -300,7 +300,7 @@ function ConnectionBlock() {
   }
   const cols = rows?.length ? Object.keys(rows[0]).slice(0, 8) : []
   return (<div className="sa-stack">
-    {test && <Notice state={test.ok ? 'ok' : 'critical'}>{test.ok ? `Connected${test.message ? ` — ${test.message}` : ''}.` : `It does not answer: ${test.message ?? 'no reason given'}`}</Notice>}
+    {test && <Notice state={test.ok ? 'ok' : 'critical'}>{test.ok ? (test.message ? `It works — ${test.message}.` : 'It works.') : `It does not answer: ${test.message ?? 'no reason given'}`}</Notice>}
     {err && <Notice state="critical">{err}</Notice>}
     {!offers ? <Empty icon="lucide:loader">Asking what it offers…</Empty> : (<>
       <Section icon="lucide:table" title="What it reads" subtitle={`${offers.entities.length} thing${offers.entities.length === 1 ? '' : 's'} to read`}>

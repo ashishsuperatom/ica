@@ -45,6 +45,7 @@ export function checkBody(kind: Kind, body: unknown): string[] {
     if (b.start !== undefined && (typeof b.start !== 'object' || Array.isArray(b.start))) out.push('an agent\'s start is fields by slice')
     if (b.ica !== undefined && typeof b.ica !== 'string') out.push('an agent\'s ica names the agent that answers in words')
     for (const k of ['icon', 'accent', 'says'] as const) if (b[k] !== undefined && typeof b[k] !== 'string') out.push(`an agent's ${k} is text`)
+    if (b.main !== undefined && (typeof b.main !== 'object' || typeof b.main?.label !== 'string' || (b.main.says !== undefined && typeof b.main.says !== 'string'))) out.push('an agent\'s main view has a label and perhaps a line')
     if (b.starts !== undefined && (!Array.isArray(b.starts) || b.starts.some((x: any) => !x || typeof x.key !== 'string' || !x.key || typeof x.label !== 'string' || !x.label || typeof x.start !== 'object' || Array.isArray(x.start) || (x.says !== undefined && typeof x.says !== 'string'))))
       out.push('an agent\'s starts are each a key, a label, an optional line, and a start (fields by slice)')
     return out

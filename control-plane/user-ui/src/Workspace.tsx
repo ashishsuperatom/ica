@@ -34,7 +34,7 @@ interface View {
 }
 interface SessionMsg { t: string; reason?: string; view?: View; uis?: ProgramUI[]; actions?: { package: string; label: string; intent: any }[]; functions?: Record<string, string[]>; result?: { block: string; opened: boolean; stale?: boolean } }
 /** An agent as the workspace lists it: its look (an iconify icon, an accent, one line) and its starting points. */
-export interface WorkAgent { id: string; name: string; isDefault?: boolean; look: { icon?: string; accent?: string; says?: string }; starts: { key: string; label: string; says: string }[] }
+export interface WorkAgent { id: string; name: string; isDefault?: boolean; look: { icon?: string; accent?: string; says?: string; main?: { label: string; says?: string } }; starts: { key: string; label: string; says: string }[] }
 
 const newId = () => `ses-${crypto.randomUUID()}`
 const plain = (s: string) => s.replace(/\*\*|__|`|^#+\s*|^>\s*/g, '').replace(/(^|\s)_([^_]+)_(?=\s|$)/g, '$1$2').trim()
@@ -152,7 +152,7 @@ export default function Workspace({ request, subscribeLive, scopes, projectId, t
         <ProgramEnvContext.Provider value={programEnv}>
           {opening
             ? <div className="sa-work"><Steps onSwitch={() => {}} items={[{ id: 'opening', at: new Date().toISOString(), node: (
-                <BlockFrame id="opening" step={1} label={opening.name} title={(startKey && opening.starts.find((x) => x.key === startKey)?.label) || opening.name} subtitle="Opening…" busy
+                <BlockFrame id="opening" step={1} label={opening.name} title={(startKey && opening.starts.find((x) => x.key === startKey)?.label) || opening.name} subtitle={opening.look.says} busy
                   icon={opening.look.icon} accent={accentOf(opening.look.accent)}><StepSkeleton label="Opening" /></BlockFrame>
               ) }]} /></div>
             : sessionId
@@ -322,7 +322,7 @@ function SessionSteps({ session, request, fetchFile, agentOf, onArtifacts, artif
       const fromIdx = pending.from ? path.indexOf(pending.from) : path.length - 1
       steps.push({ id: 'pending', at: new Date().toISOString(), node: (
         <BlockFrame id="pending" step={path.length + 1} label={pending.beats ? 'Question' : agent.name} title={pending.label || 'The next step'} busy
-          cause={pending.beats ? undefined : 'Opening'} from={fromIdx >= 0 ? { id: path[fromIdx], step: fromIdx + 1, onPath: true } : undefined} onReveal={revealBlock}
+          cause={pending.beats ? undefined : pending.label} from={fromIdx >= 0 ? { id: path[fromIdx], step: fromIdx + 1, onPath: true } : undefined} onReveal={revealBlock}
           icon={pending.beats ? 'lucide:message-circle-question' : agent.look.icon} accent={pending.beats ? 'var(--series-2)' : accentOf(agent.look.accent)}>
           {pending.beats ? <div className="sa-card" aria-busy="true" aria-live="polite"><BeatRows beats={pending.beats} live /></div> : <StepSkeleton />}
         </BlockFrame>

@@ -1,0 +1,20 @@
+/*
+ * MOTION — things arrive, they do not pop. When an item or a card first appears (the sidebar filling as the network
+ * answers, a step's cards replacing its skeleton) it rises in: 80 ms, eased out, each a few milliseconds after the one
+ * before it in its group. Only on arrival — a re-render keeps what is already there still. Never longer than 100 ms;
+ * nothing at all when the person asks for less motion (base.css).
+ */
+@keyframes sa-arrive { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+.sa-nav-item,
+.sa-block__body .sa-card,
+.sa-block__body .sa-sub-card,
+.sa-block__body .sa-next > *,
+.sa-question > * { animation: sa-arrive var(--dur-arrive) var(--ease-out-arrive) both; }
+
+/* One after another within a group: a short step each, the cascade itself held under ~100 ms. */
+.sa-sidebar__group > :nth-child(2), .sa-kpi-grid > :nth-child(2), .sa-sub-grid > :nth-child(2), .sa-stack > :nth-child(2), .sa-next > :nth-child(2), .sa-question > :nth-child(2) { animation-delay: 10ms; }
+.sa-sidebar__group > :nth-child(3), .sa-kpi-grid > :nth-child(3), .sa-sub-grid > :nth-child(3), .sa-stack > :nth-child(3), .sa-next > :nth-child(3), .sa-question > :nth-child(3) { animation-delay: 20ms; }
+.sa-sidebar__group > :nth-child(4), .sa-kpi-grid > :nth-child(4), .sa-sub-grid > :nth-child(4), .sa-stack > :nth-child(4), .sa-next > :nth-child(4), .sa-question > :nth-child(4) { animation-delay: 30ms; }
+.sa-sidebar__group > :nth-child(5), .sa-kpi-grid > :nth-child(5), .sa-sub-grid > :nth-child(5), .sa-stack > :nth-child(5), .sa-next > :nth-child(5), .sa-question > :nth-child(5) { animation-delay: 40ms; }
+.sa-sidebar__group > :nth-child(n+6), .sa-kpi-grid > :nth-child(n+6), .sa-sub-grid > :nth-child(n+6), .sa-stack > :nth-child(n+6), .sa-next > :nth-child(n+6), .sa-question > :nth-child(n+6) { animation-delay: 50ms; }

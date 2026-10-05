@@ -284,7 +284,7 @@ export interface AgentSpec {
   /** Its starting points: each opens a session on a STATE of its own (fields by slice over the agent's start). */
   starts?: AgentStart[]
 }
-export interface AgentLook { icon?: string; accent?: string; says?: string }
+export interface AgentLook { icon?: string; accent?: string; says?: string; /** Its main view: what opening it shows, named as that view is. */ main?: { label: string; says?: string } }
 export interface AgentStart { key: string; label: string; says?: string; start: Record<string, Record<string, unknown>> }
 
 export function checkAgent(v: unknown): Problems {

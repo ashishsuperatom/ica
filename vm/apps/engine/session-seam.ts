@@ -137,7 +137,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
   const fromNode = (n: { name: string; body: any; scope: string; owner: string | null }): AgentSpec => ({
     id: n.name, name: String(n.body.title ?? n.name), scope: n.scope as AgentSpec['scope'], owner: n.owner ?? 'platform', domain: n.body.domain,
     programs: n.body.programs ?? [], tools: n.body.tools ?? [], ...(n.body.start ? { start: n.body.start } : {}), ui: { start: n.body.ui?.start ?? '' }, ica: n.body.ica ?? 'composer', ...(n.body.isDefault ? { isDefault: true } : {}),
-    look: { ...(n.body.icon ? { icon: n.body.icon } : {}), ...(n.body.accent ? { accent: n.body.accent } : {}), ...(n.body.says ? { says: n.body.says } : {}) }, starts: Array.isArray(n.body.starts) ? n.body.starts : [],
+    look: { ...(n.body.icon ? { icon: n.body.icon } : {}), ...(n.body.accent ? { accent: n.body.accent } : {}), ...(n.body.says ? { says: n.body.says } : {}), ...(n.body.main?.label ? { main: { label: String(n.body.main.label), ...(n.body.main.says ? { says: String(n.body.main.says) } : {}) } } : {}) }, starts: Array.isArray(n.body.starts) ? n.body.starts : [],
   })
   function graphAgents(): AgentSpec[] {
     const s = graphStore(); if (!s) return []

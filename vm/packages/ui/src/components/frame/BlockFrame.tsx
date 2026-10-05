@@ -50,6 +50,9 @@ export default function BlockFrame(p: FrameProps) {
       notify(`${name} copied`, 'note')
     } catch (err) { notify(`Could not copy: ${err instanceof Error ? err.message : String(err)}`, 'error') }
   }
+  // Working shows ONE sign: before the step has anything to show, the badge spins (and the step's own skeleton fills
+  // it); once it has content and is being changed in place, the badge keeps its icon and a spinner sits by the title.
+  const empty = !content.current?.textContent?.trim()
   const toggle = () => setCollapsed(!collapsed)
   return (
     <article id={`block-${p.id}`} className="sa-block" data-block={p.id}>
@@ -57,13 +60,13 @@ export default function BlockFrame(p: FrameProps) {
         onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget && (e.preventDefault(), toggle())}
         className="sa-block__head" title={collapsed ? 'Open this step' : 'Collapse this step'}>
         <span className="sa-badge" style={{ background: p.accent ?? 'var(--series-1)' }} title={`Step ${p.step}`}>
-          {p.busy && !content.current?.textContent ? <span className="sa-spinner" /> : p.icon ? <Icon icon={p.icon} /> : p.step}
+          {p.busy && empty ? <span className="sa-spinner" aria-label="Working" /> : p.icon ? <Icon icon={p.icon} /> : p.step}
         </span>
         <div className="sa-block__heading">
           <div className="sa-block__title-row">
             {label && title !== label && <span className="sa-label sa-block__kind">{label}</span>}
             <h2 ref={titleRef} className="sa-block__title" title={typeof title === 'string' ? title : undefined}>{title}</h2>
-            {p.busy && <span className="sa-spinner sa-faint" aria-label="Working" />}
+            {p.busy && !empty && <span className="sa-spinner sa-faint" aria-label="Working" />}
           </div>
           <div className="sa-block__subtitle" title={p.cause ?? (typeof (header.subtitle ?? p.subtitle) === 'string' ? String(header.subtitle ?? p.subtitle) : undefined)}>
             {p.cause && p.from ? (<>

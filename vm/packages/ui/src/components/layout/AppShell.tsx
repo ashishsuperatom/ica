@@ -1,8 +1,8 @@
 // The app shell, the same for every surface: where to go on the left, the thread in the middle, the artifacts on the
 // right; the phone header; the sidebar's and the pane's states remembered per browser; the connection status.
 //
-// The artifacts pane opens and closes from one place: its head's top-right corner. Closed, it narrows to a rail whose
-// head holds the same button in the same corner.
+// The artifacts pane opens and closes from one corner, the top right: open, its head's button closes it; closed, it is a
+// small square there with a badge saying how many artifacts there are, and opens it.
 
 import { useState, type ReactNode } from 'react'
 import { Icon } from '@iconify/react'
@@ -19,7 +19,7 @@ export default function AppShell({ sidebar, children, artifacts, artifactsCount,
   status?: ReactNode
 }) {
   const [collapsed, setCollapsed] = useState(() => (typeof window !== 'undefined' && window.innerWidth < 768 ? true : recall<boolean>('sidebar-collapsed', false)))
-  const [paneOpen, setPaneOpen] = useState(() => recall<boolean>('artifacts-open', true))
+  const [paneOpen, setPaneOpen] = useState(() => recall<boolean>('artifacts-open', false))
   const toggle = (c: boolean) => { setCollapsed(c); if (window.innerWidth >= 768) remember('sidebar-collapsed', c) }
   const pane = (o: boolean) => { setPaneOpen(o); remember('artifacts-open', o) }
   return (
@@ -34,19 +34,24 @@ export default function AppShell({ sidebar, children, artifacts, artifactsCount,
           {status && <div className="sa-app__pill">{status}</div>}
           <main className="sa-app__page">{children}</main>
         </div>
-        {artifacts && (
-          <aside className={`sa-artifacts${paneOpen ? '' : ' sa-artifacts--rail'}`} aria-label="Artifacts">
+        {artifacts && paneOpen && (
+          <aside className="sa-artifacts" aria-label="Artifacts">
             <div className="sa-artifacts__head">
-              {paneOpen && <span className="sa-label">Artifacts</span>}
-              <button className="sa-icon-btn sa-artifacts__toggle" onClick={() => pane(!paneOpen)} aria-expanded={paneOpen}
-                title={paneOpen ? 'Hide the artifacts' : 'Show the artifacts'} aria-label={paneOpen ? 'Hide the artifacts' : 'Show the artifacts'}>
-                <Icon icon={paneOpen ? 'lucide:panel-right-close' : 'lucide:panel-right-open'} />
+              <span className="sa-label">Artifacts</span>
+              <button className="sa-icon-btn sa-artifacts__toggle" onClick={() => pane(false)} aria-expanded title="Hide the artifacts" aria-label="Hide the artifacts">
+                <Icon icon="lucide:panel-right-close" />
               </button>
             </div>
-            {paneOpen
-              ? <div className="sa-artifacts__body">{artifacts}</div>
-              : !!artifactsCount && <button className="sa-artifacts__count" onClick={() => pane(true)} title={`${artifactsCount} artifacts`}>{artifactsCount}</button>}
+            <div className="sa-artifacts__body">{artifacts}</div>
           </aside>
+        )}
+        {/* Closed, the pane is a small square in the same corner, saying how many there are; it opens the pane. */}
+        {artifacts && !paneOpen && (
+          <button className="sa-artifacts__fab" onClick={() => pane(true)} aria-expanded={false} data-has={!!artifactsCount}
+            title={artifactsCount ? `${artifactsCount} artifact${artifactsCount === 1 ? '' : 's'} — show them` : 'Artifacts — nothing yet'} aria-label="Show the artifacts">
+            <Icon icon="lucide:layers" />
+            {!!artifactsCount && <span className="sa-artifacts__badge">{artifactsCount > 99 ? '99+' : artifactsCount}</span>}
+          </button>
         )}
       </div>
     </>
