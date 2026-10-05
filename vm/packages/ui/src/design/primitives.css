@@ -17,6 +17,10 @@
 .sa-btn:disabled { opacity: 0.5; }
 .sa-btn--primary { background: var(--primary); color: var(--on-accent); border-color: var(--primary); }
 .sa-btn--primary:not(:disabled):hover { background: var(--primary-strong); border-color: var(--primary-strong); color: var(--on-accent); }
+.sa-btn--danger { color: var(--loss-ink); border-color: var(--loss-line); }
+.sa-btn--danger:not(:disabled):hover { background: var(--loss-wash); border-color: var(--loss); color: var(--loss-ink); }
+.sa-btn--danger.sa-btn--primary { background: var(--loss); border-color: var(--loss); color: var(--on-accent); }
+.sa-btn--danger.sa-btn--primary:not(:disabled):hover { background: var(--loss-ink); border-color: var(--loss-ink); color: var(--on-accent); }
 .sa-btn--pill { border-radius: var(--r-full); color: var(--ink); border-color: var(--line-strong); }
 .sa-btn--pill:not(:disabled):hover { border-color: var(--primary); color: var(--primary-strong); background: var(--hover-wash); }
 .sa-btn--link { height: auto; padding: 0 var(--sp-1); border: 0; background: none; color: var(--muted); font-weight: var(--w-regular); }
@@ -92,6 +96,9 @@
 .sa-input--text { width: 8rem; }
 .sa-input--date { width: 9.5rem; font-variant-numeric: tabular-nums; }
 .sa-input:disabled { opacity: 0.6; }
+/* Several lines: the field grows with its rows; code and model names read in the mono face. */
+textarea.sa-input, .sa-input--area { height: auto; min-height: 4.5rem; padding-block: var(--sp-2); line-height: var(--lh-normal); resize: vertical; }
+.sa-input--mono { font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: var(--t-sm); }
 .sa-field { display: inline-flex; align-items: center; gap: var(--sp-1h); }
 .sa-field__label { font-size: var(--t-xs); color: var(--muted); max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sa-stepper { display: inline-flex; align-items: center; gap: var(--sp-1); }

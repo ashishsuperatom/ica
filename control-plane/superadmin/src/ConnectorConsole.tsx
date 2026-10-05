@@ -9,6 +9,9 @@ import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import type { Hub } from './hub'
 import { CodexEventLog, mergeEvent, type AgentEvent } from './CodexEventLog'   // codex (events-kind) view
+import { PageHeader, Status } from '@superatom/ui'
+
+const TERM_BG = '#0d0f0d'   // the terminal's background: xterm's theme and its frame agree
 
 // Uses the ONE shared project hub (from ProjectDetailPage) — it opens NO socket of its own.
 export function ConnectorConsole({ hub }: { hub: Hub }) {
@@ -37,7 +40,7 @@ export function ConnectorConsole({ hub }: { hub: Hub }) {
   useEffect(() => {
     if (!elRef.current) return
     const term = new Terminal({ cursorBlink: false, fontSize: 11, convertEol: false, cols: COLS, rows: ROWS, scrollback: 8000,
-      theme: { background: '#0d0f0d', foreground: '#e6e2da', ...ANSI } })
+      theme: { background: TERM_BG, foreground: '#e6e2da', ...ANSI } })
     term.open(elRef.current)
     termRef.current = term
     // Raw keystrokes/paste typed in the terminal go straight to the connector's PTY (drives claude directly —
@@ -73,24 +76,19 @@ export function ConnectorConsole({ hub }: { hub: Hub }) {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, height: 'calc(100vh - 210px)', minHeight: 460 }}>
-      <div className="between">
-        <div>
-          <strong>Coding agent</strong>
-          <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>Connect a data source or run an infra task — the agent works live in the terminal.</div>
-        </div>
-        <span className="muted" style={{ fontSize: 12 }}>{status === 'live' ? 'connected' : status}</span>
-      </div>
-      <div style={{ flex: 1, minHeight: 0, background: '#0d0f0d', borderRadius: 10, padding: '8px 10px', overflow: 'auto' }}>
+    <div className="sa-stack" style={{ height: 'calc(100vh - 210px)', minHeight: 460 }}>
+      <PageHeader title="Coding agent" subtitle="Connect a data source or run an infrastructure task. The agent works live in the terminal." actions={<Status state={status === 'live' ? 'ok' : status === 'connecting' ? 'running' : 'attention'}>{status === 'live' ? 'connected' : status}</Status>} />
+      {/* the terminal's frame: its height is what xterm fills, its background the terminal's own */}
+      <div className="sa-card sa-scroll" style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 'var(--sp-2) var(--sp-2h)', background: streamKind === 'pty' ? TERM_BG : undefined }}>
         {/* pty (claude) → xterm, kept mounted so its buffer survives; events (codex) → the structured log */}
         <div ref={elRef} style={{ height: '100%', display: streamKind === 'pty' ? 'block' : 'none' }} />
         {streamKind === 'events' && <CodexEventLog events={events} busy={busy} />}
       </div>
-      <form className="row" style={{ gap: 8 }} onSubmit={(e) => { e.preventDefault(); if (!input.trim()) return; send(input); setInput('') }}>
-        <input className="input" style={{ flex: 1 }} value={input} onChange={(e) => setInput(e.target.value)}
+      <form className="sa-row" onSubmit={(e) => { e.preventDefault(); if (!input.trim()) return; send(input); setInput('') }}>
+        <input className="sa-input sa-grow" aria-label="Message" value={input} onChange={(e) => setInput(e.target.value)}
           placeholder={status === 'live' ? 'Ask the connector agent…' : 'Connecting…'}
           disabled={busy || status !== 'live'} />
-        <button className="btn" disabled={busy || status !== 'live' || !input.trim()}>{busy ? 'Working…' : 'Send'}</button>
+        <button className="sa-btn sa-btn--primary" disabled={busy || status !== 'live' || !input.trim()}>{busy ? 'Working…' : 'Send'}</button>
       </form>
     </div>
   )

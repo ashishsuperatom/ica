@@ -7,6 +7,7 @@
 // THIS FILE IS CANONICAL. The user-ui has a COPY (control-plane/user-ui/src/CodexEventLog.tsx) that references
 // this one — make changes HERE first, then sync the copy. (Deliberate copy, not a shared import.)
 import { useEffect, useState } from 'react'
+import { Code, Icon, Status } from '@superatom/ui'
 
 export type AgentEvent = { kind: 'command' | 'message' | 'reasoning' | 'file' | 'turn' | 'user'; id?: string; text?: string; command?: string; output?: string; status?: string; done?: boolean }
 
@@ -17,14 +18,15 @@ export function mergeEvent(evs: AgentEvent[], e: AgentEvent): AgentEvent[] {
 }
 
 // Minimal inline markdown → HTML: bold + code only (italics deliberately not parsed), plus `- ` bullet lines.
+// Paragraphs and lists are plain elements; .sa-prose spaces them.
 function inlineMd(s: string): string {
   return s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code>$1</code>')
 }
 function md(text: string): string {
   const esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   const out: string[] = []; let para: string[] = [], bul: string[] = []
-  const fp = () => { if (para.length) { out.push(para.join('<br/>')); para = [] } }
-  const fb = () => { if (bul.length) { out.push(`<ul style="margin:6px 0;padding-left:18px">${bul.join('')}</ul>`); bul = [] } }
+  const fp = () => { if (para.length) { out.push(`<p>${para.join('<br/>')}</p>`); para = [] } }
+  const fb = () => { if (bul.length) { out.push(`<ul>${bul.join('')}</ul>`); bul = [] } }
   for (const ln of esc.split('\n')) {
     const m = ln.match(/^\s*[-•]\s+(.*)/)
     if (m) { fp(); bul.push(`<li>${inlineMd(m[1])}</li>`) }
@@ -34,50 +36,45 @@ function md(text: string): string {
   fp(); fb(); return out.join('')
 }
 
-const mono = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' as const }
-
 function CmdOutput({ text }: { text: string }) {
   const [open, setOpen] = useState(false)
   const lines = text.replace(/\s+$/, '').split('\n')
   const CAP = 5, hidden = lines.length - CAP
   const shown = open || hidden <= 0 ? lines : lines.slice(0, CAP)
   return (
-    <div style={{ marginTop: 4 }}>
-      <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#8a9a8c', fontSize: 12, lineHeight: 1.5, ...mono }}>{shown.join('\n')}</pre>
-      {hidden > 0 && <span onClick={() => setOpen((o) => !o)} style={{ cursor: 'pointer', color: '#6f8a70', fontSize: 11, userSelect: 'none' }}>{open ? '▲ show less' : `▾ +${hidden} lines`}</span>}
+    <div className="sa-prose">
+      <pre>{shown.join('\n')}</pre>
+      {hidden > 0 && <button type="button" className="sa-btn sa-btn--link" onClick={() => setOpen((o) => !o)}>
+        <Icon icon={open ? 'lucide:chevron-up' : 'lucide:chevron-down'} className="sa-btn__icon" />{open ? 'Show less' : `${hidden} more lines`}
+      </button>}
     </div>
   )
 }
 
 function CodexEvent({ e }: { e: AgentEvent }) {
-  if (e.kind === 'turn') return <div style={{ borderTop: '1px solid #263026', margin: '14px 0' }} />
+  if (e.kind === 'turn') return <hr />
   if (e.kind === 'user') return (
-    <div style={{ margin: '16px 0 10px', paddingTop: 12, borderTop: '1px solid #263026', color: '#e7efe7', fontSize: 13.5, fontWeight: 600 }}>
-      <span style={{ color: '#6f8a70' }}>›</span> {e.text}
-    </div>
+    <p className="sa-row sa-row--tight"><Icon icon="lucide:chevron-right" className="sa-faint" /><strong>{e.text}</strong></p>
   )
   if (e.kind === 'command') return (
-    <div style={{ margin: '9px 0' }}>
-      <div style={{ color: '#cfe3d0', fontSize: 12.5, ...mono }}>
-        <span style={{ color: e.status === 'in_progress' ? '#c9a24a' : '#7fae7f' }}>●</span>{' '}
-        <span style={{ color: '#9db29e' }}>Ran</span> {e.command}
+    <div className="sa-stack sa-stack--3">
+      <div className="sa-row sa-row--wrap">
+        <Status state={e.status === 'in_progress' ? 'running' : 'ok'}>Ran</Status>
+        <Code>{e.command}</Code>
       </div>
       {e.output ? <CmdOutput text={e.output} /> : null}
     </div>
   )
   if (e.kind === 'file') return (
-    <div style={{ margin: '9px 0', color: '#cfe3d0', fontSize: 12.5, ...mono }}>
-      <span style={{ color: '#7fae7f' }}>●</span> <span style={{ color: '#9db29e' }}>Edited</span> {e.text}
-    </div>
+    <div className="sa-row sa-row--wrap"><Status state="ok">Edited</Status><Code>{e.text}</Code></div>
   )
-  const muted = e.kind === 'reasoning'
-  return <div style={{ margin: '9px 0', color: muted ? '#8a9a8c' : '#d3e4d4', fontSize: 13, lineHeight: 1.55, fontStyle: muted ? 'italic' : 'normal' }} dangerouslySetInnerHTML={{ __html: md(e.text ?? '') }} />
+  return <div className={e.kind === 'reasoning' ? 'sa-prose sa-muted' : 'sa-prose'} dangerouslySetInnerHTML={{ __html: md(e.text ?? '') }} />
 }
 
 function ThinkingLine() {
   const [n, setN] = useState(1)
   useEffect(() => { const t = setInterval(() => setN((x) => (x % 3) + 1), 420); return () => clearInterval(t) }, [])
-  return <div style={{ color: '#c9a24a', fontSize: 12.5, fontStyle: 'italic', margin: '9px 0' }}>◐ codex is thinking{'.'.repeat(n)}</div>
+  return <p className="sa-row sa-muted"><span className="sa-spinner" />codex is thinking{'.'.repeat(n)}</p>
 }
 
 export function CodexEventLog({ events, busy }: { events: AgentEvent[]; busy?: boolean }) {
@@ -86,7 +83,7 @@ export function CodexEventLog({ events, busy }: { events: AgentEvent[]; busy?: b
   const thinking = !!busy && !streaming
   if (!events.length && !thinking) return null
   return (
-    <div>
+    <div className="sa-stack">
       {events.map((e, i) => <CodexEvent key={e.id ?? `turn${i}`} e={e} />)}
       {thinking && <ThinkingLine />}
     </div>

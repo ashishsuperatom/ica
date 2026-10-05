@@ -274,6 +274,7 @@ export class ProjectDO extends DurableObject<Env> {
     // REST API
     if (request.method === 'GET'  && path === '/status')       return this.getStatus()
     if (request.method === 'GET'  && path === '/attention')    return this.attention()
+    if (path === '/warehouse/grants') return this.warehouseGrants(request)
     if (request.method === 'POST' && path === '/setup')        return this.setup(request)
     if (request.method === 'POST' && path === '/keys/add')     return this.addKey(request)
     if (request.method === 'POST' && path === '/keys/prune')   return this.pruneKeys(request)
@@ -885,6 +886,29 @@ export class ProjectDO extends DurableObject<Env> {
     }
     return { ok: true, credits_micro: micro, priced: !!price, session: b.session ?? null }
   }
+  /** What this project may read of its organisation's warehouse: each table's latest grant, unless revoked. */
+  private grantInForce(): Record<string, string[] | null> {
+    const out: Record<string, string[] | null> = {}
+    for (const r of this.ctx.storage.sql.exec('SELECT g.tbl, g.columns, g.revoked FROM warehouse_grants g JOIN (SELECT tbl, MAX(seq) AS m FROM warehouse_grants GROUP BY tbl) x ON x.m = g.seq') as Iterable<any>)
+      if (!r.revoked) out[String(r.tbl)] = r.columns === null ? null : JSON.parse(String(r.columns))
+    return out
+  }
+  /** The grants, set by the organisation's administrator through the worker (never from a hub message). */
+  private async warehouseGrants(request: Request): Promise<Response> {
+    if (request.method === 'GET') return Response.json({ grant: this.grantInForce(), history: [...this.ctx.storage.sql.exec('SELECT * FROM warehouse_grants ORDER BY seq DESC LIMIT 100')] })
+    const b: any = await request.json().catch(() => ({}))
+    const tbl = String(b.table ?? '')
+    if (!/^[a-z][a-z0-9_]{0,62}$/.test(tbl)) return Response.json({ error: 'name the table' }, { status: 400 })
+    const by = String(b.by ?? 'admin'), at = new Date().toISOString()
+    if (request.method === 'DELETE') this.ctx.storage.sql.exec('INSERT INTO warehouse_grants (tbl, columns, revoked, by, at) VALUES (?, NULL, 1, ?, ?)', tbl, by, at)
+    else {
+      const cols = b.columns === null || b.columns === undefined ? null : Array.isArray(b.columns) && b.columns.every((c: unknown) => typeof c === 'string' && /^[a-z_][a-z0-9_]{0,62}$/.test(c)) ? b.columns : undefined
+      if (cols === undefined) return Response.json({ error: 'columns are a list of column names, or null for all of them' }, { status: 400 })
+      this.ctx.storage.sql.exec('INSERT INTO warehouse_grants (tbl, columns, revoked, by, at) VALUES (?, ?, 0, ?, ?)', tbl, cols === null ? null : JSON.stringify(cols), by, at)
+    }
+    this.audit.record({ actor: { kind: 'user', id: by }, via: 'ui', action: request.method === 'DELETE' ? 'warehouse.revoke' : 'warehouse.grant', target: tbl, outcome: 'ok', detail: { columns: b.columns ?? null } })
+    return Response.json({ grant: this.grantInForce() })
+  }
   private usageSummary(url: URL): Response {
     const since = url.searchParams.get('since') ?? new Date(Date.now() - 30 * 86_400_000).toISOString()
     // PER PERSON: who used what — every call counted, those no turn named kept as the project's own ('unattributed').
@@ -1333,6 +1357,29 @@ export class ProjectDO extends DurableObject<Env> {
       return
     }
     // ── The decision memory (no engine needed): the paths from a step, how a step turned out, the decision states ──
+    // ── The organisation's warehouse, as far as this project was granted (no engine needed) ──
+    if ((pl.t === 'warehouse:tables' || pl.t === 'warehouse:query') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
+      const who = this.principalOf(sender)
+      try {
+        if (!who) throw new Error('who is asking is not known')
+        const org = await this.orgId()
+        if (!org) throw new Error('this project belongs to no organisation')
+        const grant = this.grantInForce()
+        const orgDo = this.env.ORG.get(this.env.ORG.idFromName(org))
+        if (pl.t === 'warehouse:tables') {
+          const r: any = await (await orgDo.fetch(new Request('http://do/warehouse', { headers: { 'x-sa-org': org } }))).json()
+          const tables = (r.tables ?? []).filter((t: any) => t.name in grant).map((t: any) => ({ ...t, columns: grant[t.name] === null ? t.columns : t.columns.filter((c: any) => grant[t.name]!.includes(c.name)) }))
+          hubReply({ t: 'warehouse:tables', configured: !!r.configured, tables, reqId: pl.reqId })
+        } else {
+          const res = await orgDo.fetch(new Request('http://do/warehouse/query', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-org': org }, body: JSON.stringify({ sql: pl.sql, limit: pl.limit, grant, project: this._pid, by: who }) }))
+          const out: any = await res.json()
+          if (!res.ok) throw new Error(out.error ?? `the warehouse answered ${res.status}`)
+          this.audit.record({ actor: { kind: sender.type === 'agent' ? 'agent' : 'user', id: who, ...(sender.email ? { email: sender.email } : {}) }, via: sender.type === 'agent' ? 'agent' : 'ui', action: 'warehouse.query', target: org, outcome: 'ok', detail: { rows: out.rows?.length ?? 0 } })
+          hubReply({ t: 'warehouse:result', ...out, reqId: pl.reqId })
+        }
+      } catch (e: any) { hubReply({ t: 'warehouse:refused', reason: e?.message ?? String(e), reqId: pl.reqId }) }
+      return
+    }
     if (typeof pl.t === 'string' && pl.t.startsWith('decision:') && pl.t !== 'decision:register' && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
       const who = this.principalOf(sender)
       if (!who) { hubReply({ t: 'decision:refused', reason: 'who is asking is not known', reqId: pl.reqId }); return }

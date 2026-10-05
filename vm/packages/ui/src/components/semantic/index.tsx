@@ -14,6 +14,7 @@
 //   Code                   a value to be read exactly (an id, a key's prefix, a command)
 //   Figures                a row of headline figures (each a Kpi)
 //   Toolbar                the controls above a list: search, filters, the action that adds one
+//   Dialog                 a question that needs an answer first, over the page
 
 import type { FormEvent, ReactNode } from 'react'
 import { Icon } from '@iconify/react'
@@ -100,7 +101,7 @@ export function AttentionList<T extends Attention>({ items, onOpen, empty }: { i
 export function ActionBar({ children }: { children: ReactNode }) { return <div className="sa-actionbar">{children}</div> }
 
 export function Empty({ icon = 'lucide:circle-dashed', children }: { icon?: string; children: ReactNode }) {
-  return <p className="sa-empty"><Icon icon={icon} /> <span>{children}</span></p>
+  return <p className="sa-empty-line"><Icon icon={icon} /> <span>{children}</span></p>
 }
 
 /** A screen's name, one line on what it is for, and its actions at the end. */
@@ -141,4 +142,18 @@ export function Figures({ children }: { children: ReactNode }) { return <div cla
 /** The controls above a list: search, filters, and the action that adds one (at the end). */
 export function Toolbar({ children, end }: { children?: ReactNode; end?: ReactNode }) {
   return <div className="sa-toolbar">{children}{end && <div className="sa-toolbar__end">{end}</div>}</div>
+}
+
+/** A question that needs an answer before anything else: over the page, closed by its own buttons, Escape, or a
+ *  click outside. Its actions sit at the foot (the one that changes something, last). */
+export function Dialog({ title, children, actions, onClose }: { title: ReactNode; children: ReactNode; actions?: ReactNode; onClose: () => void }) {
+  return (
+    <div className="sa-dialog" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }} onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}>
+      <div className="sa-dialog__box" role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : undefined}>
+        <h2 className="sa-dialog__title">{title}</h2>
+        <div className="sa-dialog__body">{children}</div>
+        {actions && <div className="sa-dialog__actions">{actions}</div>}
+      </div>
+    </div>
+  )
 }

@@ -10,6 +10,9 @@ import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import type { Hub } from './hub'
 import { CodexEventLog, mergeEvent, type AgentEvent } from './CodexEventLog'   // codex (events-kind) view
+import { PageHeader, Status } from '@superatom/ui'
+
+const TERM_BG = '#0d0f0d'   // the terminal's background: xterm's theme and its frame agree
 
 export function GroundingConsole({ hub }: { hub: Hub }) {
   const elRef = useRef<HTMLDivElement | null>(null)
@@ -29,7 +32,7 @@ export function GroundingConsole({ hub }: { hub: Hub }) {
   useEffect(() => {
     if (!elRef.current) return
     const term = new Terminal({ cursorBlink: false, fontSize: 11, convertEol: false, cols: COLS, rows: ROWS, scrollback: 8000,
-      theme: { background: '#0d0f0d', foreground: '#e6e2da', ...ANSI } })
+      theme: { background: TERM_BG, foreground: '#e6e2da', ...ANSI } })
     term.open(elRef.current)
     termRef.current = term
     // Raw keystrokes go to the grounding PTY too (so /login etc. works if the agent ever needs it).
@@ -67,19 +70,16 @@ export function GroundingConsole({ hub }: { hub: Hub }) {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, height: 'calc(100vh - 210px)', minHeight: 460 }}>
-      <div className="between">
-        <div>
-          <strong>Grounding agent</strong>
-          <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>Builds the value→id resolution indexes — entity names, hierarchies, and id patterns — from this project’s own data. Cold: runs only when you trigger it.</div>
-        </div>
-        <div className="row" style={{ gap: 10 }}>
-          <span className="muted" style={{ fontSize: 12 }}>{status === 'live' ? 'connected' : status}</span>
-          <button className="btn ghost" onClick={() => build(true)} disabled={busy || status !== 'live'} title="Wipe the index and rebuild from empty">Rebuild (clear)</button>
-          <button className="btn" onClick={() => build(false)} disabled={busy || status !== 'live'}>{busy ? 'Building…' : 'Build / improve'}</button>
-        </div>
-      </div>
-      <div style={{ flex: 1, minHeight: 0, background: '#0d0f0d', borderRadius: 10, padding: '8px 10px', overflow: 'auto' }}>
+    <div className="sa-stack" style={{ height: 'calc(100vh - 210px)', minHeight: 460 }}>
+      <PageHeader title="Grounding agent"
+        subtitle="Builds the value→id indexes (entity names, hierarchies and id patterns) from this project’s own data. It runs only when you start it."
+        actions={<>
+          <Status state={status === 'live' ? 'ok' : status === 'connecting' ? 'running' : 'attention'}>{status === 'live' ? 'connected' : status}</Status>
+          <button className="sa-btn" onClick={() => build(true)} disabled={busy || status !== 'live'} title="Wipe the index and rebuild from empty">Rebuild from empty</button>
+          <button className="sa-btn sa-btn--primary" onClick={() => build(false)} disabled={busy || status !== 'live'}>{busy ? 'Building…' : 'Build / improve'}</button>
+        </>} />
+      {/* the terminal's frame: its height is what xterm fills, its background the terminal's own */}
+      <div className="sa-card sa-scroll" style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 'var(--sp-2) var(--sp-2h)', background: streamKind === 'pty' ? TERM_BG : undefined }}>
         <div ref={elRef} style={{ height: '100%', display: streamKind === 'pty' ? 'block' : 'none' }} />
         {streamKind === 'events' && <CodexEventLog events={events} busy={busy} />}
       </div>

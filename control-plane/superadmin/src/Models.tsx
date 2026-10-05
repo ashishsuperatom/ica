@@ -18,6 +18,7 @@
 // harness, one provider, one model per agent — not the options behind it.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { ActionBar, Code, Empty, Field, Form, Icon, Notice, Receipt, RecordList, Section, Status, Toolbar, type Column } from '@superatom/ui'
 
 type Api = (path: string, init?: RequestInit) => Promise<Response>
 type Provider = { name: string; route: string; disabled: string | null }
@@ -30,13 +31,12 @@ type Row = {
 }
 
 const AGENTS = ['analyst', 'connector', 'grounding', 'modeller', 'composer', 'narrator']
-const cell: React.CSSProperties = { padding: '7px 10px', borderBottom: '1px solid var(--line)', textAlign: 'left', verticalAlign: 'top' }
-const head: React.CSSProperties = { ...cell, fontSize: 11.5, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: .3 }
 const ago = (t?: number) => {
   if (!t) return ''
   const m = Math.round((Date.now() - t) / 60000)
   return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`
 }
+const brain = (a: AgentRow) => `${a.harness} · ${a.provider} · ${a.model}`
 
 export function AgentsScreen({ api }: { api: Api }) {
   const [rows, setRows] = useState<Row[] | null>(null)
@@ -73,17 +73,17 @@ export function AgentsScreen({ api }: { api: Api }) {
 
   const dirty = models && saved && JSON.stringify(models) !== JSON.stringify(saved)
   const save = async () => {
-    setBusy(true); setMsg('saving…')
+    setBusy(true); setMsg('Saving…')
     const r = await api('/catalogue', { method: 'PUT', body: JSON.stringify({ models }) })
     setBusy(false)
-    if (!r.ok) { setMsg(`could not save: ${r.status} ${await r.text()}`); return }
+    if (!r.ok) { setMsg(`Could not save: ${r.status} ${await r.text()}`); return }
     await load()          // re-read: the project dropdowns offer whatever is STORED
-    setMsg('saved')
+    setMsg('Saved')
   }
 
-  if (!rows || !models) return <div className="muted">loading…</div>
+  if (!rows || !models) return <Empty>Loading agents…</Empty>
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 30 }}>
+    <div className="sa-stack sa-stack--4">
       <Projects rows={rows} onRefresh={load} />
       <Catalogue providers={providers} models={models} usedBy={usedBy} source={source} dirty={!!dirty} busy={busy} msg={msg}
                  onChange={setModels} onSave={save} onDiscard={() => { setMsg(''); load() }} />
@@ -96,90 +96,60 @@ function Projects({ rows, onRefresh }: { rows: Row[]; onRefresh: () => void }) {
   const [open, setOpen] = useState<string | null>(null)
   const drift = rows.filter(r => r.running && r.savedVersion != null && r.running.version !== r.savedVersion).length
   const dark = rows.filter(r => !r.running).length
+  const failed = rows.filter(r => r.error)
+  const opened = rows.find(r => r.projectId === open)
+  const columns: Column<Row>[] = [
+    { key: 'project', label: 'Project', render: r => <span className="sa-row sa-row--tight"><Icon icon={open === r.projectId ? 'lucide:chevron-down' : 'lucide:chevron-right'} /><b>{r.project}</b></span> },
+    { key: 'org', label: 'Organization', render: r => <span className="sa-muted">{r.org}</span> },
+    { key: 'assigned', label: 'Assigned', render: r => <Code>v{r.savedVersion ?? '—'}</Code> },
+    { key: 'running', label: 'Running', render: r => {
+      const live = r.running
+      if (!live) return <Status state="neutral">engine offline</Status>
+      const agreed = live.version === r.savedVersion
+      return (
+        <span className="sa-row sa-row--tight">
+          <Status state={agreed ? 'ok' : 'critical'}>v{live.version}{agreed ? '' : ' · not picked up'}</Status>
+          <span className="sa-faint">{ago(live.at)}</span>
+        </span>
+      )
+    } },
+    { key: 'composer', label: 'Composer', render: r => { const c = r.running?.agents?.composer; return c ? <Code>{brain(c)}</Code> : <span className="sa-faint">—</span> } },
+    { key: 'go', label: '', align: 'end', render: r => (
+      <Link className="sa-btn sa-btn--link" to={`/org/${r.orgId}/projects/${r.projectId}/settings`} onClick={e => e.stopPropagation()}>
+        Configure <Icon icon="lucide:arrow-right" className="sa-btn__icon" />
+      </Link>
+    ) },
+  ]
   return (
-    <section>
-      <div className="between" style={{ alignItems: 'baseline' }}>
-        <h3 style={{ margin: '0 0 2px' }}>Projects</h3>
-        <div className="row" style={{ gap: 12, alignItems: 'center', fontSize: 12.5 }}>
-          <span className="muted">
-            {rows.length - dark} running{drift ? ` · ${drift} not picked up` : ''}{dark ? ` · ${dark} offline` : ''}
-          </span>
-          <button className="btn ghost" onClick={onRefresh}>Refresh</button>
-        </div>
-      </div>
-      <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
-        Assigned on each project’s own settings page; reported by that project’s engine.
-      </div>
-      {rows.length === 0 ? <div className="empty">No projects yet.</div> : (
-        <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead><tr>
-              <th style={head}>project</th><th style={head}>org</th><th style={head}>assigned</th>
-              <th style={head}>running</th><th style={head}>composer</th><th style={head}></th>
-            </tr></thead>
-            <tbody>
-              {rows.map(r => {
-                const live = r.running
-                const agreed = live && live.version === r.savedVersion
-                const comp = live?.agents?.composer
-                const isOpen = open === r.projectId
-                return [
-                  <tr key={r.projectId}>
-                    <td style={cell}>
-                      <span onClick={() => setOpen(isOpen ? null : r.projectId)} style={{ cursor: 'pointer', fontWeight: 600 }}>
-                        {isOpen ? '▾' : '▸'} {r.project}
-                      </span>
-                    </td>
-                    <td style={{ ...cell, color: 'var(--muted)' }}>{r.org}</td>
-                    <td style={cell}><code className="mono">v{r.savedVersion ?? '—'}</code></td>
-                    <td style={cell}>
-                      {live
-                        ? <span style={{ color: agreed ? 'var(--ok)' : 'var(--bad)' }}>
-                            v{live.version}{agreed ? '' : ' — not picked up'}
-                            <span className="muted" style={{ marginLeft: 6, fontSize: 11.5 }}>{ago(live.at)}</span>
-                          </span>
-                        : <span className="muted">engine offline</span>}
-                    </td>
-                    <td style={{ ...cell, fontFamily: 'monospace', fontSize: 11.5 }}>
-                      {comp ? `${comp.harness} · ${comp.provider} · ${comp.model}` : <span className="muted">—</span>}
-                    </td>
-                    <td style={{ ...cell, textAlign: 'right' }}>
-                      <Link to={`/org/${r.orgId}/projects/${r.projectId}/settings`} style={{ fontSize: 12.5 }}>Configure →</Link>
-                    </td>
-                  </tr>,
-                  // Expanded: every agent, and ONLY what the engine reports — an assignment nothing has picked
-                  // up is deliberately not drawn as a table of agents.
-                  isOpen && live?.agents ? (
-                    <tr key={r.projectId + ':open'}>
-                      <td style={{ ...cell, background: 'var(--line)' }} colSpan={6}>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 6 }}>
-                          {AGENTS.map(a => {
-                            const x = live.agents![a]
-                            return x ? (
-                              <div key={a} style={{ fontSize: 12 }}>
-                                <span className="muted">{a}</span><br />
-                                <code className="mono" style={{ fontSize: 11.5 }}>{x.harness} · {x.provider} · {x.model}</code>
-                              </div>
-                            ) : null
-                          })}
-                        </div>
-                      </td>
-                    </tr>
-                  ) : null,
-                  r.error ? (
-                    <tr key={r.projectId + ':err'}><td style={{ ...cell, color: 'var(--bad)' }} colSpan={6}>could not read: {r.error}</td></tr>
-                  ) : null,
-                ]
-              })}
-            </tbody>
-          </table>
-        </div>
+    <>
+      <Section icon="lucide:boxes" title="Projects" subtitle="Assigned on each project’s settings page; reported by its own engine"
+        note={`${rows.length - dark} running${drift ? ` · ${drift} not picked up` : ''}${dark ? ` · ${dark} offline` : ''}`}
+        actions={<button className="sa-btn" onClick={onRefresh}><Icon icon="lucide:refresh-cw" className="sa-btn__icon" />Refresh</button>}>
+        {failed.length > 0 && (
+          <div className="sa-section__body sa-stack sa-stack--3">
+            {failed.map(r => <Notice key={r.projectId} state="critical"><b>{r.project}</b>: could not read — {r.error}</Notice>)}
+          </div>
+        )}
+        <RecordList columns={columns} rows={rows} keyOf={r => r.projectId} empty="No projects yet."
+          onRow={r => setOpen(open === r.projectId ? null : r.projectId)} />
+      </Section>
+      {/* Opened: every agent, and ONLY what the engine reports — an assignment nothing has picked up is
+          deliberately not drawn as a list of agents. */}
+      {opened && (
+        <Section icon="lucide:bot" title={opened.project} subtitle="Each agent’s brain, as its engine reports it"
+          actions={<button className="sa-icon-btn sa-icon-btn--sm" aria-label="Close" title="Close" onClick={() => setOpen(null)}><Icon icon="lucide:x" /></button>}>
+          {opened.running?.agents
+            ? <Receipt items={AGENTS.filter(a => opened.running!.agents![a]).map(a => [a, <Code key={a}>{brain(opened.running!.agents![a])}</Code>])} />
+            : <Empty>Its engine has not reported which agents it runs.</Empty>}
+        </Section>
       )}
-    </section>
+    </>
   )
 }
 
 // ── CATALOGUE ───────────────────────────────────────────────────────────────────────────────────────────────
+type Entry = { p: Provider; m: string | null }
+
 function Catalogue({ providers, models, usedBy, source, dirty, busy, msg, onChange, onSave, onDiscard }: {
   providers: Provider[]; models: Record<string, string[]>; usedBy: Map<string, string[]>
   source: string | null; dirty: boolean; busy: boolean; msg: string
@@ -207,102 +177,72 @@ function Catalogue({ providers, models, usedBy, source, dirty, busy, msg, onChan
   // Matched on the ACCOUNT as well as the model, so "opencode" narrows to one account and "glm" to a family.
   const needle = q.trim().toLowerCase()
   const hit = (p: Provider, m: string) => !needle || m.toLowerCase().includes(needle) || p.name.toLowerCase().includes(needle)
-  const flat = providers.flatMap(p => (models[p.name] ?? []).filter(m => hit(p, m)).map(m => ({ p, m })))
+  const flat: Entry[] = providers.flatMap(p => (models[p.name] ?? []).filter(m => hit(p, m)).map(m => ({ p, m })))
   const total = providers.reduce((n, p) => n + (models[p.name] ?? []).length, 0)
+  // An account with nothing catalogued still gets a row: knowing it EXISTS and cannot be chosen yet is the thing
+  // you came to find out. Hidden while searching — it is not a match.
+  const bare: Entry[] = needle ? [] : providers.filter(p => (models[p.name] ?? []).length === 0).map(p => ({ p, m: null }))
+
+  const columns: Column<Entry>[] = [
+    { key: 'account', label: 'Account', render: ({ p }) => <Code>{p.name}</Code> },
+    { key: 'route', label: 'Route', render: ({ p }) => (
+      <span className="sa-row sa-row--tight"><span className="sa-muted">{p.route}</span>{p.disabled && <Status state="neutral">off</Status>}</span>
+    ) },
+    { key: 'model', label: 'Model', wrap: true, render: ({ p, m }) => m
+      ? <Code>{m}</Code>
+      : <span className="sa-faint">Nothing catalogued — no project can choose this account{p.disabled ? ` · ${p.disabled}` : ''}</span> },
+    { key: 'used', label: 'Used by', wrap: true, render: ({ p, m }) => {
+      if (!m) return null
+      const users = usedBy.get(`${p.name}/${m}`) ?? []
+      return users.length ? users.join(', ') : <span className="sa-faint">—</span>
+    } },
+    { key: 'remove', label: '', align: 'end', render: ({ p, m }) => {
+      if (!m) return null
+      const k = `${p.name}/${m}`
+      const users = usedBy.get(k) ?? []
+      return confirming === k
+        ? <span className="sa-row sa-row--tight">
+            <span className={users.length ? '' : 'sa-muted'}>{users.length ? <Status state="critical">used by {users.join(', ')}</Status> : 'Remove?'}</span>
+            <button className="sa-btn sa-btn--link" onClick={() => { remove(p.name, m); setConfirming(null) }}>Remove{users.length ? ' anyway' : ''}</button>
+            <button className="sa-btn sa-btn--link" onClick={() => setConfirming(null)}>Cancel</button>
+          </span>
+        : <button className="sa-icon-btn sa-icon-btn--sm" aria-label={`Remove ${m}`} title={`Remove ${m}`} onClick={() => setConfirming(k)}><Icon icon="lucide:x" /></button>
+    } },
+  ]
+
   return (
-    <section>
-      <div className="between" style={{ alignItems: 'baseline' }}>
-        <h3 style={{ margin: '0 0 2px' }}>Catalogue</h3>
-        <span className="muted" style={{ fontSize: 12 }}>
-          {source === 'default' ? 'showing the shipped default — nothing saved yet' : ''}
-        </span>
-      </div>
-      <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
-        What a project’s profile may choose from, per account. Adding one makes it selectable everywhere, with no
-        engine rebuild.
-      </div>
-      <div className="row" style={{ gap: 10, alignItems: 'center', marginBottom: 8 }}>
-        <input className="input" value={q} onChange={e => setQ(e.target.value)} placeholder="search models or accounts…"
-               style={{ fontSize: 13, width: 260 }} />
-        <span className="muted" style={{ fontSize: 12.5 }}>
-          {needle ? `${flat.length} of ${total}` : `${total} model${total === 1 ? '' : 's'}`}
-        </span>
-        {needle && <button className="btn ghost" onClick={() => setQ('')}>Clear</button>}
-      </div>
-
-      <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-          <thead><tr>
-            <th style={head}>account</th><th style={head}>route</th><th style={head}>model</th>
-            <th style={head}>used by</th><th style={head}></th>
-          </tr></thead>
-          <tbody>
-            {flat.map(({ p, m }) => {
-              const users = usedBy.get(`${p.name}/${m}`) ?? []
-              return (
-                <tr key={`${p.name}/${m}`} style={{ opacity: p.disabled ? .6 : 1 }}>
-                  <td style={{ ...cell, fontFamily: 'monospace', fontSize: 12 }}>{p.name}</td>
-                  <td style={{ ...cell, color: 'var(--muted)', fontSize: 12 }}>
-                    {p.route}{p.disabled ? ' · off' : ''}
-                  </td>
-                  <td style={{ ...cell, fontFamily: 'monospace', fontSize: 12 }}>{m}</td>
-                  <td style={{ ...cell, fontSize: 12, color: users.length ? 'var(--ok)' : 'var(--muted)' }}>
-                    {users.length ? users.join(', ') : '—'}
-                  </td>
-                  <td style={{ ...cell, textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    {confirming === `${p.name}/${m}`
-                      ? <span className="row" style={{ gap: 8, justifyContent: 'flex-end', fontSize: 12 }}>
-                          <span style={{ color: users.length ? 'var(--bad)' : 'var(--muted)' }}>
-                            {users.length ? `used by ${users.join(', ')} — remove anyway?` : 'remove?'}
-                          </span>
-                          <span onClick={() => { remove(p.name, m); setConfirming(null) }}
-                                style={{ cursor: 'pointer', color: 'var(--bad)', fontWeight: 600 }}>remove</span>
-                          <span onClick={() => setConfirming(null)} style={{ cursor: 'pointer', color: 'var(--muted)' }}>cancel</span>
-                        </span>
-                      : <span onClick={() => setConfirming(`${p.name}/${m}`)} title="remove"
-                              style={{ cursor: 'pointer', color: users.length ? 'var(--bad)' : 'var(--muted)' }}>×</span>}
-                  </td>
-                </tr>
-              )
-            })}
-            {needle && flat.length === 0 && (
-              <tr><td style={{ ...cell, color: 'var(--muted)' }} colSpan={5}>nothing matches “{q}”.</td></tr>
-            )}
-            {/* An account with nothing catalogued still gets a row: knowing it EXISTS and cannot be chosen yet
-                is the thing you came to find out. Hidden while searching — it is not a match. */}
-            {!needle && providers.filter(p => (models[p.name] ?? []).length === 0).map(p => (
-              <tr key={p.name} style={{ opacity: .6 }}>
-                <td style={{ ...cell, fontFamily: 'monospace', fontSize: 12 }}>{p.name}</td>
-                <td style={{ ...cell, color: 'var(--muted)', fontSize: 12 }}>{p.route}{p.disabled ? ' · off' : ''}</td>
-                <td style={{ ...cell, color: 'var(--muted)', fontSize: 12 }} colSpan={3}>
-                  nothing catalogued — no project can choose this account
-                  {p.disabled ? ` · ${p.disabled}` : ''}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="card" style={{ padding: 14, marginTop: 12 }}>
-        <strong style={{ fontSize: 13 }}>Add models</strong>
-        <div className="muted" style={{ fontSize: 12.5, margin: '4px 0 8px' }}>One per line, or comma separated. Duplicates are ignored.</div>
-        <div className="row" style={{ gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-          <select className="input" value={addTo} onChange={e => setAddTo(e.target.value)} style={{ fontSize: 13 }}>
-            <option value="">choose an account…</option>
-            {providers.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
-          </select>
-          <textarea className="input" value={paste} onChange={e => setPaste(e.target.value)} rows={3} placeholder={'deepseek-v4-flash\nglm-5.3'}
-                    style={{ flex: 1, minWidth: 260, fontFamily: 'monospace', fontSize: 13, resize: 'vertical' }} />
-          <button className="btn ghost" onClick={addMany} disabled={!addTo || !paste.trim()}>Add</button>
+    <>
+      <Section icon="lucide:library" title="Catalogue" subtitle="What a project’s profile may choose from, per account — selectable everywhere at once, no engine rebuild"
+        note={source === 'default' ? 'Shipped default — nothing saved yet' : undefined}>
+        <div className="sa-section__body">
+          <Toolbar end={<span className="sa-muted">{needle ? `${flat.length} of ${total}` : `${total} model${total === 1 ? '' : 's'}`}</span>}>
+            <input className="sa-input sa-input--sm" value={q} onChange={e => setQ(e.target.value)} placeholder="Search models or accounts…" aria-label="Search models or accounts" />
+            {needle && <button className="sa-btn sa-btn--link" onClick={() => setQ('')}>Clear</button>}
+          </Toolbar>
         </div>
-      </div>
+        <RecordList columns={columns} rows={[...flat, ...bare]} keyOf={e => `${e.p.name}/${e.m ?? ''}`}
+          empty={needle ? `Nothing matches “${q}”.` : 'No accounts yet.'} />
+        <ActionBar>
+          <button className="sa-btn sa-btn--primary" onClick={onSave} disabled={busy || !dirty}>Save catalogue</button>
+          <button className="sa-btn" onClick={onDiscard} disabled={busy || !dirty}>Discard changes</button>
+          <span className="sa-note">{dirty ? 'Unsaved changes' : msg}</span>
+        </ActionBar>
+      </Section>
 
-      <div className="row" style={{ gap: 10, marginTop: 12, alignItems: 'center' }}>
-        <button className="btn" onClick={onSave} disabled={busy || !dirty}>Save catalogue</button>
-        <button className="btn ghost" onClick={onDiscard} disabled={busy || !dirty}>Discard changes</button>
-        <span className="muted" style={{ fontSize: 12.5 }}>{dirty ? 'unsaved changes' : msg}</span>
-      </div>
-    </section>
+      <Section icon="lucide:list-plus" title="Add models" subtitle="Added to the catalogue above; save it to make them selectable">
+        <Form onSubmit={addMany} actions={<button className="sa-btn" disabled={!addTo || !paste.trim()}>Add</button>}>
+          <Field label="Account">
+            <select className="sa-input" value={addTo} onChange={e => setAddTo(e.target.value)}>
+              <option value="">Choose an account…</option>
+              {providers.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Models" help="One per line, or comma separated. Duplicates are ignored.">
+            {/* height: .sa-input fixes one control height; a textarea needs its rows (a gap in the design system). */}
+            <textarea className="sa-input sa-input--mono" value={paste} onChange={e => setPaste(e.target.value)} rows={4} placeholder={'deepseek-v4-flash\nglm-5.3'} />
+          </Field>
+        </Form>
+      </Section>
+    </>
   )
 }

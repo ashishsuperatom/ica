@@ -6,6 +6,7 @@ import { DashboardsPanel } from './Dashboards'
 import { AgentKeysPanel, AuditPanel } from './AgentKeys'
 import { AccessPoliciesPanel } from './AccessPolicies'
 import { GroupsPanel } from './Groups'
+import { WarehousePanel } from './Warehouse'
 import { UsagePanel } from './Usage'
 import { useProjectHub } from './hub'
 import { Inspector, SECTIONS, SECTION_LABEL, type Section } from './Inspector'
@@ -15,7 +16,7 @@ import { AnalystConsole } from './AnalystConsole'
 import { useSession, SignIn, UserButton } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useSearchParams, MemoryRouter, useLocation } from 'react-router-dom'
 import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
-import { AppShell, Sidebar, LocalThread, Toasts, useThread, startThread, type Registry } from '@superatom/ui'
+import { AppShell, Sidebar, LocalThread, Toasts, useThread, startThread, type Registry, Section as SectionCard, Kpi, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
 import '@superatom/ui/design.css'
 import { AdminContext, ADMIN_OWN_BLOCKS } from './AdminBlocks'
 
@@ -31,7 +32,7 @@ import { AdminContext, ADMIN_OWN_BLOCKS } from './AdminBlocks'
 //
 // So: confirm on success, say so on failure, and fall back to selecting the text if there is no clipboard at
 // all, because "select this and press ⌘C" is still an answer.
-function CopyButton({ text, label = 'Copy', className = 'btn' }: { text: string; label?: string; className?: string }) {
+function CopyButton({ text, label = 'Copy', className = 'sa-btn' }: { text: string; label?: string; className?: string }) {
   const [state, setState] = useState<'idle' | 'done' | 'failed'>('idle')
   useEffect(() => {
     if (state === 'idle') return
@@ -46,8 +47,9 @@ function CopyButton({ text, label = 'Copy', className = 'btn' }: { text: string;
     } catch { setState('failed') }
   }
   return (
-    <button className={className} onClick={copy} title={state === 'failed' ? 'Select the text above and press ⌘C' : undefined}>
-      {state === 'done' ? '✓ Copied' : state === 'failed' ? 'Select it above and ⌘C' : label}
+    <button type="button" className={className} onClick={copy} title={state === 'failed' ? 'Select the text above and press ⌘C' : undefined}>
+      <Icon icon={state === 'done' ? 'lucide:check' : state === 'failed' ? 'lucide:text-select' : 'lucide:copy'} className="sa-btn__icon" />
+      {state === 'done' ? 'Copied' : state === 'failed' ? 'Select it above and ⌘C' : label}
     </button>
   )
 }
@@ -104,42 +106,6 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .top{display:flex;align-items:center;gap:12px;padding:8px 20px;border-bottom:1px solid var(--line);
  background:#fff;position:sticky;top:0;z-index:5;min-height:44px}
 .content{padding:16px 20px 40px;width:100%;min-width:0}
-
-.h1{font-size:22px;font-weight:700;letter-spacing:-.02em;margin:0 0 2px}
-.bread{font-size:13px;color:var(--sub);display:flex;gap:7px;align-items:center}
-.row{display:flex;align-items:center;gap:10px}
-.between{display:flex;align-items:center;justify-content:space-between}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;
- box-shadow:0 1px 1px rgba(48,49,61,.04)}
-.grid{display:grid;gap:12px}
-.btn{padding:7px 14px;background:var(--purple);color:#fff;border:none;border-radius:7px;
- font-size:14px;font-weight:600;cursor:pointer;transition:background .15s;white-space:nowrap}
-.btn:hover{background:var(--purple-d)}
-.btn:disabled{opacity:.5;cursor:default}
-.btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line);font-weight:500}
-.btn.ghost.on{background:var(--ink);color:#fff;border-color:var(--ink)}
-.btn.sm{padding:5px 11px;font-size:12.5px;border-radius:6px}
-.btn.danger{background:#fff;color:var(--bad);border:1px solid #f3d0dc}
-.btn.ok{background:var(--ok)}
-.input,select.input{padding:8px 11px;border:1px solid var(--line);border-radius:7px;font-size:14px;
- background:#fff;outline:none;transition:box-shadow .15s,border-color .15s}
-.input:focus{border-color:var(--purple);box-shadow:0 0 0 3px var(--primary-ring)}
-.pill{font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:999px;text-transform:capitalize}
-.mono{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--faint)}
-.muted{color:var(--sub)}
-.tile{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:11px 13px}
-.tile .k{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--sub)}
-.tile .v{font-size:17px;font-weight:700;margin-top:3px}
-.list>*{margin-bottom:10px}
-.evt{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line2);font-size:13px}
-.evt:last-child{border-bottom:none}
-.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-.clickable{cursor:pointer}
-.clickable:hover{border-color:var(--purple)}
-.empty{color:var(--faint);font-size:14px;text-align:center;padding:32px 0}
-.spin{width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--purple);
- border-radius:50%;display:inline-block;animation:s .7s linear infinite}
-@keyframes s{to{transform:rotate(360deg)}}
 .signin{max-width:420px;margin:110px auto;padding:0 16px;text-align:center}
 `
 
@@ -159,17 +125,24 @@ const I = {
   chat: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z"/></svg>,
 }
 
-// status → color
-const SC: Record<string, string> = {
-  started: 'var(--ok)', running: 'var(--ok)', active: 'var(--ok)',
-  starting: 'var(--warn)', created: 'var(--warn)', creating: 'var(--warn)', pending: 'var(--warn)',
-  suspended: 'var(--warn)', stopping: 'var(--warn)', stopped: 'var(--muted)',
-  destroyed: 'var(--bad)', destroying: 'var(--bad)',
+// a machine's or a thing's state word → the state it is in
+const STATE_OF: Record<string, StatusState> = {
+  started: 'ok', running: 'ok', active: 'ok', online: 'ok',
+  starting: 'attention', created: 'attention', creating: 'attention', pending: 'attention',
+  suspended: 'attention', stopping: 'attention', stopped: 'neutral',
+  destroyed: 'critical', destroying: 'critical',
 }
-const sc = (s?: string) => SC[s ?? ''] ?? 'var(--muted)'
 function Pill({ s }: { s?: string }) {
-  const c = sc(s)
-  return <span className="pill" style={{ background: `color-mix(in srgb, ${c} 13%, #fff)`, color: c }}>{s ?? 'unknown'}</span>
+  return <Status state={STATE_OF[s ?? ''] ?? 'neutral'}>{s ?? 'unknown'}</Status>
+}
+
+/** Where a page is: its trail of places, the last one the page itself. */
+function Crumbs({ items }: { items: React.ReactNode[] }) {
+  return (
+    <nav className="sa-row sa-row--tight sa-muted" aria-label="Where you are">
+      {items.map((it, i) => <span key={i} className="sa-row sa-row--tight">{i > 0 && <Icon icon="lucide:chevron-right" />}{it}</span>)}
+    </nav>
+  )
 }
 function ago(ms: number) {
   const s = Math.max(0, Math.floor((Date.now() - ms) / 1000))
@@ -234,7 +207,7 @@ function Shell({ children, crumbs, nav }: { children: React.ReactNode; crumbs?: 
     <div className="admin-block">
       <Style />
       {nav && <nav className="admin-block__nav side">{nav}</nav>}
-      <div className="content">{children}</div>
+      <div className="content"><div className="sa-stack sa-stack--4">{children}</div></div>
     </div>
   )
   return (
@@ -258,8 +231,8 @@ function Shell({ children, crumbs, nav }: { children: React.ReactNode; crumbs?: 
         <div className="foot"><UserButton /></div>
       </aside>
       <div className="main">
-        <div className="top">{crumbs ?? <span className="muted" style={{ fontSize: 13 }}>Superatom admin</span>}</div>
-        <div className="content">{children}</div>
+        <div className="top">{crumbs ?? <span className="sa-note">Superatom admin</span>}</div>
+        <div className="content"><div className="sa-stack sa-stack--4">{children}</div></div>
       </div>
     </div>
   )
@@ -271,8 +244,10 @@ export function App() {
   if (!isSignedIn) {
     return (
       <><Style /><div className="signin">
-        <div className="brand" style={{ fontSize: 26, marginBottom: 20 }}>super<span>atom</span></div>
-        <SignIn />
+        <div className="sa-stack sa-stack--4">
+          <PageHeader title="Superatom" subtitle="Sign in to the admin console." />
+          <SignIn />
+        </div>
       </div></>
     )
   }
@@ -439,6 +414,34 @@ function AdminWorkspace() {
   )
 }
 
+// ── A dialog over the page ───────────────────────────────────────────────────
+// The design system has no dialog yet: this is the one place that draws the scrim, and everything inside is a Section.
+function Dialog({ icon, accent, title, subtitle, onClose, footer, children }: {
+  icon: string; accent?: Accent; title: string; subtitle?: string; onClose: () => void; footer?: React.ReactNode; children: React.ReactNode
+}) {
+  return (
+    <div role="dialog" aria-modal="true" aria-label={title} onClick={onClose} className="sa-dialog">
+      <div className="sa-dialog__frame" onClick={(e) => e.stopPropagation()}>
+        <SectionCard icon={icon} accent={accent} title={title} subtitle={subtitle} footer={footer}>{children}</SectionCard>
+      </div>
+    </div>
+  )
+}
+
+/** Values shown once, one per line, to be copied exactly; focusing them selects them all (the copy button's fallback). */
+function EnvBlock({ text }: { text: string }) {
+  return (
+    <div className="sa-stack sa-stack--3" tabIndex={0} aria-label="Values to copy" onFocus={(e) => window.getSelection()?.selectAllChildren(e.currentTarget)}>
+      {text.split('\n').map((l) => <Code key={l}>{l}</Code>)}
+    </div>
+  )
+}
+
+/** "Show deleted" — a filter on a list, in its section's head. */
+function ShowDeleted({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return <label className="sa-row sa-row--tight sa-muted"><input type="checkbox" checked={value} onChange={(e) => onChange(e.target.checked)} /> Show deleted</label>
+}
+
 // ── Destructive-action guard ─────────────────────────────────────────────────
 // A delete is NEVER one click from a list. This modal spells out the consequences and only arms the
 // Delete button once the user has typed the exact resource name — so deletion is always deliberate.
@@ -447,27 +450,19 @@ function ConfirmDelete({ kind, name, consequences, onConfirm, onClose }: {
 }) {
   const [typed, setTyped] = useState(''); const [busy, setBusy] = useState(false)
   const armed = typed.trim() === name
+  const run = async () => { if (!armed || busy) return; setBusy(true); try { await onConfirm() } finally { setBusy(false) } }
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={onClose}>
-      <div className="card" style={{ maxWidth: 520, width: '92%', padding: 22 }} onClick={e => e.stopPropagation()}>
-        <h3 style={{ marginTop: 0, color: 'var(--bad)' }}>Delete {kind} “{name}”?</h3>
-        <p className="muted" style={{ marginTop: 4, marginBottom: 8 }}>This can’t be undone from here. Deleting will:</p>
-        <ul style={{ margin: '0 0 14px 18px', fontSize: 13, color: 'var(--muted)', lineHeight: 1.65 }}>
-          {consequences.map((c, i) => <li key={i}>{c}</li>)}
-        </ul>
-        <label style={{ display: 'block', fontSize: 13, marginBottom: 6 }}>Type <strong>{name}</strong> to confirm:</label>
-        <input className="input" value={typed} onChange={e => setTyped(e.target.value)} placeholder={name} autoFocus
-          onKeyDown={e => { if (e.key === 'Enter' && armed && !busy) { setBusy(true); Promise.resolve(onConfirm()).finally(() => setBusy(false)) } }}
-          style={{ width: '100%', marginBottom: 14 }} />
-        <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
-          <button className="btn ghost" onClick={onClose} disabled={busy}>Cancel</button>
-          <button className="btn danger" disabled={!armed || busy}
-            onClick={async () => { setBusy(true); try { await onConfirm() } finally { setBusy(false) } }}>
-            {busy ? 'Deleting…' : `Delete ${kind}`}
-          </button>
-        </div>
-      </div>
-    </div>
+    <Dialog icon="lucide:trash-2" accent="loss" title={`Delete ${kind} “${name}”?`} onClose={onClose}>
+      <div className="sa-section__body"><Notice state="critical">This can’t be undone from here. Deleting will:</Notice></div>
+      <ul className="sa-notes">{consequences.map((c, i) => <li key={i}>{c}</li>)}</ul>
+      <Form onSubmit={() => void run()}
+        actions={<><button type="button" className="sa-btn" onClick={onClose} disabled={busy}>Cancel</button>
+          <button className="sa-btn sa-btn--danger sa-btn--primary" disabled={!armed || busy}>{busy ? 'Deleting…' : `Delete ${kind}`}</button></>}>
+        <Field label={`Type ${name} to confirm`}>
+          <input className="sa-input" value={typed} onChange={e => setTyped(e.target.value)} placeholder={name} autoFocus />
+        </Field>
+      </Form>
+    </Dialog>
   )
 }
 
@@ -488,24 +483,22 @@ function MyOrgLanding() {
     }).catch(() => setOrgs([]))
   }, [token, api, nav])
 
-  if (!orgs) return <Shell><div className="muted" style={{ padding: 24 }}>Loading…</div></Shell>
+  if (!orgs) return <Shell><Empty icon="lucide:loader">Reading your organisations…</Empty></Shell>
   if (orgs.length === 0) return (
-    <Shell><div style={{ padding: 24 }}>
-      <h2 style={{ marginTop: 0 }}>No access yet</h2>
-      <div className="muted">This account is not a member of any organisation. Ask an administrator to add your email address.</div>
-    </div></Shell>
+    <Shell>
+      <PageHeader title="No access yet" subtitle="This account is not a member of any organisation." />
+      <Notice state="attention">Ask an administrator to add your email address to their organisation.</Notice>
+    </Shell>
   )
   return (
     <Shell>
-      <h2 style={{ marginTop: 0 }}>Your organisations</h2>
-      <div className="grid">
-        {orgs.map(o => (
-          <Link key={o.id} to={`/org/${o.id}`} className="card">
-            <div className="card-title">{o.name}</div>
-            {o.myLevel && <div className="muted" style={{ fontSize: 12 }}>{o.myLevel === 'org-admin' ? 'administrator' : 'member'}</div>}
-          </Link>
-        ))}
-      </div>
+      <PageHeader title="Your organisations" subtitle="Choose the organisation to open." />
+      <SectionCard icon="lucide:building-2" title="Organisations" note={`${orgs.length}`}>
+        <RecordList rows={orgs} keyOf={(o) => String(o.id)} onRow={(o) => nav(`/org/${o.id}`)} columns={[
+          { key: 'name', label: 'Name' },
+          { key: 'myLevel', label: 'You are', render: (o) => o.myLevel ? <Status state="neutral">{o.myLevel === 'org-admin' ? 'administrator' : 'member'}</Status> : '—' },
+        ]} />
+      </SectionCard>
     </Shell>
   )
 }
@@ -513,43 +506,39 @@ function MyOrgLanding() {
 function OrgListPage() {
   const token = useAuth(); const api = useApi(token)
   const [orgs, setOrgs] = useState<any[]>([]); const [showDeleted, setShowDeleted] = useState(false)
+  const [draft, setDraft] = useState({ name: '', adminEmail: '' })
   const nav = useNavigate()
   const fetchOrgs = useCallback(() => { if (token) api(`/organizations?deleted=${showDeleted ? '1' : '0'}`).then(r => r.json()).then(setOrgs).catch(() => {}) }, [token, api, showDeleted])
   useEffect(() => { fetchOrgs() }, [fetchOrgs])
   // The first admin is created WITH the organisation: an org nobody can enter is not much use, and this is the
   // only moment where forgetting is easy to do and annoying to notice.
-  async function create(e: React.FormEvent<HTMLFormElement>) { e.preventDefault(); const fd = new FormData(e.currentTarget); await api('/organizations', { method: 'POST', body: JSON.stringify({ name: fd.get('name'), adminEmail: fd.get('adminEmail') }) }); (e.target as HTMLFormElement).reset(); fetchOrgs() }
+  async function create() { await api('/organizations', { method: 'POST', body: JSON.stringify({ name: draft.name, adminEmail: draft.adminEmail }) }); setDraft({ name: '', adminEmail: '' }); fetchOrgs() }
   // Deletion is NOT here — it lives on the org page's Danger zone (deliberate, type-to-confirm). Restore is safe.
   const restore = async (id: string) => { await api('/organizations', { method: 'PUT', body: JSON.stringify({ id }) }); fetchOrgs() }
 
   return (
     <Shell>
-      <div className="between" style={{ marginBottom: 18 }}>
-        <h1 className="h1">Organizations</h1>
-        <label className="row muted" style={{ fontSize: 13, cursor: 'pointer' }}>
-          <input type="checkbox" checked={showDeleted} onChange={e => setShowDeleted(e.target.checked)} /> Show deleted
-        </label>
-      </div>
+      <PageHeader title="Organisations" subtitle="Every organisation on the platform. Open one to manage its projects and people." />
       {/* Creating organisations belongs to the platform console alone. */}
-      {HOST_SCOPE !== 'admin' && <form onSubmit={create} className="row" style={{ marginBottom: 20 }}>
-        <input name="name" placeholder="New organization name" required className="input" style={{ flex: 1 }} />
-        <input name="adminEmail" type="email" placeholder="First admin's email" className="input" style={{ flex: 1 }} />
-        <button className="btn">Create</button>
-      </form>}
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))' }}>
-        {orgs.map(o => (
-          <div key={o.id} className="card clickable" style={{ opacity: o.deleted ? .55 : 1 }} onClick={() => !o.deleted && nav(`/org/${o.id}`)}>
-            <div className="between">
-              <strong style={{ fontSize: 15 }}>{o.name}</strong>
-              {o.deleted
-                ? <button className="btn sm ok" onClick={e => { e.stopPropagation(); restore(o.id) }}>Restore</button>
-                : <span className="muted" style={{ fontSize: 12 }}>Open →</span>}
-            </div>
-            <code className="mono">{o.id}</code>
-          </div>
-        ))}
-      </div>
-      {orgs.length === 0 && <div className="empty">No organizations yet — create one above.</div>}
+      {HOST_SCOPE !== 'admin' && (
+        <SectionCard icon="lucide:plus" title="New organisation" subtitle="Its first administrator is invited with it">
+          <Form onSubmit={() => void create()} actions={<button className="sa-btn sa-btn--primary">Create</button>}>
+            <Field label="Name"><input className="sa-input" required value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} placeholder="Acme" /></Field>
+            <Field label="First administrator’s email"><input className="sa-input" type="email" value={draft.adminEmail} onChange={e => setDraft({ ...draft, adminEmail: e.target.value })} placeholder="name@acme.com" /></Field>
+          </Form>
+        </SectionCard>
+      )}
+      <SectionCard icon="lucide:building-2" title="Organisations" note={`${orgs.length}`} actions={<ShowDeleted value={showDeleted} onChange={setShowDeleted} />}>
+        <RecordList rows={orgs} keyOf={(o) => String(o.id)} onRow={(o) => { if (!o.deleted) nav(`/org/${o.id}`) }}
+          empty={HOST_SCOPE !== 'admin' ? 'No organisations yet. Create the first one above.' : 'No organisations yet.'}
+          columns={[
+            { key: 'name', label: 'Name' },
+            { key: 'id', label: 'Id', render: (o) => <Code>{o.id}</Code> },
+            { key: 'act', label: '', align: 'end', render: (o) => o.deleted
+              ? <span className="sa-row sa-row--tight"><Status state="neutral">deleted</Status><button className="sa-btn" onClick={e => { e.stopPropagation(); restore(o.id) }}>Restore</button></span>
+              : null },
+          ]} />
+      </SectionCard>
     </Shell>
   )
 }
@@ -561,11 +550,8 @@ function OrgListPage() {
 function ModelsPage() {
   const token = useAuth(); const api = useApi(token)
   return (
-    <Shell crumbs={<><Link to="/">Organizations</Link><span>/</span>Agents</>}>
-      <h2 style={{ margin: '0 0 4px' }}>Agents</h2>
-      <div className="muted" style={{ marginBottom: 18 }}>
-        Which brain each project’s agents run on, and what they may choose from.
-      </div>
+    <Shell crumbs={<Crumbs items={[<Link to="/">Organisations</Link>, 'Agents']} />}>
+      <PageHeader title="Agents" subtitle="Which model each project’s agents run on, and what they may choose from." />
       <AgentsScreen api={api} />
     </Shell>
   )
@@ -576,11 +562,8 @@ function ModelsPage() {
 function CredentialsPage() {
   const token = useAuth(); const api = useApi(token)
   return (
-    <Shell crumbs={<><Link to="/">Organizations</Link><span>/</span>Credentials</>}>
-      <h2 style={{ margin: '0 0 4px' }}>Credentials</h2>
-      <div className="muted" style={{ marginBottom: 18 }}>
-        The keys the coding agents use, and who may use them. Stored sealed; values are never shown here.
-      </div>
+    <Shell crumbs={<Crumbs items={[<Link to="/">Organisations</Link>, 'Credentials']} />}>
+      <PageHeader title="Credentials" subtitle="The keys the coding agents use, and who may use them. Stored sealed; values are never shown here." />
       <Credentials api={api} />
     </Shell>
   )
@@ -589,27 +572,28 @@ function CredentialsPage() {
 function OrgDetailPage() {
   const token = useAuth(); const { orgId } = useParams<{ orgId: string }>(); const api = useApi(token, orgId)
   const [search, setSearch] = useSearchParams()
-  const tab = (search.get('tab') as 'projects' | 'users' | 'usage' | 'settings') || 'projects'
+  const tab = (search.get('tab') as 'projects' | 'users' | 'usage' | 'warehouse' | 'settings') || 'projects'
   const [projects, setProjects] = useState<any[]>([]); const [users, setUsers] = useState<any[]>([])
   const [showDeleted, setShowDeleted] = useState(false); const nav = useNavigate()
   const [conn, setConn] = useState<{ id: string; apiKey: string; wsUrl: string } | null>(null)   // external-project connection info (copyable panel)
+  const [newProject, setNewProject] = useState({ name: '', provider: 'fly' })
+  const [newUser, setNewUser] = useState({ email: '', name: '', role: 'user' })
   // Teams-token generation moved to the PROJECT's Settings view. Here we only need the org NAME (for the
   // type-to-confirm delete) + the Danger-zone modal toggle.
   const [orgName, setOrgName] = useState(''); const [delOrg, setDelOrg] = useState(false)
   useEffect(() => { if (token) api('/organizations').then(r => r.json()).then((os: any[]) => setOrgName(Array.isArray(os) ? (os.find(o => o.id === orgId)?.name ?? '') : '')).catch(() => {}) }, [token, api, orgId])
   const fetchProjects = useCallback(() => { if (token) api(`/projects?deleted=${showDeleted ? '1' : '0'}`).then(r => r.json()).then(setProjects).catch(() => {}) }, [token, api, showDeleted])
   useEffect(() => { if (!token) return; fetchProjects(); api('/users').then(r => r.json()).then(setUsers).catch(() => {}) }, [token, api, fetchProjects])
-  async function createProject(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault(); const fd = new FormData(e.currentTarget)
-    const provider = String(fd.get('provider') || 'fly')   // 'fly' = managed machine · 'external' = local/EC2 (you run the engine)
-    const r = await api('/projects', { method: 'POST', body: JSON.stringify({ name: fd.get('name'), provider, createdBy: 'superadmin' }) })
-    const p = await r.json(); (e.target as HTMLFormElement).reset(); fetchProjects()
+  async function createProject() {
+    const provider = newProject.provider || 'fly'   // 'fly' = managed machine · 'external' = local/EC2 (you run the engine)
+    const r = await api('/projects', { method: 'POST', body: JSON.stringify({ name: newProject.name, provider, createdBy: 'superadmin' }) })
+    const p = await r.json(); setNewProject({ name: '', provider: 'fly' }); fetchProjects()
     // External = no Fly machine → show the connection info in a copyable panel (key is shown ONCE).
     // Managed (fly) → just open the project.
     if (p.provider === 'external' && p.apiKey) setConn({ id: p.id, apiKey: p.apiKey, wsUrl: p.wsUrl })
     else nav(`/org/${orgId}/projects/${p.id}`)
   }
-  async function createUser(e: React.FormEvent<HTMLFormElement>) { e.preventDefault(); const fd = new FormData(e.currentTarget); await api('/users', { method: 'POST', body: JSON.stringify({ email: fd.get('email'), name: fd.get('name'), role: fd.get('role') }) }); (e.target as HTMLFormElement).reset(); api('/users').then(r => r.json()).then(setUsers).catch(() => {}) }
+  async function createUser() { await api('/users', { method: 'POST', body: JSON.stringify({ email: newUser.email, name: newUser.name, role: newUser.role }) }); setNewUser({ email: '', name: '', role: 'user' }); api('/users').then(r => r.json()).then(setUsers).catch(() => {}) }
   // Project delete lives on the project's own Settings → Danger zone (type-to-confirm), not on this list.
   const restoreProject = async (id: string) => { await api('/projects', { method: 'PUT', body: JSON.stringify({ id }) }); fetchProjects() }
 
@@ -634,111 +618,102 @@ function OrgDetailPage() {
   }
 
   return (
-    <Shell crumbs={<><Link to="/">Organizations</Link><span>/</span><code className="mono">{orgId?.slice(0, 8)}…</code></>}>
+    <Shell crumbs={<Crumbs items={[<Link to="/">Organisations</Link>, orgName || <Code>{orgId?.slice(0, 8)}…</Code>]} />}>
       {conn && (() => {
         const env = `ICA_PROJECT=${conn.id}\nICA_KEY=${conn.apiKey}\nICA_HUB=${conn.wsUrl}`
         return (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setConn(null)}>
-            <div className="card" style={{ maxWidth: 660, width: '92%', padding: 22 }} onClick={e => e.stopPropagation()}>
-              <h3 style={{ marginTop: 0 }}>Project created — Local / EC2 compute</h3>
-              <p className="muted" style={{ marginTop: 4 }}>No Fly machine. Run your own code-engine with these — the API key is shown <strong>once</strong>, so copy it now.</p>
-              <textarea readOnly value={env} onFocus={e => e.currentTarget.select()} rows={3}
-                style={{ width: '100%', fontFamily: 'monospace', fontSize: 13, padding: 12, borderRadius: 8, resize: 'vertical', whiteSpace: 'pre' }} />
-              <div className="row" style={{ gap: 8, marginTop: 12, alignItems: 'center' }}>
-                <CopyButton text={env} />
-                <button className="btn ghost" onClick={() => { const id = conn.id; setConn(null); nav(`/org/${orgId}/projects/${id}`) }}>Open project</button>
-                <button className="btn ghost" onClick={() => setConn(null)} style={{ marginLeft: 'auto' }}>Close</button>
-              </div>
+          <Dialog icon="lucide:server" title="Project created on your own compute" subtitle="No Fly machine — you run the engine" onClose={() => setConn(null)}
+            footer={<><CopyButton text={env} />
+              <button className="sa-btn" onClick={() => { const id = conn.id; setConn(null); nav(`/org/${orgId}/projects/${id}`) }}>Open project</button>
+              <span className="sa-grow" />
+              <button className="sa-btn sa-btn--link" onClick={() => setConn(null)}>Close</button></>}>
+            <div className="sa-section__body sa-stack">
+              <Notice state="attention">Run your own code-engine with these. The API key is shown <strong>once</strong> — copy it now.</Notice>
+              <EnvBlock text={env} />
             </div>
-          </div>
+          </Dialog>
         )
       })()}
       {rot && (() => {
         const env = `ICA_PROJECT=${rot.id}\nICA_KEY=${rot.apiKey}`
         return (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setRot(null)}>
-            <div className="card" style={{ maxWidth: 660, width: '92%', padding: 22 }} onClick={e => e.stopPropagation()}>
-              <h3 style={{ marginTop: 0 }}>{rot.done ? 'Rotation complete' : 'New key issued — both keys work'}</h3>
+          <Dialog icon="lucide:key-round" title={rot.done ? 'Rotation complete' : 'New key issued — both keys work'} onClose={() => setRot(null)}
+            footer={<><CopyButton text={env} />
+              {!rot.done && <button className="sa-btn sa-btn--primary" onClick={finishRotation}>Finish — retire the old key</button>}
+              <span className="sa-grow" />
+              <button className="sa-btn sa-btn--link" onClick={() => setRot(null)}>Close</button></>}>
+            <div className="sa-section__body sa-stack">
               {rot.done
-                ? <p className="muted" style={{ marginTop: 4 }}>The old key no longer works. Any box still holding it will fail to connect until its <code>.env</code> is updated.</p>
-                : <p className="muted" style={{ marginTop: 4 }}>The old key still works, so nothing is down. Put this in every engine's <code>.env</code> and restart it, then press <strong>Finish</strong> to retire the old key. Shown <strong>once</strong>.</p>}
-              <textarea readOnly value={env} onFocus={e => e.currentTarget.select()} rows={2}
-                style={{ width: '100%', fontFamily: 'monospace', fontSize: 13, padding: 12, borderRadius: 8, resize: 'vertical', whiteSpace: 'pre' }} />
-              <div className="row" style={{ gap: 8, marginTop: 12, alignItems: 'center' }}>
-                <CopyButton text={env} />
-                {!rot.done && <button className="btn" onClick={finishRotation}>Finish — retire the old key</button>}
-                <button className="btn ghost" onClick={() => setRot(null)} style={{ marginLeft: 'auto' }}>Close</button>
-              </div>
+                ? <Notice state="ok">The old key no longer works. Any box still holding it will fail to connect until its <Code>.env</Code> is updated.</Notice>
+                : <Notice state="attention">The old key still works, so nothing is down. Put this in every engine’s <Code>.env</Code> and restart it, then press <strong>Finish</strong> to retire the old key. Shown <strong>once</strong>.</Notice>}
+              <EnvBlock text={env} />
             </div>
-          </div>
+          </Dialog>
         )
       })()}
-      <div className="row" style={{ gap: 8, marginBottom: 18 }}>
-        {(['projects', 'users', 'usage', 'settings'] as const).map(t => (
-          <button key={t} className={`btn ghost ${tab === t ? 'on' : ''}`} onClick={() => setSearch({ tab: t })} style={{ textTransform: 'capitalize' }}>{t}</button>
-        ))}
-        <label className="row muted" style={{ marginLeft: 'auto', fontSize: 13, cursor: 'pointer' }}>
-          <input type="checkbox" checked={showDeleted} onChange={e => setShowDeleted(e.target.checked)} /> Show deleted
-        </label>
-      </div>
+      <PageHeader title={orgName || 'Organisation'} subtitle="Its projects, the people in it, what it uses, and its settings." />
+      <Tabs label="Parts of the organisation" value={tab} onChange={(t) => setSearch({ tab: t })} items={[
+        { key: 'projects', label: 'Projects', icon: 'lucide:folder-kanban', count: projects.length },
+        { key: 'users', label: 'Users', icon: 'lucide:users', count: users.length },
+        { key: 'usage', label: 'Usage', icon: 'lucide:gauge' },
+        { key: 'warehouse', label: 'Warehouse', icon: 'lucide:database' },
+        { key: 'settings', label: 'Settings', icon: 'lucide:settings-2' },
+      ]} />
 
       {tab === 'projects' && <>
-        <form onSubmit={createProject} className="row" style={{ marginBottom: 18 }}>
-          <input name="name" placeholder="New project name" required className="input" style={{ flex: 1 }} />
-          <select name="provider" defaultValue="fly" className="input" title="Where the code-engine runs">
-            <option value="fly">Fly machine (managed)</option>
-            <option value="external">Local / EC2 (you run the engine)</option>
-          </select>
-          <button className="btn">Create project</button>
-        </form>
-        <div className="list">
-          {projects.map(p => (
-            <div key={p.id} className="card clickable between" style={{ opacity: p.deleted ? .55 : 1 }} onClick={() => !p.deleted && nav(`/org/${orgId}/projects/${p.id}`)}>
-              <div><strong>{p.name}</strong><br/><code className="mono">{p.id}</code></div>
-              {p.deleted
-                ? <button className="btn sm ok" onClick={e => { e.stopPropagation(); restoreProject(p.id) }}>Restore</button>
-                : <span className="row" style={{ gap: 10, alignItems: 'center' }}>
-                    <button className="btn sm ghost" title="Issue a new API key; the old one keeps working until you finish"
-                            onClick={e => { e.stopPropagation(); rotateKey(p.id) }}>Rotate key</button>
-                    <span className="muted" style={{ fontSize: 12 }}>Open →</span>
-                  </span>}
-            </div>
-          ))}
-        </div>
-        {projects.length === 0 && <div className="empty">No projects yet.</div>}
+        <SectionCard icon="lucide:plus" title="New project" subtitle="Choose where its engine runs">
+          <Form onSubmit={() => void createProject()} actions={<button className="sa-btn sa-btn--primary">Create project</button>}>
+            <Field label="Name"><input className="sa-input" required value={newProject.name} onChange={e => setNewProject({ ...newProject, name: e.target.value })} placeholder="Finance analytics" /></Field>
+            <Field label="Where the code-engine runs">
+              <select className="sa-input" value={newProject.provider} onChange={e => setNewProject({ ...newProject, provider: e.target.value })}>
+                <option value="fly">Fly machine (managed)</option>
+                <option value="external">Local / EC2 (you run the engine)</option>
+              </select>
+            </Field>
+          </Form>
+        </SectionCard>
+        <SectionCard icon="lucide:folder-kanban" title="Projects" note={`${projects.length}`} actions={<ShowDeleted value={showDeleted} onChange={setShowDeleted} />}>
+          <RecordList rows={projects} keyOf={(p) => String(p.id)} onRow={(p) => { if (!p.deleted) nav(`/org/${orgId}/projects/${p.id}`) }} empty="No projects yet."
+            columns={[
+              { key: 'name', label: 'Name' },
+              { key: 'id', label: 'Id', render: (p) => <Code>{p.id}</Code> },
+              { key: 'act', label: '', align: 'end', render: (p) => p.deleted
+                ? <span className="sa-row sa-row--tight"><Status state="neutral">deleted</Status><button className="sa-btn" onClick={e => { e.stopPropagation(); restoreProject(p.id) }}>Restore</button></span>
+                : <button className="sa-btn sa-btn--link" title="Issue a new API key; the old one keeps working until you finish"
+                    onClick={e => { e.stopPropagation(); rotateKey(p.id) }}>Rotate key</button> },
+            ]} />
+        </SectionCard>
       </>}
 
       {tab === 'usage' && <UsagePanel api={api} />}
+      {tab === 'warehouse' && <WarehousePanel api={api} projects={projects.filter((p: any) => !p.deleted).map((p: any) => ({ id: p.id, name: p.name }))} />}
       {tab === 'users' && <>
-        <form onSubmit={createUser} className="row" style={{ marginBottom: 18 }}>
-          <input name="email" type="email" placeholder="Email" required className="input" style={{ flex: 2 }} />
-          <input name="name" placeholder="Name" className="input" style={{ flex: 1 }} />
-          <select name="role" className="input"><option value="user">user</option><option value="admin">admin</option></select>
-          <button className="btn">Add</button>
-        </form>
-        <div className="list">
-          {users.map(u => (
-            <div key={u.id} className="card row">
-              <strong>{u.email}</strong><span className="muted">{u.name}</span>
-              <Pill s={u.role} />
-              <code className="mono" style={{ marginLeft: 'auto' }}>{u.id}</code>
-            </div>
-          ))}
-        </div>
-        {users.length === 0 && <div className="empty">No users yet.</div>}
+        <SectionCard icon="lucide:user-plus" title="Add a person" subtitle="People are added here once, then given access per project">
+          <Form onSubmit={() => void createUser()} actions={<button className="sa-btn sa-btn--primary">Add</button>}>
+            <Field label="Email"><input className="sa-input" type="email" required value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} placeholder="name@company.com" /></Field>
+            <Field label="Name"><input className="sa-input" value={newUser.name} onChange={e => setNewUser({ ...newUser, name: e.target.value })} /></Field>
+            <Field label="Role">
+              <select className="sa-input" value={newUser.role} onChange={e => setNewUser({ ...newUser, role: e.target.value })}><option value="user">user</option><option value="admin">admin</option></select>
+            </Field>
+          </Form>
+        </SectionCard>
+        <SectionCard icon="lucide:users" title="Users" note={`${users.length}`}>
+          <RecordList rows={users} keyOf={(u) => String(u.id)} empty="No users yet." columns={[
+            { key: 'email', label: 'Email' },
+            { key: 'name', label: 'Name' },
+            { key: 'role', label: 'Role', render: (u) => <Pill s={u.role} /> },
+            { key: 'id', label: 'Id', align: 'end', render: (u) => <Code>{u.id}</Code> },
+          ]} />
+        </SectionCard>
       </>}
 
       {/* Deleting an ORGANISATION is a platform act — the customer console never offers it, and the API refuses
           it for anyone but superadmin regardless. */}
-      {tab === 'settings' && HOST_SCOPE !== 'admin' && (
-        <div className="card" style={{ padding: 18, borderColor: 'var(--bad)' }}>
-          <h3 style={{ margin: '0 0 4px', color: 'var(--bad)' }}>Danger zone</h3>
-          <div className="between">
-            <div><strong>Delete this organization</strong><div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>Removes the org and every project inside it.</div></div>
-            <button className="btn danger" onClick={() => setDelOrg(true)}>Delete organization…</button>
-          </div>
-        </div>
-      )}
+      {tab === 'settings' && (HOST_SCOPE !== 'admin'
+        ? <SectionCard icon="lucide:triangle-alert" accent="loss" title="Danger zone" subtitle="Delete this organisation: it removes the organisation and every project inside it">
+            <ActionBar><button className="sa-btn" onClick={() => setDelOrg(true)}>Delete organisation…</button></ActionBar>
+          </SectionCard>
+        : <Empty>Nothing to set here: an organisation is deleted from the platform console.</Empty>)}
       {delOrg && <ConfirmDelete kind="organization" name={orgName || orgId || ''} onClose={() => setDelOrg(false)}
         consequences={[`Delete organization “${orgName || orgId}”`, `Delete all ${projects.length} project(s) inside it`, 'Detach their engines / bots', 'Soft-delete — restorable from the org list (Show deleted)']}
         onConfirm={async () => { await api('/organizations', { method: 'DELETE', body: JSON.stringify({ id: orgId }) }); nav('/') }} />}
@@ -747,10 +722,25 @@ function OrgDetailPage() {
 }
 
 // ── Project detail — live monitoring dashboard ───────────────────────────────
-const EVT_COLOR = (e: string) =>
-  /fail|error|evict/.test(e) ? 'var(--bad)' :
-  /suspend|stop|leave|disconnect/.test(e) ? 'var(--warn)' :
-  /connect|woke|start|join|deliver/.test(e) ? 'var(--ok)' : 'var(--accent)'
+const evtState = (e: string): StatusState =>
+  /fail|error|evict/.test(e) ? 'critical' :
+  /suspend|stop|leave|disconnect/.test(e) ? 'attention' :
+  /connect|woke|start|join|deliver/.test(e) ? 'ok' : 'running'
+
+// The Teams setup steps, each a title and what to do.
+const TEAMS_GUIDE: [string, React.ReactNode][] = [
+  ['1 · Create the bot', <>Azure Portal → create an <em>Azure Bot</em> resource. For “Type of App”, <em>Multi-tenant</em> is simplest.</>],
+  ['2 · Enable the Teams channel', <>On the Azure Bot → <em>Channels</em> → select <em>Microsoft Teams</em> → agree &amp; apply. Without this, Teams can’t reach the bot.</>],
+  ['3 · Set the messaging endpoint', <>Copy the endpoint shown below → Azure Bot → <em>Configuration</em> → <em>Messaging endpoint</em> → Save.</>],
+  ['4 · App ID', <>Azure Bot → <em>Configuration</em> → <em>Microsoft App ID</em> (the app registration’s <em>Application (client) ID</em>).</>],
+  ['5 · Client secret', <>Azure Portal → <em>App registrations</em> → your bot’s app → <em>Certificates &amp; secrets</em> → <em>New client secret</em> → copy the <strong>Value</strong> immediately (shown only once — the “Secret ID” is <em>not</em> it).</>],
+  ['6 · Tenant ID', <>Azure Portal → <em>Microsoft Entra ID</em> → <em>Overview</em> → <em>Tenant ID</em> (needed for single-tenant apps).</>],
+  ['7 · Connect here', <>Paste the three values below → <em>Connect Teams</em>. This stores the credentials so the engine can answer — it does <em>not</em> yet put the bot in Teams.</>],
+  ['8 · Build the Teams app package', <>One per project — don’t reuse another project’s. A <em>.zip</em> of <em>manifest.json</em> + two icons (<em>color</em> 192×192, <em>outline</em> 32×32), all at the zip root. In manifest.json: set <em>bots[0].botId</em> (and <em>webApplicationInfo.id</em> if present) to <strong>this</strong> bot’s App ID, give it a <strong>new unique</strong> <em>id</em> (a fresh GUID — the app’s own id, not the bot’s), and a distinct <em>name</em>. (Prefer a UI? <em>dev.teams.microsoft.com → Apps → Import app</em> lets you edit + publish instead.)</>],
+  ['9 · Upload it to your org', <>Teams → <em>Apps</em> → <em>Manage your apps</em> → <em>Upload an app</em> → <em>“Upload an app to your org’s app catalog”</em> → pick the .zip. (Admins can also use <em>Teams admin center → Manage apps → Upload</em>.)</>],
+  ['10 · Find it in Teams', <>Teams → <em>Apps</em> → <em>Built for your org</em> → your app → <em>Add</em>. Org apps can take a while (up to ~24h) to appear — give it time and refresh.</>],
+  ['11 · Start chatting', <>Open a 1:1 chat with the bot and message it (e.g. “how many customers do we have?”), or add it to a channel and <em>@mention</em> it. It answers for <em>this</em> project only.</>],
+]
 
 // Channels: connect a chat surface (Teams, Slack, …) to this project. It mints a scoped service
 // token + stores the channel's bot credentials in the project's ChannelDO — all via the admin
@@ -761,11 +751,10 @@ function ChannelsPanel({ projectId, api }: { projectId: string; api: (path: stri
   const [busy, setBusy] = useState(false); const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [showGuide, setShowGuide] = useState(false)
   const [status, setStatus] = useState<{ connected?: boolean; appId?: string; tenantId?: string; hasSecret?: boolean; configuredAt?: number } | null>(null)
-  const fld: React.CSSProperties = { display: 'block', marginBottom: 10, fontSize: 13, color: 'var(--muted)' }
   const refreshStatus = () => api(`/messaging/${projectId}/teams/status`).then(r => (r.ok ? r.json() : null)).then(d => setStatus(d?.channels?.teams ?? null)).catch(() => {})
   useEffect(() => { refreshStatus() }, [projectId])   // show "connected" without ever re-exposing the secret
-  async function connect(e: React.FormEvent) {
-    e.preventDefault(); setBusy(true); setMsg(null)
+  async function connect() {
+    setBusy(true); setMsg(null)
     try {
       // 1) mint a scoped service token for this project's teams channel
       const st = await api(`/projects/${projectId}/service-token`, { method: 'POST', body: JSON.stringify({ channel: 'teams' }) })
@@ -781,60 +770,36 @@ function ChannelsPanel({ projectId, api }: { projectId: string; api: (path: stri
     } catch (err: any) { setMsg({ ok: false, text: String(err?.message ?? err) }) } finally { setBusy(false) }
   }
   return (
-    <div>
-      <div className="card" style={{ marginBottom: 14 }}>
-        <strong>Messaging channels</strong>
-        <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>Connect a chat surface to this project. Each connects to the engine as a scoped bot, routed by URL to this project only.</div>
-      </div>
-      <form onSubmit={connect} className="card">
-        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-          <strong>Microsoft Teams</strong>
-          <button type="button" onClick={() => setShowGuide(v => !v)}
-            style={{ fontSize: 12, padding: '3px 9px', border: '1px solid var(--line)', borderRadius: 6, background: 'transparent', color: 'var(--muted)', cursor: 'pointer' }}>
-            {showGuide ? '× Hide setup guide' : 'ⓘ Setup guide'}
-          </button>
-        </div>
-        <div className="muted" style={{ fontSize: 12.5, margin: '4px 0 12px' }}>Set the messaging endpoint in Azure, then paste the bot's App ID, client secret, and tenant ID below and connect. First time? Open the setup guide.</div>
-        {status?.connected && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', alignItems: 'center', margin: '0 0 12px', padding: '8px 12px', border: '1px solid var(--ok)', borderRadius: 8, background: 'rgba(60,190,120,.08)', fontSize: 12.5 }}>
-            <span style={{ color: 'var(--ok)', fontWeight: 600 }}>● Connected</span>
-            <span className="muted">App ID <span className="mono">{status.appId}</span></span>
-            <span className="muted">Tenant <span className="mono">{status.tenantId}</span></span>
-            <span className="muted">Client secret {status.hasSecret ? 'set ✓' : '—'}</span>
-            {status.configuredAt ? <span className="muted">· configured {new Date(status.configuredAt).toLocaleString()}</span> : null}
-            <span className="muted" style={{ flexBasis: '100%', fontSize: 11.5 }}>The secret is stored, never shown. Re-enter the fields below only to update it.</span>
-          </div>
-        )}
-        {showGuide && (
-          <ol style={{ margin: '0 0 14px', paddingLeft: 30, fontSize: 12.5, lineHeight: 1.65, color: 'var(--muted)', background: 'rgba(127,127,127,.06)', border: '1px solid var(--line)', borderRadius: 8, padding: '12px 14px 12px 32px' }}>
-            <li><strong>Create the bot.</strong> Azure Portal → create an <em>Azure Bot</em> resource. For “Type of App”, <em>Multi-tenant</em> is simplest.</li>
-            <li><strong>Enable the Teams channel.</strong> On the Azure Bot → <em>Channels</em> → select <em>Microsoft Teams</em> → agree &amp; apply. Without this, Teams can’t reach the bot.</li>
-            <li><strong>Set the messaging endpoint.</strong> Copy the endpoint shown below → Azure Bot → <em>Configuration</em> → <em>Messaging endpoint</em> → Save.</li>
-            <li><strong>App ID.</strong> Azure Bot → <em>Configuration</em> → <em>Microsoft App ID</em> (the app registration’s <em>Application (client) ID</em>).</li>
-            <li><strong>Client secret.</strong> Azure Portal → <em>App registrations</em> → your bot’s app → <em>Certificates &amp; secrets</em> → <em>New client secret</em> → copy the <strong>Value</strong> immediately (shown only once — the “Secret ID” is <em>not</em> it).</li>
-            <li><strong>Tenant ID.</strong> Azure Portal → <em>Microsoft Entra ID</em> → <em>Overview</em> → <em>Tenant ID</em> (needed for single-tenant apps).</li>
-            <li><strong>Connect here.</strong> Paste the three values below → <em>Connect Teams</em>. This stores the credentials so the engine can answer — it does <em>not</em> yet put the bot in Teams.</li>
-            <li><strong>Build the Teams app package</strong> (one per project — don’t reuse another project’s). A <em>.zip</em> of <em>manifest.json</em> + two icons (<em>color</em> 192×192, <em>outline</em> 32×32), all at the zip root. In manifest.json: set <em>bots[0].botId</em> (and <em>webApplicationInfo.id</em> if present) to <strong>this</strong> bot’s App ID, give it a <strong>new unique</strong> <em>id</em> (a fresh GUID — the app’s own id, not the bot’s), and a distinct <em>name</em>. (Prefer a UI? <em>dev.teams.microsoft.com → Apps → Import app</em> lets you edit + publish instead.)</li>
-            <li><strong>Upload it to your org.</strong> Teams → <em>Apps</em> → <em>Manage your apps</em> → <em>Upload an app</em> → <em>“Upload an app to your org’s app catalog”</em> → pick the .zip. (Admins can also use <em>Teams admin center → Manage apps → Upload</em>.)</li>
-            <li><strong>Find it in Teams.</strong> Teams → <em>Apps</em> → <em>Built for your org</em> → your app → <em>Add</em>. Org apps can take a while (up to ~24h) to appear — give it time and refresh.</li>
-            <li><strong>Start chatting.</strong> Open a 1:1 chat with the bot and message it (e.g. “how many customers do we have?”), or add it to a channel and <em>@mention</em> it. It answers for <em>this</em> project only.</li>
-          </ol>
-        )}
-        <label style={fld}>Messaging endpoint <span style={{ fontSize: 11 }}>(paste into Azure Bot → Configuration)</span>
-          <input readOnly value={endpoint} onFocus={e => e.currentTarget.select()} className="mono" style={{ width: '100%', marginTop: 4, padding: '7px 10px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 12 }} />
-        </label>
-        <label style={fld}>App ID<input value={appId} onChange={e => setAppId(e.target.value)} required placeholder="b153838f-…" style={{ width: '100%', marginTop: 4, padding: '7px 10px', border: '1px solid var(--line)', borderRadius: 6 }} /></label>
-        <label style={fld}>Client secret<input value={secret} onChange={e => setSecret(e.target.value)} required type="password" placeholder="secret value" style={{ width: '100%', marginTop: 4, padding: '7px 10px', border: '1px solid var(--line)', borderRadius: 6 }} /></label>
-        <label style={fld}>Tenant ID<input value={tenantId} onChange={e => setTenantId(e.target.value)} required placeholder="b9bd0c3d-…" style={{ width: '100%', marginTop: 4, padding: '7px 10px', border: '1px solid var(--line)', borderRadius: 6 }} /></label>
-        <div className="row" style={{ gap: 10, marginTop: 12, alignItems: 'center' }}>
-          <button className="btn" disabled={busy}>{busy ? 'Connecting…' : 'Connect Teams'}</button>
-          {msg && <span style={{ fontSize: 13, color: msg.ok ? 'var(--ok)' : 'var(--bad)' }}>{msg.text}</span>}
-        </div>
-      </form>
-      <div className="card" style={{ marginTop: 14, opacity: .55 }}>
-        <strong>Slack</strong><div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>Coming soon — same flow, one adapter away.</div>
-      </div>
-    </div>
+    <>
+      <SectionCard icon="lucide:message-square" title="Microsoft Teams" subtitle="Each channel joins the engine as a scoped bot, routed to this project only"
+        actions={<button type="button" className="sa-btn sa-btn--link" onClick={() => setShowGuide(v => !v)}>
+          <Icon icon={showGuide ? 'lucide:x' : 'lucide:book-open'} className="sa-btn__icon" />{showGuide ? 'Hide setup guide' : 'Setup guide'}</button>}>
+        {status?.connected && <>
+          <Receipt items={[
+            ['Status', <Status state="ok">Connected</Status>],
+            ['App ID', <Code>{status.appId}</Code>],
+            ['Tenant', <Code>{status.tenantId}</Code>],
+            ['Client secret', status.hasSecret ? 'set' : '—'],
+            ...(status.configuredAt ? [['Configured', new Date(status.configuredAt).toLocaleString()] as [string, React.ReactNode]] : []),
+          ]} />
+          <div className="sa-section__body"><Notice>The secret is stored, never shown. Re-enter the fields below only to update it.</Notice></div>
+        </>}
+        {showGuide && <Receipt items={TEAMS_GUIDE} />}
+        <Form onSubmit={() => void connect()} error={msg && !msg.ok ? msg.text : undefined}
+          actions={<button className="sa-btn sa-btn--primary" disabled={busy}>{busy ? 'Connecting…' : 'Connect Teams'}</button>}>
+          <Field label="Messaging endpoint" help="Paste into Azure Bot → Configuration. First time? Open the setup guide.">
+            <input className="sa-input" readOnly value={endpoint} onFocus={e => e.currentTarget.select()} />
+          </Field>
+          <Field label="App ID"><input className="sa-input" value={appId} onChange={e => setAppId(e.target.value)} required placeholder="b153838f-…" /></Field>
+          <Field label="Client secret"><input className="sa-input" value={secret} onChange={e => setSecret(e.target.value)} required type="password" placeholder="secret value" /></Field>
+          <Field label="Tenant ID"><input className="sa-input" value={tenantId} onChange={e => setTenantId(e.target.value)} required placeholder="b9bd0c3d-…" /></Field>
+        </Form>
+        {msg?.ok && <div className="sa-section__body"><Notice state="ok">{msg.text}</Notice></div>}
+      </SectionCard>
+      <SectionCard icon="lucide:hash" title="Slack">
+        <Empty icon="lucide:clock">Coming soon — the same flow, one adapter away.</Empty>
+      </SectionCard>
+    </>
   )
 }
 
@@ -847,6 +812,7 @@ function AccessPanel({ projectId, orgId, api, token }: { projectId: string; orgI
   const [roles, setRoles] = useState<any[]>([])
   const [orgUsers, setOrgUsers] = useState<any[]>([])
   const [err, setErr] = useState('')
+  const [pick, setPick] = useState({ email: '', roleId: '' })
   const orgApi = useApi(token, orgId)
 
   const load = useCallback(async () => {
@@ -859,13 +825,15 @@ function AccessPanel({ projectId, orgId, api, token }: { projectId: string; orgI
 
   const assigned = new Set(access.map(a => String(a.email).toLowerCase()))
   const available = orgUsers.filter(u => !assigned.has(String(u.email).toLowerCase()))
+  // What the selects show: the choice made, or their first option.
+  const email = available.some(u => u.email === pick.email) ? pick.email : (available[0]?.email ?? '')
+  const roleId = roles.some(r => String(r.id) === pick.roleId) ? pick.roleId : String(roles[0]?.id ?? '')
 
-  async function assign(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault(); setErr('')
-    const fd = new FormData(e.currentTarget)
-    const r = await orgApi('/assignments', { method: 'POST', body: JSON.stringify({ projectId, email: fd.get('email'), roleId: fd.get('roleId') }) })
+  async function assign() {
+    setErr('')
+    const r = await orgApi('/assignments', { method: 'POST', body: JSON.stringify({ projectId, email, roleId }) })
     if (!r.ok) { setErr(await r.text()); return }
-    ;(e.target as HTMLFormElement).reset(); load()
+    setPick({ email: '', roleId: '' }); load()
   }
   async function unassign(email: string) {
     setErr('')
@@ -876,53 +844,42 @@ function AccessPanel({ projectId, orgId, api, token }: { projectId: string; orgI
 
   return (
     <>
-      {err && <div className="card" style={{ padding: 10, borderColor: 'var(--bad)', marginBottom: 12 }}>{err}</div>}
-      {!orgId && <div className="muted" style={{ marginBottom: 12 }}>Loading the organisation…</div>}
+      {err && <Notice state="critical">{err}</Notice>}
+      {!orgId && <Empty icon="lucide:loader">Reading the organisation…</Empty>}
 
-      <form onSubmit={assign} className="row" style={{ marginBottom: 18, gap: 8 }}>
-        <select name="email" required className="input" style={{ flex: 1 }} disabled={!available.length}>
-          {available.length
-            ? available.map(u => <option key={u.email} value={u.email}>{u.email}{u.name ? ` — ${u.name}` : ''}</option>)
-            : <option value="">everyone in the organisation already has access</option>}
-        </select>
-        <select name="roleId" className="input">
-          {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-        </select>
-        <button className="btn" disabled={!available.length || !orgId}>Give access</button>
-      </form>
+      <SectionCard icon="lucide:user-plus" title="Give access" subtitle="People come from the organisation; here they get a role in this project">
+        <Form onSubmit={() => void assign()} actions={<button className="sa-btn sa-btn--primary" disabled={!available.length || !orgId}>Give access</button>}>
+          <Field label="Person">
+            <select className="sa-input" required value={email} onChange={e => setPick({ ...pick, email: e.target.value })} disabled={!available.length}>
+              {available.length
+                ? available.map(u => <option key={u.email} value={u.email}>{u.email}{u.name ? ` — ${u.name}` : ''}</option>)
+                : <option value="">everyone in the organisation already has access</option>}
+            </select>
+          </Field>
+          <Field label="Role">
+            <select className="sa-input" value={roleId} onChange={e => setPick({ ...pick, roleId: e.target.value })}>
+              {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          </Field>
+        </Form>
+      </SectionCard>
 
-      <div className="grid" style={{ gridTemplateColumns: '1fr' }}>
-        {access.map(a => (
-          <div key={a.email} className="card" style={{ padding: 12 }}>
-            <div className="between">
-              <div>
-                <strong>{a.email}</strong>
-                <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
-                  {a.role_name ?? a.role_id}
-                  {a.source === 'org-admin' && ' · administers the organisation'}
-                </div>
-              </div>
-              {a.source === 'org-admin'
-                ? <span className="muted" style={{ fontSize: 12 }}>managed by the organisation</span>
-                : <button className="btn danger" onClick={() => unassign(a.email)}>Remove</button>}
-            </div>
-          </div>
-        ))}
-      </div>
-      {access.length === 0 && <div className="empty">Nobody has been given access yet.</div>}
+      <SectionCard icon="lucide:users" title="Who has access" note={`${access.length}`}>
+        <RecordList rows={access} keyOf={(a) => String(a.email)} empty="Nobody has been given access yet." columns={[
+          { key: 'email', label: 'Person' },
+          { key: 'role', label: 'Role', render: (a) => <>{a.role_name ?? a.role_id}{a.source === 'org-admin' && <span className="sa-muted"> · administers the organisation</span>}</> },
+          { key: 'act', label: '', align: 'end', render: (a) => a.source === 'org-admin'
+            ? <span className="sa-muted">managed by the organisation</span>
+            : <button className="sa-btn" onClick={() => unassign(a.email)}>Remove</button> },
+        ]} />
+      </SectionCard>
 
-      <h3 style={{ marginTop: 26 }}>Roles</h3>
-      <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>
-        Roles belong to this project — the same person can hold a different one elsewhere.
-      </div>
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))' }}>
-        {roles.map(r => (
-          <div key={r.id} className="card" style={{ padding: 12 }}>
-            <div className="between"><strong>{r.name}</strong>{r.builtin && <span className="muted" style={{ fontSize: 11 }}>built-in</span>}</div>
-            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{(r.permissions ?? []).join(', ') || '—'}</div>
-          </div>
-        ))}
-      </div>
+      <SectionCard icon="lucide:shield" title="Roles" subtitle="Roles belong to this project — the same person can hold a different one elsewhere">
+        <RecordList rows={roles} keyOf={(r) => String(r.id)} empty="No roles yet." columns={[
+          { key: 'name', label: 'Role', render: (r) => <span className="sa-row sa-row--tight">{r.name}{r.builtin && <Status state="neutral">built-in</Status>}</span> },
+          { key: 'permissions', label: 'May', wrap: true, render: (r) => (r.permissions ?? []).join(', ') || '—' },
+        ]} />
+      </SectionCard>
     </>
   )
 }
@@ -953,40 +910,36 @@ function IndexPanel({ hub }: { hub: ReturnType<typeof useProjectHub> }) {
 
   return (
     <>
-      <div className="muted" style={{ marginBottom: 12 }}>
-        The index records the tables and fields each connected source has, so an agent can find where something
-        lives instead of guessing. Building is resumable — running it again picks up where it left off and skips
-        what is already indexed.
-      </div>
-      <div className="row" style={{ gap: 8, marginBottom: 16 }}>
-        <button className="btn" disabled={busy || hub.status !== 'live'} onClick={() => start(false)}>
-          {busy ? 'Building…' : 'Build / resume'}
-        </button>
-        <button className="btn danger" disabled={busy || hub.status !== 'live'} onClick={() => start(true)}>
-          Rebuild from empty
-        </button>
-        {hub.status !== 'live' && <span className="muted" style={{ alignSelf: 'center', fontSize: 12.5 }}>the engine is not connected</span>}
-      </div>
+      <SectionCard icon="lucide:database-zap" title="Build the index" subtitle="Records the tables and fields of each connected source, so an agent finds where something lives instead of guessing"
+        actions={<>
+          <button className="sa-btn" disabled={busy || hub.status !== 'live'} onClick={() => start(true)}>Rebuild from empty</button>
+          <button className="sa-btn sa-btn--primary" disabled={busy || hub.status !== 'live'} onClick={() => start(false)}>{busy ? 'Building…' : 'Build / resume'}</button>
+        </>}>
+        <div className="sa-section__body sa-stack">
+          <Notice>Building resumes: running it again picks up where it left off and skips what is already indexed.</Notice>
+          {hub.status !== 'live' && <Notice state="attention">The engine is not connected.</Notice>}
+        </div>
+      </SectionCard>
 
       {summary?.sources && (
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(230px,1fr))', marginBottom: 16 }}>
-          {summary.sources.map((s: any) => (
-            <div key={s.id} className="card" style={{ padding: 12 }}>
-              <div className="between"><strong>{s.id}</strong><span className="muted" style={{ fontSize: 11 }}>{s.dialect}</span></div>
-              <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>
-                {s.error ? <span style={{ color: 'var(--bad)' }}>{s.error}</span>
-                         : `${s.containers} tables · +${s.indexed} indexed · ${s.fields} fields`}
-              </div>
-            </div>
-          ))}
-        </div>
+        <SectionCard icon="lucide:database" title="Sources" note={`${summary.sources.length}`}>
+          <RecordList rows={summary.sources as any[]} keyOf={(s) => String(s.id)} columns={[
+            { key: 'id', label: 'Source' },
+            { key: 'dialect', label: 'Dialect' },
+            { key: 'containers', label: 'Tables', align: 'end', render: (s) => s.error ? '—' : String(s.containers) },
+            { key: 'indexed', label: 'Indexed now', align: 'end', render: (s) => s.error ? '—' : `+${s.indexed}` },
+            { key: 'fields', label: 'Fields', align: 'end', render: (s) => s.error ? '—' : String(s.fields) },
+            { key: 'state', label: 'State', wrap: true, render: (s) => s.error ? <span className="sa-row sa-row--tight"><Status state="critical">failed</Status>{s.error}</span> : <Status state="ok">indexed</Status> },
+          ]} />
+        </SectionCard>
       )}
 
       {lines.length > 0 && (
-        <pre style={{ background: 'var(--panel, #f6f6f4)', border: '1px solid var(--line, #ddd)', borderRadius: 6,
-                      padding: 12, maxHeight: 420, overflow: 'auto', fontSize: 12.5, lineHeight: 1.5 }}>
-          {lines.join('\n')}<div ref={endRef} />
-        </pre>
+        <SectionCard icon="lucide:scroll-text" title="Progress" note={busy ? 'building' : undefined}>
+          <div className="sa-section__scroll sa-section__scroll--tall sa-scroll">
+            <pre className="sa-section__text">{lines.join('\n')}<div ref={endRef} /></pre>
+          </div>
+        </SectionCard>
       )}
     </>
   )
@@ -1206,7 +1159,7 @@ function ProjectDetailPage() {
       const expanded = openGroup === it.id || childActive   // auto-expand the group whose child is the active view
       return (
         <div key={it.id}>
-          <a className={'nav' + (view === it.id || childActive ? ' on' : '')} style={{ cursor: 'pointer' }}
+          <a className={'nav' + (view === it.id || childActive ? ' on' : '')}
             onClick={() => {
               if (!it.children) { setView(it.id); return }
               // Toggle the group. Opening it also navigates to its first child, so one click gets you somewhere.
@@ -1222,7 +1175,7 @@ function ProjectDetailPage() {
             for (const c of it.children) {
               if (c.group && c.group !== lastGroup) {
                 lastGroup = c.group
-                out.push(<div key={'grp-' + c.group} style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--faint)', padding: '11px 0 3px 14px' }}>{c.group}</div>)
+                out.push(<div key={'grp-' + c.group} className="grp">{c.group}</div>)
               }
               out.push(<a key={c.id} className={'subnav' + (view === c.id ? ' on' : '')} onClick={() => setView(c.id)}>{c.label}</a>)
             }
@@ -1233,66 +1186,48 @@ function ProjectDetailPage() {
     })}
   </>
 
+  // One line on what the view is for, from the places by purpose (the same words as the workspace's sidebar).
+  const says = purposesOf(projectId ?? '').flatMap(p => p.places).find(pl => pl.path === `/pro/${projectId}${view === 'overview' ? '' : '/' + view}`)?.says
+  const profileEnv = (key: string) => `ICA_PROJECT=${projectId}\nICA_KEY=${key}`
+
   return (
-    <Shell nav={nav} crumbs={<><Link to="/">Organizations</Link><span>/</span><Link to={`/org/${orgId}`}>{meta.org ?? <code className="mono">{orgId?.slice(0, 8)}…</code>}</Link><span>/</span>{meta.project ?? <code className="mono">{projectId?.slice(0, 8)}…</code>}</>}>
-      {/* Compact header — org/project already live in the breadcrumb + sidebar, so the title stays tiny and
-          the content gets the space. */}
-      <div className="between" style={{ marginBottom: 10 }}>
-        <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-          <span style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: '.02em', color: 'var(--muted)' }}>{title}</span>
-          {!loading && <Pill s={liveState} />}
-        </div>
-        {loading && <span className="row muted" style={{ fontSize: 12 }}><span className="spin" /> connecting…</span>}
-      </div>
+    <Shell nav={nav} crumbs={<Crumbs items={[<Link to="/">Organisations</Link>, <Link to={`/org/${orgId}`}>{meta.org ?? <Code>{orgId?.slice(0, 8)}…</Code>}</Link>, meta.project ?? <Code>{projectId?.slice(0, 8)}…</Code>]} />}>
+      <PageHeader title={title} subtitle={says}
+        actions={loading ? <span className="sa-row sa-row--tight sa-muted"><span className="sa-spinner" /> connecting…</span> : <Pill s={liveState} />} />
 
       {view === 'overview' && <>
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', marginBottom: 14 }}>
-          <div className="tile"><div className="k">Compute</div><div className="v" style={{ fontSize: 15 }}>{provider === 'external' ? 'Local / EC2' : 'Fly machine'}</div></div>
-          <div className="tile"><div className="k">State</div><div className="v"><Pill s={liveState} /></div></div>
-          <div className="tile"><div className="k">Heartbeat</div><div className="v" style={{ fontSize: 15 }}>{m?.lastHeartbeat ? ago(m.lastHeartbeat) : '—'}</div></div>
-          <div className="tile"><div className="k">Connections</div><div className="v">{conns.length}</div></div>
-          {provider !== 'external' && m?.idlePhase && <div className="tile"><div className="k">Idle phase</div><div className="v" style={{ fontSize: 15 }}><Pill s={m.idlePhase} /></div></div>}
-          {m?.region && <div className="tile"><div className="k">Region</div><div className="v" style={{ fontSize: 15 }}>{m.region}</div></div>}
-        </div>
-        <div className="card" style={{ marginBottom: 14 }}>
-          <strong>Live connections</strong>
-          {conns.length === 0
-            ? <div className="muted" style={{ fontSize: 13, marginTop: 8 }}>Nobody connected to the hub right now.</div>
-            : <div className="row" style={{ flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-                {conns.map((c: any) => (
-                  <span key={c.wsId} className="row" style={{ gap: 6, padding: '5px 11px', border: '1px solid var(--line)', borderRadius: 999, fontSize: 13 }}>
-                    <span className="dot" style={{ background: 'var(--ok)' }} /><strong>{c.type}</strong><code className="mono">{c.wsId}</code>
-                  </span>
-                ))}
-              </div>}
-        </div>
-        <div className="card between">
-          <div><strong>User app</strong><div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>Open this project as an end user</div></div>
-          <div className="row" style={{ gap: 8 }}>
-            <a className="btn" href={`https://${projectId}.superatom.site/`} target="_blank" rel="noreferrer">Open on superatom.site ↗</a>
-            {domains[0] && <a className="btn ghost" href={`https://${domains[0]}.superatom.site`} target="_blank" rel="noreferrer">Open on {domains[0]}.superatom.site ↗</a>}
-          </div>
-        </div>
+        <Figures>
+          <Kpi label="Compute" value={provider === 'external' ? 'Local / EC2' : 'Fly machine'} />
+          <Kpi label="State" value={<Pill s={liveState} />} />
+          <Kpi label="Heartbeat" value={m?.lastHeartbeat ? ago(m.lastHeartbeat) : '—'} />
+          <Kpi label="Connections" value={conns.length} />
+          {provider !== 'external' && m?.idlePhase && <Kpi label="Idle phase" value={<Pill s={m.idlePhase} />} />}
+          {m?.region && <Kpi label="Region" value={m.region} />}
+        </Figures>
+        <SectionCard icon="lucide:plug" title="Live connections" subtitle="Who is connected to the project’s hub now" note={`${conns.length}`}>
+          <RecordList rows={conns} keyOf={(c) => String(c.wsId)} empty="Nobody is connected to the hub right now." columns={[
+            { key: 'type', label: 'Who', render: (c) => <span className="sa-row sa-row--tight"><Status state="ok">live</Status>{c.type}</span> },
+            { key: 'wsId', label: 'Connection', align: 'end', render: (c) => <Code>{c.wsId}</Code> },
+          ]} />
+        </SectionCard>
+        <SectionCard icon="lucide:app-window" title="User app" subtitle="Open this project as an end user">
+          <ActionBar>
+            <a className="sa-btn sa-btn--primary" href={`https://${projectId}.superatom.site/`} target="_blank" rel="noreferrer"><Icon icon="lucide:external-link" className="sa-btn__icon" />Open on superatom.site</a>
+            {domains[0] && <a className="sa-btn" href={`https://${domains[0]}.superatom.site`} target="_blank" rel="noreferrer"><Icon icon="lucide:external-link" className="sa-btn__icon" />Open on {domains[0]}.superatom.site</a>}
+          </ActionBar>
+        </SectionCard>
       </>}
 
       {view.startsWith('inspector/') && <Inspector hub={hub} section={view.slice('inspector/'.length) as Section} />}
 
       {view === 'events' && (
-        <div className="card">
-          <div className="between" style={{ marginBottom: 6 }}>
-            <strong>Event log <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>· from the Durable Object</span></strong>
-            <span className="row muted" style={{ fontSize: 12 }}><span className="dot" style={{ background: 'var(--ok)' }} /> live</span>
-          </div>
-          {logs.length === 0 && <div className="empty">No events recorded yet.</div>}
-          {logs.map((l: any) => (
-            <div key={l.id} className="evt">
-              <span className="dot" style={{ background: EVT_COLOR(l.event) }} />
-              <code style={{ fontWeight: 700, color: EVT_COLOR(l.event), minWidth: 160 }}>{l.event}</code>
-              <span className="muted" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.detail || ''}</span>
-              <span className="mono" style={{ whiteSpace: 'nowrap' }}>{new Date(l.created_at * 1000).toLocaleTimeString()}</span>
-            </div>
-          ))}
-        </div>
+        <SectionCard icon="lucide:activity" title="Event log" subtitle="From the project’s Durable Object" actions={<Status state="ok">live</Status>}>
+          <RecordList rows={logs} keyOf={(l) => String(l.id)} empty="No events recorded yet." columns={[
+            { key: 'event', label: 'Event', render: (l) => <Status state={evtState(l.event)}>{l.event}</Status> },
+            { key: 'detail', label: 'Detail', render: (l) => <span title={l.detail || undefined}>{l.detail || ''}</span> },
+            { key: 'at', label: 'Time', align: 'end', render: (l) => new Date(l.created_at * 1000).toLocaleTimeString() },
+          ]} />
+        </SectionCard>
       )}
 
       {view === 'dashboards' && <DashboardsPanel api={api} token={token} projectId={projectId!} />}
@@ -1301,291 +1236,221 @@ function ProjectDetailPage() {
       {view === 'data-access' && <AccessPoliciesPanel api={api} projectId={projectId!} />}
       {view === 'groups' && <GroupsPanel api={api} projectId={projectId!} />}
       {view === 'subdomains' && (
-        <div className="card">
-          <strong>Subdomains</strong>
-          <div className="muted" style={{ fontSize: 12.5, marginTop: 2, marginBottom: 10 }}>Map a name to this project. Users open <code className="mono">&lt;name&gt;.superatom.site</code>. (The project id also works directly.)</div>
-          <div className="row" style={{ gap: 8 }}>
-            <div className="row" style={{ gap: 0, flex: 1, maxWidth: 360 }}>
-              <input value={sub} onChange={e => checkSub(e.target.value.toLowerCase())} placeholder="acme"
-                style={{ flex: 1, padding: '7px 10px', border: '1px solid var(--line)', borderRadius: '6px 0 0 6px', fontFamily: 'inherit' }} />
-              <span style={{ padding: '7px 10px', border: '1px solid var(--line)', borderLeft: 'none', borderRadius: '0 6px 6px 0', fontSize: 13, color: 'var(--muted)' }}>.superatom.site</span>
-            </div>
-            <button className="btn" onClick={claimSub} disabled={!subState?.ok}>Claim</button>
-            {subState && <span style={{ fontSize: 12.5, color: subState.ok ? 'var(--ok)' : 'var(--bad)' }}>{subState.msg}</span>}
-          </div>
-          {domains.length > 0 &&
-            <div className="row" style={{ flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
-              {domains.map(d => (
-                <span key={d} className="row" style={{ gap: 8, padding: '5px 11px', border: '1px solid var(--line)', borderRadius: 999, fontSize: 13 }}>
-                  <a className="mono" href={`https://${d}.superatom.site`} target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'none' }}>{d}.superatom.site ↗</a>
-                  <span onClick={() => releaseSub(d)} style={{ cursor: 'pointer', color: 'var(--bad)' }} title="release">×</span>
-                </span>
-              ))}
-            </div>}
-        </div>
+        <SectionCard icon="lucide:globe" title="Subdomains" subtitle="Map a name to this project; people open <name>.superatom.site (the project id also works)" note={`${domains.length}`}>
+          <Form onSubmit={() => { if (subState?.ok) void claimSub() }} actions={<button className="sa-btn sa-btn--primary" disabled={!subState?.ok}>Claim</button>}>
+            <Field label="Name" help={<span className="sa-row sa-row--tight sa-row--wrap">Opens at <Code>{`${sub || 'name'}.superatom.site`}</Code>{subState && <Status state={subState.ok ? 'ok' : 'critical'}>{subState.msg}</Status>}</span>}>
+              <input className="sa-input" value={sub} onChange={e => checkSub(e.target.value.toLowerCase())} placeholder="acme" />
+            </Field>
+          </Form>
+          <RecordList rows={domains.map(d => ({ d }))} keyOf={(r) => r.d} empty="No names mapped yet." columns={[
+            { key: 'd', label: 'Address', render: (r) => <a href={`https://${r.d}.superatom.site`} target="_blank" rel="noreferrer" className="sa-row sa-row--tight"><Code>{`${r.d}.superatom.site`}</Code><Icon icon="lucide:external-link" /></a> },
+            { key: 'act', label: '', align: 'end', render: (r) => <button className="sa-btn sa-btn--link" title="release" onClick={() => releaseSub(r.d)}>Release</button> },
+          ]} />
+        </SectionCard>
       )}
 
-      {view === 'settings' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div className="card" style={{ padding: 18 }}>
-            <strong>Teams bot credential</strong>
-            <div className="muted" style={{ fontSize: 12.5, margin: '4px 0 12px' }}>Generate a scoped service token so a Teams bot can act as this project’s runtime. Shown once.</div>
-            <button className="btn ghost" onClick={() => genServiceToken('teams')}>Generate Teams token</button>
+      {view === 'settings' && <>
+        <SectionCard icon="lucide:bot" title="Teams bot credential" subtitle="A scoped service token so a Teams bot can act as this project’s runtime. Shown once">
+          <ActionBar><button className="sa-btn" onClick={() => genServiceToken('teams')}>Generate Teams token</button></ActionBar>
+        </SectionCard>
+        <SectionCard icon="lucide:key-round" title="Project API key" subtitle="In every engine’s .env; it unlocks this project’s pooled provider credentials">
+          <div className="sa-section__body sa-stack">
+            <p className="sa-muted">Rotating issues a <strong>second</strong> key — both work, so nothing goes down — then “Finish” retires the old one.</p>
+            {rot && <>
+              {rot.done
+                ? <Notice state="ok">Done — the old key no longer works. Any box still holding it will fail to connect until its <Code>.env</Code> is updated.</Notice>
+                : <Notice state="attention">Shown once. Put it in every engine’s <Code>.env</Code> and restart, then press Finish.</Notice>}
+              <EnvBlock text={profileEnv(rot.apiKey)} />
+            </>}
           </div>
-          <div className="card" style={{ padding: 18 }}>
-            <strong>Project API key</strong>
-            <div className="muted" style={{ fontSize: 12.5, margin: '4px 0 12px' }}>
-              This key is in every engine’s <code>.env</code> and unlocks this project’s pooled provider credentials.
-              Rotating issues a <strong>second</strong> key — both work, so nothing goes down — then “Finish” retires the old one.
-            </div>
+          <ActionBar>
             {!rot
-              ? <button className="btn ghost" onClick={rotateKey}>Rotate key</button>
+              ? <button className="sa-btn" onClick={rotateKey}>Rotate key</button>
               : <>
-                  <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>
-                    {rot.done
-                      ? 'Done — the old key no longer works. Any box still holding it will fail to connect until its .env is updated.'
-                      : 'Shown once. Put it in every engine’s .env and restart, then press Finish.'}
-                  </div>
-                  <textarea readOnly value={`ICA_PROJECT=${projectId}\nICA_KEY=${rot.apiKey}`} rows={2}
-                    onFocus={e => e.currentTarget.select()}
-                    style={{ width: '100%', fontFamily: 'monospace', fontSize: 13, padding: 12, borderRadius: 8, whiteSpace: 'pre' }} />
-                  <div className="row" style={{ gap: 8, marginTop: 10 }}>
-                    <CopyButton text={`ICA_PROJECT=${projectId}\nICA_KEY=${rot.apiKey}`} />
-                    {!rot.done && <button className="btn" onClick={finishRotation}>Finish — retire the old key</button>}
-                    <button className="btn ghost" onClick={() => setRot(null)} style={{ marginLeft: 'auto' }}>Close</button>
-                  </div>
+                  <CopyButton text={profileEnv(rot.apiKey)} />
+                  {!rot.done && <button className="sa-btn sa-btn--primary" onClick={finishRotation}>Finish — retire the old key</button>}
+                  <button className="sa-btn sa-btn--link" onClick={() => setRot(null)}>Close</button>
                 </>}
-          </div>
-          {role === 'superadmin' && (() => {
-            // The document being edited, never null: an unconfigured project is an empty one, not an absent one.
-            const doc: Draft = draft ?? { agents: {} }
-            const AGENTS = ['analyst', 'connector', 'grounding', 'composer', 'narrator']
-            const HARNESSES = ['claude-code-pty', 'opencode', 'pi', 'codex']
-            const THINKING = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
-            const running = prof?.running
-            // A harness reaches only certain accounts, and an account carries only certain models — so changing
-            // one clears what it invalidates instead of leaving a pair that cannot exist. With exactly one
-            // possible account (claude-code-pty, codex) it is chosen outright: presenting a single option as a
-            // decision is busywork.
-            const setAgent = (a: string, k: string, v: string) =>
-              setDraft(d => {
-                const cur = d ?? { agents: {} }
-                const row: any = { ...(cur.agents?.[a] ?? {}), [k]: v || undefined }
-                // THE MODEL STAYS when the account changes: it is translated into the new account's spelling
-                // (claude-haiku-4-5 ↔ anthropic/claude-haiku-4.5). Cleared, and said so, only when the new
-                // account does not serve it at all.
-                const carry = (provider: string | undefined) => {
-                  if (!row.model || !provider) return
-                  const same = modelOn(row.model, cat?.models?.[provider] ?? [])
-                  if (!same) setProfMsg(`${a}: ${provider} does not serve ${row.model} — choose a model`)
-                  row.model = same ?? undefined
+          </ActionBar>
+        </SectionCard>
+        {role === 'superadmin' && (() => {
+          // The document being edited, never null: an unconfigured project is an empty one, not an absent one.
+          const doc: Draft = draft ?? { agents: {} }
+          const AGENTS = ['analyst', 'connector', 'grounding', 'composer', 'narrator']
+          const HARNESSES = ['claude-code-pty', 'opencode', 'pi', 'codex']
+          const THINKING = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+          const running = prof?.running
+          // A harness reaches only certain accounts, and an account carries only certain models — so changing
+          // one clears what it invalidates instead of leaving a pair that cannot exist. With exactly one
+          // possible account (claude-code-pty, codex) it is chosen outright: presenting a single option as a
+          // decision is busywork.
+          const setAgent = (a: string, k: string, v: string) =>
+            setDraft(d => {
+              const cur = d ?? { agents: {} }
+              const row: any = { ...(cur.agents?.[a] ?? {}), [k]: v || undefined }
+              // THE MODEL STAYS when the account changes: it is translated into the new account's spelling
+              // (claude-haiku-4-5 ↔ anthropic/claude-haiku-4.5). Cleared, and said so, only when the new
+              // account does not serve it at all.
+              const carry = (provider: string | undefined) => {
+                if (!row.model || !provider) return
+                const same = modelOn(row.model, cat?.models?.[provider] ?? [])
+                if (!same) setProfMsg(`${a}: ${provider} does not serve ${row.model} — choose a model`)
+                row.model = same ?? undefined
+              }
+              if (k === 'harness') {
+                const can = cat?.harnesses?.[v]?.providers ?? []
+                if (!row.provider || !can.includes(row.provider)) {
+                  row.provider = can.length === 1 ? can[0] : undefined
+                  if (row.provider) carry(row.provider); else row.model = undefined
                 }
-                if (k === 'harness') {
-                  const can = cat?.harnesses?.[v]?.providers ?? []
-                  if (!row.provider || !can.includes(row.provider)) {
-                    row.provider = can.length === 1 ? can[0] : undefined
-                    if (row.provider) carry(row.provider); else row.model = undefined
-                  }
-                }
-                if (k === 'provider') carry(v)
-                return { ...cur, agents: { ...cur.agents, [a]: row } }
-              })
-            return (
-              <div className="card" style={{ padding: 18 }}>
-                <strong>Agent profile</strong>
-                <div className="muted" style={{ fontSize: 12.5, margin: '4px 0 12px' }}>
-                  Which harness, provider and model each agent runs on. Applied to the next session each agent
-                  builds — a question already in flight keeps the session it started on.
+              }
+              if (k === 'provider') carry(v)
+              return { ...cur, agents: { ...cur.agents, [a]: row } }
+            })
+          const rows = AGENTS.map(a => ({ a, cur: doc.agents?.[a] ?? {} }))
+          return (
+            <SectionCard icon="lucide:cpu" title="Agent profile" subtitle="Which harness, provider and model each agent runs on">
+              <div className="sa-section__body sa-stack">
+                <p className="sa-muted">
+                  Applied to the next session each agent builds — a question already in flight keeps the session it started on.
                   {' '}Models come from the platform <Link to="/models">catalogue</Link>.
-                </div>
+                </p>
+              </div>
+              {/* WHAT IS ACTUALLY RUNNING — reported by the engine, not inferred from the last write. */}
+              <Receipt items={[
+                ['Saved', <Code>v{prof?.version ?? 0}</Code>],
+                ['Engine running', running
+                  ? <span className="sa-row sa-row--tight sa-row--wrap">
+                      <Status state={running.version === prof?.version ? 'ok' : 'critical'}>v{running.version}</Status>
+                      {/* WHEN it said so. A report with no time on it cannot be told from a stale one. */}
+                      {running.at ? <span className="sa-muted">as of {new Date(running.at).toLocaleString()}</span> : null}
+                    </span>
+                  : <span className="sa-muted">engine has not reported — start it to see what it is running</span>],
+              ]} />
+              {/* AN EXPLICIT EMPTY OPTION on every select. A <select> whose value matches no option renders the FIRST
+                  one instead — so an untouched row displayed "claude-code-pty / opencode-go" and read as a choice
+                  nobody had made. Unset must look unset, and here it means precisely one thing: this agent keeps
+                  whatever the engine defaults to. */}
+              <RecordList rows={rows} keyOf={(r) => r.a} columns={[
+                { key: 'a', label: 'Agent' },
+                { key: 'harness', label: 'Harness', render: ({ a, cur }) => (
+                  <select className="sa-input sa-input--sm" value={cur.harness ?? ''} onChange={e => setAgent(a, 'harness', e.target.value)}>
+                    <option value="">— engine default —</option>
+                    {HARNESSES.map(h => <option key={h} value={h}>{h}</option>)}
+                  </select>) },
+                { key: 'provider', label: 'Provider', render: ({ a, cur }) => (
+                  <select className="sa-input sa-input--sm" value={cur.provider ?? ''} onChange={e => setAgent(a, 'provider', e.target.value)}>
+                    <option value="">— engine default —</option>
+                    {(cat?.providers ?? [])
+                      .filter(p => !cur.harness || (cat?.harnesses?.[cur.harness]?.providers ?? []).includes(p.name))
+                      .map(p =>
+                        <option key={p.name} value={p.name} disabled={!!p.disabled}>
+                          {p.name}{p.disabled ? ' — turned off' : ''}
+                        </option>)}
+                    {/* Keep a value the contract no longer offers visible rather than silently
+                        rewriting this agent to something nobody chose. */}
+                    {cur.provider && !(cat?.providers ?? []).some(p => p.name === cur.provider) &&
+                      <option value={cur.provider}>{cur.provider} (unknown to the proxy)</option>}
+                  </select>) },
+                { key: 'model', label: 'Model', render: ({ a, cur }) => (
+                  <select className="sa-input sa-input--sm" value={cur.model ?? ''} onChange={e => setAgent(a, 'model', e.target.value)}>
+                    <option value="">— engine default —</option>
+                    {/* No provider chosen yet means no models to offer — the catalogue is keyed by
+                        account, so the question "which models" has no answer until one is picked. */}
+                    {(cur.provider ? cat?.models?.[cur.provider] ?? [] : []).map((m: string) =>
+                      <option key={m} value={m}>{m}</option>)}
+                    {cur.model && !(cur.provider ? cat?.models?.[cur.provider] ?? [] : []).includes(cur.model) &&
+                      <option value={cur.model}>{cur.model} (not in the catalogue)</option>}
+                  </select>) },
+                // How much the model reasons. Each harness takes it its own way and clamps it to what the model
+                // offers; unset keeps the harness's default.
+                { key: 'thinking', label: 'Thinking', render: ({ a, cur }) => (
+                  <select className="sa-input sa-input--sm" value={cur.thinking ?? ''} onChange={e => setAgent(a, 'thinking', e.target.value)}>
+                    <option value="">— default —</option>
+                    {THINKING.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>) },
+              ]} />
 
-                {/* WHAT IS ACTUALLY RUNNING — reported by the engine, not inferred from the last write. */}
-                <div className="row" style={{ gap: 10, alignItems: 'center', marginBottom: 12, fontSize: 12.5 }}>
-                  <span className="muted">saved</span><code className="mono">v{prof?.version ?? 0}</code>
-                  <span className="muted">engine running</span>
-                  {running
-                    ? <>
-                        <code className="mono" style={{ color: running.version === prof?.version ? 'var(--ok)' : 'var(--bad)' }}>v{running.version}</code>
-                        {/* WHEN it said so. A report with no time on it cannot be told from a stale one. */}
-                        {running.at ? <span className="muted">as of {new Date(running.at).toLocaleString()}</span> : null}
-                      </>
-                    : <span style={{ color: 'var(--muted)' }}>engine has not reported — start it to see what it is running</span>}
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'auto repeat(4, minmax(160px, 1fr))', gap: 8, alignItems: 'center' }}>
-                  <span className="muted" style={{ fontSize: 12 }}>agent</span>
-                  <span className="muted" style={{ fontSize: 12 }}>harness</span>
-                  <span className="muted" style={{ fontSize: 12 }}>provider</span>
-                  <span className="muted" style={{ fontSize: 12 }}>model</span>
-                  <span className="muted" style={{ fontSize: 12 }}>thinking</span>
-                  {AGENTS.map(a => {
-                    const cur = doc.agents?.[a] ?? {}
-                    const live = running?.agents?.[a]
-                    return (
-                      <div key={a} style={{ display: 'contents' }}>
-                        <span style={{ fontSize: 13 }}>{a}</span>
-                        {/* AN EXPLICIT EMPTY OPTION on every select. A <select> whose value matches no option
-                            renders the FIRST one instead — so an untouched row displayed "claude-code-pty /
-                            opencode-go" and read as a choice nobody had made. Unset must look unset, and here
-                            it means precisely one thing: this agent keeps whatever the engine defaults to. */}
-                        <select className="input" value={cur.harness ?? ''} onChange={e => setAgent(a, 'harness', e.target.value)}
-                                style={{ fontSize: 13, padding: '6px 9px' }}>
-                          <option value="">— engine default —</option>
-                          {HARNESSES.map(h => <option key={h} value={h}>{h}</option>)}
-                        </select>
-                        <select className="input" value={cur.provider ?? ''} onChange={e => setAgent(a, 'provider', e.target.value)}
-                                style={{ fontSize: 13, padding: '6px 9px' }}>
-                          <option value="">— engine default —</option>
-                          {(cat?.providers ?? [])
-                            .filter(p => !cur.harness || (cat?.harnesses?.[cur.harness]?.providers ?? []).includes(p.name))
-                            .map(p =>
-                              <option key={p.name} value={p.name} disabled={!!p.disabled}>
-                                {p.name}{p.disabled ? ' — turned off' : ''}
-                              </option>)}
-                          {/* Keep a value the contract no longer offers visible rather than silently
-                              rewriting this agent to something nobody chose. */}
-                          {cur.provider && !(cat?.providers ?? []).some(p => p.name === cur.provider) &&
-                            <option value={cur.provider}>{cur.provider} (unknown to the proxy)</option>}
-                        </select>
-                        <select className="input" value={cur.model ?? ''} onChange={e => setAgent(a, 'model', e.target.value)}
-                                style={{ fontSize: 13, padding: '6px 9px' }}>
-                          <option value="">— engine default —</option>
-                          {/* No provider chosen yet means no models to offer — the catalogue is keyed by
-                              account, so the question "which models" has no answer until one is picked. */}
-                          {(cur.provider ? cat?.models?.[cur.provider] ?? [] : []).map((m: string) =>
-                            <option key={m} value={m}>{m}</option>)}
-                          {cur.model && !(cur.provider ? cat?.models?.[cur.provider] ?? [] : []).includes(cur.model) &&
-                            <option value={cur.model}>{cur.model} (not in the catalogue)</option>}
-                        </select>
-                        {/* How much the model reasons. Each harness takes it its own way and clamps it to what the
-                            model offers; unset keeps the harness's default. */}
-                        <select className="input" value={cur.thinking ?? ''} onChange={e => setAgent(a, 'thinking', e.target.value)}
-                                style={{ fontSize: 13, padding: '6px 9px' }}>
-                          <option value="">— default —</option>
-                          {THINKING.map(t => <option key={t} value={t}>{t}</option>)}
-                        </select>
-                      </div>
-                    )
+              {/* CAUTIONS COME FROM THE PROFILE, not from this file — adding one later is a data change. */}
+              {AGENTS.some(a => { const h = doc.agents?.[a]?.harness; return h && doc.harnessNotes?.[a]?.[h] }) && (
+                <div className="sa-section__body sa-stack">
+                  {AGENTS.flatMap(a => {
+                    const h = doc.agents?.[a]?.harness
+                    const note = h ? doc.harnessNotes?.[a]?.[h] : null
+                    return note ? [<Notice key={`${a}-${h}`} state={note.level === 'warn' ? 'attention' : 'neutral'}><strong>{a} → {h}</strong> · {note.text}</Notice>] : []
                   })}
                 </div>
+              )}
 
-                {/* CAUTIONS COME FROM THE PROFILE, not from this file — adding one later is a data change. */}
-                {AGENTS.flatMap(a => {
-                  const h = doc.agents?.[a]?.harness
-                  const note = h ? doc.harnessNotes?.[a]?.[h] : null
-                  return note ? [<div key={`${a}-${h}`} style={{ marginTop: 10, padding: '8px 11px', borderRadius: 8, fontSize: 12.5,
-                                       border: '1px solid var(--line)', color: note.level === 'warn' ? 'var(--bad)' : 'var(--muted)' }}>
-                                   <strong>{a} → {h}</strong> · {note.text}
-                                 </div>] : []
-                })}
+              <ActionBar>
+                <button className="sa-btn sa-btn--primary" onClick={saveProfile}>Apply</button>
+                <button className="sa-btn" onClick={() => { setDraft(prof?.profile ?? prof?.running?.profile ?? null); setProfMsg('') }}>Reset</button>
+                {profMsg && <span className="sa-note">{profMsg}</span>}
+              </ActionBar>
 
-                <div className="row" style={{ gap: 10, marginTop: 12, alignItems: 'center' }}>
-                  <button className="btn" onClick={saveProfile}>Apply</button>
-                  <button className="btn ghost" onClick={() => { setDraft(prof?.profile ?? prof?.running?.profile ?? null); setProfMsg('') }}>Reset</button>
-                  <span className="muted" style={{ fontSize: 12.5 }}>{profMsg}</span>
-                </div>
-
-                {/* The engine's own view, per agent, including which layer decided each value — an ICA_* on the
-                    box overrides this profile, and that must be visible here rather than a silent surprise. */}
-                {running?.agents && (
-                  <details style={{ marginTop: 12 }}>
-                    <summary className="muted" style={{ fontSize: 12.5, cursor: 'pointer' }}>
-                      What the engine reports it is running{running.at ? ` — reported ${new Date(running.at).toLocaleString()}` : ''}
+              {/* The engine's own view, per agent, including which layer decided each value — an ICA_* on the
+                  box overrides this profile, and that must be visible here rather than a silent surprise. */}
+              {running?.agents && (
+                <div className="sa-section__body">
+                  <details className="sa-disclosure">
+                    <summary className="sa-disclosure__summary sa-label">
+                      <Icon icon="lucide:chevron-right" />What the engine reports it is running
+                      {running.at && <span className="sa-disclosure__meta">reported {new Date(running.at).toLocaleString()}</span>}
                     </summary>
-                    {/* A TABLE, not aligned text. Monospace with a separator between fields does not make
-                        columns — the values differ in length, so every row starts its provider somewhere else
-                        and the thing you scan for is the thing that moves. */}
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, marginTop: 8 }}>
-                      <thead>
-                        <tr>{['agent', 'harness', 'provider', 'model'].map(h =>
-                          <th key={h} style={{ textAlign: 'left', padding: '5px 8px', borderBottom: '1px solid var(--line)',
-                                               fontSize: 11, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>{h}</th>)}</tr>
-                      </thead>
-                      <tbody>
-                        {AGENTS.map(a => {
-                          const r = running.agents[a]
-                          if (!r) return null
-                          const mine = doc.agents?.[a]
-                          // A row the profile pins is worth distinguishing from one running the engine's own
-                          // default — otherwise this table cannot say which of your choices took effect.
-                          const pinned = !!(mine?.harness && mine?.provider && mine?.model)
-                          return (
-                            <tr key={a}>
-                              <td style={{ padding: '5px 8px', borderBottom: '1px solid var(--line)' }}>
-                                {a}{pinned ? '' : <span className="muted" style={{ fontSize: 11 }}> · default</span>}
-                              </td>
-                              {[r.harness, r.provider, r.model].map((v, i) =>
-                                <td key={i} style={{ padding: '5px 8px', borderBottom: '1px solid var(--line)',
-                                                     fontFamily: 'monospace', fontSize: 12 }}>{v}</td>)}
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
+                    {/* A TABLE, not aligned text: the values differ in length, so only columns let you scan them. */}
+                    <div className="sa-disclosure__panel">
+                      <RecordList rows={AGENTS.filter(a => running.agents[a]).map(a => ({ a, r: running.agents[a] }))} keyOf={(x) => x.a} columns={[
+                        // A row the profile pins is worth distinguishing from one running the engine's own default —
+                        // otherwise this table cannot say which of your choices took effect.
+                        { key: 'a', label: 'Agent', render: ({ a }) => { const mine = doc.agents?.[a]; const pinned = !!(mine?.harness && mine?.provider && mine?.model); return <>{a}{pinned ? '' : <span className="sa-muted"> · default</span>}</> } },
+                        { key: 'harness', label: 'Harness', render: ({ r }) => <Code>{r.harness}</Code> },
+                        { key: 'provider', label: 'Provider', render: ({ r }) => <Code>{r.provider}</Code> },
+                        { key: 'model', label: 'Model', render: ({ r }) => <Code>{r.model}</Code> },
+                      ]} />
+                    </div>
                   </details>
-                )}
-              </div>
-            )
-          })()}
+                </div>
+              )}
+            </SectionCard>
+          )
+        })()}
 
-          <div className="card" style={{ padding: 18, borderColor: 'var(--bad)' }}>
-            <h3 style={{ margin: '0 0 4px', color: 'var(--bad)' }}>Danger zone</h3>
-            <div className="between">
-              <div><strong>Delete this project</strong><div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>Tears down its engine wiring, machine mapping, and channel credentials.</div></div>
-              <button className="btn danger" onClick={() => setDelProj(true)}>Delete project…</button>
-            </div>
-          </div>
-        </div>
-      )}
+        <SectionCard icon="lucide:triangle-alert" accent="loss" title="Danger zone" subtitle="Delete this project: it tears down its engine wiring, machine mapping and channel credentials">
+          <ActionBar><button className="sa-btn" onClick={() => setDelProj(true)}>Delete project…</button></ActionBar>
+        </SectionCard>
+      </>}
 
       {svc && (() => {
         const env = `SA_HUB_WS=${svc.wsUrl}\nSA_PROJECT_ID=${svc.projectId}\nSA_ENGINE_TOKEN=${svc.token}`
         const exp = new Date(svc.expiresAt).toLocaleDateString()
         return (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setSvc(null)}>
-            <div className="card" style={{ maxWidth: 660, width: '92%', padding: 22 }} onClick={e => e.stopPropagation()}>
-              <h3 style={{ marginTop: 0 }}>{svc.channel} bot credential — service token</h3>
-              <p className="muted" style={{ marginTop: 4 }}>Paste into the surface’s <code>.env</code>. Authorizes the bot as a <code>runtime</code> for this project only, until {exp}.</p>
-              <textarea readOnly value={env} onFocus={e => e.currentTarget.select()} rows={4} style={{ width: '100%', fontFamily: 'monospace', fontSize: 13, padding: 12, borderRadius: 8, resize: 'vertical', whiteSpace: 'pre' }} />
-              <div className="row" style={{ gap: 8, marginTop: 12, alignItems: 'center' }}>
-                <CopyButton text={env} />
-                <button className="btn ghost" onClick={() => setSvc(null)} style={{ marginLeft: 'auto' }}>Close</button>
-              </div>
+          <Dialog icon="lucide:bot" title={`${svc.channel} bot credential — service token`} onClose={() => setSvc(null)}
+            footer={<><CopyButton text={env} /><span className="sa-grow" /><button className="sa-btn sa-btn--link" onClick={() => setSvc(null)}>Close</button></>}>
+            <div className="sa-section__body sa-stack">
+              <Notice>Paste into the surface’s <Code>.env</Code>. It authorises the bot as a <Code>runtime</Code> for this project only, until {exp}.</Notice>
+              <EnvBlock text={env} />
             </div>
-          </div>
+          </Dialog>
         )
       })()}
       {delProj && <ConfirmDelete kind="project" name={meta.project || projectId || ''} onClose={() => setDelProj(false)}
         consequences={[`Delete project “${meta.project || projectId}”`, 'Tear down its engine wiring + machine mapping', 'Revoke its channel / bot credentials', 'Soft-delete — restorable from the org’s project list (Show deleted)']}
         onConfirm={async () => { await api('/projects', { method: 'DELETE', body: JSON.stringify({ id: projectId }) }); navigate(`/org/${orgId}`) }} />}
 
-      {view === 'agent' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div className="card between">
-            <div><strong>Data source</strong><div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>Upload a file the agent can use, or just describe the source in the console below.</div></div>
-            <div className="row">
-              {error && <span style={{ fontSize: 12, color: 'var(--bad)' }}>{error}</span>}
-              <label className="btn ghost" style={{ cursor: 'pointer' }}>
-                {uploading ? 'Uploading…' : '+ Upload file'}
-                <input type="file" onChange={e => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = '' }} style={{ display: 'none' }} disabled={uploading} />
-              </label>
-            </div>
-          </div>
-          <ConnectorConsole hub={hub} />
-        </div>
-      )}
+      {view === 'agent' && <>
+        <SectionCard icon="lucide:upload" title="Data source" subtitle="Upload a file the agent can use, or describe the source in the console below"
+          actions={<label className="sa-btn" role="button">
+            <Icon icon="lucide:upload" className="sa-btn__icon" />{uploading ? 'Uploading…' : 'Upload file'}
+            <input type="file" hidden onChange={e => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = '' }} disabled={uploading} />
+          </label>}>
+          {error ? <div className="sa-section__body"><Notice state="critical">{error}</Notice></div> : null}
+        </SectionCard>
+        <ConnectorConsole hub={hub} />
+      </>}
 
-      {view === 'analyst' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <AnalystConsole hub={hub} />
-        </div>
-      )}
+      {view === 'analyst' && <AnalystConsole hub={hub} />}
 
-      {view === 'grounding' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <GroundingConsole hub={hub} />
-        </div>
-      )}
+      {view === 'grounding' && <GroundingConsole hub={hub} />}
 
       {view === 'index' && <IndexPanel hub={hub} />}
       {view === 'access' && <AccessPanel projectId={projectId!} orgId={orgId ?? status?.orgId ?? null} api={api} token={token} />}

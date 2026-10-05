@@ -2,16 +2,17 @@
 // A key lets an agent — any system, our own CLI among them — work with this project within the scopes given here. It is
 // shown once, when made; only its hash is kept. Revoking is final and ends the key's open connections at once.
 // The audit history beside it is everything that happened in the project: who asked what, who changed what, refusals.
-import React, { useCallback, useEffect, useState } from 'react'
+// Drawn only with the semantic components (@superatom/ui); no CSS of its own.
+import { useCallback, useEffect, useState } from 'react'
+import { Section, Form, Field, Choices, RecordList, Notice, Status, Code, Toolbar, Icon } from '@superatom/ui'
 import { AGENT_SCOPES, type AgentScope } from '../../shared/agent-scopes'
 
 type Api = (p: string, i?: RequestInit) => Promise<Response>
 type Key = { id: string; name: string; prefix: string; scopes: string[]; created_by: string; created_at: string; expires_at: string | null; revoked_at: string | null; revoked_by: string | null; last_used_at: string | null }
 type Event = { id: string; at: string; actor: { kind: string; id: string; email?: string }; via: string; action: string; target?: string; outcome: string; detail?: Record<string, unknown> }
 
-const SCOPE_TEXT: Record<AgentScope, string> = { sessions: 'Agents and their sessions: open, change, read', ask: 'Ask questions in words', graph: 'Knowledge: read it, make and change its own concepts and domains, suggest changes', programs: 'Programs: build from source, list, publish its own', decisions: 'Decisions: the paths from a step, record how a step turned out, read decision states', learn: 'Learning: change decision states through their named operations' }
+const SCOPE_TEXT: Record<AgentScope, string> = { sessions: 'Agents and their sessions: open, change, read', ask: 'Ask questions in words', graph: 'Knowledge: read it, make and change its own concepts and domains, suggest changes', programs: 'Programs: build from source, list, publish its own', decisions: 'Decisions: the paths from a step, record how a step turned out, read decision states', learn: 'Learning: change decision states through their named operations', warehouse: 'Warehouse: the tables and columns this project was granted, and SQL over them' }
 const when = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : '—')
-const ERR = { color: '#b3261e', fontSize: 12.5, marginBottom: 10 }
 
 export function AgentKeysPanel({ api, projectId }: { api: Api; projectId: string }) {
   const [keys, setKeys] = useState<Key[]>([])
@@ -41,66 +42,66 @@ export function AgentKeysPanel({ api, projectId }: { api: Api; projectId: string
     if (!r.ok) setErr(((await r.json().catch(() => ({}))) as { error?: string }).error ?? `Revoking failed (${r.status}).`)
     setRevoking(null); load()
   }
+  const ready = !!name.trim() && !!scopes.length
 
   return (
-    <div className="card">
-      <strong>Agent keys</strong>
-      <div className="muted" style={{ fontSize: 12.5, marginTop: 2, marginBottom: 10 }}>
-        A key lets an agent work with this project within its scopes — Codex, Claude, any system, or the Superatom CLI
-        (<code className="mono">printf %s "$KEY" | sacli login</code>). Everything it does is in the audit history.
-      </div>
-
-      <div className="row" style={{ gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-        <input id="agent-key-name" className="input" style={{ maxWidth: 240 }} placeholder="What it is for (e.g. ci bot)" value={name} onChange={(e) => setName(e.target.value)} />
-        <select id="agent-key-days" className="input" style={{ maxWidth: 150 }} value={days} onChange={(e) => setDays(e.target.value)}>
-          <option value="7">Expires in 7 days</option><option value="30">Expires in 30 days</option><option value="90">Expires in 90 days</option><option value="365">Expires in a year</option><option value="never">Never expires</option>
-        </select>
-        <button className="btn" onClick={create} disabled={!name.trim() || !scopes.length}>Make key</button>
-      </div>
-      <div className="row" style={{ gap: 14, marginBottom: 12, flexWrap: 'wrap' }}>
-        {(Object.keys(AGENT_SCOPES) as AgentScope[]).map((s) => (
-          <label key={s} style={{ fontSize: 12.5, display: 'flex', gap: 6, alignItems: 'center' }}>
-            <input type="checkbox" checked={scopes.includes(s)} onChange={(e) => setScopes(e.target.checked ? [...scopes, s] : scopes.filter((x) => x !== s))} />
-            <span><strong>{s}</strong> — {SCOPE_TEXT[s]}</span>
-          </label>
-        ))}
-      </div>
-      {err && <div style={ERR}>{err}</div>}
+    <div className="sa-stack sa-stack--4">
+      {err && <Notice state="critical">{err}</Notice>}
 
       {made && (
-        <div style={{ border: '1px solid #e8c16b', background: '#fff8e6', borderRadius: 6, padding: 12, marginBottom: 12 }}>
-          <div style={{ fontSize: 12.5, marginBottom: 6 }}><strong>Copy the key for “{made.name}” now.</strong> It will not be shown again.</div>
-          <div className="row" style={{ gap: 8 }}>
-            <code className="mono" style={{ fontSize: 11.5, wordBreak: 'break-all', flex: 1 }}>{made.key}</code>
-            <button className="btn" onClick={() => { void navigator.clipboard.writeText(made.key).then(() => setCopied(true)) }}>{copied ? 'Copied' : 'Copy'}</button>
-            <button className="btn" onClick={() => setMade(null)}>Done</button>
+        <Notice state="attention" action={
+          <span className="sa-row sa-row--tight">
+            <button type="button" className="sa-btn sa-btn--primary" onClick={() => { void navigator.clipboard.writeText(made.key).then(() => setCopied(true)) }}>
+              <Icon icon={copied ? 'lucide:check' : 'lucide:copy'} className="sa-btn__icon" />{copied ? 'Copied' : 'Copy'}
+            </button>
+            <button type="button" className="sa-btn" onClick={() => setMade(null)}>Done</button>
+          </span>
+        }>
+          <div className="sa-stack">
+            <span><strong>Copy the key for “{made.name}” now.</strong> It will not be shown again.</span>
+            <Code>{made.key}</Code>
           </div>
-        </div>
+        </Notice>
       )}
 
-      {!keys.length && <div className="muted" style={{ fontSize: 12.5 }}>No agent keys yet.</div>}
-      {!!keys.length && (
-        <table style={{ width: '100%', fontSize: 12.5, borderCollapse: 'collapse' }}>
-          <thead><tr className="muted" style={{ textAlign: 'left' }}><th style={{ padding: '5px 6px' }}>Name</th><th>Scopes</th><th>Made</th><th>Last used</th><th>Expires</th><th>Key</th><th /></tr></thead>
-          <tbody>
-            {keys.map((k) => (
-              <tr key={k.id} style={{ borderTop: '1px solid var(--hair, #e2e4e8)', opacity: k.revoked_at ? 0.55 : 1 }}>
-                <td style={{ padding: '6px' }}><strong>{k.name}</strong></td>
-                <td>{k.scopes.join(', ')}</td>
-                <td className="muted">{when(k.created_at)}<br />{k.created_by}</td>
-                <td className="muted">{when(k.last_used_at)}</td>
-                <td className="muted">{k.revoked_at ? `revoked ${when(k.revoked_at)} by ${k.revoked_by}` : k.expires_at ? when(k.expires_at) : 'never'}</td>
-                <td className="mono muted" style={{ fontSize: 11 }}>{k.prefix}…</td>
-                <td style={{ textAlign: 'right' }}>
-                  {!k.revoked_at && (revoking?.id === k.id
-                    ? <span className="row" style={{ gap: 6, justifyContent: 'flex-end' }}><span style={{ fontSize: 12 }}>Revoke for good?</span><button className="btn" style={{ color: '#b3261e' }} onClick={() => revoke(k)}>Revoke</button><button className="btn" onClick={() => setRevoking(null)}>Keep</button></span>
-                    : <button className="btn" onClick={() => setRevoking(k)}>Revoke…</button>)}
-                </td>
-              </tr>
+      <Section icon="lucide:key-round" title="Make an agent key" subtitle="Let an agent work with this project within the scopes you give it">
+        <Form onSubmit={() => { if (ready) void create() }}
+          actions={<button className="sa-btn sa-btn--primary" disabled={!ready}>Make key</button>}>
+          <Field label="What it is for" help={<>Codex, Claude, any system, or the Superatom CLI (<Code>printf %s "$KEY" | sacli login</Code>). Everything it does is in the audit history.</>}>
+            <input id="agent-key-name" className="sa-input" placeholder="ci bot" value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+          <Field label="Expires">
+            <select id="agent-key-days" className="sa-input" value={days} onChange={(e) => setDays(e.target.value)}>
+              <option value="7">In 7 days</option><option value="30">In 30 days</option><option value="90">In 90 days</option><option value="365">In a year</option><option value="never">Never</option>
+            </select>
+          </Field>
+          <Choices label="Scopes">
+            {(Object.keys(AGENT_SCOPES) as AgentScope[]).map((s) => (
+              <label key={s}>
+                <input type="checkbox" checked={scopes.includes(s)} onChange={(e) => setScopes(e.target.checked ? [...scopes, s] : scopes.filter((x) => x !== s))} />
+                <span><strong>{s}</strong> — {SCOPE_TEXT[s]}</span>
+              </label>
             ))}
-          </tbody>
-        </table>
-      )}
+          </Choices>
+        </Form>
+      </Section>
+
+      <Section icon="lucide:key-square" title="Agent keys" note={keys.length ? `${keys.length}` : undefined}>
+        <RecordList rows={keys} keyOf={(k) => k.id} empty="No agent keys yet. A key you make appears here; only its prefix is kept on view."
+          columns={[
+            { key: 'name', label: 'Name', render: (k) => <strong title={k.name}>{k.name}</strong> },
+            { key: 'scopes', label: 'Scopes', render: (k) => k.scopes.join(', ') },
+            { key: 'made', label: 'Made', wrap: true, render: (k) => <>{when(k.created_at)}<br /><span className="sa-muted">{k.created_by}</span></> },
+            { key: 'used', label: 'Last used', render: (k) => <span className="sa-muted">{when(k.last_used_at)}</span> },
+            { key: 'expires', label: 'Expires', wrap: true, render: (k) => k.revoked_at
+              ? <span className="sa-row sa-row--wrap sa-row--tight"><Status state="critical">Revoked</Status><span className="sa-muted">{when(k.revoked_at)} by {k.revoked_by}</span></span>
+              : <span className="sa-muted">{k.expires_at ? when(k.expires_at) : 'Never'}</span> },
+            { key: 'prefix', label: 'Key', render: (k) => <Code>{k.prefix}…</Code> },
+            { key: 'revoke', label: '', align: 'end', render: (k) => k.revoked_at ? null : revoking?.id === k.id
+              ? <span className="sa-row sa-row--tight"><span>Revoke for good?</span><button type="button" className="sa-btn sa-btn--danger sa-btn--primary" onClick={() => void revoke(k)}>Revoke</button><button type="button" className="sa-btn sa-btn--link" onClick={() => setRevoking(null)}>Keep</button></span>
+              : <button type="button" className="sa-btn sa-btn--link" onClick={() => setRevoking(k)}>Revoke…</button> },
+          ]} />
+      </Section>
     </div>
   )
 }
@@ -128,33 +129,26 @@ export function AuditPanel({ api, projectId }: { api: Api; projectId: string }) 
     return ''
   }
   return (
-    <div className="card">
-      <strong>Audit history</strong>
-      <div className="muted" style={{ fontSize: 12.5, marginTop: 2, marginBottom: 10 }}>Everything that happened in this project, newest first: who asked what, who changed what, and what was refused. It cannot be changed.</div>
-      <div className="row" style={{ gap: 8, marginBottom: 10 }}>
-        <input id="audit-action" className="input" style={{ maxWidth: 220 }} placeholder="Action (e.g. question, agent-key)" value={action} onChange={(e) => setAction(e.target.value.trim())} />
-        <input id="audit-actor" className="input" style={{ maxWidth: 260 }} placeholder="Who (user id or agent:key_…)" value={actor} onChange={(e) => setActor(e.target.value.trim())} />
+    <Section icon="lucide:scroll-text" title="Audit history" subtitle="Everything that happened in this project, newest first. It cannot be changed."
+      footer={events.length >= 100 ? <button type="button" className="sa-btn" onClick={() => load(events[events.length - 1].at)}>Older</button> : undefined}>
+      <div className="sa-section__body sa-stack">
+        <Toolbar>
+          <input id="audit-action" className="sa-input" placeholder="Action (question, agent-key…)" aria-label="Action" value={action} onChange={(e) => setAction(e.target.value.trim())} />
+          <input id="audit-actor" className="sa-input" placeholder="Who (user id or agent:key_…)" aria-label="Who" value={actor} onChange={(e) => setActor(e.target.value.trim())} />
+        </Toolbar>
+        {err && <Notice state="critical">{err}</Notice>}
       </div>
-      {err && <div style={ERR}>{err}</div>}
-      {!events.length && !err && <div className="muted" style={{ fontSize: 12.5 }}>Nothing recorded yet.</div>}
-      {!!events.length && (
-        <table style={{ width: '100%', fontSize: 12.5, borderCollapse: 'collapse' }}>
-          <thead><tr className="muted" style={{ textAlign: 'left' }}><th style={{ padding: '5px 6px' }}>When</th><th>Who</th><th>Via</th><th>Action</th><th>What</th><th>Outcome</th></tr></thead>
-          <tbody>
-            {events.map((e) => (
-              <tr key={e.id} style={{ borderTop: '1px solid var(--hair, #e2e4e8)' }}>
-                <td className="muted" style={{ padding: '5px 6px', whiteSpace: 'nowrap' }}>{when(e.at)}</td>
-                <td>{e.actor.email ?? e.actor.id}</td>
-                <td className="muted">{e.via}</td>
-                <td className="mono" style={{ fontSize: 11.5 }}>{e.action}</td>
-                <td style={{ maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis' }}>{what(e)}{e.target ? <span className="muted"> · {e.target}</span> : null}</td>
-                <td style={{ color: e.outcome === 'ok' ? undefined : '#b3261e' }}>{e.outcome}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {(!err || !!events.length) && (
+        <RecordList rows={events} keyOf={(e) => e.id} empty="Nothing recorded yet. Who asks or changes anything here appears in this list."
+          columns={[
+            { key: 'at', label: 'When', render: (e) => <span className="sa-muted">{when(e.at)}</span> },
+            { key: 'who', label: 'Who', render: (e) => e.actor.email ?? e.actor.id },
+            { key: 'via', label: 'Via', render: (e) => <span className="sa-muted">{e.via}</span> },
+            { key: 'action', label: 'Action', render: (e) => <Code>{e.action}</Code> },
+            { key: 'what', label: 'What', render: (e) => { const w = what(e); return <span title={e.target ? `${w} · ${e.target}` : w}>{w}{e.target ? <span className="sa-muted"> · {e.target}</span> : null}</span> } },
+            { key: 'outcome', label: 'Outcome', render: (e) => <Status state={e.outcome === 'ok' ? 'ok' : 'critical'}>{e.outcome}</Status> },
+          ]} />
       )}
-      {events.length >= 100 && <button className="btn" style={{ marginTop: 10 }} onClick={() => load(events[events.length - 1].at)}>Older</button>}
-    </div>
+    </Section>
   )
 }

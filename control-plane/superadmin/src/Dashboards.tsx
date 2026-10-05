@@ -3,7 +3,9 @@
 // which build is current, and the worker serves it at /dashboard/<id>/ behind the same sign-in as everything
 // else. Nothing is rewritten on upload — the object stays exactly what your bundler produced — so republishing
 // is a new build id and a rollback is a metadata change.
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+// Drawn only with the semantic components (@superatom/ui); no CSS of its own.
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Section, Form, Field, RecordList, Receipt, Notice, Status, Code, Empty, Icon } from '@superatom/ui'
 
 type Dash = { id: string; name: string; build_id?: string; files?: number; bytes?: number; uploaded_by?: string; uploaded_at?: number; version?: number; builds?: number }
 type Build = { build_id: string; n: number; files: number; bytes: number; uploaded_by?: string; uploaded_at: number; current: boolean; kind?: string; from_n?: number; pruned?: boolean }
@@ -142,122 +144,120 @@ export function DashboardsPanel({ api, token, projectId }: { api: (p: string, i?
   }
 
   return (
-    <div className="card">
-      <strong>Dashboards</strong>
-      <div className="muted" style={{ fontSize: 12.5, marginTop: 2, marginBottom: 10 }}>
-        Upload a built React app. It is served at <code className="mono">{host}/dashboard/&lt;id&gt;/</code> behind the same sign-in as the rest of the project.
-        Build with <code className="mono">base: './'</code> where you can — absolute asset paths are rewritten on the way out, but a relative build needs no rewriting at all.
-      </div>
+    <div className="sa-stack sa-stack--4">
+      <Section icon="lucide:layout-dashboard" title="Dashboards" subtitle="Publish a built React app behind the project's sign-in">
+        <div className="sa-section__body">
+          <Notice>
+            Served at <Code>{host}/dashboard/&lt;id&gt;/</Code> behind the same sign-in as the rest of the project.
+            Build with <Code>base: './'</Code> where you can: absolute asset paths are rewritten on the way out, a relative build needs no rewriting.
+          </Notice>
+        </div>
+        <Form onSubmit={() => void create()}
+          actions={<button className="sa-btn sa-btn--primary" disabled={!name.trim()}>Create dashboard</button>}>
+          <Field label="Name">
+            <input className="sa-input" placeholder="Dashboard name" value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+        </Form>
+      </Section>
+      {err && <Notice state="critical">{err}</Notice>}
+      {note && <Notice state="ok">{note}</Notice>}
 
-      <div className="row" style={{ gap: 8, marginBottom: 14 }}>
-        <input className="input" style={{ maxWidth: 280 }} placeholder="Dashboard name" value={name}
-               onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create()} />
-        <button className="btn" onClick={create} disabled={!name.trim()}>Create</button>
-      </div>
-      {err && <div className="muted" style={{ color: '#b3261e', fontSize: 12.5, marginBottom: 10 }}>{err}</div>}
-      {note && <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>{note}</div>}
+      {!list.length && <Empty icon="lucide:layout-dashboard">No dashboards yet. Each one you create appears here, ready for its first build.</Empty>}
 
-      {!list.length && <div className="muted" style={{ fontSize: 12.5 }}>No dashboards yet.</div>}
-
-      {list.map((d) => (
-        <div key={d.id} style={{ border: '1px solid var(--hair, #e2e4e8)', borderRadius: 6, padding: 12, marginBottom: 10 }}>
-          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
-            <div>
-              <strong>{d.name}</strong>
-              <code className="mono" style={{ fontSize: 11.5, marginLeft: 8, opacity: .7 }}>/dashboard/{d.id}/</code>
-            </div>
-            <div className="row" style={{ gap: 8 }}>
-              {d.build_id && <a className="btn" href={`https://${host}/dashboard/${d.id}/`} target="_blank" rel="noreferrer">Open ↗</a>}
-
-            </div>
-          </div>
-
-          <div className="muted" style={{ fontSize: 12, margin: '6px 0 10px' }}>
-            {d.build_id
-              ? <>{d.version ? <strong>v{d.version}</strong> : 'Published'} · {fmtWhen(d.uploaded_at)} · {d.files} files · {fmtBytes(d.bytes)}{d.uploaded_by ? ` · ${d.uploaded_by}` : ''}
-                  {' · '}<a href="#" onClick={(e) => { e.preventDefault(); showBuilds(d.id) }}>{builds[d.id] ? 'hide history' : `history${d.builds ? ` (${d.builds})` : ''}`}</a></>
-              : <>Nothing published yet.</>}
-          </div>
-
-          {builds[d.id] && (
-            <table style={{ width: '100%', fontSize: 12.5, borderCollapse: 'collapse', marginBottom: 10 }}>
-              <tbody>
-                {builds[d.id]!.map((b) => (
-                  <tr key={b.build_id} style={{ borderTop: '1px solid var(--hair, #e2e4e8)' }}>
-                    <td style={{ padding: '5px 6px', fontWeight: b.current ? 600 : 400 }}>v{b.n}{b.kind === 'restore' && b.from_n ? ` · restores v${b.from_n}` : ''}{b.current ? ' · live' : ''}{b.pruned ? ' · files removed' : ''}</td>
-                    <td className="muted" style={{ padding: '5px 6px' }}>{fmtWhen(b.uploaded_at)}</td>
-                    <td className="muted" style={{ padding: '5px 6px' }}>{b.files} files · {fmtBytes(b.bytes)}</td>
-                    <td className="muted" style={{ padding: '5px 6px' }}>{b.uploaded_by ?? ''}</td>
-                    <td className="mono muted" style={{ padding: '5px 6px', fontSize: 11 }}>{b.build_id}</td>
-                    <td style={{ padding: '5px 6px', textAlign: 'right' }}>{!b.current && !b.pruned && <button className="btn" onClick={() => setConfirm({ id: d.id, build: b })}>Make live again</button>}</td>
-                  </tr>
-                ))}
-                {!builds[d.id]!.length && <tr><td className="muted" style={{ padding: '5px 6px' }}>No builds recorded yet.</td></tr>}
-              </tbody>
-            </table>
-          )}
-          {confirm?.id === d.id && (() => {
-            const live = builds[d.id]?.find((b) => b.current)
-            const next = (builds[d.id]?.[0]?.n ?? 0) + 1
-            const when = (b?: Build) => b ? `${fmtWhen(b.uploaded_at)}${b.uploaded_by ? ` · ${b.uploaded_by}` : ''} · ${b.files} files · ${fmtBytes(b.bytes)}` : '—'
-            return (
-              <div style={{ border: '1px solid var(--hair, #e2e4e8)', borderRadius: 6, padding: 12, marginBottom: 10, fontSize: 12.5 }}>
-                <div style={{ marginBottom: 6 }}><strong>Live now:</strong> v{live?.n ?? '?'} · {when(live)}</div>
-                <div style={{ marginBottom: 10 }}><strong>After:</strong> v{next}, the files of v{confirm.build.n} ({when(confirm.build)}). v{live?.n ?? '?'} stays in the history.</div>
-                <div className="row" style={{ gap: 8 }}>
-                  <button className="btn" onClick={() => makeCurrent(d.id, confirm.build.build_id)}>Make v{confirm.build.n}'s files live as v{next}</button>
-                  <button className="btn" onClick={() => setConfirm(null)}>Cancel</button>
-                </div>
-              </div>
-            )
-          })()}
-
-          {/* Drop the build directory, or pick it. Both end up as the same list of path→file pairs. */}
-          <div
-            onDragOver={(e) => { e.preventDefault(); setOver(d.id) }}
-            onDragLeave={() => setOver(null)}
-            onDrop={async (e) => { e.preventDefault(); setOver(null); publish(d.id, await filesFromDrop(e.dataTransfer)) }}
-            onClick={() => pickers.current[d.id]?.click()}
-            style={{
-              border: `1.5px dashed ${over === d.id ? '#15385c' : 'var(--hair, #cbd0d6)'}`,
-              background: over === d.id ? 'rgba(21,56,92,.04)' : 'transparent',
-              borderRadius: 6, padding: '18px 12px', textAlign: 'center', cursor: 'pointer',
-              fontSize: 12.5, color: 'var(--muted, #6c7075)',
-            }}>
-            {busy === d.id
-              ? (progress?.id === d.id
-                  ? <div>
-                      <div style={{ marginBottom: 6 }}>{progress.storing ? 'Storing…' : `Uploading… ${fmtBytes(progress.sent)} of ${fmtBytes(progress.total)} (${progress.total ? Math.round(100 * progress.sent / progress.total) : 0}%)`}</div>
-                      <div style={{ height: 6, borderRadius: 3, background: 'var(--hair, #e2e4e8)', overflow: 'hidden' }}>
-                        <div style={{ height: '100%', width: `${progress.total ? Math.min(100, Math.round(100 * progress.sent / progress.total)) : 0}%`, background: progress.storing ? '#15385c' : '#2f7d5b', transition: 'width .15s linear' }} />
-                      </div>
-                    </div>
-                  : 'Uploading…')
-              : <>Drop the build directory here, or <u>choose a folder</u></>}
-          </div>
-          <input
-            ref={(el) => { pickers.current[d.id] = el }}
-            type="file" multiple hidden
-            // @ts-expect-error — directory picking is not in the DOM types
-            webkitdirectory="" directory=""
-            onChange={(e) => {
-              const fs = [...(e.target.files ?? [])]
-              // webkitRelativePath is `dist/assets/x.js`; the chosen folder is the build root, so drop its name.
-              const files = fs.map((f) => ({ path: (f.webkitRelativePath || f.name).split('/').slice(1).join('/') || f.name, file: f }))
-              publish(d.id, files); e.target.value = ''
-            }} />
-          <div className="muted" style={{ fontSize: 12, marginTop: 10, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            {deleting?.id === d.id
+      {list.map((d) => {
+        const history = builds[d.id]
+        return (
+          <Section key={d.id} icon="lucide:app-window" title={d.name} subtitle={<Code>/dashboard/{d.id}/</Code>}
+            actions={<>
+              {d.build_id && <button type="button" className="sa-btn sa-btn--link" onClick={() => void showBuilds(d.id)}>{history ? 'Hide history' : `History${d.builds ? ` (${d.builds})` : ''}`}</button>}
+              {d.build_id && <a className="sa-btn" href={`https://${host}/dashboard/${d.id}/`} target="_blank" rel="noreferrer"><Icon icon="lucide:external-link" className="sa-btn__icon" />Open</a>}
+            </>}
+            footer={deleting?.id === d.id
               ? <>
                   <span>Type <strong>{d.name}</strong> to delete this dashboard, its builds and its address:</span>
-                  <input className="input" style={{ maxWidth: 220 }} autoFocus value={deleting.typed} onChange={(e) => setDeleting({ id: d.id, typed: e.target.value })} onKeyDown={(e) => { if (e.key === 'Escape') setDeleting(null) }} />
-                  <button className="btn" disabled={deleting.typed.trim() !== d.name} onClick={() => remove(d.id)} style={{ background: deleting.typed.trim() === d.name ? '#b3261e' : undefined }}>Delete for good</button>
-                  <a href="#" onClick={(e) => { e.preventDefault(); setDeleting(null) }}>cancel</a>
+                  <input className="sa-input sa-input--sm" aria-label="Dashboard name" autoFocus value={deleting.typed} onChange={(e) => setDeleting({ id: d.id, typed: e.target.value })} onKeyDown={(e) => { if (e.key === 'Escape') setDeleting(null) }} />
+                  <button type="button" className="sa-btn sa-btn--danger sa-btn--primary" disabled={deleting.typed.trim() !== d.name} onClick={() => void remove(d.id)}>Delete for good</button>
+                  <button type="button" className="sa-btn sa-btn--link" onClick={() => setDeleting(null)}>Cancel</button>
                 </>
-              : <a href="#" onClick={(e) => { e.preventDefault(); setDeleting({ id: d.id, typed: '' }) }}>Delete this dashboard…</a>}
-          </div>
-        </div>
-      ))}
+              : <button type="button" className="sa-btn sa-btn--link" onClick={() => setDeleting({ id: d.id, typed: '' })}>Delete this dashboard…</button>}>
+            {d.build_id
+              ? <Receipt items={[
+                  ['Live', <Status key="v" state="ok">{d.version ? `v${d.version}` : 'Published'}</Status>],
+                  ['Published', `${fmtWhen(d.uploaded_at)}${d.uploaded_by ? ` · ${d.uploaded_by}` : ''}`],
+                  ['Size', `${d.files} files · ${fmtBytes(d.bytes)}`],
+                ]} />
+              : <Empty>Nothing published yet. Drop a build below to publish v1.</Empty>}
+
+            {history && (
+              <RecordList rows={history} keyOf={(b) => b.build_id} empty="No builds recorded yet."
+                columns={[
+                  { key: 'n', label: 'Version', render: (b) => <span className="sa-row sa-row--tight">
+                      <strong>v{b.n}</strong>
+                      {b.kind === 'restore' && b.from_n ? <span className="sa-muted">restores v{b.from_n}</span> : null}
+                      {b.current && <Status state="ok">live</Status>}
+                      {b.pruned && <Status state="neutral">files removed</Status>}
+                    </span> },
+                  { key: 'at', label: 'Uploaded', render: (b) => <span className="sa-muted">{fmtWhen(b.uploaded_at)}</span> },
+                  { key: 'size', label: 'Size', render: (b) => <span className="sa-muted">{b.files} files · {fmtBytes(b.bytes)}</span> },
+                  { key: 'by', label: 'By', render: (b) => <span className="sa-muted">{b.uploaded_by ?? ''}</span> },
+                  { key: 'build_id', label: 'Build', render: (b) => <Code>{b.build_id}</Code> },
+                  { key: 'live', label: '', align: 'end', render: (b) => (!b.current && !b.pruned ? <button type="button" className="sa-btn" onClick={() => setConfirm({ id: d.id, build: b })}>Make live again</button> : null) },
+                ]} />
+            )}
+
+            <div className="sa-section__body sa-stack">
+              {confirm?.id === d.id && (() => {
+                const live = history?.find((b) => b.current)
+                const next = (history?.[0]?.n ?? 0) + 1
+                const when = (b?: Build) => b ? `${fmtWhen(b.uploaded_at)}${b.uploaded_by ? ` · ${b.uploaded_by}` : ''} · ${b.files} files · ${fmtBytes(b.bytes)}` : '—'
+                return (
+                  <Notice state="attention" action={
+                    <span className="sa-row sa-row--tight">
+                      <button type="button" className="sa-btn sa-btn--primary" onClick={() => void makeCurrent(d.id, confirm.build.build_id)}>Make v{confirm.build.n}'s files live as v{next}</button>
+                      <button type="button" className="sa-btn sa-btn--link" onClick={() => setConfirm(null)}>Cancel</button>
+                    </span>
+                  }>
+                    <div className="sa-stack">
+                      <span><strong>Live now:</strong> v{live?.n ?? '?'} · {when(live)}</span>
+                      <span><strong>After:</strong> v{next}, the files of v{confirm.build.n} ({when(confirm.build)}). v{live?.n ?? '?'} stays in the history.</span>
+                    </div>
+                  </Notice>
+                )
+              })()}
+
+              {/* Drop the build directory, or pick it. Both end up as the same list of path→file pairs. */}
+              <button type="button" className="sa-sub-card" data-active={over === d.id || undefined}
+                onDragOver={(e) => { e.preventDefault(); setOver(d.id) }}
+                onDragLeave={() => setOver(null)}
+                onDrop={async (e) => { e.preventDefault(); setOver(null); publish(d.id, await filesFromDrop(e.dataTransfer)) }}
+                onClick={() => pickers.current[d.id]?.click()}>
+                {busy === d.id
+                  ? (progress?.id === d.id
+                      ? <>
+                          <span className="sa-sub-card__title">{progress.storing ? 'Storing…' : `Uploading… ${fmtBytes(progress.sent)} of ${fmtBytes(progress.total)} (${progress.total ? Math.round(100 * progress.sent / progress.total) : 0}%)`}</span>
+                          <progress max={progress.total || 1} value={progress.storing ? progress.total || 1 : Math.min(progress.sent, progress.total || 1)} />
+                        </>
+                      : <span className="sa-sub-card__title">Uploading…</span>)
+                  : <>
+                      <span className="sa-sub-card__title">{over === d.id ? 'Release to publish this build' : 'Drop the build directory here, or choose a folder'}</span>
+                      <span className="sa-sub-card__text">Each upload is a new version; the earlier ones stay in the history.</span>
+                    </>}
+              </button>
+              <input
+                ref={(el) => { pickers.current[d.id] = el }}
+                type="file" multiple hidden
+                // @ts-expect-error — directory picking is not in the DOM types
+                webkitdirectory="" directory=""
+                onChange={(e) => {
+                  const fs = [...(e.target.files ?? [])]
+                  // webkitRelativePath is `dist/assets/x.js`; the chosen folder is the build root, so drop its name.
+                  const files = fs.map((f) => ({ path: (f.webkitRelativePath || f.name).split('/').slice(1).join('/') || f.name, file: f }))
+                  publish(d.id, files); e.target.value = ''
+                }} />
+            </div>
+          </Section>
+        )
+      })}
     </div>
   )
 }

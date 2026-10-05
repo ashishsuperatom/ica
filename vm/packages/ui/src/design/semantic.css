@@ -53,7 +53,7 @@
 
 /* ActionBar · Empty */
 .sa-actionbar { display: flex; flex-wrap: wrap; gap: var(--sp-2); padding: var(--sp-3) var(--sp-5); }
-.sa-empty { display: flex; align-items: center; gap: var(--sp-2); color: var(--faint); font-size: var(--t-sm); padding: var(--sp-4) var(--sp-5); margin: 0; }
+.sa-empty-line { display: flex; align-items: center; gap: var(--sp-2); color: var(--faint); font-size: var(--t-sm); padding: var(--sp-4) var(--sp-5); margin: 0; }
 
 /* PageHeader */
 .sa-pagehead { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; padding-bottom: var(--sp-1); }
@@ -90,3 +90,28 @@
 /* Toolbar */
 .sa-toolbar { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .sa-toolbar__end { margin-left: auto; display: flex; gap: var(--sp-2); }
+
+/* Inside a Section a notice or a toolbar keeps the section's gutter (in a body or a form, the body's) */
+.sa-section .sa-notice, .sa-section .sa-toolbar { margin: var(--sp-3) var(--sp-5); }
+.sa-section__body .sa-notice, .sa-section__body .sa-toolbar, .sa-form .sa-notice, .sa-dialog .sa-notice { margin: 0; }
+
+/* Dialog */
+.sa-dialog { position: fixed; inset: 0; z-index: var(--z-modal, 50); display: grid; place-items: center; padding: var(--sp-4); background: color-mix(in srgb, var(--ink) 28%, transparent); }
+.sa-dialog__box { width: min(32rem, 100%); max-height: calc(100vh - 2 * var(--sp-4)); overflow: auto; background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--shadow-pop, 0 12px 40px rgba(16, 24, 40, 0.18)); padding: var(--sp-5); display: grid; gap: var(--sp-3); }
+.sa-dialog__title { font-size: var(--t-md); font-weight: var(--w-semibold); color: var(--ink); margin: 0; }
+.sa-dialog__body { display: grid; gap: var(--sp-3); font-size: var(--t-base); color: var(--ink); min-width: 0; }
+.sa-dialog__actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
+
+/* A drop target (a file, a folder) while something is held over it; a long task's progress */
+[data-drop-target][data-active='true'] { border-color: var(--primary); background: var(--primary-wash); }
+.sa-progress { width: 100%; height: 6px; appearance: none; border: 0; border-radius: var(--r-full); background: var(--panel); overflow: hidden; }
+.sa-progress::-webkit-progress-bar { background: var(--panel); border-radius: var(--r-full); }
+.sa-progress::-webkit-progress-value { background: var(--primary); border-radius: var(--r-full); }
+.sa-progress::-moz-progress-bar { background: var(--primary); border-radius: var(--r-full); }
+
+/* A record list cell with a quieter second line (a date, then who) */
+.sa-cell__sub { display: block; font-size: var(--t-xs); color: var(--faint); }
+/* A Section shown as a dialog (its own card is the box) */
+.sa-dialog__frame { width: min(41rem, 100%); max-height: calc(100vh - 2 * var(--sp-4)); overflow: auto; }
+/* Inside a block the frame already names the screen: the page header keeps its line and its actions */
+.sa-block .sa-pagehead__title { display: none; }

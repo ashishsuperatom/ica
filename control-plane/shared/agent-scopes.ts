@@ -2,7 +2,7 @@
 // the hub (which enforces it) and the admin console (which offers it). A message no scope names is refused.
 
 /** Messages the hub answers itself, from the platform's own records (no engine needed). */
-export const HUB_MESSAGES = ['session:list', 'session:read', 'program:list', 'program:publish', 'activity:list', 'decision:paths', 'decision:outcome', 'decision:states', 'decision:state', 'decision:change', 'decision:learn', 'artifact:record', 'artifact:decide', 'artifact:list', 'artifact:get', 'decision:register'] as const
+export const HUB_MESSAGES = ['session:list', 'session:read', 'program:list', 'program:publish', 'activity:list', 'decision:paths', 'decision:outcome', 'decision:states', 'decision:state', 'decision:change', 'decision:learn', 'artifact:record', 'artifact:decide', 'artifact:list', 'artifact:get', 'decision:register', 'warehouse:tables', 'warehouse:query'] as const
 /** Messages every agent key may send, whatever its scopes: its own activities. */
 export const ALWAYS_ALLOWED = ['activity:list'] as const
 
@@ -19,6 +19,8 @@ export const AGENT_SCOPES = {
   decisions: ['decision:paths', 'decision:outcome', 'decision:states', 'decision:state', 'artifact:record', 'artifact:decide', 'artifact:list', 'artifact:get', 'decision:register'],
   /** The learning path: change decision states through their named operations. */
   learn: ['decision:states', 'decision:state', 'decision:change', 'decision:learn'],
+  /** The organisation's warehouse, as far as this project was granted: its tables and columns, and SQL over them. */
+  warehouse: ['warehouse:tables', 'warehouse:query'],
   graph: ['graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish'],
 } as const
 

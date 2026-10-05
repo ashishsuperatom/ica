@@ -300,7 +300,7 @@ export default {
       }
       // Anything that changes the project — machine lifecycle, access, roles, datasources, keys, tokens — is for
       // whoever administers it. A member may look, not provision.
-      const PROVISIONING = /^(machine|service-token|access|roles|datasources|members|verify-conn|info|fly|suspend|resume|stop|delete|dashboards|agent-keys|audit|groups|attention)/
+      const PROVISIONING = /^(machine|service-token|access|roles|datasources|members|verify-conn|info|fly|suspend|resume|stop|delete|dashboards|agent-keys|audit|groups|attention|warehouse)/
       // A person's own connection is theirs to make and remove; the DO checks shared ones are made by an admin.
       const ownConnection = /^connections(\/con_[\w-]+)?$/.test(subPath)
       const isProvisioning = !ownConnection && (request.method !== 'GET' || PROVISIONING.test(subPath))
@@ -695,6 +695,26 @@ export default {
         if (!su) return new Response('only the platform grants credits', { status: 403 })
         const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by: su.email ?? su.userId })
         return env.ORG.get(env.ORG.idFromName(orgId)).fetch(new Request('https://do/credits/grant', { method: 'POST', headers: { 'content-type': 'application/json' }, body }))
+      }
+      // THE ORGANISATION'S WAREHOUSE (warehouse/): its tables, made and appended to by its administrators (or what they
+      // run), queried by them over everything; a project's grant — the tables and columns it may read — is set here too,
+      // by the organisation's administrator, and kept by the project.
+      if (path === '/api/warehouse' || path.startsWith('/api/warehouse/')) {
+        const sub = path.slice('/api'.length)
+        const org = env.ORG.get(env.ORG.idFromName(orgId))
+        const headers = { 'content-type': 'application/json', 'x-sa-org': orgId }
+        if (sub === '/warehouse/grants') {
+          const project = new URL(request.url).searchParams.get('project') ?? ''
+          const projects = await (await org.fetch(new Request('http://do/projects'))).json() as { id: string }[]
+          if (!projects.some((p) => p.id === project)) return Response.json({ error: 'that project is not in this organisation' }, { status: 404 })
+          const stub = env.PROJECT.get(env.PROJECT.idFromName(project))
+          if (request.method === 'GET') return stub.fetch(new Request('http://do/warehouse/grants'))
+          const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by: oa.email ?? 'admin' })
+          return stub.fetch(new Request('http://do/warehouse/grants', { method: request.method, headers, body }))
+        }
+        if (request.method === 'GET') return org.fetch(new Request(`http://do${sub}`, { headers }))
+        const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by: oa.email ?? 'admin', ...(sub === '/warehouse/query' ? { grant: 'all' } : {}) })
+        return org.fetch(new Request(`http://do${sub}`, { method: 'POST', headers, body }))
       }
       // USAGE PER PERSON across the organisation's projects: what each of its people used (tokens, cache, credits), and
       // what no turn named ('unattributed'). An admin sees everyone; a member sees themselves.

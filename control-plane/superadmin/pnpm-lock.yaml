@@ -26,6 +26,12 @@ importers:
       echarts-for-react:
         specifier: 3.0.6
         version: 3.0.6(echarts@6.1.0)(react@19.2.6)
+      hyparquet:
+        specifier: 1.31.2
+        version: 1.31.2
+      hyparquet-writer:
+        specifier: 0.16.10
+        version: 0.16.10
       marked:
         specifier: ^17.0.6
         version: 17.0.6
@@ -1381,6 +1387,15 @@ packages:
   glob-to-regexp@0.4.1:
     resolution: {integrity: sha512-lkX1HJXwyMcprw/5YUZc2s7DrpAiHB21/V+E1rHUrVNokkvB6bqMzT0VfV6/86ZNabt1k14YOIaT7nDvOX3Iiw==}
 
+  hyparquet-writer@0.16.10:
+    resolution: {integrity: sha512-53fpiA57kdJ2V7X97/VSAzHr8rb8Z2cr126T1pTL9TapZNOP/wNJqFh+jc7dRwwg9TpVMYeRNDMb+r5oiLqwjg==}
+
+  hyparquet@1.31.1:
+    resolution: {integrity: sha512-tF9580Xb+41+Eb+mH0av1k7m1PWl+PSKrX66Yd7UOZ760cwEXP9/enwHRMSCeVncaubRI8XPb3v580/ujYKK5w==}
+
+  hyparquet@1.31.2:
+    resolution: {integrity: sha512-dpVTCGkPPIdfDExa7YZGaJpuBTmLFDKGeZ6meHUj1mz/Q3qmaQHGLLqCyPBkQjfxrYNb08YTax682qeGO+zkVA==}
+
   js-cookie@3.0.7:
     resolution: {integrity: sha512-z/wZZgDrkNV1eA0ULjM/F9/50Ya8fbzgKneSpoPsXSGd0KnpdtHfOZWK+GcwLk+EZbS4F9RBhU+K2RgzuDaItw==}
     engines: {node: '>=20'}
@@ -2722,6 +2737,14 @@ snapshots:
     optional: true
 
   glob-to-regexp@0.4.1: {}
+
+  hyparquet-writer@0.16.10:
+    dependencies:
+      hyparquet: 1.31.1
+
+  hyparquet@1.31.1: {}
+
+  hyparquet@1.31.2: {}
 
   js-cookie@3.0.7: {}
 

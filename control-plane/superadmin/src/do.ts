@@ -11,6 +11,7 @@ import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/
 import { ORG_MIGRATIONS } from './migrations.js'
 import { DurableObject } from 'cloudflare:workers'
 import { createRecorder } from './records.js'
+import { warehouse, WarehouseRefusal, type Grant } from './warehouse/index.js'
 
 interface Session {
   ws:     WebSocket
@@ -44,6 +45,7 @@ export class OrgDO extends DurableObject<Env> {
     }
 
     // REST API
+    if (path === '/warehouse' || path.startsWith('/warehouse/')) return this.warehouse(request, path)
     if (path === '/credits' || path.startsWith('/credits/')) return this.credits(request, path)
     if (request.method === 'GET'  && path === '/projects')     return this.getProjects(url)
     if (request.method === 'POST' && path === '/projects')     return this.createProject(request)
@@ -62,6 +64,49 @@ export class OrgDO extends DurableObject<Env> {
     if (request.method === 'POST' && path === '/messages')     return this.addMessage(request)
 
     return new Response('not found', { status: 404 })
+  }
+
+  // ── The organisation's warehouse (warehouse/): this DO coordinates it — names it, records what is done to it, routes
+  //    each operation through the module. The data is in object storage, never here. A query arrives with what may be
+  //    read: 'all' (an organisation administrator) or a project's grant (its ProjectDO sends it).
+  private async warehouse(request: Request, path: string): Promise<Response> {
+    const { bridge, ingest } = warehouse(this.env)
+    const org = request.headers.get('x-sa-org') ?? this.ctx.id.name ?? 'default'
+    const json = (v: unknown, status = 200) => Response.json(v, { status })
+    const log = (op: string, o: { tbl?: string | null; project?: string | null; rows?: number | null; snapshot?: string | null; ok: boolean; detail?: unknown; by: string }) =>
+      this.ctx.storage.sql.exec('INSERT INTO warehouse_ops (at, op, tbl, project, rows, snapshot, ok, detail, by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        new Date().toISOString(), op, o.tbl ?? null, o.project ?? null, o.rows ?? null, o.snapshot ?? null, o.ok ? 1 : 0, o.detail === undefined ? null : JSON.stringify(o.detail), o.by)
+    const body: any = request.method === 'POST' ? await request.json().catch(() => ({})) : {}
+    const by = String(body.by ?? 'platform')
+    try {
+      if (request.method === 'GET' && path === '/warehouse') {
+        const ops = [...this.ctx.storage.sql.exec('SELECT * FROM warehouse_ops ORDER BY seq DESC LIMIT 50')]
+        return json({ configured: bridge.configured, org, tables: bridge.configured ? await bridge.tables(org) : [], ops })
+      }
+      if (request.method === 'POST' && path === '/warehouse/tables') {
+        await ingest.createTable(org, { name: String(body.name ?? ''), columns: Array.isArray(body.columns) ? body.columns : [] })
+        log('create', { tbl: body.name, ok: true, detail: { columns: body.columns }, by })
+        return json({ ok: true, table: body.name }, 201)
+      }
+      if (request.method === 'POST' && path === '/warehouse/append') {
+        const rows = Array.isArray(body.rows) ? body.rows : []
+        if (rows.length > 50_000) throw new WarehouseRefusal('at most 50,000 rows in one append — send the rest in another')
+        const r = await ingest.append(org, String(body.table ?? ''), rows)
+        log('append', { tbl: body.table, project: body.project ?? null, rows: r.rows, snapshot: r.snapshot, ok: true, by })
+        return json({ ok: true, ...r })
+      }
+      if (request.method === 'POST' && path === '/warehouse/query') {
+        const grant: Grant | 'all' = body.grant === 'all' ? 'all' : (body.grant && typeof body.grant === 'object' ? body.grant : {})
+        const r = await bridge.queryAs(org, String(body.sql ?? ''), grant, { limit: Number(body.limit) || 100 })
+        log('query', { tbl: r.tables.join(','), project: body.project ?? null, rows: r.rows.length, ok: true, detail: { sql: String(body.sql).slice(0, 2000) }, by })
+        return json({ columns: r.columns, rows: r.rows, truncated: r.truncated })
+      }
+      return json({ error: 'not found' }, 404)
+    } catch (e: any) {
+      const refused = e instanceof WarehouseRefusal
+      log(path.split('/').pop() ?? 'op', { tbl: body.table ?? body.name ?? null, project: body.project ?? null, ok: false, detail: { error: String(e?.message ?? e).slice(0, 500), ...(body.sql ? { sql: String(body.sql).slice(0, 2000) } : {}) }, by })
+      return json({ error: e?.message ?? String(e) }, refused ? 400 : 502)
+    }
   }
 
   // ── WebSocket ───────────────────────────────────────────────────────────────

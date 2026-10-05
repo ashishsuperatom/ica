@@ -1,7 +1,9 @@
 // ── Groups, for one project ─────────────────────────────────────────────────────────────────────────────────────────
 // Who is in which group (scope group:<name>): people by email, agent keys by id. A group decides what its members see
 // (agents, programs, knowledge scoped to it), which data access policies apply to them, and can carry a credit budget.
-import React, { useCallback, useEffect, useState } from 'react'
+// Drawn only with the semantic components (@superatom/ui); no CSS of its own.
+import { useCallback, useEffect, useState } from 'react'
+import { Section, Form, Field, RecordList, Notice, Empty, Code } from '@superatom/ui'
 
 type Api = (p: string, i?: RequestInit) => Promise<Response>
 type Group = { name: string; description: string | null; members: string[] }
@@ -22,25 +24,33 @@ export function GroupsPanel({ api, projectId }: { api: Api; projectId: string })
     if (await say(await api(`${base}/${g}/members`, { method: 'POST', body: JSON.stringify({ member: m }) }))) { setMember({ ...member, [g]: '' }); load() }
   }
   const remove = async (g: string, m: string) => { if (await say(await api(`${base}/${g}/members?member=${encodeURIComponent(m)}`, { method: 'DELETE' }))) load() }
+
   return (
-    <div className="card">
-      <strong>Groups</strong>
-      <div className="muted" style={{ fontSize: 12.5, marginTop: 2, marginBottom: 10 }}>A group decides what its members see (agents, programs and knowledge scoped to it), which data access policies apply to them, and can carry a credit budget.</div>
-      {err && <div className="muted" style={{ color: '#b3261e', fontSize: 12.5, marginBottom: 10 }}>{err}</div>}
-      <div className="row" style={{ gap: 8, marginBottom: 14 }}>
-        <input id="group-name" className="input" style={{ maxWidth: 220 }} placeholder="finance" value={name} onChange={(e) => setName(e.target.value)} />
-        <button className="btn" onClick={create} disabled={!name.trim()}>Create group</button>
-      </div>
-      {!groups.length && <div className="muted" style={{ fontSize: 12.5 }}>No groups yet.</div>}
+    <div className="sa-stack sa-stack--4">
+      {err && <Notice state="critical">{err}</Notice>}
+      <Section icon="lucide:users" title="Groups" subtitle="What members see, which data policies apply, and a credit budget">
+        <Form onSubmit={() => { if (name.trim()) void create() }}
+          actions={<button className="sa-btn sa-btn--primary" disabled={!name.trim()}>Create group</button>}>
+          <Field label="Name" help="A group decides what its members see (agents, programs and knowledge scoped to it), which data access policies apply to them, and can carry a credit budget.">
+            <input id="group-name" className="sa-input" placeholder="finance" value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+        </Form>
+      </Section>
+      {!groups.length && <Empty icon="lucide:users">No groups yet. Each group you create appears here with its members.</Empty>}
       {groups.map((g) => (
-        <div key={g.name} style={{ border: '1px solid var(--hair, #e2e4e8)', borderRadius: 6, padding: 12, marginBottom: 10 }}>
-          <strong>{g.name}</strong> <span className="muted" style={{ fontSize: 12 }}>{g.members.length} member{g.members.length === 1 ? '' : 's'}</span>
-          <div style={{ margin: '6px 0' }}>{g.members.map((m) => <span key={m} className="mono" style={{ fontSize: 12, marginRight: 10 }}>{m.replace(/^email:/, '')} <a href="#" onClick={(e) => { e.preventDefault(); void remove(g.name, m) }}>×</a></span>)}</div>
-          <div className="row" style={{ gap: 8 }}>
-            <input id={`group-add-${g.name}`} className="input" style={{ maxWidth: 280 }} placeholder="a@company.com or agent:key_…" value={member[g.name] ?? ''} onChange={(e) => setMember({ ...member, [g.name]: e.target.value })} />
-            <button className="btn" onClick={() => add(g.name)} disabled={!(member[g.name] ?? '').trim()}>Add</button>
-          </div>
-        </div>
+        <Section key={g.name} icon="lucide:users-round" title={g.name} note={`${g.members.length} member${g.members.length === 1 ? '' : 's'}`}>
+          <RecordList keyOf={(m) => m.id} rows={g.members.map((id) => ({ id }))} empty="No members yet."
+            columns={[
+              { key: 'id', label: 'Member', render: (m) => <Code>{m.id.replace(/^email:/, '')}</Code> },
+              { key: 'remove', label: '', align: 'end', render: (m) => <button type="button" className="sa-btn sa-btn--link" onClick={() => void remove(g.name, m.id)}>Remove</button> },
+            ]} />
+          <Form onSubmit={() => { if ((member[g.name] ?? '').trim()) void add(g.name) }}
+            actions={<button className="sa-btn sa-btn--primary" disabled={!(member[g.name] ?? '').trim()}>Add member</button>}>
+            <Field label="Add a member" help="A person by email, or an agent key by its id.">
+              <input id={`group-add-${g.name}`} className="sa-input" placeholder="a@company.com or agent:key_…" value={member[g.name] ?? ''} onChange={(e) => setMember({ ...member, [g.name]: e.target.value })} />
+            </Field>
+          </Form>
+        </Section>
       ))}
     </div>
   )

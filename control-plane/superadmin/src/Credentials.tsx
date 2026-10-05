@@ -9,41 +9,8 @@
 // The order of the page follows what an operator actually needs to know, worst first: what is expiring, then
 // what is exhausted, then the rest.
 
-import { useCallback, useEffect, useState } from 'react'
-
-// The table markup used a class that was never defined anywhere, so it rendered with no borders, no padding
-// and headers that did not line up with their columns. Styles live here, scoped to this screen, rather than in
-// a shared sheet: this is the only table with these columns, and a shared rule is one another screen inherits
-// by accident.
-const CSS = `
-.cred-tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
-.cred-tbl th{
-  text-align:left;font-weight:600;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
-  color:var(--sa-text-faint,#9a9285);padding:0 12px 8px;border-bottom:1px solid var(--sa-border,#e8e4de);white-space:nowrap}
-.cred-tbl td{padding:11px 12px;border-bottom:1px solid var(--sa-border-soft,#f0ede8);vertical-align:top}
-.cred-tbl tr:last-child td{border-bottom:none}
-.cred-tbl tbody tr:hover{background:var(--sa-bg,#faf9f7)}
-/* The id is the thing you scan for, so it leads and is monospaced; the note explains without competing. */
-.cred-tbl .id{font-family:var(--sa-font-mono,ui-monospace,monospace);font-weight:600;white-space:nowrap}
-.cred-tbl .note{font-size:12px;color:var(--sa-text-muted,#6b6560);margin-top:2px;max-width:280px}
-.cred-tbl .sub{font-size:11px;color:var(--sa-text-faint,#9a9285);margin-top:2px;white-space:nowrap}
-.cred-tbl td.acts{text-align:right;white-space:nowrap}
-.cred-tbl td.acts .btn{margin-left:6px;padding:4px 10px;font-size:12px}
-.cred-tbl .num{font-variant-numeric:tabular-nums}
-.cred-row-off td{opacity:.5}
-/* A state worth acting on should read as one; everything normal should stay quiet. */
-.cred-tag{font-size:11px;font-weight:600;padding:2px 7px;border-radius:10px;white-space:nowrap}
-.cred-ok{color:var(--sa-text-faint,#9a9285);font-weight:400}
-.cred-warn{background:#fef3e2;color:#b45309}
-.cred-bad{background:#fee;color:#b91c1c}
-.cred-off{background:#f1f0ee;color:#6b6560}
-`
-let cssDone = false
-function ensureCSS() {
-  if (cssDone || typeof document === 'undefined') return
-  cssDone = true
-  const el = document.createElement('style'); el.textContent = CSS; document.head.appendChild(el)
-}
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Code, Empty, Field, Form, Icon, Notice, RecordList, Section, Status, type Column } from '@superatom/ui'
 
 interface Entry {
   id: string
@@ -90,29 +57,47 @@ async function call(api: Api, path: string, init?: RequestInit): Promise<any> {
 // The figure comes from the PROVIDER, not from anything we counted — so it is absolute, and a stale read is
 // simply an older truth rather than a wrong one.
 function usageCell(e: Entry) {
-  if (!e?.canAskUsage) return <span className="cred-ok" title="this provider exposes no usage endpoint">—</span>
+  if (!e?.canAskUsage) return <span className="sa-faint" title="this provider exposes no usage endpoint">—</span>
   const u = e.usage
-  if (!u) return <span className="cred-ok">not checked</span>
-  if (u.error) return <span className="cred-ok" title={u.error}>unavailable</span>
+  if (!u) return <span className="sa-faint">not checked</span>
+  if (u.error) return <span className="sa-faint" title={u.error}>unavailable</span>
   const age = Math.round((Date.now() - u.observedAt) / 60000)
   const pct = typeof u.percentUsed === 'number' ? u.percentUsed : null
   const money = u.unit === 'usd' && typeof u.limit === 'number' ? `$${(u.used ?? 0).toFixed(2)} of $${u.limit}` : null
   const detail = u.windows
     ? Object.entries(u.windows).map(([k, w]) => `${k} ${w.percent}%`).join(' · ')
     : u.resetsAt ? `resets ${String(u.resetsAt).slice(0, 10)}` : ''
+  const figure = money ?? (pct !== null ? `${pct}%` : '—')
   return (
     <span title={`observed ${age}m ago${detail ? ' · ' + detail : ''}`}>
-      <span className={pct !== null && pct >= 80 ? 'cred-tag cred-warn' : 'num'}>{money ?? (pct !== null ? `${pct}%` : '—')}</span>
-      {detail && <div className="sub">{detail}</div>}
+      {pct !== null && pct >= 80 ? <Status state="attention">{figure}</Status> : figure}
+      {detail && <div className="sa-note">{detail}</div>}
     </span>
   )
 }
 
+function expiryCell(e: Entry) {
+  // Said explicitly: this kind of key HAS no expiry, which is different from not knowing.
+  if (e.expiresInDays === null) return <span className="sa-faint">none</span>
+  if (e.expired) return <Status state="critical">expired</Status>
+  if (e.expiresInDays <= 3) return <Status state="attention">{e.expiresInDays}d</Status>
+  return `${e.expiresInDays}d`
+}
+
+function stateCell(e: Entry) {
+  if (e.disabled) return <span title="parked — kept, but never used"><Status state="neutral">parked</Status></span>
+  if (e.exhausted) return <Status state="attention">exhausted</Status>
+  return <Status state="ok">ok</Status>
+}
+
 export function Credentials({ api }: { api: Api }) {
-  ensureCSS()
   const [d, setD] = useState<Partial<Data> | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // The forms stay uncontrolled — a key's value is never held in React state — so each is read through one of
+  // its inputs (`input.form`).
+  const keyField = useRef<HTMLInputElement>(null)
+  const groupField = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
     try { setD(await call(api, '/credentials')); setErr(null) }
@@ -127,9 +112,10 @@ export function Credentials({ api }: { api: Api }) {
     finally { setBusy(false) }
   }
 
-  const addEntry = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    const f = new FormData(e.currentTarget)
+  const addEntry = async () => {
+    const form = keyField.current?.form
+    if (!form) return
+    const f = new FormData(form)
     const groups = String(f.get('groups') || '').split(',').map(s => s.trim()).filter(Boolean)
     await act('/credentials/entry', {
       method: 'POST',
@@ -138,11 +124,19 @@ export function Credentials({ api }: { api: Api }) {
         groups: groups.length ? groups : undefined, note: f.get('note') || undefined,
       }),
     })
-    e.currentTarget.reset()
+    form.reset()
   }
 
-  if (err && !d) return <div className="card"><b>Could not load credentials</b><div className="muted" style={{ marginTop: 6 }}>{err}</div></div>
-  if (!d) return <div className="muted">Loading…</div>
+  const assignGroup = async () => {
+    const form = groupField.current?.form
+    if (!form) return
+    const f = new FormData(form)
+    await act('/credentials/group', { method: 'POST', body: JSON.stringify({ projectId: f.get('projectId'), group: f.get('group') }) })
+    form.reset()
+  }
+
+  if (err && !d) return <Notice state="critical"><b>Could not load credentials.</b> {err}</Notice>
+  if (!d) return <Empty>Loading credentials…</Empty>
 
   // Absent fields must not take the page down — but they must not be disguised as emptiness either. An API
   // that answered with an error or an older shape is a DIFFERENT fact from "there are no credentials", and
@@ -150,15 +144,12 @@ export function Credentials({ api }: { api: Api }) {
   // that were already there.
   if (!Array.isArray(d.entries)) {
     return (
-      <div className="card" style={{ borderColor: '#b91c1c' }}>
-        <b style={{ color: '#b91c1c' }}>Unexpected response</b>
-        <div className="muted" style={{ marginTop: 6 }}>
-          The API did not return a credential list. This is not the same as having none — nothing has been lost.
+      <Section icon="lucide:octagon-alert" accent="loss" title="Unexpected response" subtitle="Not the same as having no credentials — nothing has been lost">
+        <div className="sa-section__body sa-stack sa-stack--3">
+          <Notice state="critical">The API did not return a credential list.</Notice>
+          <pre className="sa-code">{JSON.stringify(d, null, 2).slice(0, 1200)}</pre>
         </div>
-        <pre className="mono" style={{ marginTop: 10, fontSize: 12, overflow: 'auto', maxHeight: 200 }}>
-          {JSON.stringify(d, null, 2).slice(0, 1200)}
-        </pre>
-      </div>
+      </Section>
     )
   }
   const entries = d.entries
@@ -166,139 +157,93 @@ export function Credentials({ api }: { api: Api }) {
   const providers = Array.isArray(d.providers) ? d.providers : []
   const soon = Array.isArray(d.expiring) ? d.expiring : []
 
+  const columns: Column<Entry>[] = [
+    { key: 'id', label: 'Credential', wrap: true, render: e => <>
+      <Code>{e.id}</Code>
+      {e.note && <div className="sa-note">{e.note}</div>}
+    </> },
+    { key: 'provider', label: 'Provider' },
+    { key: 'groups', label: 'Groups', render: e => e.groups?.length ? e.groups.join(', ') : <span className="sa-faint">any</span> },
+    { key: 'used', label: 'Used', align: 'end', render: usageCell },
+    { key: 'expires', label: 'Expires', align: 'end', render: expiryCell },
+    { key: 'state', label: 'State', render: stateCell },
+    { key: 'acts', label: '', align: 'end', render: e => (
+      <span className="sa-row sa-row--tight">
+        {e.exhausted && !e.disabled && <button className="sa-btn" disabled={busy}
+          onClick={() => act(`/credentials/revive/${encodeURIComponent(e.id)}`, { method: 'POST' })}>Revive</button>}
+        {/* Parking keeps the key and stops it being spent — the middle ground between using it and having to
+            enter it again later. */}
+        <button className="sa-btn sa-btn--link" disabled={busy}
+          onClick={() => act(`/credentials/enable/${encodeURIComponent(e.id)}`, { method: 'POST', body: JSON.stringify({ enabled: !!e.disabled }) })}>
+          {e.disabled ? 'Enable' : 'Disable'}
+        </button>
+        <button className="sa-btn sa-btn--link" disabled={busy}
+          onClick={() => confirm(`Remove ${e.id}? Any box using it falls back to the next candidate.`) &&
+            act(`/credentials/entry/${encodeURIComponent(e.id)}`, { method: 'DELETE' })}>Remove</button>
+      </span>
+    ) },
+  ]
+  const groupRows = Object.entries(groups).map(([projectId, group]) => ({ projectId, group }))
+
   return (
-    <>
+    <div className="sa-stack sa-stack--4">
       {/* The warning goes first because it is the only thing here that is time-critical: a lapsed credential
           surfaces at the agent as something unrelated, which is expensive to diagnose. */}
       {soon.length > 0 && (
-        <div className="card" style={{ borderColor: '#d97706', marginBottom: 16 }}>
-          <b style={{ color: '#d97706' }}>Expiring soon</b>
-          <ul style={{ margin: '8px 0 0 18px' }}>
+        <Notice state={soon.some(x => x.inDays < 0) ? 'critical' : 'attention'}>
+          <div className="sa-stack sa-stack--3">
+            <b>Expiring soon</b>
             {soon.map(x => (
-              <li key={x.id}>
-                <code className="mono">{x.id}</code> ({x.provider}) — {x.inDays < 0 ? <b>expired</b> : <>in {x.inDays} day{x.inDays === 1 ? '' : 's'}</>}
-                {x.provider === 'openai-codex' && <span className="muted"> · re-seed with <code className="mono">codex login</code></span>}
-              </li>
+              <div key={x.id}>
+                <Code>{x.id}</Code> ({x.provider}) — {x.inDays < 0 ? <b>expired</b> : <>in {x.inDays} day{x.inDays === 1 ? '' : 's'}</>}
+                {x.provider === 'openai-codex' && <> · re-seed with <Code>codex login</Code></>}
+              </div>
             ))}
-          </ul>
-        </div>
+          </div>
+        </Notice>
       )}
 
       {!d.sealed && (
-        <div className="card" style={{ borderColor: '#b91c1c', marginBottom: 16 }}>
-          <b style={{ color: '#b91c1c' }}>Not sealed</b>
-          <div className="muted" style={{ marginTop: 6 }}>
-            CREDENTIALS_MASTER_KEY is not set, so credentials are stored in the clear. Set it and re-save each entry.
-          </div>
-        </div>
+        <Notice state="critical">
+          <b>Not sealed.</b> CREDENTIALS_MASTER_KEY is not set, so credentials are stored in the clear. Set it and re-save each entry.
+        </Notice>
       )}
 
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-          <b>Keys</b>
-          <button className="btn ghost" disabled={busy} onClick={() => act('/credentials/refresh', { method: 'POST' })}>
-            Refresh usage
-          </button>
-        </div>
-        <div className="muted" style={{ margin: '4px 0 10px' }}>
-          Values are never shown here and never returned by the API — only a box that proves which project it is
-          ever receives one.
-        </div>
-        <table className="cred-tbl">
-          <thead><tr>
-            <th style={{ width: '30%' }}>Credential</th><th>Provider</th><th>Groups</th>
-            <th>Used</th><th>Expires</th><th>State</th><th style={{ width: 170 }} />
-          </tr></thead>
-          <tbody>
-            {entries.length === 0 && <tr><td colSpan={7} className="muted">
-              Nothing in the vault yet. There is no fallback — a provider with no entry here simply fails, which
-              is deliberate: borrowing an unrelated key is how one gets spent without anyone noticing.
-            </td></tr>}
-            {entries.map(e => (
-              <tr key={e.id} style={e.disabled ? { opacity: 0.55 } : undefined}>
-                <td><code className="mono">{e.id}</code>{e.note && <div className="muted" style={{ fontSize: 12 }}>{e.note}</div>}</td>
-                <td>{e.provider}</td>
-                <td>{e.groups?.length ? e.groups.join(', ') : <span className="muted">any</span>}</td>
-                <td>{usageCell(e)}</td>
-                <td className="num">
-                  {e.expiresInDays === null
-                    // Said explicitly: this kind of key HAS no expiry, which is different from not knowing.
-                    ? <span className="cred-ok">none</span>
-                    : e.expired ? <span className="cred-tag cred-bad">expired</span>
-                    : e.expiresInDays <= 3 ? <span className="cred-tag cred-warn">{e.expiresInDays}d</span>
-                    : <span>{e.expiresInDays}d</span>}
-                </td>
-                <td>
-                  {e.disabled ? <span className="cred-tag cred-off" title="parked — kept, but never used">parked</span>
-                    : e.exhausted ? <span className="cred-tag cred-warn">exhausted</span>
-                    : <span className="cred-ok">ok</span>}
-                </td>
-                <td className="acts">
-                  {e.exhausted && !e.disabled && <button className="btn ghost" disabled={busy}
-                    onClick={() => act(`/credentials/revive/${encodeURIComponent(e.id)}`, { method: 'POST' })}>Revive</button>}
-                  {/* Parking keeps the key and stops it being spent — the middle ground between using it and
-                      having to enter it again later. */}
-                  <button className="btn ghost" disabled={busy}
-                    onClick={() => act(`/credentials/enable/${encodeURIComponent(e.id)}`, { method: 'POST', body: JSON.stringify({ enabled: !!e.disabled }) })}>
-                    {e.disabled ? 'Enable' : 'Disable'}
-                  </button>
-                  <button className="btn ghost" disabled={busy}
-                    onClick={() => confirm(`Remove ${e.id}? Any box using it falls back to the next candidate.`) &&
-                      act(`/credentials/entry/${encodeURIComponent(e.id)}`, { method: 'DELETE' })}>Remove</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {err && <Notice state="critical">{err}</Notice>}
 
-      <div className="card" style={{ marginBottom: 16 }}>
-        <b>Add a key</b>
-        <div className="muted" style={{ margin: '4px 0 10px' }}>
-          Sealed on the way in. An expiry is read from the credential itself when it carries one (a JWT does),
-          rather than typed — a date someone types is a date someone forgets.
-        </div>
-        <form onSubmit={addEntry} className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-          <input name="id" placeholder="id (codex2)" required className="input" style={{ width: 150 }} />
-          <select name="provider" className="input" style={{ width: 170 }} required defaultValue="">
-            <option value="" disabled>provider…</option>
-            {providers.map(p => <option key={p} value={p}>{p}</option>)}
-          </select>
-          <input name="groups" placeholder="groups (prod, test) — blank = any" className="input" style={{ width: 240 }} />
-          <input name="note" placeholder="note" className="input" style={{ width: 200 }} />
-          <input name="value" type="password" placeholder="the key" required className="input" style={{ flex: 1, minWidth: 240 }} />
-          <button className="btn" disabled={busy}>Add</button>
-        </form>
-      </div>
+      <Section icon="lucide:key-round" title="Keys" subtitle="Values are never shown or returned — only a box that proves which project it is ever receives one"
+        note={`${entries.length} ${entries.length === 1 ? 'key' : 'keys'}`}
+        actions={<button className="sa-btn" disabled={busy} onClick={() => act('/credentials/refresh', { method: 'POST' })}>
+          <Icon icon="lucide:refresh-cw" className="sa-btn__icon" />Refresh usage
+        </button>}>
+        <RecordList columns={columns} rows={entries} keyOf={e => e.id}
+          empty="Nothing in the vault yet. There is no fallback — a provider with no entry here simply fails, which is deliberate: borrowing an unrelated key is how one gets spent without anyone noticing." />
+      </Section>
 
-      <div className="card">
-        <b>Project groups</b>
-        <div className="muted" style={{ margin: '4px 0 10px' }}>
-          Which pool a project draws on. Unassigned projects are <code className="mono">default</code>, deliberately
-          the least privileged — a project nobody has classified should not inherit production's quota.
-        </div>
-        <table className="cred-tbl">
-          <thead><tr><th>Project</th><th>Group</th></tr></thead>
-          <tbody>
-            {Object.keys(groups).length === 0 && <tr><td colSpan={2} className="muted">None assigned — everything is <code className="mono">default</code>.</td></tr>}
-            {Object.entries(groups).map(([pid, g]) => (
-              <tr key={pid}><td><code className="mono">{pid}</code></td><td>{g}</td></tr>
-            ))}
-          </tbody>
-        </table>
-        <form className="row" style={{ gap: 8, marginTop: 10 }} onSubmit={async (ev) => {
-          ev.preventDefault()
-          const f = new FormData(ev.currentTarget)
-          await act('/credentials/group', { method: 'POST', body: JSON.stringify({ projectId: f.get('projectId'), group: f.get('group') }) })
-          ev.currentTarget.reset()
-        }}>
-          <input name="projectId" placeholder="project id" required className="input" style={{ flex: 1 }} />
-          <input name="group" placeholder="group (prod)" required className="input" style={{ width: 160 }} />
-          <button className="btn" disabled={busy}>Assign</button>
-        </form>
-      </div>
+      <Section icon="lucide:plus" title="Add a key" subtitle="Sealed on the way in; an expiry is read from the key itself when it carries one (a JWT does)">
+        <Form onSubmit={() => void addEntry()} actions={<button className="sa-btn sa-btn--primary" disabled={busy}>Add key</button>}>
+          <Field label="Id"><input ref={keyField} name="id" placeholder="codex2" required className="sa-input" /></Field>
+          <Field label="Provider">
+            <select name="provider" className="sa-input" required defaultValue="">
+              <option value="" disabled>Choose a provider…</option>
+              {providers.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </Field>
+          <Field label="Groups" help="Comma separated (prod, test). Blank means any group."><input name="groups" placeholder="prod, test" className="sa-input" /></Field>
+          <Field label="Note"><input name="note" className="sa-input" /></Field>
+          <Field label="Key"><input name="value" type="password" required className="sa-input" /></Field>
+        </Form>
+      </Section>
 
-      {err && <div className="muted" style={{ color: '#b91c1c', marginTop: 12 }}>{err}</div>}
-    </>
+      <Section icon="lucide:users" title="Project groups"
+        subtitle={<>Which pool a project draws on. Unassigned projects are <Code>default</Code>, the least privileged — a project nobody has classified should not inherit production’s quota</>}>
+        <RecordList columns={[{ key: 'projectId', label: 'Project', render: r => <Code>{r.projectId}</Code> }, { key: 'group', label: 'Group' }]}
+          rows={groupRows} keyOf={r => r.projectId} empty={<>None assigned — everything is <Code>default</Code>.</>} />
+        <Form onSubmit={() => void assignGroup()} actions={<button className="sa-btn" disabled={busy}>Assign</button>}>
+          <Field label="Project id"><input ref={groupField} name="projectId" required className="sa-input" /></Field>
+          <Field label="Group"><input name="group" placeholder="prod" required className="sa-input" /></Field>
+        </Form>
+      </Section>
+    </div>
   )
 }

@@ -9,6 +9,9 @@ import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import type { Hub } from './hub'
 import { CodexEventLog, mergeEvent, type AgentEvent } from './CodexEventLog'
+import { PageHeader, Status, Notice } from '@superatom/ui'
+
+const TERM_BG = '#0d0f0d'   // the terminal's background: xterm's theme and its frame agree
 
 export function AnalystConsole({ hub }: { hub: Hub }) {
   const elRef = useRef<HTMLDivElement | null>(null)
@@ -27,7 +30,7 @@ export function AnalystConsole({ hub }: { hub: Hub }) {
 
   useEffect(() => {
     if (!elRef.current) return
-    const term = new Terminal({ cursorBlink: false, fontSize: 11, convertEol: false, cols: COLS, rows: ROWS, scrollback: 8000, theme: { background: '#0d0f0d', foreground: '#e6e2da', ...ANSI } })
+    const term = new Terminal({ cursorBlink: false, fontSize: 11, convertEol: false, cols: COLS, rows: ROWS, scrollback: 8000, theme: { background: TERM_BG, foreground: '#e6e2da', ...ANSI } })
     term.open(elRef.current)
     termRef.current = term
     term.onData((d) => hubRef.current.send({ to: { type: 'code-engine' }, payload: { t: 'term:input', which: 'analyst', data: d } }))
@@ -60,20 +63,18 @@ export function AnalystConsole({ hub }: { hub: Hub }) {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, height: 'calc(100vh - 210px)', minHeight: 460 }}>
-      <div className="between">
-        <div><strong>Analyst</strong><div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>Ask a question and watch the analyst build the program and answer it, live.</div></div>
-        <span className="muted" style={{ fontSize: 12 }}>{status === 'live' ? 'connected' : status}</span>
-      </div>
-      <div style={{ flex: 1, minHeight: 0, background: '#0d0f0d', borderRadius: 10, padding: '8px 10px', overflow: 'auto' }}>
+    <div className="sa-stack" style={{ height: 'calc(100vh - 210px)', minHeight: 460 }}>
+      <PageHeader title="Analyst" subtitle="Ask a question and watch the analyst build the program and answer it, live." actions={<Status state={status === 'live' ? 'ok' : status === 'connecting' ? 'running' : 'attention'}>{status === 'live' ? 'connected' : status}</Status>} />
+      {/* the terminal's frame: its height is what xterm fills, its background the terminal's own */}
+      <div className="sa-card sa-scroll" style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 'var(--sp-2) var(--sp-2h)', background: streamKind === 'pty' ? TERM_BG : undefined }}>
         <div ref={elRef} style={{ height: '100%', display: streamKind === 'pty' ? 'block' : 'none' }} />
         {streamKind === 'events' && <CodexEventLog events={events} busy={busy} />}
       </div>
-      {answer && <div className="card" style={{ fontSize: 13, lineHeight: 1.5 }}><strong>Answer.</strong> {answer}</div>}
-      <form className="row" style={{ gap: 8 }} onSubmit={(e) => { e.preventDefault(); if (!input.trim()) return; ask(input); setInput('') }}>
-        <input className="input" style={{ flex: 1 }} value={input} onChange={(e) => setInput(e.target.value)}
+      {answer && <Notice state="ok"><strong>Answer.</strong> {answer}</Notice>}
+      <form className="sa-row" onSubmit={(e) => { e.preventDefault(); if (!input.trim()) return; ask(input); setInput('') }}>
+        <input className="sa-input sa-grow" aria-label="Question" value={input} onChange={(e) => setInput(e.target.value)}
           placeholder={status === 'live' ? 'Ask the analyst a question…' : 'Connecting…'} disabled={busy || status !== 'live'} />
-        <button className="btn" disabled={busy || status !== 'live' || !input.trim()}>{busy ? 'Working…' : 'Ask'}</button>
+        <button className="sa-btn sa-btn--primary" disabled={busy || status !== 'live' || !input.trim()}>{busy ? 'Working…' : 'Ask'}</button>
       </form>
     </div>
   )

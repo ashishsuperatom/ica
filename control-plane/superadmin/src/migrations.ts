@@ -212,6 +212,14 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     CREATE TRIGGER IF NOT EXISTS register_no_update BEFORE UPDATE ON decision_register BEGIN SELECT RAISE(ABORT, 'the decision register is append-only'); END;
     CREATE TRIGGER IF NOT EXISTS register_no_delete BEFORE DELETE ON decision_register BEGIN SELECT RAISE(ABORT, 'the decision register is append-only'); END;
   ` },
+  { id: 28, name: 'warehouse grants', up: `
+    -- What this project may read of its organisation's warehouse (warehouse/access.ts): a table, and its columns or all
+    -- of them (columns NULL). Every change is a new row; the grant in force is each table's latest, unless revoked.
+    CREATE TABLE IF NOT EXISTS warehouse_grants (seq INTEGER PRIMARY KEY AUTOINCREMENT, tbl TEXT NOT NULL, columns TEXT, revoked INTEGER NOT NULL DEFAULT 0, by TEXT NOT NULL, at TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS idx_wh_grants ON warehouse_grants(tbl, seq);
+    CREATE TRIGGER IF NOT EXISTS wh_grants_no_update BEFORE UPDATE ON warehouse_grants BEGIN SELECT RAISE(ABORT, 'warehouse grants are append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS wh_grants_no_delete BEFORE DELETE ON warehouse_grants BEGIN SELECT RAISE(ABORT, 'warehouse grants are append-only'); END;
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */
@@ -257,6 +265,15 @@ export const ORG_MIGRATIONS: Migration[] = [
     CREATE INDEX IF NOT EXISTS idx_budgets_subject ON budgets(subject, seq);
     -- Usage attributed to a person, when it is known (the usage ledger's debits carry who).
     ALTER TABLE credit_ledger ADD COLUMN principal TEXT;
+  ` },
+  { id: 4, name: 'warehouse operations', up: `
+    -- What was done to the organisation's warehouse (warehouse/): tables made, rows appended, queries run — who, what,
+    -- how it went. The data itself is in object storage; this is the record. Append-only.
+    CREATE TABLE IF NOT EXISTS warehouse_ops (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, op TEXT NOT NULL, tbl TEXT, project TEXT,
+      rows INTEGER, snapshot TEXT, ok INTEGER NOT NULL, detail TEXT, by TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS idx_wh_ops_at ON warehouse_ops(at);
+    CREATE TRIGGER IF NOT EXISTS wh_ops_no_update BEFORE UPDATE ON warehouse_ops BEGIN SELECT RAISE(ABORT, 'warehouse operations are append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS wh_ops_no_delete BEFORE DELETE ON warehouse_ops BEGIN SELECT RAISE(ABORT, 'warehouse operations are append-only'); END;
   ` },
 ]
 
