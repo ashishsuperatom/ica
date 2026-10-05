@@ -1,7 +1,7 @@
 // COLUMNS — a graph walked left to right. Each column holds what the selection to its left composes (the caller decides
 // what that is); selecting a thing changes the columns to its right. A column may attach another thing to the one
 // selected on its left (from a searchable list of what is not attached yet), detach one, and add a new one. Beside the
-// columns, a detail panel shows what is selected. Each column scrolls on its own.
+// columns, a detail panel shows what is selected. Each column scrolls on its own; one search above them all.
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Icon } from '@iconify/react'
@@ -50,9 +50,8 @@ function Picker({ attach, onClose }: { attach: NonNullable<ColumnSpec['attach']>
 }
 
 function Column({ col }: { col: ColumnSpec }) {
-  const [q, setQ] = useState('')
   const [picking, setPicking] = useState(false)
-  const list = col.items.filter((it) => !q || `${it.title} ${it.key} ${it.line ?? ''}`.toLowerCase().includes(q.toLowerCase()))
+  const list = col.items
   return (
     <section className="sa-col" aria-label={col.title}>
       <header className="sa-col__head">
@@ -64,7 +63,6 @@ function Column({ col }: { col: ColumnSpec }) {
         {picking && col.attach && <Picker attach={{ ...col.attach, onAttach: (k) => { col.attach!.onAttach(k); setPicking(false) } }} onClose={() => setPicking(false)} />}
       </header>
       {col.caption && <div className="sa-col__caption">{col.caption}</div>}
-      <div className="sa-col__find"><Icon icon="lucide:search" /><input className="sa-col__input" placeholder="Find…" value={q} onChange={(e) => setQ(e.target.value)} aria-label={`Find in ${col.title}`} /></div>
       <div className="sa-col__body">
         {list.map((it) => (
           <div key={it.key} className="sa-col__item" data-selected={col.selected === it.key}>
@@ -76,9 +74,16 @@ function Column({ col }: { col: ColumnSpec }) {
           </div>
         ))}
         {!col.items.length && <p className="sa-col__empty">{col.empty ?? 'Nothing here.'}</p>}
-        {!!col.items.length && !list.length && <p className="sa-col__empty">Nothing matches.</p>}
       </div>
     </section>
+  )
+}
+
+/** One search over every column: the caller filters what each holds. */
+export function ColumnsSearch({ value, onChange, placeholder = 'Search everything…' }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  return (
+    <div className="sa-cols__search"><Icon icon="lucide:search" /><input id="cols-search" className="sa-col__input" placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} />
+      {value && <button className="sa-icon-btn" aria-label="Clear the search" onClick={() => onChange('')}><Icon icon="lucide:x" /></button>}</div>
   )
 }
 

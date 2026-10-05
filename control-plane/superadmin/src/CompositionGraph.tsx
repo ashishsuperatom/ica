@@ -6,7 +6,7 @@
 // Drawn only with the semantic components (@superatom/ui).
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Columns, Dialog, Form, Field, Notice, Receipt, Code, Empty, Icon, notify, type ColumnItem, type ColumnSpec } from '@superatom/ui'
+import { Columns, ColumnsSearch, Dialog, Form, Field, Notice, Receipt, Code, Empty, Icon, notify, type ColumnItem, type ColumnSpec } from '@superatom/ui'
 import { useProjectHub } from './hub'
 
 type Body = Record<string, any>
@@ -19,6 +19,9 @@ const FORMS: [string, string][] = [['text', 'Text'], ['bullets', 'Bullet list'],
 const toText = (b: Body): string => b.form === 'text' ? String(b.text ?? '')
   : b.form === 'worked' ? (b.items ?? []).map((e: any) => `## ${e.question}\n${(e.steps ?? []).map((s: string, i: number) => `${i + 1}. ${s}`).join('\n')}`).join('\n\n')
   : (b.items ?? []).join('\n')
+/** How an intermediate concept is composed: its title, its line, then each atomic concept beneath it — the sum of its parts. */
+const composedText = (title: string, line: string, parts: Node[]) =>
+  [`# ${title}${line.trim() ? `\n${line.trim()}` : ''}`, ...parts.map((p) => `## ${p.body.title ?? p.title}\n${toText(p.body).trim()}`)].join('\n\n')
 function fromText(form: string, title: string, text: string): Body {
   if (form === 'text') return { title, form, text }
   if (form === 'worked') {
@@ -43,6 +46,7 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   const [atom, setAtom] = useState<string | null>(null)
   const [focus, setFocus] = useState<Focus>(null)
   const [making, setMaking] = useState<null | { kind: 'intermediate' | 'atomic'; into: string | null }>(null)
+  const [q, setQ] = useState('')
   const load = useCallback(async () => {
     try { const r = await hub.request('compositionColumns'); if (r.error) setErr(r.error); else if (r.exists === false) setErr('This project has no composition graph yet.'); else { setErr(''); setGraph(r) } }
     catch (e: any) { setErr(e?.message ?? String(e)) }
@@ -57,12 +61,16 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   const d = graph.domains.find((x) => x.name === dom) ?? null
   const m = graph.intermediate.find((x) => x.name === mid) ?? null
   const isMid = (n: string) => by.get(n)?.composed === true
-  // What each column holds: everything of its kind, or what the selection to its left composes.
-  const mids = d ? d.concepts.filter(isMid).map((n) => by.get(n)!).filter(Boolean) : graph.intermediate
-  const showMids = !d || mids.length > 0   // a domain with no intermediate concepts goes straight to its atomic ones
+  // What each column holds: everything of its kind, or what the selection to its left composes. A search looks
+  // through everything, whatever is selected.
+  const needle = q.trim().toLowerCase()
+  const hit = (n: Node) => `${n.title} ${n.name} ${n.line} ${toText(n.body)} ${n.body.description ?? ''}`.toLowerCase().includes(needle)
+  const domainList = needle ? graph.domains.filter(hit) : graph.domains
+  const mids = needle ? graph.intermediate.filter(hit) : d ? d.concepts.filter(isMid).map((n) => by.get(n)!).filter(Boolean) : graph.intermediate
   const reach = (x: Node) => [...x.concepts.filter((n) => !isMid(n)), ...x.concepts.filter(isMid).flatMap((n) => by.get(n)?.concepts ?? [])]
-  const atomsIn = m ? m.concepts : d ? [...new Set(reach(d))] : graph.atomic.map((a) => a.name)
+  const atomsIn = needle ? graph.atomic.filter(hit).map((a) => a.name) : m ? m.concepts : d ? [...new Set(reach(d))] : graph.atomic.map((a) => a.name)
   const atoms = atomsIn.map((n) => by.get(n)).filter((x): x is Node => !!x && !x.composed)
+  const searching = !!needle
   // Where a new or attached atomic concept goes: the selected intermediate — or a domain that composes atomic ones directly.
   const atomTarget = m ?? (d && !mids.length ? d : null)
   const item = (n: Node, tag?: string): ColumnItem => ({ key: n.name, title: n.title || n.name, line: n.line || (n.concepts.length ? `${n.concepts.length} concept${n.concepts.length === 1 ? '' : 's'}` : undefined), tag })
@@ -86,22 +94,22 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   }
 
   const columns: ColumnSpec[] = [
-    { key: 'domains', title: 'Domains', icon: 'lucide:bot', items: graph.domains.map((n) => item(n)), selected: dom, onSelect: (k) => select('domain', k), empty: 'No domains yet.' },
-    ...(showMids ? [{
-      key: 'intermediate', title: 'Intermediate concepts', icon: 'lucide:layers', caption: d ? `In ${d.title}` : 'Every intermediate concept',
+    { key: 'domains', title: 'Domains', icon: 'lucide:bot', items: domainList.map((n) => item(n)), selected: dom, onSelect: (k) => select('domain', k), empty: searching ? 'No domain matches.' : 'No domains yet.' },
+    {
+      key: 'intermediate', title: 'Intermediate concepts', icon: 'lucide:layers', caption: searching ? 'Matching the search' : d ? `In ${d.title}` : 'Every intermediate concept',
       items: mids.map((n) => item(n)), selected: mid, onSelect: (k: string) => select('intermediate', k),
-      ...(d ? { onDetach: (k: string) => void change('graph:leave', d.name, k), detachLabel: `Detach from ${d.title}`,
+      ...(d && !searching ? { onDetach: (k: string) => void change('graph:leave', d.name, k), detachLabel: `Detach from ${d.title}`,
         attach: { label: `Attach to ${d.title}…`, candidates: graph.intermediate.filter((x) => !d.concepts.includes(x.name)).map((n) => item(n)), onAttach: (k: string) => void change('graph:join', d.name, k) } } : {}),
       onNew: () => setMaking({ kind: 'intermediate', into: d?.name ?? null }),
-      empty: d ? `${d.title} has no intermediate concepts yet — attach one, or make one.` : 'No intermediate concepts yet — make one to combine atomic concepts.',
-    } as ColumnSpec] : []),
+      empty: searching ? 'No intermediate concept matches.' : d ? `${d.title} has no intermediate concepts yet — attach one, or make one from atomic concepts.` : 'No intermediate concepts yet — make one from atomic concepts.',
+    },
     {
-      key: 'atomic', title: 'Atomic concepts', icon: 'lucide:atom', caption: m ? `In ${m.title}` : d ? `Everything ${d.title} composes` : 'Every atomic concept',
+      key: 'atomic', title: 'Atomic concepts', icon: 'lucide:atom', caption: searching ? 'Matching the search' : m ? `In ${m.title}` : d ? `Everything ${d.title} composes` : 'Every atomic concept',
       items: atoms.map((n) => item(n)), selected: atom, onSelect: (k) => select('atomic', k),
-      ...(atomTarget ? { onDetach: (k: string) => void change('graph:leave', atomTarget.name, k), detachLabel: `Detach from ${atomTarget.title}`,
+      ...(atomTarget && !searching ? { onDetach: (k: string) => void change('graph:leave', atomTarget.name, k), detachLabel: `Detach from ${atomTarget.title}`,
         attach: { label: `Attach to ${atomTarget.title}…`, candidates: graph.atomic.filter((x) => !atomTarget.concepts.includes(x.name)).map((n) => item(n)), onAttach: (k: string) => void change('graph:join', atomTarget.name, k) } } : {}),
       onNew: () => setMaking({ kind: 'atomic', into: atomTarget?.name ?? null }),
-      empty: m ? `${m.title} has no atomic concepts yet — attach some.` : 'No atomic concepts here.',
+      empty: searching ? 'No atomic concept matches.' : m ? `${m.title} has no atomic concepts yet — attach some.` : 'No atomic concepts here.',
     },
   ]
 
@@ -109,11 +117,14 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   const partOf = (name: string) => [...graph.intermediate, ...graph.domains].filter((x) => x.concepts.includes(name))
   return (
     <div className="sa-graphpage">
+      <ColumnsSearch value={q} onChange={setQ} placeholder="Search domains and concepts — titles and what they say" />
       <Columns columns={columns} detail={focused
         ? <Detail key={focused.name + focused.hash} hub={hub} node={focused} kind={focus!.kind} by={by} partOf={partOf(focused.name)} goTo={goTo} change={change} reload={load} intermediates={graph.intermediate} />
         : <div className="sa-graphpage__hint"><Icon icon="lucide:mouse-pointer-click" /><p>Select a domain or a concept to see all of it here, change it, and walk what it composes.</p>
             <Receipt items={[['Domains', String(graph.domains.length)], ['Intermediate concepts', String(graph.intermediate.length)], ['Atomic concepts', String(graph.atomic.length)]]} /></div>} />
-      {making && <NewConcept hub={hub} kind={making.kind} into={making.into ? by.get(making.into)?.title ?? making.into : null}
+      {making?.kind === 'atomic' && <NewConcept hub={hub} kind="atomic" into={making.into ? by.get(making.into)?.title ?? making.into : null}
+        onClose={() => setMaking(null)} onMade={async (name) => { if (making.into) await change('graph:join', making.into, name); else await load(); setMaking(null); goTo(name) }} />}
+      {making?.kind === 'intermediate' && <NewIntermediate hub={hub} atomic={graph.atomic} preset={atom ? [atom] : []} into={making.into ? by.get(making.into)?.title ?? making.into : null}
         onClose={() => setMaking(null)} onMade={async (name) => { if (making.into) await change('graph:join', making.into, name); else await load(); setMaking(null); goTo(name) }} />}
     </div>
   )
@@ -167,7 +178,8 @@ function Detail({ hub, node, kind, by, partOf, goTo, change, reload, intermediat
       {meta}
     </div>
   )
-  if (kind === 'intermediate') return <IntermediateDetail hub={hub} node={node} reload={reload} meta={meta} order={order(node, 'Its atomic concepts')} links={links('Part of', partOf, 'No domain composes it yet.')} />
+  if (kind === 'intermediate') return <IntermediateDetail hub={hub} node={node} reload={reload} meta={meta} order={order(node, 'Its atomic concepts')} links={links('Part of', partOf, 'No domain composes it yet.')}
+    composed={composedText(String(b.title ?? node.title), String(b.text ?? ''), node.concepts.map((c) => by.get(c)).filter((x): x is Node => !!x))} />
   return <AtomicDetail hub={hub} node={node} reload={reload} meta={meta} links={links('Part of', partOf, 'Nothing composes it yet — attach it to an intermediate concept.')} />
 }
 
@@ -233,7 +245,7 @@ function AtomicDetail({ hub, node, reload, meta, links }: { hub: ReturnType<type
   )
 }
 
-function IntermediateDetail({ hub, node, reload, meta, order, links }: { hub: ReturnType<typeof useProjectHub>; node: Node; reload: () => Promise<void>; meta: ReactNode; order: ReactNode; links: ReactNode }) {
+function IntermediateDetail({ hub, node, reload, meta, order, links, composed }: { hub: ReturnType<typeof useProjectHub>; node: Node; reload: () => Promise<void>; meta: ReactNode; order: ReactNode; links: ReactNode; composed: string }) {
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(String(node.body.title ?? '')), [line, setLine] = useState(String(node.body.text ?? '')), [reason, setReason] = useState('')
   const s = useSave(hub, node.name, reload)
@@ -252,9 +264,56 @@ function IntermediateDetail({ hub, node, reload, meta, order, links }: { hub: Re
         </Form>
       )}
       {order}
+      <div className="sa-graphpage__block"><h3 className="sa-label">What it composes to</h3><pre className="sa-graphpage__prompt">{composed}</pre></div>
       {links}
       {meta}
     </div>
+  )
+}
+
+/** An intermediate concept is made from atomic ones: pick them (two or more), put them in order with the arrows, and
+ *  see what they compose to as you go. */
+function NewIntermediate({ hub, atomic, preset, into, onClose, onMade }: { hub: ReturnType<typeof useProjectHub>; atomic: Node[]; preset: string[]; into: string | null; onClose: () => void; onMade: (name: string) => void }) {
+  const [title, setTitle] = useState(''), [line, setLine] = useState(''), [chosen, setChosen] = useState<string[]>(preset), [find, setFind] = useState(''), [err, setErr] = useState('')
+  const name = title.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+  const byName = new Map(atomic.map((a) => [a.name, a]))
+  const toggle = (n: string) => setChosen((c) => (c.includes(n) ? c.filter((x) => x !== n) : [...c, n]))
+  const move = (i: number, by: number) => setChosen((c) => { const x = [...c]; const [it] = x.splice(i, 1); x.splice(i + by, 0, it); return x })
+  const list = atomic.filter((a) => !find || `${a.title} ${a.name} ${a.line}`.toLowerCase().includes(find.toLowerCase()))
+  const make = async () => {
+    const r = await hub.call({ t: 'graph:concept', name, body: { title: title.trim(), form: 'composed', ...(line.trim() ? { text: line.trim() } : {}), concepts: chosen }, reason: 'made in the console' }).catch((e) => ({ reason: String(e?.message ?? e) }))
+    if (r?.t !== 'graph:reply') { setErr(r?.reason ?? 'It was not made'); return }
+    notify(`Made ${title.trim()}`, 'note'); onMade(name)
+  }
+  return (
+    <Dialog title="New intermediate concept" onClose={onClose}>
+      <div className="sa-newmid">
+        <Form onSubmit={() => void make()} error={err} actions={<><button type="button" className="sa-btn" onClick={onClose}>Cancel</button><button className="sa-btn sa-btn--primary" disabled={!name || chosen.length < 2}>{into ? `Make and attach to ${into}` : 'Make'}</button></>}>
+          <Field label="Title" help={name ? <>Named <Code>{name}</Code></> : undefined}><input id="nm-title" className="sa-input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Project health" /></Field>
+          <Field label="A line of its own (optional)"><input id="nm-line" className="sa-input" value={line} onChange={(e) => setLine(e.target.value)} placeholder="How a project is judged" /></Field>
+          <div className="sa-newmid__pick">
+            <div className="sa-newmid__side">
+              <h3 className="sa-label">Atomic concepts <span className="sa-col__count">{chosen.length} chosen — at least two</span></h3>
+              <div className="sa-cols__search"><Icon icon="lucide:search" /><input id="nm-find" className="sa-col__input" placeholder="Find…" value={find} onChange={(e) => setFind(e.target.value)} /></div>
+              <div className="sa-newmid__list">
+                {list.map((a) => <label key={a.name} className="sa-newmid__opt"><input type="checkbox" checked={chosen.includes(a.name)} onChange={() => toggle(a.name)} /><span><span className="sa-col__title">{a.title}</span><span className="sa-col__line">{a.line}</span></span></label>)}
+              </div>
+            </div>
+            <div className="sa-newmid__side">
+              <h3 className="sa-label">In this order</h3>
+              {chosen.length ? <ol className="sa-graphpage__order">{chosen.map((c, i) => (
+                <li key={c}><span>{byName.get(c)?.title ?? c}</span><span className="sa-graphpage__acts" style={{ opacity: 1 }}>
+                  <button type="button" className="sa-icon-btn" disabled={i === 0} aria-label="Move up" onClick={() => move(i, -1)}><Icon icon="lucide:arrow-up" /></button>
+                  <button type="button" className="sa-icon-btn" disabled={i === chosen.length - 1} aria-label="Move down" onClick={() => move(i, 1)}><Icon icon="lucide:arrow-down" /></button>
+                  <button type="button" className="sa-icon-btn" aria-label="Take out" onClick={() => toggle(c)}><Icon icon="lucide:x" /></button></span></li>))}</ol>
+                : <p className="sa-note">Tick atomic concepts on the left.</p>}
+              <h3 className="sa-label">What it composes to</h3>
+              <pre className="sa-graphpage__prompt">{composedText(title.trim() || 'Untitled', line, chosen.map((c) => byName.get(c)).filter((x): x is Node => !!x))}</pre>
+            </div>
+          </div>
+        </Form>
+      </div>
+    </Dialog>
   )
 }
 
@@ -270,7 +329,7 @@ function SystemPrompt({ hub, domain }: { hub: ReturnType<typeof useProjectHub>; 
   )
 }
 
-/** Make a concept — atomic (its content) or intermediate (a line of its own) — attached to what is selected, if anything. */
+/** Make an atomic concept (its content), attached to what is selected, if anything. */
 function NewConcept({ hub, kind, into, onClose, onMade }: { hub: ReturnType<typeof useProjectHub>; kind: 'intermediate' | 'atomic'; into: string | null; onClose: () => void; onMade: (name: string) => void }) {
   const [title, setTitle] = useState(''), [form, setForm] = useState('text'), [text, setText] = useState(''), [err, setErr] = useState('')
   const name = title.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')

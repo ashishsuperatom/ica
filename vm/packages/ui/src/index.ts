@@ -46,7 +46,7 @@ export { default as NextMoves, MovePill } from './components/question/NextMoves.
 export { default as AboutNumbers, type AboutFacts } from './components/question/AboutNumbers.tsx'
 
 // the semantic components: what a screen composes
-export { Columns, type ColumnSpec, type ColumnItem } from './components/semantic/Columns.tsx'
+export { Columns, ColumnsSearch, type ColumnSpec, type ColumnItem } from './components/semantic/Columns.tsx'
 export { Form, Field, Choices, Receipt, RecordList, Status, AttentionList, ActionBar, Empty, PageHeader, Tabs, Notice, Code, Figures, Toolbar, Dialog, type Column, type Attention, type State as StatusState } from './components/semantic/index.tsx'
 
 // primitives
