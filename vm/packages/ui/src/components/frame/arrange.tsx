@@ -72,8 +72,11 @@ interface State {
   /** The blocks on screen now (each card list adds itself), and putting all of them back as they were. */
   scopes: Set<string>
   resetScreen: () => void
+  /** How many cards each block on screen holds: Arrange is offered only where there are cards to arrange. */
+  report: (scope: string, cards: number) => void
+  arrangeable: boolean
 }
-const Ctx = createContext<State>({ on: false, start: () => {}, finish: () => {}, selected: null, select: () => {}, drafts: new Map(), round: 0, selectedHidden: false, showSelected: () => {}, scopes: new Set(), resetScreen: () => {} })
+const Ctx = createContext<State>({ on: false, start: () => {}, finish: () => {}, selected: null, select: () => {}, drafts: new Map(), round: 0, selectedHidden: false, showSelected: () => {}, scopes: new Set(), resetScreen: () => {}, report: () => {}, arrangeable: false })
 export const useArranging = () => useContext(Ctx)
 
 export function ArrangeProvider({ children }: { children: ReactNode }) {
@@ -128,7 +131,13 @@ export function ArrangeProvider({ children }: { children: ReactNode }) {
     }
     setTick((t) => t + 1)
   }, [scopes, drafts])
-  const value = { on, start, finish, selected, select, drafts, round, selectedHidden, showSelected, scopes, resetScreen }
+  const counts = useRef(new Map<string, number>()).current
+  const [arrangeable, setArrangeable] = useState(false)
+  const report = useCallback((scope: string, cards: number) => {
+    if (cards > 0) counts.set(scope, cards); else counts.delete(scope)
+    setArrangeable([...counts.values()].some((n) => n >= 2))
+  }, [counts])
+  const value = { on, start, finish, selected, select, drafts, round, selectedHidden, showSelected, scopes, resetScreen, report, arrangeable }
   return (
     <Ctx.Provider value={value}>
       <div className={on ? 'sa-arrange-root sa-arranging' : 'sa-arrange-root'}>{children}</div>
@@ -187,7 +196,8 @@ export function arranged(ids: string[], order: string[]): string[] {
   return present
 }
 
-function place(col: HTMLElement, layout: Layout) {
+/** Lays the cards out; says how many can be moved. */
+function place(col: HTMLElement, layout: Layout): number {
   const cards = cardsOf(col)
   const movable = cards.filter((c) => c.id !== null).map((c) => c.id!)
   const seq = arranged(movable, layout.order)
@@ -200,6 +210,7 @@ function place(col: HTMLElement, layout: Layout) {
   })
   // Hidden: not shown, except while arranging (design/motion.css), where it is faded and can be brought back.
   for (const c of cards) c.el.toggleAttribute('data-arrange-hidden', c.id !== null && layout.hidden.includes(c.id))
+  return movable.length
 }
 
 /**
@@ -221,7 +232,7 @@ function slide(col: HTMLElement, change: () => void, follow?: HTMLElement) {
 
 /** Arranges the cards inside `root` for the block at `scope` (its own address). */
 export function useArrange(root: RefObject<HTMLElement | null>, scope: string) {
-  const { on, selected, select, drafts, round, scopes } = useArranging()
+  const { on, selected, select, drafts, round, scopes, report } = useArranging()
   const current = () => drafts.get(scope) ?? kept(scope)
   useEffect(() => {
     scopes.add(scope)
@@ -235,7 +246,7 @@ export function useArrange(root: RefObject<HTMLElement | null>, scope: string) {
     const r = root.current
     if (!r) return
     let frame = 0
-    const apply = () => place(columnOf(r), current())
+    const apply = () => { report(scope, place(columnOf(r), current())) }
     // After a cancel, the cards slide back to the kept order; otherwise they are simply placed.
     if (round > 0) slide(columnOf(r), apply)
     else apply()
@@ -250,6 +261,7 @@ export function useArrange(root: RefObject<HTMLElement | null>, scope: string) {
     return () => {
       watch.disconnect()
       cancelAnimationFrame(frame)
+      report(scope, 0)
       window.removeEventListener('sa-arrange-redraw', redraw)
     }
   }, [root, scope, round])
@@ -313,7 +325,9 @@ export function useArrange(root: RefObject<HTMLElement | null>, scope: string) {
 
 /** The switch, at the bottom, quiet: rarely used. While on, it says what to do, with Cancel beside Done. */
 export function ArrangeButton() {
-  const { on, start, finish, selectedHidden, showSelected, resetScreen } = useArranging()
+  const { on, start, finish, selectedHidden, showSelected, resetScreen, arrangeable } = useArranging()
+  // Offered only where there is something to arrange: a block (or page) with two cards or more.
+  if (!on && !arrangeable) return null
   return (
     <div className="sa-arrange-bar" data-copy="skip">
       {on ? (

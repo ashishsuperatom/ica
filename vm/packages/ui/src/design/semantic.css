@@ -33,7 +33,6 @@
 /* A row is one line high whatever it holds, so loading rows and records are the same size. */
 .sa-records__table tbody tr { height: 44px; }
 .sa-chartframe { position: relative; min-width: 0; }
-.sa-chartframe > * { height: 100%; }
 .sa-records__table { width: 100%; border-collapse: collapse; font-size: var(--t-base); }
 .sa-records__table th { text-align: start; font-size: var(--t-2xs); font-weight: var(--w-semibold); text-transform: uppercase; letter-spacing: 0.04em; color: var(--faint); background: var(--panel); padding: var(--sp-2) var(--sp-4); white-space: nowrap; }
 .sa-records__table td { padding: var(--sp-2) var(--sp-4); border-top: 1px solid var(--line); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 28rem; }
@@ -131,7 +130,14 @@
 .sa-section__body .sa-actionbar, .sa-form .sa-actionbar { padding: 0; }
 
 /* ── Columns: a graph walked left to right, each column scrolling on its own, the detail beside them ─────────── */
-.sa-cols { display: grid; gap: var(--sp-3); flex: 1; min-height: 24rem; }
+.sa-cols { display: grid; gap: var(--sp-3); flex: 1; min-height: 24rem; overflow-x: auto; overflow-y: hidden; padding-bottom: var(--sp-1); }
+.sa-cols__cell { position: relative; display: flex; min-height: 0; min-width: 0; }
+.sa-cols__cell > .sa-col { flex: 1; }
+/* Between two columns: drag to resize (the cursor says so); double-click puts the usual width back. */
+.sa-cols__resize { position: absolute; top: 0; bottom: 0; right: calc(-1 * var(--sp-3) / 2 - 4px); width: 8px; cursor: col-resize; z-index: 2; touch-action: none; }
+.sa-cols__resize::after { content: ''; position: absolute; top: 12px; bottom: 12px; left: 3px; width: 2px; border-radius: 2px; background: transparent; transition: background var(--dur-1) var(--ease); }
+.sa-cols__resize:hover::after, .sa-resizing .sa-cols__resize::after { background: var(--primary); }
+.sa-resizing, .sa-resizing * { cursor: col-resize !important; user-select: none; }
 .sa-col { position: relative; display: flex; flex-direction: column; min-height: 0; min-width: 0; border-width: 1px; border-radius: var(--r-lg); background: var(--surface); }
 .sa-col__head { position: relative; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); min-height: 44px; padding: 0 var(--sp-2) 0 var(--sp-3); border-bottom-width: 1px; }
 .sa-col__name { display: inline-flex; align-items: center; gap: var(--sp-1h); font-weight: var(--w-semibold); font-size: var(--t-sm); color: var(--ink); white-space: nowrap; }
@@ -149,17 +155,16 @@
 .sa-col__item[data-selected='true'] .sa-col__title { color: var(--primary-strong); font-weight: var(--w-medium); }
 .sa-col__tag { flex-shrink: 0; font-size: var(--t-2xs); color: var(--muted); background: var(--panel); border-radius: var(--r-full); padding: 0 var(--sp-1h); }
 .sa-col__line { font-size: var(--t-xs); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sa-col__detach { opacity: 0; margin-right: var(--sp-1); }
-.sa-col__item:hover .sa-col__detach, .sa-col__detach:focus-visible { opacity: 1; }
+.sa-col__act { opacity: 0; margin-right: var(--sp-1); flex-shrink: 0; }
+.sa-col__item:hover .sa-col__act, .sa-col__act:focus-visible { opacity: 1; }
+.sa-col__attach:hover { color: var(--primary); }
+.sa-col__item[data-linked='true'] { background: color-mix(in srgb, var(--primary) 6%, transparent); }
+.sa-col__group { position: sticky; top: calc(-1 * var(--sp-1)); z-index: 1; background: var(--surface); padding: var(--sp-2) var(--sp-1h) var(--sp-1); font-size: var(--t-2xs); font-weight: var(--w-semibold); text-transform: uppercase; letter-spacing: 0.04em; color: var(--faint); }
+.sa-col__group--rest { margin-top: var(--sp-2); border-top: 1px solid var(--line); }
 .sa-col__detach:hover { color: var(--loss, var(--critical)); }
 .sa-col__empty { margin: var(--sp-2); font-size: var(--t-xs); color: var(--faint); }
-.sa-col__picker { position: absolute; top: calc(100% + 4px); left: var(--sp-2); right: var(--sp-2); z-index: var(--z-popover); max-height: 60vh; display: flex; flex-direction: column; border-width: 1px; border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow-float); animation: sa-arrive var(--dur-arrive) var(--ease-out-arrive) both; }
-.sa-col__picklist { overflow-y: auto; padding: var(--sp-1); }
-.sa-col__pick { display: flex; align-items: flex-start; gap: var(--sp-1h); width: 100%; padding: var(--sp-1h) var(--sp-2); border-radius: var(--r-sm); text-align: left; color: var(--muted); }
-.sa-col__pick:hover { background: var(--primary-wash); color: var(--primary); }
-.sa-col__picktext { display: flex; flex-direction: column; min-width: 0; }
 .sa-col--detail { overflow-y: auto; }
-@media (max-width: 1000px) { .sa-cols { grid-template-columns: 1fr !important; } .sa-col { max-height: 70vh; } }
+@media (max-width: 760px) { .sa-cols { grid-template-columns: 1fr !important; overflow-x: visible; } .sa-col { max-height: 70vh; } .sa-cols__resize { display: none; } }
 
 /* ── The graph page (a page step): the columns fill it; the detail reads like a document ──────────────────────── */
 .sa-app__page:has(> .sa-fullpage) { display: flex; flex-direction: column; }

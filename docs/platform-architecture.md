@@ -1074,6 +1074,21 @@ fails says so in its place. Earlier addresses (`/org/…`, `/pro/…`, `/w/…`)
 billing email, address, tax number) are kept by the organisation, every change recorded; card payments wait for the
 payment provider, which will hold the card.
 
+### The admin console's cache (built 2026-10-06)
+
+**In the user's words:** an LRU cache in the browser for the data the admin console shows. Every time we click something,
+first load from the browser so we can move between places quickly — everything instantaneous because it is already
+loaded — and always make the query to the back end; when its data comes, replace it. So there is never a stale cache. A
+maximum size; when local storage runs out of memory, clear the cache. It is not the place for the token and small
+settings — those are different; this is only the data shown in the admin platform.
+
+**Built:** `control-plane/superadmin/src/cache.ts`, used by the console's `useApi` (and the graph page): a read is shown at
+once from the cache when it was read before and asked of the server every time; a fresh answer that differs replaces it
+and every reader reads again. Keys are who · organisation · path; least recently used goes first (at most 300 reads,
+4 MB, 500 KB each); full storage clears it; a change made (anything but a read) forgets that person's reads in that
+organisation; reads that change by the second (status, logs, attention) are never cached; a read that changes on every
+ask stops causing re-reads.
+
 ### The composition graph in columns (built 2026-10-06)
 
 **In the user's words (2026-10-05):** some things do not make sense in the block view; the composition graph needs white
@@ -1090,7 +1105,7 @@ they show in the middle column marked *atomic*, and can be detached); an interme
 concept that is part of one stays atomic. Composing renders an intermediate as its heading, its line, then its atomic
 concepts beneath it. Attaching and detaching are one governed change (`graph:join` / `graph:leave` with `into`: a domain
 or an intermediate concept); the CLI the same (`composition-graph join <domain|intermediate> <concept>`). The console's
-Graph tab is the three columns (`Columns` in the framework, reusable for other linked things), each searchable, with
+graph page is the three columns (`Columns` in the framework, reusable for other linked things), each searchable, with
 *New* in the intermediate and atomic columns (made and attached to what is selected on the left).
 
 ### Arrange — every block's cards, in the framework (built 2026-10-06)

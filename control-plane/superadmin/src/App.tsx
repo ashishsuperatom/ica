@@ -1,4 +1,5 @@
-import { Component, useState, useEffect, useCallback, useMemo, useRef, createContext, useContext } from 'react'
+import { Component, useState, useEffect, useCallback, useMemo, useRef, createContext, useContext, useSyncExternalStore } from 'react'
+import { cached as cacheRead, keep as cacheKeep, forget as cacheForget, changed as cacheChanged, revision as cacheRevision, subscribe as cacheSubscribe } from './cache'
 import { loadToken, mintToken, dropToken, claimReauthOnce, tokenValid } from '../../shared/session-token'
 import { Credentials } from './Credentials'
 import { AgentsScreen } from './Models'
@@ -178,20 +179,44 @@ function useAuth() {
   }, [session, token])
   return token
 }
+/** Reads that change by the second (a machine's state, its event log) are always asked fresh, never shown from the cache. */
+const LIVE = /\/(status|logs|attention)(\?|$)/
 function useApi(token: string | null, orgId?: string | null) {
+  // The console's cache (cache.ts): a read is shown from this browser at once, asked of the server every time, and
+  // replaced when the server says something else — every reader then reads again, getting the fresh copy at once.
+  const rev = useSyncExternalStore(cacheSubscribe, cacheRevision)
   return useCallback(async (path: string, init?: RequestInit) => {
-    const res = await fetch(`/api${path}`, {
-      headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}), ...(orgId ? { 'x-org-id': orgId } : {}) },
-      ...init,
-    })
-    // Self-heal: a 401 means the token was rejected (expired mid-session). Drop it and re-exchange on
-    // reload. The sessionStorage guard prevents a reload loop if re-exchange also fails (dead Clerk session).
-    if (res.status === 401 && claimReauthOnce()) {
-      dropToken()
-      location.reload()
+    const who = (() => { try { const c = JSON.parse(atob(String(token).split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); return String(c.email ?? c.userId ?? '') } catch { return '' } })()
+    const scope = `${who}|${orgId ?? ''}|`
+    const read = !init?.method || init.method === 'GET'
+    const ask = async () => {
+      const res = await fetch(`/api${path}`, {
+        headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}), ...(orgId ? { 'x-org-id': orgId } : {}) },
+        ...init,
+      })
+      // Self-heal: a 401 means the token was rejected (expired mid-session). Drop it and re-exchange on
+      // reload. The sessionStorage guard prevents a reload loop if re-exchange also fails (dead Clerk session).
+      if (res.status === 401 && claimReauthOnce()) {
+        dropToken()
+        location.reload()
+      }
+      return res
     }
-    return res
-  }, [token, orgId])
+    if (!read) { const res = await ask(); if (res.ok) cacheForget(scope); return res }
+    if (!token || LIVE.test(path)) return ask()
+    const key = scope + path
+    const before = cacheRead(key)
+    const fresh = ask().then(async (res) => {
+      if (res.ok && (res.headers.get('content-type') ?? '').includes('json')) {
+        const text = await res.clone().text()
+        if (text !== before) { cacheKeep(key, text); if (before !== null) cacheChanged(key) }
+      }
+      return res
+    })
+    if (before === null) return fresh
+    void fresh.catch(() => {})
+    return new Response(before, { status: 200, headers: { 'content-type': 'application/json' } })
+  }, [token, orgId, rev])   // eslint-disable-line react-hooks/exhaustive-deps
 }
 
 /** Pages are drawn inside the console's layout (its sidebar and breadcrumbs are the way around), so a page draws its
@@ -609,7 +634,7 @@ function OrgListPage() {
       </Figures>
       <div className="sa-two-col">
         <SectionCard icon="lucide:chart-column" title="Model use" subtitle="Tokens a day, last 30 days, by organisation">
-          <div className="sa-section__chart"><ChartFrame loading={usage === null}>
+          <div className="sa-section__chart"><ChartFrame loading={usage === null} height={284}>
             <TimeColumns periods={days} values={byDay} format={compact} empty="No model use in the last 30 days" series={live.map((o) => ({ key: o.id, label: o.name }))} />
           </ChartFrame></div>
         </SectionCard>

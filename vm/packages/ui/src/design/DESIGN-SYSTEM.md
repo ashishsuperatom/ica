@@ -106,7 +106,7 @@ src/lib/draft.ts    commit-on-close, once, for every control that stays open (Dr
 
 **Nothing jumps (the user, 2026-10-06):** a screen does not load, change, then change again. From the first paint every
 part holds the place and size it will have: figures render every tile (`Kpi loading`, one height loaded or not); charts
-sit in a `ChartFrame` of their height, a shimmer until their numbers arrive; a list is `RecordList` with `rows={null}`
+sit in a `ChartFrame` whose shimmer is as tall as the chart will be (legend and axis included) — loaded, the chart takes the height it needs, never clipped; a list is `RecordList` with `rows={null}`
 (not yet read) — rows of the records' size, never "nothing here" that then fills — and with `pageSize` a page never
 grows, with `search` anything is found whatever page it is on. Lists of things that grow (organisations, projects,
 people) are lists with search and pages, never every one of them drawn as a card. Something that can only grow does so

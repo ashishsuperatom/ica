@@ -106,7 +106,7 @@ export function Inspector({ hub, section }: { hub: Hub; section: Section }) {
   const Body = ({
     summary: SummaryView,
     grounding: GroundingView, index: IndexView, files: FilesView, db: DbView, logs: LogsView,
-    changes: (p: ViewProps) => <CompositionPart {...p} part="changes" />, questions: (p: ViewProps) => <CompositionPart {...p} part="questions" />, sessions: (p: ViewProps) => <CompositionPart {...p} part="sessions" />,
+    changes: ChangesView, questions: QuestionsView, sessions: SessionsView,
   } as Record<string, (p: ViewProps) => ReactElement>)[section] ?? SummaryView
 
   return (
@@ -211,6 +211,12 @@ const short = (h?: string | null, n = 8) => (h ? String(h).slice(0, n) : '—')
 const isoOf = (local: string) => (local ? new Date(local).toISOString() : undefined)
 const HashMove = ({ from, to }: { from?: string | null; to?: string | null }) =>
   <span className="sa-row sa-row--tight"><Code>{short(from, 7)}</Code><Icon icon="lucide:arrow-right" /><Code>{to ? short(to, 7) : 'removed'}</Code></span>
+
+// Defined once, outside any render: a component made inside a render is a new kind each time the page refreshes (every
+// few seconds), so React would remount it and ask the engine again.
+const ChangesView = (p: ViewProps) => <CompositionPart {...p} part="changes" />
+const QuestionsView = (p: ViewProps) => <CompositionPart {...p} part="questions" />
+const SessionsView = (p: ViewProps) => <CompositionPart {...p} part="sessions" />
 
 /** The graph's history, its questions and its sessions — each a place of its own (the graph itself is its own page). */
 function CompositionPart({ hub, part }: ViewProps & { part: 'changes' | 'questions' | 'sessions' }) {

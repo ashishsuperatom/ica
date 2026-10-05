@@ -115,9 +115,10 @@ export function RecordList<R extends Record<string, any>>({ columns, rows: given
   )
 }
 
-/** A chart's place: always its height, a shimmer of that height while its numbers are on their way. */
+/** A chart's place while its numbers are on their way: a shimmer as tall as the chart will be (`height`: the chart's
+ *  own, its legend and axis included). Loaded, the chart takes the height it needs — the frame never clips it. */
 export function ChartFrame({ loading = false, height = 240, children }: { loading?: boolean; height?: number; children: ReactNode }) {
-  return <div className="sa-chartframe" style={{ height }}>{loading ? <span className="sa-skeleton" style={{ width: '100%', height: '100%' }} aria-label="Loading" /> : children}</div>
+  return <div className="sa-chartframe" style={{ minHeight: height }}>{loading ? <span className="sa-skeleton" style={{ width: '100%', height }} aria-label="Loading" /> : children}</div>
 }
 
 export function Status({ state, children }: { state: State; children: ReactNode }) {

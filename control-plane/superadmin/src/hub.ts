@@ -9,7 +9,7 @@
 //   • request(view)  — a correlated round-trip to the engine's INSPECTOR, returning a promise
 // Everything shares the one socket; `reqId` is what keeps concurrent inspector panels apart.
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { sender, receiver } from '../../../clients/transport'
 import { parcelStore, apiOfHub } from '../../../clients/parcels'
 
@@ -111,5 +111,7 @@ export function useProjectHub(projectId: string | undefined, token: string | nul
     return () => { subscribers.current.delete(fn) }
   }, [])
 
-  return { status, err, waking, send, subscribe, request, call }
+  // The same object until the connection's state changes: screens depend on it, and a new one each render made them
+  // re-subscribe, re-attach and re-ask the engine on every render.
+  return useMemo(() => ({ status, err, waking, send, subscribe, request, call }), [status, err, waking, send, subscribe, request, call])
 }

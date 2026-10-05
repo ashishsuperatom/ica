@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Columns, ColumnsSearch, Dialog, Form, Field, Notice, Receipt, Code, Empty, Icon, notify, type ColumnItem, type ColumnSpec } from '@superatom/ui'
 import { useProjectHub } from './hub'
+import { cached, keep } from './cache'
 
 type Body = Record<string, any>
 interface Node { name: string; title: string; line: string; scope: string; owner: string | null; hash: string; concepts: string[]; body: Body; composed?: boolean; form?: string; agents?: { name: string; title: string }[] }
@@ -39,7 +40,10 @@ function fromText(form: string, title: string, text: string): Body {
 
 export function CompositionGraph({ projectId, token }: { projectId: string; token: string | null }) {
   const hub = useProjectHub(projectId, token)
-  const [graph, setGraph] = useState<Graph | null>(null)
+  // Shown at once from this browser's copy (cache.ts) when it was read before; the engine's answer replaces it.
+  const who = (() => { try { return String(JSON.parse(atob(String(token).split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).email ?? '') } catch { return '' } })()
+  const cacheKey = `${who}|graph|${projectId}`
+  const [graph, setGraph] = useState<Graph | null>(() => { try { const c = cached(cacheKey); return c ? JSON.parse(c) as Graph : null } catch { return null } })
   const [err, setErr] = useState('')
   const [dom, setDom] = useState<string | null>(null)
   const [mid, setMid] = useState<string | null>(null)
@@ -48,9 +52,9 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   const [making, setMaking] = useState<null | { kind: 'intermediate' | 'atomic'; into: string | null }>(null)
   const [q, setQ] = useState('')
   const load = useCallback(async () => {
-    try { const r = await hub.request('compositionColumns'); if (r.error) setErr(r.error); else if (r.exists === false) setErr('This project has no composition graph yet.'); else { setErr(''); setGraph(r) } }
+    try { const r = await hub.request('compositionColumns'); if (r.error) setErr(r.error); else if (r.exists === false) setErr('This project has no composition graph yet.'); else { setErr(''); setGraph(r); keep(cacheKey, JSON.stringify(r)) } }
     catch (e: any) { setErr(e?.message ?? String(e)) }
-  }, [hub])
+  }, [hub.request, cacheKey])   // eslint-disable-line react-hooks/exhaustive-deps -- hub is a new object each render; its request is stable
   useEffect(() => { if (hub.status === 'live') void load() }, [hub.status, load])
 
   const by = useMemo(() => new Map([...(graph?.domains ?? []), ...(graph?.intermediate ?? []), ...(graph?.atomic ?? [])].map((n) => [n.name, n])), [graph])
@@ -59,7 +63,7 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   if (!graph) return (
     <div className="sa-graphpage">
       <ColumnsSearch value="" onChange={() => {}} placeholder="Search domains and concepts — titles and what they say" />
-      <Columns columns={[['domains', 'Domains', 'lucide:bot'], ['intermediate', 'Intermediate concepts', 'lucide:layers'], ['atomic', 'Atomic concepts', 'lucide:atom']].map(([key, title, icon]) => ({ key, title, icon, items: [], onSelect: () => {}, loading: true }))}
+      <Columns keep="composition-graph" columns={[['domains', 'Domains', 'lucide:bot'], ['intermediate', 'Intermediate concepts', 'lucide:layers'], ['atomic', 'Atomic concepts', 'lucide:atom']].map(([key, title, icon]) => ({ key, title, icon, items: [], onSelect: () => {}, loading: true }))}
         detail={<div className="sa-graphpage__hint"><Icon icon="lucide:loader" /><p>{hub.status === 'live' ? 'Reading the graph…' : hub.status === 'connecting' ? 'Connecting to the project…' : 'The project is not connected. Retrying.'}</p></div>} />
     </div>
   )
@@ -67,24 +71,26 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   const d = graph.domains.find((x) => x.name === dom) ?? null
   const m = graph.intermediate.find((x) => x.name === mid) ?? null
   const isMid = (n: string) => by.get(n)?.composed === true
-  // What each column holds: everything of its kind, or what the selection to its left composes. A search looks
-  // through everything, whatever is selected.
+  // Every column holds every thing of its kind; what the selection on the left holds comes first, above a separator,
+  // the rest below it — attached from there. A search narrows every column.
   const needle = q.trim().toLowerCase()
-  const hit = (n: Node) => `${n.title} ${n.name} ${n.line} ${toText(n.body)} ${n.body.description ?? ''}`.toLowerCase().includes(needle)
-  const domainList = needle ? graph.domains.filter(hit) : graph.domains
-  const mids = needle ? graph.intermediate.filter(hit) : d ? d.concepts.filter(isMid).map((n) => by.get(n)!).filter(Boolean) : graph.intermediate
-  const reach = (x: Node) => [...x.concepts.filter((n) => !isMid(n)), ...x.concepts.filter(isMid).flatMap((n) => by.get(n)?.concepts ?? [])]
-  const atomsIn = needle ? graph.atomic.filter(hit).map((a) => a.name) : m ? m.concepts : d ? [...new Set(reach(d))] : graph.atomic.map((a) => a.name)
-  const atoms = atomsIn.map((n) => by.get(n)).filter((x): x is Node => !!x && !x.composed)
-  const searching = !!needle
-  // Where a new or attached atomic concept goes: the selected intermediate — or a domain that composes atomic ones directly.
-  const atomTarget = m ?? (d && !mids.length ? d : null)
-  const item = (n: Node, tag?: string): ColumnItem => ({ key: n.name, title: n.title || n.name, line: n.line || (n.concepts.length ? `${n.concepts.length} concept${n.concepts.length === 1 ? '' : 's'}` : undefined), tag })
+  const hit = (n: Node) => !needle || `${n.title} ${n.name} ${n.line} ${toText(n.body)} ${n.body.description ?? ''}`.toLowerCase().includes(needle)
+  const reach = (x: Node) => [...new Set([...x.concepts.filter((n) => !isMid(n)), ...x.concepts.filter(isMid).flatMap((n) => by.get(n)?.concepts ?? [])])]
+  // Where an atomic concept is attached: the selected intermediate concept, else the selected domain itself.
+  const atomTarget = m ?? d
+  const item = (n: Node): ColumnItem => ({ key: n.name, title: n.title || n.name, line: n.line || (n.concepts.length ? `${n.concepts.length} concept${n.concepts.length === 1 ? '' : 's'}` : undefined) })
 
   const change = async (t: 'graph:join' | 'graph:leave', into: string, concept: string, at?: number) => {
     const r = await hub.call({ t, into, concept, ...(at !== undefined ? { at } : {}), reason: 'in the console' }).catch((e) => ({ reason: String(e?.message ?? e) }))
     if (r?.t !== 'graph:reply') { notify(r?.reason ?? 'The graph did not change', 'refused'); return false }
     await load(); return true
+  }
+  /** Detach an atomic concept from the selection: directly from it, or say which intermediate concept holds it. */
+  const detachAtom = (k: string) => {
+    if (!atomTarget) return
+    if (atomTarget.concepts.includes(k)) { void change('graph:leave', atomTarget.name, k); return }
+    const via = atomTarget.concepts.map((c) => by.get(c)).find((x) => x?.concepts.includes(k))
+    notify(via ? `It is in ${via.title} — select that intermediate concept to detach it there` : 'It is not in the selection', 'refused')
   }
   const select = (kind: NonNullable<Focus>['kind'], name: string) => {
     if (kind === 'domain') { const again = dom === name; setDom(again ? null : name); setMid(null); setAtom(null); setFocus(again ? null : { kind, name }) }
@@ -100,22 +106,20 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   }
 
   const columns: ColumnSpec[] = [
-    { key: 'domains', title: 'Domains', icon: 'lucide:bot', items: domainList.map((n) => item(n)), selected: dom, onSelect: (k) => select('domain', k), empty: searching ? 'No domain matches.' : 'No domains yet.' },
+    { key: 'domains', title: 'Domains', icon: 'lucide:bot', items: graph.domains.filter(hit).map(item), selected: dom, onSelect: (k) => select('domain', k), empty: needle ? 'No domain matches.' : 'No domains yet.' },
     {
-      key: 'intermediate', title: 'Intermediate concepts', icon: 'lucide:layers', caption: searching ? 'Matching the search' : d ? `In ${d.title}` : 'Every intermediate concept',
-      items: mids.map((n) => item(n)), selected: mid, onSelect: (k: string) => select('intermediate', k),
-      ...(d && !searching ? { onDetach: (k: string) => void change('graph:leave', d.name, k), detachLabel: `Detach from ${d.title}`,
-        attach: { label: `Attach to ${d.title}…`, candidates: graph.intermediate.filter((x) => !d.concepts.includes(x.name)).map((n) => item(n)), onAttach: (k: string) => void change('graph:join', d.name, k) } } : {}),
+      key: 'intermediate', title: 'Intermediate concepts', icon: 'lucide:layers', caption: needle ? 'Matching the search' : 'Every intermediate concept',
+      items: graph.intermediate.filter(hit).map(item), selected: mid, onSelect: (k) => select('intermediate', k),
+      ...(d ? { linked: d.concepts.filter(isMid), linkedTo: d.title, onAttach: (k: string) => void change('graph:join', d.name, k), onDetach: (k: string) => void change('graph:leave', d.name, k) } : {}),
       onNew: () => setMaking({ kind: 'intermediate', into: d?.name ?? null }),
-      empty: searching ? 'No intermediate concept matches.' : d ? `${d.title} has no intermediate concepts yet — attach one, or make one from atomic concepts.` : 'No intermediate concepts yet — make one from atomic concepts.',
+      empty: needle ? 'No intermediate concept matches.' : 'No intermediate concepts yet — make one from atomic concepts.',
     },
     {
-      key: 'atomic', title: 'Atomic concepts', icon: 'lucide:atom', caption: searching ? 'Matching the search' : m ? `In ${m.title}` : d ? `Everything ${d.title} composes` : 'Every atomic concept',
-      items: atoms.map((n) => item(n)), selected: atom, onSelect: (k) => select('atomic', k),
-      ...(atomTarget && !searching ? { onDetach: (k: string) => void change('graph:leave', atomTarget.name, k), detachLabel: `Detach from ${atomTarget.title}`,
-        attach: { label: `Attach to ${atomTarget.title}…`, candidates: graph.atomic.filter((x) => !atomTarget.concepts.includes(x.name)).map((n) => item(n)), onAttach: (k: string) => void change('graph:join', atomTarget.name, k) } } : {}),
+      key: 'atomic', title: 'Atomic concepts', icon: 'lucide:atom', caption: needle ? 'Matching the search' : 'Every atomic concept',
+      items: graph.atomic.filter(hit).map(item), selected: atom, onSelect: (k) => select('atomic', k),
+      ...(atomTarget ? { linked: m ? m.concepts : reach(d!), linkedTo: atomTarget.title, onAttach: (k: string) => void change('graph:join', atomTarget.name, k), onDetach: detachAtom } : {}),
       onNew: () => setMaking({ kind: 'atomic', into: atomTarget?.name ?? null }),
-      empty: searching ? 'No atomic concept matches.' : m ? `${m.title} has no atomic concepts yet — attach some.` : 'No atomic concepts here.',
+      empty: needle ? 'No atomic concept matches.' : 'No atomic concepts yet.',
     },
   ]
 
@@ -124,7 +128,7 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   return (
     <div className="sa-graphpage">
       <ColumnsSearch value={q} onChange={setQ} placeholder="Search domains and concepts — titles and what they say" />
-      <Columns columns={columns} detail={focused
+      <Columns keep="composition-graph" columns={columns} detail={focused
         ? <Detail key={focused.name + focused.hash} hub={hub} node={focused} kind={focus!.kind} by={by} partOf={partOf(focused.name)} goTo={goTo} change={change} reload={load} intermediates={graph.intermediate} />
         : <div className="sa-graphpage__hint"><Icon icon="lucide:mouse-pointer-click" /><p>Select a domain or a concept to see all of it here, change it, and walk what it composes.</p>
             <Receipt items={[['Domains', String(graph.domains.length)], ['Intermediate concepts', String(graph.intermediate.length)], ['Atomic concepts', String(graph.atomic.length)]]} /></div>} />
