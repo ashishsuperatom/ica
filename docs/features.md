@@ -127,7 +127,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - The audit history flowing to the platform's own Basin (Pipelines → Catalog → R2 SQL); Analytics Engine dropped, Workers Logs and Traces on.
 - The engine's own audit events, through an ingest endpoint signed with the project key.
 - Organisation keys creating projects through the CLI.
-- Permissions still to do: one principal name for a person everywhere; revocable sign-in tokens; service tokens bound to one project; the fast-router key per project; the consoles showing only what one's capabilities allow (the server already refuses); roles and organisation keys in the console.
+- Permissions still to do: one principal name for a person everywhere; revocable sign-in tokens; service tokens bound to one project; the consoles showing only what one's capabilities allow (the server already refuses); roles and organisation keys in the console.
 - Installing the CLI and the engine with one command, from per-OS releases kept in R2 (latest and every version).
 - CLI extras: self-update, shell completion, OS keychain, `watch`, proxy support, standalone binaries.
 

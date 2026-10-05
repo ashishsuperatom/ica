@@ -11,17 +11,16 @@
 // Auth is the FIRST message (`hello`); every later message is an envelope above.
 
 // Who you are on the hub.
-export type Role = 'runtime' | 'code-engine' | 'fast-router' | 'admin'
+export type Role = 'runtime' | 'code-engine' | 'admin'
 
 // A runtime's origin surface. Also the `svc:<surface>` service-member convention
 // (a headless bot authenticates as member `svc:teams`, `svc:slack`, …).
 export type Surface = 'web' | 'teams' | 'slack' | 'ios' | 'android'
 
 // ── Handshake (first message after connect) ──────────────────────────────────
-// A human/bot presents a platform JWT; server-side adapters present a shared key.
+// A human/bot presents a platform JWT; the engine presents its project's key.
 export type Hello =
   | { type: 'hello'; role: 'runtime'; token: string }                              // user or bot: platform JWT
-  | { type: 'hello'; role: 'runtime' | 'fast-router'; key: string }                // shared-secret adapter
   | { type: 'hello'; role: 'code-engine'; key: string; instanceId?: string; epoch?: number }
 
 // ── Envelope ──────────────────────────────────────────────────────────────────

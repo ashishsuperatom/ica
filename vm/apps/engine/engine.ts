@@ -798,7 +798,6 @@ async function handle(payload: any, from: any) {
       .then(() => emit(from, A('status', 'analyst', { text: 'Compacted ✓' })))
       .catch((e: any) => emit(from, A('status', 'analyst', { text: `Compact failed: ${e?.message ?? e}` })))
   }
-  else if (payload.t === 'suggest') { /* as-you-type — later (fast-router) */ }
 }
 
 // Boot self-check: PROVE the engine is operational (store writable + read-back, workspace present, data

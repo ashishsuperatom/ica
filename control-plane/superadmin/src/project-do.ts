@@ -52,7 +52,7 @@ const STOP_AFTER_MS    = 24 * 60 * 60 * 1000   // 24 h idle → stop (release th
 
 interface ConnInfo {
   wsId: string
-  type: string       // "code-engine" | "runtime" | "fast-router" | "admin"
+  type: string       // "code-engine" | "runtime" | "admin" | "agent"
   userId?: string    // only for user connections; an agent key's is `agent:<keyId>`
   email?: string     // the person's address, from their token (for the audit history)
   scopes?: string[]  // an agent key's scopes (shared/agent-scopes.ts)
@@ -431,7 +431,7 @@ export class ProjectDO extends DurableObject<Env> {
       if (!att) continue
       this.wsById.set(att.wsId, ws)
       this.connByWs.set(ws, att)
-      if (att.type === 'code-engine' || att.type === 'fast-router') this.roleRegistry.set(att.type, att.wsId)
+      if (att.type === 'code-engine') this.roleRegistry.set(att.type, att.wsId)
     }
   }
 
@@ -602,40 +602,6 @@ export class ProjectDO extends DurableObject<Env> {
       return
     }
 
-    // ── Server-side (fast-router): the fast-router worker. Authenticates with the SHARED fast-router
-    // secret (a single worker env var FR_SHARED_KEY), NOT a per-project key — so the fast-router DO
-    // needs no provisioning. Passive: never records engine liveness / wakes the machine.
-    if (role === 'fast-router') {
-      const shared = (this.env as any).FR_SHARED_KEY
-      if (!key || !shared || key !== shared) {
-        this.log('ws:auth_failed', { role: 'fast-router', reason: key ? 'invalid key' : 'missing key' })
-        ws.close(4001, 'Invalid fast-router key')
-        return
-      }
-      this.log('ws:fr_auth_ok', {})
-      if (await this.register(ws, role, undefined, undefined, instanceId, epoch)) this.flushQueued(ws)
-      return
-    }
-
-    // ── Server-side runtime: a code-engine dialing INTO a fast-router DO as a client, using the
-    // shared key. A 'runtime' is any CONSUMER of a hub: a browser is a runtime of its project DO
-    // (authed by JWT, in the token branch below); a code-engine is a runtime of the fast-router DO
-    // (authed by this shared key). MULTI — many code-engines share one fast-router DO, addressed by
-    // wsId; they reach the worker via to:{type:'fast-router'} and it replies by wsId. Passive — no
-    // heartbeat, no machine wake. Guarded on `key` so a BROWSER runtime (role:'runtime' + token, no
-    // key) falls through to JWT auth instead of being rejected here.
-    if (role === 'runtime' && key) {
-      const shared = (this.env as any).FR_SHARED_KEY   // the same shared fast-router secret every code-engine joins with
-      if (!shared || key !== shared) {
-        this.log('ws:auth_failed', { role: 'runtime', reason: 'invalid key' })
-        ws.close(4001, 'Invalid fast-router key')
-        return
-      }
-      this.log('ws:rt_key_auth_ok', {})
-      this.register(ws, 'runtime', undefined, undefined)
-      return
-    }
-
     // ── An agent (any system acting with an agent key the project's admin made) ──
     if (role === 'agent') {
       const v = key ? await this.agentKeys.verify(String(key)) : { ok: false as const, reason: 'no key' }
@@ -704,14 +670,14 @@ export class ProjectDO extends DurableObject<Env> {
     // Generate wsId
     const wsId = crypto.randomUUID().slice(0, 8)
 
-    // Singletons (code-engine, fast-router) own the role slot so {to:{type}} routes to them. Non-singletons
+    // The singleton (code-engine) owns its role slot so {to:{type}} routes to them. Non-singletons
     // (runtime, admin) are MULTI and never evict each other. For singletons we use IDENTITY + FENCING so a
     // reconnect never wars with itself and a zombie can never steal the slot back from a newer instance:
     //   • same instanceId  → the same process reconnecting → quietly supersede its own stale socket (4005)
     //   • newer epoch      → a genuinely newer process     → deliberate takeover of the old holder (4002)
     //   • older/equal epoch→ a zombie/stale reconnect       → FENCE the newcomer (4006), keep the holder
     // The fence is what breaks the register→evict→reconnect ping-pong. (epoch = the engine's boot time.)
-    const singleton = type === 'code-engine' || type === 'fast-router'
+    const singleton = type === 'code-engine'
     if (singleton && this.roleRegistry.has(type)) {
       const oldWs = this.wsById.get(this.roleRegistry.get(type)!)
       const old = oldWs ? this.connByWs.get(oldWs) : undefined
@@ -1348,7 +1314,7 @@ export class ProjectDO extends DurableObject<Env> {
   // ── The audit history ──────────────────────────────────────────────────────
   // What a message means, for the record: its action and what it carried. Liveness and screen bookkeeping are not
   // actions (pings, resizes, keystrokes into a terminal, sync pulls); everything else is recorded.
-  private static NOT_ACTIONS = new Set(['session:list', 'activity:list', 'tick', 'ping', 'ui:resize', 'term:input', 'term:detach', 'sync:req', 'answer:get', 'answer:ack', 'log:attach', 'log:detach', 'suggestions:req', 'suggest', 'sessions:list', 'analyst:sync', 'session:file', 'view:open', 'view:intent'])
+  private static NOT_ACTIONS = new Set(['session:list', 'activity:list', 'tick', 'ping', 'ui:resize', 'term:input', 'term:detach', 'sync:req', 'answer:get', 'answer:ack', 'log:attach', 'log:detach', 'suggestions:req', 'sessions:list', 'analyst:sync', 'session:file', 'view:open', 'view:intent'])
   private auditMessage(sender: ConnInfo, pl: any, outcome: 'ok' | 'refused', reason?: string) {
     const t = String(pl?.t ?? '')
     if (outcome === 'ok' && ProjectDO.NOT_ACTIONS.has(t)) return
@@ -1433,8 +1399,7 @@ export class ProjectDO extends DurableObject<Env> {
     const caps = sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent' ? this.capsOf(sender) : null
     if (caps) {
       const toType = (msg.to as any)?.type
-      // A runtime with no person behind it (a code-engine joined with the fast-router key) only reaches the fast-router.
-      if (sender.type === 'runtime' && !sender.userId && toType !== 'fast-router') { hubReply({ t: 'error', source: 'hub', reason: 'who is asking is not known', reqId: pl.reqId }); return }
+      if (!sender.userId) { hubReply({ t: 'error', source: 'hub', reason: 'who is asking is not known', reqId: pl.reqId }); return }
       if (sender.userId && pl.t === 'part' && !this.partsChecked.has(msg)) {
         // Held until whole; then the whole is checked and the parts go on in order.
         const k = `${sender.wsId}:${String(pl.id)}`

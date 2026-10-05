@@ -327,14 +327,8 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const [terminalOpen, setTerminalOpen] = useState(false)
   const [askTick, setAskTick] = useState(0)                    // bumps on every new question → useLogNav jumps each log view to it
   const [role, setRole]         = useState<'user' | 'developer'>('developer')   // for now: everyone is developer (sees the agents)
-  // Live as-you-type suggestions from the fast-router (optional; absent if not configured).
-  const [liveSuggest, setLiveSuggest] = useState<{ items: any[]; intent?: any } | null>(null)
   const [multiline, setMultiline] = useState(false)   // composer layout: single row vs text-over-controls
   const multilineRef = useRef(false)
-  const inputId       = useRef<string | null>(null)   // fresh per input focus → routes replies to this box
-  const suggestSeq    = useRef(0)                      // per-keystroke; drop-stale
-  const lastSuggestSeq = useRef(-1)
-  const suggestTimer  = useRef<any>(null)
   const inputRef    = useRef<HTMLTextAreaElement>(null)
   const historyRef  = useRef<string[]>(
     (() => { try { return JSON.parse(localStorage.getItem(`sa-hist:${projectId}`) || '[]') } catch { return [] } })()
@@ -589,13 +583,6 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
         }
         if (msg.t === 'agents:list:res') { setAgents(Array.isArray(msg.agents) ? msg.agents : []); return }
         if (msg.t === 'suggestions:res') { if (msg.suggestions?.groups) setSuggestions(msg.suggestions); return }
-        if (msg.t === 'suggestions') {   // fast-router (as-you-type) — drop stale + ignore other input boxes
-          if (typeof msg.seq === 'number' && msg.seq < lastSuggestSeq.current) return
-          if (msg.inputId && inputId.current && msg.inputId !== inputId.current) return
-          lastSuggestSeq.current = typeof msg.seq === 'number' ? msg.seq : lastSuggestSeq.current
-          setLiveSuggest({ items: msg.items ?? [], intent: msg.intent })
-          return
-        }
         if (msg.t === 'session:load:res') {
           if (msg.sessionId !== sidRef.current) return
           const items = (msg.items ?? []).map((it: any) => {
@@ -950,7 +937,7 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
     setStatus('')
     setBusy(true); busyRef.current = true; armWatchdog()
     if (inputRef.current) { inputRef.current.value = ''; inputRef.current.style.height = 'auto' }
-    setLiveSuggest(null); multilineRef.current = false; setMultiline(false)
+    multilineRef.current = false; setMultiline(false)
     // userId is NOT sent — the hub stamps the authenticated userId onto `from` server-side (trusted).
     // The agent a person chose for a new chat goes with its first question; after that the chat is that agent's.
     const agent = firstRef.current ? chosenRef.current : ''
@@ -978,11 +965,6 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
     autoGrow(el)
     const m = !!el && el.scrollHeight > 46   // > one line → text-over-controls layout
     if (m !== multilineRef.current) { multilineRef.current = m; setMultiline(m) }
-    clearTimeout(suggestTimer.current)
-    suggestTimer.current = setTimeout(() => {
-      if (!inputId.current) inputId.current = crypto.randomUUID()
-      send({ t: 'suggest', projectId, inputId: inputId.current, seq: ++suggestSeq.current, text: inputRef.current?.value ?? '' })
-    }, 120)
   }
   const composer = () => {
     const plus = (
@@ -999,7 +981,6 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
     const textarea = (
       <textarea key="ta" ref={inputRef} rows={1} style={{ ...s.composerTextarea, ...(multiline ? { width: '100%' } : { flex: 1 }) }}
         placeholder="Ask about your data…"
-        onFocus={() => { if (!inputId.current) { inputId.current = crypto.randomUUID(); suggestSeq.current = 0; lastSuggestSeq.current = -1 } }}
         onInput={onComposerInput}
         onKeyDown={e => {
           if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); return }
@@ -1027,21 +1008,6 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
       </div>
     )
   }
-  const liveSuggestBlock = () => (liveSuggest && liveSuggest.items.length > 0) ? (
-    <div style={{ margin: '0 0 8px' }}>
-      {liveSuggest.items.slice(0, 6).map((it: any, i: number) => (
-        <div key={i} onMouseDown={e => {
-            e.preventDefault()   // put the suggestion in the box (editable); DON'T submit — the user edits + presses Enter
-            const el = inputRef.current
-            if (el) { el.value = it.question || it.label; autoGrow(el); const m = el.scrollHeight > 46; if (m !== multilineRef.current) { multilineRef.current = m; setMultiline(m) }; el.focus() }
-            setLiveSuggest(null)
-          }}
-          style={s.suggestRow}
-          onMouseEnter={e => (e.currentTarget.style.borderColor = '#d8c9b8')}
-          onMouseLeave={e => (e.currentTarget.style.borderColor = '#e8e4de')}>{it.question || it.label}</div>
-      ))}
-    </div>
-  ) : null
 
   // The rail colour of each lane's events in every log, from the hellos.
   const hues: Record<string, string> = {}
@@ -1140,7 +1106,6 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
               </div>
             )}
             {composer()}
-            {liveSuggestBlock()}
           </div>
         </div>
       ) : (
@@ -1207,8 +1172,7 @@ const attachLogs = () => ['analyst-log', 'composer-log', 'narration'].forEach((c
           </div>
           <div style={s.bottomBar}>
             <div style={{ width: '100%', maxWidth: 720, margin: '0 auto' }}>
-              {liveSuggestBlock()}
-              {composer()}
+                {composer()}
             </div>
           </div>
         </>

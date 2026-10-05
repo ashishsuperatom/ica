@@ -438,7 +438,7 @@ may read and whether it may write. A project's people and keys read with `wareho
 and append with `warehouse.query` / `warehouse.write`; `sacli warehouse` does each, with whichever key it holds.
 
 *Later (planned):* one principal name for a person everywhere (today `email:`, `user:<clerk id>`, `agent:`);
-revocable sign-in tokens; service tokens bound to one project; the fast-router key per project.
+revocable sign-in tokens; service tokens bound to one project.
 
 ### Storage and builds
 
