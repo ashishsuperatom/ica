@@ -35,7 +35,9 @@ export async function run(state: { view: Slice }, ctx: Ctx) {
   // A view named only by what it looks at (an agent's start) opens as the application opens it, with its defaults (its
   // window); a full question is asked as it is.
   const opening = !('window' in q) && !('by' in q) && !('pages' in q)
-  return show(await ctx.services.app(opening ? { t: 'app:start', focus: q.focus, where: q.where ?? [] } : { t: 'app:ask', question: q }), ctx)
+  // (no filters named: the view's own starting filters).
+  const where = Array.isArray(q.where) && q.where.length ? { where: q.where } : {}
+  return show(await ctx.services.app(opening ? { t: 'app:start', focus: q.focus, ...where } : { t: 'app:ask', question: q }), ctx)
 }
 
 /** A row clicked in one of the view's blocks: the block's row move (the dimension, the row's key and label, a view to
