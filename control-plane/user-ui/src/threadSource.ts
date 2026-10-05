@@ -73,6 +73,7 @@ const blockId = () => `vb${Date.now().toString(36)}${(counter++).toString(36)}`
 
 export function viewSource(request: Request, agent: string, startAt: string | null): ThreadSource {
   let local: Local | null = null
+  let opening: Promise<SessionMsg> | null = null
   const here = () => location.pathname
   const msgOf = (l: Local): SessionMsg => ({ t: 'session:view', view: l.view, ...l.extras })
 
@@ -95,19 +96,24 @@ export function viewSource(request: Request, agent: string, startAt: string | nu
   // Back and Forward walk the thread: the history entry holds it.
   const restore = (): Local | null => { const h = history.state?.[KEY]; return h && h.path === here() ? h.local as Local : null }
 
+  /** The first look at the view: from the STATE in the address (a link, a reload elsewhere), else the agent's start. */
+  const firstLook = async (): Promise<SessionMsg> => {
+    const v = new URLSearchParams(location.search).get('v')
+    let state: Record<string, unknown> | undefined
+    if (v) { try { state = JSON.parse(await unsqueeze(v)) } catch { state = undefined } }
+    const r: SessionMsg = await request({ t: 'view:open', agent, ...(state ? { state } : startAt ? { startAt } : {}) })
+    if (r?.t !== 'view:view' || !r.view) return r
+    local = fromReply(r, { open: state ? { state } : startAt ? { startAt } : {}, edits: [] })
+    await save(false)
+    return msgOf(local)
+  }
+
   return {
     kind: 'view',
     async load() {
       const saved = restore()
       if (saved) { local = saved; return msgOf(saved) }
-      const v = new URLSearchParams(location.search).get('v')
-      let state: Record<string, unknown> | undefined
-      if (v) { try { state = JSON.parse(await unsqueeze(v)) } catch { state = undefined } }
-      const r: SessionMsg = await request({ t: 'view:open', agent, ...(state ? { state } : startAt ? { startAt } : {}) })
-      if (r?.t !== 'view:view' || !r.view) return r
-      local = fromReply(r, { open: state ? { state } : startAt ? { startAt } : {}, edits: [] })
-      await save(false)
-      return msgOf(local)
+      return (opening ??= firstLook().finally(() => { opening = null }))
     },
     async intent(payload) {
       if (!local) throw new Error('the view is not open')

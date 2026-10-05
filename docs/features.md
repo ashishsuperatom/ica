@@ -99,6 +99,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Agents carry their look (icon, accent, one line) and starting points; home is the dashboards' front door (a section per agent, its starting points as cards); `session:open { startAt }`.
 - A view's question as framework components: QuestionControls (filter chips, adding a filter with members searched, breakdown, window by kind, assumptions), NextMoves, AboutNumbers — used by the app-views program; programs' views may read through the surface (`ProgramEnv`) while changes stay intents.
 - Connectors (`connectors/`): a package of its own — manifest, server module on one SDK (HTTP with retries and paging, rows and types from JSON, one MCP client), built by hash; run in Cloudflare Dynamic Workers whose only way out is the gateway (allowed hosts, credentials added there, every request recorded); data and actions apart (a change needs a person's confirmation); code mode (a program over the connections, no network of its own); github, rest-json, mcp-server built; in the one connections catalog; the user UI opens a connection (test, entities, rows, actions, record).
+- Views and sessions: an agent is browsed as a view kept by the browser (steps in the history, the current STATE in the address, nothing written on the server but a usage row); it becomes a session only at a question to the agent or a recorded decision, by replaying the path in the engine.
 
 ## Planned (not built)
 - Prices for prompt-cache tokens (counted per call, not yet priced).

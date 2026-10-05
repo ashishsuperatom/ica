@@ -206,7 +206,8 @@ function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, 
   }, [fetchFile, source])
 
   useEffect(() => {
-    if (session && opened.get(session)) { opened.delete(session); return }
+    // A session just kept from a view arrives with what was shown; the hand-over is dropped a moment later.
+    if (session && opened.get(session)) { setTimeout(() => opened.delete(session), 5000); return }
     void source.load().then(accept)
   }, [session, source, accept])
   // A view's steps are in the history: Back and Forward bring its thread back as it was there.

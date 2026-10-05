@@ -472,7 +472,7 @@ Not the session's STATE: the core of decision intelligence, to be expanded later
   - **Ports from the registry** on `127.0.0.1` (project 1's data source manager at `127.0.0.1:4008`, …). Works everywhere
     without admin rights. *Recommended for that reason.*
 
-### Views and sessions — one thread, two homes (design, 2026-10-05)
+### Views and sessions — one thread, two homes (built 2026-10-05)
 
 **In the user's words:** "I just click on one of the agent, I'm not doing anything… are we actually creating a new
 session in the file system?" — "whenever I change a filter or do something and no new blocks are added, really there is
@@ -495,6 +495,11 @@ uniformity is there… a proper solution, a proper thinking behind it."
   from usage and for the decision memory's sense of common paths; learned paths for a view come from a stateless
   "recognise this STATE" call.
 - **Replaces** the held-in-memory interim (deferringLog, 2026-10-05), which kept a session at its first filter change.
+- **As built:** engine `view:open` / `view:intent` (a throwaway in-memory session, nothing kept) and `session:keep`
+  (the path replayed: opening, each step's intent, each change made in place); the user UI's `threadSource.ts` gives the
+  one steps component either home; a view's thread lives in the history entry, the current STATE in the address
+  (deflate + base64url, kept out of the address past 6,000 characters — the history still holds it); `view_events`
+  (ProjectDO 30) is the usage record; `decision:paths` takes a view's inline STATE.
 
 ### Connectors — the framework (built 2026-10-05)
 
