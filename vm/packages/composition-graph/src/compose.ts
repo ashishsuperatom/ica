@@ -17,11 +17,16 @@ export const conceptsOf = (d: Pick<DomainBody, 'concepts' | 'parts'>): string[] 
 /** A value the organisation decides — a threshold, a list, a currency — named once, read by name. */
 export interface SettingBody { value: unknown; description: string }
 export interface Example { question: string; steps: string[] }
-/** A concept: text, in one of a few forms, composed into an agent's context. */
+/** A concept, composed into an agent's context: ATOMIC — text in one of a few forms — or INTERMEDIATE ('composed'): a
+ *  combination of atomic concepts, in order, perhaps with a line of its own. A domain composes intermediate concepts
+ *  (and, as written before intermediates existed, atomic ones directly); an intermediate composes atomic ones only. */
 export type ConceptBody =
   | { title: string; form: 'bullets' | 'numbered'; items: string[] }
   | { title: string; form: 'worked'; items: Example[] }
   | { title: string; form: 'text'; text: string }
+  | { title: string; form: 'composed'; text?: string; concepts: string[] }
+export type AtomicBody = Exclude<ConceptBody, { form: 'composed' }>
+export const isComposed = (b: unknown): b is Extract<ConceptBody, { form: 'composed' }> => !!b && (b as any).form === 'composed'
 export interface FileBody { name: string; text: string }
 
 export interface Composition {
@@ -51,24 +56,32 @@ export const ANSWERING = `# How every answer is given
 
 export const identityOf = (domain: string) => `You are Superatom's agent for ${domain} at this organisation.`
 
-/** A concept, rendered by its form. */
-export function renderConcept(p: ConceptBody): string {
+/** A concept as it is composed: an atomic one alone, or an intermediate one with its atomic concepts read. */
+export type ComposedConcept = AtomicBody | (Extract<ConceptBody, { form: 'composed' }> & { parts: AtomicBody[] })
+
+/** A concept, rendered by its form; an intermediate one is its title (and line), then its atomic concepts beneath it. */
+export function renderConcept(p: ComposedConcept | ConceptBody, level = 1): string {
+  const h = '#'.repeat(level)
   let body: string
   switch (p.form) {
     case 'bullets': body = p.items.map((l) => `- ${l}`).join('\n'); break
     case 'numbered': body = p.items.map((l, i) => `${i + 1}. ${l}`).join('\n'); break
-    case 'worked': body = p.items.map((e) => `## ${e.question}\n${e.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}`).join('\n\n'); break
+    case 'worked': body = p.items.map((e) => `${h}# ${e.question}\n${e.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}`).join('\n\n'); break
     case 'text': body = p.text; break
+    case 'composed': {
+      const parts = 'parts' in p ? p.parts.map((x) => renderConcept(x, level + 1)).join('\n\n') : ''
+      return `${h} ${p.title}${p.text?.trim() ? `\n${p.text.trim()}` : ''}${parts ? `\n\n${parts}` : ''}`
+    }
   }
-  return `# ${p.title}\n${body.trim()}`
+  return `${h} ${p.title}\n${body.trim()}`
 }
 
 /** A domain's text from its pieces in memory. */
-export function render(domain: string, concepts: ConceptBody[], files: { name: string }[], settings: { name: string; value: unknown; description: string }[] = []): string {
+export function render(domain: string, concepts: (ComposedConcept | ConceptBody)[], files: { name: string }[], settings: { name: string; value: unknown; description: string }[] = []): string {
   const named = files.length ? `\n\nIn your folder, from this domain: ${files.map((f) => f.name).join(', ')}.` : ''
   // The organisation's settings, with their values: the text names them, the programs read them from settings.json.
   const set = settings.length ? `\n\n# Settings (in settings.json; the programs read them there)\n${settings.map((x) => `- ${x.name}: ${JSON.stringify(x.value)} — ${x.description}`).join('\n')}` : ''
-  return `${identityOf(domain)}\n\n${ANSWERING}\n\n${concepts.map(renderConcept).join('\n\n')}${set}${named}`
+  return `${identityOf(domain)}\n\n${ANSWERING}\n\n${concepts.map((c) => renderConcept(c)).join('\n\n')}${set}${named}`
 }
 
 /** A domain composed from the store, as it is now or as it was at a moment. With a viewer's scopes, it holds only what
@@ -78,14 +91,20 @@ export function compose(store: Store, domain: string, asOf?: number, opts: { vie
   if (!d || d.kind !== 'domain') throw new Error(`there is no domain "${domain}"${asOf ? ` as of ${new Date(asOf).toISOString()}` : ''}`)
   if (opts.viewer && !visibleTo(d.scope, opts.viewer)) throw new Error(`there is no domain "${domain}" for this viewer`)
   const used: Record<string, string> = { [domain]: d.hash }
-  const read = <B,>(name: string, kind: 'concept' | 'file' | 'setting'): B | null => {
+  const read = <B,>(name: string, kind: 'concept' | 'file' | 'setting', by = `domain "${domain}"`): B | null => {
     const n = store.get<B>(name, asOf)
-    if (!n || n.kind !== kind) throw new Error(`domain "${domain}" names ${kind} "${name}", which there is not`)
+    if (!n || n.kind !== kind) throw new Error(`${by} names ${kind} "${name}", which there is not`)
     if (opts.viewer && !visibleTo(n.scope, opts.viewer)) return null
     used[name] = n.hash
     return n.body
   }
-  const parts = conceptsOf(d.body).map((p) => read<ConceptBody>(p, 'concept')).filter((x): x is ConceptBody => x !== null)
+  // An intermediate concept brings its atomic concepts, in its order (those the viewer sees).
+  const concept = (name: string): ComposedConcept | null => {
+    const b = read<ConceptBody>(name, 'concept')
+    if (!b || !isComposed(b)) return b
+    return { ...b, parts: b.concepts.map((x) => read<ConceptBody>(x, 'concept', `concept "${name}"`)).filter((x): x is AtomicBody => x !== null && !isComposed(x)) }
+  }
+  const parts = conceptsOf(d.body).map(concept).filter((x): x is ComposedConcept => x !== null)
   const files = d.body.files.map((f) => read<FileBody>(f, 'file')).filter((x): x is FileBody => x !== null)
   const settings = (d.body.settings ?? []).map((n) => ({ name: n, ...read<SettingBody>(n, 'setting')! }))
   return { domain, text: render(domain, parts, files, settings), files, settings: Object.fromEntries(settings.map((x) => [x.name, x.value])),

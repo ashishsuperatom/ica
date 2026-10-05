@@ -185,7 +185,7 @@ export function createInspector(deps: InspectorDeps) {
       const domains = compositionDomains(store).map((d) => {
         const node = store.get<DomainBody>(d.name)!
         const concepts = conceptsOf(node.body).map((name) => { const n = store.get<ConceptBody>(name); return { name, hash: n?.hash ?? null, title: n?.body.title ?? null, form: n?.body.form ?? null,
-          lines: n ? (n.body.form === 'text' ? 1 : n.body.items.length) : 0 } })
+          lines: n ? (n.body.form === 'text' ? 1 : n.body.form === 'composed' ? n.body.concepts.length : n.body.items.length) : 0 } })
         const files = node.body.files.map((name) => { const n = store.get<FileBody>(name); return { name, hash: n?.hash ?? null, file: n?.body.name ?? null, bytes: n ? n.body.text.length : 0 } })
         const asked = store.questions(40, d.name).map((q) => ({ at: q.at, session: q.session, question: q.question, how: q.how, domainHash: q.domainHash,
           decided: Array.isArray(q.ranked) ? ((q.ranked as any[])[0]?.terms ?? []).slice(0, 6) : [] }))
@@ -195,6 +195,16 @@ export function createInspector(deps: InspectorDeps) {
         moved: note.used && Object.keys(note.used).length ? compositionDrift(store, note.used).map((x) => x.name) : [] })
       sessions.sort((a, b) => String(b.at ?? '').localeCompare(String(a.at ?? '')))
       return { exists: true, domains, changes: store.changes(60), counts: { domain: store.names('domain').length, concept: store.names('concept').length, file: store.names('file').length }, sessions: sessions.slice(0, MAX_ROWS) }
+    })
+  }
+  /** The graph as three columns: every domain with the concepts it composes, every intermediate concept with the atomic
+   *  ones it composes, every atomic concept — each with its title, owner, scope and a line of its text. */
+  async function compositionColumns() {
+    return withComposition((store) => {
+      const line = (b: any) => String(b?.text ?? (Array.isArray(b?.items) ? b.items.map((x: any) => (typeof x === 'string' ? x : x?.question ?? '')).join(' · ') : '')).slice(0, 240)
+      const domains = store.names('domain').map((n) => { const b = store.content<DomainBody>(n.hash); return { name: n.name, title: n.name, line: String(b.description ?? '').slice(0, 240), scope: n.scope, owner: n.owner, concepts: conceptsOf(b) } })
+      const concepts = store.names('concept').map((n) => { const b = store.content<any>(n.hash); return { name: n.name, title: String(b.title ?? n.name), form: String(b.form), composed: b.form === 'composed', line: line(b), scope: n.scope, owner: n.owner, concepts: b.form === 'composed' ? (b.concepts as string[]) : [] } })
+      return { exists: true, domains, intermediate: concepts.filter((c) => c.composed), atomic: concepts.filter((c) => !c.composed) }
     })
   }
   /** One node: its content as it is now or was at a moment, every change to it, and the domains that name it. */
@@ -215,7 +225,7 @@ export function createInspector(deps: InspectorDeps) {
 
   const VIEWS: Record<string, (a: any) => any> = {
     overview, file, dir, logs, index, grounding, db,
-    composition, compositionNode, compositionCompose,
+    composition, compositionNode, compositionCompose, compositionColumns,
   }
 
   return {

@@ -1052,27 +1052,24 @@ programs' views; people ask on a topic from the left), and the **control plane**
 governance: the same design system). A project's dashboard code stops being a copy: its capabilities become programs,
 its scenarios agents.
 
-### A canvas beside the blocks — the composition graph (proposed, 2026-10-05)
+### The composition graph in columns (built 2026-10-06)
 
-**In the user's words:** some things do not make sense in the block view. The composition graph needs white space to
-see everything properly and think about it, and a system that is more like a graph — a graph-like structure, because it
-is a composition graph, and it is hard to represent it in blocks. Not everything has to be a block; some things can be
-an exception. How to do it, and how to mix the two, is a hard thing to think about.
+**In the user's words (2026-10-05):** some things do not make sense in the block view; the composition graph needs white
+space to see everything and think about it, something more like a graph. **Then (2026-10-06):** don't do it in a canvas —
+just have columns. When any node is selected in the first column, show all its first neighbours in the column to its
+right; each column scrolls independently. In the right column show first whatever is connected to the one selected on
+the left, and then the rest. A node on the right can be selected and attached to the one selected on the left, or removed
+— it becomes detached from the selected one. Three columns: **domains → intermediate concepts → atomic concepts**. An
+intermediate concept is a combination of some atomic concepts.
 
-*Proposal (to agree):* a second kind of step, the **canvas**. A block is read top to bottom inside the thread's column; a
-canvas takes the whole page (no column, no frame), because what it shows is a space, not a document.
-- **Opening one:** it is still a step of the thread — it has a title, sits in the history, Back returns to the block it
-  was opened from — but while it is the current step the thread steps aside: the column is replaced by the canvas, with
-  the steps above it collapsed into a thin strip at the top (click one to go back to the thread).
-- **The composition graph on it:** domains, agents, concepts and programs as nodes; edges are what the graph already
-  says — an agent → its domain and its programs, a domain → its concepts *in order* (the order is the composition).
-  Scope shows as the node's tint (global, a group's, one's own); a pending suggestion as a mark on its node. Laid out
-  left to right (agents → domains → concepts), zoom and pan, filter by domain or scope.
-- **Mixing:** selecting a node opens its detail as an ordinary block in a panel at the right — the same block the thread
-  would show (what it is, the system prompt it composes to, its history, suggestions to decide). Acting in the panel
-  (approve, publish, join a concept) is a structured change like any other, and the canvas redraws. So the canvas is
-  for seeing the shape; blocks stay the place where things are read and decided.
-- **Other canvases later:** the data index (sources → tables → fields), a program's provenance, decision paths.
+**Built:** an intermediate concept is a concept of form `composed` listing atomic concepts in order (and perhaps a line
+of its own); a domain composes intermediate concepts (a domain written before them may still list atomic ones directly —
+they show in the middle column marked *atomic*, and can be detached); an intermediate composes atomic ones only, and a
+concept that is part of one stays atomic. Composing renders an intermediate as its heading, its line, then its atomic
+concepts beneath it. Attaching and detaching are one governed change (`graph:join` / `graph:leave` with `into`: a domain
+or an intermediate concept); the CLI the same (`composition-graph join <domain|intermediate> <concept>`). The console's
+Graph tab is the three columns (`Columns` in the framework, reusable for other linked things), each searchable, with
+*New* in the intermediate and atomic columns (made and attached to what is selected on the left).
 
 ### Creating and publishing
 

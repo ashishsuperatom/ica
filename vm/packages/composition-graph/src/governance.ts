@@ -8,7 +8,7 @@
 // than what they read.
 
 import { canonical, hashOf, type Kind, type Scope, type Store } from './store.js'
-import { conceptsOf, type ConceptBody, type DomainBody } from './compose.js'
+import { conceptsOf, isComposed, type ConceptBody, type DomainBody } from './compose.js'
 
 export class GovernanceRefusal extends Error {}
 
@@ -27,7 +27,8 @@ export function checkBody(kind: Kind, body: unknown): string[] {
     if (b.form === 'text') return typeof b.text === 'string' && b.text.trim() ? [] : ['a text concept has its text']
     if (b.form === 'bullets' || b.form === 'numbered') return Array.isArray(b.items) && b.items.length && b.items.every((x: unknown) => typeof x === 'string' && x.trim()) ? [] : [`a ${b.form} concept has its items, each text`]
     if (b.form === 'worked') return Array.isArray(b.items) && b.items.every((x: any) => typeof x?.question === 'string' && Array.isArray(x.steps)) ? [] : ['a worked concept has examples, each a question and its steps']
-    return ['a concept\'s form is text, bullets, numbered or worked']
+    if (b.form === 'composed') return Array.isArray(b.concepts) && b.concepts.every((x: unknown) => typeof x === 'string' && x) && (b.text === undefined || typeof b.text === 'string') ? [] : ['an intermediate concept lists its atomic concepts by name (and may have a line of its own)']
+    return ['a concept\'s form is text, bullets, numbered, worked, or composed (an intermediate concept)']
   }
   if (kind === 'domain') {
     const lists = ['capabilities', 'concepts', 'files'] as const
@@ -81,6 +82,7 @@ export function write(store: Store, actor: Actor, name: string, kind: Kind, body
   if (!cur && place.scope && !actor.admin && place.scope !== own) throw new GovernanceRefusal(`a new "${name}" starts as yours (${own}) — then suggest it for ${place.scope === 'global' ? 'everyone' : place.scope} (publish)`)
   if (!cur && !place.scope && !actor.admin) place = { ...place, scope: own }
   if (kind === 'domain') for (const c of conceptsOf(body as DomainBody)) if (!store.get(c)) throw new GovernanceRefusal(`the domain names a concept that does not exist: "${c}"`)
+  if (kind === 'concept') checkLevels(store, name, body as ConceptBody)
   if (kind === 'agent') { const d = store.get((body as any).domain); if (!d || d.kind !== 'domain') throw new GovernanceRefusal(`the agent names a domain that does not exist: "${(body as any).domain}"`) }
   try {
     return store.put(name, kind, body, { by: actor.id, reason: ctx.reason, from: ctx.from }, { ...(place.scope ? { scope: place.scope } : {}), ...(cur ? {} : { owner: actor.id }) })
@@ -103,18 +105,39 @@ export function publish(store: Store, actor: Actor, name: string, scope: Scope, 
   return get(store, Number(r.lastInsertRowid))!
 }
 
-/** Put a concept into a domain's composition (at a position), or take it out — a change to the domain. */
-export function compose(store: Store, actor: Actor, domain: string, concept: string, how: { leave?: boolean; at?: number }, reason?: string) {
-  const d = store.get<DomainBody>(domain)
-  if (!d || d.kind !== 'domain') throw new GovernanceRefusal(`there is no domain "${domain}"`)
-  const list = conceptsOf(d.body).filter((c) => c !== concept)
+/** The levels hold: an intermediate concept composes atomic concepts that exist (never itself, never another
+ *  intermediate); a concept that is a part of an intermediate stays atomic. */
+function checkLevels(store: Store, name: string, body: ConceptBody) {
+  if (isComposed(body)) {
+    for (const c of body.concepts) {
+      const n = store.get<ConceptBody>(c)
+      if (!n || n.kind !== 'concept') throw new GovernanceRefusal(`"${name}" names a concept that does not exist: "${c}"`)
+      if (c === name || isComposed(n.body)) throw new GovernanceRefusal(`"${c}" is an intermediate concept — an intermediate concept is made of atomic ones`)
+    }
+    const within = partOf(store, name)
+    if (within.length) throw new GovernanceRefusal(`"${name}" is a part of ${within.map((x) => `"${x}"`).join(', ')} — a part stays atomic`)
+  }
+}
+/** The intermediate concepts a concept is a part of. */
+export const partOf = (store: Store, concept: string): string[] =>
+  store.names('concept').filter((n) => { const b = store.content<ConceptBody>(n.hash); return isComposed(b) && b.concepts.includes(concept) }).map((n) => n.name)
+
+/** Attach a concept to a domain or to an intermediate concept (at a position), or detach it — a change to the one it is
+ *  attached to. A domain takes any concept; an intermediate concept takes atomic ones. */
+export function compose(store: Store, actor: Actor, into: string, concept: string, how: { leave?: boolean; at?: number }, reason?: string) {
+  const d = store.get<DomainBody | ConceptBody>(into)
+  if (!d || !(d.kind === 'domain' || (d.kind === 'concept' && isComposed(d.body)))) throw new GovernanceRefusal(`there is no domain or intermediate concept "${into}"`)
+  const had = d.kind === 'domain' ? conceptsOf(d.body as DomainBody) : (d.body as Extract<ConceptBody, { form: 'composed' }>).concepts
+  const list = had.filter((c) => c !== concept)
   if (!how.leave) {
     const c = store.get(concept)
     if (!c || c.kind !== 'concept') throw new GovernanceRefusal(`there is no concept "${concept}"`)
     list.splice(Math.max(0, Math.min(how.at ?? list.length, list.length)), 0, concept)
-  } else if (list.length === conceptsOf(d.body).length) throw new GovernanceRefusal(`"${concept}" is not in "${domain}"`)
-  const { parts: _legacy, ...rest } = d.body
-  return write(store, actor, domain, 'domain', { ...rest, concepts: list }, { reason: reason ?? `${how.leave ? 'leave' : 'join'} ${concept}` })
+  } else if (list.length === had.length) throw new GovernanceRefusal(`"${concept}" is not in "${into}"`)
+  const why = { reason: reason ?? `${how.leave ? 'detach' : 'attach'} ${concept}` }
+  if (d.kind === 'concept') return write(store, actor, into, 'concept', { ...(d.body as object), concepts: list }, why)
+  const { parts: _legacy, ...rest } = d.body as DomainBody
+  return write(store, actor, into, 'domain', { ...rest, concepts: list }, why)
 }
 
 /** Suggest a change to a node someone else owns (or a node with no owner). */

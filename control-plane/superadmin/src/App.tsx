@@ -7,7 +7,7 @@ import { AgentKeysPanel, AuditPanel } from './AgentKeys'
 import { AccessPoliciesPanel } from './AccessPolicies'
 import { GroupsPanel } from './Groups'
 import { WarehousePanel } from './Warehouse'
-import { OrgPeoplePanel, OrgKeysPanel } from './People'
+import { OrgPeoplePanel, OrgKeysPanel, ProjectAccessPanel } from './People'
 import { UsagePanel } from './Usage'
 import { useProjectHub } from './hub'
 import { Inspector, SECTIONS, SECTION_LABEL, type Section } from './Inspector'
@@ -959,80 +959,8 @@ function ChannelsPanel({ projectId, api }: { projectId: string; api: (path: stri
 // The assignment call goes to the ORG (it is the one that knows who belongs to it) and the org writes into this
 // project — so a project can never invent a user of its own. Roles are the project's own.
 function AccessPanel({ projectId, orgId, api, token }: { projectId: string; orgId: string | null; api: ReturnType<typeof useApi>; token: string | null }) {
-  const [access, setAccess] = useState<any[]>([])
-  const [roles, setRoles] = useState<any[]>([])
-  const [orgUsers, setOrgUsers] = useState<any[]>([])
-  const [err, setErr] = useState('')
-  const [pick, setPick] = useState({ email: '', roleId: '' })
   const orgApi = useApi(token, orgId)
-
-  const load = useCallback(async () => {
-    if (!token) return
-    api(`/projects/${projectId}/access`).then(r => r.json()).then(d => setAccess(d.access ?? [])).catch(() => {})
-    api(`/projects/${projectId}/roles`).then(r => r.json()).then(d => setRoles(d.roles ?? [])).catch(() => {})
-    if (orgId) orgApi('/users').then(r => r.json()).then(d => setOrgUsers(Array.isArray(d) ? d : (d.users ?? []))).catch(() => {})
-  }, [api, orgApi, projectId, orgId, token])
-  useEffect(() => { load() }, [load])
-
-  const assigned = new Set(access.map(a => String(a.email).toLowerCase()))
-  const available = orgUsers.filter(u => !assigned.has(String(u.email).toLowerCase()))
-  // What the selects show: the choice made, or their first option.
-  const email = available.some(u => u.email === pick.email) ? pick.email : (available[0]?.email ?? '')
-  const roleId = roles.some(r => String(r.id) === pick.roleId) ? pick.roleId : String(roles[0]?.id ?? '')
-
-  async function assign() {
-    setErr('')
-    const r = await orgApi('/assignments', { method: 'POST', body: JSON.stringify({ projectId, email, roleId }) })
-    if (!r.ok) { setErr(await r.text()); return }
-    setPick({ email: '', roleId: '' }); load()
-  }
-  async function unassign(email: string) {
-    setErr('')
-    const r = await orgApi('/assignments', { method: 'DELETE', body: JSON.stringify({ projectId, email }) })
-    if (!r.ok) { setErr(await r.text()); return }
-    load()
-  }
-
-  return (
-    <>
-      {err && <Notice state="critical">{err}</Notice>}
-      {!orgId && <Empty icon="lucide:loader">Reading the organisation…</Empty>}
-
-      <SectionCard icon="lucide:user-plus" title="Give access" subtitle="People come from the organisation; here they get a role in this project">
-        <Form onSubmit={() => void assign()} actions={<button className="sa-btn sa-btn--primary" disabled={!available.length || !orgId}>Give access</button>}>
-          <Field label="Person">
-            <select className="sa-input" required value={email} onChange={e => setPick({ ...pick, email: e.target.value })} disabled={!available.length}>
-              {available.length
-                ? available.map(u => <option key={u.email} value={u.email}>{u.email}{u.name ? ` — ${u.name}` : ''}</option>)
-                : <option value="">everyone in the organisation already has access</option>}
-            </select>
-          </Field>
-          <Field label="Role">
-            <select className="sa-input" value={roleId} onChange={e => setPick({ ...pick, roleId: e.target.value })}>
-              {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-            </select>
-          </Field>
-        </Form>
-      </SectionCard>
-
-      <SectionCard icon="lucide:users" title="Who has access" note={`${access.length}`}>
-        <RecordList rows={access} keyOf={(a) => String(a.email)} empty="Nobody has been given access yet." columns={[
-          { key: 'email', label: 'Person' },
-          { key: 'role', label: 'Role', render: (a) => <>{a.role_name ?? a.role_id}{a.source === 'org-admin' && <span className="sa-muted"> · administers the organisation</span>}</> },
-          { key: 'act', label: '', align: 'end', render: (a) => a.source === 'org-admin'
-            ? <span className="sa-muted">managed by the organisation</span>
-            : <button className="sa-btn" onClick={() => unassign(a.email)}>Remove</button> },
-        ]} />
-      </SectionCard>
-
-      <SectionCard icon="lucide:shield" title="Roles" subtitle="Roles belong to this project — the same person can hold a different one elsewhere">
-        <RecordList rows={roles} keyOf={(r) => String(r.id)} empty="No roles yet." columns={[
-          { key: 'name', label: 'Role', render: (r) => <span className="sa-row sa-row--tight">{r.name}{r.builtin && <Status state="neutral">built-in</Status>}</span> },
-          { key: 'permissions', label: 'May', wrap: true, render: (r) => (r.permissions ?? []).join(', ') || '—' },
-        ]} />
-      </SectionCard>
-    </>
-  )
+  return <ProjectAccessPanel projectId={projectId} api={api} orgApi={orgId ? orgApi : null} />
 }
 
 // ── Datasource index (per project) ──────────────────────────────────────────

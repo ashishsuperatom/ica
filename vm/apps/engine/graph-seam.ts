@@ -55,8 +55,10 @@ export function createGraphSeam(d: { projectDir: string; send: (to: any, msg: Re
           return ok({ name: payload.name, ...r, node: s.get(payload.name) })
         }
         case 'graph:join': case 'graph:leave': {
-          const r = g.compose(s, who, str(payload.domain, 'domain'), str(payload.concept, 'concept'), { leave: t === 'graph:leave', at: payload.at === undefined ? undefined : Number(payload.at) }, payload.reason)
-          return ok({ ...r, node: s.get(payload.domain) })
+          // attached to (or detached from) a domain, or an intermediate concept
+          const into = str(payload.into ?? payload.domain, 'into')
+          const r = g.compose(s, who, into, str(payload.concept, 'concept'), { leave: t === 'graph:leave', at: payload.at === undefined ? undefined : Number(payload.at) }, payload.reason)
+          return ok({ ...r, node: s.get(into) })
         }
         case 'graph:suggest': return ok({ suggestion: g.suggest(s, who, str(payload.name, 'name'), str(payload.kind, 'kind') as Kind, payload.body, String(payload.reason ?? '')) })
         case 'graph:publish': return ok({ suggestion: g.publish(s, who, str(payload.name, 'name'), str(payload.scope, 'scope') as any, String(payload.reason ?? '')) })

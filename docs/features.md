@@ -24,6 +24,8 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 
 **Knowledge and computation**
 - Composition graph: concepts, domains, files and settings stored by hash, an append-only change log, time travel, scopes and owners, join/leave, and a CLI for every change.
+- Intermediate concepts (a combination of atomic concepts, in order) between domains and atomic concepts; attach and detach at either level; the console's composition graph as three columns (domains → intermediate → atomic), what is attached first, each column searchable and scrolling on its own, new concepts made and attached in place.
+- Project access in the console: who has access and their role (changed in place), the project's roles in plain words, a project's own roles made from the capabilities its maker holds.
 - Migrations for every database, engine and Durable Objects alike: one runner, no down migrations, a fast check; engine databases backed up beside themselves (no off-box backup, none for Durable Objects).
 - Platform types: the shapes of STATE, ops, intents, programs, answers, agents, sessions and the governance log, each with checks that answer in sentences.
 - STATE engine: every function gets the whole STATE frozen and can set only its own slice; it re-runs whatever reads a changed path, in dependency order.

@@ -7,9 +7,10 @@
 //   composition-graph history <name>
 //   composition-graph changes [--limit n]
 //   composition-graph compose <domain> [--as-of <iso>] [--viewer <scope,…>] [--used]
-//   composition-graph concept <name> --title <t> --text <text|@file> [--form text|bullets|numbered]   add or edit a concept
-//   composition-graph join <domain> <concept> [--at <position>]      put a concept into a domain's composition
-//   composition-graph leave <domain> <concept>                       take it out (the concept stays in the graph)
+//   composition-graph concept <name> --title <t> --text <text|@file> [--form text|bullets|numbered]   add or edit an atomic concept
+//   composition-graph concept <name> --title <t> --form composed [--text <line>] [--parts a,b]       an intermediate concept
+//   composition-graph join <domain|intermediate> <concept> [--at <position>]   attach a concept (an intermediate takes atomic ones)
+//   composition-graph leave <domain|intermediate> <concept>                    detach it (the concept stays in the graph)
 //   composition-graph put <name> --kind concept|file|domain|setting --body <json|@file>   (a file: --kind file --text @<path>)
 //   composition-graph remove <name>
 //
@@ -24,7 +25,8 @@ import { readFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Store, type Kind } from './store.js'
-import { compose, domains, join as joinConcept, leave as leaveConcept } from './compose.js'
+import { compose, domains } from './compose.js'
+import { compose as attach, write as governedWrite, GovernanceRefusal } from './governance.js'
 import { importDomains, type WrittenDomain, type WrittenSetting } from './import.js'
 import { verifyGraph, verifyAgainst, type Finding } from './verify.js'
 
@@ -50,26 +52,34 @@ const said = (name: string, r: { hash: string; changed: boolean }) => console.lo
 const store = new Store(dbFile)
 const [command, ...rest] = args
 
+/** The operator's own change, with the graph's rules (the levels, what exists); a refusal is a sentence. */
+const operator = <T,>(fn: () => T): T => { try { return fn() } catch (e) { if (e instanceof GovernanceRefusal) fail(e.message); throw e } }
 if (command === 'domains') {
   for (const d of domains(store, { asOf, viewer })) console.log(`${d.name}\t${d.capabilities.join(', ')}`)
 } else if (command === 'names') {
   for (const n of store.names(flags.kind as Kind | undefined, { asOf, viewer })) console.log(`${n.kind}\t${n.name}\t${n.scope}${n.owner ? `\t${n.owner}` : ''}\t${n.hash.slice(0, 12)}`)
 } else if (command === 'concept') {
-  const name = rest[0] ?? fail('concept <name> --title <t> --text <text|@file> [--form text|bullets|numbered]')
+  const name = rest[0] ?? fail('concept <name> --title <t> --text <text|@file> [--form text|bullets|numbered|composed]')
   const form = (flags.form as string) ?? 'text'
   const title = text(flags.title) ?? fail('--title <t>')
-  const body = text(flags.text) ?? fail('--text <text|@file>')
-  if (!['text', 'bullets', 'numbered'].includes(form)) fail('--form text, bullets or numbered')
-  const concept = form === 'text' ? { title, form: 'text', text: body } : { title, form, items: body.split('\n').map((l) => l.replace(/^\s*(?:[-*]|\d+\.)\s*/, '').trim()).filter(Boolean) }
-  said(name, store.put(name, 'concept', concept, ctx, place))
+  if (!['text', 'bullets', 'numbered', 'composed'].includes(form)) fail('--form text, bullets, numbered or composed')
+  if (form === 'composed') {
+    const parts = typeof flags.parts === 'string' ? flags.parts.split(',').map((x) => x.trim()).filter(Boolean) : []
+    const line = text(flags.text)
+    said(name, operator(() => governedWrite(store, { id: ctx.by, admin: true }, name, 'concept', { title, form: 'composed', ...(line ? { text: line } : {}), concepts: parts }, { reason: ctx.reason, from: ctx.from }, place)))
+  } else {
+    const body = text(flags.text) ?? fail('--text <text|@file>')
+    const concept = form === 'text' ? { title, form: 'text', text: body } : { title, form, items: body.split('\n').map((l) => l.replace(/^\s*(?:[-*]|\d+\.)\s*/, '').trim()).filter(Boolean) }
+    said(name, store.put(name, 'concept', concept, ctx, place))
+  }
 } else if (command === 'join') {
-  const [domain, concept] = rest
-  if (!domain || !concept) fail('join <domain> <concept> [--at <position>]')
-  said(domain, joinConcept(store, domain, concept, ctx, typeof flags.at === 'string' ? Number(flags.at) : undefined))
+  const [into, concept] = rest
+  if (!into || !concept) fail('join <domain|intermediate> <concept> [--at <position>]')
+  said(into, operator(() => attach(store, { id: ctx.by, admin: true }, into, concept, { at: typeof flags.at === 'string' ? Number(flags.at) : undefined }, ctx.reason)))
 } else if (command === 'leave') {
-  const [domain, concept] = rest
-  if (!domain || !concept) fail('leave <domain> <concept>')
-  said(domain, leaveConcept(store, domain, concept, ctx))
+  const [from, concept] = rest
+  if (!from || !concept) fail('leave <domain|intermediate> <concept>')
+  said(from, operator(() => attach(store, { id: ctx.by, admin: true }, from, concept, { leave: true }, ctx.reason)))
 } else if (command === 'show') {
   const n = store.get(rest[0] ?? fail('show <name>'), asOf) ?? fail(`there is no "${rest[0]}"${asOf ? ' at that moment' : ''}`)
   console.log(JSON.stringify({ name: n.name, kind: n.kind, hash: n.hash, body: n.body }, null, 2))

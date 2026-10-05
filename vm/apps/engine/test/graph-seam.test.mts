@@ -61,3 +61,12 @@ test('imported knowledge with no owner: only an admin changes it; refusals are s
   out.length = 0; await seam.handle({ t: 'graph:domains' }, { type: 'runtime' })
   assert.equal(out.at(-1).reason, 'the hub did not say who is asking')
 })
+
+test('intermediate concepts: made, attached to a domain, atomic ones attached to them and detached — over the hub', async () => {
+  assert.equal((await root({ t: 'graph:concept', name: 'judging', body: { title: 'Judging a trip', form: 'composed', text: 'How a trip is judged.', concepts: [] } })).changed, true)
+  assert.equal((await root({ t: 'graph:join', into: 'trips', concept: 'judging' })).node.body.concepts.includes('judging'), true)
+  assert.deepEqual((await root({ t: 'graph:join', into: 'judging', concept: 'settlement' })).node.body.concepts, ['settlement'])
+  assert.match((await root({ t: 'graph:join', into: 'judging', concept: 'judging' })).reason, /made of atomic ones/)
+  assert.match((await root({ t: 'graph:compose', domain: 'trips' })).composition.text, /# Judging a trip\nHow a trip is judged\.\n\n## Settlement/)
+  assert.deepEqual((await root({ t: 'graph:leave', into: 'judging', concept: 'settlement' })).node.body.concepts, [])
+})

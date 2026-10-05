@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { Section, RecordList, Form, Field, Choices, Notice, Status, Code, Icon } from '@superatom/ui'
-import { ORG_CAPABILITIES, ORG_KEY_SCOPES, type OrgCapability } from '../../shared/permissions'
+import { ORG_CAPABILITIES, ORG_KEY_SCOPES, PROJECT_CAPABILITIES, type OrgCapability, type ProjectCapability } from '../../shared/permissions'
 
 type Api = (path: string, init?: RequestInit) => Promise<Response>
 type Role = { id: string; name: string; capabilities: string[]; builtin: boolean }
@@ -187,6 +187,116 @@ export function OrgKeysPanel({ api }: { api: Api }) {
           { key: 'state', label: '', render: (k) => k.revoked_at ? <Status state="critical">Revoked</Status> : <span className="sa-muted">until {day(k.expires_at)}</span> },
           { key: 'x', label: '', align: 'end', render: (k) => k.revoked_at ? null : <button className="sa-btn sa-btn--link" onClick={() => void revoke(k.id)}>Revoke</button> },
         ]} />
+    </Section>
+  )
+}
+
+// ── A project: who has access, as what — the project's roles, built-in and its own ──────────────────────────────────
+
+type Access = { email: string; role_id: string; role_name?: string; source: string; capabilities: string[] }
+const said = (c: string) => PROJECT_CAPABILITIES[c as ProjectCapability] ?? c
+
+/** Who may work in a project and as what. People come from the organisation; here they get one of the project's roles. */
+export function ProjectAccessPanel({ projectId, api, orgApi }: { projectId: string; api: Api; orgApi: Api | null }) {
+  const [access, setAccess] = useState<Access[]>([])
+  const [roles, setRoles] = useState<Role[]>([])
+  const [people, setPeople] = useState<{ email: string; name?: string }[]>([])
+  const [held, setHeld] = useState<string[]>([])
+  const [err, setErr] = useState('')
+  const [pick, setPick] = useState({ email: '', roleId: 'member' })
+  const load = useCallback(() => {
+    api(`/projects/${projectId}/access`).then((r) => (r.ok ? r.json() : { access: [] })).then((d) => setAccess((d as any).access ?? [])).catch(() => {})
+    api(`/projects/${projectId}/roles`).then((r) => (r.ok ? r.json() : { roles: [] })).then((d) => setRoles((d as any).roles ?? [])).catch(() => {})
+    api(`/projects/${projectId}/me`).then((r) => (r.ok ? r.json() : null)).then((d) => setHeld((d as any)?.capabilities ?? [])).catch(() => {})
+    orgApi?.('/users').then((r) => (r.ok ? r.json() : [])).then((d) => setPeople(Array.isArray(d) ? d : [])).catch(() => {})
+  }, [api, orgApi, projectId])
+  useEffect(load, [load])
+  const givable = (r: Role) => r.capabilities.every((c) => held.includes(c))
+  const assigned = new Set(access.map((a) => a.email.toLowerCase()))
+  const available = people.filter((u) => !assigned.has(u.email.toLowerCase()))
+  const email = available.some((u) => u.email === pick.email) ? pick.email : (available[0]?.email ?? '')
+  const give = async (who: string, roleId: string) => {
+    const r = await (orgApi ?? api)('/assignments', { method: 'POST', body: JSON.stringify({ projectId, email: who, roleId }) })
+    setErr(r.ok ? '' : await errorOf(r)); load()
+  }
+  const take = async (who: string) => {
+    const r = await (orgApi ?? api)('/assignments', { method: 'DELETE', body: JSON.stringify({ projectId, email: who }) })
+    setErr(r.ok ? '' : await errorOf(r)); load()
+  }
+  const may = held.includes('project.people')
+  const roleOf = (id: string) => roles.find((r) => r.id === id)
+  return (
+    <div className="sa-stack sa-stack--4">
+      {err && <Notice state="critical">{err}</Notice>}
+      {may && (
+        <Section icon="lucide:user-plus" title="Give access" subtitle="People come from the organisation; here they get a role in this project">
+          <Form onSubmit={() => void give(email, pick.roleId)} actions={<button className="sa-btn sa-btn--primary" disabled={!email}>Give access</button>}>
+            <Field label="Person">
+              <select id="pa-person" className="sa-input" value={email} onChange={(e) => setPick({ ...pick, email: e.target.value })} disabled={!available.length}>
+                {available.length ? available.map((u) => <option key={u.email} value={u.email}>{u.email}{u.name ? ` — ${u.name}` : ''}</option>) : <option value="">Everyone in the organisation has access already</option>}
+              </select>
+            </Field>
+            <Field label="Role" help={roleOf(pick.roleId)?.capabilities.map(said).join(' · ')}>
+              <select id="pa-role" className="sa-input" value={pick.roleId} onChange={(e) => setPick({ ...pick, roleId: e.target.value })}>
+                {roles.filter(givable).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            </Field>
+          </Form>
+        </Section>
+      )}
+      <Section icon="lucide:users" title="Who has access" note={`${access.length}`} subtitle="The organisation's owners and admins administer every project">
+        <RecordList rows={access} keyOf={(a) => a.email} empty="Nobody has been given access yet."
+          columns={[
+            { key: 'email', label: 'Person', render: (a) => <span title={a.email}>{a.email}</span> },
+            { key: 'role', label: 'Role', render: (a) => a.source === 'org-admin'
+              ? <span className="sa-row sa-row--tight"><Status state="running">Admin</Status><span className="sa-muted">from the organisation</span></span>
+              : may && givable(roleOf(a.role_id) ?? { id: a.role_id, name: a.role_id, capabilities: a.capabilities, builtin: false })
+                ? <select id={`pa-${a.email}`} className="sa-input sa-input--compact" value={a.role_id} onChange={(e) => void give(a.email, e.target.value)}>{roles.filter((r) => givable(r) || r.id === a.role_id).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
+                : <Status state="neutral">{roleOf(a.role_id)?.name ?? a.role_id}</Status> },
+            { key: 'how', label: 'Came in', render: (a) => <span className="sa-muted">{a.source === 'domain' ? 'by their email domain' : a.source === 'org-admin' ? 'organisation' : 'given'}</span> },
+            { key: 'x', label: '', align: 'end', render: (a) => a.source === 'org-admin' || !may ? null : <button className="sa-btn sa-btn--link" onClick={() => void take(a.email)}>Remove</button> },
+          ]} />
+      </Section>
+      <ProjectRoles projectId={projectId} api={api} roles={roles} held={held} onChange={load} />
+    </div>
+  )
+}
+
+/** The project's roles in plain words, and making one of its own (no more than the maker holds). */
+function ProjectRoles({ projectId, api, roles, held, onChange }: { projectId: string; api: Api; roles: Role[]; held: string[]; onChange: () => void }) {
+  const [draft, setDraft] = useState<{ name: string; capabilities: string[] }>({ name: '', capabilities: ['project.view'] })
+  const [err, setErr] = useState('')
+  const may = held.includes('project.people')
+  const save = async () => {
+    const r = await api(`/projects/${projectId}/roles`, { method: 'POST', body: JSON.stringify(draft) })
+    if (!r.ok) { setErr(await errorOf(r)); return }
+    setErr(''); setDraft({ name: '', capabilities: ['project.view'] }); onChange()
+  }
+  const drop = async (id: string) => { const r = await api(`/projects/${projectId}/roles`, { method: 'DELETE', body: JSON.stringify({ id }) }); setErr(r.ok ? '' : await errorOf(r)); onChange() }
+  return (
+    <Section icon="lucide:shield" title="Roles" subtitle="What each role may do in this project — the same person can hold a different role elsewhere">
+      <RecordList rows={roles} keyOf={(r) => r.id}
+        columns={[
+          { key: 'name', label: 'Role', render: (r) => <strong>{r.name}</strong> },
+          { key: 'kind', label: '', render: (r) => <span className="sa-muted">{r.builtin ? 'built in' : "this project's"}</span> },
+          { key: 'caps', label: 'May', wrap: true, render: (r) => r.capabilities.map(said).join(' · ') },
+          { key: 'x', label: '', align: 'end', render: (r) => may && !r.builtin ? <button className="sa-btn sa-btn--link" onClick={() => void drop(r.id)}>Remove</button> : null },
+        ]} />
+      {may && (
+        <Form onSubmit={() => void save()} error={err} actions={<button className="sa-btn sa-btn--primary" disabled={!draft.name.trim()}>Save the role</button>}>
+          <Field label="A role of this project's own" help="For example an analyst, who asks and reads the warehouse but approves nothing.">
+            <input id="pr-name" className="sa-input" placeholder="Analyst" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+          </Field>
+          <Choices label="It may">
+            {(Object.keys(PROJECT_CAPABILITIES) as ProjectCapability[]).map((c) => (
+              <label key={c} data-disabled={!held.includes(c)} title={held.includes(c) ? undefined : 'You do not hold this, so you cannot give it'}>
+                <input type="checkbox" id={`pcap-${c}`} disabled={!held.includes(c)} checked={draft.capabilities.includes(c)} onChange={(e) => setDraft({ ...draft, capabilities: e.target.checked ? [...draft.capabilities, c] : draft.capabilities.filter((x) => x !== c) })} />
+                <span>{PROJECT_CAPABILITIES[c]} <span className="sa-muted">({c})</span></span>
+              </label>
+            ))}
+          </Choices>
+        </Form>
+      )}
     </Section>
   )
 }

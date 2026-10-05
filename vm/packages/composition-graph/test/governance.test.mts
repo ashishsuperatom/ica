@@ -4,7 +4,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Store } from '../src/store.ts'
-import { governance as g, GovernanceRefusal } from '../src/index.ts'
+import { governance as g, GovernanceRefusal, compose as composeDomain } from '../src/index.ts'
 
 const fresh = () => new Store(join(mkdtempSync(join(tmpdir(), 'gov-')), 'composition.sqlite'))
 const ana = { id: 'user:ana' }, bo = { id: 'user:bo' }, bot = { id: 'agent:key_1' }, admin = { id: 'user:root', admin: true }
@@ -24,7 +24,7 @@ test('a new node is made by whoever writes it and is theirs; only they (or an ad
 test('bodies and names are checked; a domain may only name concepts that exist', () => {
   const s = fresh()
   assert.throws(() => g.write(s, ana, 'x', 'concept', { title: 'X', form: 'text' }), /a text concept has its text/)
-  assert.throws(() => g.write(s, ana, 'x', 'concept', { title: 'X', form: 'poem', text: 'y' }), /form is text, bullets, numbered or worked/)
+  assert.throws(() => g.write(s, ana, 'x', 'concept', { title: 'X', form: 'poem', text: 'y' }), /form is text, bullets, numbered, worked, or composed/)
   assert.throws(() => g.write(s, ana, 'bad name', 'concept', text('y')), /is not a name/)
   assert.throws(() => g.write(s, ana, 'x', 'setting', { value: 1 }), /a setting is not changed this way/)
   assert.throws(() => g.write(s, ana, 'trips', 'domain', { capabilities: [], concepts: ['nope'], files: [] }), /names a concept that does not exist: "nope"/)
@@ -118,4 +118,29 @@ test('publishing is decided: a person cannot widen their own node; they suggest 
   assert.equal(s.get('mine')!.scope, 'group:finance')
   assert.equal(s.get('mine')!.hash, before)
   assert.equal(g.write(s, admin, 'mine', 'concept', text('Ana\'s way of reading settlement.'), {}, { scope: 'global' }).changed !== undefined, true)   // an admin may widen directly
+})
+
+test('two levels: a domain composes intermediate concepts, an intermediate composes atomic ones; attach and detach at either', () => {
+  const s = fresh()
+  g.write(s, admin, 'rag', 'concept', text('RAG is the worst of four.'))
+  g.write(s, admin, 'pillar', 'concept', text('A pillar is a department tree.'))
+  g.write(s, admin, 'health', 'concept', { title: 'Project health', form: 'composed', text: 'How a project is judged.', concepts: ['rag'] })
+  g.write(s, admin, 'pmo', 'domain', { capabilities: [], concepts: [], files: [] })
+  g.compose(s, admin, 'pmo', 'health', {})                                   // a domain takes an intermediate
+  g.compose(s, admin, 'health', 'pillar', {})                                // an intermediate takes an atomic
+  assert.deepEqual((s.get('health')!.body as any).concepts, ['rag', 'pillar'])
+  const text1 = composeDomain(s, 'pmo').text
+  assert.match(text1, /# Project health\nHow a project is judged\.\n\n## Settled|# Project health\nHow a project is judged\.\n\n## /)
+  assert.ok(text1.indexOf('RAG is the worst') < text1.indexOf('A pillar is'))   // in its order
+  // the levels hold
+  assert.throws(() => g.compose(s, admin, 'health', 'health', {}), /intermediate concept — an intermediate concept is made of atomic ones/)
+  g.write(s, admin, 'other', 'concept', { title: 'Other', form: 'composed', concepts: [] })
+  assert.throws(() => g.compose(s, admin, 'other', 'health', {}), /made of atomic ones/)
+  assert.throws(() => g.write(s, admin, 'rag', 'concept', { title: 'RAG', form: 'composed', concepts: [] }), /is a part of "health" — a part stays atomic/)
+  assert.throws(() => g.compose(s, admin, 'rag', 'pillar', {}), /no domain or intermediate concept "rag"/)
+  // detach
+  g.compose(s, admin, 'health', 'rag', { leave: true })
+  assert.deepEqual((s.get('health')!.body as any).concepts, ['pillar'])
+  assert.throws(() => g.compose(s, admin, 'health', 'rag', { leave: true }), /"rag" is not in "health"/)
+  assert.doesNotMatch(composeDomain(s, 'pmo').text, /RAG is the worst/)
 })
