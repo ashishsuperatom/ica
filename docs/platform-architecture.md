@@ -1052,6 +1052,28 @@ programs' views; people ask on a topic from the left), and the **control plane**
 governance: the same design system). A project's dashboard code stops being a copy: its capabilities become programs,
 its scenarios agents.
 
+### The admin console in three layers (built 2026-10-06)
+
+**In the user's words:** the block idea is not a good idea for the super admin — we are not making decisions by going from
+one place to another; it is a hierarchy: I want to see this thing on the left, go there, see things. Some things could still
+be blocks. Separate two ideas: one is the Superatom platform altogether — creating organisations, giving people access,
+making admins for an organisation, keys, models and their credentials — and only the super admin sees it. The second is a
+specific organisation: create projects, give access, the warehouse (the warehouse happens in this second layer), payment —
+the credit card, address and billing address. Inside that, each project: its roles, data access, and the rest. See it layer
+by layer, represented in the URL, so we can jump to a place directly. A tree: Superatom (the company, its assets, how the
+platform runs) → the organisation (we give it to them; they think about everything in it) → its projects. One hierarchy
+of the UI so everything is obvious; no card system everywhere — only where it is the essential piece.
+
+**Built:** one router, every place a page with its own address — the platform `/` (organisations, engines, attention,
+models and agents, credentials), an organisation `/o/<org>/<place>` (projects, people and roles, warehouse, usage and
+credits, billing, settings), a project `/o/<org>/p/<project>/<place>` (attention; knowledge; data; agents; people;
+operations). The sidebar holds the places of the layer you are in, with the way up at its top; the breadcrumbs the path,
+each step with a switcher. A place is shown only to someone whose role holds what it needs (the server refuses the rest
+regardless). Blocks remain where a flow helps: Attention, whose items open approvals and suggestions as steps. A page that
+fails says so in its place. Earlier addresses (`/org/…`, `/pro/…`, `/w/…`) land on their place. Billing details (name,
+billing email, address, tax number) are kept by the organisation, every change recorded; card payments wait for the
+payment provider, which will hold the card.
+
 ### The composition graph in columns (built 2026-10-06)
 
 **In the user's words (2026-10-05):** some things do not make sense in the block view; the composition graph needs white

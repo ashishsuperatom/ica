@@ -333,6 +333,13 @@ export const ORG_MIGRATIONS: Migration[] = [
       if (first) db.all("UPDATE users SET role = 'owner' WHERE id = ? RETURNING id", first.id)
     }
   } },
+  { id: 6, name: 'billing details', up: `
+    -- Who the organisation is billed as: name, billing email, address, tax number. Every change kept (the latest is in
+    -- force); card details never come here — the payment provider keeps them.
+    CREATE TABLE IF NOT EXISTS billing_details (seq INTEGER PRIMARY KEY AUTOINCREMENT, details TEXT NOT NULL, by TEXT NOT NULL, at TEXT NOT NULL);
+    CREATE TRIGGER IF NOT EXISTS billing_no_update BEFORE UPDATE ON billing_details BEGIN SELECT RAISE(ABORT, 'billing details are append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS billing_no_delete BEFORE DELETE ON billing_details BEGIN SELECT RAISE(ABORT, 'billing details are append-only'); END;
+  ` },
 ]
 
 // ── GlobalDO ─────────────────────────────────────────────────────────────────────────────────────────────────────

@@ -30,7 +30,7 @@ function AttentionBlock() {
         const c: any = await env.api('/credentials').then((x) => x.ok ? x.json() : null).catch(() => null)
         for (const e of c?.expiring ?? []) out.push({ id: `cred:${e.id}`, kind: 'credential', state: e.expiresAt && e.expiresAt < Date.now() ? 'critical' : 'attention', title: `Credential ${e.id} ${e.expiresAt && e.expiresAt < Date.now() ? 'has expired' : 'expires soon'}`, detail: e.provider, path: '/credentials', action: 'Open credentials' })
         const p: any = await env.api('/profiles').then((x) => x.ok ? x.json() : null).catch(() => null)
-        for (const pr of p?.projects ?? []) if (!pr.running) out.push({ id: `offline:${pr.projectId}`, kind: 'engine', state: 'attention', title: `${pr.project}: its engine has not reported`, where: pr.org, path: `/pro/${pr.projectId}`, action: 'Open the project' })
+        for (const pr of p?.projects ?? []) if (!pr.running) out.push({ id: `offline:${pr.projectId}`, kind: 'engine', state: 'attention', title: `${pr.project}: its engine has not reported`, where: pr.org, path: `/o/${pr.orgId}/p/${pr.projectId}`, action: 'Open the project' })
       }
       if (live) setItems(out)
     })()

@@ -250,3 +250,7 @@
 
 /* A page step: the whole page, no frame — its own content decides its layout. */
 .sa-fullpage { height: 100%; min-height: 0; display: flex; flex-direction: column; padding: var(--sp-4) var(--sp-5); }
+/* A console page: the width there is, a margin around it. */
+.sa-console__page { padding: var(--sp-5) var(--sp-6) var(--sp-10); min-width: 0; }
+.sa-console__page > .admin-block > .content { padding: 0; }
+@media (max-width: 767px) { .sa-console__page { padding: var(--sp-4); } }

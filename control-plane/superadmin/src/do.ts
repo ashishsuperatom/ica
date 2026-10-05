@@ -57,6 +57,7 @@ export class OrgDO extends DurableObject<Env> {
     if (request.method === 'GET'  && path === '/me')           return this.me(url)
     if (request.method === 'GET'  && path === '/audit')        return Response.json({ events: [...this.ctx.storage.sql.exec('SELECT * FROM org_audit ORDER BY seq DESC LIMIT 200')] })
     if (path === '/roles')                                     return this.roles(request)
+    if (path === '/billing')                                   return this.billing(request)
     if (path === '/keys' || path.startsWith('/keys/'))         return this.keys(request, path)
     if (request.method === 'POST' && path === '/agent')        return this.agent(request)
     if (request.method === 'GET'  && path === '/users')        return this.getUsers()
@@ -338,6 +339,25 @@ export class OrgDO extends DurableObject<Env> {
       return Response.json({ ok: true })
     }
     return Response.json({ error: 'not found' }, { status: 404 })
+  }
+
+  /** Who the organisation is billed as. Card details are never kept here (the payment provider holds them). */
+  private async billing(req: Request): Promise<Response> {
+    const sql = this.ctx.storage.sql
+    const latest = () => { const [r] = [...sql.exec('SELECT details, by, at FROM billing_details ORDER BY seq DESC LIMIT 1')] as any[]; return r ? { details: JSON.parse(String(r.details)), by: r.by, at: r.at } : { details: null } }
+    if (req.method === 'GET') return Response.json(latest())
+    if (req.method !== 'PUT') return Response.json({ error: 'use GET or PUT' }, { status: 405 })
+    const b = await req.json().catch(() => ({})) as any
+    const FIELDS = ['name', 'email', 'line1', 'line2', 'city', 'region', 'postcode', 'country', 'taxId'] as const
+    const details: Record<string, string> = {}
+    for (const f of FIELDS) { const v = String(b?.[f] ?? '').trim(); if (v.length > 200) return Response.json({ error: `${f} is at most 200 characters` }, { status: 400 }); if (v) details[f] = v }
+    if (!details.name) return Response.json({ error: 'the name the organisation is billed as is required' }, { status: 400 })
+    if (!details.email || !/^[^\s@]+@[^\s@]+$/.test(details.email)) return Response.json({ error: 'a billing email address is required' }, { status: 400 })
+    if (!details.line1 || !details.city || !details.country) return Response.json({ error: 'an address needs its first line, a city and a country' }, { status: 400 })
+    const caller = this.callerOf(req)
+    sql.exec('INSERT INTO billing_details (details, by, at) VALUES (?, ?, ?)', JSON.stringify(details), caller.email || 'platform', new Date().toISOString())
+    this.record('billing.details', 'billing', caller.email, { fields: Object.keys(details) })
+    return Response.json(latest())
   }
 
   /** Who changed who may do what here (org_audit, append-only). */

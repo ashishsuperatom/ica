@@ -189,6 +189,14 @@ describe('in an organisation', () => {
     const events = (await at('/org/audit')).body.events.map((e: any) => e.op)
     expect(events).toEqual(expect.arrayContaining(['person.add', 'person.role', 'role.set']))
   })
+  it('billing details: required fields checked, the latest in force, the change recorded', async () => {
+    const put = (body: unknown) => at('/org/billing', { method: 'PUT', headers: as('olga@x.io', OWNER), body: JSON.stringify(body) })
+    expect((await put({ name: 'Acme' })).body.error).toMatch(/billing email/)
+    expect((await put({ name: 'Acme', email: 'ap@acme.com' })).body.error).toMatch(/first line, a city and a country/)
+    expect((await put({ name: 'Acme', email: 'ap@acme.com', line1: '1 Main St', city: 'Auckland', country: 'NZ', taxId: 'NZ123' })).body.details).toMatchObject({ name: 'Acme', taxId: 'NZ123' })
+    expect((await at('/org/billing')).body.details.city).toBe('Auckland')
+    expect((await at('/org/audit')).body.events.map((e: any) => e.op)).toContain('billing.details')
+  })
   it('organisation keys: within the maker\'s capabilities, cut to its scopes, and to what the maker holds now', async () => {
     const mia = as('mia@x.io', ['warehouse.query', 'warehouse.write'])
     expect((await at('/org/keys', { method: 'POST', headers: { ...mia, 'x-sa-org': ORG }, body: JSON.stringify({ name: 'loader', scopes: ['warehouse.manage'] }) })).body.error).toMatch(/do not hold: warehouse.manage/)

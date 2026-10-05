@@ -120,7 +120,7 @@ export function orgRouteNeeds(method: string, path: string): RouteNeed {
   if (path === '/projects') return read ? 'any' : 'org.projects'   // a member sees the projects they are in
   if (path === '/assignments') return 'org.people'                 // or project.people in that project (the Worker checks)
   if (path === '/conversations' || path.startsWith('/conversations')) return 'org.audit'
-  if (path === '/credits' || path === '/credits/budgets') return 'org.billing'
+  if (path === '/credits' || path === '/credits/budgets' || path === '/billing') return 'org.billing'
   if (path === '/usage/people') return 'any'                        // a person sees themselves; org.billing sees everyone
   if (path === '/keys' || path.startsWith('/keys/')) return 'org.keys'
   if (path === '/warehouse') return 'any'                           // filtered: what the caller's warehouse capabilities show

@@ -125,7 +125,7 @@ export function AuditPanel({ api, projectId }: { api: Api; projectId: string }) 
     api(`/projects/${projectId}/audit?${q}`).then(async (r) => {
       if (!r.ok) { setErr(`The history could not be read (${r.status}).`); return }
       const d = await r.json() as { events: Event[] }
-      setErr(''); setEvents((prev) => (before ? [...prev, ...d.events] : d.events))
+      setErr(''); const got = Array.isArray(d.events) ? d.events : []; setEvents((prev) => (before ? [...prev, ...got] : got))
     }).catch(() => setErr('The history could not be read.'))
   }, [api, projectId, action, actor])
   useEffect(() => load(), [load])
