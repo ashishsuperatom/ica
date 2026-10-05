@@ -472,14 +472,29 @@ Not the session's STATE: the core of decision intelligence, to be expanded later
   - **Ports from the registry** on `127.0.0.1` (project 1's data source manager at `127.0.0.1:4008`, …). Works everywhere
     without admin rights. *Recommended for that reason.*
 
-### A session is kept only once it is used (2026-10-05)
+### Views and sessions — one thread, two homes (design, 2026-10-05)
 
 **In the user's words:** "I just click on one of the agent, I'm not doing anything… are we actually creating a new
-session in the file system?" Opening an agent shows its starting view, but nothing is kept until the person does
-something in it — a change, a move, a question, going back to a step, recording a decision, making an agent from it.
-Until then its entries are held in the engine's memory (`deferringLog` in `@superatom/session`), written nowhere — not
-to the log, not to the platform, not in "Your sessions"; the first use writes them all, in order. An unused session
-simply goes. `session:keep` keeps one explicitly (the UI sends it before recording on an untouched step).
+session in the file system?" — "whenever I change a filter or do something and no new blocks are added, really there is
+no point in creating a new session, that will be a waste." — "Only if I ask a question, then only we create a new session
+because we are talking about the agent." — "I want to do it in such a way that it is not complicating it, like
+uniformity is there… a proper solution, a proper thinking behind it."
+
+- **One model:** a thread of steps; each step a STATE (small JSON: what the view looks at, its filters, breakdown,
+  window); the answer is derived from STATE by running the agent's programs. Same thread, frames and controls everywhere.
+- **Two homes:** a **view** (browsing) is kept by the browser — the address carries the current step's STATE, the
+  history holds the tree; the server writes nothing but one small usage event per action; coming back recomputes the
+  answer fresh (a dashboard shows today's numbers). A **session** (a conversation) is kept by the platform — the answer
+  history, unchangeable, branchable, the answers as shown.
+- **The engine is stateless for views:** the browser sends a step's STATE with the intent; the engine runs the same
+  session code on a throwaway in-memory session and returns the new STATE and answer — one code path, writing nothing.
+- **Kept when it must be:** the first question to the agent, recording a decision, or making an agent from it. Then
+  the path browsed is written as the session's first steps (the engine recomputes their answers itself), and the question
+  follows. Filter changes and drill-downs never create a session.
+- **Without a session:** usage events (agent, view, control, when) to the platform's usage record — for defaults learned
+  from usage and for the decision memory's sense of common paths; learned paths for a view come from a stateless
+  "recognise this STATE" call.
+- **Replaces** the held-in-memory interim (deferringLog, 2026-10-05), which kept a session at its first filter change.
 
 ### Connectors — the framework (built 2026-10-05)
 
