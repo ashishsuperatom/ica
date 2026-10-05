@@ -32,7 +32,8 @@ export function WarehousePanel({ api, projects }: { api: Api; projects: { id: st
     setError(''); setState({ configured: !!j.configured, tables: j.tables ?? [], ops: j.ops ?? [] })
   }, [api])
   useEffect(() => { void load() }, [load])
-  if (!state) return <Empty icon="lucide:loader">Reading the warehouse…</Empty>
+  // While it is read, the tables and the record are already in their places, as loading rows.
+  if (!state) return <div className="sa-stack sa-stack--4"><Tables tables={null} /><Operations ops={null} /></div>
   return (
     <div className="sa-stack sa-stack--4">
       {error && <Notice state="critical">{error}</Notice>}
@@ -49,9 +50,9 @@ export function WarehousePanel({ api, projects }: { api: Api; projects: { id: st
   )
 }
 
-function Tables({ tables }: { tables: Table[] }) {
+function Tables({ tables }: { tables: Table[] | null }) {
   const [open, setOpen] = useState<string | null>(null)
-  const t = tables.find((x) => x.name === open)
+  const t = tables?.find((x) => x.name === open)
   return (<>
     <Section icon="lucide:database" title="Tables" subtitle="One warehouse for the organisation; each project reads only what it is granted.">
       <RecordList rows={tables} keyOf={(x) => x.name} onRow={(x) => setOpen(x.name === open ? null : x.name)} empty="No tables yet."
@@ -210,7 +211,7 @@ function Grants({ api, tables, projects }: { api: Api; tables: Table[]; projects
   )
 }
 
-function Operations({ ops }: { ops: Op[] }) {
+function Operations({ ops }: { ops: Op[] | null }) {
   return (
     <Section icon="lucide:history" title="What was done" subtitle="Tables made, rows added, questions asked — newest first.">
       <RecordList rows={ops} keyOf={(o) => String(o.seq)} empty="Nothing yet."

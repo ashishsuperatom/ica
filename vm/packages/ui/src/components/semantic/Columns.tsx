@@ -22,6 +22,8 @@ export interface ColumnSpec {
   /** Make a new thing of this kind. */
   onNew?: () => void
   empty?: string
+  /** Its things are on their way: rows of their size are drawn, never an empty column that then fills. */
+  loading?: boolean
 }
 
 function Picker({ attach, onClose }: { attach: NonNullable<ColumnSpec['attach']>; onClose: () => void }) {
@@ -64,7 +66,9 @@ function Column({ col }: { col: ColumnSpec }) {
       </header>
       {col.caption && <div className="sa-col__caption">{col.caption}</div>}
       <div className="sa-col__body">
-        {list.map((it) => (
+        {col.loading && Array.from({ length: 8 }, (_, i) => (
+          <div key={`l${i}`} className="sa-col__item" aria-hidden><span className="sa-col__main"><span className="sa-skeleton" style={{ width: `${50 + ((i * 17) % 40)}%`, height: 12 }} /><span className="sa-skeleton" style={{ width: '80%', height: 9, marginTop: 6 }} /></span></div>))}
+        {!col.loading && list.map((it) => (
           <div key={it.key} className="sa-col__item" data-selected={col.selected === it.key}>
             <button className="sa-col__main" onClick={() => col.onSelect(it.key)} title={it.line || it.title}>
               <span className="sa-col__title">{it.title}{it.tag && <span className="sa-col__tag">{it.tag}</span>}</span>
@@ -73,7 +77,7 @@ function Column({ col }: { col: ColumnSpec }) {
             {col.onDetach && <button className="sa-icon-btn sa-col__detach" title={col.detachLabel ?? 'Detach'} aria-label={`${col.detachLabel ?? 'Detach'} ${it.title}`} onClick={() => col.onDetach!(it.key)}><Icon icon="lucide:unlink" /></button>}
           </div>
         ))}
-        {!col.items.length && <p className="sa-col__empty">{col.empty ?? 'Nothing here.'}</p>}
+        {!col.loading && !col.items.length && <p className="sa-col__empty">{col.empty ?? 'Nothing here.'}</p>}
       </div>
     </section>
   )

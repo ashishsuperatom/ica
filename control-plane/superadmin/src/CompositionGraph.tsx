@@ -54,9 +54,15 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   useEffect(() => { if (hub.status === 'live') void load() }, [hub.status, load])
 
   const by = useMemo(() => new Map([...(graph?.domains ?? []), ...(graph?.intermediate ?? []), ...(graph?.atomic ?? [])].map((n) => [n.name, n])), [graph])
-  if (hub.status !== 'live') return <Empty>{hub.status === 'connecting' ? 'Connecting to the project…' : 'The project is not connected. Retrying.'}</Empty>
   if (err) return <Notice state="critical">{err}</Notice>
-  if (!graph) return <Empty>Reading the graph…</Empty>
+  // Until the graph is read, the page is already its shape: the search, three columns of loading rows, the detail's place.
+  if (!graph) return (
+    <div className="sa-graphpage">
+      <ColumnsSearch value="" onChange={() => {}} placeholder="Search domains and concepts — titles and what they say" />
+      <Columns columns={[['domains', 'Domains', 'lucide:bot'], ['intermediate', 'Intermediate concepts', 'lucide:layers'], ['atomic', 'Atomic concepts', 'lucide:atom']].map(([key, title, icon]) => ({ key, title, icon, items: [], onSelect: () => {}, loading: true }))}
+        detail={<div className="sa-graphpage__hint"><Icon icon="lucide:loader" /><p>{hub.status === 'live' ? 'Reading the graph…' : hub.status === 'connecting' ? 'Connecting to the project…' : 'The project is not connected. Retrying.'}</p></div>} />
+    </div>
+  )
 
   const d = graph.domains.find((x) => x.name === dom) ?? null
   const m = graph.intermediate.find((x) => x.name === mid) ?? null
