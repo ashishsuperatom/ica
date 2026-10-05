@@ -10,16 +10,19 @@
 //   files · db · logs   the agents' directories, the raw table inventory, the engine's log channel
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react'
-import { Section as Panel, RecordList, Receipt, Status, Empty, Notice, Code, Figures, Kpi, Tabs, Toolbar, Icon, Columns, Dialog, Form, Field, notify, type StatusState } from '@superatom/ui'
+import { Section as Panel, RecordList, Receipt, Status, Empty, Notice, Code, Figures, Kpi, Tabs, Toolbar, Icon, type StatusState } from '@superatom/ui'
 import type { Hub } from './hub'
 
 export type Section =
-  | 'summary' | 'composition' | 'grounding' | 'index' | 'files' | 'db' | 'logs'
+  | 'summary' | 'composition' | 'changes' | 'questions' | 'sessions' | 'grounding' | 'index' | 'files' | 'db' | 'logs'
 
 // Grouped so the views read as a few coherent buckets, not one flat list.
 export const SECTIONS: { id: Section; label: string; group?: string }[] = [
   { id: 'summary',   label: 'Summary' },
   { id: 'composition', label: 'Composition graph', group: 'Knowledge' },
+  { id: 'changes',   label: 'Graph changes',    group: 'Knowledge' },
+  { id: 'questions', label: 'Questions',        group: 'Knowledge' },
+  { id: 'sessions',  label: 'Sessions',         group: 'Knowledge' },
   { id: 'grounding', label: 'Grounding',        group: 'Knowledge' },
   { id: 'index',     label: 'Datasource index', group: 'Knowledge' },
   { id: 'files',     label: 'Files',            group: 'Storage' },
@@ -102,7 +105,8 @@ export function Inspector({ hub, section }: { hub: Hub; section: Section }) {
   // A link to a section that no longer exists lands on the summary rather than a blank page.
   const Body = ({
     summary: SummaryView,
-    grounding: GroundingView, index: IndexView, files: FilesView, db: DbView, logs: LogsView, composition: CompositionView,
+    grounding: GroundingView, index: IndexView, files: FilesView, db: DbView, logs: LogsView,
+    changes: (p: ViewProps) => <CompositionPart {...p} part="changes" />, questions: (p: ViewProps) => <CompositionPart {...p} part="questions" />, sessions: (p: ViewProps) => <CompositionPart {...p} part="sessions" />,
   } as Record<string, (p: ViewProps) => ReactElement>)[section] ?? SummaryView
 
   return (
@@ -208,112 +212,28 @@ const isoOf = (local: string) => (local ? new Date(local).toISOString() : undefi
 const HashMove = ({ from, to }: { from?: string | null; to?: string | null }) =>
   <span className="sa-row sa-row--tight"><Code>{short(from, 7)}</Code><Icon icon="lucide:arrow-right" /><Code>{to ? short(to, 7) : 'removed'}</Code></span>
 
-function CompositionView({ hub }: ViewProps) {
+/** The graph's history, its questions and its sessions — each a place of its own (the graph itself is its own page). */
+function CompositionPart({ hub, part }: ViewProps & { part: 'changes' | 'questions' | 'sessions' }) {
   const { data, err, loading, reload } = useInspect(hub, 'composition', {}, 'composition')
-  const [tab, setTab] = useState<string | null>(null)
   const [pick, setPick] = useState<CompPick | null>(null)
   if (err) return <Err msg={err} retry={reload} />
   if (!data) return <Loading on={loading} />
   if (data.exists === false) return <Notice>This project has no composition graph yet. Import one with <Code>composition-graph import knowledge/index.mts</Code>.</Notice>
   const domains: any[] = data.domains ?? []
-  const questionsCount = domains.reduce((n, d) => n + (d.asked?.length ?? 0), 0)
-  const tabs = [
-    { key: 'graph', label: 'Graph', icon: 'lucide:columns-3', count: data.counts ? data.counts.domain + data.counts.concept : undefined },
-    ...domains.map(d => ({ key: `agent:${d.name}`, label: d.name, icon: 'lucide:bot', count: d.asked?.length ?? 0 })),
-    { key: 'changes', label: 'Changes', icon: 'lucide:git-commit-horizontal', count: data.changes?.length ?? 0 },
-    { key: 'questions', label: 'Questions', icon: 'lucide:message-circle-question', count: questionsCount },
-    { key: 'sessions', label: 'Sessions', icon: 'lucide:messages-square', count: data.sessions?.length ?? 0 },
-  ]
-  const current = tab && tabs.some(t => t.key === tab) ? tab : tabs[0].key
-  const go = (p: CompPick) => setPick(p)
-  const agentName = current.startsWith('agent:') ? current.slice('agent:'.length) : null
-  return (
+  if (pick) return (
     <div className="sa-stack sa-stack--4">
-      <div className="sa-row">
-        <div className="sa-grow"><Tabs label="Composition graph" items={tabs} value={current} onChange={k => { setTab(k); setPick(null) }} /></div>
-        <Refresh onClick={reload} />
-      </div>
-      {pick ? <>
-        <div><button className="sa-btn sa-btn--link" onClick={() => setPick(null)}><Icon icon="lucide:chevron-left" className="sa-btn__icon" />Back to {tabs.find(t => t.key === current)?.label}</button></div>
-        {pick.kind === 'node' && <CompNode hub={hub} name={pick.name} />}
-        {pick.kind === 'prompt' && <CompPrompt hub={hub} domain={pick.domain} />}
-      </> : <>
-        {current === 'graph' && <CompColumns hub={hub} go={go} onChanged={reload} />}
-        {agentName !== null && <CompAgent d={domains.find(x => x.name === agentName)} go={go} />}
-        {current === 'changes' && <CompChanges changes={data.changes ?? []} go={go} />}
-        {current === 'questions' && <CompQuestions domains={domains} />}
-        {current === 'sessions' && <CompSessions sessions={data.sessions ?? []} />}
-      </>}
+      <div><button className="sa-btn sa-btn--link" onClick={() => setPick(null)}><Icon icon="lucide:chevron-left" className="sa-btn__icon" />Back</button></div>
+      {pick.kind === 'node' && <CompNode hub={hub} name={pick.name} />}
+      {pick.kind === 'prompt' && <CompPrompt hub={hub} domain={pick.domain} />}
     </div>
   )
-}
-
-/** The graph as three columns — domains, intermediate concepts, atomic concepts. Selecting one puts what it composes
- *  first in the next column, then the rest; a thing from the rest is attached to the one selected, a linked one detached. */
-function CompColumns({ hub, go, onChanged }: { hub: Hub; go: (p: CompPick) => void; onChanged: () => void }) {
-  const { data, err, loading, reload } = useInspect(hub, 'compositionColumns', {}, 'ccolumns')
-  const [dom, setDom] = useState<string | null>(null)
-  const [mid, setMid] = useState<string | null>(null)
-  const [atom, setAtom] = useState<string | null>(null)
-  const [making, setMaking] = useState<null | 'intermediate' | 'atomic'>(null)
-  const [busy, setBusy] = useState(false)
-  if (err) return <Err msg={err} retry={reload} />
-  if (!data) return <Loading on={loading} />
-  type N = { name: string; title: string; line: string; concepts: string[]; composed?: boolean }
-  const domains: N[] = data.domains ?? [], mids: N[] = data.intermediate ?? [], atoms: N[] = data.atomic ?? []
-  const d = domains.find(x => x.name === dom) ?? null
-  const m = mids.find(x => x.name === mid) ?? null
-  // A domain written before intermediate concepts existed composes atomic ones directly: they show with it, marked.
-  const direct = d ? atoms.filter(a => d.concepts.includes(a.name)) : []
-  const change = async (t: 'graph:join' | 'graph:leave', into: string, concept: string) => {
-    setBusy(true)
-    const r = await hub.call({ t, into, concept, reason: `${t === 'graph:join' ? 'attached' : 'detached'} in the console` }).catch((e) => ({ reason: String(e?.message ?? e) }))
-    setBusy(false)
-    if (r?.t !== 'graph:reply') { notify(r?.reason ?? 'The graph did not change', 'refused'); return }
-    reload(); onChanged()
-  }
-  const item = (n: N, tag?: string) => ({ key: n.name, title: n.title || n.name, line: n.line || (n.concepts.length ? `${n.concepts.length} concept${n.concepts.length === 1 ? '' : 's'}` : undefined), tag })
   return (
-    <>
-      {busy && <Notice>Changing the graph…</Notice>}
-      <Columns columns={[
-        { key: 'domains', title: 'Domains', icon: 'lucide:bot', items: domains.map(n => item(n)), selected: dom, onSelect: (k) => { setDom(k); setMid(null); setAtom(null) },
-          onOpen: (k) => go({ kind: 'prompt', domain: k }), empty: 'No domains yet.' },
-        { key: 'intermediate', title: 'Intermediate concepts', icon: 'lucide:layers', items: [...mids.map(n => item(n)), ...direct.map(n => item(n, 'atomic'))],
-          selected: mid, onSelect: (k) => { setMid(k); setAtom(null) }, onOpen: (k) => go({ kind: 'node', name: k }),
-          ...(d ? { linked: d.concepts, linkedTo: d.title || d.name, onAttach: (k: string) => void change('graph:join', d.name, k), onDetach: (k: string) => void change('graph:leave', d.name, k) } : {}),
-          action: <button className="sa-btn sa-btn--link" onClick={() => setMaking('intermediate')}><Icon icon="lucide:plus" className="sa-btn__icon" />New</button>,
-          empty: 'No intermediate concepts yet — make one to combine atomic concepts.' },
-        { key: 'atomic', title: 'Atomic concepts', icon: 'lucide:atom', items: atoms.map(n => item(n)), selected: atom, onSelect: setAtom, onOpen: (k) => go({ kind: 'node', name: k }),
-          ...(m ? { linked: m.concepts, linkedTo: m.title || m.name, onAttach: (k: string) => void change('graph:join', m.name, k), onDetach: (k: string) => void change('graph:leave', m.name, k) } : {}),
-          action: <button className="sa-btn sa-btn--link" onClick={() => setMaking('atomic')}><Icon icon="lucide:plus" className="sa-btn__icon" />New</button>,
-          empty: 'No atomic concepts yet.' },
-      ]} />
-      {making && <NewConcept hub={hub} kind={making} attachTo={making === 'intermediate' ? d?.name ?? null : m?.name ?? null}
-        onClose={() => setMaking(null)} onMade={() => { setMaking(null); reload(); onChanged() }} />}
-    </>
-  )
-}
-
-/** Make a concept — atomic (its text) or intermediate (a line of its own; atomic ones are attached after) — and attach it
- *  to what is selected on the left, if anything. */
-function NewConcept({ hub, kind, attachTo, onClose, onMade }: { hub: Hub; kind: 'intermediate' | 'atomic'; attachTo: string | null; onClose: () => void; onMade: () => void }) {
-  const [title, setTitle] = useState(''), [text, setText] = useState(''), [err, setErr] = useState('')
-  const name = title.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-  const make = async () => {
-    const body = kind === 'intermediate' ? { title: title.trim(), form: 'composed', ...(text.trim() ? { text: text.trim() } : {}), concepts: [] } : { title: title.trim(), form: 'text', text: text.trim() }
-    const r = await hub.call({ t: 'graph:concept', name, body, reason: 'made in the console' }).catch((e) => ({ reason: String(e?.message ?? e) }))
-    if (r?.t !== 'graph:reply') { setErr(r?.reason ?? 'It was not made'); return }
-    if (attachTo) { const j = await hub.call({ t: 'graph:join', into: attachTo, concept: name }).catch((e) => ({ reason: String(e?.message ?? e) })); if (j?.t !== 'graph:reply') notify(`Made, but not attached: ${j?.reason ?? ''}`, 'refused') }
-    notify(`Made ${title.trim()}`, 'note'); onMade()
-  }
-  return (
-    <Dialog title={kind === 'intermediate' ? 'New intermediate concept' : 'New atomic concept'} onClose={onClose}>
-      <Form onSubmit={() => void make()} error={err} actions={<><button type="button" className="sa-btn" onClick={onClose}>Cancel</button><button className="sa-btn sa-btn--primary" disabled={!name || (kind === 'atomic' && !text.trim())}>Make{attachTo ? ` and attach to ${attachTo}` : ''}</button></>}>
-        <Field label="Title" help={name ? <>Named <Code>{name}</Code></> : undefined}><input id="nc-title" className="sa-input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder={kind === 'intermediate' ? 'Project health' : 'RAG status'} /></Field>
-        <Field label={kind === 'intermediate' ? 'A line of its own (optional)' : 'What the agent should know'}><textarea id="nc-text" className="sa-input" rows={kind === 'intermediate' ? 2 : 6} value={text} onChange={(e) => setText(e.target.value)} /></Field>
-      </Form>
-    </Dialog>
+    <div className="sa-stack sa-stack--4">
+      <div className="sa-row"><div className="sa-grow" /><Refresh onClick={reload} /></div>
+      {part === 'changes' && <CompChanges changes={data.changes ?? []} go={setPick} />}
+      {part === 'questions' && <CompQuestions domains={domains} />}
+      {part === 'sessions' && <CompSessions sessions={data.sessions ?? []} />}
+    </div>
   )
 }
 

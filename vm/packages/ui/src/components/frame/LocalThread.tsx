@@ -35,6 +35,9 @@ export interface BlockDef {
   /** The block's title from its props (else its label). */
   title?: (props: Record<string, unknown>) => string
   subtitle?: (props: Record<string, unknown>) => string | undefined
+  /** A PAGE, not a block: something that needs the whole page to be seen (a graph to walk) is a thread on its own —
+   *  started from the sidebar, drawn full width without a frame, with nothing opened below it. */
+  page?: boolean
   render: (api: BlockApi) => ReactNode
 }
 export type Registry = Record<string, BlockDef>
@@ -133,6 +136,12 @@ export default function LocalThread({ blocks, home, empty: emptyView, after, onR
   }, [commit])
 
   const path = useMemo(() => activePath(tree), [tree])
+  const rootDef = path[0] ? blocks[path[0].type] : undefined
+  if (path[0] && rootDef?.page) {
+    const b = path[0]
+    const api: BlockApi = { id: b.id, props: b.props, open: () => {}, update: (props) => update(b.id, props), start }
+    return <div className="sa-fullpage"><BlockContext.Provider value={api}>{rootDef.render(api)}</BlockContext.Provider></div>
+  }
   const items: StepItem[] = path.map((b, i) => {
     const def = blocks[b.type]
     const parent = b.parent ? tree.nodes[b.parent] : null

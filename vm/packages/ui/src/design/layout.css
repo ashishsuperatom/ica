@@ -247,3 +247,6 @@
 .sa-crumbs__choice-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sa-crumbs__hint { color: var(--faint); font-size: var(--t-xs); padding: var(--sp-1) var(--sp-2); }
 @media (max-width: 767px) { .sa-app__crumbs { padding: 0 var(--sp-4); } .sa-crumbs__step:not([data-current='true']):not(:nth-last-child(2)) { display: none; } }
+
+/* A page step: the whole page, no frame — its own content decides its layout. */
+.sa-fullpage { height: 100%; min-height: 0; display: flex; flex-direction: column; padding: var(--sp-4) var(--sp-5); }

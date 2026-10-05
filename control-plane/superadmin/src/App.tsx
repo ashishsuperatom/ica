@@ -8,6 +8,7 @@ import { AccessPoliciesPanel } from './AccessPolicies'
 import { GroupsPanel } from './Groups'
 import { WarehousePanel } from './Warehouse'
 import { OrgPeoplePanel, OrgKeysPanel, ProjectAccessPanel } from './People'
+import { CompositionGraph } from './CompositionGraph'
 import { UsagePanel } from './Usage'
 import { useProjectHub } from './hub'
 import { Inspector, SECTIONS, SECTION_LABEL, type Section } from './Inspector'
@@ -324,14 +325,26 @@ function ScreenBlock() {
   return (
     <ShellMode.Provider value="block">
       <MemoryRouter initialEntries={[path]}>
-        <MoveWatcher home={path} onMove={(to) => open('screen', { path: to }, `Opened ${titleOf(to).title}`)} />
+        <MoveWatcher home={path} onMove={(to) => { const g = graphOf(to); if (g) startThread('graph', { projectId: g }); else open('screen', { path: to }, `Opened ${titleOf(to).title}`) }} />
         <AdminRoutes />
       </MemoryRouter>
     </ShellMode.Provider>
   )
 }
 
+/** The composition graph is a page of its own (a graph needs the whole page), not a block of the thread. */
+const graphOf = (path: string): string | null => /^\/(?:org\/[^/]+\/projects|pro)\/([^/?]+)\/inspector\/composition\/?(?:\?.*)?$/.exec(path)?.[1] ?? null
+function GraphPage() {
+  const { props } = useThread()
+  const env = useContext(AdminContext)
+  const report = useContext(ScopeReport)
+  const pid = String(props.projectId)
+  useEffect(() => { report(`/pro/${pid}/inspector/composition`) }, [pid, report])
+  return <CompositionGraph projectId={pid} token={env?.token ?? null} />
+}
+
 const ADMIN_BLOCKS: Registry = {
+  graph: { label: 'Composition graph', page: true, title: () => 'Composition graph', render: () => <GraphPage /> },
   screen: {
     label: 'Console', render: () => <ScreenBlock />,
     title: (p) => titleOf(String(p.path ?? '/')).title,
@@ -344,7 +357,10 @@ function purposesOf(pid: string) {
   const P = (v: string) => `/pro/${pid}${v ? `/${v}` : ''}`
   return [
     { key: 'knowledge', title: 'Knowledge', icon: 'lucide:library', says: 'What the agents know, versioned and governed.', places: [
-      { label: 'Composition graph', icon: 'lucide:network', path: P('inspector/composition'), says: 'Domains, concepts, agents — every change kept, suggestions decided.' },
+      { label: 'Composition graph', icon: 'lucide:network', path: P('inspector/composition'), says: 'Domains, intermediate and atomic concepts — walk, change and compose them.' },
+      { label: 'Graph changes', icon: 'lucide:git-commit-horizontal', path: P('inspector/changes'), says: 'Every edit to the graph: which node, by whom, why.' },
+      { label: 'Questions', icon: 'lucide:message-circle-question', path: P('inspector/questions'), says: 'Every question and the agent it went to.' },
+      { label: 'Sessions', icon: 'lucide:messages-square', path: P('inspector/sessions'), says: 'Each chat made from the graph, and what changed since.' },
       { label: 'Summary', icon: 'lucide:scan-search', path: P('inspector/summary'), says: 'What the engine holds, at a glance.' }] },
     { key: 'data', title: 'Data', icon: 'lucide:database', says: 'Where the data comes from and how it is found.', places: [
       { label: 'Data index', icon: 'lucide:table-properties', path: P('index'), says: 'Every source, its tables and fields.' },
@@ -377,8 +393,8 @@ function purposesOf(pid: string) {
 
 function AdminWorkspace() {
   // Where the address points (an org, a project and its view, the platform pages) is the block the thread starts from.
-  const first = useMemo(() => { const p = location.pathname.slice(ROUTER_BASE.length).replace(/^\/w(?=\/|$)/, '') || '/'; return { type: 'screen', props: { path: p + location.search.replace(/[?&]classic(=[^&]*)?/, '') } } }, [])
-  const go = (path: string) => startThread('screen', { path })
+  const first = useMemo(() => { const p = location.pathname.slice(ROUTER_BASE.length).replace(/^\/w(?=\/|$)/, '') || '/'; const g = graphOf(p); return g ? { type: 'graph', props: { projectId: g, path: p } } : { type: 'screen', props: { path: p + location.search.replace(/[?&]classic(=[^&]*)?/, '') } } }, [])
+  const go = (path: string) => { const g = graphOf(path); if (g) startThread('graph', { projectId: g }); else startThread('screen', { path }) }
   const token = useAuth()
   const api = useApi(token, null)
   const [scope, setScope] = useState<{ org?: string; project?: string }>(() => scopeOf(String(first.props.path)))
@@ -455,7 +471,7 @@ function AdminWorkspace() {
       )}>
         <AdminContext.Provider value={env}>
           <ScopeReport.Provider value={report}>
-            <LocalThread blocks={{ ...ADMIN_BLOCKS, ...ADMIN_OWN_BLOCKS }} home={first} address={(b) => (b.type === 'screen' ? `${ROUTER_BASE}${String(b.props.path ?? '/')}` : null)} />
+            <LocalThread blocks={{ ...ADMIN_BLOCKS, ...ADMIN_OWN_BLOCKS }} home={first} address={(b) => (b.type === 'screen' ? `${ROUTER_BASE}${String(b.props.path ?? '/')}` : b.type === 'graph' ? `${ROUTER_BASE}/pro/${String(b.props.projectId)}/inspector/composition` : null)} />
           </ScopeReport.Provider>
         </AdminContext.Provider>
       </AppShell>
