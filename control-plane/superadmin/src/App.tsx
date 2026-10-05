@@ -343,28 +343,28 @@ function purposesOf(pid: string) {
   const P = (v: string) => `/pro/${pid}${v ? `/${v}` : ''}`
   return [
     { key: 'knowledge', title: 'Knowledge', icon: 'lucide:library', says: 'What the agents know, versioned and governed.', places: [
-      { label: 'Composition graph', path: P('inspector/composition'), says: 'Domains, concepts, agents — every change kept, suggestions decided.' }] },
+      { label: 'Composition graph', icon: 'lucide:network', path: P('inspector/composition'), says: 'Domains, concepts, agents — every change kept, suggestions decided.' }] },
     { key: 'data', title: 'Data', icon: 'lucide:database', says: 'Where the data comes from and how it is found.', places: [
-      { label: 'Data index', path: P('index'), says: 'Every source, its tables and fields.' },
-      { label: 'Grounding', path: P('inspector/grounding'), says: 'Names people use, matched to the records they mean.' }] },
+      { label: 'Data index', icon: 'lucide:table-properties', path: P('index'), says: 'Every source, its tables and fields.' },
+      { label: 'Grounding', icon: 'lucide:anchor', path: P('inspector/grounding'), says: 'Names people use, matched to the records they mean.' }] },
     { key: 'agents', title: 'Agents at work', icon: 'lucide:bot', says: 'Which model each agent runs on, and the agents\' consoles.', places: [
-      { label: 'Agents and models', path: P('agents'), says: 'The harness, account and model each agent runs.' },
-      { label: 'Connector', path: P('agent'), says: 'Connect a data source with the connector agent.' },
-      { label: 'Analyst', path: P('analyst'), says: 'Explore the data with the analyst.' },
-      { label: 'Grounding agent', path: P('grounding'), says: 'Build the grounding.' }] },
+      { label: 'Agents and models', icon: 'lucide:cpu', path: P('agents'), says: 'The harness, account and model each agent runs.' },
+      { label: 'Connector', icon: 'lucide:plug', path: P('agent'), says: 'Connect a data source with the connector agent.' },
+      { label: 'Analyst', icon: 'lucide:search', path: P('analyst'), says: 'Explore the data with the analyst.' },
+      { label: 'Grounding agent', icon: 'lucide:bot', path: P('grounding'), says: 'Build the grounding.' }] },
     { key: 'people', title: 'People and access', icon: 'lucide:users', says: 'Who may do what, and see which data.', places: [
-      { label: 'Who has access', path: P('access'), says: 'Members of the project and their roles.' },
-      { label: 'Groups', path: P('groups'), says: 'Groups, their members and budgets.' },
-      { label: 'Data access', path: P('data-access'), says: 'Rows, columns and denials per person, role, group or key.' },
-      { label: 'Agent keys', path: P('agent-keys'), says: 'Keys agents and scripts use, and their scopes.' }] },
+      { label: 'Who has access', icon: 'lucide:users', path: P('access'), says: 'Members of the project and their roles.' },
+      { label: 'Groups', icon: 'lucide:users-round', path: P('groups'), says: 'Groups, their members and budgets.' },
+      { label: 'Data access', icon: 'lucide:shield-check', path: P('data-access'), says: 'Rows, columns and denials per person, role, group or key.' },
+      { label: 'Agent keys', icon: 'lucide:key-round', path: P('agent-keys'), says: 'Keys agents and scripts use, and their scopes.' }] },
     { key: 'operations', title: 'Operations', icon: 'lucide:settings-2', says: 'The engine, what happened, and settings.', places: [
-      { label: 'Overview', path: P(''), says: 'The engine: compute, state, connections.' },
-      { label: 'Event log', path: P('events'), says: 'What the project did.' },
-      { label: 'Audit history', path: P('audit'), says: 'Who did what, and how it ended.' },
-      { label: 'Dashboards', path: P('dashboards'), says: 'Published dashboards and their builds.' },
-      { label: 'Subdomains', path: P('subdomains'), says: 'The project\'s addresses.' },
-      { label: 'Channels', path: P('channels'), says: 'Teams and other channels.' },
-      { label: 'Settings', path: P('settings'), says: 'Keys, the agent profile, the danger zone.' }] },
+      { label: 'Overview', icon: 'lucide:gauge', path: P(''), says: 'The engine: compute, state, connections.' },
+      { label: 'Event log', icon: 'lucide:list', path: P('events'), says: 'What the project did.' },
+      { label: 'Audit history', icon: 'lucide:history', path: P('audit'), says: 'Who did what, and how it ended.' },
+      { label: 'Dashboards', icon: 'lucide:layout-dashboard', path: P('dashboards'), says: 'Published dashboards and their builds.' },
+      { label: 'Subdomains', icon: 'lucide:globe', path: P('subdomains'), says: 'The project\'s addresses.' },
+      { label: 'Channels', icon: 'lucide:message-square', path: P('channels'), says: 'Teams and other channels.' },
+      { label: 'Settings', icon: 'lucide:settings-2', path: P('settings'), says: 'Keys, the agent profile, the danger zone.' }] },
   ]
 }
 
@@ -377,16 +377,26 @@ function AdminWorkspace() {
   const [scope, setScope] = useState<{ org?: string; project?: string }>(() => scopeOf(String(first.props.path)))
   const report = useCallback((path: string) => { const s = scopeOf(path); if (s.project || s.org) setScope((cur) => ({ ...cur, ...s, ...(s.org && !s.project && s.org !== cur.org ? { project: undefined } : {}) })) }, [])
   const env = useMemo(() => ({ api, token, superadmin: HOST_SCOPE === 'superadmin', openScreen: go }), [api, token])
-  // THE PLACES, BY PURPOSE, for the scope in view: what needs a decision first, then the work in the order it happens.
+  // Every project, by name (the platform's view lists them all; an organisation's console reaches its own through it).
+  const [projects, setProjects] = useState<{ projectId: string; project: string; org: string; orgId: string; running: boolean | null }[]>([])
+  useEffect(() => { if (!token || HOST_SCOPE !== 'superadmin') return; void api('/profiles').then((r) => (r.ok ? r.json() : null)).then((d: any) => setProjects(Array.isArray(d?.projects) ? d.projects : [])).catch(() => {}) }, [token, api])
+  const inScope = projects.find((p) => p.projectId === scope.project)
+  const orgName = projects.find((p) => p.orgId === scope.org)?.org ?? inScope?.org
+  // THE PLACES, BY PURPOSE, for the scope in view: what needs a decision first, then every place of the project laid out
+  // by purpose — nothing behind an extra click.
   const groups = [
-    ...(scope.project ? [{ label: `Project ${scope.project.slice(0, 8)}`, items: [
-      { key: 'p-attention', label: 'Attention', icon: 'lucide:bell', onClick: () => startThread('attention', { projectId: scope.project }) },
-      ...purposesOf(scope.project).map((p) => ({ key: `p-${p.key}`, label: p.title, icon: p.icon, onClick: () => startThread('purpose', { title: p.title, says: p.says, places: p.places }) })),
-    ] }] : []),
-    ...(scope.org ? [{ label: `Organisation ${scope.org.slice(0, 8)}`, items: [
+    ...(scope.project ? [
+      { label: inScope?.project ?? `Project ${scope.project.slice(0, 8)}`, items: [
+        { key: 'p-attention', label: 'Attention', icon: 'lucide:bell', onClick: () => startThread('attention', { projectId: scope.project }) },
+      ] },
+      ...purposesOf(scope.project).map((p) => ({ label: p.title, items: p.places.map((pl) => ({ key: `p-${pl.path}`, label: pl.label, icon: (pl as any).icon ?? p.icon, title: pl.says, onClick: () => go(pl.path) })) })),
+    ] : []),
+    ...(scope.org ? [{ label: orgName ?? `Organisation ${scope.org.slice(0, 8)}`, items: [
       { key: 'o-projects', label: 'Projects', icon: 'lucide:folder-kanban', onClick: () => go(`/org/${scope.org}`) },
       { key: 'o-members', label: 'Members', icon: 'lucide:users', onClick: () => go(`/org/${scope.org}?tab=users`) },
       { key: 'o-usage', label: 'Usage and credits', icon: 'lucide:gauge', onClick: () => go(`/org/${scope.org}?tab=usage`) },
+      { key: 'o-warehouse', label: 'Warehouse', icon: 'lucide:database', onClick: () => go(`/org/${scope.org}?tab=warehouse`) },
+      { key: 'o-settings', label: 'Settings', icon: 'lucide:settings-2', onClick: () => go(`/org/${scope.org}?tab=settings`) },
     ] }] : []),
     { label: HOST_SCOPE === 'superadmin' ? 'Platform' : 'Organisations', items: [
       ...(HOST_SCOPE === 'superadmin' ? [{ key: 'attention', label: 'Attention', icon: 'lucide:bell', onClick: () => startThread('attention', {}) }] : []),
@@ -396,6 +406,9 @@ function AdminWorkspace() {
         { key: 'agents', label: 'Models and agents', icon: 'lucide:cpu', onClick: () => go('/agents') },
       ] : []),
     ] },
+    ...(projects.length ? [{ label: 'Projects', items: projects.map((p) => ({ key: `pr-${p.projectId}`, label: p.project, title: `${p.org} · ${p.running ? 'its engine is running' : 'its engine has not reported'}`,
+      icon: p.running ? 'lucide:circle-dot' : 'lucide:circle-dashed', active: p.projectId === scope.project,
+      onClick: () => { setScope({ org: p.orgId, project: p.projectId }); go(`/pro/${p.projectId}`) } })) }] : []),
     { label: 'More', items: [{ key: 'classic', label: 'Classic console', icon: 'lucide:layout-template', onClick: () => { location.search = '?classic=1' } }] },
   ]
   return (
