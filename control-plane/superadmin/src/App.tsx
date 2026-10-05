@@ -16,7 +16,7 @@ import { AnalystConsole } from './AnalystConsole'
 import { useSession, SignIn, UserButton } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useSearchParams, MemoryRouter, useLocation } from 'react-router-dom'
 import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
-import { AppShell, Sidebar, LocalThread, Toasts, useThread, startThread, type Registry, Section as SectionCard, Kpi, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
+import { AppShell, Sidebar, LocalThread, Toasts, useThread, startThread, type Registry, Section as SectionCard, Kpi, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
 import '@superatom/ui/design.css'
 import { AdminContext, ADMIN_OWN_BLOCKS } from './AdminBlocks'
 
@@ -251,14 +251,10 @@ export function App() {
       </div></>
     )
   }
-  // THE ADMIN WORKSPACE is the console: every screen a block of a thread (AdminWorkspace below). The classic pages stay
-  // reachable with ?classic=1 while it settles.
-  if (!new URLSearchParams(location.search).has('classic')) return <AdminWorkspace />
-  return (
-    <BrowserRouter basename={ROUTER_BASE}>
-      <AdminRoutes />
-    </BrowserRouter>
-  )
+  // THE ADMIN WORKSPACE is the console: every screen a block of a thread (AdminWorkspace below). An old ?classic=1
+  // address lands here too — there is one console.
+  if (new URLSearchParams(location.search).has('classic')) history.replaceState(null, '', location.pathname)
+  return <AdminWorkspace />
 }
 
 /** The console's screens, by address — drawn as pages (classic) or one per block (the admin workspace). */
@@ -283,6 +279,10 @@ function AdminRoutes() {
 // of the console's screens (by its address, in a router of its own); when a screen moves somewhere — another tab,
 // another view, another project — that place opens as a new block below, and the block stays as it was. Every function
 // of the console is kept; only its structure is the platform's.
+/** Names of organisations and projects by id (the workspace fills it), so headers say "Fusion5", not an id. */
+const NAMES = new Map<string, string>()
+const named = (id: string, kind: string) => NAMES.get(id) ?? `${kind} ${id.slice(0, 8)}`
+const words = (s: string) => { const w = s.replace(/[-/]/g, ' ').trim(); return w ? w[0].toUpperCase() + w.slice(1) : w }
 const titleOf = (path: string): { title: string; label: string; icon: string } => {
   const [p, q] = path.split('?')
   const tab = new URLSearchParams(q ?? '').get('tab')
@@ -290,9 +290,9 @@ const titleOf = (path: string): { title: string; label: string; icon: string } =
   if (p === '/credentials') return { title: 'Credentials', label: 'Platform', icon: 'lucide:key-round' }
   if (p === '/agents') return { title: 'Models and agents', label: 'Platform', icon: 'lucide:cpu' }
   const proj = /^\/(?:org\/[^/]+\/projects|pro)\/([^/]+)\/?(.*)$/.exec(p)
-  if (proj) return { title: proj[2] ? proj[2].replace(/[-/]/g, ' ') : 'Overview', label: `Project ${proj[1].slice(0, 8)}`, icon: 'lucide:folder-kanban' }
+  if (proj) return { title: proj[2] ? words(proj[2]) : 'Overview', label: named(proj[1], 'Project'), icon: 'lucide:folder-kanban' }
   const org = /^\/org\/([^/]+)$/.exec(p)
-  if (org) return { title: tab ? tab : 'Projects', label: `Organisation ${org[1].slice(0, 8)}`, icon: 'lucide:building' }
+  if (org) return { title: tab ? words(tab) : 'Projects', label: named(org[1], 'Organisation'), icon: 'lucide:building' }
   return { title: p, label: 'Console', icon: 'lucide:square' }
 }
 
@@ -380,13 +380,20 @@ function AdminWorkspace() {
   // Every project, by name (the platform's view lists them all; an organisation's console reaches its own through it).
   const [projects, setProjects] = useState<{ projectId: string; project: string; org: string; orgId: string; running: boolean | null }[]>([])
   useEffect(() => { if (!token || HOST_SCOPE !== 'superadmin') return; void api('/profiles').then((r) => (r.ok ? r.json() : null)).then((d: any) => setProjects(Array.isArray(d?.projects) ? d.projects : [])).catch(() => {}) }, [token, api])
+  // The organisations' names (and the projects' when the platform lists them) for headers and the sidebar.
+  const [, setNamed] = useState(0)
+  useEffect(() => {
+    if (!token) return
+    void api('/organizations').then((r) => (r.ok ? r.json() : [])).then((os: any[]) => { for (const o of Array.isArray(os) ? os : []) NAMES.set(o.id, o.name); setNamed((n) => n + 1) }).catch(() => {})
+  }, [token, api])
+  useEffect(() => { for (const p of projects) { NAMES.set(p.projectId, p.project); NAMES.set(p.orgId, p.org) } setNamed((n) => n + 1) }, [projects])
   const inScope = projects.find((p) => p.projectId === scope.project)
-  const orgName = projects.find((p) => p.orgId === scope.org)?.org ?? inScope?.org
+  const orgName = scope.org ? NAMES.get(scope.org) ?? projects.find((p) => p.orgId === scope.org)?.org : undefined
   // THE PLACES, BY PURPOSE, for the scope in view: what needs a decision first, then every place of the project laid out
   // by purpose — nothing behind an extra click.
   const groups = [
     ...(scope.project ? [
-      { label: inScope?.project ?? `Project ${scope.project.slice(0, 8)}`, items: [
+      { label: inScope?.project ?? named(scope.project, 'Project'), items: [
         { key: 'p-attention', label: 'Attention', icon: 'lucide:bell', onClick: () => startThread('attention', { projectId: scope.project }) },
       ] },
       ...purposesOf(scope.project).map((p) => ({ label: p.title, items: p.places.map((pl) => ({ key: `p-${pl.path}`, label: pl.label, icon: (pl as any).icon ?? p.icon, title: pl.says, onClick: () => go(pl.path) })) })),
@@ -409,7 +416,6 @@ function AdminWorkspace() {
     ...(projects.length ? [{ label: 'Projects', items: projects.map((p) => ({ key: `pr-${p.projectId}`, label: p.project, title: `${p.org} · ${p.running ? 'its engine is running' : 'its engine has not reported'}`,
       icon: p.running ? 'lucide:circle-dot' : 'lucide:circle-dashed', active: p.projectId === scope.project,
       onClick: () => { setScope({ org: p.orgId, project: p.projectId }); go(`/pro/${p.projectId}`) } })) }] : []),
-    { label: 'More', items: [{ key: 'classic', label: 'Classic console', icon: 'lucide:layout-template', onClick: () => { location.search = '?classic=1' } }] },
   ]
   return (
     <>
@@ -516,42 +522,143 @@ function MyOrgLanding() {
   )
 }
 
+const ORG_ACCENTS: Accent[] = ['series-1', 'series-2', 'series-3', 'warn', 'win']
+type ProjectCard = { id: string; name: string; orgId: string; running: boolean | null }
+
+/** A project as a card: its name, whether its engine is running, and where it opens. */
+function ProjectCardButton({ p, onOpen }: { p: ProjectCard; onOpen: () => void }) {
+  const state: StatusState = p.running === null ? 'neutral' : p.running ? 'ok' : 'attention'
+  return (
+    <button type="button" className="sa-sub-card" onClick={onOpen} title={`Open ${p.name}`}>
+      <span className="sa-sub-card__title"><span className="sa-row sa-row--tight"><Icon icon="lucide:folder-kanban" />{p.name}</span></span>
+      <span className="sa-sub-card__text"><Status state={state}>{p.running === null ? 'engine not known' : p.running ? 'engine running' : 'engine has not reported'}</Status></span>
+    </button>
+  )
+}
+
 function OrgListPage() {
   const token = useAuth(); const api = useApi(token)
-  const [orgs, setOrgs] = useState<any[]>([]); const [showDeleted, setShowDeleted] = useState(false)
+  const [orgs, setOrgs] = useState<any[] | null>(null); const [showDeleted, setShowDeleted] = useState(false)
+  const [projects, setProjects] = useState<ProjectCard[]>([])
+  const [making, setMaking] = useState(false)
   const [draft, setDraft] = useState({ name: '', adminEmail: '' })
+  const [err, setErr] = useState('')
   const nav = useNavigate()
-  const fetchOrgs = useCallback(() => { if (token) api(`/organizations?deleted=${showDeleted ? '1' : '0'}`).then(r => r.json()).then(setOrgs).catch(() => {}) }, [token, api, showDeleted])
+  const fetchOrgs = useCallback(() => { if (token) api(`/organizations?deleted=${showDeleted ? '1' : '0'}`).then(r => r.json()).then((d) => setOrgs(Array.isArray(d) ? d : [])).catch(() => setOrgs([])) }, [token, api, showDeleted])
   useEffect(() => { fetchOrgs() }, [fetchOrgs])
-  // The first admin is created WITH the organisation: an org nobody can enter is not much use, and this is the
-  // only moment where forgetting is easy to do and annoying to notice.
-  async function create() { await api('/organizations', { method: 'POST', body: JSON.stringify({ name: draft.name, adminEmail: draft.adminEmail }) }); setDraft({ name: '', adminEmail: '' }); fetchOrgs() }
+  // Every organisation's projects, and whether each one's engine is running (the platform console sees them all at once;
+  // an organisation's console asks each of its organisations).
+  useEffect(() => {
+    if (!token || !orgs) return
+    let live = true
+    void (async () => {
+      const running = new Map<string, boolean>()
+      if (HOST_SCOPE === 'superadmin') {
+        const d: any = await api('/profiles').then((r) => (r.ok ? r.json() : null)).catch(() => null)
+        for (const p of d?.projects ?? []) running.set(p.projectId, !!p.running)
+      }
+      const all = await Promise.all(orgs.filter((o) => !o.deleted).map(async (o) => {
+        const r = await fetch('/api/projects?deleted=0', { headers: { authorization: `Bearer ${token}`, 'x-org-id': o.id } }).catch(() => null)
+        const list: any[] = r?.ok ? await r.json() : []
+        return list.filter((p) => !p.deleted).map((p): ProjectCard => ({ id: p.id, name: p.name, orgId: o.id, running: running.has(p.id) ? running.get(p.id)! : null }))
+      }))
+      if (live) setProjects(all.flat())
+    })()
+    return () => { live = false }
+  }, [token, api, orgs])
+  // What happened in the last 30 days: each project's model use by day (what the platform meters).
+  const [usage, setUsage] = useState<{ project: string; day: string; calls: number; tokens: number; credits: number }[] | null>(null)
+  useEffect(() => {
+    if (!token || !projects.length) return
+    let live = true
+    void Promise.all(projects.map(async (p) => {
+      const r = await fetch(`/api/projects/${p.id}/usage`, { headers: { authorization: `Bearer ${token}` } }).catch(() => null)
+      const d: any = r?.ok ? await r.json().catch(() => null) : null
+      return (d?.usage ?? []).map((u: any) => ({ project: p.id, day: String(u.day), calls: Number(u.calls) || 0, tokens: (Number(u.tokens_in) || 0) + (Number(u.tokens_out) || 0), credits: (Number(u.credits_micro) || 0) / 1e6 }))
+    })).then((rows) => { if (live) setUsage(rows.flat()) })
+    return () => { live = false }
+  }, [token, projects])
+  // The first admin is created WITH the organisation: an org nobody can enter is not much use.
+  async function create() {
+    setErr('')
+    const r = await api('/organizations', { method: 'POST', body: JSON.stringify({ name: draft.name, adminEmail: draft.adminEmail }) })
+    if (!r.ok) { setErr(((await r.json().catch(() => ({}))) as any).error ?? `It was not made (${r.status})`); return }
+    setDraft({ name: '', adminEmail: '' }); setMaking(false); fetchOrgs()
+  }
   // Deletion is NOT here — it lives on the org page's Danger zone (deliberate, type-to-confirm). Restore is safe.
   const restore = async (id: string) => { await api('/organizations', { method: 'PUT', body: JSON.stringify({ id }) }); fetchOrgs() }
+  const live = (orgs ?? []).filter((o) => !o.deleted), deleted = (orgs ?? []).filter((o) => o.deleted)
+  const days = Array.from({ length: 30 }, (_, i) => new Date(Date.now() - (29 - i) * 86_400_000).toISOString().slice(0, 10))
+  const orgOfProject = new Map(projects.map((p) => [p.id, p.orgId]))
+  const byDay: Record<string, Record<string, number>> = {}
+  for (const u of usage ?? []) { const o = orgOfProject.get(u.project) ?? '?'; (byDay[u.day] ??= {})[o] = (byDay[u.day]?.[o] ?? 0) + u.tokens }
+  const callsBy = new Map<string, number>(); for (const u of usage ?? []) callsBy.set(u.project, (callsBy.get(u.project) ?? 0) + u.calls)
+  const totals = (usage ?? []).reduce((t, u) => ({ calls: t.calls + u.calls, tokens: t.tokens + u.tokens, credits: t.credits + u.credits }), { calls: 0, tokens: 0, credits: 0 })
+  const compact = (v: number) => new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(v)
+  const runningCount = projects.filter((p) => p.running).length
+  const known = projects.filter((p) => p.running !== null).length
 
   return (
     <Shell>
-      <PageHeader title="Organisations" subtitle="Every organisation on the platform. Open one to manage its projects and people." />
-      {/* Creating organisations belongs to the platform console alone. */}
-      {HOST_SCOPE !== 'admin' && (
-        <SectionCard icon="lucide:plus" title="New organisation" subtitle="Its first administrator is invited with it">
-          <Form onSubmit={() => void create()} actions={<button className="sa-btn sa-btn--primary">Create</button>}>
-            <Field label="Name"><input className="sa-input" required value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} placeholder="Acme" /></Field>
-            <Field label="First administrator’s email"><input className="sa-input" type="email" value={draft.adminEmail} onChange={e => setDraft({ ...draft, adminEmail: e.target.value })} placeholder="name@acme.com" /></Field>
-          </Form>
+      <PageHeader title="Organisations" subtitle="Every organisation on the platform, its projects, and whether their engines are running."
+        actions={HOST_SCOPE !== 'admin' ? <button className="sa-btn sa-btn--primary" onClick={() => setMaking(true)}><Icon icon="lucide:plus" /> New organisation</button> : undefined} />
+      <Figures>
+        <Kpi label="Organisations" value={orgs ? live.length : '…'} accent="series-1" />
+        <Kpi label="Projects" value={projects.length} accent="series-2" />
+        {known > 0 && <Kpi label="Engines running" value={`${runningCount} of ${known}`} accent={runningCount < known ? 'warn' : 'win'} foot={runningCount < known ? `${known - runningCount} not reporting` : 'all reporting'} />}
+        {usage && <Kpi label="Model calls · 30 days" value={compact(totals.calls)} accent="series-3" foot={`${compact(totals.tokens)} tokens`} />}
+        {usage && totals.credits > 0 && <Kpi label="Credits · 30 days" value={compact(totals.credits)} accent="series-1" />}
+      </Figures>
+      {usage && (
+        <div className="sa-two-col">
+          <SectionCard icon="lucide:chart-column" title="Model use" subtitle="Tokens a day, last 30 days, by organisation">
+            <div className="sa-section__chart">
+              <TimeColumns periods={days} values={byDay} format={compact} empty="No model use in the last 30 days"
+                series={live.map((o) => ({ key: o.id, label: o.name }))} />
+            </div>
+          </SectionCard>
+          <SectionCard icon="lucide:chart-pie" title="Where the work is" subtitle="Model calls by project, last 30 days">
+            <div className="sa-section__chart">
+              <Donut height={240} format={compact} empty="No model calls in the last 30 days"
+                slices={[...callsBy.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([id, v]) => ({ name: projects.find((p) => p.id === id)?.name ?? id.slice(0, 8), value: v }))} />
+            </div>
+          </SectionCard>
+        </div>
+      )}
+      {orgs === null && <Empty icon="lucide:loader">Reading the organisations…</Empty>}
+      {orgs && live.length === 0 && <Empty icon="lucide:building-2">{HOST_SCOPE !== 'admin' ? 'No organisations yet. Make the first one.' : 'No organisations yet.'}</Empty>}
+      {live.map((o, i) => {
+        const mine = projects.filter((p) => p.orgId === o.id)
+        const up = mine.filter((p) => p.running).length
+        return (
+          <SectionCard key={o.id} tinted icon="lucide:building-2" accent={ORG_ACCENTS[i % ORG_ACCENTS.length]} title={o.name}
+            subtitle={`${mine.length} project${mine.length === 1 ? '' : 's'}${mine.some((p) => p.running !== null) ? ` · ${up} engine${up === 1 ? '' : 's'} running` : ''}`}
+            actions={<button className="sa-btn sa-btn--link" onClick={() => nav(`/org/${o.id}`)}>Open <Icon icon="mdi:arrow-right" /></button>}>
+            <div className="sa-home__group">
+              {mine.length
+                ? <div className="sa-sub-grid">{mine.map((p) => <ProjectCardButton key={p.id} p={p} onOpen={() => nav(`/org/${o.id}/projects/${p.id}`)} />)}</div>
+                : <Empty icon="lucide:folder-plus">No projects yet — open the organisation to make one.</Empty>}
+            </div>
+          </SectionCard>
+        )
+      })}
+      <div className="sa-row"><ShowDeleted value={showDeleted} onChange={setShowDeleted} /></div>
+      {showDeleted && deleted.length > 0 && (
+        <SectionCard icon="lucide:archive" accent="neutral" title="Deleted organisations" subtitle="Restoring one brings back its projects and people">
+          <RecordList rows={deleted} keyOf={(o) => String(o.id)} columns={[
+            { key: 'name', label: 'Organisation' },
+            { key: 'act', label: '', align: 'end', render: (o) => <button className="sa-btn" onClick={() => restore(o.id)}>Restore</button> },
+          ]} />
         </SectionCard>
       )}
-      <SectionCard icon="lucide:building-2" title="Organisations" note={`${orgs.length}`} actions={<ShowDeleted value={showDeleted} onChange={setShowDeleted} />}>
-        <RecordList rows={orgs} keyOf={(o) => String(o.id)} onRow={(o) => { if (!o.deleted) nav(`/org/${o.id}`) }}
-          empty={HOST_SCOPE !== 'admin' ? 'No organisations yet. Create the first one above.' : 'No organisations yet.'}
-          columns={[
-            { key: 'name', label: 'Name' },
-            { key: 'id', label: 'Id', render: (o) => <Code>{o.id}</Code> },
-            { key: 'act', label: '', align: 'end', render: (o) => o.deleted
-              ? <span className="sa-row sa-row--tight"><Status state="neutral">deleted</Status><button className="sa-btn" onClick={e => { e.stopPropagation(); restore(o.id) }}>Restore</button></span>
-              : null },
-          ]} />
-      </SectionCard>
+      {making && (
+        <Dialog icon="lucide:building-2" title="New organisation" subtitle="Its first administrator is invited with it" onClose={() => setMaking(false)}>
+          <Form onSubmit={() => void create()} error={err} actions={<><button type="button" className="sa-btn" onClick={() => setMaking(false)}>Cancel</button><button className="sa-btn sa-btn--primary">Make the organisation</button></>}>
+            <Field label="Name"><input id="org-name" className="sa-input" required autoFocus value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} placeholder="Acme" /></Field>
+            <Field label="First administrator’s email"><input id="org-admin" className="sa-input" type="email" required value={draft.adminEmail} onChange={e => setDraft({ ...draft, adminEmail: e.target.value })} placeholder="name@acme.com" /></Field>
+          </Form>
+        </Dialog>
+      )}
     </Shell>
   )
 }
@@ -590,6 +697,7 @@ function OrgDetailPage() {
   const [showDeleted, setShowDeleted] = useState(false); const nav = useNavigate()
   const [conn, setConn] = useState<{ id: string; apiKey: string; wsUrl: string } | null>(null)   // external-project connection info (copyable panel)
   const [newProject, setNewProject] = useState({ name: '', provider: 'fly' })
+  const [makingProject, setMakingProject] = useState(false)
   const [newUser, setNewUser] = useState({ email: '', name: '', role: 'user' })
   // Teams-token generation moved to the PROJECT's Settings view. Here we only need the org NAME (for the
   // type-to-confirm delete) + the Danger-zone modal toggle.
@@ -674,28 +782,43 @@ function OrgDetailPage() {
       ]} />
 
       {tab === 'projects' && <>
-        <SectionCard icon="lucide:plus" title="New project" subtitle="Choose where its engine runs">
-          <Form onSubmit={() => void createProject()} actions={<button className="sa-btn sa-btn--primary">Create project</button>}>
-            <Field label="Name"><input className="sa-input" required value={newProject.name} onChange={e => setNewProject({ ...newProject, name: e.target.value })} placeholder="Finance analytics" /></Field>
-            <Field label="Where the code-engine runs">
-              <select className="sa-input" value={newProject.provider} onChange={e => setNewProject({ ...newProject, provider: e.target.value })}>
-                <option value="fly">Fly machine (managed)</option>
-                <option value="external">Local / EC2 (you run the engine)</option>
-              </select>
-            </Field>
-          </Form>
+        <Figures>
+          <Kpi label="Projects" value={projects.filter((p) => !p.deleted).length} accent="series-1" />
+          <Kpi label="People" value={users.length} accent="series-2" />
+        </Figures>
+        <SectionCard icon="lucide:folder-kanban" title="Projects" subtitle="Open one to see its agents, data, people and engine"
+          actions={<><ShowDeleted value={showDeleted} onChange={setShowDeleted} /><button className="sa-btn sa-btn--primary" onClick={() => setMakingProject(true)}><Icon icon="lucide:plus" /> New project</button></>}>
+          <div className="sa-home__group">
+            {projects.filter((p) => !p.deleted).length === 0 && <Empty icon="lucide:folder-plus">No projects yet. Make the first one.</Empty>}
+            <div className="sa-sub-grid">
+              {projects.filter((p) => !p.deleted).map((p) => (
+                <button key={p.id} type="button" className="sa-sub-card" onClick={() => nav(`/org/${orgId}/projects/${p.id}`)} title={`Open ${p.name}`}>
+                  <span className="sa-sub-card__title"><span className="sa-row sa-row--tight"><Icon icon="lucide:folder-kanban" />{p.name}</span></span>
+                  <span className="sa-sub-card__text">{p.created_at ? `made ${new Date(Number(p.created_at) * 1000).toLocaleDateString()}` : 'Open it'}</span>
+                </button>
+              ))}
+            </div>
+            {projects.some((p) => p.deleted) && (
+              <RecordList rows={projects.filter((p) => p.deleted)} keyOf={(p) => String(p.id)} columns={[
+                { key: 'name', label: 'Deleted project' },
+                { key: 'act', label: '', align: 'end', render: (p) => <button className="sa-btn" onClick={() => restoreProject(p.id)}>Restore</button> },
+              ]} />
+            )}
+          </div>
         </SectionCard>
-        <SectionCard icon="lucide:folder-kanban" title="Projects" note={`${projects.length}`} actions={<ShowDeleted value={showDeleted} onChange={setShowDeleted} />}>
-          <RecordList rows={projects} keyOf={(p) => String(p.id)} onRow={(p) => { if (!p.deleted) nav(`/org/${orgId}/projects/${p.id}`) }} empty="No projects yet."
-            columns={[
-              { key: 'name', label: 'Name' },
-              { key: 'id', label: 'Id', render: (p) => <Code>{p.id}</Code> },
-              { key: 'act', label: '', align: 'end', render: (p) => p.deleted
-                ? <span className="sa-row sa-row--tight"><Status state="neutral">deleted</Status><button className="sa-btn" onClick={e => { e.stopPropagation(); restoreProject(p.id) }}>Restore</button></span>
-                : <button className="sa-btn sa-btn--link" title="Issue a new API key; the old one keeps working until you finish"
-                    onClick={e => { e.stopPropagation(); rotateKey(p.id) }}>Rotate key</button> },
-            ]} />
-        </SectionCard>
+        {makingProject && (
+          <Dialog icon="lucide:folder-plus" title="New project" subtitle="Choose where its engine runs" onClose={() => setMakingProject(false)}>
+            <Form onSubmit={() => { void createProject(); setMakingProject(false) }} actions={<><button type="button" className="sa-btn" onClick={() => setMakingProject(false)}>Cancel</button><button className="sa-btn sa-btn--primary">Make the project</button></>}>
+              <Field label="Name"><input id="proj-name" className="sa-input" required autoFocus value={newProject.name} onChange={e => setNewProject({ ...newProject, name: e.target.value })} placeholder="Finance analytics" /></Field>
+              <Field label="Where its engine runs">
+                <select id="proj-provider" className="sa-input" value={newProject.provider} onChange={e => setNewProject({ ...newProject, provider: e.target.value })}>
+                  <option value="fly">A managed machine (Fly)</option>
+                  <option value="external">Your own machine (local or EC2)</option>
+                </select>
+              </Field>
+            </Form>
+          </Dialog>
+        )}
       </>}
 
       {tab === 'usage' && <UsagePanel api={api} />}

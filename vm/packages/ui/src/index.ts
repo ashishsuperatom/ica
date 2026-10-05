@@ -54,6 +54,7 @@ export { default as MultiSelect, type MultiOption, type MultiGroup } from './com
 export { default as ViewToggle, useView, type ViewOption } from './components/ui/ViewToggle.tsx'
 export { default as Donut, legendLayout, type Slice, type LegendLayout } from './components/ui/Donut.tsx'
 export { default as StackedBars } from './components/ui/StackedBars.tsx'
+export { default as TimeColumns, type TimeSeries } from './components/ui/TimeColumns.tsx'
 export { default as Settle } from './components/ui/Settle.tsx'
 export { default as Nothing } from './components/ui/Nothing.tsx'
 export { default as Toasts } from './components/ui/Toasts.tsx'
