@@ -7,6 +7,7 @@ import { AgentKeysPanel, AuditPanel } from './AgentKeys'
 import { AccessPoliciesPanel } from './AccessPolicies'
 import { GroupsPanel } from './Groups'
 import { WarehousePanel } from './Warehouse'
+import { OrgPeoplePanel, OrgKeysPanel } from './People'
 import { UsagePanel } from './Usage'
 import { useProjectHub } from './hub'
 import { Inspector, SECTIONS, SECTION_LABEL, type Section } from './Inspector'
@@ -16,7 +17,7 @@ import { AnalystConsole } from './AnalystConsole'
 import { useSession, SignIn, UserButton } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useSearchParams, MemoryRouter, useLocation } from 'react-router-dom'
 import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
-import { AppShell, Sidebar, LocalThread, Toasts, useThread, startThread, type Registry, Section as SectionCard, Kpi, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
+import { AppShell, Sidebar, Breadcrumbs, type Crumb, LocalThread, Toasts, useThread, startThread, type Registry, Section as SectionCard, Kpi, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
 import '@superatom/ui/design.css'
 import { AdminContext, ADMIN_OWN_BLOCKS } from './AdminBlocks'
 
@@ -203,10 +204,10 @@ function useApi(token: string | null, orgId?: string | null) {
 const ShellMode = createContext<'page' | 'block'>('page')
 
 function Shell({ children, crumbs, nav }: { children: React.ReactNode; crumbs?: React.ReactNode; nav?: React.ReactNode }) {
+  // In a block the sidebar and the breadcrumbs are the way around: a screen's own section links are not drawn again.
   if (useContext(ShellMode) === 'block') return (
     <div className="admin-block">
       <Style />
-      {nav && <nav className="admin-block__nav side">{nav}</nav>}
       <div className="content"><div className="sa-stack sa-stack--4">{children}</div></div>
     </div>
   )
@@ -343,10 +344,12 @@ function purposesOf(pid: string) {
   const P = (v: string) => `/pro/${pid}${v ? `/${v}` : ''}`
   return [
     { key: 'knowledge', title: 'Knowledge', icon: 'lucide:library', says: 'What the agents know, versioned and governed.', places: [
-      { label: 'Composition graph', icon: 'lucide:network', path: P('inspector/composition'), says: 'Domains, concepts, agents — every change kept, suggestions decided.' }] },
+      { label: 'Composition graph', icon: 'lucide:network', path: P('inspector/composition'), says: 'Domains, concepts, agents — every change kept, suggestions decided.' },
+      { label: 'Summary', icon: 'lucide:scan-search', path: P('inspector/summary'), says: 'What the engine holds, at a glance.' }] },
     { key: 'data', title: 'Data', icon: 'lucide:database', says: 'Where the data comes from and how it is found.', places: [
       { label: 'Data index', icon: 'lucide:table-properties', path: P('index'), says: 'Every source, its tables and fields.' },
-      { label: 'Grounding', icon: 'lucide:anchor', path: P('inspector/grounding'), says: 'Names people use, matched to the records they mean.' }] },
+      { label: 'Grounding', icon: 'lucide:anchor', path: P('inspector/grounding'), says: 'Names people use, matched to the records they mean.' },
+      { label: 'Datasource index', icon: 'lucide:list-tree', path: P('inspector/index'), says: 'What the engine indexed of each source.' }] },
     { key: 'agents', title: 'Agents at work', icon: 'lucide:bot', says: 'Which model each agent runs on, and the agents\' consoles.', places: [
       { label: 'Agents and models', icon: 'lucide:cpu', path: P('agents'), says: 'The harness, account and model each agent runs.' },
       { label: 'Connector', icon: 'lucide:plug', path: P('agent'), says: 'Connect a data source with the connector agent.' },
@@ -365,6 +368,10 @@ function purposesOf(pid: string) {
       { label: 'Subdomains', icon: 'lucide:globe', path: P('subdomains'), says: 'The project\'s addresses.' },
       { label: 'Channels', icon: 'lucide:message-square', path: P('channels'), says: 'Teams and other channels.' },
       { label: 'Settings', icon: 'lucide:settings-2', path: P('settings'), says: 'Keys, the agent profile, the danger zone.' }] },
+    { key: 'storage', title: 'Storage', icon: 'lucide:hard-drive', says: 'The engine\'s files, database and logs.', places: [
+      { label: 'Files', icon: 'lucide:folder-tree', path: P('inspector/files'), says: 'The project\'s files on the engine.' },
+      { label: 'Database', icon: 'lucide:database', path: P('inspector/db'), says: 'The engine\'s tables.' },
+      { label: 'Logs', icon: 'lucide:scroll-text', path: P('inspector/logs'), says: 'The engine\'s logs.' }] },
   ]
 }
 
@@ -375,20 +382,25 @@ function AdminWorkspace() {
   const token = useAuth()
   const api = useApi(token, null)
   const [scope, setScope] = useState<{ org?: string; project?: string }>(() => scopeOf(String(first.props.path)))
-  const report = useCallback((path: string) => { const s = scopeOf(path); if (s.project || s.org) setScope((cur) => ({ ...cur, ...s, ...(s.org && !s.project && s.org !== cur.org ? { project: undefined } : {}) })) }, [])
+  // Where you are: the place the latest screen opened (the sidebar marks it, the breadcrumbs name it).
+  const [here, setHere] = useState(String(first.props.path))
+  const report = useCallback((path: string) => { setHere(path); const s = scopeOf(path); setScope((cur) => (s.project || s.org ? { ...cur, ...s, ...(s.org && !s.project && s.org !== cur.org ? { project: undefined } : {}) } : {})) }, [])
   const env = useMemo(() => ({ api, token, superadmin: HOST_SCOPE === 'superadmin', openScreen: go }), [api, token])
   // Every project, by name (the platform's view lists them all; an organisation's console reaches its own through it).
   const [projects, setProjects] = useState<{ projectId: string; project: string; org: string; orgId: string; running: boolean | null }[]>([])
   useEffect(() => { if (!token || HOST_SCOPE !== 'superadmin') return; void api('/profiles').then((r) => (r.ok ? r.json() : null)).then((d: any) => setProjects(Array.isArray(d?.projects) ? d.projects : [])).catch(() => {}) }, [token, api])
   // The organisations' names (and the projects' when the platform lists them) for headers and the sidebar.
   const [, setNamed] = useState(0)
+  const [orgs, setOrgs] = useState<{ id: string; name: string }[]>([])
   useEffect(() => {
     if (!token) return
-    void api('/organizations').then((r) => (r.ok ? r.json() : [])).then((os: any[]) => { for (const o of Array.isArray(os) ? os : []) NAMES.set(o.id, o.name); setNamed((n) => n + 1) }).catch(() => {})
+    void api('/organizations').then((r) => (r.ok ? r.json() : [])).then((d: any) => { const os: any[] = Array.isArray(d) ? d : d?.organizations ?? []; for (const o of os) NAMES.set(o.id, o.name); setOrgs(os.map((o) => ({ id: o.id, name: o.name }))); setNamed((n) => n + 1) }).catch(() => {})
   }, [token, api])
   useEffect(() => { for (const p of projects) { NAMES.set(p.projectId, p.project); NAMES.set(p.orgId, p.org) } setNamed((n) => n + 1) }, [projects])
   const inScope = projects.find((p) => p.projectId === scope.project)
-  const orgName = scope.org ? NAMES.get(scope.org) ?? projects.find((p) => p.orgId === scope.org)?.org : undefined
+  const orgOf = scope.org ?? inScope?.orgId
+  const orgName = orgOf ? NAMES.get(orgOf) ?? projects.find((p) => p.orgId === orgOf)?.org : undefined
+  const isHere = (path: string) => here.split('?')[0].replace(/^\/org\/[^/]+\/projects\//, '/pro/').replace(/\/$/, '') === path.split('?')[0].replace(/\/$/, '') && (!path.includes('?') || here.split('?')[1] === path.split('?')[1])
   // THE PLACES, BY PURPOSE, for the scope in view: what needs a decision first, then every place of the project laid out
   // by purpose — nothing behind an extra click.
   const groups = [
@@ -396,30 +408,49 @@ function AdminWorkspace() {
       { label: inScope?.project ?? named(scope.project, 'Project'), items: [
         { key: 'p-attention', label: 'Attention', icon: 'lucide:bell', onClick: () => startThread('attention', { projectId: scope.project }) },
       ] },
-      ...purposesOf(scope.project).map((p) => ({ label: p.title, items: p.places.map((pl) => ({ key: `p-${pl.path}`, label: pl.label, icon: (pl as any).icon ?? p.icon, title: pl.says, onClick: () => go(pl.path) })) })),
+      ...purposesOf(scope.project).map((p) => ({ label: p.title, items: p.places.map((pl) => ({ key: `p-${pl.path}`, label: pl.label, icon: (pl as any).icon ?? p.icon, title: pl.says, active: isHere(pl.path), onClick: () => go(pl.path) })) })),
     ] : []),
-    ...(scope.org ? [{ label: orgName ?? `Organisation ${scope.org.slice(0, 8)}`, items: [
-      { key: 'o-projects', label: 'Projects', icon: 'lucide:folder-kanban', onClick: () => go(`/org/${scope.org}`) },
-      { key: 'o-members', label: 'Members', icon: 'lucide:users', onClick: () => go(`/org/${scope.org}?tab=users`) },
-      { key: 'o-usage', label: 'Usage and credits', icon: 'lucide:gauge', onClick: () => go(`/org/${scope.org}?tab=usage`) },
-      { key: 'o-warehouse', label: 'Warehouse', icon: 'lucide:database', onClick: () => go(`/org/${scope.org}?tab=warehouse`) },
-      { key: 'o-settings', label: 'Settings', icon: 'lucide:settings-2', onClick: () => go(`/org/${scope.org}?tab=settings`) },
+    ...(orgOf ? [{ label: orgName ?? `Organisation ${orgOf.slice(0, 8)}`, items: [
+      { key: 'o-projects', label: 'Projects', icon: 'lucide:folder-kanban', active: isHere(`/org/${orgOf}`), onClick: () => go(`/org/${orgOf}`) },
+      { key: 'o-members', label: 'Members', icon: 'lucide:users', active: isHere(`/org/${orgOf}?tab=users`), onClick: () => go(`/org/${orgOf}?tab=users`) },
+      { key: 'o-usage', label: 'Usage and credits', icon: 'lucide:gauge', active: isHere(`/org/${orgOf}?tab=usage`), onClick: () => go(`/org/${orgOf}?tab=usage`) },
+      { key: 'o-warehouse', label: 'Warehouse', icon: 'lucide:warehouse', active: isHere(`/org/${orgOf}?tab=warehouse`), onClick: () => go(`/org/${orgOf}?tab=warehouse`) },
+      { key: 'o-settings', label: 'Settings', icon: 'lucide:settings-2', active: isHere(`/org/${orgOf}?tab=settings`), onClick: () => go(`/org/${orgOf}?tab=settings`) },
     ] }] : []),
     { label: HOST_SCOPE === 'superadmin' ? 'Platform' : 'Organisations', items: [
       ...(HOST_SCOPE === 'superadmin' ? [{ key: 'attention', label: 'Attention', icon: 'lucide:bell', onClick: () => startThread('attention', {}) }] : []),
-      { key: 'orgs', label: HOST_SCOPE === 'admin' ? 'Your organisation' : 'Organisations', icon: 'lucide:building-2', onClick: () => go('/') },
+      { key: 'orgs', label: HOST_SCOPE === 'admin' ? 'Your organisation' : 'Organisations', icon: 'lucide:building-2', active: isHere('/'), onClick: () => go('/') },
       ...(HOST_SCOPE === 'superadmin' ? [
-        { key: 'credentials', label: 'Credentials', icon: 'lucide:key-round', onClick: () => go('/credentials') },
-        { key: 'agents', label: 'Models and agents', icon: 'lucide:cpu', onClick: () => go('/agents') },
+        { key: 'credentials', label: 'Credentials', icon: 'lucide:key-round', active: isHere('/credentials'), onClick: () => go('/credentials') },
+        { key: 'agents', label: 'Models and agents', icon: 'lucide:cpu', active: isHere('/agents'), onClick: () => go('/agents') },
       ] : []),
     ] },
     ...(projects.length ? [{ label: 'Projects', items: projects.map((p) => ({ key: `pr-${p.projectId}`, label: p.project, title: `${p.org} · ${p.running ? 'its engine is running' : 'its engine has not reported'}`,
-      icon: p.running ? 'lucide:circle-dot' : 'lucide:circle-dashed', active: p.projectId === scope.project,
+      icon: p.running ? 'lucide:circle-dot' : 'lucide:circle-dashed', active: p.projectId === scope.project && isHere(`/pro/${p.projectId}`),
       onClick: () => { setScope({ org: p.orgId, project: p.projectId }); go(`/pro/${p.projectId}`) } })) }] : []),
+  ]
+  // WHERE YOU ARE, at the top: the platform › the organisation › the project › the place — each a way back, and where
+  // there are others like it, a switcher straight to another.
+  const placeHere = scope.project ? purposesOf(scope.project).flatMap((p) => p.places).find((pl) => isHere(pl.path)) : undefined
+  const orgTab = /[?&]tab=([\w-]+)/.exec(here)?.[1]
+  const orgPlaces: [string, string, string][] = [['', 'Projects', 'lucide:folder-kanban'], ['users', 'Members', 'lucide:users'], ['usage', 'Usage and credits', 'lucide:gauge'], ['warehouse', 'Warehouse', 'lucide:warehouse'], ['settings', 'Settings', 'lucide:settings-2']]
+  const platformTitle = here === '/credentials' ? 'Credentials' : here === '/agents' ? 'Models and agents' : null
+  const crumbs: Crumb[] = [
+    { key: 'home', label: HOST_SCOPE === 'superadmin' ? 'Superatom' : 'Your organisation', icon: 'lucide:house', onClick: () => go('/'),
+      ...(HOST_SCOPE === 'superadmin' ? { choices: [['/', 'Organisations', 'lucide:building-2'], ['/credentials', 'Credentials', 'lucide:key-round'], ['/agents', 'Models and agents', 'lucide:cpu']].map(([p, l, i]) => ({ key: p, label: l, icon: i, active: isHere(p), onClick: () => go(p) })) } : {}) },
+    ...(platformTitle ? [{ key: 'platform', label: platformTitle }] : []),
+    ...(orgOf ? [{ key: 'org', label: orgName ?? 'Organisation', icon: 'lucide:building', onClick: () => go(`/org/${orgOf}`),
+      choices: orgs.map((o) => ({ key: o.id, label: o.name, icon: 'lucide:building', active: o.id === orgOf, onClick: () => { setScope({ org: o.id }); go(`/org/${o.id}`) } })) }] : []),
+    ...(scope.project ? [{ key: 'project', label: inScope?.project ?? named(scope.project, 'Project'), icon: 'lucide:folder-kanban', onClick: () => go(`/pro/${scope.project}`),
+      choices: projects.filter((p) => !orgOf || p.orgId === orgOf).map((p) => ({ key: p.projectId, label: p.project, icon: p.running ? 'lucide:circle-dot' : 'lucide:circle-dashed', hint: p.running ? 'running' : undefined, active: p.projectId === scope.project, onClick: () => { setScope({ org: p.orgId, project: p.projectId }); go(`/pro/${p.projectId}`) } })) }] : []),
+    ...(scope.project ? [{ key: 'place', label: placeHere?.label ?? titleOf(here).title, icon: placeHere?.icon,
+      choices: purposesOf(scope.project).flatMap((p) => p.places.map((pl) => ({ key: pl.path, label: pl.label, icon: pl.icon, hint: p.title, active: isHere(pl.path), onClick: () => go(pl.path) }))) }]
+      : orgOf ? [{ key: 'org-place', label: orgPlaces.find(([t]) => t === (orgTab ?? ''))?.[1] ?? 'Projects',
+        choices: orgPlaces.map(([t, l, i]) => ({ key: t || 'projects', label: l, icon: i, active: (orgTab ?? '') === t, onClick: () => go(`/org/${orgOf}${t ? `?tab=${t}` : ''}`) })) }] : []),
   ]
   return (
     <>
-      <AppShell sidebar={(collapsed, toggle) => (
+      <AppShell wide crumbs={<Breadcrumbs items={crumbs} />} sidebar={(collapsed, toggle) => (
         <Sidebar name="Superatom admin" connected groups={groups} collapsed={collapsed} onToggle={toggle} foot={() => <UserButton />} />
       )}>
         <AdminContext.Provider value={env}>
@@ -693,6 +724,7 @@ function OrgDetailPage() {
   const token = useAuth(); const { orgId } = useParams<{ orgId: string }>(); const api = useApi(token, orgId)
   const [search, setSearch] = useSearchParams()
   const tab = (search.get('tab') as 'projects' | 'users' | 'usage' | 'warehouse' | 'settings') || 'projects'
+  const inBlock = useContext(ShellMode) === 'block'
   const [projects, setProjects] = useState<any[]>([]); const [users, setUsers] = useState<any[]>([])
   const [showDeleted, setShowDeleted] = useState(false); const nav = useNavigate()
   const [conn, setConn] = useState<{ id: string; apiKey: string; wsUrl: string } | null>(null)   // external-project connection info (copyable panel)
@@ -773,13 +805,14 @@ function OrgDetailPage() {
         )
       })()}
       <PageHeader title={orgName || 'Organisation'} subtitle="Its projects, the people in it, what it uses, and its settings." />
-      <Tabs label="Parts of the organisation" value={tab} onChange={(t) => setSearch({ tab: t })} items={[
+      {/* In the workspace the sidebar and the breadcrumbs are the way between these; the tabs are for the page alone. */}
+      {inBlock ? null : <Tabs label="Parts of the organisation" value={tab} onChange={(t) => setSearch({ tab: t })} items={[
         { key: 'projects', label: 'Projects', icon: 'lucide:folder-kanban', count: projects.length },
         { key: 'users', label: 'Users', icon: 'lucide:users', count: users.length },
         { key: 'usage', label: 'Usage', icon: 'lucide:gauge' },
         { key: 'warehouse', label: 'Warehouse', icon: 'lucide:database' },
         { key: 'settings', label: 'Settings', icon: 'lucide:settings-2' },
-      ]} />
+      ]} />}
 
       {tab === 'projects' && <>
         <Figures>
@@ -822,26 +855,8 @@ function OrgDetailPage() {
       </>}
 
       {tab === 'usage' && <UsagePanel api={api} />}
-      {tab === 'warehouse' && <WarehousePanel api={api} projects={projects.filter((p: any) => !p.deleted).map((p: any) => ({ id: p.id, name: p.name }))} />}
-      {tab === 'users' && <>
-        <SectionCard icon="lucide:user-plus" title="Add a person" subtitle="People are added here once, then given access per project">
-          <Form onSubmit={() => void createUser()} actions={<button className="sa-btn sa-btn--primary">Add</button>}>
-            <Field label="Email"><input className="sa-input" type="email" required value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} placeholder="name@company.com" /></Field>
-            <Field label="Name"><input className="sa-input" value={newUser.name} onChange={e => setNewUser({ ...newUser, name: e.target.value })} /></Field>
-            <Field label="Role">
-              <select className="sa-input" value={newUser.role} onChange={e => setNewUser({ ...newUser, role: e.target.value })}><option value="user">user</option><option value="admin">admin</option></select>
-            </Field>
-          </Form>
-        </SectionCard>
-        <SectionCard icon="lucide:users" title="Users" note={`${users.length}`}>
-          <RecordList rows={users} keyOf={(u) => String(u.id)} empty="No users yet." columns={[
-            { key: 'email', label: 'Email' },
-            { key: 'name', label: 'Name' },
-            { key: 'role', label: 'Role', render: (u) => <Pill s={u.role} /> },
-            { key: 'id', label: 'Id', align: 'end', render: (u) => <Code>{u.id}</Code> },
-          ]} />
-        </SectionCard>
-      </>}
+      {tab === 'warehouse' && <><WarehousePanel api={api} projects={projects.filter((p: any) => !p.deleted).map((p: any) => ({ id: p.id, name: p.name }))} /><OrgKeysPanel api={api} /></>}
+      {tab === 'users' && <OrgPeoplePanel api={api} />}
 
       {/* Deleting an ORGANISATION is a platform act — the customer console never offers it, and the API refuses
           it for anyone but superadmin regardless. */}

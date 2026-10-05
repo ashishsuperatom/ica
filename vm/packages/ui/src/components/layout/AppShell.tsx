@@ -8,7 +8,7 @@ import { useState, type ReactNode } from 'react'
 import { Icon } from '@iconify/react'
 import { recall, remember } from '../../lib/remember'
 
-export default function AppShell({ sidebar, children, artifacts, artifactsCount, status }: {
+export default function AppShell({ sidebar, children, artifacts, artifactsCount, status, crumbs, wide = false }: {
   /** The left: given whether it is collapsed and how to toggle it. */
   sidebar: (collapsed: boolean, toggle: (collapsed: boolean) => void) => ReactNode
   children: ReactNode
@@ -17,6 +17,10 @@ export default function AppShell({ sidebar, children, artifacts, artifactsCount,
   /** How many there are, shown on the closed rail. */
   artifactsCount?: number
   status?: ReactNode
+  /** Where you are, at the top (Breadcrumbs). */
+  crumbs?: ReactNode
+  /** A working console: blocks use the width there is, rather than a reading column. */
+  wide?: boolean
 }) {
   const [collapsed, setCollapsed] = useState(() => (typeof window !== 'undefined' && window.innerWidth < 768 ? true : recall<boolean>('sidebar-collapsed', false)))
   const [paneOpen, setPaneOpen] = useState(() => recall<boolean>('artifacts-open', false))
@@ -28,9 +32,10 @@ export default function AppShell({ sidebar, children, artifacts, artifactsCount,
         <button onClick={() => toggle(!collapsed)} className="sa-app__menu-btn" aria-label="Menu"><Icon icon="mynaui:sidebar" /></button>
         <span className="sa-app__topbar-title">Menu</span>
       </div>
-      <div className="sa-app">
+      <div className="sa-app" data-wide={wide}>
         {sidebar(collapsed, toggle)}
         <div className="sa-app__main">
+          {crumbs && <div className="sa-app__crumbs">{crumbs}</div>}
           {status && <div className="sa-app__pill">{status}</div>}
           <main className="sa-app__page">{children}</main>
         </div>

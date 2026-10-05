@@ -4,16 +4,20 @@
  */
 
 /* Form · Field · Choices */
-.sa-form { display: grid; gap: var(--sp-3); max-width: var(--form-w); padding: var(--sp-4) var(--sp-5); }
-.sa-form__fields { display: grid; gap: var(--sp-3); border: 0; padding: 0; margin: 0; min-width: 0; }
+/* A form uses the block's width: short fields side by side, choices and long text across it. */
+.sa-form { display: grid; gap: var(--sp-3); padding: var(--sp-4) var(--sp-5); }
+.sa-form__fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr)); gap: var(--sp-3) var(--sp-5); border: 0; padding: 0; margin: 0; min-width: 0; }
+.sa-form__fields > [role='group'], .sa-form__fields > .sa-field-row:has(textarea), .sa-form__fields > :not(.sa-field-row) { grid-column: 1 / -1; }
 .sa-form[data-locked='true'] .sa-form__fields { opacity: 0.8; }
 .sa-form__actions { display: flex; gap: var(--sp-2); justify-content: flex-end; }
 .sa-form__error { color: var(--loss-ink); font-size: var(--t-sm); overflow-wrap: anywhere; margin: 0; }
 .sa-field-row { display: grid; gap: var(--sp-1); min-width: 0; }
 .sa-field-row__label { font-size: var(--t-sm); color: var(--muted); font-weight: var(--w-medium); }
 .sa-field-row__help { font-size: var(--t-xs); color: var(--faint); overflow-wrap: anywhere; }
-.sa-choices { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
-.sa-choices label { display: inline-flex; align-items: center; gap: var(--sp-1h); font-size: var(--t-sm); color: var(--ink); }
+.sa-choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 24rem), 1fr)); gap: var(--sp-2) var(--sp-5); }
+.sa-choices label { display: inline-flex; align-items: flex-start; gap: var(--sp-1h); font-size: var(--t-sm); color: var(--ink); }
+.sa-choices label input { margin-top: 3px; flex-shrink: 0; }
+.sa-choices label[data-disabled='true'] { color: var(--faint); cursor: not-allowed; }
 
 /* Receipt */
 .sa-receipt { display: grid; gap: var(--sp-1); padding: var(--sp-4) var(--sp-5); margin: 0; }
@@ -26,7 +30,8 @@
 .sa-records__table { width: 100%; border-collapse: collapse; font-size: var(--t-base); }
 .sa-records__table th { text-align: start; font-size: var(--t-2xs); font-weight: var(--w-semibold); text-transform: uppercase; letter-spacing: 0.04em; color: var(--faint); background: var(--panel); padding: var(--sp-2) var(--sp-4); white-space: nowrap; }
 .sa-records__table td { padding: var(--sp-2) var(--sp-4); border-top: 1px solid var(--line); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 28rem; }
-.sa-records__table td[data-wrap='true'] { white-space: normal; overflow-wrap: anywhere; }
+/* A wrapping cell wraps at words and keeps room to be read; it is never squeezed to a letter a line. */
+.sa-records__table td[data-wrap='true'] { white-space: normal; overflow-wrap: break-word; min-width: 12rem; }
 .sa-records__table [data-align='end'] { text-align: end; font-variant-numeric: tabular-nums; }
 .sa-records__table tr[data-opens='true'] { cursor: pointer; }
 .sa-records__table tr[data-opens='true']:hover td { background: var(--primary-wash); }

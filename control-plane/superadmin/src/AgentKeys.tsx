@@ -5,14 +5,15 @@
 // Drawn only with the semantic components (@superatom/ui); no CSS of its own.
 import { useCallback, useEffect, useState } from 'react'
 import { Section, Form, Field, Choices, RecordList, Notice, Status, Code, Toolbar, Icon } from '@superatom/ui'
-import { AGENT_SCOPES, type AgentScope } from '../../shared/agent-scopes'
+import { AGENT_SCOPES, scopeCapabilities, type AgentScope } from '../../shared/agent-scopes'
 
 type Api = (p: string, i?: RequestInit) => Promise<Response>
 type Key = { id: string; name: string; prefix: string; scopes: string[]; created_by: string; created_at: string; expires_at: string | null; revoked_at: string | null; revoked_by: string | null; last_used_at: string | null }
 type Event = { id: string; at: string; actor: { kind: string; id: string; email?: string }; via: string; action: string; target?: string; outcome: string; detail?: Record<string, unknown> }
 
 const SCOPE_TEXT: Record<AgentScope, string> = { sessions: 'Agents and their sessions: open, change, read', ask: 'Ask questions in words', graph: 'Knowledge: read it, make and change its own concepts and domains, suggest changes', programs: 'Programs: build from source, list, publish its own', decisions: 'Decisions: the paths from a step, record how a step turned out, read decision states', learn: 'Learning: change decision states through their named operations', warehouse: 'Warehouse: the tables and columns this project was granted, and SQL over them', publish: 'Publishing: make concepts, domains, agents and programs seen by everyone; decide suggestions', 'warehouse-write': 'Warehouse writing: append rows to the tables this project may write', connectors: 'Connections: read other systems, run their actions (changes wait for a person), code mode' }
-const when = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : '—')
+const when = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—')
+const whenFull = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : '')
 
 export function AgentKeysPanel({ api, projectId }: { api: Api; projectId: string }) {
   const [keys, setKeys] = useState<Key[]>([])
@@ -28,6 +29,10 @@ export function AgentKeysPanel({ api, projectId }: { api: Api; projectId: string
     api(`/projects/${projectId}/agent-keys`).then((r) => (r.ok ? r.json() : { keys: [] })).then((d) => setKeys((d as { keys?: Key[] }).keys ?? [])).catch(() => {})
   }, [api, projectId])
   useEffect(load, [load])
+  // What the person making a key holds here: a scope is offered only to someone who holds what it gives.
+  const [held, setHeld] = useState<string[] | null>(null)
+  useEffect(() => { api(`/projects/${projectId}/me`).then((r) => (r.ok ? r.json() : null)).then((d) => setHeld(((d as { capabilities?: string[] } | null)?.capabilities) ?? [])).catch(() => setHeld([])) }, [api, projectId])
+  const lacks = (s: AgentScope) => (held ? scopeCapabilities(s).filter((c) => !held.includes(c)) : [])
 
   const create = async () => {
     setErr(''); setMade(null); setCopied(false)
@@ -76,12 +81,15 @@ export function AgentKeysPanel({ api, projectId }: { api: Api; projectId: string
             </select>
           </Field>
           <Choices label="Scopes">
-            {(Object.keys(AGENT_SCOPES) as AgentScope[]).map((s) => (
-              <label key={s}>
-                <input type="checkbox" checked={scopes.includes(s)} onChange={(e) => setScopes(e.target.checked ? [...scopes, s] : scopes.filter((x) => x !== s))} />
-                <span><strong>{s}</strong> — {SCOPE_TEXT[s]}</span>
-              </label>
-            ))}
+            {(Object.keys(AGENT_SCOPES) as AgentScope[]).map((s) => {
+              const missing = lacks(s)
+              return (
+                <label key={s} title={missing.length ? `Needs ${missing.join(', ')}, which your role here does not hold` : undefined} data-disabled={missing.length > 0}>
+                  <input type="checkbox" disabled={missing.length > 0} checked={scopes.includes(s)} onChange={(e) => setScopes(e.target.checked ? [...scopes, s] : scopes.filter((x) => x !== s))} />
+                  <span><strong>{s}</strong> — {SCOPE_TEXT[s]}{missing.length > 0 && <span className="sa-muted"> (needs {missing.join(', ')})</span>}</span>
+                </label>
+              )
+            })}
           </Choices>
         </Form>
       </Section>
@@ -91,12 +99,13 @@ export function AgentKeysPanel({ api, projectId }: { api: Api; projectId: string
           columns={[
             { key: 'name', label: 'Name', render: (k) => <strong title={k.name}>{k.name}</strong> },
             { key: 'scopes', label: 'Scopes', render: (k) => k.scopes.join(', ') },
-            { key: 'made', label: 'Made', wrap: true, render: (k) => <>{when(k.created_at)}<br /><span className="sa-muted">{k.created_by}</span></> },
-            { key: 'used', label: 'Last used', render: (k) => <span className="sa-muted">{when(k.last_used_at)}</span> },
-            { key: 'expires', label: 'Expires', wrap: true, render: (k) => k.revoked_at
-              ? <span className="sa-row sa-row--wrap sa-row--tight"><Status state="critical">Revoked</Status><span className="sa-muted">{when(k.revoked_at)} by {k.revoked_by}</span></span>
-              : <span className="sa-muted">{k.expires_at ? when(k.expires_at) : 'Never'}</span> },
-            { key: 'prefix', label: 'Key', render: (k) => <Code>{k.prefix}…</Code> },
+            { key: 'by', label: 'Made by', render: (k) => <span title={k.created_by}>{k.created_by}</span> },
+            { key: 'made', label: 'Made', render: (k) => <span title={whenFull(k.created_at)}>{when(k.created_at)}</span> },
+            { key: 'used', label: 'Last used', render: (k) => <span className="sa-muted" title={whenFull(k.last_used_at)}>{when(k.last_used_at)}</span> },
+            { key: 'expires', label: 'Expires', render: (k) => k.revoked_at
+              ? <span className="sa-row sa-row--tight" title={`Revoked ${whenFull(k.revoked_at)} by ${k.revoked_by}`}><Status state="critical">Revoked</Status><span className="sa-muted">{when(k.revoked_at)}</span></span>
+              : <span className="sa-muted" title={whenFull(k.expires_at)}>{k.expires_at ? when(k.expires_at) : 'Never'}</span> },
+            { key: 'prefix', label: 'Key', render: (k) => <Code>{k.prefix.slice(-10)}…</Code> },
             { key: 'revoke', label: '', align: 'end', render: (k) => k.revoked_at ? null : revoking?.id === k.id
               ? <span className="sa-row sa-row--tight"><span>Revoke for good?</span><button type="button" className="sa-btn sa-btn--danger sa-btn--primary" onClick={() => void revoke(k)}>Revoke</button><button type="button" className="sa-btn sa-btn--link" onClick={() => setRevoking(null)}>Keep</button></span>
               : <button type="button" className="sa-btn sa-btn--link" onClick={() => setRevoking(k)}>Revoke…</button> },

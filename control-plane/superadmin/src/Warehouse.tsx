@@ -155,21 +155,22 @@ function Ask({ api, tables }: { api: Api; tables: Table[] }) {
 function Grants({ api, tables, projects }: { api: Api; tables: Table[]; projects: { id: string; name: string }[] }) {
   const [project, setProject] = useState(projects[0].id)
   const [grant, setGrant] = useState<Record<string, string[] | null>>({})
+  const [writable, setWritable] = useState<string[]>([])
   const [error, setError] = useState('')
   const load = useCallback(async () => {
     const r = await api(`/warehouse/grants?project=${encodeURIComponent(project)}`); const j: any = await r.json().catch(() => ({}))
     if (!r.ok) { setError(j.error ?? 'The grants could not be read'); return }
-    setError(''); setGrant(j.grant ?? {})
+    setError(''); setGrant(j.grant ?? {}); setWritable(j.writable ?? [])
   }, [api, project])
   useEffect(() => { void load() }, [load])
-  const set = async (table: string, columns: string[] | null | 'revoke') => {
-    const r = await api(`/warehouse/grants?project=${encodeURIComponent(project)}`, { method: columns === 'revoke' ? 'DELETE' : 'PUT', body: JSON.stringify({ table, ...(columns === 'revoke' ? {} : { columns }) }) })
+  const set = async (table: string, columns: string[] | null | 'revoke', write = columns === null && writable.includes(table)) => {
+    const r = await api(`/warehouse/grants?project=${encodeURIComponent(project)}`, { method: columns === 'revoke' ? 'DELETE' : 'PUT', body: JSON.stringify({ table, ...(columns === 'revoke' ? {} : { columns, write }) }) })
     const j: any = await r.json().catch(() => ({}))
     if (!r.ok) { setError(j.error ?? 'The grant was not changed'); return }
-    setError(''); setGrant(j.grant ?? {})
+    setError(''); setGrant(j.grant ?? {}); setWritable(j.writable ?? [])
   }
   return (
-    <Section icon="lucide:key-round" title="What each project may read" subtitle="A project sees only the tables granted to it, and within a table perhaps only some columns.">
+    <Section icon="lucide:key-round" title="What each project may read and write" subtitle="A project sees only the tables granted to it, and within a table perhaps only some columns; it appends only to tables it may write.">
       <div className="sa-section__body sa-stack">
         <Toolbar>
           <Field label="Project">
@@ -181,7 +182,7 @@ function Grants({ api, tables, projects }: { api: Api; tables: Table[]; projects
           const g = t.name in grant ? grant[t.name] : undefined
           return (
             <div key={t.name} className="sa-stack">
-              <Receipt items={[[t.name, g === undefined ? <Status key="s" state="neutral">not granted</Status> : g === null ? <Status key="s" state="ok">every column</Status> : <Status key="s" state="attention">{`${g.length} of ${t.columns.length} columns`}</Status>]]} />
+              <Receipt items={[[t.name, g === undefined ? <Status key="s" state="neutral">not granted</Status> : g === null ? <Status key="s" state="ok">{writable.includes(t.name) ? 'reads and writes every column' : 'every column'}</Status> : <Status key="s" state="attention">{`${g.length} of ${t.columns.length} columns`}</Status>]]} />
               <Choices label={`Columns of ${t.name} this project may read`}>
                 {t.columns.map((c) => {
                   const on = g === null || (Array.isArray(g) && g.includes(c.name))
@@ -196,6 +197,9 @@ function Grants({ api, tables, projects }: { api: Api; tables: Table[]; projects
               </Choices>
               <ActionBar>
                 <button className="sa-btn" onClick={() => void set(t.name, null)}>Grant every column</button>
+                {writable.includes(t.name)
+                  ? <button className="sa-btn" onClick={() => void set(t.name, null, false)}>Stop writing</button>
+                  : <button className="sa-btn" title="Writing is the whole table: the project reads every column too" onClick={() => void set(t.name, null, true)}>Let it write</button>}
                 {g !== undefined && <button className="sa-btn sa-btn--link" onClick={() => void set(t.name, 'revoke')}>Revoke</button>}
               </ActionBar>
             </div>
