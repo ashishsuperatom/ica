@@ -1,16 +1,14 @@
 // The ask bar: words typed at the foot of a thread (Enter sends, Shift+Enter breaks a line), stuck to the bottom of the
-// page, the same on every surface. What the words go to is the surface's: it is given the send and says whether it is
-// working and where the words are asked from.
+// page, the same on every surface: attaching on the left (not yet), the words, sending on the right. What the words go to
+// is the surface's: it is given the send and says whether it is working.
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Icon } from '@iconify/react'
 
-export default function AskBar({ onAsk, busy = false, placeholder = 'Ask a question…', from, working }: {
+export default function AskBar({ onAsk, busy = false, placeholder = 'Ask a question…', working }: {
   onAsk: (text: string) => void
   busy?: boolean
   placeholder?: string
-  /** Where the words are asked from (the block's title), shown under the field. */
-  from?: string
   /** What is being worked on, above the field, while busy. */
   working?: ReactNode
 }) {
@@ -23,6 +21,9 @@ export default function AskBar({ onAsk, busy = false, placeholder = 'Ask a quest
       {busy && working && <div className="sa-askbar__working" aria-live="polite">{working}</div>}
       <form className="sa-askbar__form" onSubmit={(e) => { e.preventDefault(); send() }}>
         <div className="sa-askbar__field">
+          <button type="button" className="sa-icon-btn sa-askbar__plus" disabled aria-label="Attach" title="Attach — not yet">
+            <Icon icon="lucide:plus" />
+          </button>
           <textarea id="sa-ask" ref={box} className="sa-askbar__input" rows={1} value={text} disabled={busy}
             placeholder={busy ? 'Working on it…' : placeholder} aria-label={placeholder}
             onChange={(e) => setText(e.target.value)}
@@ -31,7 +32,6 @@ export default function AskBar({ onAsk, busy = false, placeholder = 'Ask a quest
             <Icon icon={busy ? 'lucide:loader' : 'lucide:arrow-up'} className={busy ? 'sa-spin' : undefined} />
           </button>
         </div>
-        {from && <div className="sa-askbar__hint truncate" title={from}>{busy ? 'working…' : 'asked from'} <b>{from}</b></div>}
       </form>
     </div>
   )

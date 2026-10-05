@@ -341,7 +341,6 @@ function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, 
     return steps
   }, [view, msg, paths, pending, deciding, agent, fetchFile, request, session, loadArtifacts, intent])   // eslint-disable-line react-hooks/exhaustive-deps
 
-  const leafLead = view ? leadOf(view.answers.find((a) => a.id === view.blocks.find((b) => b.id === view.leaf)?.answer)?.markdown ?? '') : null
   return (
     <div ref={root} className="sa-work">
       {refused && <p className="sa-alert" role="alert"><span className="sa-alert__text">{refused}</span></p>}
@@ -350,7 +349,7 @@ function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, 
           <BlockFrame id="opening" step={1} label={agent.name} title={(viewStart && agent.starts.find((x) => x.key === viewStart)?.label) || agent.look.main?.label || agent.name}
             subtitle={agent.look.says} busy icon={agent.look.icon} accent={accentOf(agent.look.accent)}><StepSkeleton label="Opening" /></BlockFrame>
         ))}
-        after={view && <AskBar onAsk={(t) => void ask(t)} busy={!!pending} placeholder="Ask about these numbers…" from={leafLead?.title ?? agent.name} />} />
+        after={view && <AskBar onAsk={(t) => void ask(t)} busy={!!pending} placeholder="Ask about these numbers…" />} />
     </div>
   )
 }

@@ -57,7 +57,11 @@
 .sa-profile__line { display: block; font-size: var(--t-xs); color: var(--faint); line-height: var(--lh-tight); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── The connection pill ── */
-.sa-status { display: inline-flex; align-items: center; gap: var(--sp-1h); height: 24px; max-width: 24rem; padding: 0 var(--sp-2h); border-radius: var(--r-full); border-width: 1px; background: var(--surface); font-size: var(--t-xs); color: var(--muted); box-shadow: var(--shadow-card); }
+.sa-status { display: inline-flex; align-items: center; gap: var(--sp-1h); height: 24px; max-width: 24rem; padding: 0 var(--sp-2h); border-radius: var(--r-full); border-width: 1px; background: var(--surface); font-size: var(--t-xs); color: var(--muted); box-shadow: var(--shadow-card); cursor: default; outline: none; transition: padding var(--dur-1) var(--ease), gap var(--dur-1) var(--ease); }
+/* Folded: just the dot (the words return on hover or focus, and whenever the connection changes) */
+.sa-status__words { display: inline-flex; align-items: center; gap: var(--sp-1); overflow: hidden; white-space: nowrap; max-width: 22rem; transition: max-width var(--dur-arrive) var(--ease-out-arrive), opacity var(--dur-arrive) var(--ease-out-arrive); }
+.sa-status[data-saying='false']:not(:hover):not(:focus-visible) { gap: 0; padding: 0 var(--sp-2); }
+.sa-status[data-saying='false']:not(:hover):not(:focus-visible) .sa-status__words { max-width: 0; opacity: 0; }
 .sa-status__detail { color: var(--faint); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── Thread ── */
@@ -211,8 +215,8 @@
 .sa-home__ask .sa-askbar__form { max-width: none; }
 .sa-artifacts__make { margin-top: var(--sp-3); }
 
-/* The artifacts pane, closed: a small square in the top-right corner (under the connection pill), with a badge */
-.sa-artifacts__fab { position: fixed; top: 44px; right: var(--sp-3); z-index: var(--z-pill); width: 36px; height: 36px; display: grid; place-items: center; border-radius: 11px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); box-shadow: var(--shadow-card); transition: color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), transform var(--dur-1) var(--ease); }
+/* The artifacts pane, closed: a small square at the bottom right, level with the ask bar's field, with a badge */
+.sa-artifacts__fab { position: fixed; bottom: calc(var(--sp-3) + 5px); right: var(--sp-4); z-index: var(--z-pill); width: 40px; height: 40px; display: grid; place-items: center; border-radius: 11px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); box-shadow: var(--shadow-card); transition: color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), transform var(--dur-1) var(--ease); }
 .sa-artifacts__fab > svg { width: 17px; height: 17px; }
 .sa-artifacts__fab:hover { color: var(--primary-strong); border-color: var(--primary); transform: translateY(-1px); }
 .sa-artifacts__fab[data-has='true'] { color: var(--primary-strong); }

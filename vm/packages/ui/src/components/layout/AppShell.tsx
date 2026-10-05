@@ -1,8 +1,8 @@
 // The app shell, the same for every surface: where to go on the left, the thread in the middle, the artifacts on the
 // right; the phone header; the sidebar's and the pane's states remembered per browser; the connection status.
 //
-// The artifacts pane opens and closes from one corner, the top right: open, its head's button closes it; closed, it is a
-// small square there with a badge saying how many artifacts there are, and opens it.
+// The artifacts pane: open, its head's button closes it; closed, it is a small square at the bottom right, level with the
+// ask bar, with a badge saying how many artifacts there are, and opens it.
 
 import { useState, type ReactNode } from 'react'
 import { Icon } from '@iconify/react'
@@ -45,11 +45,11 @@ export default function AppShell({ sidebar, children, artifacts, artifactsCount,
             <div className="sa-artifacts__body">{artifacts}</div>
           </aside>
         )}
-        {/* Closed, the pane is a small square in the same corner, saying how many there are; it opens the pane. */}
+        {/* Closed, the pane is a small square at the bottom right, level with the ask bar, saying how many there are. */}
         {artifacts && !paneOpen && (
           <button className="sa-artifacts__fab" onClick={() => pane(true)} aria-expanded={false} data-has={!!artifactsCount}
             title={artifactsCount ? `${artifactsCount} artifact${artifactsCount === 1 ? '' : 's'} — show them` : 'Artifacts — nothing yet'} aria-label="Show the artifacts">
-            <Icon icon="lucide:layers" />
+            <Icon icon="lucide:files" />
             {!!artifactsCount && <span className="sa-artifacts__badge">{artifactsCount > 99 ? '99+' : artifactsCount}</span>}
           </button>
         )}
