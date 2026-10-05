@@ -472,7 +472,37 @@ Not the session's STATE: the core of decision intelligence, to be expanded later
   - **Ports from the registry** on `127.0.0.1` (project 1's data source manager at `127.0.0.1:4008`, …). Works everywhere
     without admin rights. *Recommended for that reason.*
 
-### Customer data warehouse — stopped (2026-10-05)
+### The organisation's data warehouse — the module (built 2026-10-05)
+
+**The spec, in the user's words, is `docs/warehouse-module-spec.md`.** It answers the stop below: no Pipelines per
+customer — the Workers and Durable Objects that receive data write the Iceberg tables themselves.
+
+- **Owned by the organisation:** one logical Iceberg warehouse each — a namespace (`org_<id>`) in the one shared Basin
+  Catalog; the catalog lays out the files. Projects are not warehouses: a project is **granted** tables, and within a
+  table perhaps only some columns — an authorization boundary, not a storage one.
+- **The module** (`control-plane/superadmin/src/warehouse/`): the **Data Source Bridge** (`tables`, `describe`, `query`)
+  that the rest of Superatom reads through, and **Ingest** (`createTable`, `append`) kept apart from it. The backend is
+  chosen in `warehouse/index.ts` alone: the **cloud** (Basin Catalog + R2 + Basin SQL) today; a local Iceberg stack later
+  behind the same two interfaces (not built). Nothing Basin-specific leaves `warehouse/cloud/`.
+- **Writing from a Worker:** Basin SQL is read-only, so an append writes the Iceberg files itself — a Parquet data file
+  carrying the table's field ids, a manifest and a manifest list in Avro (the parent snapshot's manifests carried
+  forward), then a commit that holds only if the table has not moved (on a conflict the list is made again). Verified
+  with DuckDB and PyIceberg reading the result; an append on a table another engine wrote carries its manifests forward.
+  The catalog's maintenance compacts the small files.
+- **Reading:** Basin SQL runs the query (no engine of ours). Before it runs, the **access check fails closed**: every name
+  must be a granted table, a granted column, an alias the query made, or SQL's own word; `*` over limited columns, writes,
+  comments and a second statement are refused; plain table names are placed in the organisation's namespace.
+- **Who does what:** the **OrgDO** coordinates — names the warehouse, routes every operation through the module, keeps an
+  append-only record of what was done (`warehouse_ops`); no data in DO state. The **ProjectDO** keeps the project's grant
+  (append-only `warehouse_grants`), set by the organisation's administrator (`/api/warehouse/grants`). Projects read
+  through the hub (`warehouse:tables`, `warehouse:query`; agent-key scope `warehouse`), audited. Organisation
+  administrators make tables, append and query everything from `/api/warehouse` and the console's Warehouse tab.
+- **Setting it up (needs the user):** settings `WAREHOUSE_ACCOUNT_ID`, `WAREHOUSE_BUCKET`; secrets
+  `WAREHOUSE_CATALOG_TOKEN` (R2 + Basin Catalog) and optionally `WAREHOUSE_SQL_TOKEN` (Basin SQL); the bucket bound as
+  `WAREHOUSE` (R2) with its catalog enabled. Until then every call says the warehouse is not set up.
+- **Next:** a `warehouse` source kind in the datasource manager, so engine programs read it through the one data path.
+
+### Customer data warehouse — stopped (2026-10-05, superseded by the module above)
 
 **Flagged and stopped, in the user's words:** if a proper, Fabric-like warehouse per customer cannot be built on
 Cloudflare, it is not built half-heartedly; something else will be thought of. The limitation: an account has at most

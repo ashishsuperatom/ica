@@ -93,6 +93,12 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Docker image for the engine, and provisioning of one Fly.io machine per project.
 - iOS voice-first client.
 
+- The organisation's data warehouse module (inside the Worker): one Iceberg warehouse per organisation in the shared Basin Catalog; the Data Source Bridge (tables, describe, query) and Ingest (make a table, append) apart; appends written from the Worker (Parquet + Avro manifests + a conflict-safe commit, verified with DuckDB and PyIceberg); Basin SQL reads behind a fail-closed access check; project grants by table and column (ProjectDO), the OrgDO's record of what was done; hub `warehouse:*` with the `warehouse` scope; the console's Warehouse tab.
+- The admin console on the semantic design system: every screen built from PageHeader, Section, RecordList, Receipt, Form, Figures, Tabs, Status, Notice, Code, Empty, Dialog — no inline styles or legacy classes left (xterm's sizing aside).
+- The workspace steady and whole: a step appears complete (its program views loaded, its paths read), a new step stands at once as an answer-shaped skeleton, an edit in place dims the step; the step anatomy of the dashboards (header from the answer's first line, controls above, next moves as pills, about these numbers); the artifacts pane opens and closes from one corner.
+- Agents carry their look (icon, accent, one line) and starting points; home is the dashboards' front door (a section per agent, its starting points as cards); `session:open { startAt }`.
+- A view's question as framework components: QuestionControls (filter chips, adding a filter with members searched, breakdown, window by kind, assumptions), NextMoves, AboutNumbers — used by the app-views program; programs' views may read through the surface (`ProgramEnv`) while changes stay intents.
+
 ## Planned (not built)
 - Prices for prompt-cache tokens (counted per call, not yet priced).
 
@@ -122,6 +128,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Payment through Stripe (a checkout whose webhook adds credits), invoices and per-plan limits; metering engine time and queries.
 - The data protocol for many users at once (fairness and queueing across users); activities in the user UI.
 - The platform's own data warehouse: every DO's records in one Basin, queryable with SQL (customer warehouses stopped: Pipelines' 20-per-account limit).
+- The organisation's data warehouse live on Cloudflare: needs the catalog token, bucket and R2 binding set (the module is built — see Built); a `warehouse` source kind in the datasource manager.
 - Data sources as templates copied per project, with dialect code moved out of the platform.
 - Running without Docker (Windows, macOS, Linux, Electron) with a per-project port registry.
 - Programs running in dynamic workers.
