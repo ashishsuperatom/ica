@@ -376,3 +376,48 @@ export function stepOf(v: { agent: string; states: Record<string, State>; blocks
 
 /** Whose memory an experience is: the session owner's user scope. */
 export const scopeOfUser = (user: string): Scope => `user:${String(user).replace(/^user:/, '')}`
+
+// ── The first learner ───────────────────────────────────────────────────────────────────────────────────────────────
+// Learning is a separate path (System 4, assumed); this is the plainest honest one, so the memory is never empty while
+// people work: where people reached the same step (one agent, the same STATE) at least twice and took paths from it,
+// that situation becomes a decision state whose paths are what was taken, each with how often. It writes only through
+// the named operations (create, then reinforce and generalise as more comes), so a better learner replaces it without
+// anything else changing. Nothing here guesses why; the reasoning it writes is the record.
+
+export interface Seen_ { id: string; agent: string; stateHash: string; cues: string[]; world: World; taken: Taken | null; scope: Scope }
+
+/** What the first learner would write, given the experiences and the current decision states. */
+export function learn(experiences: Seen_[], current: (id: string) => DecisionVersion | null, supportsOf: (id: string) => string[] = () => [], minimum = 2): DecisionOp[] {
+  const groups = new Map<string, Seen_[]>()
+  for (const e of experiences) {
+    if (!e.taken || !e.stateHash) continue
+    const k = `${e.agent}\u0000${e.stateHash}`
+    groups.set(k, [...(groups.get(k) ?? []), e])
+  }
+  const ops: DecisionOp[] = []
+  for (const list of groups.values()) {
+    if (list.length < minimum) continue
+    const { agent, stateHash } = list[0]
+    const id = `auto.${agent.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.${stateHash.slice(0, 12)}`.slice(0, 80)
+    // The paths: each distinct one taken, most taken first.
+    const byPath = new Map<string, { taken: Taken; n: number }>()
+    for (const e of list) { const k = JSON.stringify({ k: e.taken!.kind, o: e.taken!.ops, a: e.taken!.action, c: e.taken!.call ? { p: e.taken!.call.package, f: e.taken!.call.fn } : null, t: e.taken!.kind === 'language' ? words(e.taken!.text ?? '').join(' ') : null }); const x = byPath.get(k); if (x) x.n++; else byPath.set(k, { taken: e.taken!, n: 1 }) }
+    const paths: Path[] = [...byPath.values()].sort((a, b) => b.n - a.n).slice(0, 8).map((x, i) => ({
+      id: `p${i + 1}`, label: x.taken.label.replace(/^./, (c) => c.toUpperCase()), reasoning: `taken ${x.n} of ${list.length} times from here`,
+      intent: { ...(x.taken.ops ? { ops: x.taken.ops } : {}), ...(x.taken.action ? { action: x.taken.action } : {}), ...(x.taken.call ? { call: x.taken.call } : {}), ...(x.taken.kind === 'language' ? { text: x.taken.text } : {}), to: x.taken.to ?? 'new' },
+    }))
+    // Its cues: what every passage through it shared (the agent and the STATE's own values); the scope: whose they were.
+    const shared = list.slice(1).reduce((acc, e) => acc.filter((c) => e.cues.includes(c)), list[0].cues).slice(0, 40)
+    const scopes = [...new Set(list.map((e) => e.scope))]
+    const scope: Scope = scopes.length === 1 ? scopes[0] : 'global'
+    const body: DecisionBody = { title: `${agent}: a step reached ${list.length} times`, description: `A step of ${agent} people reached ${list.length} times, and the paths they took from it.`, cues: shared.length ? shared : [agent.toLowerCase()], paths, seen: {} }
+    const cur = current(id)
+    if (!cur) { ops.push({ op: 'create', id, scope, body, supports: list.map((e) => e.id) }); continue }
+    if (cur.status !== 'active') continue
+    const already = new Set(supportsOf(id))
+    const fresh = list.filter((e) => !already.has(e.id)).map((e) => e.id)
+    if (fresh.length) ops.push({ op: 'reinforce', id, supports: fresh })
+    if (JSON.stringify(cur.body.paths) !== JSON.stringify(paths)) ops.push({ op: 'generalise', id, body: { ...body, title: cur.body.title.startsWith(`${agent}: a step reached`) ? body.title : cur.body.title, description: cur.body.description } })
+  }
+  return ops
+}

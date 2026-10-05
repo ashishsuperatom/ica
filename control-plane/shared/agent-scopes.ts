@@ -2,7 +2,7 @@
 // the hub (which enforces it) and the admin console (which offers it). A message no scope names is refused.
 
 /** Messages the hub answers itself, from the platform's own records (no engine needed). */
-export const HUB_MESSAGES = ['session:list', 'session:read', 'program:list', 'program:publish', 'activity:list', 'decision:paths', 'decision:outcome', 'decision:states', 'decision:state', 'decision:change', 'artifact:record', 'artifact:decide', 'artifact:list', 'artifact:get', 'decision:register'] as const
+export const HUB_MESSAGES = ['session:list', 'session:read', 'program:list', 'program:publish', 'activity:list', 'decision:paths', 'decision:outcome', 'decision:states', 'decision:state', 'decision:change', 'decision:learn', 'artifact:record', 'artifact:decide', 'artifact:list', 'artifact:get', 'decision:register'] as const
 /** Messages every agent key may send, whatever its scopes: its own activities. */
 export const ALWAYS_ALLOWED = ['activity:list'] as const
 
@@ -18,7 +18,7 @@ export const AGENT_SCOPES = {
   /** The decision memory: the paths from a step and how a step turned out (with sessions), read the decision states. */
   decisions: ['decision:paths', 'decision:outcome', 'decision:states', 'decision:state', 'artifact:record', 'artifact:decide', 'artifact:list', 'artifact:get', 'decision:register'],
   /** The learning path: change decision states through their named operations. */
-  learn: ['decision:states', 'decision:state', 'decision:change'],
+  learn: ['decision:states', 'decision:state', 'decision:change', 'decision:learn'],
   graph: ['graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish'],
 } as const
 

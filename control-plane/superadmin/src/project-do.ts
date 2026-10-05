@@ -1343,6 +1343,9 @@ export class ProjectDO extends DurableObject<Env> {
           hubReply({ t: 'decision:states', asOf: out.asOf, states: out.states.filter((x: any) => !sees || sees.has(x.scope)), reqId: pl.reqId })
         } else if (pl.t === 'decision:state') {
           hubReply({ t: 'decision:state', ...(await call(`/state/${encodeURIComponent(String(pl.id ?? ''))}`)), reqId: pl.reqId })
+        } else if (pl.t === 'decision:learn') {
+          if (!sender.admin && sender.type !== 'agent') throw new Error('only an administrator or a learning agent runs the learner')
+          hubReply({ t: 'decision:learned', ...(await call('/learn', {})), reqId: pl.reqId })
         } else if (pl.t === 'decision:change') {
           // The learning path: an admin, or an agent key allowed to learn.
           if (!sender.admin && sender.type !== 'agent') throw new Error('only an administrator or a learning agent changes the decision memory')

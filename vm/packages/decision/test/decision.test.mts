@@ -77,3 +77,21 @@ test('a taken path is described from the intent, and matched to a state\'s path'
   assert.equal(samePath(t, body().paths[0]), true)
   assert.equal(samePath(takenOf({ kind: 'structured', ops: [{ op: 'set', path: 'pmo.by', value: 'pillar' }] as any }), body().paths[1]), true)
 })
+
+test('the first learner: a step reached twice with paths taken becomes a decision state; more passages reinforce it; nothing below the minimum', async () => {
+  const { learn } = await import('../src/index.ts')
+  const e = (id: string, path: string, hash = 'h1', user = 'user:u1') => ({ id, agent: 'portfolio', stateHash: hash, cues: ['portfolio', 'view overruns', id], world: { overrun: 12 }, scope: user,
+    taken: { kind: 'structured' as const, label: `ran pmo.${path}`, call: { package: 'pmo', fn: path } } })
+  const none = (_: string) => null
+  assert.deepEqual(learn([e('e1', 'flag')], none), [])
+  const ops = learn([e('e1', 'flag'), e('e2', 'flag'), e('e3', 'by'), e('x', 'flag', 'h2')], none)
+  assert.equal(ops.length, 1)
+  const op: any = ops[0]
+  assert.equal(op.op, 'create'); assert.equal(op.scope, 'user:u1'); assert.deepEqual(op.supports, ['e1', 'e2', 'e3'])
+  assert.deepEqual(op.body.cues, ['portfolio', 'view overruns'])
+  assert.deepEqual(op.body.paths.map((p: any) => [p.label, p.reasoning]), [['Ran pmo.flag', 'taken 2 of 3 times from here'], ['Ran pmo.by', 'taken 1 of 3 times from here']])
+  const cur = { id: op.id, version: 1, at: '', by: 'l', why: '', op: 'create', scope: op.scope, status: 'active', body: op.body, supports: op.supports, contradicts: [] } as any
+  const again = learn([e('e1', 'flag'), e('e2', 'flag'), e('e3', 'by'), e('e4', 'by', 'h1', 'user:u2')], (id) => (id === op.id ? cur : null), () => op.supports)
+  assert.deepEqual(again.map((o: any) => o.op), ['reinforce', 'generalise'])
+  assert.deepEqual((again[0] as any).supports, ['e4'])
+})

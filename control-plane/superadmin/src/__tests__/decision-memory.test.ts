@@ -144,4 +144,17 @@ describe('decision memory', () => {
     expect((await at(`/decision/states?asOf=${encodeURIComponent(before)}`)).body.states.map((s: any) => s.id)).toEqual(['overruns'])
     expect((await at('/decision/state/overruns')).body.versions.map((v: any) => v.op)).toEqual(['create', 'invalidate'])
   })
+
+  it('the first learner: a step people reached again and again becomes a decision state of the paths they took, through the named operations', async () => {
+    const r = await post('/decision/learn', {})
+    expect(r.body.written).toEqual([expect.objectContaining({ op: 'create', version: 1 })])
+    const id = r.body.written[0].id
+    const st = (await at(`/decision/state/${encodeURIComponent(id)}`)).body.state
+    expect(st.body.paths[0]).toMatchObject({ label: 'Ran pmo.flag', reasoning: 'taken 4 of 4 times from here', intent: { call: { package: 'pmo', fn: 'flag' } } })
+    expect(st.supports).toHaveLength(4)
+    expect((await post('/decision/learn', {})).body.written).toEqual([])   // nothing new: nothing written
+    const u1 = await socket(jwt({ userId: 'u1', email: 'u1@x.io', role: 'superadmin' }))
+    expect((await u1.ask({ t: 'decision:paths', session: 's-3', block: 'b1' })).matches.map((m: any) => m.id)).toContain(id)
+    u1.ws.close()
+  })
 })

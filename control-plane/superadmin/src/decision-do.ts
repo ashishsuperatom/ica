@@ -19,7 +19,7 @@ import { DurableObject } from 'cloudflare:workers'
 import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
 import { DECISION_MIGRATIONS } from './migrations.js'
 import { createRecorder } from './records.js'
-import { recognise, plan, samePath, isScope, DecisionRefusal, DEFAULT_RECOGNITION, type Candidate, type DecisionOp, type DecisionVersion, type Experience, type PathRecord, type RecognitionSettings, type Taken, type World } from '../../../vm/packages/decision/src/index.js'
+import { recognise, plan, samePath, isScope, learn, DecisionRefusal, DEFAULT_RECOGNITION, type Candidate, type DecisionOp, type DecisionVersion, type Experience, type PathRecord, type RecognitionSettings, type Taken, type World } from '../../../vm/packages/decision/src/index.js'
 
 const OUTCOMES = ['succeeded', 'failed', 'abandoned', 'reversed']
 
@@ -75,6 +75,44 @@ export class DecisionDO extends DurableObject<Env> {
     return recognise(cues, world, candidates, df, n, this.settings())
   }
 
+  /** Apply one operation as the learning path would: through plan, every version kept, the index rebuilt. */
+  private change(op: DecisionOp, by: string, why: string): { id: string; version: number }[] {
+    const cur = this.current()
+    const worldOf = (id: string) => { const r = this.sql('SELECT world FROM experiences WHERE id = ?', id)[0]; return r ? JSON.parse(r.world) : null }
+    const writes = plan(op, (id) => cur.get(id) ?? null, worldOf)
+    const at = new Date().toISOString()
+    const written: { id: string; version: number }[] = []
+    this.ctx.storage.transactionSync(() => {
+      for (const w of writes) {
+        const version = (cur.get(w.id)?.version ?? 0) + 1
+        this.ctx.storage.sql.exec('INSERT INTO versions (id, version, at, by, why, op, scope, status, body, supports, contradicts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          w.id, version, at, by, why, op.op, w.scope, w.status, JSON.stringify(w.body), JSON.stringify(w.supports), JSON.stringify(w.contradicts))
+        this.ctx.storage.sql.exec('DELETE FROM cue_index WHERE id = ?', w.id)
+        if (w.status === 'active') for (const c of new Set(w.body.cues.map((x) => x.trim().toLowerCase()))) this.ctx.storage.sql.exec('INSERT OR IGNORE INTO cue_index (cue, id) VALUES (?, ?)', c, w.id)
+        written.push({ id: w.id, version })
+        this.record('decision.version', `${w.id}:${version}`, { ...w, version, at, by, why, op: op.op }, at)
+      }
+    })
+    return written
+  }
+
+  /** The first learner over the latest experiences (learn in vm/packages/decision): what it wrote. */
+  private runLearner(): { id: string; version: number; op: string }[] {
+    const exps = this.sql('SELECT id, agent, state_hash, cues, world, taken, scope FROM experiences WHERE taken IS NOT NULL ORDER BY at DESC LIMIT 5000')
+      .map((r) => ({ id: String(r.id), agent: String(r.agent), stateHash: String(r.state_hash), cues: JSON.parse(r.cues), world: JSON.parse(r.world), taken: JSON.parse(r.taken), scope: String(r.scope) }))
+    const cur = this.current()
+    const supportsOf = (id: string) => this.sql('SELECT supports FROM versions WHERE id = ?', id).flatMap((r) => JSON.parse(r.supports))
+    const out: { id: string; version: number; op: string }[] = []
+    for (const op of learn(exps, (id) => cur.get(id) ?? null, supportsOf)) {
+      try { for (const w of this.change(op, 'learner:first', 'repeated steps: the paths people took from the same step')) out.push({ ...w, op: op.op }) }
+      catch (e) { if (!(e instanceof DecisionRefusal)) throw e }
+    }
+    return out
+  }
+
+  // Every six hours while experiences arrive, the first learner runs; a better learner takes its place without change here.
+  async alarm() { this.runLearner() }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url)
     const j = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
@@ -93,6 +131,7 @@ export class DecisionDO extends DurableObject<Env> {
         this.ctx.storage.sql.exec('INSERT INTO experiences (id, at, session, block, agent, scope, cues, world, state_hash, taken, recognised) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
           e.id, e.at, e.session, e.block, e.agent, e.scope, JSON.stringify(e.cues), JSON.stringify(e.world), e.stateHash, e.taken ? JSON.stringify(e.taken) : null, recognised)
         this.record('decision.experience', e.id, e, e.at)
+        if ((await this.ctx.storage.getAlarm()) == null) await this.ctx.storage.setAlarm(Date.now() + 6 * 3_600_000)
         return j({ id: e.id, recognised, mode: r.mode })
       }
       if (request.method === 'POST' && url.pathname === '/recognise') return j(this.recogniseNow(strs(body.cues), nums(body.world), strs(body.scopes)))
@@ -109,25 +148,9 @@ export class DecisionDO extends DurableObject<Env> {
       }
       if (request.method === 'POST' && url.pathname === '/change') {
         if (!body.by || !body.why) return j({ error: 'a change to the decision memory says who and why' }, 400)
-        const op = body.op as DecisionOp
-        const cur = this.current()
-        const worldOf = (id: string) => { const r = this.sql('SELECT world FROM experiences WHERE id = ?', id)[0]; return r ? JSON.parse(r.world) : null }
-        const writes = plan(op, (id) => cur.get(id) ?? null, worldOf)
-        const at = new Date().toISOString()
-        const written: { id: string; version: number }[] = []
-        this.ctx.storage.transactionSync(() => {
-          for (const w of writes) {
-            const version = (cur.get(w.id)?.version ?? 0) + 1
-            this.ctx.storage.sql.exec('INSERT INTO versions (id, version, at, by, why, op, scope, status, body, supports, contradicts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-              w.id, version, at, String(body.by), String(body.why), op.op, w.scope, w.status, JSON.stringify(w.body), JSON.stringify(w.supports), JSON.stringify(w.contradicts))
-            this.ctx.storage.sql.exec('DELETE FROM cue_index WHERE id = ?', w.id)
-            if (w.status === 'active') for (const c of new Set(w.body.cues.map((x) => x.trim().toLowerCase()))) this.ctx.storage.sql.exec('INSERT OR IGNORE INTO cue_index (cue, id) VALUES (?, ?)', c, w.id)
-            written.push({ id: w.id, version })
-            this.record('decision.version', `${w.id}:${version}`, { ...w, version, at, by: body.by, why: body.why, op: op.op }, at)
-          }
-        })
-        return j({ written })
+        return j({ written: this.change(body.op as DecisionOp, String(body.by), String(body.why)) })
       }
+      if (request.method === 'POST' && url.pathname === '/learn') return j({ written: this.runLearner() })
       if (request.method === 'GET' && url.pathname === '/states') {
         const asOf = url.searchParams.get('asOf') ?? undefined
         const states = [...this.current(asOf).values()].filter((v) => url.searchParams.get('all') === '1' || v.status === 'active').map((v) => ({ ...v, record: this.recordOf(v.id, v) }))

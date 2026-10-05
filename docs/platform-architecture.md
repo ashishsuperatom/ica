@@ -793,6 +793,9 @@ attractor pattern (`docs/stable-attractor-associative-memory-source.md`):
   - **not learned** (nothing matches well, or the evidence is thin or competing) — explore: the agent answers and the
     programs' own actions are offered; the experience is recorded, so it can become memory.
   Memory is advisory, never authoritative; contradictions are kept as competing states until evidence explains them.
+- **The first learner** (built): the plainest honest learning so the memory is never empty — a step people reached at
+  least twice (one agent, the same STATE) becomes a decision state of the paths they took, each with how often; it
+  writes only through the named operations, so a better learner (System 4) replaces it with nothing else changing.
 - **Learning is a separate path** (assumed working): it reads experiences and outcomes and changes decision states
   only through named operations — create, reinforce, weaken, merge, generalise, specialise, supersede, split, compete,
   invalidate — each recorded with who, when and why; nothing is erased; any decision state can be read as of any moment.
