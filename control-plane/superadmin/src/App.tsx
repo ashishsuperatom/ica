@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, createContext, useContext } from 'react'
 import { loadToken, mintToken, dropToken, claimReauthOnce, tokenValid } from '../../shared/session-token'
 import { Credentials } from './Credentials'
 import { AgentsScreen } from './Models'
@@ -13,8 +13,10 @@ import { ConnectorConsole } from './ConnectorConsole'
 import { GroundingConsole } from './GroundingConsole'
 import { AnalystConsole } from './AnalystConsole'
 import { useSession, SignIn, UserButton } from '@clerk/react'
-import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useSearchParams } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useSearchParams, MemoryRouter, useLocation } from 'react-router-dom'
 import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
+import { AppShell, Sidebar, LocalThread, Toasts, useThread, startThread, type Registry } from '@superatom/ui'
+import '@superatom/ui/design.css'
 
 // ── COPY, AND SAY SO ─────────────────────────────────────────────────────────
 // Four copy buttons did their work in total silence. Copying a credential is the one moment you MUST know it
@@ -90,6 +92,13 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .side .subnav:hover{background:#f6f8fb;color:var(--ink)}
 .side .subnav.on{background:var(--primary-wash);color:var(--purple);font-weight:600;border-left-color:var(--purple)}
 .side .foot{border-top:1px solid var(--line2);padding:9px 12px;display:flex;align-items:center;gap:10px}
+/* a console screen inside a block of the admin workspace: its section links as a row of actions, its content padded */
+.admin-block{min-width:0}
+.admin-block__nav.side{width:auto;height:auto;position:static;border:0;border-bottom:1px solid var(--line);flex-direction:row;flex-wrap:wrap;gap:2px 4px;padding:8px 12px;background:var(--surface-subtle)}
+.admin-block__nav.side .grp{display:none}
+.admin-block__nav.side .nav{margin:0;padding:4px 9px;font-size:12.5px}
+.admin-block__nav.side .subnav{margin-left:0;border-left:0;padding:4px 9px;border-radius:6px}
+.admin-block .content{padding:14px 16px}
 .main{flex:1;min-width:0;display:flex;flex-direction:column}
 .top{display:flex;align-items:center;gap:12px;padding:8px 20px;border-bottom:1px solid var(--line);
  background:#fff;position:sticky;top:0;z-index:5;min-height:44px}
@@ -215,7 +224,18 @@ function useApi(token: string | null, orgId?: string | null) {
   }, [token, orgId])
 }
 
+/** Where a page is drawn: as a page of the classic console, or inside a block of the admin workspace (no chrome; its
+ *  section links become the block's actions). */
+const ShellMode = createContext<'page' | 'block'>('page')
+
 function Shell({ children, crumbs, nav }: { children: React.ReactNode; crumbs?: React.ReactNode; nav?: React.ReactNode }) {
+  if (useContext(ShellMode) === 'block') return (
+    <div className="admin-block">
+      <Style />
+      {nav && <nav className="admin-block__nav side">{nav}</nav>}
+      <div className="content">{children}</div>
+    </div>
+  )
   return (
     <div className="app">
       <Style />
@@ -255,8 +275,19 @@ export function App() {
       </div></>
     )
   }
+  // THE ADMIN WORKSPACE is the console: every screen a block of a thread (AdminWorkspace below). The classic pages stay
+  // reachable with ?classic=1 while it settles.
+  if (!new URLSearchParams(location.search).has('classic')) return <AdminWorkspace />
   return (
     <BrowserRouter basename={ROUTER_BASE}>
+      <AdminRoutes />
+    </BrowserRouter>
+  )
+}
+
+/** The console's screens, by address — drawn as pages (classic) or one per block (the admin workspace). */
+function AdminRoutes() {
+  return (
       <Routes>
         {/* Landing: the platform console lists every org; the customer console sends you to your own. */}
         <Route path="/" element={HOST_SCOPE === 'admin' ? <MyOrgLanding /> : <OrgListPage />} />
@@ -268,7 +299,79 @@ export function App() {
         {/* The older nested form still resolves, so existing links keep working. */}
         <Route path="/org/:orgId/projects/:projectId/*" element={<ProjectDetailPage />} />
       </Routes>
-    </BrowserRouter>
+  )
+}
+
+// ── THE ADMIN WORKSPACE ─────────────────────────────────────────────────────────────────────────────────────
+// The console on the platform's framework: where to go on the left, a thread of blocks in the middle. Each block is one
+// of the console's screens (by its address, in a router of its own); when a screen moves somewhere — another tab,
+// another view, another project — that place opens as a new block below, and the block stays as it was. Every function
+// of the console is kept; only its structure is the platform's.
+const titleOf = (path: string): { title: string; label: string; icon: string } => {
+  const [p, q] = path.split('?')
+  const tab = new URLSearchParams(q ?? '').get('tab')
+  if (p === '/' ) return { title: 'Organisations', label: 'Organisations', icon: 'lucide:building-2' }
+  if (p === '/credentials') return { title: 'Credentials', label: 'Platform', icon: 'lucide:key-round' }
+  if (p === '/agents') return { title: 'Models and agents', label: 'Platform', icon: 'lucide:cpu' }
+  const proj = /^\/(?:org\/[^/]+\/projects|pro)\/([^/]+)\/?(.*)$/.exec(p)
+  if (proj) return { title: proj[2] ? proj[2].replace(/[-/]/g, ' ') : 'Overview', label: `Project ${proj[1].slice(0, 8)}`, icon: 'lucide:folder-kanban' }
+  const org = /^\/org\/([^/]+)$/.exec(p)
+  if (org) return { title: tab ? tab : 'Projects', label: `Organisation ${org[1].slice(0, 8)}`, icon: 'lucide:building' }
+  return { title: p, label: 'Console', icon: 'lucide:square' }
+}
+
+/** Inside a block's router: a move elsewhere opens a new block, and this block goes back to where it was. */
+function MoveWatcher({ home, onMove }: { home: string; onMove: (to: string) => void }) {
+  const loc = useLocation(); const navigate = useNavigate()
+  useEffect(() => {
+    const here = loc.pathname + loc.search
+    if (here !== home) { onMove(here); navigate(home, { replace: true }) }
+  }, [loc.pathname, loc.search])   // eslint-disable-line react-hooks/exhaustive-deps
+  return null
+}
+
+function ScreenBlock() {
+  const { props, open } = useThread()
+  const path = String(props.path ?? '/')
+  return (
+    <ShellMode.Provider value="block">
+      <MemoryRouter initialEntries={[path]}>
+        <MoveWatcher home={path} onMove={(to) => open('screen', { path: to }, `Opened ${titleOf(to).title}`)} />
+        <AdminRoutes />
+      </MemoryRouter>
+    </ShellMode.Provider>
+  )
+}
+
+const ADMIN_BLOCKS: Registry = {
+  screen: {
+    label: 'Console', render: () => <ScreenBlock />,
+    title: (p) => titleOf(String(p.path ?? '/')).title,
+    subtitle: (p) => titleOf(String(p.path ?? '/')).label,
+  },
+}
+
+function AdminWorkspace() {
+  // Where the address points (an org, a project and its view, the platform pages) is the block the thread starts from.
+  const first = useMemo(() => { const p = location.pathname.slice(ROUTER_BASE.length).replace(/^\/w(?=\/|$)/, '') || '/'; return { type: 'screen', props: { path: p + location.search.replace(/[?&]classic(=[^&]*)?/, '') } } }, [])
+  const go = (path: string) => startThread('screen', { path })
+  const groups = [
+    { items: [{ key: 'orgs', label: HOST_SCOPE === 'admin' ? 'Your organisation' : 'Organisations', icon: 'lucide:building-2', onClick: () => go('/') }] },
+    ...(HOST_SCOPE === 'superadmin' ? [{ label: 'Platform', items: [
+      { key: 'credentials', label: 'Credentials', icon: 'lucide:key-round', onClick: () => go('/credentials') },
+      { key: 'agents', label: 'Models and agents', icon: 'lucide:cpu', onClick: () => go('/agents') },
+    ] }] : []),
+    { label: 'More', items: [{ key: 'classic', label: 'Classic console', icon: 'lucide:layout-template', onClick: () => { location.search = '?classic=1' } }] },
+  ]
+  return (
+    <>
+      <AppShell sidebar={(collapsed, toggle) => (
+        <Sidebar name="Superatom admin" connected groups={groups} collapsed={collapsed} onToggle={toggle} foot={() => <UserButton />} />
+      )}>
+        <LocalThread blocks={ADMIN_BLOCKS} home={first} />
+      </AppShell>
+      <Toasts />
+    </>
   )
 }
 

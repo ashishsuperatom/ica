@@ -6,7 +6,8 @@
     "target": "ES2022", "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext", "moduleResolution": "bundler", "jsx": "react-jsx",
     "strict": true, "noEmit": true, "skipLibCheck": true, "esModuleInterop": true, "resolveJsonModule": true,
-    "types": ["vite/client"]
+    "types": ["vite/client"], "allowImportingTsExtensions": true,
+    "paths": { "@superatom/ui": ["../../vm/packages/ui/src/index.ts"], "@superatom/platform-types": ["../../vm/packages/platform-types/src/index.ts"], "react": ["./node_modules/@types/react"], "react/*": ["./node_modules/@types/react/*"] }
   },
   "include": ["src/**/*.tsx", "src/hub.ts", "src/hub-core.ts", "src/termColors.ts"],
   "exclude": ["src/__tests__/**"]
