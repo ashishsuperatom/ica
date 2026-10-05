@@ -1,0 +1,18 @@
+{
+  "id": "rest-json",
+  "name": "REST API (JSON)",
+  "version": 1,
+  "icon": "lucide:braces",
+  "accent": "series-2",
+  "says": "Any HTTP API that answers in JSON: name its endpoints, read them as tables.",
+  "category": "api",
+  "hosts": ["{baseUrl}"],
+  "fields": [
+    { "key": "baseUrl", "label": "Base URL", "type": "url", "required": true, "placeholder": "https://api.example.com/v1" },
+    { "key": "endpoints", "label": "Endpoints", "type": "text", "required": true, "help": "One per line: a name and a path, e.g. “customers /customers”. Each becomes something to read." },
+    { "key": "header", "label": "Auth header", "type": "text", "default": "Authorization", "help": "The header the token goes in." },
+    { "key": "token", "label": "Token", "type": "secret", "help": "Sent as “Bearer <token>” in the auth header, if the API needs one." }
+  ],
+  "auth": { "kind": "header", "header": "{header}", "template": "Bearer {token}" },
+  "offers": { "data": true, "actions": false }
+}

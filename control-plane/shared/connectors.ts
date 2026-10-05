@@ -7,12 +7,20 @@
 // engine-side bridge that runs it (null: it can be saved, not yet run). Code connectors run in the engine; API connectors
 // are an HTTP API or MCP server — both are connections, listed together and part of the data source index.
 
+import CLOUD from '../../connectors/dist/catalog.json'
+
 export type FieldType = 'text' | 'secret' | 'number' | 'url' | 'select' | 'textarea'
 export interface ConnectorField { name: string; label: string; type: FieldType; required?: boolean; options?: string[]; help?: string; placeholder?: string }
 /** How it runs: CODE — our bridge in the engine (machine to machine, the whole engine has access); API — no code of
  *  ours, an HTTP API or an MCP server, used by agents and programs through it. Otherwise the same thing: a connection. */
-export type Runs = 'code' | 'api'
-export interface Connector { id: string; title: string; kind: 'sql' | 'rest' | 'mcp'; runs: Runs; description: string; levels: ('project' | 'user')[]; fields: ConnectorField[]; bridge: string | null }
+/** CLOUD — a connector of the connectors package (connectors/): its code runs in the platform's sandbox, reached
+ *  through the gateway that holds the connection's credentials; it reads data and may do actions. */
+export type Runs = 'code' | 'api' | 'cloud'
+export interface Connector {
+  id: string; title: string; kind: 'sql' | 'rest' | 'mcp'; runs: Runs; description: string; levels: ('project' | 'user')[]; fields: ConnectorField[]; bridge: string | null
+  /** How it is shown (cloud connectors carry an iconify icon and an accent), and what it offers. */
+  icon?: string; accent?: string; offers?: { data: boolean; actions: boolean }; category?: string
+}
 
 export const CONNECTORS: Connector[] = [
   { id: 'netsuite', runs: 'code', title: 'NetSuite', kind: 'sql', description: 'Oracle NetSuite through SuiteQL, with an OAuth 2.0 machine-to-machine certificate.', levels: ['project'], bridge: 'netsuite-suiteql',
@@ -34,16 +42,12 @@ export const CONNECTORS: Connector[] = [
       { name: 'database', label: 'Database', type: 'text', required: true }, { name: 'user', label: 'User', type: 'text', required: true },
       { name: 'password', label: 'Password', type: 'secret', required: true }, { name: 'ssl', label: 'SSL', type: 'select', options: ['require', 'prefer', 'disable'] },
     ] },
-  { id: 'rest-api', runs: 'api', title: 'REST API', kind: 'rest', description: 'Any HTTP API with a token.', levels: ['project', 'user'], bridge: null,
-    fields: [
-      { name: 'baseUrl', label: 'Base URL', type: 'url', required: true }, { name: 'header', label: 'Auth header', type: 'text', placeholder: 'Authorization' },
-      { name: 'token', label: 'Token', type: 'secret', required: true },
-    ] },
-  { id: 'mcp', runs: 'api', title: 'MCP server', kind: 'mcp', description: 'A Model Context Protocol server, whose tools agents can use.', levels: ['project', 'user'], bridge: null,
-    fields: [
-      { name: 'url', label: 'Server URL', type: 'url', required: true }, { name: 'transport', label: 'Transport', type: 'select', options: ['streamable-http', 'sse'] },
-      { name: 'token', label: 'Token', type: 'secret', help: 'Sent as a bearer token, if the server needs one.' },
-    ] },
+  // the cloud connectors: every connector the connectors package built (connectors/dist/catalog.json)
+  ...(CLOUD as any[]).map((m): Connector => ({
+    id: m.id, title: m.name, runs: 'cloud', kind: m.category === 'mcp' ? 'mcp' : m.category === 'database' ? 'sql' : 'rest', description: m.says, levels: ['project', 'user'], bridge: null,
+    icon: m.icon, accent: m.accent, offers: m.offers, category: m.category,
+    fields: (m.fields as any[]).map((f) => ({ name: f.key, label: f.label, type: f.type === 'boolean' ? 'select' : f.type, ...(f.type === 'boolean' ? { options: ['true', 'false'] } : {}), ...(f.required ? { required: true } : {}), ...(f.options ? { options: f.options } : {}), ...(f.help ? { help: f.help } : {}), ...(f.placeholder ? { placeholder: f.placeholder } : {}) })),
+  })),
 ]
 
 export const connectorById = (id: string) => CONNECTORS.find((c) => c.id === id)

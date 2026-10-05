@@ -3,7 +3,7 @@
 // Each click opens a block below; each block is drawn in the platform's frame with the design system's primitives.
 
 import { createContext, useContext, useEffect, useState } from 'react'
-import { Section, notify, useThread, Form, Field, Choices, Receipt, RecordList, Status, ActionBar, Empty, AskBar, BeatRows, Icon, ACCENT, type Accent, type Registry } from '@superatom/ui'
+import { Section, notify, useThread, Form, Field, Choices, Receipt, RecordList, Status, ActionBar, Empty, AskBar, BeatRows, Icon, ACCENT, Notice, Toolbar, type Accent, type Registry } from '@superatom/ui'
 import type { WorkAgent } from './Workspace'
 import { accentOf } from './agentLook'
 import type { Connector } from '../../shared/connectors'
@@ -174,7 +174,7 @@ function ActivityBlock() {
   )
 }
 
-type Conn = { id: string; connector: string; name: string; level: 'project' | 'user'; runnable: boolean; runs: 'code' | 'api'; origin: 'platform' | 'engine' }
+type Conn = { id: string; connector: string; name: string; level: 'project' | 'user'; runnable: boolean; runs: 'code' | 'api' | 'cloud'; origin: 'platform' | 'engine' }
 const useApi = () => {
   const env = useEnv()
   return (path: string, init: RequestInit = {}) => fetch(`/api/projects/${encodeURIComponent(env.projectId)}${path}`, { ...init, credentials: 'include', headers: { 'content-type': 'application/json', ...(env.token ? { authorization: `Bearer ${env.token}` } : {}) } })
@@ -195,14 +195,23 @@ function ConnectionsBlock() {
     <Section icon="lucide:plug" title={`${list.length} connections`} subtitle="Yours and the project's shared ones. A secret is sent once, sealed, and never shown again.">
       <RecordList rows={list} keyOf={(c) => c.id} empty="No connections yet." columns={[
         { key: 'name', label: 'Name' },
-        { key: 'what', label: 'What', render: (c) => `${connectors.find((x) => x.id === c.connector)?.title ?? c.connector} · ${c.runs === 'code' ? 'code' : 'API'}${c.origin === 'engine' ? ' (on the engine)' : ''}` },
+        { key: 'what', label: 'What', render: (c) => `${connectors.find((x) => x.id === c.connector)?.title ?? c.connector} · ${c.runs === 'code' ? 'code' : c.runs === 'cloud' ? 'cloud' : 'API'}${c.origin === 'engine' ? ' (on the engine)' : ''}` },
         { key: 'state', label: 'State', render: (c) => <Status state={c.runnable ? 'ok' : 'attention'}>{c.runnable ? 'connected' : 'not runnable yet'}</Status> },
         { key: 'level', label: 'Who uses it', render: (c) => (c.level === 'project' ? 'the project' : 'you') },
-        { key: 'remove', label: '', align: 'end', render: (c) => (c.origin === 'platform' ? <button className="sa-btn sa-btn--link" onClick={() => void remove(c.id)}>Remove</button> : null) },
-      ]} />
+        { key: 'remove', label: '', align: 'end', render: (c) => (c.origin === 'platform' ? <button className="sa-btn sa-btn--link" onClick={(e) => { e.stopPropagation(); void remove(c.id) }}>Remove</button> : null) },
+      ]} onRow={(c) => { if (c.runs === 'cloud') open('connection', { id: c.id, name: c.name, connector: c.connector }, `Opened ${c.name}`) }} />
     </Section>
-    <Section icon="lucide:plus" title="Connect" subtitle="Pick what to connect.">
-      <ActionBar>{connectors.map((c) => <button key={c.id} className="sa-btn" title={c.description} onClick={() => open('connection-new', { connector: c.id }, `Connecting ${c.title}`)}>{c.title}</button>)}</ActionBar>
+    <Section icon="lucide:plus" title="Connect" subtitle="What can be connected: each reads its system, and some can act in it.">
+      <div className="sa-section__body">
+        <div className="sa-sub-grid">
+          {connectors.map((c) => (
+            <button key={c.id} type="button" className="sa-sub-card" title={c.description} onClick={() => open('connection-new', { connector: c.id }, `Connecting ${c.title}`)}>
+              <span className="sa-sub-card__title"><span className="sa-row sa-row--tight"><Icon icon={c.icon ?? (c.kind === 'sql' ? 'lucide:database' : c.kind === 'mcp' ? 'lucide:plug-zap' : 'lucide:globe')} />{c.title}</span></span>
+              <span className="sa-sub-card__text">{c.description}{c.offers?.actions ? ' · can act' : ''}</span>
+            </button>
+          ))}
+        </div>
+      </div>
     </Section>
   </>)
 }
@@ -223,7 +232,7 @@ function ConnectionNew() {
     const d = await r.json().catch(() => ({})) as { error?: string; connection?: { id: string } }
     if (!r.ok) { setErr(d.error ?? `Refused (${r.status}).`); return }
     update({ sent: true, name, level })   // the secret values are never kept in the thread
-    open('connection-made', { title: c.title, name, level }, `Connected ${name}`)
+    open('connection-made', { title: c.title, name, level, id: d.connection?.id, connector: c.id, cloud: c.runs === 'cloud' }, `Connected ${name}`)
   }
   return (
     <Form onSubmit={() => void connect()} locked={sent} error={err} actions={<button className="sa-btn sa-btn--primary">Connect</button>}>
@@ -245,8 +254,90 @@ function ConnectionNew() {
 }
 
 function ConnectionMade() {
+  const { props, open } = useThread()
+  return (<>
+    <Receipt items={[['Connected', String(props.name)], ['What', String(props.title)], ['Who uses it', props.level === 'project' ? 'Everyone in the project' : 'Only you'], ['Its secrets', "Sealed with the platform's key; never shown again."]]} />
+    {!!props.cloud && !!props.id && <ActionBar><button className="sa-btn sa-btn--primary" onClick={() => open('connection', { id: props.id, name: props.name, connector: props.connector }, `Opened ${String(props.name)}`)}>Open it</button></ActionBar>}
+  </>)
+}
+
+type Entity = { name: string; label?: string; description?: string; fields: { name: string; type: string }[]; filters?: string[] }
+type ConnAction = { name: string; label: string; description: string; effect: 'read' | 'write' | 'irreversible'; confirm?: boolean; input: { name: string; type: string; description?: string; required?: boolean }[] }
+
+/** A cloud connection: does it work, what it offers (things to read, things it can do), a look at what it reads, its
+ *  actions (one that changes the other system runs only when you confirm it), and the record of every call. */
+function ConnectionBlock() {
+  const env = useEnv()
   const { props } = useThread()
-  return <Receipt items={[['Connected', String(props.name)], ['What', String(props.title)], ['Who uses it', props.level === 'project' ? 'Everyone in the project' : 'Only you'], ['Its secrets', "Sealed with the platform's key; never shown again."]]} />
+  const id = String(props.id)
+  const [test, setTest] = useState<{ ok: boolean; message?: string } | null>(null)
+  const [offers, setOffers] = useState<{ entities: Entity[]; actions: ConnAction[] } | null>(null)
+  const [err, setErr] = useState('')
+  const [entity, setEntity] = useState('')
+  const [filters, setFilters] = useState<Record<string, string>>({})
+  const [rows, setRows] = useState<Record<string, unknown>[] | null>(null)
+  const [action, setAction] = useState<ConnAction | null>(null)
+  const [input, setInput] = useState<Record<string, string>>({})
+  const [done, setDone] = useState<string>('')
+  const [calls, setCalls] = useState<any[]>([])
+  const ask = async (t: string, extra: Record<string, unknown> = {}) => {
+    const r = await env.request({ t: `connector:${t}`, connection: id, ...extra })
+    if (r?.t === 'connector:refused') throw new Error(r.reason)
+    return r
+  }
+  const refreshCalls = () => { void ask('calls').then((r) => setCalls(r.calls ?? [])).catch(() => {}) }
+  useEffect(() => {
+    void ask('test').then((r) => setTest(r.result)).catch((e) => setTest({ ok: false, message: e.message }))
+    void ask('introspect').then((r) => { setOffers(r.result); const first = r.result?.entities?.[0]?.name; if (first) setEntity(first) }).catch((e) => setErr(e.message)).finally(refreshCalls)
+  }, [id])   // eslint-disable-line react-hooks/exhaustive-deps
+  const ent = offers?.entities.find((e) => e.name === entity)
+  const read = async () => { setErr(''); setRows(null); try { const r = await ask('read', { entity, filters, limit: 20 }); setRows(r.result?.rows ?? []) } catch (e: any) { setErr(e.message) } refreshCalls() }
+  const run = async () => {
+    if (!action) return
+    setErr(''); setDone('')
+    try { const r = await ask('act', { action: action.name, input, confirmed: true }); setDone(r.result?.message ?? 'Done'); notify(`${action.label}: done`, 'note') } catch (e: any) { setErr(e.message) }
+    refreshCalls()
+  }
+  const cols = rows?.length ? Object.keys(rows[0]).slice(0, 8) : []
+  return (<div className="sa-stack">
+    {test && <Notice state={test.ok ? 'ok' : 'critical'}>{test.ok ? `Connected${test.message ? ` — ${test.message}` : ''}.` : `It does not answer: ${test.message ?? 'no reason given'}`}</Notice>}
+    {err && <Notice state="critical">{err}</Notice>}
+    {!offers ? <Empty icon="lucide:loader">Asking what it offers…</Empty> : (<>
+      <Section icon="lucide:table" title="What it reads" subtitle={`${offers.entities.length} thing${offers.entities.length === 1 ? '' : 's'} to read`}>
+        <div className="sa-section__body sa-stack">
+          <Toolbar>
+            <Field label="Read"><select id="con-entity" className="sa-input" value={entity} onChange={(e) => { setEntity(e.target.value); setRows(null); setFilters({}) }}>{offers.entities.map((e) => <option key={e.name} value={e.name}>{e.label ?? e.name}</option>)}</select></Field>
+            {(ent?.filters ?? []).map((f) => <Field key={f} label={f}><input id={`con-f-${f}`} className="sa-input" value={filters[f] ?? ''} onChange={(e) => setFilters({ ...filters, [f]: e.target.value })} /></Field>)}
+          </Toolbar>
+          {ent?.description && <p className="sa-note">{ent.description}</p>}
+          <ActionBar><button className="sa-btn sa-btn--primary" onClick={() => void read()}>Read the first 20</button></ActionBar>
+        </div>
+        {rows && <RecordList rows={rows.map((r, i) => ({ ...r, __i: i }))} keyOf={(r: any) => String(r.__i)} empty="Nothing came back." columns={cols.map((c) => ({ key: c, label: c, render: (r: any) => (r[c] === null || r[c] === undefined ? '—' : typeof r[c] === 'object' ? JSON.stringify(r[c]).slice(0, 80) : String(r[c])) }))} />}
+      </Section>
+      {offers.actions.length > 0 && (
+        <Section icon="lucide:zap" title="What it can do" subtitle="An action that changes the other system runs only when you confirm it; agents ask you first.">
+          <RecordList rows={offers.actions} keyOf={(a) => a.name} onRow={(a) => { setAction(a); setInput({}); setDone('') }} columns={[
+            { key: 'label', label: 'Action' }, { key: 'description', label: 'What it does', wrap: true },
+            { key: 'effect', label: 'Changes', render: (a) => <Status state={a.effect === 'read' ? 'neutral' : a.effect === 'irreversible' ? 'critical' : 'attention'}>{a.effect === 'read' ? 'nothing' : a.effect === 'irreversible' ? 'cannot be undone' : 'something'}</Status> },
+          ]} />
+          {action && (
+            <Form onSubmit={() => void run()} actions={<><button type="button" className="sa-btn" onClick={() => setAction(null)}>Cancel</button><button className={`sa-btn sa-btn--primary${action.effect === 'irreversible' ? ' sa-btn--danger' : ''}`}>{action.effect === 'read' ? 'Run' : `Confirm: ${action.label}`}</button></>}>
+              <Field label="Action" help={action.description}><span>{action.label}</span></Field>
+              {action.input.map((f) => <Field key={f.name} label={`${f.name}${f.required ? ' *' : ''}`} help={f.description}><input id={`con-a-${f.name}`} className="sa-input" value={input[f.name] ?? ''} onChange={(e) => setInput({ ...input, [f.name]: e.target.value })} required={f.required} /></Field>)}
+              {done && <Notice state="ok">{done}</Notice>}
+            </Form>
+          )}
+        </Section>
+      )}
+    </>)}
+    <Section icon="lucide:history" title="What it did" subtitle="Every operation and every request it made — never a credential or a body.">
+      <RecordList rows={calls} keyOf={(c) => String(c.seq)} empty="Nothing yet." columns={[
+        { key: 'at', label: 'When', render: (c) => when(c.at) }, { key: 'op', label: 'What' }, { key: 'target', label: 'On', wrap: true, render: (c) => c.target ?? '—' },
+        { key: 'rows', label: 'Rows', align: 'end', render: (c) => c.rows ?? '—' },
+        { key: 'ok', label: '', render: (c) => <Status state={c.ok ? 'ok' : 'critical'}>{c.ok ? (c.status ? String(c.status) : 'done') : (c.error ?? 'failed')}</Status> },
+      ]} />
+    </Section>
+  </div>)
 }
 
 export const PAGE_BLOCKS: Registry = {
@@ -258,4 +349,5 @@ export const PAGE_BLOCKS: Registry = {
   connections: { label: 'Connections', icon: 'lucide:plug', accent: 'var(--series-3)', render: () => <ConnectionsBlock /> },
   'connection-new': { label: 'New connection', icon: 'lucide:plus', accent: 'var(--series-3)', title: (p) => (p.sent ? `Connection: ${String(p.name)}` : 'Connect'), render: () => <ConnectionNew /> },
   'connection-made': { label: 'Connected', icon: 'lucide:check', accent: 'var(--win)', title: (p) => `${String(p.name)} is connected`, render: () => <ConnectionMade /> },
+  connection: { label: 'Connection', icon: 'lucide:plug', accent: 'var(--series-3)', title: (p) => String(p.name), subtitle: (p) => String(p.connector ?? ''), render: () => <ConnectionBlock /> },
 }

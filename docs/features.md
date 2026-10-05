@@ -98,6 +98,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - The workspace steady and whole: a step appears complete (its program views loaded, its paths read), a new step stands at once as an answer-shaped skeleton, an edit in place dims the step; the step anatomy of the dashboards (header from the answer's first line, controls above, next moves as pills, about these numbers); the artifacts pane opens and closes from one corner.
 - Agents carry their look (icon, accent, one line) and starting points; home is the dashboards' front door (a section per agent, its starting points as cards); `session:open { startAt }`.
 - A view's question as framework components: QuestionControls (filter chips, adding a filter with members searched, breakdown, window by kind, assumptions), NextMoves, AboutNumbers — used by the app-views program; programs' views may read through the surface (`ProgramEnv`) while changes stay intents.
+- Connectors (`connectors/`): a package of its own — manifest, server module on one SDK (HTTP with retries and paging, rows and types from JSON, one MCP client), built by hash; run in Cloudflare Dynamic Workers whose only way out is the gateway (allowed hosts, credentials added there, every request recorded); data and actions apart (a change needs a person's confirmation); code mode (a program over the connections, no network of its own); github, rest-json, mcp-server built; in the one connections catalog; the user UI opens a connection (test, entities, rows, actions, record).
 
 ## Planned (not built)
 - Prices for prompt-cache tokens (counted per call, not yet priced).
@@ -128,6 +129,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Payment through Stripe (a checkout whose webhook adds credits), invoices and per-plan limits; metering engine time and queries.
 - The data protocol for many users at once (fairness and queueing across users); activities in the user UI.
 - The platform's own data warehouse: every DO's records in one Basin, queryable with SQL (customer warehouses stopped: Pipelines' 20-per-account limit).
+- Connectors next: the datasource index over connector schemas; a `cloud` source kind in the datasource manager; OAuth 2 connections; connectors' own React views; an approval flow for actions agents propose; semantic models over connector entities; more connectors.
 - The organisation's data warehouse live on Cloudflare: needs the catalog token, bucket and R2 binding set (the module is built — see Built); a `warehouse` source kind in the datasource manager.
 - Data sources as templates copied per project, with dialect code moved out of the platform.
 - Running without Docker (Windows, macOS, Linux, Electron) with a per-project port registry.

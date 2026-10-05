@@ -1,0 +1,127 @@
+[
+  {
+    "id": "github",
+    "name": "GitHub",
+    "version": 1,
+    "icon": "mdi:github",
+    "accent": "series-1",
+    "says": "Repositories, issues and pull requests; open an issue.",
+    "category": "saas",
+    "hosts": [
+      "api.github.com"
+    ],
+    "fields": [
+      {
+        "key": "token",
+        "label": "Access token",
+        "type": "secret",
+        "required": true,
+        "help": "A fine-grained personal access token with read access to the repositories (and issues: write, to open issues)."
+      },
+      {
+        "key": "owner",
+        "label": "Owner",
+        "type": "text",
+        "help": "A user or organisation whose repositories are read first (optional)."
+      }
+    ],
+    "auth": {
+      "kind": "header",
+      "header": "Authorization",
+      "template": "Bearer {token}"
+    },
+    "offers": {
+      "data": true,
+      "actions": true
+    },
+    "hash": "6b1d3d93c78bef5ff18f309bee29f4f48921cafedcb4c15b437437ad793a7830"
+  },
+  {
+    "id": "mcp-server",
+    "name": "MCP server",
+    "version": 1,
+    "icon": "lucide:plug-zap",
+    "accent": "series-3",
+    "says": "Any Model Context Protocol server: its tools become actions, its resources things to read.",
+    "category": "mcp",
+    "hosts": [
+      "{url}"
+    ],
+    "fields": [
+      {
+        "key": "url",
+        "label": "Server URL",
+        "type": "url",
+        "required": true,
+        "help": "The server's Streamable HTTP endpoint (often ending in /mcp)."
+      },
+      {
+        "key": "token",
+        "label": "Token",
+        "type": "secret",
+        "help": "Sent as a bearer token, if the server needs one."
+      }
+    ],
+    "auth": {
+      "kind": "header",
+      "header": "Authorization",
+      "template": "Bearer {token}"
+    },
+    "offers": {
+      "data": true,
+      "actions": true
+    },
+    "hash": "11bd098ece178fffbc840ac5ce3fd37cec7da1f3af7f661d0aca644ea9419dfe"
+  },
+  {
+    "id": "rest-json",
+    "name": "REST API (JSON)",
+    "version": 1,
+    "icon": "lucide:braces",
+    "accent": "series-2",
+    "says": "Any HTTP API that answers in JSON: name its endpoints, read them as tables.",
+    "category": "api",
+    "hosts": [
+      "{baseUrl}"
+    ],
+    "fields": [
+      {
+        "key": "baseUrl",
+        "label": "Base URL",
+        "type": "url",
+        "required": true,
+        "placeholder": "https://api.example.com/v1"
+      },
+      {
+        "key": "endpoints",
+        "label": "Endpoints",
+        "type": "text",
+        "required": true,
+        "help": "One per line: a name and a path, e.g. “customers /customers”. Each becomes something to read."
+      },
+      {
+        "key": "header",
+        "label": "Auth header",
+        "type": "text",
+        "default": "Authorization",
+        "help": "The header the token goes in."
+      },
+      {
+        "key": "token",
+        "label": "Token",
+        "type": "secret",
+        "help": "Sent as “Bearer <token>” in the auth header, if the API needs one."
+      }
+    ],
+    "auth": {
+      "kind": "header",
+      "header": "{header}",
+      "template": "Bearer {token}"
+    },
+    "offers": {
+      "data": true,
+      "actions": false
+    },
+    "hash": "236d1839a7960968d7bc1f17c73c0071de4da7d12ac3190bb544b18da39bb860"
+  }
+]

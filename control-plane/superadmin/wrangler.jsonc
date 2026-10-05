@@ -7,6 +7,9 @@
   // (developers.cloudflare.com/workers/configuration/compatibility-flags) before moving it again.
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
+  // Cloud connectors (connectors/) run in Dynamic Workers, loaded by hash: their only way out is the ConnectorGateway
+  // entrypoint (the connection's credentials added there); code mode's programs have no network, only ConnectorProxy.
+  "worker_loaders": [{ "binding": "LOADER" }],
   // Workers Logs and Traces (Cloudflare's own observability): what the Worker and its Durable Objects log, and traces
   // of their calls — sampled, kept by Cloudflare for days. The audit history is separate (the AUDIT pipeline).
   "observability": {

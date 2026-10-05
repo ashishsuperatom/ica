@@ -220,6 +220,20 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     CREATE TRIGGER IF NOT EXISTS wh_grants_no_update BEFORE UPDATE ON warehouse_grants BEGIN SELECT RAISE(ABORT, 'warehouse grants are append-only'); END;
     CREATE TRIGGER IF NOT EXISTS wh_grants_no_delete BEFORE DELETE ON warehouse_grants BEGIN SELECT RAISE(ABORT, 'warehouse grants are append-only'); END;
   ` },
+  { id: 29, name: 'connector calls and schemas', up: `
+    -- Every operation run on a connection (connectors/): test, introspect, read, act, code — who, what, how it went —
+    -- and every request its code made through the gateway (op 'http': method, host, path, status; never a header or a
+    -- body). Append-only: the complete record of what reached other systems.
+    CREATE TABLE IF NOT EXISTS connector_calls (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, connection TEXT, op TEXT NOT NULL, target TEXT,
+      by TEXT, ok INTEGER NOT NULL, rows INTEGER, status INTEGER, ms INTEGER, error TEXT);
+    CREATE INDEX IF NOT EXISTS idx_connector_calls ON connector_calls(connection, seq);
+    CREATE TRIGGER IF NOT EXISTS connector_calls_no_update BEFORE UPDATE ON connector_calls BEGIN SELECT RAISE(ABORT, 'connector calls are append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS connector_calls_no_delete BEFORE DELETE ON connector_calls BEGIN SELECT RAISE(ABORT, 'connector calls are append-only'); END;
+    -- What a connection offers, as its connector last said (entities with their fields, actions with what they change):
+    -- each introspection a new row; the data source index reads the latest.
+    CREATE TABLE IF NOT EXISTS connector_schemas (seq INTEGER PRIMARY KEY AUTOINCREMENT, connection TEXT NOT NULL, entities TEXT NOT NULL, actions TEXT NOT NULL, at TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS idx_connector_schemas ON connector_schemas(connection, seq);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

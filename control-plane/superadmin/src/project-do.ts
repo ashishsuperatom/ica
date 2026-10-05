@@ -35,6 +35,7 @@ import { costOf, priceFor, type Price } from './metering.js'
 import { createRecorder, type Recorder } from './records.js'
 import { connectorById, checkConnection, CONNECTORS } from '../../shared/connectors.js'
 import { seal, unseal } from './proxy/seal.js'
+import { runConnector, runCode, manifestOf } from './connectors/runtime.js'
 
 
 // How long a question queued for a sleeping machine is still worth waking up for. Past this the person has
@@ -275,6 +276,13 @@ export class ProjectDO extends DurableObject<Env> {
     if (request.method === 'GET'  && path === '/status')       return this.getStatus()
     if (request.method === 'GET'  && path === '/attention')    return this.attention()
     if (path === '/warehouse/grants') return this.warehouseGrants(request)
+    // The connector gateway's record of the requests a connection's code made; code mode's proxy running an operation.
+    // Both internal (the worker never forwards connector-* paths).
+    if (request.method === 'POST' && path === '/connector-calls') return this.connectorCalls(request)
+    if (request.method === 'POST' && path === '/connector-op') {
+      const b: any = await request.json().catch(() => ({}))
+      try { return this.j(await this.connectorOp(b.sender as ConnInfo, String(b.op), b.payload ?? {})) } catch (e: any) { return this.j({ error: e?.message ?? String(e) }, 400) }
+    }
     if (request.method === 'POST' && path === '/setup')        return this.setup(request)
     if (request.method === 'POST' && path === '/keys/add')     return this.addKey(request)
     if (request.method === 'POST' && path === '/keys/prune')   return this.pruneKeys(request)
@@ -886,6 +894,71 @@ export class ProjectDO extends DurableObject<Env> {
     }
     return { ok: true, credits_micro: micro, priced: !!price, session: b.session ?? null }
   }
+  // ── Cloud connectors (connectors/): a connection's connector run in its sandbox, governed here ──
+  /** A connection as someone may run it: a shared one for anyone in the project, a personal one for its owner (or an
+   *  admin); its secrets unsealed for the gateway alone. */
+  private async connectionToRun(id: string, sender: ConnInfo) {
+    const [r] = [...this.ctx.storage.sql.exec('SELECT * FROM connections WHERE id = ? AND removed_at IS NULL', id)] as any[]
+    if (!r) throw new Error(`there is no connection ${id}`)
+    const me = sender.email ? `email:${sender.email.toLowerCase()}` : this.principalOf(sender)
+    if (r.level === 'user' && r.owner !== me && !sender.admin) throw new Error(`connection ${id} is someone else's`)
+    if (!manifestOf(r.connector)) throw new Error(`${r.name} is not a cloud connector; the engine runs it`)
+    const master = (this.env as any).CREDENTIALS_MASTER_KEY
+    const secrets = r.secrets_sealed ? JSON.parse(await unseal(r.secrets_sealed, master)) : {}
+    const version = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${r.settings}|${r.secrets_sealed ?? ''}`)))].slice(0, 6).map((b) => b.toString(16).padStart(2, '0')).join('')
+    return { id: r.id as string, name: r.name as string, connector: r.connector as string, settings: JSON.parse(r.settings), secrets, version }
+  }
+  private recordCall(c: { connection?: string | null; op: string; target?: string | null; by?: string | null; ok: boolean; rows?: number | null; status?: number | null; ms?: number | null; error?: string | null }) {
+    this.ctx.storage.sql.exec('INSERT INTO connector_calls (at, connection, op, target, by, ok, rows, status, ms, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      new Date().toISOString(), c.connection ?? null, c.op, c.target ?? null, c.by ?? null, c.ok ? 1 : 0, c.rows ?? null, c.status ?? null, c.ms ?? null, c.error ? String(c.error).slice(0, 500) : null)
+  }
+  private async connectorCalls(request: Request): Promise<Response> {
+    const b: any = await request.json().catch(() => ({}))
+    for (const c of Array.isArray(b.calls) ? b.calls.slice(0, 200) : []) this.recordCall({ connection: String(b.connection ?? ''), op: 'http', target: `${c.method} ${c.host}${c.path}`, ok: !c.refused && c.status < 400, status: c.status, ms: c.ms, error: c.refused ?? null })
+    return this.j({ ok: true })
+  }
+  /** One connector operation for someone: catalog, test, introspect, read, act (a change needs a person's confirmation),
+   *  run (code mode), calls (the record). Every operation is recorded. */
+  private async connectorOp(sender: ConnInfo, op: string, pl: any): Promise<Record<string, unknown>> {
+    const who = sender.email ? `email:${sender.email.toLowerCase()}` : this.principalOf(sender)
+    if (!who) throw new Error('who is asking is not known')
+    const exportsObj = (this.ctx as any).exports
+    if (op === 'catalog') return { connectors: CONNECTORS.filter((c) => c.runs === 'cloud') }
+    if (op === 'calls') {
+      const id = String(pl.connection ?? ''); await this.connectionToRun(id, sender)
+      return { calls: [...this.ctx.storage.sql.exec('SELECT * FROM connector_calls WHERE connection = ? ORDER BY seq DESC LIMIT 100', id)] }
+    }
+    if (op === 'run') {
+      const code = String(pl.code ?? '')
+      if (!code.trim() || code.length > 100_000) throw new Error('code mode runs a program of at most 100,000 characters')
+      const t0 = Date.now()
+      const r = await runCode(this.env, exportsObj, this._pid, { type: sender.type, userId: sender.userId, email: sender.email, admin: !!sender.admin, scopes: sender.scopes ?? [] }, code)
+      this.recordCall({ op: 'run', target: `${code.length} characters`, by: who, ok: r.ok, ms: Date.now() - t0, error: r.error ?? null })
+      return r as unknown as Record<string, unknown>
+    }
+    const c = await this.connectionToRun(String(pl.connection ?? ''), sender)
+    const t0 = Date.now()
+    if (op === 'act') {
+      const latest = [...this.ctx.storage.sql.exec('SELECT actions FROM connector_schemas WHERE connection = ? ORDER BY seq DESC LIMIT 1', c.id)][0] as any
+      const actions: any[] = latest ? JSON.parse(String(latest.actions)) : (((await runConnector(this.env, exportsObj, this._pid, c, 'introspect', null)).result as any)?.actions ?? [])
+      const spec = actions.find((a) => a.name === pl.action)
+      if (!spec) throw new Error(`${c.name} has no action "${pl.action}"`)
+      if ((spec.effect !== 'read' || spec.confirm) && !(pl.confirmed === true && sender.type !== 'agent')) {
+        this.recordCall({ connection: c.id, op: 'act', target: spec.name, by: who, ok: false, error: 'needs a person\'s confirmation' })
+        throw new Error(`${spec.label ?? spec.name} ${spec.effect === 'irreversible' ? 'cannot be undone' : 'changes'} ${c.name}: a person confirms it before it runs`)
+      }
+    }
+    const req = op === 'read' ? { entity: pl.entity, filters: pl.filters ?? {}, cursor: pl.cursor ?? null, since: pl.since ?? null, limit: Math.min(Number(pl.limit) || 100, 1000) } : op === 'act' ? { action: pl.action, input: pl.input ?? {} } : null
+    if (!['test', 'introspect', 'read', 'act'].includes(op)) throw new Error(`there is no connector operation "${op}"`)
+    const r = await runConnector(this.env, exportsObj, this._pid, c, op as any, req)
+    const rows = op === 'read' && r.ok ? ((r.result as any)?.rows?.length ?? 0) : null
+    this.recordCall({ connection: c.id, op, target: op === 'read' ? String(pl.entity) : op === 'act' ? String(pl.action) : null, by: who, ok: r.ok, rows, ms: Date.now() - t0, error: r.error ?? null })
+    if (op === 'introspect' && r.ok) this.ctx.storage.sql.exec('INSERT INTO connector_schemas (connection, entities, actions, at) VALUES (?, ?, ?, ?)', c.id, JSON.stringify((r.result as any)?.entities ?? []), JSON.stringify((r.result as any)?.actions ?? []), new Date().toISOString())
+    if (op === 'act') this.audit.record({ actor: { kind: sender.type === 'agent' ? 'agent' : 'user', id: who, ...(sender.email ? { email: sender.email } : {}) }, via: sender.type === 'agent' ? 'agent' : 'ui', action: 'connector.act', target: `${c.id}/${pl.action}`, outcome: r.ok ? 'ok' : 'error', detail: { input: Object.keys(pl.input ?? {}) } })
+    if (!r.ok) throw new Error(r.error ?? 'the connector failed')
+    return { connection: c.id, op, result: r.result, logs: r.logs }
+  }
+
   /** What this project may read of its organisation's warehouse: each table's latest grant, unless revoked. */
   private grantInForce(): Record<string, string[] | null> {
     const out: Record<string, string[] | null> = {}
@@ -955,7 +1028,7 @@ export class ProjectDO extends DurableObject<Env> {
   /** Connections a person may see: the project's shared ones and their own; never a secret. An admin sees all. */
   private connectionRows(who: string | null, admin: boolean) {
     return ([...this.ctx.storage.sql.exec('SELECT id, connector, name, level, owner, settings, created_by, created_at FROM connections WHERE removed_at IS NULL ORDER BY created_at')] as any[])
-      .filter((r) => admin || r.level === 'project' || r.owner === who).map((r) => ({ ...r, settings: JSON.parse(r.settings), runs: connectorById(r.connector)?.runs ?? 'api', runnable: !!connectorById(r.connector)?.bridge || connectorById(r.connector)?.runs === 'api', origin: 'platform' }))
+      .filter((r) => admin || r.level === 'project' || r.owner === who).map((r) => ({ ...r, settings: JSON.parse(r.settings), runs: connectorById(r.connector)?.runs ?? 'api', runnable: !!connectorById(r.connector)?.bridge || ['api', 'cloud'].includes(connectorById(r.connector)?.runs ?? ''), origin: 'platform' }))
       // and the code connectors the engine runs — the same thing, configured on the engine
       .concat(([...this.ctx.storage.sql.exec('SELECT * FROM engine_sources ORDER BY id')] as any[]).map((e) => ({ id: `engine:${e.id}`, connector: e.dialect ?? e.kind ?? 'source', name: e.id, level: 'project', owner: 'project',
         settings: { kind: e.kind, dialect: e.dialect, description: e.description }, created_by: 'engine', created_at: e.reported_at, runs: 'code', runnable: !!e.ready, origin: 'engine' })))
@@ -988,7 +1061,7 @@ export class ProjectDO extends DurableObject<Env> {
       this.ctx.storage.sql.exec('INSERT INTO connections (id, connector, name, level, owner, settings, secrets_sealed, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
         id, c.id, name, level, level === 'user' ? who : 'project', JSON.stringify(settings), Object.keys(secrets).length ? await seal(JSON.stringify(secrets), master) : null, email, new Date().toISOString())
       this.audit.record({ actor, via: 'ui', action: 'connection.create', target: id, outcome: 'ok', detail: { connector: c.id, name, level, settings } })   // never the secrets
-      return this.j({ connection: { id, connector: c.id, name, level, settings, runnable: !!c.bridge } }, 201)
+      return this.j({ connection: { id, connector: c.id, name, level, settings, runnable: !!c.bridge || c.runs === 'cloud' } }, 201)
     }
     const m = path.match(/^\/connections\/(con_[\w-]+)$/)
     if (m && request.method === 'DELETE') {
@@ -1357,6 +1430,12 @@ export class ProjectDO extends DurableObject<Env> {
       return
     }
     // ── The decision memory (no engine needed): the paths from a step, how a step turned out, the decision states ──
+    // ── Cloud connectors: run a connection's connector in its sandbox (no engine needed) ──
+    if (typeof pl.t === 'string' && pl.t.startsWith('connector:') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
+      try { hubReply({ t: pl.t === 'connector:catalog' ? 'connector:catalog' : 'connector:result', ...(await this.connectorOp(sender, pl.t.slice('connector:'.length), pl)), reqId: pl.reqId }) }
+      catch (e: any) { hubReply({ t: 'connector:refused', reason: e?.message ?? String(e), reqId: pl.reqId }) }
+      return
+    }
     // ── The organisation's warehouse, as far as this project was granted (no engine needed) ──
     if ((pl.t === 'warehouse:tables' || pl.t === 'warehouse:query') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
       const who = this.principalOf(sender)

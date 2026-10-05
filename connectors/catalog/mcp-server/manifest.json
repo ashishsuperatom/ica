@@ -1,0 +1,16 @@
+{
+  "id": "mcp-server",
+  "name": "MCP server",
+  "version": 1,
+  "icon": "lucide:plug-zap",
+  "accent": "series-3",
+  "says": "Any Model Context Protocol server: its tools become actions, its resources things to read.",
+  "category": "mcp",
+  "hosts": ["{url}"],
+  "fields": [
+    { "key": "url", "label": "Server URL", "type": "url", "required": true, "help": "The server's Streamable HTTP endpoint (often ending in /mcp)." },
+    { "key": "token", "label": "Token", "type": "secret", "help": "Sent as a bearer token, if the server needs one." }
+  ],
+  "auth": { "kind": "header", "header": "Authorization", "template": "Bearer {token}" },
+  "offers": { "data": true, "actions": true }
+}

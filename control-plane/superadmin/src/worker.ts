@@ -18,6 +18,7 @@ export { SessionDO } from './session-do.js'
 export { DecisionDO } from './decision-do.js'
 export { UserDO } from './user-do.js'
 export { GraphDO } from './graph-do.js'
+export { ConnectorGateway, ConnectorProxy } from './connectors/runtime.js'
 // The channel-agnostic messaging module (Teams/Slack/… adapters) — imported, never inlined.
 import { channelAdapter } from '../../../clients/messaging/index.js'
 // Speech-to-text for voice clients (mobile). A SELF-CONTAINED module in src/transcription/ —
@@ -300,7 +301,7 @@ export default {
       }
       // Anything that changes the project — machine lifecycle, access, roles, datasources, keys, tokens — is for
       // whoever administers it. A member may look, not provision.
-      const PROVISIONING = /^(machine|service-token|access|roles|datasources|members|verify-conn|info|fly|suspend|resume|stop|delete|dashboards|agent-keys|audit|groups|attention|warehouse)/
+      const PROVISIONING = /^(machine|service-token|access|roles|datasources|members|verify-conn|info|fly|suspend|resume|stop|delete|dashboards|agent-keys|audit|groups|attention)/
       // A person's own connection is theirs to make and remove; the DO checks shared ones are made by an admin.
       const ownConnection = /^connections(\/con_[\w-]+)?$/.test(subPath)
       const isProvisioning = !ownConnection && (request.method !== 'GET' || PROVISIONING.test(subPath))
@@ -311,6 +312,9 @@ export default {
       // `debug` returns the project's API key. It was reachable by any member as a plain GET; nothing outside the
       // engine's own box has a use for it, so it is not served here at all.
       if (subPath === 'debug') return new Response('not found', { status: 404 })
+      // A project's warehouse grant is the ORGANISATION's to set (/api/warehouse/grants); connector call records and
+      // operations are the platform's own (the gateway, the hub) — none of them is a public call on a project.
+      if (subPath.startsWith('warehouse') || subPath.startsWith('connector-')) return new Response('not found', { status: 404 })
       // `access/arrive` is the worker's own question to the DO (a verified domain on first sign-in), never a public call.
       if (subPath.startsWith('access/arrive')) return new Response('not found', { status: 404 })
       // Usage is recorded by the model proxy, never posted from outside.
@@ -707,10 +711,11 @@ export default {
           const project = new URL(request.url).searchParams.get('project') ?? ''
           const projects = await (await org.fetch(new Request('http://do/projects'))).json() as { id: string }[]
           if (!projects.some((p) => p.id === project)) return Response.json({ error: 'that project is not in this organisation' }, { status: 404 })
-          const stub = env.PROJECT.get(env.PROJECT.idFromName(project))
-          if (request.method === 'GET') return stub.fetch(new Request('http://do/warehouse/grants'))
+          const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${project}`))
+          const ph = { 'content-type': 'application/json', 'x-sa-project': project }
+          if (request.method === 'GET') return stub.fetch(new Request('http://do/warehouse/grants', { headers: ph }))
           const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by: oa.email ?? 'admin' })
-          return stub.fetch(new Request('http://do/warehouse/grants', { method: request.method, headers, body }))
+          return stub.fetch(new Request('http://do/warehouse/grants', { method: request.method, headers: ph, body }))
         }
         if (request.method === 'GET') return org.fetch(new Request(`http://do${sub}`, { headers }))
         const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by: oa.email ?? 'admin', ...(sub === '/warehouse/query' ? { grant: 'all' } : {}) })

@@ -1,0 +1,16 @@
+{
+  "id": "github",
+  "name": "GitHub",
+  "version": 1,
+  "icon": "mdi:github",
+  "accent": "series-1",
+  "says": "Repositories, issues and pull requests; open an issue.",
+  "category": "saas",
+  "hosts": ["api.github.com"],
+  "fields": [
+    { "key": "token", "label": "Access token", "type": "secret", "required": true, "help": "A fine-grained personal access token with read access to the repositories (and issues: write, to open issues)." },
+    { "key": "owner", "label": "Owner", "type": "text", "help": "A user or organisation whose repositories are read first (optional)." }
+  ],
+  "auth": { "kind": "header", "header": "Authorization", "template": "Bearer {token}" },
+  "offers": { "data": true, "actions": true }
+}

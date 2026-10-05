@@ -46,16 +46,16 @@ async function engineAsk(msg: Record<string, unknown>) {
 describe('connections', () => {
   let shared = '', mine = ''
   it('forms are checked against their connector; a shared connection is an admin\'s to make', async () => {
-    expect((await admin('/connectors')).body.connectors.map((c: any) => c.id)).toEqual(['netsuite', 'sqlserver', 'postgres', 'rest-api', 'mcp'])
+    expect((await admin('/connectors')).body.connectors.map((c: any) => c.id)).toEqual(['netsuite', 'sqlserver', 'postgres', 'github', 'mcp-server', 'rest-json'])
     expect((await admin('/connections', 'POST', { connector: 'postgres', name: 'warehouse', values: { host: 'db', database: 'x' } })).body.error).toBe('User is required; Password is required')
-    expect((await admin('/connections', 'POST', { connector: 'mcp', name: 'tools', values: { url: 'not a url' } })).body.error).toBe('Server URL is a URL (http or https)')
+    expect((await admin('/connections', 'POST', { connector: 'mcp-server', name: 'tools', values: { url: 'not a url' } })).body.error).toBe('Server URL is a URL (http or https)')
     expect((await ana('/connections', 'POST', { connector: 'postgres', name: 'warehouse', level: 'project', values: { host: 'db', database: 'x', user: 'u', password: 'p' } })).status).toBe(403)
     const r = await admin('/connections', 'POST', { connector: 'postgres', name: 'warehouse', values: { host: 'db', port: 5432, database: 'sales', user: 'reader', password: 's3cret!' } })
     expect(r.status).toBe(201); shared = r.body.connection.id
     expect(JSON.stringify(r.body)).not.toContain('s3cret!')
   })
   it('a person connects their own; they see shared ones and theirs, never a secret, never another\'s', async () => {
-    const r = await ana('/connections', 'POST', { connector: 'rest-api', name: 'my crm', level: 'user', values: { baseUrl: 'https://crm.example.com', token: 'tok-ana' } })
+    const r = await ana('/connections', 'POST', { connector: 'rest-json', name: 'my crm', level: 'user', values: { baseUrl: 'https://crm.example.com', endpoints: 'customers /customers', token: 'tok-ana' } })
     expect(r.status).toBe(201); mine = r.body.connection.id
     const anaSees = (await ana('/connections')).body.connections
     expect(anaSees.map((c: any) => c.name).sort()).toEqual(['my crm', 'warehouse'])
@@ -87,5 +87,21 @@ describe('connections', () => {
     const actions = events.map((e: any) => e.action)
     expect(actions).toEqual(expect.arrayContaining(['connection.create', 'connection.remove', 'connection.open']))
     expect(JSON.stringify(events)).not.toMatch(/s3cret|tok-ana/)
+  })
+})
+
+describe('cloud connectors in the one catalog', () => {
+  it('lists every built connector as a connection to make, its form from its manifest, secrets sealed apart', async () => {
+    const { CONNECTORS, connectorById, checkConnection } = await import('../../../shared/connectors')
+    const gh = connectorById('github')!
+    expect(gh.runs).toBe('cloud')
+    expect(gh.icon).toBe('mdi:github')
+    expect(gh.offers).toEqual({ data: true, actions: true })
+    expect(CONNECTORS.some((c) => c.id === 'mcp-server' && c.kind === 'mcp')).toBe(true)
+    const r = checkConnection(gh, { token: 'ghp_x', owner: 'acme' })
+    expect(r.problems).toEqual([])
+    expect(r.secrets).toEqual({ token: 'ghp_x' })
+    expect(r.settings).toEqual({ owner: 'acme' })
+    expect(checkConnection(gh, {}).problems).toEqual(['Access token is required'])
   })
 })

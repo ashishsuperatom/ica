@@ -472,6 +472,40 @@ Not the session's STATE: the core of decision intelligence, to be expanded later
   - **Ports from the registry** on `127.0.0.1` (project 1's data source manager at `127.0.0.1:4008`, …). Works everywhere
     without admin rights. *Recommended for that reason.*
 
+### Connectors — the framework (built 2026-10-05)
+
+**The request, in the user's words: `docs/connector-system-request.md`.** A standard way for an enterprise's systems to
+attach — built one by one in this repo, governed, with data and actions kept apart, and nothing common copied into each.
+
+- **A package of its own** (`connectors/`, like the CLI): a connector is a manifest, a server module and optionally a
+  React view, built on one SDK (`src/sdk.ts`, `src/mcp.ts`) and kept by hash. `pnpm build` writes `dist/` (the catalog
+  and the bundled code); the control plane ships it with each deploy. Guide: `connectors/README.md`.
+- **Data and actions.** Entities to read (fields typed), actions to do — each saying what it changes (`read`, `write`,
+  `irreversible`). An action that changes anything runs only with a person's confirmation; an agent's request for one is
+  refused with that reason (an approval flow can carry it later). Every action is audited.
+- **Runs in a sandbox: Cloudflare Dynamic Workers.** The connector's code is loaded by hash into a Dynamic Worker (one
+  isolate per connector version and connection, kept warm). Its only way out is the **ConnectorGateway** entrypoint in
+  the platform's Worker: only the manifest's hosts (resolved from the connection's settings), the connection's
+  credentials added there (the code never holds a secret), redirects not followed with them, every request recorded.
+- **Connections** are the ones the platform already kept (shared by the project, or a person's own; secrets sealed):
+  cloud connectors joined the one catalog (`shared/connectors.ts`, `runs: 'cloud'`), replacing the saved-only REST and
+  MCP entries. Opening one: test, what it offers, a look at the rows, its actions, and its record.
+- **Code mode.** Instead of an agent calling a connector once per turn, it writes one program: `connector:run` runs it in a
+  Dynamic Worker with **no network** (`globalOutbound: null`); its only reach is `connectors` (the **ConnectorProxy**),
+  which runs each read and action as the caller — the same checks, the same record, a change still waiting for a person.
+- **MCP.** One connector (`mcp-server`) reaches any MCP server over Streamable HTTP: its tools become actions by their
+  hints (read-only → a lookup; destructive → cannot be undone), its resources become entities; a read-only tool is also
+  readable as rows. Any connector that speaks MCP reuses the one client.
+- **The record.** Every operation (test, introspect, read, act, run) and every request a connector's code made (method,
+  host, path, status — never a header or a body) goes to the project's append-only `connector_calls`; each introspection
+  is kept (`connector_schemas`), the latest being what the connection offers.
+- **Hub:** `connector:catalog|test|introspect|read|act|run|calls`, agent-key scope `connectors`.
+- **Next:** the datasource index reading `connector_schemas` (every connector's data findable beside the databases'); a
+  `cloud` source kind in the datasource manager so engine programs read connections through the one data path; OAuth 2
+  connections (the platform runs the flow, keeps the tokens sealed); a connector's own React view (web.tsx); an approval
+  flow for actions agents propose; semantic models over connector entities; pushing data to a system as a governed
+  action; more connectors, one by one.
+
 ### The organisation's data warehouse — the module (built 2026-10-05)
 
 **The spec, in the user's words, is `docs/warehouse-module-spec.md`.** It answers the stop below: no Pipelines per
