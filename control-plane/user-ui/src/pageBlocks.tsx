@@ -92,14 +92,14 @@ function Home() {
 function AgentsBlock() {
   const env = useEnv()
   const { open } = useThread()
-  const [agents, setAgents] = useState<{ id: string; name: string; scope: string; isDefault?: boolean }[]>([])
+  const [agents, setAgents] = useState<{ id: string; name: string; scope: string; isDefault?: boolean }[] | null>(null)
   useEffect(() => { void env.request({ t: 'session:agents' }).then((r) => setAgents(r.agents ?? [])) }, [env.request])
   const publish = async (a: { id: string; name: string }) => {
     const r = await env.request({ t: 'graph:publish', name: a.id, scope: 'global', reason: 'ready for everyone in the project' })
     notify(r.t === 'graph:reply' ? `Asked to publish ${a.name} — an administrator decides` : r.reason ?? 'Could not ask to publish it', r.t === 'graph:reply' ? 'note' : 'refused')
   }
   return (
-    <Section icon="lucide:bot" title={`${agents.length} agents you can see`} subtitle="Open one to start a session, or make a new one."
+    <Section icon="lucide:bot" title={`${(agents ?? []).length} agents you can see`} subtitle="Open one to start a session, or make a new one."
       actions={<button className="sa-btn sa-btn--primary" onClick={() => open('agent-new', {}, 'Making an agent')}>New agent</button>}>
       <RecordList rows={agents} keyOf={(a) => a.id} empty="No agents you can see yet." onRow={(a) => env.go(`s/${a.id}`)} columns={[
         { key: 'name', label: 'Agent', render: (a) => <>{a.name}{a.isDefault ? <> <Status state="neutral">default</Status></> : null}</> },
@@ -160,9 +160,9 @@ function AgentMade() {
 
 function ActivityBlock() {
   const env = useEnv()
-  const [rows, setRows] = useState<any[]>([])
+  const [rows, setRows] = useState<any[] | null>(null)
   useEffect(() => { void env.request({ t: 'activity:list' }).then((r) => setRows(r.activities ?? [])) }, [env.request])
-  useEffect(() => env.subscribeLive((m) => { if (m.t === 'activity' && m.activity?.id) setRows((prev) => [m.activity, ...prev.filter((x) => x.id !== m.activity.id)].slice(0, 100)) }), [env.subscribeLive])
+  useEffect(() => env.subscribeLive((m) => { if (m.t === 'activity' && m.activity?.id) setRows((prev) => [m.activity, ...(prev ?? []).filter((x) => x.id !== m.activity.id)].slice(0, 100)) }), [env.subscribeLive])
   return (
     <Section icon="lucide:activity" title="Running for you, and lately" subtitle="Program builds and session runs; kept current as they change.">
       <RecordList rows={rows} keyOf={(a) => a.id} empty="Nothing running, and nothing in the last day." columns={[
@@ -184,7 +184,7 @@ function ConnectionsBlock() {
   const api = useApi()
   const { open } = useThread()
   const [connectors, setConnectors] = useState<Connector[]>([])
-  const [list, setList] = useState<Conn[]>([])
+  const [list, setList] = useState<Conn[] | null>(null)
   const load = () => {
     api('/connectors').then((r) => r.json()).then((d: any) => setConnectors(d.connectors ?? [])).catch(() => {})
     api('/connections').then((r) => r.json()).then((d: any) => setList(d.connections ?? [])).catch(() => {})
@@ -192,7 +192,7 @@ function ConnectionsBlock() {
   useEffect(load, [])   // eslint-disable-line react-hooks/exhaustive-deps
   const remove = async (id: string) => { const r = await api(`/connections/${id}`, { method: 'DELETE' }); if (!r.ok) notify(((await r.json().catch(() => ({}))) as any).error ?? 'Refused', 'refused'); load() }
   return (<>
-    <Section icon="lucide:plug" title={`${list.length} connections`} subtitle="Yours and the project's shared ones. A secret is sent once, sealed, and never shown again.">
+    <Section icon="lucide:plug" title={`${(list ?? []).length} connections`} subtitle="Yours and the project's shared ones. A secret is sent once, sealed, and never shown again.">
       <RecordList rows={list} keyOf={(c) => c.id} empty="No connections yet." columns={[
         { key: 'name', label: 'Name' },
         { key: 'what', label: 'What', render: (c) => `${connectors.find((x) => x.id === c.connector)?.title ?? c.connector} · ${c.runs === 'code' ? 'code' : c.runs === 'cloud' ? 'cloud' : 'API'}${c.origin === 'engine' ? ' (on the engine)' : ''}` },
@@ -279,7 +279,7 @@ function ConnectionBlock() {
   const [action, setAction] = useState<ConnAction | null>(null)
   const [input, setInput] = useState<Record<string, string>>({})
   const [done, setDone] = useState<string>('')
-  const [calls, setCalls] = useState<any[]>([])
+  const [calls, setCalls] = useState<any[] | null>(null)
   const ask = async (t: string, extra: Record<string, unknown> = {}) => {
     const r = await env.request({ t: `connector:${t}`, connection: id, ...extra })
     if (r?.t === 'connector:refused') throw new Error(r.reason)

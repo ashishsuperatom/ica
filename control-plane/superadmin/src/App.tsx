@@ -19,7 +19,7 @@ import { AnalystConsole } from './AnalystConsole'
 import { useSession, SignIn, UserButton } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
-import { AppShell, Sidebar, Breadcrumbs, Arranged, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
+import { AppShell, Sidebar, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
 import '@superatom/ui/design.css'
 import { AdminContext, ADMIN_OWN_BLOCKS } from './AdminBlocks'
 
@@ -293,7 +293,8 @@ function Console() {
   const loc = useLocation(); const nav = useNavigate()
   const m = /^\/o\/([^/]+)(?:\/p\/([^/]+)(?:\/(.*))?|\/([^/]+))?\/?$/.exec(loc.pathname)
   const org = m?.[1] ?? null, project = m?.[2] ?? null
-  const place = (project ? m?.[3] : m?.[4]) ?? ''
+  // Where you are in the layer: the place after the project, or after the organisation, or the platform's own place.
+  const place = (project ? m?.[3] : org ? m?.[4] : loc.pathname.split('/')[1]) ?? ''
   const layer: 'platform' | 'org' | 'project' = project ? 'project' : org ? 'org' : 'platform'
   const api = useApi(token, null), orgApi = useApi(token, org)
   const [, bump] = useState(0)
@@ -319,7 +320,9 @@ function Console() {
   ] : layer === 'org' ? [
     ...(superadmin ? [{ items: [item('up', 'Superatom', 'lucide:arrow-left', '/', false)] }] : []),
     { label: orgName, items: ORG_PLACES.filter((pl) => holds(orgCaps, pl.needs)).map((pl) => item(`o-${pl.slug}`, pl.label, pl.icon, O(pl.slug), place === pl.slug, pl.says)) },
-    ...(projects.length ? [{ label: 'Projects', items: projects.map((p) => item(`pr-${p.id}`, p.name, 'lucide:folder', `/o/${org}/p/${p.id}`, false)) }] : []),
+    // A few projects to jump straight to; all of them are on the organisation's Projects page (searchable, paged).
+    ...(projects.length ? [{ label: 'Projects', items: [...projects.slice(0, 8).map((p) => item(`pr-${p.id}`, p.name, 'lucide:folder', `/o/${org}/p/${p.id}`, false)),
+      ...(projects.length > 8 ? [item('pr-all', `All ${projects.length} projects`, 'lucide:list', O(''), false)] : [])] }] : []),
   ] : [
     { items: [item('up', orgName, 'lucide:arrow-left', O(''), false, `Back to ${orgName}`)] },
     { label: projectName, items: [item('p-attention', 'Attention', 'lucide:bell', P('attention'), place === 'attention')] },
@@ -406,12 +409,12 @@ function EnginesPage() {
   const token = useAuth(); const api = useApi(token); const nav = useNavigate()
   const [rows, setRows] = useState<{ projectId: string; project: string; org: string; orgId: string; running: boolean | null }[] | null>(null)
   useEffect(() => { if (token) void api('/profiles').then((r) => (r.ok ? r.json() : null)).then((d: any) => setRows(Array.isArray(d?.projects) ? d.projects : [])).catch(() => setRows([])) }, [token, api])
-  if (!rows) return <Empty icon="lucide:loader">Reading the engines…</Empty>
+  const list = rows ?? []
   return (
     <Shell>
       <PageHeader title="Engines" subtitle="Every project's engine, and whether it is reporting." />
-      <Figures><Kpi label="Projects" value={rows.length} accent="series-1" /><Kpi label="Reporting" value={rows.filter((r) => r.running).length} accent="win" /><Kpi label="Silent" value={rows.filter((r) => !r.running).length} accent="warn" /></Figures>
-      <RecordList rows={rows} keyOf={(r) => r.projectId} onRow={(r) => nav(`/o/${r.orgId}/p/${r.projectId}`)} columns={[
+      <Figures><Kpi label="Projects" value={list.length} loading={!rows} accent="series-1" /><Kpi label="Reporting" value={list.filter((r) => r.running).length} loading={!rows} accent="win" /><Kpi label="Silent" value={list.filter((r) => !r.running).length} loading={!rows} accent="warn" /></Figures>
+      <RecordList rows={rows} search={(r) => `${r.project} ${r.org}`} searchLabel="Find a project or organisation…" pageSize={15} keyOf={(r) => r.projectId} onRow={(r) => nav(`/o/${r.orgId}/p/${r.projectId}`)} columns={[
         { key: 'project', label: 'Project' }, { key: 'org', label: 'Organisation' },
         { key: 'running', label: 'Engine', render: (r) => <Status state={r.running ? 'ok' : 'attention'}>{r.running ? 'reporting' : 'not reporting'}</Status> },
       ]} />
@@ -530,7 +533,7 @@ function ProjectCardButton({ p, onOpen }: { p: ProjectCard; onOpen: () => void }
 function OrgListPage() {
   const token = useAuth(); const api = useApi(token)
   const [orgs, setOrgs] = useState<any[] | null>(null); const [showDeleted, setShowDeleted] = useState(false)
-  const [projects, setProjects] = useState<ProjectCard[]>([])
+  const [projects, setProjects] = useState<ProjectCard[] | null>(null)
   const [making, setMaking] = useState(false)
   const [draft, setDraft] = useState({ name: '', adminEmail: '' })
   const [err, setErr] = useState('')
@@ -560,7 +563,8 @@ function OrgListPage() {
   // What happened in the last 30 days: each project's model use by day (what the platform meters).
   const [usage, setUsage] = useState<{ project: string; day: string; calls: number; tokens: number; credits: number }[] | null>(null)
   useEffect(() => {
-    if (!token || !projects.length) return
+    if (!token || !projects) return
+    if (!projects.length) { setUsage([]); return }
     let live = true
     void Promise.all(projects.map(async (p) => {
       const r = await fetch(`/api/projects/${p.id}/usage`, { headers: { authorization: `Bearer ${token}` } }).catch(() => null)
@@ -580,59 +584,54 @@ function OrgListPage() {
   const restore = async (id: string) => { await api('/organizations', { method: 'PUT', body: JSON.stringify({ id }) }); fetchOrgs() }
   const live = (orgs ?? []).filter((o) => !o.deleted), deleted = (orgs ?? []).filter((o) => o.deleted)
   const days = Array.from({ length: 30 }, (_, i) => new Date(Date.now() - (29 - i) * 86_400_000).toISOString().slice(0, 10))
-  const orgOfProject = new Map(projects.map((p) => [p.id, p.orgId]))
+  const all = projects ?? []
+  const orgOfProject = new Map(all.map((p) => [p.id, p.orgId]))
   const byDay: Record<string, Record<string, number>> = {}
   for (const u of usage ?? []) { const o = orgOfProject.get(u.project) ?? '?'; (byDay[u.day] ??= {})[o] = (byDay[u.day]?.[o] ?? 0) + u.tokens }
   const callsBy = new Map<string, number>(); for (const u of usage ?? []) callsBy.set(u.project, (callsBy.get(u.project) ?? 0) + u.calls)
+  const callsByOrg = new Map<string, number>(); for (const [p, c] of callsBy) { const o = orgOfProject.get(p); if (o) callsByOrg.set(o, (callsByOrg.get(o) ?? 0) + c) }
   const totals = (usage ?? []).reduce((t, u) => ({ calls: t.calls + u.calls, tokens: t.tokens + u.tokens, credits: t.credits + u.credits }), { calls: 0, tokens: 0, credits: 0 })
   const compact = (v: number) => new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(v)
-  const runningCount = projects.filter((p) => p.running).length
-  const known = projects.filter((p) => p.running !== null).length
+  const runningCount = all.filter((p) => p.running).length
+  const known = all.filter((p) => p.running !== null).length
 
+  // Nothing here moves as it loads: every figure, both charts and the list hold their place from the first paint, and
+  // fill in as their numbers arrive.
   return (
     <Shell>
       <PageHeader title="Organisations" subtitle="Every organisation on the platform, its projects, and whether their engines are running."
         actions={HOST_SCOPE !== 'admin' ? <button className="sa-btn sa-btn--primary" onClick={() => setMaking(true)}><Icon icon="lucide:plus" /> New organisation</button> : undefined} />
       <Figures>
-        <Kpi label="Organisations" value={orgs ? live.length : '…'} accent="series-1" />
-        <Kpi label="Projects" value={projects.length} accent="series-2" />
-        {known > 0 && <Kpi label="Engines running" value={`${runningCount} of ${known}`} accent={runningCount < known ? 'warn' : 'win'} foot={runningCount < known ? `${known - runningCount} not reporting` : 'all reporting'} />}
-        {usage && <Kpi label="Model calls · 30 days" value={compact(totals.calls)} accent="series-3" foot={`${compact(totals.tokens)} tokens`} />}
-        {usage && totals.credits > 0 && <Kpi label="Credits · 30 days" value={compact(totals.credits)} accent="series-1" />}
+        <Kpi label="Organisations" value={live.length} loading={orgs === null} accent="series-1" />
+        <Kpi label="Projects" value={all.length} loading={projects === null} accent="series-2" />
+        <Kpi label="Engines running" value={known ? `${runningCount} of ${known}` : '—'} loading={projects === null} accent={runningCount < known ? 'warn' : 'win'} foot={known ? (runningCount < known ? `${known - runningCount} not reporting` : 'all reporting') : 'none known'} />
+        <Kpi label="Model calls · 30 days" value={compact(totals.calls)} loading={usage === null} accent="series-3" foot={`${compact(totals.tokens)} tokens${totals.credits > 0 ? ` · ${compact(totals.credits)} credits` : ''}`} />
       </Figures>
-      {usage && (
-        <div className="sa-two-col">
-          <SectionCard icon="lucide:chart-column" title="Model use" subtitle="Tokens a day, last 30 days, by organisation">
-            <div className="sa-section__chart">
-              <TimeColumns periods={days} values={byDay} format={compact} empty="No model use in the last 30 days"
-                series={live.map((o) => ({ key: o.id, label: o.name }))} />
-            </div>
-          </SectionCard>
-          <SectionCard icon="lucide:chart-pie" title="Where the work is" subtitle="Model calls by project, last 30 days">
-            <div className="sa-section__chart">
-              <Donut height={240} format={compact} empty="No model calls in the last 30 days"
-                slices={[...callsBy.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([id, v]) => ({ name: projects.find((p) => p.id === id)?.name ?? id.slice(0, 8), value: v }))} />
-            </div>
-          </SectionCard>
-        </div>
-      )}
-      {orgs === null && <Empty icon="lucide:loader">Reading the organisations…</Empty>}
-      {orgs && live.length === 0 && <Empty icon="lucide:building-2">{HOST_SCOPE !== 'admin' ? 'No organisations yet. Make the first one.' : 'No organisations yet.'}</Empty>}
-      {live.map((o, i) => {
-        const mine = projects.filter((p) => p.orgId === o.id)
-        const up = mine.filter((p) => p.running).length
-        return (
-          <SectionCard key={o.id} tinted icon="lucide:building-2" accent={ORG_ACCENTS[i % ORG_ACCENTS.length]} title={o.name}
-            subtitle={`${mine.length} project${mine.length === 1 ? '' : 's'}${mine.some((p) => p.running !== null) ? ` · ${up} engine${up === 1 ? '' : 's'} running` : ''}`}
-            actions={<button className="sa-btn sa-btn--link" onClick={() => nav(`/o/${o.id}`)}>Open <Icon icon="mdi:arrow-right" /></button>}>
-            <div className="sa-home__group">
-              {mine.length
-                ? <div className="sa-sub-grid">{mine.map((p) => <ProjectCardButton key={p.id} p={p} onOpen={() => nav(`/o/${o.id}/p/${p.id}`)} />)}</div>
-                : <Empty icon="lucide:folder-plus">No projects yet — open the organisation to make one.</Empty>}
-            </div>
-          </SectionCard>
-        )
-      })}
+      <div className="sa-two-col">
+        <SectionCard icon="lucide:chart-column" title="Model use" subtitle="Tokens a day, last 30 days, by organisation">
+          <div className="sa-section__chart"><ChartFrame loading={usage === null}>
+            <TimeColumns periods={days} values={byDay} format={compact} empty="No model use in the last 30 days" series={live.map((o) => ({ key: o.id, label: o.name }))} />
+          </ChartFrame></div>
+        </SectionCard>
+        <SectionCard icon="lucide:chart-pie" title="Where the work is" subtitle="Model calls by project, last 30 days">
+          <div className="sa-section__chart"><ChartFrame loading={usage === null}>
+            <Donut height={240} format={compact} empty="No model calls in the last 30 days"
+              slices={[...callsBy.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([id, v]) => ({ name: all.find((p) => p.id === id)?.name ?? id.slice(0, 8), value: v }))} />
+          </ChartFrame></div>
+        </SectionCard>
+      </div>
+      <SectionCard icon="lucide:building-2" title="Organisations" note={orgs ? `${live.length}` : undefined}>
+        <RecordList rows={live} keyOf={(o) => String(o.id)} onRow={(o) => nav(`/o/${o.id}`)} loading={orgs === null} loadingRows={3}
+          search={(o) => String(o.name)} searchLabel="Find an organisation…" pageSize={10}
+          empty={HOST_SCOPE !== 'admin' ? 'No organisations yet. Make the first one.' : 'No organisations yet.'}
+          columns={[
+            { key: 'name', label: 'Organisation', render: (o) => <strong>{o.name}</strong> },
+            { key: 'projects', label: 'Projects', align: 'end', render: (o) => projects ? String(all.filter((p) => p.orgId === o.id).length) : '…' },
+            { key: 'engines', label: 'Engines running', align: 'end', render: (o) => { if (!projects) return '…'; const mine = all.filter((p) => p.orgId === o.id && p.running !== null); return mine.length ? `${mine.filter((p) => p.running).length} of ${mine.length}` : '—' } },
+            { key: 'calls', label: 'Model calls · 30 days', align: 'end', render: (o) => usage ? compact(callsByOrg.get(o.id) ?? 0) : '…' },
+            { key: 'open', label: '', align: 'end', render: () => <Icon icon="lucide:chevron-right" /> },
+          ]} />
+      </SectionCard>
       <div className="sa-row"><ShowDeleted value={showDeleted} onChange={setShowDeleted} /></div>
       {showDeleted && deleted.length > 0 && (
         <SectionCard icon="lucide:archive" accent="neutral" title="Deleted organisations" subtitle="Restoring one brings back its projects and people">
@@ -696,8 +695,10 @@ function OrgDetailPage() {
   // type-to-confirm delete) + the Danger-zone modal toggle.
   const [orgName, setOrgName] = useState(''); const [delOrg, setDelOrg] = useState(false)
   useEffect(() => { if (token) api('/organizations').then(r => r.json()).then((os: any[]) => setOrgName(Array.isArray(os) ? (os.find(o => o.id === orgId)?.name ?? '') : '')).catch(() => {}) }, [token, api, orgId])
-  const fetchProjects = useCallback(() => { if (token) api(`/projects?deleted=${showDeleted ? '1' : '0'}`).then(r => r.json()).then(setProjects).catch(() => {}) }, [token, api, showDeleted])
-  useEffect(() => { if (!token) return; fetchProjects(); api('/users').then(r => r.json()).then(setUsers).catch(() => {}) }, [token, api, fetchProjects])
+  const [projectsRead, setProjectsRead] = useState(false)
+  const fetchProjects = useCallback(() => { if (token) api(`/projects?deleted=${showDeleted ? '1' : '0'}`).then(r => r.json()).then((d) => { setProjects(Array.isArray(d) ? d : []); setProjectsRead(true) }).catch(() => setProjectsRead(true)) }, [token, api, showDeleted])
+  const [usersRead, setUsersRead] = useState(false)
+  useEffect(() => { if (!token) return; fetchProjects(); api('/users').then(r => (r.ok ? r.json() : [])).then((d) => { setUsers(Array.isArray(d) ? d : []); setUsersRead(true) }).catch(() => setUsersRead(true)) }, [token, api, fetchProjects])
   async function createProject() {
     const provider = newProject.provider || 'fly'   // 'fly' = managed machine · 'external' = local/EC2 (you run the engine)
     const r = await api('/projects', { method: 'POST', body: JSON.stringify({ name: newProject.name, provider, createdBy: 'superadmin' }) })
@@ -777,21 +778,19 @@ function OrgDetailPage() {
 
       {tab === 'projects' && <>
         <Figures>
-          <Kpi label="Projects" value={projects.filter((p) => !p.deleted).length} accent="series-1" />
-          <Kpi label="People" value={users.length} accent="series-2" />
+          <Kpi label="Projects" value={projects.filter((p) => !p.deleted).length} loading={!projectsRead} accent="series-1" />
+          <Kpi label="People" value={users.length} loading={!usersRead} accent="series-2" />
         </Figures>
         <SectionCard icon="lucide:folder-kanban" title="Projects" subtitle="Open one to see its agents, data, people and engine"
           actions={<><ShowDeleted value={showDeleted} onChange={setShowDeleted} /><button className="sa-btn sa-btn--primary" onClick={() => setMakingProject(true)}><Icon icon="lucide:plus" /> New project</button></>}>
           <div className="sa-home__group">
-            {projects.filter((p) => !p.deleted).length === 0 && <Empty icon="lucide:folder-plus">No projects yet. Make the first one.</Empty>}
-            <div className="sa-sub-grid">
-              {projects.filter((p) => !p.deleted).map((p) => (
-                <button key={p.id} type="button" className="sa-sub-card" onClick={() => nav(`/o/${orgId}/p/${p.id}`)} title={`Open ${p.name}`}>
-                  <span className="sa-sub-card__title"><span className="sa-row sa-row--tight"><Icon icon="lucide:folder-kanban" />{p.name}</span></span>
-                  <span className="sa-sub-card__text">{p.created_at ? `made ${new Date(Number(p.created_at) * 1000).toLocaleDateString()}` : 'Open it'}</span>
-                </button>
-              ))}
-            </div>
+            <RecordList rows={projects.filter((p) => !p.deleted)} keyOf={(p) => String(p.id)} onRow={(p) => nav(`/o/${orgId}/p/${p.id}`)} loading={!projectsRead} loadingRows={3}
+              search={(p) => String(p.name)} searchLabel="Find a project…" pageSize={10} empty="No projects yet. Make the first one."
+              columns={[
+                { key: 'name', label: 'Project', render: (p) => <strong>{p.name}</strong> },
+                { key: 'made', label: 'Made', render: (p) => <span className="sa-muted">{p.created_at ? new Date(Number(p.created_at) * 1000).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span> },
+                { key: 'open', label: '', align: 'end', render: () => <Icon icon="lucide:chevron-right" /> },
+              ]} />
             {projects.some((p) => p.deleted) && (
               <RecordList rows={projects.filter((p) => p.deleted)} keyOf={(p) => String(p.id)} columns={[
                 { key: 'name', label: 'Deleted project' },

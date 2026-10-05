@@ -10,13 +10,13 @@ type Api = (p: string, i?: RequestInit) => Promise<Response>
 type Policy = { id: string; applies_to: string; source: string; table: string; kind: 'row' | 'deny' | 'mask'; predicate?: string | null; column?: string | null; note?: string | null }
 
 export function AccessPoliciesPanel({ api, projectId }: { api: Api; projectId: string }) {
-  const [list, setList] = useState<Policy[]>([])
+  const [list, setList] = useState<Policy[] | null>(null)
   const [form, setForm] = useState({ applies_to: 'everyone', source: '', table: '', kind: 'row', predicate: '', column: '', note: '' })
   const [subject, setSubject] = useState('')
   const [attrs, setAttrs] = useState<Record<string, unknown> | null>(null)
   const [attr, setAttr] = useState({ key: '', value: '' })
   const [err, setErr] = useState('')
-  const [domains, setDomains] = useState<{ domain: string; role_id: string; added_by: string }[]>([])
+  const [domains, setDomains] = useState<{ domain: string; role_id: string; added_by: string }[] | null>(null)
   const [dom, setDom] = useState({ domain: '', roleId: 'viewer' })
   const base = `/projects/${projectId}`
   const loadDomains = useCallback(() => { api(`${base}/access-domains`).then((r) => (r.ok ? r.json() : { domains: [] })).then((d) => setDomains((d as { domains: typeof domains }).domains)).catch(() => {}) }, [api, base])
@@ -50,7 +50,7 @@ export function AccessPoliciesPanel({ api, projectId }: { api: Api; projectId: s
     <div className="sa-stack sa-stack--4">
       {err && <Notice state="critical">{err}</Notice>}
 
-      <Section icon="lucide:shield-check" title="Data access" subtitle="What each person or agent may read, applied to every table a query reads" note={list.length ? `${list.length} polic${list.length === 1 ? 'y' : 'ies'}` : undefined}>
+      <Section icon="lucide:shield-check" title="Data access" subtitle="What each person or agent may read, applied to every table a query reads" note={(list ?? []).length ? `${(list ?? []).length} polic${(list ?? []).length === 1 ? 'y' : 'ies'}` : undefined}>
         <RecordList rows={list} keyOf={(p) => p.id} empty="No policies: everyone with access to the project reads everything."
           columns={[
             { key: 'applies_to', label: 'Applies to' },

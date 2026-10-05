@@ -104,6 +104,14 @@ src/lib/draft.ts    commit-on-close, once, for every control that stays open (Dr
     ninety seconds — `lib/pending.ts`); `app:refused` (nothing written in time) removes the placeholder with a toast. The reader is told a block's question, title, headline figures and notes — never rows.
 18. **A second theme** is a second `:root[data-theme=…]` block in tokens.css redefining the same names.
 
+**Nothing jumps (the user, 2026-10-06):** a screen does not load, change, then change again. From the first paint every
+part holds the place and size it will have: figures render every tile (`Kpi loading`, one height loaded or not); charts
+sit in a `ChartFrame` of their height, a shimmer until their numbers arrive; a list is `RecordList` with `rows={null}`
+(not yet read) — rows of the records' size, never "nothing here" that then fills — and with `pageSize` a page never
+grows, with `search` anything is found whatever page it is on. Lists of things that grow (organisations, projects,
+people) are lists with search and pages, never every one of them drawn as a card. Something that can only grow does so
+at the bottom, below everything else.
+
 ## Which block for which data
 
 - **KPI tile** (`Kpi`) — one figure with a state: the label, the number in its meaning's colour, one line of hint.

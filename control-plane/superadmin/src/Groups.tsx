@@ -9,7 +9,7 @@ type Api = (p: string, i?: RequestInit) => Promise<Response>
 type Group = { name: string; description: string | null; members: string[] }
 
 export function GroupsPanel({ api, projectId }: { api: Api; projectId: string }) {
-  const [groups, setGroups] = useState<Group[]>([])
+  const [groups, setGroups] = useState<Group[] | null>(null)
   const [name, setName] = useState('')
   const [member, setMember] = useState<Record<string, string>>({})
   const [err, setErr] = useState('')
@@ -36,8 +36,8 @@ export function GroupsPanel({ api, projectId }: { api: Api; projectId: string })
           </Field>
         </Form>
       </Section>
-      {!groups.length && <Empty icon="lucide:users">No groups yet. Each group you create appears here with its members.</Empty>}
-      {groups.map((g) => (
+      {!(groups ?? []).length && <Empty icon="lucide:users">No groups yet. Each group you create appears here with its members.</Empty>}
+      {(groups ?? []).map((g) => (
         <Section key={g.name} icon="lucide:users-round" title={g.name} note={`${g.members.length} member${g.members.length === 1 ? '' : 's'}`}>
           <RecordList keyOf={(m) => m.id} rows={g.members.map((id) => ({ id }))} empty="No members yet."
             columns={[

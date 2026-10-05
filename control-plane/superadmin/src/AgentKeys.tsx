@@ -16,7 +16,7 @@ const when = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString(un
 const whenFull = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : '')
 
 export function AgentKeysPanel({ api, projectId }: { api: Api; projectId: string }) {
-  const [keys, setKeys] = useState<Key[]>([])
+  const [keys, setKeys] = useState<Key[] | null>(null)
   const [name, setName] = useState('')
   const [scopes, setScopes] = useState<AgentScope[]>(['sessions'])
   const [days, setDays] = useState('90')
@@ -94,7 +94,7 @@ export function AgentKeysPanel({ api, projectId }: { api: Api; projectId: string
         </Form>
       </Section>
 
-      <Section icon="lucide:key-square" title="Agent keys" note={keys.length ? `${keys.length}` : undefined}>
+      <Section icon="lucide:key-square" title="Agent keys" note={(keys ?? []).length ? `${(keys ?? []).length}` : undefined}>
         <RecordList rows={keys} keyOf={(k) => k.id} empty="No agent keys yet. A key you make appears here; only its prefix is kept on view."
           columns={[
             { key: 'name', label: 'Name', render: (k) => <strong title={k.name}>{k.name}</strong> },
@@ -116,7 +116,7 @@ export function AgentKeysPanel({ api, projectId }: { api: Api; projectId: string
 }
 
 export function AuditPanel({ api, projectId }: { api: Api; projectId: string }) {
-  const [events, setEvents] = useState<Event[]>([])
+  const [events, setEvents] = useState<Event[] | null>(null)
   const [action, setAction] = useState('')
   const [actor, setActor] = useState('')
   const [err, setErr] = useState('')
@@ -125,7 +125,7 @@ export function AuditPanel({ api, projectId }: { api: Api; projectId: string }) 
     api(`/projects/${projectId}/audit?${q}`).then(async (r) => {
       if (!r.ok) { setErr(`The history could not be read (${r.status}).`); return }
       const d = await r.json() as { events: Event[] }
-      setErr(''); const got = Array.isArray(d.events) ? d.events : []; setEvents((prev) => (before ? [...prev, ...got] : got))
+      setErr(''); const got = Array.isArray(d.events) ? d.events : []; setEvents((prev) => (before ? [...(prev ?? []), ...got] : got))
     }).catch(() => setErr('The history could not be read.'))
   }, [api, projectId, action, actor])
   useEffect(() => load(), [load])
@@ -139,7 +139,7 @@ export function AuditPanel({ api, projectId }: { api: Api; projectId: string }) 
   }
   return (
     <Section icon="lucide:scroll-text" title="Audit history" subtitle="Everything that happened in this project, newest first. It cannot be changed."
-      footer={events.length >= 100 ? <button type="button" className="sa-btn" onClick={() => load(events[events.length - 1].at)}>Older</button> : undefined}>
+      footer={(events ?? []).length >= 100 ? <button type="button" className="sa-btn" onClick={() => load((events ?? [])[(events ?? []).length - 1].at)}>Older</button> : undefined}>
       <div className="sa-section__body sa-stack">
         <Toolbar>
           <input id="audit-action" className="sa-input" placeholder="Action (question, agent-key…)" aria-label="Action" value={action} onChange={(e) => setAction(e.target.value.trim())} />
@@ -147,7 +147,7 @@ export function AuditPanel({ api, projectId }: { api: Api; projectId: string }) 
         </Toolbar>
         {err && <Notice state="critical">{err}</Notice>}
       </div>
-      {(!err || !!events.length) && (
+      {(!err || !!(events ?? []).length) && (
         <RecordList rows={events} keyOf={(e) => e.id} empty="Nothing recorded yet. Who asks or changes anything here appears in this list."
           columns={[
             { key: 'at', label: 'When', render: (e) => <span className="sa-muted">{when(e.at)}</span> },

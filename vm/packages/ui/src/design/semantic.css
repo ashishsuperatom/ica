@@ -27,6 +27,13 @@
 
 /* RecordList */
 .sa-records { overflow-x: auto; }
+.sa-records__find { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-4); border-bottom-width: 1px; color: var(--faint); }
+.sa-records__input { flex: 1; min-width: 0; border: 0; background: transparent; font-size: var(--t-sm); color: var(--ink); outline: none; }
+.sa-records__none { padding: var(--sp-4) !important; color: var(--faint) !important; text-align: center; }
+/* A row is one line high whatever it holds, so loading rows and records are the same size. */
+.sa-records__table tbody tr { height: 44px; }
+.sa-chartframe { position: relative; min-width: 0; }
+.sa-chartframe > * { height: 100%; }
 .sa-records__table { width: 100%; border-collapse: collapse; font-size: var(--t-base); }
 .sa-records__table th { text-align: start; font-size: var(--t-2xs); font-weight: var(--w-semibold); text-transform: uppercase; letter-spacing: 0.04em; color: var(--faint); background: var(--panel); padding: var(--sp-2) var(--sp-4); white-space: nowrap; }
 .sa-records__table td { padding: var(--sp-2) var(--sp-4); border-top: 1px solid var(--line); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 28rem; }

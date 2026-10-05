@@ -16,7 +16,7 @@
 //   Toolbar                the controls above a list: search, filters, the action that adds one
 //   Dialog                 a question that needs an answer first, over the page
 
-import type { FormEvent, ReactNode } from 'react'
+import { useState, type FormEvent, type ReactNode } from 'react'
 import { Icon } from '@iconify/react'
 
 export type State = 'ok' | 'attention' | 'critical' | 'running' | 'neutral'
@@ -57,21 +57,67 @@ export function Receipt({ items }: { items: [string, ReactNode][] }) {
 }
 
 export interface Column<R> { key: string; label: string; align?: 'start' | 'end'; render?: (row: R) => ReactNode; wrap?: boolean }
-export function RecordList<R extends Record<string, any>>({ columns, rows, keyOf, onRow, empty }: { columns: Column<R>[]; rows: R[]; keyOf: (r: R) => string; onRow?: (r: R) => void; empty?: ReactNode }) {
-  if (!rows.length) return <Empty>{empty ?? 'Nothing here yet.'}</Empty>
+/**
+ * Records in rows. It never jumps: while `loading` (or while `rows` is still null — not yet read) it draws rows of the
+ * size the records will have, never "nothing here" that then fills in; with `pageSize` it
+ * shows that many at a time with a pager (a page never grows); with `search` it finds among all of them, whatever page.
+ */
+export function RecordList<R extends Record<string, any>>({ columns, rows: given, keyOf, onRow, empty, loading: busy = false, loadingRows, search, searchLabel = 'Find…', pageSize }: {
+  columns: Column<R>[]; rows: R[] | null | undefined; keyOf: (r: R) => string; onRow?: (r: R) => void; empty?: ReactNode
+  /** The records are on their way: rows of their size are drawn instead. */
+  loading?: boolean
+  loadingRows?: number
+  /** What a record is found by (its words); a search box is drawn above. */
+  search?: (r: R) => string
+  searchLabel?: string
+  /** At most this many at a time, with a pager. */
+  pageSize?: number
+}) {
+  const [q, setQ] = useState('')
+  const [page, setPage] = useState(0)
+  const loading = busy || given == null
+  const rows = given ?? []
+  const found = search && q.trim() ? rows.filter((r) => search(r).toLowerCase().includes(q.trim().toLowerCase())) : rows
+  const pages = pageSize ? Math.max(1, Math.ceil(found.length / pageSize)) : 1
+  const at = Math.min(page, pages - 1)
+  const shown = pageSize ? found.slice(at * pageSize, at * pageSize + pageSize) : found
+  const head = search && (rows.length > 0 || loading) && (
+    <div className="sa-records__find"><Icon icon="lucide:search" /><input className="sa-records__input" placeholder={searchLabel} value={q} onChange={(e) => { setQ(e.target.value); setPage(0) }} aria-label={searchLabel} /></div>
+  )
+  if (!loading && !rows.length) return <Empty>{empty ?? 'Nothing here yet.'}</Empty>
   return (
     <div className="sa-records">
+      {head}
       <table className="sa-records__table">
         <thead><tr>{columns.map((c) => <th key={c.key} data-align={c.align ?? 'start'}>{c.label}</th>)}</tr></thead>
-        <tbody>{rows.map((r) => (
-          <tr key={keyOf(r)} data-opens={!!onRow} onClick={onRow ? () => onRow(r) : undefined} tabIndex={onRow ? 0 : undefined}
-            onKeyDown={onRow ? (e) => { if (e.key === 'Enter') onRow(r) } : undefined}>
-            {columns.map((c) => <td key={c.key} data-align={c.align ?? 'start'} data-wrap={!!c.wrap}>{c.render ? c.render(r) : String(r[c.key] ?? '—')}</td>)}
-          </tr>
-        ))}</tbody>
+        <tbody>{loading
+          ? Array.from({ length: loadingRows ?? pageSize ?? 4 }, (_, i) => (
+              <tr key={`loading-${i}`} aria-hidden>{columns.map((c, j) => <td key={c.key}><span className="sa-skeleton sa-skeleton--inline" style={{ width: j === 0 ? '60%' : '40%', height: 12 }} /></td>)}</tr>))
+          : shown.map((r) => (
+              <tr key={keyOf(r)} data-opens={!!onRow} onClick={onRow ? () => onRow(r) : undefined} tabIndex={onRow ? 0 : undefined}
+                onKeyDown={onRow ? (e) => { if (e.key === 'Enter') onRow(r) } : undefined}>
+                {columns.map((c) => <td key={c.key} data-align={c.align ?? 'start'} data-wrap={!!c.wrap}>{c.render ? c.render(r) : String(r[c.key] ?? '—')}</td>)}
+              </tr>))}
+          {!loading && !shown.length && <tr><td colSpan={columns.length} className="sa-records__none">Nothing matches “{q}”.</td></tr>}
+        </tbody>
       </table>
+      {pageSize && !loading && found.length > pageSize && (
+        <div className="sa-pager" data-copy="skip">
+          <span className="sa-pager__count">{`${at * pageSize + 1}–${Math.min(found.length, at * pageSize + pageSize)} of ${found.length}`}</span>
+          <div className="sa-pager__nav">
+            <button className="sa-btn" disabled={at === 0} onClick={() => setPage(at - 1)}><Icon icon="lucide:chevron-left" className="sa-btn__icon" />Previous</button>
+            <span className="sa-pager__page">{at + 1} / {pages}</span>
+            <button className="sa-btn" disabled={at >= pages - 1} onClick={() => setPage(at + 1)}>Next<Icon icon="lucide:chevron-right" className="sa-btn__icon" /></button>
+          </div>
+        </div>
+      )}
     </div>
   )
+}
+
+/** A chart's place: always its height, a shimmer of that height while its numbers are on their way. */
+export function ChartFrame({ loading = false, height = 240, children }: { loading?: boolean; height?: number; children: ReactNode }) {
+  return <div className="sa-chartframe" style={{ height }}>{loading ? <span className="sa-skeleton" style={{ width: '100%', height: '100%' }} aria-label="Loading" /> : children}</div>
 }
 
 export function Status({ state, children }: { state: State; children: ReactNode }) {
