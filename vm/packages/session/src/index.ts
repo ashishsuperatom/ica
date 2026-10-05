@@ -90,6 +90,7 @@ export function createSessions(opts: SessionsOptions) {
     if (opts.log.read(o.session).length) throw new SessionRefusal([`session ${o.session} already exists`])
     const at = now()
     const state = opts.engine.start(o.start, o.agentKeys)
+    opts.log.hold?.(o.session)   // kept only once it is used (deferringLog)
     opts.log.append(o.session, { t: 'open', at, session: o.session, user: o.user, agent: o.agent })
     opts.log.append(o.session, { t: 'block', at, id: id('blk'), parent: null, state, stateHash: stateHash(state), intent: null })
     return read(o.session)
@@ -100,6 +101,7 @@ export function createSessions(opts: SessionsOptions) {
     if (bad.length) throw new SessionRefusal(bad)
     const before = read(i.session)
     if (i.by !== before.user) throw new SessionRefusal([`session ${i.session} is ${before.user}'s; ${i.by} cannot change it`])
+    opts.log.commit?.(i.session)   // the first use: the session is kept from here
     const from = i.block ?? before.leaf
     const base = before.states[from]
     if (!base) throw new SessionRefusal([`session ${i.session} has no block ${from}`])
@@ -167,6 +169,7 @@ export function createSessions(opts: SessionsOptions) {
     const v = read(session)
     if (by !== v.user) throw new SessionRefusal([`session ${session} is ${v.user}'s; ${by} cannot change it`])
     if (!v.states[block]) throw new SessionRefusal([`session ${session} has no block ${block}`])
+    opts.log.commit?.(session)
     if (v.leaf !== block) opts.log.append(session, { t: 'current', at: now(), block })
     return read(session)
   }

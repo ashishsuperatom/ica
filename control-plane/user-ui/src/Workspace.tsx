@@ -49,6 +49,19 @@ function leadOf(md: string): { title?: string; said?: string; rest: string } {
   return m ? { title: m[1], said: m[2], rest: lines.filter((_, j) => j !== i).join('\n') } : { rest: md }
 }
 
+/** Record something on a session (a decision, what it made): the session is kept first — one only looked at is not —
+ *  and the record waits a moment for the platform to have it. */
+async function recordKept(request: Request, session: string, payload: Record<string, unknown>) {
+  await request({ t: 'session:keep', session })
+  let m: any
+  for (let i = 0; i < 5; i++) {
+    m = await request(payload)
+    if (m?.t !== 'artifact:refused' || !/no such session/i.test(String(m?.reason ?? ''))) return m
+    await new Promise((r) => setTimeout(r, 700))
+  }
+  return m
+}
+
 /** Views opened by this page and ready to show (their programs' views loaded): a session opens from here without asking again. */
 const opened = new Map<string, SessionMsg>()
 /** A view made ready to show whole: its programs' React sides loaded, and the paths from its current step, waited for a
@@ -72,7 +85,10 @@ export default function Workspace({ request, subscribeLive, scopes, projectId, t
 }) {
   const me = useMemo(who, [])
   const [sessions, setSessions] = useState<{ session: string; agent: string; title: string; updated?: string }[]>([])
-  useEffect(() => { void request({ t: 'session:list' }).then((m) => setSessions(Array.isArray(m?.sessions) ? m.sessions : [])) }, [request, path])
+  const [listTick, setListTick] = useState(0)
+  // A session is kept only once it is used, so the list is read again then (a moment later, once the platform has it).
+  useEffect(() => { void request({ t: 'session:list' }).then((m) => setSessions(Array.isArray(m?.sessions) ? m.sessions : [])) }, [request, path, listTick])
+  const onUsed = useCallback(() => { setTimeout(() => setListTick((n) => n + 1), 1200) }, [])
   const agentOf = useCallback((id: string): WorkAgent => agents.find((a) => a.id === id) ?? { id, name: id, look: {}, starts: [] }, [agents])
   const sessionId = /^[\w-]+$/.test(path) ? path : null
   const startMatch = /^s\/([\w-]+)(?:\/([\w-]+))?/.exec(path)
@@ -156,7 +172,7 @@ export default function Workspace({ request, subscribeLive, scopes, projectId, t
                   icon={opening.look.icon} accent={accentOf(opening.look.accent)}><StepSkeleton label="Opening" /></BlockFrame>
               ) }]} /></div>
             : sessionId
-            ? <SessionSteps key={sessionId} session={sessionId} request={request} fetchFile={fetchFile} agentOf={agentOf} onArtifacts={setArtifacts} artifactsTick={artifactsTick} />
+            ? <SessionSteps key={sessionId} session={sessionId} request={request} fetchFile={fetchFile} agentOf={agentOf} onArtifacts={setArtifacts} artifactsTick={artifactsTick} onUsed={onUsed} />
             : <PagesContext.Provider value={pagesEnv}>
                 <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} address={(b) => (b.type === 'home' ? '/w' : ['agents', 'activity', 'connections'].includes(b.type) ? `/w?page=${b.type}` : null)} />
               </PagesContext.Provider>}
@@ -176,7 +192,7 @@ function ForkAgent({ session, request, onMade }: { session: string; request: Req
     const t = title.trim(); if (!t) return
     const m = await request({ t: 'session:fork', session, name: t, title: t })
     if (m?.t !== 'session:forked') { notify(m?.reason ?? 'The agent could not be made', 'refused'); return }
-    await request({ t: 'artifact:record', session, kind: 'agent', title: `Agent: ${t}`, body: { agent: m.agent, domain: m.domain, concept: m.concept, scope: m.scope, reasoning: 'made from this session: its questions and the steps taken' } })
+    await recordKept(request, session, { t: 'artifact:record', session, kind: 'agent', title: `Agent: ${t}`, body: { agent: m.agent, domain: m.domain, concept: m.concept, scope: m.scope, reasoning: 'made from this session: its questions and the steps taken' } })
     notify(`${t} made — yours until it is published`, 'note'); setOpen(false); setTitle(''); onMade()
   }
   if (!open) return <button className="sa-btn sa-btn--link sa-artifacts__make" title="An agent that knows what this session learned: the questions asked and the steps taken" onClick={() => setOpen(true)}>Make an agent from this session</button>
@@ -189,7 +205,7 @@ function ForkAgent({ session, request, onMade }: { session: string; request: Req
 
 type Pending = { kind: 'new'; from: string | null; label: string; beats?: { text: string; at: number }[] } | { kind: 'edit'; block: string }
 
-function SessionSteps({ session, request, fetchFile, agentOf, onArtifacts, artifactsTick }: { session: string; request: Request; fetchFile: FetchFile; agentOf: (id: string) => WorkAgent; onArtifacts: (a: Artifact[]) => void; artifactsTick: number }) {
+function SessionSteps({ session, request, fetchFile, agentOf, onArtifacts, artifactsTick, onUsed }: { session: string; request: Request; fetchFile: FetchFile; agentOf: (id: string) => WorkAgent; onArtifacts: (a: Artifact[]) => void; artifactsTick: number; onUsed: () => void }) {
   const [msg, setMsg] = useState<SessionMsg | null>(() => opened.get(session) ?? null)
   const [refused, setRefused] = useState('')
   const [pending, setPending] = useState<Pending | null>(null)
@@ -241,8 +257,9 @@ function SessionSteps({ session, request, fetchFile, agentOf, onArtifacts, artif
     const m = await request({ t: 'session:intent', session, ...payload })
     await accept(m)
     setPending(null)
+    if (m?.t === 'session:view') onUsed()
     if (opens && m?.view?.leaf) setTimeout(() => revealBlock(m.view.leaf), 30)
-  }, [pending, view, request, session, accept])
+  }, [pending, view, request, session, accept, onUsed])
   const intentRef = useRef(intent); intentRef.current = intent
   useEffect(() => {
     const el = root.current
@@ -262,6 +279,7 @@ function SessionSteps({ session, request, fetchFile, agentOf, onArtifacts, artif
     })
     await accept(m)
     setPending(null)
+    if (m?.t === 'session:view') onUsed()
     if (m?.view?.leaf) setTimeout(() => revealBlock(m.view.leaf), 30)
   }
 
@@ -309,7 +327,7 @@ function SessionSteps({ session, request, fetchFile, agentOf, onArtifacts, artif
               {uis.map((u) => { const body = u.blocks.filter((b) => !u.head?.includes(b)); return body.length ? <ProgramBlock key={`b:${u.hash}`} program={u} only={body} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} /> : null })}
               {isLeaf && (deciding === id
                 ? <DecisionForm onCancel={() => setDeciding(null)} onRecord={async (body, approval) => {
-                    const m = await request({ t: 'artifact:record', session, block: id, kind: 'decision', body, approval })
+                    const m = await recordKept(request, session, { t: 'artifact:record', session, block: id, kind: 'decision', body, approval })
                     if (m?.t === 'artifact:recorded') { notify('Decision recorded', 'note'); setDeciding(null); void loadArtifacts() } else notify(m?.reason ?? 'The decision was not recorded', 'refused')
                   }} />
                 : <div className="sa-step__decide"><button className="sa-btn sa-btn--link" onClick={() => setDeciding(id)}>Record a decision from this step</button></div>)}

@@ -90,7 +90,9 @@ test('refused with a sentence: another user, no user, no agent, a broken op, wor
   await ask({ t: 'session:open', session: 's2', agent: 'trips' })
   assert.deepEqual(await ask({ t: 'session:get', session: 's2' }, 'u2'), { t: 'session:refused', reason: 'session s2 is not yours', reqId: undefined })
   assert.equal((await ask({ t: 'session:get', session: 's2' }, null)).reason, 'the hub did not say who is asking')
-  // an agent key is its own identity: it neither sees a person's session nor passes for one
+  // an agent key is its own identity: it neither sees a person's session nor passes for one (a session only looked at is
+  // held by the process that opened it; kept, any process reads it)
+  await ask({ t: 'session:keep', session: 's2' })
   const agentOut: any[] = []
   const agentSeam = createSessionSeam({ projectDir: home, datasource: url, send: (_t, m) => agentOut.push(m) })
   await agentSeam.handle({ t: 'session:get', session: 's2' }, { type: 'agent', userId: 'agent:key_1' })

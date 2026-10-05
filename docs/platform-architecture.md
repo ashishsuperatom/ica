@@ -472,6 +472,15 @@ Not the session's STATE: the core of decision intelligence, to be expanded later
   - **Ports from the registry** on `127.0.0.1` (project 1's data source manager at `127.0.0.1:4008`, …). Works everywhere
     without admin rights. *Recommended for that reason.*
 
+### A session is kept only once it is used (2026-10-05)
+
+**In the user's words:** "I just click on one of the agent, I'm not doing anything… are we actually creating a new
+session in the file system?" Opening an agent shows its starting view, but nothing is kept until the person does
+something in it — a change, a move, a question, going back to a step, recording a decision, making an agent from it.
+Until then its entries are held in the engine's memory (`deferringLog` in `@superatom/session`), written nowhere — not
+to the log, not to the platform, not in "Your sessions"; the first use writes them all, in order. An unused session
+simply goes. `session:keep` keeps one explicitly (the UI sends it before recording on an untouched step).
+
 ### Connectors — the framework (built 2026-10-05)
 
 **The request, in the user's words: `docs/connector-system-request.md`.** A standard way for an enterprise's systems to

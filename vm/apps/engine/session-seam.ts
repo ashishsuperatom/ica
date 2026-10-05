@@ -27,7 +27,7 @@ import { placeForRunning, pick } from './knowledge.js'
 import { checkAgent, type AgentSpec, type Intent } from '@superatom/platform-types'
 import { ProgramStore, ProgramError, loadPackage } from '@superatom/programs'
 import { createStateEngine, StateRefusal, type StateEngine } from '@superatom/state'
-import { createSessions, fileLog, history, replay, SessionRefusal, type SessionLog, type SessionView } from '@superatom/session'
+import { createSessions, deferringLog, fileLog, history, replay, SessionRefusal, type SessionLog, type SessionView } from '@superatom/session'
 import { Store, governance as g, GovernanceRefusal } from '@superatom/composition-graph'
 import { cardOf } from './answer-card.js'
 import { whoIs, type Who } from './identity.js'
@@ -81,7 +81,7 @@ const pathOfView = (v: SessionView, block: string) => { const out: string[] = []
 const describe = (i: Intent) => i.call ? `ran ${i.call.package}.${i.call.fn}` : i.action ? `took ${i.action.package} · ${i.action.id}` : (i.ops ?? []).map((o: any) => `${o.op} ${o.path}${'value' in o ? ` = ${JSON.stringify(o.value)}` : ''}`).join(', ') || 'a change'
 
 /** The messages this seam takes (session:new, session:load and session:compact are the chat's). */
-export const SESSION_MESSAGES = new Set(['session:agents', 'session:open', 'session:intent', 'session:goto', 'session:get', 'session:file', 'session:fork', 'session:start'])
+export const SESSION_MESSAGES = new Set(['session:keep', 'session:agents', 'session:open', 'session:intent', 'session:goto', 'session:get', 'session:file', 'session:fork', 'session:start'])
 
 /** A starting point's fields over the agent's start, slice by slice. */
 export const mergeStart = (base: Record<string, Record<string, unknown>>, over: Record<string, Record<string, unknown>>) =>
@@ -90,7 +90,8 @@ export const mergeStart = (base: Record<string, Record<string, unknown>>, over: 
 export function createSessionSeam(d: SessionSeamDeps) {
   const agentsDir = join(d.projectDir, 'agents')
   const store = new ProgramStore(join(d.projectDir, 'programs', 'store'))
-  const log = d.log ?? fileLog(join(d.projectDir, 'sessions'))
+  // A session opened and only looked at is held, not kept; its first use writes it (deferringLog).
+  const log = deferringLog(d.log ?? fileLog(join(d.projectDir, 'sessions')))
 
   // A domain's programs (the composition graph's), run where the platform places them, for whoever asked: their access
   // goes with the run (SA_READER), their output (totals, a page) comes back as JSON. The same run within five minutes
@@ -303,6 +304,13 @@ export function createSessionSeam(d: SessionSeamDeps) {
         const r = await answerWords(opened, session, String(payload.text ?? ''), null, from, user, payload.reqId)
         return reply(await present(r.session, { routed: { agent: agent.id, name: agent.name, how }, result: { block: r.block, opened: r.opened, answer: r.answer } }))
       }
+      // Keep a session that was only looked at (something is about to be recorded on it: a decision, an agent from it).
+      if (t === 'session:keep') {
+        const v = replay(log.read(session))
+        if (!v) throw new SessionSeamRefusal(`there is no session ${session}`)
+        viewOf(v, user); log.commit?.(session)
+        return reply({ t: 'session:kept', session })
+      }
       if (t === 'session:get') {
         const v = replay(log.read(session), payload.asOf ? String(payload.asOf) : undefined)
         if (!v) throw new SessionSeamRefusal(`there is no session ${session}`)
@@ -315,6 +323,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       // agent's domain and what this session learned, as worked examples (each question and the steps taken after it).
       // The person's own until it is published; every node written through the graph's governance.
       if (t === 'session:fork') {
+        log.commit?.(session)   // making an agent from it is a use
         const s = graphStore()
         if (!s) throw new SessionSeamRefusal('this project keeps no composition graph to make an agent in')
         const name = String(payload.name ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
