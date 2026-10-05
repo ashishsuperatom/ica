@@ -24,14 +24,14 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 
 **Knowledge and computation**
 - Composition graph: concepts, domains, files and settings stored by hash, an append-only change log, time travel, scopes and owners, join/leave, and a CLI for every change.
-- Migrations for every database, engine and Durable Objects alike: one runner, no down migrations, a fast check, backups.
+- Migrations for every database, engine and Durable Objects alike: one runner, no down migrations, a fast check; engine databases backed up beside themselves (no off-box backup, none for Durable Objects).
 - Platform types: the shapes of STATE, ops, intents, programs, answers, agents, sessions and the governance log, each with checks that answer in sentences.
 - STATE engine: every function gets the whole STATE frozen and can set only its own slice; it re-runs whatever reads a changed path, in dependency order.
 - Programs: a Node side and a React side built with TypeScript, identified by hash, kept immutable in a store, loaded into STATE, inspectable; with a CLI.
 - Programs' views loaded by screens from the platform (R2, by hash) — the engine is not needed to draw them; the engine uploads every program it built on each connect.
 - The program contract (`docs/program-contract.md`) and template (`programs init`), the one standard every builder works to.
 - Agents as first-class nodes of the composition graph (owned, scoped, governed, versioned, kept by the platform), made with `graph:agent`.
-- Program pipeline: source sent by a person or agent, built by the engine, uploaded as a hash-checked bundle to R2 and the project's catalogue, published by its owner, fetched and checked by any engine that runs it.
+- Program pipeline: source sent by a person or agent, built by the engine, uploaded as a hash-checked bundle to R2 and the project's catalogue, published by its owner (over the hub; no screen or named CLI command yet), fetched and checked by any engine that runs it.
 - Governance in the composition graph: one owner per node, others suggest, the owner approves or rejects (stale suggestions refused), all append-only; the graph read and changed over the hub (`graph:*`).
 - Agents over HTTP: one route that sends an agent's message through the same path as its WebSocket.
 - Sessions: one user's blocks as a tree (each path through it a thread), current-view vs new-block intents, branching from earlier blocks, the answer history, stale runs dropped, an append-only log readable as of any moment.
@@ -45,16 +45,16 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Agent API keys per project: made by the project's admin, shown once and stored only as a hash, scoped, expiring and revocable (revoking ends open connections).
 - Agent connections to the hub: only to the engine, only within the key's scopes, the agent's identity stamped on every message.
 - The hub stamps who sent every message, so the engine always knows the user.
-- Audit history in each project's Durable Object, from one path only: every message through its relay and every HTTP call through its one gate, recorded once (specific event or the call itself); append-only.
+- Audit history in each project's Durable Object, from one path only: every message through its relay and every HTTP call through its one gate, recorded once (specific event or the call itself); append-only, never written from outside. The engine's own events are not recorded yet.
 - Background work visible: program builds and session runs reported as activities (running, done, failed), kept by the hub and sent to their owner and admins; listed on reconnect and by `sacli activity`.
 - Credit assignment: budgets for people and groups within an organisation (monthly or total), usage attributed to a session's owner, people over budget refused new work.
 - Usage metering and credits: every model call's tokens kept per project and priced from the platform's price list (versions kept); an append-only credit ledger per organisation (grants by the platform, debits by usage); work refused, with a sentence, when an organisation on a plan has used its credits.
-- Enterprise sign-in provisioned on first arrival: a project lets a verified company domain in with a role (never admin, never a public mail domain), the grant audited; the identity provider itself is connected in Clerk.
+- Enterprise sign-in provisioned on first arrival: a project lets a company domain in with a role (the domain's ownership is not checked yet; Clerk runs on a development instance) (never admin, never a public mail domain), the grant audited; the identity provider itself is connected in Clerk.
 - User UI pages: Agents (list, open, make a new agent — its domain, programs, who sees it), Activity (live background work), Connections; the admin console's Groups panel.
 - Connections to other systems, one thing in two kinds — code connectors (our bridges in the engine) and API connectors (HTTP APIs, MCP servers): a registry of connectors with their forms; connections shared by the project (admins) or a person's own; secrets sealed with the platform's master key, never shown again, handed to the engine only when it runs them (a personal one only for its owner); the engine's own sources listed beside them; a Connections page in the user UI.
 - Groups and scope everywhere it matters: groups per project; the hub stamps each sender's scopes on every message; knowledge, agents and programs show only what those scopes see; policies can apply to a group.
 - Agents' own data tools apply the asker's data access (written per turn; unresolvable means nothing is read).
-- Data access per reader: row filters, denials and column masks per source and table, for everyone, a role, a person or an agent key, with per-reader attributes (fail closed); resolved by the platform, carried with each session intent, applied by the SQL rewrite to every table read.
+- Data access per reader: row filters, denials and column masks per source and table (SQL sources; other sources are not filtered yet), for everyone, a role, a person or an agent key, with per-reader attributes (fail closed); resolved by the platform, carried with each session intent, applied by the SQL rewrite to every table read.
 - `sacli`, the Superatom CLI: login with profiles (one project each), agents, sessions, asking questions, JSON output, exit codes, and one background connection per project that cleans up after an hour idle.
 
 **Platform (Cloudflare)**
@@ -62,10 +62,10 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Sign-in through Clerk to our own tokens, plus browser-redirect PKCE login for mobile.
 - Sessions kept by the platform: a SessionDO per session holds its log (append-only, ordered, conflicts refused), the engine syncs every append and catches up on reconnect, and a person reads their sessions back without the engine.
 - The composition graph kept by the platform: every change, suggestion and decision replicated to a GraphDO, anchored on each reconnect (diverged histories refused, a lagging engine catches up), an empty engine rebuilt from it.
-- A UserDO per person: the index of their sessions across projects and their personal state.
+- A UserDO per person: the index of their sessions across projects (its personal-state store is not used yet).
 - Answer durability: the project's Durable Object buffers answers, and web and iOS pull the ones they missed.
 - Parcel transport: large bodies stored in R2 by hash with HMAC tickets.
-- Model proxy: provider keys held in a vault, per-project metering and throttling, and a tunnel for codex.
+- Model proxy: provider keys held in a vault, per-project metering, failed-login throttling (no request rate limits yet), and a tunnel for codex.
 - Speech-to-text endpoint.
 - Dashboard publishing: a built app is uploaded to R2 and served per project, with versioned builds and rollback.
 - Admin console: analyst, connector and grounding terminals, models, credentials, dashboards and an inspector.
@@ -86,14 +86,14 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - One UI framework (@superatom/ui): slob's design system in plain CSS, the shell (left navigation, the thread, the artifacts pane on the right), block frames and branch bars, the one answer component and its block renderers, paths from here, artifacts, primitives (Section, Select, MultiSelect, ViewToggle, Donut, StackedBars), helpers; the project template and both project dashboards draw from it instead of copies (sync retires moved files).
 - Decision memory (DecisionDO, one per project, on the stable-attractor pattern): every intent in a session recorded as an experience (the step's cues and world, the path taken); decision states made and changed only through named operations (create, reinforce, weaken, merge, generalise, specialise, supersede, split, compete, invalidate), append-only and readable as of any moment; recognition of a step (learned · similar, learned · changed with what moved, not learned) with each path's reasoning and record; outcomes; hub messages decision:paths/outcome/states/state/change; agent-key scopes decisions and learn.
 - Usage per person for every harness: each model call's usage as the harness itself reports it (pi, opencode, Claude Code's transcript, codex's session log), stamped with the turn's session and person, kept append-only with cache tokens; organisation admins see usage per person per month across projects.
-- Reporting worker: renders an answer as HTML and PNG.
+- Reporting worker: renders an answer as HTML and PNG (used by the channel bots, on the earlier chat path).
 - Cloudflare config on wrangler.jsonc with a current compatibility date and pinned tool versions.
 
 **Deployment and clients**
 - Docker image for the engine, and provisioning of one Fly.io machine per project.
-- iOS voice-first client.
+- iOS voice-first client (on the earlier chat path: no agents, sessions or views yet).
 
-- The organisation's data warehouse module (inside the Worker): one Iceberg warehouse per organisation in the shared Basin Catalog; the Data Source Bridge (tables, describe, query) and Ingest (make a table, append) apart; appends written from the Worker (Parquet + Avro manifests + a conflict-safe commit, verified with DuckDB and PyIceberg); Basin SQL reads behind a fail-closed access check; project grants by table and column (ProjectDO), the OrgDO's record of what was done; hub `warehouse:*` with the `warehouse` scope; the console's Warehouse tab.
+- The organisation's data warehouse module (inside the Worker; not live until its catalog token, bucket and binding are set): one Iceberg warehouse per organisation in the shared Basin Catalog; the Data Source Bridge (tables, describe, query) and Ingest (make a table, append) apart; appends written from the Worker (Parquet + Avro manifests + a conflict-safe commit, verified with DuckDB and PyIceberg); Basin SQL reads behind a fail-closed access check; project grants by table and column (ProjectDO), the OrgDO's record of what was done; hub `warehouse:*` with the `warehouse` scope; the console's Warehouse tab.
 - The admin console on the semantic design system: every screen built from PageHeader, Section, RecordList, Receipt, Form, Figures, Tabs, Status, Notice, Code, Empty, Dialog — no inline styles or legacy classes left (xterm's sizing aside).
 - The workspace steady and whole: a step appears complete (its program views loaded, its paths read), a new step stands at once as an answer-shaped skeleton, an edit in place dims the step; the step anatomy of the dashboards (header from the answer's first line, controls above, next moves as pills, about these numbers); the artifacts pane opens and closes from one corner.
 - Agents carry their look (icon, accent, one line) and starting points; home is the dashboards' front door (a section per agent, its starting points as cards); `session:open { startAt }`.
@@ -102,11 +102,17 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Views and sessions: an agent is browsed as a view kept by the browser (steps in the history, the current STATE in the address, nothing written on the server but a usage row); it becomes a session only at a question to the agent or a recorded decision, by replaying the path in the engine.
 
 ## Planned (not built)
+- Backups and restore: project homes off the box, Durable Objects exported, a restore drill.
+- Production identity: Clerk on a production instance, company domains verified (DNS), SCIM provisioning and deprovisioning, token revocation.
+- Audit complete: the engine's own events recorded; the platform recorder bound (its RECORDS stream is unbound, so records are dropped).
+- Observability: alerts when an engine stops reporting, a sync diverges or errors rise; the engine's logs shipped.
+- Rate limits and fairness per person and per project (requests, agent turns), beyond credits.
+- Onboarding: organisations made self-serve, invitations and email, a one-command engine install.
+- Programs sandboxed: their server side off the engine's process, their React side out of the page's origin.
 - Prices for prompt-cache tokens (counted per call, not yet priced).
 
 **Product**
-- The user UI rebuilt on blocks, cards and the thread, using the session runtime and `<Intent>`.
-- The existing answer card made the platform's one answer component.
+- The earlier chat (/c/) moved onto the one answer component, or retired (iOS, the channel bots and `sacli ask` still use it).
 - A data hub (bounded cache refreshed by server events) and a design system for the new UI.
 - The builder agent, which writes programs and the concepts that tell agents how to use them.
 - The org knowledge index that programs attach to.
