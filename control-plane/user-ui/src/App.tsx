@@ -261,6 +261,10 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
   const waiting = useRef(new Map<string, (m: any) => void>())
   // Frames that report progress on a request (an agent's narration while it answers) — they keep it waiting.
   const progress = useRef(new Map<string, (m: any) => void>())
+  // Requests waiting for the socket, and whether it is ready for them (open, and welcomed when there is a hub).
+  const queuedRef = useRef<any[]>([])
+  const readyRef = useRef(false)
+  const flushQueued = () => { readyRef.current = true; const q = queuedRef.current.splice(0); for (const p of q) send(p) }
   const liveBus = useRef(new Set<(m: any) => void>())
   const request = useCallback((payload: Record<string, unknown>, onProgress?: (m: any) => void) => new Promise<any>((resolve) => {
     const reqId = `ui-${Math.random().toString(36).slice(2, 10)}`
@@ -435,8 +439,9 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     })
   }, [feed, sessionId])
 
-  // Fetch config (Mapbox token etc.) and set on globals
+  // Fetch config (Mapbox token etc.) and set on globals — from the local engine; the cloud has no such address.
   useEffect(() => {
+    if (CLOUD) return
     fetch(`${VM_HTTP}/config`)
       .then(r => r.json())
       .then(cfg => {
@@ -491,6 +496,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
       wsRef.current = ws
       ws.onopen = () => {
         setConnected(true)
+        if (!CLOUD) flushQueued()
         if (CLOUD) ws.send(JSON.stringify({ type: 'hello', token, role: 'runtime' }))
         else { send({ t: 'analyst:sync' }); send({ t: 'sessions:list', projectId }); send({ t: 'session:load', sessionId: sidRef.current }); send({ t: 'suggestions:req', projectId }); send({ t: 'agents:list' }); send({ t: 'session:agents' }); attachTerm(); attachLogs() }
       }
@@ -499,6 +505,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
       // from a flaky network: a dot that blinks green and goes out, with nothing anywhere saying why. The hub
       // closes with 4001 (bad/missing token) and 4003 (no access), and neither is worth retrying blindly.
       ws.onclose = (e) => {
+        readyRef.current = false
         wireIn.current?.reset()
         setConnected(false); setBusy(false); setStatus(''); clearWatchdog(); busyRef.current = false
         const rejected = e.code === 4001 || e.code === 4003
@@ -544,6 +551,7 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
           return
         }
         if (msg.t === 'welcome') {
+          flushQueued()
           // Read-only project info from THIS project's DO (never the org DO). Extensible: more fields later.
           if (msg.project) { setProj(msg.project); if (msg.project.name) document.title = msg.project.name }
           if (Array.isArray(msg.scopes)) setMyScopes(msg.scopes)
@@ -727,6 +735,8 @@ export function App({ token, projectId = 'default' }: { token?: string | null; p
     // socket was between reconnects was destroyed in the browser — never sent, never logged — while the UI
     // still flipped to "thinking" and the watchdog then blamed the engine 25s later. The engine was idle and
     // healthy the whole time. Say so instead.
+    // A page's request made before the socket is ready waits for it (sent on welcome), instead of being lost.
+    if ((ws?.readyState !== 1 || !readyRef.current) && typeof payload?.reqId === 'string' && payload.reqId.startsWith('ui-')) { queuedRef.current.push(payload); return }
     if (ws?.readyState !== 1) {
       console.warn('[ws] not open — dropping', payload?.t, '(readyState', ws?.readyState, ')')
       if (payload?.t === 'analyse') endTurn('Not connected — your question was not sent. Reconnecting…')

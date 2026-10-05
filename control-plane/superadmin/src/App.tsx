@@ -54,12 +54,14 @@ const VM_URL = import.meta.env.VITE_VM_URL ?? 'http://localhost:5050'
 
 // ── Design system — Stripe dashboard look (injected once) ─────────────────────
 const CSS = `
-:root{--purple:#635bff;--purple-d:#5145e8;--ink:#1a1f36;--sub:#697386;--faint:#8792a2;
- --bg:#f6f8fb;--card:#fff;--line:#e3e8ee;--line2:#eef1f6;
- --ok:#0e7c46;--okbg:#d7f7e3;--warn:#9a6700;--warnbg:#fdf1d6;--bad:#b3093c;--brand:#635bff;--muted:#697386;--faint2:#8792a2;--accent:#635bff}
+/* ONE DESIGN SYSTEM: the console's names, bound to the platform's tokens (@superatom/ui design/tokens.css, imported in
+   main.tsx) — the same palette, type and radii as every other surface. The console keeps its own layout classes. */
+:root{--purple:var(--primary);--purple-d:var(--primary-strong);--sub:var(--muted);
+ --bg:var(--page);--card:var(--surface);--line2:var(--panel);
+ --ok:var(--win-ink);--okbg:var(--win-wash);--warnbg:var(--warn-wash);--bad:var(--loss);--brand:var(--primary);--faint2:var(--faint);--accent:var(--primary)}
 *{box-sizing:border-box}
-body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
- background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;font-size:14px}
+body{margin:0;font-family:var(--font);font-feature-settings:var(--font-features);
+ background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;font-size:var(--t-base)}
 a{color:var(--purple);text-decoration:none}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 
@@ -78,7 +80,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .side .nav{display:flex;align-items:center;gap:9px;padding:6px 9px;border-radius:7px;
  font-size:13.5px;color:var(--ink);font-weight:500;cursor:pointer;margin-bottom:1px}
 .side .nav:hover{background:#f6f8fb}
-.side .nav.on{background:#f0f1ff;color:var(--purple);font-weight:600}
+.side .nav.on{background:var(--primary-wash);color:var(--purple);font-weight:600}
 .side .nav svg{width:16px;height:16px;flex-shrink:0;opacity:.85}
 /* expander chevron + the nested sub-items it reveals */
 .side .chev{margin-left:auto;width:11px;height:11px;opacity:.55;transition:transform .15s}
@@ -86,7 +88,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .side .subnav{display:block;margin-left:20px;padding:5px 9px 5px 11px;border-left:1px solid var(--line);
  font-size:13px;color:var(--sub);cursor:pointer;border-radius:0 6px 6px 0}
 .side .subnav:hover{background:#f6f8fb;color:var(--ink)}
-.side .subnav.on{background:#f0f1ff;color:var(--purple);font-weight:600;border-left-color:var(--purple)}
+.side .subnav.on{background:var(--primary-wash);color:var(--purple);font-weight:600;border-left-color:var(--purple)}
 .side .foot{border-top:1px solid var(--line2);padding:9px 12px;display:flex;align-items:center;gap:10px}
 .main{flex:1;min-width:0;display:flex;flex-direction:column}
 .top{display:flex;align-items:center;gap:12px;padding:8px 20px;border-bottom:1px solid var(--line);
@@ -111,7 +113,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .btn.ok{background:var(--ok)}
 .input,select.input{padding:8px 11px;border:1px solid var(--line);border-radius:7px;font-size:14px;
  background:#fff;outline:none;transition:box-shadow .15s,border-color .15s}
-.input:focus{border-color:var(--purple);box-shadow:0 0 0 3px #635bff22}
+.input:focus{border-color:var(--purple);box-shadow:0 0 0 3px var(--primary-ring)}
 .pill{font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:999px;text-transform:capitalize}
 .mono{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--faint)}
 .muted{color:var(--sub)}
