@@ -54,6 +54,10 @@
     "REPORTING_URL": "https://reports.superatom.site",
     // The platform's own domain: a connector may never be pointed at it (connectors/src/gateway.ts).
     "PLATFORM_DOMAIN": "superatom.site",
+    // The organisations' warehouse (src/warehouse): the account and bucket its Basin Catalog lives in; the token is the
+    // secret WAREHOUSE_CATALOG_TOKEN; data files are written through the WAREHOUSE binding below.
+    "WAREHOUSE_ACCOUNT_ID": "91e1058d99235b9c34602fb0c28916d3",
+    "WAREHOUSE_BUCKET": "superatom-warehouse",
     // Speech-to-text model for POST /api/transcribe (module: src/transcription/). Any audio-capable OpenRouter model;
     // changing it needs no code edit or redeploy of the module.
     "TRANSCRIBE_MODEL": "google/gemini-2.5-flash-lite"
@@ -95,6 +99,7 @@
   ],
 
   "r2_buckets": [
+    { "binding": "WAREHOUSE", "bucket_name": "superatom-warehouse" },
     { "binding": "PACKAGES", "bucket_name": "frontend-packages" }
   ]
 }

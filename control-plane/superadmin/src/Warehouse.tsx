@@ -41,6 +41,7 @@ export function WarehousePanel({ api, projects }: { api: Api; projects: { id: st
       )}
       <Tables tables={state.tables} />
       {state.configured && <NewTable api={api} onMade={load} />}
+      {state.configured && state.tables.length > 0 && <AddRows api={api} tables={state.tables} onAdded={load} />}
       {state.configured && state.tables.length > 0 && <Ask api={api} tables={state.tables} />}
       {state.tables.length > 0 && projects.length > 0 && <Grants api={api} tables={state.tables} projects={projects} />}
       <Operations ops={state.ops} />
@@ -83,6 +84,44 @@ function NewTable({ api, onMade }: { api: Api; onMade: () => void }) {
       <Form onSubmit={() => void make()} error={error} actions={<button className="sa-btn sa-btn--primary">Make the table</button>}>
         <Field label="Name" help="Lowercase letters, digits and _, starting with a letter."><input id="wh-name" className="sa-input" value={name} onChange={(e) => setName(e.target.value)} required pattern="[a-z][a-z0-9_]*" /></Field>
         <Field label="Columns" help={`Types: ${TYPES.join(', ')}`}><textarea id="wh-cols" className="sa-input sa-input--area" rows={5} value={cols} onChange={(e) => setCols(e.target.value)} /></Field>
+      </Form>
+    </Section>
+  )
+}
+
+/** Two rows shaped like the table, to start from. */
+function sampleRows(t: Table): string {
+  const v = (c: Column, i: number) => c.type === 'string' ? `${c.name} ${i + 1}` : c.type === 'boolean' ? i === 0 : c.type === 'date' ? `2026-10-0${i + 1}` : c.type.startsWith('timestamp') ? `2026-10-0${i + 1}T09:00:00Z` : (i + 1) * (c.type === 'double' || c.type === 'float' ? 10.5 : 1)
+  return JSON.stringify([0, 1].map((i) => Object.fromEntries(t.columns.map((c) => [c.name, v(c, i)]))), null, 2)
+}
+
+/** Rows added by hand (a list of objects, one per row) — what a sender does, for trying a table out. */
+function AddRows({ api, tables, onAdded }: { api: Api; tables: Table[]; onAdded: () => void }) {
+  const [table, setTable] = useState(tables[0].name)
+  const t = tables.find((x) => x.name === table) ?? tables[0]
+  const [text, setText] = useState(() => sampleRows(t))
+  const [error, setError] = useState(''); const [done, setDone] = useState(''); const [busy, setBusy] = useState(false)
+  const add = async () => {
+    setError(''); setDone('')
+    let rows: unknown
+    try { rows = JSON.parse(text) } catch { setError('The rows are not JSON: write a list of objects, one per row.'); return }
+    if (!Array.isArray(rows) || !rows.length) { setError('Write a list of rows, one object each.'); return }
+    setBusy(true)
+    const r = await api('/warehouse/append', { method: 'POST', body: JSON.stringify({ table, rows }) }); const j: any = await r.json().catch(() => ({}))
+    setBusy(false)
+    if (!r.ok) { setError(j.error ?? 'The rows were not added'); return }
+    setDone(`${j.rows} row${j.rows === 1 ? '' : 's'} added to ${table}.`); onAdded()
+  }
+  return (
+    <Section icon="lucide:list-plus" title="Add rows" subtitle="Rows usually arrive from what sends them; here they can be added by hand to try a table out.">
+      {done && <div className="sa-section__body"><Notice state="ok">{done}</Notice></div>}
+      <Form onSubmit={() => void add()} error={error} actions={<button className="sa-btn sa-btn--primary" disabled={busy}>{busy ? 'Adding…' : 'Add the rows'}</button>}>
+        <Field label="Table">
+          <select id="wh-rows-table" className="sa-input" value={table} onChange={(e) => { setTable(e.target.value); const nt = tables.find((x) => x.name === e.target.value); if (nt) setText(sampleRows(nt)) }}>
+            {tables.map((x) => <option key={x.name} value={x.name}>{x.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Rows" help="A JSON list, one object per row, its keys the table's columns."><textarea id="wh-rows" className="sa-input sa-input--area sa-input--mono" rows={7} value={text} onChange={(e) => setText(e.target.value)} /></Field>
       </Form>
     </Section>
   )
