@@ -8,6 +8,12 @@
 //   AttentionList          what needs a decision, worst first: each opens its step
 //   ActionBar              the paths at the end of a block
 //   Empty                  nothing here yet, said plainly, with what will appear
+//   PageHeader             a screen's name, one line on what it is for, and its actions
+//   Tabs                   the parts of one thing, one shown at a time
+//   Notice                 a sentence the person should read: a note, a warning, a failure
+//   Code                   a value to be read exactly (an id, a key's prefix, a command)
+//   Figures                a row of headline figures (each a Kpi)
+//   Toolbar                the controls above a list: search, filters, the action that adds one
 
 import type { FormEvent, ReactNode } from 'react'
 import { Icon } from '@iconify/react'
@@ -95,4 +101,44 @@ export function ActionBar({ children }: { children: ReactNode }) { return <div c
 
 export function Empty({ icon = 'lucide:circle-dashed', children }: { icon?: string; children: ReactNode }) {
   return <p className="sa-empty"><Icon icon={icon} /> <span>{children}</span></p>
+}
+
+/** A screen's name, one line on what it is for, and its actions at the end. */
+export function PageHeader({ title, subtitle, actions }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode }) {
+  return (
+    <header className="sa-pagehead">
+      <div className="sa-pagehead__words"><h1 className="sa-pagehead__title">{title}</h1>{subtitle && <p className="sa-pagehead__subtitle">{subtitle}</p>}</div>
+      {actions && <div className="sa-pagehead__actions">{actions}</div>}
+    </header>
+  )
+}
+
+/** The parts of one thing, one shown at a time; each tab may carry a count. */
+export function Tabs<K extends string>({ items, value, onChange, label = 'Parts' }: { items: { key: K; label: string; count?: number; icon?: string }[]; value: K; onChange: (k: K) => void; label?: string }) {
+  return (
+    <div className="sa-tabs" role="tablist" aria-label={label}>
+      {items.map((t) => (
+        <button key={t.key} role="tab" type="button" aria-selected={t.key === value} className="sa-tabs__tab" onClick={() => onChange(t.key)}>
+          {t.icon && <Icon icon={t.icon} />}{t.label}{t.count !== undefined && <span className="sa-tabs__count">{t.count}</span>}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** A sentence the person should read: a note, a warning or a failure, with what to do about it. */
+export function Notice({ state = 'neutral', children, action }: { state?: 'neutral' | 'attention' | 'critical' | 'ok'; children: ReactNode; action?: ReactNode }) {
+  const icon = state === 'critical' ? 'lucide:octagon-alert' : state === 'attention' ? 'lucide:triangle-alert' : state === 'ok' ? 'lucide:circle-check' : 'lucide:info'
+  return <div className="sa-notice" data-state={state} role={state === 'critical' ? 'alert' : 'status'}><Icon icon={icon} /><div className="sa-notice__text">{children}</div>{action}</div>
+}
+
+/** A value to be read exactly: an id, a key's prefix, a command. */
+export function Code({ children, title }: { children: ReactNode; title?: string }) { return <code className="sa-code" title={title}>{children}</code> }
+
+/** A row of headline figures: give it Kpi children. */
+export function Figures({ children }: { children: ReactNode }) { return <div className="sa-kpi-grid sa-figures">{children}</div> }
+
+/** The controls above a list: search, filters, and the action that adds one (at the end). */
+export function Toolbar({ children, end }: { children?: ReactNode; end?: ReactNode }) {
+  return <div className="sa-toolbar">{children}{end && <div className="sa-toolbar__end">{end}</div>}</div>
 }
