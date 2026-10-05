@@ -4,11 +4,14 @@
 
 import { useRef, useState, type ReactNode } from 'react'
 import { Icon } from '@iconify/react'
+import { useArrange } from './arrange'
 import { notify } from '../../lib/toast'
 import { CopyContext, HeaderContext, type CopyText, type Header } from './header'
 import { blockToText } from './copy'
 
 export interface FrameProps {
+  /** Where Arrange keeps this block's card order (default: its kind and title). */
+  arrangeScope?: string
   id: string
   step: number
   /** The step's colour (a token's value or a var()). */
@@ -54,6 +57,8 @@ export default function BlockFrame(p: FrameProps) {
   // it); once it has content and is being changed in place, the badge keeps its icon and a spinner sits by the title.
   const empty = !content.current?.textContent?.trim()
   const toggle = () => setCollapsed(!collapsed)
+  // Its cards can be arranged (Arrange, at the bottom of the page): kept per kind of block and its title.
+  useArrange(content, p.arrangeScope ?? `block:${label}:${typeof p.title === 'string' ? p.title : ''}`)
   return (
     <article id={`block-${p.id}`} className="sa-block" data-block={p.id}>
       <header role="button" tabIndex={0} aria-expanded={!collapsed} onClick={toggle}

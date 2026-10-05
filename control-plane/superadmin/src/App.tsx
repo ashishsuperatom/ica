@@ -19,7 +19,7 @@ import { AnalystConsole } from './AnalystConsole'
 import { useSession, SignIn, UserButton } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
-import { AppShell, Sidebar, Breadcrumbs, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
+import { AppShell, Sidebar, Breadcrumbs, Arranged, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
 import '@superatom/ui/design.css'
 import { AdminContext, ADMIN_OWN_BLOCKS } from './AdminBlocks'
 
@@ -201,7 +201,6 @@ const ShellMode = createContext<'page' | 'block'>('block')
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="admin-block">
-      <Style />
       <div className="content"><div className="sa-stack sa-stack--4">{children}</div></div>
     </div>
   )
@@ -337,11 +336,14 @@ function Console() {
   const full = layer === 'project' && place === 'graph'
   return (
     <>
+      <Style />
       <AppShell wide crumbs={<Breadcrumbs items={crumbs} />} sidebar={(collapsed, toggle) => (
         <Sidebar name={layer === 'project' ? projectName : layer === 'org' ? orgName : 'Superatom'} connected groups={groups} collapsed={collapsed} onToggle={toggle} foot={() => <UserButton />} />
       )}>
         <AdminContext.Provider value={env}>
           <div className={full ? 'sa-fullpage' : 'sa-console__page'}>
+            {/* A page's cards can be arranged (Arrange, at the bottom): kept per place, the same for every organisation and project. */}
+            <Arranged scope={`page:${loc.pathname.replace(/\/o\/[^/]+/, '/o/*').replace(/\/p\/[^/]+/, '/p/*')}`} className={full ? 'sa-fill' : undefined}>
             <PageGuard key={loc.pathname}><Routes>
               <Route path="/" element={superadmin ? <OrgListPage /> : <MyOrgLanding />} />
               <Route path="/engines" element={<EnginesPage />} />
@@ -360,6 +362,7 @@ function Console() {
               <Route path="/pro/:projectId/*" element={<ProjectMoved />} />
               <Route path="*" element={<Empty icon="lucide:map-pin-off">There is nothing at this address. <Link to="/">Go to the start</Link>.</Empty>} />
             </Routes></PageGuard>
+            </Arranged>
           </div>
         </AdminContext.Provider>
       </AppShell>

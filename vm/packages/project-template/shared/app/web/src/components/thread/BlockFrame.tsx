@@ -18,7 +18,7 @@ export default function BlockFrame({ block, children }: { block: Node; children:
   const accent = ACCENT[isSaid || isAbout ? 'neutral' : ((catalog.scenarios.find((s) => s.key === cap?.scenario)?.accent ?? 'series-1') as Accent)]
   const earlier = block.earlier ? ` · from earlier, ${new Date(block.earlier).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}` : ''
   return (
-    <Frame id={block.id} step={block.step} accent={accent} label={label} title={title}
+    <Frame id={block.id} step={block.step} accent={accent} label={label} title={title} arrangeScope={`block:${label}`}
       icon={isSaid ? 'lucide:book-open-text' : undefined}
       cause={block.cause} from={block.from ? { ...block.from, onPath: !!from } : undefined} onReveal={revealBlock}
       subtitle={`${block.answer?.said ?? cap?.whenToUse ?? ''}${earlier}`.trim() || undefined}

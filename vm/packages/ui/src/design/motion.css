@@ -18,3 +18,28 @@
 .sa-sidebar__group > :nth-child(4), .sa-kpi-grid > :nth-child(4), .sa-sub-grid > :nth-child(4), .sa-stack > :nth-child(4), .sa-next > :nth-child(4), .sa-question > :nth-child(4) { animation-delay: 30ms; }
 .sa-sidebar__group > :nth-child(5), .sa-kpi-grid > :nth-child(5), .sa-sub-grid > :nth-child(5), .sa-stack > :nth-child(5), .sa-next > :nth-child(5), .sa-question > :nth-child(5) { animation-delay: 40ms; }
 .sa-sidebar__group > :nth-child(n+6), .sa-kpi-grid > :nth-child(n+6), .sa-sub-grid > :nth-child(n+6), .sa-stack > :nth-child(n+6), .sa-next > :nth-child(n+6), .sa-question > :nth-child(n+6) { animation-delay: 50ms; }
+
+/* ── Arrange (components/frame/arrange.tsx): while arranging, a card is one thing to pick, not a set of controls ── */
+.sa-arrange-root { display: contents; }
+.sa-arranged { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
+.sa-arranging [data-arrange-column] > [data-arrange-card] { cursor: pointer; position: relative; }
+.sa-arranging [data-arrange-column] > [data-arrange-card] * { pointer-events: none; }
+/* The ring is drawn inside the card's own edge, over its content: outside it, the block's frame would clip it. */
+.sa-arranging [data-arrange-column] > [data-arrange-card]:hover::after, [data-arrange-selected]::after { content: ''; position: absolute; inset: 0; border-radius: var(--r-lg); pointer-events: none; z-index: 30; }
+.sa-arranging [data-arrange-column] > [data-arrange-card]:hover::after { border: 1.5px dashed var(--line-strong); }
+[data-arrange-selected]::after { border: 2.5px solid var(--primary) !important; box-shadow: 0 0 0 4px var(--primary-ring); }
+/* Hidden cards (Arrange · Delete): not shown — except while arranging, faded and marked, to be brought back. */
+.sa-arrange-root:not(.sa-arranging) [data-arrange-hidden] { display: none !important; }
+.sa-arranging [data-arrange-column] > [data-arrange-hidden] { opacity: 0.4; }
+.sa-arranging [data-arrange-column] > [data-arrange-hidden]::before { content: 'Hidden'; position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 31; padding: 1px var(--sp-2); border-radius: var(--r-full); background: var(--ink); color: var(--surface); font-size: var(--t-2xs); }
+/* The switch: at the bottom right, quiet; beside the artifacts square when there is one. */
+.sa-app__arrange { position: fixed; right: var(--sp-4); bottom: var(--sp-3); z-index: var(--z-popover); }
+.sa-app__arrange[data-beside-artifacts='true'] { right: calc(var(--sp-4) + 56px); }
+.sa-arrange-bar { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; justify-content: flex-end; }
+.sa-arrange-bar__say { padding: var(--sp-1h) var(--sp-3); border-radius: var(--r-full); background: var(--ink); color: var(--surface); font-size: var(--t-xs); box-shadow: var(--shadow-float); }
+.sa-arrange-bar__btn { display: inline-flex; align-items: center; gap: var(--sp-1h); padding: var(--sp-1) var(--sp-2h); border-radius: var(--r-full); border-width: 1px; background: var(--surface); color: var(--muted); font-size: var(--t-xs); box-shadow: var(--shadow-card); }
+.sa-arrange-bar__btn:hover { color: var(--ink); }
+.sa-arrange-bar__btn--quiet { color: var(--faint); background: color-mix(in srgb, var(--surface) 70%, transparent); box-shadow: none; }
+.sa-arrange-bar__btn--accent { border-color: var(--primary); color: var(--primary); }
+.sa-arrange-bar__btn--done { background: var(--primary); border-color: var(--primary); color: var(--on-primary, #fff); }
+@media (max-width: 767px) { .sa-app__arrange { display: none; } }

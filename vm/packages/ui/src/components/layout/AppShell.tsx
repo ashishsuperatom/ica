@@ -7,6 +7,7 @@
 import { useState, type ReactNode } from 'react'
 import { Icon } from '@iconify/react'
 import { recall, remember } from '../../lib/remember'
+import { ArrangeProvider, ArrangeButton } from '../frame/arrange'
 
 export default function AppShell({ sidebar, children, artifacts, artifactsCount, status, crumbs, wide = false }: {
   /** The left: given whether it is collapsed and how to toggle it. */
@@ -27,7 +28,7 @@ export default function AppShell({ sidebar, children, artifacts, artifactsCount,
   const toggle = (c: boolean) => { setCollapsed(c); if (window.innerWidth >= 768) remember('sidebar-collapsed', c) }
   const pane = (o: boolean) => { setPaneOpen(o); remember('artifacts-open', o) }
   return (
-    <>
+    <ArrangeProvider>
       <div className="sa-app__topbar">
         <button onClick={() => toggle(!collapsed)} className="sa-app__menu-btn" aria-label="Menu"><Icon icon="mynaui:sidebar" /></button>
         <span className="sa-app__topbar-title">Menu</span>
@@ -58,7 +59,9 @@ export default function AppShell({ sidebar, children, artifacts, artifactsCount,
             {!!artifactsCount && <span className="sa-artifacts__badge">{artifactsCount > 99 ? '99+' : artifactsCount}</span>}
           </button>
         )}
+        {/* Arrange: every block's cards (and every arranged page's) moved up or down, kept in this browser. */}
+        <div className="sa-app__arrange" data-beside-artifacts={!!artifacts && !paneOpen}><ArrangeButton /></div>
       </div>
-    </>
+    </ArrangeProvider>
   )
 }

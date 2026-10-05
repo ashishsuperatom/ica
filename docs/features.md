@@ -24,6 +24,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 
 **Knowledge and computation**
 - Composition graph: concepts, domains, files and settings stored by hash, an append-only change log, time travel, scopes and owners, join/leave, and a CLI for every change.
+- Arrange in the framework (from slob): move a block's or a page's cards up and down, hide and bring back, kept in this browser — every block, every console page, the user UI and the project template's app.
 - The admin console in three layers with their own addresses: the platform (`/`), an organisation (`/o/<org>/…`: projects, people and roles, warehouse, usage, billing details, settings), a project (`/o/<org>/p/<project>/…`); a sidebar per layer, breadcrumbs with switchers, places shown by what one's role holds, old addresses redirected, a failing page contained.
 - Intermediate concepts (a combination of atomic concepts, in order) between domains and atomic concepts; attach and detach at either level; the console's composition graph as three columns (domains → intermediate → atomic), what is attached first, each column searchable and scrolling on its own, new concepts made and attached in place.
 - Project access in the console: who has access and their role (changed in place), the project's roles in plain words, a project's own roles made from the capabilities its maker holds.

@@ -1093,6 +1093,22 @@ or an intermediate concept); the CLI the same (`composition-graph join <domain|i
 Graph tab is the three columns (`Columns` in the framework, reusable for other linked things), each searchable, with
 *New* in the intermediate and atomic columns (made and attached to what is selected on the left).
 
+### Arrange — every block's cards, in the framework (built 2026-10-06)
+
+**In the user's words:** whenever there is a block and cards — look at the slob application — we have a concept called
+*arrange*: arrange the cards inside a block, which happens first, which second, the order of it; it is stored only in
+local storage. Replicate it exactly; the Arrange button at the bottom. Not only in the admin console — in the user UI too.
+It is part of our template and framework, so everything gets it for free wherever there is a block UI — a framework, not
+an ad hoc thing in one page.
+
+**Built:** `components/frame/arrange.tsx` in `@superatom/ui`, slob's mechanism as it is: Arrange at the bottom right turns
+it on; a click selects a card, ↑ ↓ move it within its block, Delete hides it (shown faded while arranging, "Show this card"
+brings it back), Reset this screen, Enter or Done keeps, Esc or Cancel puts back. The order is kept in localStorage per
+scope, applied before paint (no jump); a card is a Section (its title) or anything marked `data-card` (figures are). Every
+surface gets it with nothing to write: AppShell holds the switch, every BlockFrame's body is arranged (per kind of block and
+title, or its own `arrangeScope`), and a page wrapped in `<Arranged>` too — the admin console wraps every page (kept per
+place, the same for every organisation and project); the project template's thread keeps it per capability.
+
 ### Creating and publishing
 
 - A person works in a session; when it holds knowledge worth keeping they **make an agent from it** (its domain's

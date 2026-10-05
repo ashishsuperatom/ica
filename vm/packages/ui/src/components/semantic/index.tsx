@@ -137,7 +137,7 @@ export function Notice({ state = 'neutral', children, action }: { state?: 'neutr
 export function Code({ children, title }: { children: ReactNode; title?: string }) { return <code className="sa-code" title={title}>{children}</code> }
 
 /** A row of headline figures: give it Kpi children. */
-export function Figures({ children }: { children: ReactNode }) { return <div className="sa-kpi-grid sa-figures">{children}</div> }
+export function Figures({ children }: { children: ReactNode }) { return <div className="sa-kpi-grid sa-figures" data-card="figures">{children}</div> }
 
 /** The controls above a list: search, filters, and the action that adds one (at the end). */
 export function Toolbar({ children, end }: { children?: ReactNode; end?: ReactNode }) {
