@@ -128,7 +128,8 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
     return [...out]
   }, [tables, term, picked])   // eslint-disable-line react-hooks/exhaustive-deps
   const shownQueries = (queries ?? []).filter((x) => !term || x.name.toLowerCase().includes(term) || x.sql.toLowerCase().includes(term) || `q:${x.id}` === picked)
-  const saved = shownQueries.filter((x) => x.name), recent = shownQueries.filter((x) => !x.name)
+  // One list, the most recently run first; a saved one shows its name.
+  const listed = [...shownQueries].sort((a, b) => String(b.lastRun ?? '').localeCompare(String(a.lastRun ?? '')))
   /** Run SQL: as it is (again), or as a new query — recorded by the platform, then opened as one of the reader's. */
   const runSql = (sql: string, from: ExplorerQuery | null) => {
     if (from && sql.trim() === from.sql.trim()) { setRunNo((n) => n + 1); return }
@@ -176,14 +177,14 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
           <div className="sa-explorer__list">
             <header className="sa-explorer__head">
               <button className="sa-explorer__fold" onClick={() => toggle('tables')} aria-expanded={!shut('tables')}><Icon icon={shut('tables') ? 'lucide:chevron-right' : 'lucide:chevron-down'} /><span className="sa-explorer__title">Tables</span>{tables && <span className="sa-col__count">{tables.length}</span>}</button>{tablesHead}</header>
-            {!shut('tables') && <>
+            {!shut('tables') && <div className="sa-explorer__branch">
             {tables === null && Array.from({ length: 5 }, (_, i) => <div key={i} className="sa-explorer__item" aria-hidden><span /><span className="sa-skeleton" style={{ width: `${45 + ((i * 19) % 40)}%`, height: 11 }} /></div>)}
             {tables !== null && !tables.length && <p className="sa-col__empty">{empty ?? 'No tables yet.'}</p>}
             {tables !== null && tables.length > 0 && !groups.length && <p className="sa-col__empty">No table matches.</p>}
             {groups.map(([g, list]) => (
               <div key={g}>
                 {g && <button className="sa-explorer__grouphead" onClick={() => toggle(`g:${g}`)} aria-expanded={!shut(`g:${g}`)}><Icon icon={shut(`g:${g}`) ? 'lucide:chevron-right' : 'lucide:chevron-down'} /><span className="sa-explorer__name">{g}</span><span className="sa-explorer__n">{list.length}</span></button>}
-                {!(g && shut(`g:${g}`)) && list.map((t) => {
+                {!(g && shut(`g:${g}`)) && <div className={g ? 'sa-explorer__branch' : undefined}>{list.map((t) => {
                   const col = term && !t.name.toLowerCase().includes(term) ? t.columns.find((c) => c.name.toLowerCase().includes(term)) : undefined
                   return (
                     <button key={t.name} className="sa-explorer__item" data-selected={picked === `t:${t.name}`} onClick={() => pick(`t:${t.name}`)} title={t.description || t.name}>
@@ -192,23 +193,20 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
                       <span className="sa-explorer__n">{t.rows != null ? COMPACT.format(t.rows) : ''}</span>
                     </button>
                   )
-                })}
+                })}</div>}
               </div>
             ))}
-            </>}
+            </div>}
             {(queries !== undefined || onSaveQuery) && <>
               <header className="sa-explorer__head sa-explorer__head--queries">
                 <button className="sa-explorer__fold" onClick={() => toggle('queries')} aria-expanded={!shut('queries')}><Icon icon={shut('queries') ? 'lucide:chevron-right' : 'lucide:chevron-down'} /><span className="sa-explorer__title">Queries</span>{queries && <span className="sa-col__count">{queries.length}</span>}</button>
                 {onSaveQuery && <button className="sa-btn sa-btn--link" onClick={() => { setDraft({ name: '', sql: '', ran: null }); setLearnt((l) => ({ ...l, 'q:new': [] })); pick('q:new') }}><Icon icon="lucide:plus" className="sa-btn__icon" />New</button>}</header>
-              {!shut('queries') && <>
+              {!shut('queries') && <div className="sa-explorer__branch">
               {queries === null && <div className="sa-explorer__item" aria-hidden><span /><span className="sa-skeleton" style={{ width: '60%', height: 11 }} /></div>}
               {picked === 'q:new' && <button className="sa-explorer__item" data-selected><Icon icon="lucide:file-code-2" /><span className="sa-explorer__name">{draft.name || 'New query'}</span><span /></button>}
-              {saved.length > 0 && <button className="sa-explorer__grouphead" onClick={() => toggle('saved')} aria-expanded={!shut('saved')}><Icon icon={shut('saved') ? 'lucide:chevron-right' : 'lucide:chevron-down'} /><span className="sa-explorer__name">Saved</span><span className="sa-explorer__n">{saved.length}</span></button>}
-              {!shut('saved') && saved.map(queryItem)}
-              {recent.length > 0 && <button className="sa-explorer__grouphead" onClick={() => toggle('recent')} aria-expanded={!shut('recent')}><Icon icon={shut('recent') ? 'lucide:chevron-right' : 'lucide:chevron-down'} /><span className="sa-explorer__name">Recent</span><span className="sa-explorer__n">{recent.length}</span></button>}
-              {!shut('recent') && recent.map(queryItem)}
+              {listed.map(queryItem)}
               {queries && !queries.length && picked !== 'q:new' && <p className="sa-col__empty">Your queries appear here once you run one.</p>}
-              </>}
+              </div>}
             </>}
           </div>
           {places.length > 0 && (
