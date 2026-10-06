@@ -162,5 +162,5 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - An agent end-to-end test suite.
 
 **Clients**
-- Microsoft Teams and Slack bots.
+- Microsoft Teams and Slack bots. Teams has its path: a conversation is one session, the composer answers in a few lines for a chat, and the reply card carries the report's image and a link to the full report (narration at most a line a minute). Not yet tried in a live Teams chat; Slack has no path yet.
 - Android client.

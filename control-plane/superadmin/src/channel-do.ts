@@ -21,7 +21,8 @@ const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { sta
 const retryable = (e: Error) => Object.assign(e, { retryable: true })
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const TYPING_MS = 4000              // re-send the channel "typing" indicator this often while a turn is pending
-const TURN_TTL_MS = 15 * 60_000     // stop typing (drop the pending turn) if no answer arrives within this
+const TURN_TTL_MS = 30 * 60_000     // stop typing (drop the pending turn) if no answer arrives within this (a composer turn's cap)
+const NARRATE_EVERY_MS = 60_000     // at most one progress line a minute in a chat
 
 export class ChannelDO {
   constructor(private state: DurableObjectState, private env: any) {}
@@ -101,8 +102,11 @@ export class ChannelDO {
         // conversation ref but does NOT delete it — the final answer still needs it. Best-effort; never gates.
         const { qid, channel, text } = await request.json() as any
         if (!text) return json({ ok: true })
-        const rec = await this.state.storage.get<{ channel: string; conv: ConversationRef; question?: string }>(`pending:${qid}`)
+        const rec = await this.state.storage.get<{ channel: string; conv: ConversationRef; question?: string; saidAt?: number }>(`pending:${qid}`)
         if (!rec) return json({ ok: true, note: 'no pending turn' })
+        // A chat stays a conversation: one line of progress a minute at most, the typing indicator between them.
+        if (rec.saidAt && Date.now() - rec.saidAt < NARRATE_EVERY_MS) return json({ ok: true, note: 'paced' })
+        await this.state.storage.put(`pending:${qid}`, { ...rec, saidAt: Date.now() })
         const ch = rec.channel || channel
         const adapter = channelAdapter(ch)
         const cfg = (await this.state.storage.get<Config>('config')) ?? {}
@@ -167,10 +171,22 @@ export class ChannelDO {
     if (!ws) throw new Error('hub did not upgrade to a websocket')
     ws.accept()
     ws.send(JSON.stringify({ type: 'hello', role: 'runtime', token: serviceToken }))
+    const sessionId = await this.sessionOf(channel, conv)
     ws.send(JSON.stringify({ to: { type: 'code-engine' }, payload: {
-      t: 'analyse', question: message.text, projectId, sessionId: `${channel}:${conv.conversationId}`,
+      t: 'analyse', question: message.text, projectId, sessionId,
       questionId: qid, role: 'user', channel } }))
     await sleep(1200); try { ws.close() } catch { /* closing */ }   // let the hub relay, then release — no waiting
+  }
+
+  /** A chat conversation is one session: its id kept here the first time the conversation asks something (a session id is
+   *  [A-Za-z0-9_-]; a conversation's id is the channel's and is not). */
+  private async sessionOf(channel: string, conv: ConversationRef): Promise<string> {
+    const key = `session:${channel}:${conv.conversationId}`
+    const known = await this.state.storage.get<string>(key)
+    if (known) return known
+    const made = `ses-${crypto.randomUUID()}`
+    await this.state.storage.put(key, made)
+    return made
   }
 
   // Keep the channel's "typing" indicator alive while any turn is pending, WITHOUT holding a socket. Re-arms

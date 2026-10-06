@@ -68,7 +68,7 @@ export type Reader = { principal: string; policies: Record<string, unknown[]> } 
 
 export interface Composer {
   /** A question in prose, asked from a screen: the answer is markdown at out/<qid>/said.md. */
-  say(text: string, context: string, handlers: RunHandlers | undefined, opts: { qid: string; reader?: Reader; person?: string }): Promise<Said>
+  say(text: string, context: string, handlers: RunHandlers | undefined, opts: { qid: string; reader?: Reader; person?: string; where?: string }): Promise<Said>
   session: Session
   cwd: string
   sessionId: string
@@ -144,7 +144,7 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
         if (/^[ \t]*:::\S+[ \t]+\S+/m.test(piece)) void blocksNamedIn(piece, cwd).then((blocks) => handlers?.onAnswer?.(piece, blocks)).catch(() => handlers?.onAnswer?.(piece))
         else handlers?.onAnswer?.(piece)
       }
-      const prompt = `What the person is looking at:\n${context}\n\nTheir question: ${text}\n\ntoday: ${todayIn(opts.projectDir)}\nqid: ${o.qid}`
+      const prompt = `What the person is looking at:\n${context}\n\n${o.where ? `Where they read the answer: ${o.where}\n\n` : ''}Their question: ${text}\n\ntoday: ${todayIn(opts.projectDir)}\nqid: ${o.qid}`
       const r = await session.run(prompt, { ...handlers, forSession: opts.sessionId, forPerson: o.person, onEvent: (ev) => {
         if (ev.kind === 'message' && ev.text?.trim()) {
           last = ev.text.trim()

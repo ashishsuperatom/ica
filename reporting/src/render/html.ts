@@ -141,10 +141,17 @@ function sectionHtml(s: AnswerSection): string {
 /** Minimal prose handling: blank-line paragraphs and **bold**. Deliberately not a
  *  markdown engine — the engine's prose is plain, and every construct we support
  *  is one more thing that must render identically in three places. */
+/** The prose of an answer is light markdown: paragraphs, **bold**, _italic_, `# headings` (drawn bold) and `-` bullets. */
 function paragraphs(text: string): string {
-  return String(text).split(/\n{2,}/).map((p) =>
-    esc(p.trim()).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br/>')
-  ).filter(Boolean).map((p) => `<p>${p}</p>`).join('')
+  const line = (l: string) => {
+    const t = l.trim()
+    const h = /^#{1,6}\s+(.*)$/.exec(t)
+    const bullet = /^[-*]\s+(.*)$/.exec(t)
+    const body = esc(h ? h[1] : bullet ? bullet[1] : t)
+      .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|\s)_([^_]+)_(?=\s|[.,;:!?]|$)/g, '$1<i>$2</i>').replace(/`([^`]+)`/g, '$1')
+    return h ? `<b>${body}</b>` : bullet ? `&bull; ${body}` : body
+  }
+  return String(text).split(/\n{2,}/).map((p) => p.trim().split('\n').map(line).join('<br/>')).filter(Boolean).map((p) => `<p>${p}</p>`).join('')
 }
 
 export interface RenderHtmlOptions {

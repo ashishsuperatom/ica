@@ -23,6 +23,7 @@ import { renderer } from './renderer.js'
 import { sampleAnswer } from './sample.js'
 import { authorised, isSafeId, reportId } from './auth.js'
 import { getBytes, getJson, jsonKey, pngKey, putBytes, putJson } from './store.js'
+import { normalise } from './normalise.js'
 import type { Answer, StoredReport } from './types.js'
 
 interface Env {
@@ -91,7 +92,7 @@ export default {
             id, projectId: body.projectId, title: body.title,
             createdAt: Date.now(), expiresAt, source: body.source,
           },
-          answer: body.category ? { ...body.answer, category: body.answer.category ?? body.category } : body.answer,
+          answer: normalise(body.category ? { ...body.answer, category: body.answer.category ?? body.category } : body.answer),
         }
         // Store the ANSWER only. The PNG is not rendered here: the caller is a live
         // turn waiting on this response, and an image nobody opens is wasted work.
