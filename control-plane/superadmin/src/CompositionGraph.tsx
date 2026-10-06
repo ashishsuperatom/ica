@@ -5,7 +5,7 @@
 // detach, order, make, edit (or suggest, when it is someone else's). How the graph moved over time is its own view.
 // Drawn only with the semantic components (@superatom/ui).
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
 import { Columns, ColumnsSearch, Dialog, markdownToHtml, Form, Field, Notice, Receipt, Code, Empty, Icon, notify, type ColumnItem, type ColumnSpec } from '@superatom/ui'
 import { useProjectHub } from './hub'
 import { cached, keep } from './cache'
@@ -16,7 +16,7 @@ interface Version { id: number; name: string; message: string; upto: number; at:
 interface Graph { domains: Node[]; intermediate: Node[]; atomic: Node[]; version?: Version }
 /** Each version's parent (the version it grew from), and the version now grew from. */
 interface Tree { parents: Record<string, string | null>; now: string | null }
-type Focus = { kind: 'domain' | 'intermediate' | 'atomic'; name: string } | null
+type Focus = { kind: 'domain' | 'intermediate' | 'atomic'; name: string; edit?: boolean } | null
 
 /** A concept's content as Markdown — a list or worked examples written before concepts were Markdown read as their Markdown. */
 const toText = (b: Body): string => b.form === 'text' ? String(b.text ?? '')
@@ -126,7 +126,10 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
 
   // Looking at a version: nothing is attached, detached or made — it is how the graph was.
   const shown = viewing ? columns.map((c) => ({ ...c, onAttach: undefined, onDetach: undefined, onNew: undefined })) : columns
-  const focused = focus ? by.get(focus.name) ?? null : null
+  // A concept of the selected domain, picked in its column: the domain stays on the right, that concept open in it.
+  const inDomain = !!(focus?.kind === 'atomic' && !focus.edit && d && !m && reach(d).includes(focus.name))
+  const focused = inDomain ? d : focus ? by.get(focus.name) ?? null : null
+  const focusKind = inDomain ? 'domain' as const : focus?.kind
   const partOf = (name: string) => [...graph.intermediate, ...graph.domains].filter((x) => x.concepts.includes(name))
   return (
     <div className="sa-graphpage">
@@ -144,7 +147,8 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
         </div>
       )}
       <Columns keep="composition-graph" columns={shown} detail={focused
-        ? <Detail key={focused.name + focused.hash} hub={hub} node={focused} kind={focus!.kind} by={by} partOf={partOf(focused.name)} goTo={goTo} change={change} reload={load} intermediates={graph.intermediate} readOnly={!!viewing} />
+        ? <Detail key={focused.name + focused.hash} hub={hub} node={focused} kind={focusKind!} by={by} partOf={partOf(focused.name)} goTo={goTo} change={change} reload={load} intermediates={graph.intermediate} readOnly={!!viewing}
+            openOnly={inDomain ? focus!.name : null} onEdit={(name) => { setAtom(name); setFocus({ kind: by.get(name)?.composed ? 'intermediate' : 'atomic', name, edit: true }) }} />
         : <div className="sa-graphpage__hint"><Icon icon="lucide:mouse-pointer-click" /><p>Select a domain or a concept to see all of it here, change it, and walk what it composes.</p>
             <Receipt items={[['Domains', String(graph.domains.length)], ['Intermediate concepts', String(graph.intermediate.length)], ['Atomic concepts', String(graph.atomic.length)]]} /></div>} />
       {making?.kind === 'atomic' && <NewConcept hub={hub} kind="atomic" into={making.into ? by.get(making.into)?.title ?? making.into : null}
@@ -263,8 +267,9 @@ function NameVersion({ hub, since, last, onClose, onNamed }: { hub: ReturnType<t
 }
 
 /** What is selected: all of it, and its editor. */
-function Detail({ hub, node, kind, by, partOf, goTo, change, reload, intermediates, readOnly = false }: {
+function Detail({ hub, node, kind, by, partOf, goTo, change, reload, intermediates, readOnly = false, openOnly = null, onEdit }: {
   hub: ReturnType<typeof useProjectHub>; node: Node; kind: NonNullable<Focus>['kind']; by: Map<string, Node>; partOf: Node[]; intermediates: Node[]; readOnly?: boolean
+  openOnly?: string | null; onEdit: (name: string) => void
   goTo: (name: string) => void; change: (t: 'graph:join' | 'graph:leave', into: string, concept: string, at?: number) => Promise<boolean>; reload: () => Promise<void>
 }) {
   const b = node.body
@@ -304,7 +309,7 @@ function Detail({ hub, node, kind, by, partOf, goTo, change, reload, intermediat
         ['Programs and files', (b.files ?? []).length ? `${b.files.length}` : '—'],
       ]} />
       {(b.intents ?? []).length > 0 && <div className="sa-graphpage__block"><h3 className="sa-label">Phrases it serves</h3><div className="sa-words">{b.intents.map((t: string) => <span key={t} className="sa-word">{t}</span>)}</div></div>}
-      {order(node, 'What it composes')}
+      <Composes owner={node} by={by} openOnly={openOnly} readOnly={readOnly} change={change} onEdit={onEdit} />
  {!readOnly && <AttachPick label="Attach an intermediate concept" options={intermediates.filter((x) => !node.concepts.includes(x.name))} onAttach={(k) => void change('graph:join', node.name, k)} />}
       <SystemPrompt hub={hub} domain={node.name} />
       {meta}
@@ -313,6 +318,63 @@ function Detail({ hub, node, kind, by, partOf, goTo, change, reload, intermediat
   if (kind === 'intermediate') return <IntermediateDetail readOnly={readOnly} hub={hub} node={node} reload={reload} meta={meta} order={order(node, 'Its atomic concepts')} links={links('Part of', partOf, 'No domain composes it yet.')}
     composed={composedText(String(b.title ?? node.title), String(b.text ?? ''), node.concepts.map((c) => by.get(c)).filter((x): x is Node => !!x))} />
   return <AtomicDetail readOnly={readOnly} hub={hub} node={node} reload={reload} meta={meta} links={links('Part of', partOf, 'Nothing composes it yet — attach it to an intermediate concept.')} />
+}
+
+/** What a domain composes, in its order, each concept opened in place to read: several may be open at once; a concept
+ *  picked in its column closes the rest and opens alone. ↑ ↓ move between them, Enter opens or closes one. */
+function Composes({ owner, by, openOnly, readOnly, change, onEdit }: { owner: Node; by: Map<string, Node>; openOnly: string | null; readOnly: boolean
+  change: (t: 'graph:join' | 'graph:leave', into: string, concept: string, at?: number) => Promise<boolean>; onEdit: (name: string) => void }) {
+  // The direct part that is the picked concept, or holds it (an intermediate concept).
+  const partFor = (name: string | null) => (name ? owner.concepts.find((c) => c === name || by.get(c)?.concepts.includes(name)) ?? null : null)
+  const [open, setOpen] = useState<Set<string>>(() => new Set(partFor(openOnly) ? [partFor(openOnly)!] : []))
+  const heads = useRef<(HTMLButtonElement | null)[]>([])
+  useEffect(() => {
+    const p = partFor(openOnly); if (!p) return
+    setOpen(new Set([p]))
+    requestAnimationFrame(() => heads.current[owner.concepts.indexOf(p)]?.closest('.sa-acc__item')?.scrollIntoView({ block: 'nearest' }))
+  }, [openOnly])   // eslint-disable-line react-hooks/exhaustive-deps
+  const toggle = (c: string) => setOpen((o) => { const n = new Set(o); if (n.has(c)) n.delete(c); else n.add(c); return n })
+  const keys = (e: KeyboardEvent, i: number) => {
+    const to = e.key === 'ArrowDown' ? i + 1 : e.key === 'ArrowUp' ? i - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? owner.concepts.length - 1 : null
+    if (to === null || to < 0 || to >= owner.concepts.length) return
+    e.preventDefault(); heads.current[to]?.focus()
+  }
+  const textOf = (n: Node) => (n.composed ? composedText(String(n.body.title ?? n.title), String(n.body.text ?? ''), n.concepts.map((c) => by.get(c)).filter((x): x is Node => !!x)) : toText(n.body))
+  const all = open.size === owner.concepts.length && owner.concepts.length > 0
+  return (
+    <div className="sa-graphpage__block">
+      <div className="sa-acc__bar">
+        <h3 className="sa-label">What it composes <span className="sa-col__count">{owner.concepts.length}</span></h3>
+        {owner.concepts.length > 0 && <button className="sa-btn sa-btn--link" onClick={() => setOpen(all ? new Set() : new Set(owner.concepts))}>{all ? 'Close all' : 'Open all'}</button>}
+      </div>
+      {!owner.concepts.length ? <p className="sa-note">Nothing yet — attach from the column.</p> : (
+        <div className="sa-acc">
+          {owner.concepts.map((c, i) => {
+            const n = by.get(c), isOpen = open.has(c), text = n ? textOf(n) : ''
+            return (
+              <section key={c} className="sa-acc__item" data-open={isOpen}>
+                <div className="sa-acc__head">
+                  <button ref={(el) => { heads.current[i] = el }} className="sa-acc__toggle" aria-expanded={isOpen} onClick={() => toggle(c)} onKeyDown={(e) => keys(e, i)}>
+                    <Icon icon="lucide:chevron-right" className="sa-acc__chev" />
+                    <span className="sa-acc__n">{i + 1}</span>
+                    <span className="sa-acc__title">{n?.title ?? c}</span>
+                    {n?.composed && <span className="sa-col__tag">intermediate</span>}
+                  </button>
+                  {!readOnly && <span className="sa-acc__acts">
+                    <button className="sa-icon-btn" disabled={i === 0} title="Move up" aria-label="Move up" onClick={() => void change('graph:join', owner.name, c, i - 1)}><Icon icon="lucide:arrow-up" /></button>
+                    <button className="sa-icon-btn" disabled={i === owner.concepts.length - 1} title="Move down" aria-label="Move down" onClick={() => void change('graph:join', owner.name, c, i + 1)}><Icon icon="lucide:arrow-down" /></button>
+                    <button className="sa-icon-btn" title="Edit" aria-label={`Edit ${n?.title ?? c}`} onClick={() => onEdit(c)}><Icon icon="lucide:pencil" /></button>
+                    <button className="sa-icon-btn" title="Detach" aria-label="Detach" onClick={() => void change('graph:leave', owner.name, c)}><Icon icon="lucide:unlink" /></button>
+                  </span>}
+                </div>
+                {isOpen && (text.trim() ? <div className="sa-acc__body sa-graphpage__md sa-prose" dangerouslySetInnerHTML={{ __html: markdownToHtml(text) }} /> : <p className="sa-acc__body sa-note">Empty.</p>)}
+              </section>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
 }
 
 /** Attach one from a list (a domain's first intermediate concept, when its column is not shown). */

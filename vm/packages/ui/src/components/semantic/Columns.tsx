@@ -4,7 +4,7 @@
 // browser) and never narrower than it can be read: past the window, the columns scroll sideways. One search above them
 // all; beside them, the detail of what is selected.
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { Icon } from '@iconify/react'
 import { recall, remember } from '../../lib/remember'
 
@@ -33,10 +33,22 @@ export interface ColumnSpec {
 
 const MIN = 260
 
+/** ↑ ↓ in a column move what is selected in it, in the order shown (what the selection holds first, then the rest). */
+function step(e: ReactKeyboardEvent<HTMLButtonElement>, col: ColumnSpec, key: string) {
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+  const body = e.currentTarget.closest('.sa-col__body'); if (!body) return
+  const keys = [...body.querySelectorAll<HTMLElement>('.sa-col__item[data-key]')].map((el) => el.dataset.key!)
+  const next = keys[keys.indexOf(key) + (e.key === 'ArrowDown' ? 1 : -1)]
+  if (!next) return
+  e.preventDefault()
+  col.onSelect(next)
+  requestAnimationFrame(() => { const el = body.querySelector<HTMLElement>(`.sa-col__item[data-key="${CSS.escape(next)}"] .sa-col__main`); el?.focus(); el?.scrollIntoView({ block: 'nearest' }) })
+}
+
 function Item({ it, col, linked }: { it: ColumnItem; col: ColumnSpec; linked: boolean | null }) {
   return (
     <div className="sa-col__item" data-key={it.key} data-selected={col.selected === it.key} data-linked={linked === null ? undefined : String(linked)}>
-      <button className="sa-col__main" onClick={() => col.onSelect(it.key)} title={it.line || it.title}>
+      <button className="sa-col__main" onClick={() => col.onSelect(it.key)} onKeyDown={(e) => step(e, col, it.key)} title={it.line || it.title}>
         <span className="sa-col__title">{it.title}{it.tag && <span className="sa-col__tag">{it.tag}</span>}</span>
         {it.line && <span className="sa-col__line">{it.line}</span>}
       </button>

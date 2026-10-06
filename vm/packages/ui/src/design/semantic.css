@@ -139,7 +139,12 @@
 .sa-cols__cell { position: relative; z-index: 1; display: flex; min-height: 0; min-width: 0; }
 /* The graph's edges: beneath the columns, seen in the gaps between them */
 .sa-cols__edges { position: absolute; top: 0; left: 0; z-index: 0; pointer-events: none; overflow: visible; }
-.sa-cols__edges path { fill: none; stroke: var(--primary); stroke-opacity: 0.55; stroke-width: 1.5; }
+/* the graph's structure in its own colour: the selection is the accent, what composes it is slate */
+.sa-cols { --graph-edge: var(--series-3); }
+.sa-cols__edges path { fill: none; stroke: var(--graph-edge); stroke-opacity: 0.6; stroke-width: 1.5; }
+/* resizing a column: its handle's line alone in the gap — the edges step aside until it is let go */
+.sa-cols__edges { transition: opacity var(--dur-1) var(--ease); }
+.sa-cols:has(.sa-cols__resize:hover) .sa-cols__edges, .sa-resizing .sa-cols__edges { opacity: 0; }
 .sa-cols__cell > .sa-col { flex: 1; }
 /* Between two columns: drag to resize (the cursor says so); double-click puts the usual width back. */
 .sa-cols__resize { position: absolute; top: 0; bottom: 0; right: calc(-1 * var(--cols-gap) / 2 - 4px); width: 8px; cursor: col-resize; z-index: 2; touch-action: none; }
@@ -158,7 +163,10 @@
 .sa-col__body { flex: 1; min-height: 0; overflow-y: auto; padding: 2px var(--sp-1) var(--sp-2); }
 .sa-col__item { display: flex; align-items: center; gap: 2px; border-radius: var(--r-sm); }
 .sa-col__item:hover { background: var(--panel); }
-.sa-col__item[data-selected='true'] { background: var(--primary-wash); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 30%, transparent); }
+.sa-col__item[data-selected='true'], .sa-col__item[data-selected='true']:hover { background: var(--primary-wash); }
+/* focus is the selection's own ring, inside the row — never the browser's outline around it */
+.sa-col__main:focus-visible { outline: none; }
+.sa-col__item:has(.sa-col__main:focus-visible) { box-shadow: inset 0 0 0 2px var(--primary-ring); }
 .sa-col__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0; padding: var(--sp-1) var(--sp-2); text-align: left; }
 .sa-col__title { display: flex; align-items: center; gap: var(--sp-1h); min-width: 0; font-size: var(--t-sm); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sa-col__item[data-selected='true'] .sa-col__title { color: var(--primary-strong); font-weight: var(--w-medium); }
@@ -170,10 +178,8 @@
 .sa-col__group { position: sticky; top: calc(-1 * var(--sp-1)); z-index: 1; background: var(--surface); padding: var(--sp-2) var(--sp-1h) var(--sp-1); font-size: var(--t-2xs); font-weight: var(--w-semibold); text-transform: uppercase; letter-spacing: 0.04em; color: var(--faint); }
 .sa-col__group--rest { margin-top: var(--sp-2); }
 /* What the selection on the left holds: a lane of its own, in the accent; the others quieter below it */
-.sa-col__lane { margin: var(--sp-1) 0 0; padding: 0 0 var(--sp-1); border-radius: var(--r-md); background: color-mix(in srgb, var(--primary-wash) 70%, transparent); box-shadow: inset 2px 0 0 var(--primary); }
-.sa-col__lane .sa-col__group { position: static; background: transparent; }
-.sa-col__group--in { color: var(--primary-strong); }
-.sa-col__lane .sa-col__item:hover { background: color-mix(in srgb, var(--primary) 10%, transparent); }
+.sa-col__lane { margin: var(--sp-1) 0 0; }
+.sa-col__group--in { color: var(--ink); }
 .sa-col__lane[data-empty='true'] .sa-col__empty { margin: 0 var(--sp-2) var(--sp-1); }
 .sa-col__item[data-linked='false'] .sa-col__title { color: var(--muted); }
 .sa-col__item[data-linked='false'] .sa-col__line { color: var(--faint); }
@@ -262,7 +268,7 @@ button.sa-vtree__main:hover { background: var(--panel); }
 .sa-newmid__opt input { margin-top: 3px; }
 @media (max-width: 760px) { .sa-newmid__pick { grid-template-columns: 1fr; } }
 
-.sa-col__item[data-linked='true'] .sa-col__title::before { content: ''; flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%; background: var(--primary); }
+.sa-col__item[data-linked='true'] .sa-col__title::before { content: ''; flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%; background: var(--graph-edge, var(--series-3)); }
 .sa-col__item[data-linked='true']:not([data-selected='true']) .sa-col__title { color: var(--ink); }
 .sa-col__group { padding: var(--sp-2) var(--sp-2) 2px; }
 .sa-fullpage:has(.sa-graphpage) { padding: var(--sp-2) var(--sp-3); }
@@ -430,3 +436,21 @@ button.sa-vtree__main:hover { background: var(--panel); }
 .sa-explorer__branch .sa-explorer__item { padding-left: var(--sp-2h); }
 .sa-explorer__branch .sa-explorer__branch { margin-left: calc(var(--sp-1h) + 7px); }
 .sa-explorer__branch .sa-col__empty { padding-left: var(--sp-2h); }
+
+/* What a domain composes, each concept opened in place to read */
+.sa-acc__bar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.sa-acc { display: grid; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+.sa-acc__item + .sa-acc__item { border-top: 1px solid var(--line); }
+.sa-acc__head { display: flex; align-items: center; gap: var(--sp-1); padding-right: var(--sp-1); }
+.sa-acc__head:hover { background: var(--panel); }
+.sa-acc__toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-2h); text-align: left; font-size: var(--t-sm); color: var(--ink); }
+.sa-acc__toggle:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--primary-ring); border-radius: var(--r-sm); }
+.sa-acc__chev { flex-shrink: 0; color: var(--faint); transition: transform var(--dur-1) var(--ease); }
+.sa-acc__item[data-open='true'] .sa-acc__chev { transform: rotate(90deg); color: var(--ink); }
+.sa-acc__n { flex-shrink: 0; min-width: 1.25rem; font-size: var(--t-xs); color: var(--faint); font-variant-numeric: tabular-nums; }
+.sa-acc__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--w-medium); }
+.sa-acc__item[data-open='true'] .sa-acc__title { white-space: normal; }
+.sa-acc__acts { display: inline-flex; flex-shrink: 0; opacity: 0; }
+.sa-acc__head:hover .sa-acc__acts, .sa-acc__acts:focus-within { opacity: 1; }
+.sa-acc__body { margin: 0; padding: var(--sp-1) var(--sp-3) var(--sp-3) calc(var(--sp-2h) + 2.75rem); }
+@media (prefers-reduced-motion: reduce) { .sa-acc__chev { transition: none; } }
