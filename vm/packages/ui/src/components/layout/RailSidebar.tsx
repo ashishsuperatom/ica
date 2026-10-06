@@ -14,6 +14,8 @@ const PANEL_MIN = 200, PANEL_MAX = 440
 
 export interface RailPlace {
   key: string; label: string; icon: string
+  /** The place's own colour: its icon always, a light tint of it behind when hovered or where one is. */
+  accent?: string
   /** Going there (a page); a place with a panel opens its panel too. */
   onClick?: () => void
   /** The place's own list, shown beside the rail. */
@@ -68,7 +70,7 @@ export default function RailSidebar({ name, places, current, foot, pinned, onPin
           <button type="button" className="sa-railbar__mark" data-active={current === 'about'} title="Superatom — about" aria-label="About Superatom" onClick={onAbout}
             onMouseEnter={() => { if (!pinned) setPeek(null) }}><SuperatomMark size={26} /></button>
           {places.map((p) => (
-            <button key={p.key} type="button" className="sa-railbar__place" data-active={p.key === current} data-open={p.key === open && !!p.panel}
+            <button key={p.key} type="button" className="sa-railbar__place" style={p.accent ? { '--accent': p.accent } as React.CSSProperties : undefined} data-active={p.key === current} data-open={p.key === open && !!p.panel}
               title={p.label} aria-label={p.label} onClick={() => pick(p)}
               onMouseEnter={() => { if (!phone()) { hold(); setPeek(p.panel ? p.key : null) } }}>
               <Icon icon={p.icon} />

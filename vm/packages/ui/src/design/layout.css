@@ -378,3 +378,8 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 .sa-railbar__panel .sa-nav-row > .sa-nav-item, .sa-railbar__panel .sa-nav-row > .sa-nav-item:hover, .sa-railbar__panel .sa-nav-row > .sa-nav-item[data-active='true'] { background: none; }
 .sa-railbar__mark { --mark-ground: var(--rail); width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: var(--r-md); color: var(--ink); margin-bottom: var(--sp-2); }
 .sa-railbar__mark:hover, .sa-railbar__mark:focus-visible, .sa-railbar__mark[data-active='true'] { --mark-ground: var(--rail-active); outline: none; background: var(--rail-active); }
+/* Each rail place in its own colour: the icon always; a light tint of it behind on hover and where one is. */
+.sa-railbar__place { color: var(--accent, var(--muted)); }
+.sa-railbar__place:hover, .sa-railbar__place[data-open='true'], .sa-railbar__place:focus-visible { color: var(--accent, var(--ink)); background: color-mix(in srgb, var(--accent, var(--ink)) 9%, transparent); }
+.sa-railbar__place[data-active='true'] { color: var(--accent, var(--ink)); background: color-mix(in srgb, var(--accent, var(--ink)) 14%, transparent); }
+.sa-railbar__place[data-active='true'] > svg { color: var(--accent, var(--ink)); }

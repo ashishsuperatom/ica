@@ -123,8 +123,10 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   useEffect(() => { const k = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.altKey && e.key.toLowerCase() === 'u') { e.preventDefault(); toggleActivity() } }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k) }, [toggleActivity])
   // How the person keeps a conversation: a name, pinned, in a collection, archived — kept in their UserDO.
   const keep = useCallback(async (session: string, change: { name?: string; pinned?: boolean; archived?: boolean; collection?: string }) => {
+    // Shown at once; kept in the person's UserDO behind it — and put back as it is there if that is refused.
+    setSessions((list) => list.map((s) => (s.session === session ? { ...s, ...change } : s)))
     const m = await request({ t: 'session:keep', session, ...change })
-    if (m?.t === 'session:kept') setListTick((n) => n + 1); else notify(m?.reason ?? 'That could not be changed', 'refused')
+    if (m?.t !== 'session:kept') { setListTick((n) => n + 1); notify(m?.reason ?? 'That could not be changed', 'refused') }
   }, [request])
   const [naming, setNaming] = useState<{ session: string; what: 'name' | 'collection'; value: string } | null>(null)
   const titleOf = (s: Conversation) => s.name || plain(s.title) || agentOf(s.agent).name
@@ -165,14 +167,14 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
     ? <button type="button" className="sa-sidelist__more" onClick={() => setShownConversations((n) => n + 30)}>Show more</button> : null
   const named = agents.filter((a) => !a.isDefault)
   const places: RailPlace[] = [
-    { key: 'home', label: 'Home', icon: 'solar:home-angle-linear', onClick: () => page('home'), actions: sideActions,
+    { key: 'home', label: 'Home', icon: 'solar:home-angle-linear', accent: 'var(--place-home)', onClick: () => page('home'), actions: sideActions,
       panel: activityView ? <><NavList groups={[nav[0]!]} /><SideActivity request={request} subscribeLive={subscribeLive} /></> : <><NavList groups={nav} />{moreConversations}</> },
-    { key: 'agents', label: 'Agents', icon: 'solar:widget-linear', onClick: () => page('agents'), actions: sideActions,
+    { key: 'agents', label: 'Agents', icon: 'solar:widget-linear', accent: 'var(--place-agents)', onClick: () => page('agents'), actions: sideActions,
       panel: <NavList groups={[
         { items: [{ key: 'agents', label: 'All agents', icon: 'solar:list-linear', active: onPages && root === 'agents', onClick: () => page('agents') }] },
         { label: 'Agents', items: named.map((a) => ({ key: `a:${a.id}`, label: a.name, icon: a.look.icon ?? 'solar:widget-linear', active: startAgent === a.id || (!!sessionId && current === a.id), onClick: () => go(`s/${a.id}`) })) },
       ]} /> },
-    { key: 'connections', label: 'Connections', icon: 'solar:link-round-linear', onClick: () => page('connections') },
+    { key: 'connections', label: 'Connections', icon: 'solar:link-round-linear', accent: 'var(--place-connections)', onClick: () => page('connections') },
   ]
   const railAt = onPages && root === 'about' ? 'about' : sessionId || (onPages && (root === 'home' || !root)) ? 'home' : startAgent || (onPages && root?.startsWith('agent')) ? 'agents' : onPages && root?.startsWith('connection') ? 'connections' : ''
   const [showKeys, setShowKeys] = useState(false)
