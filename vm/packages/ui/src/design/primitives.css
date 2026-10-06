@@ -156,6 +156,13 @@ textarea.sa-input, .sa-input--area { height: auto; min-height: 4.5rem; padding-b
 @media (hover: none) { .sa-section__hover { opacity: 1; } }
 .sa-section__foot { display: flex; align-items: center; gap: var(--sp-2h); flex-wrap: wrap; padding: 11px var(--sp-5); border-top-width: 1px; background: var(--surface-subtle); }
 .sa-section__body { padding: var(--sp-4) var(--sp-5); }
+/* A CARD PADS WHAT IT HOLDS. The parts made to sit straight in a card bring their own inset (a table runs edge to edge, a
+   form, a receipt, a body pad themselves) and are named here, once; anything else a card holds — a caller's own content —
+   is given the card's inset, so nothing can end up pressed against its edge. A part that runs edge to edge by design and
+   is not listed says so with [data-bleed]. */
+.sa-section__content > :not(.sa-section__body, .sa-records, .sa-records__find, .sa-receipt, .sa-form, .sa-sub-grid, .sa-section__scroll, .sa-section__text, .sa-facts, .sa-empty, .sa-empty-line, .sa-notice, .sa-toolbar, .sa-home__group, .sa-table, [data-bleed]) { margin-inline: var(--sp-5); }
+.sa-section__content > :not(.sa-section__body, .sa-records, .sa-records__find, .sa-receipt, .sa-form, .sa-sub-grid, .sa-section__scroll, .sa-section__text, .sa-facts, .sa-empty, .sa-empty-line, .sa-notice, .sa-toolbar, .sa-home__group, .sa-table, [data-bleed]):first-child { margin-top: var(--sp-4); }
+.sa-section__content > :not(.sa-section__body, .sa-records, .sa-records__find, .sa-receipt, .sa-form, .sa-sub-grid, .sa-section__scroll, .sa-section__text, .sa-facts, .sa-empty, .sa-empty-line, .sa-notice, .sa-toolbar, .sa-home__group, .sa-table, [data-bleed]):last-child { margin-bottom: var(--sp-4); }
 .sa-section__chart { padding: var(--sp-3h) var(--sp-5) var(--sp-3); }
 .sa-section__text { padding: var(--sp-4) var(--sp-5); font-size: var(--t-base); line-height: var(--lh-relaxed); color: var(--ink); white-space: pre-wrap; }
 .sa-section__empty { padding: var(--sp-3) var(--sp-4); }
@@ -387,7 +394,7 @@ table.sa-table { width: 100%; border-collapse: collapse; }
 .sa-sub-card { min-width: 0; }
 .sa-sub-card__title { font-size: var(--t-base); font-weight: var(--w-medium); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sa-sub-card__text { font-size: var(--t-xs); color: var(--muted); line-height: var(--lh-snug); overflow-wrap: anywhere; }
-.sa-sub-grid { display: grid; grid-template-columns: 1fr; gap: var(--sp-2); }
+.sa-sub-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); }
 @media (min-width: 640px) { .sa-sub-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (min-width: 1024px) { .sa-sub-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 
@@ -409,7 +416,7 @@ table.sa-table { width: 100%; border-collapse: collapse; }
 .sa-row--wrap { flex-wrap: wrap; }
 .sa-row--tight { gap: var(--sp-1h); }
 .sa-grow { flex: 1; min-width: 0; }
-.sa-two-col { display: grid; grid-template-columns: 1fr; gap: var(--sp-3h); }
+.sa-two-col { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3h); }
 @media (min-width: 1024px) { .sa-two-col { grid-template-columns: repeat(2, minmax(0, 1fr)); } .sa-two-col__span { grid-column: span 2; } }
 .sa-busy { opacity: 0.55; pointer-events: none; transition: opacity var(--dur-1) var(--ease); }
 

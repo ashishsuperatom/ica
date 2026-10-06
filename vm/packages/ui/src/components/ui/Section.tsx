@@ -52,7 +52,7 @@ export function Section({ title, subtitle, note, icon, accent = 'series-1', tint
           </span>
         </div>
       )}
-      <Settle>{children}</Settle>
+      <Settle innerClassName="sa-section__content">{children}</Settle>
       {footer && <div data-copy="skip" className="sa-section__foot">{footer}</div>}
     </section>
   )

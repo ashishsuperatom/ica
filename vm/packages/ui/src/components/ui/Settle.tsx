@@ -13,7 +13,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
-export default function Settle({ children, className = '' }: { children: ReactNode; className?: string }) {
+export default function Settle({ children, className = '', innerClassName }: { children: ReactNode; className?: string; innerClassName?: string }) {
   const inner = useRef<HTMLDivElement>(null)
   const last = useRef<number | undefined>(undefined)
   const [height, setHeight] = useState<number>()
@@ -43,7 +43,7 @@ export default function Settle({ children, className = '' }: { children: ReactNo
       style={{ height, overflow: moving ? 'hidden' : undefined }}
       onTransitionEnd={(e) => e.propertyName === 'height' && setMoving(false)}
     >
-      <div ref={inner}>{children}</div>
+      <div ref={inner} className={innerClassName}>{children}</div>
     </div>
   )
 }

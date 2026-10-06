@@ -422,14 +422,19 @@ function Moved({ to }: { to: (path: string, q: URLSearchParams) => string }) {
 function ProjectMoved() {
   const token = useAuth(); const api = useApi(token); const loc = useLocation(); const nav = useNavigate()
   const { projectId } = useParams<{ projectId: string }>()
+  const [lost, setLost] = useState(false)
   useEffect(() => {
     if (!token) return
-    void api(`/projects/${projectId}/status`).then((r) => r.json()).then((s: any) => {
+    // The project says which organisation owns it; one that does not know is found in the person's projects.
+    void (async () => {
       const rest = loc.pathname.replace(/^\/pro\/[^/]+/, '').replace(/^\/inspector\/composition$/, '/graph')
-      if (s?.orgId) nav(`/o/${s.orgId}/p/${projectId}${rest}`, { replace: true })
-    }).catch(() => {})
+      const s: any = await api(`/projects/${projectId}/status`).then((r) => r.json()).catch(() => null)
+      let org: string | null = s?.orgId ?? null
+      if (!org) { const mine: any = await api('/me/projects').then((r) => r.json()).catch(() => null); org = (Array.isArray(mine) ? mine : []).find((o: any) => (o.projects ?? []).some((p: any) => p.id === projectId))?.org?.id ?? null }
+      if (org) nav(`/o/${org}/p/${projectId}${rest}`, { replace: true }); else setLost(true)
+    })()
   }, [token])   // eslint-disable-line react-hooks/exhaustive-deps
-  return <Empty icon="lucide:loader">Finding the project…</Empty>
+  return lost ? <Empty icon="lucide:search-x">This project is not one of yours, or it no longer exists.</Empty> : <Empty icon="lucide:loader">Finding the project…</Empty>
 }
 
 /** Every project's engine across the platform, and whether it reports. */
