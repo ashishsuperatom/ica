@@ -5,7 +5,7 @@
 import { parseArgs, type ParseArgsConfig } from 'node:util'
 import { createInterface } from 'node:readline'
 import { CliError, DEFAULT_HUB, maskKey, orgOfKey, projectOfKey, readCredentials, writeCredentials, configPath, folderProfile } from './config.ts'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, readdirSync } from 'node:fs'
 import { join, resolve, dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { connect, type Hub } from './hub.ts'
@@ -38,6 +38,7 @@ Commands:
   ask              ask the project a question in words
   activity         what is running for you in the project (builds, runs), and what ran lately
   warehouse        the organisation's warehouse: tables, query, append — and, with an organisation key, create and grant
+  program build    build a program from its source folder: the build and its source are kept by the platform
   graph import     import the project's written knowledge (knowledge/index.mts) into its graph, on the platform
   call             send any message the platform takes, with its fields as JSON (prints the reply as JSON)
   status           the background connection: up, since when, how long until it closes
@@ -81,6 +82,10 @@ An intent to "current" (the default) replaces the current block's answer; "new" 
 earlier block (--block) branches the session into a new thread. Values are JSON; a bare word is a string.`,
   projects: `sacli projects      the saved profiles, their projects, and which one is in use here`,
   use: `sacli use <profile> [--here]   make <profile> the default, or (--here) write .sacli.json so this folder uses it`,
+  program: `sacli program build <folder>
+
+A program's source — manifest.json, doc.md, server/…, web/… — built by the project's engine and kept by the platform,
+the build with the source it came from. Needs a key with the programs scope.`,
   graph: `sacli graph import <knowledge/index.mts> [--reason '<why>']
 
 The project's written knowledge — its domains, their concepts and files, its settings — imported into the project's
@@ -284,6 +289,25 @@ export async function run(argv: string[], io: Io): Promise<number> {
       const r = await hub!.request(payload, { timeoutMs })
       if (r.t === 'session:refused') throw new CliError(r.reason ?? 'refused')
       return r
+    }
+    if (cmd === 'program') {
+      if (pos[1] !== 'build' || !pos[2]) throw new CliError('sacli program build <folder>', 2)
+      const root = resolve(io.cwd ?? process.cwd(), pos[2])
+      const files: Record<string, string> = {}
+      const walk = (dir: string, rel: string) => {
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+          if (e.name === 'node_modules' || e.name === 'dist' || e.name.startsWith('.')) continue
+          const r = rel ? `${rel}/${e.name}` : e.name
+          if (e.isDirectory()) walk(join(dir, e.name), r)
+          else if (/^(manifest\.json|doc\.md|(server|web)\/.+)$/.test(r)) files[r] = readFileSync(join(dir, e.name), 'utf8')
+        }
+      }
+      try { walk(root, '') } catch (e: any) { throw new CliError(`${pos[2]} could not be read: ${e?.message ?? e}`, 1) }
+      if (!files['manifest.json']) throw new CliError(`${pos[2]} has no manifest.json`, 1)
+      const r = await hub.request({ t: 'program:build', files }, { timeoutMs })
+      if (r.t !== 'program:built') throw new CliError(String(r.reason ?? r.error ?? r.t), 1)
+      out(`${r.name} ${r.version ?? ''} → ${String(r.hash).slice(0, 12)}${r.added ? '' : ' (already kept)'}`, r)
+      return 0
     }
     if (cmd === 'graph') {
       if (pos[1] !== 'import' || !pos[2]) throw new CliError('sacli graph import <knowledge/index.mts>', 2)

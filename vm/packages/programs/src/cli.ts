@@ -1,6 +1,6 @@
 // programs — build a program into the project's store, and run it in the STATE engine against the project's data.
 //
-//   programs init <name>                                a new program's source from the template (programs/src/<name>)
+//   programs init <name>                                a new program's source from the template, in ./<name> (then: sacli program build ./<name>)
 //   programs build <source folder>                      compile, check, hash; prints the hash (the same source, the same hash)
 //   programs list                                       the programs in the store
 //   programs doc <hash|name>                            its documentation
@@ -66,9 +66,9 @@ async function main() {
   if (cmd === 'init') {
     const name = a
     if (!name || !/^[a-z][a-z0-9-]{1,60}$/.test(name)) throw new ProgramError(['a program name is lower-case letters, digits and dashes'])
-    const home = process.env.ENGINE_PROJECT_DIR
-    if (!home) throw new ProgramError(['ENGINE_PROJECT_DIR names the project home the program is made in'])
-    const dest = join(home, 'programs', 'src', name)
+    // Written where its author works; built into the project with `sacli program build`, which keeps the build and its
+    // source on the platform — never in a project's home.
+    const dest = resolve(name)
     if (existsSync(dest)) throw new ProgramError([`${dest} exists already`])
     const template = new URL('../../project-template/start/programs/template/', import.meta.url)
     cpSync(template, dest, { recursive: true })
@@ -76,7 +76,7 @@ async function main() {
     const m = JSON.parse(readFileSync(mf, 'utf8'))
     m.id = `prg_${name.replace(/-/g, '_')}`; m.name = name; m.ui.blocks = [name]; m.package.owns = name.replace(/-/g, '_')
     writeFileSync(mf, JSON.stringify(m, null, 2) + '\n')
-    console.log(`${dest}\n(from the template — see docs/program-contract.md; rename the slice "example" in server/ and web/ to "${m.package.owns}")`)
+    console.log(`${dest}\n(from the template — see docs/program-contract.md; rename the slice "example" in server/ and web/ to "${m.package.owns}"; then sacli program build ${name})`)
     return
   }
   if (cmd === 'build') { const r = buildProgram(resolve(a ?? '.'), store); console.log(`${r.hash}  ${r.manifest.name}`); return }

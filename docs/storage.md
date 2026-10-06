@@ -117,7 +117,7 @@ Roots (`engine.ts`): `STATE_ROOT` = `$ENGINE_STATE_DIR` or `~/.superatom/state`;
 | `sessions/<sid>/STATE.json`, `ANSWER_HISTORY.jsonl`, `context.md`, `<qid>/answer.md` (+ `blocks.json`, `queries.jsonl`), `attachments/` | the session as files: current STATE, answer history, start context, each answer committed, its files | the log is; these are written from it (attachments come from R2) |
 | `sessions/<sid>/work/` | the session's agent's own folder (its tools, data, out/, harness notes) | no |
 | `workspace/` | the shared folder of the connector and grounding agents | no |
-| `programs/store/<sha256>/`, `programs/src/`, `programs/incoming/` | built programs, sources, staging | built bundles → R2 `programs/` |
+| `programs/store/<sha256>/`, `programs/incoming/` | built programs — each with the source it was built from (`source/`, inside its hash) — and build staging; no program source is kept in a home (authors build with `sacli program build`) | bundles, source included → R2 `programs/`; fetched back by hash |
 | `knowledge/`, `app/`, `datasources/` | domain knowledge (imported into the platform's graph with `sacli graph import`; the engine never reads it), the project's own app, `datasources/<name>/bridge.mjs` (each code connection's bridge, downloaded from the platform by hash — settings and secrets only in memory) and the manager's `query-results.sqlite` cache | knowledge → the platform's graph; connections ← ProjectDO (`connections:pull`); dashboards upload to R2 |
 
 Outside the home: the harnesses' own login files (`~/.claude.json`, `~/.codex/auth.json`, pi's `auth.json`).

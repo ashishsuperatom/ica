@@ -123,6 +123,13 @@ export function buildProgram(srcDir: string, store: ProgramStore): Built {
     compileSide(join(srcDir, 'server'), join(staging, 'node'), 'server')
     compileSide(join(srcDir, 'web'), join(staging, 'web'), 'web')
     writeFileSync(join(staging, 'doc.md'), readFileSync(join(srcDir, 'doc.md')))
+    // The source it was built from travels with it (source/…), inside its hash: the platform keeps a program's source
+    // with its build, so it can be read and built again from there — never only on one machine's disk.
+    for (const f of files(srcDir)) {
+      const rel = posix(relative(srcDir, f))
+      if (!/^(manifest\.json|doc\.md|(server|web)\/.+)$/.test(rel) || /(^|\/)(node_modules|dist)\//.test(rel)) continue
+      const to = join(staging, 'source', rel); mkdirSync(dirname(to), { recursive: true }); writeFileSync(to, readFileSync(f))
+    }
     // The manifest as built: what the author wrote, with the bundles named. The hash is added after hashing.
     const built: Omit<ProgramManifest, 'hash'> = {
       ...source,

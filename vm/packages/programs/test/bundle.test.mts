@@ -13,7 +13,7 @@ test('a built program travels as one bundle and arrives as the same program, in 
   const a = built()
   const b = toBundle(a.store, a.hash)
   assert.equal(await bundleHash(b.files), a.hash)                 // Web Crypto agrees with the store's hash
-  assert.deepEqual(Object.keys(b.files).sort(), ['doc.md', 'manifest.json', 'node/index.js', 'node/sql.js', 'web/index.js'])
+  assert.deepEqual(Object.keys(b.files).sort(), ['doc.md', 'manifest.json', 'node/index.js', 'node/sql.js', 'source/doc.md', 'source/manifest.json', 'source/server/index.ts', 'source/server/sql.ts', 'source/web/index.tsx', 'web/index.js'])   // the build, and the source it was built from
   const other = new ProgramStore(mkdtempSync(join(tmpdir(), 'bun2-')))
   assert.equal(await fromBundle(other, b), a.hash)
   assert.equal(other.verify(a.hash), true)

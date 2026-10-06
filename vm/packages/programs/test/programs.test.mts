@@ -14,7 +14,7 @@ test('a build is compiled, checked and hashed; the same source builds to the sam
   const { src, store } = fresh()
   const a = buildProgram(src, store)
   assert.match(a.hash, /^[0-9a-f]{64}$/)
-  assert.deepEqual(readdirSync(a.dir).sort(), ['built.json', 'doc.md', 'manifest.json', 'node', 'web'])
+  assert.deepEqual(readdirSync(a.dir).sort(), ['built.json', 'doc.md', 'manifest.json', 'node', 'source', 'web'])
   assert.equal(a.manifest.node.bundle, 'node/index.js')
   assert.equal(a.manifest.hash, a.hash)
   const b = buildProgram(src, store)

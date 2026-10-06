@@ -7,6 +7,9 @@ dashboard and the program helpers are the same in every project; this is that pa
   question state, windows, loader, resolver, the fact reader, the recorder and the check against the composition
   graph), the whole client (`app/web/`), and the helpers programs state their rules with
   (`knowledge/shared/sql-rows.mjs`, `js-rows.mjs`).
+- `programs/` — programs every project runs (`app-views`): built into a project's platform with `sacli program build
+  vm/packages/project-template/programs/<name>` (the platform keeps the build and its source; the engine downloads it),
+  never copied into a home.
 - `start/` — what a new project begins with and then owns: `facts.mjs`, `dimensions.mjs`, `project.mjs`, an empty
   `capabilities/`, an empty knowledge index with the two settings every dashboard reads.
 
