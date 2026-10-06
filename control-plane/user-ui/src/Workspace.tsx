@@ -130,19 +130,19 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const titleOf = (s: Conversation) => s.name || plain(s.title) || agentOf(s.agent).name
   const live = sessions.filter((s) => !s.archived)
   const collections = [...new Set(live.map((s) => s.collection).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b))
-  const menuOf = (s: Conversation) => (close: () => void) => {
-    const act = (fn: () => void) => () => { close(); fn() }
-    return <>
-      <button type="button" className="sa-menu__item" onClick={act(() => setNaming({ session: s.session, what: 'name', value: titleOf(s) }))}>Rename</button>
-      <button type="button" className="sa-menu__item" onClick={act(() => void keep(s.session, { pinned: !s.pinned }))}>{s.pinned ? 'Unpin' : 'Pin'}</button>
-      <div className="sa-menu__sub">Keep in a collection</div>
-      {collections.filter((c) => c !== s.collection).map((c) => <button key={c} type="button" className="sa-menu__item" onClick={act(() => void keep(s.session, { collection: c }))}>{c}</button>)}
-      <button type="button" className="sa-menu__item" onClick={act(() => setNaming({ session: s.session, what: 'collection', value: '' }))}>New collection…</button>
-      {s.collection && <button type="button" className="sa-menu__item" onClick={act(() => void keep(s.session, { collection: '' }))}>Take out of {s.collection}</button>}
-      <button type="button" className="sa-menu__item" onClick={act(() => void keep(s.session, { archived: !s.archived }))}>{s.archived ? 'Unarchive' : 'Archive'}</button>
-    </>
-  }
-  const itemOf = (s: Conversation) => ({ key: `s:${s.session}`, label: titleOf(s), active: s.session === sessionId, onClick: () => go(s.session), menu: menuOf(s) })
+  const menuOf = (s: Conversation) => () => <>
+    <MenuItem icon="solar:pen-linear" label="Rename" onClick={() => setNaming({ session: s.session, what: 'name', value: titleOf(s) })} />
+    <MenuItem icon={s.pinned ? 'solar:pin-bold' : 'solar:pin-linear'} label={s.pinned ? 'Unpin' : 'Pin'} onClick={() => void keep(s.session, { pinned: !s.pinned })} />
+    <MenuItem icon="solar:folder-linear" label="Move to collection" sub={<>
+      {collections.filter((c) => c !== s.collection).map((c) => <MenuItem key={c} icon="solar:folder-linear" label={c} onClick={() => void keep(s.session, { collection: c })} />)}
+      <MenuItem icon="solar:add-folder-linear" label="New collection…" onClick={() => setNaming({ session: s.session, what: 'collection', value: '' })} />
+      {s.collection && <MenuItem icon="solar:close-circle-linear" label={`Take out of ${s.collection}`} onClick={() => void keep(s.session, { collection: '' })} />}
+    </>} />
+    <MenuRule />
+    <MenuItem icon={s.archived ? 'solar:archive-up-linear' : 'solar:archive-linear'} label={s.archived ? 'Unarchive' : 'Archive'} onClick={() => void keep(s.session, { archived: !s.archived })} />
+  </>
+  const itemOf = (s: Conversation) => ({ key: `s:${s.session}`, label: titleOf(s), active: s.session === sessionId, onClick: () => go(s.session), menu: menuOf(s),
+    quick: [{ key: 'pin', icon: s.pinned ? 'solar:pin-bold' : 'solar:pin-linear', label: s.pinned ? 'Unpin' : 'Pin', onClick: () => void keep(s.session, { pinned: !s.pinned }) }] })
   const loose = live.filter((s) => !s.pinned && !s.collection)
   const nav = [
     { items: [{ key: 'new', label: 'New chat', icon: 'solar:pen-new-square-linear', onClick: newChat }] },
@@ -152,9 +152,9 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   ]
   const searchItems: SearchItem[] = [
     { key: 'a:new', label: 'New chat', icon: 'solar:pen-new-square-linear', group: 'Go to', onSelect: newChat },
-    { key: 'a:agents', label: 'Agents', icon: 'solar:stars-linear', group: 'Go to', onSelect: () => page('agents') },
+    { key: 'a:agents', label: 'Agents', icon: 'solar:widget-linear', group: 'Go to', onSelect: () => page('agents') },
     { key: 'a:activity', label: 'Activity', icon: 'solar:pulse-linear', group: 'Go to', onSelect: () => page('activity') },
-    { key: 'a:connections', label: 'Connections', icon: 'solar:plug-circle-linear', group: 'Go to', onSelect: () => page('connections') },
+    { key: 'a:connections', label: 'Connections', icon: 'solar:link-round-linear', group: 'Go to', onSelect: () => page('connections') },
     ...sessions.map((s) => ({ key: `s:${s.session}`, label: titleOf(s), sub: [agentOf(s.agent).name, s.collection].filter(Boolean).join(' · '), group: s.archived ? 'Archived' : 'Conversations', onSelect: () => go(s.session) })),
   ]
   const sideActions = <>
@@ -165,14 +165,14 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
     ? <button type="button" className="sa-sidelist__more" onClick={() => setShownConversations((n) => n + 30)}>Show more</button> : null
   const named = agents.filter((a) => !a.isDefault)
   const places: RailPlace[] = [
-    { key: 'home', label: 'Home', icon: 'solar:home-2-linear', onClick: () => page('home'), actions: sideActions,
+    { key: 'home', label: 'Home', icon: 'solar:home-angle-linear', onClick: () => page('home'), actions: sideActions,
       panel: activityView ? <><NavList groups={[nav[0]!]} /><SideActivity request={request} subscribeLive={subscribeLive} /></> : <><NavList groups={nav} />{moreConversations}</> },
-    { key: 'agents', label: 'Agents', icon: 'solar:stars-linear', onClick: () => page('agents'), actions: sideActions,
+    { key: 'agents', label: 'Agents', icon: 'solar:widget-linear', onClick: () => page('agents'), actions: sideActions,
       panel: <NavList groups={[
-        { items: [{ key: 'agents', label: 'All agents', icon: 'solar:widget-linear', active: onPages && root === 'agents', onClick: () => page('agents') }] },
-        { label: 'Agents', items: named.map((a) => ({ key: `a:${a.id}`, label: a.name, icon: a.look.icon ?? 'solar:stars-linear', active: startAgent === a.id || (!!sessionId && current === a.id), onClick: () => go(`s/${a.id}`) })) },
+        { items: [{ key: 'agents', label: 'All agents', icon: 'solar:list-linear', active: onPages && root === 'agents', onClick: () => page('agents') }] },
+        { label: 'Agents', items: named.map((a) => ({ key: `a:${a.id}`, label: a.name, icon: a.look.icon ?? 'solar:widget-linear', active: startAgent === a.id || (!!sessionId && current === a.id), onClick: () => go(`s/${a.id}`) })) },
       ]} /> },
-    { key: 'connections', label: 'Connections', icon: 'solar:plug-circle-linear', onClick: () => page('connections') },
+    { key: 'connections', label: 'Connections', icon: 'solar:link-round-linear', onClick: () => page('connections') },
   ]
   const railAt = sessionId || (onPages && (root === 'home' || !root)) ? 'home' : startAgent || (onPages && root?.startsWith('agent')) ? 'agents' : onPages && root?.startsWith('connection') ? 'connections' : ''
   const [showKeys, setShowKeys] = useState(false)
@@ -203,8 +203,8 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
                 <MenuItem icon="solar:user-circle-linear" label="Profile" onClick={() => page('profile')} />
                 <MenuItem icon="solar:settings-linear" label="Settings" onClick={() => page('settings')} />
                 <MenuRule />
-                <MenuItem icon="solar:stars-linear" label="Agents" onClick={() => page('agents')} />
-                <MenuItem icon="solar:plug-circle-linear" label="Connections" onClick={() => page('connections')} />
+                <MenuItem icon="solar:widget-linear" label="Agents" onClick={() => page('agents')} />
+                <MenuItem icon="solar:link-round-linear" label="Connections" onClick={() => page('connections')} />
                 <MenuItem icon="solar:pulse-linear" label="Activity" onClick={() => page('activity')} />
                 <MenuRule />
                 <MenuItem icon="solar:question-circle-linear" label="Help" sub={<>

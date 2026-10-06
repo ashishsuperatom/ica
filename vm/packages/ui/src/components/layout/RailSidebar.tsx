@@ -66,7 +66,7 @@ export default function RailSidebar({ name, places, current, foot, pinned, onPin
             <button key={p.key} type="button" className="sa-railbar__place" data-active={p.key === current} data-open={p.key === open && !!p.panel}
               title={p.label} aria-label={p.label} onClick={() => pick(p)}
               onMouseEnter={() => { if (!phone()) { hold(); setPeek(p.panel ? p.key : null) } }}>
-              <Icon icon={p.key === current ? p.icon.replace(/-linear$/, '-bold') : p.icon} />
+              <Icon icon={p.icon} />
             </button>
           ))}
           <span className="sa-railbar__gap" />
