@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Icon } from '@iconify/react'
-import { Section, RecordList, Form, Field, Choices, Notice, Status, Code, Toolbar, Receipt, ActionBar, Dialog, Explorer, notify, type ExplorerTable, type ExplorerRequest } from '@superatom/ui'
+import { Section, RecordList, Form, Field, Choices, Notice, Status, Code, Toolbar, Receipt, ActionBar, Dialog, Explorer, notify, type ExplorerTable, type ExplorerRequest, type ExplorerQuery } from '@superatom/ui'
 
 type Api = (path: string, init?: RequestInit) => Promise<Response>
 type Column = { name: string; type: string; required?: boolean }
@@ -25,7 +25,7 @@ function columnsFrom(text: string): { columns: Column[]; problem?: string } {
   return { columns }
 }
 
-export function WarehousePanel({ api, projects, keys }: { api: Api; projects: { id: string; name: string }[]; keys?: ReactNode }) {
+export function WarehousePanel({ api, orgId, projects, keys }: { api: Api; orgId: string; projects: { id: string; name: string }[]; keys?: ReactNode }) {
   const [state, setState] = useState<{ configured: boolean; tables: Table[]; ops: Op[]; caps: string[] } | null>(null)
   const [error, setError] = useState('')
   const [dialog, setDialog] = useState<{ kind: 'new' } | { kind: 'rows' | 'owner'; table: Table } | null>(null)
@@ -35,6 +35,19 @@ export function WarehousePanel({ api, projects, keys }: { api: Api; projects: { 
     setError(''); setState({ configured: !!j.configured, tables: j.tables ?? [], ops: j.ops ?? [], caps: j.capabilities ?? [] })
   }, [api])
   useEffect(() => { void load() }, [load])
+  // One's own queries over this warehouse, kept in one's UserDO; every run is recorded by the platform.
+  const [queries, setQueries] = useState<ExplorerQuery[] | null>(null)
+  const loadQueries = useCallback(async () => {
+    const r = await api('/warehouse/queries'); const j: any = await r.json().catch(() => ({}))
+    setQueries(r.ok ? j.queries ?? [] : [])
+  }, [api])
+  useEffect(() => { void loadQueries() }, [loadQueries])
+  const saveQuery = useCallback(async (q: { id?: number; name: string; sql: string; columns?: unknown }) => {
+    const r = await api('/warehouse/queries', { method: 'POST', body: JSON.stringify(q) }); const j: any = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(j.error ?? 'Not saved')
+    return j as ExplorerQuery
+  }, [api])
+  const deleteQuery = useCallback(async (id: number) => { await api(`/warehouse/queries/${id}`, { method: 'DELETE' }) }, [api])
   const read = useCallback(async (req: ExplorerRequest) => {
     const r = await api('/warehouse/explore', { method: 'POST', body: JSON.stringify(req) }); const j: any = await r.json().catch(() => ({}))
     if (!r.ok) throw new Error(j.error ?? `The warehouse answered ${r.status}`)
@@ -43,7 +56,6 @@ export function WarehousePanel({ api, projects, keys }: { api: Api; projects: { 
   const may = (c: string) => !!state?.caps.includes(c)
   const tables: ExplorerTable[] | null = state ? state.tables.map((t) => ({ ...t, group: t.owner ? `Owned by ${t.owner}` : 'No owner set' })) : null
   const places = [
-    ...(state?.configured && may('warehouse.query') ? [{ key: 'sql', label: 'Ask in SQL', icon: 'lucide:terminal-square', render: () => <Ask api={api} tables={state.tables} /> }] : []),
     ...(state && state.tables.length > 0 && projects.length > 0 && may('warehouse.manage') ? [{ key: 'grants', label: 'What projects may read', icon: 'lucide:shield-check', render: () => <Grants api={api} tables={state.tables} projects={projects} /> }] : []),
     ...(may('warehouse.query') || may('warehouse.manage') ? [{ key: 'record', label: 'What was done', icon: 'lucide:history', render: () => <Operations ops={state?.ops ?? null} /> }] : []),
     ...(keys ? [{ key: 'keys', label: 'Organisation keys', icon: 'lucide:key-round', render: () => keys }] : []),
@@ -54,7 +66,8 @@ export function WarehousePanel({ api, projects, keys }: { api: Api; projects: { 
       {state && !state.configured && !error && (
         <Notice state="attention">The warehouse is not set up on this platform yet: it needs the catalog's account and bucket, its token, and the bucket bound for writing. Until then nothing can be made or asked here.</Notice>
       )}
-      <Explorer keep="org-warehouse" tables={tables} read={read} places={places}
+      <Explorer keep={`org-warehouse:${orgId}`} tables={tables} read={read} places={places}
+        {...(may('warehouse.query') ? { queries, onSaveQuery: saveQuery, onDeleteQuery: deleteQuery, onQueriesChanged: loadQueries } : {})}
         empty={state?.configured ? 'No tables yet — make the first one.' : 'No tables.'}
         tablesHead={state?.configured && may('warehouse.manage') ? <button className="sa-btn sa-btn--link" onClick={() => setDialog({ kind: 'new' })}><Icon icon="lucide:plus" className="sa-btn__icon" />New</button> : null}
         actions={(t) => {
@@ -142,31 +155,6 @@ function AddRows({ api, table, onClose, onAdded }: { api: Api; table: Table; onC
         <Field label="Rows" help="A JSON list, one object per row, its keys the table's columns. Rows usually arrive from what sends them, in batches; this is for trying a table out."><textarea id="wh-rows" className="sa-input sa-input--area sa-input--mono" rows={10} value={text} onChange={(e) => setText(e.target.value)} /></Field>
       </Form>
     </Dialog>
-  )
-}
-
-function Ask({ api, tables }: { api: Api; tables: Table[] }) {
-  const [sql, setSql] = useState(`SELECT * FROM ${tables[0].name} LIMIT 20`)
-  const [result, setResult] = useState<{ columns: string[]; rows: Record<string, unknown>[]; truncated: boolean } | null>(null)
-  const [error, setError] = useState(''); const [busy, setBusy] = useState(false)
-  const run = async () => {
-    setBusy(true); setError('')
-    const r = await api('/warehouse/query', { method: 'POST', body: JSON.stringify({ sql, limit: 100 }) }); const j: any = await r.json().catch(() => ({}))
-    setBusy(false)
-    if (!r.ok) { setError(j.error ?? 'The query was not answered'); setResult(null); return }
-    setResult(j)
-  }
-  return (
-    <Section icon="lucide:terminal-square" title="Ask the warehouse" subtitle="SELECT over the organisation's tables, named plainly. At most 100 rows come back.">
-      <Form onSubmit={() => void run()} error={error} actions={<button className="sa-btn sa-btn--primary" disabled={busy}>{busy ? 'Asking…' : 'Run'}</button>}>
-        <Field label="SQL"><textarea id="wh-sql" className="sa-input sa-input--area sa-input--mono" rows={4} value={sql} onChange={(e) => setSql(e.target.value)} /></Field>
-      </Form>
-      {result && (
-        <RecordList rows={result.rows.map((r, i) => ({ ...r, __i: i }))} keyOf={(r) => String(r.__i)} empty="No rows."
-          columns={result.columns.map((c) => ({ key: c, label: c, render: (r: any) => (r[c] === null || r[c] === undefined ? '—' : String(r[c])) }))} />
-      )}
-      {result?.truncated && <div className="sa-section__body"><Notice>More rows matched; the first 100 are shown.</Notice></div>}
-    </Section>
   )
 }
 

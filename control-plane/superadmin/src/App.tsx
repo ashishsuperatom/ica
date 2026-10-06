@@ -761,7 +761,7 @@ function OrgDetailPage() {
   }
 
   // The warehouse is the whole page: the explorer, with everything else beside its tables.
-  if (tab === 'warehouse') return <WarehousePanel api={api} projects={projects.filter((p: any) => !p.deleted).map((p: any) => ({ id: p.id, name: p.name }))} keys={<OrgKeysPanel api={api} />} />
+  if (tab === 'warehouse') return <WarehousePanel api={api} orgId={orgId ?? ''} projects={projects.filter((p: any) => !p.deleted).map((p: any) => ({ id: p.id, name: p.name }))} keys={<OrgKeysPanel api={api} />} />
 
   return (
     <Shell>

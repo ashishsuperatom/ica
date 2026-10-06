@@ -1158,6 +1158,39 @@ Ask in SQL, What projects may read, What was done (explorer reads are recorded b
 keys; above a table's rows: Add rows, Owner. `sacli warehouse explore <op> <table>` gives agents the same reads.
 Later: views, versions and transformations (the semantic warehouse); a table's grant from its own head.
 
+**In the user's words (2026-10-06, round 2):** listing tables and showing 10 or 100 rows should be fast — it is Parquet
+and Cloudflare SQL, just 1,000 rows should be almost instantaneous; why not? One search only: on the left it searches the
+tables and their column names (whatever metadata there is), and the same search searches the actual data of the opened
+table — in the database, not only what the screen shows. A warehouse cache in the front end (an LRU of its own), so what
+was seen comes back immediately — above all the column analysis on the right, which is slow; going to another table and
+back must be instant. A click on a cell selects it with a border (as Google Sheets or Excel), arrow keys move, the
+selection stays in view (scroll at the edges), Ctrl-C copies — no copy on click. Every query is a table too: a list of
+queries beside the tables, click one to load it and run it again; no separate "Ask in SQL" card — a query's result is the
+same table view, with the column analysis and filters wherever possible. The column analysis must have everything Rill
+(Rill Data) has — show example, show distribution, all of it. And saved queries are stored on the platform, not the
+front end.
+*Why it is not instant:* measured from the Worker, R2 SQL answers in 0.5–1.4 s whatever the size: a distributed engine
+plans, reads the table's Iceberg metadata and manifests from R2, then the Parquet — a fixed cost per query. Our own cost
+on top (a catalog listing and every table's metadata before each query, each catalog call 1–8 s) is removed: one
+warehouse per isolate, the tables' schemas kept five minutes, forgotten on our own writes. Instant is the browser cache.
+Reading small tables' Parquet directly in the Worker would be faster still — not done; the standard engine was chosen.
+*Where queries live — the user's words:* not the organisation's DO alone: each person who comes sees something else; with
+many people given access to projects, each runs their own queries. They are stored in the **UserDO** (its SQLite): a
+section for the warehouse with every query they have asked — perhaps a very small subset of what they got last time, but
+above all the queries themselves. Every user logs in, so it is simple: every user has their own, and inside it a warehouse.
+*Built:* `warehouse_queries` in the UserDO (keyed `user:<id>`): which warehouse (organisation) and project ('' = the
+organisation's page), the SQL, an optional name (named = saved; unnamed = recent), runs, last run, rows, up to five rows of
+the last answer, its columns. The platform records each run itself — the Worker on the organisation's page, the ProjectDO
+in a project (`warehouse:queries`, `…:save`, `…:delete` over the hub) — and the answer carries `recorded: {id}`.
+
+**The UserDO as everyone's front door — the user's words (2026-10-06, for later, not switching now):** the UserDO belongs to
+the user and many things will come into it — we will track what a user does, quite a lot. After a while, every
+connection from the front end goes to the user's UserDO instead of straight to the ProjectDO as today. The engine is
+connected to the ProjectDO — otherwise the engine would have to connect to every user, which is not good. To limit what a
+user can do, to allow several connections per user, to fan out and manage throughput, every user connects to their
+UserDO; based on their access it decides and sends the message on to the ProjectDO; the project passes on to the
+OrganisationDO what is the organisation's. A very clean architecture — to be discussed and done a bit later.
+
 ### Appending and partitioning in the warehouse (question, 2026-10-06)
 
 **In the user's words:** Parquet files are a one-time thing, a compression system — appending is not like a scale

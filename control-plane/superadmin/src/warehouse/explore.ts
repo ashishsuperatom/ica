@@ -8,11 +8,14 @@ import type { QueryResult, TableInfo } from './bridge'
 
 export interface Filter { column: string; value: string | null }
 export interface Narrowing { q?: string; where?: Filter[] }
-export type ExploreRequest =
-  | ({ op: 'rows'; table: string; sort?: string | null; dir?: 'asc' | 'desc'; page?: number; size?: number } & Narrowing)
-  | ({ op: 'values'; table: string; column: string } & Narrowing)
-  | { op: 'profile'; table: string }
-  | ({ op: 'spread'; table: string; column: string } & Narrowing)
+/** What is explored: a table (by name), or a query's result (its SQL, and its columns once known). */
+export interface Source { table?: string; query?: { sql: string; columns?: { name: string; type: string }[] } }
+export type ExploreRequest = Source & (
+  | ({ op: 'rows'; sort?: string | null; dir?: 'asc' | 'desc'; page?: number; size?: number } & Narrowing)
+  | ({ op: 'values'; column: string } & Narrowing)
+  | { op: 'profile' }
+  | ({ op: 'spread'; column: string } & Narrowing)
+  | { op: 'bins'; ranges: Record<string, [number, number]> })
 
 export type Kind = 'number' | 'time' | 'bool' | 'text'
 export function kindOf(type: string): Kind {
@@ -20,6 +23,64 @@ export function kindOf(type: string): Kind {
   if (/^(date|timestamp|time)/.test(type)) return 'time'
   if (type === 'boolean') return 'bool'
   return 'text'
+}
+
+/** A table, or a query's result, as the explorer reads it: where its rows come FROM, and its columns. */
+export interface Explored { name: string; from: string; columns: { name: string; type: string }[]; rows?: number; order?: string[] }
+
+/** A table as the explorer reads it. */
+export const tableSource = (t: TableInfo): Explored => ({ name: t.name, from: t.name, columns: t.columns, rows: t.rows })
+
+const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/
+/** A value's kind, guessed from what a query returned (a query's columns carry no types). */
+function typeOfValue(v: unknown): string {
+  if (typeof v === 'number' || typeof v === 'bigint') return 'double'
+  if (typeof v === 'boolean') return 'boolean'
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) return 'date'
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(v)) return 'timestamp'
+  return 'string'
+}
+
+/**
+ * A query's result as something to explore: its own SQL in parentheses, its columns (as the caller knows them, or learnt
+ * by running it for one row), and its own ORDER BY where that names only its columns — the order its rows are shown in.
+ * A column without a plain name (`count(*)`) cannot be searched or profiled: it is left out, and named in `skipped`.
+ */
+export async function querySource(run: Run, sql: string, known?: { name: string; type: string }[]): Promise<Explored & { skipped: string[] }> {
+  const text = sql.trim().replace(/;\s*$/, '')
+  if (!text) throw new ExploreRefusal('write a query')
+  let columns = known?.filter((c) => IDENT.test(c.name)).map((c) => ({ name: c.name, type: String(c.type) })) ?? null
+  let skipped: string[] = []
+  if (!columns?.length) {
+    const r = await run(text, 1)
+    skipped = r.columns.filter((c) => !IDENT.test(c))
+    columns = r.columns.filter((c) => IDENT.test(c)).map((c) => ({ name: c, type: typeOfValue(r.rows[0]?.[c]) }))
+  }
+  if (!columns.length) throw new ExploreRefusal('the query names no column the explorer can read — name each computed column with AS')
+  return { name: 'query', from: `(${text}) sa_q`, columns, order: ownOrder(text, columns.map((c) => c.name)), skipped }
+}
+
+/** The query's own top-level ORDER BY, when it is only its columns (by name or position) with ASC/DESC. */
+function ownOrder(sql: string, names: string[]): string[] | undefined {
+  const toks = sql.match(/"[^"]*"|'(?:[^']|'')*'|[A-Za-z_][A-Za-z0-9_]*|\d+|\S/g) ?? []
+  let depth = 0, at = -1
+  toks.forEach((t, i) => { if (t === '(') depth++; else if (t === ')') depth--; else if (depth === 0 && t.toLowerCase() === 'order' && toks[i + 1]?.toLowerCase() === 'by') at = i + 2 })
+  if (at < 0) return undefined
+  const out: string[] = []
+  let cur: string | null = null
+  for (let i = at; i < toks.length; i++) {
+    const t = toks[i], w = t.toLowerCase()
+    if (w === 'limit') break
+    if (t === ',') { if (!cur) return undefined; out.push(cur); cur = null; continue }
+    if (w === 'asc' || w === 'nulls' || w === 'first' || w === 'last') continue
+    if (w === 'desc') { if (!cur) return undefined; cur += ' DESC'; continue }
+    if (cur) return undefined
+    const name = /^\d+$/.test(t) ? names[Number(t) - 1] : t.replace(/^"|"$/g, '')
+    if (!name || !names.includes(name)) return undefined
+    cur = `"${name}"`
+  }
+  if (cur) out.push(cur)
+  return out.length ? out : undefined
 }
 
 export interface ColumnProfile { name: string; type: string; kind: Kind; distinct: number | null; nulls: number; min: string | null; max: string | null; mean: number | null; q1: number | null; median: number | null; q3: number | null; trues: number | null }
@@ -36,7 +97,7 @@ const num = (v: unknown): number | null => (v === null || v === undefined || v =
 const str = (v: unknown): string | null => (v === null || v === undefined ? null : String(v))
 
 /** The SQL pieces, from checked names only. */
-function sqlOf(t: TableInfo) {
+function sqlOf(t: Explored) {
   const readable = new Map(t.columns.map((c) => [c.name, c]))
   const col = (name: string) => {
     const c = readable.get(String(name))
@@ -57,10 +118,10 @@ function sqlOf(t: TableInfo) {
     for (const f of n.where ?? []) parts.push(f.value === null ? `${id(f.column)} IS NULL` : `${text(f.column)} = ${lit(String(f.value))}`)
     return parts.length ? ` WHERE ${parts.join(' AND ')}` : ''
   }
-  return { col, id, text, where, table: t.name }
+  return { col, id, text, where, table: t.from }
 }
 
-export async function explore(run: Run, t: TableInfo, r: ExploreRequest): Promise<unknown> {
+export async function explore(run: Run, t: Explored, r: ExploreRequest): Promise<unknown> {
   if (!t.columns.length) throw new ExploreRefusal(`you may read no column of ${t.name}`)
   const s = sqlOf(t)
   const all = t.columns.map((c) => s.id(c.name))
@@ -71,7 +132,8 @@ export async function explore(run: Run, t: TableInfo, r: ExploreRequest): Promis
     const w = s.where(r)
     // No OFFSET in the warehouse: rows are numbered in their order, and a page is a range of those numbers. The order is
     // the chosen column, then every column — so a page is the same page each time it is asked.
-    const order = [...(r.sort ? [`${s.id(r.sort)} ${r.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST`] : []), ...all.filter((c) => !r.sort || c !== s.id(r.sort))].join(', ')
+    const first = r.sort ? [`${s.id(r.sort)} ${r.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST`] : t.order ?? []
+    const order = [...first, ...all.filter((c) => !first.some((f) => f.startsWith(`${c} `) || f === c))].join(', ')
     const from = (page - 1) * size
     // Unnarrowed, the table's own snapshot counts its rows (when it does): one query fewer.
     const counted = !w && t.rows !== undefined ? { columns: [], rows: [{ sa_total: t.rows }], truncated: false } : null
@@ -79,7 +141,7 @@ export async function explore(run: Run, t: TableInfo, r: ExploreRequest): Promis
       counted ?? run(`SELECT COUNT(*) AS sa_total FROM ${s.table}${w}`, 1),
       run(`SELECT ${all.join(', ')} FROM (SELECT ${all.join(', ')}, ROW_NUMBER() OVER (ORDER BY ${order}) AS sa_rn FROM ${s.table}${w}) sa_page WHERE sa_rn > ${from} AND sa_rn <= ${from + size} ORDER BY sa_rn`, size),
     ])
-    return { total: num(total.rows[0]?.sa_total) ?? 0, page, size, rows: rows.rows }
+    return { total: num(total.rows[0]?.sa_total) ?? 0, page, size, rows: rows.rows, columns: t.columns }
   }
 
   if (r.op === 'values') {
@@ -130,5 +192,22 @@ export async function explore(run: Run, t: TableInfo, r: ExploreRequest): Promis
     }
     return { kind: 'none' } satisfies Spread
   }
-  throw new ExploreRefusal('the explorer reads rows, values, a profile or a spread')
+  if (r.op === 'bins') {
+    // Every column's small histogram in one read: twenty bins between the low and high the profile found, counted by
+    // conditional sums (numbers as they are; dates and times by their epoch seconds).
+    const parts: string[] = [], plan: { name: string; lo: number; w: number; at: number }[] = []
+    for (const [name, range] of Object.entries(r.ranges ?? {})) {
+      const c = s.col(name), k = kindOf(c.type)
+      const lo = Number(range?.[0]), hi = Number(range?.[1])
+      if ((k !== 'number' && k !== 'time') || !Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) continue
+      const v = k === 'time' ? `date_part('epoch', ${s.id(name)})` : `CAST(${s.id(name)} AS DOUBLE)`
+      const w = (hi - lo) / BINS
+      plan.push({ name, lo, w, at: parts.length })
+      for (let b = 0; b < BINS; b++) parts.push(`SUM(CASE WHEN ${b === BINS - 1 ? `${v} >= ${lo + b * w}` : `${v} >= ${lo + b * w} AND ${v} < ${lo + (b + 1) * w}`} THEN 1 ELSE 0 END) AS sa_b${parts.length}`)
+    }
+    if (!parts.length) return { bins: {} }
+    const x = (await run(`SELECT ${parts.join(', ')} FROM ${s.table}`, 1)).rows[0] ?? {}
+    return { bins: Object.fromEntries(plan.map((p) => [p.name, Array.from({ length: BINS }, (_, b) => num(x[`sa_b${p.at + b}`]) ?? 0)])) }
+  }
+  throw new ExploreRefusal('the explorer reads rows, values, a profile, a spread or bins')
 }

@@ -11,7 +11,7 @@ import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/
 import { ORG_MIGRATIONS } from './migrations.js'
 import { DurableObject } from 'cloudflare:workers'
 import { createRecorder } from './records.js'
-import { warehouse, WarehouseRefusal, explore, ExploreRefusal, type Grant } from './warehouse/index.js'
+import { warehouse, WarehouseRefusal, explore, querySource, tableSource, ExploreRefusal, type Grant } from './warehouse/index.js'
 import { AgentKeys, KeyRefusal, ORG_KEYS } from './agent-keys.js'
 import { beyond, builtinRole, checkRole, isCapability, orgMessageAllowed, ORG_ADMINISTERS_PROJECTS, ORG_ROLES, type Capability } from '../../shared/permissions.js'
 import { SUPERADMIN_EMAILS } from './auth/tokens.js'
@@ -119,11 +119,19 @@ export class OrgDO extends DurableObject<Env> {
         // What may be read: 'all', or a project's grant — the explorer is given only those columns, and every query it
         // makes is checked against the same grant again.
         const grant: Grant | 'all' = body.grant === 'all' ? 'all' : (body.grant && typeof body.grant === 'object' ? body.grant : {})
+        const run = (sql: string, limit: number) => bridge.queryAs(org, sql, grant, { limit })
+        if (body.query && typeof body.query === 'object') {
+          // A query's result, explored like a table: every query the explorer makes over it is checked as a whole.
+          const src = await querySource(run, String(body.query.sql ?? ''), Array.isArray(body.query.columns) ? body.query.columns : undefined)
+          const out: any = await explore(run, src, body)
+          log('explore', { tbl: 'query', project: body.project ?? null, ok: true, detail: { op: body.op }, by })
+          return json({ ...out, ...(body.op === 'rows' ? { columns: src.columns, skipped: src.skipped } : {}) })
+        }
         const tbl = String(body.table ?? '')
         const info = await bridge.describe(org, tbl)
         if (!info || (grant !== 'all' && !(tbl in grant))) throw new WarehouseRefusal(`there is no table "${tbl}" you may read`)
         const allowed = grant === 'all' || grant[tbl] === null ? info.columns : info.columns.filter((c) => (grant[tbl] as string[]).includes(c.name))
-        const out = await explore((sql, limit) => bridge.queryAs(org, sql, grant, { limit }), { ...info, columns: allowed }, body)
+        const out = await explore(run, tableSource({ ...info, columns: allowed }), body)
         log('explore', { tbl, project: body.project ?? null, ok: true, detail: { op: body.op }, by })
         return json(out)
       }

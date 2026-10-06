@@ -90,7 +90,7 @@ earlier block (--block) branches the session into a new thread. Values are JSON;
   sacli warehouse query "<sql>" [--limit <n>]          SQL over them (read-only; a project key reads its grant only)
   sacli warehouse append <table> [--rows '<json>' | --file <rows.json>]   rows (a JSON list; stdin when neither)
 With an organisation key (sak_org_…) made by someone who may manage the warehouse:
-  sacli warehouse explore <rows|values|profile|spread> <table> [--column c] [--q text] [--sort c --desc] [--page n --size n]
+  sacli warehouse explore <rows|values|profile|spread> <table | --sql "<query>"> [--column c] [--q text] [--sort c --desc] [--page n --size n]
   sacli warehouse create <table> --column <name>:<type>[!] …   types: string long int double float boolean date
                                                               timestamp timestamptz; a ! makes the column required
   sacli warehouse grants --project <id>                what a project may read and write
@@ -132,7 +132,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
     const specific: ParseArgsConfig['options'] = cmd === 'session'
       ? { id: { type: 'string' }, 'as-of': { type: 'string' }, set: { type: 'string', multiple: true }, add: { type: 'string', multiple: true }, remove: { type: 'string', multiple: true },
           call: { type: 'string' }, param: { type: 'string', multiple: true }, act: { type: 'string' }, to: { type: 'string' }, block: { type: 'string' } }
-      : cmd === 'warehouse' ? { rows: { type: 'string' }, file: { type: 'string' }, limit: { type: 'string' }, column: { type: 'string', multiple: true }, project: { type: 'string' }, columns: { type: 'string' }, write: { type: 'boolean' }, q: { type: 'string' }, sort: { type: 'string' }, desc: { type: 'boolean' }, page: { type: 'string' }, size: { type: 'string' } }
+      : cmd === 'warehouse' ? { rows: { type: 'string' }, file: { type: 'string' }, limit: { type: 'string' }, column: { type: 'string', multiple: true }, project: { type: 'string' }, columns: { type: 'string' }, write: { type: 'boolean' }, q: { type: 'string' }, sort: { type: 'string' }, desc: { type: 'boolean' }, page: { type: 'string' }, size: { type: 'string' }, sql: { type: 'string' } }
       : cmd === 'ask' ? { session: { type: 'string' } } : cmd === 'use' ? { here: { type: 'boolean' } } : cmd === 'call' ? { data: { type: 'string' } } : {}
     let parsed
     try { parsed = parseArgs({ args: argv, options: { ...GLOBAL, ...specific }, allowPositionals: true, strict: true }) }
@@ -193,8 +193,8 @@ export async function run(argv: string[], io: Io): Promise<number> {
     // The explorer's structured reads: sacli warehouse explore <rows|values|profile|spread> <table> [--column c] [--q text] [--sort c] [--desc] [--page n] [--size n]
     const exploreReq = (args: string[]) => {
       const [op, table] = args
-      if (!['rows', 'values', 'profile', 'spread'].includes(String(op)) || !table) throw new CliError('sacli warehouse explore <rows|values|profile|spread> <table> [--column c] [--q text] [--sort c] [--desc] [--page n] [--size n]', 2)
-      return { t: 'warehouse:explore', op, table, ...(o.column ? { column: String(Array.isArray(o.column) ? o.column[0] : o.column) } : {}), q: o.q ? String(o.q) : '', where: [], ...(o.sort ? { sort: String(o.sort), dir: o.desc ? 'desc' : 'asc' } : {}), page: o.page ? Number(o.page) : 1, size: o.size ? Number(o.size) : 50 }
+      if (!['rows', 'values', 'profile', 'spread'].includes(String(op)) || (!table && !o.sql)) throw new CliError('sacli warehouse explore <rows|values|profile|spread> <table | --sql "<query>"> [--column c] [--q text] [--sort c] [--desc] [--page n] [--size n]', 2)
+      return { t: 'warehouse:explore', op, ...(o.sql ? { query: { sql: String(o.sql) } } : { table }), ...(o.column ? { column: String(Array.isArray(o.column) ? o.column[0] : o.column) } : {}), q: o.q ? String(o.q) : '', where: [], ...(o.sort ? { sort: String(o.sort), dir: o.desc ? 'desc' : 'asc' } : {}), page: o.page ? Number(o.page) : 1, size: o.size ? Number(o.size) : 50 }
     }
     const rowsGiven = async (): Promise<unknown[]> => {
       let text = o.rows as string | undefined

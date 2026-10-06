@@ -8,7 +8,7 @@ import { checkQuery, capRows, type Grant } from '../access'
 import { namespaceOf, NOT_CONFIGURED, TABLE_NAME, COLUMN_TYPES, WarehouseRefusal, type Column, type DataSourceBridge, type Ingest, type TableInfo } from '../bridge'
 
 /** How long what the catalog said about an organisation's tables is trusted (this warehouse's own writes forget it). */
-const SCHEMA_TTL = 60_000
+const SCHEMA_TTL = 5 * 60_000
 
 export interface CloudConfig { accountId: string; bucket: string; catalogToken: string; sqlToken: string; catalogUri?: string; sqlEndpoint?: string }
 

@@ -113,17 +113,18 @@ async function projectAccessOf(request: Request, env: Env, projectId: string):
 
 /** The caller's standing in ONE org: their role there and what it holds (the platform's superadmin everything). */
 async function orgAccessOf(request: Request, env: Env, orgId: string):
-    Promise<{ ok: boolean; level: 'superadmin' | 'org-admin' | 'member' | 'none'; email: string; role: string | null; caps: Capability[] }> {
+    Promise<{ ok: boolean; level: 'superadmin' | 'org-admin' | 'member' | 'none'; email: string; role: string | null; caps: Capability[]; userId?: string }> {
   const claims = await claimsOf(request, env)
   const email = (claims?.email || '').toLowerCase()
+  const userId = claims?.userId ? String(claims.userId) : undefined
   if (!claims) return { ok: false, level: 'none', email: '', role: null, caps: [] }
-  if (claims.role === 'superadmin') return { ok: true, level: 'superadmin', email, role: 'superadmin', caps: [...capabilitiesOf('org')] }
+  if (claims.role === 'superadmin') return { ok: true, level: 'superadmin', email, role: 'superadmin', caps: [...capabilitiesOf('org')], userId }
   if (!email) return { ok: false, level: 'none', email, role: null, caps: [] }
   const org = env.ORG.get(env.ORG.idFromName(orgId))
   const me: any = await org.fetch(`https://do/me?email=${encodeURIComponent(email)}`).then(r => r.json()).catch(() => ({}))
   if (!me?.member) return { ok: false, level: 'none', email, role: null, caps: [] }
   const caps: Capability[] = Array.isArray(me.capabilities) ? me.capabilities : []
-  return { ok: true, level: me.role === 'owner' || me.role === 'admin' ? 'org-admin' : 'member', email, role: String(me.role), caps }
+  return { ok: true, level: me.role === 'owner' || me.role === 'admin' ? 'org-admin' : 'member', email, role: String(me.role), caps, userId }
 }
 
 /** Does this standing meet what a route needs? */
@@ -758,8 +759,26 @@ export default {
           const sees = ['warehouse.query', 'warehouse.write', 'warehouse.manage'].some((c) => can(oa.caps, c as Capability))
           return Response.json({ configured: r.configured, org: r.org, tables: sees ? r.tables : [], ops: can(oa.caps, 'warehouse.query') || can(oa.caps, 'warehouse.manage') ? r.ops : [], capabilities: oa.caps.filter((c) => c.startsWith('warehouse.')) })
         }
+        // One's own queries over this warehouse live in one's UserDO (the organisation's page: project '').
+        const me = oa.userId ? (env as any).USER.get((env as any).USER.idFromName(`user:${oa.userId}`)) : null
+        if (sub === '/warehouse/queries' || sub.startsWith('/warehouse/queries/')) {
+          if (!me) return Response.json({ error: 'who is asking is not known' }, { status: 401 })
+          const qs = `org=${encodeURIComponent(orgId)}&project=`
+          if (request.method === 'POST') return me.fetch(new Request('http://do/warehouse/queries', { method: 'POST', body: JSON.stringify({ ...(await request.json().catch(() => ({})) as object), org: orgId, project: '' }) }))
+          return me.fetch(new Request(`http://do${sub}?${qs}`, { method: request.method }))
+        }
         if (request.method === 'GET') return org.fetch(new Request(`http://do${sub}`, { headers }))
-        const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by, ...(sub === '/warehouse/query' || sub === '/warehouse/explore' ? { grant: 'all' } : {}) })
+        const asked: any = await request.json().catch(() => ({}))
+        if (sub === '/warehouse/explore' && asked?.query && me) {
+          // A query run (its first page, as written): the organisation answers, the person's UserDO records it.
+          const res = await org.fetch(new Request(`http://do${sub}`, { method: 'POST', headers, body: JSON.stringify({ ...asked, by, grant: 'all' }) }))
+          if (!res.ok || asked.op !== 'rows' || Number(asked.page ?? 1) !== 1 || asked.q || asked.where?.length || asked.sort) return res
+          const out: any = await res.json()
+          const rec: any = await me.fetch(new Request('http://do/warehouse/runs', { method: 'POST', body: JSON.stringify({ org: orgId, project: '', sql: asked.query.sql, columns: out.columns, rows: out.total, sample: (out.rows ?? []).slice(0, 5) }) })).then((r: Response) => r.json()).catch(() => null)
+          return Response.json({ ...out, ...(rec?.id ? { recorded: { id: rec.id } } : {}) })
+        }
+        const body = JSON.stringify({ ...asked, by, ...(sub === '/warehouse/query' || sub === '/warehouse/explore' ? { grant: 'all' } : {}) })
+        if (request.method === 'DELETE') return org.fetch(new Request(`http://do${sub}`, { method: 'DELETE', headers }))
         return org.fetch(new Request(`http://do${sub}`, { method: request.method, headers, body }))
       }
       // USAGE PER PERSON across the organisation's projects: what each of its people used (tokens, cache, credits), and

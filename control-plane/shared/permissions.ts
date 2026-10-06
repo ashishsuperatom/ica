@@ -129,6 +129,7 @@ export function orgRouteNeeds(method: string, path: string): RouteNeed {
   if (path === '/warehouse/append') return 'warehouse.write'
   if (path === '/warehouse/query' || path === '/warehouse/explore') return 'warehouse.query'
   if (path === '/warehouse/owner') return 'warehouse.manage'
+  if (path === '/warehouse/queries' || path.startsWith('/warehouse/queries/')) return 'warehouse.query'   // one's own, in one's UserDO
   return 'org.roles'
 }
 
@@ -146,7 +147,7 @@ export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   'decision:change': 'project.publish', 'decision:learn': 'project.publish',
   // Publishing a program: its owner, or someone with project.publish (the catalogue decides which).
   'program:publish': 'project.ask',
-  'warehouse:tables': 'warehouse.use', 'warehouse:query': 'warehouse.use', 'warehouse:explore': 'warehouse.use', 'warehouse:append': 'warehouse.append',
+  'warehouse:tables': 'warehouse.use', 'warehouse:query': 'warehouse.use', 'warehouse:explore': 'warehouse.use', 'warehouse:queries': 'warehouse.use', 'warehouse:queries:save': 'warehouse.use', 'warehouse:queries:delete': 'warehouse.use', 'warehouse:append': 'warehouse.append',
   // Terminals into the agents, the inspector, index and grounding builds, engine settings: running the project.
   'term:attach': 'project.manage', 'term:input': 'project.manage', 'term:detach': 'project.manage', 'inspect:req': 'project.manage',
   'index:build': 'project.manage', 'grounding:build': 'project.manage', 'config:update': 'project.manage', 'app:reload': 'project.manage',

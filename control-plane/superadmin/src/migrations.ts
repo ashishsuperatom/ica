@@ -434,6 +434,15 @@ export const USER_MIGRATIONS: Migration[] = [
     CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated);
     CREATE TABLE IF NOT EXISTS state (project TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, updated TEXT NOT NULL, PRIMARY KEY (project, key));
   ` },
+  { id: 2, name: 'warehouse queries', up: `
+    -- The person's queries over a warehouse (an organisation's), from the organisation or from one of its projects
+    -- (project '' = the organisation's page): every one they ran — the recent ones — and those they named (saved). Each
+    -- keeps its result's columns, how often and when it last ran, how many rows it gave, and a few of them.
+    CREATE TABLE IF NOT EXISTS warehouse_queries (id INTEGER PRIMARY KEY AUTOINCREMENT, org TEXT NOT NULL, project TEXT NOT NULL DEFAULT '',
+      name TEXT NOT NULL DEFAULT '', sql TEXT NOT NULL, columns TEXT, runs INTEGER NOT NULL DEFAULT 0, last_run TEXT, last_rows INTEGER,
+      last_sample TEXT, created TEXT NOT NULL, updated TEXT NOT NULL);
+    CREATE UNIQUE INDEX IF NOT EXISTS warehouse_queries_sql ON warehouse_queries (org, project, sql);
+  ` },
 ]
 
 // ── GraphDO ──────────────────────────────────────────────────────────────────────────────────────────────────────────

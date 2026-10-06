@@ -1501,7 +1501,7 @@ export class ProjectDO extends DurableObject<Env> {
       return
     }
     // ── The organisation's warehouse, as far as this project was granted (no engine needed) ──
-    if ((pl.t === 'warehouse:tables' || pl.t === 'warehouse:query' || pl.t === 'warehouse:explore' || pl.t === 'warehouse:append') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
+    if ((pl.t === 'warehouse:tables' || pl.t === 'warehouse:query' || pl.t === 'warehouse:explore' || pl.t === 'warehouse:append' || pl.t === 'warehouse:queries' || pl.t === 'warehouse:queries:save' || pl.t === 'warehouse:queries:delete') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
       const who = this.principalOf(sender)
       try {
         if (!who) throw new Error('who is asking is not known')
@@ -1529,7 +1529,22 @@ export class ProjectDO extends DurableObject<Env> {
           const res = await orgDo.fetch(new Request('http://do/warehouse/explore', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-org': org }, body: JSON.stringify({ ...req, grant, project: this._pid, by: who }) }))
           const out: any = await res.json()
           if (!res.ok) throw new Error(out.error ?? `the warehouse answered ${res.status}`)
-          hubReply({ t: 'warehouse:explored', ...out, reqId: pl.reqId })
+          // A query run (its first page, as written) is recorded in the person's own UserDO, for this project.
+          let recorded: { id: number } | undefined
+          if (req.query && req.op === 'rows' && Number(req.page ?? 1) === 1 && !req.q && !req.where?.length && !req.sort) {
+            const r: any = await this.userStub(who).fetch('http://do/warehouse/runs', { method: 'POST', body: JSON.stringify({ org, project: this._pid, sql: req.query.sql, columns: out.columns, rows: out.total, sample: (out.rows ?? []).slice(0, 5) }) }).then((x: Response) => x.json()).catch(() => null)
+            if (r?.id) recorded = { id: r.id }
+          }
+          hubReply({ t: 'warehouse:explored', ...out, ...(recorded ? { recorded } : {}), reqId: pl.reqId })
+        } else if (pl.t === 'warehouse:queries' || pl.t === 'warehouse:queries:save' || pl.t === 'warehouse:queries:delete') {
+          // One's own queries over the warehouse, from this project: kept in one's UserDO.
+          const me = this.userStub(who), qs = `org=${encodeURIComponent(org)}&project=${encodeURIComponent(this._pid)}`
+          const res = pl.t === 'warehouse:queries' ? await me.fetch(`http://do/warehouse/queries?${qs}`)
+            : pl.t === 'warehouse:queries:save' ? await me.fetch('http://do/warehouse/queries', { method: 'POST', body: JSON.stringify({ id: pl.id, name: pl.name, sql: pl.sql, columns: pl.columns, org, project: this._pid }) })
+            : await me.fetch(`http://do/warehouse/queries/${Number(pl.id)}?${qs}`, { method: 'DELETE' })
+          const out: any = await res.json()
+          if (!res.ok) throw new Error(out.error ?? `not done (${res.status})`)
+          hubReply({ t: 'warehouse:queries', ...out, reqId: pl.reqId })
         } else {
           const res = await orgDo.fetch(new Request('http://do/warehouse/query', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-org': org }, body: JSON.stringify({ sql: pl.sql, limit: pl.limit, grant, project: this._pid, by: who }) }))
           const out: any = await res.json()
