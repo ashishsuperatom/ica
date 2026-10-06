@@ -658,10 +658,11 @@ const agentStream = (w: Which, from: any): RunHandlers => ({
 const announceKind = (w: Which, from: any, agent: any) =>
   emit(from, A('hello', w, { streamKind: agent?.session?.kind ?? 'events', pty: agent?.session?.kind === 'pty', scope: 'project', ...profileOf(w === 'connector' ? 'connector' : w === 'grounding' ? 'grounding' : 'analyst'), label: w === 'connector' ? 'Connector' : w === 'grounding' ? 'Grounding' : 'Analyst', hue: w === 'connector' ? '#7a5cc9' : w === 'grounding' ? '#b8562a' : '#c08a2b', interactive: true }))
 const isAgentBusy = (w: Which) => (w === 'connector' ? connectorBusy : w === 'grounding' ? groundingBusy : busySessions.size > 0)
-const termViewers: Record<Which, Set<any>> = { analyst: new Set(), connector: new Set(), grounding: new Set() }
+// Who watches each agent's terminal, by their connection id (each message brings a new `from` object).
+const termViewers: Record<Which, Map<string, any>> = { analyst: new Map(), connector: new Map(), grounding: new Map() }
 const termUnsub: Record<Which, (() => void) | null> = { analyst: null, connector: null, grounding: null }
 async function attachTerminal(w: Which, from: any) {
-  termViewers[w].add(from)
+  termViewers[w].set(String(from?.id ?? ''), from)
   const agent = await slotFor(w).get()
   const t = termChunkT(w)
   const kind = agent.session.kind ?? 'events'
@@ -677,7 +678,7 @@ async function attachTerminal(w: Which, from: any) {
   if (!termUnsub[w] && agent.session.onRaw) {
     termUnsub[w] = agent.session.onRaw((d: string) => {
       if (isAgentBusy(w)) return                                             // during a run, the per-run stream already feeds output
-      for (const v of termViewers[w]) emit(v, { t, text: d })
+      for (const v of termViewers[w].values()) emit(v, { t, text: d })
     })
   }
 }
@@ -765,7 +766,7 @@ async function handle(payload: any, from: any) {
   else if (payload.t === 'grounding:build') { handleGrounding(from, !!payload.rebuild) }        // admin console → grounding agent builds (rebuild:true = wipe first, else additive)
   else if (payload.t === 'connector:ask') { handleConnector(String(payload.text || ''), from) }   // admin console → connector agent (raw PTY back)
   else if (payload.t === 'term:attach') { attachTerminal(normWhich(payload.which), from) }         // open a live typeable terminal into an agent's PTY (e.g. /login)
-  else if (payload.t === 'term:detach') { termViewers[normWhich(payload.which)]?.delete(from) }    // UI switched away from the raw terminal → stop streaming PTY bytes to it
+  else if (payload.t === 'term:detach') { termViewers[normWhich(payload.which)]?.delete(String(from?.id ?? '')) }    // UI switched away from the raw terminal → stop streaming PTY bytes to it
   else if (payload.t === 'term:input')  { inputTerminal(normWhich(payload.which), String(payload.data ?? '')) }   // raw keystrokes/paste → the agent's PTY
   // ── Admin INSPECTOR (read-only) ─────────────────────────────────────────────
   // One request type, many views (see inspect.ts). reqId is echoed back so the admin UI can have
@@ -783,7 +784,7 @@ async function handle(payload: any, from: any) {
   }
   else if (payload.t === 'analyst:sync') { resyncAnalyst(from, true) }   // real (re)connect → full replay of the live analyst log
   else if (payload.t === 'sessions:list') { resyncAnalyst(from, false) }   // sidebar refresh only → NO event replay (keeps the question dividers)
-  else if (payload.t === 'session:load') { emit(from, { t: 'session:load:res', items: [] }) }
+  else if (payload.t === 'session:load') { emit(from, { t: 'session:load:res', sessionId: payload.sessionId ?? null, items: [] }) }
   else if (payload.t === 'suggestions:req') { emit(from, { t: 'suggestions:res', suggestions: { groups: [] } }) }
   else if (payload.t === 'ui:resize') {   // UI fitted its terminal → resize the matching agent's PTY (claude-code)
     const slot = slotFor(normWhich(payload.which))

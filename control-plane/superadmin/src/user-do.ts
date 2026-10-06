@@ -9,6 +9,7 @@ import { DurableObject } from 'cloudflare:workers'
 import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
 import { USER_MIGRATIONS } from './migrations.js'
 import { sessionStore } from './session-store.js'
+import { personHub } from './user-hub.js'
 
 export class UserDO extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -16,7 +17,18 @@ export class UserDO extends DurableObject<Env> {
     this.ctx.blockConcurrencyWhile(async () => { runMigrations(durableObjectDb(this.ctx.storage), USER_MIGRATIONS, { name: 'user' }) })
   }
 
+  private hub() { return personHub(this.ctx, this.env) }
+  // The person's tabs and devices (user-hub.ts): their sockets, and what their projects send back.
+  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) { await this.hub().message(ws, message) }
+  async webSocketClose(ws: WebSocket) { await this.hub().closed(ws) }
+  async webSocketError(ws: WebSocket) { await this.hub().closed(ws) }
+  /** RPC from a ProjectDO: a message for this person on one of their links. */
+  async deliver(project: string, wsId: string, data: string) { return this.hub().deliver(project, wsId, data) }
+  /** RPC from a ProjectDO: the link ends; its tabs close. */
+  async closeLink(project: string, wsId: string, code: number, reason: string) { this.hub().closeLink(project, wsId, code, reason) }
+
   async fetch(request: Request): Promise<Response> {
+    if (request.headers.get('upgrade') === 'websocket') return this.hub().accept(request)
     const url = new URL(request.url)
     const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
     const sql = this.ctx.storage.sql

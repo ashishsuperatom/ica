@@ -1223,7 +1223,7 @@ deleted_classes`). Six Durable Object classes remain: GlobalDO, OrgDO, ProjectDO
 
 
 
-### Every connection through the UserDO (discussion, 2026-10-06 — not built)
+### Every connection through the UserDO (built, 2026-10-06)
 
 **In the user's words:** the answer buffer, the view events and the session owners can all go into the user's Durable
 Object once the front end connects only to the UserDO; it becomes much cleaner. Imagine we are moving there: how would
@@ -1248,6 +1248,22 @@ the ChannelDO, ICA tools) are not people — they keep talking to the ProjectDO 
 their own; (4) project admins still reach a person's session for approvals and the audit — through the owner's UserDO,
 as today. *Path:* first the UserDO accepts the socket and passes everything through unchanged; then the inbox and view
 events move; then limits and the clients' address.
+
+**Decided (the user, 2026-10-06):** not gradual — move everything now (one user): every browser tab, the admin console,
+the iOS app and the project apps connect to the person's UserDO; many tabs, one UserDO; RPC between the objects. And
+deliver carefully: a person asked in the browser, then opens the session on the phone — the phone should get the answer
+there because it opened the session, not because every device gets everything. Lanes and attachments (once the
+terminal's, on the ProjectDO) now go through the UserDO: a structured way of pushing and pulling, what goes where.
+*Built:* the Worker sends every socket that carries a person's sign-in (`/_ws/<project>?token=…`; not a service
+identity) to `user:<id>` — the clients' protocol is unchanged (hello, envelopes), so the web app, the console, iOS and
+the project apps needed no change. `user-hub.ts` keeps one link per project and surface (`personLink`,
+`personMessage`, `personUnlink` on the ProjectDO, by RPC); the ProjectDO's link is a connection like any other in its hub
+(kept in `person_links`, found again after a wake), whose `send` is an RPC to the UserDO's `deliver`. Delivery: a reply
+to a request (reqId) → the tab that sent it (`asked`, kept six hours); an answer (qid) → the tab that asked and every tab
+with its session open; a session's news → the tabs with that session open; a log → the tabs attached to its channel;
+an agent lane's stream → the tabs on that lane; the hub's own notices → every tab of the link. A tab's lanes — sessions
+it opened or asked in, logs and lanes it attached to — live on its socket. Engines (key), agents (agent keys) and
+service identities (the ChannelDO, Teams) still talk to the ProjectDO directly.
 
 ### Appending and partitioning in the warehouse (question, 2026-10-06)
 

@@ -434,6 +434,15 @@ export class ProjectDO extends DurableObject<Env> {
       this.connByWs.set(ws, att)
       if (att.type === 'code-engine') this.roleRegistry.set(att.type, att.wsId)
     }
+    // People's links, kept beside the sockets (see personLink).
+    try {
+      for (const r of [...this.ctx.storage.sql.exec('SELECT conn FROM person_links')] as any[]) {
+        const c = JSON.parse(String(r.conn)) as ConnInfo & { channels?: string[] }
+        const conn: ConnInfo = { ...c, channels: c.channels ? new Set(c.channels) : undefined }
+        const ws = this.linkSocket(conn)
+        this.wsById.set(conn.wsId, ws); this.connByWs.set(ws, conn)
+      }
+    } catch { /* before its migration ran: no links yet */ }
   }
 
   private async handleMessage(ws: WebSocket, msg: any) {
@@ -650,15 +659,9 @@ export class ProjectDO extends DurableObject<Env> {
       // `members` remains for SERVICE identities — a bot has a userId and no address — so both are consulted,
       // in that order. Checking only `members`, as this did, meant assigning someone in the console did not
       // actually let them in: two lists, one of which nothing wrote to any more.
-      let admin = claims.role === 'superadmin'
-      if (claims.role !== 'superadmin') {
-        const email = String(claims.email || '').toLowerCase()
-        const arrived = email ? this.accessOnArrival(email) : null
-        const byEmail = arrived ? [arrived] : []
-        const byUserId = byEmail.length ? [] : [...this.ctx.storage.sql.exec('SELECT role FROM members WHERE user_id = ?', claims.userId)]
-        if (!byEmail.length && !byUserId.length) { ws.close(4003, 'No access to this project'); return }
-        admin = !!email && can(this.capabilitiesOfEmail(email), 'project.audit')
-      }
+      const verdict = this.admitPerson(claims, 'runtime')
+      if (!verdict.ok) { ws.close(verdict.code, verdict.reason); return }
+      const admin = verdict.admin
       this.markUserActivity()
       this.wakeMachine()
       this.register(ws, 'runtime', claims.userId, claims.role, undefined, undefined, { email: claims.email, admin })
@@ -667,6 +670,83 @@ export class ProjectDO extends DurableObject<Env> {
 
     ws.close(4001, 'Missing auth: provide key or token')
   }
+
+  /** A person, by their verified sign-in, on a surface ('admin' = the superadmin console, 'runtime' = their own apps):
+   *  whether they may in, and whether they administer the project. Access is by email (the organisation assigns people
+   *  to the project, landing in `access`); `members` keeps service identities that have no address. */
+  private admitPerson(claims: { userId: string; email?: string; role?: string }, surface: 'admin' | 'runtime'): { ok: true; admin: boolean } | { ok: false; code: number; reason: string } {
+    if (surface === 'admin') return claims.role === 'superadmin' ? { ok: true, admin: true } : { ok: false, code: 4003, reason: 'Admin surface requires superadmin' }
+    if (claims.role === 'superadmin') return { ok: true, admin: true }
+    const email = String(claims.email || '').toLowerCase()
+    const arrived = email ? this.accessOnArrival(email) : null
+    const byUserId = arrived ? [] : [...this.ctx.storage.sql.exec('SELECT role FROM members WHERE user_id = ?', claims.userId)]
+    if (!arrived && !byUserId.length) return { ok: false, code: 4003, reason: 'No access to this project' }
+    return { ok: true, admin: !!email && can(this.capabilitiesOfEmail(email), 'project.audit') }
+  }
+
+  // ── People, through their UserDO ──────────────────────────────────────────────────────────────────────────────────
+  // A person never holds a socket here: every tab and device of theirs connects to their own UserDO, which keeps ONE
+  // link per project and surface. The link is a connection like any other in this hub — its `send` is an RPC call to
+  // the person's UserDO (which fans it out to their tabs), its close a call to drop them. Links are kept in
+  // person_links so a hibernation wake or a deploy finds them again; a delivery to a UserDO with no tab left on the
+  // project ends the link.
+  private linkStubs = new Map<string, any>()
+  private linkSocket(conn: ConnInfo): WebSocket {
+    const user = (this.linkStubs.get(conn.wsId) ?? this.userStub(`user:${conn.userId}`))
+    this.linkStubs.set(conn.wsId, user)   // one stub per link: calls on it arrive in the order they were made
+    return {
+      send: (data: string) => { void Promise.resolve(user.deliver(this._pid, conn.wsId, data)).then((r: any) => { if (r?.gone) this.dropLink(conn.wsId) }).catch(() => {}) },
+      close: (code?: number, reason?: string) => { void Promise.resolve(user.closeLink(this._pid, conn.wsId, code ?? 1000, reason ?? '')).catch(() => {}); this.dropLink(conn.wsId) },
+      serializeAttachment: (c: ConnInfo) => this.saveLink(c),
+      deserializeAttachment: () => this.connByWs.get(this.wsById.get(conn.wsId)!) ?? conn,
+    } as unknown as WebSocket
+  }
+  private saveLink(c: ConnInfo) {
+    this.ctx.storage.sql.exec('INSERT OR REPLACE INTO person_links (ws_id, conn, at) VALUES (?, ?, ?)', c.wsId, JSON.stringify({ ...c, channels: c.channels ? [...c.channels] : undefined }), Date.now())
+  }
+  private dropLink(wsId: string) {
+    const ws = this.wsById.get(wsId)
+    const conn = ws ? this.connByWs.get(ws) : undefined
+    this.ctx.storage.sql.exec('DELETE FROM person_links WHERE ws_id = ?', wsId)
+    this.linkStubs.delete(wsId)
+    if (!ws || !conn) return
+    this.wsById.delete(wsId); this.connByWs.delete(ws)
+    this.log('ws:disconnected', { wsId, type: conn.type, userId: conn.userId ?? null })
+    this.broadcastToAll(ws, { from: { id: 'hub', type: 'hub' }, payload: { t: 'connection:leave', wsId, type: conn.type } })
+  }
+  /** A person's UserDO links them to this project (a first tab opened it): admitted as on any socket, then welcomed. */
+  async personLink(a: { project: string; userId: string; email?: string; role?: string; surface: string }) {
+    if (!this._pid) this._pid = a.project
+    this.hydrate()
+    const surface = a.surface === 'admin' ? 'admin' : 'runtime'
+    const verdict = this.admitPerson({ userId: a.userId, email: a.email, role: a.role }, surface)
+    if (!verdict.ok) return verdict
+    const wsId = `${surface === 'admin' ? 'pa' : 'pr'}-${a.userId}`
+    const had = this.wsById.get(wsId)
+    const before = had ? this.connByWs.get(had) : undefined
+    const conn: ConnInfo = { wsId, type: surface, userId: a.userId, orgRole: a.role, ...(a.email ? { email: a.email } : {}), ...(verdict.admin ? { admin: true } : {}), ...(before?.channels ? { channels: before.channels } : {}) }
+    if (surface === 'runtime') { this.markUserActivity(); this.wakeMachine() }
+    const ws = had ?? this.linkSocket(conn)
+    this.wsById.set(wsId, ws); this.connByWs.set(ws, conn); this.saveLink(conn)
+    if (!had) {
+      this.log('ws:connected', { wsId, type: surface, userId: a.userId, orgRole: a.role ?? null, via: 'user' })
+      this.broadcastToAll(ws, { from: { id: 'hub', type: 'hub' }, payload: { t: 'connection:join', wsId, type: surface } })
+    }
+    return { ok: true as const, wsId, type: surface, welcome: { t: 'welcome', wsId, type: surface, project: { id: this._pid, name: await this.projectName() }, scopes: this.scopesOf(conn) } }
+  }
+  /** A message from one of a person's tabs, through their link — handled exactly as one from a socket. */
+  async personMessage(project: string, wsId: string, msg: any): Promise<{ ok: true } | { relink: true }> {
+    if (!this._pid) this._pid = project
+    this.hydrate()
+    const ws = this.wsById.get(wsId)
+    if (!ws || !this.connByWs.get(ws)) return { relink: true }
+    if (msg?.type === 'hello' || msg?.type === 'bye') return { ok: true }
+    try { await this.handleMessage(ws, msg) }
+    catch (e: any) { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'error', reason: e?.message ?? 'not handled' } })) }
+    return { ok: true }
+  }
+  /** The person's last tab on this project closed. */
+  async personUnlink(project: string, wsId: string) { if (!this._pid) this._pid = project; this.hydrate(); this.dropLink(wsId) }
 
   // Returns true if the connection was registered, false if it was FENCED (rejected — an older/stale
   // singleton connection that a newer instance already superseded). Callers skip post-register work on false.
@@ -1764,7 +1844,7 @@ export class ProjectDO extends DurableObject<Env> {
         }
         // Fly: queue the message + wake the managed machine. Record the wake COMMAND we're issuing (beside the
         // engine's own lifecycle events) so the log shows both what the engine reported and what we told it.
-        this.ctx.storage.sql.exec('INSERT INTO message_queue (msg_json) VALUES (?)', JSON.stringify(msg))
+        this.ctx.storage.sql.exec('INSERT INTO message_queue (msg_json) VALUES (?)', JSON.stringify(envelope))   // with who sent it, so the reply finds them
         this.log('machine:wake_requested', { trigger: 'user-message', payloadType: (msg.payload as any)?.t ?? null, fromPhase: phase ?? null })
         this.wakeMachine()
         senderWs.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'machine:waking' } }))
@@ -1782,7 +1862,11 @@ export class ProjectDO extends DurableObject<Env> {
     // The engine LABELS a log message `to: {type:'log', channel}` (payload carries the qid). The DO looks up the
     // qid's OWNER and delivers only to that user's connections attached to the channel — never another user's.
     if (to.type === 'log' && to.channel) {
-      const owner = (msg.payload as any)?.qid ? this.buffer.ownerOf((msg.payload as any).qid) : ''
+      const pl0 = msg.payload as any
+      // Whose log it is: the question's asker, else the session's owner; unknown — the project's admins only.
+      let owner = pl0?.qid ? this.buffer.ownerOf(pl0.qid) : ''
+      const sid = pl0?.sid ?? pl0?.sessionId ?? pl0?.session
+      if (!owner && sid) owner = String(([...this.ctx.storage.sql.exec('SELECT principal FROM session_owners WHERE session = ?', String(sid))][0] as any)?.principal ?? '').replace(/^user:/, '')
       this.deliverToChannel(to.channel, owner, envelope)
       return
     }
@@ -1842,13 +1926,12 @@ export class ProjectDO extends DurableObject<Env> {
   }
   // Tier-2 variant for AGENT LOGS: deliver only to the OWNER's connections that have ATTACHED to `channel`.
   // Owner-scoped = the authz boundary (a user's logs reach only that user); attach-filtered = bandwidth (a
-  // client that isn't watching gets nothing). owner '' (project-level, e.g. semantic consolidation — no user
-  // data) → all attached connections of the channel.
+  // client that isn't watching gets nothing). owner '' (a log nobody can be found to own) → the project's admins only.
   private deliverToChannel(channel: string, owner: string, envelope: Envelope) {
     for (const [ws, conn] of this.connByWs) {
       if (conn.type === 'code-engine' || !conn.channels?.has(channel)) continue
-      if (owner && conn.userId !== owner) continue
-      this.deliverToConn(ws, conn, envelope)
+      if (owner ? conn.userId !== owner : !conn.admin) continue
+      this.deliverToConn(ws, conn, { ...envelope, channel } as Envelope)   // the channel kept beside the recipient's address (a person's UserDO delivers by it)
     }
   }
   private broadcastToAll(senderWs: WebSocket, envelope: Envelope) {
@@ -2278,7 +2361,7 @@ export class ProjectDO extends DurableObject<Env> {
       if (nowSec - (Number((q as any).created_at) || 0) > QUEUE_MAX_AGE_MS / 1000) { stale++; continue }
       try {
         const msg = JSON.parse((q as any).msg_json)
-        ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: msg.payload }))
+        ws.send(JSON.stringify(msg.from ? msg : { from: { id: 'hub', type: 'hub' }, payload: msg.payload }))
         sent++
       } catch (err: any) {
         failed++

@@ -8,7 +8,8 @@ export function createWire(o: { emit: (to: any, frame: any) => void; handle: (wh
   const toWire = new Map<string, ReturnType<typeof sender>>()
   const fromWire = new Map<string, ReturnType<typeof receiver>>()
   const senderFor = (to: any) => {
-    const key = String(to?.id ?? 'broadcast')
+    // One sender per ADDRESS — a connection, a log channel, the chat channel — each sending to its own `to`.
+    const key = JSON.stringify([to?.id ?? null, to?.type ?? null, to?.channel ?? null])
     let s = toWire.get(key)
     if (!s) { s = sender({ send: (frame) => o.emit(to, frame), parcels: o.parcels, onFallback: (why) => console.warn(`[wire] parcel not made (${why}); sent as parts`) }); toWire.set(key, s) }
     return s

@@ -270,6 +270,10 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     -- Whose each session is: its log lives in that person's UserDO.
     ALTER TABLE sessions_known ADD COLUMN user TEXT;
   ` },
+  { id: 33, name: 'people linked through their UserDO', up: `
+    -- Each person on this project, linked through their own UserDO (one per surface): the connection as the hub knows it.
+    CREATE TABLE IF NOT EXISTS person_links (ws_id TEXT PRIMARY KEY, conn TEXT NOT NULL, at INTEGER NOT NULL);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */
@@ -449,5 +453,10 @@ export const USER_MIGRATIONS: Migration[] = [
       kind TEXT NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL, block TEXT, body TEXT NOT NULL, by TEXT NOT NULL, at TEXT NOT NULL, note TEXT, UNIQUE (project, session, id, version));
     CREATE TRIGGER IF NOT EXISTS session_artifacts_no_update BEFORE UPDATE ON session_artifacts BEGIN SELECT RAISE(ABORT, 'artifacts are append-only'); END;
     CREATE TRIGGER IF NOT EXISTS session_artifacts_no_delete BEFORE DELETE ON session_artifacts BEGIN SELECT RAISE(ABORT, 'artifacts are append-only'); END;
+  ` },
+  { id: 4, name: 'who asked what', up: `
+    -- Which of the person's tabs sent a request (r:<reqId>) or asked a question (q:<qid>): its reply goes back there.
+    CREATE TABLE IF NOT EXISTS asked (key TEXT PRIMARY KEY, tab TEXT NOT NULL, at INTEGER NOT NULL);
+    CREATE INDEX IF NOT EXISTS asked_at ON asked (at);
   ` },
 ]

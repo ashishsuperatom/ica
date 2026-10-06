@@ -1,7 +1,7 @@
 // Superadmin worker
 //
 // Routing:
-//   /_ws/{projectId}  → ProjectDO  (WS hub: code-engine + users)
+//   /_ws/{projectId}  → a person: their UserDO (which links them to the project); engines, agents, services: ProjectDO
 //   /ws               → OrgDO      (admin WS: real-time broadcast)
 //   /api/*            → OrgDO      (users, projects, datasources, conversations)
 //   /*                → React SPA via ASSETS
@@ -193,6 +193,18 @@ export default {
       // An agent declares itself and sends its key only in its hello, never in a URL (URLs end up in logs).
       const agent = url.searchParams.get('agent') === '1'
       if (!key && !token && !agent) return new Response('authentication required', { status: 401 })
+      // A PERSON (a signed-in token, not a service identity) connects to their own UserDO — every tab and device of
+      // theirs, in every project — which links them to the project (user-hub.ts). Engines (key), agents (agent=1) and
+      // service identities (svc:) talk to the project directly.
+      if (token && !key && !agent) {
+        const claims = await verifyJwt(token, env.JWT_SECRET).catch(() => null)
+        if (claims?.userId && claims.role !== 'service' && !String(claims.userId).startsWith('svc:')) {
+          const fwd = new Request(request)
+          fwd.headers.set('x-sa-project', decodeURIComponent(wsMatch[1].split('?')[0]))
+          fwd.headers.set('x-sa-claims', JSON.stringify({ userId: claims.userId, email: claims.email, role: claims.role }))
+          return env.USER.get(env.USER.idFromName(`user:${claims.userId}`)).fetch(fwd)
+        }
+      }
       const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${wsMatch[1]}`))
       return stub.fetch(request)
     }
