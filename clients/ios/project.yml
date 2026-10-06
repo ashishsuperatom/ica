@@ -55,6 +55,9 @@ targets:
       path: Superatom/Info.plist
       properties:
         CFBundleDisplayName: Superatom
+        # The version and build number come from the settings above, so raising them is one edit.
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen:
           UIColorName: ""
         UISupportedInterfaceOrientations:
