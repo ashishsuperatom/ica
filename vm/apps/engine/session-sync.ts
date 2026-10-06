@@ -1,4 +1,4 @@
-// SESSIONS TO THE PLATFORM. The platform keeps the truth of every session (its SessionDO); the engine's log file is the
+// SESSIONS TO THE PLATFORM. The platform keeps the truth of every session (in its owner's UserDO); the engine's log file is the
 // replica it writes first. After every append, and again whenever the engine reconnects, the entries the platform does
 // not have yet go up as `session:sync { session, from, entries }`, in chunks that fit a frame. The platform answers
 // `session:synced { upto }`, and `upto` is written down beside the log, so a restart resends nothing it already has.

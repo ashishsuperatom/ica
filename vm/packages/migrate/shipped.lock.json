@@ -46,17 +46,10 @@
     "1": "07c5961c0df303cd",
     "2": "67e7a3062bc04821"
   },
-  "SessionDO": {
-    "1": "a63795f91f167825",
-    "2": "42e0cb942c4e0cf4"
-  },
   "UserDO": {
     "1": "0f3e29fd337dec73",
     "2": "545fcf0c22e5dfb2",
     "3": "70a9ff3c374312e4"
-  },
-  "GraphDO": {
-    "1": "a1a8a05dbc6beed4"
   },
   "engine composition graph": {
     "1": "bbcea13c87779246",

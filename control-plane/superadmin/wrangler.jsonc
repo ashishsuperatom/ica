@@ -23,10 +23,8 @@
       { "class_name": "ProjectDO", "name": "PROJECT" },
       { "class_name": "GlobalDO", "name": "GLOBAL" },
       { "class_name": "ChannelDO", "name": "CHANNEL" },
-      { "class_name": "SessionDO", "name": "SESSION" },
       { "class_name": "DecisionDO", "name": "DECISION" },
-      { "class_name": "UserDO", "name": "USER" },
-      { "class_name": "GraphDO", "name": "GRAPH" }
+      { "class_name": "UserDO", "name": "USER" }
     ]
   },
   // Cloudflare's own record of which classes exist (not our SQLite migrations, which are in src/migrations.ts).
@@ -37,7 +35,9 @@
     { "tag": "v4", "new_sqlite_classes": ["ChannelDO"] },
     { "tag": "v5", "new_sqlite_classes": ["SessionDO", "UserDO"] },
     { "tag": "v6", "new_sqlite_classes": ["GraphDO"] },
-    { "tag": "v7", "new_sqlite_classes": ["DecisionDO"] }
+    { "tag": "v7", "new_sqlite_classes": ["DecisionDO"] },
+    // 2026-10-06: the graph went into the ProjectDO, sessions into their owner's UserDO (their data copied and checked first).
+    { "tag": "v8", "deleted_classes": ["GraphDO", "SessionDO"] }
   ],
 
   "vars": {

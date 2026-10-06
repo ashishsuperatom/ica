@@ -990,7 +990,7 @@ system in plain CSS, proc's tree — is the best of them, and is copied byte for
 - **Thread** — a tree (proc): going back to a step and changing it starts a branch; a branch switcher at each fork;
   each step a block with its frame (step badge, title, the cause that opened it linking to its parent, hover copy ·
   collapse · remove), a separator with the time between steps, Shift+↑/↓. The thread is the platform's session (its
-  log, synced to SessionDO), not a browser's: the address names the session and its current block — absolute, never an
+  log, synced to the owner's UserDO), not a browser's: the address names the session and its current block — absolute, never an
   operation list.
 - **Blocks** — act in place when looking closer, open a new block when moving on or deciding; a decision is a block
   whose form locks and whose receipt captures before and after; live blocks re-read, record blocks never do. A block
@@ -1110,7 +1110,7 @@ who; append-only). A version is read **by change id**, not by time, so changes m
 into it. Naming needs an admin; restoring is governed like any change and writes `back to version <name>` changes in
 one savepoint. CLI: `composition-graph versions | version <name> --message … | restore <name>`; hub: `graph:versions`,
 `graph:version`, `graph:restore`, and `compositionColumns({version})`; versions travel with the replica (cursor
-`version`) to the GraphDO and back. The graph page shows the strip beside the search, a banner while viewing a version
+`version`) to the platform (the ProjectDO) and back. The graph page shows the strip beside the search, a banner while viewing a version
 (read-only: nothing attached, detached, made or edited), **Make this the current graph** and **Back to now**.
 
 ### The warehouse explorer (built, 2026-10-06)
@@ -1209,6 +1209,17 @@ session is appended to every turn and branches when a block is edited, so while 
 Workers KV is not (eventually consistent, up to about a minute; last write wins). A finished session is immutable: an
 object in R2 by hash (as parcels are), its index and few facts in the person's UserDO. So the SessionDO could become: the
 live log in the UserDO, the finished log in R2. Not done yet — to be decided.
+
+**Decided and done (the user, 2026-10-06):** fold the graph into the ProjectDO and the SessionDO into the UserDO; move the
+data ourselves — two projects, one user — and keep no migration code for it. Everything that belongs to a person goes in
+their UserDO (their sessions, their warehouse queries); later every connection goes front end → UserDO → ProjectDO (which
+holds, copied in at creation, everything it needs, authorization included — the OrgDO is not crossed) → the engine.
+*Done:* `graph_records`/`graph_content` in the ProjectDO (graph-store.ts); `session_entries`/`session_artifacts` in the
+UserDO (session-store.ts), the ProjectDO knowing each session's owner (`sessions_known.user`, from its opening entry). The
+data was copied once by a temporary step and checked (TotalGroup: 93 graph records, 17 sessions; Fusion5: 171 and 38; no
+artifacts existed anywhere; no mismatch), then both engines re-sent all 77 of their synced sessions from their own files,
+each landing at exactly its old length. The copy code, both classes and their files were then deleted (wrangler `v8
+deleted_classes`). Six Durable Object classes remain: GlobalDO, OrgDO, ProjectDO, UserDO, DecisionDO, ChannelDO.
 
 
 

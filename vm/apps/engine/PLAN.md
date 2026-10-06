@@ -26,7 +26,7 @@ what is built and what is next.
   messages (`session:agents|open|intent|goto|get|file`) — open, intent (ops, action, call; to current or new; from any block), goto, get (as of a moment) — on the
   agent's programs; each view carries the answers as cards (`answer-card.ts`, shared with the chat) and the intents the
   programs offer. The user UI shows it at `/s/<agent>` (`control-plane/user-ui/src/AgentSession.tsx`).
-- Sessions are kept by the platform: `session-sync.ts` pushes every append to the session's SessionDO
+- Sessions are kept by the platform: `session-sync.ts` pushes every append to the platform (kept in the session owner's UserDO)
   (`session:sync` → `session:synced`, a watermark beside the log) and everything missing on reconnect.
 - `program-seam.ts`: `program:build` (source → build → upload to the platform as the asker's draft); sessions fetch a
   program the store lacks from the platform (`platform.ts`, the project's key). `graph-seam.ts`: `graph:*` — the

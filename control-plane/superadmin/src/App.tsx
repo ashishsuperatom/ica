@@ -359,8 +359,8 @@ function Console() {
     : layer === 'org' ? ORG_PLACES.find((pl) => pl.slug === place)?.label ?? 'Projects' : PLATFORM_PLACES.find((pl) => pl.slug === place)?.label ?? 'Organisations'
   const crumbs: Crumb[] = [
     ...(superadmin ? [{ key: 'home', label: 'Superatom', icon: 'lucide:house', onClick: () => nav('/'), choices: PLATFORM_PLACES.map((pl) => ({ key: pl.slug || 'orgs', label: pl.label, icon: pl.icon, active: layer === 'platform' && place === pl.slug, onClick: () => nav(`/${pl.slug}`) })) }] : []),
-    ...(org ? [{ key: 'org', label: orgName, icon: 'lucide:building', onClick: () => nav(O('')), choices: orgs.map((o) => ({ key: o.id, label: o.name, icon: 'lucide:building', active: o.id === org, onClick: () => nav(`/o/${o.id}`) })) }] : []),
-    ...(project ? [{ key: 'project', label: projectName, icon: 'lucide:folder-kanban', onClick: () => nav(P('')), choices: projects.map((p) => ({ key: p.id, label: p.name, icon: 'lucide:folder', active: p.id === project, onClick: () => nav(`/o/${org}/p/${p.id}`) })) }] : []),
+    ...(org ? [{ key: 'org', label: orgName, icon: 'lucide:building', onClick: () => nav(O('')), choices: orgs.map((o) => ({ key: o.id, label: o.name, icon: 'lucide:building', active: o.id === org, onClick: () => nav(`/o/${o.id}${layer === 'org' && place ? `/${place}` : ''}`) })) }] : []),
+    ...(project ? [{ key: 'project', label: projectName, icon: 'lucide:folder-kanban', onClick: () => nav(P('')), choices: projects.map((p) => ({ key: p.id, label: p.name, icon: 'lucide:folder', active: p.id === project, onClick: () => nav(`/o/${org}/p/${p.id}${place ? `/${place}` : ''}`) })) }] : []),
     { key: 'place', label: placeLabel },
   ]
   const full = (layer === 'project' && (place === 'graph' || place === 'warehouse')) || (layer === 'org' && place === 'warehouse')

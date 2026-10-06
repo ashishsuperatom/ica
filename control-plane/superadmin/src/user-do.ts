@@ -77,16 +77,6 @@ export class UserDO extends DurableObject<Env> {
       try { return json({ artifact: store.recordArtifact(project, session, b) }) } catch (e: any) { return json({ error: e.message }, 404) }
     }
     if (request.method === 'GET' && what === 'artifacts') return json({ artifacts: store.artifacts(project, session) })
-    // FOLD 2026-10-06 (temporary): a session's entries and artifacts copied from its retired SessionDO, then its index.
-    if (request.method === 'POST' && what === 'import') {
-      const b = await request.json() as { entries: any[]; artifacts: any[] }
-      const sql = this.ctx.storage.sql
-      this.ctx.storage.transactionSync(() => {
-        for (const e of b.entries ?? []) sql.exec('INSERT OR IGNORE INTO session_entries (project, session, seq, entry, at) VALUES (?, ?, ?, ?, ?)', project, session, e.seq, e.entry, e.at)
-        for (const a of b.artifacts ?? []) sql.exec('INSERT OR IGNORE INTO session_artifacts (project, session, id, version, kind, title, status, block, body, by, at, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', project, session, a.id, a.version, a.kind, a.title, a.status, a.block ?? null, a.body, a.by, a.at, a.note ?? null)
-      })
-      return json(await store.append(project, session, store.count(project, session), []))
-    }
     if (request.method === 'GET' && what.startsWith('artifact/')) {
       const versions = store.artifactVersions(project, session, decodeURIComponent(what.slice('artifact/'.length)))
       return versions.length ? json({ versions }) : json({ error: 'there is no such artifact' }, 404)

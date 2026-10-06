@@ -1,4 +1,4 @@
-// THE GRAPH TO THE PLATFORM, AND BACK. The platform keeps the composition graph's records (its GraphDO); this engine's
+// THE GRAPH TO THE PLATFORM, AND BACK. The platform keeps the composition graph's records (in the project's Durable Object); this engine's
 // graph is the replica it writes first. On every welcome:
 //
 //   1. ask where the platform's copy ends (its cursor);

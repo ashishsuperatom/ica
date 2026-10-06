@@ -501,9 +501,9 @@ export class ProjectDO extends DurableObject<Env> {
     // Sent by the engine after it resolves its profile — at boot, and again after adopting a pushed change.
     // This, not the last write, is what a UI should show: saving a profile and a box running it are two
     // different facts, and they differ whenever a machine is asleep, unreachable, or mid-question.
-    // ── A session's log, pushed up by the engine: the platform keeps the truth (SessionDO), the person's index
+    // ── A session's log, pushed up by the engine: the platform keeps the truth (in its owner's UserDO), the person's index
     //    of their sessions follows (UserDO), and the engine hears how far the platform has it. ──
-    // ── The composition graph's records, replicated up by the engine (GraphDO); where the platform's copy ends; and
+    // ── The composition graph's records, replicated up by the engine (kept here, graph-store.ts); where the platform's copy ends; and
     //    batches back down to rebuild an engine whose graph is empty. ──
     // ── What the engine did, for the platform's warehouse (an agent's turn, its steps and queries): recorded here, the
     //    one path, never by the engine itself. Only the engine's own kinds. ──
@@ -601,7 +601,6 @@ export class ProjectDO extends DurableObject<Env> {
         return
       }
       this.log('ws:ce_auth_ok', {})
-      await this.foldOnce().catch((e: any) => console.log(`[fold] ${this._pid} failed: ${e?.stack ?? e}`))   // FOLD 2026-10-06 (temporary)
       if (msg.machineId) await this.reconcileMachineId(msg.machineId)   // self-heal (Fly-verified) the tracked machine id (survives recreate/resize)
       this.recordHeartbeat()
       if (await this.register(ws, role, undefined, undefined, instanceId, epoch)) this.flushQueued(ws)
@@ -1212,40 +1211,6 @@ export class ProjectDO extends DurableObject<Env> {
       for (const s of this.graph().open()) items.push({ id: `suggestion:${s.id}`, kind: 'suggestion', state: 'attention', title: s.scope ? `Publish ${s.name} to ${s.scope === 'global' ? 'everyone' : s.scope}` : `Change suggested to ${s.name}`, detail: `${String(s.by).replace(/^(email|user|agent):/, '')}: ${s.reason}`, suggestion: s.id, name: s.name, at: s.at })
     } catch { /* the graph replica unreachable: its suggestions are not listed */ }
     return this.j({ items })
-  }
-
-  // ── FOLD 2026-10-06 (temporary, deleted with the GraphDO and SessionDO classes once copied) ─────────────────────────
-  // The project's graph from its GraphDO into graph_records/graph_content; each known session's entries and artifacts
-  // from its SessionDO into its owner's UserDO. Once per project; what was copied is logged and kept under the flag.
-  private async foldOnce() {
-    const done = await this.ctx.storage.get('fold-2026-10-06')
-    if (done) { console.log(`[fold] ${this._pid} done ${JSON.stringify(done)}`); return }
-    const env = this.env as any, sql = this.ctx.storage.sql
-    const out = { records: 0, contents: 0, sessions: 0, entries: 0, artifacts: 0, unowned: [] as string[], mismatch: [] as string[] }
-    const g: any = await (await env.GRAPH.get(env.GRAPH.idFromName(`graph:${this._pid}`)).fetch('http://do/')).json()
-    this.ctx.storage.transactionSync(() => {
-      for (const c of g.contents ?? []) { sql.exec('INSERT OR IGNORE INTO graph_content (hash, body) VALUES (?, ?)', c.hash, c.body); out.contents++ }
-      for (const r of g.records ?? []) { sql.exec('INSERT OR IGNORE INTO graph_records (kind, key, at, body) VALUES (?, ?, ?, ?)', r.kind, r.key, r.at, r.body); out.records++ }
-    })
-    for (const r of g.records ?? []) { const [h] = [...sql.exec('SELECT body FROM graph_records WHERE kind = ? AND key = ?', r.kind, r.key)] as any[]; if (!h || h.body !== r.body) out.mismatch.push(`graph ${r.kind} ${r.key}`) }
-    for (const k of [...sql.exec('SELECT session FROM sessions_known')] as any[]) {
-      const session = String(k.session)
-      const d: any = await (await env.SESSION.get(env.SESSION.idFromName(`ses:${this._pid}:${session}`)).fetch('http://do/')).json()
-      const owner = d.meta?.user ?? (d.entries ?? []).map((e: any) => JSON.parse(e.entry)).find((e: any) => e.t === 'open')?.user
-      if (!owner) { if ((d.entries ?? []).length || (d.artifacts ?? []).length) out.unowned.push(session); continue }
-      sql.exec('UPDATE sessions_known SET user = ? WHERE session = ?', owner, session)
-      const q = `project=${encodeURIComponent(this._pid)}&session=${encodeURIComponent(session)}`
-      const r = await this.userStub(owner).fetch(`http://do/session/import?${q}`, { method: 'POST', body: JSON.stringify({ entries: d.entries ?? [], artifacts: d.artifacts ?? [] }) })
-      if (!r.ok) throw new Error(`session ${session}: ${await r.text()}`)
-      const kept: any = await r.json()
-      if (Number(kept.upto) < (d.entries ?? []).length) out.mismatch.push(`session ${session}: ${kept.upto} of ${(d.entries ?? []).length} entries`)
-      const arts: any = await (await this.sessionAt(session).fetch('http://do/artifacts')).json()
-      const ids = new Set((d.artifacts ?? []).map((a: any) => a.id))
-      if ((arts.artifacts ?? []).length !== ids.size) out.mismatch.push(`session ${session}: ${(arts.artifacts ?? []).length} of ${ids.size} artifacts`)
-      out.sessions++; out.entries += (d.entries ?? []).length; out.artifacts += (d.artifacts ?? []).length
-    }
-    await this.ctx.storage.put('fold-2026-10-06', out)
-    console.log(`[fold] ${this._pid} ${JSON.stringify(out)}`)
   }
 
   /** The project's composition graph, kept here (graph-store.ts). */
