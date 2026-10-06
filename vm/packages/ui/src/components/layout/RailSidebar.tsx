@@ -5,6 +5,10 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Icon } from '@iconify/react'
+import { recall, remember } from '../../lib/remember'
+
+/** How wide the panel may be dragged, in pixels. */
+const PANEL_MIN = 200, PANEL_MAX = 440
 
 export interface RailPlace {
   key: string; label: string; icon: string
@@ -35,6 +39,17 @@ export default function RailSidebar({ name, connected, statusWord, places, curre
   const hold = () => clearTimeout(leave.current)
   const away = () => { hold(); leave.current = setTimeout(() => setPeek(null), 220) }
   useEffect(() => () => clearTimeout(leave.current), [])
+  // The panel's width: dragged at its right edge between PANEL_MIN and PANEL_MAX, kept in this browser.
+  const [width, setWidth] = useState(() => { const w = recall<number>('sidebar-panel-w', 0); return w >= PANEL_MIN && w <= PANEL_MAX ? w : 0 })
+  const drag = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const panel = (e.currentTarget.parentElement as HTMLElement), x0 = e.clientX, w0 = panel.getBoundingClientRect().width
+    let w = w0
+    const move = (m: PointerEvent) => { w = Math.round(Math.min(PANEL_MAX, Math.max(PANEL_MIN, w0 + m.clientX - x0))); setWidth(w) }
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); document.body.style.cursor = ''; remember('sidebar-panel-w', w) }
+    document.body.style.cursor = 'col-resize'
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
+  }
   const open = pinned ? shown : peek
   const place = places.find((p) => p.key === open && p.panel) ?? null
   const word = statusWord ?? (connected ? 'Connected' : 'Reconnecting…')
@@ -59,7 +74,7 @@ export default function RailSidebar({ name, connected, statusWord, places, curre
           {foot}
         </nav>
         {place && (
-          <div className="sa-railbar__panel" data-floating={!pinned}>
+          <div className="sa-railbar__panel" data-floating={!pinned} style={width ? { width } : undefined}>
             <div className="sa-sidebar__head">
               <span className="sa-sidebar__brand" title={name}><span className="sa-sidebar__name truncate">{name}</span></span>
               {place.actions}
@@ -67,6 +82,8 @@ export default function RailSidebar({ name, connected, statusWord, places, curre
                 title={pinned ? 'Close the side panel' : 'Keep the side panel open'} aria-label={pinned ? 'Close the side panel' : 'Keep the side panel open'}><Icon icon="mynaui:sidebar" /></button>
             </div>
             <div className="sa-sidebar__nav sa-scroll-hide" onClick={(e) => { if (phone() && (e.target as HTMLElement).closest('.sa-nav-item')) onPin(false) }}>{place.panel}</div>
+            <div className="sa-railbar__resize" role="separator" aria-orientation="vertical" aria-label="Drag to widen or narrow the side panel" title="Drag to widen; double-click for the usual width"
+              onPointerDown={drag} onDoubleClick={() => { setWidth(0); remember('sidebar-panel-w', 0) }} />
           </div>
         )}
       </aside>
