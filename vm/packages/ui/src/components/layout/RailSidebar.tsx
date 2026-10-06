@@ -25,12 +25,12 @@ export interface RailPlace {
   actions?: ReactNode
 }
 
-export default function RailSidebar({ name, places, current, foot, pinned, onPin, onAbout, onHome }: {
+export default function RailSidebar({ name, places, current, foot, pinned, onPin, onMark, markTitle = 'About Superatom', onHome }: {
   name: string
   /** The project's name at the panel's head opens its home. */
   onHome: () => void
-  /** The Superatom mark at the top of the rail, always there: it opens the about page. */
-  onAbout: () => void
+  /** The Superatom mark at the top of the rail, always there, and what it opens (the about page; the console's top). */
+  onMark: () => void; markTitle?: string
   places: RailPlace[]
   /** The rail place where the person is. */
   current: string
@@ -73,7 +73,7 @@ export default function RailSidebar({ name, places, current, foot, pinned, onPin
       {pinned && <div className="sa-sidebar__scrim" onClick={() => onPin(false)} />}
       <aside className="sa-railbar" data-pinned={pinned} onMouseLeave={away} onMouseEnter={hold}>
         <nav className="sa-railbar__rail" aria-label="Places">
-          <button type="button" className="sa-railbar__mark" data-active={current === 'about'} title="Superatom — about" aria-label="About Superatom" onClick={onAbout}
+          <button type="button" className="sa-railbar__mark" data-active={current === 'about'} title={markTitle} aria-label={markTitle} onClick={onMark}
             onMouseEnter={() => { if (!pinned) setPeek(null) }}><SuperatomMark size={26} /></button>
           {places.map((p) => (
             <button key={p.key} type="button" className="sa-railbar__place" style={p.accent ? { '--accent': p.accent } as React.CSSProperties : undefined} data-active={p.key === current} data-open={p.key === open && !!p.panel}

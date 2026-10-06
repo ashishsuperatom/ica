@@ -25,9 +25,13 @@
   --page: #ffffff; /* the page behind the cards: plain white by default */
   --sidebar: #ffffff;
   --brand-electron: #0f9488; /* the electron of the Superatom mark */
-  --place-home: #0e9488; /* the rail's places, each its own colour: home */
-  --place-agents: #6d3bef; /* agents */
-  --place-connections: #c2650a; /* connections */
+  /* The rail's places, each its own colour (shown faded): a palette a surface assigns in order. */
+  --place-1: #0e9488;
+  --place-2: #6d3bef;
+  --place-3: #c2650a;
+  --place-4: #2563eb;
+  --place-5: #d92d20;
+  --place-6: #64748b;
   --rail: #f4f5f7; /* the thin rail of big places, set apart from the white panel beside it */
   --rail-active: #e7e9ed; /* the rail place where one is; a picked row in the panel */
   --line: #e4e9f0; /* borders and row dividers */

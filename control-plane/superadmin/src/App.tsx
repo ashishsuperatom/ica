@@ -21,7 +21,7 @@ import { AnalystConsole } from './AnalystConsole'
 import { useSession, SignIn, UserButton } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
-import { AppShell, Sidebar, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
+import { AppShell, RailSidebar, NavList, type RailPlace, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
 import '@superatom/ui/design.css'
 import { AdminContext, ADMIN_OWN_BLOCKS } from './AdminBlocks'
 
@@ -272,55 +272,55 @@ interface Place { slug: string; label: string; icon: string; says: string; needs
 function purposesOf(): { key: string; title: string; places: Place[] }[] {
   return [
     { key: 'knowledge', title: 'Knowledge', places: [
-      { slug: 'graph', label: 'Composition graph', icon: 'lucide:network', says: 'Domains, intermediate and atomic concepts — walk, change and compose them.', needs: 'project.manage' },
-      { slug: 'inspector/changes', label: 'Graph changes', icon: 'lucide:git-commit-horizontal', says: 'Every edit to the graph: which node, by whom, why.', needs: 'project.manage' },
-      { slug: 'inspector/questions', label: 'Questions', icon: 'lucide:message-circle-question', says: 'Every question and the agent it went to.', needs: 'project.manage' },
-      { slug: 'inspector/sessions', label: 'Sessions', icon: 'lucide:messages-square', says: 'Each chat made from the graph, and what changed since.', needs: 'project.manage' }] },
+      { slug: 'graph', label: 'Composition graph', icon: 'solar:structure-linear', says: 'Domains, intermediate and atomic concepts — walk, change and compose them.', needs: 'project.manage' },
+      { slug: 'inspector/changes', label: 'Graph changes', icon: 'solar:notes-linear', says: 'Every edit to the graph: which node, by whom, why.', needs: 'project.manage' },
+      { slug: 'inspector/questions', label: 'Questions', icon: 'solar:question-circle-linear', says: 'Every question and the agent it went to.', needs: 'project.manage' },
+      { slug: 'inspector/sessions', label: 'Sessions', icon: 'solar:chat-round-line-linear', says: 'Each chat made from the graph, and what changed since.', needs: 'project.manage' }] },
     { key: 'data', title: 'Data', places: [
-      { slug: 'warehouse', label: 'Warehouse', icon: 'lucide:warehouse', says: 'The organisation\'s tables granted to this project: rows, columns, values.', needs: 'warehouse.use' },
-      { slug: 'index', label: 'Data index', icon: 'lucide:table-properties', says: 'Every source, its tables and fields.', needs: 'project.manage' },
-      { slug: 'inspector/grounding', label: 'Grounding', icon: 'lucide:anchor', says: 'Names people use, matched to the records they mean.', needs: 'project.manage' },
-      { slug: 'inspector/index', label: 'Datasource index', icon: 'lucide:list-tree', says: 'What the engine indexed of each source.', needs: 'project.manage' },
-      { slug: 'data-access', label: 'Data access', icon: 'lucide:shield-check', says: 'Rows, columns and denials per person, role, group or key.', needs: 'project.data' }] },
+      { slug: 'warehouse', label: 'Warehouse', icon: 'solar:box-linear', says: 'The organisation\'s tables granted to this project: rows, columns, values.', needs: 'warehouse.use' },
+      { slug: 'index', label: 'Data index', icon: 'solar:layers-linear', says: 'Every source, its tables and fields.', needs: 'project.manage' },
+      { slug: 'inspector/grounding', label: 'Grounding', icon: 'solar:map-point-linear', says: 'Names people use, matched to the records they mean.', needs: 'project.manage' },
+      { slug: 'inspector/index', label: 'Datasource index', icon: 'solar:checklist-linear', says: 'What the engine indexed of each source.', needs: 'project.manage' },
+      { slug: 'data-access', label: 'Data access', icon: 'solar:shield-check-linear', says: 'Rows, columns and denials per person, role, group or key.', needs: 'project.data' }] },
     { key: 'agents', title: 'Agents', places: [
-      { slug: 'agents', label: 'Agents and models', icon: 'lucide:cpu', says: 'The harness, account and model each agent runs.', needs: 'project.manage' },
-      { slug: 'agent', label: 'Connector', icon: 'lucide:plug', says: 'Connect a data source with the connector agent.', needs: 'project.manage' },
-      { slug: 'analyst', label: 'Analyst', icon: 'lucide:search', says: 'Explore the data with the analyst.', needs: 'project.manage' },
-      { slug: 'grounding', label: 'Grounding agent', icon: 'lucide:bot', says: 'Build the grounding.', needs: 'project.manage' }] },
+      { slug: 'agents', label: 'Agents and models', icon: 'solar:cpu-linear', says: 'The harness, account and model each agent runs.', needs: 'project.manage' },
+      { slug: 'agent', label: 'Connector', icon: 'solar:link-round-linear', says: 'Connect a data source with the connector agent.', needs: 'project.manage' },
+      { slug: 'analyst', label: 'Analyst', icon: 'solar:magnifer-linear', says: 'Explore the data with the analyst.', needs: 'project.manage' },
+      { slug: 'grounding', label: 'Grounding agent', icon: 'solar:map-point-search-linear', says: 'Build the grounding.', needs: 'project.manage' }] },
     { key: 'people', title: 'People', places: [
-      { slug: 'access', label: 'Access and roles', icon: 'lucide:users', says: 'Who works in the project, and as what.', needs: 'project.people' },
-      { slug: 'groups', label: 'Groups', icon: 'lucide:users-round', says: 'Groups and their members.', needs: 'project.people' },
-      { slug: 'agent-keys', label: 'Agent keys', icon: 'lucide:key-round', says: 'Keys agents and scripts use, and their scopes.', needs: 'project.keys' }] },
+      { slug: 'access', label: 'Access and roles', icon: 'solar:users-group-rounded-linear', says: 'Who works in the project, and as what.', needs: 'project.people' },
+      { slug: 'groups', label: 'Groups', icon: 'solar:users-group-two-rounded-linear', says: 'Groups and their members.', needs: 'project.people' },
+      { slug: 'agent-keys', label: 'Agent keys', icon: 'solar:key-linear', says: 'Keys agents and scripts use, and their scopes.', needs: 'project.keys' }] },
     { key: 'operations', title: 'Operations', places: [
-      { slug: '', label: 'Engine', icon: 'lucide:gauge', says: 'The engine: compute, state, connections.', needs: 'project.view' },
-      { slug: 'events', label: 'Event log', icon: 'lucide:list', says: 'What the project did.', needs: 'project.audit' },
-      { slug: 'audit', label: 'Audit history', icon: 'lucide:history', says: 'Who did what, and how it ended.', needs: 'project.audit' },
-      { slug: 'dashboards', label: 'Dashboards', icon: 'lucide:layout-dashboard', says: 'Published dashboards and their builds.', needs: 'project.view' },
-      { slug: 'subdomains', label: 'Addresses', icon: 'lucide:globe', says: 'The project\'s addresses.', needs: 'project.manage' },
-      { slug: 'channels', label: 'Channels', icon: 'lucide:message-square', says: 'Teams and other channels.', needs: 'project.manage' },
-      { slug: 'inspector/summary', label: 'Engine contents', icon: 'lucide:scan-search', says: 'What the engine holds, at a glance.', needs: 'project.manage' },
-      { slug: 'inspector/files', label: 'Files', icon: 'lucide:folder-tree', says: 'The project\'s files on the engine.', needs: 'project.manage' },
-      { slug: 'inspector/db', label: 'Database', icon: 'lucide:database', says: 'The engine\'s tables.', needs: 'project.manage' },
-      { slug: 'inspector/logs', label: 'Logs', icon: 'lucide:scroll-text', says: 'The engine\'s logs.', needs: 'project.manage' },
-      { slug: 'settings', label: 'Settings', icon: 'lucide:settings-2', says: 'Keys, the agent profile, the danger zone.', needs: 'project.manage' }] },
+      { slug: '', label: 'Engine', icon: 'solar:server-square-linear', says: 'The engine: compute, state, connections.', needs: 'project.view' },
+      { slug: 'events', label: 'Event log', icon: 'solar:list-linear', says: 'What the project did.', needs: 'project.audit' },
+      { slug: 'audit', label: 'Audit history', icon: 'solar:history-linear', says: 'Who did what, and how it ended.', needs: 'project.audit' },
+      { slug: 'dashboards', label: 'Dashboards', icon: 'solar:chart-square-linear', says: 'Published dashboards and their builds.', needs: 'project.view' },
+      { slug: 'subdomains', label: 'Addresses', icon: 'solar:global-linear', says: 'The project\'s addresses.', needs: 'project.manage' },
+      { slug: 'channels', label: 'Channels', icon: 'solar:chat-square-linear', says: 'Teams and other channels.', needs: 'project.manage' },
+      { slug: 'inspector/summary', label: 'Engine contents', icon: 'solar:eye-scan-linear', says: 'What the engine holds, at a glance.', needs: 'project.manage' },
+      { slug: 'inspector/files', label: 'Files', icon: 'solar:folder-with-files-linear', says: 'The project\'s files on the engine.', needs: 'project.manage' },
+      { slug: 'inspector/db', label: 'Database', icon: 'solar:database-linear', says: 'The engine\'s tables.', needs: 'project.manage' },
+      { slug: 'inspector/logs', label: 'Logs', icon: 'solar:document-text-linear', says: 'The engine\'s logs.', needs: 'project.manage' },
+      { slug: 'settings', label: 'Settings', icon: 'solar:settings-linear', says: 'Keys, the agent profile, the danger zone.', needs: 'project.manage' }] },
   ]
 }
 /** The places of an organisation. */
 const ORG_PLACES: Place[] = [
-  { slug: '', label: 'Projects', icon: 'lucide:folder-kanban', says: 'Its projects.' },
-  { slug: 'people', label: 'People and roles', icon: 'lucide:users', says: 'Who is in it, and as what.', needs: 'org.people' },
-  { slug: 'warehouse', label: 'Warehouse', icon: 'lucide:warehouse', says: 'Its tables, what each project may read and write, its keys.', needs: 'warehouse' },
-  { slug: 'usage', label: 'Usage and credits', icon: 'lucide:gauge', says: 'What its people used.' },
-  { slug: 'billing', label: 'Billing', icon: 'lucide:receipt', says: 'Who it is billed as, how it pays.', needs: 'org.billing' },
-  { slug: 'settings', label: 'Settings', icon: 'lucide:settings-2', says: 'The organisation itself.', needs: 'org.roles' },
+  { slug: '', label: 'Projects', icon: 'solar:folder-2-linear', says: 'Its projects.' },
+  { slug: 'people', label: 'People and roles', icon: 'solar:users-group-rounded-linear', says: 'Who is in it, and as what.', needs: 'org.people' },
+  { slug: 'warehouse', label: 'Warehouse', icon: 'solar:box-linear', says: 'Its tables, what each project may read and write, its keys.', needs: 'warehouse' },
+  { slug: 'usage', label: 'Usage and credits', icon: 'solar:chart-2-linear', says: 'What its people used.' },
+  { slug: 'billing', label: 'Billing', icon: 'solar:bill-list-linear', says: 'Who it is billed as, how it pays.', needs: 'org.billing' },
+  { slug: 'settings', label: 'Settings', icon: 'solar:settings-linear', says: 'The organisation itself.', needs: 'org.roles' },
 ]
 /** The platform's places (Superatom's own). */
 const PLATFORM_PLACES: Place[] = [
-  { slug: '', label: 'Organisations', icon: 'lucide:building-2', says: 'Every organisation and its owners.' },
-  { slug: 'engines', label: 'Engines', icon: 'lucide:server', says: 'Every project\'s engine, and whether it reports.' },
-  { slug: 'attention', label: 'Attention', icon: 'lucide:bell', says: 'What needs a decision.' },
-  { slug: 'models', label: 'Models and agents', icon: 'lucide:cpu', says: 'The model catalogue and the agents\' harnesses.' },
-  { slug: 'credentials', label: 'Credentials', icon: 'lucide:key-round', says: 'The accounts models are reached through.' },
+  { slug: '', label: 'Organisations', icon: 'solar:buildings-2-linear', says: 'Every organisation and its owners.' },
+  { slug: 'engines', label: 'Engines', icon: 'solar:server-square-linear', says: 'Every project\'s engine, and whether it reports.' },
+  { slug: 'attention', label: 'Attention', icon: 'solar:bell-linear', says: 'What needs a decision.' },
+  { slug: 'models', label: 'Models and agents', icon: 'solar:cpu-linear', says: 'The model catalogue and the agents\' harnesses.' },
+  { slug: 'credentials', label: 'Credentials', icon: 'solar:key-linear', says: 'The accounts models are reached through.' },
 ]
 const holds = (caps: string[] | null, needs?: string) => !needs || !caps ? true : needs === 'warehouse' ? caps.some((c) => c.startsWith('warehouse.')) : caps.includes(needs)
 
@@ -352,26 +352,41 @@ function Console() {
   const P = (slug: string) => `/o/${org}/p/${project}${slug ? `/${slug}` : ''}`
   const O = (slug: string) => `/o/${org}${slug ? `/${slug}` : ''}`
   const item = (key: string, label: string, icon: string, to: string, active: boolean, title?: string) => ({ key, label, icon, active, onClick: () => nav(to), ...(title ? { title } : {}) })
+  // The rail holds the layer's areas, each in its own (faded) colour; the panel the pages of the area picked. An area of
+  // one page has no panel: its rail place opens the page.
+  type Area = { key: string; label: string; icon: string; pages: { key: string; label: string; icon: string; to: string; active: boolean; title?: string }[] }
   const projectPlaces = purposesOf().map((g) => ({ ...g, places: g.places.filter((pl) => holds(projCaps, pl.needs)) })).filter((g) => g.places.length)
-  const groups = layer === 'platform' ? [
-    { label: 'Superatom', items: PLATFORM_PLACES.filter((pl) => superadmin || pl.slug === '').map((pl) => item(`pf-${pl.slug}`, pl.label, pl.icon, `/${pl.slug}`, place === pl.slug && !org, pl.says)) },
-  ] : layer === 'org' ? [
-    ...(superadmin ? [{ items: [item('up', 'Superatom', 'lucide:arrow-left', '/', false)] }] : []),
-    { label: orgName, items: ORG_PLACES.filter((pl) => holds(orgCaps, pl.needs)).map((pl) => item(`o-${pl.slug}`, pl.label, pl.icon, O(pl.slug), place === pl.slug, pl.says)) },
-    // A few projects to jump straight to; all of them are on the organisation's Projects page (searchable, paged).
-    ...(projects.length ? [{ label: 'Projects', items: [...projects.slice(0, 8).map((p) => item(`pr-${p.id}`, p.name, 'lucide:folder', `/o/${org}/p/${p.id}`, false)),
-      ...(projects.length > 8 ? [item('pr-all', `All ${projects.length} projects`, 'lucide:list', O(''), false)] : [])] }] : []),
-  ] : [
-    { items: [item('up', orgName, 'lucide:arrow-left', O(''), false, `Back to ${orgName}`)] },
-    { label: projectName, items: [item('p-attention', 'Attention', 'lucide:bell', P('attention'), place === 'attention')] },
-    ...projectPlaces.map((g) => ({ label: g.title, items: g.places.map((pl) => item(`p-${pl.slug}`, pl.label, pl.icon, P(pl.slug), place === pl.slug, pl.says)) })),
+  const AREA_ICON: Record<string, string> = { knowledge: 'solar:lightbulb-bolt-linear', data: 'solar:database-linear', agents: 'solar:widget-linear', people: 'solar:users-group-rounded-linear', operations: 'solar:server-square-linear' }
+  const page = (key: string, pl: Place, to: string, active: boolean) => ({ key, label: pl.label, icon: pl.icon, to, active, title: pl.says })
+  const areas: Area[] = layer === 'platform' ? [
+    ...PLATFORM_PLACES.filter((pl) => superadmin || pl.slug === '').filter((pl) => pl.slug !== 'credentials').map((pl) => ({ key: `pf-${pl.slug}`, label: pl.label, icon: pl.icon,
+      pages: pl.slug === 'models' ? PLATFORM_PLACES.filter((x) => x.slug === 'models' || x.slug === 'credentials').map((x) => page(`pf-${x.slug}`, x, `/${x.slug}`, place === x.slug && !org)) : [page(`pf-${pl.slug}`, pl, `/${pl.slug}`, place === pl.slug && !org)] })),
+  ] : layer === 'org' ? (() => {
+    const at = (slug: string) => ORG_PLACES.find((pl) => pl.slug === slug && holds(orgCaps, pl.needs))
+    const one = (slug: string, icon?: string): Area[] => { const pl = at(slug); return pl ? [{ key: `o-${slug}`, label: pl.label, icon: icon ?? pl.icon, pages: [page(`o-${slug}`, pl, O(slug), place === slug)] }] : [] }
+    const money = ['usage', 'billing'].map(at).filter(Boolean) as Place[]
+    return [
+      { key: 'o-projects', label: 'Projects', icon: 'solar:folder-2-linear', pages: [page('o-', ORG_PLACES[0]!, O(''), place === ''), ...projects.slice(0, 12).map((p) => ({ key: `pr-${p.id}`, label: p.name, icon: 'solar:folder-linear', to: `/o/${org}/p/${p.id}`, active: false }))] },
+      ...one('people'), ...one('warehouse'),
+      ...(money.length ? [{ key: 'o-money', label: 'Usage and billing', icon: 'solar:wallet-linear', pages: money.map((pl) => page(`o-${pl.slug}`, pl, O(pl.slug), place === pl.slug)) }] : []),
+      ...one('settings'),
+    ]
+  })() : [
+    { key: 'p-attention', label: 'Attention', icon: 'solar:bell-linear', pages: [{ key: 'p-attention', label: 'Attention', icon: 'solar:bell-linear', to: P('attention'), active: place === 'attention' }] },
+    ...projectPlaces.map((g) => ({ key: `p-${g.key}`, label: g.title, icon: AREA_ICON[g.key] ?? 'solar:widget-linear', pages: g.places.map((pl) => page(`p-${pl.slug}`, pl, P(pl.slug), place === pl.slug)) })),
   ]
+  const railPlaces: RailPlace[] = areas.map((a, i) => ({
+    key: a.key, label: a.label, icon: a.icon, accent: `var(--place-${(i % 6) + 1})`,
+    ...(a.pages.length === 1 ? { onClick: () => nav(a.pages[0]!.to) } : { panel: <NavList groups={[{ label: a.label, items: a.pages.map((x) => item(x.key, x.label, x.icon, x.to, x.active, x.title)) }]} /> }),
+  }))
+  const railAt = areas.find((a) => a.pages.some((x) => x.active))?.key ?? ''
+  const layerHome = layer === 'project' ? P('') : layer === 'org' ? O('') : '/'
   const placeLabel = layer === 'project' ? (place === 'attention' ? 'Attention' : purposesOf().flatMap((g) => g.places).find((pl) => pl.slug === place)?.label ?? 'Engine')
     : layer === 'org' ? ORG_PLACES.find((pl) => pl.slug === place)?.label ?? 'Projects' : PLATFORM_PLACES.find((pl) => pl.slug === place)?.label ?? 'Organisations'
   const crumbs: Crumb[] = [
-    ...(superadmin ? [{ key: 'home', label: 'Superatom', icon: 'lucide:house', onClick: () => nav('/'), choices: PLATFORM_PLACES.map((pl) => ({ key: pl.slug || 'orgs', label: pl.label, icon: pl.icon, active: layer === 'platform' && place === pl.slug, onClick: () => nav(`/${pl.slug}`) })) }] : []),
-    ...(org ? [{ key: 'org', label: orgName, icon: 'lucide:building', onClick: () => nav(O('')), choices: orgs.map((o) => ({ key: o.id, label: o.name, icon: 'lucide:building', active: o.id === org, onClick: () => nav(`/o/${o.id}${layer === 'org' && place ? `/${place}` : ''}`) })) }] : []),
-    ...(project ? [{ key: 'project', label: projectName, icon: 'lucide:folder-kanban', onClick: () => nav(P('')), choices: projects.map((p) => ({ key: p.id, label: p.name, icon: 'lucide:folder', active: p.id === project, onClick: () => nav(`/o/${org}/p/${p.id}${place ? `/${place}` : ''}`) })) }] : []),
+    ...(superadmin ? [{ key: 'home', label: 'Superatom', icon: 'solar:home-angle-linear', onClick: () => nav('/'), choices: PLATFORM_PLACES.map((pl) => ({ key: pl.slug || 'orgs', label: pl.label, icon: pl.icon, active: layer === 'platform' && place === pl.slug, onClick: () => nav(`/${pl.slug}`) })) }] : []),
+    ...(org ? [{ key: 'org', label: orgName, icon: 'solar:buildings-2-linear', onClick: () => nav(O('')), choices: orgs.map((o) => ({ key: o.id, label: o.name, icon: 'solar:buildings-2-linear', active: o.id === org, onClick: () => nav(`/o/${o.id}${layer === 'org' && place ? `/${place}` : ''}`) })) }] : []),
+    ...(project ? [{ key: 'project', label: projectName, icon: 'solar:folder-2-linear', onClick: () => nav(P('')), choices: projects.map((p) => ({ key: p.id, label: p.name, icon: 'solar:folder-linear', active: p.id === project, onClick: () => nav(`/o/${org}/p/${p.id}${place ? `/${place}` : ''}`) })) }] : []),
     { key: 'place', label: placeLabel },
   ]
   const full = (layer === 'project' && (place === 'graph' || place === 'warehouse')) || (layer === 'org' && place === 'warehouse')
@@ -379,7 +394,9 @@ function Console() {
     <>
       <Style />
       <AppShell wide crumbs={<Breadcrumbs items={crumbs} />} sidebar={(collapsed, toggle) => (
-        <Sidebar name={layer === 'project' ? projectName : layer === 'org' ? orgName : 'Superatom'} connected groups={groups} collapsed={collapsed} onToggle={toggle} foot={() => <UserButton />} />
+        <RailSidebar name={layer === 'project' ? projectName : layer === 'org' ? orgName : 'Superatom'} places={railPlaces} current={railAt}
+          pinned={!collapsed} onPin={(p) => toggle(!p)} onHome={() => nav(layerHome)} onMark={() => nav('/')} markTitle="Superatom"
+          foot={<UserButton />} />
       )}>
         <AdminContext.Provider value={env}>
           <div className={full ? 'sa-fullpage' : 'sa-console__page'}>

@@ -167,14 +167,14 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
     ? <button type="button" className="sa-sidelist__more" onClick={() => setShownConversations((n) => n + 30)}>Show more</button> : null
   const named = agents.filter((a) => !a.isDefault)
   const places: RailPlace[] = [
-    { key: 'home', label: 'Home', icon: 'solar:home-angle-linear', accent: 'var(--place-home)', onClick: () => page('home'), actions: sideActions,
+    { key: 'home', label: 'Home', icon: 'solar:home-angle-linear', accent: 'var(--place-1)', onClick: () => page('home'), actions: sideActions,
       panel: activityView ? <><NavList groups={[nav[0]!]} /><SideActivity request={request} subscribeLive={subscribeLive} /></> : <><NavList groups={nav} />{moreConversations}</> },
-    { key: 'agents', label: 'Agents', icon: 'solar:widget-linear', accent: 'var(--place-agents)', onClick: () => page('agents'), actions: sideActions,
+    { key: 'agents', label: 'Agents', icon: 'solar:widget-linear', accent: 'var(--place-2)', onClick: () => page('agents'), actions: sideActions,
       panel: <NavList groups={[
         { items: [{ key: 'agents', label: 'All agents', icon: 'solar:list-linear', active: onPages && root === 'agents', onClick: () => page('agents') }] },
         { label: 'Agents', items: named.map((a) => ({ key: `a:${a.id}`, label: a.name, icon: a.look.icon ?? 'solar:widget-linear', active: startAgent === a.id || (!!sessionId && current === a.id), onClick: () => go(`s/${a.id}`) })) },
       ]} /> },
-    { key: 'connections', label: 'Connections', icon: 'solar:link-round-linear', accent: 'var(--place-connections)', onClick: () => page('connections') },
+    { key: 'connections', label: 'Connections', icon: 'solar:link-round-linear', accent: 'var(--place-3)', onClick: () => page('connections') },
   ]
   const railAt = onPages && root === 'about' ? 'about' : sessionId || (onPages && (root === 'home' || !root)) ? 'home' : startAgent || (onPages && root?.startsWith('agent')) ? 'agents' : onPages && root?.startsWith('connection') ? 'connections' : ''
   const [showKeys, setShowKeys] = useState(false)
@@ -199,7 +199,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
     <>
       <AppShell
         sidebar={(collapsed, toggle) => (
-          <RailSidebar name={projectName} onAbout={() => page('about')} onHome={() => page('home')} places={places} current={railAt} pinned={!collapsed} onPin={(p) => toggle(!p)}
+          <RailSidebar name={projectName} onMark={() => page('about')} onHome={() => page('home')} places={places} current={railAt} pinned={!collapsed} onPin={(p) => toggle(!p)}
             foot={<UserProfile name={me.name} email={me.email}
               menu={<>
                 <MenuItem icon="solar:user-circle-linear" label="Profile" onClick={() => page('profile')} />

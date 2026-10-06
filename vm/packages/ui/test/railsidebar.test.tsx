@@ -20,7 +20,7 @@ const places = [
 ]
 const root = createRoot(document.getElementById('root')!)
 await act(async () => root.render(
-  <AppShell sidebar={(collapsed, toggle) => <RailSidebar name="P" places={places} current="home" pinned={!collapsed} onPin={(p) => toggle(!p)} onAbout={() => {}} onHome={() => {}} />}>
+  <AppShell sidebar={(collapsed, toggle) => <RailSidebar name="P" places={places} current="home" pinned={!collapsed} onPin={(p) => toggle(!p)} onMark={() => {}} onHome={() => {}} />}>
     <main>page</main>
   </AppShell>))
 const $ = (s: string) => document.querySelector(s) as HTMLElement | null
@@ -62,7 +62,7 @@ test('the head toggle on a floating panel pins it — every time', async () => {
 
 const leaveAll = async () => act(async () => { $('.sa-railbar')!.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })); await new Promise((r) => setTimeout(r, 300)) })
 const at = async (current: string) => act(async () => root.render(
-  <AppShell sidebar={(collapsed, toggle) => <RailSidebar name="P" places={[...places, { key: 'connections', label: 'Connections', icon: 'x:c' }]} current={current} pinned={!collapsed} onPin={(p) => toggle(!p)} onAbout={() => {}} onHome={() => {}} />}>
+  <AppShell sidebar={(collapsed, toggle) => <RailSidebar name="P" places={[...places, { key: 'connections', label: 'Connections', icon: 'x:c' }]} current={current} pinned={!collapsed} onPin={(p) => toggle(!p)} onMark={() => {}} onHome={() => {}} />}>
     <main>page</main>
   </AppShell>))
 
