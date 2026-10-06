@@ -458,6 +458,17 @@ revocable sign-in tokens; service tokens bound to one project.
     on save the platform tells the engine `<kind>:changed`; the engine pulls what comes after its own cursor, in order,
     on that message and on every reconnect (so a message missed while it was away costs nothing); a record already held
     is checked equal and skipped; an engine copy that disagrees is set aside and rebuilt from the platform.
+  - **Where it is kept (the user, 2026-10-07):** only metadata and JSON-like, table-like data is stored in the project's
+    Durable Object; everything else — files — goes to the R2 bucket, connected to the Durable Object by metadata (its
+    hash, when, by whom), so we always know what any project contains, keep its history, and know how to delete it.
+    The platform is the source of truth for almost everything — not data that is easily generated again, and not
+    files specific to the engine that make sense only where it runs (caches, indexes, agents' working folders).
+  - **The doors up (what the engine generates):** a thing is kept on the platform only when it goes through its door;
+    everything else an agent writes is its scratch. A program → `program:build` (the platform keeps the build and its
+    source); a connection's bridge → uploaded after the connector agent's turn; a concept, domain or agent definition →
+    `graph:write` (written by the platform, as the person); a session (its log, answers, files) → session sync. People's
+    doors in: the console, `sacli graph import` (knowledge), `sacli program build`, `sacli app publish`, connections in
+    the console. A new kind worth keeping gets its own door.
   - **Engine → platform** (made in the engine): sessions and conversations, programs, dashboards, and the nodes an
     agent generates (an agent made from a session) — sent as writes the platform makes, governed, as the person.
   - **Platform → engine** (held by the platform): the composition graph — domains, concepts, agents, settings, its

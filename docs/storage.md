@@ -110,15 +110,20 @@ Roots (`engine.ts`): `STATE_ROOT` = `$ENGINE_STATE_DIR` or `~/.superatom/state`;
 
 | Path under `<home>` | Holds | To the platform |
 |---|---|---|
-| `.env`, `settings.json`, `profile.json`, `secrets/` | the engine's settings and credentials, org settings, last profile | no (profile mirrors ProjectDO) |
+| `.env`, `profile.json` | the engine's identity and start-up settings (project, key, hub, ports), the last agent profile adopted | no (the profile mirrors ProjectDO); no credential of a connection or a model is ever here |
 | `db/composition.sqlite` | the composition graph's REPLICA: pulled from the ProjectDO (`graph:pull` on welcome and on `graph:changed`), never written here; set aside (`.differs-<ms>`) and rebuilt when it disagrees | ← ProjectDO (the graph lives there) |
-| `db/datasource-index.sqlite`, `db/grounding.sqlite`, `db/agent-sessions.sqlite`, `db/backups/` | rebuildable indexes, harness session ids, backups | no |
+| `db/datasource-index.sqlite`, `db/grounding.sqlite`, `db/agent-sessions.sqlite`, `db/backups/` | rebuildable indexes, harness session ids, migration backups (engine-only: they make sense only where the engine runs) | no |
 | `sessions/<sid>/session.jsonl` | a session's log — the engine writes it first | yes → the owner's UserDO `session_entries` (`session:sync`, per session; after a reconnect one session at a time); `synced.json` says how far |
 | `sessions/<sid>/STATE.json`, `ANSWER_HISTORY.jsonl`, `context.md`, `<qid>/answer.md` (+ `blocks.json`, `queries.jsonl`), `attachments/` | the session as files: current STATE, answer history, start context, each answer committed, its files | the log is; these are written from it (attachments come from R2) |
 | `sessions/<sid>/work/` | the session's agent's own folder (its tools, data, out/, harness notes) | no |
 | `workspace/` | the shared folder of the connector and grounding agents | no |
 | `programs/store/<sha256>/`, `programs/incoming/` | built programs — each with the source it was built from (`source/`, inside its hash) — and build staging; no program source is kept in a home (authors build with `sacli program build`) | bundles, source included → R2 `programs/`; fetched back by hash |
-| `knowledge/`, `app/`, `datasources/` | domain knowledge (imported into the platform's graph with `sacli graph import`; the engine never reads it), the project's own app, `datasources/<name>/bridge.mjs` (each code connection's bridge, downloaded from the platform by hash — settings and secrets only in memory) and the manager's `query-results.sqlite` cache | knowledge → the platform's graph; connections ← ProjectDO (`connections:pull`); dashboards upload to R2 |
+| `app/server/` (+ `.version`) | the project's app as last published — downloaded from the platform (`app:changed`), exactly that version, never edited here | ← ProjectDO `app_versions` + R2 `app/<project>/<hash>` |
+| `datasources/<name>/bridge.mjs`, `datasources/query-results.sqlite` | each code connection's bridge, downloaded by hash (its settings and secrets only in memory); the manager's result cache | bridges ← ProjectDO `connections` + R2 `bridge/<project>/<hash>`; the cache: no |
+
+Nothing a person writes lives in a home: a project's knowledge and its app's source are written in a workspace
+(`~/.superatom/work/<project>/`: `knowledge/`, `app/`, their git history), imported (`sacli graph import`) and published
+(`sacli app publish`) to the platform, and downloaded by the engine from there.
 
 Outside the home: the harnesses' own login files (`~/.claude.json`, `~/.codex/auth.json`, pi's `auth.json`).
 
