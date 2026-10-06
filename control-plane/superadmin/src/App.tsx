@@ -18,10 +18,10 @@ import { Inspector, SECTIONS, SECTION_LABEL, type Section } from './Inspector'
 import { ConnectorConsole } from './ConnectorConsole'
 import { GroundingConsole } from './GroundingConsole'
 import { AnalystConsole } from './AnalystConsole'
-import { useSession, SignIn, UserButton } from '@clerk/react'
+import { useSession, useUser, useClerk, SignIn } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
-import { AppShell, RailSidebar, NavList, type RailPlace, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
+import { AppShell, RailSidebar, NavList, type RailPlace, UserProfile, MenuItem, MenuRule, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
 import '@superatom/ui/design.css'
 import { AdminContext, ADMIN_OWN_BLOCKS } from './AdminBlocks'
 
@@ -382,7 +382,7 @@ function Console() {
   const railAt = areas.find((a) => a.pages.some((x) => x.active))?.key ?? ''
   const layerHome = layer === 'project' ? P('') : layer === 'org' ? O('') : '/'
   const placeLabel = layer === 'project' ? (place === 'attention' ? 'Attention' : purposesOf().flatMap((g) => g.places).find((pl) => pl.slug === place)?.label ?? 'Engine')
-    : layer === 'org' ? ORG_PLACES.find((pl) => pl.slug === place)?.label ?? 'Projects' : PLATFORM_PLACES.find((pl) => pl.slug === place)?.label ?? 'Organisations'
+    : layer === 'org' ? ORG_PLACES.find((pl) => pl.slug === place)?.label ?? 'Projects' : place === 'profile' ? 'Profile' : PLATFORM_PLACES.find((pl) => pl.slug === place)?.label ?? 'Organisations'
   const crumbs: Crumb[] = [
     ...(superadmin ? [{ key: 'home', label: 'Superatom', icon: 'solar:home-angle-linear', onClick: () => nav('/'), choices: PLATFORM_PLACES.map((pl) => ({ key: pl.slug || 'orgs', label: pl.label, icon: pl.icon, active: layer === 'platform' && place === pl.slug, onClick: () => nav(`/${pl.slug}`) })) }] : []),
     ...(org ? [{ key: 'org', label: orgName, icon: 'solar:buildings-2-linear', onClick: () => nav(O('')), choices: orgs.map((o) => ({ key: o.id, label: o.name, icon: 'solar:buildings-2-linear', active: o.id === org, onClick: () => nav(`/o/${o.id}${layer === 'org' && place ? `/${place}` : ''}`) })) }] : []),
@@ -396,7 +396,7 @@ function Console() {
       <AppShell wide crumbs={<Breadcrumbs items={crumbs} />} sidebar={(collapsed, toggle) => (
         <RailSidebar name={layer === 'project' ? projectName : layer === 'org' ? orgName : 'Superatom'} places={railPlaces} current={railAt}
           pinned={!collapsed} onPin={(p) => toggle(!p)} onHome={() => nav(layerHome)} onMark={() => nav('/')} markTitle="Superatom"
-          foot={<UserButton />} />
+          foot={<PersonMenu onProfile={() => nav('/profile')} />} />
       )}>
         <AdminContext.Provider value={env}>
           <div className={full ? 'sa-fullpage' : 'sa-console__page'}>
@@ -408,6 +408,7 @@ function Console() {
               <Route path="/attention" element={<AttentionPage key="platform" />} />
               <Route path="/models" element={<ModelsPage />} />
               <Route path="/credentials" element={<CredentialsPage />} />
+              <Route path="/profile" element={<ProfilePage superadmin={superadmin} orgs={orgs} />} />
               <Route path="/o/:orgId/p/:projectId/graph" element={<CompositionGraph projectId={project ?? ''} token={token} />} />
               <Route path="/o/:orgId/p/:projectId/warehouse" element={<ProjectWarehouse key={project ?? ''} projectId={project ?? ''} token={token} />} />
               <Route path="/o/:orgId/p/:projectId/attention" element={<AttentionPage key={project ?? ''} projectId={project ?? undefined} />} />
@@ -543,6 +544,45 @@ function ConfirmDelete({ kind, name, consequences, onConfirm, onClose }: {
 // Landing for admin.superatom.site. The API already returns only the orgs this person belongs to, so the
 // common case (exactly one) goes straight there and the URL becomes /org/<id> as if they had typed it.
 // Someone in several orgs picks; someone in none is told, rather than shown an empty console.
+/** The person, at the rail's foot: our own menu (the same as the workspace's); only sign-in and security is Clerk's. */
+function PersonMenu({ onProfile }: { onProfile: () => void }) {
+  const { user } = useUser()
+  const clerk = useClerk()
+  const email = user?.primaryEmailAddress?.emailAddress
+  return (
+    <UserProfile name={user?.fullName || email || 'Signed in'} email={email} menu={<>
+      <MenuItem icon="solar:user-circle-linear" label="Profile" onClick={onProfile} />
+      <MenuItem icon="solar:shield-keyhole-linear" label="Sign-in and security" onClick={() => clerk.openUserProfile()} />
+      <MenuRule />
+      <MenuItem icon="solar:logout-2-linear" label="Log out" onClick={() => { dropToken(); void clerk.signOut() }} />
+    </>} />
+  )
+}
+
+/** Who is signed in: their name and email, what they are on the platform, the organisations they are in. */
+function ProfilePage({ superadmin, orgs }: { superadmin: boolean; orgs: { id: string; name: string }[] }) {
+  const { user } = useUser()
+  const clerk = useClerk()
+  const nav = useNavigate()
+  const email = user?.primaryEmailAddress?.emailAddress
+  const fact = (k: string, v: React.ReactNode) => <div className="sa-facts__row"><span className="sa-facts__key">{k}</span><span className="sa-facts__value">{v}</span></div>
+  return (<>
+    <PageHeader title="Profile" />
+    <SectionCard icon="solar:user-circle-linear" title={user?.fullName || email || 'Signed in'}>
+      <div className="sa-facts">
+        {fact('Name', user?.fullName || '—')}
+        {fact('Email', email ?? '—')}
+        {fact('On the platform', superadmin ? 'Administrator of Superatom' : 'Member of its organisations')}
+        {fact('Signed up', user?.createdAt ? new Date(user.createdAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—')}
+      </div>
+      <ActionBar><button type="button" className="sa-btn" onClick={() => clerk.openUserProfile()}>Sign-in and security</button></ActionBar>
+    </SectionCard>
+    <SectionCard icon="solar:buildings-2-linear" title="Your organisations">
+      <RecordList rows={orgs} keyOf={(o) => o.id} empty="Not in an organisation yet." onRow={(o) => nav(`/o/${o.id}`)} columns={[{ key: 'name', label: 'Organisation', render: (o) => o.name }]} />
+    </SectionCard>
+  </>)
+}
+
 function MyOrgLanding() {
   const token = useAuth(); const api = useApi(token)
   const [orgs, setOrgs] = useState<any[] | null>(null)
