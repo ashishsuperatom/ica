@@ -443,6 +443,7 @@ export class ProjectDO extends DurableObject<Env> {
         await this.handleHello(ws, msg)
       } catch (err: any) {
         this.log('ws:hello_error', { error: err?.message ?? String(err) })
+        console.log(`[hello] ${this._pid} failed: ${err?.stack ?? err}`)
         ws.close(4001, 'Internal error')
       }
       return
