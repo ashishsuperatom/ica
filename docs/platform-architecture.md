@@ -1191,7 +1191,26 @@ user can do, to allow several connections per user, to fan out and manage throug
 UserDO; based on their access it decides and sends the message on to the ProjectDO; the project passes on to the
 OrganisationDO what is the organisation's. A very clean architecture — to be discussed and done a bit later.
 
-### Appending and partitioning in the warehouse (question, 2026-10-06)
+### How many Durable Objects (question, 2026-10-06)
+
+**In the user's words (thinking aloud):** the graph data not being at the project level but in another graph Durable
+Object feels redundant — what does it have that could not be in the ProjectDO? A Durable Object's SQLite holds some
+10 GB, so it should be easy in the ProjectDO. The graph belongs to the project — unless the graph becomes really about
+agents and their capabilities, then it might make sense. The ChannelDO is fine: Teams and other channels are a separate
+thing. The DecisionDO is fine: the state machine has its specific reason. The session: a user has sessions; a session is
+not edited once done, so a few facts stay with the user as the session, and the rest of its data could go to a key-value
+store.
+
+*Assessment:* the limit is 10 GB of SQLite per Durable Object. A graph is text — kilobytes to megabytes — so size is no
+reason. The GraphDO was split for isolation, not need: the ProjectDO runs one request at a time and is the hub for every
+socket of the project, so a big graph catch-up would queue behind and ahead of live messages — but graph syncs are small
+and occasional. Folding it into the ProjectDO (its records and content as two more tables) loses nothing. Sessions: a live
+session is appended to every turn and branches when a block is edited, so while live it needs a consistent log, which
+Workers KV is not (eventually consistent, up to about a minute; last write wins). A finished session is immutable: an
+object in R2 by hash (as parcels are), its index and few facts in the person's UserDO. So the SessionDO could become: the
+live log in the UserDO, the finished log in R2. Not done yet — to be decided.
+
+
 
 **In the user's words:** Parquet files are a one-time thing, a compression system — appending is not like a scale
 system, you cannot just append another row. So how exactly are we adding data incrementally — will that be a problem?
