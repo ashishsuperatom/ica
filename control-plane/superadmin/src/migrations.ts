@@ -279,6 +279,14 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     -- _graph_migrations). Here: who changed it, by their id, with the email the hub knew them by.
     CREATE TABLE IF NOT EXISTS graph_people (id TEXT PRIMARY KEY, email TEXT NOT NULL);
   ` },
+  { id: 35, name: 'the graph copy engines pushed, gone', up: `
+    -- Before the platform held the graph, engines pushed a copy of its records here (migration 32). The graph was built
+    -- from it once (2026-10-07: F5 54 nodes, TG 45, the same as their engines); the copy is no longer read.
+    DROP TRIGGER IF EXISTS graph_records_no_update;
+    DROP TRIGGER IF EXISTS graph_records_no_delete;
+    DROP TABLE IF EXISTS graph_records;
+    DROP TABLE IF EXISTS graph_content;
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

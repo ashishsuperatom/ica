@@ -72,7 +72,7 @@ to the warehouse, with ms), `warehouse_tables` (owners); legacy `datasources`, `
 - the engine: `api_key` (the project key `sk-proj-…`), `fly_machine`, `engine_running`, `profile`, `message_queue`
   (for a sleeping engine, 60 min), `engine_sources`;
 - the hub: `person_links` (each person linked through their UserDO), `logs` (event log);
-- knowledge and work: the composition graph itself — its own tables (`content`, `name`, `change`, `question`, `suggestion`, `decision`, `version`, by its own migrations in `_graph_migrations`; `graph.ts`) and `graph_people` (who changed it, by email); `graph_records`, `graph_content` (the copy engines pushed before the platform held the graph — imported once into the graph's tables, dropped next), `programs` (catalogue; bundles in R2),
+- knowledge and work: the composition graph itself — its own tables (`content`, `name`, `change`, `question`, `suggestion`, `decision`, `version`, by its own migrations in `_graph_migrations`; `graph.ts`) and `graph_people` (who changed it, by email), `programs` (catalogue; bundles in R2),
   `dashboards`, `dashboard_builds`, `decision_register`, `activities`, `connections` (settings; `secrets_sealed` with the
   master key), `connector_calls`, `connector_schemas`;
 - who asked what: `answer_buffer` (only who asked each question — it decides whose logs reach whom), `session_owners`

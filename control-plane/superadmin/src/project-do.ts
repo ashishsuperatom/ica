@@ -1,7 +1,7 @@
 // ProjectDO — one per project: the project's own record and its hub.
 //
 // It keeps what is the project's: who may do what (members, access, roles, groups, keys, grants — copied in from the
-// organisation, so nothing here crosses to the OrgDO on the way), the composition graph (graph-store.ts), programs,
+// organisation, so nothing here crosses to the OrgDO on the way), the composition graph (graph.ts), programs,
 // the engine connection and its machine, connections to data, decisions, the audit, activities and usage.
 //
 // Who is in its hub:
@@ -37,8 +37,6 @@ import { connectorById, checkConnection, CONNECTORS } from '../../shared/connect
 import { seal, unseal } from './proxy/seal.js'
 import { runConnector, runCode, manifestOf } from './connectors/runtime.js'
 import { projectGraph, migrateGraph, GRAPH_MESSAGES, GRAPH_VIEWS, type Who } from './graph.js'
-import { Store, sqlStorageGraphDb, applyReplica } from '../../../vm/packages/composition-graph/src/index.js'
-import { graphStore } from './graph-store.js'
 import { keyOf as fileKeys } from './files.js'
 
 
@@ -220,7 +218,6 @@ export class ProjectDO extends DurableObject<Env> {
     runMigrations(durableObjectDb(this.ctx.storage), PROJECT_MIGRATIONS, { name: `ProjectDO ${this.ctx.id.toString().slice(0, 8)}`, adopt: adoptProjectSchemaVersion })
     // The composition graph's own tables, by its own migrations (graph.ts).
     migrateGraph(this.ctx.storage)
-    this.graphFromRecordsOnce()
 
     // If this DO has a machine with a stale heartbeat, set an alarm so it
     // gets suspended within 10 min of this DO loading (handles existing DOs
@@ -520,8 +517,6 @@ export class ProjectDO extends DurableObject<Env> {
     // different facts, and they differ whenever a machine is asleep, unreachable, or mid-question.
     // ── A session's log, pushed up by the engine: the platform keeps the truth (in its owner's UserDO), the person's index
     //    of their sessions follows (UserDO), and the engine hears how far the platform has it. ──
-    // ── The composition graph's records, replicated up by the engine (kept here, graph-store.ts); where the platform's copy ends; and
-    //    batches back down to rebuild an engine whose graph is empty. ──
     // ── What the engine did, for the platform's warehouse (an agent's turn, its steps and queries): recorded here, the
     //    one path, never by the engine itself. Only the engine's own kinds. ──
     if (msg.type === 'record' && sender.type === 'code-engine') {
@@ -1323,23 +1318,9 @@ export class ProjectDO extends DurableObject<Env> {
     return this.j({ items })
   }
 
-  /** The project's composition graph, kept here (graph-store.ts). */
+  /** The project's composition graph, held here (graph.ts). */
   private _graph?: ReturnType<typeof projectGraph>
   private graph() { return (this._graph ??= projectGraph(this.ctx.storage, this.env, () => this._pid)) }
-  /** ONE-TIME (removed in the next commit, once it has run on every project): the graph built from the copy of its
-   *  records the engines pushed here before the platform held it. */
-  private graphFromRecordsOnce() {
-    const sql = this.ctx.storage.sql
-    if (Number([...sql.exec('SELECT COUNT(*) AS n FROM change')][0]?.n ?? 0) > 0) return
-    const copy = graphStore(this.ctx.storage, this.env, () => this._pid)
-    let c: any = {}
-    for (let i = 0; i < 10_000; i++) {
-      const b = copy.pull(c, 1000)
-      if (!b.changes.length && !b.suggestions.length && !b.versions.length && !b.decisions.some((d: any) => Number(d.at) > (c.decisionAt ?? 0))) break
-      applyReplica(new Store(sqlStorageGraphDb(this.ctx.storage)), b as any)
-      c = b.next
-    }
-  }
   private decisionStub() { return (this.env as any).DECISION.get((this.env as any).DECISION.idFromName(`dec:${this._pid}`)) }
   /** Where a session lives: its owner's UserDO, asked with this project and the session's id (session-store.ts). */
   private sessionAt(session: string) {

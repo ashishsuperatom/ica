@@ -1244,7 +1244,7 @@ live log in the UserDO, the finished log in R2. Not done yet — to be decided.
 data ourselves — two projects, one user — and keep no migration code for it. Everything that belongs to a person goes in
 their UserDO (their sessions, their warehouse queries); later every connection goes front end → UserDO → ProjectDO (which
 holds, copied in at creation, everything it needs, authorization included — the OrgDO is not crossed) → the engine.
-*Done:* `graph_records`/`graph_content` in the ProjectDO (graph-store.ts); `session_entries`/`session_artifacts` in the
+*Done:* the composition graph in the ProjectDO (since 2026-10-07 held there, graph.ts — the engine a replica); `session_entries`/`session_artifacts` in the
 UserDO (session-store.ts), the ProjectDO knowing each session's owner (`sessions_known.user`, from its opening entry). The
 data was copied once by a temporary step and checked (TotalGroup: 93 graph records, 17 sessions; Fusion5: 171 and 38; no
 artifacts existed anywhere; no mismatch), then both engines re-sent all 77 of their synced sessions from their own files,
