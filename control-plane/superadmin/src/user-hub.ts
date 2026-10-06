@@ -59,6 +59,7 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
   const sql = ctx.storage.sql
   const inbox = new AnswerBuffer(sql)
   const chains = new Map<string, Promise<unknown>>()   // per link: what it sends is handled in order
+  const inOrder = new Map<string, Promise<unknown>>()   // per tab: what it sends is handled in order
   const joiners = new Map<string, { r: ReturnType<typeof receiver>; whole: any }>()   // per link: parts being joined
   const held = new Map<string, string[]>()   // per message being joined: its frames, to forward once it is whole
   const projectStub = (pid: string) => (env as any).PROJECT.get((env as any).PROJECT.idFromName(`proj:${pid}`))
@@ -136,20 +137,8 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
     to(on)
   }
 
-  return {
-    /** A socket from the Worker, its sign-in already verified there. */
-    accept(request: Request): Response {
-      const project = request.headers.get('x-sa-project') ?? ''
-      const claims = JSON.parse(request.headers.get('x-sa-claims') ?? 'null') as Claims | null
-      if (!project || !claims?.userId) return new Response('who and which project', { status: 400 })
-      const pair = new WebSocketPair()
-      const [client, server] = Object.values(pair) as [WebSocket, WebSocket]
-      ctx.acceptWebSocket(server)
-      save(server, { tab: crypto.randomUUID().slice(0, 12), project, surface: 'runtime', claims, lanes: [] })
-      return new Response(null, { status: 101, webSocket: client })
-    },
-
-    async message(ws: WebSocket, raw: string | ArrayBuffer) {
+  /** One message from a tab (see `message`: called in order). */
+  async function handle(ws: WebSocket, raw: string | ArrayBuffer) {
       const t = tabOf(ws); if (!t) return
       let msg: any
       try { msg = JSON.parse(typeof raw === 'string' ? raw : new TextDecoder().decode(raw)) } catch { send(ws, { from: HUB, payload: { t: 'error', reason: 'Invalid JSON' } }); return }
@@ -180,12 +169,43 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
       }
       let r: any = await projectStub(t.project).personMessage(t.project, t.wsId, msg)
       if (r?.relink && await link(ws, t)) r = await projectStub(t.project).personMessage(t.project, t.wsId!, msg)
-    },
+    }
 
-    async closed(ws: WebSocket) {
+  async function closeTab(ws: WebSocket) {
       const t = tabOf(ws); if (!t?.wsId) return
       const rest = linkTabs(t.project, t.wsId).filter(([w]) => w !== ws)
       if (!rest.length) await projectStub(t.project).personUnlink(t.project, t.wsId).catch(() => {})
+    }
+
+  return {
+    /** A socket from the Worker, its sign-in already verified there. */
+    accept(request: Request): Response {
+      const project = request.headers.get('x-sa-project') ?? ''
+      const claims = JSON.parse(request.headers.get('x-sa-claims') ?? 'null') as Claims | null
+      if (!project || !claims?.userId) return new Response('who and which project', { status: 400 })
+      const pair = new WebSocketPair()
+      const [client, server] = Object.values(pair) as [WebSocket, WebSocket]
+      ctx.acceptWebSocket(server)
+      save(server, { tab: crypto.randomUUID().slice(0, 12), project, surface: 'runtime', claims, lanes: [] })
+      return new Response(null, { status: 101, webSocket: client })
+    },
+
+    /** A tab's messages are handled one after another, each whole before the next: a device may send right behind its
+     *  hello without waiting for the welcome, and what it sends must find the tab linked, not race the link. */
+    message(ws: WebSocket, raw: string | ArrayBuffer): Promise<void> {
+      const key = tabOf(ws)?.tab ?? ''
+      const next = (inOrder.get(key) ?? Promise.resolve()).then(() => handle(ws, raw)).catch((e) => console.warn(`[user] a message failed: ${e?.message ?? e}`))
+      inOrder.set(key, next)
+      void next.finally(() => { if (inOrder.get(key) === next) inOrder.delete(key) })
+      return next
+    },
+
+    /** A tab closed: after what it sent is handled (a link still being made is then let go). */
+    closed(ws: WebSocket): Promise<void> {
+      const key = tabOf(ws)?.tab ?? ''
+      const last = (inOrder.get(key) ?? Promise.resolve()).then(() => closeTab(ws)).catch(() => {})
+      inOrder.delete(key)
+      return last
     },
 
     /** What the project sends this person, to the tabs it belongs to. No tab left on the link: it is gone. */

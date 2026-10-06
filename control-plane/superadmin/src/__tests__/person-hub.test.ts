@@ -59,6 +59,22 @@ describe('every person through their UserDO', () => {
     expect(new Set(w.map((m) => m.payload.wsId)).size).toBe(1)
     expect(w[0].payload.project.id).toBe(PID)
   })
+  it('what a device sends right behind its hello waits for the link instead of closing the socket', async () => {
+    // The phone sends hello, sync:req and log:attach at once, without waiting for the welcome.
+    const r = await mf.dispatchFetch(`http://x/_ws/${PID}?token=${jwt({ userId: 'ios', email: 'ios@x.io', role: 'superadmin' })}`, { headers: { upgrade: 'websocket' } })
+    const ws = r.webSocket!; const got: any[] = []; let closed: number | null = null
+    ws.addEventListener('message', (e: any) => got.push(JSON.parse(String(e.data))))
+    ws.addEventListener('close', (e: any) => { closed = e.code })
+    ws.accept()
+    ws.send(JSON.stringify({ type: 'hello', role: 'runtime' }))
+    ws.send(JSON.stringify({ to: { type: 'code-engine' }, payload: { t: 'sync:req' } }))
+    ws.send(JSON.stringify({ to: { type: 'code-engine' }, payload: { t: 'early-probe', reqId: 'early' } }))
+    await engine.until((m) => m.payload?.t === 'early-probe')
+    await settle()
+    expect(closed).toBe(null)
+    expect(got.map((m) => m.payload?.t).slice(0, 2)).toEqual(['welcome', 'sync:res'])
+    ws.close()
+  })
   it('a reply goes to the tab that asked, and only there', async () => {
     a1.send({ to: { type: 'code-engine' }, payload: { t: 'probe', reqId: 'r1' } })
     const atEngine = await engine.until((m) => m.payload?.t === 'probe')
