@@ -310,13 +310,36 @@ function Rows({ opened, read, cache, space, narrow, setWhere, keep, onColumns, o
   const range = sel && anchor ? { r0: Math.min(sel.r, anchor.r), r1: Math.max(sel.r, anchor.r), c0: Math.min(sel.c, anchor.c), c1: Math.max(sel.c, anchor.c) } : sel ? { r0: sel.r, r1: sel.r, c0: sel.c, c1: sel.c } : null
   const inRange = (r: number, c: number) => !!range && r >= range.r0 && r <= range.r1 && c >= range.c0 && c <= range.c1
   const choose = (r: number, c: number, extend: boolean) => { if (extend && sel) { setAnchor(anchor ?? sel); setSel({ r, c }) } else { setSel({ r, c }); setAnchor(null) } }
+  // Whole rows (picked by their numbers): copied with the column names first, so they paste into a sheet as a table.
+  const wholeRows = !!range && range.c0 === 0 && range.c1 === columns.length - 1 && columns.length > 1
   const copy = () => {
     if (!range) return
     const lines: string[] = []
+    if (wholeRows) lines.push(columns.map((c) => c.name).join('\t'))
     for (let r = range.r0; r <= range.r1; r++) lines.push(columns.slice(range.c0, range.c1 + 1).map((col) => shown(rows[r]?.[col.name]) ?? '').join('\t'))
-    const n = (range.r1 - range.r0 + 1) * (range.c1 - range.c0 + 1)
-    navigator.clipboard?.writeText(lines.join('\n')).then(() => notify(n === 1 ? 'Copied' : `Copied ${n} cells`, 'note'), () => notify('Could not copy', 'refused'))
+    const rowsN = range.r1 - range.r0 + 1, n = rowsN * (range.c1 - range.c0 + 1)
+    navigator.clipboard?.writeText(lines.join('\n')).then(() => notify(wholeRows ? `Copied ${rowsN} row${rowsN === 1 ? '' : 's'}` : n === 1 ? 'Copied' : `Copied ${n} cells`, 'note'), () => notify('Could not copy', 'refused'))
   }
+  /** A row picked by its number: the whole row; with shift, every row from the one picked before. */
+  const chooseRow = (r: number, extend: boolean) => {
+    const last = columns.length - 1
+    if (extend && (anchor ?? sel)) { const a = anchor ?? sel!; setAnchor({ r: a.r, c: 0 }); setSel({ r, c: last }) } else { setAnchor({ r, c: 0 }); setSel({ r, c: last }) }
+  }
+  // What the selected numbers come to (more than one cell): how many, their sum, mean, least and most.
+  const stats = useMemo(() => {
+    if (!range || (range.r0 === range.r1 && range.c0 === range.c1)) return null
+    const nums: number[] = []
+    let cells = 0
+    for (let r = range.r0; r <= range.r1; r++) for (let c = range.c0; c <= range.c1; c++) {
+      cells++
+      const v = rows[r]?.[columns[c]?.name ?? '']
+      if (typeof v === 'number' && Number.isFinite(v)) nums.push(v)
+      else if (typeof v === 'string' && v.trim() !== '' && kindOf(columns[c].type) === 'number' && Number.isFinite(Number(v))) nums.push(Number(v))
+    }
+    if (!nums.length) return { cells, n: 0 }
+    const sum = nums.reduce((a, b) => a + b, 0)
+    return { cells, n: nums.length, sum, mean: sum / nums.length, min: Math.min(...nums), max: Math.max(...nums) }
+  }, [range?.r0, range?.r1, range?.c0, range?.c1, rows, columns])   // eslint-disable-line react-hooks/exhaustive-deps
   const onKey = (e: React.KeyboardEvent) => {
     if (!sel) return
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c') { e.preventDefault(); copy(); return }
@@ -361,7 +384,7 @@ function Rows({ opened, read, cache, space, narrow, setWhere, keep, onColumns, o
           <tbody>
             {rows.map((r, i) => (
               <tr key={i} data-row-sel={sel?.r === i}>
-                <td className="sa-explorer__no">{from + i + 1}</td>
+                <td className="sa-explorer__no" onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); chooseRow(i, e.shiftKey) }} title="Select the row · ⇧ select rows · ⌘/Ctrl-C copies">{from + i + 1}</td>
                 {columns.map((c, k) => { const v = shown(r[c.name]); return (
                   <td key={c.name} data-cell={`${i}:${k}`} data-kind={kindOf(c.type)} data-sel={sel?.r === i && sel?.c === k} data-range={inRange(i, k) && !(sel?.r === i && sel?.c === k)}
                     onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); choose(i, k, e.shiftKey) }} title={v ?? 'empty'}>{v ?? <span className="sa-explorer__null">empty</span>}</td>) })}
@@ -374,7 +397,8 @@ function Rows({ opened, read, cache, space, narrow, setWhere, keep, onColumns, o
     <footer className="sa-explorer__pager">
       <span className="sa-explorer__n">{page ? `${count(page.total ? from + 1 : 0)}–${count(Math.min(from + size, page.total))} of ${count(page.total)} rows${narrow.q || narrow.where.length ? ' matching' : ''}` : '…'}</span>
       {loading && <Icon icon="lucide:loader-2" className="sa-spin" />}
-      <span className="sa-note sa-explorer__cell">{sel ? <>{columns[sel.c]?.name}: <strong>{selected ?? 'empty'}</strong>{range && (range.r1 > range.r0 || range.c1 > range.c0) ? ` · ${(range.r1 - range.r0 + 1) * (range.c1 - range.c0 + 1)} cells` : ''} · ⌘/Ctrl-C copies</> : 'Click a cell to select it · arrows move · ⇧ extends'}</span>
+      {stats ? <SelectionStats stats={stats} rows={wholeRows ? range!.r1 - range!.r0 + 1 : null} />
+        : <span className="sa-note sa-explorer__cell">{sel ? <>{columns[sel.c]?.name}: <strong>{selected ?? 'empty'}</strong> · ⌘/Ctrl-C copies</> : 'Click a cell to select it · arrows move · ⇧ extends'}</span>}
       <span className="sa-explorer__pagerright">
         <select id={`${keep}-size`} className="sa-input sa-input--compact" value={size} title="Rows a page" onChange={(e) => { const n = Number(e.target.value); setSize(n); remember(`${keep}:size`, n) }}>{SIZES.map((n) => <option key={n} value={n}>{n} a page</option>)}</select>
         <button className="sa-icon-btn" disabled={pageNo <= 1} onClick={() => go(1)} aria-label="First page" title="First page"><Icon icon="lucide:chevrons-left" /></button>
@@ -385,6 +409,26 @@ function Rows({ opened, read, cache, space, narrow, setWhere, keep, onColumns, o
       </span>
     </footer>
   </>)
+}
+
+/** What the selection comes to, before the pages: the count always; sum and mean first, least and most when there is room
+ *  (all of them on hover). */
+function SelectionStats({ stats, rows }: { stats: { cells: number; n: number; sum?: number; mean?: number; min?: number; max?: number }; rows: number | null }) {
+  const all = [
+    `${rows !== null ? `${N.format(rows)} row${rows === 1 ? '' : 's'}` : `${N.format(stats.cells)} cells`}`,
+    ...(stats.n ? [`Sum ${stat(stats.sum)}`, `Mean ${stat(stats.mean)}`, `Min ${stat(stats.min)}`, `Max ${stat(stats.max)}`, ...(stats.n !== stats.cells ? [`${N.format(stats.n)} numbers`] : [])] : []),
+  ]
+  return (
+    <span className="sa-explorer__stats-bar" title={`${all.join(' · ')} — ⌘/Ctrl-C copies`}>
+      <strong>{all[0]}</strong>
+      {stats.n > 0 && <>
+        <span>Sum <b>{stat(stats.sum)}</b></span>
+        <span>Mean <b>{stat(stats.mean)}</b></span>
+        <span className="sa-explorer__stat--minor">Min <b>{stat(stats.min)}</b></span>
+        <span className="sa-explorer__stat--minor">Max <b>{stat(stats.max)}</b></span>
+      </>}
+    </span>
+  )
 }
 
 type SortBy = 'type' | 'name' | 'empty' | 'table'
