@@ -13,7 +13,6 @@ import { getIndexer } from './indexer.js'
 export interface BuildOpts {
   store: DataSourceIndex
   managerUrl: string
-  seedTables?: Record<string, string[]>   // per-source table hints (a source with no catalog to enumerate)
   only?: string                           // one source id, else every source the manager knows
   wipe?: boolean                          // start that source's index empty instead of resuming
   log?: (line: string) => void
@@ -29,7 +28,6 @@ export interface BuildResult {
 export async function buildDatasourceIndex(opts: BuildOpts): Promise<BuildResult> {
   const { store, managerUrl } = opts
   const log = opts.log ?? (() => {})
-  const seeds = opts.seedTables ?? {}
 
   const rawQuery = async (id: string, sql: string): Promise<any[]> => {
     const r = await fetch(managerUrl + '/query', {
@@ -64,7 +62,7 @@ export async function buildDatasourceIndex(opts: BuildOpts): Promise<BuildResult
     catch (e: any) { log(`  ${e.message}`); result.push({ id: s.id, dialect: s.dialect, containers: 0, indexed: 0, fields: 0, skipped: 0, failed: 0, error: e.message }); continue }
 
     // STEP 1 — enumerate every container BEFORE indexing any, so progress is a known fraction.
-    // The source's own catalog is the primary list; seeds and type-specific fallbacks fill in where there is none.
+    // The source's own catalog (its bridge's introspect) is the list; type-specific fallbacks fill in where there is none.
     log('  step 1 · enumerating tables…')
     let catalogTables: string[] | undefined
     try {
@@ -73,10 +71,10 @@ export async function buildDatasourceIndex(opts: BuildOpts): Promise<BuildResult
       })).json()
       const t = (j.tables || []).map((x: any) => String(x?.name ?? x ?? '')).filter(Boolean)
       if (t.length) { catalogTables = t; log(`  step 1 · ${t.length} tables from the source's own catalog`) }
-    } catch { /* no catalog → fall back to seeds / type knowledge */ }
+    } catch { /* no catalog → fall back to type knowledge */ }
 
     let containers: string[]
-    try { containers = await indexer.listContainers(s.id, rawQuery, { seedTables: seeds[s.id], catalogTables }) }
+    try { containers = await indexer.listContainers(s.id, rawQuery, { catalogTables }) }
     catch (e: any) { log(`  step 1 FAILED: ${e.message}`); result.push({ id: s.id, dialect: s.dialect, containers: 0, indexed: 0, fields: 0, skipped: 0, failed: 0, error: e.message }); continue }
 
     // What is already indexed, so a resume skips it. If this cannot be read for any reason, the honest

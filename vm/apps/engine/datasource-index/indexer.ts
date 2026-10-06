@@ -2,7 +2,7 @@
 // (b) INDEX one container into flat DataSourceEntry rows. Split this way so the runner can be RESUMABLE:
 // Phase 0 = listContainers (enumerate the work list); Phase N = indexContainer per item, persisting as it goes
 // (resume = work-list − already-indexed). Generic per TYPE — zero source-specific coupling; a source passes
-// extra seed tables via config, never hard-coded names.
+// the tables a source names itself (its bridge's introspect), never hard-coded names.
 //
 // `source` is the datasource name — BOTH the query id and the SOURCE segment of every index key. Container/
 // field names are preserved EXACTLY as the source spells them.
@@ -36,7 +36,7 @@ import { dsiKey, type DataSourceEntry } from '@superatom/datasource-index'
 export type RawQuery = (source: string, sql: string) => Promise<any[]>
 // catalogTables = the definitive table list from the source's own catalog (for NetSuite, the metadata-catalog via
 // the bridge's /introspect) — the PRIMARY enumeration when available; the type-specific fallbacks fill in if not.
-export interface IndexerOpts { seedTables?: string[]; catalogTables?: string[] }
+export interface IndexerOpts { catalogTables?: string[] }
 export interface TypeIndexer {
   listContainers(source: string, query: RawQuery, opts: IndexerOpts): Promise<string[]>
   indexContainer(source: string, container: string, query: RawQuery): Promise<DataSourceEntry[]>
@@ -111,7 +111,7 @@ const mssql: TypeIndexer = {
 }
 
 // ── suiteql (NetSuite/REST) — NO ODBC catalog. Enumerate: custom records LIVE via customrecordtype + a known
-// STANDARD table list (general NetSuite knowledge, probed) + any config seeds. Index by sampling rows. ──
+// STANDARD table list (general NetSuite knowledge, probed) + what the source names itself. Index by sampling rows. ──
 // STANDARD is the reusable per-type list — expanded from validating a real NetSuite schema (adds billing/charge/
 // budget/resource-allocation/subsidiary-relationship/tax/etc. that a naive core list misses). Non-existent ones
 // are simply skipped at index time, so over-including is harmless.
@@ -134,17 +134,16 @@ const NETSUITE_STANDARD = ['entity','customer','vendor','employee','contact','pa
 const suiteql: TypeIndexer = {
   // Enumeration is DEFENSE-IN-DEPTH: each source of names is independent + guarded, and we UNION whatever
   // succeeds. If customrecordtype is momentarily unavailable (token blip / timeout / rate limit) we still return
-  // the standard + seed list; a later resume re-adds the custom records. Never throws — worst case returns [].
+  // the standard list and the source's own; a later resume re-adds the custom records. Never throws — worst case returns [].
   async listContainers(source, query, opts) {
     const set = new Set<string>()
     // PRIMARY: the metadata-catalog (definitive standard + custom), passed in from the bridge's /introspect.
     for (const t of (opts.catalogTables ?? [])) { const s = String(t).toLowerCase(); if (s) set.add(s) }
-    for (const t of (opts.seedTables ?? [])) set.add(t)            // config seeds
     for (const t of NETSUITE_STANDARD) set.add(t)                  // FALLBACK: general NetSuite knowledge (no-catalog case)
     try {                                                          // FALLBACK: custom records live (if the catalog was unavailable)
       const rows = await query(source, `SELECT scriptid FROM customrecordtype`)
       if (Array.isArray(rows)) for (const r of rows) { const s = r?.scriptid; if (s) set.add(String(s).toLowerCase()) }
-    } catch (e: any) { console.warn(`  [${source}] customrecordtype enumeration failed (${String(e?.message ?? e).slice(0, 80)}) — using catalog/standard/seeds; resume will retry`) }
+    } catch (e: any) { console.warn(`  [${source}] customrecordtype enumeration failed (${String(e?.message ?? e).slice(0, 80)}) — using catalog/standard; resume will retry`) }
     return [...set].sort()
   },
   // One container = one sample call. EVERY failure mode (table absent, no permission, 429 rate-limit, timeout,

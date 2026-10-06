@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto'
 import { agentConfig, type AgentOverride } from '../../config/index.js'
 import { createSession, prepareWorkspace, type Harness, type Session, type RunHandlers } from '../../ica/index.js'
 import { toolUsage, keepOnlyTools } from '../../ica/workspace.js'
-import { projectSettings } from '../../settings.js'
+import { openStore } from '@superatom/composition-graph/node'
 
 export interface ComposerOpts {
   root: string
@@ -84,7 +84,13 @@ export function todayIn(projectDir?: string): string {
   const zone = zoneOf(projectDir)
   return `${dayIn(zone)} (${zone})`
 }
-const zoneOf = (projectDir?: string) => (projectDir ? projectSettings(projectDir).timezone : undefined) as string | undefined ?? 'UTC'
+// The organisation's time zone: the graph's setting "timezone" (held by the platform; this reads the engine's replica), else UTC.
+const zoneOf = (projectDir?: string) => {
+  const file = projectDir ? join(projectDir, 'db', 'composition.sqlite') : ''
+  if (!file || !existsSync(file)) return 'UTC'
+  const s = openStore(file)
+  try { const v = (s.get<any>('timezone')?.body?.value); return typeof v === 'string' && v ? v : 'UTC' } catch { return 'UTC' } finally { s.close() }
+}
 const dayIn = (zone: string) => new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
 /** The date alone, as a program's ctx.today reads it. */
 export const dayOf = (projectDir?: string) => dayIn(zoneOf(projectDir))

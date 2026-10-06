@@ -351,13 +351,9 @@ async function handleIndexBuild(from: any, opts: { rebuild?: boolean; only?: str
   indexBusy = true
   const t0 = Date.now()
   try {
-    // Per-project seed tables, when the project ships them (a source with no catalog to enumerate).
-    let seedTables: Record<string, string[]> = {}
-    try { seedTables = JSON.parse(readFileSync(join(PROJECT_DIR, 'datasources', 'index-seeds.json'), 'utf8')) }
-    catch { /* none — the source's own catalog is enough */ }
     emit(from, { t: 'index:status', text: `Building the datasource index${opts.only ? ` for ${opts.only}` : ''}${opts.rebuild ? ' (from empty)' : ' (resuming)'}…` })
     const r = await buildDatasourceIndex({
-      store: indexStore, managerUrl: DATASOURCE, seedTables, only: opts.only, wipe: !!opts.rebuild,
+      store: indexStore, managerUrl: DATASOURCE, only: opts.only, wipe: !!opts.rebuild,
       log: (line) => emit(from, { t: 'index:line', text: line }),
     })
     const total = r.sources.reduce((n, x) => n + x.fields, 0)
