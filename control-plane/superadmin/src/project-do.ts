@@ -1218,7 +1218,8 @@ export class ProjectDO extends DurableObject<Env> {
   // The project's graph from its GraphDO into graph_records/graph_content; each known session's entries and artifacts
   // from its SessionDO into its owner's UserDO. Once per project; what was copied is logged and kept under the flag.
   private async foldOnce() {
-    if (await this.ctx.storage.get('fold-2026-10-06')) return
+    const done = await this.ctx.storage.get('fold-2026-10-06')
+    if (done) { console.log(`[fold] ${this._pid} done ${JSON.stringify(done)}`); return }
     const env = this.env as any, sql = this.ctx.storage.sql
     const out = { records: 0, contents: 0, sessions: 0, entries: 0, artifacts: 0, unowned: [] as string[], mismatch: [] as string[] }
     const g: any = await (await env.GRAPH.get(env.GRAPH.idFromName(`graph:${this._pid}`)).fetch('http://do/')).json()
