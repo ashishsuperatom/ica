@@ -29,6 +29,7 @@ import { createMachine, stopMachine, FLY_APP } from './fly.js'
 // Auth: token primitives + Clerk→platform-token mint (./auth/tokens.ts) and the mobile browser-redirect
 // device flow (./auth/mobile.ts). worker.ts only routes to these; the rules live in the module.
 import { verifyJwt, signJwt, mintPlatformTokenFromClerk, type JwtClaims } from './auth/tokens.js'
+import { routeSocket } from './ws-route.js'
 import { handleParcelRoute } from './parcels.js'
 import { mobileAuthPage, handleMobileCode, handleMobileExchange, handleMeProjects } from './auth/mobile.js'
 import { can, capabilitiesOf, orgRouteNeeds, projectRouteNeeds, beyond, builtinRole, type Capability, type RouteNeed } from '../../shared/permissions.js'
@@ -193,20 +194,7 @@ export default {
       // An agent declares itself and sends its key only in its hello, never in a URL (URLs end up in logs).
       const agent = url.searchParams.get('agent') === '1'
       if (!key && !token && !agent) return new Response('authentication required', { status: 401 })
-      // A PERSON (a signed-in token, not a service identity) connects to their own UserDO — every tab and device of
-      // theirs, in every project — which links them to the project (user-hub.ts). Engines (key), agents (agent=1) and
-      // service identities (svc:) talk to the project directly.
-      if (token && !key && !agent) {
-        const claims = await verifyJwt(token, env.JWT_SECRET).catch(() => null)
-        if (claims?.userId && claims.role !== 'service' && !String(claims.userId).startsWith('svc:')) {
-          const fwd = new Request(request)
-          fwd.headers.set('x-sa-project', decodeURIComponent(wsMatch[1].split('?')[0]))
-          fwd.headers.set('x-sa-claims', JSON.stringify({ userId: claims.userId, email: claims.email, role: claims.role }))
-          return env.USER.get(env.USER.idFromName(`user:${claims.userId}`)).fetch(fwd)
-        }
-      }
-      const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${wsMatch[1]}`))
-      return stub.fetch(request)
+      return routeSocket(request, env, decodeURIComponent(wsMatch[1].split('?')[0]))   // a person: their UserDO (ws-route.ts)
     }
 
     // ── Project API (machine status, etc.) ─────────────────────────────────

@@ -12,10 +12,12 @@ import { PROJECT_ROLES } from '../../../shared/permissions'
 const here = fileURLToPath(new URL('.', import.meta.url))
 const PID = '11111111-2222-3333-4444-555555555555'
 const harness = `
+import { routeSocket } from '../ws-route.ts'
 export { ProjectDO } from '../project-do.ts'
+export { UserDO } from '../user-do.ts'
 export default { async fetch(req, env) {
   const u = new URL(req.url); const stub = env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}'))
-  if (u.pathname.startsWith('/_ws/')) return stub.fetch(req)
+  if (u.pathname.startsWith('/_ws/')) return routeSocket(req, env, '${PID}')
   const fwd = new Request('http://do' + u.pathname.slice(3) + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return stub.fetch(fwd)
 } }`
 let mf: Miniflare
@@ -29,7 +31,7 @@ const admin = as('admin@x.io', true), ana = as('ana@x.io'), bo = as('bo@x.io')
 beforeAll(async () => {
   const out = await build({ stdin: { contents: harness, resolveDir: here, loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'] })
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
-    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: 'x', CREDENTIALS_MASTER_KEY: sealKeygen() } })
+    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: 'x', CREDENTIALS_MASTER_KEY: sealKeygen() } })
   await mf.dispatchFetch('http://x/do/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'ek', provider: 'external', name: 'P' }) })
 }, 60_000)
 afterAll(async () => { await mf?.dispose() })

@@ -18,10 +18,12 @@ import { createActivities } from '../../../../vm/apps/engine/activity.ts'
 const here = fileURLToPath(new URL('.', import.meta.url))
 const PID = '11111111-2222-3333-4444-555555555555'
 const harness = `
+import { routeSocket } from '../ws-route.ts'
 export { ProjectDO } from '../project-do.ts'
+export { UserDO } from '../user-do.ts'
 export default { async fetch(req, env) {
   const u = new URL(req.url); const stub = env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}'))
-  if (u.pathname.startsWith('/_ws/')) return stub.fetch(req)
+  if (u.pathname.startsWith('/_ws/')) return routeSocket(req, env, '${PID}')
   const eng = u.pathname.match(/^\\/api\\/engine\\/[0-9a-f-]{36}\\/(.+)$/)
   const path = eng ? '/engine/' + eng[1] : u.pathname.slice(3)
   const fwd = new Request('http://do' + path + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return stub.fetch(fwd)
@@ -34,7 +36,7 @@ let mf: Miniflare, data: Server
 const call = async (path: string, init?: RequestInit) => { const r = await mf.dispatchFetch(`http://x/do${path}`, init); return r.json() as Promise<any> }
 
 async function socket(hello: Record<string, unknown>) {
-  const r = await mf.dispatchFetch(`http://x/_ws/${PID}`, { headers: { upgrade: 'websocket' } })
+  const r = await mf.dispatchFetch(`http://x/_ws/${PID}${hello.token ? `?token=${hello.token}` : ''}`, { headers: { upgrade: 'websocket' } })
   const ws = r.webSocket!
   const got: any[] = []
   ws.addEventListener('message', (e: any) => got.push(JSON.parse(String(e.data))))
@@ -77,7 +79,7 @@ beforeAll(async () => {
   await new Promise<void>((r) => data.listen(0, '127.0.0.1', () => r()))
   const out = await build({ stdin: { contents: harness, resolveDir: here, loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'] })
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
-    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: 'x' } })
+    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: 'x' } })
   await call('/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'engine-key', provider: 'external', name: 'P' }) })
   await call('/access', { method: 'POST', body: JSON.stringify({ email: 'admin@test.io', roleId: 'admin' }) })   // the keys' maker administers the project
 }, 60_000)

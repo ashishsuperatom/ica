@@ -12,19 +12,12 @@ const PID = '11111111-2222-3333-4444-555555555555'
 const SECRET = 's3cret'
 // The Worker's own routing for /_ws (worker.ts), in small.
 const harness = `
-import { verifyJwt } from '../auth/tokens.ts'
+import { routeSocket } from '../ws-route.ts'
 export { ProjectDO } from '../project-do.ts'
 export { UserDO } from '../user-do.ts'
 export default { async fetch(req, env) {
   const u = new URL(req.url)
-  if (u.pathname.startsWith('/_ws/')) {
-    const token = u.searchParams.get('token')
-    if (token) {
-      const c = await verifyJwt(token, env.JWT_SECRET)
-      if (c?.userId) { const f = new Request(req); f.headers.set('x-sa-project', '${PID}'); f.headers.set('x-sa-claims', JSON.stringify({ userId: c.userId, email: c.email, role: c.role })); return env.USER.get(env.USER.idFromName('user:' + c.userId)).fetch(f) }
-    }
-    return env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}')).fetch(req)
-  }
+  if (u.pathname.startsWith('/_ws/')) return routeSocket(req, env, '${PID}')
   const fwd = new Request('http://do' + u.pathname.slice(3) + u.search, req); fwd.headers.set('x-sa-project', '${PID}')
   return env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}')).fetch(fwd)
 } }`

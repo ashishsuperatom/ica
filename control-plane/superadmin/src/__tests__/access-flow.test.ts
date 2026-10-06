@@ -17,10 +17,12 @@ import { createAccess } from '../../../../vm/apps/engine/access.ts'
 const here = fileURLToPath(new URL('.', import.meta.url))
 const PID = '11111111-2222-3333-4444-555555555555'
 const harness = `
+import { routeSocket } from '../ws-route.ts'
 export { ProjectDO } from '../project-do.ts'
+export { UserDO } from '../user-do.ts'
 export default { async fetch(req, env) {
   const u = new URL(req.url); const stub = env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}'))
-  if (u.pathname.startsWith('/_ws/')) return stub.fetch(req)
+  if (u.pathname.startsWith('/_ws/')) return routeSocket(req, env, '${PID}')
   const fwd = new Request('http://do' + u.pathname.slice(3) + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return stub.fetch(fwd)
 } }`
 const home = mkdtempSync(join(here, '.home-'))
@@ -29,7 +31,7 @@ const seen: any[] = []
 const call = async (path: string, init?: RequestInit) => { const r = await mf.dispatchFetch(`http://x/do${path}`, init); return { status: r.status, body: await r.json() as any } }
 
 async function socket(hello: Record<string, unknown>) {
-  const r = await mf.dispatchFetch(`http://x/_ws/${PID}`, { headers: { upgrade: 'websocket' } })
+  const r = await mf.dispatchFetch(`http://x/_ws/${PID}${hello.token ? `?token=${hello.token}` : ''}`, { headers: { upgrade: 'websocket' } })
   const ws = r.webSocket!
   const got: any[] = []
   ws.addEventListener('message', (e: any) => got.push(JSON.parse(String(e.data))))
@@ -53,7 +55,7 @@ beforeAll(async () => {
   writeFileSync(join(home, 'agents', 'trips.json'), JSON.stringify({ id: 'trips', name: 'Trips', scope: 'global', owner: 'user:b', domain: 'd', programs: ['unsettled-trips'], tools: [], ui: { start: 's' }, ica: 'composer' }))
   const out = await build({ stdin: { contents: harness, resolveDir: here, loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'] })
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
-    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: 'x' } })
+    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: 'x' } })
   await call('/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'ek', provider: 'external', name: 'P' }) })
   await call('/access', { method: 'POST', body: JSON.stringify({ email: 'admin@test.io', roleId: 'admin' }) })   // the keys' maker administers the project
   const engine = await socket({ role: 'code-engine', key: 'ek', instanceId: 'e', epoch: 1 })

@@ -20,16 +20,12 @@ const here = fileURLToPath(new URL('.', import.meta.url))
 const PID = '11111111-2222-3333-4444-555555555555'
 const SECRET = 's3cret'
 const harness = `
-import { verifyJwt } from '../auth/tokens.ts'
+import { routeSocket } from '../ws-route.ts'
 export { ProjectDO } from '../project-do.ts'
 export { UserDO } from '../user-do.ts'
 export default { async fetch(req, env) {
   const u = new URL(req.url); const stub = env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}'))
-  if (u.pathname.startsWith('/_ws/')) {
-    const token = u.searchParams.get('token'); const c = token ? await verifyJwt(token, env.JWT_SECRET) : null
-    if (c?.userId) { const f = new Request(req); f.headers.set('x-sa-project', '${PID}'); f.headers.set('x-sa-claims', JSON.stringify({ userId: c.userId, email: c.email, role: c.role })); return env.USER.get(env.USER.idFromName('user:' + c.userId)).fetch(f) }   // a person: their UserDO (worker.ts)
-    return env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}')).fetch(req)
-  }
+  if (u.pathname.startsWith('/_ws/')) return routeSocket(req, env, '${PID}')
   const fwd = new Request('http://do' + u.pathname.slice(3) + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return stub.fetch(fwd)
 } }`
 

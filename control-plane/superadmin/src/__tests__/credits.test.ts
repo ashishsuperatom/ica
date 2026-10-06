@@ -11,7 +11,9 @@ import { createHmac } from 'node:crypto'
 const here = fileURLToPath(new URL('.', import.meta.url))
 const PID = '11111111-2222-3333-4444-555555555555', ORG = 'org-test'
 const harness = `
+import { routeSocket } from '../ws-route.ts'
 export { ProjectDO } from '../project-do.ts'
+export { UserDO } from '../user-do.ts'
 export { OrgDO } from '../do.ts'
 export { GlobalDO } from '../global-do.ts'
 export default { async fetch(req, env) {
@@ -19,7 +21,7 @@ export default { async fetch(req, env) {
   if (u.pathname.startsWith('/org/')) return env.ORG.get(env.ORG.idFromName('${ORG}')).fetch(new Request('http://do' + u.pathname.slice(4), req))
   if (u.pathname.startsWith('/global/')) return env.GLOBAL.get(env.GLOBAL.idFromName('global')).fetch(new Request('http://do' + u.pathname.slice(7), req))
   const stub = env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}'))
-  if (u.pathname.startsWith('/_ws/')) return stub.fetch(req)
+  if (u.pathname.startsWith('/_ws/')) return routeSocket(req, env, '${PID}')
   const fwd = new Request('http://do' + u.pathname.slice(3) + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return stub.fetch(fwd)
 } }`
 let mf: Miniflare
@@ -33,14 +35,14 @@ const jwt = (claims: Record<string, unknown>) => {
 beforeAll(async () => {
   const out = await build({ stdin: { contents: harness, resolveDir: here, loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'] })
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
-    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, ORG: { className: 'OrgDO', useSQLite: true }, GLOBAL: { className: 'GlobalDO', useSQLite: true } },
+    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true }, ORG: { className: 'OrgDO', useSQLite: true }, GLOBAL: { className: 'GlobalDO', useSQLite: true } },
     r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: 's' } })
   await at('/do/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'ek', provider: 'external', name: 'P', orgId: ORG }) })
 }, 60_000)
 afterAll(async () => { await mf?.dispose() })
 
 async function ask(token: string, sessionId?: string) {
-  const r = await mf.dispatchFetch(`http://x/_ws/${PID}`, { headers: { upgrade: 'websocket' } })
+  const r = await mf.dispatchFetch(`http://x/_ws/${PID}?token=${token}`, { headers: { upgrade: 'websocket' } })
   const ws = r.webSocket!; const got: any[] = []
   ws.addEventListener('message', (e: any) => got.push(JSON.parse(String(e.data)))); ws.accept()
   ws.send(JSON.stringify({ type: 'hello', role: 'runtime', token }))

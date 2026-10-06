@@ -19,11 +19,13 @@ const SECRET = 'test-jwt-secret'
 
 // The DO behind a minimal router: /_ws/<pid> is the hub socket, /do/<path> a call as the worker forwards it.
 const harness = `
+import { routeSocket } from '../ws-route.ts'
 export { ProjectDO } from '../project-do.ts'
+export { UserDO } from '../user-do.ts'
 export default { async fetch(req, env) {
   const u = new URL(req.url)
   const stub = env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}'))
-  if (u.pathname.startsWith('/_ws/')) return stub.fetch(req)
+  if (u.pathname.startsWith('/_ws/')) return routeSocket(req, env, '${PID}')
   const fwd = new Request('http://do' + u.pathname.slice(3) + u.search, req)
   fwd.headers.set('x-sa-project', '${PID}')
   return stub.fetch(fwd)
@@ -40,7 +42,7 @@ const jwt = (claims: Record<string, unknown>) => {
 
 /** A socket to the hub, with every payload it receives and how it closed. */
 async function connect(hello: Record<string, unknown>) {
-  const r = await mf.dispatchFetch(`http://x/_ws/${PID}`, { headers: { upgrade: 'websocket' } })
+  const r = await mf.dispatchFetch(`http://x/_ws/${PID}${hello.token ? `?token=${hello.token}` : ''}`, { headers: { upgrade: 'websocket' } })
   const ws = r.webSocket!
   const got: any[] = []
   let closed: { code: number; reason: string } | null = null
@@ -60,7 +62,7 @@ async function connect(hello: Record<string, unknown>) {
 beforeAll(async () => {
   const out = await build({ stdin: { contents: harness, resolveDir: here, loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'] })
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
-    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: SECRET } })
+    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: SECRET } })
   await call('/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'engine-key', provider: 'external', name: 'Test project' }) })
   // The keys' maker administers the project (a key acts for its maker, cut to what they hold).
   await call('/access', { method: 'POST', body: JSON.stringify({ email: 'admin@test.io', roleId: 'admin' }) })
