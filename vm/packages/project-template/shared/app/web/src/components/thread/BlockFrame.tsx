@@ -13,7 +13,7 @@ export default function BlockFrame({ block, children }: { block: Node; children:
   const cap = capabilityOf(catalog, block.question.focus)
   const isAbout = block.about || block.question.focus === 'about'
   const isSaid = block.kind === 'said'
-  const label = isSaid ? 'Reader' : isAbout ? 'About' : cap?.label ?? block.question.focus
+  const label = isSaid ? 'Answer' : isAbout ? 'About' : cap?.label ?? block.question.focus
   const title = (isSaid ? block.said?.text ?? block.placeholder : block.answer?.title ?? block.placeholder) ?? label
   const accent = ACCENT[isSaid || isAbout ? 'neutral' : ((catalog.scenarios.find((s) => s.key === cap?.scenario)?.accent ?? 'series-1') as Accent)]
   const earlier = block.earlier ? ` · from earlier, ${new Date(block.earlier).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}` : ''

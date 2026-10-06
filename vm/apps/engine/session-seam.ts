@@ -288,7 +288,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
   }
 
   /** Words in a session: the agent is told the step and its programs, answers, and its :::intent line is applied. */
-  async function answerWords(view: SessionView, session: string, words: string, block: string | null, from: any, user: string, reqId?: string, o: { qid?: string; channel?: string } = {}) {
+  async function answerWords(view: SessionView, session: string, words: string, block: string | null, from: any, user: string, reqId?: string, o: { qid?: string; channel?: string; screen?: string } = {}) {
     if (!d.ask) throw new SessionSeamRefusal('this engine answers no words in sessions')
     const text = words.trim()
     if (!text) throw new SessionSeamRefusal('a question in words has words')
@@ -304,7 +304,8 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const folder = join(d.projectDir, 'sessions', session)
     const started = view.context ? `What this session was started with:\n${view.context}` : ''
     const files = view.attachments?.length ? `The session's files (read them as you need):\n${view.attachments.map((a) => `- ${join(folder, 'attachments', a.name)} (${a.type}, ${a.size} bytes)`).join('\n')}` : ''
-    const context = [started, files, `The step's STATE:\n${JSON.stringify(state)}`, answerNow ? `What the step shows now:\n${answerNow}` : '', INTENT_CONTRACT, docs ? `The programs:\n${docs}` : ''].filter(Boolean).join('\n\n')
+    const looking = o.screen ? `What the person is looking at:\n${o.screen}` : ''
+    const context = [looking, started, files, `The step's STATE:\n${JSON.stringify(state)}`, answerNow ? `What the step shows now:\n${answerNow}` : '', INTENT_CONTRACT, docs ? `The programs:\n${docs}` : ''].filter(Boolean).join('\n\n')
     const qid = o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
     // The default agent answers from whichever domain the words reach; any other agent from its own.
     const said = await asReader(who, () => d.ask!({ session, text, context, domain: spec.isDefault ? null : spec.domain, from, reqId, qid, channel: o.channel }))
@@ -488,20 +489,21 @@ export function createSessionSeam(d: SessionSeamDeps) {
   /** A question in a session by its id, from any door (a chat, the phone, a chat channel): the session is opened first
    *  if it is new — on the agent chosen, else the one its words reach — then the words are its next turn, the same as
    *  words typed in it. The session's answer, and which agent gave it. */
-  async function ask(o: { session: string; text: string; from: any; qid: string; agent?: string; channel?: string; context?: string }) {
+  async function ask(o: { session: string; text: string; from: any; qid: string; agent?: string; channel?: string; context?: string; screen?: string; domain?: string | null; reqId?: string }) {
     if (!/^[\w-]{1,80}$/.test(o.session)) throw new SessionSeamRefusal(`"${o.session}" is not a session id`)
     const user = userOf(o.from)
     const visible = (scope: string) => { try { const w = whoIs(o.from); return w.admin || scope === 'global' || w.scopes.includes(scope) } catch { return scope === 'global' } }
     let view = replay(log.read(o.session))
     let routed: { agent: string; name: string; how: string } | null = null
     if (!view) {
-      const picked = o.agent ? { agent: readAgent(o.agent), how: 'chosen' } : await agentFor(o.text, visible)
+      const ofDomain = !o.agent && o.domain ? graphAgents().find((a) => !a.isDefault && a.domain === o.domain && visible(a.scope)) : undefined
+      const picked = o.agent ? { agent: readAgent(o.agent), how: 'chosen' } : ofDomain ? { agent: ofDomain, how: 'chosen' } : await agentFor(o.text, visible)
       if (!visible(picked.agent.scope)) throw new SessionSeamRefusal(`there is no agent "${picked.agent.id}"`)
       const { sessions: rt, packages } = await runtimeFor(picked.agent.id)
       view = await asReader(whoIs(o.from), () => rt.openAndRun({ session: o.session, user, agent: picked.agent.id, start: picked.agent.start, run: packages.map((p) => p.name), ...contextOf(o) }))
       routed = { agent: picked.agent.id, name: picked.agent.name, how: picked.how }
     } else viewOf(view, user)
-    const r = await answerWords(view, o.session, o.text, null, o.from, user, undefined, { qid: o.qid, channel: o.channel })
+    const r = await answerWords(view, o.session, o.text, null, o.from, user, o.reqId, { qid: o.qid, channel: o.channel, screen: o.screen })
     const spec = readAgent(view.agent)
     return { answer: r.answer, agent: routed ?? { agent: spec.id, name: spec.name, how: 'session' } }
   }

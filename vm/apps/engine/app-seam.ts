@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createComposer, type Composer, type QueryRecord } from './agents/composer/index.js'
 import { createNarrator, capResultData, isDataCall } from './agents/narrator/index.js'
-import { pick, compose, place, remember, recordQuestion, placeForRunning, domainsOf } from './knowledge.js'
+import { pick, compose, place, remember, recordQuestion, placeForRunning, domainsOf, domainFor } from './knowledge.js'
 import type { AgentEvent } from './ica/session.js'
 import { personOf } from './identity.js'
 
@@ -32,6 +32,8 @@ export interface AppSeamDeps {
   composerStamp?: () => string
   /** The asker's data access for the turn (access.ts readerFor). */
   readerFor?: (from: any) => Promise<import('./agents/composer/index.js').Reader>
+  /** A question asked from the application: a composer turn in a session, as every question is (session-seam ask). */
+  askInSession: (o: { session: string; text: string; from: any; qid: string; screen: string; domain: string | null; reqId?: string }) => Promise<{ answer: { markdown: string; blocks?: Record<string, unknown> } | null; agent: unknown }>
 }
 
 export interface Said {
@@ -225,7 +227,15 @@ export function createAppSeam(d: AppSeamDeps) {
       /** A domain's programs, placed in the application's own folder and kept to the graph as it is now: { dir, used }. */
       domain: (name: string) => placeForRunning(d.projectDir, name, join(d.projectDir, 'app', '.domains', name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')), d.datasource),
       sources: async () => { const r = await fetch(`${d.datasource}/sources`); const body: any = await r.json().catch(() => ({})); return body.sources ?? [] },
-      say: (text: string, context: string, o: { qid: string; threadId: string; focus?: string | null }) => say(text, context, { ...o, reqId: payload.reqId, from }),
+      // A question typed in the application: a composer turn in the thread's session — opened on the agent of the domain the
+      // screen is about — with what the person is looking at going with the question.
+      say: async (text: string, screen: string, o: { qid: string; threadId: string; focus?: string | null }): Promise<Said> => {
+        const t1 = Date.now()
+        const domain = (await domainFor(d.projectDir, o.focus).catch(() => null))?.name ?? null
+        const r = await d.askInSession({ session: o.threadId, text, from, qid: o.qid, screen, domain, reqId: payload.reqId })
+        const blocks = Object.entries(r.answer?.blocks ?? {}).map(([marker, block]) => ({ marker, block }))
+        return { markdown: r.answer?.markdown ?? null, blocks, calls: [], queries: [], ms: Date.now() - t1, agent: r.agent as any }
+      },
       reply: (msg: Record<string, unknown>) => {
         const out = { ...msg, t: String(msg.t ?? 'app:res'), reqId: payload.reqId }
         console.log(`[app] → ${out.t} ${payload.reqId ?? ''} ${JSON.stringify(out).length} bytes · ${Date.now() - t0} ms · to ${from?.id ?? '?'}`)

@@ -532,7 +532,7 @@ const sessionSeam = createSessionSeam({ fetchAttachment: enginePlatform ? (s, h)
 // The composition graph is kept by the platform too: pushed after every change, rebuilt from it when this one is empty.
 const graphSync = createGraphSync({ file: graphFileOf(PROJECT_DIR), send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true }, log: (s) => console.warn(s) })
 const graphSeam = createGraphSeam({ projectDir: PROJECT_DIR, send: (to, msg) => { wire.send(to, msg); if (msg.t === 'graph:reply') graphSync.push() } })
-const appSeam = createAppSeam({ icaBaseUrl: OC_URL, composerStamp, readerFor: turnReader, record: recordToPlatform, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
+const appSeam = createAppSeam({ askInSession: (o) => sessionSeam.ask(o), icaBaseUrl: OC_URL, composerStamp, readerFor: turnReader, record: recordToPlatform, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
 
 async function handle(payload: any, from: any) {
   if (wire.receive(payload, from)) return

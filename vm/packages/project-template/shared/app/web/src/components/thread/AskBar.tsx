@@ -1,4 +1,4 @@
-// A typed question at the foot of the thread, read in prose by the thread's reader and shown as a new block under the
+// A typed question at the foot of the thread, answered in prose by the composer and shown as a new block under the
 // block it was asked from — the nearest block above the active leaf that is a state. On the home page, with no block
 // yet, a question starts a thread of its own, and its words pick the agent that answers. Enter sends, Shift+Enter
 // breaks a line; one reading at a time per thread.
@@ -24,7 +24,7 @@ export default function AskBar() {
           </button>
           <textarea
             ref={box} className="sa-askbar__input" rows={1} value={text} disabled={saying || !from}
-            placeholder={saying ? 'The reader is on it…' : from ? 'Ask about these numbers…' : 'Ask a question…'}
+            placeholder={saying ? 'Working on it…' : from ? 'Ask about these numbers…' : 'Ask a question…'}
             aria-label="Ask about these numbers"
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}

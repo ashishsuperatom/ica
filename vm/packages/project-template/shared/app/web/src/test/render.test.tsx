@@ -287,7 +287,7 @@ describe('show what you have, ask anyway (lib/cache)', () => {
 })
 
 describe('a reading (app:said)', () => {
-  it('the reader guards the reply', () => {
+  it('the composer guards the reply', () => {
     const r = readReply({ t: 'app:said', text: 'why?', qid: 'q', markdown: '# hi', ms: 1200, question: { focus: 'summary' }, calls: [{ id: 'c1', canonical: 'x', ms: 10, at: 't' }, { canonical: 'y', refused: 'no' }, 5, {}] })
     expect(r?.t).toBe('app:said')
     if (r?.t !== 'app:said') return

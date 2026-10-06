@@ -1549,3 +1549,17 @@ In scope, beyond what is above:
 6. The DO hierarchy (user, session, state) and engine ↔ platform sync; the optional warehouse.
 7. Project scoping on shared ports, so the system runs without Docker (Windows, macOS, Linux, Electron).
 8. Programs in dynamic workers (later).
+
+### One kind of agent: the ICA with concepts (2026-10-06)
+
+**In the user's words:** remove all reader — unified agent — the composer is the only thing. I don't see any reason why
+the connector has to be another agent; think of it like this: it's an ICA (intelligent coding agent) with different
+concepts and other things. Some concepts we will add, for example for the connector, so it's also going to be the same
+thing. We will try to figure out how to create domains for our internal things — not only for the user, it could also be
+for the user; make everything uniform. But at the current time I do not want the reader, I just want the composer.
+
+*Done now:* a dashboard's typed question is a composer turn in a platform session like every other door (session-seam
+`ask`, opened on the agent of the domain the screen is about, with what the person is looking at going with each
+question); the word "reader" (as an agent) is gone from the dashboard and its wire. *Later:* the connector (and the other
+internal agents) become the same ICA given an internal domain of concepts — connecting a source, grounding — rather than
+agents of their own.

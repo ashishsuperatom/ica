@@ -53,7 +53,7 @@ export interface Node {
   about?: About
   /** The answer shown is one seen earlier (at this time); the fresh one is on its way. */
   earlier?: string
-  /** A reading: prose the reader wrote for a typed question, asked from the block above. Its `question` is that
+  /** A reading: prose the composer wrote for a typed question, asked from the block above. Its `question` is that
    * block's question, kept for the context of further asks; it is never a state — nothing moves from it. */
   said?: Said
   kind?: 'said'
@@ -82,7 +82,7 @@ interface ThreadApi {
   home: () => void
   /** The sources block — a child of the leaf, or a fresh thread when there is none. */
   openAbout: () => void
-  /** A typed question, read in prose by the thread's reader, as a child of the active leaf. */
+  /** A typed question, answered in prose by the composer, as a child of the active leaf. */
   say: (text: string) => void
   /** A reading is on its way for this thread. */
   saying: boolean
@@ -259,7 +259,7 @@ export function ThreadProvider({ client, children }: { client: Client; children:
     commit({ ...EMPTY, rev: live.current.rev + 1 }, true)
   }, [commit])
 
-  /** What the reader is told about a block: its question, title, headline figures and notes — never its rows. */
+  /** What the composer is told about a block: its question, title, headline figures and notes — never its rows. */
   const contextOf = (n: Node): SayContext => {
     const a = n.answer
     const kpis = a?.blocks.find((b) => b.type === 'kpis')

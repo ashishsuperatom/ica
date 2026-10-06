@@ -210,7 +210,7 @@ export class MockClient implements Client {
       await new Promise((r) => setTimeout(r, 600)); options.onBeat?.('Asking the graph for projects by RAG in the window.')
       await new Promise((r) => setTimeout(r, 300)); options.onPart?.('Reading the numbers now.')
       const now = new Date().toISOString()
-      if (/cannot|can't|impossible/i.test(payload.text)) return { t: 'app:refused', reason: 'The reader wrote nothing in time (mock).' }
+      if (/cannot|can't|impossible/i.test(payload.text)) return { t: 'app:refused', reason: 'No answer was written in time (mock).' }
       return { t: 'app:said', said: readSaid({ text: payload.text, qid: 'mock', ms: 1500, question: payload.question, markdown: `**On "${payload.text}"** — read from *${payload.title || payload.question.focus}* (mock; nothing was computed).\n\n- The window and filters of the block above were kept.\n- Two figures were looked up on the graph.\n\n| what | value |\n|---|---|\n| first | 1,234 |\n| second | 56.7% |\n\nA reading is prose: it stands on the calls below, and a person moves on from the block above it.`, calls: [{ id: 'c1', canonical: 'projects by rag in the window', ms: 412, at: now }, { id: 'c2', canonical: 'remaining budget by pillar', ms: 388, at: now, refused: 'remaining budget is not summable across currencies' }] }) }
     }
     if (payload.t === 'app:members') {

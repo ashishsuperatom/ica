@@ -68,9 +68,9 @@ export interface Answer {
   said?: string; dropped?: string[]
 }
 
-// ── say: a typed question, read in prose by the thread's reader agent ──
+// ── say: a typed question, answered in prose by the composer, in the thread's session ──
 export interface Headline { label: string; value: unknown; unit: Unit }
-/** What the reader is told about a block: its question and what it showed — never its rows. */
+/** What the composer is told about a block: its question and what it showed — never its rows. */
 /** One ask a block made of the graph: the question in the graph's own shape, and how many rows came back. */
 export interface Asked { question: unknown; rows?: number }
 export interface SayContext { question: Question; title: string; headline: Headline[]; notes: string[]; asked: Asked[] }
