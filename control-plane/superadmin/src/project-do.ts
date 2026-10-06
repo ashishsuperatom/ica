@@ -635,6 +635,9 @@ export class ProjectDO extends DurableObject<Env> {
       try { claims = await verifyJwt(token, secret) }
       catch { ws.close(4001, 'JWT verify error'); return }
       if (!claims) { ws.close(4001, 'Invalid JWT'); return }
+      // People never connect here: every tab and device of theirs goes to their own UserDO, which links them (personLink).
+      // Only service identities (the ChannelDO, Teams) hold a token socket of their own.
+      if (claims.role !== 'service' && !String(claims.userId ?? '').startsWith('svc:')) { ws.close(4001, 'People connect through their own UserDO'); return }
 
       // SURFACE and AUTHORIZATION are SEPARATE. The connection TYPE follows the surface the client DECLARES in its
       // hello `role` ('admin' = the superadmin console app; 'runtime' = a human's client: web/voice/mobile). The JWT

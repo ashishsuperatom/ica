@@ -13,6 +13,7 @@ const here = fileURLToPath(new URL('.', import.meta.url))
 const PID = '11111111-2222-3333-4444-555555555555'
 const SECRET = 's3cret'
 const harness = `
+import { verifyJwt } from '../auth/tokens.ts'
 export { ProjectDO } from '../project-do.ts'
 export { UserDO } from '../user-do.ts'
 export { DecisionDO } from '../decision-do.ts'
@@ -20,7 +21,11 @@ export default { async fetch(req, env) {
   const u = new URL(req.url)
   if (u.pathname.startsWith('/decision/')) { const fwd = new Request('http://do' + u.pathname.slice(9) + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return env.DECISION.get(env.DECISION.idFromName('dec:${PID}')).fetch(fwd) }
   const stub = env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}'))
-  if (u.pathname.startsWith('/_ws/')) return stub.fetch(req)
+  if (u.pathname.startsWith('/_ws/')) {
+    const token = u.searchParams.get('token'); const c = token ? await verifyJwt(token, env.JWT_SECRET) : null
+    if (c?.userId) { const f = new Request(req); f.headers.set('x-sa-project', '${PID}'); f.headers.set('x-sa-claims', JSON.stringify({ userId: c.userId, email: c.email, role: c.role })); return env.USER.get(env.USER.idFromName('user:' + c.userId)).fetch(f) }   // a person: their UserDO (worker.ts)
+    return env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}')).fetch(req)
+  }
   const fwd = new Request('http://do' + u.pathname.slice(3) + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return stub.fetch(fwd)
 } }`
 let mf: Miniflare
@@ -52,7 +57,7 @@ let engine: WebSocket
 const engineGot: any[] = []
 
 async function socket(token: string) {
-  const r = await mf.dispatchFetch(`http://x/_ws/${PID}`, { headers: { upgrade: 'websocket' } })
+  const r = await mf.dispatchFetch(`http://x/_ws/${PID}?token=${token}`, { headers: { upgrade: 'websocket' } })
   const ws = r.webSocket!; const got: any[] = []
   ws.addEventListener('message', (e: any) => got.push(JSON.parse(String(e.data)))); ws.accept()
   ws.send(JSON.stringify({ type: 'hello', role: 'runtime', token }))
