@@ -41,10 +41,10 @@ export default function RailSidebar({ name, places: given, current, foot, pinned
   pinned: boolean; onPin: (pinned: boolean) => void
 }) {
   const phone = () => typeof window !== 'undefined' && window.innerWidth < 768
-  // Every place has a panel: one without pages of its own shows itself as the one row. So resting on any place shows
-  // a panel, a click on any place pins it, and a pinned panel always has something in it.
+  // Every place has a panel: one with nothing under it shows an empty one (its name, no rows). So resting on any place
+  // always changes the panel to that place's, and a click on any place pins it.
   const places: (RailPlace & { panel: ReactNode })[] = given.map((p) => p.panel ? p as RailPlace & { panel: ReactNode } : { ...p,
-    panel: <NavList groups={[{ label: p.label, items: [{ key: p.key, label: p.label, icon: p.icon, active: p.key === current, onClick: () => p.onClick?.() }] }]} /> })
+    panel: <NavList groups={[{ label: p.label, items: [] }]} /> })
   const isPlace = (k: string) => places.some((p) => p.key === k)
   // Whose panel is shown: where the person is, or the place last picked; on a page of no place (about), the last one.
   const [shown, setShown] = useState(isPlace(current) ? current : places[0]?.key ?? '')

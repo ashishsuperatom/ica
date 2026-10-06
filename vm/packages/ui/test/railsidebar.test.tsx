@@ -81,6 +81,13 @@ test('pinned on a page whose place has no panel (about, connections), the panel 
   }
 })
 
+test('pinned, resting on another place shows that place\'s panel — an empty one when it has nothing — then back', async () => {
+  await at('home')
+  await hover(place('Connections'))
+  assert.equal(state(), 'pinned'); assert.equal(panel()!.querySelectorAll('.sa-nav-item').length, 0)
+  await leaveAll(); assert.ok(panel()!.textContent?.includes('conversations'))
+})
+
 test('every place shows a panel on rest and pins on a click — a place without pages shows itself', async () => {
   await at('home')
   await click(toggleBtn()); assert.equal(state(), 'closed')
@@ -88,7 +95,8 @@ test('every place shows a panel on rest and pins on a click — a place without 
     await hover(place(label)); assert.equal(state(), 'floating', `rest on ${label}`)
     await click(place(label)); assert.equal(state(), 'pinned', `click on ${label}`)
     await leaveAll(); assert.equal(state(), 'pinned', `${label} stays`)
-    assert.ok(panel()!.textContent?.includes(label === 'Home' ? 'conversations' : label === 'Agents' ? 'agents' : 'Connections'))
+    assert.ok(panel()!.textContent?.includes(label === 'Home' ? 'conversations' : label === 'Agents' ? 'agents' : 'Connections'), `${label}'s own panel`)
+    if (label === 'Connections') assert.equal(panel()!.querySelectorAll('.sa-nav-item').length, 0, 'nothing under it: an empty panel')
     await click(toggleBtn()); assert.equal(state(), 'closed')
   }
   await act(async () => root.unmount())
