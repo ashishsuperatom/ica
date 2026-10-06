@@ -253,9 +253,12 @@ export class ProjectDO extends DurableObject<Env> {
     if (!mark.recorded) {
       const path = new URL(request.url).pathname
       let actor: any = null
-      try { actor = JSON.parse(request.headers.get('x-sa-actor') ?? 'null') } catch { /* malformed: recorded as the platform */ }
-      try {
-        this.audit.record({ actor: actor?.kind && actor?.id ? actor : { kind: 'system', id: 'platform' }, via: actor ? 'api' : 'system', action: `api.${request.method.toLowerCase()}`,
+      try { actor = JSON.parse(request.headers.get('x-sa-actor') ?? 'null') } catch { /* malformed: not a person's */ }
+      // The audit history is who did what: the platform's own parts talking successfully is not kept; anything refused
+      // or failed is, whoever made it.
+      const known = !!(actor?.kind && actor?.id)
+      if (known || !res.ok) try {
+        this.audit.record({ actor: known ? actor : { kind: 'system', id: 'platform' }, via: known ? 'api' : 'system', action: `api.${request.method.toLowerCase()}`,
           target: path.slice(1, 200), outcome: res.ok ? 'ok' : res.status >= 500 ? 'error' : 'refused', detail: { status: res.status } })
       } catch (e: any) { this.log('audit:refused', { message: e?.message ?? String(e) }) }
     }
@@ -2232,7 +2235,9 @@ export class ProjectDO extends DurableObject<Env> {
     // `running` is what the ENGINE last reported it had adopted — NOT what was last saved. A UI must be able to
     // show that a change has actually taken effect, and those are different facts whenever a box is asleep,
     // unreachable, or still finishing the question it was on.
-    return Response.json({ ...(p ?? { profile: null, version: 0, updatedBy: null, updatedAt: 0 }), running: this.runningProfile })
+    // `online`: an engine is connected to this project now.
+    const online = [...this.connByWs.values()].some((c) => c.type === 'code-engine')
+    return Response.json({ ...(p ?? { profile: null, version: 0, updatedBy: null, updatedAt: 0 }), running: this.runningProfile, online })
   }
 
   private async putProfile(req: Request): Promise<Response> {

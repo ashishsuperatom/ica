@@ -154,10 +154,12 @@ const inspector = createInspector({
   index: indexStore, agentSessions, projectId: PROJECT, datasourceUrl: DATASOURCE,
   roots: { workspace: WORKSPACE, sessions: SESSIONS, db: DB_DIR },
   runtime: () => ({
+    // The composer answers every question (one per open session); the analyst is listed only while it runs.
     agents: {
-      analyst:   { ...agentConfig('analyst'),   busy: false },
+      composer:  { ...agentConfig('composer'), busy: appSeam.busy() > 0, sessions: appSeam.open() },
       connector: { ...agentConfig('connector'), busy: connectorBusy },
       grounding: { ...agentConfig('grounding'), busy: groundingBusy },
+      ...(analystSlot.session() ? { analyst: { ...agentConfig('analyst'), busy: false } } : {}),
     },
     uptimeMs: Date.now() - EPOCH,
   }),

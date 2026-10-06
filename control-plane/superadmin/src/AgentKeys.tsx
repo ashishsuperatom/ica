@@ -154,7 +154,7 @@ export function AuditPanel({ api, projectId }: { api: Api; projectId: string }) 
             { key: 'who', label: 'Who', render: (e) => e.actor.email ?? e.actor.id },
             { key: 'via', label: 'Via', render: (e) => <span className="sa-muted">{e.via}</span> },
             { key: 'action', label: 'Action', render: (e) => <Code>{e.action}</Code> },
-            { key: 'what', label: 'What', render: (e) => { const w = what(e); return <span title={e.target ? `${w} · ${e.target}` : w}>{w}{e.target ? <span className="sa-muted"> · {e.target}</span> : null}</span> } },
+            { key: 'what', label: 'What', render: (e) => { const w = what(e); return <span title={[w, e.target].filter(Boolean).join(' · ')}>{w}{e.target ? <span className="sa-muted">{w ? ' · ' : ''}{e.target}</span> : null}</span> } },
             { key: 'outcome', label: 'Outcome', render: (e) => <Status state={e.outcome === 'ok' ? 'ok' : 'critical'}>{e.outcome}</Status> },
           ]} />
       )}

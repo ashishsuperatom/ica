@@ -481,7 +481,8 @@ export default {
           try {
             const d = await (await stub.fetch(new Request('http://do/profile'))).json() as any
             return { org: o.name, orgId: o.id, projectId: pr.id, project: pr.name,
-                     savedVersion: d.version ?? 0, updatedAt: d.updatedAt ?? 0, running: d.running ?? null }
+                     // `running`: whether an engine is connected now (the profile it adopted is the profile page's business)
+                     savedVersion: d.version ?? 0, updatedAt: d.updatedAt ?? 0, running: typeof d.online === 'boolean' ? d.online : null }
           } catch (e: any) {
             return { org: o.name, orgId: o.id, projectId: pr.id, project: pr.name,
                      savedVersion: null, running: null, error: String(e?.message ?? e).slice(0, 120) }

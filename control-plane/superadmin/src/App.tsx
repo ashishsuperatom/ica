@@ -37,6 +37,17 @@ import { AdminContext, ADMIN_OWN_BLOCKS } from './AdminBlocks'
 //
 // So: confirm on success, say so on failure, and fall back to selecting the text if there is no clipboard at
 // all, because "select this and press ⌘C" is still an answer.
+/** An event's detail as a reader takes it in: who and what kind of connection, else its fields as words — never raw JSON. */
+function eventWords(detail: string | null | undefined): string {
+  if (!detail) return ''
+  let d: any
+  try { d = JSON.parse(detail) } catch { return detail }
+  if (!d || typeof d !== 'object') return String(d)
+  const who = d.email ?? (typeof d.userId === 'string' ? d.userId.replace(/^user_/, '').slice(0, 8) + '…' : null)
+  if (d.type && who) return `${d.type} · ${who}`
+  return Object.entries(d).filter(([, v]) => v !== null && v !== undefined && typeof v !== 'object').slice(0, 4).map(([k, v]) => `${k} ${String(v).slice(0, 40)}`).join(' · ')
+}
+
 function CopyButton({ text, label = 'Copy', className = 'sa-btn' }: { text: string; label?: string; className?: string }) {
   const [state, setState] = useState<'idle' | 'done' | 'failed'>('idle')
   useEffect(() => {
@@ -1240,7 +1251,7 @@ function ProjectDetailPage() {
         <SectionCard icon="lucide:activity" title="Event log" subtitle="From the project’s Durable Object" actions={<Status state="ok">live</Status>}>
           <RecordList rows={logs} keyOf={(l) => String(l.id)} empty="No events recorded yet." columns={[
             { key: 'event', label: 'Event', render: (l) => <Status state={evtState(l.event)}>{l.event}</Status> },
-            { key: 'detail', label: 'Detail', render: (l) => <span title={l.detail || undefined}>{l.detail || ''}</span> },
+            { key: 'detail', label: 'Detail', render: (l) => <span title={l.detail || undefined}>{eventWords(l.detail)}</span> },
             { key: 'at', label: 'Time', align: 'end', render: (l) => new Date(l.created_at * 1000).toLocaleTimeString() },
           ]} />
         </SectionCard>

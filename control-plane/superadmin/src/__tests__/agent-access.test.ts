@@ -169,9 +169,8 @@ describe('agent keys, identities and the audit history, in the real ProjectDO', 
   it('the audit history has it all, newest first; a malformed event is refused', async () => {
     const events = (await call('/audit?limit=50')).body.events
     const line = (e: any) => `${e.actor.kind}:${e.actor.id.startsWith('agent:') ? 'agent' : e.actor.id.startsWith('key:') ? 'badkey' : e.actor.id} ${e.via} ${e.action} ${e.outcome}`
-    expect(events.map(line).reverse().slice(0, 12)).toEqual([
-      'system:platform system api.post ok',                   // the project set up
-      'system:platform system api.post ok',                   // the keys' maker given the admin role
+    expect(events.map(line).reverse().slice(0, 10)).toEqual([
+      // the project set up and the keys' maker given the admin role: the platform's own calls, which succeeded — not kept
       'system:platform system api.post refused',              // a key with no scope, refused
       'system:platform system api.post refused',              // a key with an unknown scope, refused
       'user:admin@test.io admin agent-key.create ok',

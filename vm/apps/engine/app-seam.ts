@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createComposer, type Composer, type QueryRecord } from './agents/composer/index.js'
 import { createNarrator, capResultData, isDataCall } from './agents/narrator/index.js'
-import { pick, compose, place, recordQuestion, placeForRunning, domainsOf } from './knowledge.js'
+import { pick, compose, place, remember, recordQuestion, placeForRunning, domainsOf } from './knowledge.js'
 import type { AgentEvent } from './ica/session.js'
 import { personOf } from './identity.js'
 
@@ -88,6 +88,8 @@ export function createAppSeam(d: AppSeamDeps) {
       const composer = (async () => {
         const k = domain ? await compose(d.projectDir, domain) : null
         const c = await createComposer({ root: d.workspaceRoot, projectId: d.project, managerUrl: d.datasource, projectDir: d.projectDir, sessionId: sid, reference: k?.text, tools: domain?.tools, ...(d.icaBaseUrl ? { ica: { baseUrl: d.icaBaseUrl } } : {}) })
+        // What the session was made from, noted in its folder (which domain, the hashes it read): the inspector's sessions and drift read it.
+        if (k && domain) await remember(k, domain, c.cwd, picked.route).catch(() => {})
         if (k) { await place(k, c.cwd); console.log(`[app] thread ${sid.slice(0, 8)} is "${k.domain}" (${k.text.length} chars) · routed ${picked.route?.ranked.slice(0, 2).map((x) => `${x.domain} ${x.score}`).join(' · ') ?? '—'}`) }
         return c
       })()
@@ -241,5 +243,5 @@ export function createAppSeam(d: AppSeamDeps) {
     return new Promise((resolve) => { let done = false; void handle(payload, from, (m) => { if (!done) { done = true; resolve(m) } }).then(() => { if (!done) resolve({ t: 'app:error', error: 'the application did not answer' }) }) })
   }
 
-  return { handle, present, say, call, stop, busy: () => turning.size }
+  return { handle, present, say, call, stop, busy: () => turning.size, open: () => composers.size }
 }

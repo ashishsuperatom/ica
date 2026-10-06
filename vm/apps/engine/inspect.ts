@@ -194,6 +194,15 @@ export function createInspector(deps: InspectorDeps) {
       })
       for (const { id, note } of notes) sessions.push({ id, domain: String(note.domain ?? ''), at: note.at ?? null, used: Object.keys(note.used ?? {}).length,
         moved: note.used && Object.keys(note.used).length ? compositionDrift(store, note.used).map((x) => x.name) : [] })
+      // A session whose folder has no note (made before the composer wrote one) is known from the questions asked in it:
+      // its domain, and the domain's version when the question was asked.
+      const noted = new Set(notes.map((n) => n.id))
+      for (const q of store.questions(2000)) {
+        if (!q.domain || noted.has(q.session)) continue
+        noted.add(q.session)   // newest first: the latest question speaks for the session
+        const used = q.domainHash ? { [q.domain]: q.domainHash } : null
+        sessions.push({ id: q.session, domain: q.domain, at: new Date(q.at).toISOString(), used: used ? 1 : 0, moved: used ? compositionDrift(store, used).map((x) => x.name) : [] })
+      }
       sessions.sort((a, b) => String(b.at ?? '').localeCompare(String(a.at ?? '')))
       return { exists: true, domains, people: peopleIn(roots.db), changes: store.changes(60), counts: { domain: store.names('domain').length, concept: store.names('concept').length, file: store.names('file').length }, sessions: sessions.slice(0, MAX_ROWS) }
     })

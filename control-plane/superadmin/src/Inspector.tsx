@@ -136,7 +136,7 @@ function SummaryView({ hub }: ViewProps) {
       <div className="sa-two-col">
         <Panel icon="lucide:bot" title="Agents" note={`${agents.length}`}>
           <RecordList rows={agents} keyOf={a => a.name} empty="No agents are running." columns={[
-            { key: 'name', label: 'Agent' },
+            { key: 'name', label: 'Agent', render: a => <>{a.name}{typeof a.sessions === 'number' && <div className="sa-note">{a.sessions} session{a.sessions === 1 ? '' : 's'} open</div>}</> },
             { key: 'model', label: 'Model', render: a => <Code>{a.harness}{a.provider ? ` · ${a.provider}` : ''}:{a.model}</Code> },
             { key: 'busy', label: 'State', align: 'end', render: a => <Status state={a.busy ? 'running' : 'neutral'}>{a.busy ? 'busy' : 'idle'}</Status> },
           ]} />
