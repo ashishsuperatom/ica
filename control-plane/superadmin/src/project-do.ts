@@ -735,7 +735,7 @@ export class ProjectDO extends DurableObject<Env> {
       this.log('ws:connected', { wsId, type: surface, userId: a.userId, orgRole: a.role ?? null, via: 'user' })
       this.broadcastToAll(ws, { from: { id: 'hub', type: 'hub' }, payload: { t: 'connection:join', wsId, type: surface } })
     }
-    return { ok: true as const, wsId, type: surface, welcome: { t: 'welcome', wsId, type: surface, project: { id: this._pid, name: await this.projectName() }, scopes: this.scopesOf(conn) } }
+    return { ok: true as const, wsId, type: surface, welcome: { t: 'welcome', wsId, type: surface, project: { id: this._pid, name: await this.projectName() }, scopes: this.scopesOf(conn), caps: this.capsOf(conn) } }
   }
   /** A message from one of a person's tabs, through their link — handled exactly as one from a socket. */
   async personMessage(project: string, wsId: string, msg: any): Promise<{ ok: true } | { relink: true }> {

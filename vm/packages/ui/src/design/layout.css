@@ -218,6 +218,14 @@
 .sa-home__ask .sa-askbar { position: static; padding: 0; background: none; }
 .sa-home__ask .sa-askbar__form { max-width: none; }
 .sa-artifacts__make { margin-top: var(--sp-3); }
+/* The session agent's own work, beside the artifacts (project admins) */
+.sa-agentwork { margin-top: var(--sp-4); border-top: 1px solid var(--line); padding-top: var(--sp-3); }
+.sa-agentwork__head { display: flex; justify-content: space-between; align-items: center; font-size: var(--t-sm); font-weight: var(--w-medium); color: var(--ink); }
+.sa-agentwork__empty { font-size: var(--t-xs); color: var(--faint); margin-top: var(--sp-2); }
+.sa-agentwork__list { list-style: none; margin: var(--sp-2) 0 0; padding: 0; display: grid; gap: var(--sp-1h, 6px); max-height: 60vh; overflow-y: auto; }
+.sa-agentwork__list > li { min-width: 0; }
+.sa-agentwork__kind { display: block; font-size: var(--t-xs); color: var(--muted); }
+.sa-agentwork__list pre { margin: 2px 0 0; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--t-xs); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow-y: auto; background: var(--surface-subtle); border-radius: 6px; padding: var(--sp-1) var(--sp-2); }
 
 /* The artifacts pane, closed: a small square at the bottom right, level with the ask bar's field, with a badge */
 .sa-artifacts__fab { position: fixed; bottom: calc(var(--sp-3) + 5px); right: var(--sp-4); z-index: var(--z-pill); width: 40px; height: 40px; display: grid; place-items: center; border-radius: 11px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); box-shadow: var(--shadow-card); transition: color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), transform var(--dur-1) var(--ease); }

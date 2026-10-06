@@ -368,6 +368,8 @@ table.sa-table { width: 100%; border-collapse: collapse; }
 .sa-menu__title { font-size: var(--t-base); font-weight: var(--w-medium); color: var(--ink); margin-top: var(--sp-0); overflow-wrap: anywhere; }
 .sa-menu__line { font-size: var(--t-xs); color: var(--muted); overflow-wrap: anywhere; }
 .sa-menu__line--faint { color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-menu__item { display: block; width: 100%; text-align: left; padding: var(--sp-2) var(--sp-3h); font-size: var(--t-sm); color: var(--ink); border-top: 1px solid var(--line); }
+.sa-menu__item:hover, .sa-menu__item:focus-visible { background: var(--hover-wash); }
 
 /* ── Action card: a launcher — an icon tile, a title and a line, a call to action ── */
 .sa-action-card { display: flex; align-items: center; gap: var(--sp-3h); width: 100%; text-align: left; padding: var(--sp-4) var(--sp-5); }

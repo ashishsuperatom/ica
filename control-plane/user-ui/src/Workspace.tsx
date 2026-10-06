@@ -10,7 +10,8 @@
 //   artifacts  the decisions recorded in this session (and their versions), with the step that made each
 //
 // Everything is the platform's: the session is the engine's (session:*), the decision memory and the artifacts the
-// platform's (decision:paths, artifact:*). The old chat stays at /c/<id>.
+// platform's (decision:paths, artifact:*). It is the only view of the user UI: a new chat starts from home, where the first
+// question picks the agent.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '@superatom/ui/design.css'
@@ -66,13 +67,15 @@ async function ready(m: SessionMsg, fetchFile: FetchFile, source: ThreadSource):
   return recognised
 }
 
-export default function Workspace({ request, subscribeLive, scopes, projectId, token, projectName, connected, agents, path, go, extraNav }: {
-  request: Request; subscribeLive: (fn: (m: any) => void) => () => void; scopes: string[]; projectId: string; token?: string | null; projectName: string; connected: boolean
+export default function Workspace({ request, send, subscribeLive, scopes, caps, projectId, token, projectName, connected, status, agents, path, go, onSignOut }: {
+  request: Request; send: (payload: Record<string, unknown>) => void; subscribeLive: (fn: (m: any) => void) => () => void
+  scopes: string[]; caps: string[]; projectId: string; token?: string | null; projectName: string
+  /** Whether the socket is open, and what to say when it is not (an expired sign-in, no access). */
+  connected: boolean; status: string
   agents: WorkAgent[]
   /** The workspace's address: '' (home), '<session>' or 's/<agent>[/<start>]' (start a session with an agent). */
   path: string; go: (path: string) => void
-  /** The rest of the user UI (the chat, pages, consoles), kept reachable. */
-  extraNav: { key: string; label: string; icon: string; onClick: () => void }[]
+  onSignOut?: () => void
 }) {
   const me = useMemo(who, [])
   const [sessions, setSessions] = useState<{ session: string; agent: string; title: string; updated?: string }[]>([])
@@ -106,8 +109,13 @@ export default function Workspace({ request, subscribeLive, scopes, projectId, t
   const page = (type: string) => { if (sessionId || startAgent) { setPending({ type }); go('') } else startThread(type) }
   const onPages = !sessionId && !startAgent
   const current = sessionId ? sessions.find((s) => s.session === sessionId)?.agent ?? null : startAgent
+  // A new chat is home with the ask bar ready: the first question opens the session, with the agent it reaches.
+  const newChat = () => { page('home'); setTimeout(() => (document.querySelector('.sa-askbar textarea, .sa-askbar input') as HTMLElement | null)?.focus(), 80) }
   const nav = [{
-    items: [{ key: 'home', label: 'Home', icon: 'lucide:house', active: onPages && root === 'home', onClick: () => page('home') }],
+    items: [
+      { key: 'new', label: 'New chat', icon: 'lucide:square-pen', active: false, onClick: newChat },
+      { key: 'home', label: 'Home', icon: 'lucide:house', active: onPages && root === 'home', onClick: () => page('home') },
+    ],
   }, {
     label: 'Agents',
     items: agents.filter((a) => !a.isDefault).map((a) => ({ key: `a:${a.id}`, label: a.name, icon: a.look.icon ?? 'lucide:bot', title: a.look.says, active: !onPages && current === a.id, onClick: () => go(`s/${a.id}`) })),
@@ -120,7 +128,6 @@ export default function Workspace({ request, subscribeLive, scopes, projectId, t
       { key: 'agents', label: 'Manage agents', icon: 'lucide:bot', active: onPages && root === 'agents', onClick: () => page('agents') },
       { key: 'activity', label: 'Activity', icon: 'lucide:activity', active: onPages && root === 'activity', onClick: () => page('activity') },
       { key: 'connections', label: 'Connections', icon: 'lucide:plug', active: onPages && root === 'connections', onClick: () => page('connections') },
-      ...extraNav,
     ],
   }]
 
@@ -134,12 +141,14 @@ export default function Workspace({ request, subscribeLive, scopes, projectId, t
       <AppShell
         sidebar={(collapsed, toggle) => (
           <Sidebar name={projectName} connected={connected} groups={nav} collapsed={collapsed} onToggle={toggle}
-            foot={(rail) => <UserProfile name={me.name} email={me.email} context={projectName} showName={!rail} />} />
+            foot={(rail) => <UserProfile name={me.name} email={me.email} context={projectName} showName={!rail}
+              menu={onSignOut ? <button type="button" className="sa-menu__item" onClick={onSignOut}>Sign out</button> : undefined} />} />
         )}
-        status={<ConnectionStatus status={connected ? 'open' : 'reconnecting'} />}
+        status={<ConnectionStatus status={connected ? 'open' : /access/.test(status) ? 'rejected' : 'reconnecting'} message={connected ? undefined : status || undefined} />}
         artifacts={sessionId ? <>
           <Artifacts items={artifacts} onReveal={(b) => revealBlock(b)} />
           <ForkAgent session={sessionId} request={request} onMade={() => setArtifactsTick((n) => n + 1)} />
+          {caps.includes('project.audit') && <AgentWork key={sessionId} session={sessionId} send={send} subscribeLive={subscribeLive} />}
         </> : undefined}
         artifactsCount={artifacts.length}>
         <ProgramEnvContext.Provider value={programEnv}>
@@ -173,6 +182,39 @@ function ForkAgent({ session, request, onMade }: { session: string; request: Req
     <Form onSubmit={() => void fork()} actions={<><button type="button" className="sa-btn" onClick={() => setOpen(false)}>Cancel</button><button className="sa-btn sa-btn--primary">Make the agent</button></>}>
       <Field label="The new agent's title"><input id="sa-fork-title" className="sa-input" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus required /></Field>
     </Form>
+  )
+}
+
+/** What the session's agent (its composer) did, as it does it: the raw work, for whoever administers the project. The
+ *  log reaches only the session's owner, so this shows the work of one's own sessions. */
+type WorkEvent = { id: string; kind: string; text?: string; output?: string; title?: string; done?: boolean }
+function AgentWork({ session, send, subscribeLive }: { session: string; send: (p: Record<string, unknown>) => void; subscribeLive: (fn: (m: any) => void) => () => void }) {
+  const [open, setOpen] = useState(false)
+  const [events, setEvents] = useState<WorkEvent[]>([])
+  useEffect(() => {
+    if (!open) return
+    send({ t: 'log:attach', channel: 'composer-log', session })
+    const off = subscribeLive((m) => {
+      if (m?.sid !== session || m?.lane !== 'composer') return
+      if (m.t === 'agent:event' && m.ev && typeof m.ev.id === 'string') {
+        const ev = m.ev as WorkEvent
+        setEvents((list) => { const i = list.findIndex((e) => e.id === ev.id); if (i < 0) return [...list, ev].slice(-300); const next = list.slice(); next[i] = { ...next[i], ...ev }; return next })
+      } else if (m.t === 'agent:chunk' && typeof m.text === 'string') {
+        setEvents((list) => { const last = list[list.length - 1]; return last?.kind === 'output' ? [...list.slice(0, -1), { ...last, text: ((last.text ?? '') + m.text).slice(-20000) }] : [...list, { id: `out-${list.length}`, kind: 'output', text: m.text }].slice(-300) })
+      }
+    })
+    return () => { off(); send({ t: 'log:detach', channel: 'composer-log' }) }
+  }, [open, session, send, subscribeLive])
+  if (!open) return <button className="sa-btn sa-btn--link sa-artifacts__make" title="The session agent's own work: its tool calls and output, as it works" onClick={() => setOpen(true)}>Watch the agent work</button>
+  return (
+    <div className="sa-agentwork">
+      <div className="sa-agentwork__head"><span>The agent's work</span><button type="button" className="sa-btn sa-btn--link" onClick={() => setOpen(false)}>Hide</button></div>
+      {events.length === 0
+        ? <div className="sa-agentwork__empty">Shown from the next question on.</div>
+        : <ol className="sa-agentwork__list">{events.map((e) => (
+            <li key={e.id} data-kind={e.kind}><span className="sa-agentwork__kind">{e.title || e.kind}</span>{(e.text || e.output) && <pre>{String(e.text || e.output).slice(-4000)}</pre>}</li>
+          ))}</ol>}
+    </div>
   )
 }
 
