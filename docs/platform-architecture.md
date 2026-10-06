@@ -1264,6 +1264,15 @@ with its session open; a session's news → the tabs with that session open; a l
 an agent lane's stream → the tabs on that lane; the hub's own notices → every tab of the link. A tab's lanes — sessions
 it opened or asked in, logs and lanes it attached to — live on its socket. Engines (key), agents (agent keys) and
 service identities (the ChannelDO, Teams) still talk to the ProjectDO directly.
+*The inbox* (the answer buffer) is now the UserDO's, by project: questions as they leave, answers and follow-ups as they
+arrive, served to a device that was away (sync:req, answer:get, answer:ack) without asking the project; the ProjectDO
+keeps only who asked each question (it decides whose logs and answers reach whom). A large message (parts, or a parcel)
+hides its question and session: the UserDO joins it, decides from the whole, and forwards the original frames in order.
+*Kept in the ProjectDO, on purpose:* `view_events` (what was browsed in the project) and `session_owners` (whom the
+project charges for a session's spend) are the project's usage record, not the person's state. *Found and fixed on the
+way:* a log nobody could be found to own reached every attached person (now the session's owner, else admins only);
+the engine's wire shared one sender — one address — for every log and channel; terminal viewers were never removed;
+`session:load:res` carried no session; a question queued while the machine slept lost who asked.
 
 ### Appending and partitioning in the warehouse (question, 2026-10-06)
 

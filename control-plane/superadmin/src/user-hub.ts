@@ -16,6 +16,15 @@
 //   • an error with no request → the tab that last sent something; the hub's own notices → every tab of the link.
 // A tab's lanes (sessions it opened or asked in, logs and terminals it attached to) live on its socket so a hibernation
 // wake finds them; who asked what is kept in `asked` (a reply can come long after its request).
+//
+// A large message comes as parts or as a parcel (clients/transport.ts), which hide its question and session: the hub
+// joins them (reading a parcel from the bucket), decides from the whole message, and forwards the original frames —
+// in order, one link at a time. It is also the person's INBOX (answer-buffer.ts, by project): questions as they leave,
+// answers as they arrive; a device that was away pulls them (sync:req, answer:get, answer:ack) from here alone.
+
+import { receiver } from '../../../clients/transport.js'
+import { bucketStore } from './parcels.js'
+import { AnswerBuffer } from './answer-buffer.js'
 
 type Claims = { userId: string; email?: string; role?: string }
 export interface Tab { tab: string; project: string; surface: 'runtime' | 'admin'; claims: Claims; wsId?: string; lanes: string[] }
@@ -44,8 +53,13 @@ function laneOf(payload: any): { session?: string; lane?: string } {
   return { ...(typeof session === 'string' && session ? { session } : {}), ...(typeof payload?.lane === 'string' ? { lane: payload.lane } : {}) }
 }
 
-export function personHub(ctx: DurableObjectState, env: Env) {
+export function personHub(ctx: DurableObjectState, env_: Env) {
+  const env = env_
   const sql = ctx.storage.sql
+  const inbox = new AnswerBuffer(sql)
+  const chains = new Map<string, Promise<unknown>>()   // per link: what it sends is handled in order
+  const joiners = new Map<string, { r: ReturnType<typeof receiver>; whole: any }>()   // per link: parts being joined
+  const held = new Map<string, string[]>()   // per message being joined: its frames, to forward once it is whole
   const projectStub = (pid: string) => (env as any).PROJECT.get((env as any).PROJECT.idFromName(`proj:${pid}`))
   const tabOf = (ws: WebSocket) => ws.deserializeAttachment() as Tab | null
   const save = (ws: WebSocket, t: Tab) => ws.serializeAttachment(t)
@@ -66,6 +80,59 @@ export function personHub(ctx: DurableObjectState, env: Env) {
     t.wsId = r.wsId; save(ws, t)
     send(ws, { from: HUB, to: { id: r.wsId, type: r.type }, payload: r.welcome })
     return true
+  }
+
+  /** A frame from the project: joined with its other parts first if it is a part or a parcel, then routed whole. */
+  async function take(project: string, wsId: string, data: string) {
+    let env: any
+    try { env = JSON.parse(data) } catch { return }
+    const pl = env?.payload
+    if (!(pl?.t === 'part' || (pl && typeof pl === 'object' && 'parcel' in pl))) { route(project, wsId, env, [data]); return }
+    const key = `${project}|${wsId}`
+    const j = joiners.get(key) ?? { r: receiver({ deliver: (w) => { j.whole = w }, parcels: bucketStore((env_ as any).PACKAGES, project) }), whole: null }
+    joiners.set(key, j)
+    const id = `${key}|${pl.t === 'part' ? String(pl.id) : 'parcel'}`
+    held.set(id, [...(held.get(id) ?? []), data])
+    j.whole = null
+    await j.r.receive(pl)
+    if (!j.whole) return   // more parts to come
+    const frames = held.get(id) ?? [data]
+    held.delete(id)
+    route(project, wsId, { ...env, payload: j.whole }, frames)
+    j.whole = null
+  }
+
+  /** A whole message from the project, to the tabs it belongs to (its frames forwarded as they came). */
+  function route(project: string, wsId: string, env: any, frames: string[]) {
+    const on = linkTabs(project, wsId)
+    if (!on.length) { void projectStub(project).personUnlink(project, wsId).catch(() => {}); return }
+    const pl = env?.payload ?? {}
+    const kind = String(pl.t ?? '')
+    if (kind === 'analyst:answer' && pl.qid && !pl.replay) inbox.recordAnswer(pl)
+    else if (kind === 'followups' && pl.qid) inbox.recordFollowups(pl)
+    const to = (tabs: (readonly [WebSocket, Tab])[]) => { for (const [ws] of tabs) for (const f of frames) send(ws, f) }
+    const has = (lane: string) => on.filter(([, t]) => t.lanes.includes(lane))
+    const { session } = laneOf(pl)
+    const asker = pl.qid ? askedBy(`q:${pl.qid}`) : undefined
+    const mine = (tabs: (readonly [WebSocket, Tab])[]) => tabs.filter(([, t]) => t.tab === asker || (session && t.lanes.includes(`session:${session}`)))
+    // A reply to a request: the tab that sent it (if it is still open; else nobody — it asked, it left).
+    if (pl.reqId !== undefined && pl.reqId !== null) { const tab = askedBy(`r:${pl.reqId}`); if (tab) return to(on.filter(([, t]) => t.tab === tab)) }
+    // An agent log: the tabs attached to its channel — of those, the one that asked or has its session open.
+    const channel = env?.channel ?? (env?.to?.type === 'log' ? env.to.channel : undefined)
+    if (channel) { const attached = has(`log:${channel}`); return to(asker || session ? mine(attached) : attached) }
+    // An agent terminal: the tabs watching it, and the tab whose request it streams.
+    const terminal = terminalOf(pl)
+    const replyKey = replyKeyOf(kind)
+    const requester = replyKey ? askedBy(`t:${replyKey}`) : undefined
+    if (terminal) { const watching = on.filter(([, t]) => t.lanes.includes(`term:${terminal}`) || t.tab === requester); if (watching.length) return to(watching) }
+    // A reply without a reqId: the tab that sent its request.
+    if (requester) return to(on.filter(([, t]) => t.tab === requester))
+    // An answer, or a session's news: whoever asked, and every tab with that session open.
+    if (asker || session) return to(mine(on))
+    // An error that answers no request: the tab that last sent something.
+    if (kind === 'error') { const last = askedBy('last'); return to(on.filter(([, t]) => t.tab === last)) }
+    // The hub's own notices, and anything addressed to the person as a whole.
+    to(on)
   }
 
   return {
@@ -90,6 +157,12 @@ export function personHub(ctx: DurableObjectState, env: Env) {
       if (!t.wsId) { try { ws.close(4001, 'Not authenticated — send { type: "hello", ... } first') } catch { /* closed */ } ; return }
       const pl = msg?.payload ?? {}
       const kind = String(pl.t ?? '')
+      // The inbox answers from here: the project (and its engine) are not asked.
+      const reply = (payload: unknown) => send(ws, { from: HUB, to: { id: t.wsId, type: t.surface }, payload })
+      if (kind === 'sync:req') { reply(inbox.sync(t.project)); return }
+      if (kind === 'answer:get') { reply(inbox.get(t.project, pl.qid)); return }
+      if (kind === 'answer:ack') { inbox.ack(t.project, pl.qids); return }
+      if (kind === 'analyse' && pl.questionId) inbox.recordPending(t.project, pl)
       // What this tab asked, and what it now has open.
       remember('last', t.tab)
       if (typeof pl.reqId === 'string' || typeof pl.reqId === 'number') remember(`r:${pl.reqId}`, t.tab)
@@ -116,35 +189,9 @@ export function personHub(ctx: DurableObjectState, env: Env) {
 
     /** What the project sends this person, to the tabs it belongs to. No tab left on the link: it is gone. */
     deliver(project: string, wsId: string, data: string): { ok: true } | { gone: true } {
-      const on = linkTabs(project, wsId)
-      if (!on.length) return { gone: true }
-      let env: any
-      try { env = JSON.parse(data) } catch { return { ok: true } }
-      const pl = env?.payload ?? {}
-      const kind = String(pl.t ?? '')
-      const to = (tabs: (readonly [WebSocket, Tab])[]) => { for (const [ws] of tabs) send(ws, data) }
-      const has = (lane: string) => on.filter(([, t]) => t.lanes.includes(lane))
-      const { session } = laneOf(pl)
-      const asker = pl.qid ? askedBy(`q:${pl.qid}`) : undefined
-      const mine = (tabs: (readonly [WebSocket, Tab])[]) => tabs.filter(([, t]) => t.tab === asker || (session && t.lanes.includes(`session:${session}`)))
-      // A reply to a request: the tab that sent it (if it is still open; else nobody — it asked, it left).
-      if (pl.reqId !== undefined && pl.reqId !== null) { const tab = askedBy(`r:${pl.reqId}`); if (tab) { to(on.filter(([, t]) => t.tab === tab)); return { ok: true } } }
-      // An agent log: the tabs attached to its channel — of those, the one that asked or has its session open.
-      const channel = env?.channel ?? (env?.to?.type === 'log' ? env.to.channel : undefined)
-      if (channel) { const attached = has(`log:${channel}`); to(asker || session ? mine(attached) : attached); return { ok: true } }
-      // An agent terminal: the tabs watching it, and the tab whose request it streams.
-      const terminal = terminalOf(pl)
-      const replyKey = replyKeyOf(kind)
-      const requester = replyKey ? askedBy(`t:${replyKey}`) : undefined
-      if (terminal) { const watching = on.filter(([, t]) => t.lanes.includes(`term:${terminal}`) || t.tab === requester); if (watching.length) { to(watching); return { ok: true } } }
-      // A reply without a reqId: the tab that sent its request.
-      if (requester) { to(on.filter(([, t]) => t.tab === requester)); return { ok: true } }
-      // An answer, or a session's news: whoever asked, and every tab with that session open.
-      if (asker || session) { to(mine(on)); return { ok: true } }
-      // An error that answers no request: the tab that last sent something.
-      if (kind === 'error') { const last = askedBy('last'); to(on.filter(([, t]) => t.tab === last)); return { ok: true } }
-      // The hub's own notices, and anything addressed to the person as a whole.
-      to(on)
+      if (!linkTabs(project, wsId).length) return { gone: true }
+      const key = `${project}|${wsId}`
+      chains.set(key, (chains.get(key) ?? Promise.resolve()).then(() => take(project, wsId, data)).catch(() => {}))
       return { ok: true }
     },
 

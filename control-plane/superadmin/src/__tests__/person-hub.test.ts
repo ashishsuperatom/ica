@@ -113,6 +113,29 @@ describe('every person through their UserDO', () => {
     expect(a1.got.some((m) => ['analyst:chunk', 'sessions:res', 'error'].includes(m.payload?.t))).toBe(false)
     expect(a3.got.some((m) => m.payload?.t === 'analyst:chunk') || a2.got.some((m) => m.payload?.t === 'sessions:res')).toBe(false)
   })
+  it('a large answer in parts reaches only its asker and session, whole, and lands in the inbox', async () => {
+    a1.send({ to: { type: 'code-engine' }, payload: { t: 'analyse', questionId: 'q2', sessionId: 's2', question: 'how much' } })
+    const asked = await engine.until((m) => m.payload?.t === 'analyse' && m.payload.questionId === 'q2')
+    const body = JSON.stringify({ t: 'analyst:answer', qid: 'q2', sid: 's2', answer: { markdown: 'x'.repeat(3000) } })
+    const parts = [body.slice(0, 1500), body.slice(1500)]
+    parts.forEach((data, i) => engine.send({ to: { id: asked.from.id, type: 'runtime' }, payload: { t: 'part', id: 'big1', part: i, of: parts.length, data } }))
+    await a1.until((m) => m.payload?.t === 'part' && m.payload.part === 1)
+    await settle()
+    expect(a1.got.filter((m) => m.payload?.t === 'part' && m.payload.id === 'big1')).toHaveLength(2)
+    expect(a2.got.some((m) => m.payload?.id === 'big1') || a3.got.some((m) => m.payload?.id === 'big1')).toBe(false)
+    // A device that was away pulls it from the person's own inbox — the project is not asked.
+    const phone = await tab('ana')
+    await phone.until((m) => m.payload?.t === 'welcome')
+    const before = engine.got.length
+    phone.send({ to: { type: 'code-engine' }, payload: { t: 'sync:req' } })
+    const res = await phone.until((m) => m.payload?.t === 'sync:res')
+    expect(res.payload.answers.map((x: any) => x.qid)).toEqual(expect.arrayContaining(['q2', 'q1']))
+    phone.send({ to: { type: 'code-engine' }, payload: { t: 'answer:get', qid: 'q2' } })
+    expect((await phone.until((m) => m.payload?.t === 'answer:res')).payload).toMatchObject({ status: 'ready', question: 'how much' })
+    await settle()
+    expect(engine.got.slice(before).some((m) => ['sync:req', 'answer:get'].includes(m.payload?.t))).toBe(false)
+    phone.ws.close()
+  })
   it('a person without access is refused', async () => {
     const bo = await tab('bo', 'user')
     for (let i = 0; i < 100 && bo.closed() === null; i++) await new Promise((r) => setTimeout(r, 20))

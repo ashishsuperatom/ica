@@ -459,4 +459,16 @@ export const USER_MIGRATIONS: Migration[] = [
     CREATE TABLE IF NOT EXISTS asked (key TEXT PRIMARY KEY, tab TEXT NOT NULL, at INTEGER NOT NULL);
     CREATE INDEX IF NOT EXISTS asked_at ON asked (at);
   ` },
+  { id: 5, name: 'the inbox', up: `
+    -- The person's inbox, by project (answer-buffer.ts keys it by "user_id"; here that is the project): each question as it
+    -- left, its answer and follow-ups as they arrived — for a device that was away; and their recent sessions.
+    CREATE TABLE IF NOT EXISTS answer_buffer (
+      qid TEXT PRIMARY KEY, user_id TEXT NOT NULL DEFAULT '', session_id TEXT, question TEXT,
+      payload_json TEXT, followups_json TEXT,
+      at INTEGER NOT NULL, answered_at INTEGER, acked INTEGER NOT NULL DEFAULT 0);
+    CREATE INDEX IF NOT EXISTS idx_ab_user ON answer_buffer(user_id, at);
+    CREATE TABLE IF NOT EXISTS session_snapshot (
+      session_id TEXT NOT NULL, user_id TEXT NOT NULL DEFAULT '', title TEXT, last_at INTEGER NOT NULL,
+      PRIMARY KEY (session_id, user_id));
+  ` },
 ]

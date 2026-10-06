@@ -17,7 +17,9 @@ export class UserDO extends DurableObject<Env> {
     this.ctx.blockConcurrencyWhile(async () => { runMigrations(durableObjectDb(this.ctx.storage), USER_MIGRATIONS, { name: 'user' }) })
   }
 
-  private hub() { return personHub(this.ctx, this.env) }
+  // One hub per instance: it holds the parts of large messages being joined and keeps each link's frames in order.
+  private _hub?: ReturnType<typeof personHub>
+  private hub() { return (this._hub ??= personHub(this.ctx, this.env)) }
   // The person's tabs and devices (user-hub.ts): their sockets, and what their projects send back.
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) { await this.hub().message(ws, message) }
   async webSocketClose(ws: WebSocket) { await this.hub().closed(ws) }

@@ -1785,9 +1785,8 @@ export class ProjectDO extends DurableObject<Env> {
       return
     }
     if (sender.type === 'runtime') {
-      if (pl.t === 'sync:req')   { hubReply(this.buffer.sync(sender.userId || '')); return }
-      if (pl.t === 'answer:get') { hubReply(this.buffer.get(sender.userId || '', pl.qid)); return }
-      if (pl.t === 'answer:ack') { this.buffer.ack(sender.userId || '', pl.qids); return }
+      // A person's inbox (what they asked, the answers for a device that was away) is in their UserDO (user-hub.ts);
+      // here only who asked each question is kept — it decides whose logs and answers reach whom.
       // Agent-LOG subscriptions live in the DO (not the engine): a client attaches when it opens a log view and
       // detaches when it leaves, so the DO alone decides who receives which channel. Ephemeral (re-attach on reconnect).
       // Runtime-only is correct: the browser is ALWAYS a runtime surface (see handleHello — type follows the declared
@@ -1803,8 +1802,7 @@ export class ProjectDO extends DurableObject<Env> {
       // record it for durable per-user recovery, and (b) — LAYER 1, separate from the base reply — fan it out to
       // the same user's OTHER devices. Keyed by the qid's OWNER, so it can reach ONLY that user (authz by
       // construction). Agent LOGS are a different layer (analyst-log/composer-log) and are never fanned out here.
-      if (pl.t === 'analyst:answer' && pl.qid && !pl.replay) { this.buffer.recordAnswer(pl); this.record('chat.answer', String(pl.qid), { qid: pl.qid, sid: pl.sid ?? null, category: pl.category ?? null, answer: pl.answer ?? null, timing: pl.timing ?? null }) }
-      else if (pl.t === 'followups' && pl.qid) this.buffer.recordFollowups(pl)
+      if (pl.t === 'analyst:answer' && pl.qid && !pl.replay) { this.record('chat.answer', String(pl.qid), { qid: pl.qid, sid: pl.sid ?? null, category: pl.category ?? null, answer: pl.answer ?? null, timing: pl.timing ?? null }) }
       if ((pl.t === 'analyst:answer' || pl.t === 'followups') && pl.qid && !pl.replay) {
         const owner = this.buffer.ownerOf(pl.qid)
         if (owner) this.deliverToUser(owner, envelope, (msg.to as any)?.id)   // Tier 2 — the user's other devices (skip the base-routed asker)
