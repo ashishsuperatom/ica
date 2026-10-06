@@ -1420,6 +1420,26 @@ place, the same for every organisation and project); the project template's thre
   owner decides; the decided version is published; everything keeps its history (time travel) and its scope
   (global / group / user).
 
+## Everything is a program (the user, 2026-10-07)
+
+**In the user's words:** the domain scripts, like allocation.mjs — we can get rid of them and only have programs. If in a
+program the React part we do not use, only the backend part, then it's the same thing; so everything could be just a
+program. They will also have their React thing, but we may or may not use it: the agent uses it and gets the data. We
+do not need two different kinds of thing — programs are one category, and that is enough; we do not need to invent
+another type. The project app we see today is also just a collection of programs.
+
+Someone (a person, or an agent) builds either a program or a dashboard — why should they be different things? What is
+the purpose, and how are they used? If we build a dashboard, why should it not also have the STATE concept? Everything
+is one session: every session has a domain and a list of programs. A dashboard is also a program, or a report —
+everything is a program; there is no separate concept of a dashboard. We may have a special thing called a dashboard,
+because we want a specialised version for some people — that is what goes in the dashboard section — but it is nothing
+different from a program, and people can ask questions below it, if they have the permission (the permission system
+covers them too).
+
+*Open:* where programs are stored — one place (today's program catalogue: metadata in the project's Durable Object, the
+bundle, source included, in R2), with the project app's views becoming programs there and the separate app store
+(`app_versions`) going away.
+
 ## Applications
 
 - **User UI — the base application, the same for every project.** It gets everything the dashboard has today, plus
