@@ -37,11 +37,42 @@ const plainTitle = (s: string) => (s ?? '').replace(/\*\*|__|`/g, '').replace(/(
 const when = (iso?: string) => (iso ? new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '')
 
 function Home() {
-  // A new chat: nothing up front but the question — the ask bar is at the foot, as on every page.
+  // The project's front door: every agent the person can ask, as the project defines it — its main view as the card,
+  // each of its starting points beneath with when to use it. Nothing here is the platform's own: it is the agents'.
+  const env = useEnv()
+  const { open } = useThread()
+  const named = env.agents.filter((a) => !a.isDefault)
   return (
-    <div className="sa-newchat">
-      <h1 className="sa-newchat__title">What do you want to know?</h1>
-      <p className="sa-newchat__line">Ask in your own words: the agent that knows the subject answers, and the conversation is kept on the left.</p>
+    <div className="sa-home">
+      {named.map((a) => {
+        const accent = accentOf(a.look.accent)
+        const icon = a.look.icon ?? 'solar:widget-linear'
+        return (
+          <Section key={a.id} tinted icon={icon} accent={(a.look.accent && a.look.accent in ACCENT ? a.look.accent : 'series-1') as Accent} title={a.name} subtitle={a.look.says}>
+            <div className="sa-home__group">
+              <button type="button" onClick={() => env.go(`s/${a.id}`)} className="sa-card sa-card--lift sa-action-card" style={{ '--accent': accent } as React.CSSProperties} title={a.look.says}>
+                <span className="sa-action-card__tile"><Icon icon={icon} /></span>
+                <div className="sa-action-card__body">
+                  <p className="sa-action-card__title">{a.look.main?.label ?? a.name}</p>
+                  <p className="sa-action-card__text">{a.look.main?.says ?? a.look.says ?? ''}</p>
+                </div>
+                <span className="sa-action-card__cta">Open <Icon icon="solar:arrow-right-linear" /></span>
+              </button>
+              {a.starts.length > 0 && (
+                <div className="sa-sub-grid">
+                  {a.starts.map((x) => (
+                    <button key={x.key} type="button" className="sa-sub-card" title={x.says} onClick={() => env.go(`s/${a.id}/${x.key}`)}>
+                      <span className="sa-sub-card__title">{x.label}</span>
+                      <span className="sa-sub-card__text">{x.says}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </Section>
+        )
+      })}
+      {named.length === 0 && <Empty icon="solar:widget-linear">No agents you can see yet. <button className="sa-btn sa-btn--link" onClick={() => open('agents', {}, 'Looked at the agents')}>Manage agents</button></Empty>}
     </div>
   )
 }

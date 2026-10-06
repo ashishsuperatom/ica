@@ -216,11 +216,11 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
               </>} />} />
         )}
         status={<ConnectionStatus status={connected ? 'open' : /access/.test(status) ? 'rejected' : 'reconnecting'} message={connected ? undefined : status || undefined} />}
-        artifacts={sessionId ? <>
+        artifacts={!sessionId ? <Artifacts items={[]} empty="What a conversation decides or makes — a decision record, a file — shows here." /> : <>
           <Artifacts items={artifacts} onReveal={(b) => revealBlock(b)} />
           <ForkAgent session={sessionId} request={request} onMade={() => setArtifactsTick((n) => n + 1)} />
           {caps.includes('project.audit') && <AgentWork key={sessionId} session={sessionId} send={send} subscribeLive={subscribeLive} />}
-        </> : undefined}
+        </>}
         artifactsCount={artifacts.length}>
         <ProgramEnvContext.Provider value={programEnv}>
           {source
