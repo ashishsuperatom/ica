@@ -21,7 +21,7 @@ import { AnalystConsole } from './AnalystConsole'
 import { useSession, useUser, useClerk, SignIn } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
-import { AppShell, RailSidebar, NavList, type RailPlace, UserProfile, MenuItem, MenuRule, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
+import { AppShell, RailSidebar, NavList, type RailPlace, UserProfile, MenuItem, MenuRule, Search, useSearchKey, type SearchItem, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
 import '@superatom/ui/design.css'
 import { AdminContext, ADMIN_OWN_BLOCKS } from './AdminBlocks'
 
@@ -375,8 +375,20 @@ function Console() {
     { key: 'p-attention', label: 'Attention', icon: 'solar:bell-linear', pages: [{ key: 'p-attention', label: 'Attention', icon: 'solar:bell-linear', to: P('attention'), active: place === 'attention' }] },
     ...projectPlaces.map((g) => ({ key: `p-${g.key}`, label: g.title, icon: AREA_ICON[g.key] ?? 'solar:widget-linear', pages: g.places.map((pl) => page(`p-${pl.slug}`, pl, P(pl.slug), place === pl.slug)) })),
   ]
+  // Search (⌘K, or the button in the panel's head): this layer's pages, one's organisations and this one's projects, the
+  // platform's pages.
+  const [searching, setSearching] = useState(false)
+  useSearchKey(useCallback(() => setSearching(true), []))
+  const searchItems: SearchItem[] = [
+    ...areas.flatMap((a) => a.pages.map((x) => ({ key: `pg:${x.key}`, label: x.label, sub: a.label === x.label ? undefined : a.label, icon: x.icon, group: layer === 'project' ? projectName : layer === 'org' ? orgName : 'Superatom', onSelect: () => nav(x.to) }))),
+    ...projects.map((p) => ({ key: `pr:${p.id}`, label: p.name, sub: orgName, icon: 'solar:folder-linear', group: 'Projects', onSelect: () => nav(`/o/${org}/p/${p.id}`) })),
+    ...orgs.map((o) => ({ key: `org:${o.id}`, label: o.name, icon: 'solar:buildings-2-linear', group: 'Organisations', onSelect: () => nav(`/o/${o.id}`) })),
+    ...(superadmin && layer !== 'platform' ? PLATFORM_PLACES.map((pl) => ({ key: `pf:${pl.slug}`, label: pl.label, icon: pl.icon, group: 'Superatom', onSelect: () => nav(`/${pl.slug}`) })) : []),
+    { key: 'me', label: 'Profile', icon: 'solar:user-circle-linear', group: 'You', onSelect: () => nav('/profile') },
+  ]
+  const searchButton = <button type="button" className="sa-icon-btn sa-icon-btn--lg" onClick={() => setSearching(true)} title="Search (⌘K)" aria-label="Search"><Icon icon="solar:magnifer-linear" /></button>
   const railPlaces: RailPlace[] = areas.map((a, i) => ({
-    key: a.key, label: a.label, icon: a.icon, accent: `var(--place-${(i % 6) + 1})`,
+    key: a.key, label: a.label, icon: a.icon, accent: `var(--place-${(i % 6) + 1})`, actions: searchButton,
     ...(a.pages.length === 1 ? { onClick: () => nav(a.pages[0]!.to) } : { panel: <NavList groups={[{ label: a.label, items: a.pages.map((x) => item(x.key, x.label, x.icon, x.to, x.active, x.title)) }]} /> }),
   }))
   const railAt = areas.find((a) => a.pages.some((x) => x.active))?.key ?? ''
@@ -393,6 +405,7 @@ function Console() {
   return (
     <>
       <Style />
+      {searching && <Search items={searchItems} placeholder="Search pages, projects, organisations…" onClose={() => setSearching(false)} />}
       <AppShell wide crumbs={<Breadcrumbs items={crumbs} />} sidebar={(collapsed, toggle) => (
         <RailSidebar name={layer === 'project' ? projectName : layer === 'org' ? orgName : 'Superatom'} places={railPlaces} current={railAt}
           pinned={!collapsed} onPin={(p) => toggle(!p)} onHome={() => nav(layerHome)} onMark={() => nav('/')} markTitle="Superatom"
