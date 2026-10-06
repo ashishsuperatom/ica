@@ -751,14 +751,13 @@ async function warmEssentialAgents() {
   catch (e: any) { console.warn(`[ica] box credentials: ${e?.message ?? e} — continuing with whatever this box has`) }
 
   if (warmed) return; warmed = true
-  console.log('[ica] warming essential agents (analyst · connector)…')
+  console.log('[ica] warming essential agents (connector)…')
   const warm = async (name: string, p: Promise<unknown>): Promise<{ name: string; ok: boolean; ms: number }> => {
     const t0 = Date.now()
     try { await p; const ms = Date.now() - t0; console.log(`[ica] warm: ${name} ready (${(ms / 1000).toFixed(1)}s)`); return { name, ok: true, ms } }
     catch (e: any) { console.warn(`[ica] warm: ${name} failed (falls back to lazy) — ${e?.message ?? e}`); return { name, ok: false, ms: Date.now() - t0 } }
   }
   const results = await Promise.all([
-    warm('analyst',   analystSlot.get().then(a => a.session.warmup?.())),
     // DOES THE CREDENTIAL ACTUALLY WORK? warm-up above only proves a process started and its prompt appeared,
     // which stays true with no credential at all — that is exactly how a box that could not answer anything
     // reported every agent healthy. One real round trip is the difference between "the TUI is up" and "this
