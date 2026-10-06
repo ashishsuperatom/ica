@@ -70,6 +70,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 **Platform (Cloudflare)**
 - Control-plane Worker with Org, Project, Global and Channel Durable Objects, serving the admin console and each project's user UI on superatom.site.
 - Sign-in through Clerk to our own tokens, plus browser-redirect PKCE login for mobile.
+- Every person through their own UserDO: all their tabs and devices (web app, console, iOS, project apps) connect there, linked to each project by RPC; each tab gets only its own replies, the answers and news of the sessions it has open, and the logs and terminals it attached to.
 - Sessions kept by the platform, in their owner's UserDO: each session's log (append-only, ordered, conflicts refused), the engine syncs every append and catches up on reconnect, and a person reads their sessions back without the engine.
 - The composition graph kept by the platform: every change, suggestion and decision replicated to the project's Durable Object, anchored on each reconnect (diverged histories refused, a lagging engine catches up), an empty engine rebuilt from it.
 - A UserDO per person: the index of their sessions across projects (its personal-state store is not used yet).

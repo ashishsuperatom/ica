@@ -1,21 +1,19 @@
-// ProjectDO — Durable Object per project
+// ProjectDO — one per project: the project's own record and its hub.
 //
-// Responsibilities:
-//   - SQLite: fly_machine reference, api key, members, datasources, conversations
-//   - WebSocket hub: role registry, message relay with stamped `from`, per-role routing
+// It keeps what is the project's: who may do what (members, access, roles, groups, keys, grants — copied in from the
+// organisation, so nothing here crosses to the OrgDO on the way), the composition graph (graph-store.ts), programs,
+// the engine connection and its machine, connections to data, decisions, the audit, activities and usage.
 //
-// Every connection authenticates via `hello`:
-//   - server-side (code-engine, adapters): { type: "hello", key: "sk-proj-...", role: "..." }
-//   - browser (runtime):                 { type: "hello", token: "<our-jwt>", role: "runtime" }
+// Who is in its hub:
+//   - the engine:           { type: "hello", role: "code-engine", key: "sk-proj-..." }
+//   - agents (agent keys):  { type: "hello", role: "agent", key: "sak_..." }
+//   - service identities:   { type: "hello", role: "runtime", token: "<service jwt>" } (the ChannelDO, Teams)
+//   - PEOPLE, never directly: every tab and device of a person connects to that person's UserDO (user-hub.ts), which
+//     holds one link here per surface (personLink / personMessage / personUnlink, by RPC). The link is a connection like
+//     any other; its `send` is an RPC back to the UserDO, which decides which of the person's tabs gets what.
 //
-// Auth flow:
-//   1. User logs in via Clerk (SSO, email, MFA, etc.) in the React SPA
-//   2. React SPA sends Clerk session → Worker POST /api/auth/token → validates with Clerk
-//   3. Worker returns our own JWT (signed with HMAC-SHA256, carries userId, orgId, role)
-//   4. All subsequent WS and API calls use our JWT — Clerk is out of the picture
-//
-// The DO ALWAYS stamps `from` on every relayed message — clients never set it.
-// Clients send `to` (optional; absent = broadcast); the DO resolves `to.type` via role registry.
+// The hub ALWAYS stamps `from` on every relayed message — clients never set it. Clients send `to` (absent = to everyone
+// in the hub); `to.type` resolves through the role registry.
 
 import { DurableObject } from 'cloudflare:workers'
 import { suspendMachine, stopMachine as flyStopMachine, startMachine as flyStartMachine, getMachineStatus, safeName, FLY_APP } from './fly.js'
