@@ -83,10 +83,8 @@ async function attempt(): Promise<Fetched[]> {
 
   const got: Fetched[] = []
   for (const name of BOX_SIDE) {
-    // Something already in the environment WINS. A box deliberately configured with its own token, or a
-    // developer's laptop with a login, must not be quietly overridden by the fleet's shared credential.
-    const known = ENV_FALLBACK[name]
-    if (known && process.env[known]) { console.log(`[ica] ${known} already set — leaving it alone`); continue }
+    // The platform's vault WINS (one path: what the platform holds is what runs). Only a provider the vault has no
+    // credential for falls back to what this machine has of its own (a developer's login).
     try {
       const r = await fetch(`https://proxy.${platform}/p/${encodeURIComponent(project)}/_key/${name}`,
         { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(15_000) })
@@ -99,7 +97,7 @@ async function attempt(): Promise<Fetched[]> {
       if (!b?.key) { console.warn(`[ica] vault answered for ${name} without a credential`); continue }
       const envVar: string | undefined = b.envVar ?? ENV_FALLBACK[name]
       if (!envVar) { console.warn(`[ica] vault did not say where ${name}'s credential belongs`); continue }
-      if (process.env[envVar]) { console.log(`[ica] ${envVar} already set — leaving it alone`); continue }
+      if (process.env[envVar] && process.env[envVar] !== b.key) console.log(`[ica] ${envVar} was set on this machine — the vault's credential replaces it`)
       process.env[envVar] = b.key
       got.push({ provider: name, envVar, keyId: b.keyId ?? null, expiresAt: b.expiresAt ?? null })
       // The id and the expiry, never the value. Enough to answer "which credential is this box using, and how
