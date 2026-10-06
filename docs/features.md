@@ -74,7 +74,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Sessions kept by the platform, in their owner's UserDO: each session's log (append-only, ordered, conflicts refused), the engine syncs every append and catches up on reconnect, and a person reads their sessions back without the engine.
 - The composition graph kept by the platform: every change, suggestion and decision replicated to the project's Durable Object, anchored on each reconnect (diverged histories refused, a lagging engine catches up), an empty engine rebuilt from it.
 - A UserDO per person: the index of their sessions across projects (its personal-state store is not used yet).
-- Answer durability: the project's Durable Object buffers answers, and web and iOS pull the ones they missed.
+- Answer durability: each person's UserDO buffers their answers, and iOS pulls the ones it missed.
 - Parcel transport: large bodies stored in R2 by hash with HMAC tickets.
 - Model proxy: provider keys held in a vault, per-project metering, failed-login throttling (no request rate limits yet), and a tunnel for codex.
 - Speech-to-text endpoint.
@@ -102,7 +102,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 
 **Deployment and clients**
 - Docker image for the engine, and provisioning of one Fly.io machine per project.
-- iOS voice-first client (on the earlier chat path: no agents, sessions or views yet).
+- iOS voice-first client, through its person's UserDO; each question is a composer turn in a session (the app's own conversation), answers drawn by its own renderer. No agents list or session views yet; not yet on TestFlight (scripts/testflight.sh needs App Store Connect access).
 
 - The organisation's data warehouse (inside the Worker; live on Cloudflare R2 Data Catalog + R2 SQL, verified 2026-10-06 with a 3,000-row table in the TotalGroup organisation; the catalog's automatic compaction on, 128 MB files): one Iceberg warehouse per organisation in the shared Basin Catalog; the Data Source Bridge (tables, describe, query) and Ingest (make a table, append) apart; appends written from the Worker (Parquet + Avro manifests + a conflict-safe commit, verified with DuckDB and PyIceberg); Basin SQL reads behind a fail-closed access check; project grants by table and column (ProjectDO), the OrgDO's record of what was done; hub `warehouse:*` with the `warehouse` scope; the console's Warehouse tab.
 - The admin console on the semantic design system: every screen built from PageHeader, Section, RecordList, Receipt, Form, Figures, Tabs, Status, Notice, Code, Empty, Dialog — no inline styles or legacy classes left (xterm's sizing aside).
@@ -123,7 +123,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Prices for prompt-cache tokens (counted per call, not yet priced).
 
 **Product**
-- The earlier chat (/c/) moved onto the one answer component, or retired (iOS, the channel bots and `sacli ask` still use it).
+- The `analyse` door retired: iOS, the channel bots and `sacli ask` speak sessions themselves (today it is a turn in a session, answered in the older answer shape).
 - A data hub (bounded cache refreshed by server events) and a design system for the new UI.
 - The builder agent, which writes programs and the concepts that tell agents how to use them.
 - The org knowledge index that programs attach to.
