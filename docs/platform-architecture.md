@@ -1223,6 +1223,34 @@ deleted_classes`). Six Durable Object classes remain: GlobalDO, OrgDO, ProjectDO
 
 
 
+### Every connection through the UserDO (discussion, 2026-10-06 — not built)
+
+**In the user's words:** the answer buffer, the view events and the session owners can all go into the user's Durable
+Object once the front end connects only to the UserDO; it becomes much cleaner. Imagine we are moving there: how would
+the architecture look? Simulate it and discuss.
+
+*Simulated:* a browser tab (or the phone) opens one socket to its person's UserDO, which checks the sign-in once and holds
+everything that is the person's: their sessions, their warehouse queries, an **inbox** (today's answer_buffer: answers
+land there whether or not a device is open, and every device of theirs reads from it), what they browsed (view events),
+their preferences. Who owns a session stops being a fact anyone records: a session lives in its owner's UserDO. The
+UserDO passes the person's messages to the ProjectDO they concern; the ProjectDO stays the authority on who may do what
+(members, roles, grants, keys — copied in from the organisation when the project is made, so the OrgDO is never crossed)
+and keeps the single engine connection, the graph, programs, the audit, activities and usage. Answers and events come
+back the other way: engine → ProjectDO → the UserDO of whoever asked (or every connected member's, for project-wide
+news) → that person's tabs. A fan-out tree: one engine socket, one link per active person, their tabs below.
+*Gains:* the ProjectDO's load follows active people, not tabs; a person's limits (rate, queue, several devices) are kept
+in one place; answers wait in the inbox for a device that was offline; one place serves a person's home across all their
+projects.
+*To settle when built:* (1) the UserDO ↔ ProjectDO link as RPC calls both ways, not a held WebSocket — a socket a Durable
+Object opens itself keeps it awake, RPC lets both sleep; (2) the extra hop — the two objects may live in different
+places, so the ProjectDO's location matters, and streamed answers carry sequence numbers; (3) agents and keys (sacli,
+the ChannelDO, ICA tools) are not people — they keep talking to the ProjectDO directly, or get a principal object of
+their own; (4) project admins still reach a person's session for approvals and the audit — through the owner's UserDO,
+as today. *Path:* first the UserDO accepts the socket and passes everything through unchanged; then the inbox and view
+events move; then limits and the clients' address.
+
+### Appending and partitioning in the warehouse (question, 2026-10-06)
+
 **In the user's words:** Parquet files are a one-time thing, a compression system — appending is not like a scale
 system, you cannot just append another row. So how exactly are we adding data incrementally — will that be a problem?
 How does it normally work in a Parquet file system? And have we thought properly about partitioning — there are many
