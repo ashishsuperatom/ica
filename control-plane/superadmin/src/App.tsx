@@ -21,7 +21,7 @@ import { AnalystConsole } from './AnalystConsole'
 import { useSession, useUser, useClerk, SignIn } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
-import { AppShell, RailSidebar, NavList, type RailPlace, UserProfile, MenuItem, MenuRule, Search, useSearchKey, type SearchItem, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
+import { AppShell, RailSidebar, NavList, type RailPlace, UserProfile, MenuItem, MenuRule, Search, useSearchKey, type SearchItem, ConnectionStatus, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
 import '@superatom/ui/design.css'
 import { AdminContext, ADMIN_OWN_BLOCKS } from './AdminBlocks'
 
@@ -377,6 +377,10 @@ function Console() {
   ]
   // Search (⌘K, or the button in the panel's head): this layer's pages, one's organisations and this one's projects, the
   // platform's pages.
+  // The project's socket (shared with every page of the project): its state top right, as in the workspace.
+  const hub = useProjectHub(project ?? undefined, token)
+  const connection = project ? <ConnectionStatus status={hub.status === 'live' ? 'open' : hub.status === 'connecting' ? 'connecting' : 'reconnecting'}
+    message={hub.waking ? 'starting the engine' : hub.err || undefined} /> : undefined
   const [searching, setSearching] = useState(false)
   useSearchKey(useCallback(() => setSearching(true), []))
   const searchItems: SearchItem[] = [
@@ -406,7 +410,7 @@ function Console() {
     <>
       <Style />
       {searching && <Search items={searchItems} placeholder="Search pages, projects, organisations…" onClose={() => setSearching(false)} />}
-      <AppShell wide crumbs={<Breadcrumbs items={crumbs} />} sidebar={(collapsed, toggle) => (
+      <AppShell wide crumbs={<Breadcrumbs items={crumbs} />} status={connection} sidebar={(collapsed, toggle) => (
         <RailSidebar name={layer === 'project' ? projectName : layer === 'org' ? orgName : 'Superatom'} places={railPlaces} current={railAt}
           pinned={!collapsed} onPin={(p) => toggle(!p)} onHome={() => nav(layerHome)} onMark={() => nav('/')} markTitle="Superatom"
           foot={<PersonMenu onProfile={() => nav('/profile')} />} />

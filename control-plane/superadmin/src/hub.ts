@@ -1,6 +1,6 @@
 // ── The project hub connection ────────────────────────────────────────────────
-// ONE persistent WebSocket per PROJECT, owned by ProjectDetailPage so it survives switching
-// sidebar views. The admin SPA never talks to code-engine directly — it connects to the project's
+// ONE persistent WebSocket per PROJECT, shared by every screen that uses the project (counted: opened by the first,
+// closed a moment after the last lets go, so moving between pages keeps it). The admin SPA never talks to code-engine directly — it connects to the project's
 // Durable Object (always superatom.site, even when the SPA is served locally), authenticates as the
 // superadmin 'admin' role, and the DO relays req/res frames to the engine. The DO stores nothing.
 //
@@ -9,7 +9,7 @@
 //   • request(view)  — a correlated round-trip to the engine's INSPECTOR, returning a promise
 // Everything shares the one socket; `reqId` is what keeps concurrent inspector panels apart.
 
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { sender, receiver } from '../../../clients/transport'
 import { parcelStore, apiOfHub } from '../../../clients/parcels'
 
@@ -31,87 +31,101 @@ export type Hub = {
   call: (payload: Record<string, unknown>) => Promise<any>
 }
 
-export function useProjectHub(projectId: string | undefined, token: string | null): Hub {
-  const [status, setStatus] = useState<Hub['status']>('connecting')
-  const [err, setErr] = useState('')
-  const [waking, setWaking] = useState(false)
-  const wsRef = useRef<WebSocket | null>(null)
-  const subscribers = useRef(new Set<(m: any) => void>())
-  // reqId → the promise callbacks waiting on it. Cleared on resolve, reject, or socket close.
-  const pending = useRef(new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void; timer: number }>())
+/** One project's connection, shared by every screen using it. */
+type Conn = {
+  key: string; projectId: string; token: string
+  ws: WebSocket | null; closed: boolean; refs: number; ka?: number; closing?: number
+  view: { status: Hub['status']; err: string; waking: boolean }
+  watchers: Set<() => void>
+  subscribers: Set<(m: any) => void>
+  pending: Map<string, { resolve: (v: any) => void; reject: (e: Error) => void; timer: number }>
+}
+const conns = new Map<string, Conn>()
 
-  useEffect(() => {
-    if (!token || !projectId) return
-    let closed = false
-    function connect() {
-      const ws = new WebSocket(`${HUB}/_ws/${projectId}?token=${encodeURIComponent(token!)}`)
-      wsRef.current = ws
-      ws.onopen = () => ws.send(JSON.stringify({ type: 'hello', token, role: 'admin' }))
-      ws.onclose = () => {
-        inbound.reset()
-        setStatus('down')
-        // Fail every in-flight request rather than leaving panels spinning until their timeouts.
-        for (const [, p] of pending.current) { clearTimeout(p.timer); p.reject(new Error('hub disconnected')) }
-        pending.current.clear()
-        if (!closed) setTimeout(connect, 3000)
-      }
-      ws.onerror = () => ws.close()
-      // Frames in through the transport (parts and parcels are its business), whole messages out to the handlers.
-      const inbound = receiver({ deliver: (whole) => onWire(whole), parcels: parcelStore({ api: apiOfHub(HUB), projectId: projectId! }) })
-      ws.onmessage = (e) => { const raw = JSON.parse(e.data); const frame = raw.payload ?? raw; if (frame) void inbound.receive(frame) }
-      const onWire = (m: any) => {
-        if (m?.t === 'welcome') { setStatus('live'); setErr('') }
-        else if (m?.t === 'machine:waking') setWaking(true)
-        else if (m?.t === 'engine:ready') setWaking(false)
-        else if (m?.t === 'error') setErr(m.message ?? m.reason ?? 'hub error')
-        // Resolve a waiting request (an inspector view, or any message sent with call()).
-        if (m?.reqId && pending.current.has(m.reqId)) {
-          const p = pending.current.get(m.reqId)
-          if (p) { clearTimeout(p.timer); pending.current.delete(m.reqId); setWaking(false); p.resolve(m) }
-        }
-        subscribers.current.forEach(fn => { try { fn(m) } catch { /* one bad subscriber can't break the hub */ } })
-      }
+function set(c: Conn, patch: Partial<Conn['view']>) { c.view = { ...c.view, ...patch }; c.watchers.forEach((w) => w()) }
+
+function open(c: Conn) {
+  const ws = new WebSocket(`${HUB}/_ws/${c.projectId}?token=${encodeURIComponent(c.token)}`)
+  c.ws = ws
+  ws.onopen = () => ws.send(JSON.stringify({ type: 'hello', token: c.token, role: 'admin' }))
+  // Frames in through the transport (parts and parcels are its business), whole messages out to the handlers.
+  const inbound = receiver({ deliver: (whole) => onWire(whole), parcels: parcelStore({ api: apiOfHub(HUB), projectId: c.projectId }) })
+  ws.onclose = () => {
+    inbound.reset()
+    set(c, { status: 'down' })
+    // Fail every in-flight request rather than leaving panels spinning until their timeouts.
+    for (const [, p] of c.pending) { clearTimeout(p.timer); p.reject(new Error('hub disconnected')) }
+    c.pending.clear()
+    if (!c.closed) setTimeout(() => { if (!c.closed) open(c) }, 3000)
+  }
+  ws.onerror = () => ws.close()
+  ws.onmessage = (e) => { const raw = JSON.parse(e.data); const frame = raw.payload ?? raw; if (frame) void inbound.receive(frame) }
+  const onWire = (m: any) => {
+    if (m?.t === 'welcome') set(c, { status: 'live', err: '' })
+    else if (m?.t === 'machine:waking') set(c, { waking: true })
+    else if (m?.t === 'engine:ready') set(c, { waking: false })
+    else if (m?.t === 'error') set(c, { err: m.message ?? m.reason ?? 'hub error' })
+    // Resolve a waiting request (an inspector view, or any message sent with call()).
+    if (m?.reqId && c.pending.has(m.reqId)) {
+      const p = c.pending.get(m.reqId)!
+      clearTimeout(p.timer); c.pending.delete(m.reqId); if (c.view.waking) set(c, { waking: false }); p.resolve(m)
     }
-    connect()
-    // Keepalive so the non-hibernating DO stays warm and the idle admin WS isn't dropped.
-    const ka = setInterval(() => { if (wsRef.current?.readyState === 1) wsRef.current.send(JSON.stringify({ type: 'heartbeat' })) }, 12000)
-    return () => { closed = true; clearInterval(ka); wsRef.current?.close() }
-  }, [token, projectId])
+    c.subscribers.forEach((fn) => { try { fn(m) } catch { /* one bad subscriber can't break the hub */ } })
+  }
+}
 
-  const send = useCallback((msg: any) => { if (wsRef.current?.readyState === 1) wsRef.current.send(JSON.stringify(msg)) }, [])
+function acquire(projectId: string, token: string): Conn {
+  const key = `${projectId}|${token}`
+  let c = conns.get(key)
+  if (!c) {
+    c = { key, projectId, token, ws: null, closed: false, refs: 0, view: { status: 'connecting', err: '', waking: false }, watchers: new Set(), subscribers: new Set(), pending: new Map() }
+    conns.set(key, c)
+    open(c)
+    // Keepalive so the DO stays warm and the idle admin socket isn't dropped.
+    const cc = c
+    c.ka = window.setInterval(() => { if (cc.ws?.readyState === 1) cc.ws.send(JSON.stringify({ type: 'heartbeat' })) }, 12000)
+  }
+  clearTimeout(c.closing)
+  c.refs++
+  return c
+}
 
-  const request = useCallback((view: string, args: Record<string, unknown> = {}) => {
-    return new Promise<any>((resolve, reject) => {
-      const ws = wsRef.current
-      if (ws?.readyState !== 1) { reject(new Error('not connected to the project hub')); return }
-      const reqId = Math.random().toString(36).slice(2)
-      const timer = window.setTimeout(() => {
-        pending.current.delete(reqId)
-        reject(new Error('the engine did not answer in time — it may be starting up'))
-      }, REQUEST_TIMEOUT_MS)
-      pending.current.set(reqId, { resolve, reject, timer })
-      void sender({ send: (frame) => ws.send(JSON.stringify({ to: { type: 'code-engine' }, payload: frame })) }).send({ t: 'inspect:req', view, reqId, ...args })
-    })
-  }, [])
+function release(c: Conn) {
+  c.refs--
+  if (c.refs > 0) return
+  // Closed a moment later, so going from one page of the project to another keeps the socket.
+  c.closing = window.setTimeout(() => { if (c.refs > 0) return; c.closed = true; clearInterval(c.ka); c.ws?.close(); conns.delete(c.key) }, 5000)
+}
 
-  /** Any message to the engine or the hub, answered by the reply that carries its request id. */
-  const call = useCallback((payload: Record<string, unknown>) => {
-    return new Promise<any>((resolve, reject) => {
-      const ws = wsRef.current
-      if (ws?.readyState !== 1) { reject(new Error('not connected to the project hub')); return }
-      const reqId = Math.random().toString(36).slice(2)
-      const timer = window.setTimeout(() => { pending.current.delete(reqId); reject(new Error('no answer in time')) }, REQUEST_TIMEOUT_MS)
-      pending.current.set(reqId, { resolve, reject, timer })
-      void sender({ send: (frame) => ws.send(JSON.stringify({ to: { type: 'code-engine' }, payload: frame })) }).send({ ...payload, reqId })
-    })
-  }, [])
+const IDLE: Conn['view'] = { status: 'connecting', err: '', waking: false }
 
-  const subscribe = useCallback((fn: (m: any) => void) => {
-    subscribers.current.add(fn)
-    return () => { subscribers.current.delete(fn) }
-  }, [])
-
+export function useProjectHub(projectId: string | undefined, token: string | null): Hub {
+  const [conn, setConn] = useState<Conn | null>(null)
+  useEffect(() => {
+    if (!projectId || !token) { setConn(null); return }
+    const c = acquire(projectId, token); setConn(c)
+    return () => release(c)
+  }, [projectId, token])
+  const view = useSyncExternalStore(
+    (w) => { if (!conn) return () => {}; conn.watchers.add(w); return () => { conn.watchers.delete(w) } },
+    () => conn?.view ?? IDLE)
   // The same object until the connection's state changes: screens depend on it, and a new one each render made them
   // re-subscribe, re-attach and re-ask the engine on every render.
-  return useMemo(() => ({ status, err, waking, send, subscribe, request, call }), [status, err, waking, send, subscribe, request, call])
+  return useMemo(() => {
+    const ask = (payload: Record<string, unknown>, timeoutWords: string) => new Promise<any>((resolve, reject) => {
+      const ws = conn?.ws
+      if (!conn || ws?.readyState !== 1) { reject(new Error('not connected to the project hub')); return }
+      const reqId = Math.random().toString(36).slice(2)
+      const timer = window.setTimeout(() => { conn.pending.delete(reqId); reject(new Error(timeoutWords)) }, REQUEST_TIMEOUT_MS)
+      conn.pending.set(reqId, { resolve, reject, timer })
+      void sender({ send: (frame) => ws.send(JSON.stringify({ to: { type: 'code-engine' }, payload: frame })) }).send({ ...payload, reqId })
+    })
+    return {
+      ...view,
+      send: (msg: any) => { if (conn?.ws?.readyState === 1) conn.ws.send(JSON.stringify(msg)) },
+      subscribe: (fn: (m: any) => void) => { conn?.subscribers.add(fn); return () => { conn?.subscribers.delete(fn) } },
+      request: (v: string, args: Record<string, unknown> = {}) => ask({ t: 'inspect:req', view: v, ...args }, 'the engine did not answer in time — it may be starting up'),
+      call: (payload: Record<string, unknown>) => ask(payload, 'no answer in time'),
+    }
+  }, [conn, view])
 }
