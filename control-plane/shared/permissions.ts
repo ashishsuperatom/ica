@@ -138,7 +138,7 @@ export function orgRouteNeeds(method: string, path: string): RouteNeed {
 const VIEW = ['session:agents', 'agents:list', 'view:open', 'view:intent', 'session:get', 'session:file', 'session:list', 'session:read', 'sessions:list', 'session:load', 'program:list', 'activity:list',
   'graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:versions', 'decision:paths', 'decision:states', 'decision:state', 'artifact:list', 'artifact:get', 'connector:catalog',
   'sync:req', 'answer:get', 'answer:ack', 'log:attach', 'log:detach', 'ping', 'tick', 'ui:resize', 'suggestions:req', 'analyst:sync']
-const ASK = ['analyse', 'turn:stop', 'session:open', 'session:intent', 'session:goto', 'session:keep', 'session:fork', 'session:start', 'session:new', 'session:compact', 'artifact:record', 'decision:outcome', 'decision:register', 'program:build',
+const ASK = ['analyse', 'turn:stop', 'session:open', 'session:intent', 'session:goto', 'session:keep', 'session:fork', 'session:start', 'session:attach', 'session:new', 'session:compact', 'artifact:record', 'decision:outcome', 'decision:register', 'program:build',
   'graph:concept', 'graph:domain', 'graph:agent', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:version', 'graph:restore', 'connector:test', 'connector:introspect', 'connector:read', 'connector:act', 'connector:run', 'connector:calls', 'connector:ask']
 export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   ...Object.fromEntries(VIEW.map((t) => [t, 'project.view'])),

@@ -101,7 +101,9 @@ export interface Intent {
   /** The block it was sent from; left out, the session's current block. An earlier block branches. */
   block?: string
   /** A language intent's outcome, from the ICA: the STATE change it read from the words, and its answer. */
-  result?: { ops?: Op[]; markdown?: string; files?: string[] }
+  result?: { ops?: Op[]; markdown?: string; files?: string[]; blocks?: Record<string, Record<string, unknown>> }
+  /** A language intent's question id: its answer is committed at <session>/<qid>/answer.md. */
+  qid?: string
   by: string
   at: string
 }

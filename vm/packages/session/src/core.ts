@@ -11,12 +11,13 @@ export class SessionRefusal extends Error {
 
 /** One entry of a session's log. */
 export type Entry =
-  | { t: 'open'; at: string; session: string; user: string; agent: string }
+  | { t: 'open'; at: string; session: string; user: string; agent: string; context?: string }   // context: what it was started with (a dashboard's view)
   | { t: 'block'; at: string; id: string; parent: string | null; state: State; stateHash: string; intent: string | null }
   | { t: 'state'; at: string; block: string; state: State; stateHash: string; intent: string }   // the current block's STATE replaced
   | { t: 'answer'; at: string; answer: Answer }
   | { t: 'intent'; at: string; intent: Intent }
   | { t: 'current'; at: string; block: string }                                                   // a person moved to another block
+  | { t: 'attachment'; at: string; name: string; hash: string; size: number; type: string }       // a file added to the session (in its attachments/)
 
 export interface SessionLog {
   append(session: string, entry: Entry): void
@@ -40,13 +41,17 @@ export interface SessionView extends Session {
   /** Every answer, in order, the replaced ones too. */
   answers: Answer[]
   intents: Intent[]
+  /** What the session was started with (a dashboard's view, …), given to its agent with every question. */
+  context?: string
+  /** The session's files, in its attachments folder. */
+  attachments: { name: string; hash: string; size: number; type: string; at: string }[]
 }
 
 export function replay(entries: Entry[], asOf?: string): SessionView | null {
   let v: SessionView | null = null
   for (const e of entries) {
     if (asOf && e.at > asOf) break
-    if (e.t === 'open') { v = { id: e.session, user: e.user, agent: e.agent, state: { packages: {} }, blocks: [], leaf: '', created: e.at, updated: e.at, states: {}, answers: [], intents: [] }; continue }
+    if (e.t === 'open') { v = { id: e.session, user: e.user, agent: e.agent, state: { packages: {} }, blocks: [], leaf: '', created: e.at, updated: e.at, states: {}, answers: [], intents: [], attachments: [], ...(e.context ? { context: e.context } : {}) }; continue }
     if (!v) continue
     v.updated = e.at
     if (e.t === 'block') { v.blocks.push({ id: e.id, parent: e.parent, answer: null, stateHash: e.stateHash }); v.states[e.id] = e.state; v.leaf = e.id }
@@ -54,6 +59,7 @@ export function replay(entries: Entry[], asOf?: string): SessionView | null {
     else if (e.t === 'answer') { v.answers.push(e.answer); const b = v.blocks.find((x) => x.id === e.answer.block); if (b) b.answer = e.answer.id }
     else if (e.t === 'intent') v.intents.push(e.intent)
     else if (e.t === 'current') v.leaf = e.block
+    else if (e.t === 'attachment') v.attachments = [...v.attachments.filter((a) => a.name !== e.name), { name: e.name, hash: e.hash, size: e.size, type: e.type, at: e.at }]
   }
   if (v) v.state = v.states[v.leaf] ?? { packages: {} }
   return v

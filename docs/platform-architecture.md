@@ -1223,6 +1223,28 @@ deleted_classes`). Six Durable Object classes remain: GlobalDO, OrgDO, ProjectDO
 
 
 
+### One ICA, the composer, and what a session keeps (the user, 2026-10-06)
+
+**In the user's words:** we only MUST have one ICA, and it has to be called COMPOSER — the analyst is not used, the
+dashboards' "reader" is the composer by another door. As discussed before: Intent → Classifier (choose an agent/domain)
+→ ICA (the composer) → [narration] → answer.md. In a session two important things are stored: (1) STATE — a file,
+STATE.json, changed and written every time through an operation; (2) ANSWER_HISTORY.jsonl — append only: {q1, ans1},
+{q2, ans2}… (not only questions and answers; there can be more — illustration) — the partial history of the session,
+the user's view of what they asked. Every session can also have attachments: files, in an attachments folder inside
+the session. Every session can be started with additional context (like the dashboard gives the reader agent). Once
+the agent commits its answer we take it — but today it may be sessionId/answer.md, which risks taking the previous
+question's answer: it must be sessionId/<qid>/answer.md, so every question's answer is written in its own place; once
+it is written and the agent's work is finished, we take that answer and send it to the user.
+All of these — the files of a session — are also stored on the platform, in the user's Durable Object, on the session
+side. They are made in the engine, so they are replicated from the engine to the platform, and there has to be a path
+for sending them, done properly. Not at engine start-up (we would upload so much, and from which session?): only when a
+specific session is being talked about. The engine can be down sometimes but the platform is always on; the engine has
+to send everything through the project's Durable Object anyway, which saves it to the user's — and the answer always
+goes to the user's Durable Object, whatever happens, so it can be kept there.
+*Decided:* the engine writes `<sid>/<qid>/answer.md` from the composer's committed answer and sends exactly that file;
+`session.jsonl` stays the one append-only truth (branching, the platform's sync), with `STATE.json` and
+`ANSWER_HISTORY.jsonl` written beside it after every change.
+
 ### Every connection through the UserDO (built, 2026-10-06)
 
 **In the user's words:** the answer buffer, the view events and the session owners can all go into the user's Durable

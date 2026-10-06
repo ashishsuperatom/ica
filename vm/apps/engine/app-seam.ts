@@ -4,6 +4,7 @@
 // it may use — the data manager, a domain's programs, who is asking, the composer for a question in prose — and a way to reply
 // on the same envelope. Nothing else changes hands. A project without one gets the platform's default UI.
 import { existsSync } from 'node:fs'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createComposer, type Composer, type QueryRecord } from './agents/composer/index.js'
@@ -149,10 +150,29 @@ export function createAppSeam(d: AppSeamDeps) {
       new Promise<Said>((res) => { timer = setTimeout(() => { try { composer.session.stop() } catch { /* best effort */ }; res({ markdown: null, blocks: [], calls: [], queries: [], ms: Date.now() - t0 }) }, MAX_SAY_MS) }),
     ])
     if (timer) clearTimeout(timer)
+    // THE ANSWER IS COMMITTED IN ITS QUESTION'S OWN PLACE — <session>/<qid>/answer.md — and what is sent is that file,
+    // read back: never a session-wide file a previous question could have left. The engine writes it from the answer
+    // the composer committed (its `:::answer` message), once its work is finished.
+    const committed = await commit(o.threadId, o.qid, said)
+    if (committed !== undefined) said.markdown = committed
     // The turn to the platform's warehouse (through the project's DO): who asked what on which screen, the answer, the queries.
     d.record?.('agent.turn', o.qid, { qid: o.qid, session: o.threadId, asker: o.from?.userId ?? null, question: text, context, agent: 'composer', via: 'app', domain: agent?.name ?? null,
       queries: said.queries ?? [], answer: said.markdown, ms: Date.now() - t0 })
     return { markdown: said.markdown, blocks: said.blocks ?? [], calls: [], queries: said.queries ?? [], ms: Date.now() - t0, agent }
+  }
+
+  /** Commit a turn's answer at <projectDir>/sessions/<session>/<qid>/ (answer.md, and the blocks its markers name), and
+   *  read it back: what is sent is what was written. undefined: there was nothing to commit, or the place is not valid. */
+  async function commit(session: string, qid: string, said: { markdown: string | null; blocks?: unknown[]; queries?: unknown[] }): Promise<string | undefined> {
+    if (said.markdown == null || !/^[\w-]{1,80}$/.test(session) || !/^[\w-]{1,80}$/.test(qid)) return undefined
+    const dir = join(d.projectDir, 'sessions', session, qid)
+    try {
+      await mkdir(dir, { recursive: true })
+      await writeFile(join(dir, 'answer.md'), said.markdown)
+      if (said.blocks?.length) await writeFile(join(dir, 'blocks.json'), JSON.stringify(said.blocks))
+      if (said.queries?.length) await writeFile(join(dir, 'queries.jsonl'), said.queries.map((q) => JSON.stringify(q)).join('\n') + '\n')
+      return await readFile(join(dir, 'answer.md'), 'utf8')
+    } catch (e: any) { console.warn(`[app] ${qid}: the answer was not committed: ${e?.message ?? e}`); return undefined }
   }
 
   async function handle(payload: any, from: any, deliver: (msg: Record<string, unknown>) => void = (msg) => d.send(from, msg)) {

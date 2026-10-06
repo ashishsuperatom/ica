@@ -13,7 +13,7 @@ export const ALWAYS_ALLOWED = ['activity:list'] as const
 export const AGENT_SCOPES = {
   /** Agents and their sessions: list agents, open a session, send intents, move between blocks, read it — and read
    *  their own sessions back from the platform. */
-  sessions: ['session:agents', 'view:open', 'view:intent', 'session:keep', 'session:open', 'session:intent', 'session:goto', 'session:get', 'session:file', 'session:list', 'session:read', 'session:fork', 'session:start'],
+  sessions: ['session:agents', 'view:open', 'view:intent', 'session:keep', 'session:open', 'session:intent', 'session:goto', 'session:get', 'session:file', 'session:list', 'session:read', 'session:fork', 'session:start', 'session:attach'],
   /** Ask a question in words, and stop it. */
   ask: ['analyse', 'turn:stop'],
   /** Programs: build one from its source (the engine builds and uploads it), list them, publish one it built. */

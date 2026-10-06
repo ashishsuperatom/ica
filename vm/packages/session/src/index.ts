@@ -17,7 +17,7 @@
 // read as of any moment. The log is behind a small interface: a file per session in the engine, a Durable Object on
 // the platform.
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Answer, Intent, Op, State } from '@superatom/platform-types'
 import { checkIntent } from '@superatom/platform-types'
@@ -26,20 +26,46 @@ import { stateHash, StateRefusal, type Outcome, type Ran, type StateEngine } fro
 import { SessionRefusal, replay, type Entry, type SessionLog, type SessionView } from './core.ts'
 export * from './core.ts'
 
-/** The log as a JSON-lines file per session: `<dir>/<session>/session.jsonl`. Appended, never rewritten. */
+/** The log as a JSON-lines file per session: `<dir>/<session>/session.jsonl`. Appended, never rewritten — the truth.
+ *  Beside it, kept up to date after every change so anyone can read the session without replaying it:
+ *    STATE.json            the current block's STATE
+ *    ANSWER_HISTORY.jsonl  append only: each answer with the question (intent) that made it
+ *    context.md            what the session was started with, when it was started with something
+ *    <qid>/answer.md       each question's committed answer (written by the turn, see the engine's app seam)
+ *    attachments/          the session's files */
 export function fileLog(dir: string): SessionLog {
   const file = (s: string) => {
     if (!/^[\w-]+$/.test(s)) throw new SessionRefusal([`"${s}" is not a session id`])
     return join(dir, s, 'session.jsonl')
   }
+  const read = (s: string): Entry[] => {
+    const f = file(s)
+    if (!existsSync(f)) return []
+    // A line cut off by a crash mid-write is the last one; it is left out, everything before it stands.
+    return readFileSync(f, 'utf8').split('\n').filter(Boolean).flatMap((l) => { try { return [JSON.parse(l) as Entry] } catch { return [] } })
+  }
+  /** Write a file whole or not at all (a reader never sees half of it). */
+  const whole = (path: string, text: string) => { writeFileSync(`${path}.tmp`, text); renameSync(`${path}.tmp`, path) }
+  const materialise = (s: string, e: Entry) => {
+    const folder = join(dir, s)
+    if (e.t === 'open' && e.context) whole(join(folder, 'context.md'), e.context)
+    if (e.t === 'open' || e.t === 'block' || e.t === 'state' || e.t === 'current') {
+      const v = replay(read(s))
+      if (v) whole(join(folder, 'STATE.json'), JSON.stringify(v.state, null, 2) + '\n')
+    }
+    if (e.t === 'answer') {
+      const intent = [...read(s)].reverse().find((x): x is Extract<Entry, { t: 'intent' }> => x.t === 'intent' && x.intent.id === e.answer.cause)?.intent
+      const asked = intent ? { kind: intent.kind, ...(intent.text ? { text: intent.text } : {}), ...(intent.call ? { call: intent.call } : {}), ...(intent.action ? { action: intent.action } : {}), ...(intent.ops ? { ops: intent.ops.length } : {}), by: intent.by } : null
+      appendFileSync(join(folder, 'ANSWER_HISTORY.jsonl'), JSON.stringify({ at: e.answer.at, ...(intent?.qid ? { qid: intent.qid } : {}), intent: asked, block: e.answer.block,
+        answer: { id: e.answer.id, markdown: e.answer.markdown, blocks: Object.keys(e.answer.blocks ?? {}), ...(e.answer.replaced ? { replaced: e.answer.replaced } : {}) } }) + '\n')
+    }
+  }
   return {
-    append: (s, e) => { const f = file(s); mkdirSync(dirname(f), { recursive: true }); appendFileSync(f, JSON.stringify(e) + '\n') },
-    read: (s) => {
-      const f = file(s)
-      if (!existsSync(f)) return []
-      // A line cut off by a crash mid-write is the last one; it is left out, everything before it stands.
-      return readFileSync(f, 'utf8').split('\n').filter(Boolean).flatMap((l) => { try { return [JSON.parse(l) as Entry] } catch { return [] } })
+    append: (s, e) => {
+      const f = file(s); mkdirSync(dirname(f), { recursive: true }); appendFileSync(f, JSON.stringify(e) + '\n')
+      try { materialise(s, e) } catch (err: any) { console.warn(`[session] ${s}: the files beside its log were not written: ${err?.message ?? err}`) }
     },
+    read,
   }
 }
 
@@ -88,11 +114,11 @@ export function createSessions(opts: SessionsOptions) {
 
   /** Open a session: on the agent's start (its fields over every package's initial slice), or on a whole STATE a view
    *  was already at (a browsed view becoming a session, or a view computed in a throwaway session). */
-  function open(o: { session: string; user: string; agent: string; start?: Parameters<StateEngine['start']>[0]; agentKeys?: Record<string, unknown>; state?: State }): SessionView {
+  function open(o: { session: string; user: string; agent: string; start?: Parameters<StateEngine['start']>[0]; agentKeys?: Record<string, unknown>; state?: State; context?: string }): SessionView {
     if (opts.log.read(o.session).length) throw new SessionRefusal([`session ${o.session} already exists`])
     const at = now()
     const state = o.state ?? opts.engine.start(o.start, o.agentKeys)
-    opts.log.append(o.session, { t: 'open', at, session: o.session, user: o.user, agent: o.agent })
+    opts.log.append(o.session, { t: 'open', at, session: o.session, user: o.user, agent: o.agent, ...(o.context ? { context: o.context } : {}) })
     opts.log.append(o.session, { t: 'block', at, id: id('blk'), parent: null, state, stateHash: stateHash(state), intent: null })
     return read(o.session)
   }

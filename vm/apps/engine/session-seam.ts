@@ -20,7 +20,8 @@
 // hashes in the project's program store (programs/store), loaded into one STATE engine whose data goes through the
 // datasource manager. Each session is logged in sessions/<session>/session.jsonl.
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { placeForRunning, pick } from './knowledge.js'
@@ -51,7 +52,7 @@ export interface SessionSeamDeps {
   /** The project's own application (app/server), for a program that stands on its views (services.app); without it, none. */
   app?: (payload: Record<string, unknown>, from: any) => Promise<any>
   /** Words answered by the session's agent (the composer on the agent's domain); without it, a session takes only controls. */
-  ask?: (o: { session: string; text: string; context: string; domain: string | null; from: any; reqId?: string }) => Promise<{ markdown: string | null; blocks: unknown[] }>
+  ask?: (o: { session: string; text: string; context: string; domain: string | null; from: any; reqId?: string; qid?: string }) => Promise<{ markdown: string | null; blocks: unknown[] }>
 }
 
 /** What the agent is told about the step it is answering from, and how its answer may change it. */
@@ -81,7 +82,9 @@ const pathOfView = (v: SessionView, block: string) => { const out: string[] = []
 const describe = (i: Intent) => i.call ? `ran ${i.call.package}.${i.call.fn}` : i.action ? `took ${i.action.package} · ${i.action.id}` : (i.ops ?? []).map((o: any) => `${o.op} ${o.path}${'value' in o ? ` = ${JSON.stringify(o.value)}` : ''}`).join(', ') || 'a change'
 
 /** The messages this seam takes (session:new, session:load and session:compact are the chat's). */
-export const SESSION_MESSAGES = new Set(['view:open', 'view:intent', 'session:keep', 'session:agents', 'session:open', 'session:intent', 'session:goto', 'session:get', 'session:file', 'session:fork', 'session:start'])
+export const SESSION_MESSAGES = new Set(['view:open', 'view:intent', 'session:keep', 'session:agents', 'session:open', 'session:intent', 'session:goto', 'session:get', 'session:file', 'session:fork', 'session:start', 'session:attach'])
+/** The largest file a session takes (it travels as a parcel). */
+const ATTACHMENT_MAX = 20_000_000
 
 /** A starting point's fields over the agent's start, slice by slice. */
 export const mergeStart = (base: Record<string, Record<string, unknown>>, over: Record<string, Record<string, unknown>>) =>
@@ -108,6 +111,9 @@ function ownState(given: any, engine: { start(over?: Record<string, Record<strin
   }
   return engine.start(over)
 }
+
+/** What a session is started with (a dashboard's view, a page's words), from the payload that opens it. */
+const contextOf = (p: any): { context?: string } => (typeof p?.context === 'string' && p.context.trim() ? { context: p.context.trim().slice(0, 20_000) } : {})
 
 /** A structured intent from a screen's payload (ops, an action or a call), for a session or a view. */
 function structured(p: any, session: string, by: string, to: 'current' | 'new'): Intent {
@@ -277,9 +283,14 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const shown = view.blocks.find((b) => b.id === at)?.answer
     const answerNow = shown ? view.answers.find((a) => a.id === shown)?.markdown ?? '' : ''
     const docs = packages.map((p) => `## ${p.name}\n${(() => { try { return store.doc(p.hash) } catch { return '(no doc)' } })()}`).join('\n\n')
-    const context = [`The step's STATE:\n${JSON.stringify(state)}`, answerNow ? `What the step shows now:\n${answerNow}` : '', INTENT_CONTRACT, docs ? `The programs:\n${docs}` : ''].filter(Boolean).join('\n\n')
+    // What the session was started with and the files it holds go with every question.
+    const folder = join(d.projectDir, 'sessions', session)
+    const started = view.context ? `What this session was started with:\n${view.context}` : ''
+    const files = view.attachments?.length ? `The session's files (read them as you need):\n${view.attachments.map((a) => `- ${join(folder, 'attachments', a.name)} (${a.type}, ${a.size} bytes)`).join('\n')}` : ''
+    const context = [started, files, `The step's STATE:\n${JSON.stringify(state)}`, answerNow ? `What the step shows now:\n${answerNow}` : '', INTENT_CONTRACT, docs ? `The programs:\n${docs}` : ''].filter(Boolean).join('\n\n')
+    const qid = `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
     // The default agent answers from whichever domain the words reach; any other agent from its own.
-    const said = await asReader(who, () => d.ask!({ session, text, context, domain: spec.isDefault ? null : spec.domain, from, reqId }))
+    const said = await asReader(who, () => d.ask!({ session, text, context, domain: spec.isDefault ? null : spec.domain, from, reqId, qid }))
     const { markdown, intent: asked, problem } = intentOf(said.markdown ?? '')
     const blocks: Record<string, Record<string, unknown>> = {}
     for (const b of (said.blocks ?? []) as any[]) if (b?.marker && b.block && typeof b.block === 'object') blocks[String(b.marker).trim()] = b.block
@@ -287,7 +298,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'language', text,
       result: { markdown: [markdown || (said.markdown ? '' : 'No answer came back.'), problem].filter(Boolean).join('\n\n'), files: [], ...(asked?.ops ? { ops: asked.ops } : {}), ...(Object.keys(blocks).length ? { blocks } : {}) } as any,
       ...(asked?.call ? { call: asked.call } : {}), ...(asked?.action ? { action: asked.action } : {}),
-      to: asked?.to ?? (asked && !asked.call && !asked.action ? 'current' : 'new'), block: at, by: user, at: new Date().toISOString(),
+      to: asked?.to ?? (asked && !asked.call && !asked.action ? 'current' : 'new'), block: at, by: user, at: new Date().toISOString(), qid,
     }
     return asReader(who, () => rtSessions.intent(li))
   }
@@ -360,13 +371,13 @@ export function createSessionSeam(d: SessionSeamDeps) {
         const run = payload.run === false ? [] : packages.map((p) => p.name)
         // A starting point the agent declares opens on its own STATE (its fields over the agent's start, slice by slice).
         const start = startOf(spec, payload.startAt)
-        return reply(await present(await asReader(whoIs(from), () => sessions.openAndRun({ session, user, agent: spec.id, start, run }))))
+        return reply(await present(await asReader(whoIs(from), () => sessions.openAndRun({ session, user, agent: spec.id, start, run, ...contextOf(payload) }))))
       }
       // A question from home, with no agent picked: the agent its words reach (else the default one) opens a session on it.
       if (t === 'session:start') {
         const { agent, how } = await agentFor(String(payload.text ?? ''), visible)
         const { sessions: rt, packages } = await runtimeFor(agent.id)
-        const opened = await asReader(whoIs(from), () => rt.openAndRun({ session, user, agent: agent.id, start: agent.start, run: packages.map((p) => p.name) }))
+        const opened = await asReader(whoIs(from), () => rt.openAndRun({ session, user, agent: agent.id, start: agent.start, run: packages.map((p) => p.name), ...contextOf(payload) }))
         const r = await answerWords(opened, session, String(payload.text ?? ''), null, from, user, payload.reqId)
         return reply(await present(r.session, { routed: { agent: agent.id, name: agent.name, how }, result: { block: r.block, opened: r.opened, answer: r.answer } }))
       }
@@ -378,6 +389,21 @@ export function createSessionSeam(d: SessionSeamDeps) {
       const { sessions, view } = await sessionRuntime(session)
       viewOf(view, user)
       if (t === 'session:goto') return reply(await present(sessions.goTo(session, String(payload.block ?? ''), user)))
+      // A FILE ADDED TO THE SESSION: kept in its attachments folder, recorded in its log (name, hash, size, type) — its
+      // agent is told of it with every question, and the platform keeps it with the session.
+      if (t === 'session:attach') {
+        const name = String(payload.name ?? '').trim()
+        if (!/^[\w][\w .()-]{0,119}$/.test(name) || name.includes('..')) throw new SessionSeamRefusal('a file is named plainly (letters, digits, spaces, . _ - ( ), at most 120)')
+        const bytes = Buffer.from(String(payload.data ?? ''), 'base64')
+        if (!bytes.length) throw new SessionSeamRefusal('the file is empty')
+        if (bytes.length > ATTACHMENT_MAX) throw new SessionSeamRefusal(`a file is at most ${ATTACHMENT_MAX / 1_000_000} MB`)
+        const dir = join(d.projectDir, 'sessions', session, 'attachments')
+        mkdirSync(dir, { recursive: true })
+        writeFileSync(join(dir, name), bytes)
+        const entry = { t: 'attachment' as const, at: new Date().toISOString(), name, hash: createHash('sha256').update(bytes).digest('hex'), size: bytes.length, type: String(payload.type ?? 'application/octet-stream').slice(0, 100) }
+        log.append(session, entry)
+        return reply({ t: 'session:attached', session, name: entry.name, hash: entry.hash, size: entry.size, type: entry.type })
+      }
       // MAKE AN AGENT FROM THIS SESSION: forked from the session's agent (lineage kept), on a domain of its own — the
       // agent's domain and what this session learned, as worked examples (each question and the steps taken after it).
       // The person's own until it is published; every node written through the graph's governance.
