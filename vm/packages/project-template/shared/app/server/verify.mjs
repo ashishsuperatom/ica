@@ -9,7 +9,9 @@
 //   settings   every setting the application reads by name is one a domain gives
 //   template   the files every project shares are the template's (vm/packages/project-template), not changed here
 //
-//   cd <repo>/vm/apps/engine && pnpm exec tsx <project>/app/server/verify.mjs
+//   cd <repo>/vm/apps/engine && ENGINE_PROJECT_DIR=<the engine's home> pnpm exec tsx <workspace>/app/server/verify.mjs
+//   (the workspace: where the project's knowledge and app are written, then imported and published to the platform;
+//   the engine's home: its replica of the platform's graph and its settings)
 
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
@@ -18,8 +20,9 @@ import { dirname, join, relative } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const PROJECT = join(HERE, '..', '..')
-const env = Object.fromEntries(readFileSync(join(PROJECT, '.env'), 'utf8').split('\n').map((l) => l.match(/^\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$/)).filter(Boolean).map((m) => [m[1], m[2]]))
+const WORK = join(HERE, '..', '..')
+const ENGINE = process.env.ENGINE_PROJECT_DIR || WORK
+const env = Object.fromEntries(readFileSync(join(ENGINE, '.env'), 'utf8').split('\n').map((l) => l.match(/^\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$/)).filter(Boolean).map((m) => [m[1], m[2]]))
 const graphPackage = createRequire(join(process.cwd(), 'package.json')).resolve('@superatom/composition-graph')
 const { openStore } = await import(pathToFileURL(createRequire(join(process.cwd(), 'package.json')).resolve('@superatom/composition-graph/node')).href)
 const { placeForRunning } = await import(`${process.cwd()}/knowledge.ts`)
@@ -34,10 +37,10 @@ const warn = (check, subject, says) => findings.push({ level: 'warn', check, sub
 const base = (n) => n.slice(n.lastIndexOf('/') + 1)
 
 // ── graph: holds together, and holds what the knowledge writes ──
-const DB = join(PROJECT, 'db', 'composition.sqlite')
+const DB = join(ENGINE, 'db', 'composition.sqlite')
 const cli = join(dirname(graphPackage), '..', 'bin', 'composition-graph')
 let said
-try { said = execFileSync(cli, ['verify', '--db', DB, '--against', join(PROJECT, 'knowledge', 'index.mts')], { encoding: 'utf8' }) } catch (e) { said = String(e.stdout ?? '') + String(e.stderr ?? '') ; if (!said.trim()) fail('graph', DB, e.message) }
+try { said = execFileSync(cli, ['verify', '--db', DB, '--against', join(WORK, 'knowledge', 'index.mts')], { encoding: 'utf8' }) } catch (e) { said = String(e.stdout ?? '') + String(e.stderr ?? '') ; if (!said.trim()) fail('graph', DB, e.message) }
 for (const line of said.split('\n')) {
   const m = line.match(/^(FAIL|warn)\s+(\S+)\s+(.*?) — (.*)$/)
   if (m) (m[1] === 'FAIL' ? fail : warn)(`graph ${m[2]}`, m[3], m[4])
@@ -50,8 +53,8 @@ store.close()
 
 // ── views: the domains list them, and they load ──
 let last = null
-const ctx = { project: env.ICA_PROJECT, projectDir: PROJECT, who: 'verify', reply: (msg) => { last = msg },
-  domain: (name) => placeForRunning(PROJECT, name, join(PROJECT, 'app', '.domains', name.toLowerCase().replace(/[^a-z0-9]+/g, '-')), env.DATASOURCE_URL),
+const ctx = { project: env.ICA_PROJECT, projectDir: ENGINE, who: 'verify', reply: (msg) => { last = msg },
+  domain: (name) => placeForRunning(ENGINE, name, join(ENGINE, 'app', '.domains', name.toLowerCase().replace(/[^a-z0-9]+/g, '-')), env.DATASOURCE_URL),
   sources: async () => [] }
 await handle({ t: 'app:catalog' }, ctx)
 const catalog = last
@@ -106,13 +109,13 @@ const files = (dir) => readdirSync(dir).flatMap((n) => { const p = join(dir, n);
 for (const file of files(HERE)) {
   if (file === fileURLToPath(import.meta.url)) continue
   const text = readFileSync(file, 'utf8')
-  const where = relative(PROJECT, file)
+  const where = relative(WORK, file)
   for (const m of text.matchAll(/setting(?:Of)?\(\s*['"]([^'"]+)['"]/g)) if (!settingsInGraph.has(m[1])) fail('settings', where, `reads the setting "${m[1]}", which no domain gives`)
 }
 
 // ── template: the shared files are the platform's ──
 const template = join(process.cwd(), '..', '..', 'packages', 'project-template', 'cli.mjs')
-try { execFileSync(process.execPath, [template, 'check', PROJECT], { encoding: 'utf8' }) }
+try { execFileSync(process.execPath, [template, 'check', WORK], { encoding: 'utf8' }) }
 catch (e) { for (const line of String(e.stdout ?? '').split('\n')) { const m = line.match(/^(differs|missing)\s+(.*)$/); if (m) fail('template', m[2], m[1] === 'differs' ? 'changed here: a shared file is changed in the template and synced to every project' : 'missing: `cli.mjs sync` writes it') } if (!String(e.stdout ?? '').trim()) fail('template', template, e.message) }
 
 for (const f of findings) console.log(`${f.level === 'fail' ? 'FAIL' : 'warn'}  ${f.check.padEnd(15)} ${f.subject} — ${f.says}`)

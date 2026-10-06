@@ -292,6 +292,11 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     -- the bucket, bridge/<project>/<hash>), downloaded by the engine with the connection's settings and secrets.
     ALTER TABLE connections ADD COLUMN bridge TEXT;
   ` },
+  { id: 37, name: 'the project app', up: `
+    -- The project's own application — its source (server/, the dashboard's web/), published by whoever writes it: each
+    -- version kept by its hash (the files in the bucket, app/<project>/<hash>), the newest the one engines run.
+    CREATE TABLE IF NOT EXISTS app_versions (hash TEXT NOT NULL, at TEXT NOT NULL, by TEXT NOT NULL, files INTEGER NOT NULL, bytes INTEGER NOT NULL);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

@@ -151,7 +151,7 @@ export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   'warehouse:tables': 'warehouse.use', 'warehouse:query': 'warehouse.use', 'warehouse:explore': 'warehouse.use', 'warehouse:queries': 'warehouse.use', 'warehouse:queries:save': 'warehouse.use', 'warehouse:queries:delete': 'warehouse.use', 'warehouse:append': 'warehouse.append',
   // Terminals into the agents, the inspector, index and grounding builds, engine settings: running the project.
   'term:attach': 'project.manage', 'term:input': 'project.manage', 'term:detach': 'project.manage', 'inspect:req': 'project.manage',
-  'index:build': 'project.manage', 'grounding:build': 'project.manage', 'config:update': 'project.manage', 'app:reload': 'project.manage',
+  'index:build': 'project.manage', 'grounding:build': 'project.manage', 'config:update': 'project.manage', 'app:reload': 'project.manage', 'app:publish': 'project.manage',
 }
 /** What a message needs; one nobody named needs the strongest. */
 export const messageNeeds = (t: string): ProjectCapability => MESSAGE_NEEDS[t] ?? 'project.manage'

@@ -38,6 +38,7 @@ Commands:
   ask              ask the project a question in words
   activity         what is running for you in the project (builds, runs), and what ran lately
   warehouse        the organisation's warehouse: tables, query, append — and, with an organisation key, create and grant
+  app publish      publish the project's app (its server/ and web/ source) — the engine downloads and runs it
   program build    build a program from its source folder: the build and its source are kept by the platform
   graph import     import the project's written knowledge (knowledge/index.mts) into its graph, on the platform
   call             send any message the platform takes, with its fields as JSON (prints the reply as JSON)
@@ -82,6 +83,11 @@ An intent to "current" (the default) replaces the current block's answer; "new" 
 earlier block (--block) branches the session into a new thread. Values are JSON; a bare word is a string.`,
   projects: `sacli projects      the saved profiles, their projects, and which one is in use here`,
   use: `sacli use <profile> [--here]   make <profile> the default, or (--here) write .sacli.json so this folder uses it`,
+  app: `sacli app publish <app folder>
+
+The project's own application — server/ (what the engine runs) and the dashboard's web/ source — kept by the platform as
+a new version (unchanged source: nothing new); the engine downloads it and reloads. No node_modules or builds travel.
+Needs a key with the app scope.`,
   program: `sacli program build <folder>
 
 A program's source — manifest.json, doc.md, server/…, web/… — built by the project's engine and kept by the platform,
@@ -289,6 +295,29 @@ export async function run(argv: string[], io: Io): Promise<number> {
       const r = await hub!.request(payload, { timeoutMs })
       if (r.t === 'session:refused') throw new CliError(r.reason ?? 'refused')
       return r
+    }
+    if (cmd === 'app') {
+      if (pos[1] !== 'publish' || !pos[2]) throw new CliError('sacli app publish <app folder>', 2)
+      const root = resolve(io.cwd ?? process.cwd(), pos[2])
+      const files: Record<string, string> = {}
+      const walk = (dir: string, rel: string) => {
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+          if (['node_modules', 'dist', 'runs'].includes(e.name) || e.name.startsWith('.')) continue
+          const r = rel ? `${rel}/${e.name}` : e.name
+          if (e.isDirectory()) walk(join(dir, e.name), r)
+          else if (/^(server|web)\//.test(r)) {
+            // Text as it is; anything else (an image, a font) as base64 behind a marker, so it arrives intact.
+            const bytes = readFileSync(join(dir, e.name)), text = bytes.toString('utf8')
+            files[r] = Buffer.from(text, 'utf8').equals(bytes) ? text : `base64:${bytes.toString('base64')}`
+          }
+        }
+      }
+      for (const side of ['server', 'web']) { try { walk(join(root, side), side) } catch { /* a side it does not have */ } }
+      if (!files['server/index.mjs']) throw new CliError(`${pos[2]} has no server/index.mjs`, 1)
+      const r = await hub.request({ t: 'app:publish', files }, { timeoutMs })
+      if (r.t !== 'app:published') throw new CliError(String(r.reason ?? r.error ?? r.t), 1)
+      out(r.changed ? `published ${String(r.hash).slice(0, 12)} (${Object.keys(files).length} files) — the engine downloads it` : `unchanged (${String(r.hash).slice(0, 12)})`, r)
+      return 0
     }
     if (cmd === 'program') {
       if (pos[1] !== 'build' || !pos[2]) throw new CliError('sacli program build <folder>', 2)
