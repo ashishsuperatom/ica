@@ -82,7 +82,9 @@ export interface WorkspaceSpec {
 
 export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
   const projectHome = join(s.root, s.projectId)
-  const dir = s.sessionId ? join(projectHome, 'sessions', s.sessionId) : join(projectHome, 'workspace')
+  // A session's agent works in its own folder INSIDE the session (work/), never beside the session's own files (its log,
+  // STATE.json, ANSWER_HISTORY.jsonl, answers, attachments), so nothing an agent does in its folder can touch them.
+  const dir = s.sessionId ? join(projectHome, 'sessions', s.sessionId, 'work') : join(projectHome, 'workspace')
   const dbDir = join(projectHome, 'db')
   const managerUrl = s.managerUrl ?? 'http://localhost:4000'
 

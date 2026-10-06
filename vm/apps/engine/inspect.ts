@@ -179,7 +179,7 @@ export function createInspector(deps: InspectorDeps) {
     const sessions: { id: string; domain: string; at: string | null; used: number; moved: string[] }[] = []
     const notes: { id: string; note: any }[] = []
     for (const id of await readdir(roots.sessions).catch(() => [] as string[])) {
-      try { notes.push({ id, note: JSON.parse(await readFile(join(roots.sessions, id, '.domain.json'), 'utf8')) }) } catch { /* not a domain session */ }
+      try { notes.push({ id, note: JSON.parse(await readFile(join(roots.sessions, id, 'work', '.domain.json'), 'utf8')) }) } catch { /* not a domain session */ }
     }
     return withComposition((store) => {
       const domains = compositionDomains(store).map((d) => {

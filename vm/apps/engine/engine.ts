@@ -125,21 +125,10 @@ if (!PROJECT || !KEY) {
 // runs a PTY; pi is in-process). The engine never touches a server directly.
 let hub: WebSocket | null = null
 
-// PER-SESSION answer lock: DIFFERENT sessions answer CONCURRENTLY; one session still answers one at a time. The
-// stream target (reply) + channel are LOCAL per analyse() call — no cross-session clobber. curQuestion below stays
-// global as a best-effort reconnect-status snapshot only, never for answer routing.
-const busySessions = new Set<string>()
-// THE TURN IN FLIGHT, per session — so it can be STOPPED. A question can run for minutes across two agents; a
-// person who has changed their mind should not have to wait it out, and the machine should not keep spending
-// on an answer nobody wants. `stop()` is filled in by the turn itself, which is the only thing that knows what
-// it currently owns (which agent is working, the narrator, the timers).
-const inflight = new Map<string, { qid: string; stop: (why: string) => void }>()
-export function stopTurn(sid: string, why = 'the user stopped it'): boolean {
-  const t = inflight.get(sid)
-  if (!t) return false
-  t.stop(why)
-  return true
-}
+// THE TURNS: one composer turn per session at a time, stoppable — kept by the app seam (app-seam.ts), the one turn
+// every door uses (a session's words, a dashboard's ask, a chat, the phone, a chat channel).
+export function stopTurn(sid: string, why = 'the user stopped it'): boolean { return appSeam.stop(sid, why) }
+const turnsRunning = () => appSeam.busy()
 let connectorBusy = false
 let groundingBusy = false
 let indexBusy = false   // the datasource-index build — one at a time per project
@@ -166,7 +155,7 @@ const inspector = createInspector({
   roots: { workspace: WORKSPACE, sessions: SESSIONS, db: DB_DIR },
   runtime: () => ({
     agents: {
-      analyst:   { ...agentConfig('analyst'),   busy: busySessions.size > 0 },
+      analyst:   { ...agentConfig('analyst'),   busy: false },
       connector: { ...agentConfig('connector'), busy: connectorBusy },
       grounding: { ...agentConfig('grounding'), busy: groundingBusy },
     },
@@ -241,80 +230,12 @@ function makeAgentSlot<A extends Agent>(role: string, promptVersion: () => Promi
   }
 }
 const analystSlot  = makeAgentSlot('analyst',  analystPromptVersion,  (resumeId) => listSources().then(sources => createAnalyst({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, projectDir: PROJECT_DIR, ica: { resumeId } })), 'analyst')
-// The COMPOSER (System 2), ONE PER SESSION: each chat session gets its own composer (a cheap opencode CLIENT
-// session on the shared server, so N sessions ≈ free). Created on the session's first question, reused for the
-// session; only the in-flight question needs memory. Idle sessions are disposed by the sweep below.
-const composersBySession = new Map<string, { composer: Promise<Composer>; lastUsed: number; builtWith: string; domain: string | null; routed?: import('@superatom/composition-graph').Route | null; chosen?: boolean }>()
+// What a composer is built with now: a session's composer built with something else is made again (app-seam.ts).
 const composerStamp = () => { const c = agentConfig('composer'); return `${c.harness}/${c.provider}/${c.model}` }
-function getComposer(sid: string, question = '', chosen = ''): Promise<Composer> {
-  let e = composersBySession.get(sid)
-  // A composer built before a profile change is running the old harness and model. It is dropped at the next
-  // question rather than the moment the change arrives, because the change can land mid-answer and killing a
-  // composer that is halfway through a question loses the answer to make a setting current a minute sooner.
-  // The chat keeps its history; only the agent behind it is new — which is what changing a model means anyway.
-  const want = composerStamp()
-  if (e && e.builtWith !== want) {
-    console.log(`[ica] composer: profile changed (${e.builtWith} → ${want}) → fresh session for ${sid.slice(0, 8)}`)
-    const old = e.composer
-    composersBySession.delete(sid)
-    old.then(c => { try { c.session.stop() } catch {} }).catch(() => {})
-    e = undefined
-  }
-  if (!e) {
-    // A SESSION IS A DOMAIN. A folder that remembers its domain is rebuilt from what it holds; a new session's first
-    // question picks the domain, and the folder is made self-contained (knowledge.ts). A project without domains
-    // gets the chat composer as before.
-    const cwd = join(SESSIONS, sid)
-    const entry = { composer: null as unknown as Promise<Composer>, lastUsed: Date.now(), builtWith: want, domain: null as string | null, routed: undefined as import('@superatom/composition-graph').Route | null | undefined, chosen: false }
-    const made = (async () => {
-      const had = await recall(cwd)
-      if (had) {
-        const c = await createComposer({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, projectDir: PROJECT_DIR, sessionId: sid, ica: { baseUrl: OC_URL }, reference: had.text, tools: had.tools })
-        console.log(`[ica] composer: session ${sid.slice(0, 8)} recalled "${had.domain}" from its folder`)
-        return { c, domain: had.domain }
-      }
-      // A person may choose the agent; otherwise the first question's words pick it.
-      const named = chosen ? (await domainsOf(PROJECT_DIR)).find((d) => d.name === chosen) ?? null : null
-      const { domain, route: routed } = named ? { domain: named, route: null } : await pick(PROJECT_DIR, question)
-      if (named) entry.chosen = true
-      if (!domain) return { c: await createComposer({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, projectDir: PROJECT_DIR, sessionId: sid, ica: { baseUrl: OC_URL } }), domain: null }
-      const k = await compose(PROJECT_DIR, domain)
-      const c = await createComposer({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, projectDir: PROJECT_DIR, sessionId: sid, ica: { baseUrl: OC_URL }, reference: k.text, tools: domain.tools })
-      await place(k, c.cwd); await remember(k, domain, c.cwd, routed)
-      entry.routed = routed
-      const top = routed?.ranked.slice(0, 2).map((x) => `${x.domain} ${x.score}`).join(' · ')
-      console.log(`[ica] composer: session ${sid.slice(0, 8)} is "${domain.name}" (${k.text.length} chars, ${k.files.length} files) · routed ${top ?? '—'}${routed?.tie ? ' · TIE' : ''}`)
-      return { c, domain: domain.name }
-    })()
-    entry.composer = made.then((m) => m.c)
-    made.then((m) => { entry.domain = m.domain }).catch(() => {})
-    e = entry
-    composersBySession.set(sid, e)
-    console.log(`[ica] composer: new session ${sid.slice(0, 8)} (live composers: ${composersBySession.size})`)
-  }
-  e.lastUsed = Date.now()
-  return e.composer
-}
-// Dispose a session's composer only after it has been genuinely idle this long — lastUsed is bumped on EVERY
-// question for that session (see getComposer), so an active chat is never closed; a session that goes quiet for
-// 60 min is torn down (freeing its opencode session), and the next question in it transparently wakes a fresh one.
-const COMPOSER_IDLE_MS = Number(process.env.ICA_COMPOSER_IDLE_MS) || 60 * 60 * 1000
-setInterval(() => {
-  const now = Date.now()
-  for (const [sid, e] of composersBySession) {
-    if (now - e.lastUsed < COMPOSER_IDLE_MS) continue
-    composersBySession.delete(sid)
-    e.composer.then(c => { try { c.session.stop() } catch {} }).catch(() => {})
-    console.log(`[ica] composer: disposed idle session ${sid.slice(0, 8)} (live composers: ${composersBySession.size})`)
-  }
-}, 5 * 60 * 1000).unref?.()
 const connectorSlot = makeAgentSlot('connector', connectorPromptVersion, (resumeId) => createConnector({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, datasourcesDir: DATASOURCES_DIR, ica: { resumeId } }), 'connector')
 // COLD by design: never warmed at boot (below); spun up only when the admin triggers a grounding build.
 const groundingSlot = makeAgentSlot('grounding', groundingPromptVersion, (resumeId) => listSources().then(sources => createGroundingAgent({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { resumeId } })), 'grounding')
 for (const line of describeConfig()) console.log(`[config] ${line}`)
-// Live analyst state, kept so a (re)connecting client can RE-SYNC after a reload (the engine stores
-// no history — this is just the current run + last result, replayed on demand).
-let curQuestion = '', curSid = ''
 
 // Outbound is RESILIENT to a brief hub flap: if the socket is momentarily down (reconnecting), queue the frame
 // and flush it once we're re-registered — otherwise an answer/log emitted in a down window is lost forever and
@@ -384,168 +305,29 @@ function tellSurfaces(reply: any, channel: string, sid: string, qid: string, tim
   if (followups.length && reply) emit(reply, { t: 'followups', items: followups, qid, sid })
 }
 
-// ── A QUESTION, ANSWERED BY THE CONVERSATION'S AGENT ──────────────────────────────────────────────────────────
+// ── A QUESTION FROM A CHAT, THE PHONE OR A CHAT CHANNEL ───────────────────────────────────────────────────────────
 //
-// A conversation is one agent (a domain of the composition graph), chosen by the person or picked by the first
-// question's words. Its composer answers in markdown with marker lines naming the blocks it wrote. A question no agent
-// fits is told which agents there are.
+// Every question is a turn in a session: the same one composer turn as words typed in a session (app-seam.ts through
+// session-seam.ts) — the session opened first if it is new, on the agent chosen or the one the words reach. This door
+// keeps the shape its clients read (analyst:answer, followups; channel:answer for a chat channel) until they speak
+// sessions themselves.
 async function analyse(question: string, from: any, sid = '', qidIn = '', channel = '', chosenAgent = '') {
-  if (busySessions.has(sid)) {
-    emit(from, A('status', 'analyst', { text: 'Already answering a question in this chat — one at a time.', sid })); return
-  }
   if (!question.trim()) return
-  busySessions.add(sid)
-  const reply = from
-  // LIVENESS, FROM THE FIRST MOMENT: the UI's watchdog re-arms on any message, so a tick covers the silences.
-  let keepalive: ReturnType<typeof setInterval> | null = setInterval(() => { if (reply) emit(reply, { t: 'tick', sid }) }, 8000)
   const qid = qidIn || genId()
-  curQuestion = question; curSid = sid
+  const session = /^[\w-]{1,80}$/.test(sid) ? sid : `ses-${genId()}`
   const t0 = Date.now()
-  let narrator = null as Narrator | null
-  let narrationTimer: ReturnType<typeof setInterval> | null = null
-  let stopped: string | null = null
-  let stopSession: (() => void) | null = null
-  let workingAgent = 'engine'
-  const stopThisTurn = (why: string) => {
-    if (stopped) return
-    stopped = why
-    console.log(`[ica] STOP requested for ${qid.slice(0, 8)} (${workingAgent}) — ${why}`)
-    try { narrator?.stop() } catch { /* best-effort */ }
-    if (narrationTimer) { clearInterval(narrationTimer); narrationTimer = null }
-    try { stopSession?.() } catch { /* best-effort */ }
-    emit(reply, A('status', 'analyst', { text: 'Stopped.', sid, qid }))
-    emit(reply, { t: 'session:step', sid, qid, stopped: why, timing: { ms: Date.now() - t0 } })
-    emit(reply, { t: 'analyst:answer', category: 'stopped', sid, qid, timing: { ms: Date.now() - t0 },
-      answer: { status: 'answered', category: 'stopped', answer: 'Stopped.' } })
-  }
-  inflight.set(sid, { qid, stop: stopThisTurn })
-
-  const narrationBuf: string[] = []
-  let answering = false
-  let narrating = false
-  let lastDoing = ''
-  const saidBeats: string[] = []
   try {
-
-    emit(reply, A('hello', 'composer', { label: 'Composer', hue: '#4a90d9', streamKind: 'events', pty: false, interactive: false, sid, scope: 'session', ...profileOf('composer'), desc: 'The agent answering this chat.' }))
-    emitBeat(reply, 'Looking into your question…', qid, sid)
-
-    narrator = createNarrator({ cwd: WORKSPACE })
-    // A beat is worth sending the moment there is something to say: the first command lands, and the narrator is
-    // asked then rather than at the timer's next tick — the gap the person saw as seven silent seconds.
-    let firstWork = true
-    const narrateNow = async () => {
-      if (stopped || narrating || !reply || narrationBuf.length === 0) return
-      narrating = true
-      const activity = narrationBuf.splice(0).join('\n')
-      try {
-        const line = await Promise.race([narrator!.narrate(question, activity, saidBeats.slice(-3), { session: sid, person: personOf(from) }), new Promise<null>((res) => setTimeout(() => res(null), 20000))])
-        if (line) {
-          saidBeats.push(line)
-          emitBeat(reply, line, qid, sid)
-          if (channel) emit({ type: 'channel' }, { t: 'channel:narration', channel, qid, text: line })
-        }
-      } catch { /* narration is best-effort */ } finally { narrating = false }
-    }
-    narrationTimer = setInterval(narrateNow, 4000)
-
-    let currentAgent: 'composer' | 'analyst' = 'composer'
-    const stepStarted = new Map<string, number>()
-    const emitLog = (msg: any) => emit({ type: 'log', channel: currentAgent === 'composer' ? 'composer-log' : 'analyst-log' }, { ...msg, qid, sid, agent: currentAgent })
-    for (const lane of ['composer-log', 'analyst-log'])
-      emit({ type: 'log', channel: lane }, A('event', lane === 'composer-log' ? 'composer' : 'analyst', { ev: { kind: 'user', id: qid, text: question, done: true }, qid, sid }))
-    // The turn's steps, kept for the platform's warehouse (what the agent did, to learn from): commands with what
-    // they returned, and what it said — each capped, the whole bounded.
-    const turnSteps: Record<string, unknown>[] = []
-    const keepStep = (ev: AgentEvent) => {
-      if (turnSteps.length >= 200) return
-      if (ev.kind === 'command' && (ev.done || ev.status === 'completed' || ev.status === 'failed')) turnSteps.push({ kind: 'command', command: String(ev.command ?? '').slice(0, 2000), output: String(ev.output ?? '').slice(0, 4000), status: ev.status ?? null, ms: ev.ms ?? null, at: ev.at })
-      else if (ev.kind === 'message' && ev.text) turnSteps.push({ kind: 'message', text: String(ev.text).slice(0, 4000), at: ev.at })
-    }
-    const handlers: RunHandlers = {
-      onOutput: (chunk: string) => { if (!stopped) emitLog({ t: 'analyst:chunk', text: chunk }) },
-      onNarration: (text: string) => { if (!stopped && reply) emitBeat(reply, text, qid, sid) },
-      onAnswer: (text: string, blocks?: unknown[]) => { if (!stopped && reply) emit(reply, { t: 'answer:part', text, qid, sid, ...(blocks?.length ? { blocks: readingAnswer('', blocks as any).sections ?? [] } : {}) }) },
-      onEvent: (ev: AgentEvent) => {
-        // STOPPED MEANS STOPPED. The agent may take a moment to notice — a tool it started still has to return —
-        // but nothing more of it reaches the person: what they asked to end, ends on their screen at once.
-        if (stopped) return
-        ev.at ??= Date.now()
-        keepStep(ev)
-        if (ev.kind === 'command' && ev.id) {
-          if (ev.done || ev.status === 'completed' || ev.status === 'failed') {
-            const startedAt = stepStarted.get(ev.id)
-            if (startedAt !== undefined) { ev.ms ??= ev.at - startedAt; stepStarted.delete(ev.id) }
-          } else if (!stepStarted.has(ev.id)) stepStarted.set(ev.id, ev.at)
-        }
-        emitLog(A('event', currentAgent, { ev }))
-        // The narrator tells what the agent is doing, never the answer: once `:::answer` is said, what follows is not work.
-        if (ev.kind === 'message' && ev.text?.trim() && !answering) {
-          const m = ev.text.match(/^[ \t]*:::answer[ \t]*$/m)
-          if (m) answering = true
-          const prose = stripCode(m ? ev.text.slice(0, m.index) : ev.text); if (prose) narrationBuf.push(prose.slice(0, 600))
-        }
-        else if (ev.kind === 'command') {
-          const cmd = ev.command?.trim().replace(/\s+/g, ' ')
-          if (cmd && cmd !== lastDoing) { lastDoing = cmd; narrationBuf.push(('DOING: ' + cmd).slice(0, 200)); if (firstWork) { firstWork = false; void narrateNow() } }
-          if (ev.output?.trim() && isDataCall(ev.command)) narrationBuf.push(('RESULT: ' + capResultData(ev.output)).slice(0, 1800))
-        }
-      },
-    }
-
-    // A last-resort cap, so a wedged agent cannot hold the conversation's lock for good.
-    const MAX_TURN_MS = Number(process.env.ANALYST_MAX_TURN_MS) || 30 * 60 * 1000
-    const capped = async <T,>(p: Promise<T>, onTimeout: () => T): Promise<T> => {
-      p.catch(() => {})
-      let timer: ReturnType<typeof setTimeout> | undefined
-      const TIMED_OUT = Symbol('timeout')
-      const r = await Promise.race([p, new Promise<typeof TIMED_OUT>((res) => { timer = setTimeout(() => res(TIMED_OUT), MAX_TURN_MS) })])
-      if (timer) clearTimeout(timer)
-      return r === TIMED_OUT ? onTimeout() : (r as T)
-    }
-
-    const composer = await getComposer(sid, question, chosenAgent)
-    // A SESSION WITH A DOMAIN answers in the domain's way: prose with markers, the blocks the markdown names, no
-    // program, no verbs. The answer travels in the shape every surface already renders — the prose as the text,
-    // each block as a table section — so the surfaces change nothing.
-    const inSession = composersBySession.get(sid)
-    if (inSession?.domain) {
-      // Every question is recorded with the agent it went to: the first by its words (the route), the rest by the session.
-      const routedNow = inSession.routed, chosenNow = inSession.chosen
-      const how = chosenNow ? 'chosen' as const : routedNow ? 'routed' as const : 'session' as const
-      recordQuestion(PROJECT_DIR, { session: sid, qid, question, domain: inSession.domain, how, ...(routedNow ? { ranked: routedNow.ranked } : {}) })
-      inSession.routed = undefined; inSession.chosen = false
-      // Who is answering, and how it came to: said with the answer, so the person always knows which agent this is.
-      const agentLine = { name: inSession.domain, how, ...(routedNow?.ranked?.[0]?.terms ? { terms: routedNow.ranked[0].terms.slice(0, 6) } : {}) }
-      workingAgent = 'composer'; stopSession = () => { try { (composer as any).session?.stop?.() } catch { /* best-effort */ } }
-      const said = await capped(composer.say(question, 'None: the question stands on its own.', handlers, { qid, person: personOf(from), reader: await turnReader(from) }), () => ({ markdown: null, blocks: [], periods: [], queries: [], ms: Date.now() - t0 }))
-      if (stopped) { console.log(`[ica] ${qid.slice(0, 8)} stopped after ${((Date.now() - t0) / 1000).toFixed(1)}s`); return }
-      const timing = { ms: Date.now() - t0 }
-      if (said.markdown == null) { tellSurfaces(reply, channel, sid, qid, timing, { status: 'cannot_answer', answer: 'No answer was written in time. Ask it another way, or narrower.' }); return }
-      tellSurfaces(reply, channel, sid, qid, timing, { ...readingAnswer(said.markdown, said.blocks, said.periods), agent: agentLine })
-      // The whole turn to the platform's warehouse, through the project's DO (the one path): who asked what, which agent
-      // and domain answered, the steps it took, the queries it ran, the answer, and how long it took.
-      recordToPlatform('agent.turn', qid, { qid, session: sid, asker: (() => { try { return whoIs(from).id } catch { return null } })(), question, agent: 'composer', domain: inSession.domain, how,
-        steps: turnSteps, queries: said.queries, answer: said.markdown, blocks: said.blocks.length, ms: timing.ms })
-      console.log(`[ica] composer · read ${qid.slice(0, 8)} · ${(timing.ms / 1000).toFixed(1)}s · ${said.blocks.length} blocks`)
-      return
-    }
-    // NO AGENT FITS. Every answer comes from an agent; say which agents there are, and let the next question pick again.
-    composersBySession.delete(sid)
-    const agents = await agentsOf(PROJECT_DIR).catch(() => [] as { name: string }[])
-    tellSurfaces(reply, channel, sid, qid, { ms: Date.now() - t0 }, { status: 'cannot_answer',
-      answer: agents.length ? `No agent here fits this question. The agents are: ${agents.map((a) => a.name).join(', ')}. Choose one, or ask in their terms.` : 'This project has no agents yet.' })
+    const r = await sessionSeam.ask({ session, text: question, from, qid, ...(chosenAgent ? { agent: chosenAgent } : {}), ...(channel ? { channel } : {}) })
+    const a = r.answer
+    const timing = { ms: Date.now() - t0 }
+    if (!a?.markdown) { tellSurfaces(from, channel, session, qid, timing, { status: 'cannot_answer', answer: 'No answer was written in time. Ask it another way, or narrower.' }); return }
+    const blocks = Object.entries(a.blocks ?? {}).map(([marker, block]) => ({ marker, block: block as Record<string, unknown> }))
+    tellSurfaces(from, channel, session, qid, timing, { ...readingAnswer(a.markdown, blocks), agent: { name: r.agent.name, how: r.agent.how } } as any)
+    console.log(`[ica] composer · ${qid.slice(0, 8)} · session ${session.slice(0, 8)} · ${(timing.ms / 1000).toFixed(1)}s`)
   } catch (e: any) {
-    emit(reply, { t: 'session:step', sid, qid, error: `Failed: ${e?.message ?? e}`, timing: { ms: Date.now() - t0 } })
-    tellSurfaces(reply, channel, sid, qid, { ms: Date.now() - t0 }, { status: 'error', answer: `Failed: ${e?.message ?? e}` })
-  } finally {
-    if (keepalive) { clearInterval(keepalive); keepalive = null }
-    if (narrationTimer) { clearInterval(narrationTimer); narrationTimer = null }
-    try { narrator?.stop() } catch { /* best-effort */ }
-    curQuestion = ''
-    emit(reply, A('status', 'analyst', { state: 'done', sid }))
-    busySessions.delete(sid)
-    if (inflight.get(sid)?.qid === qid) inflight.delete(sid)
+    const timing = { ms: Date.now() - t0 }
+    if (e?.message === 'stopped') { emit(from, { t: 'analyst:answer', category: 'stopped', sid: session, qid, timing, answer: { status: 'answered', category: 'stopped', answer: 'Stopped.' } }); return }
+    tellSurfaces(from, channel, session, qid, timing, { status: 'error', answer: `Failed: ${e?.message ?? e}` })
   }
 }
 
@@ -657,7 +439,7 @@ const agentStream = (w: Which, from: any): RunHandlers => ({
 })
 const announceKind = (w: Which, from: any, agent: any) =>
   emit(from, A('hello', w, { streamKind: agent?.session?.kind ?? 'events', pty: agent?.session?.kind === 'pty', scope: 'project', ...profileOf(w === 'connector' ? 'connector' : w === 'grounding' ? 'grounding' : 'analyst'), label: w === 'connector' ? 'Connector' : w === 'grounding' ? 'Grounding' : 'Analyst', hue: w === 'connector' ? '#7a5cc9' : w === 'grounding' ? '#b8562a' : '#c08a2b', interactive: true }))
-const isAgentBusy = (w: Which) => (w === 'connector' ? connectorBusy : w === 'grounding' ? groundingBusy : busySessions.size > 0)
+const isAgentBusy = (w: Which) => (w === 'connector' ? connectorBusy : w === 'grounding' ? groundingBusy : false)
 // Who watches each agent's terminal, by their connection id (each message brings a new `from` object).
 const termViewers: Record<Which, Map<string, any>> = { analyst: new Map(), connector: new Map(), grounding: new Map() }
 const termUnsub: Record<Which, (() => void) | null> = { analyst: null, connector: null, grounding: null }
@@ -710,11 +492,6 @@ function resyncAnalyst(from: any, full = false) {
       if (buf) emit(from, { t: 'analyst:chunk', text: buf, replace: true })
     }
   }
-  if (busySessions.size > 0) {
-    // No reply re-target under per-session concurrency (that would steal another session's live stream). A
-    // reconnecting client recovers a missed step from the durable ProjectDO buffer instead.
-    emit(from, A('status', 'analyst', { text: 'Answering…', question: curQuestion, sid: curSid }))
-  }
 }
 
 // The wire (parts and parcels) and a project's own application live in their own modules; the engine only routes.
@@ -749,11 +526,11 @@ const enginePlatform = KEY && PROJECT ? platformOf({ hub: HUB, project: PROJECT,
 const sessionSeam = createSessionSeam({ fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, graphFile: graphFileOf(PROJECT_DIR),
   // Words in a session: the composer on the agent's domain, told the step's STATE, what it shows and the programs' docs.
   app: (payload, from) => appSeam.call(payload, from),
-  ask: (o) => appSeam.say(o.text, o.context, { qid: o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, threadId: o.session, from: o.from, reqId: o.reqId, domain: o.domain, keepContext: true }) })
+  ask: (o) => appSeam.say(o.text, o.context, { qid: o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, threadId: o.session, from: o.from, reqId: o.reqId, domain: o.domain, keepContext: true, ...(o.channel ? { channel: o.channel } : {}) }) })
 // The composition graph is kept by the platform too: pushed after every change, rebuilt from it when this one is empty.
 const graphSync = createGraphSync({ file: graphFileOf(PROJECT_DIR), send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true }, log: (s) => console.warn(s) })
 const graphSeam = createGraphSeam({ projectDir: PROJECT_DIR, send: (to, msg) => { wire.send(to, msg); if (msg.t === 'graph:reply') graphSync.push() } })
-const appSeam = createAppSeam({ readerFor: turnReader, record: recordToPlatform, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
+const appSeam = createAppSeam({ icaBaseUrl: OC_URL, composerStamp, readerFor: turnReader, record: recordToPlatform, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
 
 async function handle(payload: any, from: any) {
   if (wire.receive(payload, from)) return
@@ -940,7 +717,7 @@ function connect() {
 
 // Heartbeat: the DO drops its in-memory role registry when it hibernates. A heartbeat keeps
 // it warm so this engine STAYS the registered code-engine (else the UI shows "Starting machine…").
-setInterval(() => { if (hub?.readyState === WebSocket.OPEN) hub.send(JSON.stringify({ type: 'heartbeat', busy: busySessions.size > 0 })) }, 12000)
+setInterval(() => { if (hub?.readyState === WebSocket.OPEN) hub.send(JSON.stringify({ type: 'heartbeat', busy: turnsRunning() > 0 })) }, 12000)
 // ── Eager agent warm-up ───────────────────────────────────────────────────────
 // The ESSENTIAL agents are pre-spawned at boot, not lazily on the first question. On a Fly VM that
 // suspends/resumes to save money, a lazily-spawned claude costs ~10-15s on the FIRST question after a
