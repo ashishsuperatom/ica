@@ -474,7 +474,7 @@ export default {
       const g = env.GLOBAL.get(env.GLOBAL.idFromName('global'))
       const orgs = await (await g.fetch(new Request('http://do/organizations'))).json() as any[]
       const perOrg = await Promise.allSettled(orgs.map(async (o: any) => {
-        const orgStub = env.ORG.get(env.ORG.idFromName(o.do_name))
+        const orgStub = env.ORG.get(env.ORG.idFromName(o.id))   // an organisation's DO is named by its id, as every org route opens it (do_name is the global record's, unused)
         const projects = await (await orgStub.fetch(new Request('http://do/projects'))).json() as any[]
         return Promise.all(projects.map(async (pr: any) => {
           const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${pr.id}`))
