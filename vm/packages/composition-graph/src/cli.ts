@@ -136,6 +136,6 @@ if (command === 'domains') {
   console.log(failed ? `${failed} failed, ${findings.length - failed} warnings` : `the graph holds together${typeof flags.against === 'string' ? ' and holds what the knowledge writes' : ''}${findings.length ? ` (${findings.length} warnings)` : ''}`)
   if (failed) process.exitCode = 1
 } else {
-  fail('commands: domains · names · show · history · changes · compose · concept · join · leave · put · remove · import · verify   (every change: --by --reason --from; writes: --scope --owner)')
+  fail('commands: domains · names · show · history · changes · compose · concept · join · leave · put · remove · import · verify · versions · version · restore   (every change: --by --reason --from; writes: --scope --owner)')
 }
 store.close()
