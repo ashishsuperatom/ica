@@ -1,6 +1,7 @@
 // The two-level sidebar: a thin rail that is always there, with the big places (home, agents…) and the person at its
 // foot; beside it the panel of the place picked in the rail — its own list (conversations, agents…). Pinned, both show.
-// Unpinned, the rail alone shows, and resting on a rail place opens its panel over the page until the pointer leaves;
+// Unpinned, the rail alone shows, and resting on a rail place opens its panel over the page until the pointer leaves —
+// clicking a place opens its panel and keeps it (pinned); a panel resting over the page floats, a pinned one sits flat;
 // pinned, resting on another place shows its panel in the same spot for as long as the pointer stays.
 // On a phone it is a drawer holding both.
 
@@ -61,7 +62,8 @@ export default function RailSidebar({ name, places, current, foot, pinned, onPin
   const open = peek ?? (pinned ? shown : null)
   const place = places.find((p) => p.key === open && p.panel) ?? null
   const pick = (p: RailPlace) => {
-    if (p.panel) { setShown(p.key); setPeek(pinned ? null : p.key) }
+    clearTimeout(leave.current)
+    if (p.panel) { setShown(p.key); setPeek(null); if (!pinned && !phone()) onPin(true) }
     p.onClick?.()
   }
   return (
@@ -86,7 +88,7 @@ export default function RailSidebar({ name, places, current, foot, pinned, onPin
             <div className="sa-sidebar__head">
               <button type="button" className="sa-sidebar__brand" title={`${name} — home`} onClick={() => { onHome(); if (phone()) onPin(false) }}><span className="sa-sidebar__name truncate">{name}</span></button>
               {place.actions}
-              <button type="button" onClick={() => { onPin(!pinned); setPeek(null) }} className="sa-icon-btn sa-icon-btn--lg"
+              <button type="button" onClick={() => { clearTimeout(leave.current); onPin(!pinned); setPeek(null) }} data-on={pinned} aria-pressed={pinned} className="sa-icon-btn sa-icon-btn--lg"
                 title={pinned ? 'Close the side panel' : 'Keep the side panel open'} aria-label={pinned ? 'Close the side panel' : 'Keep the side panel open'}><Icon icon="solar:sidebar-minimalistic-linear" /></button>
             </div>
             <div className="sa-sidebar__nav sa-scroll-hide" onClick={(e) => { if (phone() && (e.target as HTMLElement).closest('.sa-nav-item')) onPin(false) }}>{place.panel}</div>

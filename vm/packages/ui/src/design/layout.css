@@ -387,3 +387,6 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 .sa-railbar__place[data-active='true'] > svg { color: inherit; }
 .sa-railbar__panel .sa-nav-row[data-active='true'], .sa-railbar__panel .sa-nav-item[data-active='true'] { background: color-mix(in srgb, var(--accent, var(--ink)) 7%, var(--surface)); }
 .sa-railbar__panel .sa-nav-row > .sa-nav-item[data-active='true'] { background: none; }
+/* Pinned or only resting: a pinned panel sits flat beside the rail, its toggle marked; a resting one floats over the page. */
+.sa-railbar__panel[data-floating='true'] { background: color-mix(in srgb, var(--accent, var(--ink)) 3%, var(--surface)); box-shadow: 0 16px 40px rgba(16, 24, 40, 0.16), 0 2px 6px rgba(16, 24, 40, 0.06); border-right-color: transparent; }
+.sa-railbar__panel .sa-sidebar__head .sa-icon-btn[data-on='true'] { color: var(--primary-strong); background: var(--primary-wash); }
