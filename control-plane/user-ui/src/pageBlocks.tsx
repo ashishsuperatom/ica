@@ -54,7 +54,7 @@ function AgentsBlock() {
     notify(r.t === 'graph:reply' ? `Asked to publish ${a.name} — an administrator decides` : r.reason ?? 'Could not ask to publish it', r.t === 'graph:reply' ? 'note' : 'refused')
   }
   return (
-    <Section icon="solar:magic-stick-3-linear" title={`${(agents ?? []).length} agents you can see`} subtitle="Open one to start a session, or make a new one."
+    <Section icon="solar:user-speak-rounded-linear" title={`${(agents ?? []).length} agents you can see`} subtitle="Open one to start a session, or make a new one."
       actions={<button className="sa-btn sa-btn--primary" onClick={() => open('agent-new', {}, 'Making an agent')}>New agent</button>}>
       <RecordList rows={agents} keyOf={(a) => a.id} empty="No agents you can see yet." onRow={(a) => env.go(`s/${a.id}`)} columns={[
         { key: 'name', label: 'Agent', render: (a) => <>{a.name}{a.isDefault ? <> <Status state="neutral">default</Status></> : null}</> },
@@ -352,7 +352,7 @@ export function KeyboardShortcuts() {
 
 export const PAGE_BLOCKS: Registry = {
   home: { label: 'Home', icon: 'solar:home-2-linear', accent: 'var(--primary)', title: () => 'Where do you want to start?', subtitle: () => 'Open an agent, then narrow, break down and follow the next moves — or ask in your own words.', render: () => <Home /> },
-  agents: { label: 'Agents', icon: 'solar:magic-stick-3-linear', accent: 'var(--series-1)', render: () => <AgentsBlock /> },
+  agents: { label: 'Agents', icon: 'solar:user-speak-rounded-linear', accent: 'var(--series-1)', render: () => <AgentsBlock /> },
   'agent-new': { label: 'New agent', icon: 'solar:add-circle-linear', accent: 'var(--series-1)', title: (p) => (p.sent ? `Agent: ${String(p.title)}` : 'Make an agent'), subtitle: (p) => (p.sent ? 'Sent — kept as it was made' : 'A title, the knowledge it answers from, the programs it may run, who sees it'), render: () => <AgentNew /> },
   'agent-made': { label: 'Made', icon: 'solar:check-circle-linear', accent: 'var(--win)', title: (p) => `${String(p.title)} is made`, subtitle: () => 'A node of the knowledge graph: owned, versioned, governed', render: () => <AgentMade /> },
   activity: { label: 'Activity', icon: 'solar:pulse-linear', accent: 'var(--series-2)', render: () => <ActivityBlock /> },
