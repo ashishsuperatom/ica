@@ -317,6 +317,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (path === '/agent-keys' || path.startsWith('/agent-keys/') || path === '/audit') return this.agentKeysAndAudit(request, path)
     if (request.method === 'POST' && path === '/agent-call') return this.agentCall(request)
     if (path === '/engine/programs' || path.startsWith('/engine/programs/')) return this.enginePrograms(request, path)
+    if (path.startsWith('/engine/attachments/')) return this.engineAttachments(request, path)
     // A program's React side, file by file, for screens (the worker has checked the caller is in the project).
     { const m = request.method === 'GET' ? path.match(/^\/programs\/([0-9a-f]{64})\/(web\/[\w./-]+\.js)$/) : null
       if (m && !m[2].includes('..')) {
@@ -897,6 +898,18 @@ export class ProjectDO extends DurableObject<Env> {
   }
 
   // ── Programs the engine builds and fetches (authenticated with the project's key) ──
+  /** A session's file, for the engine: its person put it in through their UserDO (in the bucket, by hash); the
+   *  engine reads it into the session's attachments folder. Only this project's engine reads here. */
+  private async engineAttachments(request: Request, path: string): Promise<Response> {
+    const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
+    const key = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
+    if (!key || !this.keyMatches(key)) return json({ error: 'only this project\'s engine' }, 401)
+    const hash = path.slice('/engine/attachments/'.length)
+    if (!/^[0-9a-f]{64}$/.test(hash) || request.method !== 'GET') return json({ error: 'GET a file by its hash' }, 400)
+    const o = await ((this.env as any).PACKAGES as R2Bucket | undefined)?.get(`attachments/${this._pid}/${hash}`)
+    return o ? new Response(o.body, { headers: { 'content-type': o.httpMetadata?.contentType ?? 'application/octet-stream' } }) : json({ error: 'no such file' }, 404)
+  }
+
   private async enginePrograms(request: Request, path: string): Promise<Response> {
     const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
     const key = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')

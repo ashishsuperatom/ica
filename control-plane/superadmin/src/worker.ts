@@ -276,8 +276,17 @@ export default {
 
     // ── An agent over HTTP: POST /api/agent/<projectId> with its key as the bearer, the message as the body. The
     //    project's DO checks the key and sends it the same way as over the agent's WebSocket. ──
-    // ── The engine's own calls with its project key: programs it uploads and fetches. ──
-    const engineCall = path.match(/^\/api\/engine\/([0-9a-f-]{36})\/(programs(?:\/[0-9a-f]{64})?)$/)
+    // ── A file a person adds to their session: to their own UserDO, which keeps it by hash and tells the engine. ──
+    const attach = path.match(/^\/api\/sessions\/([0-9a-f-]{36})\/([\w-]{1,80})\/attachments$/)
+    if (attach && request.method === 'POST') {
+      const claims = await claimsOf(request, env)
+      if (!claims?.userId || claims.role === 'service') return Response.json({ error: 'sign in to add a file' }, { status: 401 })
+      const fwd = new Request(`http://do/attach?project=${attach[1]}&session=${attach[2]}&${url.searchParams}`, request)
+      fwd.headers.set('x-sa-claims', JSON.stringify({ userId: claims.userId, email: claims.email, role: claims.role }))
+      return env.USER.get(env.USER.idFromName(`user:${claims.userId}`)).fetch(fwd)
+    }
+    // ── The engine's own calls with its project key: programs it uploads and fetches; the files people put in sessions. ──
+    const engineCall = path.match(/^\/api\/engine\/([0-9a-f-]{36})\/(programs(?:\/[0-9a-f]{64})?|attachments\/[0-9a-f]{64})$/)
     if (engineCall) {
       const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${engineCall[1]}`))
       const fwd = new Request(`http://do/engine/${engineCall[2]}${url.search}`, request)

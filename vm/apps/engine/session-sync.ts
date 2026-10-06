@@ -37,18 +37,40 @@ export function createSessionSync(o: { dir: string; send: (msg: Record<string, u
   function onSynced(p: { session?: string; upto?: number; gap?: boolean; conflict?: number; error?: string }): void {
     const s = String(p.session ?? '')
     clearTimeout(inflight.get(s)); inflight.delete(s)
-    if (p.conflict !== undefined) { o.log?.(`[session-sync] ${s}: the platform has a different entry ${p.conflict} — not overwritten: ${p.error ?? ''}`); return }
-    if (p.error) { o.log?.(`[session-sync] ${s}: ${p.error}`); return }
-    if (typeof p.upto !== 'number') return
+    const done = () => { if (catching === s) next() }
+    if (p.conflict !== undefined) { o.log?.(`[session-sync] ${s}: the platform has a different entry ${p.conflict} — not overwritten: ${p.error ?? ''}`); return done() }
+    if (p.error) { o.log?.(`[session-sync] ${s}: ${p.error}`); return done() }
+    if (typeof p.upto !== 'number') return done()
     const len = files.read(s).length
     writeFileSync(mark(s), JSON.stringify({ upto: Math.min(p.upto, len), at: new Date().toISOString() }))
     if (p.upto < len) push(s)
+    else done()
   }
 
-  /** Every session the platform does not have whole (after a reconnect). */
+  // CATCHING UP AFTER A RECONNECT, ONE SESSION AT A TIME: each is brought whole (all its chunks answered) before the next
+  // starts, so a box that was away long sends its sessions in turn, never all at once. A session in use is pushed as it
+  // changes, whatever the queue is doing.
+  let queue: string[] = []
+  let catching: string | null = null
+  let stuck: ReturnType<typeof setTimeout> | undefined
+  function next(): void {
+    clearTimeout(stuck)
+    catching = null
+    while (queue.length) {
+      const s = queue.shift()!
+      const len = files.read(s).length
+      if (synced(s) >= len) continue   // the platform has it whole
+      catching = s
+      stuck = setTimeout(next, INFLIGHT_MS * 2)   // no answer: go on to the next; this one is tried at the next reconnect
+      push(s)
+      return
+    }
+  }
+  /** Every session the platform does not have whole (after a reconnect), in turn. */
   function pushAll(): void {
     if (!existsSync(o.dir)) return
-    for (const s of readdirSync(o.dir)) if (/^[\w-]+$/.test(s) && existsSync(join(o.dir, s, 'session.jsonl'))) push(s)
+    queue = readdirSync(o.dir).filter((s) => /^[\w-]+$/.test(s) && existsSync(join(o.dir, s, 'session.jsonl')))
+    next()
   }
 
   /** The session log, pushing up after every append. */

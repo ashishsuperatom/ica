@@ -195,6 +195,30 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
       return { ok: true }
     },
 
+    /** A file the person adds to one of their sessions (POST /api/sessions/<project>/<session>/attachments): kept on the
+     *  platform by its hash, then the engine is told where it is (session:attach) — through the person's own link, so
+     *  the project admits them as for anything else, and the engine checks the session is theirs. */
+    async attach(request: Request): Promise<Response> {
+      const url = new URL(request.url)
+      const project = url.searchParams.get('project') ?? '', session = url.searchParams.get('session') ?? ''
+      const name = (url.searchParams.get('name') ?? '').trim(), type = (url.searchParams.get('type') ?? request.headers.get('content-type') ?? 'application/octet-stream').slice(0, 100)
+      const claims = JSON.parse(request.headers.get('x-sa-claims') ?? 'null') as Claims | null
+      const json = (v: unknown, status = 200) => Response.json(v, { status })
+      if (!claims?.userId || !project) return json({ error: 'who, and which project' }, 400)
+      if (!/^[\w][\w .()-]{0,119}$/.test(name) || name.includes('..')) return json({ error: 'a file is named plainly (letters, digits, spaces, . _ - ( ), at most 120)' }, 400)
+      const bytes = new Uint8Array(await request.arrayBuffer())
+      if (!bytes.length) return json({ error: 'the file is empty' }, 400)
+      if (bytes.length > 20_000_000) return json({ error: 'a file is at most 20 MB' }, 413)
+      const linked: any = await projectStub(project).personLink({ project, userId: claims.userId, email: claims.email, role: claims.role, surface: 'runtime' })
+      if (!linked?.ok) return json({ error: linked?.reason ?? 'no access to this project' }, 403)
+      const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))).map((b) => b.toString(16).padStart(2, '0')).join('')
+      const bucket = (env_ as any).PACKAGES as R2Bucket | undefined
+      if (!bucket) return json({ error: 'no bucket bound' }, 503)
+      await bucket.put(`attachments/${project}/${hash}`, bytes, { httpMetadata: { contentType: type } })
+      await projectStub(project).personMessage(project, linked.wsId, { to: { type: 'code-engine' }, payload: { t: 'session:attach', session, name, type, hash, size: bytes.length, reqId: `attach-${hash.slice(0, 12)}` } })
+      return json({ ok: true, session, name, hash, size: bytes.length, type }, 201)
+    },
+
     /** The project ends the link (the person was refused, or removed): every tab on it closes. */
     closeLink(project: string, wsId: string, code: number, reason: string) {
       for (const [ws] of linkTabs(project, wsId)) { try { ws.close(code, reason) } catch { /* closed */ } }

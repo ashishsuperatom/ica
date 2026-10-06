@@ -18,6 +18,7 @@ export { UserDO } from '../user-do.ts'
 export default { async fetch(req, env) {
   const u = new URL(req.url)
   if (u.pathname.startsWith('/_ws/')) return routeSocket(req, env, '${PID}')
+  if (u.pathname === '/attach') return env.USER.get(env.USER.idFromName('user:' + JSON.parse(req.headers.get('x-sa-claims')).userId)).fetch(req)   // the Worker's /api/sessions/…/attachments
   const fwd = new Request('http://do' + u.pathname.slice(3) + u.search, req); fwd.headers.set('x-sa-project', '${PID}')
   return env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}')).fetch(fwd)
 } }`
@@ -128,6 +129,21 @@ describe('every person through their UserDO', () => {
     await settle()
     expect(engine.got.slice(before).some((m) => ['sync:req', 'answer:get'].includes(m.payload?.t))).toBe(false)
     phone.ws.close()
+  })
+  it('a file a person adds goes in through their UserDO: kept by its hash, and only where it is goes on to the engine', async () => {
+    const bytes = new TextEncoder().encode('month,budget\nJan,100\n')
+    const r = await mf.dispatchFetch(`http://x/attach?project=${PID}&session=s1&name=budget.csv&type=text/csv`, { method: 'POST', body: bytes, headers: { 'x-sa-claims': JSON.stringify({ userId: 'ana', email: 'ana@x.io', role: 'superadmin' }) } })
+    expect(r.status).toBe(201)
+    const out: any = await r.json()
+    expect(out).toMatchObject({ name: 'budget.csv', size: bytes.length })
+    const atEngine = await engine.until((m) => m.payload?.t === 'session:attach')
+    expect(atEngine.payload).toMatchObject({ session: 's1', name: 'budget.csv', hash: out.hash, size: bytes.length, type: 'text/csv' })
+    expect(atEngine.payload.data).toBeUndefined()
+    expect(atEngine.from.userId).toBe('ana')
+    const kept = await (await mf.getR2Bucket('PACKAGES')).get(`attachments/${PID}/${out.hash}`)
+    expect(await kept?.text()).toBe('month,budget\nJan,100\n')
+    const bo = await mf.dispatchFetch(`http://x/attach?project=${PID}&session=s9&name=x.csv`, { method: 'POST', body: bytes, headers: { 'x-sa-claims': JSON.stringify({ userId: 'bo', email: 'bo@x.io', role: 'user' }) } })
+    expect(bo.status).toBe(403)   // no access to the project: refused before anything is kept
   })
   it('a person without access is refused', async () => {
     const bo = await tab('bo', 'user')

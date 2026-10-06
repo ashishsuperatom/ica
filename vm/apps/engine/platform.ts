@@ -7,6 +7,8 @@ export interface Platform {
   uploadProgram(bundle: ProgramBundle, by: string): Promise<{ added: boolean; entry: Record<string, unknown> }>
   fetchProgram(hash: string): Promise<ProgramBundle>
   listPrograms(q?: { name?: string; published?: boolean }): Promise<{ hash: string; name: string; uploaded_at: string; published_at: string | null }[]>
+  /** A session's file, as its person put it in (kept on the platform by its hash). */
+  fetchAttachment(hash: string): Promise<Uint8Array>
 }
 
 export function platformOf(o: { hub: string; project: string; key: string; fetch?: typeof fetch }): Platform {
@@ -22,6 +24,11 @@ export function platformOf(o: { hub: string; project: string; key: string; fetch
   return {
     uploadProgram: (bundle, by) => call(`/programs/${bundle.hash}`, { method: 'PUT', body: JSON.stringify(bundle), headers: { 'x-sa-by': by } }),
     fetchProgram: (hash) => call(`/programs/${hash}`),
+    fetchAttachment: async (hash) => {
+      const r = await f(`${base}/attachments/${hash}`, { headers: { authorization: `Bearer ${o.key}` } })
+      if (!r.ok) throw new Error(((await r.json().catch(() => null)) as any)?.error ?? `the platform answered ${r.status}`)
+      return new Uint8Array(await r.arrayBuffer())
+    },
     listPrograms: async (q = {}) => (await call(`/programs?${new URLSearchParams({ ...(q.name ? { name: q.name } : {}), ...(q.published !== undefined ? { published: String(q.published) } : {}) })}`)).programs,
   }
 }

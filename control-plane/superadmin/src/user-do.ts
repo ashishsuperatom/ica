@@ -31,6 +31,7 @@ export class UserDO extends DurableObject<Env> {
 
   async fetch(request: Request): Promise<Response> {
     if (request.headers.get('upgrade') === 'websocket') return this.hub().accept(request)
+    if (request.method === 'POST' && new URL(request.url).pathname === '/attach') return this.hub().attach(request)
     const url = new URL(request.url)
     const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
     const sql = this.ctx.storage.sql

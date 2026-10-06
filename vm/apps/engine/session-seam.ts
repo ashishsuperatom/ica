@@ -53,6 +53,8 @@ export interface SessionSeamDeps {
   app?: (payload: Record<string, unknown>, from: any) => Promise<any>
   /** Words answered by the session's agent (the composer on the agent's domain); without it, a session takes only controls. */
   ask?: (o: { session: string; text: string; context: string; domain: string | null; from: any; reqId?: string; qid?: string }) => Promise<{ markdown: string | null; blocks: unknown[] }>
+  /** A session's file from the platform, by its hash (its person put it in through their UserDO). */
+  fetchAttachment?: (hash: string) => Promise<Uint8Array>
 }
 
 /** What the agent is told about the step it is answering from, and how its answer may change it. */
@@ -83,8 +85,7 @@ const describe = (i: Intent) => i.call ? `ran ${i.call.package}.${i.call.fn}` : 
 
 /** The messages this seam takes (session:new, session:load and session:compact are the chat's). */
 export const SESSION_MESSAGES = new Set(['view:open', 'view:intent', 'session:keep', 'session:agents', 'session:open', 'session:intent', 'session:goto', 'session:get', 'session:file', 'session:fork', 'session:start', 'session:attach'])
-/** The largest file a session takes (it travels as a parcel). */
-const ATTACHMENT_MAX = 20_000_000
+
 
 /** A starting point's fields over the agent's start, slice by slice. */
 export const mergeStart = (base: Record<string, Record<string, unknown>>, over: Record<string, Record<string, unknown>>) =>
@@ -389,18 +390,20 @@ export function createSessionSeam(d: SessionSeamDeps) {
       const { sessions, view } = await sessionRuntime(session)
       viewOf(view, user)
       if (t === 'session:goto') return reply(await present(sessions.goTo(session, String(payload.block ?? ''), user)))
-      // A FILE ADDED TO THE SESSION: kept in its attachments folder, recorded in its log (name, hash, size, type) — its
-      // agent is told of it with every question, and the platform keeps it with the session.
+      // A FILE ADDED TO THE SESSION. Its person put it in through their UserDO, which kept it on the platform by its hash;
+      // what comes here is where it is (name, hash, size, type). It is read into the session's attachments folder and
+      // recorded in the log — its agent is told of it with every question.
       if (t === 'session:attach') {
-        const name = String(payload.name ?? '').trim()
+        const name = String(payload.name ?? '').trim(), hash = String(payload.hash ?? '')
         if (!/^[\w][\w .()-]{0,119}$/.test(name) || name.includes('..')) throw new SessionSeamRefusal('a file is named plainly (letters, digits, spaces, . _ - ( ), at most 120)')
-        const bytes = Buffer.from(String(payload.data ?? ''), 'base64')
-        if (!bytes.length) throw new SessionSeamRefusal('the file is empty')
-        if (bytes.length > ATTACHMENT_MAX) throw new SessionSeamRefusal(`a file is at most ${ATTACHMENT_MAX / 1_000_000} MB`)
+        if (!/^[0-9a-f]{64}$/.test(hash)) throw new SessionSeamRefusal('a file is named by its hash')
+        if (!d.fetchAttachment) throw new SessionSeamRefusal('this engine cannot read files from the platform')
+        const bytes = Buffer.from(await d.fetchAttachment(hash))
+        if (createHash('sha256').update(bytes).digest('hex') !== hash) throw new SessionSeamRefusal('the file read is not the one its hash names')
         const dir = join(d.projectDir, 'sessions', session, 'attachments')
         mkdirSync(dir, { recursive: true })
         writeFileSync(join(dir, name), bytes)
-        const entry = { t: 'attachment' as const, at: new Date().toISOString(), name, hash: createHash('sha256').update(bytes).digest('hex'), size: bytes.length, type: String(payload.type ?? 'application/octet-stream').slice(0, 100) }
+        const entry = { t: 'attachment' as const, at: new Date().toISOString(), name, hash, size: bytes.length, type: String(payload.type ?? 'application/octet-stream').slice(0, 100) }
         log.append(session, entry)
         return reply({ t: 'session:attached', session, name: entry.name, hash: entry.hash, size: entry.size, type: entry.type })
       }
