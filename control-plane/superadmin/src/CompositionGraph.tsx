@@ -8,14 +8,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
 import { Columns, ColumnsSearch, Dialog, markdownToHtml, Form, Field, Notice, Receipt, Code, Empty, Icon, notify, type ColumnItem, type ColumnSpec } from '@superatom/ui'
 import { useProjectHub } from './hub'
+import { HistoryGraph, stepSays, stepWhen, type Step } from './GraphHistory'
 import { cached, keep } from './cache'
 
 type Body = Record<string, any>
 interface Node { name: string; title: string; line: string; scope: string; owner: string | null; hash: string; concepts: string[]; body: Body; composed?: boolean; form?: string; agents?: { name: string; title: string }[] }
+type Change = { id: number; name: string; kind: string; by: string; reason: string | null; removed: boolean }
 interface Version { id: number; name: string; message: string; upto: number; at: number; by: string; asOf: number; changes: number }
 interface Graph { domains: Node[]; intermediate: Node[]; atomic: Node[]; version?: Version }
-/** Each version's parent (the version it grew from), and the version now grew from. */
-interface Tree { parents: Record<string, string | null>; now: string | null }
 type Focus = { kind: 'domain' | 'intermediate' | 'atomic'; name: string; edit?: boolean } | null
 
 /** A concept's content as Markdown — a list or worked examples written before concepts were Markdown read as their Markdown. */
@@ -32,10 +32,11 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   // Shown at once from this browser's copy (cache.ts) when it was read before; the engine's answer replaces it.
   const who = (() => { try { return String(JSON.parse(atob(String(token).split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).email ?? '') } catch { return '' } })()
   // A named version being looked at (read-only), or null: the graph as it is now.
-  const [viewing, setViewing] = useState<string | null>(null)
-  const [versions, setVersions] = useState<{ versions: Version[]; tree: Tree; since: { id: number; name: string; kind: string; by: string; reason: string | null; removed: boolean }[] } | null>(null)
+  // A step of the graph's history being looked at (read-only), or null: the graph as it is now.
+  const [viewing, setViewing] = useState<Step | null>(null)
+  const [versions, setVersions] = useState<{ versions: Version[]; steps: Step[]; since: Change[] } | null>(null)
   const [versionsOpen, setVersionsOpen] = useState(false)
-  const cacheKey = `${who}|graph|${projectId}${viewing ? `|v:${viewing}` : ''}`
+  const cacheKey = `${who}|graph|${projectId}${viewing ? `|at:${viewing.upto}` : ''}`
   const [graph, setGraph] = useState<Graph | null>(() => { try { const c = cached(cacheKey); return c ? JSON.parse(c) as Graph : null } catch { return null } })
   const [err, setErr] = useState('')
   const [dom, setDom] = useState<string | null>(null)
@@ -43,20 +44,21 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   const [atom, setAtom] = useState<string | null>(null)
   const [focus, setFocus] = useState<Focus>(null)
   const [making, setMaking] = useState<null | { kind: 'intermediate' | 'atomic'; into: string | null }>(null)
+  const [makingDomain, setMakingDomain] = useState(false)
   const [q, setQ] = useState('')
   const load = useCallback(async () => {
-    try { const r = await hub.request('compositionColumns', viewing ? { version: viewing } : {}); if (r.error) setErr(r.error); else if (r.exists === false) setErr('This project has no composition graph yet.'); else { setErr(''); setGraph(r); keep(cacheKey, JSON.stringify(r)) } }
+    try { const r = await hub.request('compositionColumns', viewing ? { upto: viewing.upto } : {}); if (r.error) setErr(r.error); else if (r.exists === false) setErr('This project has no composition graph yet.'); else { setErr(''); setGraph(r); keep(cacheKey, JSON.stringify(r)) } }
     catch (e: any) { setErr(e?.message ?? String(e)) }
   }, [hub.request, cacheKey, viewing])   // eslint-disable-line react-hooks/exhaustive-deps -- hub is a new object each render; its request is stable
   const loadVersions = useCallback(async () => {
     const r = await hub.call({ t: 'graph:versions' }).catch(() => null)
-    if (r?.t === 'graph:reply') setVersions({ versions: r.versions ?? [], tree: r.tree ?? { parents: {}, now: null }, since: r.since ?? [] })
+    if (r?.t === 'graph:reply') setVersions({ versions: r.versions ?? [], steps: r.steps ?? [], since: r.since ?? [] })
   }, [hub.call])   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (hub.status === 'live') { void load(); void loadVersions() } }, [hub.status, load, loadVersions])
-  const [naming, setNaming] = useState(false)
-  const [restoring, setRestoring] = useState(false)
+  const [naming, setNaming] = useState<Step | null>(null)
+  const [restoring, setRestoring] = useState<Step | null>(null)
   /** Look at a version (null: now): the graph as it read then, read-only. */
-  const view = (name: string | null) => { setViewing(name); setDom(null); setMid(null); setAtom(null); setFocus(null); setGraph(null) }
+  const view = (name: Step | null) => { setViewing(name); setDom(null); setMid(null); setAtom(null); setFocus(null); setGraph(null) }
 
   const by = useMemo(() => new Map([...(graph?.domains ?? []), ...(graph?.intermediate ?? []), ...(graph?.atomic ?? [])].map((n) => [n.name, n])), [graph])
   if (err) return <Notice state="critical">{err}</Notice>
@@ -107,7 +109,7 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   }
 
   const columns: ColumnSpec[] = [
-    { key: 'domains', title: 'Domains', icon: 'lucide:bot', items: graph.domains.filter(hit).map(item), selected: dom, onSelect: (k) => select('domain', k), empty: needle ? 'No domain matches.' : 'No domains yet.' },
+    { key: 'domains', title: 'Domains', icon: 'lucide:bot', items: graph.domains.filter(hit).map(item), selected: dom, onSelect: (k) => select('domain', k), onNew: () => setMakingDomain(true), empty: needle ? 'No domain matches.' : 'No domains yet.' },
     {
       key: 'intermediate', title: 'Intermediate concepts', icon: 'lucide:layers',
       items: graph.intermediate.filter(hit).map(item), selected: mid, onSelect: (k) => select('intermediate', k),
@@ -137,11 +139,12 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
         <ColumnsSearch value={q} onChange={setQ} placeholder="Search domains and concepts — titles and what they say" />
         <VersionsButton versions={versions} viewing={viewing} onOpen={() => setVersionsOpen(true)} />
       </div>
-      {viewing && graph.version && (
+      {viewing && (
         <div className="sa-graphpage__viewing" role="status">
-          <Icon icon="lucide:history" /><span><strong>Version {graph.version.name}</strong> — {graph.version.message} <span className="sa-muted">· named by {graph.version.by.replace(/^user:/, '')} on {new Date(graph.version.at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })} · read-only</span></span>
+          <Icon icon="lucide:history" /><span><strong>v{viewing.n}{viewing.tags.length ? ` · ${viewing.tags.join(', ')}` : ''}</strong> — {stepSays(viewing)} <span className="sa-muted">· {stepWhen(viewing.at)} · read-only</span></span>
           <span className="sa-graphpage__viewacts">
-            <button className="sa-btn" onClick={() => setRestoring(true)}><Icon icon="lucide:rotate-ccw" className="sa-btn__icon" />Make this the current graph</button>
+            <button className="sa-btn" onClick={() => setNaming(viewing)}><Icon icon="lucide:tag" className="sa-btn__icon" />Name it</button>
+            <button className="sa-btn" onClick={() => setRestoring(viewing)}><Icon icon="lucide:rotate-ccw" className="sa-btn__icon" />Make this the current graph</button>
             <button className="sa-btn sa-btn--primary" onClick={() => view(null)}>Back to now</button>
           </span>
         </div>
@@ -155,112 +158,68 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
         onClose={() => setMaking(null)} onMade={async (name) => { if (making.into) await change('graph:join', making.into, name); else await load(); setMaking(null); goTo(name) }} />}
       {making?.kind === 'intermediate' && <NewIntermediate hub={hub} atomic={graph.atomic} preset={atom ? [atom] : []} into={making.into ? by.get(making.into)?.title ?? making.into : null}
         onClose={() => setMaking(null)} onMade={async (name) => { if (making.into) await change('graph:join', making.into, name); else await load(); setMaking(null); goTo(name) }} />}
-      {versionsOpen && versions && <VersionsPanel versions={versions.versions} tree={versions.tree} since={versions.since.length} viewing={viewing}
-        onView={(name) => { setVersionsOpen(false); view(name) }} onName={() => { setVersionsOpen(false); setNaming(true) }} onClose={() => setVersionsOpen(false)} />}
-      {naming && <NameVersion hub={hub} since={versions?.since ?? []} last={versions?.versions[0]?.name ?? null} onClose={() => setNaming(false)} onNamed={() => { setNaming(false); void loadVersions() }} />}
-      {restoring && viewing && (
-        <Dialog title={`Make ${viewing} the current graph?`} onClose={() => setRestoring(false)}
-          actions={<><button className="sa-btn" onClick={() => setRestoring(false)}>Cancel</button><button className="sa-btn sa-btn--primary" onClick={async () => {
-            const r = await hub.call({ t: 'graph:restore', name: viewing }).catch((e) => ({ reason: String(e?.message ?? e) }))
-            setRestoring(false)
+      {versionsOpen && versions && (
+        <Dialog title="History" onClose={() => setVersionsOpen(false)} actions={<button className="sa-btn" onClick={() => setVersionsOpen(false)}>Close</button>}>
+          <p className="sa-note">Every run of changes is a version, newest at the top. Going back to an older one starts a new line from it; the line left behind stays.</p>
+          <div className="sa-history__scroll">
+            <HistoryGraph steps={versions.steps} current={viewing?.upto ?? null}
+              onPick={(st) => { setVersionsOpen(false); view(st === versions.steps[versions.steps.length - 1] ? null : st) }}
+              actions={(st, isHead) => <>
+                <button className="sa-btn sa-btn--link" onClick={() => { setVersionsOpen(false); setNaming(st) }}><Icon icon="lucide:tag" className="sa-btn__icon" />Name</button>
+                {!isHead && <button className="sa-btn sa-btn--link" onClick={() => { setVersionsOpen(false); setRestoring(st) }}><Icon icon="lucide:rotate-ccw" className="sa-btn__icon" />Make current</button>}
+              </>} />
+          </div>
+        </Dialog>
+      )}
+      {naming && <NameVersion hub={hub} step={naming} since={naming === versions?.steps[versions.steps.length - 1] ? versions?.since ?? [] : null} onClose={() => setNaming(null)} onNamed={() => { setNaming(null); void loadVersions() }} />}
+      {makingDomain && <NewDomain hub={hub} onClose={() => setMakingDomain(false)} onMade={async (name) => { setMakingDomain(false); await load(); void loadVersions(); goTo(name) }} />}
+      {restoring && (
+        <Dialog title={`Make v${restoring.n} the current graph?`} onClose={() => setRestoring(null)}
+          actions={<><button className="sa-btn" onClick={() => setRestoring(null)}>Cancel</button><button className="sa-btn sa-btn--primary" onClick={async () => {
+            const st = restoring
+            const r = await hub.call({ t: 'graph:restore', upto: st.upto }).catch((e) => ({ reason: String(e?.message ?? e) }))
+            setRestoring(null)
             if (r?.t !== 'graph:reply') { notify(r?.reason ?? 'It was not restored', 'refused'); return }
-            notify(r.restored?.length ? `Back to ${viewing}: ${r.restored.length} node${r.restored.length === 1 ? '' : 's'} changed` : `The graph already is ${viewing}`, 'note')
+            notify(r.restored?.length ? `Back to v${st.n}: ${r.restored.length} node${r.restored.length === 1 ? '' : 's'} changed` : `The graph already is v${st.n}`, 'note')
             view(null); void loadVersions()
           }}>Make it current</button></>}>
-          <p>Every node that differs from {viewing} is set back to how it was — as new changes, so nothing is lost: today's graph stays in the history, and can be named first if you may want it back.</p>
+          <p>Every node that differs from v{restoring.n} is set back to how it was — as new changes, so nothing is lost: the graph as it is now stays in the history as its own line.</p>
         </Dialog>
       )}
     </div>
   )
 }
 
-/** Where the graph is, in one button: now (and what is not yet named) or the version being looked at. Opens the tree. */
-function VersionsButton({ versions, viewing, onOpen }: { versions: { versions: Version[]; tree: Tree; since: unknown[] } | null; viewing: string | null; onOpen: () => void }) {
-  const since = versions?.since.length ?? 0
-  const at = versions?.tree.now ?? null
-  const said = viewing ? `Looking at ${viewing}` : !versions ? 'Versions' : at ? `Now · ${since ? `${since} change${since === 1 ? '' : 's'} since ${at}` : `as ${at}`}` : `Now · no version named yet`
+/** Where the graph is, in one button: its latest version (and when), or the one being looked at. Opens the history. */
+function VersionsButton({ versions, viewing, onOpen }: { versions: { steps: Step[] } | null; viewing: Step | null; onOpen: () => void }) {
+  const head = versions?.steps[versions.steps.length - 1]
+  const said = viewing ? `Looking at v${viewing.n}` : !versions ? 'History' : head ? `v${head.n} · ${stepWhen(head.at)}` : 'No changes yet'
   return (
-    <button className="sa-versions" onClick={onOpen} disabled={!versions} data-viewing={!!viewing} title="The graph's versions, as a tree">
+    <button className="sa-versions" onClick={onOpen} disabled={!versions} data-viewing={!!viewing} title="The graph's history: every version, as a graph">
       <Icon icon="lucide:git-branch" className="sa-versions__icon" /><span className="sa-versions__said">{said}</span><Icon icon="lucide:chevron-down" className="sa-versions__icon" />
     </button>
   )
 }
 
-/** The versions as a tree, oldest at the top: a version follows the one the graph was in when it was named; going back to
- *  an older version and naming again branches from it. Now sits under the version it grew from. */
-function VersionsPanel({ versions, tree, since, viewing, onView, onName, onClose }: { versions: Version[]; tree: Tree; since: number; viewing: string | null; onView: (name: string | null) => void; onName: () => void; onClose: () => void }) {
-  const byName = new Map(versions.map((v) => [v.name, v]))
-  const kids = new Map<string | null, string[]>()
-  const order = [...versions].sort((a, b) => a.upto - b.upto || a.id - b.id).map((v) => v.name)
-  for (const n of order) { const p = tree.parents[n] ?? null; kids.set(p, [...(kids.get(p) ?? []), n]) }
-  const NOW = '\u0000now'
-  kids.set(tree.now, [...(kids.get(tree.now) ?? []), NOW])
-  // A node's branches are drawn indented beneath it; its last child (the newest) carries the line on at the same depth.
-  const rows: { name: string; depth: number }[] = []
-  const walk = (name: string, depth: number) => {
-    rows.push({ name, depth })
-    const k = kids.get(name) ?? []
-    k.slice(0, -1).forEach((b) => walk(b, depth + 1))
-    if (k.length) walk(k[k.length - 1], depth)
-  }
-  ;(kids.get(null) ?? []).forEach((r) => walk(r, 0))
-  // The lines through each row: a depth's line runs on while a later row is at that depth before any shallower one.
-  const through = rows.map((_, i) => { const on: number[] = []; for (let d = 0; d < rows[i].depth; d++) { for (const r of rows.slice(i + 1)) { if (r.depth < d) break; if (r.depth === d) { on.push(d); break } } } return on })
-  const ends = rows.map((r, i) => { for (const x of rows.slice(i + 1)) { if (x.depth < r.depth) return true; if (x.depth === r.depth) return false } return true })
-  const rails = (i: number) => <>{through[i].map((d) => <span key={d} className="sa-vtree__rail" style={{ '--d': d } as CSSProperties} />)}{i > 0 && rows[i].depth > rows[i - 1].depth && <span className="sa-vtree__elbow" />}</>
-  return (
-    <Dialog title="Versions" onClose={onClose} actions={<button className="sa-btn" onClick={onClose}>Close</button>}>
-      <ol className="sa-vtree">
-        {rows.map(({ name, depth }) => {
-          if (name === NOW) return (
-            <li key="now" className="sa-vtree__row" data-now style={{ '--depth': depth } as CSSProperties} data-on={!viewing} data-end={ends[rows.findIndex((r) => r.name === NOW)]}>
-              {rails(rows.findIndex((r) => r.name === NOW))}<span className="sa-vtree__dot" />
-              <span className="sa-vtree__main">
-                <span className="sa-vtree__name">Now</span>
-                <span className="sa-vtree__meta">{since ? `${since} change${since === 1 ? '' : 's'} not yet named` : 'nothing changed since'}</span>
-              </span>
-              <span className="sa-vtree__acts">
-                {viewing && <button className="sa-btn sa-btn--link" onClick={() => onView(null)}>Back to now</button>}
-                {!viewing && since > 0 && <button className="sa-btn sa-btn--primary" onClick={onName}><Icon icon="lucide:tag" className="sa-btn__icon" />Name this version</button>}
-              </span>
-            </li>
-          )
-          const v = byName.get(name)!
-          return (
-            <li key={name} className="sa-vtree__row" style={{ '--depth': depth } as CSSProperties} data-on={viewing === name} data-end={ends[rows.findIndex((r) => r.name === name)]}>
-              {rails(rows.findIndex((r) => r.name === name))}<span className="sa-vtree__dot" />
-              <button className="sa-vtree__main" onClick={() => onView(viewing === name ? null : name)} title="Look at the graph as it was (read-only)">
-                <span className="sa-vtree__name">{v.name}{v.changes > 0 && <span className="sa-vtree__count">+{v.changes}</span>}</span>
-                <span className="sa-vtree__msg">{v.message}</span>
-                <span className="sa-vtree__meta">{v.by.replace(/^user:/, '')} · {new Date(v.at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
-              </button>
-            </li>
-          )
-        })}
-      </ol>
-    </Dialog>
-  )
-}
-
 /** Name the graph as it is now — with what changed since the last version, as a commit lists its changes. */
-function NameVersion({ hub, since, last, onClose, onNamed }: { hub: ReturnType<typeof useProjectHub>; since: { id: number; name: string; kind: string; by: string; reason: string | null; removed: boolean }[]; last: string | null; onClose: () => void; onNamed: () => void }) {
+function NameVersion({ hub, step, since, onClose, onNamed }: { hub: ReturnType<typeof useProjectHub>; step: Step; since: Change[] | null; onClose: () => void; onNamed: () => void }) {
   const [name, setName] = useState(''), [message, setMessage] = useState(''), [err, setErr] = useState('')
   const make = async () => {
-    const r = await hub.call({ t: 'graph:version', name: name.trim(), message: message.trim() }).catch((e) => ({ reason: String(e?.message ?? e) }))
+    const r = await hub.call({ t: 'graph:version', name: name.trim(), message: message.trim(), upto: step.upto }).catch((e) => ({ reason: String(e?.message ?? e) }))
     if (r?.t !== 'graph:reply') { setErr(r?.reason ?? 'It was not named'); return }
     notify(`Named ${name.trim()}`, 'note'); onNamed()
   }
   return (
-    <Dialog title="Name this version" onClose={onClose}>
+    <Dialog title={`Name v${step.n}`} onClose={onClose}>
       <Form onSubmit={() => void make()} error={err} actions={<><button type="button" className="sa-btn" onClick={onClose}>Cancel</button><button className="sa-btn sa-btn--primary" disabled={!name.trim() || !message.trim()}>Name it</button></>}>
         <Field label="Name"><input id="nv-name" className="sa-input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="A short name, like a release" /></Field>
         <Field label="What it is"><textarea id="nv-message" className="sa-input" rows={3} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="What this version of the graph is, and what changed in it" /></Field>
-        <div className="sa-graphpage__block">
-          <h3 className="sa-label">{since.length} change{since.length === 1 ? '' : 's'} since {last ?? 'the start'}</h3>
-          {since.length ? <ul className="sa-versions__changes">{since.slice(-200).reverse().map((c) => (
+        <p className="sa-note">v{step.n} · {stepWhen(step.at)} · {stepSays(step)}</p>
+        {since && since.length > 0 && <div className="sa-graphpage__block">
+          <h3 className="sa-label">{since.length} change{since.length === 1 ? '' : 's'} since the last name</h3>
+          <ul className="sa-versions__changes">{since.slice(-200).reverse().map((c) => (
             <li key={c.id}><Code>{c.name}</Code> <span className="sa-muted">{c.removed ? 'removed' : c.kind} · {c.by.replace(/^user:/, '')}{c.reason ? ` · ${c.reason}` : ''}</span></li>))}</ul>
-            : <p className="sa-note">Nothing changed since {last} — naming it again would name the same graph.</p>}
-        </div>
+        </div>}
       </Form>
     </Dialog>
   )
@@ -374,6 +333,25 @@ function Composes({ owner, by, openOnly, readOnly, change, onEdit }: { owner: No
         </div>
       )}
     </div>
+  )
+}
+
+/** A new domain: what an agent will know from the start — empty, its concepts attached from the columns after. */
+function NewDomain({ hub, onClose, onMade }: { hub: ReturnType<typeof useProjectHub>; onClose: () => void; onMade: (name: string) => void }) {
+  const [title, setTitle] = useState(''), [description, setDescription] = useState(''), [err, setErr] = useState('')
+  const name = title.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80)
+  const make = async () => {
+    const r = await hub.call({ t: 'graph:domain', name, body: { title: title.trim(), ...(description.trim() ? { description: description.trim() } : {}), capabilities: [], concepts: [], files: [] }, reason: 'made in the console' }).catch((e) => ({ reason: String(e?.message ?? e) }))
+    if (r?.t !== 'graph:reply') { setErr(r?.reason ?? 'It was not made'); return }
+    notify(`${title.trim()} made — attach its concepts from the columns`, 'note'); onMade(name)
+  }
+  return (
+    <Dialog title="New domain" onClose={onClose}>
+      <Form onSubmit={() => void make()} error={err} actions={<><button type="button" className="sa-btn" onClick={onClose}>Cancel</button><button className="sa-btn sa-btn--primary" disabled={!name}>Make it</button></>}>
+        <Field label="Title" help={name ? <>Named <Code>{name}</Code></> : undefined}><input id="nd-title" className="sa-input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What the agent is about, in a few words" /></Field>
+        <Field label="What it covers"><textarea id="nd-description" className="sa-input" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="The questions it answers and what it knows, in a sentence or two" /></Field>
+      </Form>
+    </Dialog>
   )
 }
 

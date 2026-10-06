@@ -199,15 +199,15 @@ export function createInspector(deps: InspectorDeps) {
   }
   /** The whole graph for the console's graph page: every domain (with the agents that are it), every intermediate
    *  concept, every atomic concept — each with its full content, owner, scope and version, and what it composes. */
-  async function compositionColumns(a: { version?: string } = {}) {
+  async function compositionColumns(a: { version?: string; upto?: number } = {}) {
     return withComposition((store) => {
-      // As a named version reads it (the graph as of its moment), or as it is now.
+      // As a named version reads it, or as the graph stood after a change (a step of its history), or as it is now.
       const v = a.version ? store.version(String(a.version)) : null
       if (a.version && !v) return { exists: true, error: `there is no version "${a.version}"` }
-      const upto = v?.upto   // read by change number: exact even when changes share a millisecond
+      const upto = v?.upto ?? (a.upto !== undefined && Number.isInteger(Number(a.upto)) ? Number(a.upto) : undefined)   // read by change number: exact even when changes share a millisecond
       const line = (b: any) => String(b?.text ?? (Array.isArray(b?.items) ? b.items.map((x: any) => (typeof x === 'string' ? x : x?.question ?? '')).join(' · ') : '')).replace(/\s+/g, ' ').slice(0, 200)
       const agents = store.names('agent', { upto }).map((n) => { const b = store.content<any>(n.hash); return { name: n.name, title: String(b.title ?? n.name), domain: String(b.domain ?? '') } })
-      const domains = store.names('domain', { upto }).map((n) => { const b = store.content<DomainBody>(n.hash); return { name: n.name, title: n.name, line: String(b.description ?? '').slice(0, 200), scope: n.scope, owner: n.owner, hash: n.hash, concepts: conceptsOf(b), body: b, agents: agents.filter((a) => a.domain === n.name) } })
+      const domains = store.names('domain', { upto }).map((n) => { const b = store.content<DomainBody>(n.hash); return { name: n.name, title: String((b as any).title ?? n.name), line: String(b.description ?? '').slice(0, 200), scope: n.scope, owner: n.owner, hash: n.hash, concepts: conceptsOf(b), body: b, agents: agents.filter((a) => a.domain === n.name) } })
       const concepts = store.names('concept', { upto }).map((n) => { const b = store.content<any>(n.hash); return { name: n.name, title: String(b.title ?? n.name), form: String(b.form), composed: b.form === 'composed', line: line(b), scope: n.scope, owner: n.owner, hash: n.hash, concepts: b.form === 'composed' ? (b.concepts as string[]) : [], body: b } })
       return { exists: true, ...(v ? { version: v } : {}), domains, intermediate: concepts.filter((c) => c.composed), atomic: concepts.filter((c) => !c.composed) }
     })

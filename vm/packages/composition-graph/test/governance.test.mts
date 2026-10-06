@@ -4,7 +4,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Store } from '../src/store.ts'
-import { governance as g, GovernanceRefusal, compose as composeDomain, nameVersion, restoreVersion, sinceLastVersion, versionTree } from '../src/index.ts'
+import { governance as g, GovernanceRefusal, compose as composeDomain, nameVersion, restoreVersion, restoreStep, sinceLastVersion, steps } from '../src/index.ts'
 
 const fresh = () => new Store(join(mkdtempSync(join(tmpdir(), 'gov-')), 'composition.sqlite'))
 const ana = { id: 'user:ana' }, bo = { id: 'user:bo' }, bot = { id: 'agent:key_1' }, admin = { id: 'user:root', admin: true }
@@ -182,13 +182,18 @@ test('a node made before names were plain keeps its name and can still be change
   assert.throws(() => g.write(s, ana, 'another one', 'domain', { capabilities: [], concepts: [], files: [] }), /is not a name/)
 })
 
-test('versions form a tree: going back to a version branches from it', () => {
+test('every run of changes is a step; a going back branches from the step it went back to', () => {
   const s = fresh()
-  g.write(s, admin, 'a', 'concept', text('A1')); nameVersion(s, admin, 'v1', 'first')
-  g.write(s, admin, 'a', 'concept', text('A2')); nameVersion(s, admin, 'v2', 'second')
-  restoreVersion(s, admin, 'v1')
-  g.write(s, admin, 'a', 'concept', text('A3')); nameVersion(s, admin, 'v3', 'from v1 again')
-  assert.deepEqual(versionTree(s), { parents: { v1: null, v2: 'v1', v3: 'v1' }, now: 'v3' })
-  restoreVersion(s, admin, 'v2')
-  assert.equal(versionTree(s).now, 'v2')
+  g.write(s, admin, 'a', 'concept', text('A1')); g.write(s, admin, 'b', 'concept', text('B1'))   // step 1: one run
+  nameVersion(s, admin, 'v1', 'first')
+  g.write(s, admin, 'a', 'concept', text('A2'))                                                  // step 2
+  g.write(s, ana, 'c', 'concept', text('C1'))                                                    // step 3: someone else
+  restoreStep(s, admin, steps(s)[0].upto)                                                         // step 4: back to step 1
+  g.write(s, admin, 'b', 'concept', text('B2'))                                                  // step 5
+  const st = steps(s)
+  assert.deepEqual(st.map((x) => [x.n, x.parent, x.restoredTo, x.tags]), [[1, null, null, ['v1']], [2, 1, null, []], [3, 2, null, []], [4, 1, 1, []], [5, 4, null, []]])
+  assert.equal(st[0].count, 2)
+  assert.equal(s.get('c'), null)                                                                  // going back took c away
+  nameVersion(s, admin, 'old', 'the second step', st[1].upto)
+  assert.deepEqual(steps(s)[1].tags, ['old'])
 })

@@ -10,8 +10,9 @@
 //   files · db · logs   the agents' directories, the raw table inventory, the engine's log channel
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react'
-import { Section as Panel, RecordList, Receipt, Status, Empty, Notice, Code, Figures, Kpi, Tabs, Toolbar, Icon, type StatusState } from '@superatom/ui'
+import { Section as Panel, RecordList, Receipt, Status, Empty, Notice, Code, Figures, Kpi, Tabs, Toolbar, Icon, ViewToggle, useView, type StatusState } from '@superatom/ui'
 import type { Hub } from './hub'
+import { HistoryGraph, stepSays, stepWhen, type Step } from './GraphHistory'
 
 export type Section =
   | 'summary' | 'composition' | 'changes' | 'questions' | 'sessions' | 'grounding' | 'index' | 'files' | 'db' | 'logs'
@@ -236,7 +237,7 @@ function CompositionPart({ hub, part }: ViewProps & { part: 'changes' | 'questio
   return (
     <div className="sa-stack sa-stack--4">
       <div className="sa-row"><div className="sa-grow" /><Refresh onClick={reload} /></div>
-      {part === 'changes' && <CompChanges changes={data.changes ?? []} go={setPick} />}
+      {part === 'changes' && <CompChanges hub={hub} changes={data.changes ?? []} go={setPick} />}
       {part === 'questions' && <CompQuestions domains={domains} />}
       {part === 'sessions' && <CompSessions sessions={data.sessions ?? []} />}
     </div>
@@ -294,16 +295,40 @@ function CompQuestions({ domains }: { domains: any[] }) {
   )
 }
 
-function CompChanges({ changes, go }: { changes: any[]; go: (p: CompPick) => void }) {
+function CompChanges({ hub, changes, go }: { hub: Hub; changes: any[]; go: (p: CompPick) => void }) {
+  const [view, setView] = useView<'list' | 'graph'>('graph-changes', ['list', 'graph'], 'list')
   return (
-    <Panel icon="lucide:git-commit-horizontal" title="Changes" subtitle="Every edit to the graph: which node, from which version to which, by whom, why and from what.">
-      <RecordList rows={changes} keyOf={c => String(c.id)} onRow={c => go({ kind: 'node', name: c.name })} empty="No changes yet." columns={[
+    <Panel icon="lucide:git-commit-horizontal" title="Changes" subtitle="Every edit to the graph: which node, from which version to which, by whom, why and from what."
+      actions={<ViewToggle name="graph-changes" label="Show the changes as" value={view} onChange={setView} options={[{ value: 'list', icon: 'lucide:list', label: 'List' }, { value: 'graph', icon: 'lucide:git-branch', label: 'Graph' }]} />}>
+      {view === 'graph' ? <ChangesGraph hub={hub} go={go} /> : <RecordList rows={changes} keyOf={c => String(c.id)} onRow={c => go({ kind: 'node', name: c.name })} empty="No changes yet." columns={[
         { key: 'at', label: 'When', render: c => <span className="sa-muted">{when(c.at)}</span> },
         { key: 'name', label: 'Node', wrap: true, render: c => <><div>{c.name}</div><div className="sa-note">{c.kind}</div></> },
         { key: 'version', label: 'Version', render: c => <HashMove from={c.fromHash} to={c.toHash} /> },
         { key: 'by', label: 'By · why · from', wrap: true, render: c => <><strong>{c.by}</strong>{c.reason ? ` · ${c.reason}` : ''}{c.from ? <span className="sa-muted"> · from {c.from}</span> : null}</> },
-      ]} />
+      ]} />}
     </Panel>
+  )
+}
+
+/** The changes as the graph's history: each run of changes a version on its line; one picked shows what it touched. */
+function ChangesGraph({ hub, go }: { hub: Hub; go: (p: CompPick) => void }) {
+  const [steps, setSteps] = useState<Step[] | null>(null)
+  const [err, setErr] = useState('')
+  const [picked, setPicked] = useState<Step | null>(null)
+  useEffect(() => { void hub.call({ t: 'graph:versions' }).then((r) => { if (r?.t === 'graph:reply') setSteps(r.steps ?? []); else setErr(r?.reason ?? 'The history did not come') }).catch((e) => setErr(String(e?.message ?? e))) }, [hub])   // eslint-disable-line react-hooks/exhaustive-deps
+  if (err) return <Notice state="critical">{err}</Notice>
+  if (!steps) return <Loading on />
+  return (
+    <div className="sa-stack sa-stack--3">
+      <HistoryGraph steps={steps} current={picked?.upto ?? null} onPick={(s) => setPicked(picked?.n === s.n ? null : s)} />
+      {picked && (
+        <div className="sa-stack sa-stack--2">
+          <h3 className="sa-label">v{picked.n} · {stepWhen(picked.at)}</h3>
+          <p>{stepSays(picked)}</p>
+          <div className="sa-words">{picked.names.map((n) => <button key={n} className="sa-word" onClick={() => go({ kind: 'node', name: n })}>{n}</button>)}{picked.count > picked.names.length && <span className="sa-note">and {picked.count - picked.names.length} more changes</span>}</div>
+        </div>
+      )}
+    </div>
   )
 }
 

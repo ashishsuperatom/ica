@@ -10,14 +10,16 @@ import { GovernanceRefusal, type Actor } from './governance.js'
 const NAME = /^[\w][\w .:-]{0,59}$/
 
 /** Name the graph as it is now. Someone who may publish names versions (a version is the project's word for a state). */
-export function nameVersion(store: Store, actor: Actor, name: string, message: string): Version {
+export function nameVersion(store: Store, actor: Actor, name: string, message: string, at?: number): Version {
   if (!actor.admin) throw new GovernanceRefusal('naming a version is for someone who may publish')
   const n = String(name ?? '').trim(), m = String(message ?? '').trim()
   if (!NAME.test(n)) throw new GovernanceRefusal('a version is named with letters, digits, spaces, dots and dashes (at most 60)')
   if (!m) throw new GovernanceRefusal('a version says what it is (its message)')
   if (store.version(n)) throw new GovernanceRefusal(`there is already a version "${n}"`)
-  const upto = store.lastChange()
-  if (!upto) throw new GovernanceRefusal('the graph has no changes to name yet')
+  const last = store.lastChange()
+  if (!last) throw new GovernanceRefusal('the graph has no changes to name yet')
+  if (at !== undefined && (!Number.isInteger(at) || at < 1 || at > last)) throw new GovernanceRefusal(`there is no change ${at}`)
+  const upto = at ?? last
   store.db.prepare('INSERT INTO version (name, message, upto, at, by) VALUES (?, ?, ?, ?, ?)').run(n, m, upto, Date.now(), actor.id)
   return store.version(n)!
 }
@@ -31,12 +33,23 @@ export function sinceLastVersion(store: Store): Change[] {
 /** Make the graph what it was at a version: each node that differs is set back (or taken away, or brought back) as a new
  *  change. Returns the names changed. */
 export function restoreVersion(store: Store, actor: Actor, name: string): string[] {
-  if (!actor.admin) throw new GovernanceRefusal('making a version the current graph is for someone who may publish')
   const v = store.version(name)
   if (!v) throw new GovernanceRefusal(`there is no version "${name}"`)
+  return restoreAt(store, actor, v.upto, `back to version ${v.name}`)
+}
+
+/** Make the graph what it was after change `upto` (any step of its history, named or not). */
+export function restoreStep(store: Store, actor: Actor, upto: number): string[] {
+  if (!Number.isInteger(upto) || upto < 1 || upto > store.lastChange()) throw new GovernanceRefusal(`there is no change ${upto}`)
+  return restoreAt(store, actor, upto, `back to #${upto}`)
+}
+
+function restoreAt(store: Store, actor: Actor, upto: number, reason: string): string[] {
+  if (!actor.admin) throw new GovernanceRefusal('making a version the current graph is for someone who may publish')
+  const v = { upto }
   const then = new Map(store.names(undefined, { upto: v.upto }).map((x) => [x.name, x]))
   const now = new Map(store.names().map((x) => [x.name, x]))
-  const ctx = { by: actor.id, reason: `back to version ${v.name}` }
+  const ctx = { by: actor.id, reason }
   const changed: string[] = []
   store.db.exec('SAVEPOINT cg_restore')
   try {
@@ -53,21 +66,46 @@ export function restoreVersion(store: Store, actor: Actor, name: string): string
   return changed
 }
 
-/** The versions as a tree: each one's parent is the version the graph was last made into before it was named (a restore,
- *  "back to version X"), else the version named before it. `now` is where the graph is: on the same line. Simpler than
- *  git — one line that branches where a version was gone back to. */
-export function versionTree(store: Store): { parents: Record<string, string | null>; now: string | null } {
-  const list = [...store.versions()].sort((a, b) => a.upto - b.upto || a.id - b.id)
-  const backTo = (after: number, upto?: number): string | null => {
-    let found: string | null = null
-    for (const c of store.changesBetween(after, upto)) { const m = /^back to version (.+)$/.exec(c.reason ?? ''); if (m) found = m[1] }
-    return found
+
+/** One step of the graph's history: a run of changes by one person without a long pause (or a going back, or the end of a
+ *  named version), numbered from 1 in order. Every step is a version, named or not; a name is a tag on one. A going back
+ *  starts a new line from the step it went back to — the history is a tree, drawn like a git graph. */
+export interface Step {
+  n: number; from: number; upto: number; startAt: number; at: number; by: string; count: number
+  /** The nodes it changed (the first few) and why (its reasons, each once). */
+  names: string[]; reasons: string[]
+  /** Names given to it. */
+  tags: string[]
+  /** The step it grew from: the one before it, or the one it went back to. */
+  parent: number | null
+  restoredTo: number | null
+}
+
+/** The graph's history as steps. `pauseMs`: a pause longer than this between one person's changes starts a new step. */
+export function steps(store: Store, pauseMs = 30 * 60_000): Step[] {
+  const versions = store.versions()
+  const tagAt = new Map<number, string[]>()
+  for (const v of versions) tagAt.set(v.upto, [...(tagAt.get(v.upto) ?? []), v.name])
+  const backTo = (reason: string | null): number | null => {
+    const m = /^back to (?:version (.+)|#(\d+))$/.exec(reason ?? ''); if (!m) return null
+    return m[2] ? Number(m[2]) : versions.find((v) => v.name === m[1])?.upto ?? null
   }
-  const parents: Record<string, string | null> = {}
-  let prev: (typeof list)[number] | null = null
-  for (const v of list) {
-    parents[v.name] = backTo(prev?.upto ?? 0, v.upto) ?? prev?.name ?? null
-    prev = v
+  const out: (Step & { target: number | null })[] = []
+  let cur: (Step & { target: number | null }) | null = null
+  for (const c of store.changesBetween(0)) {
+    const target = backTo(c.reason)
+    const fresh = !cur || cur.by !== c.by || c.at - cur.at > pauseMs || tagAt.has(cur.upto) || cur.target !== target
+    if (fresh) {
+      cur = { n: out.length + 1, from: c.id, upto: c.id, startAt: c.at, at: c.at, by: c.by, count: 0, names: [], reasons: [], tags: [], parent: out.length || null, restoredTo: null, target }
+      out.push(cur)
+    }
+    cur!.upto = c.id; cur!.at = c.at; cur!.count++
+    if (!cur!.names.includes(c.name) && cur!.names.length < 6) cur!.names.push(c.name)
+    if (c.reason && !cur!.reasons.includes(c.reason) && cur!.reasons.length < 3) cur!.reasons.push(c.reason)
   }
-  return { parents, now: prev ? backTo(prev.upto) ?? prev.name : null }
+  const stepOf = (upto: number) => out.find((x) => x.from <= upto && upto <= x.upto)?.n ?? null
+  return out.map(({ target, ...x }) => {
+    const restoredTo = target === null ? null : stepOf(target)
+    return { ...x, tags: tagAt.get(x.upto) ?? [], restoredTo, parent: restoredTo ?? x.parent }
+  })
 }
