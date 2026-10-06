@@ -83,7 +83,7 @@ earlier block (--block) branches the session into a new thread. Values are JSON;
   activity: `sacli activity         what is running for this key (program builds, session runs) and what ran in the last day`,
   status: `sacli status        whether the background connection for this key is up, and for how long`,
   disconnect: `sacli disconnect    closes the background connection for this key (the next command opens a new one)`,
-  ask: `sacli ask <question> [--session <id>]   asks in words; prints the answer (needs the ask scope)`,
+  ask: `sacli ask <question> [--session <id>] [--channel <name>]   asks in words; prints the answer (needs the ask scope); --channel answers as that chat (teams) reads it`,
   warehouse: `sacli warehouse <tables|query|append|create|grants|grant|revoke> …
 
   sacli warehouse tables                               the tables you may see, and their columns
@@ -133,7 +133,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       ? { id: { type: 'string' }, 'as-of': { type: 'string' }, set: { type: 'string', multiple: true }, add: { type: 'string', multiple: true }, remove: { type: 'string', multiple: true },
           call: { type: 'string' }, param: { type: 'string', multiple: true }, act: { type: 'string' }, to: { type: 'string' }, block: { type: 'string' } }
       : cmd === 'warehouse' ? { rows: { type: 'string' }, file: { type: 'string' }, limit: { type: 'string' }, column: { type: 'string', multiple: true }, project: { type: 'string' }, columns: { type: 'string' }, write: { type: 'boolean' }, q: { type: 'string' }, sort: { type: 'string' }, desc: { type: 'boolean' }, page: { type: 'string' }, size: { type: 'string' }, sql: { type: 'string' } }
-      : cmd === 'ask' ? { session: { type: 'string' } } : cmd === 'use' ? { here: { type: 'boolean' } } : cmd === 'call' ? { data: { type: 'string' } } : {}
+      : cmd === 'ask' ? { session: { type: 'string' }, channel: { type: 'string' } } : cmd === 'use' ? { here: { type: 'boolean' } } : cmd === 'call' ? { data: { type: 'string' } } : {}
     let parsed
     try { parsed = parseArgs({ args: argv, options: { ...GLOBAL, ...specific }, allowPositionals: true, strict: true }) }
     catch (e: any) { throw new CliError(`${e.message.replace(/^Unknown option/, 'unknown option')} — see sacli ${cmd ?? ''} --help`.replace(/\s+—/, ' —'), 2) }
@@ -348,7 +348,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       const sessionId = o.session ?? `ask-${crypto.randomUUID()}`
       const qid = `q-${crypto.randomUUID()}`
       // The answer comes as analyst:answer for this question; narration says what is happening meanwhile.
-      const payload = { t: 'analyse', question, projectId: hub.project.id, sessionId, questionId: qid }
+      const payload = { t: 'analyse', question, projectId: hub.project.id, sessionId, questionId: qid, ...(o.channel ? { channel: String(o.channel) } : {}) }
       const onEvent = (m: any) => { if (m.t === 'narration' && !o.json && m.text) warn(String(m.text)) }
       let m: any
       if ('on' in hub) {
