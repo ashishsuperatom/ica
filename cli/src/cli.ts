@@ -4,7 +4,7 @@
 
 import { parseArgs, type ParseArgsConfig } from 'node:util'
 import { createInterface } from 'node:readline'
-import { CliError, DEFAULT_HUB, maskKey, orgOfKey, projectOfKey, readCredentials, writeCredentials, configPath, folderProfile } from './config.ts'
+import { CliError, DEFAULT_HUB, maskKey, orgOfKey, projectOfKey, readCredentials, writeCredentials, configPath, folderProfile, folderProject } from './config.ts'
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs'
 import { join, resolve, dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -299,6 +299,8 @@ export async function run(argv: string[], io: Io): Promise<number> {
     if (cmd === 'app') {
       if (pos[1] !== 'publish' || !pos[2]) throw new CliError('sacli app publish <app folder>', 2)
       const root = resolve(io.cwd ?? process.cwd(), pos[2])
+      const owner = folderProject(root), keyProject = projectOfKey(key ?? '')
+      if (owner && keyProject && owner.project !== keyProject) throw new CliError(`${pos[2]} belongs to project ${owner.project} (${owner.file}); this key is project ${keyProject}'s — use that project's key`, 1)
       const files: Record<string, string> = {}
       const walk = (dir: string, rel: string) => {
         for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -322,6 +324,8 @@ export async function run(argv: string[], io: Io): Promise<number> {
     if (cmd === 'program') {
       if (pos[1] !== 'build' || !pos[2]) throw new CliError('sacli program build <folder>', 2)
       const root = resolve(io.cwd ?? process.cwd(), pos[2])
+      const owner = folderProject(root), keyProject = projectOfKey(key ?? '')
+      if (owner && keyProject && owner.project !== keyProject) throw new CliError(`${pos[2]} belongs to project ${owner.project} (${owner.file}); this key is project ${keyProject}'s — use that project's key`, 1)
       const files: Record<string, string> = {}
       const walk = (dir: string, rel: string) => {
         for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -341,6 +345,8 @@ export async function run(argv: string[], io: Io): Promise<number> {
     if (cmd === 'graph') {
       if (pos[1] !== 'import' || !pos[2]) throw new CliError('sacli graph import <knowledge/index.mts>', 2)
       const file = resolve(io.cwd ?? process.cwd(), pos[2])
+      const owner = folderProject(file), keyProject = projectOfKey(key ?? '')
+      if (owner && keyProject && owner.project !== keyProject) throw new CliError(`${pos[2]} belongs to project ${owner.project} (${owner.file}); this key is project ${keyProject}'s — use that project's key`, 1)
       let mod: any
       try { mod = await import(pathToFileURL(file).href) } catch (e: any) { throw new CliError(`${pos[2]} could not be read: ${e?.message ?? e}`, 1) }
       const dir = dirname(file)

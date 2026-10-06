@@ -7,7 +7,7 @@
 //   start/    a new project's own files, written once (never over a file that is there): its facts, dimensions, name
 //             and starting points, an empty knowledge index. They are the project's to change.
 //
-//   node cli.mjs new   <home> --name "<name>" --currency <code> --locale <tag> [--hub <wss url>]
+//   node cli.mjs new   <workspace> --name "<name>" --currency <code> --locale <tag> [--hub <wss url>]
 //   node cli.mjs check <home>     the shared files a home has changed or lacks (exit 1 when any)
 //   node cli.mjs sync  <home>     write the template's shared files into the home
 //
@@ -24,7 +24,7 @@ const PLATFORM = resolve(HERE, '..', '..', '..')
 const [command, home, ...rest] = process.argv.slice(2)
 const flags = {}
 for (let i = 0; i < rest.length; i++) if (rest[i].startsWith('--')) flags[rest[i].slice(2)] = rest[++i]
-const usage = 'usage: node cli.mjs new|check|sync <project home> [--name "<name>" --currency <code> --locale <tag> --hub <wss url>]'
+const usage = 'usage: node cli.mjs new|check|sync <project workspace> [--name "<name>" --currency <code> --locale <tag> --hub <wss url>]'
 if (!['new', 'check', 'sync'].includes(command) || !home) { console.error(usage); process.exit(1) }
 const HOME = resolve(home)
 
@@ -42,7 +42,11 @@ if (command === 'check') {
 }
 
 if (command === 'new') {
-  if (!existsSync(HOME)) { console.error(`${HOME} does not exist: a project home is made by the platform first`); process.exit(1) }
+  // The workspace (~/.superatom/work/<project id>/): where the project's knowledge and app are written, then imported and
+  // published to the platform. Named by its project, and bound to it, so its material can go to no other project.
+  if (!/^[0-9a-f-]{36}$/.test(basename(HOME))) { console.error(`${HOME}: a workspace is named by its project's id`); process.exit(1) }
+  mkdirSync(HOME, { recursive: true })
+  if (!existsSync(join(HOME, '.sacli.json'))) writeFileSync(join(HOME, '.sacli.json'), JSON.stringify({ project: basename(HOME) }, null, 2) + '\n')
   const missing = ['name', 'currency', 'locale'].filter((k) => !flags[k])
   if (missing.length) { console.error(`${usage}\nmissing: ${missing.map((k) => `--${k}`).join(' ')}`); process.exit(1) }
   const values = { PLATFORM, NAME: flags.name, SLUG: flags.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''), CURRENCY: flags.currency.toUpperCase(), LOCALE: flags.locale,

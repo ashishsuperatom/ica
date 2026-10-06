@@ -46,6 +46,18 @@ export class CliError extends Error {
   constructor(message: string, public code = 1) { super(message) }
 }
 
+/** The project a folder belongs to: the nearest .sacli.json going up from `dir` that names one ({ "project": "<id>" }) —
+ *  a project's workspace says whose knowledge, app and programs it holds, so they are never sent to another project. */
+export function folderProject(dir: string): { project: string; file: string } | null {
+  for (let d = dir; ; d = dirname(d)) {
+    const f = join(d, '.sacli.json')
+    if (existsSync(f)) {
+      try { const c = JSON.parse(readFileSync(f, 'utf8')); if (typeof c.project === 'string' && c.project) return { project: c.project, file: f } } catch { /* ignored */ }
+    }
+    if (dirname(d) === d) return null
+  }
+}
+
 /** The profile a folder names: the nearest .sacli.json going up from `dir` ({ "profile": "<name>" }), or null. */
 export function folderProfile(dir: string): { profile: string; file: string } | null {
   for (let d = dir; ; d = dirname(d)) {
