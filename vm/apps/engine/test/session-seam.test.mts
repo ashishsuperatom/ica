@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildProgram, ProgramStore } from '@superatom/programs'
 import { createSessionSeam } from '../session-seam.ts'
+import { agentsInGraph } from './graph-agents.ts'
 
 const home = mkdtempSync(join(tmpdir(), 'session-'))
 let server: Server, url = ''
@@ -26,10 +27,9 @@ before(async () => {
   url = `http://127.0.0.1:${(server.address() as any).port}`
   const src = fileURLToPath(new URL('../../../packages/programs/test/fixtures/unsettled-trips', import.meta.url))
   buildProgram(src, new ProgramStore(join(home, 'programs', 'store')))
-  mkdirSync(join(home, 'agents'))
-  writeFileSync(join(home, 'agents', 'trips.json'), JSON.stringify({ id: 'trips', name: 'Trips', scope: 'global', owner: 'user:builder', domain: 'vendors-and-hire', programs: ['unsettled-trips'], tools: [], start: { trips: { branch: 'PUNE' } }, ui: { start: 'web/Start.tsx' }, ica: 'composer' }))
-  writeFileSync(join(home, 'agents', 'broken.json'), JSON.stringify({ id: 'broken' }))
-  writeFileSync(join(home, 'agents', 'finance.json'), JSON.stringify({ id: 'finance', name: 'Finance', scope: 'group:finance', owner: 'user:builder', domain: 'd', programs: ['unsettled-trips'], tools: [], ui: { start: 's' }, ica: 'composer' }))
+  agentsInGraph(home, [{ id: 'trips', name: 'Trips', scope: 'global', owner: 'user:builder', domain: 'vendors-and-hire', programs: ['unsettled-trips'], tools: [], start: { trips: { branch: 'PUNE' } }, ui: { start: 'web/Start.tsx' }, ica: 'composer' }])
+  agentsInGraph(home, [{ id: 'broken' }])
+  agentsInGraph(home, [{ id: 'finance', name: 'Finance', scope: 'group:finance', owner: 'user:builder', domain: 'd', programs: ['unsettled-trips'], tools: [], ui: { start: 's' }, ica: 'composer' }])
 })
 after(() => server.close())
 
@@ -98,7 +98,7 @@ test('refused with a sentence: another user, no user, no agent, a broken op, wor
   await agentSeam.handle({ t: 'session:open', session: 'a1', agent: 'trips' }, { type: 'agent', userId: 'agent:key_1' })
   assert.equal(agentOut.at(-1).view.user, 'agent:key_1')
   assert.equal((await ask({ t: 'session:open', session: 's3', agent: 'nobody' })).reason, 'there is no agent "nobody"')
-  assert.match((await ask({ t: 'session:open', session: 's3', agent: 'broken' })).reason, /^agents\/broken.json: agent.name is required/)
+  assert.match((await ask({ t: 'session:open', session: 's3', agent: 'broken' })).reason, /^agent "broken": agent.domain is required/)
   assert.match((await ask({ t: 'session:intent', session: 's2', ops: [{ op: 'set', path: 'trips.branch', value: 7 }], to: 'current' })).reason, /trips.branch/)
   assert.match((await ask({ t: 'session:intent', session: 's2', kind: 'language', text: 'hi', to: 'new' })).reason, /answers no words in sessions/)
   assert.equal((await ask({ t: 'session:nope', session: 's2' })).reason, 'there is no session:nope')
@@ -169,6 +169,7 @@ test('an agent made from a session: forked with its lineage, on a domain of its 
   const file = join(home, 'db-fork.sqlite')
   const store = openStore(file)
   governance.write(store, { id: 'user:builder', admin: true, scopes: [] } as any, 'vendors-and-hire', 'domain', { capabilities: [], concepts: [], files: [] }, { reason: 'seed' })
+  store.put('trips', 'agent', { title: 'Trips', domain: 'vendors-and-hire', programs: ['unsettled-trips'], tools: [], start: { trips: { branch: 'PUNE' } }, ui: { start: 'web/Start.tsx' }, ica: 'composer' }, { by: 'test' }, { owner: 'user:builder' })
   store.close?.()
   const out: any[] = []
   const answers = [{ markdown: 'Hyderabad it is.\n:::intent {"ops":[{"op":"set","path":"trips.branch","value":"HYDERABAD"}],"to":"current"}', blocks: [] }]
@@ -199,7 +200,7 @@ test('a question from home, no agent picked: no domain\'s words reach it, so the
   const s0 = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), ask: async (o) => { told.push(o); return { markdown: 'Nothing fits better; here is what I know.', blocks: [] } } })
   const ask = async (payload: any) => { await s0.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u5', scopes: ['user:u5'] }); return out.at(-1) }
   assert.match((await ask({ t: 'session:start', session: 'h0', text: 'anything at all?' })).reason, /no default agent/)
-  writeFileSync(join(home, 'agents', 'helper.json'), JSON.stringify({ id: 'helper', name: 'Ask anything', scope: 'global', owner: 'user:builder', domain: 'd', programs: [], tools: [], ui: { start: '' }, ica: 'composer', isDefault: true }))
+  agentsInGraph(home, [{ id: 'helper', name: 'Ask anything', scope: 'global', owner: 'user:builder', domain: 'd', programs: [], tools: [], ui: { start: '' }, ica: 'composer', isDefault: true }])
   const r = await ask({ t: 'session:start', session: 'h1', text: 'anything at all?' })
   assert.deepEqual(r.routed, { agent: 'helper', name: 'Ask anything', how: 'default' })
   assert.equal(told[0].domain, null)

@@ -16,7 +16,8 @@
 // A refusal is session:refused { reason } — a sentence, never a different answer. Who is asking is the hub's word
 // (`from.userId`), never the payload's: a session is one user's, and only they change it.
 //
-// An agent is a file in the project home, agents/<id>.json (platform-types AgentSpec); its programs are names or
+// An agent is a node of the composition graph (kind "agent", platform-types AgentSpec), read from this engine's replica
+// of the platform's graph; its programs are names or
 // hashes in the project's program store (programs/store), loaded into one STATE engine whose data goes through the
 // datasource manager. Each session is logged in sessions/<session>/session.jsonl.
 
@@ -43,8 +44,8 @@ export interface SessionSeamDeps {
   log?: SessionLog
   /** Find a program the store lacks (the engine fetches it from the platform); by default the store only. */
   ensureProgram?: (ref: string) => Promise<string>
-  /** The composition graph's replica (graph-replica.ts), where agents are kept (kind "agent"); agents/<id>.json files are
-   *  read only as a fallback. */
+  /** The composition graph's replica (graph-replica.ts), where agents are kept (kind "agent"); by default
+   *  <projectDir>/db/composition.sqlite. */
   graphFile?: string
   /** Nodes written in the platform's graph for a person (graph-replica.ts write): the engine never writes the graph. */
   graphWrite?: (who: Record<string, unknown>, writes: { name: string; kind: string; body: unknown; reason: string; scope?: string }[]) => Promise<any[]>
@@ -134,7 +135,7 @@ function structured(p: any, session: string, by: string, to: 'current' | 'new'):
 }
 
 export function createSessionSeam(d: SessionSeamDeps) {
-  const agentsDir = join(d.projectDir, 'agents')
+  const graphFile = d.graphFile ?? join(d.projectDir, 'db', 'composition.sqlite')
   const store = new ProgramStore(join(d.projectDir, 'programs', 'store'))
   const log = d.log ?? fileLog(join(d.projectDir, 'sessions'))
 
@@ -181,9 +182,9 @@ export function createSessionSeam(d: SessionSeamDeps) {
   // Read from the replica; reopened when the replica is rebuilt (a new file: graph-replica.ts sets a wrong one aside).
   let graph: { store: Store; ino: number } | null = null
   const graphStore = () => {
-    if (!d.graphFile || !existsSync(d.graphFile)) return null
-    const ino = statSync(d.graphFile).ino
-    if (graph?.ino !== ino) { graph?.store.close(); graph = { store: openStore(d.graphFile), ino } }
+    if (!existsSync(graphFile)) return null
+    const ino = statSync(graphFile).ino
+    if (graph?.ino !== ino) { graph?.store.close(); graph = { store: openStore(graphFile), ino } }
     return graph.store
   }
   const fromNode = (n: { name: string; body: any; scope: string; owner: string | null }): AgentSpec => ({
@@ -210,15 +211,13 @@ export function createSessionSeam(d: SessionSeamDeps) {
     if (!/^[\w-]+$/.test(id)) throw new SessionSeamRefusal(`"${id}" is not an agent id`)
     const gs = graphStore()
     const node = gs ? agentNode(gs, id) : null
-    if (node?.kind === 'agent') return fromNode(node)
-    const file = join(agentsDir, `${id}.json`)
-    if (!existsSync(file)) throw new SessionSeamRefusal(`there is no agent "${id}"`)
-    let spec: AgentSpec
-    try { spec = JSON.parse(readFileSync(file, 'utf8')) } catch (e: any) { throw new SessionSeamRefusal(`agents/${id}.json is not JSON: ${e.message}`) }
-    const bad = checkAgent(spec)
-    if (bad.length) throw new SessionSeamRefusal(`agents/${id}.json: ${bad.join('; ')}`)
-    if (spec.id !== id) throw new SessionSeamRefusal(`agents/${id}.json calls itself "${spec.id}"`)
-    return spec
+    if (node?.kind === 'agent') {
+      const spec = fromNode(node)
+      const bad = checkAgent(spec)
+      if (bad.length) throw new SessionSeamRefusal(`agent "${id}": ${bad.join('; ')}`)
+      return spec
+    }
+    throw new SessionSeamRefusal(`there is no agent "${id}"`)
   }
 
   // One runtime per agent and program set: the same programs (by hash) give the same engine; a new build of a program
@@ -258,11 +257,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
   }
 
   function agents() {
-    const fromGraph = graphAgents()
-    const fromFiles = existsSync(agentsDir) ? readdirSync(agentsDir).filter((f) => f.endsWith('.json') && !fromGraph.some((a) => a.id === f.slice(0, -5))).flatMap((f) => {
-      try { return [readAgent(f.slice(0, -5))] } catch { return [] }
-    }) : []
-    return [...fromGraph, ...fromFiles].map((a) => ({ id: a.id, name: a.name, scope: a.scope, ui: a.ui, isDefault: !!a.isDefault, look: a.look ?? {}, starts: (a.starts ?? []).map((x) => ({ key: x.key, label: x.label, says: x.says ?? '' })) }))
+    return graphAgents().filter((a) => !checkAgent(a).length).map((a) => ({ id: a.id, name: a.name, scope: a.scope, ui: a.ui, isDefault: !!a.isDefault, look: a.look ?? {}, starts: (a.starts ?? []).map((x) => ({ key: x.key, label: x.label, says: x.says ?? '' })) }))
   }
 
   const viewOf = (v: SessionView, user: string) => {

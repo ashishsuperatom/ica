@@ -10,7 +10,7 @@ what is built and what is next.
 ## Knowledge (`vm/packages/composition-graph`, `knowledge.ts`)
 
 - A project's knowledge is written in its home's `knowledge/index.mts` (settings and domains: their parts, files and
-  settings) and imported into `db/composition.sqlite` with `composition-graph import`; `composition-graph verify
+  settings) and imported into the platform's graph with `sacli graph import knowledge/index.mts` (the engine's `db/composition.sqlite` is its pulled replica); `composition-graph verify
   --against` checks the graph holds what the knowledge writes.
 - A conversation's domain is composed into its agent's system prompt; its files (programs, helpers) and
   `settings.json` are placed in the conversation's folder (`knowledge.ts`).

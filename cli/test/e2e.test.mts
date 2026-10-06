@@ -15,6 +15,7 @@ import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { buildProgram, ProgramStore } from '../../vm/packages/programs/src/index.ts'
 import { createSessionSeam } from '../../vm/apps/engine/session-seam.ts'
+import { agentsInGraph } from '../../vm/apps/engine/test/graph-agents.ts'
 
 const PID = '11111111-2222-3333-4444-555555555555', ORG = 'org-e2e'
 const root = fileURLToPath(new URL('../../', import.meta.url))
@@ -36,8 +37,7 @@ before(async () => {
   // a project home with one agent and a built program
   const src = join(root, 'vm/packages/programs/test/fixtures/unsettled-trips')
   buildProgram(src, new ProgramStore(join(home, 'project', 'programs', 'store')))
-  mkdirSync(join(home, 'project', 'agents'), { recursive: true })
-  writeFileSync(join(home, 'project', 'agents', 'trips.json'), JSON.stringify({ id: 'trips', name: 'Trips', scope: 'global', owner: 'user:builder', domain: 'd', programs: ['unsettled-trips'], tools: [], ui: { start: 'web/Start.tsx' }, ica: 'composer' }))
+  agentsInGraph(join(home, 'project'), [{ id: 'trips', name: 'Trips', scope: 'global', owner: 'user:builder', domain: 'd', programs: ['unsettled-trips'], tools: [], ui: { start: 'web/Start.tsx' }, ica: 'composer' }])
   // the real ProjectDO, listening
   const harness = `export { ProjectDO } from '../project-do.ts'
 export { OrgDO } from '../do.ts'

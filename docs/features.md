@@ -72,7 +72,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Sign-in through Clerk to our own tokens, plus browser-redirect PKCE login for mobile.
 - Every person through their own UserDO: all their tabs and devices (web app, console, iOS, project apps) connect there, linked to each project by RPC; each tab gets only its own replies, the answers and news of the sessions it has open, and the logs and terminals it attached to.
 - Sessions kept by the platform, in their owner's UserDO: each session's log (append-only, ordered, conflicts refused), the engine syncs every append and catches up on reconnect, and a person reads their sessions back without the engine.
-- The composition graph held by the platform (2026-10-07): the project's Durable Object holds it (the composition-graph package over its SQLite) and answers every read and governed change people and agents make, and the console's graph views — no engine needed; each engine keeps a replica it only pulls (on welcome and when told it changed), rebuilt from the platform when it disagrees; nodes an engine generates (an agent made from a session) are written by the platform, as the person; routed questions are recorded there.
+- The composition graph held by the platform (2026-10-07): the project's Durable Object holds it (the composition-graph package over its SQLite) and answers every read and governed change people and agents make, and the console's graph views — no engine needed; each engine keeps a replica it only pulls (on welcome and when told it changed), rebuilt from the platform when it disagrees; nodes an engine generates (an agent made from a session) are written by the platform, as the person; routed questions are recorded there. The project's written knowledge is imported straight into it (`sacli graph import knowledge/index.mts`, by someone who may publish); the `composition-graph` CLI only reads an engine's replica; the engine reads no knowledge or agent files from disk.
 - A UserDO per person: the index of their sessions across projects (its personal-state store is not used yet).
 - Answer durability: each person's UserDO buffers their answers, and iOS pulls the ones it missed.
 - Parcel transport: large bodies stored in R2 by hash with HMAC tickets.
@@ -114,7 +114,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 
 ## Planned
 
-- Importing a project's written knowledge (`composition-graph import`) straight into the platform's graph (today the CLI writes a local file, which a replica now sets aside); every other data flow audited platform → engine by default, engine → platform only for what the engine generates.
+- Every data flow platform → engine by default, engine → platform only for what the engine generates (in progress: connections and credentials, program and app source, settings, grounding, sessions back down).
 
 - Conversations: delete (the session log is append-only — needs a decision), share, and the final word for a collection of conversations. The person's menu: upgrade plan (with Stripe), personalisation. (not built)
 - Backups and restore: project homes off the box, Durable Objects exported, a restore drill.

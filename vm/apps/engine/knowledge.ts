@@ -8,14 +8,14 @@
 // What the agents read is the graph's latest PUBLISHED version: edits are a draft until they are published (before the
 // first version is published, the graph as it is).
 //
-// A project with no store yet may state its domains in knowledge/index.mts, in the same shape the graph imports
-// (`composition-graph import knowledge/index.mts`); it is rendered by the same package, so the text is the same.
+// The project's written knowledge (knowledge/index.mts) reaches the graph only through the platform
+// (`sacli graph import knowledge/index.mts`); this engine reads nothing of it from disk.
 import { readFile, mkdir, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+
 import { dataSeam } from './ica/workspace.js'
-import { openStore, compose as composeFromGraph, domains as domainsInGraph, render, route, rank, indexOf, publishedUpto, type ConceptBody, type FileBody, type Route } from '@superatom/composition-graph/node'
+import { openStore, compose as composeFromGraph, domains as domainsInGraph, route, publishedUpto, type FileBody, type Route } from '@superatom/composition-graph/node'
 import { createHash } from 'node:crypto'
 
 export interface Domain { name: string; capabilities: string[]; tools?: string[] }
@@ -27,19 +27,7 @@ const storeOf = (projectDir: string) => {
   return existsSync(file) ? openStore(file) : null
 }
 
-/** A domain as the project's index.mts states it, before the graph holds it. */
-interface Stated { name: string; intents?: string[]; capabilities: string[]; concepts?: ConceptBody[]; parts?: ConceptBody[]; files?: string[]; tools?: string[] }
-async function stated(projectDir: string): Promise<Stated[]> {
-  for (const name of ['index.mts', 'index.ts']) {
-    const file = join(projectDir, 'knowledge', name)
-    if (!existsSync(file)) continue
-    try { const mod = await import(`${pathToFileURL(file).href}?t=${Date.now()}`); return Array.isArray(mod.domains) ? mod.domains : [] }
-    catch (e: any) { console.warn(`[knowledge] ${file} could not be loaded: ${e?.message ?? e}`) }
-  }
-  return []
-}
-
-/** The domains there are: the graph's, or the stated ones when the project has no graph yet. */
+/** The domains there are: the graph's (none until the platform's graph reaches this engine). */
 export async function domainsOf(projectDir: string): Promise<Domain[]> {
   const store = storeOf(projectDir)
   if (store) {
@@ -48,7 +36,7 @@ export async function domainsOf(projectDir: string): Promise<Domain[]> {
       return domainsInGraph(store, { upto }).map((d) => { const tools = composeFromGraph(store, d.name, undefined, { upto }).tools; return { name: d.name, capabilities: d.capabilities, ...(tools ? { tools } : {}) } })
     } finally { store.close() }
   }
-  return (await stated(projectDir)).map((d) => ({ name: d.name, capabilities: d.capabilities, ...(d.tools ? { tools: d.tools } : {}) }))
+  return []
 }
 
 /** The agents there are, with what each is for — for a person choosing one. */
@@ -72,12 +60,7 @@ export async function compose(projectDir: string, domain: Domain): Promise<Knowl
     try { const c = composeFromGraph(store, domain.name, undefined, { upto: publishedUpto(store) }); return { domain: c.domain, text: c.text, files: c.files, used: c.used, settings: c.settings } }
     finally { store.close() }
   }
-  const d = (await stated(projectDir)).find((x) => x.name === domain.name)
-  if (!d) throw new Error(`there is no domain "${domain.name}"`)
-  const dir = join(projectDir, 'knowledge', d.name.trim().toLowerCase().replace(/\s+/g, '-'))
-  const files: FileBody[] = []
-  for (const f of d.files ?? []) { try { files.push({ name: f, text: await readFile(join(dir, f), 'utf8') }) } catch { console.warn(`[knowledge] ${d.name}: file ${f} is missing`) } }
-  return { domain: d.name, text: render(d.name, d.concepts ?? d.parts ?? [], files), files, used: {}, settings: {} }
+  throw new Error(`there is no domain "${domain.name}": this engine has no graph yet`)
 }
 
 /** Put a domain's files and settings into an agent's folder. */
@@ -101,11 +84,8 @@ export async function pick(projectDir: string, question: string): Promise<{ doma
   if (!all.length) return { domain: null, route: null }
   const store = storeOf(projectDir)
   let r: Route
-  if (store) { try { r = route(store, question, publishedUpto(store)) } finally { store.close() } }
-  else {
-    const docs = await Promise.all((await stated(projectDir)).map(async (d) => ({ name: d.name, text: `${d.name} ${(await compose(projectDir, d)).text}`, intents: d.intents ?? [] })))
-    r = rank(indexOf(docs), question)
-  }
+  if (!store) return { domain: null, route: null }
+  try { r = route(store, question, publishedUpto(store)) } finally { store.close() }
   // A question no domain's words reach still goes somewhere: the first domain, and the route says it was not chosen.
   const chosen = all.find((d) => d.name === r.domain) ?? all[0]
   return { domain: chosen, route: r }

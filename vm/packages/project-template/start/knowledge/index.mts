@@ -1,4 +1,4 @@
-// {{NAME}}'s knowledge as the composition graph imports it (`composition-graph import knowledge/index.mts`): the
+// {{NAME}}'s knowledge as the composition graph imports it (`sacli graph import knowledge/index.mts` — into the platform's graph; engines download it): the
 // organisation's settings, and the domains — each an agent's whole system prompt, with the programs it runs. The rules
 // are programs (the source runs them, through shared/sql-rows.mjs or shared/js-rows.mjs: totals and pages of 100); the
 // concepts say what they mean.

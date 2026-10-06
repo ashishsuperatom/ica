@@ -450,6 +450,14 @@ revocable sign-in tokens; service tokens bound to one project.
     the rest of the things, they always come from the platform. As many things as possible, by default, go from
     platform to engine; only what the agent generates — because it can only be generated in the engine — goes from
     engine to platform.
+  - **One path (the user, 2026-10-07):** anything that can be sent to the platform should first go to the platform and
+    from there only should come to the engine — you cannot have both paths. Whatever you are uploading or sending, it
+    always goes to the platform and the engine downloads later on. Always send a message once it is saved in the
+    platform — "you can download it" — to the engine; if the engine is not available at that point, when it comes back
+    it downloads it anyway. *How:* every kind the platform holds is an append-only, numbered log (content by hash);
+    on save the platform tells the engine `<kind>:changed`; the engine pulls what comes after its own cursor, in order,
+    on that message and on every reconnect (so a message missed while it was away costs nothing); a record already held
+    is checked equal and skipped; an engine copy that disagrees is set aside and rebuilt from the platform.
   - **Engine → platform** (made in the engine): sessions and conversations, programs, dashboards, and the nodes an
     agent generates (an agent made from a session) — sent as writes the platform makes, governed, as the person.
   - **Platform → engine** (held by the platform): the composition graph — domains, concepts, agents, settings, its
@@ -1134,7 +1142,7 @@ And the versions as a diagram, like git's, of how things moved.
 published version** — picking an agent for a question, composing its prompt, listing domains and agents
 (`publishedUpto`; before the first version, the graph as it is). Edits after it are **the draft**, shown as the nodes
 that differ from the published graph (so a discard empties it although the log grew). **Publish** makes the next
-version, numbered v1, v2, … with a message (`graph:version {message}`, CLI `composition-graph publish --message …`);
+version, numbered v1, v2, … with a message (`graph:version {message}`, or in the console);
 **Discard** sets the draft back to the published version; **Bring into the draft** sets it to an older version, and
 publishing that starts a new line from it — the versions form a tree (`versionLine`: each version's parent is the one it
 was published from). An agent in a person's own scope (made from their session) is theirs at once; everything shared
@@ -1371,7 +1379,7 @@ of its own); a domain composes intermediate concepts (a domain written before th
 they show in the middle column marked *atomic*, and can be detached); an intermediate composes atomic ones only, and a
 concept that is part of one stays atomic. Composing renders an intermediate as its heading, its line, then its atomic
 concepts beneath it. Attaching and detaching are one governed change (`graph:join` / `graph:leave` with `into`: a domain
-or an intermediate concept); the CLI the same (`composition-graph join <domain|intermediate> <concept>`). The console's
+or an intermediate concept); `sacli call graph:join` the same. The console's
 graph page is the three columns (`Columns` in the framework, reusable for other linked things), each searchable, with
 *New* in the intermediate and atomic columns (made and attached to what is selected on the left).
 

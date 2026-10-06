@@ -15,6 +15,7 @@ import { createSessionSeam } from '../../../../vm/apps/engine/session-seam.ts'
 import { platformOf } from '../../../../vm/apps/engine/platform.ts'
 import { createActivities } from '../../../../vm/apps/engine/activity.ts'
 
+import { agentsInGraph } from '../../../../vm/apps/engine/test/graph-agents.ts'
 const here = fileURLToPath(new URL('.', import.meta.url))
 const PID = '11111111-2222-3333-4444-555555555555'
 const harness = `
@@ -72,7 +73,7 @@ const sourceOf = (dir: string) => {
   const walk = (d: string) => { for (const n of readdirSync(d)) { const p = join(d, n); if (statSync(p).isDirectory()) walk(p); else out[relative(dir, p).split('\\\\').join('/')] = readFileSync(p, 'utf8') } }
   walk(dir); return out
 }
-const agentSpec = (home: string) => { mkdirSync(join(home, 'agents'), { recursive: true }); writeFileSync(join(home, 'agents', 'trips.json'), JSON.stringify({ id: 'trips', name: 'Trips', scope: 'global', owner: 'user:b', domain: 'd', programs: ['unsettled-trips'], tools: [], ui: { start: 's' }, ica: 'composer' })) }
+const agentSpec = (home: string) => { agentsInGraph(home, [{ id: 'trips', name: 'Trips', scope: 'global', owner: 'user:b', domain: 'd', programs: ['unsettled-trips'], tools: [], ui: { start: 's' }, ica: 'composer' }]) }
 
 beforeAll(async () => {
   data = createServer((req, res) => { req.resume(); req.on('end', () => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ rows: [{ trip_no: 'T1', balance: 9 }] })) }) })

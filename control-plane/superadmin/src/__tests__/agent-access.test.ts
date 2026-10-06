@@ -164,7 +164,7 @@ describe('agent keys, identities and the audit history, in the real ProjectDO', 
     // each scope = the engine's messages of that area + the ones the hub answers itself
     const area = (prefix: string, engine: Set<string>) => [...engine, ...HUB_MESSAGES.filter((t) => t.startsWith(prefix))].sort()
     expect([...AGENT_SCOPES.sessions].sort()).toEqual(area('session:', SESSION_MESSAGES))
-    expect([...AGENT_SCOPES.graph].sort()).toEqual([...GRAPH_MESSAGES].sort())   // the graph: answered by the platform
+    expect([...new Set([...AGENT_SCOPES.graph, ...AGENT_SCOPES.publish.filter((t) => t.startsWith('graph:'))])].sort()).toEqual([...GRAPH_MESSAGES].sort())   // the graph: answered by the platform
     expect([...GRAPH_MESSAGES].every((t) => (HUB_MESSAGES as readonly string[]).includes(t))).toBe(true)
     expect([...AGENT_SCOPES.programs].sort()).toEqual(area('program:', PROGRAM_MESSAGES))
   })

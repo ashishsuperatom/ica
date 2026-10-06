@@ -13,12 +13,14 @@
 //   graph:join | graph:leave { into|domain, concept, at?, reason? }              compose a concept into a domain or concept
 //   graph:suggest { name, kind, body, reason } · graph:decide { id, verdict, reason? } · graph:publish { name, scope, reason }
 //   graph:versions · graph:version { message } (publish the draft) · graph:restore { name } (the draft set to a version)
+//   graph:import { domains, settings?, files: { "<domain>|<file>": text }, reason? }   a project's written knowledge, imported
+//                (sacli graph import knowledge/index.mts) — by someone who may publish; one unit, all or none
 //   inspect views: composition, compositionNode, compositionCompose, compositionColumns
 // → graph:reply { … } | graph:refused { reason }.
 
 import {
   Store, sqlStorageGraphDb, MIGRATIONS, compose, domains as domainsOf, conceptsOf, governance as g, GovernanceRefusal,
-  publishDraft, restoreVersion, draft, published, versionLine, sincePublished, replicaSince, START,
+  publishDraft, restoreVersion, draft, published, versionLine, sincePublished, replicaSince, START, importDomains,
   type Kind, type Cursor, type DomainBody, type ConceptBody, type FileBody,
 } from '../../../vm/packages/composition-graph/src/index.js'
 import { migrate, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
@@ -28,10 +30,10 @@ type Storage = DurableObjectStorage
 /** Who acts, as the hub knows them: user:<id> or agent:<key>, whether they may publish, their email, the scopes they see. */
 export interface Who { id: string; admin: boolean; email?: string; scopes: string[] }
 
-export const GRAPH_MESSAGES = new Set(['graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:versions', 'graph:version', 'graph:restore'])
+export const GRAPH_MESSAGES = new Set(['graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:versions', 'graph:version', 'graph:restore', 'graph:import'])
 export const GRAPH_VIEWS = new Set(['composition', 'compositionNode', 'compositionCompose', 'compositionColumns'])
 /** What changes the graph (an engine is told to pull after one). */
-const WRITES = new Set(['graph:concept', 'graph:domain', 'graph:agent', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:version', 'graph:restore'])
+const WRITES = new Set(['graph:import', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:version', 'graph:restore'])
 const KINDS: Kind[] = ['domain', 'concept', 'file', 'setting', 'agent']
 
 /** The graph's own tables, by its own migrations (kept apart from the Durable Object's: _graph_migrations). */
@@ -97,6 +99,14 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
           case 'graph:publish': return { suggestion: g.publish(s, who, str(payload.name, 'name'), str(payload.scope, 'scope') as any, String(payload.reason ?? '')) }
           case 'graph:versions': return { people: people(), versions: versionLine(s), published: published(s)?.name ?? null, draft: draft(s), since: sincePublished(s).map((c) => ({ id: c.id, at: c.at, name: c.name, kind: c.kind, by: c.by, reason: c.reason, removed: !c.toHash })) }
           case 'graph:version': return { version: publishDraft(s, who, String(payload.message ?? '')) }
+          case 'graph:import': {
+            if (!who.admin) throw new GovernanceRefusal('importing knowledge is for someone who may publish')
+            if (!Array.isArray(payload.domains)) throw new GovernanceRefusal('an import names its domains')
+            const files = (payload.files ?? {}) as Record<string, string>
+            const read = (domain: string, file: string) => { const t = files[`${domain}|${file}`]; if (typeof t !== 'string') throw new GovernanceRefusal(`the import lacks the text of ${file} (domain ${domain})`); return t }
+            const imported = s.db.atomic(() => importDomains(s, payload.domains, read, { by: who.id, reason: String(payload.reason ?? 'imported from the project\'s knowledge') }, Array.isArray(payload.settings) ? payload.settings : []))
+            return { imported }
+          }
           case 'graph:restore': return { restored: restoreVersion(s, who, str(payload.name, 'name')), version: s.version(String(payload.name)) }
           case 'graph:decide': {
             const verdict = String(payload.verdict ?? '')

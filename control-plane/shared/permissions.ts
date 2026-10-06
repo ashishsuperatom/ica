@@ -144,6 +144,7 @@ export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   ...Object.fromEntries(VIEW.map((t) => [t, 'project.view'])),
   ...Object.fromEntries(ASK.map((t) => [t, 'project.ask'])),
   'artifact:decide': 'project.approve',
+  'graph:import': 'project.publish',
   'decision:change': 'project.publish', 'decision:learn': 'project.publish',
   // Publishing a program: its owner, or someone with project.publish (the catalogue decides which).
   'program:publish': 'project.ask',

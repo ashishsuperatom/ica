@@ -14,6 +14,7 @@ import { buildProgram, ProgramStore } from '../../../../vm/packages/programs/src
 import { createSessionSeam } from '../../../../vm/apps/engine/session-seam.ts'
 import { createAccess } from '../../../../vm/apps/engine/access.ts'
 
+import { agentsInGraph } from '../../../../vm/apps/engine/test/graph-agents.ts'
 const here = fileURLToPath(new URL('.', import.meta.url))
 const PID = '11111111-2222-3333-4444-555555555555'
 const harness = `
@@ -51,8 +52,7 @@ beforeAll(async () => {
   data = createServer((req, res) => { let b = ''; req.on('data', (c) => (b += c)).on('end', () => { seen.push(JSON.parse(b)); res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ rows: [{ trip_no: 'T1', balance: 2 }] })) }) })
   await new Promise<void>((r) => data.listen(0, '127.0.0.1', () => r()))
   buildProgram(fileURLToPath(new URL('../../../../vm/packages/programs/test/fixtures/unsettled-trips', import.meta.url)), new ProgramStore(join(home, 'programs', 'store')))
-  mkdirSync(join(home, 'agents'))
-  writeFileSync(join(home, 'agents', 'trips.json'), JSON.stringify({ id: 'trips', name: 'Trips', scope: 'global', owner: 'user:b', domain: 'd', programs: ['unsettled-trips'], tools: [], ui: { start: 's' }, ica: 'composer' }))
+  agentsInGraph(home, [{ id: 'trips', name: 'Trips', scope: 'global', owner: 'user:b', domain: 'd', programs: ['unsettled-trips'], tools: [], ui: { start: 's' }, ica: 'composer' }])
   const out = await build({ stdin: { contents: harness, resolveDir: here, loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'] })
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
     durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: 'x' } })

@@ -18,4 +18,4 @@ node vm/packages/project-template/cli.mjs sync  <home>    # write the shared fil
 
 A shared file is changed here and synced to every home, never in one home alone; `check` on every home says whether
 they are in step. After `new`: `pnpm install` in `app/web`, then a domain in `knowledge/index.mts` (imported with
-`composition-graph import`), its facts, dimensions and views, and `app/server/verify.mjs` until it passes.
+`sacli graph import knowledge/index.mts`, into the platform's graph), its facts, dimensions and views, and `app/server/verify.mjs` until it passes.

@@ -87,21 +87,22 @@ test('scopes: a viewer sees global and their own; a scope change is a recorded c
   assert.throws(() => s.put('x', 'concept', c('X'), by, { scope: 'team:x' }), /not a scope/)
 })
 
-test('the CLI: add a concept, join, compose as it was, leave, list by viewer', () => {
+test('the CLI reads the replica — compose as it was, list by viewer, history — and refuses to change it', () => {
   const dir = mkdtempSync(pathJoin(tmpdir(), 'cg-cli-'))
   const db = pathJoin(dir, 'composition.sqlite')
   const bin = fileURLToPath(new URL('../bin/composition-graph', import.meta.url))
-  const run = (...a: string[]) => execFileSync(bin, [...a, '--db', db, '--by', 'tester'], { encoding: 'utf8' }).trim()
-  run('put', 'd', '--kind', 'domain', '--body', '{"capabilities":[],"concepts":[],"files":[]}')
-  assert.match(run('concept', 'rules', '--title', 'Rules', '--text', 'Bookings are confirmed consignments.'), /^rules → /)
-  assert.match(run('concept', 'steps', '--title', 'Steps', '--text', '- find the branch\n- read the trips', '--form', 'bullets', '--scope', 'group:ops'), /^steps → /)
+  const run = (...a: string[]) => execFileSync(bin, [...a, '--db', db], { encoding: 'utf8' }).trim()
+  // The replica as an engine holds it (what the platform's graph gave it).
+  const s = openStore(db), by = { by: 'tester' }
+  s.put('rules', 'concept', { title: 'Rules', form: 'text', text: 'Bookings are confirmed consignments.' }, by)
+  s.put('steps', 'concept', { title: 'Steps', form: 'bullets', items: ['find the branch', 'read the trips'] }, by, { scope: 'group:ops' })
   const empty = new Date().toISOString(); tick()
-  run('join', 'd', 'rules'); run('join', 'd', 'steps')
+  s.put('d', 'domain', { capabilities: [], concepts: ['rules', 'steps'], files: [] }, by)
+  s.close()
   assert.match(run('compose', 'd'), /# Rules\nBookings are confirmed consignments\.\n\n# Steps\n- find the branch\n- read the trips/)
   assert.doesNotMatch(run('compose', 'd', '--viewer', 'user:u1'), /# Steps/)
-  assert.doesNotMatch(run('compose', 'd', '--as-of', empty), /# Rules/)
-  run('leave', 'd', 'rules')
-  assert.doesNotMatch(run('compose', 'd'), /# Rules/)
+  assert.throws(() => run('compose', 'd', '--as-of', empty))   // the domain did not exist yet
   assert.deepEqual(run('names', '--kind', 'concept', '--viewer', 'user:u1').split('\n').map((l) => l.split('\t')[1]), ['rules'])
   assert.match(run('history', 'd'), /tester/)
+  assert.throws(() => run('concept', 'x', '--title', 'X', '--text', 'y'), (e: any) => /the graph lives in the platform/.test(String(e.stderr)))
 })

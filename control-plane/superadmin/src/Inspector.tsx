@@ -231,7 +231,7 @@ function CompositionPart({ hub, part }: ViewProps & { part: 'changes' | 'questio
   const [pick, setPick] = useState<CompPick | null>(null)
   if (err) return <Err msg={err} retry={reload} />
   if (!data) return <Loading on={loading} />
-  if (data.exists === false) return <Notice>This project has no composition graph yet. Import one with <Code>composition-graph import knowledge/index.mts</Code>.</Notice>
+  if (data.exists === false) return <Notice>This project has no composition graph yet. Import the project's knowledge with <Code>sacli graph import knowledge/index.mts</Code>.</Notice>
   const domains: any[] = data.domains ?? []
   if (pick) return (
     <div className="sa-stack sa-stack--4">
