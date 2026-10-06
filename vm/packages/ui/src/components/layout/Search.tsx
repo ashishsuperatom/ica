@@ -36,7 +36,7 @@ export default function Search({ items, placeholder = 'Search…', onClose }: { 
   return (
     <div className="sa-search" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className="sa-search__box" role="dialog" aria-modal="true" aria-label="Search">
-        <div className="sa-search__field"><Icon icon="lucide:search" />
+        <div className="sa-search__field"><Icon icon="solar:magnifer-linear" />
           <input id="sa-search-input" autoFocus value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={keys} placeholder={placeholder} aria-label="Search" />
           <kbd className="sa-search__kbd">Esc</kbd>
         </div>
@@ -48,7 +48,7 @@ export default function Search({ items, placeholder = 'Search…', onClose }: { 
               <div key={i.key}>
                 {head && <div className="sa-label sa-search__group">{head}</div>}
                 <button type="button" role="option" aria-selected={n === at} data-at={n} data-on={n === at} className="sa-search__item" onMouseEnter={() => setAt(n)} onClick={() => pick(i)}>
-                  <Icon icon={i.icon ?? 'lucide:message-square'} /><span className="sa-search__label">{i.label}</span>{i.sub && <span className="sa-search__sub">{i.sub}</span>}
+                  <Icon icon={i.icon ?? 'solar:chat-round-line-linear'} /><span className="sa-search__label">{i.label}</span>{i.sub && <span className="sa-search__sub">{i.sub}</span>}
                 </button>
               </div>
             )

@@ -6,7 +6,9 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Icon } from '@iconify/react'
 
 export interface NavItem {
-  key: string; label: string; icon: string; active?: boolean; onClick: () => void
+  key: string; label: string
+  /** Drawn before the words; a plain list (conversations) goes without. */
+  icon?: string; active?: boolean; onClick: () => void
   /** What can be done to the item (rename, pin…): a "…" on hover opens it; `close` shuts it after a choice. */
   menu?: (close: () => void) => ReactNode
 }
@@ -31,7 +33,7 @@ export default function Sidebar({ name, logo, connected, statusWord, onAbout, gr
               <span className="sa-sidebar__name truncate">{name}</span>
               {dot}
             </button>
-            <button onClick={() => onToggle(true)} className="sa-icon-btn sa-icon-btn--lg" title="Collapse sidebar" aria-label="Collapse sidebar"><Icon icon="mynaui:sidebar" /></button>
+            <button onClick={() => onToggle(true)} className="sa-icon-btn sa-icon-btn--lg" title="Collapse sidebar" aria-label="Collapse sidebar"><Icon icon="solar:sidebar-minimalistic-linear" /></button>
           </div>
           <nav className="sa-sidebar__nav sa-scroll-hide" aria-label="Sections">
             <NavList groups={groups} onGo={close} />
@@ -39,11 +41,11 @@ export default function Sidebar({ name, logo, connected, statusWord, onAbout, gr
           {foot && <div className="sa-sidebar__foot">{foot(false)}</div>}
         </>) : (<>
           <div className="sa-sidebar__head sa-sidebar__head--centred">
-            <button onClick={() => onToggle(false)} className="sa-icon-btn sa-icon-btn--lg" title="Expand sidebar" aria-label="Expand sidebar"><Icon icon="mynaui:sidebar" /></button>
+            <button onClick={() => onToggle(false)} className="sa-icon-btn sa-icon-btn--lg" title="Expand sidebar" aria-label="Expand sidebar"><Icon icon="solar:sidebar-minimalistic-linear" /></button>
           </div>
           <div className="sa-sidebar__rail">
             {groups[0]?.items.map((i) => (
-              <button key={i.key} onClick={() => go(i)} data-active={!!i.active} className="sa-nav-item sa-nav-item--rail" title={i.label}><Icon icon={i.icon} /></button>
+              <button key={i.key} onClick={() => go(i)} data-active={!!i.active} className="sa-nav-item sa-nav-item--rail" title={i.label}><Icon icon={i.icon ?? 'solar:chat-round-line-linear'} /></button>
             ))}
           </div>
           <div className="sa-sidebar__foot sa-sidebar__foot--rail">
@@ -77,12 +79,12 @@ function NavRow({ item, onGo }: { item: NavItem; onGo: () => void }) {
     document.addEventListener('mousedown', away); document.addEventListener('keydown', esc)
     return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc) }
   }, [open])
-  const button = <button onClick={onGo} data-active={!!item.active} className="sa-nav-item" title={item.label}><Icon icon={item.icon} /><span className="sa-nav-item__text">{item.label}</span></button>
+  const button = <button onClick={onGo} data-active={!!item.active} className="sa-nav-item" title={item.label}>{item.icon && <Icon icon={item.icon} />}<span className="sa-nav-item__text">{item.label}</span></button>
   if (!item.menu) return button
   return (
     <div className="sa-nav-row" ref={ref} data-open={open}>
       {button}
-      <button type="button" className="sa-nav-row__more" onClick={() => setOpen((o) => !o)} title="More" aria-label={`More for ${item.label}`} aria-expanded={open}><Icon icon="lucide:ellipsis" /></button>
+      <button type="button" className="sa-nav-row__more" onClick={() => setOpen((o) => !o)} title="More" aria-label={`More for ${item.label}`} aria-expanded={open}><Icon icon="solar:menu-dots-bold" /></button>
       {open && <div className="sa-menu sa-nav-row__menu" role="menu">{item.menu(() => setOpen(false))}</div>}
     </div>
   )

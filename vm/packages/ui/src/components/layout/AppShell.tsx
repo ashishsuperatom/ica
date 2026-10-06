@@ -30,7 +30,7 @@ export default function AppShell({ sidebar, children, artifacts, artifactsCount,
   return (
     <ArrangeProvider>
       <div className="sa-app__topbar">
-        <button onClick={() => toggle(!collapsed)} className="sa-app__menu-btn" aria-label="Menu"><Icon icon="mynaui:sidebar" /></button>
+        <button onClick={() => toggle(!collapsed)} className="sa-app__menu-btn" aria-label="Menu"><Icon icon="solar:sidebar-minimalistic-linear" /></button>
         <span className="sa-app__topbar-title">Menu</span>
       </div>
       <div className="sa-app" data-wide={wide}>
@@ -48,7 +48,7 @@ export default function AppShell({ sidebar, children, artifacts, artifactsCount,
             <div className="sa-artifacts__head">
               <span className="sa-label">Artifacts</span>
               <button className="sa-icon-btn sa-artifacts__toggle" onClick={() => pane(false)} aria-expanded title="Hide the artifacts" aria-label="Hide the artifacts">
-                <Icon icon="lucide:panel-right-close" />
+                <Icon icon="solar:sidebar-minimalistic-linear" />
               </button>
             </div>
             <div className="sa-artifacts__body">{artifacts}</div>
@@ -58,7 +58,7 @@ export default function AppShell({ sidebar, children, artifacts, artifactsCount,
         {artifacts && !paneOpen && (
           <button className="sa-artifacts__fab" onClick={() => pane(true)} aria-expanded={false} data-has={!!artifactsCount}
             title={artifactsCount ? `${artifactsCount} artifact${artifactsCount === 1 ? '' : 's'} — show them` : 'Artifacts — nothing yet'} aria-label="Show the artifacts">
-            <Icon icon="lucide:files" />
+            <Icon icon="solar:documents-linear" />
             {!!artifactsCount && <span className="sa-artifacts__badge">{artifactsCount > 99 ? '99+' : artifactsCount}</span>}
           </button>
         )}

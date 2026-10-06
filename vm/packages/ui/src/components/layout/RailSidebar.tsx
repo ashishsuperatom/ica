@@ -1,6 +1,7 @@
 // The two-level sidebar: a thin rail that is always there, with the big places (home, agents…) and the person at its
 // foot; beside it the panel of the place picked in the rail — its own list (conversations, agents…). Pinned, both show.
-// Unpinned, the rail alone shows, and resting on a rail place opens its panel over the page until the pointer leaves.
+// Unpinned, the rail alone shows, and resting on a rail place opens its panel over the page until the pointer leaves;
+// pinned, resting on another place shows its panel in the same spot for as long as the pointer stays.
 // On a phone it is a drawer holding both.
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
@@ -50,11 +51,11 @@ export default function RailSidebar({ name, connected, statusWord, places, curre
     document.body.style.cursor = 'col-resize'
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
   }
-  const open = pinned ? shown : peek
+  const open = peek ?? (pinned ? shown : null)
   const place = places.find((p) => p.key === open && p.panel) ?? null
   const word = statusWord ?? (connected ? 'Connected' : 'Reconnecting…')
   const pick = (p: RailPlace) => {
-    if (p.panel) { setShown(p.key); if (!pinned) setPeek(p.key) }
+    if (p.panel) { setShown(p.key); setPeek(pinned ? null : p.key) }
     p.onClick?.()
   }
   return (
@@ -65,8 +66,8 @@ export default function RailSidebar({ name, connected, statusWord, places, curre
           {places.map((p) => (
             <button key={p.key} type="button" className="sa-railbar__place" data-active={p.key === current} data-open={p.key === open && !!p.panel}
               title={p.label} aria-label={p.label} onClick={() => pick(p)}
-              onMouseEnter={() => { if (!pinned && !phone()) { hold(); setPeek(p.panel ? p.key : null) } }}>
-              <Icon icon={p.icon} />
+              onMouseEnter={() => { if (!phone()) { hold(); setPeek(p.panel ? p.key : null) } }}>
+              <Icon icon={p.key === current ? p.icon.replace(/-linear$/, '-bold') : p.icon} />
             </button>
           ))}
           <span className="sa-railbar__gap" />
@@ -79,7 +80,7 @@ export default function RailSidebar({ name, connected, statusWord, places, curre
               <span className="sa-sidebar__brand" title={name}><span className="sa-sidebar__name truncate">{name}</span></span>
               {place.actions}
               <button type="button" onClick={() => { onPin(!pinned); setPeek(null) }} className="sa-icon-btn sa-icon-btn--lg"
-                title={pinned ? 'Close the side panel' : 'Keep the side panel open'} aria-label={pinned ? 'Close the side panel' : 'Keep the side panel open'}><Icon icon="mynaui:sidebar" /></button>
+                title={pinned ? 'Close the side panel' : 'Keep the side panel open'} aria-label={pinned ? 'Close the side panel' : 'Keep the side panel open'}><Icon icon="solar:sidebar-minimalistic-linear" /></button>
             </div>
             <div className="sa-sidebar__nav sa-scroll-hide" onClick={(e) => { if (phone() && (e.target as HTMLElement).closest('.sa-nav-item')) onPin(false) }}>{place.panel}</div>
             <div className="sa-railbar__resize" role="separator" aria-orientation="vertical" aria-label="Drag to widen or narrow the side panel" title="Drag to widen; double-click for the usual width"

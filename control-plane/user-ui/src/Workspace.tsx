@@ -142,37 +142,37 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
       <button type="button" className="sa-menu__item" onClick={act(() => void keep(s.session, { archived: !s.archived }))}>{s.archived ? 'Unarchive' : 'Archive'}</button>
     </>
   }
-  const itemOf = (s: Conversation) => ({ key: `s:${s.session}`, label: titleOf(s), icon: s.pinned ? 'lucide:pin' : 'lucide:message-square', active: s.session === sessionId, onClick: () => go(s.session), menu: menuOf(s) })
+  const itemOf = (s: Conversation) => ({ key: `s:${s.session}`, label: titleOf(s), active: s.session === sessionId, onClick: () => go(s.session), menu: menuOf(s) })
   const loose = live.filter((s) => !s.pinned && !s.collection)
   const nav = [
-    { items: [{ key: 'new', label: 'New chat', icon: 'lucide:square-pen', active: onPages && root === 'home' && !pending, onClick: newChat }] },
+    { items: [{ key: 'new', label: 'New chat', icon: 'solar:pen-new-square-linear', active: onPages && root === 'home' && !pending, onClick: newChat }] },
     ...(live.some((s) => s.pinned) ? [{ label: 'Pinned', items: live.filter((s) => s.pinned).map(itemOf) }] : []),
     ...collections.map((c) => ({ label: c, items: live.filter((s) => !s.pinned && s.collection === c).map(itemOf) })).filter((g) => g.items.length),
     { label: 'Conversations', items: loose.slice(0, shownConversations).map(itemOf) },
   ]
   const searchItems: SearchItem[] = [
-    { key: 'a:new', label: 'New chat', icon: 'lucide:square-pen', group: 'Go to', onSelect: newChat },
-    { key: 'a:agents', label: 'Agents', icon: 'lucide:bot', group: 'Go to', onSelect: () => page('agents') },
-    { key: 'a:activity', label: 'Activity', icon: 'lucide:activity', group: 'Go to', onSelect: () => page('activity') },
-    { key: 'a:connections', label: 'Connections', icon: 'lucide:plug', group: 'Go to', onSelect: () => page('connections') },
-    ...sessions.map((s) => ({ key: `s:${s.session}`, label: titleOf(s), sub: [agentOf(s.agent).name, s.collection].filter(Boolean).join(' · '), icon: s.archived ? 'lucide:archive' : 'lucide:message-square', group: s.archived ? 'Archived' : 'Conversations', onSelect: () => go(s.session) })),
+    { key: 'a:new', label: 'New chat', icon: 'solar:pen-new-square-linear', group: 'Go to', onSelect: newChat },
+    { key: 'a:agents', label: 'Agents', icon: 'solar:magic-stick-3-linear', group: 'Go to', onSelect: () => page('agents') },
+    { key: 'a:activity', label: 'Activity', icon: 'solar:pulse-linear', group: 'Go to', onSelect: () => page('activity') },
+    { key: 'a:connections', label: 'Connections', icon: 'solar:plug-circle-linear', group: 'Go to', onSelect: () => page('connections') },
+    ...sessions.map((s) => ({ key: `s:${s.session}`, label: titleOf(s), sub: [agentOf(s.agent).name, s.collection].filter(Boolean).join(' · '), icon: s.archived ? 'solar:archive-linear' : 'solar:chat-round-line-linear', group: s.archived ? 'Archived' : 'Conversations', onSelect: () => go(s.session) })),
   ]
   const sideActions = <>
-    <button type="button" className="sa-icon-btn sa-icon-btn--lg" data-on={activityView} onClick={toggleActivity} title={activityView ? 'Back to the conversations (⌥⌘U)' : 'What is running, and lately (⌥⌘U)'} aria-label="Activity" aria-pressed={activityView}><Icon icon="lucide:bell" /></button>
-    <button type="button" className="sa-icon-btn sa-icon-btn--lg" onClick={() => setSearching(true)} title="Search (⌘K)" aria-label="Search"><Icon icon="lucide:search" /></button>
+    <button type="button" className="sa-icon-btn sa-icon-btn--lg" data-on={activityView} onClick={toggleActivity} title={activityView ? 'Back to the conversations (⌥⌘U)' : 'What is running, and lately (⌥⌘U)'} aria-label="Activity" aria-pressed={activityView}><Icon icon="solar:bell-linear" /></button>
+    <button type="button" className="sa-icon-btn sa-icon-btn--lg" onClick={() => setSearching(true)} title="Search (⌘K)" aria-label="Search"><Icon icon="solar:magnifer-linear" /></button>
   </>
   const moreConversations = loose.length > shownConversations
     ? <button type="button" className="sa-sidelist__more" onClick={() => setShownConversations((n) => n + 30)}>Show more</button> : null
   const named = agents.filter((a) => !a.isDefault)
   const places: RailPlace[] = [
-    { key: 'home', label: 'Home', icon: 'lucide:house', onClick: () => page('home'), actions: sideActions,
+    { key: 'home', label: 'Home', icon: 'solar:home-2-linear', onClick: () => page('home'), actions: sideActions,
       panel: activityView ? <><NavList groups={[nav[0]!]} /><SideActivity request={request} subscribeLive={subscribeLive} /></> : <><NavList groups={nav} />{moreConversations}</> },
-    { key: 'agents', label: 'Agents', icon: 'lucide:bot', onClick: () => page('agents'), actions: sideActions,
+    { key: 'agents', label: 'Agents', icon: 'solar:magic-stick-3-linear', onClick: () => page('agents'), actions: sideActions,
       panel: <NavList groups={[
-        { items: [{ key: 'agents', label: 'All agents', icon: 'lucide:layout-grid', active: onPages && root === 'agents', onClick: () => page('agents') }] },
-        { label: 'Agents', items: named.map((a) => ({ key: `a:${a.id}`, label: a.name, icon: a.look.icon ?? 'lucide:bot', active: startAgent === a.id || (!!sessionId && current === a.id), onClick: () => go(`s/${a.id}`) })) },
+        { items: [{ key: 'agents', label: 'All agents', icon: 'solar:widget-linear', active: onPages && root === 'agents', onClick: () => page('agents') }] },
+        { label: 'Agents', items: named.map((a) => ({ key: `a:${a.id}`, label: a.name, icon: a.look.icon ?? 'solar:magic-stick-3-linear', active: startAgent === a.id || (!!sessionId && current === a.id), onClick: () => go(`s/${a.id}`) })) },
       ]} /> },
-    { key: 'connections', label: 'Connections', icon: 'lucide:plug', onClick: () => page('connections') },
+    { key: 'connections', label: 'Connections', icon: 'solar:plug-circle-linear', onClick: () => page('connections') },
   ]
   const railAt = sessionId || (onPages && (root === 'home' || !root)) ? 'home' : startAgent || (onPages && root?.startsWith('agent')) ? 'agents' : onPages && root?.startsWith('connection') ? 'connections' : ''
   const [showKeys, setShowKeys] = useState(false)
@@ -200,17 +200,17 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
           <RailSidebar name={projectName} connected={connected} places={places} current={railAt} pinned={!collapsed} onPin={(p) => toggle(!p)}
             foot={<UserProfile name={me.name} email={me.email} context={me.email}
               menu={<>
-                <MenuItem icon="lucide:circle-user" label="Profile" onClick={() => page('profile')} />
-                <MenuItem icon="lucide:settings" label="Settings" onClick={() => page('settings')} />
+                <MenuItem icon="solar:user-circle-linear" label="Profile" onClick={() => page('profile')} />
+                <MenuItem icon="solar:settings-linear" label="Settings" onClick={() => page('settings')} />
                 <MenuRule />
-                <MenuItem icon="lucide:bot" label="Agents" onClick={() => page('agents')} />
-                <MenuItem icon="lucide:plug" label="Connections" onClick={() => page('connections')} />
-                <MenuItem icon="lucide:activity" label="Activity" onClick={() => page('activity')} />
+                <MenuItem icon="solar:magic-stick-3-linear" label="Agents" onClick={() => page('agents')} />
+                <MenuItem icon="solar:plug-circle-linear" label="Connections" onClick={() => page('connections')} />
+                <MenuItem icon="solar:pulse-linear" label="Activity" onClick={() => page('activity')} />
                 <MenuRule />
-                <MenuItem icon="lucide:life-buoy" label="Help" sub={<>
-                  <MenuItem icon="lucide:keyboard" label="Keyboard shortcuts" onClick={() => setShowKeys(true)} />
+                <MenuItem icon="solar:question-circle-linear" label="Help" sub={<>
+                  <MenuItem icon="solar:keyboard-linear" label="Keyboard shortcuts" onClick={() => setShowKeys(true)} />
                 </>} />
-                {onSignOut && <MenuItem icon="lucide:log-out" label="Log out" onClick={onSignOut} />}
+                {onSignOut && <MenuItem icon="solar:logout-2-linear" label="Log out" onClick={onSignOut} />}
               </>} />} />
         )}
         status={<ConnectionStatus status={connected ? 'open' : /access/.test(status) ? 'rejected' : 'reconnecting'} message={connected ? undefined : status || undefined} />}
@@ -470,7 +470,7 @@ function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, 
           <BlockFrame id={id} step={i + 1} label={asked ? 'Question' : agent.name} title={title}
             cause={i > 0 ? (said ?? intentWords(cause)) : undefined} subtitle={i === 0 ? said ?? `opened ${agent.name.toLowerCase()}` : undefined}
             from={parentIdx >= 0 ? { id: block.parent!, step: parentIdx + 1, onPath: true } : undefined} onReveal={revealBlock}
-            busy={editing} icon={asked ? 'lucide:message-circle-question' : agent.look.icon} accent={asked ? 'var(--series-2)' : accentOf(agent.look.accent)}>
+            busy={editing} icon={asked ? 'solar:chat-round-dots-linear' : agent.look.icon} accent={asked ? 'var(--series-2)' : accentOf(agent.look.accent)}>
             {uis.filter((u) => u.head?.length).map((u) => <ProgramBlock key={`h:${u.hash}`} program={u} only={u.head} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} />)}
             <div className={`sa-stack${editing ? ' sa-busy' : ''}`}>
               {answer ? <Answer markdown={lead.rest} blocks={answer.blocks}
@@ -499,7 +499,7 @@ function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, 
       steps.push({ id: 'pending', at: new Date().toISOString(), node: (
         <BlockFrame id="pending" step={path.length + 1} label={pending.beats ? 'Question' : agent.name} title={pending.label || 'The next step'} busy
           cause={pending.beats ? undefined : pending.label} from={fromIdx >= 0 ? { id: path[fromIdx], step: fromIdx + 1, onPath: true } : undefined} onReveal={revealBlock}
-          icon={pending.beats ? 'lucide:message-circle-question' : agent.look.icon} accent={pending.beats ? 'var(--series-2)' : accentOf(agent.look.accent)}>
+          icon={pending.beats ? 'solar:chat-round-dots-linear' : agent.look.icon} accent={pending.beats ? 'var(--series-2)' : accentOf(agent.look.accent)}>
           {pending.beats ? <div className="sa-card" aria-busy="true" aria-live="polite"><BeatRows beats={pending.beats} live /></div> : <StepSkeleton />}
         </BlockFrame>
       ) })

@@ -343,3 +343,25 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 @media (max-width: 767px) { .sa-menu--side { position: static; transform: none; margin: 0; box-shadow: none; border-width: 0; width: auto; padding: 0 0 0 var(--sp-4); } }
 .sa-dialog__keys { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-2) var(--sp-4); align-items: center; font-size: var(--t-sm); }
 .sa-dialog__keys kbd { font-family: inherit; font-size: var(--t-xs); padding: 2px var(--sp-1h); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--panel); color: var(--ink); white-space: nowrap; }
+
+/* The two-level sidebar's look: a grey rail, a white panel with a rounded corner beside it; rows plain and compact,
+   the selected one a quiet grey — no colour, no icon for a conversation. */
+.sa-railbar__rail { background: var(--rail); border-right: 0; padding-top: var(--sp-3); gap: var(--sp-1h); }
+.sa-railbar__place { width: 40px; height: 40px; color: var(--muted); }
+.sa-railbar__place > svg { width: 22px; height: 22px; }
+.sa-railbar__place:hover, .sa-railbar__place[data-open='true'] { background: var(--rail-active); color: var(--ink); }
+.sa-railbar__place[data-active='true'] { background: var(--rail-active); color: var(--ink); }
+.sa-railbar { background: var(--rail); }
+.sa-railbar__panel { background: var(--sidebar); border: 1px solid var(--line); border-bottom: 0; border-top-left-radius: 14px; margin-top: var(--sp-2); }
+.sa-railbar__panel[data-floating='true'] { border-top-right-radius: 14px; }
+.sa-railbar__panel .sa-sidebar__head { height: 52px; padding: 0 var(--sp-2) 0 var(--sp-4); }
+.sa-railbar__panel .sa-sidebar__name { font-size: var(--t-lg); font-weight: var(--w-semibold); }
+.sa-railbar__panel .sa-sidebar__nav { padding: var(--sp-1) var(--sp-2h) var(--sp-4); gap: 1px; }
+.sa-railbar__panel .sa-sidebar__group + .sa-sidebar__group { margin-top: var(--sp-4); }
+.sa-railbar__panel .sa-sidebar__group-label { padding: 0 var(--sp-2h) var(--sp-1h); font-size: var(--t-base); font-weight: var(--w-medium); color: var(--faint); text-transform: none; letter-spacing: 0; }
+.sa-railbar__panel .sa-nav-item { height: 34px; padding: 0 var(--sp-2h); gap: var(--sp-2h); font-size: var(--t-md); color: var(--ink); }
+.sa-railbar__panel .sa-nav-item > svg { width: 18px; height: 18px; color: var(--ink); }
+.sa-railbar__panel .sa-nav-item:hover { background: var(--rail); }
+.sa-railbar__panel .sa-nav-item[data-active='true'] { background: var(--rail-active); color: var(--ink); font-weight: var(--w-regular, 400); box-shadow: none; }
+.sa-railbar__panel .sa-nav-item[data-active='true'] svg { color: var(--ink); }
+.sa-railbar__panel .sa-nav-row__more:hover { background: var(--rail-active); }

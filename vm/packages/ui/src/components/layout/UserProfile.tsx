@@ -55,7 +55,7 @@ export function MenuItem({ icon, label, onClick, sub, tone }: { icon: string; la
   if (sub) return (
     <div className="sa-menu__subwrap" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
       <button type="button" role="menuitem" className="sa-menu__choice" aria-haspopup="menu" aria-expanded={open} data-open={open} onClick={() => setOpen((o) => !o)}>
-        <Icon icon={icon} /><span className="sa-menu__words">{label}</span><Icon icon="lucide:chevron-right" className="sa-menu__chev" />
+        <Icon icon={icon} /><span className="sa-menu__words">{label}</span><Icon icon="solar:alt-arrow-right-linear" className="sa-menu__chev" />
       </button>
       {open && <div className="sa-menu sa-menu--side" role="menu">{sub}</div>}
     </div>

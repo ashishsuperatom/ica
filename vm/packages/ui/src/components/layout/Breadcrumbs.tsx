@@ -21,7 +21,7 @@ function Switcher({ crumb }: { crumb: Crumb }) {
   const list = (crumb.choices ?? []).filter((c) => !q || c.label.toLowerCase().includes(q.toLowerCase()))
   return (
     <div className="sa-crumbs__switch" ref={box}>
-      <button className="sa-crumbs__more" aria-label={`Switch ${crumb.label}`} aria-expanded={open} onClick={() => { setOpen(!open); setQ('') }}><Icon icon="lucide:chevrons-up-down" /></button>
+      <button className="sa-crumbs__more" aria-label={`Switch ${crumb.label}`} aria-expanded={open} onClick={() => { setOpen(!open); setQ('') }}><Icon icon="solar:sort-vertical-linear" /></button>
       {open && (
         <div className="sa-crumbs__menu" role="menu">
           {(crumb.choices?.length ?? 0) > 8 && <input id={`crumb-${crumb.key}`} className="sa-input sa-crumbs__find" placeholder="Find…" value={q} autoFocus onChange={(e) => setQ(e.target.value)} />}
@@ -44,7 +44,7 @@ export default function Breadcrumbs({ items }: { items: Crumb[] }) {
         const last = i === items.length - 1
         return (
           <span key={c.key} className="sa-crumbs__step" data-current={last}>
-            {i > 0 && <Icon icon="lucide:chevron-right" className="sa-crumbs__sep" />}
+            {i > 0 && <Icon icon="solar:alt-arrow-right-linear" className="sa-crumbs__sep" />}
             {c.onClick && !last
               ? <button className="sa-crumbs__link" onClick={c.onClick}>{c.icon && <Icon icon={c.icon} />}<span className="truncate">{c.label}</span></button>
               : <span className="sa-crumbs__here" aria-current={last ? 'page' : undefined}>{c.icon && <Icon icon={c.icon} />}<span className="truncate">{c.label}</span></span>}

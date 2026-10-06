@@ -54,7 +54,7 @@ function AgentsBlock() {
     notify(r.t === 'graph:reply' ? `Asked to publish ${a.name} — an administrator decides` : r.reason ?? 'Could not ask to publish it', r.t === 'graph:reply' ? 'note' : 'refused')
   }
   return (
-    <Section icon="lucide:bot" title={`${(agents ?? []).length} agents you can see`} subtitle="Open one to start a session, or make a new one."
+    <Section icon="solar:magic-stick-3-linear" title={`${(agents ?? []).length} agents you can see`} subtitle="Open one to start a session, or make a new one."
       actions={<button className="sa-btn sa-btn--primary" onClick={() => open('agent-new', {}, 'Making an agent')}>New agent</button>}>
       <RecordList rows={agents} keyOf={(a) => a.id} empty="No agents you can see yet." onRow={(a) => env.go(`s/${a.id}`)} columns={[
         { key: 'name', label: 'Agent', render: (a) => <>{a.name}{a.isDefault ? <> <Status state="neutral">default</Status></> : null}</> },
@@ -122,7 +122,7 @@ function ActivityBlock() {
   useEffect(() => { void env.request({ t: 'activity:list' }).then((r) => setRows(r.activities ?? [])) }, [env.request])
   useEffect(() => env.subscribeLive((m) => { if (m.t === 'activity' && m.activity?.id) setRows((prev) => [m.activity, ...(prev ?? []).filter((x) => x.id !== m.activity.id)].slice(0, 100)) }), [env.subscribeLive])
   return (
-    <Section icon="lucide:activity" title="Running for you, and lately" subtitle="Program builds and session runs; kept current as they change.">
+    <Section icon="solar:pulse-linear" title="Running for you, and lately" subtitle="Program builds and session runs; kept current as they change.">
       <RecordList rows={rows} keyOf={(a) => a.id} empty="Nothing running, and nothing in the last day." columns={[
         { key: 'state', label: 'State', render: (a) => <Status state={a.state === 'failed' ? 'critical' : a.state === 'running' ? 'running' : 'ok'}>{a.state}</Status> },
         { key: 'title', label: 'What', wrap: true, render: (a) => <>{asWords(a.title)}{a.progress || a.detail ? <span className="sa-muted"> — {asWords(a.progress ?? a.detail)}</span> : null}</> },
@@ -150,7 +150,7 @@ function ConnectionsBlock() {
   useEffect(load, [])   // eslint-disable-line react-hooks/exhaustive-deps
   const remove = async (id: string) => { const r = await api(`/connections/${id}`, { method: 'DELETE' }); if (!r.ok) notify(((await r.json().catch(() => ({}))) as any).error ?? 'Refused', 'refused'); load() }
   return (<>
-    <Section icon="lucide:plug" title={`${(list ?? []).length} connections`} subtitle="Yours and the project's shared ones. A secret is sent once, sealed, and never shown again.">
+    <Section icon="solar:plug-circle-linear" title={`${(list ?? []).length} connections`} subtitle="Yours and the project's shared ones. A secret is sent once, sealed, and never shown again.">
       <RecordList rows={list} keyOf={(c) => c.id} empty="No connections yet." columns={[
         { key: 'name', label: 'Name' },
         { key: 'what', label: 'What', render: (c) => `${connectors.find((x) => x.id === c.connector)?.title ?? c.connector} · ${c.runs === 'code' ? 'code' : c.runs === 'cloud' ? 'cloud' : 'API'}${c.origin === 'engine' ? ' (on the engine)' : ''}` },
@@ -159,12 +159,12 @@ function ConnectionsBlock() {
         { key: 'remove', label: '', align: 'end', render: (c) => (c.origin === 'platform' ? <button className="sa-btn sa-btn--link" onClick={(e) => { e.stopPropagation(); void remove(c.id) }}>Remove</button> : null) },
       ]} onRow={(c) => { if (c.runs === 'cloud') open('connection', { id: c.id, name: c.name, connector: c.connector }, `Opened ${c.name}`) }} />
     </Section>
-    <Section icon="lucide:plus" title="Connect" subtitle="What can be connected: each reads its system, and some can act in it.">
+    <Section icon="solar:add-circle-linear" title="Connect" subtitle="What can be connected: each reads its system, and some can act in it.">
       <div className="sa-section__body">
         <div className="sa-sub-grid">
           {connectors.map((c) => (
             <button key={c.id} type="button" className="sa-sub-card" title={c.description} onClick={() => open('connection-new', { connector: c.id }, `Connecting ${c.title}`)}>
-              <span className="sa-sub-card__title"><span className="sa-row sa-row--tight"><Icon icon={c.icon ?? (c.kind === 'sql' ? 'lucide:database' : c.kind === 'mcp' ? 'lucide:plug-zap' : 'lucide:globe')} />{c.title}</span></span>
+              <span className="sa-sub-card__title"><span className="sa-row sa-row--tight"><Icon icon={c.icon ?? (c.kind === 'sql' ? 'solar:database-linear' : c.kind === 'mcp' ? 'solar:plug-circle-linear' : 'solar:global-linear')} />{c.title}</span></span>
               <span className="sa-sub-card__text">{c.description}{c.offers?.actions ? ' · can act' : ''}</span>
             </button>
           ))}
@@ -261,7 +261,7 @@ function ConnectionBlock() {
     {test && <Notice state={test.ok ? 'ok' : 'critical'}>{test.ok ? (test.message ? `It works — ${test.message}.` : 'It works.') : `It does not answer: ${test.message ?? 'no reason given'}`}</Notice>}
     {err && <Notice state="critical">{err}</Notice>}
     {!offers ? <Empty icon="lucide:loader">Asking what it offers…</Empty> : (<>
-      <Section icon="lucide:table" title="What it reads" subtitle={`${offers.entities.length} thing${offers.entities.length === 1 ? '' : 's'} to read`}>
+      <Section icon="solar:clipboard-list-linear" title="What it reads" subtitle={`${offers.entities.length} thing${offers.entities.length === 1 ? '' : 's'} to read`}>
         <div className="sa-section__body sa-stack">
           <Toolbar>
             <Field label="Read"><select id="con-entity" className="sa-input" value={entity} onChange={(e) => { setEntity(e.target.value); setRows(null); setFilters({}) }}>{offers.entities.map((e) => <option key={e.name} value={e.name}>{e.label ?? e.name}</option>)}</select></Field>
@@ -273,7 +273,7 @@ function ConnectionBlock() {
         {rows && <RecordList rows={rows.map((r, i) => ({ ...r, __i: i }))} keyOf={(r: any) => String(r.__i)} empty="Nothing came back." columns={cols.map((c) => ({ key: c, label: c, render: (r: any) => (r[c] === null || r[c] === undefined ? '—' : typeof r[c] === 'object' ? JSON.stringify(r[c]).slice(0, 80) : String(r[c])) }))} />}
       </Section>
       {offers.actions.length > 0 && (
-        <Section icon="lucide:zap" title="What it can do" subtitle="An action that changes the other system runs only when you confirm it; agents ask you first.">
+        <Section icon="solar:bolt-linear" title="What it can do" subtitle="An action that changes the other system runs only when you confirm it; agents ask you first.">
           <RecordList rows={offers.actions} keyOf={(a) => a.name} onRow={(a) => { setAction(a); setInput({}); setDone('') }} columns={[
             { key: 'label', label: 'Action' }, { key: 'description', label: 'What it does', wrap: true },
             { key: 'effect', label: 'Changes', render: (a) => <Status state={a.effect === 'read' ? 'neutral' : a.effect === 'irreversible' ? 'critical' : 'attention'}>{a.effect === 'read' ? 'nothing' : a.effect === 'irreversible' ? 'cannot be undone' : 'something'}</Status> },
@@ -288,7 +288,7 @@ function ConnectionBlock() {
         </Section>
       )}
     </>)}
-    <Section icon="lucide:history" title="What it did" subtitle="Every operation and every request it made — never a credential or a body.">
+    <Section icon="solar:history-linear" title="What it did" subtitle="Every operation and every request it made — never a credential or a body.">
       <RecordList rows={calls} keyOf={(c) => String(c.seq)} empty="Nothing yet." columns={[
         { key: 'at', label: 'When', render: (c) => when(c.at) }, { key: 'op', label: 'What' }, { key: 'target', label: 'On', wrap: true, render: (c) => c.target ?? '—' },
         { key: 'rows', label: 'Rows', align: 'end', render: (c) => c.rows ?? '—' },
@@ -302,7 +302,7 @@ function ProfileBlock() {
   const env = useEnv()
   const held = (Object.keys(PROJECT_CAPABILITIES) as (keyof typeof PROJECT_CAPABILITIES)[]).filter((c) => env.caps.includes(c))
   return (<>
-    <Section icon="lucide:circle-user" title={env.me.name}>
+    <Section icon="solar:user-circle-linear" title={env.me.name}>
       <div className="sa-facts">
         <div className="sa-facts__row"><span className="sa-facts__key">Name</span><span className="sa-facts__value">{env.me.name}</span></div>
         <div className="sa-facts__row"><span className="sa-facts__key">Email</span><span className="sa-facts__value">{env.me.email ?? '—'}</span></div>
@@ -311,10 +311,10 @@ function ProfileBlock() {
       </div>
       {env.onSignOut && <ActionBar><button type="button" className="sa-btn" onClick={env.onSignOut}>Log out</button></ActionBar>}
     </Section>
-    <Section icon="lucide:shield-check" title="What you can do here">
+    <Section icon="solar:shield-check-linear" title="What you can do here">
       {held.length
         ? <RecordList rows={held.map((c) => ({ c, what: PROJECT_CAPABILITIES[c] }))} keyOf={(r) => r.c} columns={[{ key: 'what', label: 'Allowed', wrap: true, render: (r) => r.what }]} />
-        : <Empty icon="lucide:shield">Nothing yet — a project admin gives you a role.</Empty>}
+        : <Empty icon="solar:shield-linear">Nothing yet — a project admin gives you a role.</Empty>}
     </Section>
   </>)
 }
@@ -325,20 +325,20 @@ function SettingsBlock() {
   const collections = [...env.sessions.reduce((m, s) => (s.collection && !s.archived ? m.set(s.collection, (m.get(s.collection) ?? 0) + 1) : m), new Map<string, number>())]
   const titleOf = (s: Conversation) => s.name || plainTitle(s.title) || env.agents.find((a) => a.id === s.agent)?.name || s.agent
   return (<>
-    <Section icon="lucide:archive" title="Archived conversations">
+    <Section icon="solar:archive-linear" title="Archived conversations">
       <RecordList rows={archived} keyOf={(s) => s.session} empty="Nothing archived." onRow={(s) => env.go(s.session)} columns={[
         { key: 'title', label: 'Conversation', render: (s) => titleOf(s) },
         { key: 'updated', label: 'Last step', render: (s) => when(s.updated) },
         { key: 'act', label: '', align: 'end', render: (s) => <button type="button" className="sa-btn" onClick={(e) => { e.stopPropagation(); void env.keep(s.session, { archived: false }) }}>Unarchive</button> },
       ]} />
     </Section>
-    <Section icon="lucide:folder" title="Collections">
+    <Section icon="solar:folder-linear" title="Collections">
       <RecordList rows={collections} keyOf={([c]) => c} empty="No collections — keep a conversation in one from its … menu." columns={[
         { key: 'name', label: 'Collection', render: ([c]) => c },
         { key: 'n', label: 'Conversations', align: 'end', render: ([, n]) => n },
       ]} />
     </Section>
-    <Section icon="lucide:keyboard" title="Keyboard shortcuts"><KeyboardShortcuts /></Section>
+    <Section icon="solar:keyboard-linear" title="Keyboard shortcuts"><KeyboardShortcuts /></Section>
   </>)
 }
 
@@ -351,15 +351,15 @@ export function KeyboardShortcuts() {
 }
 
 export const PAGE_BLOCKS: Registry = {
-  home: { label: 'Home', icon: 'lucide:house', accent: 'var(--primary)', title: () => 'Where do you want to start?', subtitle: () => 'Open an agent, then narrow, break down and follow the next moves — or ask in your own words.', render: () => <Home /> },
-  agents: { label: 'Agents', icon: 'lucide:bot', accent: 'var(--series-1)', render: () => <AgentsBlock /> },
-  'agent-new': { label: 'New agent', icon: 'lucide:plus', accent: 'var(--series-1)', title: (p) => (p.sent ? `Agent: ${String(p.title)}` : 'Make an agent'), subtitle: (p) => (p.sent ? 'Sent — kept as it was made' : 'A title, the knowledge it answers from, the programs it may run, who sees it'), render: () => <AgentNew /> },
-  'agent-made': { label: 'Made', icon: 'lucide:check', accent: 'var(--win)', title: (p) => `${String(p.title)} is made`, subtitle: () => 'A node of the knowledge graph: owned, versioned, governed', render: () => <AgentMade /> },
-  activity: { label: 'Activity', icon: 'lucide:activity', accent: 'var(--series-2)', render: () => <ActivityBlock /> },
-  profile: { label: 'Profile', icon: 'lucide:circle-user', accent: 'var(--primary)', render: () => <ProfileBlock /> },
-  settings: { label: 'Settings', icon: 'lucide:settings', accent: 'var(--primary)', render: () => <SettingsBlock /> },
-  connections: { label: 'Connections', icon: 'lucide:plug', accent: 'var(--series-3)', render: () => <ConnectionsBlock /> },
-  'connection-new': { label: 'New connection', icon: 'lucide:plus', accent: 'var(--series-3)', title: (p) => (p.sent ? `Connection: ${String(p.name)}` : 'Connect'), render: () => <ConnectionNew /> },
-  'connection-made': { label: 'Connected', icon: 'lucide:check', accent: 'var(--win)', title: (p) => `${String(p.name)} is connected`, render: () => <ConnectionMade /> },
-  connection: { label: 'Connection', icon: 'lucide:plug', accent: 'var(--series-3)', title: (p) => String(p.name), subtitle: (p) => String(p.connector ?? ''), render: () => <ConnectionBlock /> },
+  home: { label: 'Home', icon: 'solar:home-2-linear', accent: 'var(--primary)', title: () => 'Where do you want to start?', subtitle: () => 'Open an agent, then narrow, break down and follow the next moves — or ask in your own words.', render: () => <Home /> },
+  agents: { label: 'Agents', icon: 'solar:magic-stick-3-linear', accent: 'var(--series-1)', render: () => <AgentsBlock /> },
+  'agent-new': { label: 'New agent', icon: 'solar:add-circle-linear', accent: 'var(--series-1)', title: (p) => (p.sent ? `Agent: ${String(p.title)}` : 'Make an agent'), subtitle: (p) => (p.sent ? 'Sent — kept as it was made' : 'A title, the knowledge it answers from, the programs it may run, who sees it'), render: () => <AgentNew /> },
+  'agent-made': { label: 'Made', icon: 'solar:check-circle-linear', accent: 'var(--win)', title: (p) => `${String(p.title)} is made`, subtitle: () => 'A node of the knowledge graph: owned, versioned, governed', render: () => <AgentMade /> },
+  activity: { label: 'Activity', icon: 'solar:pulse-linear', accent: 'var(--series-2)', render: () => <ActivityBlock /> },
+  profile: { label: 'Profile', icon: 'solar:user-circle-linear', accent: 'var(--primary)', render: () => <ProfileBlock /> },
+  settings: { label: 'Settings', icon: 'solar:settings-linear', accent: 'var(--primary)', render: () => <SettingsBlock /> },
+  connections: { label: 'Connections', icon: 'solar:plug-circle-linear', accent: 'var(--series-3)', render: () => <ConnectionsBlock /> },
+  'connection-new': { label: 'New connection', icon: 'solar:add-circle-linear', accent: 'var(--series-3)', title: (p) => (p.sent ? `Connection: ${String(p.name)}` : 'Connect'), render: () => <ConnectionNew /> },
+  'connection-made': { label: 'Connected', icon: 'solar:check-circle-linear', accent: 'var(--win)', title: (p) => `${String(p.name)} is connected`, render: () => <ConnectionMade /> },
+  connection: { label: 'Connection', icon: 'solar:plug-circle-linear', accent: 'var(--series-3)', title: (p) => String(p.name), subtitle: (p) => String(p.connector ?? ''), render: () => <ConnectionBlock /> },
 }
