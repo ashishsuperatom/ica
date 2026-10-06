@@ -1436,9 +1436,28 @@ because we want a specialised version for some people — that is what goes in t
 different from a program, and people can ask questions below it, if they have the permission (the permission system
 covers them too).
 
-*Open:* where programs are stored — one place (today's program catalogue: metadata in the project's Durable Object, the
-bundle, source included, in R2), with the project app's views becoming programs there and the separate app store
-(`app_versions`) going away.
+**A full application, not only small programs (the user):** a program is like one module — it does something individually
+and has a React view. But an application can have many things: a library or a system, a full application. If all we
+have is single programs, 300 of them each done on its own, disconnected — what if they need common libraries, and what
+about a completely separate application? Otherwise we give up that capability and can only have small Node programs
+with a React view, not a full system. And: why would there be a separate app store, if we keep metadata and download
+files? A built Node.js and React program is the same thing as a small one when it comes to the file system. If
+everything becomes an agent session, that is quite good — build it; and while doing it, clean up the older versions
+of things that are no longer necessary.
+
+**So, one kind — the program — that scales from a function to a full application:**
+- A program is a package: any number of modules, any number of server functions, any number of React blocks (screens),
+  and the slice of STATE it owns. A full application is one program with many blocks (its screens and its own
+  navigation), not a different kind of thing.
+- Common code is a **library program** — functions, no blocks, no STATE — that other programs name (`uses`, by name and
+  version); the engine builds a program with the libraries it uses, from the catalogue, and records which versions (by
+  hash) went into it. Programs may also call one another's functions at run time.
+- **One store:** the program catalogue — metadata in the project's Durable Object, each build (source included) in R2.
+  No separate app store: the project app becomes an application program (or a few) on library programs.
+- **Everything is an agent session:** a session is a domain and its programs, with STATE; a dashboard is a program (an
+  application) offered in the dashboard section to the people allowed, and a question asked beneath it opens a session
+  on it. The domain scripts (`allocation.mjs` and the others) become library programs the domain's programs and its
+  agent use; the graph keeps only knowledge.
 
 ## Applications
 
