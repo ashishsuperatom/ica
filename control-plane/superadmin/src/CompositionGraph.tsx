@@ -5,7 +5,7 @@
 // detach, order, make, edit (or suggest, when it is someone else's). How the graph moved over time is its own view.
 // Drawn only with the semantic components (@superatom/ui).
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { Columns, ColumnsSearch, Dialog, markdownToHtml, Form, Field, Notice, Receipt, Code, Empty, Icon, notify, type ColumnItem, type ColumnSpec } from '@superatom/ui'
 import { useProjectHub } from './hub'
 import { cached, keep } from './cache'
@@ -14,6 +14,8 @@ type Body = Record<string, any>
 interface Node { name: string; title: string; line: string; scope: string; owner: string | null; hash: string; concepts: string[]; body: Body; composed?: boolean; form?: string; agents?: { name: string; title: string }[] }
 interface Version { id: number; name: string; message: string; upto: number; at: number; by: string; asOf: number; changes: number }
 interface Graph { domains: Node[]; intermediate: Node[]; atomic: Node[]; version?: Version }
+/** Each version's parent (the version it grew from), and the version now grew from. */
+interface Tree { parents: Record<string, string | null>; now: string | null }
 type Focus = { kind: 'domain' | 'intermediate' | 'atomic'; name: string } | null
 
 /** A concept's content as Markdown — a list or worked examples written before concepts were Markdown read as their Markdown. */
@@ -31,7 +33,8 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   const who = (() => { try { return String(JSON.parse(atob(String(token).split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).email ?? '') } catch { return '' } })()
   // A named version being looked at (read-only), or null: the graph as it is now.
   const [viewing, setViewing] = useState<string | null>(null)
-  const [versions, setVersions] = useState<{ versions: Version[]; since: { id: number; name: string; kind: string; by: string; reason: string | null; removed: boolean }[] } | null>(null)
+  const [versions, setVersions] = useState<{ versions: Version[]; tree: Tree; since: { id: number; name: string; kind: string; by: string; reason: string | null; removed: boolean }[] } | null>(null)
+  const [versionsOpen, setVersionsOpen] = useState(false)
   const cacheKey = `${who}|graph|${projectId}${viewing ? `|v:${viewing}` : ''}`
   const [graph, setGraph] = useState<Graph | null>(() => { try { const c = cached(cacheKey); return c ? JSON.parse(c) as Graph : null } catch { return null } })
   const [err, setErr] = useState('')
@@ -47,7 +50,7 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   }, [hub.request, cacheKey, viewing])   // eslint-disable-line react-hooks/exhaustive-deps -- hub is a new object each render; its request is stable
   const loadVersions = useCallback(async () => {
     const r = await hub.call({ t: 'graph:versions' }).catch(() => null)
-    if (r?.t === 'graph:reply') setVersions({ versions: r.versions ?? [], since: r.since ?? [] })
+    if (r?.t === 'graph:reply') setVersions({ versions: r.versions ?? [], tree: r.tree ?? { parents: {}, now: null }, since: r.since ?? [] })
   }, [hub.call])   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (hub.status === 'live') { void load(); void loadVersions() } }, [hub.status, load, loadVersions])
   const [naming, setNaming] = useState(false)
@@ -129,7 +132,7 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
     <div className="sa-graphpage">
       <div className="sa-graphpage__top">
         <ColumnsSearch value={q} onChange={setQ} placeholder="Search domains and concepts — titles and what they say" />
-        <VersionsStrip versions={versions?.versions ?? null} since={versions?.since.length ?? 0} viewing={viewing} onView={view} onName={() => setNaming(true)} />
+        <VersionsButton versions={versions} viewing={viewing} onOpen={() => setVersionsOpen(true)} />
       </div>
       {viewing && graph.version && (
         <div className="sa-graphpage__viewing" role="status">
@@ -148,6 +151,8 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
         onClose={() => setMaking(null)} onMade={async (name) => { if (making.into) await change('graph:join', making.into, name); else await load(); setMaking(null); goTo(name) }} />}
       {making?.kind === 'intermediate' && <NewIntermediate hub={hub} atomic={graph.atomic} preset={atom ? [atom] : []} into={making.into ? by.get(making.into)?.title ?? making.into : null}
         onClose={() => setMaking(null)} onMade={async (name) => { if (making.into) await change('graph:join', making.into, name); else await load(); setMaking(null); goTo(name) }} />}
+      {versionsOpen && versions && <VersionsPanel versions={versions.versions} tree={versions.tree} since={versions.since.length} viewing={viewing}
+        onView={(name) => { setVersionsOpen(false); view(name) }} onName={() => { setVersionsOpen(false); setNaming(true) }} onClose={() => setVersionsOpen(false)} />}
       {naming && <NameVersion hub={hub} since={versions?.since ?? []} last={versions?.versions[0]?.name ?? null} onClose={() => setNaming(false)} onNamed={() => { setNaming(false); void loadVersions() }} />}
       {restoring && viewing && (
         <Dialog title={`Make ${viewing} the current graph?`} onClose={() => setRestoring(false)}
@@ -165,31 +170,71 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   )
 }
 
-/** The named versions as a line of points, the changes between them counted, ending at now — click one to look at it. */
-function VersionsStrip({ versions, since, viewing, onView, onName }: { versions: Version[] | null; since: number; viewing: string | null; onView: (name: string | null) => void; onName: () => void }) {
-  const list = [...(versions ?? [])].reverse()   // oldest first, along the line
+/** Where the graph is, in one button: now (and what is not yet named) or the version being looked at. Opens the tree. */
+function VersionsButton({ versions, viewing, onOpen }: { versions: { versions: Version[]; tree: Tree; since: unknown[] } | null; viewing: string | null; onOpen: () => void }) {
+  const since = versions?.since.length ?? 0
+  const at = versions?.tree.now ?? null
+  const said = viewing ? `Looking at ${viewing}` : !versions ? 'Versions' : at ? `Now · ${since ? `${since} change${since === 1 ? '' : 's'} since ${at}` : `as ${at}`}` : `Now · no version named yet`
   return (
-    <div className="sa-versions" aria-label="Named versions">
-      <Icon icon="lucide:git-commit-horizontal" className="sa-versions__icon" />
-      <div className="sa-versions__line">
-        {versions === null && <span className="sa-skeleton" style={{ width: 160, height: 10 }} />}
-        {versions !== null && !list.length && <span className="sa-note">No named versions yet</span>}
-        {list.map((v, i) => (
-          <span key={v.id} className="sa-versions__step">
-            {i > 0 && <span className="sa-versions__gap" title={`${v.changes} change${v.changes === 1 ? '' : 's'} since ${list[i - 1].name}`}>{v.changes}</span>}
-            <button className="sa-versions__point" data-on={viewing === v.name} onClick={() => onView(viewing === v.name ? null : v.name)}
-              title={`${v.name} — ${v.message}\n${v.by.replace(/^user:/, '')} · ${new Date(v.at).toLocaleString()}`}>{v.name}</button>
-          </span>
-        ))}
-        {versions !== null && (
-          <span className="sa-versions__step">
-            {list.length > 0 && <span className="sa-versions__gap" title={`${since} change${since === 1 ? '' : 's'} since ${list[list.length - 1].name}`}>{since}</span>}
-            <button className="sa-versions__point sa-versions__point--now" data-on={!viewing} onClick={() => onView(null)}>Now</button>
-          </span>
-        )}
-      </div>
-      <button className="sa-btn sa-btn--link" onClick={onName} disabled={viewing !== null} title={viewing ? 'Go back to now to name a version' : 'Name the graph as it is now'}><Icon icon="lucide:tag" className="sa-btn__icon" />Name this version</button>
-    </div>
+    <button className="sa-versions" onClick={onOpen} disabled={!versions} data-viewing={!!viewing} title="The graph's versions, as a tree">
+      <Icon icon="lucide:git-branch" className="sa-versions__icon" /><span className="sa-versions__said">{said}</span><Icon icon="lucide:chevron-down" className="sa-versions__icon" />
+    </button>
+  )
+}
+
+/** The versions as a tree, oldest at the top: a version follows the one the graph was in when it was named; going back to
+ *  an older version and naming again branches from it. Now sits under the version it grew from. */
+function VersionsPanel({ versions, tree, since, viewing, onView, onName, onClose }: { versions: Version[]; tree: Tree; since: number; viewing: string | null; onView: (name: string | null) => void; onName: () => void; onClose: () => void }) {
+  const byName = new Map(versions.map((v) => [v.name, v]))
+  const kids = new Map<string | null, string[]>()
+  const order = [...versions].sort((a, b) => a.upto - b.upto || a.id - b.id).map((v) => v.name)
+  for (const n of order) { const p = tree.parents[n] ?? null; kids.set(p, [...(kids.get(p) ?? []), n]) }
+  const NOW = '\u0000now'
+  kids.set(tree.now, [...(kids.get(tree.now) ?? []), NOW])
+  // A node's branches are drawn indented beneath it; its last child (the newest) carries the line on at the same depth.
+  const rows: { name: string; depth: number }[] = []
+  const walk = (name: string, depth: number) => {
+    rows.push({ name, depth })
+    const k = kids.get(name) ?? []
+    k.slice(0, -1).forEach((b) => walk(b, depth + 1))
+    if (k.length) walk(k[k.length - 1], depth)
+  }
+  ;(kids.get(null) ?? []).forEach((r) => walk(r, 0))
+  // The lines through each row: a depth's line runs on while a later row is at that depth before any shallower one.
+  const through = rows.map((_, i) => { const on: number[] = []; for (let d = 0; d < rows[i].depth; d++) { for (const r of rows.slice(i + 1)) { if (r.depth < d) break; if (r.depth === d) { on.push(d); break } } } return on })
+  const ends = rows.map((r, i) => { for (const x of rows.slice(i + 1)) { if (x.depth < r.depth) return true; if (x.depth === r.depth) return false } return true })
+  const rails = (i: number) => <>{through[i].map((d) => <span key={d} className="sa-vtree__rail" style={{ '--d': d } as CSSProperties} />)}{i > 0 && rows[i].depth > rows[i - 1].depth && <span className="sa-vtree__elbow" />}</>
+  return (
+    <Dialog title="Versions" onClose={onClose} actions={<button className="sa-btn" onClick={onClose}>Close</button>}>
+      <ol className="sa-vtree">
+        {rows.map(({ name, depth }) => {
+          if (name === NOW) return (
+            <li key="now" className="sa-vtree__row" data-now style={{ '--depth': depth } as CSSProperties} data-on={!viewing} data-end={ends[rows.findIndex((r) => r.name === NOW)]}>
+              {rails(rows.findIndex((r) => r.name === NOW))}<span className="sa-vtree__dot" />
+              <span className="sa-vtree__main">
+                <span className="sa-vtree__name">Now</span>
+                <span className="sa-vtree__meta">{since ? `${since} change${since === 1 ? '' : 's'} not yet named` : 'nothing changed since'}</span>
+              </span>
+              <span className="sa-vtree__acts">
+                {viewing && <button className="sa-btn sa-btn--link" onClick={() => onView(null)}>Back to now</button>}
+                {!viewing && since > 0 && <button className="sa-btn sa-btn--primary" onClick={onName}><Icon icon="lucide:tag" className="sa-btn__icon" />Name this version</button>}
+              </span>
+            </li>
+          )
+          const v = byName.get(name)!
+          return (
+            <li key={name} className="sa-vtree__row" style={{ '--depth': depth } as CSSProperties} data-on={viewing === name} data-end={ends[rows.findIndex((r) => r.name === name)]}>
+              {rails(rows.findIndex((r) => r.name === name))}<span className="sa-vtree__dot" />
+              <button className="sa-vtree__main" onClick={() => onView(viewing === name ? null : name)} title="Look at the graph as it was (read-only)">
+                <span className="sa-vtree__name">{v.name}{v.changes > 0 && <span className="sa-vtree__count">+{v.changes}</span>}</span>
+                <span className="sa-vtree__msg">{v.message}</span>
+                <span className="sa-vtree__meta">{v.by.replace(/^user:/, '')} · {new Date(v.at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+              </button>
+            </li>
+          )
+        })}
+      </ol>
+    </Dialog>
   )
 }
 

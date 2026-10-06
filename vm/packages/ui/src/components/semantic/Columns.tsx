@@ -1,6 +1,6 @@
 // COLUMNS — a graph walked left to right. Each column holds every thing of its kind; selecting a thing on the left
-// puts what it holds first in the column to its right, then a separator, then the rest — attached to the selection with
-// + , detached with the unlink. Each column scrolls on its own, has a width of its own (dragged at its edge, kept in this
+// puts what it holds first in the column to its right, in a lane of its own with an edge drawn to each from the
+// selection, then the rest, quieter — attached to the selection with + , detached with the unlink. Each column scrolls on its own, has a width of its own (dragged at its edge, kept in this
 // browser) and never narrower than it can be read: past the window, the columns scroll sideways. One search above them
 // all; beside them, the detail of what is selected.
 
@@ -35,7 +35,7 @@ const MIN = 260
 
 function Item({ it, col, linked }: { it: ColumnItem; col: ColumnSpec; linked: boolean | null }) {
   return (
-    <div className="sa-col__item" data-selected={col.selected === it.key} data-linked={linked === true}>
+    <div className="sa-col__item" data-key={it.key} data-selected={col.selected === it.key} data-linked={linked === null ? undefined : String(linked)}>
       <button className="sa-col__main" onClick={() => col.onSelect(it.key)} title={it.line || it.title}>
         <span className="sa-col__title">{it.title}{it.tag && <span className="sa-col__tag">{it.tag}</span>}</span>
         {it.line && <span className="sa-col__line">{it.line}</span>}
@@ -60,14 +60,16 @@ function Column({ col }: { col: ColumnSpec }) {
       <div className="sa-col__body">
         {col.loading && Array.from({ length: 8 }, (_, i) => (
           <div key={`l${i}`} className="sa-col__item" aria-hidden><span className="sa-col__main"><span className="sa-skeleton" style={{ width: `${50 + ((i * 17) % 40)}%`, height: 12 }} /><span className="sa-skeleton" style={{ width: '80%', height: 9, marginTop: 6 }} /></span></div>))}
-        {!col.loading && linked && <>
-          <div className="sa-col__group">In {col.linkedTo} <span className="sa-col__count">{linked.length}</span></div>
-          {linked.map((it) => <Item key={it.key} it={it} col={col} linked />)}
-          {!linked.length && <p className="sa-col__empty">Nothing in it yet — attach from below.</p>}
-          <div className="sa-col__group sa-col__group--rest">Not in {col.linkedTo} <span className="sa-col__count">{rest.length}</span></div>
+        {!col.loading && !col.items.length && <p className="sa-col__empty">{col.empty ?? 'Nothing here.'}</p>}
+        {!col.loading && linked && col.items.length > 0 && <>
+          <div className="sa-col__lane" data-empty={!linked.length}>
+            <div className="sa-col__group sa-col__group--in">In {col.linkedTo} <span className="sa-col__count">{linked.length}</span></div>
+            {linked.map((it) => <Item key={it.key} it={it} col={col} linked />)}
+            {!linked.length && <p className="sa-col__empty">None yet{col.onAttach ? ' — attach one below with +' : ''}</p>}
+          </div>
+          {rest.length > 0 && <div className="sa-col__group sa-col__group--rest">Others <span className="sa-col__count">{rest.length}</span></div>}
         </>}
         {!col.loading && rest.map((it) => <Item key={it.key} it={it} col={col} linked={linked ? false : null} />)}
-        {!col.loading && !col.items.length && <p className="sa-col__empty">{col.empty ?? 'Nothing here.'}</p>}
       </div>
     </section>
   )
@@ -93,15 +95,69 @@ export function Columns({ columns, detail, keep = 'columns' }: { columns: Column
     return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
   }, [keep])
   const width = (k: string) => widths[k] ?? (k === 'detail' ? 460 : 320)
+  const edges = useEdges(columns)
   const handle = (k: string) => (
     <span className="sa-cols__resize" role="separator" aria-orientation="vertical" aria-label="Resize the column" title="Drag to resize · double-click for its usual width"
       onPointerDown={(e) => { e.preventDefault(); drag.current = { key: k, x: e.clientX, w: (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect().width }; document.body.classList.add('sa-resizing') }}
       onDoubleClick={() => setWidths((w) => { const { [k]: _gone, ...rest } = w; remember(`cols:${keep}`, rest); return rest })} />
   )
   return (
-    <div className="sa-cols" style={{ gridTemplateColumns: names.map((k, i) => (i === names.length - 1 ? `minmax(${width(k)}px, 1fr)` : `${width(k)}px`)).join(' ') }}>
+    <div className="sa-cols" ref={edges.ref} style={{ gridTemplateColumns: names.map((k, i) => (i === names.length - 1 ? `minmax(${width(k)}px, 1fr)` : `${width(k)}px`)).join(' ') }}>
+      <svg className="sa-cols__edges" aria-hidden width={edges.size.w} height={edges.size.h}>{edges.paths.map((d, i) => <path key={i} d={d} />)}</svg>
       {columns.map((c) => <div key={c.key} className="sa-cols__cell"><Column col={c} />{handle(c.key)}</div>)}
       {detail && <div className="sa-cols__cell"><section className="sa-col sa-col--detail" aria-label="Selected">{detail}</section>{handle('detail')}</div>}
     </div>
   )
+}
+
+/** The edges of the graph: from the thing selected in a column to each thing it holds in a column to its right (the
+ *  nearest column left of a linked column that has a selection). Drawn beneath the columns, so they show in the gaps
+ *  between them; a thing scrolled out of sight is reached at its column's edge. Measured again on scroll and resize. */
+function useEdges(columns: ColumnSpec[]) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [paths, setPaths] = useState<string[]>([])
+  const [size, setSize] = useState({ w: 0, h: 0 })
+  const sig = columns.map((c) => `${c.key}:${c.selected ?? ''}:${(c.linked ?? []).join(',')}:${c.items.length}`).join('|')
+  useEffect(() => {
+    const root = ref.current; if (!root) return
+    let frame = 0
+    const measure = () => {
+      frame = 0
+      const box = root.getBoundingClientRect()
+      const cells = [...root.querySelectorAll<HTMLElement>(':scope > .sa-cols__cell')].slice(0, columns.length)
+      const out: string[] = []
+      columns.forEach((col, j) => {
+        if (!col.linked?.length) return
+        let src: HTMLElement | null = null, i = j - 1
+        for (; i >= 0 && !src; i--) src = cells[i]?.querySelector<HTMLElement>('.sa-col__item[data-selected="true"]') ?? null
+        const body = cells[j]?.querySelector<HTMLElement>('.sa-col__body'); if (!src || !body) return
+        const srcBody = src.closest<HTMLElement>('.sa-col__body')!.getBoundingClientRect()
+        const s = src.getBoundingClientRect()
+        const sy = Math.min(Math.max(s.top + s.height / 2, srcBody.top), srcBody.bottom) - box.top + root.scrollTop
+        const sx = s.right - box.left + root.scrollLeft
+        const shown = body.getBoundingClientRect()
+        // Passing a column (the selection is further left): a straight line out of the selection, behind the columns
+        // between, fanning out in the gap before this one.
+        const skips = i + 1 < j - 1
+        const gap = parseFloat(getComputedStyle(root).columnGap) || 0
+        const fanFrom = skips ? cells[j]!.getBoundingClientRect().left - box.left + root.scrollLeft - gap : sx
+        if (skips) out.push(`M${sx},${sy} H${fanFrom}`)
+        for (const t of body.querySelectorAll<HTMLElement>('.sa-col__item[data-linked="true"]')) {
+          const r = t.getBoundingClientRect()
+          const ty = Math.min(Math.max(r.top + r.height / 2, shown.top + 4), shown.bottom - 4) - box.top + root.scrollTop
+          const tx = r.left - box.left + root.scrollLeft
+          const half = Math.max(12, (tx - fanFrom) / 2)
+          out.push(`M${fanFrom},${sy} C${fanFrom + half},${sy} ${tx - half},${ty} ${tx},${ty}`)
+        }
+      })
+      setPaths(out); setSize({ w: root.scrollWidth, h: root.scrollHeight })
+    }
+    const soon = () => { if (!frame) frame = requestAnimationFrame(measure) }
+    soon()
+    root.addEventListener('scroll', soon, true)
+    const ro = new ResizeObserver(soon); ro.observe(root)
+    window.addEventListener('resize', soon)
+    return () => { if (frame) cancelAnimationFrame(frame); root.removeEventListener('scroll', soon, true); ro.disconnect(); window.removeEventListener('resize', soon) }
+  }, [sig])   // eslint-disable-line react-hooks/exhaustive-deps -- `sig` is what the edges depend on
+  return { ref, paths, size }
 }

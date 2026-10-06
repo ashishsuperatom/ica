@@ -4,7 +4,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Store } from '../src/store.ts'
-import { governance as g, GovernanceRefusal, compose as composeDomain, nameVersion, restoreVersion, sinceLastVersion } from '../src/index.ts'
+import { governance as g, GovernanceRefusal, compose as composeDomain, nameVersion, restoreVersion, sinceLastVersion, versionTree } from '../src/index.ts'
 
 const fresh = () => new Store(join(mkdtempSync(join(tmpdir(), 'gov-')), 'composition.sqlite'))
 const ana = { id: 'user:ana' }, bo = { id: 'user:bo' }, bot = { id: 'agent:key_1' }, admin = { id: 'user:root', admin: true }
@@ -171,4 +171,24 @@ test('named versions: a name for a moment of the log; the graph read as of it; g
   assert.equal((s.get('a', undefined, v2.upto)!.body as any).text, 'second')   // v2 still reads as it was
   assert.deepEqual(restoreVersion(s, admin, 'v1'), [])                // already there
   assert.throws(() => s.db.exec('DELETE FROM version'), /append-only/)
+})
+
+test('a node made before names were plain keeps its name and can still be changed; a new one is named plainly', () => {
+  const s = fresh()
+  g.write(s, ana, 'a', 'concept', text('A'))
+  s.put('trips and money', 'domain', { capabilities: [], concepts: [], files: [] }, { by: 'user:ana' }, { owner: 'user:ana' })
+  g.compose(s, ana, 'trips and money', 'a', {})
+  assert.deepEqual((s.get('trips and money')!.body as any).concepts, ['a'])
+  assert.throws(() => g.write(s, ana, 'another one', 'domain', { capabilities: [], concepts: [], files: [] }), /is not a name/)
+})
+
+test('versions form a tree: going back to a version branches from it', () => {
+  const s = fresh()
+  g.write(s, admin, 'a', 'concept', text('A1')); nameVersion(s, admin, 'v1', 'first')
+  g.write(s, admin, 'a', 'concept', text('A2')); nameVersion(s, admin, 'v2', 'second')
+  restoreVersion(s, admin, 'v1')
+  g.write(s, admin, 'a', 'concept', text('A3')); nameVersion(s, admin, 'v3', 'from v1 again')
+  assert.deepEqual(versionTree(s), { parents: { v1: null, v2: 'v1', v3: 'v1' }, now: 'v3' })
+  restoreVersion(s, admin, 'v2')
+  assert.equal(versionTree(s).now, 'v2')
 })

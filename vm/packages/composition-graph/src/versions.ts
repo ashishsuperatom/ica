@@ -52,3 +52,22 @@ export function restoreVersion(store: Store, actor: Actor, name: string): string
   } catch (e) { store.db.exec('ROLLBACK TO cg_restore'); store.db.exec('RELEASE cg_restore'); throw e }
   return changed
 }
+
+/** The versions as a tree: each one's parent is the version the graph was last made into before it was named (a restore,
+ *  "back to version X"), else the version named before it. `now` is where the graph is: on the same line. Simpler than
+ *  git — one line that branches where a version was gone back to. */
+export function versionTree(store: Store): { parents: Record<string, string | null>; now: string | null } {
+  const list = [...store.versions()].sort((a, b) => a.upto - b.upto || a.id - b.id)
+  const backTo = (after: number, upto?: number): string | null => {
+    let found: string | null = null
+    for (const c of store.changesBetween(after, upto)) { const m = /^back to version (.+)$/.exec(c.reason ?? ''); if (m) found = m[1] }
+    return found
+  }
+  const parents: Record<string, string | null> = {}
+  let prev: (typeof list)[number] | null = null
+  for (const v of list) {
+    parents[v.name] = backTo(prev?.upto ?? 0, v.upto) ?? prev?.name ?? null
+    prev = v
+  }
+  return { parents, now: prev ? backTo(prev.upto) ?? prev.name : null }
+}
