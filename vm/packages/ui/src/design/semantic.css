@@ -139,9 +139,9 @@
 .sa-cols__cell { position: relative; z-index: 1; display: flex; min-height: 0; min-width: 0; }
 /* The graph's edges: beneath the columns, seen in the gaps between them */
 .sa-cols__edges { position: absolute; top: 0; left: 0; z-index: 0; pointer-events: none; overflow: visible; }
-/* the graph's structure in its own colour: the selection is the accent, what composes it is slate */
-.sa-cols { --graph-edge: var(--series-3); }
-.sa-cols__edges path { fill: none; stroke: var(--graph-edge); stroke-opacity: 0.6; stroke-width: 1.5; }
+/* the graph's structure in its own colour: the selection is the accent, what composes it is violet */
+.sa-cols { --graph-edge: var(--series-2); }
+.sa-cols__edges path { fill: none; stroke: var(--graph-edge); stroke-opacity: 0.55; stroke-width: 1.5; }
 /* resizing a column: its handle's line alone in the gap — the edges step aside until it is let go */
 .sa-cols__edges { transition: opacity var(--dur-1) var(--ease); }
 .sa-cols:has(.sa-cols__resize:hover) .sa-cols__edges, .sa-resizing .sa-cols__edges { opacity: 0; }
