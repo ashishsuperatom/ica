@@ -7,6 +7,7 @@
 .sa-app__main { display: flex; flex-direction: column; flex: 1; min-width: 0; position: relative; background: var(--page); }
 .sa-app__page { flex: 1; min-height: 0; overflow-y: auto; }
 .sa-app__pill { position: absolute; top: var(--sp-2); right: var(--sp-3); z-index: var(--z-pill); }
+.sa-app__topline { flex-shrink: 0; display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); min-height: 36px; padding: var(--sp-1) var(--sp-3) 0; }
 .sa-app__topbar { position: fixed; top: 0; left: 0; right: 0; height: var(--topbar-h); background: var(--surface); border-bottom-width: 1px; display: flex; align-items: center; padding: 0 var(--sp-4); z-index: var(--z-topbar); }
 .sa-app__topbar-title { margin-left: var(--sp-3); font-weight: var(--w-medium); color: var(--ink); }
 .sa-app__menu-btn { width: 36px; height: 36px; border-radius: var(--r-md); display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #14b8a6, var(--primary)); color: var(--on-accent); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1); }

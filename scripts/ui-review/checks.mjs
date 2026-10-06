@@ -92,6 +92,8 @@ export const CHECKS = String(function checks() {
     // and only when one of them is what is on top there — both under a dialog's scrim are not in each other's way
     const top = document.elementFromPoint(x, y)
     if (!top || !(a.contains(top) || b.contains(top))) continue
+    const modal = top.closest('[role="dialog"], [aria-modal="true"], .sa-dialog')
+    if (modal && modal.contains(a) !== modal.contains(b)) continue   // one is under a dialog: covered on purpose
     issues.push({ kind: 'overlap', what: `${name(a)} overlaps ${name(b)}`, at: rectOf(a) })
   }
   return issues.slice(0, 60)

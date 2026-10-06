@@ -38,7 +38,9 @@ export default function AppShell({ sidebar, children, artifacts, artifactsCount,
         <div className="sa-app__main">
           {/* Arrange sits in the page's top line — the breadcrumbs, or beside the status — never floating over the page. */}
           {crumbs && <div className="sa-app__crumbs">{crumbs}<span className="sa-app__arrange"><ArrangeButton /></span></div>}
-          {(status || !crumbs) && <div className="sa-app__pill">{!crumbs && <span className="sa-app__arrange"><ArrangeButton /></span>}{status}</div>}
+          {/* Without breadcrumbs, a slim line of its own holds the status and Arrange, so nothing lies over the page's first card. */}
+          {!crumbs && <div className="sa-app__topline"><span className="sa-app__arrange"><ArrangeButton /></span>{status}</div>}
+          {crumbs && status && <div className="sa-app__pill">{status}</div>}
           <main className="sa-app__page">{children}</main>
         </div>
         {artifacts && paneOpen && (
