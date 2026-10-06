@@ -1,8 +1,8 @@
 // The app shell, the same for every surface: where to go on the left, the thread in the middle, the artifacts on the
 // right; the phone header; the sidebar's and the pane's states remembered per browser; the connection status.
 //
-// The artifacts pane: open, its head's button closes it; closed, it is a small square at the bottom right, level with the
-// ask bar, with a badge saying how many artifacts there are, and opens it.
+// The artifacts pane: one small square at the bottom right, level with the ask bar, opens it and — in the same spot —
+// closes it; closed, its badge says how many artifacts there are.
 
 import { useState, type ReactNode } from 'react'
 import { Icon } from '@iconify/react'
@@ -45,14 +45,14 @@ export default function AppShell({ sidebar, children, artifacts, artifactsCount,
         </div>
         {artifacts && paneOpen && (
           <aside className="sa-artifacts" aria-label="Artifacts">
-            <div className="sa-artifacts__head">
-              <span className="sa-label">Artifacts</span>
-              <button className="sa-icon-btn sa-artifacts__toggle" onClick={() => pane(false)} aria-expanded title="Hide the artifacts" aria-label="Hide the artifacts">
-                <Icon icon="solar:sidebar-minimalistic-linear" />
-              </button>
-            </div>
+            <div className="sa-artifacts__head"><span className="sa-label">Artifacts</span></div>
             <div className="sa-artifacts__body">{artifacts}</div>
           </aside>
+        )}
+        {artifacts && paneOpen && (
+          <button className="sa-artifacts__fab" data-open onClick={() => pane(false)} aria-expanded title="Hide the artifacts" aria-label="Hide the artifacts">
+            <Icon icon="solar:sidebar-minimalistic-linear" />
+          </button>
         )}
         {/* Closed, the pane is a small square at the bottom right, level with the ask bar, saying how many there are. */}
         {artifacts && !paneOpen && (

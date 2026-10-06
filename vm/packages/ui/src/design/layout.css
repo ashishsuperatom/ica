@@ -176,8 +176,7 @@
 /* ── The artifacts pane (right): what the work produced and decided ─────────────────────────────── */
 .sa-artifacts { width: var(--artifacts-w); flex: none; border-left: 1px solid var(--line); background: var(--sidebar); display: flex; flex-direction: column; min-height: 0; }
 .sa-artifacts__head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); min-height: 52px; padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--line); }
-.sa-artifacts__toggle { margin-left: auto; }
-.sa-artifacts__body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-3) var(--sp-4); }
+.sa-artifacts__body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-3) var(--sp-4) 72px; }
 .sa-artifacts__empty { padding: var(--sp-2) 0; }
 .sa-artifacts__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
 .sa-artifact { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); padding: var(--sp-2) var(--sp-3); min-width: 0; }
@@ -357,7 +356,7 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 .sa-railbar__place:hover, .sa-railbar__place[data-open='true'] { background: var(--rail-active); color: var(--ink); }
 .sa-railbar__place[data-active='true'] { background: var(--rail-active); color: var(--ink); }
 .sa-railbar { background: var(--rail); }
-.sa-railbar__panel { background: var(--sidebar); border: 0; border-left: 1px solid var(--line); border-right: 1px solid var(--line); border-top-left-radius: 14px; }
+.sa-railbar__panel { background: var(--sidebar); border: 0; border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
 .sa-railbar__place:focus-visible { outline: none; background: var(--rail-active); color: var(--ink); }
 .sa-railbar__panel .sa-sidebar__head { height: 48px; padding: 0 var(--sp-1) 0 var(--sp-3h); gap: 0; }
 .sa-railbar__panel .sa-sidebar__name { font-size: var(--t-lg); font-weight: var(--w-semibold); }
