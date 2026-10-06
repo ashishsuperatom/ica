@@ -18,6 +18,7 @@
 import { join } from 'node:path'
 import { Store, compose, domains, governance as g, GovernanceRefusal, publishDraft, restoreVersion, draft, published, versionLine, sincePublished, type Kind } from '@superatom/composition-graph'
 import { whoIs, IdentityRefusal } from './identity.js'
+import { notePerson, peopleOf } from './people.js'
 
 export const GRAPH_MESSAGES = new Set(['graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:versions', 'graph:version', 'graph:restore'])
 
@@ -32,6 +33,7 @@ export function createGraphSeam(d: { projectDir: string; send: (to: any, msg: Re
     const reply = (msg: Record<string, unknown>) => d.send(from, { ...msg, reqId: payload.reqId })
     try {
       const who = whoIs(from)
+      notePerson(d.projectDir, who.id, who.email)
       const s = open()
       const viewer = who.admin ? undefined : who.scopes
       const asOf = payload.asOf ? Date.parse(String(payload.asOf)) : undefined
@@ -63,7 +65,7 @@ export function createGraphSeam(d: { projectDir: string; send: (to: any, msg: Re
         case 'graph:suggest': return ok({ suggestion: g.suggest(s, who, str(payload.name, 'name'), str(payload.kind, 'kind') as Kind, payload.body, String(payload.reason ?? '')) })
         case 'graph:publish': return ok({ suggestion: g.publish(s, who, str(payload.name, 'name'), str(payload.scope, 'scope') as any, String(payload.reason ?? '')) })
         // Named versions: the list (with what changed since the last one), naming the graph as it is, and going back to one.
-        case 'graph:versions': return ok({ versions: versionLine(s), published: published(s)?.name ?? null, draft: draft(s), since: sincePublished(s).map((c) => ({ id: c.id, at: c.at, name: c.name, kind: c.kind, by: c.by, reason: c.reason, removed: !c.toHash })) })
+        case 'graph:versions': return ok({ people: peopleOf(d.projectDir), versions: versionLine(s), published: published(s)?.name ?? null, draft: draft(s), since: sincePublished(s).map((c) => ({ id: c.id, at: c.at, name: c.name, kind: c.kind, by: c.by, reason: c.reason, removed: !c.toHash })) })
         case 'graph:version': return ok({ version: publishDraft(s, who, String(payload.message ?? '')) })   // publish the draft as the next version
         case 'graph:restore': return ok({ restored: restoreVersion(s, who, str(payload.name, 'name')), version: s.version(String(payload.name)) })   // the draft set to a version
         case 'graph:decide': {

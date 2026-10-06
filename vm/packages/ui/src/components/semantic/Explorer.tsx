@@ -225,7 +225,7 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
                 ? <Rows key={`${opened.key}|${JSON.stringify(opened.source)}|${runNo}`} opened={opened} read={read} cache={cache} space={keep} narrow={{ q, where }} setWhere={setWhere} keep={keep} onColumns={onColumns} onRecorded={recorded} />
                 : <div className="sa-graphpage__hint"><Icon icon="lucide:file-code-2" /><span>Write a query and run it (⌘/Ctrl-Enter): its result is explored like a table — searched, filtered, sorted, its columns profiled.</span></div>}
             </>
-            : <div className="sa-graphpage__hint"><Icon icon="lucide:table-2" /><span>{tables?.length ? 'Pick a table or a query on the left to see its rows and columns.' : tables === null ? 'Reading the tables…' : empty ?? 'No tables yet.'}</span></div>}
+            : <div className="sa-graphpage__hint"><Icon icon="lucide:table-2" /><span>{tables?.length ? 'Pick a table or a query on the left to see its rows and columns.' : tables === null ? 'Reading the tables…' : 'Nothing to explore yet.'}</span></div>}   {/* why there is nothing is said once, in the list */}
         </section>
         {opened && ready && profileOpen && !place && <aside className="sa-explorer__profile" aria-label="Its columns"><Columns key={`${opened.key}|${JSON.stringify(opened.source)}|${runNo}`} opened={opened} read={read} cache={cache} space={keep} narrow={{ q, where }} setWhere={setWhere} keep={keep} /></aside>}
       </div>

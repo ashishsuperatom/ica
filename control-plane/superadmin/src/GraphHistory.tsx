@@ -32,9 +32,10 @@ function lanesOf(versions: Line[], head: Line | undefined): Map<string, number> 
 }
 
 export const when = (ms: number) => new Date(ms).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-const who = (by: string) => by.replace(/^user:/, '').replace(/^agent:/, 'agent ')
+/** Who did it, as a person reads it: their address when the project knows it, else a short form of the id. */
+export const whoOf = (by: string, people: Record<string, string> = {}) => people[by] ?? (by.startsWith('agent:') ? `agent key ${by.slice(6, 14)}` : by.replace(/^user:(user_)?/, '').slice(0, 8) + '…')
 
-export function VersionGraph({ versions, published, draft, current, onPick, actions, draftActions }: {
+export function VersionGraph({ versions, published, draft, current, onPick, actions, draftActions, people = {} }: {
   versions: Line[]
   /** The version the agents read. */
   published: string | null
@@ -45,6 +46,8 @@ export function VersionGraph({ versions, published, draft, current, onPick, acti
   onPick?: (v: Line | null) => void
   actions?: (v: Line) => ReactNode
   draftActions?: ReactNode
+  /** Who is who: an id to the person's address. */
+  people?: Record<string, string>
 }) {
   const head = versions.find((v) => v.name === published) ?? versions[versions.length - 1]
   const lane = useMemo(() => lanesOf(versions, head), [versions, head])
@@ -85,7 +88,7 @@ export function VersionGraph({ versions, published, draft, current, onPick, acti
                 {r.restoredFrom && <span className="sa-history__back"><Icon icon="lucide:undo-2" />from {r.restoredFrom}</span>}
                 <span className="sa-history__says">{r.message}</span>
               </span>
-              <span className="sa-history__meta">{who(r.by)} · {when(r.at)} · {r.count} change{r.count === 1 ? '' : 's'}</span>
+              <span className="sa-history__meta">{whoOf(r.by, people)} · {when(r.at)} · {r.count} change{r.count === 1 ? '' : 's'}</span>
             </button>
             {actions && <span className="sa-history__acts">{actions(r)}</span>}
           </li>

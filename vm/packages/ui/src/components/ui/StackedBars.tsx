@@ -55,7 +55,7 @@ export default function StackedBars({ rows, labelKey, series, rowHeight = 30, on
         return `<div style="font-weight:500;margin-bottom:4px">${params[0]?.axisValue}</div>${lines.join('')}${foot}`
       },
     },
-    xAxis: { type: 'value', axisLabel: { ...t.fontSmall, color: t.faint, formatter: (v: number) => money(v) }, splitLine: { lineStyle: { color: t.line } }, axisLine: { show: false } },
+    xAxis: { type: 'value', axisLabel: { hideOverlap: true, ...t.fontSmall, color: t.faint, formatter: (v: number) => money(v) }, splitLine: { lineStyle: { color: t.line } }, axisLine: { show: false } },
     yAxis: { type: 'category', data: ordered.map((r) => String(r[labelKey] ?? '')), axisLabel: { ...t.font, color: t.ink, width: 170, overflow: 'truncate' }, axisTick: { show: false }, axisLine: { lineStyle: { color: t.line } } },
     series: [
       ...bars.map((s, i) => ({

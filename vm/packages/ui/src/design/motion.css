@@ -33,8 +33,9 @@
 .sa-arranging [data-arrange-column] > [data-arrange-hidden] { opacity: 0.4; }
 .sa-arranging [data-arrange-column] > [data-arrange-hidden]::before { content: 'Hidden'; position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 31; padding: 1px var(--sp-2); border-radius: var(--r-full); background: var(--ink); color: var(--surface); font-size: var(--t-2xs); }
 /* The switch: at the bottom right, quiet; beside the artifacts square when there is one. */
-.sa-app__arrange { position: fixed; right: var(--sp-4); bottom: var(--sp-3); z-index: var(--z-popover); }
-.sa-app__arrange[data-beside-artifacts='true'] { right: calc(var(--sp-4) + 56px); }
+.sa-app__arrange { margin-left: auto; display: inline-flex; align-items: center; }
+.sa-app__pill .sa-app__arrange { margin-left: 0; }
+.sa-app__pill { display: flex; align-items: center; gap: var(--sp-2); }
 .sa-arrange-bar { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; justify-content: flex-end; }
 .sa-arrange-bar__say { padding: var(--sp-1h) var(--sp-3); border-radius: var(--r-full); background: var(--ink); color: var(--surface); font-size: var(--t-xs); box-shadow: var(--shadow-float); }
 .sa-arrange-bar__btn { display: inline-flex; align-items: center; gap: var(--sp-1h); padding: var(--sp-1) var(--sp-2h); border-radius: var(--r-full); border-width: 1px; background: var(--surface); color: var(--muted); font-size: var(--t-xs); box-shadow: var(--shadow-card); }

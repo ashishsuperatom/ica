@@ -61,7 +61,9 @@ export const CHECKS = String(function checks() {
       if (el.closest('.sa-card, .sa-col, .sa-dialog__box, .sa-section, .card') !== f) continue
       if (el.closest('table, [data-bleed], .sa-records, .sa-cols__edges, svg')) continue
       const range = document.createRange(); range.selectNodeContents(n)
-      const tr = range.getBoundingClientRect()
+      // only what shows: a line cut short by its element (an ellipsis) is measured to where its element ends
+      const full = range.getBoundingClientRect(), box = el.getBoundingClientRect()
+      const tr = { left: Math.max(full.left, box.left), right: Math.min(full.right, box.right), top: full.top, width: Math.min(full.right, box.right) - Math.max(full.left, box.left), height: full.height }
       if (!tr.width || tr.right < inner.l || tr.left > inner.r) continue   // out of the frame altogether is clipping's business
       if ((tr.left - inner.l < 6 && tr.left >= inner.l - 1) || (inner.r - tr.right < 6 && tr.right <= inner.r + 1)) { seen.add(el); issues.push({ kind: 'flush', what: `“${n.textContent.trim().slice(0, 40)}” touches the edge of ${name(f).split(' ')[0]}`, at: { x: Math.round(tr.left), y: Math.round(tr.top), w: Math.round(tr.width), h: Math.round(tr.height) } }) }
     }
@@ -87,6 +89,9 @@ export const CHECKS = String(function checks() {
     // only where both are in view: a control scrolled out of its container (under a pinned footer, past a panel's end) is not lying over anything
     const x = Math.max(ra.left, rb.left) + w / 2, y = Math.max(ra.top, rb.top) + h / 2
     if (!shownAt(a, x, y) || !shownAt(b, x, y)) continue
+    // and only when one of them is what is on top there — both under a dialog's scrim are not in each other's way
+    const top = document.elementFromPoint(x, y)
+    if (!top || !(a.contains(top) || b.contains(top))) continue
     issues.push({ kind: 'overlap', what: `${name(a)} overlaps ${name(b)}`, at: rectOf(a) })
   }
   return issues.slice(0, 60)

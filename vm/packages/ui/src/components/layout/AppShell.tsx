@@ -36,8 +36,9 @@ export default function AppShell({ sidebar, children, artifacts, artifactsCount,
       <div className="sa-app" data-wide={wide}>
         {sidebar(collapsed, toggle)}
         <div className="sa-app__main">
-          {crumbs && <div className="sa-app__crumbs">{crumbs}</div>}
-          {status && <div className="sa-app__pill">{status}</div>}
+          {/* Arrange sits in the page's top line — the breadcrumbs, or beside the status — never floating over the page. */}
+          {crumbs && <div className="sa-app__crumbs">{crumbs}<span className="sa-app__arrange"><ArrangeButton /></span></div>}
+          {(status || !crumbs) && <div className="sa-app__pill">{!crumbs && <span className="sa-app__arrange"><ArrangeButton /></span>}{status}</div>}
           <main className="sa-app__page">{children}</main>
         </div>
         {artifacts && paneOpen && (
@@ -59,8 +60,6 @@ export default function AppShell({ sidebar, children, artifacts, artifactsCount,
             {!!artifactsCount && <span className="sa-artifacts__badge">{artifactsCount > 99 ? '99+' : artifactsCount}</span>}
           </button>
         )}
-        {/* Arrange: every block's cards (and every arranged page's) moved up or down, kept in this browser. */}
-        <div className="sa-app__arrange" data-beside-artifacts={!!artifacts && !paneOpen}><ArrangeButton /></div>
       </div>
     </ArrangeProvider>
   )

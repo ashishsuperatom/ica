@@ -34,7 +34,7 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   // A named version being looked at (read-only), or null: the graph as it is now.
   // A published version being looked at (read-only), or null: the draft — the graph as it is, edited here.
   const [viewing, setViewing] = useState<Line | null>(null)
-  const [versions, setVersions] = useState<{ versions: Line[]; published: string | null; draft: DraftNode[]; since: Change[] } | null>(null)
+  const [versions, setVersions] = useState<{ versions: Line[]; published: string | null; draft: DraftNode[]; since: Change[]; people: Record<string, string> } | null>(null)
   const [versionsOpen, setVersionsOpen] = useState(false)
   const cacheKey = `${who}|graph|${projectId}${viewing ? `|v:${viewing.name}` : ''}`
   const [graph, setGraph] = useState<Graph | null>(() => { try { const c = cached(cacheKey); return c ? JSON.parse(c) as Graph : null } catch { return null } })
@@ -52,7 +52,7 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   }, [hub.request, cacheKey, viewing])   // eslint-disable-line react-hooks/exhaustive-deps -- hub is a new object each render; its request is stable
   const loadVersions = useCallback(async () => {
     const r = await hub.call({ t: 'graph:versions' }).catch(() => null)
-    if (r?.t === 'graph:reply') setVersions({ versions: r.versions ?? [], published: r.published ?? null, draft: r.draft ?? [], since: r.since ?? [] })
+    if (r?.t === 'graph:reply') setVersions({ versions: r.versions ?? [], published: r.published ?? null, draft: r.draft ?? [], since: r.since ?? [], people: r.people ?? {} })
   }, [hub.call])   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (hub.status === 'live') { void load(); void loadVersions() } }, [hub.status, load, loadVersions])
   const [publishing, setPublishing] = useState(false)
@@ -166,7 +166,7 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
         <Dialog title="Versions" onClose={() => setVersionsOpen(false)} actions={<button className="sa-btn" onClick={() => setVersionsOpen(false)}>Close</button>}>
           <p className="sa-note">Edits are a draft; publishing makes the next version, and the agents read the latest one. Bringing an older version into the draft and publishing it starts a new line from it.</p>
           <div className="sa-history__scroll">
-            <VersionGraph versions={versions.versions} published={versions.published} draft={versions.draft} current={viewing?.name ?? null}
+            <VersionGraph versions={versions.versions} published={versions.published} draft={versions.draft} people={versions.people} current={viewing?.name ?? null}
               onPick={(v) => { setVersionsOpen(false); view(v) }}
               actions={(v) => v.name !== versions.published ? <button className="sa-btn sa-btn--link" onClick={() => { setVersionsOpen(false); setRestoring(v) }}><Icon icon="lucide:rotate-ccw" className="sa-btn__icon" />Bring into the draft</button> : null}
               draftActions={versions.draft.length > 0 ? <button className="sa-btn sa-btn--primary" onClick={() => { setVersionsOpen(false); setPublishing(true) }}><Icon icon="lucide:upload" className="sa-btn__icon" />Publish v{versions.versions.length + 1}</button> : undefined} />
@@ -304,7 +304,15 @@ function Composes({ owner, by, openOnly, readOnly, change, onEdit }: { owner: No
   useEffect(() => {
     const p = partFor(openOnly); if (!p) return
     setOpen(new Set([p]))
-    requestAnimationFrame(() => heads.current[owner.concepts.indexOf(p)]?.closest('.sa-acc__item')?.scrollIntoView({ block: 'nearest' }))
+    // Into view within the detail panel only — scrollIntoView would also slide the columns sideways.
+    requestAnimationFrame(() => {
+      const item = heads.current[owner.concepts.indexOf(p)]?.closest('.sa-acc__item') as HTMLElement | null
+      const pane = item?.closest('.sa-col--detail') as HTMLElement | null
+      if (!item || !pane) return
+      const ir = item.getBoundingClientRect(), pr = pane.getBoundingClientRect()
+      if (ir.top < pr.top) pane.scrollTop -= pr.top - ir.top + 8
+      else if (ir.bottom > pr.bottom) pane.scrollTop += Math.min(ir.bottom - pr.bottom + 8, ir.top - pr.top - 8)
+    })
   }, [openOnly])   // eslint-disable-line react-hooks/exhaustive-deps
   const toggle = (c: string) => setOpen((o) => { const n = new Set(o); if (n.has(c)) n.delete(c); else n.add(c); return n })
   const keys = (e: KeyboardEvent, i: number) => {

@@ -158,6 +158,9 @@ function AgentMade() {
   </>)
 }
 
+/** A line written in Markdown, as words: emphasis marks and an old session id left out. */
+const asWords = (s: unknown) => String(s ?? '').replace(/\s+in session ses-[\w-]+/g, '').replace(/\*\*|__|`/g, '').replace(/(^|\s)_([^_]+)_(?=\s|[.,;:!?]|$)/g, '$1$2').trim()
+
 function ActivityBlock() {
   const env = useEnv()
   const [rows, setRows] = useState<any[] | null>(null)
@@ -167,7 +170,7 @@ function ActivityBlock() {
     <Section icon="lucide:activity" title="Running for you, and lately" subtitle="Program builds and session runs; kept current as they change.">
       <RecordList rows={rows} keyOf={(a) => a.id} empty="Nothing running, and nothing in the last day." columns={[
         { key: 'state', label: 'State', render: (a) => <Status state={a.state === 'failed' ? 'critical' : a.state === 'running' ? 'running' : 'ok'}>{a.state}</Status> },
-        { key: 'title', label: 'What', wrap: true, render: (a) => <>{a.title}{a.progress || a.detail ? ` — ${a.progress ?? a.detail}` : ''}</> },
+        { key: 'title', label: 'What', wrap: true, render: (a) => <>{asWords(a.title)}{a.progress || a.detail ? <span className="sa-muted"> — {asWords(a.progress ?? a.detail)}</span> : null}</> },
         { key: 'when', label: 'When', align: 'end', render: (a) => when(a.updated_at ?? a.updatedAt) },
       ]} />
     </Section>

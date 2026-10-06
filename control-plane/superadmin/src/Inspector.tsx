@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { Section as Panel, RecordList, Receipt, Status, Empty, Notice, Code, Figures, Kpi, Tabs, Toolbar, Icon, ViewToggle, useView, type StatusState } from '@superatom/ui'
 import type { Hub } from './hub'
-import { VersionGraph, when as publishedWhen, type Line, type DraftNode } from './GraphHistory'
+import { VersionGraph, whoOf, when as publishedWhen, type Line, type DraftNode } from './GraphHistory'
 
 export type Section =
   | 'summary' | 'composition' | 'changes' | 'questions' | 'sessions' | 'grounding' | 'index' | 'files' | 'db' | 'logs'
@@ -237,7 +237,7 @@ function CompositionPart({ hub, part }: ViewProps & { part: 'changes' | 'questio
   return (
     <div className="sa-stack sa-stack--4">
       <div className="sa-row"><div className="sa-grow" /><Refresh onClick={reload} /></div>
-      {part === 'changes' && <CompChanges hub={hub} changes={data.changes ?? []} go={setPick} />}
+      {part === 'changes' && <CompChanges hub={hub} changes={data.changes ?? []} people={data.people ?? {}} go={setPick} />}
       {part === 'questions' && <CompQuestions domains={domains} />}
       {part === 'sessions' && <CompSessions sessions={data.sessions ?? []} />}
     </div>
@@ -295,7 +295,7 @@ function CompQuestions({ domains }: { domains: any[] }) {
   )
 }
 
-function CompChanges({ hub, changes, go }: { hub: Hub; changes: any[]; go: (p: CompPick) => void }) {
+function CompChanges({ hub, changes, people, go }: { hub: Hub; changes: any[]; people: Record<string, string>; go: (p: CompPick) => void }) {
   const [view, setView] = useView<'list' | 'graph'>('graph-changes', ['list', 'graph'], 'list')
   return (
     <Panel icon="lucide:git-commit-horizontal" title="Changes" subtitle="Every edit to the graph: which node, from which version to which, by whom, why and from what."
@@ -304,7 +304,7 @@ function CompChanges({ hub, changes, go }: { hub: Hub; changes: any[]; go: (p: C
         { key: 'at', label: 'When', render: c => <span className="sa-muted">{when(c.at)}</span> },
         { key: 'name', label: 'Node', wrap: true, render: c => <><div>{c.name}</div><div className="sa-note">{c.kind}</div></> },
         { key: 'version', label: 'Version', render: c => <HashMove from={c.fromHash} to={c.toHash} /> },
-        { key: 'by', label: 'By · why · from', wrap: true, render: c => <><strong>{c.by}</strong>{c.reason ? ` · ${c.reason}` : ''}{c.from ? <span className="sa-muted"> · from {c.from}</span> : null}</> },
+        { key: 'by', label: 'By · why · from', wrap: true, render: c => <><strong>{whoOf(c.by, people)}</strong>{c.reason ? ` · ${c.reason}` : ''}{c.from ? <span className="sa-muted"> · from {c.from}</span> : null}</> },
       ]} />}
     </Panel>
   )
@@ -312,17 +312,17 @@ function CompChanges({ hub, changes, go }: { hub: Hub; changes: any[]; go: (p: C
 
 /** The changes as the graph's versions: each published version on its line, the draft above; one picked shows what it touched. */
 function ChangesGraph({ hub, go }: { hub: Hub; go: (p: CompPick) => void }) {
-  const [data, setData] = useState<{ versions: Line[]; published: string | null; draft: DraftNode[] } | null>(null)
+  const [data, setData] = useState<{ versions: Line[]; published: string | null; draft: DraftNode[]; people: Record<string, string> } | null>(null)
   const [err, setErr] = useState('')
   const [picked, setPicked] = useState<Line | 'draft' | null>(null)
-  useEffect(() => { void hub.call({ t: 'graph:versions' }).then((r) => { if (r?.t === 'graph:reply') setData({ versions: r.versions ?? [], published: r.published ?? null, draft: r.draft ?? [] }); else setErr(r?.reason ?? 'The versions did not come') }).catch((e) => setErr(String(e?.message ?? e))) }, [hub])   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void hub.call({ t: 'graph:versions' }).then((r) => { if (r?.t === 'graph:reply') setData({ versions: r.versions ?? [], published: r.published ?? null, draft: r.draft ?? [], people: r.people ?? {} }); else setErr(r?.reason ?? 'The versions did not come') }).catch((e) => setErr(String(e?.message ?? e))) }, [hub])   // eslint-disable-line react-hooks/exhaustive-deps
   if (err) return <Notice state="critical">{err}</Notice>
   if (!data) return <Loading on />
   const names = picked === 'draft' ? data.draft.map((d) => d.name) : picked ? picked.names : []
-  const who = (by: string) => by.replace(/^user:/, '').replace(/^agent:/, 'agent ')
+  const who = (by: string) => whoOf(by, data.people)
   return (
     <div className="sa-section__body sa-stack sa-stack--4">
-      <VersionGraph versions={data.versions} published={data.published} draft={data.draft} current={picked === 'draft' ? null : picked?.name ?? '\u0000none'}
+      <VersionGraph versions={data.versions} published={data.published} draft={data.draft} people={data.people} current={picked === 'draft' ? null : picked?.name ?? '\u0000none'}
         onPick={(v) => setPicked(v === null ? (picked === 'draft' ? null : 'draft') : picked !== 'draft' && picked?.name === v.name ? null : v)} />
       {picked && (
         <div className="sa-verdetail">

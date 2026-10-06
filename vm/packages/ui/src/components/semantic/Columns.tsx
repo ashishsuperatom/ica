@@ -31,7 +31,8 @@ export interface ColumnSpec {
   loading?: boolean
 }
 
-const MIN = 260
+const MIN = 260          // narrowest a dragged column may be
+const MIN_SHARED = 220   // narrowest a column sharing the space may be
 
 /** ↑ ↓ in a column move what is selected in it, in the order shown (what the selection holds first, then the rest). */
 function step(e: ReactKeyboardEvent<HTMLButtonElement>, col: ColumnSpec, key: string) {
@@ -106,7 +107,13 @@ export function Columns({ columns, detail, keep = 'columns' }: { columns: Column
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
     return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
   }, [keep])
-  const width = (k: string) => widths[k] ?? (k === 'detail' ? 460 : 320)
+  // A column keeps the width it was dragged to; until then the columns share the space (never narrower than they can be
+  // read), the detail a larger share — so the whole graph fits the window wherever it can, and scrolls sideways only past it.
+  const track = (k: string, last: boolean) => {
+    const w = widths[k]
+    if (w) return last ? `minmax(${w}px, 1fr)` : `${w}px`
+    return k === 'detail' ? 'minmax(340px, 1.6fr)' : `minmax(${MIN_SHARED}px, 1fr)`
+  }
   const edges = useEdges(columns)
   const handle = (k: string) => (
     <span className="sa-cols__resize" role="separator" aria-orientation="vertical" aria-label="Resize the column" title="Drag to resize · double-click for its usual width"
@@ -114,7 +121,7 @@ export function Columns({ columns, detail, keep = 'columns' }: { columns: Column
       onDoubleClick={() => setWidths((w) => { const { [k]: _gone, ...rest } = w; remember(`cols:${keep}`, rest); return rest })} />
   )
   return (
-    <div className="sa-cols" ref={edges.ref} style={{ gridTemplateColumns: names.map((k, i) => (i === names.length - 1 ? `minmax(${width(k)}px, 1fr)` : `${width(k)}px`)).join(' ') }}>
+    <div className="sa-cols" ref={edges.ref} style={{ gridTemplateColumns: names.map((k, i) => track(k, i === names.length - 1)).join(' ') }}>
       <svg className="sa-cols__edges" aria-hidden width={edges.size.w} height={edges.size.h}>{edges.paths.map((d, i) => <path key={i} d={d} />)}</svg>
       {columns.map((c) => <div key={c.key} className="sa-cols__cell"><Column col={c} />{handle(c.key)}</div>)}
       {detail && <div className="sa-cols__cell"><section className="sa-col sa-col--detail" aria-label="Selected">{detail}</section>{handle('detail')}</div>}

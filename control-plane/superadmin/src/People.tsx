@@ -102,7 +102,7 @@ function RolesSection({ api, roles, held, onChange }: { api: Api; roles: Role[] 
       <RecordList rows={roles} keyOf={(r) => r.id}
         columns={[
           { key: 'name', label: 'Role', render: (r) => <strong>{r.name}</strong> },
-          { key: 'kind', label: '', render: (r) => <span className="sa-muted">{r.builtin ? 'built in' : 'custom'}</span> },
+          { key: 'kind', label: 'Kind', render: (r) => <span className="sa-muted">{r.builtin ? 'built in' : 'custom'}</span> },
           { key: 'caps', label: 'May', wrap: true, render: (r) => r.capabilities.length ? r.capabilities.map((c) => ORG_CAPABILITIES[c as OrgCapability] ?? c).join(' · ') : <span className="sa-muted">Works in the projects they are given</span> },
           { key: 'x', label: '', align: 'end', render: (r) => owner && !r.builtin ? <button className="sa-btn sa-btn--link" onClick={() => void drop(r.id)}>Remove</button> : null },
         ]} />
@@ -278,7 +278,7 @@ function ProjectRoles({ projectId, api, roles, held, onChange }: { projectId: st
       <RecordList rows={roles} keyOf={(r) => r.id}
         columns={[
           { key: 'name', label: 'Role', render: (r) => <strong>{r.name}</strong> },
-          { key: 'kind', label: '', render: (r) => <span className="sa-muted">{r.builtin ? 'built in' : "this project's"}</span> },
+          { key: 'kind', label: 'Kind', render: (r) => <span className="sa-muted">{r.builtin ? 'built in' : "this project's"}</span> },
           { key: 'caps', label: 'May', wrap: true, render: (r) => r.capabilities.map(said).join(' · ') },
           { key: 'x', label: '', align: 'end', render: (r) => may && !r.builtin ? <button className="sa-btn sa-btn--link" onClick={() => void drop(r.id)}>Remove</button> : null },
         ]} />

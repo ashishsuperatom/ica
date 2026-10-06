@@ -36,7 +36,7 @@ export default function TimeColumns({ periods, series, values, height = 240, for
       },
     },
     xAxis: { type: 'category', data: periods.map(name), axisLabel: { ...t.fontSmall, color: t.faint, hideOverlap: true }, axisTick: { show: false }, axisLine: { lineStyle: { color: t.line } } },
-    yAxis: { type: 'value', axisLabel: { ...t.fontSmall, color: t.faint, formatter: (v: number) => format(v) }, splitLine: { lineStyle: { color: t.line } } },
+    yAxis: { type: 'value', axisLabel: { hideOverlap: true, ...t.fontSmall, color: t.faint, formatter: (v: number) => format(v) }, splitLine: { lineStyle: { color: t.line } } },
     series: series.map((s, i) => ({
       name: s.label, type: 'bar', stack: 'total', barMaxWidth: 18,
       data: periods.map((p) => values[p]?.[s.key] ?? 0),

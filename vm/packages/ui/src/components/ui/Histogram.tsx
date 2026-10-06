@@ -27,7 +27,7 @@ export default function Histogram({ bins, labels, height = 120, unit = 'rows' }:
       },
     },
     xAxis: { type: 'category', data: labels, axisLabel: { show: false }, axisTick: { show: false }, axisLine: { lineStyle: { color: t.line } } },
-    yAxis: { type: 'value', axisLabel: { ...t.fontSmall, color: t.faint, formatter: (v: number) => short(v) }, splitNumber: 2, splitLine: { lineStyle: { color: t.line } } },
+    yAxis: { type: 'value', axisLabel: { hideOverlap: true, ...t.fontSmall, color: t.faint, formatter: (v: number) => short(v) }, splitNumber: 2, splitLine: { lineStyle: { color: t.line } } },
     series: [{ type: 'bar', data: bins, barCategoryGap: '8%', itemStyle: { color: t.palette[0], borderRadius: [2, 2, 0, 0] }, emphasis: { itemStyle: { opacity: 0.85 } } }],
   }
   return <ReactECharts option={option} style={{ height, width: '100%' }} notMerge opts={{ renderer: 'canvas' }} />

@@ -474,7 +474,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
           to: payload.to, ...(payload.block ? { block: String(payload.block) } : {}), by: user, at: new Date().toISOString(),
         }
         const work = () => asReader(who, () => sessions.intent(intent))
-        const r = d.activities ? await d.activities.around(who.id, 'session.run', `Running ${intent.call ? `${intent.call.package}.${intent.call.fn}` : intent.action ? `${intent.action.package} · ${intent.action.id}` : 'a change'} in session ${session}`, work, (x) => x.answer ? x.answer.markdown.split('\n')[0].slice(0, 160) : 'done') : await work()
+        const r = d.activities ? await d.activities.around(who.id, 'session.run', `Running ${intent.call ? `${intent.call.package}.${intent.call.fn}` : intent.action ? `${intent.action.package} · ${intent.action.id}` : 'a change'}`, work, (x) => x.answer ? x.answer.markdown.split('\n')[0].slice(0, 160) : 'done') : await work()
         return reply(await present(r.session, { result: { block: r.block, opened: r.opened, answer: r.answer, ...(r.stale ? { stale: true } : {}) } }))
       }
       throw new SessionSeamRefusal(`there is no ${t}`)

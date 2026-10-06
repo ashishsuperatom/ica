@@ -11,6 +11,7 @@
 //     hashes each session was made from
 // …plus the agents' directories, browsable file by file.
 
+import { peopleIn } from './people.js'
 import { readFile, readdir } from 'node:fs/promises'
 import { existsSync, statSync } from 'node:fs'
 import { join, resolve, sep, relative } from 'node:path'
@@ -194,7 +195,7 @@ export function createInspector(deps: InspectorDeps) {
       for (const { id, note } of notes) sessions.push({ id, domain: String(note.domain ?? ''), at: note.at ?? null, used: Object.keys(note.used ?? {}).length,
         moved: note.used && Object.keys(note.used).length ? compositionDrift(store, note.used).map((x) => x.name) : [] })
       sessions.sort((a, b) => String(b.at ?? '').localeCompare(String(a.at ?? '')))
-      return { exists: true, domains, changes: store.changes(60), counts: { domain: store.names('domain').length, concept: store.names('concept').length, file: store.names('file').length }, sessions: sessions.slice(0, MAX_ROWS) }
+      return { exists: true, domains, people: peopleIn(roots.db), changes: store.changes(60), counts: { domain: store.names('domain').length, concept: store.names('concept').length, file: store.names('file').length }, sessions: sessions.slice(0, MAX_ROWS) }
     })
   }
   /** The whole graph for the console's graph page: every domain (with the agents that are it), every intermediate

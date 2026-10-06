@@ -440,3 +440,6 @@ table.sa-table { width: 100%; border-collapse: collapse; }
 .sa-call > svg { width: 12px; height: 12px; flex-shrink: 0; }
 .sa-call__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sa-call__ms { color: var(--faint); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+
+/* On a narrow screen a supporting section's line wraps under its title instead of being cut to one line. */
+@media (max-width: 640px) { .sa-section__head .sa-section__subtitle { flex-basis: 100%; white-space: normal; overflow: visible; text-overflow: clip; } }

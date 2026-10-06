@@ -125,8 +125,12 @@
 /* Two charts in one row: a ring and its bars. */
 .sa-chart-pair { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); align-items: center; padding: var(--sp-3h) var(--sp-5) var(--sp-3); }
 .sa-chart-pair > * { min-width: 0; }
-@media (min-width: 1024px) {
+/* Side by side when the CARD is wide enough (not the window: a card beside a sidebar or in a narrow column is not). */
+.sa-section__content:has(> .sa-chart-pair) { container-type: inline-size; }
+@container (min-width: 720px) {
   .sa-chart-pair { grid-template-columns: 340px minmax(0, 1fr); }
+}
+@container (min-width: 1160px) {
   /* A ring with its legend beside it needs the room: the pair gives it up to half the width. */
   .sa-chart-pair[data-ring='column'] { grid-template-columns: minmax(580px, 50%) minmax(0, 1fr); }
 }
