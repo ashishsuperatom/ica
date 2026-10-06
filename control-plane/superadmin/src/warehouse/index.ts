@@ -20,7 +20,18 @@ const r2Store = (bucket: string, r2: R2Bucket): ObjectStore => ({
 /** The warehouse for this platform, from its settings: the account and bucket the catalog lives in, the tokens (secrets),
  *  the R2 binding the data files are written through. Missing any, the warehouse says it is not set up. */
 export function warehouse(env: Env) {
+  // One warehouse per isolate and settings: it keeps the catalog's prefix and what it said about the tables.
   const e = env as unknown as Record<string, any>
+  const key = [e.WAREHOUSE_ACCOUNT_ID, e.WAREHOUSE_BUCKET, e.WAREHOUSE_CATALOG_TOKEN, e.WAREHOUSE_SQL_TOKEN, e.WAREHOUSE_CATALOG_URI, e.WAREHOUSE_SQL_ENDPOINT, !!e.WAREHOUSE].join('|')
+  const kept = WAREHOUSES.get(key)
+  if (kept) return kept
+  const made = makeWarehouse(e)
+  WAREHOUSES.set(key, made)
+  return made
+}
+const WAREHOUSES = new Map<string, ReturnType<typeof cloudWarehouse>>()
+
+function makeWarehouse(e: Record<string, any>) {
   const accountId = e.WAREHOUSE_ACCOUNT_ID as string | undefined, bucket = e.WAREHOUSE_BUCKET as string | undefined
   const catalogToken = e.WAREHOUSE_CATALOG_TOKEN as string | undefined
   const r2 = e.WAREHOUSE as R2Bucket | undefined

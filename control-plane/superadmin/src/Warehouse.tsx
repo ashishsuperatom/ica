@@ -238,6 +238,7 @@ function Operations({ ops }: { ops: Op[] | null }) {
           { key: 'tbl', label: 'Table', render: (o) => (o.tbl ? <Code>{o.tbl}</Code> : '—') },
           { key: 'project', label: 'Project', render: (o) => o.project ?? '—' },
           { key: 'rows', label: 'Rows', align: 'end', render: (o) => o.rows ?? '—' },
+          { key: 'took', label: 'Took', align: 'end', render: (o) => { const ms = Number((() => { try { return JSON.parse(o.detail ?? '{}').ms } catch { return NaN } })()); return Number.isFinite(ms) ? `${(ms / 1000).toFixed(1)} s` : '—' } },
           { key: 'ok', label: '', render: (o) => <Status state={o.ok ? 'ok' : 'critical'}>{o.ok ? 'done' : 'failed'}</Status> },
           { key: 'by', label: 'By', render: (o) => o.by },
         ]} />

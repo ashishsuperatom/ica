@@ -82,9 +82,11 @@ export class OrgDO extends DurableObject<Env> {
     const { bridge, ingest } = warehouse(this.env)
     const org = request.headers.get('x-sa-org') ?? this.ctx.id.name ?? 'default'
     const json = (v: unknown, status = 200) => Response.json(v, { status })
-    const log = (op: string, o: { tbl?: string | null; project?: string | null; rows?: number | null; snapshot?: string | null; ok: boolean; detail?: unknown; by: string }) =>
+    // Each operation is recorded with how long it took (ms), so a slow warehouse shows in its record.
+    const started = Date.now()
+    const log = (op: string, o: { tbl?: string | null; project?: string | null; rows?: number | null; snapshot?: string | null; ok: boolean; detail?: Record<string, unknown>; by: string }) =>
       this.ctx.storage.sql.exec('INSERT INTO warehouse_ops (at, op, tbl, project, rows, snapshot, ok, detail, by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        new Date().toISOString(), op, o.tbl ?? null, o.project ?? null, o.rows ?? null, o.snapshot ?? null, o.ok ? 1 : 0, o.detail === undefined ? null : JSON.stringify(o.detail), o.by)
+        new Date().toISOString(), op, o.tbl ?? null, o.project ?? null, o.rows ?? null, o.snapshot ?? null, o.ok ? 1 : 0, JSON.stringify({ ...(o.detail ?? {}), ms: Date.now() - started }), o.by)
     const body: any = request.method === 'POST' ? await request.json().catch(() => ({})) : {}
     const by = String(body.by ?? 'platform')
     // Who owns each table and what it is (warehouse_tables, the latest per table); a table made before owners were kept

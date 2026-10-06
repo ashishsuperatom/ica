@@ -7,6 +7,9 @@ import { appendRows, type ObjectStore } from './append'
 import { checkQuery, capRows, type Grant } from '../access'
 import { namespaceOf, NOT_CONFIGURED, TABLE_NAME, COLUMN_TYPES, WarehouseRefusal, type Column, type DataSourceBridge, type Ingest, type TableInfo } from '../bridge'
 
+/** How long what the catalog said about an organisation's tables is trusted (this warehouse's own writes forget it). */
+const SCHEMA_TTL = 60_000
+
 export interface CloudConfig { accountId: string; bucket: string; catalogToken: string; sqlToken: string; catalogUri?: string; sqlEndpoint?: string }
 
 const tableInfo = (name: string, m: TableMetadata): TableInfo => {
@@ -23,11 +26,20 @@ export function cloudWarehouse(cfg: CloudConfig | null, store: ObjectStore | nul
   const sql = cfg ? basinSql({ accountId: cfg.accountId, bucket: cfg.bucket, token: cfg.sqlToken, endpoint: cfg.sqlEndpoint }, fetcher) : null
   const need = () => { if (!configured) throw new WarehouseRefusal(NOT_CONFIGURED) }
 
-  const tables = async (org: string) => {
+  // The catalog answers slowly (a second or more a call), and every query is checked against the organisation's tables:
+  // what it said is kept for a short while — the lookup itself, so requests at once share one — and forgotten when this
+  // warehouse makes a table or adds rows. Another writer's change shows within SCHEMA_TTL.
+  const known = new Map<string, { at: number; tables: Promise<TableInfo[]> }>()
+  const forget = (org: string) => known.delete(namespaceOf(org))
+  const tables = async (org: string): Promise<TableInfo[]> => {
     need()
     const ns = namespaceOf(org)
-    const names = await catalog!.tables(ns)
-    return Promise.all(names.map(async (n) => tableInfo(n, (await catalog!.load(ns, n)).metadata)))
+    const hit = known.get(ns)
+    if (hit && Date.now() - hit.at < SCHEMA_TTL) return hit.tables
+    const lookup = (async () => { const names = await catalog!.tables(ns); return Promise.all(names.map(async (n) => tableInfo(n, (await catalog!.load(ns, n)).metadata))) })()
+    known.set(ns, { at: Date.now(), tables: lookup })
+    lookup.catch(() => { if (known.get(ns)?.tables === lookup) known.delete(ns) })
+    return lookup
   }
   const queryAs: QueryAs = async (org, text, grant, opts = {}) => {
     need()
@@ -51,7 +63,7 @@ export function cloudWarehouse(cfg: CloudConfig | null, store: ObjectStore | nul
       tables,
       async describe(org, table) {
         need()
-        try { return tableInfo(table, (await catalog!.load(namespaceOf(org), table)).metadata) } catch (e) { if (e instanceof CatalogError && e.status === 404) return null; throw e }
+        return (await tables(org)).find((t) => t.name === table) ?? null
       },
       // The bridge's plain query reads every table of the organisation; callers with a project use queryAs.
       async query(org, text, opts) { const r = await queryAs(org, text, 'all', opts); return { columns: r.columns, rows: r.rows, truncated: r.truncated } },
@@ -73,11 +85,13 @@ export function cloudWarehouse(cfg: CloudConfig | null, store: ObjectStore | nul
         await catalog!.ensureNamespace(ns, { owner: `org:${org}` })
         const schema: IcebergSchema = { type: 'struct', 'schema-id': 0, fields: t.columns.map((c, i) => ({ id: i + 1, name: c.name, required: !!c.required, type: c.type })) }
         try { await catalog!.create(ns, t.name, schema) } catch (e) { if (e instanceof CatalogError && e.status === 409) throw new WarehouseRefusal(`there is already a table "${t.name}"`); throw e }
+        finally { forget(org) }
       },
       async append(org, table, rows) {
         need()
         try { const r = await appendRows(catalog!, store!, namespaceOf(org), table, rows); return { snapshot: r.snapshot, rows: r.rows } }
         catch (e) { if (e instanceof CatalogError && e.status === 404) throw new WarehouseRefusal(`there is no table "${table}"`); throw e }
+        finally { forget(org) }
       },
     },
   }
