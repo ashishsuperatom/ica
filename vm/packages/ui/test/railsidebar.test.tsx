@@ -77,7 +77,19 @@ test('pinned on a page whose place has no panel (about, connections), the panel 
     await at(current)
     await hover(place('Agents')); await leaveAll()
     assert.equal(state(), 'pinned', `on ${current || 'a page of no place'}`)
-    assert.equal(panel()!.textContent?.includes('conversations') || panel()!.textContent?.includes('agents'), true)
+    assert.ok(panel()!.textContent?.trim(), 'the panel has something in it')
+  }
+})
+
+test('every place shows a panel on rest and pins on a click — a place without pages shows itself', async () => {
+  await at('home')
+  await click(toggleBtn()); assert.equal(state(), 'closed')
+  for (const label of ['Home', 'Agents', 'Connections']) {
+    await hover(place(label)); assert.equal(state(), 'floating', `rest on ${label}`)
+    await click(place(label)); assert.equal(state(), 'pinned', `click on ${label}`)
+    await leaveAll(); assert.equal(state(), 'pinned', `${label} stays`)
+    assert.ok(panel()!.textContent?.includes(label === 'Home' ? 'conversations' : label === 'Agents' ? 'agents' : 'Connections'))
+    await click(toggleBtn()); assert.equal(state(), 'closed')
   }
   await act(async () => root.unmount())
 })

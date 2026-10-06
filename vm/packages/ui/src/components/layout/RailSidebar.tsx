@@ -9,6 +9,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Icon } from '@iconify/react'
 import { recall, remember } from '../../lib/remember'
 import SuperatomMark from './SuperatomMark'
+import { NavList } from './Sidebar'
 
 /** How wide the panel may be dragged, in pixels. */
 const PANEL_MIN = 200, PANEL_MAX = 440
@@ -25,7 +26,7 @@ export interface RailPlace {
   actions?: ReactNode
 }
 
-export default function RailSidebar({ name, places, current, foot, pinned, onPin, onMark, markTitle = 'About Superatom', onHome }: {
+export default function RailSidebar({ name, places: given, current, foot, pinned, onPin, onMark, markTitle = 'About Superatom', onHome }: {
   name: string
   /** The project's name at the panel's head opens its home. */
   onHome: () => void
@@ -40,11 +41,14 @@ export default function RailSidebar({ name, places, current, foot, pinned, onPin
   pinned: boolean; onPin: (pinned: boolean) => void
 }) {
   const phone = () => typeof window !== 'undefined' && window.innerWidth < 768
-  // Whose panel is shown: where the person is, or the place last picked; on a page of no place (profile), the last one.
-  // Only a place with a panel can be shown: on a page of a place without one (about, connections), the last one stays.
-  const hasPanel = (k: string) => places.some((p) => p.key === k && p.panel)
-  const [shown, setShown] = useState(hasPanel(current) ? current : places.find((p) => p.panel)?.key ?? '')
-  useEffect(() => { if (hasPanel(current)) setShown(current) }, [current])   // eslint-disable-line react-hooks/exhaustive-deps
+  // Every place has a panel: one without pages of its own shows itself as the one row. So resting on any place shows
+  // a panel, a click on any place pins it, and a pinned panel always has something in it.
+  const places: (RailPlace & { panel: ReactNode })[] = given.map((p) => p.panel ? p as RailPlace & { panel: ReactNode } : { ...p,
+    panel: <NavList groups={[{ label: p.label, items: [{ key: p.key, label: p.label, icon: p.icon, active: p.key === current, onClick: () => p.onClick?.() }] }]} /> })
+  const isPlace = (k: string) => places.some((p) => p.key === k)
+  // Whose panel is shown: where the person is, or the place last picked; on a page of no place (about), the last one.
+  const [shown, setShown] = useState(isPlace(current) ? current : places[0]?.key ?? '')
+  useEffect(() => { if (isPlace(current)) setShown(current) }, [current])   // eslint-disable-line react-hooks/exhaustive-deps
   const [peek, setPeek] = useState<string | null>(null)   // unpinned: the place whose panel is open over the page
   const leave = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const hold = () => clearTimeout(leave.current)
@@ -62,10 +66,10 @@ export default function RailSidebar({ name, places, current, foot, pinned, onPin
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
   }
   const open = peek ?? (pinned ? shown : null)
-  const place = places.find((p) => p.key === open && p.panel) ?? null
+  const place = places.find((p) => p.key === open) ?? null
   const pick = (p: RailPlace) => {
     clearTimeout(leave.current)
-    if (p.panel) { setShown(p.key); setPeek(null); if (!pinned && !phone()) onPin(true) }
+    setShown(p.key); setPeek(null); if (!pinned && !phone()) onPin(true)
     p.onClick?.()
   }
   return (
@@ -76,9 +80,9 @@ export default function RailSidebar({ name, places, current, foot, pinned, onPin
           <button type="button" className="sa-railbar__mark" data-active={current === 'about'} title={markTitle} aria-label={markTitle} onClick={onMark}
             onMouseEnter={() => { if (!pinned) setPeek(null) }}><SuperatomMark size={26} /></button>
           {places.map((p) => (
-            <button key={p.key} type="button" className="sa-railbar__place" style={p.accent ? { '--accent': p.accent } as React.CSSProperties : undefined} data-active={p.key === current} data-open={p.key === open && !!p.panel}
+            <button key={p.key} type="button" className="sa-railbar__place" style={p.accent ? { '--accent': p.accent } as React.CSSProperties : undefined} data-active={p.key === current} data-open={p.key === open}
               title={p.label} aria-label={p.label} onClick={() => pick(p)}
-              onMouseEnter={() => { if (!phone()) { hold(); setPeek(p.panel ? p.key : null) } }}>
+              onMouseEnter={() => { if (!phone()) { hold(); setPeek(p.key) } }}>
               <Icon icon={p.icon} />
             </button>
           ))}
