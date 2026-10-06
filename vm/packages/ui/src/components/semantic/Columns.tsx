@@ -107,12 +107,12 @@ export function Columns({ columns, detail, keep = 'columns' }: { columns: Column
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
     return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
   }, [keep])
-  // A column keeps the width it was dragged to while the window has room for it; until dragged the columns share the space (never narrower than they can be
+  // A column keeps the width it was dragged to; until dragged the columns share the space (never narrower than they can be
   // read), the detail a larger share — so the whole graph fits the window wherever it can, and scrolls sideways only past it.
   const track = (k: string, last: boolean) => {
     const w = widths[k]
-    // a dragged width is what the column takes when there is room; in a narrower window it gives some up, down to readable
-    if (w) return last ? `minmax(${Math.min(w, 340)}px, 1fr)` : `minmax(${MIN_SHARED}px, ${w}px)`
+    // a dragged width is the column's width, exactly — the person chose it; past the window the columns scroll sideways
+    if (w) return last ? `minmax(${w}px, 1fr)` : `${w}px`
     return k === 'detail' ? 'minmax(340px, 1.6fr)' : `minmax(${MIN_SHARED}px, 1fr)`
   }
   const edges = useEdges(columns)
