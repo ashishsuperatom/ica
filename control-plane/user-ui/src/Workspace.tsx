@@ -16,11 +16,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '@superatom/ui/design.css'
 import {
-  AppShell, Sidebar, UserProfile, ConnectionStatus, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, Artifacts, Toasts, LocalThread, AskBar, StepSkeleton,
+  AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, Artifacts, Toasts, LocalThread, AskBar, StepSkeleton,
   BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, notify, startThread, Form, Field, Choices,
   type Recognised, type Artifact, type StepItem,
 } from '@superatom/ui'
-import { PAGE_BLOCKS, PagesContext } from './pageBlocks'
+import { PAGE_BLOCKS, PagesContext, KeyboardShortcuts } from './pageBlocks'
 import { accentOf } from './agentLook'
 import ProgramBlock, { preloadProgram } from './ProgramBlock'
 import { sessionSource, viewSource, viewFromHistory, type Request, type SessionMsg, type ThreadSource, type Intent_, type View } from './threadSource'
@@ -105,15 +105,16 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
 
   // A page of the user UI is a block: from a session it opens a fresh thread starting there; on the pages, a new thread.
   const [root, setRoot] = useState<string | null>(null)
-  const [pending, setPending] = useState<{ type: string } | null>(() => { const p = new URLSearchParams(location.search).get('page'); return p && ['agents', 'activity', 'connections'].includes(p) ? { type: p } : null })
+  const [pending, setPending] = useState<{ type: string } | null>(() => { const p = new URLSearchParams(location.search).get('page'); return p && PAGES.includes(p) ? { type: p } : null })
   const page = (type: string) => { if (sessionId || startAgent) { setPending({ type }); go('') } else startThread(type) }
   const onPages = !sessionId && !startAgent
   const current = sessionId ? sessions.find((s) => s.session === sessionId)?.agent ?? null : startAgent
   // A new chat: the greeting, with the ask bar ready; the first question opens the session, with the agent it reaches.
   const focusAsk = () => setTimeout(() => (document.querySelector('.sa-askbar textarea, .sa-askbar input') as HTMLElement | null)?.focus(), 80)
   const newChat = () => { page('home'); focusAsk() }
-  // The sidebar: a new chat, then the conversations — newest first, a page at a time. Agents, connections and the rest
-  // are a click away in the person's menu; activity and search beside the name.
+  // The sidebar is two: a rail of the big places (home, agents, connections) with the person at its foot, and the panel
+  // of the place picked — home's is a new chat and the conversations, newest first, a page at a time; activity and
+  // search sit in the panel's head.
   const [shownConversations, setShownConversations] = useState(20)
   const [activityView, setActivityView] = useState(() => recall<boolean>('sidebar-activity', false))
   const toggleActivity = useCallback(() => setActivityView((v) => { remember('sidebar-activity', !v); return !v }), [])
@@ -160,8 +161,21 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
     <button type="button" className="sa-icon-btn sa-icon-btn--lg" data-on={activityView} onClick={toggleActivity} title={activityView ? 'Back to the conversations (⌥⌘U)' : 'What is running, and lately (⌥⌘U)'} aria-label="Activity" aria-pressed={activityView}><Icon icon="lucide:bell" /></button>
     <button type="button" className="sa-icon-btn sa-icon-btn--lg" onClick={() => setSearching(true)} title="Search (⌘K)" aria-label="Search"><Icon icon="lucide:search" /></button>
   </>
-  const moreConversations = !activityView && loose.length > shownConversations
+  const moreConversations = loose.length > shownConversations
     ? <button type="button" className="sa-sidelist__more" onClick={() => setShownConversations((n) => n + 30)}>Show more</button> : null
+  const named = agents.filter((a) => !a.isDefault)
+  const places: RailPlace[] = [
+    { key: 'home', label: 'Home', icon: 'lucide:house', onClick: () => page('home'), actions: sideActions,
+      panel: activityView ? <><NavList groups={[nav[0]!]} /><SideActivity request={request} subscribeLive={subscribeLive} /></> : <><NavList groups={nav} />{moreConversations}</> },
+    { key: 'agents', label: 'Agents', icon: 'lucide:bot', onClick: () => page('agents'), actions: sideActions,
+      panel: <NavList groups={[
+        { items: [{ key: 'agents', label: 'All agents', icon: 'lucide:layout-grid', active: onPages && root === 'agents', onClick: () => page('agents') }] },
+        { label: 'Agents', items: named.map((a) => ({ key: `a:${a.id}`, label: a.name, icon: a.look.icon ?? 'lucide:bot', active: startAgent === a.id || (!!sessionId && current === a.id), onClick: () => go(`s/${a.id}`) })) },
+      ]} /> },
+    { key: 'connections', label: 'Connections', icon: 'lucide:plug', onClick: () => page('connections') },
+  ]
+  const railAt = sessionId || (onPages && (root === 'home' || !root)) ? 'home' : startAgent || (onPages && root?.startsWith('agent')) ? 'agents' : onPages && root?.startsWith('connection') ? 'connections' : ''
+  const [showKeys, setShowKeys] = useState(false)
   // The ask bar is at the foot of every page alike: in a conversation it asks there; anywhere else it starts one.
   const [starting, setStarting] = useState('')
   const [startBeats, setStartBeats] = useState<{ text: string; at: number }[]>([])
@@ -177,19 +191,26 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [artifactsTick, setArtifactsTick] = useState(0)
   useEffect(() => { setArtifacts([]) }, [sessionId])
-  const pagesEnv = useMemo(() => ({ request, subscribeLive, projectId, token, scopes, agents, sessions, go }), [request, subscribeLive, projectId, token, scopes, agents, sessions, go])
+  const pagesEnv = useMemo(() => ({ request, subscribeLive, projectId, token, scopes, caps, agents, sessions, go, me, projectName, keep, onSignOut }), [request, subscribeLive, projectId, token, scopes, caps, agents, sessions, go, me, projectName, keep, onSignOut])
   const programEnv = useMemo(() => ({ request }), [request])
   return (
     <>
       <AppShell
         sidebar={(collapsed, toggle) => (
-          <Sidebar name={projectName} connected={connected} groups={nav} collapsed={collapsed} onToggle={toggle} actions={sideActions}
-            body={activityView ? <SideActivity request={request} subscribeLive={subscribeLive} /> : moreConversations}
-            foot={(rail) => <UserProfile name={me.name} email={me.email} context={projectName} showName={!rail}
+          <RailSidebar name={projectName} connected={connected} places={places} current={railAt} pinned={!collapsed} onPin={(p) => toggle(!p)}
+            foot={<UserProfile name={me.name} email={me.email} context={me.email}
               menu={<>
-                <button type="button" className="sa-menu__item" onClick={() => page('agents')}>Agents</button>
-                <button type="button" className="sa-menu__item" onClick={() => page('connections')}>Connections</button>
-                {onSignOut && <button type="button" className="sa-menu__item" onClick={onSignOut}>Sign out</button>}
+                <MenuItem icon="lucide:circle-user" label="Profile" onClick={() => page('profile')} />
+                <MenuItem icon="lucide:settings" label="Settings" onClick={() => page('settings')} />
+                <MenuRule />
+                <MenuItem icon="lucide:bot" label="Agents" onClick={() => page('agents')} />
+                <MenuItem icon="lucide:plug" label="Connections" onClick={() => page('connections')} />
+                <MenuItem icon="lucide:activity" label="Activity" onClick={() => page('activity')} />
+                <MenuRule />
+                <MenuItem icon="lucide:life-buoy" label="Help" sub={<>
+                  <MenuItem icon="lucide:keyboard" label="Keyboard shortcuts" onClick={() => setShowKeys(true)} />
+                </>} />
+                {onSignOut && <MenuItem icon="lucide:log-out" label="Log out" onClick={onSignOut} />}
               </>} />} />
         )}
         status={<ConnectionStatus status={connected ? 'open' : /access/.test(status) ? 'rejected' : 'reconnecting'} message={connected ? undefined : status || undefined} />}
@@ -204,12 +225,14 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
             ? <ThreadSteps key={sessionId ?? `view:${path}`} source={source} session={sessionId} request={request} fetchFile={fetchFile} agentOf={agentOf} viewAgent={startAgent} viewStart={startKey}
                 onArtifacts={setArtifacts} artifactsTick={artifactsTick} onUsed={onUsed} onKept={onKept} />
             : <PagesContext.Provider value={pagesEnv}>
-                <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} address={(b) => (b.type === 'home' ? '/w' : ['agents', 'activity', 'connections'].includes(b.type) ? `/w?page=${b.type}` : null)} />
+                <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} address={(b) => (b.type === 'home' ? '/w' : PAGES.includes(b.type) ? `/w?page=${b.type}` : null)} />
                 <AskBar onAsk={(t) => void startWith(t)} busy={!!starting} placeholder="Ask anything"
                   working={starting ? <><span className="sa-label">Working on: {starting}</span><BeatRows beats={startBeats.slice(-3)} live /></> : undefined} />
               </PagesContext.Provider>}
         </ProgramEnvContext.Provider>
       </AppShell>
+      {showKeys && <Dialog title="Keyboard shortcuts" onClose={() => setShowKeys(false)}
+        actions={<button type="button" className="sa-btn" onClick={() => setShowKeys(false)}>Close</button>}><KeyboardShortcuts /></Dialog>}
       {naming && <Dialog title={naming.what === 'name' ? 'Rename the conversation' : 'A new collection'} onClose={() => setNaming(null)}
         actions={<><button type="button" className="sa-btn" onClick={() => setNaming(null)}>Cancel</button>
           <button type="button" className="sa-btn sa-btn--primary" disabled={!naming.value.trim()} onClick={() => { const n = naming; setNaming(null); void keep(n.session, n.what === 'name' ? { name: n.value } : { collection: n.value }) }}>{naming.what === 'name' ? 'Rename' : 'Keep it there'}</button></>}>
@@ -223,8 +246,11 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   )
 }
 
+/** The pages of the user UI that have an address of their own (/w?page=…). */
+const PAGES = ['agents', 'activity', 'connections', 'profile', 'settings']
+
 /** One of the person's conversations, as their UserDO keeps it. */
-type Conversation = { session: string; agent: string; title: string; updated?: string; name?: string; pinned?: number | boolean; archived?: number | boolean; collection?: string }
+export type Conversation = { session: string; agent: string; title: string; updated?: string; name?: string; pinned?: number | boolean; archived?: number | boolean; collection?: string }
 
 /** The sidebar's activity view: what is running for this person now, then what ran today, then earlier. */
 function SideActivity({ request, subscribeLive }: { request: Request; subscribeLive: (fn: (m: any) => void) => () => void }) {

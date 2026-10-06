@@ -12,13 +12,9 @@ export interface NavItem {
 }
 export interface NavGroup { label?: string; items: NavItem[] }
 
-export default function Sidebar({ name, logo, connected, statusWord, onAbout, groups, foot, collapsed, onToggle, actions, body }: {
+export default function Sidebar({ name, logo, connected, statusWord, onAbout, groups, foot, collapsed, onToggle }: {
   name: string; logo?: string; connected: boolean; statusWord?: string; onAbout?: () => void
   groups: NavGroup[]; foot?: (rail: boolean) => ReactNode; collapsed: boolean; onToggle: (collapsed: boolean) => void
-  /** Small icon buttons beside the name (activity, search): drawn in the rail too when collapsed. */
-  actions?: ReactNode
-  /** What the sidebar shows below its first group instead of the other groups (a view of its own, such as activity). */
-  body?: ReactNode
 }) {
   const close = () => typeof window !== 'undefined' && window.innerWidth < 768 && onToggle(true)
   const go = (i: NavItem) => { i.onClick(); close() }
@@ -35,19 +31,10 @@ export default function Sidebar({ name, logo, connected, statusWord, onAbout, gr
               <span className="sa-sidebar__name truncate">{name}</span>
               {dot}
             </button>
-            {actions}
             <button onClick={() => onToggle(true)} className="sa-icon-btn sa-icon-btn--lg" title="Collapse sidebar" aria-label="Collapse sidebar"><Icon icon="mynaui:sidebar" /></button>
           </div>
           <nav className="sa-sidebar__nav sa-scroll-hide" aria-label="Sections">
-            {(body ? groups.slice(0, 1) : groups).map((g, gi) => (
-              <div key={gi} className="sa-sidebar__group">
-                {g.label && <div className="sa-label sa-sidebar__group-label">{g.label}</div>}
-                {g.items.map((i) => (
-                  <NavRow key={i.key} item={i} onGo={() => go(i)} />
-                ))}
-              </div>
-            ))}
-            {body}
+            <NavList groups={groups} onGo={close} />
           </nav>
           {foot && <div className="sa-sidebar__foot">{foot(false)}</div>}
         </>) : (<>
@@ -55,7 +42,6 @@ export default function Sidebar({ name, logo, connected, statusWord, onAbout, gr
             <button onClick={() => onToggle(false)} className="sa-icon-btn sa-icon-btn--lg" title="Expand sidebar" aria-label="Expand sidebar"><Icon icon="mynaui:sidebar" /></button>
           </div>
           <div className="sa-sidebar__rail">
-            {actions && <div className="sa-sidebar__rail-actions">{actions}</div>}
             {groups[0]?.items.map((i) => (
               <button key={i.key} onClick={() => go(i)} data-active={!!i.active} className="sa-nav-item sa-nav-item--rail" title={i.label}><Icon icon={i.icon} /></button>
             ))}
@@ -68,6 +54,16 @@ export default function Sidebar({ name, logo, connected, statusWord, onAbout, gr
       </aside>
     </>
   )
+}
+
+/** Groups of places, each under its label. `onGo` runs after a place is picked (a drawer closes). */
+export function NavList({ groups, onGo }: { groups: NavGroup[]; onGo?: () => void }) {
+  return <>{groups.map((g, gi) => (
+    <div key={g.label ?? gi} className="sa-sidebar__group">
+      {g.label && <div className="sa-label sa-sidebar__group-label">{g.label}</div>}
+      {g.items.map((i) => <NavRow key={i.key} item={i} onGo={() => { i.onClick(); onGo?.() }} />)}
+    </div>
+  ))}</>
 }
 
 /** One place in the sidebar, with its "…" menu when it has one. */

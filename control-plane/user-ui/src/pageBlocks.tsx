@@ -4,7 +4,8 @@
 
 import { createContext, useContext, useEffect, useState } from 'react'
 import { Section, notify, useThread, Form, Field, Choices, Receipt, RecordList, Status, ActionBar, Empty, AskBar, BeatRows, Icon, ACCENT, Notice, Toolbar, type Accent, type Registry } from '@superatom/ui'
-import type { WorkAgent } from './Workspace'
+import type { WorkAgent, Conversation } from './Workspace'
+import { PROJECT_CAPABILITIES } from '../../shared/permissions'
 import { accentOf } from './agentLook'
 import type { Connector } from '../../shared/connectors'
 
@@ -16,9 +17,16 @@ export interface PagesEnv {
   token?: string | null
   scopes: string[]
   agents: WorkAgent[]
-  sessions: { session: string; agent: string; title: string; updated?: string }[]
+  sessions: Conversation[]
   /** Go to a session, or start one with an agent (s/<agent>). */
   go: (path: string) => void
+  /** What the person may do in this project. */
+  caps: string[]
+  me: { name: string; email?: string }
+  projectName: string
+  /** Keep a conversation the person's way (name, pinned, archived, collection). */
+  keep: (session: string, change: { name?: string; pinned?: boolean; archived?: boolean; collection?: string }) => Promise<void>
+  onSignOut?: () => void
 }
 export const PagesContext = createContext<PagesEnv | null>(null)
 const useEnv = () => { const e = useContext(PagesContext); if (!e) throw new Error('page blocks need their environment'); return e }
@@ -290,12 +298,66 @@ function ConnectionBlock() {
   </div>)
 }
 
+function ProfileBlock() {
+  const env = useEnv()
+  const held = (Object.keys(PROJECT_CAPABILITIES) as (keyof typeof PROJECT_CAPABILITIES)[]).filter((c) => env.caps.includes(c))
+  return (<>
+    <Section icon="lucide:circle-user" title={env.me.name}>
+      <div className="sa-facts">
+        <div className="sa-facts__row"><span className="sa-facts__key">Name</span><span className="sa-facts__value">{env.me.name}</span></div>
+        <div className="sa-facts__row"><span className="sa-facts__key">Email</span><span className="sa-facts__value">{env.me.email ?? '—'}</span></div>
+        <div className="sa-facts__row"><span className="sa-facts__key">Project</span><span className="sa-facts__value">{env.projectName}</span></div>
+        <div className="sa-facts__row"><span className="sa-facts__key">Conversations</span><span className="sa-facts__value">{env.sessions.length}</span></div>
+      </div>
+      {env.onSignOut && <ActionBar><button type="button" className="sa-btn" onClick={env.onSignOut}>Log out</button></ActionBar>}
+    </Section>
+    <Section icon="lucide:shield-check" title="What you can do here">
+      {held.length
+        ? <RecordList rows={held.map((c) => ({ c, what: PROJECT_CAPABILITIES[c] }))} keyOf={(r) => r.c} columns={[{ key: 'what', label: 'Allowed', wrap: true, render: (r) => r.what }]} />
+        : <Empty icon="lucide:shield">Nothing yet — a project admin gives you a role.</Empty>}
+    </Section>
+  </>)
+}
+
+function SettingsBlock() {
+  const env = useEnv()
+  const archived = env.sessions.filter((s) => s.archived)
+  const collections = [...env.sessions.reduce((m, s) => (s.collection && !s.archived ? m.set(s.collection, (m.get(s.collection) ?? 0) + 1) : m), new Map<string, number>())]
+  const titleOf = (s: Conversation) => s.name || plainTitle(s.title) || env.agents.find((a) => a.id === s.agent)?.name || s.agent
+  return (<>
+    <Section icon="lucide:archive" title="Archived conversations">
+      <RecordList rows={archived} keyOf={(s) => s.session} empty="Nothing archived." onRow={(s) => env.go(s.session)} columns={[
+        { key: 'title', label: 'Conversation', render: (s) => titleOf(s) },
+        { key: 'updated', label: 'Last step', render: (s) => when(s.updated) },
+        { key: 'act', label: '', align: 'end', render: (s) => <button type="button" className="sa-btn" onClick={(e) => { e.stopPropagation(); void env.keep(s.session, { archived: false }) }}>Unarchive</button> },
+      ]} />
+    </Section>
+    <Section icon="lucide:folder" title="Collections">
+      <RecordList rows={collections} keyOf={([c]) => c} empty="No collections — keep a conversation in one from its … menu." columns={[
+        { key: 'name', label: 'Collection', render: ([c]) => c },
+        { key: 'n', label: 'Conversations', align: 'end', render: ([, n]) => n },
+      ]} />
+    </Section>
+    <Section icon="lucide:keyboard" title="Keyboard shortcuts"><KeyboardShortcuts /></Section>
+  </>)
+}
+
+/** The keys the workspace answers to. */
+export function KeyboardShortcuts() {
+  const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
+  const k = (m: string) => (mac ? m : m.replace('⌘', 'Ctrl+').replace('⌥', 'Alt+'))
+  const rows: [string, string][] = [['Search conversations, or go to a page', k('⌘K')], ['Show or hide the activity', k('⌥⌘U')], ['Send the question', 'Enter'], ['A new line in the question', 'Shift+Enter'], ['Close a menu or a dialog', 'Esc']]
+  return <div className="sa-dialog__keys sa-section__text">{rows.map(([what, keys]) => [<span key={what}>{what}</span>, <kbd key={`${what}:k`}>{keys}</kbd>])}</div>
+}
+
 export const PAGE_BLOCKS: Registry = {
   home: { label: 'Home', icon: 'lucide:house', accent: 'var(--primary)', title: () => 'Where do you want to start?', subtitle: () => 'Open an agent, then narrow, break down and follow the next moves — or ask in your own words.', render: () => <Home /> },
   agents: { label: 'Agents', icon: 'lucide:bot', accent: 'var(--series-1)', render: () => <AgentsBlock /> },
   'agent-new': { label: 'New agent', icon: 'lucide:plus', accent: 'var(--series-1)', title: (p) => (p.sent ? `Agent: ${String(p.title)}` : 'Make an agent'), subtitle: (p) => (p.sent ? 'Sent — kept as it was made' : 'A title, the knowledge it answers from, the programs it may run, who sees it'), render: () => <AgentNew /> },
   'agent-made': { label: 'Made', icon: 'lucide:check', accent: 'var(--win)', title: (p) => `${String(p.title)} is made`, subtitle: () => 'A node of the knowledge graph: owned, versioned, governed', render: () => <AgentMade /> },
   activity: { label: 'Activity', icon: 'lucide:activity', accent: 'var(--series-2)', render: () => <ActivityBlock /> },
+  profile: { label: 'Profile', icon: 'lucide:circle-user', accent: 'var(--primary)', render: () => <ProfileBlock /> },
+  settings: { label: 'Settings', icon: 'lucide:settings', accent: 'var(--primary)', render: () => <SettingsBlock /> },
   connections: { label: 'Connections', icon: 'lucide:plug', accent: 'var(--series-3)', render: () => <ConnectionsBlock /> },
   'connection-new': { label: 'New connection', icon: 'lucide:plus', accent: 'var(--series-3)', title: (p) => (p.sent ? `Connection: ${String(p.name)}` : 'Connect'), render: () => <ConnectionNew /> },
   'connection-made': { label: 'Connected', icon: 'lucide:check', accent: 'var(--win)', title: (p) => `${String(p.name)} is connected`, render: () => <ConnectionMade /> },
