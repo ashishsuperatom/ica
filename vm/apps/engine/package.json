@@ -29,7 +29,8 @@
     "@superatom/platform-types": "workspace:*",
     "@superatom/programs": "workspace:*",
     "@superatom/state": "workspace:*",
-    "@superatom/session": "workspace:*"
+    "@superatom/session": "workspace:*",
+    "@superatom/ui": "workspace:*"
   },
   "devDependencies": {
     "@types/ws": "^8.5.12",

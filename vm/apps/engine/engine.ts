@@ -25,7 +25,7 @@ import { createSession, prepareWorkspace, setUsageSink, type Session, type Harne
 import { agentConfig, describeConfig, useCache, receive, applied, type AgentName } from './config/index.js'
 import { createNarrator, capResultData, stripCode, isDataCall, type Narrator } from './agents/narrator/index.js'
 import { createAnalyst, promptVersion as analystPromptVersion } from './agents/analyst/index.js'
-import { promptVersion as composerPromptVersion, createComposer, type Composer } from './agents/composer/index.js'
+import { promptVersion as composerPromptVersion, createComposer, periodsIn, type Composer } from './agents/composer/index.js'
 import { createConnector, promptVersion as connectorPromptVersion } from './agents/connector/index.js'
 import { createGroundingAgent, promptVersion as groundingPromptVersion } from './agents/grounding/index.js'
 import { openAgentSessions } from './agent-sessions.js'
@@ -322,7 +322,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     const timing = { ms: Date.now() - t0 }
     if (!a?.markdown) { tellSurfaces(from, channel, session, qid, timing, { status: 'cannot_answer', answer: 'No answer was written in time. Ask it another way, or narrower.' }); return }
     const blocks = Object.entries(a.blocks ?? {}).map(([marker, block]) => ({ marker, block: block as Record<string, unknown> }))
-    tellSurfaces(from, channel, session, qid, timing, { ...readingAnswer(a.markdown, blocks), agent: { name: r.agent.name, how: r.agent.how } } as any)
+    tellSurfaces(from, channel, session, qid, timing, { ...readingAnswer(a.markdown, blocks, periodsIn(a.markdown)), agent: { name: r.agent.name, how: r.agent.how } } as any)
     console.log(`[ica] composer · ${qid.slice(0, 8)} · session ${session.slice(0, 8)} · ${(timing.ms / 1000).toFixed(1)}s`)
   } catch (e: any) {
     const timing = { ms: Date.now() - t0 }

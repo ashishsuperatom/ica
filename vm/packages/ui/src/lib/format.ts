@@ -24,13 +24,14 @@ export const asNumber = (v: unknown): number | null => {
   return null
 }
 
-/** Money, compact, in the project's currency: rupees in crore and lakh (₹1.2 Cr, ₹34.5 L, ₹9,800); other currencies
- *  in thousands, millions and billions (A$1.2M, A$340K). Negative keeps its sign. */
-export function money(v: unknown): string {
+/** Money, compact, in the project's currency (or the one named): rupees in crore and lakh (₹1.2 Cr, ₹34.5 L, ₹9,800);
+ *  other currencies in thousands, millions and billions (A$1.2M, A$340K). Negative keeps its sign. */
+export function money(v: unknown, currency: string = CURRENCY): string {
   const n = asNumber(v)
   if (n === null) return '—'
   const a = Math.abs(n)
   const sign = n < 0 ? '−' : ''
+  const CURRENCY = currency
   if (CURRENCY === 'INR') {
     if (a >= 1e7) return `${sign}₹${N1.format(a / 1e7)} Cr`
     if (a >= 1e5) return `${sign}₹${N1.format(a / 1e5)} L`
@@ -100,6 +101,8 @@ export function fmt(v: unknown, unit: string | undefined): string {
     case 'date': return date(v)
     case 'text': return text(v)
     default: {
+      // A currency's code is money in that currency.
+      if (unit && /^[A-Z]{3}$/.test(unit)) return money(v, unit)
       // Any other unit is a count or a measure named by its word: 12 bookings, 3.4 t.
       const n = asNumber(v)
       return n === null ? text(v) : unit && /^[a-z ]+$/i.test(unit) ? `${N1.format(n)} ${unit}` : N1.format(n)

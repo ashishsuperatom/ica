@@ -330,6 +330,7 @@ struct Cell: Hashable {
         f.numberStyle = .decimal
         f.locale = Locale(identifier: "en_US_POSIX")
         f.groupingSeparator = ","
+        f.usesGroupingSeparator = true   // the POSIX locale groups nothing unless told: 49047.68 → 49,047.68
         f.decimalSeparator = "."
         return f
     }

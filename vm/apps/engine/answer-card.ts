@@ -6,6 +6,10 @@
 // block a section. One place for both, so a table from an agent and one from a program draw the same.
 
 import type { Answer } from '../../../clients/protocol.js'
+import { fmt, numeric, asNumber } from '@superatom/ui/format'
+
+/** A figure as the web draws it (the one formatter: A$6.6M, 49,048 h), its value kept beside the words. */
+const shown = (v: unknown, unit: unknown): unknown => (typeof unit === 'string' && numeric(unit) && asNumber(v) !== null ? { value: v, display: fmt(v, unit) } : v)
 
 export interface SaidBlock { marker: string; block: Record<string, unknown> | null; error?: string }
 
@@ -56,14 +60,14 @@ export function readingAnswer(markdown: string, blocks: { marker: string; block:
     if (cols.length && rows.length) {
       sections.push({ kind: 'table', title: typeof block.title === 'string' ? block.title : undefined,
         columns: cols.map((c) => ({ label: String(c.label ?? c.key), ...(c.unit ? { unit: String(c.unit) } : {}) })),
-        rows: rows.map((r) => cols.map((c) => (r && typeof r === 'object' ? (r as any)[c.key] : r))) })
+        rows: rows.map((r) => cols.map((c) => shown(r && typeof r === 'object' ? (r as any)[c.key] : r, c.unit))) })
     } else if (Array.isArray(block.series) && rows.length) {
       // A chart, for now as its numbers: the axis and one column per series.
       const series = (block.series as any[]).filter((x) => x && x.key)
       const value = (r: any, key: string) => (r?.values && typeof r.values === 'object' ? r.values[key] : r?.[key])
       sections.push({ kind: 'table', title: typeof block.title === 'string' ? block.title : undefined,
         columns: [String(block.axis ?? 'row'), ...series.map((x) => ({ label: String(x.label ?? x.key), ...(block.unit ? { unit: String(block.unit) } : {}) }))],
-        rows: rows.map((r) => [r?.label ?? r?.key ?? r?.[String(block.axis ?? '')], ...series.map((x) => value(r, x.key))]) })
+        rows: rows.map((r) => [r?.label ?? r?.key ?? r?.[String(block.axis ?? '')], ...series.map((x) => shown(value(r, x.key), block.unit))]) })
     } else sections.push({ kind: 'text', body: `${b.marker}: a block of kind ${String(block.type ?? '?')} that this surface cannot draw yet` })
   }
   // The time the answer covers goes where every surface already shows an answer's time: its periods.

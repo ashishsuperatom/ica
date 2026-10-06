@@ -1,7 +1,8 @@
 // How sacli shows things to a person: a session's thread, an answer card, the actions on offer. --json skips all this.
 
 const pad = (s: string, n: number) => s + ' '.repeat(Math.max(0, n - [...s].length))
-const cell = (v: unknown) => v == null ? '' : typeof v === 'number' ? v.toLocaleString('en-US') : typeof v === 'object' ? JSON.stringify(v) : String(v)
+// A cell may carry its own words beside its value ({ value, display }): the words are what is shown.
+const cell = (v: unknown): string => v == null ? '' : typeof v === 'number' ? v.toLocaleString('en-US') : typeof v === 'object' ? ('display' in (v as any) ? String((v as any).display) : 'value' in (v as any) ? cell((v as any).value) : JSON.stringify(v)) : String(v)
 
 export function table(columns: string[], rows: unknown[][], max = 20): string {
   const shown = rows.slice(0, max).map((r) => r.map(cell))

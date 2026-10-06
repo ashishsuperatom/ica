@@ -17,3 +17,8 @@ test('an answer already in this shape is left as it is', () => {
   const a = { answer: 'x', sections: [{ kind: 'text', body: 'b' }], table: { columns: ['a'], rows: [[1]] } }
   assert.deepEqual(normalise(a), a)
 })
+
+test('a cell with its own words is drawn by them', () => {
+  const a = normalise({ answer: 'x', sections: [{ kind: 'table', columns: ['Kind', { label: 'Revenue', unit: 'AUD' }], rows: [['Hard', { value: 6566988.36, display: 'A$6.6M' }]] }] })
+  assert.deepEqual(a.sections[0].rows, [['Hard', 'A$6.6M']])
+})

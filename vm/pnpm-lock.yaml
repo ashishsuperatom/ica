@@ -79,6 +79,9 @@ importers:
       '@superatom/state':
         specifier: workspace:*
         version: link:../../packages/state
+      '@superatom/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       '@xterm/addon-serialize':
         specifier: ^0.14.0
         version: 0.14.0
