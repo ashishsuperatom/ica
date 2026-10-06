@@ -47,8 +47,10 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.superatom.ask
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "1"
+        CURRENT_PROJECT_VERSION: "2"
         TARGETED_DEVICE_FAMILY: "1,2"
+        # The icon is the asset catalog's AppIcon (one 1024 image; Xcode makes every size from it).
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: Superatom/Info.plist
       properties:
@@ -64,22 +66,9 @@ targets:
         UIBackgroundModes:
           - audio
         NSMicrophoneUsageDescription: Superatom listens so you can ask questions by voice.
-        # App icon declared as LOOSE PNGs rather than an asset catalog. Xcode 26.6's actool
-        # refuses to compile an app icon unless a simulator runtime matching its SDK is
-        # installed (an 8GB download) — even for a device build. CFBundleIconFiles is the
-        # pre-asset-catalog mechanism and has no such dependency. Move back to an
-        # .appiconset once that Xcode requirement is gone.
         # The login redirect target. ASWebAuthenticationSession also needs the scheme
         # registered here so iOS routes superatom://auth back to this app.
         CFBundleURLTypes:
           - CFBundleURLName: ai.superatom.ask.auth
             CFBundleURLSchemes:
               - superatom
-        CFBundleIcons:
-          CFBundlePrimaryIcon:
-            CFBundleIconFiles:
-              - AppIcon20x20
-              - AppIcon29x29
-              - AppIcon40x40
-              - AppIcon60x60
-            UIPrerenderedIcon: false

@@ -131,7 +131,11 @@ struct EngineAnswer: Hashable {
         // Prose may arrive as a string OR an array of paragraphs — the web joins the
         // array, and so do we, rather than dropping it for being the wrong type.
         answer   = Self.prose(object["answer"])
-        period   = Coerce.string(object["period"])
+        // The time an answer covers may come as `periods` ({label}…), as a reading answer carries it.
+        period   = Coerce.string(object["period"]) ?? {
+            let labels = (object["periods"] as? [[String: Any]] ?? []).compactMap { Coerce.string($0["label"]) }.filter { !$0.isEmpty }
+            return labels.isEmpty ? nil : labels.joined(separator: " · ")
+        }()
         scope    = Coerce.string(object["scope"])
         source   = Coerce.string(object["source"])
         caveat   = Coerce.string(object["caveat"])
