@@ -1184,6 +1184,9 @@ compaction first.
 **Decision (the user, 2026-10-06):** appending an immutable file n+1 is the standard way — beautiful. If Cloudflare's
 Iceberg catalog does the compaction for us, even better. No Hive-style layout: we go with today's industry standard,
 Iceberg, the way Cloudflare's catalog is made for — not our own scheme, nor something random found on the internet.
+*Done (2026-10-06):* the catalog's automatic compaction is on for the warehouse bucket (`wrangler r2 bucket catalog
+compaction enable`, 128 MB target files). Pricing: 10 GB and 1 million files compacted a month included, then $0.005/GB
+and $2/million files. Snapshot expiration (free) is left off for now: it would limit how far back time travel reaches.
 
 ### The composition graph in columns (built 2026-10-06)
 
