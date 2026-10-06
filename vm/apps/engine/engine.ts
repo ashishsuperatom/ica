@@ -746,7 +746,7 @@ setUsageSink({
   report: (u) => { usageQueue.push({ type: 'usage:report', ...u }); if (usageQueue.length > 50_000) usageQueue.shift(); flushUsage() },
 })
 const enginePlatform = KEY && PROJECT ? platformOf({ hub: HUB, project: PROJECT, key: KEY }) : null
-const sessionSeam = createSessionSeam({ fetchAttachment: enginePlatform ? (h) => enginePlatform.fetchAttachment(h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, graphFile: graphFileOf(PROJECT_DIR),
+const sessionSeam = createSessionSeam({ fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, graphFile: graphFileOf(PROJECT_DIR),
   // Words in a session: the composer on the agent's domain, told the step's STATE, what it shows and the programs' docs.
   app: (payload, from) => appSeam.call(payload, from),
   ask: (o) => appSeam.say(o.text, o.context, { qid: o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, threadId: o.session, from: o.from, reqId: o.reqId, domain: o.domain, keepContext: true }) })

@@ -14,15 +14,17 @@
 // The body is content-addressed, so the same answer sent twice is stored once, and a put whose bytes do not
 // hash to the name in the path is refused: the name is the proof of what is stored.
 import { b64url } from './auth/tokens.js'
+import { LIMITS, keyOf as files, prefixOf, sha256Hex } from './files.js'
+export { sha256Hex }
 import { isParcelled, type Parcel, type ParcelStore } from '../../../clients/transport.js'
 
 /** How long a parcel lives, and so how long its ticket works. */
 export const PARCEL_DAYS = 30
 /** The largest body the route accepts — a table of some hundred thousand rows, not a file upload. */
-export const PARCEL_MAX_BYTES = 64 * 1024 * 1024
+export const PARCEL_MAX_BYTES = LIMITS.parcel
 
 const enc = new TextEncoder()
-const keyOf = (projectId: string, hash: string) => `parcel/${projectId}/${hash}`
+const keyOf = files.parcel   // where a parcel lives: files.ts
 const isHash = (s: string) => /^[a-f0-9]{64}$/.test(s)
 
 async function hmac(secret: string, input: string): Promise<string> {
@@ -48,9 +50,6 @@ export async function verifyTicket(secret: string, projectId: string, hash: stri
   return diff === 0
 }
 
-export async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
-  return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (b) => b.toString(16).padStart(2, '0')).join('')
-}
 
 /** Put a body for a project: stored once by hash, ticketed for PARCEL_DAYS. The caller has already authenticated. */
 export async function putParcel(bucket: R2Bucket, secret: string, projectId: string, hash: string, bytes: ArrayBuffer): Promise<Parcel> {
@@ -73,7 +72,7 @@ export async function pruneParcels(bucket: R2Bucket, projectId: string, now = Da
   const before = now - PARCEL_DAYS * 86_400_000
   let cursor: string | undefined, dropped = 0
   do {
-    const page = await bucket.list({ prefix: `parcel/${projectId}/`, cursor })
+    const page = await bucket.list({ prefix: prefixOf.parcels(projectId), cursor })
     const old = page.objects.filter((o) => o.uploaded.getTime() < before).map((o) => o.key)
     if (old.length) { await bucket.delete(old); dropped += old.length }
     cursor = page.truncated ? page.cursor : undefined

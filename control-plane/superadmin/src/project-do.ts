@@ -37,6 +37,7 @@ import { connectorById, checkConnection, CONNECTORS } from '../../shared/connect
 import { seal, unseal } from './proxy/seal.js'
 import { runConnector, runCode, manifestOf } from './connectors/runtime.js'
 import { graphStore, GraphConflict } from './graph-store.js'
+import { keyOf as fileKeys } from './files.js'
 
 
 // How long a question queued for a sleeping machine is still worth waking up for. Past this the person has
@@ -904,10 +905,12 @@ export class ProjectDO extends DurableObject<Env> {
     const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
     const key = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
     if (!key || !this.keyMatches(key)) return json({ error: 'only this project\'s engine' }, 401)
-    const hash = path.slice('/engine/attachments/'.length)
-    if (!/^[0-9a-f]{64}$/.test(hash) || request.method !== 'GET') return json({ error: 'GET a file by its hash' }, 400)
-    const o = await ((this.env as any).PACKAGES as R2Bucket | undefined)?.get(`attachments/${this._pid}/${hash}`)
-    return o ? new Response(o.body, { headers: { 'content-type': o.httpMetadata?.contentType ?? 'application/octet-stream' } }) : json({ error: 'no such file' }, 404)
+    const [session, hash] = path.slice('/engine/attachments/'.length).split('/')
+    if (request.method !== 'GET') return json({ error: 'GET a session\'s file by its hash' }, 400)
+    let at: string
+    try { at = fileKeys.attachment(this._pid, session ?? '', hash ?? '') } catch (e: any) { return json({ error: e.message }, 400) }
+    const o = await ((this.env as any).PACKAGES as R2Bucket | undefined)?.get(at)
+    return o ? new Response(o.body, { headers: { 'content-type': o.httpMetadata?.contentType ?? 'application/octet-stream', 'content-length': String(o.size) } }) : json({ error: 'no such file' }, 404)
   }
 
   private async enginePrograms(request: Request, path: string): Promise<Response> {

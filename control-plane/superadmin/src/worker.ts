@@ -30,6 +30,7 @@ import { createMachine, stopMachine, FLY_APP } from './fly.js'
 // device flow (./auth/mobile.ts). worker.ts only routes to these; the rules live in the module.
 import { verifyJwt, signJwt, mintPlatformTokenFromClerk, type JwtClaims } from './auth/tokens.js'
 import { routeSocket } from './ws-route.js'
+import { LIMITS, keyOf as fileKeys } from './files.js'
 import { handleParcelRoute } from './parcels.js'
 import { mobileAuthPage, handleMobileCode, handleMobileExchange, handleMeProjects } from './auth/mobile.js'
 import { can, capabilitiesOf, orgRouteNeeds, projectRouteNeeds, beyond, builtinRole, type Capability, type RouteNeed } from '../../shared/permissions.js'
@@ -286,7 +287,7 @@ export default {
       return env.USER.get(env.USER.idFromName(`user:${claims.userId}`)).fetch(fwd)
     }
     // ── The engine's own calls with its project key: programs it uploads and fetches; the files people put in sessions. ──
-    const engineCall = path.match(/^\/api\/engine\/([0-9a-f-]{36})\/(programs(?:\/[0-9a-f]{64})?|attachments\/[0-9a-f]{64})$/)
+    const engineCall = path.match(/^\/api\/engine\/([0-9a-f-]{36})\/(programs(?:\/[0-9a-f]{64})?|attachments\/[\w-]{1,80}\/[0-9a-f]{64})$/)
     if (engineCall) {
       const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${engineCall[1]}`))
       const fwd = new Request(`http://do/engine/${engineCall[2]}${url.search}`, request)
@@ -1034,6 +1035,11 @@ async function uploadDashboardBuild(dashId: string, projectId: string, by: strin
     read.push({ rel, body: await f.part.arrayBuffer() })
   }
   read.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0))
+  // Within the limits (files.ts): each file, and the build as a whole.
+  const big = read.find((f) => f.body.byteLength > LIMITS.dashboardFile)
+  if (big) return new Response(`${big.rel} is larger than ${LIMITS.dashboardFile / 1024 / 1024} MB — a dashboard build's files are at most that`, { status: 413 })
+  const total = read.reduce((n, f) => n + f.body.byteLength, 0)
+  if (total > LIMITS.dashboardBuild) return new Response(`the build is ${Math.round(total / 1024 / 1024)} MB — at most ${LIMITS.dashboardBuild / 1024 / 1024} MB`, { status: 413 })
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', await new Blob(read.flatMap((f) => [f.rel, '\0', f.body, '\0'])).arrayBuffer()))
   const contentHash = [...digest].map((x) => x.toString(16).padStart(2, '0')).join('')
   const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
@@ -1051,7 +1057,8 @@ async function uploadDashboardBuild(dashId: string, projectId: string, by: strin
   }
 
   const buildId = new Date().toISOString().replace(/[:.]/g, '-')
-  const base = `dashboard/${projectId}/${dashId}/${buildId}`
+  let base: string
+  try { base = fileKeys.dashboardBuild(projectId, dashId, buildId) } catch (e: any) { return new Response(e.message, { status: 400 }) }
   let files = 0, bytes = 0
   for (const f of read) {
     await env.PACKAGES.put(`${base}/${f.rel}`, f.body, { httpMetadata: { contentType: mimeOf(f.rel) } })

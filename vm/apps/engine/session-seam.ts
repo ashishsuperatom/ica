@@ -54,7 +54,7 @@ export interface SessionSeamDeps {
   /** Words answered by the session's agent (the composer on the agent's domain); without it, a session takes only controls. */
   ask?: (o: { session: string; text: string; context: string; domain: string | null; from: any; reqId?: string; qid?: string }) => Promise<{ markdown: string | null; blocks: unknown[] }>
   /** A session's file from the platform, by its hash (its person put it in through their UserDO). */
-  fetchAttachment?: (hash: string) => Promise<Uint8Array>
+  fetchAttachment?: (session: string, hash: string) => Promise<Uint8Array>
 }
 
 /** What the agent is told about the step it is answering from, and how its answer may change it. */
@@ -398,7 +398,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
         if (!/^[\w][\w .()-]{0,119}$/.test(name) || name.includes('..')) throw new SessionSeamRefusal('a file is named plainly (letters, digits, spaces, . _ - ( ), at most 120)')
         if (!/^[0-9a-f]{64}$/.test(hash)) throw new SessionSeamRefusal('a file is named by its hash')
         if (!d.fetchAttachment) throw new SessionSeamRefusal('this engine cannot read files from the platform')
-        const bytes = Buffer.from(await d.fetchAttachment(hash))
+        const bytes = Buffer.from(await d.fetchAttachment(session, hash))
         if (createHash('sha256').update(bytes).digest('hex') !== hash) throw new SessionSeamRefusal('the file read is not the one its hash names')
         const dir = join(d.projectDir, 'sessions', session, 'attachments')
         mkdirSync(dir, { recursive: true })

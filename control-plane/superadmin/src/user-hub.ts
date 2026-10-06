@@ -25,6 +25,7 @@
 import { receiver } from '../../../clients/transport.js'
 import { bucketStore } from './parcels.js'
 import { AnswerBuffer } from './answer-buffer.js'
+import { LIMITS, keyOf, checkSize, sha256Hex, putByHash } from './files.js'
 
 type Claims = { userId: string; email?: string; role?: string }
 export interface Tab { tab: string; project: string; surface: 'runtime' | 'admin'; claims: Claims; wsId?: string; lanes: string[] }
@@ -206,15 +207,16 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
       const json = (v: unknown, status = 200) => Response.json(v, { status })
       if (!claims?.userId || !project) return json({ error: 'who, and which project' }, 400)
       if (!/^[\w][\w .()-]{0,119}$/.test(name) || name.includes('..')) return json({ error: 'a file is named plainly (letters, digits, spaces, . _ - ( ), at most 120)' }, 400)
+      const declared = Number(request.headers.get('content-length') ?? 0)
+      if (declared > LIMITS.attachment) return json({ error: `a file is at most ${LIMITS.attachment / 1024 / 1024} MB` }, 413)   // refused before it is read
       const bytes = new Uint8Array(await request.arrayBuffer())
-      if (!bytes.length) return json({ error: 'the file is empty' }, 400)
-      if (bytes.length > 20_000_000) return json({ error: 'a file is at most 20 MB' }, 413)
+      try { checkSize('attachment', bytes.length) } catch (e: any) { return json({ error: e.message }, e.status ?? 400) }
       const linked: any = await projectStub(project).personLink({ project, userId: claims.userId, email: claims.email, role: claims.role, surface: 'runtime' })
       if (!linked?.ok) return json({ error: linked?.reason ?? 'no access to this project' }, 403)
-      const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))).map((b) => b.toString(16).padStart(2, '0')).join('')
+      const hash = await sha256Hex(bytes)
       const bucket = (env_ as any).PACKAGES as R2Bucket | undefined
       if (!bucket) return json({ error: 'no bucket bound' }, 503)
-      await bucket.put(`attachments/${project}/${hash}`, bytes, { httpMetadata: { contentType: type } })
+      try { await putByHash(bucket, 'attachment', keyOf.attachment(project, session, hash), hash, bytes, type) } catch (e: any) { return json({ error: e.message }, e.status ?? 400) }
       await projectStub(project).personMessage(project, linked.wsId, { to: { type: 'code-engine' }, payload: { t: 'session:attach', session, name, type, hash, size: bytes.length, reqId: `attach-${hash.slice(0, 12)}` } })
       return json({ ok: true, session, name, hash, size: bytes.length, type }, 201)
     },

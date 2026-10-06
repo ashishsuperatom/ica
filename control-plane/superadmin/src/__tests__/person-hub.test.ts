@@ -140,7 +140,7 @@ describe('every person through their UserDO', () => {
     expect(atEngine.payload).toMatchObject({ session: 's1', name: 'budget.csv', hash: out.hash, size: bytes.length, type: 'text/csv' })
     expect(atEngine.payload.data).toBeUndefined()
     expect(atEngine.from.userId).toBe('ana')
-    const kept = await (await mf.getR2Bucket('PACKAGES')).get(`attachments/${PID}/${out.hash}`)
+    const kept = await (await mf.getR2Bucket('PACKAGES')).get(`attachments/${PID}/s1/${out.hash}`)
     expect(await kept?.text()).toBe('month,budget\nJan,100\n')
     const bo = await mf.dispatchFetch(`http://x/attach?project=${PID}&session=s9&name=x.csv`, { method: 'POST', body: bytes, headers: { 'x-sa-claims': JSON.stringify({ userId: 'bo', email: 'bo@x.io', role: 'user' }) } })
     expect(bo.status).toBe(403)   // no access to the project: refused before anything is kept
