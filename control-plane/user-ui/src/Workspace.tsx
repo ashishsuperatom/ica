@@ -174,7 +174,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
       ]} /> },
     { key: 'connections', label: 'Connections', icon: 'solar:link-round-linear', onClick: () => page('connections') },
   ]
-  const railAt = sessionId || (onPages && (root === 'home' || !root)) ? 'home' : startAgent || (onPages && root?.startsWith('agent')) ? 'agents' : onPages && root?.startsWith('connection') ? 'connections' : ''
+  const railAt = onPages && root === 'about' ? 'about' : sessionId || (onPages && (root === 'home' || !root)) ? 'home' : startAgent || (onPages && root?.startsWith('agent')) ? 'agents' : onPages && root?.startsWith('connection') ? 'connections' : ''
   const [showKeys, setShowKeys] = useState(false)
   // The ask bar is at the foot of every page alike: in a conversation it asks there; anywhere else it starts one.
   const [starting, setStarting] = useState('')
@@ -191,13 +191,13 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [artifactsTick, setArtifactsTick] = useState(0)
   useEffect(() => { setArtifacts([]) }, [sessionId])
-  const pagesEnv = useMemo(() => ({ request, subscribeLive, projectId, token, scopes, caps, agents, sessions, go, me, projectName, keep, onSignOut }), [request, subscribeLive, projectId, token, scopes, caps, agents, sessions, go, me, projectName, keep, onSignOut])
+  const pagesEnv = useMemo(() => ({ request, subscribeLive, projectId, token, scopes, caps, agents, sessions, go, me, projectName, keep, onSignOut, connected }), [request, subscribeLive, projectId, token, scopes, caps, agents, sessions, go, me, projectName, keep, onSignOut, connected])
   const programEnv = useMemo(() => ({ request }), [request])
   return (
     <>
       <AppShell
         sidebar={(collapsed, toggle) => (
-          <RailSidebar name={projectName} places={places} current={railAt} pinned={!collapsed} onPin={(p) => toggle(!p)}
+          <RailSidebar name={projectName} onAbout={() => page('about')} places={places} current={railAt} pinned={!collapsed} onPin={(p) => toggle(!p)}
             foot={<UserProfile name={me.name} email={me.email}
               menu={<>
                 <MenuItem icon="solar:user-circle-linear" label="Profile" onClick={() => page('profile')} />
@@ -247,7 +247,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
 }
 
 /** The pages of the user UI that have an address of their own (/w?page=…). */
-const PAGES = ['agents', 'activity', 'connections', 'profile', 'settings']
+const PAGES = ['about', 'agents', 'activity', 'connections', 'profile', 'settings']
 
 /** One of the person's conversations, as their UserDO keeps it. */
 export type Conversation = { session: string; agent: string; title: string; updated?: string; name?: string; pinned?: number | boolean; archived?: number | boolean; collection?: string }

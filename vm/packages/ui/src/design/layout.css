@@ -377,3 +377,5 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 .sa-railbar__panel .sa-nav-row:hover, .sa-railbar__panel .sa-nav-row[data-open='true'] { background: var(--rail); }
 .sa-railbar__panel .sa-nav-row[data-active='true'] { background: var(--rail-active); }
 .sa-railbar__panel .sa-nav-row > .sa-nav-item, .sa-railbar__panel .sa-nav-row > .sa-nav-item:hover, .sa-railbar__panel .sa-nav-row > .sa-nav-item[data-active='true'] { background: none; }
+.sa-railbar__mark { --mark-ground: var(--rail); width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: var(--r-md); color: var(--ink); margin-bottom: var(--sp-2); }
+.sa-railbar__mark:hover, .sa-railbar__mark:focus-visible, .sa-railbar__mark[data-active='true'] { --mark-ground: var(--rail-active); outline: none; background: var(--rail-active); }

@@ -24,6 +24,7 @@
   --panel: #eef2f6; /* a quiet fill: tracks, the active option, a group row, table heads */
   --page: #ffffff; /* the page behind the cards: plain white by default */
   --sidebar: #ffffff;
+  --brand-electron: #0f9488; /* the electron of the Superatom mark */
   --rail: #f4f5f7; /* the thin rail of big places, set apart from the white panel beside it */
   --rail-active: #e7e9ed; /* the rail place where one is; a picked row in the panel */
   --line: #e4e9f0; /* borders and row dividers */

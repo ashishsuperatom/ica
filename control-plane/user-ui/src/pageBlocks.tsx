@@ -27,6 +27,8 @@ export interface PagesEnv {
   /** Keep a conversation the person's way (name, pinned, archived, collection). */
   keep: (session: string, change: { name?: string; pinned?: boolean; archived?: boolean; collection?: string }) => Promise<void>
   onSignOut?: () => void
+  /** Whether the project's engine is reached now. */
+  connected: boolean
 }
 export const PagesContext = createContext<PagesEnv | null>(null)
 const useEnv = () => { const e = useContext(PagesContext); if (!e) throw new Error('page blocks need their environment'); return e }
@@ -298,6 +300,30 @@ function ConnectionBlock() {
   </div>)
 }
 
+function AboutBlock() {
+  const env = useEnv()
+  const named = env.agents.filter((a) => !a.isDefault)
+  return (<>
+    <Section icon="solar:info-circle-linear" title="Superatom">
+      <p className="sa-section__text">Ask about your organisation in your own words. Each question goes to the agent that knows its subject: it answers from the organisation's knowledge and the programs it may run, shows the numbers it read, and every conversation is kept for you to come back to.</p>
+    </Section>
+    <Section icon="solar:folder-linear" title="This project">
+      <div className="sa-facts">
+        <div className="sa-facts__row"><span className="sa-facts__key">Project</span><span className="sa-facts__value">{env.projectName}</span></div>
+        <div className="sa-facts__row"><span className="sa-facts__key">Its engine</span><span className="sa-facts__value"><span className="sa-row sa-row--tight" style={{ justifyContent: 'flex-end' }}><span className="sa-dot" style={{ background: env.connected ? 'var(--win)' : 'var(--warn)' }} />{env.connected ? 'Connected' : 'Reconnecting…'}</span></span></div>
+        <div className="sa-facts__row"><span className="sa-facts__key">Agents you can ask</span><span className="sa-facts__value">{named.length}</span></div>
+        <div className="sa-facts__row"><span className="sa-facts__key">Your conversations</span><span className="sa-facts__value">{env.sessions.length}</span></div>
+      </div>
+    </Section>
+    <Section icon="solar:widget-linear" title="Who answers">
+      <RecordList rows={named} keyOf={(a) => a.id} empty="No agents you can see yet." onRow={(a) => env.go(`s/${a.id}`)} columns={[
+        { key: 'name', label: 'Agent', render: (a) => <span className="sa-row sa-row--tight"><Icon icon={a.look.icon ?? 'solar:widget-linear'} />{a.name}</span> },
+        { key: 'says', label: 'Answers about', wrap: true, render: (a) => a.look.says ?? '' },
+      ]} />
+    </Section>
+  </>)
+}
+
 function ProfileBlock() {
   const env = useEnv()
   const held = (Object.keys(PROJECT_CAPABILITIES) as (keyof typeof PROJECT_CAPABILITIES)[]).filter((c) => env.caps.includes(c))
@@ -356,6 +382,7 @@ export const PAGE_BLOCKS: Registry = {
   'agent-new': { label: 'New agent', icon: 'solar:add-circle-linear', accent: 'var(--series-1)', title: (p) => (p.sent ? `Agent: ${String(p.title)}` : 'Make an agent'), subtitle: (p) => (p.sent ? 'Sent — kept as it was made' : 'A title, the knowledge it answers from, the programs it may run, who sees it'), render: () => <AgentNew /> },
   'agent-made': { label: 'Made', icon: 'solar:check-circle-linear', accent: 'var(--win)', title: (p) => `${String(p.title)} is made`, subtitle: () => 'A node of the knowledge graph: owned, versioned, governed', render: () => <AgentMade /> },
   activity: { label: 'Activity', icon: 'solar:pulse-linear', accent: 'var(--series-2)', render: () => <ActivityBlock /> },
+  about: { label: 'About', icon: 'solar:info-circle-linear', accent: 'var(--primary)', render: () => <AboutBlock /> },
   profile: { label: 'Profile', icon: 'solar:user-circle-linear', accent: 'var(--primary)', render: () => <ProfileBlock /> },
   settings: { label: 'Settings', icon: 'solar:settings-linear', accent: 'var(--primary)', render: () => <SettingsBlock /> },
   connections: { label: 'Connections', icon: 'solar:link-round-linear', accent: 'var(--series-3)', render: () => <ConnectionsBlock /> },
