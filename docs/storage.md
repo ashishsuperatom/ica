@@ -67,7 +67,7 @@ to the warehouse, with ms), `warehouse_tables` (owners); legacy `datasources`, `
 
 **ProjectDO** `proj:<project>` — the project's record and hub. Storage keys `projectName`, `orgId`. Tables:
 - who may do what: `access` (by email), `access_domains`, `roles`, `groups`, `group_members`, `members` (legacy +
-  service identities `svc:<channel>`), `agent_keys` (`sak_<project>_…`, SHA-256 only), `access_policies`,
+  service identities `svc:<channel>`), `agent_keys` (`sak_<project>_…`, SHA-256 only; capabilities, the person it acts for, the key that made it — `org:<id>` for an organisation's), `access_policies`,
   `access_attributes`, `access_version`, `warehouse_grants`;
 - the engine: `api_key` (the project key `sk-proj-…`), `fly_machine`, `engine_running`, `profile`, `message_queue`
   (for a sleeping engine, 60 min), `engine_sources`;
@@ -95,8 +95,8 @@ lanes.
 | What | Format | Kept in | How |
 |---|---|---|---|
 | project key | `sk-proj-<uuid>` | ProjectDO `api_key`; the engine's `<home>/.env` (`ICA_KEY`) | plaintext (see risks) |
-| agent key | `sak_<project>_<43>` | ProjectDO `agent_keys` | SHA-256 + prefix; expiry, revocation |
-| organisation key | `sak_org_<org>_<43>` | OrgDO `org_keys` | SHA-256 |
+| agent key | `sak_<project>_<43>` | ProjectDO `agent_keys` | SHA-256 + prefix; capabilities, made_by_key; expiry, revocation (cascades to keys it made) |
+| organisation key | `sak_org_<org>_<43>` | OrgDO `org_keys` | SHA-256 + prefix; capabilities, made_by_key; expiry, revocation (cascades) |
 | platform JWT | HS256 `{userId,email,name,role,exp}` | the client (`sa-token`, iOS Keychain) | `JWT_SECRET` |
 | provider keys for agents | — | KV `agent-credentials` | sealed with `CREDENTIALS_MASTER_KEY`; the engine holds them in its environment only |
 | connector secrets | — | ProjectDO `connections.secrets_sealed` | sealed; refused without the master key |

@@ -90,7 +90,7 @@ describe('programs: source → built → kept → published → running elsewher
   let builderKey = '', otherKey = '', hash = ''
   it('an agent sends source; the engine builds and uploads it; the platform keeps it as the agent\'s draft', async () => {
     await engine(homeA, 'a')
-    const mk = async (name: string) => (await call('/agent-keys', { method: 'POST', body: JSON.stringify({ name, scopes: ['programs', 'sessions'], by: 'admin@test.io' }) }))
+    const mk = async (name: string) => (await call('/agent-keys', { method: 'POST', body: JSON.stringify({ name, capabilities: ['project.view', 'project.ask'], by: 'admin@test.io' }) }))
     const k1 = await mk('builder'); builderKey = k1.key
     otherKey = (await mk('other')).key
     const agent = await socket({ role: 'agent', key: builderKey })

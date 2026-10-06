@@ -297,6 +297,17 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     -- version kept by its hash (the files in the bucket, app/<project>/<hash>), the newest the one engines run.
     CREATE TABLE IF NOT EXISTS app_versions (hash TEXT NOT NULL, at TEXT NOT NULL, by TEXT NOT NULL, files INTEGER NOT NULL, bytes INTEGER NOT NULL);
   ` },
+  { id: 38, name: 'keys hold capabilities', up: (db) => {
+    // A key holds capabilities — the names roles use — not scopes; and it records the key that made it, if a key did.
+    // The scopes the keys made before held are turned into the capabilities they gave (that table, as it stood).
+    const GAVE: Record<string, string[]> = { sessions: ['project.view', 'project.ask'], ask: ['project.ask'], programs: ['project.ask', 'project.view'], decisions: ['project.view', 'project.ask', 'project.approve'], learn: ['project.view', 'project.publish'], warehouse: ['warehouse.use'], 'warehouse-write': ['warehouse.use', 'warehouse.append'], connectors: ['project.view', 'project.ask'], publish: ['project.ask', 'project.publish'], app: ['project.manage'], graph: ['project.view', 'project.ask'] }
+    db.exec('ALTER TABLE agent_keys RENAME COLUMN scopes TO capabilities')
+    db.exec('ALTER TABLE agent_keys ADD COLUMN made_by_key TEXT')
+    for (const r of db.all('SELECT id, capabilities FROM agent_keys')) {
+      const scopes: string[] = JSON.parse(String(r.capabilities))
+      db.all('UPDATE agent_keys SET capabilities = ? WHERE id = ? RETURNING id', JSON.stringify([...new Set(scopes.flatMap((x) => GAVE[x] ?? []))].sort()), r.id)
+    }
+  } },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */
@@ -385,6 +396,12 @@ export const ORG_MIGRATIONS: Migration[] = [
     CREATE INDEX IF NOT EXISTS warehouse_tables_tbl ON warehouse_tables (tbl, seq);
     CREATE TRIGGER IF NOT EXISTS warehouse_tables_no_update BEFORE UPDATE ON warehouse_tables BEGIN SELECT RAISE(ABORT, 'warehouse table owners are append-only'); END;
     CREATE TRIGGER IF NOT EXISTS warehouse_tables_no_delete BEFORE DELETE ON warehouse_tables BEGIN SELECT RAISE(ABORT, 'warehouse table owners are append-only'); END;
+  ` },
+  { id: 8, name: 'keys hold capabilities', up: `
+    -- An organisation key holds organisation capabilities (it always did: warehouse.*) — named as such; and it records
+    -- the key that made it, if a key did.
+    ALTER TABLE org_keys RENAME COLUMN scopes TO capabilities;
+    ALTER TABLE org_keys ADD COLUMN made_by_key TEXT;
   ` },
 ]
 

@@ -72,7 +72,7 @@ afterAll(async () => { data?.close(); await mf?.dispose(); rmSync(home, { recurs
 describe('data access per reader', () => {
   let agent: Awaited<ReturnType<typeof socket>>, keyId = ''
   it('a policy and an attribute reach the query the agent\'s program sends', async () => {
-    const made = await call('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'reader', scopes: ['sessions'], by: 'admin@test.io' }) })
+    const made = await call('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'reader', capabilities: ['project.view', 'project.ask'], by: 'admin@test.io' }) })
     keyId = made.body.record.id
     expect((await call('/access-policies', { method: 'POST', body: JSON.stringify({ applies_to: `agent:${keyId}`, source: 'TRIPS', table: 'trips', kind: 'row', predicate: '{t}.branch IN {attr.branches}', by: 'admin@test.io' }) })).status).toBe(201)
     expect((await call('/access-policies', { method: 'POST', body: JSON.stringify({ applies_to: 'everyone', source: 'TRIPS', table: 'trips', kind: 'row', predicate: 'branch = 1', by: 'admin@test.io' }) })).body.error).toMatch(/names the table as \{t\}/)

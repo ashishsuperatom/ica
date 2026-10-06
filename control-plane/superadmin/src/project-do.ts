@@ -23,8 +23,8 @@ import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/
 import { PROJECT_MIGRATIONS, adoptProjectSchemaVersion } from './migrations.js'
 import { bucketStore } from './parcels.js'
 import { AuditLog, auditScope } from './audit.js'
-import { AgentKeys, KeyRefusal } from './agent-keys.js'
-import { isAgentScope, keyAllows, keyCapabilities, scopesGivable, HUB_MESSAGES } from '../../shared/agent-scopes.js'
+import { AgentKeys, KeyRefusal, type AgentKey } from './agent-keys.js'
+import { HUB_MESSAGES } from '../../shared/hub-messages.js'
 import { can, beyond, builtinRole, capabilitiesOf, checkRole, isCapability, messageNeeds, PROJECT_ROLES, type Capability } from '../../shared/permissions.js'
 import { SUPERADMIN_EMAILS } from './auth/tokens.js'
 import { ProgramCatalogue, CatalogueRefusal } from './program-catalogue.js'
@@ -55,7 +55,6 @@ interface ConnInfo {
   type: string       // "code-engine" | "runtime" | "admin" | "agent"
   userId?: string    // only for user connections; an agent key's is `agent:<keyId>`
   email?: string     // the person's address, from their token (for the audit history)
-  scopes?: string[]  // an agent key's scopes (shared/agent-scopes.ts)
   maker?: string     // who made an agent key: the key acts for them, cut to what they hold now
   admin?: boolean    // a person who administers this project (superadmin, org admin, or the project's admin role)
   orgRole?: string   // "admin" | "member" — from JWT, used for persona enforcement
@@ -179,6 +178,30 @@ export class ProjectDO extends DurableObject<Env> {
   // knows where to send an assignment (only the org may hand out access), without the project reading the org.
   private async orgId(): Promise<string | null> {
     return (await this.ctx.storage.get<string>('orgId')) ?? null
+  }
+
+  // ── Keys: in force, and what they hold (the worker asks on every call made with a key) ──
+  /** A key is in force when it is, and so is the key that made it — one of this project's, or an organisation's (asked
+   *  of the OrgDO). A key whose maker key went holds nothing: it goes with it. */
+  private async keyInForce(k: AgentKey, seen = new Set<string>()): Promise<boolean> {
+    if (!this.agentKeys.live(k) || seen.has(k.id)) return false
+    seen.add(k.id)
+    if (!k.made_by_key) return true
+    if (k.made_by_key.startsWith('org:')) {
+      const org = await this.orgId()
+      if (!org) return false
+      const r: any = await this.env.ORG.get(this.env.ORG.idFromName(org)).fetch(new Request(`http://do/key-alive?id=${encodeURIComponent(k.made_by_key.slice(4))}`)).then((x) => x.json()).catch(() => null)
+      return r?.alive === true
+    }
+    const parent = this.agentKeys.get(k.made_by_key)
+    return !!parent && this.keyInForce(parent, seen)
+  }
+  /** For the worker: a project key's standing — in force, what it holds now, and the person it acts for. */
+  private async keyAccess(request: Request): Promise<Response> {
+    const { key } = await request.json().catch(() => ({})) as { key?: string }
+    const v = key ? await this.agentKeys.verify(String(key)) : { ok: false as const, reason: 'no key' }
+    if (!v.ok || !(await this.keyInForce(v.key))) return Response.json({ ok: false, reason: v.ok ? 'the key that made it is no longer in force' : v.reason })
+    return Response.json({ ok: true, keyId: v.key.id, name: v.key.name, maker: v.key.created_by, caps: this.agentKeys.holds(v.key, (who) => this.capabilitiesOfEmail(who)) })
   }
 
   // Grace for a briefly-absent EXTERNAL engine before a routed message errors "offline": only if it
@@ -322,6 +345,7 @@ export class ProjectDO extends DurableObject<Env> {
     // ── Agent API keys and the audit history (the worker authorises the caller as the project's admin) ──
     if (path === '/agent-keys' || path.startsWith('/agent-keys/') || path === '/audit') return this.agentKeysAndAudit(request, path)
     if (request.method === 'POST' && path === '/agent-call') return this.agentCall(request)
+    if (request.method === 'POST' && path === '/key-access') return this.keyAccess(request)
     if (path === '/engine/programs' || path.startsWith('/engine/programs/')) return this.enginePrograms(request, path)
     if (path.startsWith('/engine/attachments/')) return this.engineAttachments(request, path)
     if (path.startsWith('/engine/connections/') || path.startsWith('/engine/bridges/')) return this.engineConnections(request, path)
@@ -641,8 +665,9 @@ export class ProjectDO extends DurableObject<Env> {
         ws.close(4001, `Invalid agent key: ${v.reason}`)
         return
       }
-      this.audit.record({ actor: { kind: 'agent', id: `agent:${v.key.id}` }, via: 'agent', action: 'agent.connect', outcome: 'ok', detail: { name: v.key.name, scopes: v.key.scopes } })
-      await this.register(ws, 'agent', `agent:${v.key.id}`, undefined, undefined, undefined, { scopes: v.key.scopes, maker: v.key.created_by })
+      if (!(await this.keyInForce(v.key))) { ws.close(4001, 'Invalid agent key: the key that made it is no longer in force'); return }
+      this.audit.record({ actor: { kind: 'agent', id: `agent:${v.key.id}` }, via: 'agent', action: 'agent.connect', outcome: 'ok', detail: { name: v.key.name, capabilities: v.key.capabilities } })
+      await this.register(ws, 'agent', `agent:${v.key.id}`, undefined, undefined, undefined, { maker: v.key.created_by })
       return
     }
 
@@ -898,7 +923,8 @@ export class ProjectDO extends DurableObject<Env> {
     if (!payload || typeof payload.t !== 'string') return json({ error: 'the body is a message: { "t": "<type>", … }' }, 400)
     payload.reqId ??= `http-${crypto.randomUUID()}`
     const wsId = `http-${crypto.randomUUID().slice(0, 8)}`
-    const conn: ConnInfo = { wsId, type: 'agent', userId: `agent:${v.key.id}`, scopes: v.key.scopes, maker: v.key.created_by }
+    if (!(await this.keyInForce(v.key))) return json({ error: 'Invalid agent key: the key that made it is no longer in force' }, 401)
+    const conn: ConnInfo = { wsId, type: 'agent', userId: `agent:${v.key.id}`, maker: v.key.created_by }
     const timeoutMs = Math.min(Math.max(Number(new URL(request.url).searchParams.get('timeout')) || 120, 1), 300) * 1000
     return await new Promise<Response>((resolve) => {
       let done = false
@@ -1106,7 +1132,7 @@ export class ProjectDO extends DurableObject<Env> {
       if (!code.trim() || code.length > 100_000) throw new Error('code mode runs a program of at most 100,000 characters')
       const t0 = Date.now()
       let r: Awaited<ReturnType<typeof runCode>> = { ok: false, error: 'the program did not run', logs: [] }
-      try { r = await runCode(this.env, exportsObj, this._pid, { type: sender.type, userId: sender.userId, email: sender.email, admin: can(this.capsOf(sender), 'project.data'), scopes: sender.scopes ?? [] }, code) }
+      try { r = await runCode(this.env, exportsObj, this._pid, { type: sender.type, userId: sender.userId, email: sender.email, admin: can(this.capsOf(sender), 'project.data'), scopes: this.scopesOf(sender) }, code) }
       catch (e: any) { r = { ok: false, error: e?.message ?? String(e), logs: [] } }
       finally { this.recordCall({ op: 'run', target: `${code.length} characters`, by: who, ok: r.ok, ms: Date.now() - t0, error: r.error ?? null }) }
       return r as unknown as Record<string, unknown>
@@ -1464,7 +1490,7 @@ export class ProjectDO extends DurableObject<Env> {
    *  member (a chat channel) a member's; an agent key its maker's (its scopes cut it further); the console everything. */
   private capsOf(c: ConnInfo): Capability[] {
     if (c.type === 'admin' || c.orgRole === 'superadmin') return [...capabilitiesOf('project')]
-    if (c.type === 'agent') return keyCapabilities(c.scopes ?? [], this.capabilitiesOfEmail(c.maker))
+    if (c.type === 'agent') { const k = this.agentKeys.get(String(c.userId ?? '').replace(/^agent:/, '')); return k ? this.agentKeys.holds(k, (who) => this.capabilitiesOfEmail(who)) : [] }
     if (c.type !== 'runtime' || !c.userId) return []
     if (c.email) return this.capabilitiesOfEmail(c.email)
     const [m] = [...this.ctx.storage.sql.exec('SELECT role FROM members WHERE user_id = ?', c.userId)] as any[]
@@ -1551,8 +1577,12 @@ export class ProjectDO extends DurableObject<Env> {
   private async agentKeysAndAudit(request: Request, path: string): Promise<Response> {
     const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
     const body: any = request.method === 'GET' ? {} : await request.json().catch(() => ({}))
-    const by = String(body.by ?? new URL(request.url).searchParams.get('by') ?? '')
-    const admin = { kind: 'user' as const, id: by || 'unknown', ...(by.includes('@') ? { email: by } : {}) }
+    let actorH: any = null
+    try { actorH = JSON.parse(request.headers.get('x-sa-actor') ?? 'null') } catch { /* none */ }
+    // Who acts: a person, or a key acting for its person (the worker says which — x-sa-actor, x-sa-key).
+    const by = String(body.by ?? actorH?.email ?? new URL(request.url).searchParams.get('by') ?? '')
+    const admin = request.headers.get('x-sa-key') ? { kind: 'agent' as const, id: String(actorH?.id ?? `agent:${request.headers.get('x-sa-key')}`) } : { kind: 'user' as const, id: by || 'unknown', ...(by.includes('@') ? { email: by } : {}) }
+    const callerCaps = request.headers.get('x-sa-caps') ? this.capsOfRequest(request) : null
     try {
       if (path === '/audit' && request.method === 'GET') {
         const q = new URL(request.url).searchParams
@@ -1566,20 +1596,22 @@ export class ProjectDO extends DurableObject<Env> {
       if (path === '/agent-keys' && request.method === 'GET') return json({ keys: this.agentKeys.list() })
       if (path === '/agent-keys' && request.method === 'POST') {
         if (!by) return json({ error: 'who is creating the key?' }, 400)
-        const givable = scopesGivable(this.capabilitiesOfEmail(by))
-        const over = (Array.isArray(body.scopes) ? body.scopes : []).filter((x: unknown) => isAgentScope(x) && !givable.includes(x))
-        if (over.length) return json({ error: `you cannot give a key what you do not hold: ${over.join(', ')}` }, 403)
-        const r = await this.agentKeys.create({ name: body.name, scopes: body.scopes, by, expiresAt: body.expiresAt ?? null })
-        this.audit.record({ actor: admin, via: 'admin', action: 'agent-key.create', target: r.record.id, outcome: 'ok', detail: { name: r.record.name, scopes: r.record.scopes, expires_at: r.record.expires_at } })
+        // A key holds at most what its maker holds here now (a person, or a key — x-sa-caps is what the caller holds).
+        const holds = callerCaps ?? this.capabilitiesOfEmail(by)
+        const over = beyond(Array.isArray(body.capabilities) ? body.capabilities.map(String) : [], holds)
+        if (over.length) return json({ error: `a key cannot be given what its maker does not hold: ${over.join(', ')}` }, 403)
+        const r = await this.agentKeys.create({ name: body.name, capabilities: body.capabilities, by, madeByKey: request.headers.get('x-sa-key'), expiresAt: body.expiresAt ?? null })
+        this.audit.record({ actor: admin, via: request.headers.get('x-sa-key') ? 'agent' : 'admin', action: 'agent-key.create', target: r.record.id, outcome: 'ok', detail: { name: r.record.name, capabilities: r.record.capabilities, made_by_key: r.record.made_by_key, expires_at: r.record.expires_at } })
         return json(r, 201)
       }
       const m = path.match(/^\/agent-keys\/([\w-]+)$/)
       if (m && request.method === 'DELETE') {
         if (!by) return json({ error: 'who is revoking the key?' }, 400)
+        if (!this.agentKeys.reaches(request.headers.get('x-sa-key'), m[1])) return json({ error: 'a key revokes only the keys below it' }, 403)
         const k = this.agentKeys.revoke(m[1], by)
         this.audit.record({ actor: admin, via: 'admin', action: 'agent-key.revoke', target: k.id, outcome: 'ok', detail: { name: k.name } })
-        // A revoked key's open connections end now, not at their next reconnect.
-        for (const [ws, conn] of this.connByWs) if (conn.type === 'agent' && conn.userId === `agent:${k.id}`) { try { ws.close(4001, 'The agent key was revoked') } catch { /* closing */ } }
+        // A revoked key's open connections end now — and those of every key it made, which go with it.
+        for (const [ws, conn] of this.connByWs) if (conn.type === 'agent') { const ck = this.agentKeys.get(String(conn.userId ?? '').replace(/^agent:/, '')); if (ck && !this.agentKeys.holds(ck, (who) => this.capabilitiesOfEmail(who)).length) { try { ws.close(4001, 'The agent key was revoked') } catch { /* closing */ } } }
         return json({ key: k })
       }
       return json({ error: 'not found' }, 404)
@@ -1625,7 +1657,7 @@ export class ProjectDO extends DurableObject<Env> {
         let inner: any = null
         try { inner = JSON.parse(held.frames.map((f) => f.payload).sort((a: any, b: any) => a.part - b.part).map((p: any) => p.data).join('')) } catch { /* not a message */ }
         const t = String(inner?.t ?? '')
-        const ok = sender.type === 'agent' ? keyAllows(sender.scopes ?? [], caps, t) : can(caps, messageNeeds(t))
+        const ok = can(caps, messageNeeds(t))
         if (!ok) { this.auditMessage(sender, inner ?? {}, 'refused', `${t || 'this message'} is not allowed for you here`); hubReply({ t: 'error', source: 'hub', reason: `${t || 'this message'} is not allowed for you here`, reqId: inner?.reqId }); return }
         // A message the platform answers itself (the graph, an app's publish, …) is handled here, whole; one for the engine
         // goes on in its parts, in order.
@@ -1637,10 +1669,9 @@ export class ProjectDO extends DurableObject<Env> {
         const t = String(pl.t ?? '')
         if (sender.type === 'agent') {
           const hubServed = (HUB_MESSAGES as readonly string[]).includes(t)
-          if ((toType !== 'code-engine' && !hubServed) || !keyAllows(sender.scopes ?? [], caps, t)) {
+          if ((toType !== 'code-engine' && !hubServed) || !can(caps, messageNeeds(t))) {
             const reason = toType !== 'code-engine' && !hubServed ? 'an agent talks only to the engine and the platform'
-              : !keyAllows(sender.scopes ?? [], [...capabilitiesOf('project')], t) ? `this key's scopes (${(sender.scopes ?? []).join(', ') || 'none'}) do not allow ${t || '(no type)'}`
-              : `the key's maker no longer holds ${messageNeeds(t)}, which ${t} needs`
+              : `${t || 'this message'} needs ${messageNeeds(t)}, which this key does not hold (or its maker no longer holds)`
             this.auditMessage(sender, pl, 'refused', reason)
             hubReply({ t: 'error', source: 'hub', reason, reqId: pl.reqId })
             return
@@ -1654,7 +1685,7 @@ export class ProjectDO extends DurableObject<Env> {
       }
     }
     // What the engine is told about the sender's standing: `admin` = may publish (widen what others see) — a person by
-    // their role, an agent key only with the publish scope from a maker who may.
+    // their role, a key by what it holds (cut to its maker).
     if (caps) envelope.from.admin = can(caps, 'project.publish') || undefined
     if (!envelope.from.admin) delete envelope.from.admin
     // Each session's owner, as their messages pass — so usage tagged with a session is attributed to them.

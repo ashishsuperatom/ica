@@ -79,7 +79,7 @@ describe('the composition graph, held by the platform', () => {
   let a: Awaited<ReturnType<typeof engine>>
 
   it('an agent makes a concept and a domain and joins them — answered by the platform with no engine connected', async () => {
-    const key = (await (await mf.dispatchFetch('http://x/do/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'kb', scopes: ['graph'], by: 'admin@test.io' }) })).json() as any).key
+    const key = (await (await mf.dispatchFetch('http://x/do/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'kb', capabilities: ['project.view', 'project.ask'], by: 'admin@test.io' }) })).json() as any).key
     bot = await socket({ role: 'agent', key })
     expect((await bot.ask({ t: 'graph:concept', name: 'settlement', body: concept('A trip is settled when its settlement document exists.'), reason: 'from the data' })).changed).toBe(true)
     expect((await bot.ask({ t: 'graph:domain', name: 'trips', body: { capabilities: [], concepts: [], files: [] } })).node.scope).toBeTruthy()

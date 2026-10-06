@@ -1,8 +1,10 @@
 # sacli — the Superatom CLI
 
-A CLI for working with a Superatom project through an **agent API key**. It's mainly for AI agents (Codex, Claude,
-or any coding agent), and works for people too. A project's admin makes the key. Everything `sacli` does is limited
-by the key's scopes and is recorded in the project's audit history. The backend knows nothing about the CLI: it knows
+A CLI for working with Superatom through a **key**: an organisation's (`sak_org_<org>_…`) or a project's
+(`sak_<project>_…`). It's mainly for AI agents (Codex, Claude, or any coding agent), and works for people too. A person
+makes the first key in the admin console; a key holding `org.keys` / `project.keys` makes keys below it. A key holds
+capabilities (the names roles use), never more than its maker holds now; when a key goes, the keys it made go with it.
+Everything `sacli` does is checked like a person's and recorded in the audit history. The backend knows nothing about the CLI: it knows
 agent keys and the agent connection, and any system may use them. `sacli` is our client.
 
 ```
@@ -17,8 +19,8 @@ sacli disconnect
 
 ## How it connects
 
-- **A key belongs to one project; a profile holds one key.** The profile in use is chosen in this order: `--profile`,
-  then `$SACLI_PROFILE`, then the nearest `.sacli.json` in this folder or above, then the default. `sacli projects`
+- **A key belongs to one project or one organisation; a profile holds one key.** The profile in use is chosen in this order: `--profile`,
+  then `$SACLI_PROFILE`, then the nearest `.sacli.json` in this folder or above, then the default. `sacli profiles`
   lists the profiles, and `sacli use <profile> [--here]` switches between them.
 - **One background connection per project.** The first command starts a small background process that holds the
   project's WebSocket. Later commands reach it over a local socket in a directory only you can enter, named by a hash
@@ -34,9 +36,12 @@ sacli disconnect
 
 **Built**
 - `login` (key from `--key`, `$SACLI_KEY` or stdin, checked before it is saved), `logout`, `whoami` (masked key)
-- profiles, one project each: `projects`, `use [--here]`, a per-folder `.sacli.json`
+- profiles, one key each: `profiles`, `use [--here]`, a per-folder `.sacli.json`
+- with an organisation key: `projects list | create | delete | restore`; with any key holding the keys capability:
+  `keys list | create [--save-as <profile>] | revoke` (`--project <id>` for a project's keys from an organisation key)
+- `api <METHOD> <path> [--data]`: the platform's REST API with the key, the same routes and checks as the console
 - `agents`; `session open | get [--as-of] | intent | goto`; `ask` (with live narration on stderr)
-- `warehouse tables | query | append` with a project key (its grant; appending needs `warehouse-write` and a table the
+- `warehouse tables | query | append` with a project key (its grant; appending needs `warehouse.append` and a table the
   organisation granted writing); with an organisation key (`sak_org_…`) also `create`, `grants`, `grant [--write]`, `revoke`
 - organisation keys: a profile may hold one (the warehouse over HTTP, no background connection)
 - the background connection: idle limit, lifetime limit, `status`, `disconnect`, cleanup on every way out

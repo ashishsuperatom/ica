@@ -1,6 +1,7 @@
-// sacli — the Superatom CLI. An agent (Codex, Claude, any coding agent) or a person works with a Superatom project
-// through an agent API key that the project's admin made. Everything it does goes through the project's hub, is limited
-// by the key's scopes, and is recorded in the project's audit history.
+// sacli — the Superatom CLI. An agent (Codex, Claude, any coding agent) or a person works with Superatom through a key:
+// an organisation's (sak_org_<org>_…) or a project's (sak_<project>_…), made by a person or by a key above it. A key
+// holds capabilities — the names roles use — never more than its maker holds now; everything it does is checked by the
+// platform the same way as for a person, and recorded in the audit history.
 
 import { parseArgs, type ParseArgsConfig } from 'node:util'
 import { createInterface } from 'node:readline'
@@ -25,8 +26,11 @@ const HELP: Record<string, string> = {
 Usage: sacli <command> [options]
 
 Commands:
-  login            save an agent API key (from --key, $SACLI_KEY or stdin) as a profile
-  projects         the saved profiles — one project each — and which is in use
+  login            save a key (from --key, $SACLI_KEY or stdin) as a profile
+  profiles         the saved profiles — one key each — and which is in use
+  projects         the organisation's projects: list, create, delete, restore (an organisation key)
+  keys             keys below this one: list, create, revoke (--project <id> for a project's, with an organisation key)
+  api              call the platform's REST API with this key: sacli api <METHOD> <path> [--data '<json>']
   use              make a profile the one in use (--here: for this folder only)
   logout           forget a saved key
   whoami           the key in use, its project, and whether the hub accepts it
@@ -55,8 +59,8 @@ Global options:
   -h, --help         help for a command
   -V, --version      the version
 
-A key belongs to one project (sak_<project>_…) or one organisation (sak_org_<org>_…, for the warehouse), and a
-profile holds one key: each profile is one project or organisation. The profile in use is
+A key belongs to one project (sak_<project>_…) or one organisation (sak_org_<org>_…), and a profile holds one key:
+each profile is one project or organisation. An organisation key holding org.projects works on all its projects. The profile in use is
 --profile, else $SACLI_PROFILE, else the nearest .sacli.json in this folder or above, else the default.
 Commands share one background connection per project, kept for an hour after the last command.
 
@@ -66,10 +70,10 @@ Run 'sacli <command> --help' for a command's options.`,
 
 Saves an agent API key, after checking the hub accepts it. The key is read from --key, $SACLI_KEY, or stdin
 (so it never has to appear in your shell history):  printf %s "$KEY" | sacli login
-Keys are made by the project's admin. Saved in ${'$'}SACLI_CONFIG or ~/.config/superatom/credentials.json (mode 600).`,
+Keys are made in the admin console, or by a key above them (sacli keys create). Saved in ${'$'}SACLI_CONFIG or ~/.config/superatom/credentials.json (mode 600).`,
   logout: `sacli logout [--profile <name>]      forgets the saved key`,
   whoami: `sacli whoami [--profile <name>]      the key in use (masked), its project, and whether the hub accepts it`,
-  agents: `sacli agents                        the project's agents (needs the sessions scope)`,
+  agents: `sacli agents                        the project's agents (needs project.view)`,
   session: `sacli session <open|get|intent|goto> …
 
   sacli session open <agent> [--id <session>]
@@ -81,27 +85,44 @@ Keys are made by the project's admin. Saved in ${'$'}SACLI_CONFIG or ~/.config/s
 
 An intent to "current" (the default) replaces the current block's answer; "new" opens a block. An intent from an
 earlier block (--block) branches the session into a new thread. Values are JSON; a bare word is a string.`,
-  projects: `sacli projects      the saved profiles, their projects, and which one is in use here`,
+  profiles: `sacli profiles      the saved profiles, their projects or organisations, and which one is in use here`,
+  projects: `sacli projects <list|create|delete|restore> …     with an organisation key holding org.projects
+
+  sacli projects list [--deleted]
+  sacli projects create <name>          a project whose engine runs outside the platform (it connects out)
+  sacli projects delete <id>            removable for 30 days: sacli projects restore <id>
+  sacli projects restore <id>`,
+  keys: `sacli keys <list|create|revoke> … [--project <id>]
+
+  sacli keys list
+  sacli keys create <name> --can <capability>,… [--days <n> | --never] [--save-as <profile>]
+  sacli keys revoke <key id>
+
+The keys of this key's node: its organisation's, or its project's — or, with an organisation key and --project, that
+project's. A new key holds at most what this one holds, and goes when this one goes; a key revokes only keys below it.
+The new key is shown once; with --save-as it is saved as that profile instead and never printed.
+Capabilities are the names roles use (sacli api GET /api/me shows what this key holds).`,
+  api: `sacli api <GET|POST|PUT|DELETE> <path> [--data '<json>']     e.g. sacli api GET /api/projects/<id>/agent-keys`,
   use: `sacli use <profile> [--here]   make <profile> the default, or (--here) write .sacli.json so this folder uses it`,
   app: `sacli app publish <app folder>
 
 The project's own application — server/ (what the engine runs) and the dashboard's web/ source — kept by the platform as
 a new version (unchanged source: nothing new); the engine downloads it and reloads. No node_modules or builds travel.
-Needs a key with the app scope.`,
+Needs project.manage.`,
   program: `sacli program build <folder>
 
 A program's source — manifest.json, doc.md, server/…, web/… — built by the project's engine and kept by the platform,
-the build with the source it came from. Needs a key with the programs scope.`,
+the build with the source it came from. Needs project.ask.`,
   graph: `sacli graph import <knowledge/index.mts> [--reason '<why>']
 
 The project's written knowledge — its domains, their concepts and files, its settings — imported into the project's
-composition graph, which the platform holds (engines download it). What is unchanged records nothing. Needs a key that
-may publish (scope publish).`,
+composition graph, which the platform holds (engines download it). What is unchanged records nothing. Needs
+project.publish.`,
   call: `sacli call <message> [--data '<json>']    e.g. sacli call graph:agent --data '{"name":"trips","body":{…}}'`,
   activity: `sacli activity         what is running for this key (program builds, session runs) and what ran in the last day`,
   status: `sacli status        whether the background connection for this key is up, and for how long`,
   disconnect: `sacli disconnect    closes the background connection for this key (the next command opens a new one)`,
-  ask: `sacli ask <question> [--session <id>] [--channel <name>]   asks in words; prints the answer (needs the ask scope); --channel answers as that chat (teams) reads it`,
+  ask: `sacli ask <question> [--session <id>] [--channel <name>]   asks in words; prints the answer (needs project.ask); --channel answers as that chat (teams) reads it`,
   warehouse: `sacli warehouse <tables|query|append|create|grants|grant|revoke> …
 
   sacli warehouse tables                               the tables you may see, and their columns
@@ -116,9 +137,8 @@ With an organisation key (sak_org_…) made by someone who may manage the wareho
                                                               — and, with --write, append (all columns)
   sacli warehouse revoke <table> --project <id>
 
-A project key needs the warehouse scope to read and warehouse-write to append, and appends only to tables the
-organisation granted the project to write. An organisation key holds what its maker holds of its scopes
-(warehouse.query, warehouse.write, warehouse.manage).`,
+A project key needs warehouse.use to read and warehouse.append to append, and appends only to tables the organisation
+granted the project to write. An organisation key needs warehouse.query, warehouse.write or warehouse.manage.`,
 }
 
 const GLOBAL: ParseArgsConfig['options'] = {
@@ -145,13 +165,14 @@ export async function run(argv: string[], io: Io): Promise<number> {
   let hub: Hub | Conn | null = null
   try {
     // The command words come first; options may be anywhere.
-    const words = argv.filter((a, i) => !a.startsWith('-') && !(i > 0 && /^--(profile|key|hub|timeout|id|as-of|set|add|remove|call|param|act|to|block|session|rows|file|limit|column|project|columns|data)$/.test(argv[i - 1])))
+    const words = argv.filter((a, i) => !a.startsWith('-') && !(i > 0 && /^--(profile|key|hub|timeout|id|as-of|set|add|remove|call|param|act|to|block|session|rows|file|limit|column|project|columns|data|can|days|save-as)$/.test(argv[i - 1])))
     const [cmd, sub] = words
     const specific: ParseArgsConfig['options'] = cmd === 'session'
       ? { id: { type: 'string' }, 'as-of': { type: 'string' }, set: { type: 'string', multiple: true }, add: { type: 'string', multiple: true }, remove: { type: 'string', multiple: true },
           call: { type: 'string' }, param: { type: 'string', multiple: true }, act: { type: 'string' }, to: { type: 'string' }, block: { type: 'string' } }
       : cmd === 'warehouse' ? { rows: { type: 'string' }, file: { type: 'string' }, limit: { type: 'string' }, column: { type: 'string', multiple: true }, project: { type: 'string' }, columns: { type: 'string' }, write: { type: 'boolean' }, q: { type: 'string' }, sort: { type: 'string' }, desc: { type: 'boolean' }, page: { type: 'string' }, size: { type: 'string' }, sql: { type: 'string' } }
-      : cmd === 'ask' ? { session: { type: 'string' }, channel: { type: 'string' } } : cmd === 'use' ? { here: { type: 'boolean' } } : cmd === 'call' ? { data: { type: 'string' } } : cmd === 'graph' ? { reason: { type: 'string' } } : {}
+      : cmd === 'ask' ? { session: { type: 'string' }, channel: { type: 'string' } } : cmd === 'use' ? { here: { type: 'boolean' } } : cmd === 'call' || cmd === 'api' ? { data: { type: 'string' } } : cmd === 'projects' ? { deleted: { type: 'boolean' } }
+      : cmd === 'keys' ? { project: { type: 'string' }, can: { type: 'string' }, days: { type: 'string' }, never: { type: 'boolean' }, 'save-as': { type: 'string' } } : cmd === 'graph' ? { reason: { type: 'string' } } : {}
     let parsed
     try { parsed = parseArgs({ args: argv, options: { ...GLOBAL, ...specific }, allowPositionals: true, strict: true }) }
     catch (e: any) { throw new CliError(`${e.message.replace(/^Unknown option/, 'unknown option')} — see sacli ${cmd ?? ''} --help`.replace(/\s+—/, ' —'), 2) }
@@ -172,7 +193,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
     const hubUrl = o.hub ?? io.env.SACLI_HUB ?? saved?.hub ?? DEFAULT_HUB
     const out = (human: string, data: unknown) => say(o.json ? JSON.stringify(data, null, 2) : human)
 
-    if (cmd === 'projects') {
+    if (cmd === 'profiles') {
       const names = Object.keys(creds.profiles)
       if (!names.length) { out('no saved profiles — run sacli login', []); return 0 }
       const rows = names.map((n) => ({ profile: n, project: projectOfKey(creds.profiles[n].key) ?? `organisation ${orgOfKey(creds.profiles[n].key)}`, hub: creds.profiles[n].hub, inUse: n === profileName, isDefault: n === creds.default }))
@@ -182,7 +203,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
     if (cmd === 'use') {
       const name = pos[1]
       if (!name) throw new CliError('which profile? sacli use <profile>', 2)
-      if (!creds.profiles[name]) throw new CliError(`there is no profile "${name}" — see sacli projects`, 2)
+      if (!creds.profiles[name]) throw new CliError(`there is no profile "${name}" — see sacli profiles`, 2)
       if (o.here) { const f = join(io.cwd ?? process.cwd(), '.sacli.json'); writeFileSync(f, JSON.stringify({ profile: name }, null, 2) + '\n'); out(`this folder now uses "${name}" (${f})`, { profile: name, file: f }); return 0 }
       creds.default = name
       writeCredentials(creds, io.env)
@@ -226,6 +247,66 @@ export async function run(argv: string[], io: Io): Promise<number> {
     const showTables = (tables: any[]) => tables.length ? tables.map((t) => `${t.name}${t.writable ? '  (this project may append)' : ''}\n${table(['column', 'type', ''], (t.columns ?? []).map((c: any) => [c.name, c.type, c.required ? 'required' : '']))}`).join('\n\n') : 'no tables you may see'
     const showResult = (r: any) => r.rows?.length ? table(r.columns ?? Object.keys(r.rows[0]), r.rows.map((x: any) => (r.columns ?? Object.keys(x)).map((c: string) => x[c] === null || x[c] === undefined ? '' : String(x[c])))) + (r.truncated ? '\n(more rows: narrow the query or raise --limit)' : '') : 'no rows'
 
+    // ── The platform's REST API with this key: the same routes, checks and audit as the console's ──
+    const httpBase = hubUrl.replace(/^ws/, 'http')
+    const rest = async (method: string, path: string, body?: unknown): Promise<any> => {
+      let r: Response
+      try { r = await fetch(`${httpBase}${path}`, { method, headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(timeoutMs) }) }
+      catch (e: any) { throw new CliError(`the hub could not be reached: ${e.message}`, 4) }
+      const text = await r.text()
+      let b: any; try { b = JSON.parse(text) } catch { b = { error: text.trim() } }
+      if (!r.ok) throw new CliError(b?.error ?? b?.reason ?? `the hub answered ${r.status}`, r.status === 401 ? 3 : 1)
+      return b
+    }
+    if (cmd === 'api') {
+      const method = String(pos[1] ?? '').toUpperCase(), path = pos[2]
+      if (!['GET', 'POST', 'PUT', 'DELETE'].includes(method) || !path?.startsWith('/')) throw new CliError(HELP.api, 2)
+      let data: unknown
+      if (o.data !== undefined) { try { data = JSON.parse(String(o.data)) } catch { throw new CliError('--data is JSON', 2) } }
+      const r = await rest(method, path, data); say(JSON.stringify(r, null, 2)); return 0
+    }
+    if (cmd === 'projects') {
+      if (!org) throw new CliError('projects are made and removed with an organisation key (sak_org_…) holding org.projects', 2)
+      if (!sub || sub === 'list') {
+        const r = await rest('GET', `/api/projects${o.deleted ? '?deleted=1' : ''}`)
+        const list = Array.isArray(r) ? r : (r.projects ?? [])
+        out(list.length ? table(['id', 'name', 'created'], list.map((p: any) => [p.id, p.name ?? '', p.created_at ? new Date(p.created_at).toISOString().slice(0, 10) : ''])) : 'no projects', list)
+        return 0
+      }
+      const arg = pos[2]
+      if (!arg) throw new CliError(HELP.projects, 2)
+      if (sub === 'create') { const r = await rest('POST', '/api/projects', { name: pos.slice(2).join(' '), provider: 'external' }); out(`made project ${r.id}`, { id: r.id, provider: r.provider }); return 0 }
+      if (sub === 'delete') { const r = await rest('DELETE', '/api/projects', { id: arg }); out(`removed project ${arg} (restorable: sacli projects restore ${arg})`, r); return 0 }
+      if (sub === 'restore') { const r = await rest('PUT', '/api/projects', { id: arg }); out(`restored project ${arg}`, r); return 0 }
+      throw new CliError(HELP.projects, 2)
+    }
+    if (cmd === 'keys') {
+      const base = o.project ? `/api/projects/${o.project}/agent-keys` : org ? '/api/keys' : `/api/projects/${projectOfKey(key)}/agent-keys`
+      if (!sub || sub === 'list') {
+        const keys = ((await rest('GET', base)).keys ?? []) as any[]
+        out(keys.length ? table(['id', 'name', 'may', 'for', 'made by key', 'state'], keys.map((k) => [k.id, k.name, (k.capabilities ?? []).join(','), k.created_by, k.made_by_key ?? '', k.revoked_at ? 'revoked' : k.expires_at ? `until ${k.expires_at.slice(0, 10)}` : 'no expiry'])) : 'no keys', keys)
+        return 0
+      }
+      if (sub === 'create') {
+        const name = pos.slice(2).join(' ').trim()
+        const capabilities = String(o.can ?? '').split(',').map((c) => c.trim()).filter(Boolean)
+        if (!name || !capabilities.length) throw new CliError(HELP.keys, 2)
+        if (o['save-as'] && creds.profiles[o['save-as']]) throw new CliError(`there is a profile "${o['save-as']}" already — sacli logout --profile ${o['save-as']} first`, 2)
+        const days = o.never ? null : Number(o.days ?? 90)
+        if (days !== null && !(days > 0)) throw new CliError('--days is a number of days', 2)
+        const r = await rest('POST', base, { name, capabilities, expiresAt: days === null ? null : new Date(Date.now() + days * 86_400_000).toISOString() })
+        if (o['save-as']) {
+          creds.profiles[o['save-as']] = { key: r.key, hub: hubUrl, savedAt: new Date().toISOString() }
+          const file = writeCredentials(creds, io.env)
+          out(`made key ${r.record.id} (${r.record.capabilities.join(', ')}) and saved it as profile "${o['save-as']}" in ${file}`, { record: r.record, profile: o['save-as'] })
+        } else out(`made key ${r.record.id} (${r.record.capabilities.join(', ')}) — copy it now, it is not shown again:
+${r.key}`, r)
+        return 0
+      }
+      if (sub === 'revoke') { const id = pos[2]; if (!id) throw new CliError(HELP.keys, 2); const r = await rest('DELETE', `${base}/${encodeURIComponent(id)}`); out(`revoked ${id} — and every key it made`, r); return 0 }
+      throw new CliError(HELP.keys, 2)
+    }
+
     // ── An organisation key: the warehouse over plain HTTP (no project, no socket) ──
     if (org) {
       const call = async (body: Record<string, unknown>) => {
@@ -237,15 +318,15 @@ export async function run(argv: string[], io: Io): Promise<number> {
         return b
       }
       if (cmd === 'login') {
-        await call({ t: 'warehouse:tables' })
+        await rest('GET', '/api/me')
         creds.profiles[profileName] = { key, hub: hubUrl, savedAt: new Date().toISOString() }
         creds.default ??= profileName
         const file = writeCredentials(creds, io.env)
         out(`logged in to organisation ${org} as profile "${profileName}" (saved in ${file})`, { ok: true, profile: profileName, org, file })
         return 0
       }
-      if (cmd === 'whoami') { await call({ t: 'warehouse:tables' }); out(`key           ${maskKey(key)}\norganisation  ${org}\nhub           ${hubUrl}\nprofile       ${o.key || io.env.SACLI_KEY ? '(from --key / $SACLI_KEY)' : profileName}`, { key: maskKey(key), org, hub: hubUrl, profile: profileName }); return 0 }
-      if (cmd !== 'warehouse') throw new CliError(`an organisation key works with sacli warehouse (and login, whoami) — ${cmd} needs a project's key`, 2)
+      if (cmd === 'whoami') { const me = await rest('GET', '/api/me'); out(`key           ${maskKey(key)}\norganisation  ${org}\nholds         ${(me.capabilities ?? []).join(', ')}\nhub           ${hubUrl}\nprofile       ${o.key || io.env.SACLI_KEY ? '(from --key / $SACLI_KEY)' : profileName}`, { key: maskKey(key), org, capabilities: me.capabilities, hub: hubUrl, profile: profileName }); return 0 }
+      if (cmd !== 'warehouse') throw new CliError(`an organisation key works with sacli projects, keys, api and warehouse (and login, whoami) — ${cmd} needs a project's key (sacli keys create … --project <id> --save-as <profile>)`, 2)
       const table_ = pos[2]
       const need = (what: string) => { if (!table_) throw new CliError(`which table? sacli warehouse ${sub} <table>${what}`, 2); return table_ }
       const project = () => { if (!o.project) throw new CliError(`which project? --project <id>`, 2); return String(o.project) }

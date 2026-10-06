@@ -91,7 +91,7 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   const read = method === 'GET' || method === 'HEAD'
   const first = sub.split('/')[0]
   // Never public: the platform's own calls into the project.
-  if (['setup', 'debug', 'org-admins', 'connector-op', 'connector-calls', 'members', 'verify-conn', 'log', 'engine'].includes(first) || first.startsWith('warehouse') || first.startsWith('connector-')) return 'internal'
+  if (['setup', 'debug', 'org-admins', 'connector-op', 'connector-calls', 'members', 'verify-conn', 'log', 'engine', 'key-access', 'agent-call'].includes(first) || first.startsWith('warehouse') || first.startsWith('connector-')) return 'internal'
   if (sub.startsWith('access/arrive')) return 'internal'
   if ((first === 'audit' || first === 'usage') && !read) return 'internal'
   if (first === 'profile' || first === 'service-token') return 'platform'
@@ -156,12 +156,14 @@ export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
 /** What a message needs; one nobody named needs the strongest. */
 export const messageNeeds = (t: string): ProjectCapability => MESSAGE_NEEDS[t] ?? 'project.manage'
 
-// ── Organisation keys: sak_org_<org>_… — an agent working for the organisation (the warehouse today) ──────────────────
+// ── Keys: the same tree as people ──────────────────────────────────────────────────────────────────────────────────
+// A key belongs to one node — an organisation (sak_org_<org>_…) or a project (sak_<project>_…) — and holds capabilities of
+// that level, the same names roles use. It holds at most what its maker holds now (checked on every call), it may make
+// keys only at or below its node and never more than it holds, and the keys it made go when it goes. There is no key
+// above an organisation: organisations are made by people.
 
-/** What an organisation key may be given: these capabilities, each only by someone holding it. */
-export const ORG_KEY_SCOPES = ['warehouse.query', 'warehouse.write', 'warehouse.manage'] as const satisfies readonly OrgCapability[]
-export type OrgKeyScope = typeof ORG_KEY_SCOPES[number]
-export const isOrgKeyScope = (s: unknown): s is OrgKeyScope => typeof s === 'string' && (ORG_KEY_SCOPES as readonly string[]).includes(s)
+/** What a key holds now: what it was given, cut to what its maker (a person, or the key that made it) holds now. */
+export const keyHolds = (given: readonly string[], makerHolds: readonly string[]): Capability[] => given.filter((c) => makerHolds.includes(c)) as Capability[]
 
 /** What each organisation-key message needs (one of these capabilities). */
 export const ORG_MESSAGE_NEEDS: Readonly<Record<string, readonly OrgCapability[]>> = {

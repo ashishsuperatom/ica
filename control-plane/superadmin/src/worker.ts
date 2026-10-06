@@ -34,7 +34,7 @@ import { LIMITS, keyOf as fileKeys } from './files.js'
 import { handleParcelRoute } from './parcels.js'
 import { mobileAuthPage, handleMobileCode, handleMobileExchange, handleMeProjects } from './auth/mobile.js'
 import { can, capabilitiesOf, orgRouteNeeds, projectRouteNeeds, beyond, builtinRole, type Capability, type RouteNeed } from '../../shared/permissions.js'
-import { orgOfKey } from './agent-keys.js'
+import { orgOfKey, projectOfKey } from './agent-keys.js'
 
 // ── Auth ────────────────────────────────────────────────────────────────────
 // Token primitives, the Clerk→platform-token mint, and SUPERADMIN_EMAILS live in ./auth/tokens.ts (imported
@@ -89,8 +89,36 @@ async function claimsOf(request: Request, env: Env): Promise<JwtClaims | null> {
 /** The caller's standing in ONE project, and what they hold there (shared/permissions.ts). ONE read, of the PROJECT's
  *  own DO — never the org's. A project is asked about on every request, so it has to answer alone: its access table
  *  already holds everyone who may touch it, including the org's owners and admins, mirrored in whenever that changes. */
+/** A key on the request (Authorization: Bearer sak_…), if any — a project's or an organisation's. */
+const bearerKey = (request: Request): string | null => { const k = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, ''); return /^sak_/.test(k) ? k : null }
+/** The organisation a call names: x-org-id, else the organisation of the key it carries. */
+const orgIdOf = (request: Request): string => request.headers.get('x-org-id') ?? (bearerKey(request) ? orgOfKey(bearerKey(request)!) : null) ?? 'default'
+
+/** A key's standing in a project: one of the project's keys (asked of its ProjectDO), or a key of the project's
+ *  organisation that holds org.projects — the organisation administers its projects, so such a key holds every project
+ *  capability there (cut, like every key, to what its maker holds now). Nothing else reaches a project. */
+async function keyProjectAccess(key: string, env: Env, projectId: string): Promise<{ ok: boolean; email: string; caps: Capability[]; key?: string }> {
+  const no = { ok: false, email: '', caps: [] as Capability[] }
+  const pk = projectOfKey(key)
+  if (pk) {
+    if (pk !== projectId) return no
+    const r: any = await env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`)).fetch(new Request('http://do/key-access', { method: 'POST', headers: { 'x-sa-project': projectId }, body: JSON.stringify({ key }) })).then((x) => x.json()).catch(() => null)
+    return r?.ok ? { ok: true, email: String(r.maker ?? ''), caps: r.caps ?? [], key: String(r.keyId) } : no
+  }
+  const org = orgOfKey(key)
+  if (!org) return no
+  const o = env.ORG.get(env.ORG.idFromName(org))
+  const projects: any = await o.fetch(new Request('http://do/projects')).then((x) => x.json()).catch(() => [])
+  if (!(Array.isArray(projects) ? projects : []).some((p: any) => p.id === projectId)) return no
+  const r: any = await o.fetch(new Request('http://do/key-access', { method: 'POST', headers: { 'x-sa-org': org }, body: JSON.stringify({ key }) })).then((x) => x.json()).catch(() => null)
+  if (!r?.ok || !can(r.caps, 'org.projects')) return no
+  return { ok: true, email: String(r.maker ?? ''), caps: [...capabilitiesOf('project')] as Capability[], key: `org:${r.keyId}` }
+}
+
 async function projectAccessOf(request: Request, env: Env, projectId: string):
-    Promise<{ ok: boolean; level: 'superadmin' | 'org-admin' | 'project-admin' | 'member' | 'none'; email: string; roleId?: string; caps: Capability[] }> {
+    Promise<{ ok: boolean; level: 'superadmin' | 'org-admin' | 'project-admin' | 'member' | 'key' | 'none'; email: string; roleId?: string; caps: Capability[]; key?: string }> {
+  const key = bearerKey(request)
+  if (key) { const k = await keyProjectAccess(key, env, projectId); return k.ok ? { ok: true, level: 'key', email: k.email, caps: k.caps, key: k.key } : { ok: false, level: 'none', email: '', caps: [] } }
   const claims = await claimsOf(request, env)
   const email = (claims?.email || '').toLowerCase()
   if (!claims) return { ok: false, level: 'none', email: '', caps: [] }
@@ -113,7 +141,14 @@ async function projectAccessOf(request: Request, env: Env, projectId: string):
 
 /** The caller's standing in ONE org: their role there and what it holds (the platform's superadmin everything). */
 async function orgAccessOf(request: Request, env: Env, orgId: string):
-    Promise<{ ok: boolean; level: 'superadmin' | 'org-admin' | 'member' | 'none'; email: string; role: string | null; caps: Capability[]; userId?: string }> {
+    Promise<{ ok: boolean; level: 'superadmin' | 'org-admin' | 'member' | 'key' | 'none'; email: string; role: string | null; caps: Capability[]; userId?: string; key?: string }> {
+  // An organisation's key, in its own organisation: what it holds now (asked of the OrgDO).
+  const key = bearerKey(request)
+  if (key) {
+    if (orgOfKey(key) !== orgId) return { ok: false, level: 'none', email: '', role: null, caps: [] }
+    const r: any = await env.ORG.get(env.ORG.idFromName(orgId)).fetch(new Request('http://do/key-access', { method: 'POST', headers: { 'x-sa-org': orgId }, body: JSON.stringify({ key }) })).then((x) => x.json()).catch(() => null)
+    return r?.ok ? { ok: true, level: 'key', email: String(r.maker ?? ''), role: null, caps: r.caps ?? [], key: String(r.keyId) } : { ok: false, level: 'none', email: '', role: null, caps: [] }
+  }
   const claims = await claimsOf(request, env)
   const email = (claims?.email || '').toLowerCase()
   const userId = claims?.userId ? String(claims.userId) : undefined
@@ -315,11 +350,13 @@ export default {
       if (subPath === 'me') return Response.json({ project: projectId, level: acc.level, role: acc.roleId ?? (acc.level === 'superadmin' ? 'superadmin' : null), capabilities: acc.caps })
       // Every call this makes to the project's DO says who the caller is (from the token checked above). The DO alone
       // records the audit history — one path, whichever way a change arrives.
-      const actor = JSON.stringify({ kind: 'user', id: acc.email || acc.level, ...(acc.email ? { email: acc.email } : {}) })
+      // A key acts for its person: the audit names the key (agent:<id>, or org:<id> for an organisation's) and that person.
+      const actor = JSON.stringify(acc.key ? { kind: 'agent', id: `agent:${acc.key}`, ...(acc.email ? { email: acc.email } : {}) } : { kind: 'user', id: acc.email || acc.level, ...(acc.email ? { email: acc.email } : {}) })
       const toDO = (input: Request | string, init?: RequestInit) => {
         const req = new Request(input as any, init)
         req.headers.set('x-sa-actor', actor); req.headers.set('x-sa-project', projectId)
         req.headers.set('x-sa-caps', JSON.stringify(acc.caps))   // what they hold; the DO applies it, the table above decided it
+        if (acc.key) req.headers.set('x-sa-key', acc.key)          // the key acting (a key it makes records it as its maker)
         return env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`)).fetch(req)
       }
       // WHAT THIS CALL NEEDS (shared/permissions.ts): a capability of the caller's role here, the platform, the
@@ -599,7 +636,7 @@ export default {
     // ── Project creation (with Fly Machine provisioning) ────────────────────
     if (request.method === 'POST' && path === '/api/projects') {
       // An organisation runs its own projects — whoever holds org.projects creates them. Superadmin may act anywhere.
-      const oa = await orgAccessOf(request, env, request.headers.get('x-org-id') ?? 'default')
+      const oa = await orgAccessOf(request, env, orgIdOf(request))
       if (!oa.ok) return new Response('unauthorized', { status: 401 })
       if (!can(oa.caps, 'org.projects')) return Response.json({ error: 'creating a project needs org.projects' }, { status: 403 })
       return handleCreateProject(request, env, url, ctx)
@@ -615,7 +652,7 @@ export default {
       if (!target) return new Response('id required', { status: 400 })
       // Removing a project from the organisation is the ORGANISATION's act (org.projects), and only of a project that is
       // the organisation's. Someone who administers the project runs it; they do not get to delete it out from under it.
-      const orgId = request.headers.get('x-org-id') ?? 'default'
+      const orgId = orgIdOf(request)
       const oa = await orgAccessOf(request, env, orgId)
       if (!oa.ok) return new Response('unauthorized', { status: 401 })
       if (!can(oa.caps, 'org.projects')) return Response.json({ error: 'removing a project needs org.projects' }, { status: 403 })
@@ -694,7 +731,7 @@ export default {
     }
 
     if (path.startsWith('/api/')) {
-      const orgId = request.headers.get('x-org-id') ?? 'default'
+      const orgId = orgIdOf(request)
       // x-org-id comes from the CLIENT, so it is a request, not a fact: without this check anyone could name any
       // org and read or mutate it. Membership decides; what the call needs is the shared table's (shared/permissions.ts).
       const oa = await orgAccessOf(request, env, orgId)
@@ -707,7 +744,7 @@ export default {
       if (!assigning && !meets(need, oa.level, oa.caps)) return Response.json({ error: `this needs ${need === 'platform' ? 'the platform' : need}, which your role in this organisation does not hold` }, { status: 403 })
       const org = env.ORG.get(env.ORG.idFromName(orgId))
       const by = oa.email || 'superadmin'
-      const orgHeaders = { 'content-type': 'application/json', 'x-sa-org': orgId, 'x-sa-actor': JSON.stringify({ kind: 'user', id: by, email: oa.email }), 'x-sa-caps': JSON.stringify(oa.caps) }
+      const orgHeaders: Record<string, string> = { 'content-type': 'application/json', 'x-sa-org': orgId, 'x-sa-actor': JSON.stringify(oa.key ? { kind: 'agent', id: `agent:${oa.key}`, email: oa.email } : { kind: 'user', id: by, email: oa.email }), 'x-sa-caps': JSON.stringify(oa.caps), ...(oa.key ? { 'x-sa-key': oa.key } : {}) }
       const projectsOfOrg = async (): Promise<any[]> => { const r = await (await org.fetch(new Request('http://do/projects'))).json().catch(() => []); return Array.isArray(r) ? r : [] }
       if (sub === '/me') return Response.json({ org: orgId, level: oa.level, role: oa.role, capabilities: oa.caps })
       // Budgets are set by whoever holds org.billing (assigning credits the organisation was given).
@@ -833,7 +870,7 @@ export default {
     // Same rule as /ws above: x-org-id is the client asking, not a fact. Without this, a socket to any path
     // other than /ws reached an organisation unauthenticated.
     if (isWs) {
-      const orgId = request.headers.get('x-org-id') ?? 'default'
+      const orgId = orgIdOf(request)
       const oa = await orgAccessOf(request, env, orgId)
       if (!oa.ok) return new Response('unauthorized', { status: 401 })
       return env.ORG.get(env.ORG.idFromName(orgId)).fetch(request)
@@ -856,7 +893,7 @@ export default {
 // ── Project creation: OrgDO + ProjectDO + Fly Machine ────────────────────────
 
 async function handleCreateProject(request: Request, env: Env, url: URL, ctx: ExecutionContext): Promise<Response> {
-  const orgId = request.headers.get('x-org-id') ?? 'default'
+  const orgId = orgIdOf(request)
 
   // provider: 'fly' (default, managed) or 'external' (local/EC2 — user runs the
   // code-engine themselves and it connects out to the hub; no Fly machine, no lifecycle).
@@ -932,7 +969,7 @@ async function handleCreateProject(request: Request, env: Env, url: URL, ctx: Ex
 
 async function handleProjectMutate(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   try {
-    const orgId = request.headers.get('x-org-id') ?? 'default'
+    const orgId = orgIdOf(request)
     const body = await request.json().catch(() => ({})) as any
     console.log(`[worker] project mutate: method=${request.method} body=`, JSON.stringify(body))
 

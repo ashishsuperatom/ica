@@ -1420,6 +1420,30 @@ place, the same for every organisation and project); the project template's thre
   owner decides; the decided version is published; everything keeps its history (time travel) and its scope
   (global / group / user).
 
+## Keys follow the same tree as people (the user, 2026-10-07)
+
+**In the user's words:** eventually the agents will do much of this work; this could be a security nightmare, so do it
+properly. The hierarchy: a super admin creates an organisation; the organisation has its own permission system — its
+admin can create and delete projects and do whatever can be done from the UI — and the structure flows from
+organisation to project, including the ability to create keys; then the project owner does things inside it. Not only
+humans: the keys themselves have this hierarchy. As long as it is structured and nothing flows in reverse — capability
+only goes downstream, like a tree — we can do almost anything. Creating an organisation is for humans only; there will
+never be a key for the super admin. One source of truth, one structural identity, in the CLI and on the backend.
+
+*So:* a key belongs to one node (an organisation or a project) and holds capabilities of that level — the same names
+roles use; at most what its maker holds now (checked on every call); it may make keys only at or below its node, never
+more than it holds; a key's children go when it goes (revoked or cut, they are cut too); every door a person uses takes
+a key, checked by the same rules; every key action is audited with the key and its maker.
+
+*As built:* `agent_keys` / `org_keys` hold `capabilities` and `made_by_key` (a key of the same node, or `org:<id>` for
+a project key an organisation key made). What a key holds = what it was given ∩ what its maker holds now — up the chain
+to the person at its root (`keyHolds`, `AgentKeys.holds`). A key is in force only while every key above it is (the
+ProjectDO asks the OrgDO for an `org:` parent). The Worker takes `Authorization: Bearer sak_…` on the REST API: a
+project key in its own project (asked of the ProjectDO's `/key-access`), an organisation key in its organisation (the
+OrgDO's `/key-access`) and, holding `org.projects`, in every project of it with every project capability. A key revokes
+only keys below it; revoking closes the connections of every key it cut. `/api/organizations` takes only a person's
+token. The CLI is the same tree: `sacli projects`, `sacli keys [--project]`, `sacli api`.
+
 ## Everything is a program (the user, 2026-10-07)
 
 **In the user's words:** the domain scripts, like allocation.mjs — we can get rid of them and only have programs. If in a

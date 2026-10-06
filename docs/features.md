@@ -50,8 +50,9 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - A guard that keeps platform code free of any one dataset's vocabulary.
 
 **Agents and the CLI**
-- Agent API keys per project: made by the project's admin, shown once and stored only as a hash, scoped, expiring and revocable (revoking ends open connections).
-- Agent connections to the hub: only to the engine, only within the key's scopes, the agent's identity stamped on every message.
+- One key tree: organisation keys (`sak_org_<org>_…`) and project keys (`sak_<project>_…`) hold capabilities — the names roles use — never more than their maker holds now; a key holding `org.keys`/`project.keys` makes keys at or below its node; a key revokes only keys below it; revoking a key ends its and its descendants' connections and calls; an organisation key with `org.projects` creates, deletes and restores projects and holds every project capability in them; no key makes an organisation. Shown once, stored only as a hash, expiring.
+- Keys accepted at every door: the hub socket, `POST /api/agent/<project>`, and the REST API (`Authorization: Bearer sak_…`), with the same checks and audit as a person.
+- Agent connections to the hub: only to the engine and the platform, only what the key holds, the agent's identity stamped on every message.
 - The hub stamps who sent every message, so the engine always knows the user.
 - Audit history in each project's Durable Object, from one path only: every message through its relay and every HTTP call through its one gate, recorded once (specific event or the call itself); append-only, never written from outside. The engine's own events are not recorded yet.
 - Background work visible: program builds and session runs reported as activities (running, done, failed), kept by the hub and sent to their owner and admins; listed on reconnect and by `sacli activity`.
@@ -64,7 +65,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Agents' own data tools apply the asker's data access (written per turn; unresolvable means nothing is read).
 - Data access per reader: row filters, denials and column masks per source and table (SQL sources; other sources are not filtered yet), for everyone, a role, a person or an agent key, with per-reader attributes (fail closed); resolved by the platform, carried with each session intent, applied by the SQL rewrite to every table read.
 - Permissions, one system for everything (shared/permissions.ts): capabilities in one vocabulary; organisation roles (owner, admin, member, custom — e.g. a data engineer who queries and writes the warehouse) and project roles (admin, member, viewer, custom) as sets of them; every project route, organisation route and hub message names what it needs (unnamed: the strongest); no one gives a role, custom role or key more than they hold; an organisation keeps an owner; a viewer never asks; a message sent in parts is checked whole; a key holds its maker's capabilities cut to its scopes, at every use; publishing (widening what others see) is a capability and a key scope; a new graph node starts in its maker's own scope; graph history and suggestions only for what one sees; members no longer read others' usage, logs or sessions; a domain is released only by its project; the organisation's own record of people, roles and keys.
-- Organisation keys (`sak_org_<org>_…`) for the warehouse; warehouse grants that also allow writing (whole tables); `warehouse:append` from a project within its grant (key scope `warehouse-write`).
+- Organisation keys (`sak_org_<org>_…`) for the warehouse; warehouse grants that also allow writing (whole tables); `warehouse:append` from a project within its grant (capability `warehouse.append`).
 - `sacli`, the Superatom CLI: login with profiles (one project or organisation each), the warehouse (tables, query, append; create and grant with an organisation key), agents, sessions, asking questions, JSON output, exit codes, and one background connection per project that cleans up after an hour idle.
 
 **Platform (Cloudflare)**
@@ -114,6 +115,8 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Views and sessions: an agent is browsed as a view kept by the browser (steps in the history, the current STATE in the address, nothing written on the server but a usage row); it becomes a session only at a question to the agent or a recorded decision, by replaying the path in the engine.
 
 ## Planned
+
+- Rate limits on creating organisations and on creating projects per organisation — tight: e.g. at most ~10 new projects a day and ~100 in all per organisation (the user, 2026-10-07: "we want to do rate limit on project creation and organization creation"; not now).
 
 - Every data flow platform → engine by default, engine → platform only for what the engine generates (in progress: connections and credentials, program and app source, settings, grounding, sessions back down).
 

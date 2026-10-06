@@ -12,7 +12,7 @@ import { ORG_MIGRATIONS } from './migrations.js'
 import { DurableObject } from 'cloudflare:workers'
 import { createRecorder } from './records.js'
 import { warehouse, WarehouseRefusal, explore, querySource, tableSource, ExploreRefusal, type Grant } from './warehouse/index.js'
-import { AgentKeys, KeyRefusal, ORG_KEYS } from './agent-keys.js'
+import { AgentKeys, KeyRefusal, ORG_KEYS, type AgentKey } from './agent-keys.js'
 import { beyond, builtinRole, checkRole, isCapability, orgMessageAllowed, ORG_ADMINISTERS_PROJECTS, ORG_ROLES, type Capability } from '../../shared/permissions.js'
 import { SUPERADMIN_EMAILS } from './auth/tokens.js'
 
@@ -60,6 +60,8 @@ export class OrgDO extends DurableObject<Env> {
     if (path === '/billing')                                   return this.billing(request)
     if (path === '/keys' || path.startsWith('/keys/'))         return this.keys(request, path)
     if (request.method === 'POST' && path === '/agent')        return this.agent(request)
+    if (request.method === 'POST' && path === '/key-access')   return this.keyAccess(request)
+    if (request.method === 'GET'  && path === '/key-alive')    return this.keyAlive(url)
     if (request.method === 'GET'  && path === '/users')        return this.getUsers()
     if (request.method === 'POST' && path === '/users')        return this.createUser(request)
     if (request.method === 'POST' && path === '/user-by-clerk-id') return this.userByClerkId(request)
@@ -403,7 +405,7 @@ export class OrgDO extends DurableObject<Env> {
     this.ctx.storage.sql.exec('INSERT INTO org_audit (at, op, target, by, detail) VALUES (?, ?, ?, ?, ?)', new Date().toISOString(), op, target, by || 'platform', JSON.stringify(detail))
   }
 
-  // ── Organisation keys (sak_org_<org>_…): an agent working for the organisation, as its maker, cut to their scopes ──
+  // ── Organisation keys (sak_org_<org>_…): an agent working for the organisation, as its maker, cut to what they hold ──
   private orgName(req: Request) { return req.headers.get('x-sa-org') ?? this.ctx.id.name ?? 'default' }
   private orgKeys(req: Request) { const org = this.orgName(req); return new AgentKeys(this.ctx.storage.sql as any, () => org, ORG_KEYS) }
   private async keys(req: Request, path: string): Promise<Response> {
@@ -414,14 +416,16 @@ export class OrgDO extends DurableObject<Env> {
       const b = await req.json().catch(() => ({})) as any
       if (req.method === 'POST' && path === '/keys') {
         if (!caller.email) return Response.json({ error: 'who is creating the key?' }, { status: 400 })
-        const over = beyond(Array.isArray(b.scopes) ? b.scopes.map(String) : [], caller.caps)
-        if (over.length) return Response.json({ error: `you cannot give a key what you do not hold: ${over.join(', ')}` }, { status: 403 })
-        const r = await keys.create({ name: b.name, scopes: b.scopes, by: caller.email, expiresAt: b.expiresAt ?? null })
-        this.record('key.create', r.record.id, caller.email, { name: r.record.name, scopes: r.record.scopes })
+        // A key holds at most what its maker holds here now (a person, or a key — x-sa-caps is what the caller holds).
+        const over = beyond(Array.isArray(b.capabilities) ? b.capabilities.map(String) : [], caller.caps)
+        if (over.length) return Response.json({ error: `a key cannot be given what its maker does not hold: ${over.join(', ')}` }, { status: 403 })
+        const r = await keys.create({ name: b.name, capabilities: b.capabilities, by: caller.email, madeByKey: req.headers.get('x-sa-key'), expiresAt: b.expiresAt ?? null })
+        this.record('key.create', r.record.id, caller.email, { name: r.record.name, capabilities: r.record.capabilities, made_by_key: r.record.made_by_key })
         return Response.json(r, { status: 201 })
       }
       const m = path.match(/^\/keys\/([\w-]+)$/)
       if (m && req.method === 'DELETE') {
+        if (!keys.reaches(req.headers.get('x-sa-key'), m[1])) return Response.json({ error: 'a key revokes only the keys below it' }, { status: 403 })
         const k = keys.revoke(m[1], caller.email || 'admin')
         this.record('key.revoke', k.id, caller.email, { name: k.name })
         return Response.json({ key: k })
@@ -433,15 +437,35 @@ export class OrgDO extends DurableObject<Env> {
     }
   }
 
-  /** One call from an organisation key: verified, cut to what its maker holds now and to its scopes, then done as any. */
+  /** What an organisation key holds now: what it was given, cut to its maker (a person here, or the key that made it). */
+  private keyHolds(req: Request, k: AgentKey): Capability[] { return this.orgKeys(req).holds(k, (who) => this.capsOfEmail(who).capabilities) }
+  /** For the worker: an organisation key's standing — in force (it and the keys that made it), what it holds, its person. */
+  private async keyAccess(req: Request): Promise<Response> {
+    const { key } = await req.json().catch(() => ({})) as { key?: string }
+    const keys = this.orgKeys(req)
+    const v = key ? await keys.verify(String(key)) : { ok: false as const, reason: 'no key' }
+    if (!v.ok) return Response.json({ ok: false, reason: v.reason })
+    const caps = this.keyHolds(req, v.key)
+    if (v.key.made_by_key && !caps.length) return Response.json({ ok: false, reason: 'the key that made it is no longer in force' })
+    return Response.json({ ok: true, keyId: v.key.id, name: v.key.name, maker: v.key.created_by, caps })
+  }
+  /** For a project: is the organisation key that made one of its keys still in force (it, and the keys that made it)? */
+  private keyAlive(url: URL): Response {
+    const keys = new AgentKeys(this.ctx.storage.sql as any, () => this.ctx.id.name ?? 'default', ORG_KEYS)
+    const k = keys.get(String(url.searchParams.get('id') ?? ''))
+    const alive = !!k && keys.live(k) && (!k.made_by_key || keys.holds(k, (who) => this.capsOfEmail(who).capabilities).length > 0)
+    return Response.json({ alive })
+  }
+
+  /** One call from an organisation key: verified, cut to what its maker holds now, then done as any. */
   private async agent(req: Request): Promise<Response> {
     const key = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
     const v = await this.orgKeys(req).verify(key)
     if (!v.ok) return Response.json({ error: `the key was refused: ${v.reason}` }, { status: 401 })
-    const held = this.capsOfEmail(v.key.created_by).capabilities.filter((c) => v.key.scopes.includes(c))
+    const held = this.keyHolds(req, v.key)
     const b = await req.json().catch(() => ({})) as any
     const t = String(b.t ?? '')
-    if (!orgMessageAllowed(held, t)) return Response.json({ error: `this key may not ${t || 'do that'} (scopes ${v.key.scopes.join(', ')}; its maker must still hold them)` }, { status: 403 })
+    if (!orgMessageAllowed(held, t)) return Response.json({ error: `this key may not ${t || 'do that'} (it holds ${held.join(', ') || 'nothing'}; cut to what its maker holds now)` }, { status: 403 })
     const by = `key:${v.key.name} (${v.key.created_by})`
     const org = this.orgName(req)
     const headers = { 'content-type': 'application/json', 'x-sa-org': org }

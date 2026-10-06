@@ -1,24 +1,24 @@
 // ── Agent keys and the audit history, for one project ───────────────────────────────────────────────────────────────
-// A key lets an agent — any system, our own CLI among them — work with this project within the scopes given here. It is
-// shown once, when made; only its hash is kept. Revoking is final and ends the key's open connections at once.
+// A key lets an agent — any system, our own CLI among them — work with this project holding the capabilities given here
+// (the names roles use), never more than its maker holds now. It is shown once, when made; only its hash is kept.
+// Revoking is final: it ends the key's open connections, and those of every key it made, at once.
 // The audit history beside it is everything that happened in the project: who asked what, who changed what, refusals.
 // Drawn only with the semantic components (@superatom/ui); no CSS of its own.
 import { useCallback, useEffect, useState } from 'react'
 import { Section, Form, Field, Choices, RecordList, Notice, Status, Code, Toolbar, Icon } from '@superatom/ui'
-import { AGENT_SCOPES, scopeCapabilities, type AgentScope } from '../../shared/agent-scopes'
+import { PROJECT_CAPABILITIES, type ProjectCapability } from '../../shared/permissions'
 
 type Api = (p: string, i?: RequestInit) => Promise<Response>
-type Key = { id: string; name: string; prefix: string; scopes: string[]; created_by: string; created_at: string; expires_at: string | null; revoked_at: string | null; revoked_by: string | null; last_used_at: string | null }
+type Key = { id: string; name: string; prefix: string; capabilities: string[]; created_by: string; made_by_key: string | null; created_at: string; expires_at: string | null; revoked_at: string | null; revoked_by: string | null; last_used_at: string | null }
 type Event = { id: string; at: string; actor: { kind: string; id: string; email?: string }; via: string; action: string; target?: string; outcome: string; detail?: Record<string, unknown> }
 
-const SCOPE_TEXT: Record<AgentScope, string> = { sessions: 'Agents and their sessions: open, change, read', ask: 'Ask questions in words', graph: 'Knowledge: read it, make and change its own concepts and domains, suggest changes', programs: 'Programs: build from source, list, publish its own', decisions: 'Decisions: the paths from a step, record how a step turned out, read decision states', learn: 'Learning: change decision states through their named operations', warehouse: 'Warehouse: the tables and columns this project was granted, and SQL over them', publish: 'Publishing: make concepts, domains, agents and programs seen by everyone; decide suggestions', 'warehouse-write': 'Warehouse writing: append rows to the tables this project may write', connectors: 'Connections: read other systems, run their actions (changes wait for a person), code mode', app: "The project's app: publish a version of its source (the engine downloads it)" }
 const when = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—')
 const whenFull = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : '')
 
 export function AgentKeysPanel({ api, projectId }: { api: Api; projectId: string }) {
   const [keys, setKeys] = useState<Key[] | null>(null)
   const [name, setName] = useState('')
-  const [scopes, setScopes] = useState<AgentScope[]>(['sessions'])
+  const [caps, setCaps] = useState<ProjectCapability[]>(['project.view', 'project.ask'])
   const [days, setDays] = useState('90')
   const [made, setMade] = useState<{ key: string; name: string } | null>(null)
   const [copied, setCopied] = useState(false)
@@ -29,15 +29,15 @@ export function AgentKeysPanel({ api, projectId }: { api: Api; projectId: string
     api(`/projects/${projectId}/agent-keys`).then((r) => (r.ok ? r.json() : { keys: [] })).then((d) => setKeys((d as { keys?: Key[] }).keys ?? [])).catch(() => {})
   }, [api, projectId])
   useEffect(load, [load])
-  // What the person making a key holds here: a scope is offered only to someone who holds what it gives.
+  // What the person making a key holds here: a capability is offered only to someone who holds it.
   const [held, setHeld] = useState<string[] | null>(null)
   useEffect(() => { api(`/projects/${projectId}/me`).then((r) => (r.ok ? r.json() : null)).then((d) => setHeld(((d as { capabilities?: string[] } | null)?.capabilities) ?? [])).catch(() => setHeld([])) }, [api, projectId])
-  const lacks = (s: AgentScope) => (held ? scopeCapabilities(s).filter((c) => !held.includes(c)) : [])
+  const lacks = (c: ProjectCapability) => !!held && !held.includes(c)
 
   const create = async () => {
     setErr(''); setMade(null); setCopied(false)
     const expiresAt = days === 'never' ? null : new Date(Date.now() + Number(days) * 86_400_000).toISOString()
-    const r = await api(`/projects/${projectId}/agent-keys`, { method: 'POST', body: JSON.stringify({ name: name.trim(), scopes, expiresAt }) })
+    const r = await api(`/projects/${projectId}/agent-keys`, { method: 'POST', body: JSON.stringify({ name: name.trim(), capabilities: caps, expiresAt }) })
     const body = await r.json().catch(() => ({})) as { key?: string; error?: string }
     if (!r.ok || !body.key) { setErr(body.error ?? `The key could not be made (${r.status}).`); return }
     setMade({ key: body.key, name: name.trim() }); setName(''); load()
@@ -47,7 +47,7 @@ export function AgentKeysPanel({ api, projectId }: { api: Api; projectId: string
     if (!r.ok) setErr(((await r.json().catch(() => ({}))) as { error?: string }).error ?? `Revoking failed (${r.status}).`)
     setRevoking(null); load()
   }
-  const ready = !!name.trim() && !!scopes.length
+  const ready = !!name.trim() && !!caps.length
 
   return (
     <div className="sa-stack sa-stack--4">
@@ -69,7 +69,7 @@ export function AgentKeysPanel({ api, projectId }: { api: Api; projectId: string
         </Notice>
       )}
 
-      <Section icon="lucide:key-round" title="Make an agent key" subtitle="Let an agent work with this project within the scopes you give it">
+      <Section icon="lucide:key-round" title="Make an agent key" subtitle="Let an agent work with this project holding what you give it — no more than you hold">
         <Form onSubmit={() => { if (ready) void create() }}
           actions={<button className="sa-btn sa-btn--primary" disabled={!ready}>Make key</button>}>
           <Field label="What it is for" help={<>Codex, Claude, any system, or the Superatom CLI (<Code>printf %s "$KEY" | sacli login</Code>). Everything it does is in the audit history.</>}>
@@ -80,16 +80,13 @@ export function AgentKeysPanel({ api, projectId }: { api: Api; projectId: string
               <option value="7">In 7 days</option><option value="30">In 30 days</option><option value="90">In 90 days</option><option value="365">In a year</option><option value="never">Never</option>
             </select>
           </Field>
-          <Choices label="Scopes">
-            {(Object.keys(AGENT_SCOPES) as AgentScope[]).map((s) => {
-              const missing = lacks(s)
-              return (
-                <label key={s} title={missing.length ? `Needs ${missing.join(', ')}, which your role here does not hold` : undefined} data-disabled={missing.length > 0}>
-                  <input type="checkbox" disabled={missing.length > 0} checked={scopes.includes(s)} onChange={(e) => setScopes(e.target.checked ? [...scopes, s] : scopes.filter((x) => x !== s))} />
-                  <span><strong>{s}</strong> — {SCOPE_TEXT[s]}{missing.length > 0 && <span className="sa-muted"> (needs {missing.join(', ')})</span>}</span>
-                </label>
-              )
-            })}
+          <Choices label="It may">
+            {(Object.keys(PROJECT_CAPABILITIES) as ProjectCapability[]).map((c) => (
+              <label key={c} title={lacks(c) ? 'Your role here does not hold this' : undefined} data-disabled={lacks(c)}>
+                <input type="checkbox" id={`agent-key-${c}`} disabled={lacks(c)} checked={caps.includes(c)} onChange={(e) => setCaps(e.target.checked ? [...caps, c] : caps.filter((x) => x !== c))} />
+                <span>{PROJECT_CAPABILITIES[c]} <span className="sa-muted">({c})</span></span>
+              </label>
+            ))}
           </Choices>
         </Form>
       </Section>
@@ -98,8 +95,8 @@ export function AgentKeysPanel({ api, projectId }: { api: Api; projectId: string
         <RecordList rows={keys} keyOf={(k) => k.id} empty="No agent keys yet. A key you make appears here; only its prefix is kept on view."
           columns={[
             { key: 'name', label: 'Name', render: (k) => <strong title={k.name}>{k.name}</strong> },
-            { key: 'scopes', label: 'Scopes', render: (k) => k.scopes.join(', ') },
-            { key: 'by', label: 'Made by', render: (k) => <span title={k.created_by}>{k.created_by}</span> },
+            { key: 'caps', label: 'May', render: (k) => k.capabilities.join(', ') },
+            { key: 'by', label: 'Made by', render: (k) => <span title={k.made_by_key ? `through key ${k.made_by_key}` : k.created_by}>{k.created_by}{k.made_by_key ? <span className="sa-muted"> (key)</span> : null}</span> },
             { key: 'made', label: 'Made', render: (k) => <span title={whenFull(k.created_at)}>{when(k.created_at)}</span> },
             { key: 'used', label: 'Last used', render: (k) => <span className="sa-muted" title={whenFull(k.last_used_at)}>{when(k.last_used_at)}</span> },
             { key: 'expires', label: 'Expires', render: (k) => k.revoked_at

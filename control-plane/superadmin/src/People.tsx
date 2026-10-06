@@ -5,12 +5,12 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { Section, RecordList, Form, Field, Choices, Notice, Status, Code, Icon } from '@superatom/ui'
-import { ORG_CAPABILITIES, ORG_KEY_SCOPES, PROJECT_CAPABILITIES, type OrgCapability, type ProjectCapability } from '../../shared/permissions'
+import { ORG_CAPABILITIES, PROJECT_CAPABILITIES, type OrgCapability, type ProjectCapability } from '../../shared/permissions'
 
 type Api = (path: string, init?: RequestInit) => Promise<Response>
 type Role = { id: string; name: string; capabilities: string[]; builtin: boolean }
 type Person = { id: string; email: string; name: string; role: string; capabilities: string[]; created_at?: number }
-type Key = { id: string; name: string; prefix: string; scopes: string[]; created_by: string; created_at: string; expires_at: string | null; revoked_at: string | null; last_used_at: string | null }
+type Key = { id: string; name: string; prefix: string; capabilities: string[]; created_by: string; created_at: string; expires_at: string | null; revoked_at: string | null; last_used_at: string | null }
 const day = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—')
 const errorOf = async (r: Response) => ((await r.json().catch(() => ({}))) as { error?: string }).error ?? `Refused (${r.status})`
 
@@ -142,12 +142,13 @@ function OrgRecord({ api }: { api: Api }) {
   )
 }
 
-/** Organisation keys: an agent working for the organisation (the warehouse), as its maker, within the scopes given. */
+/** Organisation keys: an agent working for the organisation, as its maker, holding the capabilities given (no more than
+ *  the maker holds now). One holding org.projects administers the organisation's projects, and may make their keys. */
 export function OrgKeysPanel({ api }: { api: Api }) {
   const mine = useMine(api)
   const [keys, setKeys] = useState<Key[] | null>(null)
   const [name, setName] = useState('')
-  const [scopes, setScopes] = useState<string[]>([])
+  const [caps, setCaps] = useState<OrgCapability[]>([])
   const [made, setMade] = useState<string | null>(null)
   const [err, setErr] = useState('')
   const load = useCallback(() => { api('/keys').then((r) => (r.ok ? r.json() : { keys: [] })).then((d) => setKeys((d as { keys?: Key[] }).keys ?? [])).catch(() => {}) }, [api])
@@ -155,23 +156,23 @@ export function OrgKeysPanel({ api }: { api: Api }) {
   useEffect(() => { if (held.includes('org.keys')) load() }, [load, mine])   // eslint-disable-line react-hooks/exhaustive-deps
   if (!mine || !held.includes('org.keys')) return null
   const create = async () => {
-    const r = await api('/keys', { method: 'POST', body: JSON.stringify({ name: name.trim(), scopes, expiresAt: new Date(Date.now() + 365 * 86_400_000).toISOString() }) })
+    const r = await api('/keys', { method: 'POST', body: JSON.stringify({ name: name.trim(), capabilities: caps, expiresAt: new Date(Date.now() + 365 * 86_400_000).toISOString() }) })
     if (!r.ok) { setErr(await errorOf(r)); return }
-    setErr(''); setMade(((await r.json()) as { key: string }).key); setName(''); setScopes([]); load()
+    setErr(''); setMade(((await r.json()) as { key: string }).key); setName(''); setCaps([]); load()
   }
   const revoke = async (id: string) => { const r = await api(`/keys/${encodeURIComponent(id)}`, { method: 'DELETE' }); setErr(r.ok ? '' : await errorOf(r)); load() }
   return (
-    <Section icon="lucide:key-round" title="Organisation keys" subtitle="For an agent or script working with the warehouse: sacli warehouse …">
+    <Section icon="lucide:key-round" title="Organisation keys" subtitle="For an agent or script working for the organisation: its projects, their keys, the warehouse">
       {made && <Notice state="attention" action={<button className="sa-btn sa-btn--primary" onClick={() => { void navigator.clipboard.writeText(made); setMade(null) }}><Icon icon="lucide:copy" className="sa-btn__icon" />Copy and close</button>}>
         <div className="sa-stack"><strong>Copy the key now — it will not be shown again.</strong><Code>{made}</Code></div></Notice>}
-      <Form onSubmit={() => void create()} error={err} actions={<button className="sa-btn sa-btn--primary" disabled={!name.trim() || !scopes.length}>Make key</button>}>
-        <Field label="What it is for" help={<>Then: <Code>printf %s "$KEY" | sacli login --profile warehouse</Code>. It expires in a year; it holds no more than you hold, now.</>}>
+      <Form onSubmit={() => void create()} error={err} actions={<button className="sa-btn sa-btn--primary" disabled={!name.trim() || !caps.length}>Make key</button>}>
+        <Field label="What it is for" help={<>Then: <Code>printf %s "$KEY" | sacli login --profile org</Code>. It expires in a year; it holds no more than you hold, now.</>}>
           <input id="org-key-name" className="sa-input" placeholder="nightly loader" value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
         <Choices label="It may">
-          {ORG_KEY_SCOPES.map((s) => (
+          {(Object.keys(ORG_CAPABILITIES) as OrgCapability[]).map((s) => (
             <label key={s} data-disabled={!held.includes(s)} title={held.includes(s) ? undefined : 'Your role does not hold this'}>
-              <input type="checkbox" id={`org-key-${s}`} disabled={!held.includes(s)} checked={scopes.includes(s)} onChange={(e) => setScopes(e.target.checked ? [...scopes, s] : scopes.filter((x) => x !== s))} />
+              <input type="checkbox" id={`org-key-${s}`} disabled={!held.includes(s)} checked={caps.includes(s)} onChange={(e) => setCaps(e.target.checked ? [...caps, s] : caps.filter((x) => x !== s))} />
               <span>{ORG_CAPABILITIES[s]} <span className="sa-muted">({s})</span></span>
             </label>
           ))}
@@ -180,7 +181,7 @@ export function OrgKeysPanel({ api }: { api: Api }) {
       <RecordList rows={keys} keyOf={(k) => k.id} empty="No organisation keys yet."
         columns={[
           { key: 'name', label: 'Name', render: (k) => <strong>{k.name}</strong> },
-          { key: 'scopes', label: 'May', render: (k) => k.scopes.join(', ') },
+          { key: 'caps', label: 'May', render: (k) => k.capabilities.join(', ') },
           { key: 'by', label: 'Made by', render: (k) => k.created_by },
           { key: 'made', label: 'Made', render: (k) => day(k.created_at) },
           { key: 'used', label: 'Last used', render: (k) => <span className="sa-muted">{day(k.last_used_at)}</span> },

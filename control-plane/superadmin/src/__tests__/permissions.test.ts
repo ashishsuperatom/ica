@@ -1,6 +1,6 @@
 // Who may do what ("Permissions — who may do what", docs/platform-architecture.md): the one table (shared/permissions.ts)
 // and its use in the REAL ProjectDO and OrgDO (Miniflare). A viewer looks and never asks; nothing smuggled in parts; no
-// one gives more than they hold; a key holds what its maker holds of its scopes, now; an organisation keeps an owner;
+// one gives more than they hold; a key holds what it was given that its maker holds, now; an organisation keeps an owner;
 // a project appends to the warehouse only where the organisation granted writing.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -8,8 +8,7 @@ import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { fileURLToPath } from 'node:url'
 import { createHmac } from 'node:crypto'
-import { ORG_ROLES, PROJECT_ROLES, beyond, checkRole, messageNeeds, orgRouteNeeds, projectRouteNeeds } from '../../../shared/permissions'
-import { keyCapabilities, scopesGivable } from '../../../shared/agent-scopes'
+import { ORG_ROLES, PROJECT_ROLES, beyond, checkRole, keyHolds, messageNeeds, orgRouteNeeds, projectRouteNeeds } from '../../../shared/permissions'
 
 describe('the table', () => {
   it('built-in roles: an owner alone defines roles; a viewer only looks', () => {
@@ -43,13 +42,11 @@ describe('the table', () => {
     expect(messageNeeds('term:attach')).toBe('project.manage')
     expect(messageNeeds('no:such')).toBe('project.manage')
   })
-  it('keys: a member gives no learning or warehouse writing; a key holds its maker\'s, cut to its scopes', () => {
+  it('keys: a key holds what it was given that its maker holds now', () => {
     const member = PROJECT_ROLES.member.capabilities
-    expect(scopesGivable(member)).toEqual(expect.arrayContaining(['sessions', 'ask', 'warehouse']))
-    expect(scopesGivable(member)).not.toContain('learn')
-    expect(scopesGivable(member)).not.toContain('warehouse-write')
-    expect(keyCapabilities(['graph'], PROJECT_ROLES.admin.capabilities).sort()).toEqual(['project.ask', 'project.view'])
-    expect(keyCapabilities(['learn'], member)).toEqual(['project.view'])
+    expect(beyond(['project.view', 'project.publish'], member)).toEqual(['project.publish'])
+    expect(keyHolds(['project.view', 'project.ask'], PROJECT_ROLES.admin.capabilities)).toEqual(['project.view', 'project.ask'])
+    expect(keyHolds(['project.view', 'project.ask'], PROJECT_ROLES.viewer.capabilities)).toEqual(['project.view'])
   })
 })
 
@@ -144,8 +141,8 @@ describe('in a project', () => {
     expect((await at('/do/access-domains', { method: 'POST', body: JSON.stringify({ domain: 'acme.com', roleId: 'admin', by: 'admin@x.io' }) })).body.error).toMatch(/member at most/)
   })
   it('keys: no one gives a key more than they hold; a demoted maker takes the key\'s power with them', async () => {
-    expect((await at('/do/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'k', scopes: ['learn'], by: 'mem@x.io' }) })).body.error).toMatch(/do not hold: learn/)
-    const k = await at('/do/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'k', scopes: ['sessions', 'ask'], by: 'mem@x.io' }) })
+    expect((await at('/do/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'k', capabilities: ['project.publish'], by: 'mem@x.io' }) })).body.error).toMatch(/does not hold: project.publish/)
+    const k = await at('/do/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'k', capabilities: ['project.view', 'project.ask'], by: 'mem@x.io' }) })
     expect(k.status).toBe(201)
     const engine = await socket({ role: 'code-engine', key: 'ek', instanceId: 'e3', epoch: Date.now() + 2 })
     const agent = await socket({ role: 'agent', key: k.body.key })
@@ -154,7 +151,7 @@ describe('in a project', () => {
     expect(engine.got.some((m) => m.payload?.reqId === 'k1')).toBe(true)
     await at('/do/access', { method: 'POST', body: JSON.stringify({ email: 'mem@x.io', roleId: 'viewer' }) })   // demoted
     agent.send({ to: { type: 'code-engine' }, payload: { t: 'analyse', question: 'q', reqId: 'k2' } })
-    expect((await agent.reply('k2'))?.reason).toMatch(/maker no longer holds project.ask/)
+    expect((await agent.reply('k2'))?.reason).toMatch(/analyse needs project.ask, which this key does not hold \(or its maker no longer holds\)/)
     await at('/do/access', { method: 'POST', body: JSON.stringify({ email: 'mem@x.io', roleId: 'member' }) })
     engine.close(); agent.close()
   })
@@ -199,14 +196,14 @@ describe('in an organisation', () => {
     expect((await at('/org/billing')).body.details.city).toBe('Auckland')
     expect((await at('/org/audit')).body.events.map((e: any) => e.op)).toContain('billing.details')
   })
-  it('organisation keys: within the maker\'s capabilities, cut to its scopes, and to what the maker holds now', async () => {
+  it('organisation keys: within the maker\'s capabilities, holding what it was given that the maker holds now', async () => {
     const mia = as('mia@x.io', ['warehouse.query', 'warehouse.write'])
-    expect((await at('/org/keys', { method: 'POST', headers: { ...mia, 'x-sa-org': ORG }, body: JSON.stringify({ name: 'loader', scopes: ['warehouse.manage'] }) })).body.error).toMatch(/do not hold: warehouse.manage/)
-    const k = await at('/org/keys', { method: 'POST', headers: { ...mia, 'x-sa-org': ORG }, body: JSON.stringify({ name: 'loader', scopes: ['warehouse.write'] }) })
+    expect((await at('/org/keys', { method: 'POST', headers: { ...mia, 'x-sa-org': ORG }, body: JSON.stringify({ name: 'loader', capabilities: ['warehouse.manage'] }) })).body.error).toMatch(/does not hold: warehouse.manage/)
+    const k = await at('/org/keys', { method: 'POST', headers: { ...mia, 'x-sa-org': ORG }, body: JSON.stringify({ name: 'loader', capabilities: ['warehouse.write'] }) })
     expect(k.status).toBe(201)
     expect(k.body.key).toMatch(new RegExp(`^sak_org_${ORG}_`))
     const call = (body: unknown) => at('/org/agent', { method: 'POST', headers: { authorization: `Bearer ${k.body.key}`, 'x-sa-org': ORG }, body: JSON.stringify(body) })
-    expect((await call({ t: 'warehouse:query', sql: 'select 1' })).status).toBe(403)               // not its scope
+    expect((await call({ t: 'warehouse:query', sql: 'select 1' })).status).toBe(403)               // not given it
     expect((await call({ t: 'warehouse:create', name: 't', columns: [] })).status).toBe(403)
     const appended = await call({ t: 'warehouse:append', table: 'trips', rows: [{ id: 1 }] })
     expect(appended.status).not.toBe(403)                                                            // allowed; this test has no warehouse behind it
