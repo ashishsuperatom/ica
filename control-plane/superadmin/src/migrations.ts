@@ -259,6 +259,17 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     // A project may be granted writing a warehouse table (appending to it), as well as reading it.
     addColumnIfMissing(db, 'warehouse_grants', 'write', 'INTEGER NOT NULL DEFAULT 0')
   } },
+  { id: 32, name: 'the composition graph and session owners', up: `
+    -- The project's composition graph as the platform keeps it (once a GraphDO of its own): its append-only records —
+    -- changes, suggestions, decisions, versions, each by its number — and the content they point at, by hash.
+    CREATE TABLE IF NOT EXISTS graph_records (kind TEXT NOT NULL, key TEXT NOT NULL, at INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY (kind, key));
+    CREATE INDEX IF NOT EXISTS graph_records_at ON graph_records (kind, at);
+    CREATE TABLE IF NOT EXISTS graph_content (hash TEXT PRIMARY KEY, body TEXT NOT NULL);
+    CREATE TRIGGER IF NOT EXISTS graph_records_no_update BEFORE UPDATE ON graph_records BEGIN SELECT RAISE(ABORT, 'the graph''s records are append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS graph_records_no_delete BEFORE DELETE ON graph_records BEGIN SELECT RAISE(ABORT, 'the graph''s records are append-only'); END;
+    -- Whose each session is: its log lives in that person's UserDO.
+    ALTER TABLE sessions_known ADD COLUMN user TEXT;
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */
@@ -381,24 +392,7 @@ export const GLOBAL_MIGRATIONS: Migration[] = [
   ` },
 ]
 
-// ── SessionDO and UserDO ─────────────────────────────────────────────────────────────────────────────────────────────
-
-export const SESSION_MIGRATIONS: Migration[] = [
-  { id: 1, name: 'baseline', up: `
-    CREATE TABLE IF NOT EXISTS meta (session TEXT NOT NULL, project TEXT NOT NULL, user TEXT NOT NULL, agent TEXT NOT NULL, created TEXT NOT NULL);
-    -- The session's log, in order: append-only.
-    CREATE TABLE IF NOT EXISTS entries (seq INTEGER PRIMARY KEY, entry TEXT NOT NULL, at TEXT NOT NULL);
-    CREATE TRIGGER IF NOT EXISTS entries_no_update BEFORE UPDATE ON entries BEGIN SELECT RAISE(ABORT, 'a session log is append-only'); END;
-    CREATE TRIGGER IF NOT EXISTS entries_no_delete BEFORE DELETE ON entries BEGIN SELECT RAISE(ABORT, 'a session log is append-only'); END;
-  ` },
-  { id: 2, name: 'artifacts', up: `
-    -- What the session's work produced and decided (a decision record, a file, a report, a plan): every version kept.
-    CREATE TABLE IF NOT EXISTS artifacts (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL, version INTEGER NOT NULL, kind TEXT NOT NULL,
-      title TEXT NOT NULL, status TEXT NOT NULL, block TEXT, body TEXT NOT NULL, by TEXT NOT NULL, at TEXT NOT NULL, note TEXT, UNIQUE (id, version));
-    CREATE TRIGGER IF NOT EXISTS artifacts_no_update BEFORE UPDATE ON artifacts BEGIN SELECT RAISE(ABORT, 'artifacts are append-only'); END;
-    CREATE TRIGGER IF NOT EXISTS artifacts_no_delete BEFORE DELETE ON artifacts BEGIN SELECT RAISE(ABORT, 'artifacts are append-only'); END;
-  ` },
-]
+// ── DecisionDO ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
 export const DECISION_MIGRATIONS: Migration[] = [
   { id: 1, name: 'baseline', up: `
@@ -427,6 +421,8 @@ export const DECISION_MIGRATIONS: Migration[] = [
   ` },
 ]
 
+// ── UserDO ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+
 export const USER_MIGRATIONS: Migration[] = [
   { id: 1, name: 'baseline', up: `
     CREATE TABLE IF NOT EXISTS sessions (project TEXT NOT NULL, session TEXT NOT NULL, agent TEXT NOT NULL, title TEXT NOT NULL,
@@ -443,17 +439,15 @@ export const USER_MIGRATIONS: Migration[] = [
       last_sample TEXT, created TEXT NOT NULL, updated TEXT NOT NULL);
     CREATE UNIQUE INDEX IF NOT EXISTS warehouse_queries_sql ON warehouse_queries (org, project, sql);
   ` },
-]
-
-// ── GraphDO ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-export const GRAPH_MIGRATIONS: Migration[] = [
-  { id: 1, name: 'baseline', up: `
-    -- The graph's records as the engine keeps them (change, suggestion, decision), each by its number: append-only.
-    CREATE TABLE IF NOT EXISTS records (kind TEXT NOT NULL, key TEXT NOT NULL, at INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY (kind, key));
-    CREATE INDEX IF NOT EXISTS idx_records_at ON records(kind, at);
-    CREATE TABLE IF NOT EXISTS content (hash TEXT PRIMARY KEY, body TEXT NOT NULL);
-    CREATE TRIGGER IF NOT EXISTS records_no_update BEFORE UPDATE ON records BEGIN SELECT RAISE(ABORT, 'the graph''s records are append-only'); END;
-    CREATE TRIGGER IF NOT EXISTS records_no_delete BEFORE DELETE ON records BEGIN SELECT RAISE(ABORT, 'the graph''s records are append-only'); END;
+  { id: 3, name: 'sessions', up: `
+    -- The person's sessions (once a SessionDO each): every session's log, in order and append-only, by project and session;
+    -- and what each session's work produced and decided (artifacts), every version kept. The index is in sessions.
+    CREATE TABLE IF NOT EXISTS session_entries (project TEXT NOT NULL, session TEXT NOT NULL, seq INTEGER NOT NULL, entry TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (project, session, seq));
+    CREATE TRIGGER IF NOT EXISTS session_entries_no_update BEFORE UPDATE ON session_entries BEGIN SELECT RAISE(ABORT, 'a session log is append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS session_entries_no_delete BEFORE DELETE ON session_entries BEGIN SELECT RAISE(ABORT, 'a session log is append-only'); END;
+    CREATE TABLE IF NOT EXISTS session_artifacts (seq INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT NOT NULL, session TEXT NOT NULL, id TEXT NOT NULL, version INTEGER NOT NULL,
+      kind TEXT NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL, block TEXT, body TEXT NOT NULL, by TEXT NOT NULL, at TEXT NOT NULL, note TEXT, UNIQUE (project, session, id, version));
+    CREATE TRIGGER IF NOT EXISTS session_artifacts_no_update BEFORE UPDATE ON session_artifacts BEGIN SELECT RAISE(ABORT, 'artifacts are append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS session_artifacts_no_delete BEFORE DELETE ON session_artifacts BEGIN SELECT RAISE(ABORT, 'artifacts are append-only'); END;
   ` },
 ]

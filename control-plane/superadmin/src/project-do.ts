@@ -38,6 +38,7 @@ import { createRecorder, type Recorder } from './records.js'
 import { connectorById, checkConnection, CONNECTORS } from '../../shared/connectors.js'
 import { seal, unseal } from './proxy/seal.js'
 import { runConnector, runCode, manifestOf } from './connectors/runtime.js'
+import { graphStore, GraphConflict } from './graph-store.js'
 
 
 // How long a question queued for a sleeping machine is still worth waking up for. Past this the person has
@@ -555,12 +556,15 @@ export class ProjectDO extends DurableObject<Env> {
       return
     }
     if ((msg.type === 'graph:sync' || msg.type === 'graph:cursor' || msg.type === 'graph:pull') && sender.type === 'code-engine') {
-      const stub = (this.env as any).GRAPH.get((this.env as any).GRAPH.idFromName(`graph:${this._pid}`))
+      const graph = this.graph()
       const reply = (payload: Record<string, unknown>) => { try { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload })) } catch { /* gone */ } }
       try {
-        if (msg.type === 'graph:cursor') reply({ t: 'graph:cursor', ...(await (await stub.fetch('http://do/cursor')).json() as object) })
-        else if (msg.type === 'graph:sync') reply({ t: 'graph:synced', ...(await (await stub.fetch('http://do/append', { method: 'POST', body: JSON.stringify({ ...(msg.batch ?? {}), project: this._pid }) })).json() as object) })
-        else { const c = msg.cursor ?? {}; reply({ t: 'graph:batch', batch: await (await stub.fetch(`http://do/pull?change=${Number(c.change) || 0}&suggestion=${Number(c.suggestion) || 0}&decisionAt=${Number(c.decisionAt) || 0}&version=${Number(c.version) || 0}`)).json() }) }
+        if (msg.type === 'graph:cursor') reply({ t: 'graph:cursor', cursor: graph.cursor() })
+        else if (msg.type === 'graph:sync') {
+          try { reply({ t: 'graph:synced', ...graph.append(msg.batch ?? {}) }) }
+          catch (e) { if (e instanceof GraphConflict) reply({ t: 'graph:synced', error: e.message, conflict: true, cursor: graph.cursor() }); else throw e }
+        }
+        else reply({ t: 'graph:batch', batch: graph.pull(msg.cursor ?? {}) })
       } catch (e: any) { reply({ t: msg.type === 'graph:cursor' ? 'graph:cursor' : msg.type === 'graph:sync' ? 'graph:synced' : 'graph:batch', error: e?.message ?? String(e) }) }
       return
     }
@@ -596,6 +600,7 @@ export class ProjectDO extends DurableObject<Env> {
         return
       }
       this.log('ws:ce_auth_ok', {})
+      await this.foldOnce().catch((e: any) => console.log(`[fold] ${this._pid} failed: ${e?.stack ?? e}`))   // FOLD 2026-10-06 (temporary)
       if (msg.machineId) await this.reconcileMachineId(msg.machineId)   // self-heal (Fly-verified) the tracked machine id (survives recreate/resize)
       this.recordHeartbeat()
       if (await this.register(ws, role, undefined, undefined, instanceId, epoch)) this.flushQueued(ws)
@@ -1203,27 +1208,72 @@ export class ProjectDO extends DurableObject<Env> {
     for (const d of [...this.ctx.storage.sql.exec(`SELECT r.* FROM decision_register r JOIN (SELECT artifact, MAX(version) AS m FROM decision_register GROUP BY artifact) x ON x.artifact = r.artifact AND x.m = r.version WHERE r.status = 'pending' ORDER BY r.at`)] as any[])
       items.push({ id: `approval:${d.artifact}`, kind: 'approval', state: 'attention', title: `Approve: ${d.title}`, detail: `Recorded by ${String(d.by).replace(/^(email|user):/, '')}${d.agent ? ` with ${d.agent}` : ''}`, session: d.session, artifact: d.artifact, at: d.at })
     try {
-      const g = (this.env as any).GRAPH.get((this.env as any).GRAPH.idFromName(`graph:${this._pid}`))
-      const open: any = await (await g.fetch('http://do/open')).json()
-      for (const s of open.open ?? []) items.push({ id: `suggestion:${s.id}`, kind: 'suggestion', state: 'attention', title: s.scope ? `Publish ${s.name} to ${s.scope === 'global' ? 'everyone' : s.scope}` : `Change suggested to ${s.name}`, detail: `${String(s.by).replace(/^(email|user|agent):/, '')}: ${s.reason}`, suggestion: s.id, name: s.name, at: s.at })
+      for (const s of this.graph().open()) items.push({ id: `suggestion:${s.id}`, kind: 'suggestion', state: 'attention', title: s.scope ? `Publish ${s.name} to ${s.scope === 'global' ? 'everyone' : s.scope}` : `Change suggested to ${s.name}`, detail: `${String(s.by).replace(/^(email|user|agent):/, '')}: ${s.reason}`, suggestion: s.id, name: s.name, at: s.at })
     } catch { /* the graph replica unreachable: its suggestions are not listed */ }
     return this.j({ items })
   }
 
+  // ── FOLD 2026-10-06 (temporary, deleted with the GraphDO and SessionDO classes once copied) ─────────────────────────
+  // The project's graph from its GraphDO into graph_records/graph_content; each known session's entries and artifacts
+  // from its SessionDO into its owner's UserDO. Once per project; what was copied is logged and kept under the flag.
+  private async foldOnce() {
+    if (await this.ctx.storage.get('fold-2026-10-06')) return
+    const env = this.env as any, sql = this.ctx.storage.sql
+    const out = { records: 0, contents: 0, sessions: 0, entries: 0, artifacts: 0, unowned: [] as string[], mismatch: [] as string[] }
+    const g: any = await (await env.GRAPH.get(env.GRAPH.idFromName(`graph:${this._pid}`)).fetch('http://do/')).json()
+    this.ctx.storage.transactionSync(() => {
+      for (const c of g.contents ?? []) { sql.exec('INSERT OR IGNORE INTO graph_content (hash, body) VALUES (?, ?)', c.hash, c.body); out.contents++ }
+      for (const r of g.records ?? []) { sql.exec('INSERT OR IGNORE INTO graph_records (kind, key, at, body) VALUES (?, ?, ?, ?)', r.kind, r.key, r.at, r.body); out.records++ }
+    })
+    for (const r of g.records ?? []) { const [h] = [...sql.exec('SELECT body FROM graph_records WHERE kind = ? AND key = ?', r.kind, r.key)] as any[]; if (!h || h.body !== r.body) out.mismatch.push(`graph ${r.kind} ${r.key}`) }
+    for (const k of [...sql.exec('SELECT session FROM sessions_known')] as any[]) {
+      const session = String(k.session)
+      const d: any = await (await env.SESSION.get(env.SESSION.idFromName(`ses:${this._pid}:${session}`)).fetch('http://do/')).json()
+      const owner = d.meta?.user ?? (d.entries ?? []).map((e: any) => JSON.parse(e.entry)).find((e: any) => e.t === 'open')?.user
+      if (!owner) { if ((d.entries ?? []).length || (d.artifacts ?? []).length) out.unowned.push(session); continue }
+      sql.exec('UPDATE sessions_known SET user = ? WHERE session = ?', owner, session)
+      const q = `project=${encodeURIComponent(this._pid)}&session=${encodeURIComponent(session)}`
+      const r = await this.userStub(owner).fetch(`http://do/session/import?${q}`, { method: 'POST', body: JSON.stringify({ entries: d.entries ?? [], artifacts: d.artifacts ?? [] }) })
+      if (!r.ok) throw new Error(`session ${session}: ${await r.text()}`)
+      const kept: any = await r.json()
+      if (Number(kept.upto) < (d.entries ?? []).length) out.mismatch.push(`session ${session}: ${kept.upto} of ${(d.entries ?? []).length} entries`)
+      const arts: any = await (await this.sessionAt(session).fetch('http://do/artifacts')).json()
+      const ids = new Set((d.artifacts ?? []).map((a: any) => a.id))
+      if ((arts.artifacts ?? []).length !== ids.size) out.mismatch.push(`session ${session}: ${(arts.artifacts ?? []).length} of ${ids.size} artifacts`)
+      out.sessions++; out.entries += (d.entries ?? []).length; out.artifacts += (d.artifacts ?? []).length
+    }
+    await this.ctx.storage.put('fold-2026-10-06', out)
+    console.log(`[fold] ${this._pid} ${JSON.stringify(out)}`)
+  }
+
+  /** The project's composition graph, kept here (graph-store.ts). */
+  private graph() { return graphStore(this.ctx.storage, this.env, () => this._pid) }
   private decisionStub() { return (this.env as any).DECISION.get((this.env as any).DECISION.idFromName(`dec:${this._pid}`)) }
-  private sessionStub(session: string) {
+  /** Where a session lives: its owner's UserDO, asked with this project and the session's id (session-store.ts). */
+  private sessionAt(session: string) {
     if (!/^[\w-]{1,80}$/.test(session)) throw new Error('not a session id')
-    return (this.env as any).SESSION.get((this.env as any).SESSION.idFromName(`ses:${this._pid}:${session}`))
+    const owner = ([...this.ctx.storage.sql.exec('SELECT user FROM sessions_known WHERE session = ?', session)][0] as any)?.user as string | undefined
+    const q = `project=${encodeURIComponent(this._pid)}&session=${encodeURIComponent(session)}`
+    return {
+      fetch: async (url: string, init?: RequestInit): Promise<Response> => {
+        if (!owner) return new Response(JSON.stringify({ error: 'there is no such session' }), { status: 404, headers: { 'content-type': 'application/json' } })
+        const u = new URL(url)
+        return this.userStub(owner).fetch(`http://do/session${u.pathname}?${q}${u.search ? `&${u.search.slice(1)}` : ''}`, init)
+      },
+    }
   }
   private userStub(principal: string) { return (this.env as any).USER.get((this.env as any).USER.idFromName(principal)) }
+  /** A session's entries from the engine, kept in its owner's UserDO. Whose it is comes from its opening entry, once. */
   private async syncSession(session: string, from: number, entries: unknown[]) {
-    this.ctx.storage.sql.exec('INSERT OR IGNORE INTO sessions_known (session, first_seen) VALUES (?, ?)', session, new Date().toISOString())
-    const r = await this.sessionStub(session).fetch('http://do/append', { method: 'POST', body: JSON.stringify({ project: this._pid, session, from, entries }) })
+    if (!/^[\w-]{1,80}$/.test(session)) throw new Error('not a session id')
+    const known = ([...this.ctx.storage.sql.exec('SELECT user FROM sessions_known WHERE session = ?', session)][0] as any)?.user as string | undefined
+    const open = from === 0 ? (entries as any[]).find((e) => e?.t === 'open' && typeof e.user === 'string') : undefined
+    const owner = known ?? open?.user
+    if (!owner) return { upto: 0, gap: true }   // whose it is is not known yet: send it from its opening entry
+    this.ctx.storage.sql.exec('INSERT INTO sessions_known (session, first_seen, user) VALUES (?, ?, ?) ON CONFLICT (session) DO UPDATE SET user = COALESCE(sessions_known.user, excluded.user)', session, new Date().toISOString(), owner)
+    const r = await this.sessionAt(session).fetch('http://do/append', { method: 'POST', body: JSON.stringify({ from, entries }) })
     const body: any = await r.json()
     if (r.status >= 400 && body.conflict === undefined) throw new Error(body.error ?? `the session could not be kept (${r.status})`)
-    if (body.summary?.user) {
-      await this.userStub(body.summary.user).fetch('http://do/sessions', { method: 'POST', body: JSON.stringify({ project: this._pid, session, agent: body.summary.agent, title: body.summary.title, blocks: body.summary.blocks, answers: body.summary.answers, created: body.summary.created, updated: body.summary.updated }) })
-    }
     return { upto: body.upto, ...(body.gap ? { gap: true } : {}), ...(body.conflict !== undefined ? { conflict: body.conflict, error: body.error } : {}) }
   }
   // ── Who may do what (shared/permissions.ts) ──────────────────────────────────────────────────────────────────────
@@ -1571,7 +1621,7 @@ export class ProjectDO extends DurableObject<Env> {
           if (!step) throw new Error('the view has no step to recognise')
           hubReply({ t: 'decision:paths', block: null, ...(await call('/recognise', { cues: step.cues, world: step.world, scopes: this.scopesOf(sender) })), reqId: pl.reqId })
         } else if (pl.t === 'decision:paths' || pl.t === 'decision:outcome') {
-          const r = await this.sessionStub(String(pl.session ?? '')).fetch('http://do/view')
+          const r = await this.sessionAt(String(pl.session ?? '')).fetch('http://do/view')
           const body: any = await r.json()
           if (!r.ok) throw new Error(body.error ?? 'there is no such session')
           if (body.view.user !== who && !can(caps, 'project.audit')) throw new Error(`session ${pl.session} is not yours`)
@@ -1617,7 +1667,7 @@ export class ProjectDO extends DurableObject<Env> {
           const rows = [...this.ctx.storage.sql.exec(`SELECT r.* FROM decision_register r JOIN (SELECT artifact, MAX(version) AS m FROM decision_register ${pl.asOf ? 'WHERE at <= ?' : ''} GROUP BY artifact) x ON x.artifact = r.artifact AND x.m = r.version ORDER BY r.at DESC LIMIT 200`, ...(pl.asOf ? [String(pl.asOf)] : []))]
           hubReply({ t: 'decision:register', decisions: rows, asOf: pl.asOf ?? null, reqId: pl.reqId }); return
         }
-        const stub = this.sessionStub(String(pl.session ?? ''))
+        const stub = this.sessionAt(String(pl.session ?? ''))
         const viewRes = await stub.fetch('http://do/view'); const vb: any = await viewRes.json()
         if (!viewRes.ok) throw new Error(vb.error ?? 'there is no such session')
         const view = vb.view
@@ -1680,7 +1730,7 @@ export class ProjectDO extends DurableObject<Env> {
           const r: any = await (await this.userStub(who).fetch(`http://do/sessions?project=${encodeURIComponent(this._pid)}`)).json()
           hubReply({ t: 'session:list', sessions: r.sessions ?? [], reqId: pl.reqId })
         } else {
-          const r = await this.sessionStub(String(pl.session ?? '')).fetch(`http://do/view${pl.asOf ? `?asOf=${encodeURIComponent(String(pl.asOf))}` : ''}`)
+          const r = await this.sessionAt(String(pl.session ?? '')).fetch(`http://do/view${pl.asOf ? `?asOf=${encodeURIComponent(String(pl.asOf))}` : ''}`)
           const body: any = await r.json()
           if (!r.ok) hubReply({ t: 'session:refused', reason: body.error ?? 'there is no such session', reqId: pl.reqId })
           else if (body.view.user !== who) hubReply({ t: 'session:refused', reason: `session ${pl.session} is not yours`, reqId: pl.reqId })

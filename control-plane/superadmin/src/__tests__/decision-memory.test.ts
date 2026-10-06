@@ -14,12 +14,10 @@ const PID = '11111111-2222-3333-4444-555555555555'
 const SECRET = 's3cret'
 const harness = `
 export { ProjectDO } from '../project-do.ts'
-export { SessionDO } from '../session-do.ts'
 export { UserDO } from '../user-do.ts'
 export { DecisionDO } from '../decision-do.ts'
 export default { async fetch(req, env) {
   const u = new URL(req.url)
-  if (u.pathname.startsWith('/session/')) { const [, , id, ...rest] = u.pathname.split('/'); return env.SESSION.get(env.SESSION.idFromName('ses:${PID}:' + id)).fetch(new Request('http://do/' + rest.join('/') + u.search, req)) }
   if (u.pathname.startsWith('/decision/')) { const fwd = new Request('http://do' + u.pathname.slice(9) + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return env.DECISION.get(env.DECISION.idFromName('dec:${PID}')).fetch(fwd) }
   const stub = env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}'))
   if (u.pathname.startsWith('/_ws/')) return stub.fetch(req)
@@ -45,9 +43,13 @@ async function sessionWith(id: string, overrun: number) {
     { t: 'intent', at: t(3), intent: { id: 'i1', session: id, kind: 'structured', call: { package: 'pmo', fn: 'flag' }, to: 'new', block: 'b1', by: 'user:u1', at: t(3) } },
     { t: 'block', at: t(3), id: 'b2', parent: 'b1', state, stateHash: 'h2', intent: 'i1' },
   ]
-  const r = await post(`/session/${id}/append`, { project: PID, session: id, from: 0, entries })
-  expect(r.status).toBe(200)
+  // As the engine sends it: through the hub, kept in the session owner's UserDO.
+  engine.send(JSON.stringify({ type: 'session:sync', session: id, from: 0, entries }))
+  for (let i = 0; i < 200; i++) { const m = engineGot.find((x) => x.payload?.t === 'session:synced' && x.payload.session === id); if (m) { expect(m.payload.upto).toBe(entries.length); return } await new Promise((r) => setTimeout(r, 20)) }
+  throw new Error(`session ${id} never synced`)
 }
+let engine: WebSocket
+const engineGot: any[] = []
 
 async function socket(token: string) {
   const r = await mf.dispatchFetch(`http://x/_ws/${PID}`, { headers: { upgrade: 'websocket' } })
@@ -64,9 +66,14 @@ async function socket(token: string) {
 beforeAll(async () => {
   const out = await build({ stdin: { contents: harness, resolveDir: here, loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'] })
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
-    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, SESSION: { className: 'SessionDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true }, DECISION: { className: 'DecisionDO', useSQLite: true } },
+    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true }, DECISION: { className: 'DecisionDO', useSQLite: true } },
     r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: SECRET } })
   await at('/do/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'ek', provider: 'external', name: 'P' }) })
+  const r = await mf.dispatchFetch(`http://x/_ws/${PID}`, { headers: { upgrade: 'websocket' } })
+  engine = r.webSocket! as unknown as WebSocket
+  engine.addEventListener('message', (e: any) => engineGot.push(JSON.parse(String(e.data)))); (engine as any).accept()
+  engine.send(JSON.stringify({ type: 'hello', role: 'code-engine', key: 'ek', instanceId: 'e', epoch: 1 }))
+  for (let i = 0; i < 200 && !engineGot.some((m) => m.payload?.t === 'welcome'); i++) await new Promise((r) => setTimeout(r, 20))
 }, 60_000)
 afterAll(async () => { await mf?.dispose() })
 
@@ -127,7 +134,8 @@ describe('decision memory', () => {
     expect((await u1.ask({ t: 'artifact:list', session: 's-1' })).artifacts.map((a: any) => a.title)).toEqual(['Flag the overruns to the PMO'])
     // it waits in the project's Attention, as an approval with where it is
     const att = (await at('/do/attention')).body.items
-    expect(att).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'approval', state: 'attention', title: 'Approve: Flag the overruns to the PMO', session: 's-1', artifact: rec.artifact.id }), expect.objectContaining({ kind: 'engine', state: 'critical' })]))
+    expect(att).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'approval', state: 'attention', title: 'Approve: Flag the overruns to the PMO', session: 's-1', artifact: rec.artifact.id })]))
+    expect(att.some((x: any) => x.kind === 'engine')).toBe(false)   // the engine that sent the sessions is connected
     const approved = await u1.ask({ t: 'artifact:decide', session: 's-1', id: rec.artifact.id, status: 'approved', note: 'agreed' })   // a superadmin may
     expect(approved.artifact).toMatchObject({ status: 'approved', version: 2, body: { approvals: [{ status: 'approved', note: 'agreed' }] } })
     expect((await u1.ask({ t: 'artifact:get', session: 's-1', id: rec.artifact.id })).versions.map((v: any) => v.status)).toEqual(['pending', 'approved'])

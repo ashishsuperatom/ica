@@ -1,5 +1,5 @@
 // Sessions kept by the platform, end to end in the REAL Durable Objects (Miniflare): a person works in a session through
-// the engine's real session seam; every append is pushed up (session-sync.ts) to the session's SessionDO, and the
+// the engine's real session seam; every append is pushed up (session-sync.ts) to the session owner's UserDO, and the
 // person's UserDO indexes it; the person lists and reads it back from the platform without the engine; nobody else can;
 // a restart resends everything without a duplicate; a gap is healed; a conflicting entry is refused, never overwritten.
 
@@ -21,7 +21,6 @@ const PID = '11111111-2222-3333-4444-555555555555'
 const SECRET = 's3cret'
 const harness = `
 export { ProjectDO } from '../project-do.ts'
-export { SessionDO } from '../session-do.ts'
 export { UserDO } from '../user-do.ts'
 export default { async fetch(req, env) {
   const u = new URL(req.url); const stub = env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}'))
@@ -70,7 +69,7 @@ beforeAll(async () => {
   writeFileSync(join(home, 'agents', 'trips.json'), JSON.stringify({ id: 'trips', name: 'Trips', scope: 'global', owner: 'user:b', domain: 'd', programs: ['unsettled-trips'], tools: [], ui: { start: 's' }, ica: 'composer' }))
   const out = await build({ stdin: { contents: harness, resolveDir: here, loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'] })
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
-    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, SESSION: { className: 'SessionDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } },
+    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } },
     r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: SECRET } })
   await mf.dispatchFetch('http://x/do/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'ek', provider: 'external', name: 'P' }) })
   engine = await socket({ role: 'code-engine', key: 'ek', instanceId: 'e', epoch: 1 })

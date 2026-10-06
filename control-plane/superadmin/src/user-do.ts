@@ -8,6 +8,7 @@
 import { DurableObject } from 'cloudflare:workers'
 import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
 import { USER_MIGRATIONS } from './migrations.js'
+import { sessionStore } from './session-store.js'
 
 export class UserDO extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -47,9 +48,49 @@ export class UserDO extends DurableObject<Env> {
         return json({ ok: true })
       }
     }
+    // Sessions (session-store.ts), asked by the project's hub: /session/<append|view|upto|artifact|artifacts|artifact/<id>>
+    // with ?project&session.
+    if (url.pathname.startsWith('/session/')) return this.session(request, url)
     // Warehouse queries: GET /warehouse/queries?org&project · POST /warehouse/runs (the platform records a run) ·
     // POST /warehouse/queries (name or rename one, save a new one) · DELETE /warehouse/queries/<id>?org&project
     if (url.pathname.startsWith('/warehouse/')) return this.warehouseQueries(request, url)
+    return json({ error: 'not found' }, 404)
+  }
+
+  private async session(request: Request, url: URL): Promise<Response> {
+    const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
+    const project = url.searchParams.get('project') ?? '', session = url.searchParams.get('session') ?? ''
+    if (!project || !/^[\w-]{1,80}$/.test(session)) return json({ error: 'a session is named by its project and id' }, 400)
+    const store = sessionStore(this.ctx.storage, this.env)
+    const what = url.pathname.slice('/session/'.length)
+    if (request.method === 'POST' && what === 'append') {
+      const b = await request.json() as { from: number; entries: any[] }
+      if (!Number.isInteger(b?.from) || b.from < 0 || !Array.isArray(b.entries)) return json({ error: 'an append says where it starts, and its entries' }, 400)
+      const r = await store.append(project, session, b.from, b.entries)
+      return json(r, r.conflict !== undefined ? 409 : 200)
+    }
+    if (request.method === 'GET' && what === 'view') { const v = store.view(project, session, url.searchParams.get('asOf') ?? undefined); return v ? json(v) : json({ error: 'there is no such session' }, 404) }
+    if (request.method === 'GET' && what === 'upto') return json({ upto: store.count(project, session) })
+    if (request.method === 'POST' && what === 'artifact') {
+      const b = await request.json() as any
+      if (!b?.by || !b?.kind || !b?.title || !b?.status || !b?.body || typeof b.body !== 'object') return json({ error: 'an artifact names its kind, title, status, body and who' }, 400)
+      try { return json({ artifact: store.recordArtifact(project, session, b) }) } catch (e: any) { return json({ error: e.message }, 404) }
+    }
+    if (request.method === 'GET' && what === 'artifacts') return json({ artifacts: store.artifacts(project, session) })
+    // FOLD 2026-10-06 (temporary): a session's entries and artifacts copied from its retired SessionDO, then its index.
+    if (request.method === 'POST' && what === 'import') {
+      const b = await request.json() as { entries: any[]; artifacts: any[] }
+      const sql = this.ctx.storage.sql
+      this.ctx.storage.transactionSync(() => {
+        for (const e of b.entries ?? []) sql.exec('INSERT OR IGNORE INTO session_entries (project, session, seq, entry, at) VALUES (?, ?, ?, ?, ?)', project, session, e.seq, e.entry, e.at)
+        for (const a of b.artifacts ?? []) sql.exec('INSERT OR IGNORE INTO session_artifacts (project, session, id, version, kind, title, status, block, body, by, at, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', project, session, a.id, a.version, a.kind, a.title, a.status, a.block ?? null, a.body, a.by, a.at, a.note ?? null)
+      })
+      return json(await store.append(project, session, store.count(project, session), []))
+    }
+    if (request.method === 'GET' && what.startsWith('artifact/')) {
+      const versions = store.artifactVersions(project, session, decodeURIComponent(what.slice('artifact/'.length)))
+      return versions.length ? json({ versions }) : json({ error: 'there is no such artifact' }, 404)
+    }
     return json({ error: 'not found' }, 404)
   }
 
