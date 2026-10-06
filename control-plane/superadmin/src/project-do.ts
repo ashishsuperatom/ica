@@ -992,17 +992,6 @@ export class ProjectDO extends DurableObject<Env> {
       const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code)))].map((x) => x.toString(16).padStart(2, '0')).join('')
       await bucket.put(`bridge/${this._pid}/${hash}`, code)
       const [have] = [...this.ctx.storage.sql.exec("SELECT id, bridge FROM connections WHERE name = ? AND level = 'project' AND removed_at IS NULL", name)] as any[]
-      // ONE-TIME (removed in the next commit): the connections that lived on the engines' disks, moved here with their
-      // settings and secrets.
-      if (body.connector && connectorById(String(body.connector))) {
-        const master = (this.env as any).CREDENTIALS_MASTER_KEY
-        const sealed = body.secrets && Object.keys(body.secrets).length ? await seal(JSON.stringify(body.secrets), master) : null
-        const id = have?.id ?? `con_${crypto.randomUUID().slice(0, 12)}`
-        if (!have) this.ctx.storage.sql.exec("INSERT INTO connections (id, connector, name, level, owner, settings, secrets_sealed, created_by, created_at, bridge) VALUES (?, ?, ?, 'project', 'project', ?, ?, 'engine', ?, ?)", id, String(body.connector), name, JSON.stringify(body.settings ?? {}), sealed, new Date().toISOString(), hash)
-        else this.ctx.storage.sql.exec('UPDATE connections SET connector = ?, settings = ?, secrets_sealed = ?, bridge = ? WHERE id = ?', String(body.connector), JSON.stringify(body.settings ?? {}), sealed, hash, id)
-        this.sendToRole('code-engine', { t: 'connections:changed' })
-        return json({ name, bridge: hash, moved: true })
-      }
       if (have) this.ctx.storage.sql.exec('UPDATE connections SET bridge = ? WHERE id = ?', hash, have.id)
       else this.ctx.storage.sql.exec("INSERT INTO connections (id, connector, name, level, owner, settings, secrets_sealed, created_by, created_at, bridge) VALUES (?, 'code', ?, 'project', 'project', '{}', NULL, 'engine', ?, ?)",
         `con_${crypto.randomUUID().slice(0, 12)}`, name, new Date().toISOString(), hash)

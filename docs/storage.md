@@ -74,7 +74,7 @@ to the warehouse, with ms), `warehouse_tables` (owners); legacy `datasources`, `
 - the hub: `person_links` (each person linked through their UserDO), `logs` (event log);
 - knowledge and work: the composition graph itself — its own tables (`content`, `name`, `change`, `question`, `suggestion`, `decision`, `version`, by its own migrations in `_graph_migrations`; `graph.ts`) and `graph_people` (who changed it, by email), `programs` (catalogue; bundles in R2),
   `dashboards`, `dashboard_builds`, `decision_register`, `activities`, `connections` (settings; `secrets_sealed` with the
-  master key), `connector_calls`, `connector_schemas`;
+  master key; `bridge` — a code connection's bridge, its code in R2 `bridge/<project>/<sha256>`, downloaded by the engine), `connector_calls`, `connector_schemas`;
 - who asked what: `answer_buffer` (only who asked each question — it decides whose logs reach whom), `session_owners`
   (whom usage is charged to), `sessions_known` (each session's owner → which UserDO holds it);
 - the record: `audit_log` (append-only, also to `AUDIT`), `usage_events`, `view_events`.
@@ -118,7 +118,7 @@ Roots (`engine.ts`): `STATE_ROOT` = `$ENGINE_STATE_DIR` or `~/.superatom/state`;
 | `sessions/<sid>/work/` | the session's agent's own folder (its tools, data, out/, harness notes) | no |
 | `workspace/` | the shared folder of the connector and grounding agents | no |
 | `programs/store/<sha256>/`, `programs/src/`, `programs/incoming/` | built programs, sources, staging | built bundles → R2 `programs/` |
-| `knowledge/`, `app/`, `agents/`, `datasources/` | domain knowledge, the project's own app, agent files, the datasource manager's state (`registry.json`, `query-results.sqlite`) | knowledge via the graph; dashboards upload to R2 |
+| `knowledge/`, `app/`, `datasources/` | domain knowledge (imported into the platform's graph with `sacli graph import`; the engine never reads it), the project's own app, `datasources/<name>/bridge.mjs` (each code connection's bridge, downloaded from the platform by hash — settings and secrets only in memory) and the manager's `query-results.sqlite` cache | knowledge → the platform's graph; connections ← ProjectDO (`connections:pull`); dashboards upload to R2 |
 
 Outside the home: the harnesses' own login files (`~/.claude.json`, `~/.codex/auth.json`, pi's `auth.json`).
 

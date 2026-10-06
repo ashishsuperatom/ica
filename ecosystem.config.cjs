@@ -11,7 +11,7 @@
 //   ICA_PROJECT / ICA_HUB / ICA_KEY / DATASOURCE_URL     where the engine connects, and its data seam
 //   PROJECT_NAME                                         names its processes: sa-engine-<name>, sa-datasources-<name>
 //   DATASOURCE_PORT                                      the port its datasource manager listens on
-//   anything else (ICA_COMPOSER_HARNESS, NETSUITE_*, …)  passed to both processes
+//   anything else  passed to both processes (a connection's settings and secrets come from the platform, never from here)
 //
 //   pm2 start ecosystem.config.cjs                  every project with a home
 //   pm2 start ecosystem.config.cjs --only sa-engine-<name>
