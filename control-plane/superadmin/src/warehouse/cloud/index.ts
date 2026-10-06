@@ -4,7 +4,7 @@
 import { basinSql } from './sql'
 import { icebergCatalog, CatalogError, type IcebergSchema, type TableMetadata } from './catalog'
 import { appendRows, type ObjectStore } from './append'
-import { checkQuery, type Grant } from '../access'
+import { checkQuery, capRows, type Grant } from '../access'
 import { namespaceOf, NOT_CONFIGURED, TABLE_NAME, COLUMN_TYPES, WarehouseRefusal, type Column, type DataSourceBridge, type Ingest, type TableInfo } from '../bridge'
 
 export interface CloudConfig { accountId: string; bucket: string; catalogToken: string; sqlToken: string; catalogUri?: string; sqlEndpoint?: string }
@@ -32,8 +32,15 @@ export function cloudWarehouse(cfg: CloudConfig | null, store: ObjectStore | nul
     let checked
     try { checked = checkQuery(text, schemas, grant === 'all' ? null : grant, namespaceOf(org)) } catch (e: any) { throw new WarehouseRefusal(e.message) }
     const limit = Math.max(1, Math.min(opts.limit ?? 100, 5000))
-    const r = await sql!.query(`SELECT * FROM (${checked.sql}) AS answer LIMIT ${limit + 1}`)
-    return { columns: r.columns, rows: r.rows.slice(0, limit), truncated: r.rows.length > limit, tables: checked.tables }
+    let capped
+    try { capped = capRows(checked.sql, limit + 1) } catch (e: any) { throw new WarehouseRefusal(e.message) }
+    const r = await sql!.query(capped)
+    // An expression's own name carries the table as the warehouse placed it (`min(<namespace>.t.x)`): shown as written.
+    const ns = `${namespaceOf(org)}.`
+    const plain = (c: string) => c.split(ns).join('')
+    const columns = r.columns.map(plain)
+    const rows = r.rows.slice(0, limit).map((row) => Object.fromEntries(Object.entries(row).map(([k, v]) => [plain(k), v])))
+    return { columns, rows, truncated: r.rows.length > limit, tables: checked.tables }
   }
   return {
     bridge: {

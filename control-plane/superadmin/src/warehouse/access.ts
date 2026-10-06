@@ -72,9 +72,14 @@ export function checkQuery(sql: string, schemas: TableInfo[], grant: Grant | nul
     }
   })
   const used: string[] = []
+  // Whether we are in a FROM is kept per parenthesis: a subquery has its own, and after its `)` the outer one goes on
+  // (so `FROM (SELECT … WHERE …) s` knows `s` is the subquery's alias).
   let inFrom = false
+  let outer: boolean[] = []
+  const paren = (t: { text: string }) => { if (t.text === '(') { outer.push(inFrom); inFrom = false; return true } if (t.text === ')') { inFrom = outer.pop() ?? false } return false }
   toks.forEach((t, k) => {
     const w = lower(t)
+    if (paren(t)) return
     if (t.kind === 'word' && (w === 'from' || w === 'join')) { inFrom = true; return }
     if (t.kind === 'word' && ENDS_FROM.includes(w)) inFrom = false
     if (!isName(t)) return
@@ -126,9 +131,10 @@ export function checkQuery(sql: string, schemas: TableInfo[], grant: Grant | nul
 
   // Place the tables: each table slot gets the organisation's namespace.
   let out = '', last = 0
-  inFrom = false
+  inFrom = false; outer = []
   toks.forEach((t, k) => {
     const w = t.text.toLowerCase()
+    if (paren(t)) return
     if (t.kind === 'word' && (w === 'from' || w === 'join')) { inFrom = true; return }
     if (t.kind === 'word' && ENDS_FROM.includes(w)) inFrom = false
     const prev = toks[k - 1]
@@ -139,6 +145,22 @@ export function checkQuery(sql: string, schemas: TableInfo[], grant: Grant | nul
   })
   out += text.slice(last)
   return { sql: out, tables: [...new Set(used)] }
+}
+
+/**
+ * The query with at most `n` rows: its own top-level LIMIT lowered to n, or a LIMIT n added. Never wrapped in an outer
+ * SELECT — that would lose the query's ORDER BY.
+ */
+export function capRows(sql: string, n: number): string {
+  const toks = tokens(sql)
+  let depth = 0, at = -1
+  toks.forEach((t, k) => { if (t.text === '(') depth++; else if (t.text === ')') depth--; else if (depth === 0 && t.kind === 'word' && t.text.toLowerCase() === 'limit') at = k })
+  const num = at >= 0 ? toks[at + 1] : undefined
+  if (num && /^\d+$/.test(num.text) && at + 2 === toks.length) {
+    return sql.slice(0, num.at) + String(Math.min(Number(num.text), n)) + sql.slice(num.at + num.text.length)
+  }
+  if (at >= 0) throw new Error('end the query with LIMIT and a number, or leave the limit to the warehouse')
+  return `${sql} LIMIT ${n}`
 }
 
 /** A grant as it is kept and shown: only tables that exist, only columns the table has. */

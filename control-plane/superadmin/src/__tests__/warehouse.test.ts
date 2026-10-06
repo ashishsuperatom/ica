@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { readAvro, writeAvro } from '../warehouse/cloud/avro'
-import { checkQuery } from '../warehouse/access'
+import { checkQuery, capRows } from '../warehouse/access'
 import { cloudWarehouse } from '../warehouse/cloud/index'
 import { parseExact, stringifyExact } from '../warehouse/cloud/catalog'
 import { namespaceOf, type TableInfo } from '../warehouse/bridge'
@@ -9,6 +9,19 @@ const orders: TableInfo = { name: 'orders', columns: [{ name: 'id', type: 'long'
 const people: TableInfo = { name: 'people', columns: [{ name: 'id', type: 'long' }, { name: 'salary', type: 'double' }] }
 
 describe('the warehouse access check (fails closed)', () => {
+  it('knows a subquery\'s alias, and still checks what the subquery reads', () => {
+    expect(checkQuery('SELECT count(*) FROM (SELECT customer FROM orders WHERE amount > 1) s', [orders], null, 'n').sql).toBe('SELECT count(*) FROM (SELECT customer FROM n.orders WHERE amount > 1) s')
+    expect(checkQuery('SELECT s.customer FROM (SELECT customer FROM orders) AS s ORDER BY s.customer', [orders], null, 'n').sql).toBe('SELECT s.customer FROM (SELECT customer FROM n.orders) AS s ORDER BY s.customer')
+    expect(() => checkQuery('SELECT count(*) FROM (SELECT margin FROM orders) s', [orders], { orders: ['customer'] }, 'n')).toThrow(/may not read the column "margin"/)
+    expect(() => checkQuery('SELECT count(*) FROM (SELECT customer FROM orders) margin', [orders], null, 'n')).toThrow(/name of a column/)
+  })
+  it('caps the rows without wrapping the query (its order kept)', () => {
+    expect(capRows('SELECT a FROM t ORDER BY a', 101)).toBe('SELECT a FROM t ORDER BY a LIMIT 101')
+    expect(capRows('SELECT a FROM t ORDER BY a LIMIT 10', 101)).toBe('SELECT a FROM t ORDER BY a LIMIT 10')
+    expect(capRows('SELECT a FROM t LIMIT 9000', 101)).toBe('SELECT a FROM t LIMIT 101')
+    expect(capRows('SELECT a FROM (SELECT a FROM t LIMIT 5) s', 101)).toBe('SELECT a FROM (SELECT a FROM t LIMIT 5) s LIMIT 101')
+    expect(() => capRows('SELECT a FROM t LIMIT 5 OFFSET 2', 101)).toThrow(/LIMIT/)
+  })
   it('places plain table names in the organisation\'s namespace and lets granted columns through', () => {
     const r = checkQuery('SELECT customer, sum(amount) AS total FROM orders o WHERE o.amount > 10 GROUP BY customer ORDER BY total DESC', [orders, people], { orders: ['customer', 'amount'] }, 'org_acme')
     expect(r.sql).toBe('SELECT customer, sum(amount) AS total FROM org_acme.orders o WHERE o.amount > 10 GROUP BY customer ORDER BY total DESC')
@@ -122,7 +135,7 @@ describe('the warehouse module, end to end against a catalog in memory', () => {
     expect((await bridge.tables('acme')).map((t) => t.name)).toEqual(['orders'])
     const r = await bridge.queryAs('acme', 'SELECT customer, sum(amount) AS total FROM orders GROUP BY customer', { orders: ['customer', 'amount'] }, { limit: 10 })
     expect(r.rows).toEqual([{ customer: 'Acme', total: 3 }])
-    expect(f.queries.at(-1)).toBe('SELECT * FROM (SELECT customer, sum(amount) AS total FROM org_acme.orders GROUP BY customer) AS answer LIMIT 11')
+    expect(f.queries.at(-1)).toBe('SELECT customer, sum(amount) AS total FROM org_acme.orders GROUP BY customer LIMIT 11')
     await expect(bridge.queryAs('acme', 'SELECT id FROM orders', { orders: ['customer'] })).rejects.toThrow(/may not read the column "id"/)
     expect(await bridge.tables('other')).toEqual([])   // another organisation sees nothing of this one
   })
