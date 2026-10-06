@@ -15,7 +15,8 @@ export function ProjectWarehouse({ projectId, token }: { projectId: string; toke
     void hub.call({ t: 'warehouse:tables' }).then((m: any) => {
       if (m?.t !== 'warehouse:tables') { setState({ configured: true, error: m?.reason ?? 'The warehouse could not be read' }); setTables([]); return }
       setState({ configured: !!m.configured, error: '' })
-      setTables((m.tables ?? []).map((t: any) => ({ ...t, group: t.writable ? 'Read and written by this project' : 'Read by this project' })))
+      // Every table here is one the project reads; those it also writes are set apart.
+      setTables((m.tables ?? []).map((t: any) => ({ ...t, group: t.writable ? 'Written by this project' : '' })))
     }).catch((e: any) => { setState({ configured: true, error: String(e?.message ?? e) }); setTables([]) })
   }, [hub.status, hub.call])
   // One's own queries from this project, kept in one's UserDO through the project's hub.

@@ -471,4 +471,12 @@ export const USER_MIGRATIONS: Migration[] = [
       session_id TEXT NOT NULL, user_id TEXT NOT NULL DEFAULT '', title TEXT, last_at INTEGER NOT NULL,
       PRIMARY KEY (session_id, user_id));
   ` },
+  { id: 6, name: 'sessions as the person keeps them', up: `
+    -- What the person does with their own sessions: the name they gave one (over the title its first question gave it),
+    -- pinned to the top, archived out of the list, and the collection it is kept in ('' = none).
+    ALTER TABLE sessions ADD COLUMN name TEXT NOT NULL DEFAULT '';
+    ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE sessions ADD COLUMN collection TEXT NOT NULL DEFAULT '';
+  ` },
 ]

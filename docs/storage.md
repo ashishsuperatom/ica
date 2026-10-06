@@ -79,7 +79,7 @@ to the warehouse, with ms), `warehouse_tables` (owners); legacy `datasources`, `
   (whom usage is charged to), `sessions_known` (each session's owner → which UserDO holds it);
 - the record: `audit_log` (append-only, also to `AUDIT`), `usage_events`, `view_events`.
 
-**UserDO** `user:<id>` (or an agent key's principal) — one person: `sessions` (their index), `session_entries`
+**UserDO** `user:<id>` (or an agent key's principal) — one person: `sessions` (their index, with how they keep each: their name for it, pinned, archived, its collection — `session:keep`), `session_entries`
 (every session's log — the platform's copy is the truth), `session_artifacts`, `answer_buffer` + `session_snapshot`
 (their inbox, by project), `asked` (which tab sent which request or question, 6 h), `warehouse_queries` (recent and
 saved, with 5 sample rows), `state` (personal key/value). Each tab's socket carries its project, surface, sign-in and

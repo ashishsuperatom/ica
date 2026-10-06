@@ -39,6 +39,7 @@ export { Arranged, ArrangeButton, ArrangeProvider, useArrange, useArranging, arr
 export { default as Breadcrumbs, type Crumb, type CrumbChoice } from './components/layout/Breadcrumbs.tsx'
 export { default as UserProfile } from './components/layout/UserProfile.tsx'
 export { default as ConnectionStatus, type Connection } from './components/layout/ConnectionStatus.tsx'
+export { default as Search, useSearchKey, type SearchItem } from './components/layout/Search.tsx'
 
 // a view's question and what it stands on: the controls, the next moves, about these numbers
 export { default as QuestionControls, memberKeys, type QuestionOp, type QuestionCatalog, type QuestionMember } from './components/question/QuestionControls.tsx'

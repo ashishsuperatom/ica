@@ -125,7 +125,8 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
   const groups = useMemo(() => {
     const out = new Map<string, ExplorerTable[]>()
     for (const t of tables ?? []) if (matches(t) || `t:${t.name}` === picked) out.set(t.group ?? '', [...(out.get(t.group ?? '') ?? []), t])
-    return [...out]
+    // One group alone is the list itself: no heading over it.
+    return out.size === 1 ? [['', [...out.values()][0]!] as [string, ExplorerTable[]]] : [...out]
   }, [tables, term, picked])   // eslint-disable-line react-hooks/exhaustive-deps
   const shownQueries = (queries ?? []).filter((x) => !term || x.name.toLowerCase().includes(term) || x.sql.toLowerCase().includes(term) || `q:${x.id}` === picked)
   // One list, the most recently run first; a saved one shows its name.

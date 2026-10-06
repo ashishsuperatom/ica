@@ -2,15 +2,23 @@
 // signed in at the foot. Where you are stays selected whatever step is opened below it. A column on a wide screen, a
 // drawer on a small one, a rail of icons when collapsed.
 
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Icon } from '@iconify/react'
 
-export interface NavItem { key: string; label: string; icon: string; active?: boolean; onClick: () => void }
+export interface NavItem {
+  key: string; label: string; icon: string; active?: boolean; onClick: () => void
+  /** What can be done to the item (rename, pin…): a "…" on hover opens it; `close` shuts it after a choice. */
+  menu?: (close: () => void) => ReactNode
+}
 export interface NavGroup { label?: string; items: NavItem[] }
 
-export default function Sidebar({ name, logo, connected, statusWord, onAbout, groups, foot, collapsed, onToggle }: {
+export default function Sidebar({ name, logo, connected, statusWord, onAbout, groups, foot, collapsed, onToggle, actions, body }: {
   name: string; logo?: string; connected: boolean; statusWord?: string; onAbout?: () => void
   groups: NavGroup[]; foot?: (rail: boolean) => ReactNode; collapsed: boolean; onToggle: (collapsed: boolean) => void
+  /** Small icon buttons beside the name (activity, search): drawn in the rail too when collapsed. */
+  actions?: ReactNode
+  /** What the sidebar shows below its first group instead of the other groups (a view of its own, such as activity). */
+  body?: ReactNode
 }) {
   const close = () => typeof window !== 'undefined' && window.innerWidth < 768 && onToggle(true)
   const go = (i: NavItem) => { i.onClick(); close() }
@@ -27,17 +35,19 @@ export default function Sidebar({ name, logo, connected, statusWord, onAbout, gr
               <span className="sa-sidebar__name truncate">{name}</span>
               {dot}
             </button>
+            {actions}
             <button onClick={() => onToggle(true)} className="sa-icon-btn sa-icon-btn--lg" title="Collapse sidebar" aria-label="Collapse sidebar"><Icon icon="mynaui:sidebar" /></button>
           </div>
           <nav className="sa-sidebar__nav sa-scroll-hide" aria-label="Sections">
-            {groups.map((g, gi) => (
+            {(body ? groups.slice(0, 1) : groups).map((g, gi) => (
               <div key={gi} className="sa-sidebar__group">
                 {g.label && <div className="sa-label sa-sidebar__group-label">{g.label}</div>}
                 {g.items.map((i) => (
-                  <button key={i.key} onClick={() => go(i)} data-active={!!i.active} className="sa-nav-item" title={i.label}><Icon icon={i.icon} /><span className="sa-nav-item__text">{i.label}</span></button>
+                  <NavRow key={i.key} item={i} onGo={() => go(i)} />
                 ))}
               </div>
             ))}
+            {body}
           </nav>
           {foot && <div className="sa-sidebar__foot">{foot(false)}</div>}
         </>) : (<>
@@ -45,7 +55,8 @@ export default function Sidebar({ name, logo, connected, statusWord, onAbout, gr
             <button onClick={() => onToggle(false)} className="sa-icon-btn sa-icon-btn--lg" title="Expand sidebar" aria-label="Expand sidebar"><Icon icon="mynaui:sidebar" /></button>
           </div>
           <div className="sa-sidebar__rail">
-            {groups.flatMap((g) => g.items).map((i) => (
+            {actions && <div className="sa-sidebar__rail-actions">{actions}</div>}
+            {groups[0]?.items.map((i) => (
               <button key={i.key} onClick={() => go(i)} data-active={!!i.active} className="sa-nav-item sa-nav-item--rail" title={i.label}><Icon icon={i.icon} /></button>
             ))}
           </div>
@@ -56,5 +67,27 @@ export default function Sidebar({ name, logo, connected, statusWord, onAbout, gr
         </>)}
       </aside>
     </>
+  )
+}
+
+/** One place in the sidebar, with its "…" menu when it has one. */
+function NavRow({ item, onGo }: { item: NavItem; onGo: () => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const away = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false)
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    document.addEventListener('mousedown', away); document.addEventListener('keydown', esc)
+    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc) }
+  }, [open])
+  const button = <button onClick={onGo} data-active={!!item.active} className="sa-nav-item" title={item.label}><Icon icon={item.icon} /><span className="sa-nav-item__text">{item.label}</span></button>
+  if (!item.menu) return button
+  return (
+    <div className="sa-nav-row" ref={ref} data-open={open}>
+      {button}
+      <button type="button" className="sa-nav-row__more" onClick={() => setOpen((o) => !o)} title="More" aria-label={`More for ${item.label}`} aria-expanded={open}><Icon icon="lucide:ellipsis" /></button>
+      {open && <div className="sa-menu sa-nav-row__menu" role="menu">{item.menu(() => setOpen(false))}</div>}
+    </div>
   )
 }

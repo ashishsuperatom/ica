@@ -152,6 +152,7 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
       if (kind === 'sync:req') { reply(inbox.sync(t.project)); return }
       if (kind === 'answer:get') { reply(inbox.get(t.project, pl.qid)); return }
       if (kind === 'answer:ack') { inbox.ack(t.project, pl.qids); return }
+      if (kind === 'session:keep') { reply({ ...keepSession(t.project, pl), reqId: pl.reqId }); return }
       if (kind === 'analyse' && pl.questionId) inbox.recordPending(t.project, pl)
       // What this tab asked, and what it now has open.
       remember('last', t.tab)
@@ -170,6 +171,20 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
       let r: any = await projectStub(t.project).personMessage(t.project, t.wsId, msg)
       if (r?.relink && await link(ws, t)) r = await projectStub(t.project).personMessage(t.project, t.wsId!, msg)
     }
+
+  /** The person keeps one of their sessions their way: a name, pinned, archived, in a collection. Only what is given changes. */
+  function keepSession(project: string, pl: any): { t: string; session?: string; reason?: string } {
+    const session = String(pl.session ?? '')
+    if (![...sql.exec('SELECT 1 FROM sessions WHERE project = ? AND session = ?', project, session)].length) return { t: 'session:refused', reason: 'there is no such session of yours' }
+    const sets: string[] = [], args: unknown[] = []
+    if (typeof pl.name === 'string') { if (pl.name.length > 200) return { t: 'session:refused', reason: 'a name is at most 200 characters' }; sets.push('name = ?'); args.push(pl.name.trim()) }
+    if (typeof pl.collection === 'string') { if (pl.collection.length > 80) return { t: 'session:refused', reason: 'a collection name is at most 80 characters' }; sets.push('collection = ?'); args.push(pl.collection.trim()) }
+    if (typeof pl.pinned === 'boolean') { sets.push('pinned = ?'); args.push(pl.pinned ? 1 : 0) }
+    if (typeof pl.archived === 'boolean') { sets.push('archived = ?'); args.push(pl.archived ? 1 : 0) }
+    if (!sets.length) return { t: 'session:refused', reason: 'nothing to change' }
+    sql.exec(`UPDATE sessions SET ${sets.join(', ')} WHERE project = ? AND session = ?`, ...args, project, session)
+    return { t: 'session:kept', session }
+  }
 
   async function closeTab(ws: WebSocket) {
       const t = tabOf(ws); if (!t?.wsId) return

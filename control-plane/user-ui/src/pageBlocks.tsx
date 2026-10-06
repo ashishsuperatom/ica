@@ -27,64 +27,11 @@ const plainTitle = (s: string) => (s ?? '').replace(/\*\*|__|`/g, '').replace(/(
 const when = (iso?: string) => (iso ? new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '')
 
 function Home() {
-  const env = useEnv()
-  const { open } = useThread()
-  const [asking, setAsking] = useState('')
-  const [beats, setBeats] = useState<{ text: string; at: number }[]>([])
-  const agentOf = (id: string) => env.agents.find((a) => a.id === id)
-  const ask = async (text: string) => {
-    const t = text.trim(); if (!t || asking) return
-    const sid = newId()
-    setAsking(t); setBeats([{ text: 'Finding the agent for this question…', at: Date.now() }])
-    const m = await env.request({ t: 'session:start', session: sid, text: t, kind: 'language' }, (p) => { if (p?.t === 'narration' && p.text) setBeats((b) => [...b, { text: String(p.text), at: Date.now() }]) })
-    setAsking(''); setBeats([])
-    if (m?.t === 'session:view') env.go(sid); else notify(m?.reason ?? 'The question could not be asked', 'refused')
-  }
-  const named = env.agents.filter((a) => !a.isDefault)
+  // A new chat: nothing up front but the question — the ask bar is at the foot, as on every page.
   return (
-    <div className="sa-home">
-      <div className="sa-home__ask">
-        <AskBar onAsk={(t) => void ask(t)} busy={!!asking} placeholder="Ask anything — the agent that knows answers"
-          working={<><span className="sa-label">Working on: {asking}</span><BeatRows beats={beats.slice(-3)} live /></>} />
-      </div>
-      {named.map((a) => {
-        const accent = accentOf(a.look.accent)
-        const icon = a.look.icon ?? 'lucide:bot'
-        return (
-          <Section key={a.id} tinted icon={icon} accent={(a.look.accent && a.look.accent in ACCENT ? a.look.accent : 'series-1') as Accent} title={a.name} subtitle={a.look.says}>
-            <div className="sa-home__group">
-              <button type="button" onClick={() => env.go(`s/${a.id}`)} className="sa-card sa-card--lift sa-action-card" style={{ '--accent': accent } as React.CSSProperties} title={a.look.says}>
-                <span className="sa-action-card__tile"><Icon icon={icon} /></span>
-                <div className="sa-action-card__body">
-                  <p className="sa-action-card__title">{a.look.main?.label ?? a.name}</p>
-                  <p className="sa-action-card__text">{a.look.main?.says ?? (a.look.says || 'Start a session')}</p>
-                </div>
-                <span className="sa-action-card__cta">Open <Icon icon="mdi:arrow-right" /></span>
-              </button>
-              {a.starts.length > 0 && (
-                <div className="sa-sub-grid">
-                  {a.starts.map((x) => (
-                    <button key={x.key} type="button" className="sa-sub-card" title={x.says} onClick={() => env.go(`s/${a.id}/${x.key}`)}>
-                      <span className="sa-sub-card__title">{x.label}</span>
-                      <span className="sa-sub-card__text">{x.says}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </Section>
-        )
-      })}
-      {named.length === 0 && <Empty icon="lucide:bot">No agents you can see yet. <button className="sa-btn sa-btn--link" onClick={() => open('agents', {}, 'Looked at the agents')}>Manage agents</button></Empty>}
-      {env.sessions.length > 0 && (
-        <Section icon="lucide:history" title="Your sessions" subtitle="Pick up where you left off.">
-          <RecordList rows={env.sessions.slice(0, 8)} keyOf={(s) => s.session} onRow={(s) => env.go(s.session)} columns={[
-            { key: 'title', label: 'Session', render: (s) => <span className="sa-row sa-row--tight"><Icon icon={agentOf(s.agent)?.look.icon ?? 'lucide:messages-square'} />{plainTitle(s.title) || agentOf(s.agent)?.name || s.agent}</span> },
-            { key: 'agent', label: 'Agent', render: (s) => agentOf(s.agent)?.name ?? s.agent },
-            { key: 'updated', label: 'Last step', align: 'end', render: (s) => when(s.updated) },
-          ]} />
-        </Section>
-      )}
+    <div className="sa-newchat">
+      <h1 className="sa-newchat__title">What do you want to know?</h1>
+      <p className="sa-newchat__line">Ask in your own words: the agent that knows the subject answers, and the conversation is kept on the left.</p>
     </div>
   )
 }

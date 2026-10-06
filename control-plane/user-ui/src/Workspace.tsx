@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '@superatom/ui/design.css'
 import {
-  AppShell, Sidebar, UserProfile, ConnectionStatus, Steps, BlockFrame, Answer, Paths, Artifacts, Toasts, LocalThread, AskBar, StepSkeleton,
+  AppShell, Sidebar, UserProfile, ConnectionStatus, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, Artifacts, Toasts, LocalThread, AskBar, StepSkeleton,
   BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, notify, startThread, Form, Field, Choices,
   type Recognised, type Artifact, type StepItem,
 } from '@superatom/ui'
@@ -78,7 +78,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   onSignOut?: () => void
 }) {
   const me = useMemo(who, [])
-  const [sessions, setSessions] = useState<{ session: string; agent: string; title: string; updated?: string }[]>([])
+  const [sessions, setSessions] = useState<Conversation[]>([])
   const [listTick, setListTick] = useState(0)
   // A session is kept only once it is used, so the list is read again then (a moment later, once the platform has it).
   useEffect(() => { void request({ t: 'session:list' }).then((m) => setSessions(Array.isArray(m?.sessions) ? m.sessions : [])) }, [request, path, listTick])
@@ -109,27 +109,70 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const page = (type: string) => { if (sessionId || startAgent) { setPending({ type }); go('') } else startThread(type) }
   const onPages = !sessionId && !startAgent
   const current = sessionId ? sessions.find((s) => s.session === sessionId)?.agent ?? null : startAgent
-  // A new chat is home with the ask bar ready: the first question opens the session, with the agent it reaches.
-  const newChat = () => { page('home'); setTimeout(() => (document.querySelector('.sa-askbar textarea, .sa-askbar input') as HTMLElement | null)?.focus(), 80) }
-  const nav = [{
-    items: [
-      { key: 'new', label: 'New chat', icon: 'lucide:square-pen', active: false, onClick: newChat },
-      { key: 'home', label: 'Home', icon: 'lucide:house', active: onPages && root === 'home', onClick: () => page('home') },
-    ],
-  }, {
-    label: 'Agents',
-    items: agents.filter((a) => !a.isDefault).map((a) => ({ key: `a:${a.id}`, label: a.name, icon: a.look.icon ?? 'lucide:bot', title: a.look.says, active: !onPages && current === a.id, onClick: () => go(`s/${a.id}`) })),
-  }, {
-    label: 'Your sessions',
-    items: sessions.slice(0, 10).map((s) => ({ key: `s:${s.session}`, label: plain(s.title || agentOf(s.agent).name), icon: agentOf(s.agent).look.icon ?? 'lucide:messages-square', active: s.session === sessionId, onClick: () => go(s.session) })),
-  }, {
-    label: 'More',
-    items: [
-      { key: 'agents', label: 'Manage agents', icon: 'lucide:bot', active: onPages && root === 'agents', onClick: () => page('agents') },
-      { key: 'activity', label: 'Activity', icon: 'lucide:activity', active: onPages && root === 'activity', onClick: () => page('activity') },
-      { key: 'connections', label: 'Connections', icon: 'lucide:plug', active: onPages && root === 'connections', onClick: () => page('connections') },
-    ],
-  }]
+  // A new chat: the greeting, with the ask bar ready; the first question opens the session, with the agent it reaches.
+  const focusAsk = () => setTimeout(() => (document.querySelector('.sa-askbar textarea, .sa-askbar input') as HTMLElement | null)?.focus(), 80)
+  const newChat = () => { page('home'); focusAsk() }
+  // The sidebar: a new chat, then the conversations — newest first, a page at a time. Agents, connections and the rest
+  // are a click away in the person's menu; activity and search beside the name.
+  const [shownConversations, setShownConversations] = useState(20)
+  const [activityView, setActivityView] = useState(() => recall<boolean>('sidebar-activity', false))
+  const toggleActivity = useCallback(() => setActivityView((v) => { remember('sidebar-activity', !v); return !v }), [])
+  const [searching, setSearching] = useState(false)
+  useSearchKey(useCallback(() => setSearching(true), []))
+  useEffect(() => { const k = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.altKey && e.key.toLowerCase() === 'u') { e.preventDefault(); toggleActivity() } }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k) }, [toggleActivity])
+  // How the person keeps a conversation: a name, pinned, in a collection, archived — kept in their UserDO.
+  const keep = useCallback(async (session: string, change: { name?: string; pinned?: boolean; archived?: boolean; collection?: string }) => {
+    const m = await request({ t: 'session:keep', session, ...change })
+    if (m?.t === 'session:kept') setListTick((n) => n + 1); else notify(m?.reason ?? 'That could not be changed', 'refused')
+  }, [request])
+  const [naming, setNaming] = useState<{ session: string; what: 'name' | 'collection'; value: string } | null>(null)
+  const titleOf = (s: Conversation) => s.name || plain(s.title) || agentOf(s.agent).name
+  const live = sessions.filter((s) => !s.archived)
+  const collections = [...new Set(live.map((s) => s.collection).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b))
+  const menuOf = (s: Conversation) => (close: () => void) => {
+    const act = (fn: () => void) => () => { close(); fn() }
+    return <>
+      <button type="button" className="sa-menu__item" onClick={act(() => setNaming({ session: s.session, what: 'name', value: titleOf(s) }))}>Rename</button>
+      <button type="button" className="sa-menu__item" onClick={act(() => void keep(s.session, { pinned: !s.pinned }))}>{s.pinned ? 'Unpin' : 'Pin'}</button>
+      <div className="sa-menu__sub">Keep in a collection</div>
+      {collections.filter((c) => c !== s.collection).map((c) => <button key={c} type="button" className="sa-menu__item" onClick={act(() => void keep(s.session, { collection: c }))}>{c}</button>)}
+      <button type="button" className="sa-menu__item" onClick={act(() => setNaming({ session: s.session, what: 'collection', value: '' }))}>New collection…</button>
+      {s.collection && <button type="button" className="sa-menu__item" onClick={act(() => void keep(s.session, { collection: '' }))}>Take out of {s.collection}</button>}
+      <button type="button" className="sa-menu__item" onClick={act(() => void keep(s.session, { archived: !s.archived }))}>{s.archived ? 'Unarchive' : 'Archive'}</button>
+    </>
+  }
+  const itemOf = (s: Conversation) => ({ key: `s:${s.session}`, label: titleOf(s), icon: s.pinned ? 'lucide:pin' : 'lucide:message-square', active: s.session === sessionId, onClick: () => go(s.session), menu: menuOf(s) })
+  const loose = live.filter((s) => !s.pinned && !s.collection)
+  const nav = [
+    { items: [{ key: 'new', label: 'New chat', icon: 'lucide:square-pen', active: onPages && root === 'home' && !pending, onClick: newChat }] },
+    ...(live.some((s) => s.pinned) ? [{ label: 'Pinned', items: live.filter((s) => s.pinned).map(itemOf) }] : []),
+    ...collections.map((c) => ({ label: c, items: live.filter((s) => !s.pinned && s.collection === c).map(itemOf) })).filter((g) => g.items.length),
+    { label: 'Conversations', items: loose.slice(0, shownConversations).map(itemOf) },
+  ]
+  const searchItems: SearchItem[] = [
+    { key: 'a:new', label: 'New chat', icon: 'lucide:square-pen', group: 'Go to', onSelect: newChat },
+    { key: 'a:agents', label: 'Agents', icon: 'lucide:bot', group: 'Go to', onSelect: () => page('agents') },
+    { key: 'a:activity', label: 'Activity', icon: 'lucide:activity', group: 'Go to', onSelect: () => page('activity') },
+    { key: 'a:connections', label: 'Connections', icon: 'lucide:plug', group: 'Go to', onSelect: () => page('connections') },
+    ...sessions.map((s) => ({ key: `s:${s.session}`, label: titleOf(s), sub: [agentOf(s.agent).name, s.collection].filter(Boolean).join(' · '), icon: s.archived ? 'lucide:archive' : 'lucide:message-square', group: s.archived ? 'Archived' : 'Conversations', onSelect: () => go(s.session) })),
+  ]
+  const sideActions = <>
+    <button type="button" className="sa-icon-btn sa-icon-btn--lg" data-on={activityView} onClick={toggleActivity} title={activityView ? 'Back to the conversations (⌥⌘U)' : 'What is running, and lately (⌥⌘U)'} aria-label="Activity" aria-pressed={activityView}><Icon icon="lucide:bell" /></button>
+    <button type="button" className="sa-icon-btn sa-icon-btn--lg" onClick={() => setSearching(true)} title="Search (⌘K)" aria-label="Search"><Icon icon="lucide:search" /></button>
+  </>
+  const moreConversations = !activityView && loose.length > shownConversations
+    ? <button type="button" className="sa-sidelist__more" onClick={() => setShownConversations((n) => n + 30)}>Show more</button> : null
+  // The ask bar is at the foot of every page alike: in a conversation it asks there; anywhere else it starts one.
+  const [starting, setStarting] = useState('')
+  const [startBeats, setStartBeats] = useState<{ text: string; at: number }[]>([])
+  const startWith = useCallback(async (text: string) => {
+    const t = text.trim(); if (!t || starting) return
+    const sid = newId()
+    setStarting(t); setStartBeats([{ text: 'Finding the agent for this question…', at: Date.now() }])
+    const m = await request({ t: 'session:start', session: sid, text: t, kind: 'language' }, (p: any) => { if (p?.t === 'narration' && p.text) setStartBeats((b) => [...b, { text: String(p.text), at: Date.now() }]) })
+    setStarting(''); setStartBeats([])
+    if (m?.t === 'session:view') { opened.set(sid, m as SessionMsg); setListTick((n) => n + 1); go(sid) } else notify(m?.reason ?? 'The question could not be asked', 'refused')
+  }, [request, starting, go])
 
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [artifactsTick, setArtifactsTick] = useState(0)
@@ -140,9 +183,14 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
     <>
       <AppShell
         sidebar={(collapsed, toggle) => (
-          <Sidebar name={projectName} connected={connected} groups={nav} collapsed={collapsed} onToggle={toggle}
+          <Sidebar name={projectName} connected={connected} groups={nav} collapsed={collapsed} onToggle={toggle} actions={sideActions}
+            body={activityView ? <SideActivity request={request} subscribeLive={subscribeLive} /> : moreConversations}
             foot={(rail) => <UserProfile name={me.name} email={me.email} context={projectName} showName={!rail}
-              menu={onSignOut ? <button type="button" className="sa-menu__item" onClick={onSignOut}>Sign out</button> : undefined} />} />
+              menu={<>
+                <button type="button" className="sa-menu__item" onClick={() => page('agents')}>Agents</button>
+                <button type="button" className="sa-menu__item" onClick={() => page('connections')}>Connections</button>
+                {onSignOut && <button type="button" className="sa-menu__item" onClick={onSignOut}>Sign out</button>}
+              </>} />} />
         )}
         status={<ConnectionStatus status={connected ? 'open' : /access/.test(status) ? 'rejected' : 'reconnecting'} message={connected ? undefined : status || undefined} />}
         artifacts={sessionId ? <>
@@ -157,11 +205,55 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
                 onArtifacts={setArtifacts} artifactsTick={artifactsTick} onUsed={onUsed} onKept={onKept} />
             : <PagesContext.Provider value={pagesEnv}>
                 <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} address={(b) => (b.type === 'home' ? '/w' : ['agents', 'activity', 'connections'].includes(b.type) ? `/w?page=${b.type}` : null)} />
+                <AskBar onAsk={(t) => void startWith(t)} busy={!!starting} placeholder="Ask anything"
+                  working={starting ? <><span className="sa-label">Working on: {starting}</span><BeatRows beats={startBeats.slice(-3)} live /></> : undefined} />
               </PagesContext.Provider>}
         </ProgramEnvContext.Provider>
       </AppShell>
+      {naming && <Dialog title={naming.what === 'name' ? 'Rename the conversation' : 'A new collection'} onClose={() => setNaming(null)}
+        actions={<><button type="button" className="sa-btn" onClick={() => setNaming(null)}>Cancel</button>
+          <button type="button" className="sa-btn sa-btn--primary" disabled={!naming.value.trim()} onClick={() => { const n = naming; setNaming(null); void keep(n.session, n.what === 'name' ? { name: n.value } : { collection: n.value }) }}>{naming.what === 'name' ? 'Rename' : 'Keep it there'}</button></>}>
+        <input className="sa-input" autoFocus value={naming.value} maxLength={naming.what === 'name' ? 200 : 80} placeholder={naming.what === 'name' ? 'What this conversation is about' : 'The collection’s name'}
+          onChange={(e) => setNaming({ ...naming, value: e.target.value })}
+          onKeyDown={(e) => { if (e.key === 'Enter' && naming.value.trim()) { const n = naming; setNaming(null); void keep(n.session, n.what === 'name' ? { name: n.value } : { collection: n.value }) } }} />
+      </Dialog>}
+      {searching && <Search items={searchItems} placeholder="Search conversations, or go to…" onClose={() => setSearching(false)} />}
       <Toasts />
     </>
+  )
+}
+
+/** One of the person's conversations, as their UserDO keeps it. */
+type Conversation = { session: string; agent: string; title: string; updated?: string; name?: string; pinned?: number | boolean; archived?: number | boolean; collection?: string }
+
+/** The sidebar's activity view: what is running for this person now, then what ran today, then earlier. */
+function SideActivity({ request, subscribeLive }: { request: Request; subscribeLive: (fn: (m: any) => void) => () => void }) {
+  const [rows, setRows] = useState<any[] | null>(null)
+  useEffect(() => { void request({ t: 'activity:list' }).then((r: any) => setRows(Array.isArray(r?.activities) ? r.activities : [])) }, [request])
+  useEffect(() => subscribeLive((m) => { if (m?.t === 'activity' && m.activity?.id) setRows((prev) => [m.activity, ...(prev ?? []).filter((x) => x.id !== m.activity.id)].slice(0, 100)) }), [subscribeLive])
+  const words = (v: unknown) => String(v ?? '').replace(/\s+in session ses-[\w-]+/g, '').replace(/\*\*|__|`/g, '').replace(/(^|\s)_([^_]+)_(?=\s|[.,;:!?]|$)/g, '$1$2').trim()
+  const at = (a: any) => Date.parse(a.updated_at ?? a.updatedAt ?? '') || 0
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const groups: [string, any[]][] = rows ? [
+    ['Running', rows.filter((a) => a.state === 'running')],
+    ['Today', rows.filter((a) => a.state !== 'running' && at(a) >= today.getTime())],
+    ['Earlier', rows.filter((a) => a.state !== 'running' && at(a) < today.getTime())],
+  ] : []
+  if (!rows) return <p className="sa-sidelist__none">Reading what ran…</p>
+  return (
+    <div className="sa-sidelist">
+      {groups.map(([label, list]) => (label === 'Running' || list.length) ? (
+        <div key={label}>
+          <div className="sa-label sa-sidelist__head">{label}</div>
+          {list.length ? list.slice(0, 30).map((a) => (
+            <div key={a.id} className="sa-sidelist__item" title={words(a.title)}>
+              <span className="sa-sidelist__title">{words(a.title)}</span>
+              {(a.progress || a.detail) && <span className="sa-sidelist__line">{words(a.progress ?? a.detail)}</span>}
+            </div>
+          )) : <p className="sa-sidelist__none">Nothing running</p>}
+        </div>
+      ) : null)}
+    </div>
   )
 }
 
