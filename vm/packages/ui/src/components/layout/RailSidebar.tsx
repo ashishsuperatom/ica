@@ -80,7 +80,7 @@ export default function RailSidebar({ name, places, current, foot, pinned, onPin
           {foot}
         </nav>
         {place && (
-          <div className="sa-railbar__panel" data-floating={!pinned} style={width ? { width } : undefined}>
+          <div className="sa-railbar__panel" data-floating={!pinned} style={{ ...(width ? { width } : {}), ...(place.accent ? { '--accent': place.accent } : {}) } as React.CSSProperties}>
             <div className="sa-sidebar__head">
               <span className="sa-sidebar__brand" title={name}><span className="sa-sidebar__name truncate">{name}</span></span>
               {place.actions}

@@ -378,9 +378,11 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 .sa-railbar__panel .sa-nav-row > .sa-nav-item, .sa-railbar__panel .sa-nav-row > .sa-nav-item:hover, .sa-railbar__panel .sa-nav-row > .sa-nav-item[data-active='true'] { background: none; }
 .sa-railbar__mark { --mark-ground: var(--rail); width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: var(--r-md); color: var(--ink); margin-bottom: var(--sp-2); }
 .sa-railbar__mark:hover, .sa-railbar__mark:focus-visible, .sa-railbar__mark[data-active='true'] { --mark-ground: var(--rail-active); outline: none; background: var(--rail-active); }
-/* Each rail place in its own colour: the icon always; a light tint of it behind on hover and where one is. */
-.sa-railbar__place { color: var(--accent, var(--muted)); }
-.sa-railbar__place:hover, .sa-railbar__place[data-open='true'], .sa-railbar__place:focus-visible { color: var(--accent, var(--ink)); background: color-mix(in srgb, var(--accent, var(--ink)) 9%, transparent); }
-.sa-railbar__place[data-active='true'] { color: var(--accent, var(--ink)); background: color-mix(in srgb, var(--accent, var(--ink)) 14%, transparent); }
-.sa-railbar__place[data-active='true'] > svg { color: var(--accent, var(--ink)); }
-.sa-menu--side::before { content: ''; position: absolute; top: 0; bottom: 0; right: 100%; width: var(--sp-2); }
+/* Each rail place in its own colour, faded: the icon a soft mix of it; a faint tint behind on hover and where one is.
+   The place's panel carries the same colour: its picked row is tinted with it. */
+.sa-railbar__place { color: color-mix(in srgb, var(--accent, var(--muted)) 55%, var(--muted)); }
+.sa-railbar__place:hover, .sa-railbar__place[data-open='true'], .sa-railbar__place:focus-visible { color: color-mix(in srgb, var(--accent, var(--ink)) 70%, var(--muted)); background: color-mix(in srgb, var(--accent, var(--ink)) 6%, var(--rail)); }
+.sa-railbar__place[data-active='true'] { color: color-mix(in srgb, var(--accent, var(--ink)) 75%, var(--muted)); background: color-mix(in srgb, var(--accent, var(--ink)) 10%, var(--rail)); }
+.sa-railbar__place[data-active='true'] > svg { color: inherit; }
+.sa-railbar__panel .sa-nav-row[data-active='true'], .sa-railbar__panel .sa-nav-item[data-active='true'] { background: color-mix(in srgb, var(--accent, var(--ink)) 7%, var(--surface)); }
+.sa-railbar__panel .sa-nav-row > .sa-nav-item[data-active='true'] { background: none; }
