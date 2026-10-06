@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { Store, importDomains, verifyGraph, verifyAgainst } from '../src/index.ts'
+import { openStore, Store, importDomains, verifyGraph, verifyAgainst } from '../src/node.ts'
 
 const by = { by: 'test' }
 const part = (t: string) => ({ title: t, form: 'bullets' as const, items: [t] })
@@ -14,7 +14,7 @@ const good = [{ name: 'a', description: 'about a', intents: ['a'], capabilities:
 const fails = (fs: ReturnType<typeof verifyGraph>) => fs.filter((f) => f.level === 'fail').map((f) => `${f.check}: ${f.says}`)
 
 test('a graph that holds together, and holds what was written, has no failures', () => {
-  const s = new Store(':memory:')
+  const s = openStore(':memory:')
   importDomains(s, good, read, by, settings)
   assert.deepEqual(fails(verifyGraph(s)), [])
   assert.deepEqual(fails(verifyAgainst(s, good, read, settings)), [])
@@ -23,26 +23,26 @@ test('a graph that holds together, and holds what was written, has no failures',
 })
 
 test('a file importing one its domain does not place fails', () => {
-  const s = new Store(':memory:')
+  const s = openStore(':memory:')
   importDomains(s, [{ ...good[0], files: ['rule.mjs'] }], read, by, settings)
   assert.ok(fails(verifyGraph(s)).some((x) => /imports \.\/helper\.mjs/.test(x)))
 })
 
 test('a file reading a setting its domain does not give fails', () => {
-  const s = new Store(':memory:')
+  const s = openStore(':memory:')
   importDomains(s, [{ ...good[0], settings: [] }], read, by, settings)
   assert.ok(fails(verifyGraph(s)).some((x) => /reads the setting "reporting-currency-code"/.test(x)))
 })
 
 test('a domain naming a node that is gone, or of another kind, fails', () => {
-  const s = new Store(':memory:')
+  const s = openStore(':memory:')
   importDomains(s, good, read, by, settings)
   s.remove('a/definitions', by)
   assert.ok(fails(verifyGraph(s)).some((x) => /names concept "a\/definitions", which the graph does not hold/.test(x)))
 })
 
 test('the graph and the written knowledge disagreeing fails, both ways', () => {
-  const s = new Store(':memory:')
+  const s = openStore(':memory:')
   importDomains(s, good, read, by, settings)
   const changed = [{ ...good[0], concepts: [{ title: 'Definitions', form: 'bullets' as const, items: ['a means something else now'] }] }]
   assert.ok(fails(verifyAgainst(s, changed, read, settings)).some((x) => /a\/definitions|differs|import the knowledge/.test(x)))
@@ -51,7 +51,7 @@ test('the graph and the written knowledge disagreeing fails, both ways', () => {
 })
 
 test('two files a domain places under one name fail', () => {
-  const s = new Store(':memory:')
+  const s = openStore(':memory:')
   importDomains(s, [{ ...good[0], files: ['rule.mjs', 'shared/helper.mjs', 'other/rule.mjs'] }], (d, f) => read(d, f), by, settings)
   assert.ok(fails(verifyGraph(s)).some((x) => /places two files named rule\.mjs/.test(x)))
 })

@@ -49,6 +49,9 @@ export interface MigrateOptions {
    *  migrations it already has. Asked only when the database has no migration record yet; those are recorded as
    *  applied, without running, and the rest run. */
   adopt?: (db: MigrationDb) => number
+  /** The table its record is kept in (default _migrations): a second set of migrations in the same database — a
+   *  package's own, kept by that package — keeps its record apart. */
+  table?: string
 }
 
 export interface MigrateResult {
@@ -60,7 +63,12 @@ export interface MigrateResult {
 
 export class MigrationError extends Error {}
 
-const TABLE = '_migrations'
+/** The record table: _migrations, or a package's own (a name of letters, digits and underscores). */
+const ledger = (table?: string) => {
+  if (table === undefined) return '_migrations'
+  if (!/^_?[a-z][a-z0-9_]{0,40}$/.test(table)) throw new MigrationError(`"${table}" is not a migration record table name`)
+  return table
+}
 
 /** A short fingerprint of a migration — its name, and its SQL (a function migration: its name only): FNV-1a, 64 bits,
  *  as hex. Sync and dependency-free, because a Worker has no synchronous crypto. */
@@ -86,7 +94,7 @@ function checkList(name: string, migrations: Migration[]): Migration[] {
 }
 
 /** The last migration a database recorded, or null when it has no record yet (one indexed row). */
-function lastApplied(db: MigrationDb): { id: number; fingerprint: string } | null {
+function lastApplied(db: MigrationDb, TABLE: string): { id: number; fingerprint: string } | null {
   try {
     const [r] = db.all(`SELECT id, fingerprint FROM ${TABLE} ORDER BY id DESC LIMIT 1`)
     return r ? { id: Number(r.id), fingerprint: String(r.fingerprint) } : null
@@ -98,19 +106,19 @@ function lastApplied(db: MigrationDb): { id: number; fingerprint: string } | nul
 export function migrate(db: MigrationDb, migrations: Migration[], opts: MigrateOptions): MigrateResult {
   const list = checkList(opts.name, migrations)
   const last = list.at(-1)
-  const at = lastApplied(db)
+  const at = lastApplied(db, ledger(opts.table))
   if (last && at && at.id === last.id && at.fingerprint === fingerprint(last)) return { applied: [], current: last.id }
   return migrateFully(db, list, opts)
 }
 
 /** Every recorded migration against the code — refuses an edited, renamed or unknown one. For tests and CI: the
  *  runtime check is the last migration only, and the full one when something is pending. */
-export function verifyMigrations(db: MigrationDb, migrations: Migration[], name: string): void {
+export function verifyMigrations(db: MigrationDb, migrations: Migration[], name: string, table?: string): void {
   const list = checkList(name, migrations)
-  checkRecord(db, list, name)
+  checkRecord(db, list, name, ledger(table))
 }
 
-function checkRecord(db: MigrationDb, list: Migration[], name: string) {
+function checkRecord(db: MigrationDb, list: Migration[], name: string, TABLE: string) {
   db.exec(`CREATE TABLE IF NOT EXISTS ${TABLE} (id INTEGER PRIMARY KEY, name TEXT NOT NULL, fingerprint TEXT NOT NULL, applied_at TEXT NOT NULL)`)
   const done = db.all(`SELECT id, name, fingerprint FROM ${TABLE} ORDER BY id`).map((r) => ({ id: Number(r.id), name: String(r.name), fingerprint: String(r.fingerprint) }))
   const opts = { name }
@@ -127,14 +135,15 @@ function checkRecord(db: MigrationDb, list: Migration[], name: string) {
 }
 
 function migrateFully(db: MigrationDb, list: Migration[], opts: MigrateOptions): MigrateResult {
+  const TABLE = ledger(opts.table)
   const now = opts.now ?? (() => new Date().toISOString())
-  let done = checkRecord(db, list, opts.name)
+  let done = checkRecord(db, list, opts.name, TABLE)
   if (!done.length && opts.adopt) {
     const had = opts.adopt(db)
     if (!Number.isInteger(had) || had < 0 || had > list.length) throw new MigrationError(`${opts.name}: an earlier scheme says it has ${had} migrations; this code knows ${list.length}. Update the code.`)
     if (had > 0) {
       db.transaction(() => { for (const m of list.slice(0, had)) db.all(`INSERT INTO ${TABLE} (id, name, fingerprint, applied_at) VALUES (?, ?, ?, ?) RETURNING id`, m.id, m.name, fingerprint(m), `adopted ${now()}`) })
-      done = checkRecord(db, list, opts.name)
+      done = checkRecord(db, list, opts.name, TABLE)
     }
   }
   const pending = list.slice(done.length)

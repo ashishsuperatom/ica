@@ -5,12 +5,10 @@
 // name, from which hash to which, by whom, why, from what evidence, when. So the graph as of any moment is the last
 // change to each name before it, and a session made from the graph can always be compared with it.
 
-import { migrateFile } from '@superatom/migrate/node'
+// The store runs on any SQLite through GraphDb: the platform's (a Durable Object's, sqlStorageGraphDb below) holds the
+// graph; an engine's replica and the CLI open a file (node.ts). Nothing here needs Node, so a Worker can load it.
 import { addColumnIfMissing, type Migration } from '@superatom/migrate'
-import { DatabaseSync } from 'node:sqlite'
 import { createHash } from 'node:crypto'
-import { mkdirSync } from 'node:fs'
-import { dirname } from 'node:path'
 
 export type Kind = 'domain' | 'concept' | 'file' | 'setting' | 'agent'
 /** Who sees a node: everyone (global), a group's members (group:<name>), or one person (user:<id>). */
@@ -91,16 +89,37 @@ export function canonical(v: unknown): string {
 }
 export const hashOf = (body: unknown) => createHash('sha256').update(canonical(body)).digest('hex')
 
-export class Store {
-  readonly db: DatabaseSync
-  constructor(file: string) {
-    if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true })
-    this.db = new DatabaseSync(file)
-    this.db.exec('PRAGMA busy_timeout = 15000')
-    if (file !== ':memory:') this.db.exec('PRAGMA journal_mode = WAL')
-    migrateFile(this.db, file, MIGRATIONS, 'composition.sqlite')
+/** One SQL statement, as the store uses it. */
+export interface GraphStatement {
+  get(...params: unknown[]): unknown
+  all(...params: unknown[]): unknown[]
+  run(...params: unknown[]): { lastInsertRowid: number | bigint }
+}
+/** The SQLite a graph lives in: statements, and one unit of work (all of it, or none; units nest). */
+export interface GraphDb {
+  prepare(sql: string): GraphStatement
+  atomic<T>(fn: () => T): T
+  close?(): void
+}
+
+/** A Durable Object's SQLite (its `ctx.storage`) as a graph's database: its own transactions (BEGIN and SAVEPOINT are
+ *  not allowed there); a unit inside a unit is part of the outer one. Already migrated by the caller. */
+export function sqlStorageGraphDb(storage: { sql: { exec(sql: string, ...params: unknown[]): Iterable<Record<string, unknown>> }; transactionSync<T>(fn: () => T): T }): GraphDb {
+  let depth = 0
+  const exec = (sql: string, params: unknown[]) => storage.sql.exec(sql, ...params.map((p) => (p === undefined ? null : p)))
+  return {
+    prepare: (sql) => ({
+      get: (...p) => { for (const r of exec(sql, p)) return r; return undefined },
+      all: (...p) => [...exec(sql, p)],
+      run: (...p) => { [...exec(sql, p)]; const r = [...storage.sql.exec('SELECT last_insert_rowid() AS id')][0]; return { lastInsertRowid: Number(r?.id ?? 0) } },
+    }),
+    atomic: (fn) => { if (depth > 0) return fn(); depth++; try { return storage.transactionSync(fn) } finally { depth-- } },
   }
-  close() { this.db.close() }
+}
+
+export class Store {
+  constructor(readonly db: GraphDb) {}
+  close() { this.db.close?.() }
 
   /** Point a name at this content. Unchanged content is no change and records nothing. */
   put<B>(name: string, kind: Kind, body: B, ctx: ChangeContext, place: Placement = {}): { hash: string; changed: boolean } {
@@ -111,16 +130,14 @@ export class Store {
     const owner = place.owner !== undefined ? place.owner : (cur?.owner ?? null)
     if (!/^(global|group:[^\s:]+|user:[^\s:]+)$/.test(scope)) throw new Error(`"${scope}" is not a scope: global, group:<name> or user:<id>`)
     // Unchanged content, scope and owner records nothing; a new scope or owner alone is a change (same content).
-    if (cur?.hash === hash && cur.scope === scope && cur.owner === owner) return { hash, changed: false }
+    if (cur && cur.hash === hash && cur.scope === scope && cur.owner === owner) return { hash, changed: false }
     const now = Date.now()
-    this.db.exec('SAVEPOINT cg_write')
-    try {
+    this.db.atomic(() => {
       this.db.prepare('INSERT OR IGNORE INTO content (hash, body, at) VALUES (?, ?, ?)').run(hash, canonical(body), now)
       this.db.prepare('INSERT INTO name (name, kind, hash, scope, owner) VALUES (?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET hash = excluded.hash, scope = excluded.scope, owner = excluded.owner').run(name, kind, hash, scope, owner)
       this.db.prepare('INSERT INTO change (at, name, kind, from_hash, to_hash, by, reason, evidence, scope, owner) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
         .run(now, name, kind, cur?.hash ?? null, hash, ctx.by, ctx.reason ?? null, ctx.from ?? null, scope, owner)
-      this.db.exec('RELEASE cg_write')
-    } catch (e) { this.db.exec('ROLLBACK TO cg_write'); this.db.exec('RELEASE cg_write'); throw e }
+    })
     return { hash, changed: true }
   }
 
@@ -128,13 +145,11 @@ export class Store {
   remove(name: string, ctx: ChangeContext): boolean {
     const cur = this.db.prepare('SELECT kind, hash FROM name WHERE name = ?').get(name) as { kind: string; hash: string } | undefined
     if (!cur) return false
-    this.db.exec('SAVEPOINT cg_write')
-    try {
+    this.db.atomic(() => {
       this.db.prepare('DELETE FROM name WHERE name = ?').run(name)
       this.db.prepare('INSERT INTO change (at, name, kind, from_hash, to_hash, by, reason, evidence, scope) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, NULL)')
         .run(Date.now(), name, cur.kind, cur.hash, ctx.by, ctx.reason ?? null, ctx.from ?? null)
-      this.db.exec('RELEASE cg_write')
-    } catch (e) { this.db.exec('ROLLBACK TO cg_write'); this.db.exec('RELEASE cg_write'); throw e }
+    })
     return true
   }
 

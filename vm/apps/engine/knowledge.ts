@@ -1,6 +1,6 @@
 // ── Knowledge: what an agent knows from the start, read from the project's composition graph ──────────────────
 //
-// The graph is @superatom/composition-graph, in the project's own store (<projectDir>/db/composition.sqlite): domains
+// The graph is @superatom/composition-graph, held by the platform; this engine reads its replica (<projectDir>/db/composition.sqlite, graph-replica.ts): domains
 // composed from named concepts, stored by hash, every change recorded. This module only reads it: which domains there
 // are, which one a session is, and the composition to give its agent — whose whole system prompt it is, never a file
 // to read — with the files placed in its folder and the hashes it was made from noted there.
@@ -15,7 +15,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { dataSeam } from './ica/workspace.js'
-import { Store, compose as composeFromGraph, domains as domainsInGraph, render, route, rank, indexOf, publishedUpto, type ConceptBody, type FileBody, type Route } from '@superatom/composition-graph'
+import { openStore, compose as composeFromGraph, domains as domainsInGraph, render, route, rank, indexOf, publishedUpto, type ConceptBody, type FileBody, type Route } from '@superatom/composition-graph/node'
 import { createHash } from 'node:crypto'
 
 export interface Domain { name: string; capabilities: string[]; tools?: string[] }
@@ -24,7 +24,7 @@ export interface Knowledge { domain: string; text: string; files: FileBody[]; us
 /** The project's graph, when it has one. The caller closes it. */
 const storeOf = (projectDir: string) => {
   const file = join(projectDir, 'db', 'composition.sqlite')
-  return existsSync(file) ? new Store(file) : null
+  return existsSync(file) ? openStore(file) : null
 }
 
 /** A domain as the project's index.mts states it, before the graph holds it. */
@@ -111,12 +111,6 @@ export async function pick(projectDir: string, question: string): Promise<{ doma
   return { domain: chosen, route: r }
 }
 
-/** Record a question with the agent it went to — routed by its words, or asked in a session that already was a domain. */
-export function recordQuestion(projectDir: string, q: { session: string; qid?: string; question: string; domain: string | null; how: 'routed' | 'chosen' | 'session'; ranked?: unknown }): void {
-  const store = storeOf(projectDir)
-  if (!store) return
-  try { store.recordQuestion(q) } catch (e: any) { console.warn(`[knowledge] question not recorded: ${e?.message ?? e}`) } finally { store.close() }
-}
 
 /** A domain's programs, ready to run in a folder of their own — for a caller that runs them without an agent (a
  *  project's application). The folder gets what a chat's folder gets: the files, settings.json and the data seam. It

@@ -21,7 +21,7 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const PROJECT = join(HERE, '..', '..')
 const env = Object.fromEntries(readFileSync(join(PROJECT, '.env'), 'utf8').split('\n').map((l) => l.match(/^\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$/)).filter(Boolean).map((m) => [m[1], m[2]]))
 const graphPackage = createRequire(join(process.cwd(), 'package.json')).resolve('@superatom/composition-graph')
-const { Store } = await import(pathToFileURL(graphPackage).href)
+const { openStore } = await import(pathToFileURL(createRequire(join(process.cwd(), 'package.json')).resolve('@superatom/composition-graph/node')).href)
 const { placeForRunning } = await import(`${process.cwd()}/knowledge.ts`)
 const { handle } = await import('./index.mjs')
 const { FACTS } = await import('./facts.mjs')
@@ -43,7 +43,7 @@ for (const line of said.split('\n')) {
   if (m) (m[1] === 'FAIL' ? fail : warn)(`graph ${m[2]}`, m[3], m[4])
 }
 
-const store = new Store(DB)
+const store = openStore(DB)   // this engine's replica of the platform's graph
 const domains = new Map(store.names('domain').map((d) => [d.name, store.get(d.name).body]))
 const settingsInGraph = new Set(store.names('setting').map((s) => s.name))
 store.close()

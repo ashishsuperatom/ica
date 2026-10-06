@@ -217,10 +217,16 @@ const HashMove = ({ from, to }: { from?: string | null; to?: string | null }) =>
 // few seconds), so React would remount it and ask the engine again.
 const ChangesView = (p: ViewProps) => <CompositionPart {...p} part="changes" />
 const QuestionsView = (p: ViewProps) => <CompositionPart {...p} part="questions" />
-const SessionsView = (p: ViewProps) => <CompositionPart {...p} part="sessions" />
+/** Sessions made from the graph, with what moved since: from the engine, which holds the sessions' folders. */
+const SessionsView = ({ hub }: ViewProps) => {
+  const { data, err, loading, reload } = useInspect(hub, 'graphSessions', {}, 'graphSessions')
+  if (err) return <Err msg={err} retry={reload} />
+  if (!data) return <Loading on={loading} />
+  return <div className="sa-stack sa-stack--4"><div className="sa-row"><div className="sa-grow" /><Refresh onClick={reload} /></div><CompSessions sessions={data.sessions ?? []} /></div>
+}
 
 /** The graph's history, its questions and its sessions — each a place of its own (the graph itself is its own page). */
-function CompositionPart({ hub, part }: ViewProps & { part: 'changes' | 'questions' | 'sessions' }) {
+function CompositionPart({ hub, part }: ViewProps & { part: 'changes' | 'questions' }) {
   const { data, err, loading, reload } = useInspect(hub, 'composition', {}, 'composition')
   const [pick, setPick] = useState<CompPick | null>(null)
   if (err) return <Err msg={err} retry={reload} />
@@ -239,7 +245,6 @@ function CompositionPart({ hub, part }: ViewProps & { part: 'changes' | 'questio
       <div className="sa-row"><div className="sa-grow" /><Refresh onClick={reload} /></div>
       {part === 'changes' && <CompChanges hub={hub} changes={data.changes ?? []} people={data.people ?? {}} go={setPick} />}
       {part === 'questions' && <CompQuestions domains={domains} />}
-      {part === 'sessions' && <CompSessions sessions={data.sessions ?? []} />}
     </div>
   )
 }

@@ -1,10 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { Store, compose, drift, hashOf } from '../src/index.ts'
+import { openStore, Store, compose, drift, hashOf } from '../src/node.ts'
 
 const by = { by: 'test', reason: 'a test' }
 const graph = () => {
-  const s = new Store(':memory:')
+  const s = openStore(':memory:')
   s.put('d/definitions', 'concept', { title: 'Definitions', form: 'bullets', items: ['a is a', 'b is b'] }, by)
   s.put('d/examples', 'concept', { title: 'Examples', form: 'worked', items: [{ question: 'Q?', steps: ['one', 'two'] }] }, by)
   s.put('d/run.mjs', 'file', { name: 'run.mjs', text: 'console.log(1)' }, by)

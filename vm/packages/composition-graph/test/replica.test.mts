@@ -3,10 +3,9 @@ import assert from 'node:assert/strict'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Store } from '../src/store.ts'
-import { compose, governance as g, replicaSince, applyReplica, hasAfter, START, ReplicaConflict, publishDraft, type Cursor } from '../src/index.ts'
+import { openStore, type Store, compose, governance as g, replicaSince, applyReplica, hasAfter, START, ReplicaConflict, publishDraft, type Cursor } from '../src/node.ts'
 
-const fresh = () => new Store(join(mkdtempSync(join(tmpdir(), 'rep-')), 'composition.sqlite'))
+const fresh = () => openStore(join(mkdtempSync(join(tmpdir(), 'rep-')), 'composition.sqlite'))
 const text = (t: string) => ({ title: 'T', form: 'text', text: t })
 const ana = { id: 'user:ana' }, bo = { id: 'user:bo' }
 

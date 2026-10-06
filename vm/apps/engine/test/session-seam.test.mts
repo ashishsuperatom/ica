@@ -105,10 +105,10 @@ test('refused with a sentence: another user, no user, no agent, a broken op, wor
 })
 
 test('an agent kept in the composition graph is listed (by its scope) and opens a working session', async () => {
-  const { Store, governance } = await import('@superatom/composition-graph')
+  const { openStore, governance } = await import('@superatom/composition-graph/node')
   const graphFile = join(home, 'db', 'composition.sqlite')
   mkdirSync(join(home, 'db'), { recursive: true })
-  const g = new Store(graphFile)
+  const g = openStore(graphFile)
   const ana = { id: 'user:ana', admin: true }   // may publish: places the agent in group ops
   governance.write(g, ana, 'c1', 'concept', { title: 'Settled', form: 'text', text: 'A trip is settled when its settlement document exists.' })
   governance.write(g, ana, 'trips-domain', 'domain', { capabilities: [], concepts: ['c1'], files: [] })
@@ -165,14 +165,17 @@ test('words in a session: the agent is told the step and its programs; its :::in
 })
 
 test('an agent made from a session: forked with its lineage, on a domain of its own with what the session learned as worked examples, the person\'s own', async () => {
-  const { Store, governance } = await import('@superatom/composition-graph')
+  const { openStore, governance } = await import('@superatom/composition-graph/node')
   const file = join(home, 'db-fork.sqlite')
-  const store = new Store(file)
+  const store = openStore(file)
   governance.write(store, { id: 'user:builder', admin: true, scopes: [] } as any, 'vendors-and-hire', 'domain', { capabilities: [], concepts: [], files: [] }, { reason: 'seed' })
   store.close?.()
   const out: any[] = []
   const answers = [{ markdown: 'Hyderabad it is.\n:::intent {"ops":[{"op":"set","path":"trips.branch","value":"HYDERABAD"}],"to":"current"}', blocks: [] }]
-  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), graphFile: file, ask: async () => answers.shift()! })
+  // The platform, as this engine reaches it: it writes the nodes through governance, as the person (the replica here
+  // stands in for its copy).
+  const platform = async (who: any, writes: any[]) => { const st = openStore(file); try { return writes.map((w) => ({ name: w.name, ...governance.write(st, who, w.name, w.kind, w.body, { reason: w.reason }, w.scope ? { scope: w.scope } : {}), node: st.get(w.name) })) } finally { st.close() } }
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), graphFile: file, graphWrite: platform, ask: async () => answers.shift()! })
   const from = { id: 'ws1', type: 'runtime', userId: 'u9', scopes: ['user:u9'] }
   const ask = async (payload: any) => { await s.handle(payload, from); return out.at(-1) }
   await ask({ t: 'session:open', session: 'f1', agent: 'trips' })
@@ -182,7 +185,7 @@ test('an agent made from a session: forked with its lineage, on a domain of its 
   const forked = await ask({ t: 'session:fork', session: 'f1', name: 'Hyderabad trips', title: 'Hyderabad trips' })
   assert.equal(forked.t, 'session:forked')
   assert.deepEqual([forked.agent, forked.domain, forked.concept, forked.scope], ['hyderabad-trips', 'hyderabad-trips-domain', 'hyderabad-trips-learned', 'user:u9'])
-  const g = new Store(file)
+  const g = openStore(file)
   const agent = g.get('hyderabad-trips')!
   assert.equal(agent.kind, 'agent'); assert.equal(agent.scope, 'user:u9')
   assert.deepEqual([agent.body.forkedFrom, agent.body.fromSession, agent.body.domain, agent.body.programs], ['trips', 'f1', 'hyderabad-trips-domain', ['unsettled-trips']])
@@ -247,9 +250,9 @@ test('a change the agent asks for that is not a valid op is left out — the ans
 })
 
 test('a question from an application screen is a composer turn in a session: on the agent of the screen\'s domain, with what the person is looking at', async () => {
-  const { Store, governance } = await import('@superatom/composition-graph')
+  const { openStore, governance } = await import('@superatom/composition-graph/node')
   const graphFile = join(home, 'db-screen.sqlite')
-  const g = new Store(graphFile)
+  const g = openStore(graphFile)
   const admin = { id: 'user:admin', admin: true }
   governance.write(g, admin, 'c1', 'concept', { title: 'Settled', form: 'text', text: 'A trip is settled when its settlement document exists.' })
   governance.write(g, admin, 'trips-domain', 'domain', { capabilities: [], concepts: ['c1'], files: [] })

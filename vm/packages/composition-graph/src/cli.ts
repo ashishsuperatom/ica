@@ -27,12 +27,13 @@
 import { readFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { Store, type Kind } from './store.js'
+import { type Kind } from './store.js'
+import { openStore, verifyAgainst } from './node.js'
 import { compose, domains } from './compose.js'
 import { compose as attach, write as governedWrite, GovernanceRefusal } from './governance.js'
 import { publishDraft, restoreVersion, draft, published } from './versions.js'
 import { importDomains, type WrittenDomain, type WrittenSetting } from './import.js'
-import { verifyGraph, verifyAgainst, type Finding } from './verify.js'
+import { verifyGraph, type Finding } from './verify.js'
 
 const argv = process.argv.slice(2)
 const flags: Record<string, string | true> = {}
@@ -53,7 +54,7 @@ if (asOf !== undefined && Number.isNaN(asOf)) fail(`--as-of ${flags['as-of']} is
 const viewer = typeof flags.viewer === 'string' ? flags.viewer.split(',').map((x) => x.trim()).filter(Boolean) : undefined
 const place = { ...(typeof flags.scope === 'string' ? { scope: flags.scope } : {}), ...(typeof flags.owner === 'string' ? { owner: flags.owner } : {}) }
 const said = (name: string, r: { hash: string; changed: boolean }) => console.log(r.changed ? `${name} → ${r.hash.slice(0, 12)}` : `${name} unchanged`)
-const store = new Store(dbFile)
+const store = openStore(dbFile)
 const [command, ...rest] = args
 
 /** The operator's own change, with the graph's rules (the levels, what exists); a refusal is a sentence. */

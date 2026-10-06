@@ -189,13 +189,11 @@ export function decide(store: Store, actor: Actor, id: number, verdict: 'approve
       if (s.kind === 'domain') for (const c of conceptsOf(s.body as DomainBody)) if (!store.get(c)) throw new GovernanceRefusal(`the suggested domain names a concept that does not exist: "${c}"`)
     }
   }
-  // One unit: the decision and, for an approval, the change it makes (a savepoint, so it nests with put's own).
-  store.db.exec('SAVEPOINT cg_decide')
-  try {
+  // One unit: the decision and, for an approval, the change it makes (units nest: put's own is part of it).
+  store.db.atomic(() => {
     store.db.prepare('INSERT INTO decision (suggestion, at, by, verdict, reason) VALUES (?, ?, ?, ?, ?)').run(id, Date.now(), actor.id, verdict, reason ?? null)
     if (verdict === 'approved') store.put(s.name, s.kind, s.body, { by: actor.id, reason: `approved suggestion ${id} by ${s.by}: ${s.reason}${reason ? ` — ${reason}` : ''}`, from: `suggestion:${id}` }, s.scope ? { scope: s.scope } : {})
-    store.db.exec('RELEASE cg_decide')
-  } catch (e) { store.db.exec('ROLLBACK TO cg_decide'); store.db.exec('RELEASE cg_decide'); throw e }
+  })
   return get(store, id)!
 }
 

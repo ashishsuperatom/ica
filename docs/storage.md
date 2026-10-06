@@ -72,7 +72,7 @@ to the warehouse, with ms), `warehouse_tables` (owners); legacy `datasources`, `
 - the engine: `api_key` (the project key `sk-proj-…`), `fly_machine`, `engine_running`, `profile`, `message_queue`
   (for a sleeping engine, 60 min), `engine_sources`;
 - the hub: `person_links` (each person linked through their UserDO), `logs` (event log);
-- knowledge and work: `graph_records`, `graph_content` (the composition graph), `programs` (catalogue; bundles in R2),
+- knowledge and work: the composition graph itself — its own tables (`content`, `name`, `change`, `question`, `suggestion`, `decision`, `version`, by its own migrations in `_graph_migrations`; `graph.ts`) and `graph_people` (who changed it, by email); `graph_records`, `graph_content` (the copy engines pushed before the platform held the graph — imported once into the graph's tables, dropped next), `programs` (catalogue; bundles in R2),
   `dashboards`, `dashboard_builds`, `decision_register`, `activities`, `connections` (settings; `secrets_sealed` with the
   master key), `connector_calls`, `connector_schemas`;
 - who asked what: `answer_buffer` (only who asked each question — it decides whose logs reach whom), `session_owners`
@@ -111,7 +111,7 @@ Roots (`engine.ts`): `STATE_ROOT` = `$ENGINE_STATE_DIR` or `~/.superatom/state`;
 | Path under `<home>` | Holds | To the platform |
 |---|---|---|
 | `.env`, `settings.json`, `profile.json`, `secrets/` | the engine's settings and credentials, org settings, last profile | no (profile mirrors ProjectDO) |
-| `db/composition.sqlite` | the composition graph | yes → ProjectDO `graph_records`/`graph_content` (`graph:sync`) |
+| `db/composition.sqlite` | the composition graph's REPLICA: pulled from the ProjectDO (`graph:pull` on welcome and on `graph:changed`), never written here; set aside (`.differs-<ms>`) and rebuilt when it disagrees | ← ProjectDO (the graph lives there) |
 | `db/datasource-index.sqlite`, `db/grounding.sqlite`, `db/agent-sessions.sqlite`, `db/backups/` | rebuildable indexes, harness session ids, backups | no |
 | `sessions/<sid>/session.jsonl` | a session's log — the engine writes it first | yes → the owner's UserDO `session_entries` (`session:sync`, per session; after a reconnect one session at a time); `synced.json` says how far |
 | `sessions/<sid>/STATE.json`, `ANSWER_HISTORY.jsonl`, `context.md`, `<qid>/answer.md` (+ `blocks.json`, `queries.jsonl`), `attachments/` | the session as files: current STATE, answer history, start context, each answer committed, its files | the log is; these are written from it (attachments come from R2) |

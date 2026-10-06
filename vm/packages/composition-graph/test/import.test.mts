@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { Store, compose, importDomains } from '../src/index.ts'
+import { openStore, Store, compose, importDomains } from '../src/node.ts'
 
 const by = { by: 'test' }
 const shared = { name: 'shared/organisation', title: 'Organisation', form: 'bullets' as const, items: ['one source'] }
@@ -11,7 +11,7 @@ const written = [
 const read = (d: string, f: string) => `// ${d}/${f}`
 
 test('a named concept is one node both domains name; the rest are each domain\'s own', () => {
-  const s = new Store(':memory:')
+  const s = openStore(':memory:')
   importDomains(s, written, read, by)
   assert.deepEqual(s.names('concept').map((n) => n.name), ['a/definitions', 'b/definitions', 'shared/organisation'])
   assert.deepEqual((s.get('a')!.body as any).concepts, ['shared/organisation', 'a/definitions'])
@@ -21,7 +21,7 @@ test('a named concept is one node both domains name; the rest are each domain\'s
 })
 
 test('an edit to the shared concept reaches every domain that names it, as one change', () => {
-  const s = new Store(':memory:')
+  const s = openStore(':memory:')
   importDomains(s, written, read, by)
   s.put('shared/organisation', 'concept', { title: 'Organisation', form: 'bullets', items: ['one source, now two'] }, { by: 'ana', reason: 'a second source' })
   assert.match(compose(s, 'a').text, /one source, now two/)
@@ -30,15 +30,15 @@ test('an edit to the shared concept reaches every domain that names it, as one c
 })
 
 test('importing again changes nothing; a shared concept written two ways is refused', () => {
-  const s = new Store(':memory:')
+  const s = openStore(':memory:')
   importDomains(s, written, read, by)
   assert.ok(importDomains(s, written, read, by).every((r) => !r.changed))
   const twoWays = [written[0], { ...written[1], concepts: [{ ...shared, items: ['another text'] }] }]
-  assert.throws(() => importDomains(new Store(':memory:'), twoWays, read, by), /written two ways/)
+  assert.throws(() => importDomains(openStore(':memory:'), twoWays, read, by), /written two ways/)
 })
 
 test('a file listed by its path is one node every domain that lists it shares, placed under its file name', () => {
-  const s = new Store(':memory:')
+  const s = openStore(':memory:')
   const withShared = [{ ...written[0], files: ['a.mjs', 'shared/rates.mjs'] }, { ...written[1], files: ['shared/rates.mjs'] }]
   importDomains(s, withShared, (d, f) => (f.includes('/') ? `// ${f}` : `// ${d}/${f}`), by)
   assert.deepEqual(s.names('file').map((n) => n.name), ['a/a.mjs', 'shared/rates.mjs'])

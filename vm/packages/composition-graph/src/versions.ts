@@ -57,8 +57,7 @@ export function restoreVersion(store: Store, actor: Actor, name: string): string
   const now = new Map(store.names().map((x) => [x.name, x]))
   const ctx = { by: actor.id, reason: `back to version ${v.name}` }
   const changed: string[] = []
-  store.db.exec('SAVEPOINT cg_restore')
-  try {
+  store.db.atomic(() => {
     for (const [n] of now) if (!then.has(n)) { store.remove(n, ctx); changed.push(n) }
     for (const [n, was] of then) {
       const cur = now.get(n)
@@ -67,8 +66,7 @@ export function restoreVersion(store: Store, actor: Actor, name: string): string
       store.put(n, was.kind, at.body, ctx, { scope: was.scope })
       changed.push(n)
     }
-    store.db.exec('RELEASE cg_restore')
-  } catch (e) { store.db.exec('ROLLBACK TO cg_restore'); store.db.exec('RELEASE cg_restore'); throw e }
+  })
   return changed
 }
 

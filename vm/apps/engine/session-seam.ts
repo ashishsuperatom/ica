@@ -20,7 +20,7 @@
 // hashes in the project's program store (programs/store), loaded into one STATE engine whose data goes through the
 // datasource manager. Each session is logged in sessions/<session>/session.jsonl.
 
-import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync, statSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
@@ -29,7 +29,7 @@ import { checkAgent, checkObject, checkOp, type AgentSpec, type Intent } from '@
 import { ProgramStore, ProgramError, loadPackage } from '@superatom/programs'
 import { createStateEngine, StateRefusal, type StateEngine } from '@superatom/state'
 import { createSessions, memoryLog, fileLog, history, replay, SessionRefusal, type SessionLog, type SessionView } from '@superatom/session'
-import { Store, governance as g, GovernanceRefusal, publishedUpto } from '@superatom/composition-graph'
+import { openStore, GovernanceRefusal, publishedUpto, type Store } from '@superatom/composition-graph/node'
 import { cardOf } from './answer-card.js'
 import { whoIs, type Who } from './identity.js'
 import { asReader, currentReader, AccessRefusal } from './access.js'
@@ -43,8 +43,11 @@ export interface SessionSeamDeps {
   log?: SessionLog
   /** Find a program the store lacks (the engine fetches it from the platform); by default the store only. */
   ensureProgram?: (ref: string) => Promise<string>
-  /** The composition graph, where agents are kept (kind "agent"); agents/<id>.json files are read only as a fallback. */
+  /** The composition graph's replica (graph-replica.ts), where agents are kept (kind "agent"); agents/<id>.json files are
+   *  read only as a fallback. */
   graphFile?: string
+  /** Nodes written in the platform's graph for a person (graph-replica.ts write): the engine never writes the graph. */
+  graphWrite?: (who: Record<string, unknown>, writes: { name: string; kind: string; body: unknown; reason: string; scope?: string }[]) => Promise<any[]>
   /** Long work made visible (activity.ts); without it, nothing is reported. */
   activities?: ReturnType<typeof import('./activity.js').createActivities>
   /** The reader's data access policies for a source (access.ts); without it, reads carry none. */
@@ -175,8 +178,14 @@ export function createSessionSeam(d: SessionSeamDeps) {
   }
 
   // Agents are nodes of the composition graph (owned, scoped, governed, versioned, kept by the platform).
-  let graph: Store | null = null
-  const graphStore = () => { if (!d.graphFile || !existsSync(d.graphFile)) return null; return (graph ??= new Store(d.graphFile)) }
+  // Read from the replica; reopened when the replica is rebuilt (a new file: graph-replica.ts sets a wrong one aside).
+  let graph: { store: Store; ino: number } | null = null
+  const graphStore = () => {
+    if (!d.graphFile || !existsSync(d.graphFile)) return null
+    const ino = statSync(d.graphFile).ino
+    if (graph?.ino !== ino) { graph?.store.close(); graph = { store: openStore(d.graphFile), ino } }
+    return graph.store
+  }
   const fromNode = (n: { name: string; body: any; scope: string; owner: string | null }): AgentSpec => ({
     id: n.name, name: String(n.body.title ?? n.name), scope: n.scope as AgentSpec['scope'], owner: n.owner ?? 'platform', domain: n.body.domain,
     programs: n.body.programs ?? [], tools: n.body.tools ?? [], ...(n.body.start ? { start: n.body.start } : {}), ui: { start: n.body.ui?.start ?? '' }, ica: n.body.ica ?? 'composer', ...(n.body.isDefault ? { isDefault: true } : {}),
@@ -458,10 +467,14 @@ export function createSessionSeam(d: SessionSeamDeps) {
         const scope = `user:${String(who.id).replace(/^user:/, '')}`
         const concept = `${name}-learned`, domain = `${name}-domain`
         const why = `made from session ${session} of ${spec.id}`
-        g.write(s, who, concept, 'concept', { title: `What was learned in "${title}"`, form: 'worked', items }, { reason: why }, { scope: scope as any })
-        g.write(s, who, domain, 'domain', { ...(base.body as any), concepts: [...((base.body as any).concepts ?? []), concept], forkedFrom: spec.domain }, { reason: why }, { scope: scope as any })
-        const r = g.write(s, who, name, 'agent', { title, domain, programs: spec.programs, tools: spec.tools ?? [], ica: spec.ica, ...(spec.start ? { start: spec.start } : {}), ui: spec.ui, forkedFrom: spec.id, fromSession: session }, { reason: why }, { scope: scope as any })
-        return reply({ t: 'session:forked', agent: name, concept, domain, scope, node: r })
+        if (!d.graphWrite) throw new SessionSeamRefusal('this engine cannot reach the platform\'s graph')
+        // Written in the platform's graph, as the person: its governance decides; this replica gets them by its next pull.
+        const results = await d.graphWrite({ ...who }, [
+          { name: concept, kind: 'concept', body: { title: `What was learned in "${title}"`, form: 'worked', items }, reason: why, scope },
+          { name: domain, kind: 'domain', body: { ...(base.body as any), concepts: [...((base.body as any).concepts ?? []), concept], forkedFrom: spec.domain }, reason: why, scope },
+          { name, kind: 'agent', body: { title, domain, programs: spec.programs, tools: spec.tools ?? [], ica: spec.ica, ...(spec.start ? { start: spec.start } : {}), ui: spec.ui, forkedFrom: spec.id, fromSession: session }, reason: why, scope },
+        ]).catch((e: any) => { throw new SessionSeamRefusal(e?.message ?? String(e)) })
+        return reply({ t: 'session:forked', agent: name, concept, domain, scope, node: results.at(-1) })
       }
       if (t === 'session:intent') {
         const who = whoIs(from)

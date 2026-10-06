@@ -3,10 +3,9 @@ import assert from 'node:assert/strict'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Store } from '../src/store.ts'
-import { governance as g, GovernanceRefusal, compose as composeDomain, publishDraft, publishedUpto, draft, restoreVersion, versionLine, route } from '../src/index.ts'
+import { openStore, governance as g, GovernanceRefusal, compose as composeDomain, publishDraft, publishedUpto, draft, restoreVersion, versionLine, route } from '../src/node.ts'
 
-const fresh = () => new Store(join(mkdtempSync(join(tmpdir(), 'gov-')), 'composition.sqlite'))
+const fresh = () => openStore(join(mkdtempSync(join(tmpdir(), 'gov-')), 'composition.sqlite'))
 const ana = { id: 'user:ana' }, bo = { id: 'user:bo' }, bot = { id: 'agent:key_1' }, admin = { id: 'user:root', admin: true }
 const text = (t: string) => ({ title: 'Settlement', form: 'text', text: t })
 
@@ -86,8 +85,8 @@ test('a node with no owner (imported knowledge) is changed or decided only by an
   const sug = g.suggest(s, ana, 'legacy', 'concept', text('better'), 'fix')
   assert.throws(() => g.decide(s, ana, sug.id, 'approved'), /has no owner — an admin decides/)
   assert.equal(g.decide(s, admin, sug.id, 'approved').status, 'approved')
-  assert.throws(() => s.db.exec('DELETE FROM decision'), /decisions are append-only/)
-  assert.throws(() => s.db.exec("UPDATE suggestion SET reason = 'x'"), /suggestions are append-only/)
+  assert.throws(() => s.db.prepare('DELETE FROM decision').run(), /decisions are append-only/)
+  assert.throws(() => s.db.prepare("UPDATE suggestion SET reason = 'x'").run(), /suggestions are append-only/)
 })
 
 test('an agent is a node like any other: checked, owned, governed, its domain must exist', () => {
@@ -171,7 +170,7 @@ test('edits are a draft; publishing makes the next version, which the agents rea
   assert.equal(v2.name, 'v2')
   assert.match(composeDomain(s, 'd', undefined, { upto: publishedUpto(s) }).text, /second/)
   assert.equal(route(s, 'second', publishedUpto(s)).ranked[0].domain, 'd')
-  assert.throws(() => s.db.exec('DELETE FROM version'), /append-only/)
+  assert.throws(() => s.db.prepare('DELETE FROM version').run(), /append-only/)
 })
 
 test('published versions form a tree: bringing an older one back and publishing starts a new line from it', () => {

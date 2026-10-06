@@ -37,15 +37,14 @@ import { DataSourceIndex, dataSourceStats } from '@superatom/datasource-index'
 // import would break every deploy while working perfectly here.
 import type { EngineMsgType } from '../../../clients/protocol.js'
 import { createWire } from './wire.js'
-import { pick, compose, place, remember, recall, recordQuestion, domainsOf, agentsOf } from './knowledge.js'
+import { pick, compose, place, remember, recall, domainsOf, agentsOf } from './knowledge.js'
 import { parcelStore, apiOfHub } from '../../../clients/parcels.js'
 import { createAppSeam } from './app-seam.js'
 import { createSessionSeam, SESSION_MESSAGES } from './session-seam.js'
 import { createSessionSync } from './session-sync.js'
-import { createGraphSeam, GRAPH_MESSAGES } from './graph-seam.js'
 import { createProgramSeam, PROGRAM_MESSAGES } from './program-seam.js'
 import { platformOf } from './platform.js'
-import { createGraphSync, graphFileOf } from './graph-sync.js'
+import { createGraphReplica, graphFileOf } from './graph-replica.js'
 import { createAccess, readerFor } from './access.js'
 import { whoIs, personOf } from './identity.js'
 import { createActivities } from './activity.js'
@@ -525,20 +524,18 @@ setUsageSink({
   report: (u) => { usageQueue.push({ type: 'usage:report', ...u }); if (usageQueue.length > 50_000) usageQueue.shift(); flushUsage() },
 })
 const enginePlatform = KEY && PROJECT ? platformOf({ hub: HUB, project: PROJECT, key: KEY }) : null
-const sessionSeam = createSessionSeam({ fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, graphFile: graphFileOf(PROJECT_DIR),
+// The composition graph lives in the platform; this engine keeps a replica it pulls into (graph-replica.ts).
+const graphReplica = createGraphReplica({ file: graphFileOf(PROJECT_DIR), send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true }, log: (s) => console.warn(s) })
+const sessionSeam = createSessionSeam({ graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, graphFile: graphFileOf(PROJECT_DIR),
   // Words in a session: the composer on the agent's domain, told the step's STATE, what it shows and the programs' docs.
   app: (payload, from) => appSeam.call(payload, from),
   ask: (o) => appSeam.say(o.text, o.context, { qid: o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, threadId: o.session, from: o.from, reqId: o.reqId, domain: o.domain, keepContext: true, ...(o.channel ? { channel: o.channel } : {}) }) })
-// The composition graph is kept by the platform too: pushed after every change, rebuilt from it when this one is empty.
-const graphSync = createGraphSync({ file: graphFileOf(PROJECT_DIR), send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true }, log: (s) => console.warn(s) })
-const graphSeam = createGraphSeam({ projectDir: PROJECT_DIR, send: (to, msg) => { wire.send(to, msg); if (msg.t === 'graph:reply') graphSync.push() } })
-const appSeam = createAppSeam({ askInSession: (o) => sessionSeam.ask(o), icaBaseUrl: OC_URL, composerStamp, readerFor: turnReader, record: recordToPlatform, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
+const appSeam = createAppSeam({ asked: (q) => graphReplica.asked(q), askInSession: (o) => sessionSeam.ask(o), icaBaseUrl: OC_URL, composerStamp, readerFor: turnReader, record: recordToPlatform, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
 
 async function handle(payload: any, from: any) {
   if (wire.receive(payload, from)) return
   if (typeof payload?.t === 'string' && payload.t.startsWith('app:')) { void appSeam.handle(payload, from); return }
   if (SESSION_MESSAGES.has(payload?.t)) { void sessionSeam.handle(payload, from); return }
-  if (GRAPH_MESSAGES.has(payload?.t)) { void graphSeam.handle(payload, from); return }
   if (PROGRAM_MESSAGES.has(payload?.t)) { void programSeam.handle(payload, from); return }
   if (payload.t === 'analyse') { analyse(String(payload.question || ''), from, String(payload.sessionId || ''), String(payload.questionId || ''), String(payload.channel || ''), String(payload.agent || '')) }
   else if (payload.t === 'agents:list') { agentsOf(PROJECT_DIR).then((agents) => emit(from, { t: 'agents:list:res', agents } as any)).catch(() => emit(from, { t: 'agents:list:res', agents: [] } as any)) }   // UI supplies both ids; channel set for chat-channel turns
@@ -664,7 +661,7 @@ function connect() {
       console.log(`[ica] registered (${m.payload.wsId}) — running self-check…`)
       flushOutbox()   // re-registered → deliver anything queued while the socket was flapping (answers, logs)
       sessionSync.pushAll()   // and every session the platform does not have whole
-      graphSync.welcome()     // and the graph: pushed from where the platform's copy ends, or rebuilt from it
+      graphReplica.welcome()  // and the graph's replica: what changed in the platform's graph since
       flushUsage()   // usage reported while the platform was out of reach
       void programSeam.syncUp((x) => console.warn(x)).catch((e) => console.warn(`[programs] sync failed: ${e?.message ?? e}`))   // and every program built here
       // and the code connectors this engine runs (its datasource manager's sources), for the platform to list beside the rest
@@ -698,7 +695,7 @@ function connect() {
       return
     }
     if (t === 'session:synced') { sessionSync.onSynced(m.payload); return }
-    if (t === 'graph:cursor' || t === 'graph:synced' || t === 'graph:batch') { graphSync.onMessage(m.payload); return }
+    if (t === 'graph:batch' || t === 'graph:changed' || t === 'graph:written') { graphReplica.onMessage(m.payload); return }
     if (t === 'access:resolved' || t === 'access:changed') { access.onMessage(m.payload); return }
     if (t === 'fenced')     { console.log('[ica] fenced — a newer engine holds this role (obsolete instance)'); return }
     if (t === 'superseded') { console.log('[ica] superseded by our own reconnection'); return }

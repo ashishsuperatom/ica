@@ -64,9 +64,9 @@ export function verifyGraph(store: Store): Finding[] {
 }
 
 /** The graph against the project's written knowledge: every node importing it would write must be there, the same. */
-export function verifyAgainst(store: Store, domains: WrittenDomain[], readFile: (domain: string, file: string) => string, settings: WrittenSetting[] = []): Finding[] {
+export function verifyAgainst(store: Store, domains: WrittenDomain[], readFile: (domain: string, file: string) => string, settings: WrittenSetting[] = [], scratch: () => Store): Finding[] {
   const out: Finding[] = []
-  const written = new Store(':memory:')
+  const written = scratch()
   try {
     let imported
     try { imported = importDomains(written, domains, readFile, { by: 'verify' }, settings) }

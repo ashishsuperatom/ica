@@ -36,7 +36,9 @@ import { createRecorder, type Recorder } from './records.js'
 import { connectorById, checkConnection, CONNECTORS } from '../../shared/connectors.js'
 import { seal, unseal } from './proxy/seal.js'
 import { runConnector, runCode, manifestOf } from './connectors/runtime.js'
-import { graphStore, GraphConflict } from './graph-store.js'
+import { projectGraph, migrateGraph, GRAPH_MESSAGES, GRAPH_VIEWS, type Who } from './graph.js'
+import { Store, sqlStorageGraphDb, applyReplica } from '../../../vm/packages/composition-graph/src/index.js'
+import { graphStore } from './graph-store.js'
 import { keyOf as fileKeys } from './files.js'
 
 
@@ -216,6 +218,9 @@ export class ProjectDO extends DurableObject<Env> {
   // ── Schema: migrations (migrations.ts), once per wake; a single-row read when nothing is pending ──
   private async migrate() {
     runMigrations(durableObjectDb(this.ctx.storage), PROJECT_MIGRATIONS, { name: `ProjectDO ${this.ctx.id.toString().slice(0, 8)}`, adopt: adoptProjectSchemaVersion })
+    // The composition graph's own tables, by its own migrations (graph.ts).
+    migrateGraph(this.ctx.storage)
+    this.graphFromRecordsOnce()
 
     // If this DO has a machine with a stale heartbeat, set an alarm so it
     // gets suspended within 10 min of this DO loading (handles existing DOs
@@ -568,17 +573,22 @@ export class ProjectDO extends DurableObject<Env> {
       catch (e: any) { reply({ error: e?.message ?? String(e) }) }
       return
     }
-    if ((msg.type === 'graph:sync' || msg.type === 'graph:cursor' || msg.type === 'graph:pull') && sender.type === 'code-engine') {
-      const graph = this.graph()
+    // The engine's replica of the graph: what it lacks after its cursor; and the questions it routes, recorded here.
+    if (msg.type === 'graph:write' && sender.type === 'code-engine') {
+      // Nodes written for a person (who, as the hub stamped them when they asked the engine) — through governance, as them.
+      const w = msg.who ?? {}
+      const who: Who = { id: String(w.id ?? ''), admin: w.admin === true, ...(typeof w.email === 'string' ? { email: w.email } : {}), scopes: Array.isArray(w.scopes) ? w.scopes.map(String) : [] }
+      const r = /^(user|agent):\S+$/.test(who.id) ? this.graph().writeFor(who, msg.writes) : { error: 'who the write is for is not known', changed: false }
+      try { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'graph:written', reqId: msg.reqId, ...(r.error ? { error: r.error } : { results: r.results }) } })) } catch { /* gone */ }
+      if (r.changed) this.sendToRole('code-engine', { t: 'graph:changed', cursor: this.graph().cursor() })
+      return
+    }
+    if ((msg.type === 'graph:pull' || msg.type === 'graph:asked') && sender.type === 'code-engine') {
       const reply = (payload: Record<string, unknown>) => { try { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload })) } catch { /* gone */ } }
       try {
-        if (msg.type === 'graph:cursor') reply({ t: 'graph:cursor', cursor: graph.cursor() })
-        else if (msg.type === 'graph:sync') {
-          try { reply({ t: 'graph:synced', ...graph.append(msg.batch ?? {}) }) }
-          catch (e) { if (e instanceof GraphConflict) reply({ t: 'graph:synced', error: e.message, conflict: true, cursor: graph.cursor() }); else throw e }
-        }
-        else reply({ t: 'graph:batch', batch: graph.pull(msg.cursor ?? {}) })
-      } catch (e: any) { reply({ t: msg.type === 'graph:cursor' ? 'graph:cursor' : msg.type === 'graph:sync' ? 'graph:synced' : 'graph:batch', error: e?.message ?? String(e) }) }
+        if (msg.type === 'graph:pull') reply({ t: 'graph:batch', batch: this.graph().pull(msg.cursor ?? {}), cursor: this.graph().cursor() })
+        else this.graph().asked(msg.question)
+      } catch (e: any) { if (msg.type === 'graph:pull') reply({ t: 'graph:batch', error: e?.message ?? String(e) }); else console.warn(`[graph] a question was not recorded: ${e?.message ?? e}`) }
       return
     }
     if (msg.type === 'session:sync' && sender.type === 'code-engine') {
@@ -1314,7 +1324,22 @@ export class ProjectDO extends DurableObject<Env> {
   }
 
   /** The project's composition graph, kept here (graph-store.ts). */
-  private graph() { return graphStore(this.ctx.storage, this.env, () => this._pid) }
+  private _graph?: ReturnType<typeof projectGraph>
+  private graph() { return (this._graph ??= projectGraph(this.ctx.storage, this.env, () => this._pid)) }
+  /** ONE-TIME (removed in the next commit, once it has run on every project): the graph built from the copy of its
+   *  records the engines pushed here before the platform held it. */
+  private graphFromRecordsOnce() {
+    const sql = this.ctx.storage.sql
+    if (Number([...sql.exec('SELECT COUNT(*) AS n FROM change')][0]?.n ?? 0) > 0) return
+    const copy = graphStore(this.ctx.storage, this.env, () => this._pid)
+    let c: any = {}
+    for (let i = 0; i < 10_000; i++) {
+      const b = copy.pull(c, 1000)
+      if (!b.changes.length && !b.suggestions.length && !b.versions.length && !b.decisions.some((d: any) => Number(d.at) > (c.decisionAt ?? 0))) break
+      applyReplica(new Store(sqlStorageGraphDb(this.ctx.storage)), b as any)
+      c = b.next
+    }
+  }
   private decisionStub() { return (this.env as any).DECISION.get((this.env as any).DECISION.idFromName(`dec:${this._pid}`)) }
   /** Where a session lives: its owner's UserDO, asked with this project and the session's id (session-store.ts). */
   private sessionAt(session: string) {
@@ -1571,6 +1596,18 @@ export class ProjectDO extends DurableObject<Env> {
       if (!c.ok) { this.auditMessage(sender, pl, 'refused', c.reason); hubReply({ t: 'error', source: 'credits', reason: c.reason, reqId: pl.reqId }); return }
     }
     if (sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent') this.auditMessage(sender, pl, 'ok')
+    // ── The composition graph: held here (graph.ts) — read and changed here, never by an engine ──
+    if ((GRAPH_MESSAGES.has(String(pl.t)) || (pl.t === 'inspect:req' && GRAPH_VIEWS.has(String(pl.view)))) && (sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent')) {
+      if (!sender.userId) { hubReply({ t: 'graph:refused', reason: 'who is asking is not known', reqId: pl.reqId }); return }
+      const graph = this.graph()
+      if (pl.t === 'inspect:req') { hubReply({ t: 'inspect:res', reqId: pl.reqId, view: pl.view, ...graph.view(String(pl.view), pl) }); return }
+      const who: Who = { id: sender.type === 'agent' ? sender.userId : `user:${sender.userId}`, admin: !!envelope.from.admin, ...(sender.email && sender.type !== 'agent' ? { email: sender.email } : {}), scopes: this.scopesOf(sender) }
+      const { reply, changed } = graph.handle(pl, who)
+      hubReply({ ...reply, reqId: pl.reqId })
+      // The engines' replicas pull what changed.
+      if (changed) this.sendToRole('code-engine', { t: 'graph:changed', cursor: graph.cursor() })
+      return
+    }
     // Browsing an agent's views: one small usage row each (never the STATE), then on to the engine as any message.
     if ((pl.t === 'view:open' || pl.t === 'view:intent') && (sender.type === 'runtime' || sender.type === 'agent')) {
       const control = pl.t === 'view:open' ? (pl.startAt ? `start ${String(pl.startAt)}` : pl.state ? 'reopened' : 'opened')

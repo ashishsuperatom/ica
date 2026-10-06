@@ -274,6 +274,11 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     -- Each person on this project, linked through their own UserDO (one per surface): the connection as the hub knows it.
     CREATE TABLE IF NOT EXISTS person_links (ws_id TEXT PRIMARY KEY, conn TEXT NOT NULL, at INTEGER NOT NULL);
   ` },
+  { id: 34, name: 'the graph is held here', up: `
+    -- The composition graph lives in this Durable Object (its tables are the graph's own, by its own migrations:
+    -- _graph_migrations). Here: who changed it, by their id, with the email the hub knew them by.
+    CREATE TABLE IF NOT EXISTS graph_people (id TEXT PRIMARY KEY, email TEXT NOT NULL);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

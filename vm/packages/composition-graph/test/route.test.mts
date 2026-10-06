@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { indexOf, rank, terms } from '../src/index.ts'
+import { indexOf, rank, terms } from '../src/node.ts'
 
 const index = indexOf([
   { name: 'utilisation', text: 'utilised hours per person week, red week below the threshold, target hours, project allocation', intents: ['utilisation', 'under the threshold', 'billable hours', 'timesheet'] },

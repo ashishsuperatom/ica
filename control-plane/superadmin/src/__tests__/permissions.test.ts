@@ -109,9 +109,9 @@ describe('in a project', () => {
     member.send({ to: { type: 'code-engine' }, payload: { t: 'term:attach', reqId: 'm1' } })
     expect((await member.reply('m1'))?.reason).toMatch(/term:attach needs project.manage/)
     // the engine hears who may publish: an admin may, a member may not
-    member.send({ to: { type: 'code-engine' }, payload: { t: 'graph:domains', reqId: 'm2' } })
+    member.send({ to: { type: 'code-engine' }, payload: { t: 'view:open', agent: 'a', reqId: 'm2' } })
     const admin = await socket({ role: 'runtime', token: jwt({ userId: 'a', email: 'admin@x.io', role: 'user' }) })
-    admin.send({ to: { type: 'code-engine' }, payload: { t: 'graph:domains', reqId: 'a2' } })
+    admin.send({ to: { type: 'code-engine' }, payload: { t: 'view:open', agent: 'a', reqId: 'a2' } })
     await new Promise((r) => setTimeout(r, 200))
     expect(engine.got.find((m) => m.payload?.reqId === 'm2')?.from.admin).toBeUndefined()
     expect(engine.got.find((m) => m.payload?.reqId === 'a2')?.from.admin).toBe(true)

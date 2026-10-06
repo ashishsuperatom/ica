@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 import { createHmac } from 'node:crypto'
 import { AGENT_SCOPES, HUB_MESSAGES } from '../../../shared/agent-scopes'
 import { SESSION_MESSAGES } from '../../../../vm/apps/engine/session-seam.ts'
-import { GRAPH_MESSAGES } from '../../../../vm/apps/engine/graph-seam.ts'
+import { GRAPH_MESSAGES } from '../graph.ts'
 import { PROGRAM_MESSAGES } from '../../../../vm/apps/engine/program-seam.ts'
 
 const here = fileURLToPath(new URL('.', import.meta.url))
@@ -117,18 +117,16 @@ describe('agent keys, identities and the audit history, in the real ProjectDO', 
     expect(atEngine.from).toMatchObject({ type: 'runtime', userId: 'user_42' })
   })
 
-  it('an agent over HTTP goes the same way as over its socket: scoped, audited, answered by the engine', async () => {
+  it('an agent over HTTP goes the same way as over its socket: scoped, audited, answered (the graph, by the platform)', async () => {
     const made = await call('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'http bot', scopes: ['graph'], by: 'admin@test.io' }) })
     const httpKey = made.body.key
-    // the engine answers whatever reaches it, addressed back to the sender
-    const answer = (e: any) => { const m = JSON.parse(String(e.data)); if (m.payload?.t === 'graph:domains') engine.ws.send(JSON.stringify({ to: { id: m.from.id, type: m.from.type }, payload: { t: 'graph:reply', domains: [{ name: 'trips' }], reqId: m.payload.reqId, who: m.from } })) }
-    engine.ws.addEventListener('message', answer)
-    const r = await mf.dispatchFetch('http://x/do/agent-call', { method: 'POST', headers: { authorization: `Bearer ${httpKey}` }, body: JSON.stringify({ t: 'graph:domains' }) })
-    expect(r.status).toBe(200)
-    const body: any = await r.json()
-    expect(body).toMatchObject({ t: 'graph:reply', domains: [{ name: 'trips' }], who: { type: 'agent', userId: `agent:${made.body.record.id}` } })
-    expect(body.who.admin).toBeUndefined()                           // an agent is never an admin
-    engine.ws.removeEventListener('message', answer)
+    const post = async (payload: any) => { const r = await mf.dispatchFetch('http://x/do/agent-call', { method: 'POST', headers: { authorization: `Bearer ${httpKey}` }, body: JSON.stringify(payload) }); return { status: r.status, body: await r.json() as any } }
+    const made1 = await post({ t: 'graph:concept', name: 'http-note', body: { title: 'Note', form: 'text', text: 'made over HTTP' } })
+    expect(made1.status).toBe(200)
+    expect(made1.body).toMatchObject({ t: 'graph:reply', changed: true })
+    expect(made1.body.node.owner).toBe(`agent:${made.body.record.id}`)   // as the key
+    expect(made1.body.node.scope).toBe(`user:${made.body.record.id}`)    // an agent never publishes by itself
+    expect((await post({ t: 'graph:names', kind: 'concept' })).body.names.map((n: any) => n.name)).toContain('http-note')
     const scoped = await mf.dispatchFetch('http://x/do/agent-call', { method: 'POST', headers: { authorization: `Bearer ${httpKey}` }, body: JSON.stringify({ t: 'session:agents' }) })
     expect(scoped.status).toBe(403)
     expect(((await scoped.json()) as any).reason).toBe("this key's scopes (graph) do not allow session:agents")
@@ -142,11 +140,15 @@ describe('agent keys, identities and the audit history, in the real ProjectDO', 
     expect((await call('/groups', { method: 'POST', body: JSON.stringify({ name: 'Bad Name', by: 'admin@test.io' }) })).body.error).toMatch(/lower-case/)
     const agent = await connect({ role: 'agent', key: made.body.key })
     await agent.until((m) => m.payload?.t === 'welcome')
-    agent.send({ to: { type: 'code-engine' }, payload: { t: 'graph:domains', reqId: 'g1' } })
-    expect((await engine.until((m) => m.payload?.reqId === 'g1')).from.scopes).toEqual([`user:${made.body.record.id}`])   // its own
+    // what it sees with: its own scope, then its groups' too — a node of the group shows only once it is in it
+    const root = await connect({ role: 'runtime', token: jwt({ userId: 'root', email: 'root@test.io', role: 'superadmin' }) })
+    await root.until((m) => m.payload?.t === 'welcome')
+    root.send({ to: { type: 'code-engine' }, payload: { t: 'graph:concept', name: 'finance-only', body: { title: 'F', form: 'text', text: 'for finance' }, scope: 'group:finance', reqId: 'r1' } })
+    expect((await root.until((m) => m.payload?.reqId === 'r1')).payload.node.scope).toBe('group:finance')
+    const sees = async (reqId: string) => { agent.send({ to: { type: 'code-engine' }, payload: { t: 'graph:names', kind: 'concept', reqId } }); return (await agent.until((m) => m.payload?.reqId === reqId)).payload.names.map((n: any) => n.name) }
+    expect(await sees('g1')).not.toContain('finance-only')
     await call('/groups/finance/members', { method: 'POST', body: JSON.stringify({ member: `agent:${made.body.record.id}`, by: 'admin@test.io' }) })
-    agent.send({ to: { type: 'code-engine' }, payload: { t: 'graph:domains', reqId: 'g2' } })
-    expect((await engine.until((m) => m.payload?.reqId === 'g2')).from.scopes).toEqual([`user:${made.body.record.id}`, 'group:finance'])
+    expect(await sees('g2')).toContain('finance-only')
     const groups = (await call('/groups')).body.groups
     expect(groups).toEqual([expect.objectContaining({ name: 'finance', members: [`agent:${made.body.record.id}`] })])
   })
@@ -154,7 +156,7 @@ describe('agent keys, identities and the audit history, in the real ProjectDO', 
   it('the hub tells the engine who administers the project', async () => {
     const admin = await connect({ role: 'runtime', token: jwt({ userId: 'root', email: 'root@test.io', role: 'superadmin' }) })
     await admin.until((m) => m.payload?.t === 'welcome')
-    admin.send({ to: { type: 'code-engine' }, payload: { t: 'graph:domains', reqId: 'adm' } })
+    admin.send({ to: { type: 'code-engine' }, payload: { t: 'session:agents', reqId: 'adm' } })
     expect((await engine.until((m) => m.payload?.reqId === 'adm')).from).toMatchObject({ type: 'runtime', userId: 'root', admin: true, scopes: ['user:root'] })
   })
 
@@ -162,7 +164,8 @@ describe('agent keys, identities and the audit history, in the real ProjectDO', 
     // each scope = the engine's messages of that area + the ones the hub answers itself
     const area = (prefix: string, engine: Set<string>) => [...engine, ...HUB_MESSAGES.filter((t) => t.startsWith(prefix))].sort()
     expect([...AGENT_SCOPES.sessions].sort()).toEqual(area('session:', SESSION_MESSAGES))
-    expect([...AGENT_SCOPES.graph].sort()).toEqual(area('graph:', GRAPH_MESSAGES))
+    expect([...AGENT_SCOPES.graph].sort()).toEqual([...GRAPH_MESSAGES].sort())   // the graph: answered by the platform
+    expect([...GRAPH_MESSAGES].every((t) => (HUB_MESSAGES as readonly string[]).includes(t))).toBe(true)
     expect([...AGENT_SCOPES.programs].sort()).toEqual(area('program:', PROGRAM_MESSAGES))
   })
 

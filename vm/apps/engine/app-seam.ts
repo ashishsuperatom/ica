@@ -9,11 +9,13 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createComposer, type Composer, type QueryRecord } from './agents/composer/index.js'
 import { createNarrator, capResultData, isDataCall } from './agents/narrator/index.js'
-import { pick, compose, place, remember, recordQuestion, placeForRunning, domainsOf, domainFor } from './knowledge.js'
+import { pick, compose, place, remember, placeForRunning, domainsOf, domainFor } from './knowledge.js'
 import type { AgentEvent } from './ica/session.js'
 import { personOf } from './identity.js'
 
 export interface AppSeamDeps {
+  /** A question and the domain it went to, recorded by the platform (graph-replica.ts asked). */
+  asked?: (q: { session: string; qid?: string; question: string; domain: string | null; how: 'routed' | 'chosen' | 'session'; ranked?: unknown }) => void
   project: string
   projectDir: string
   datasource: string
@@ -126,7 +128,7 @@ export function createAppSeam(d: AppSeamDeps) {
     const entry = await composerFor(o.threadId, text, o.domain)
     const composer = await entry.composer
     const routedNow = entry.routed as { ranked: { domain: string; terms: string[] }[] } | undefined
-    recordQuestion(d.projectDir, { session: o.threadId, qid: o.qid, question: text, domain: entry.domain, how: routedNow ? 'routed' : 'session', ...(routedNow ? { ranked: routedNow.ranked } : {}) })
+    d.asked?.({ session: o.threadId, qid: o.qid, question: text, domain: entry.domain, how: routedNow ? 'routed' : 'session', ...(routedNow ? { ranked: routedNow.ranked } : {}) })
     entry.routed = undefined
     const agent = { name: entry.domain, how: routedNow ? 'routed' : 'session', ...(routedNow?.ranked?.[0]?.terms ? { terms: routedNow.ranked[0].terms.slice(0, 6) } : {}) }
     // A thread that knows a domain answers the question as asked, in the domain's own terms: the screen is not

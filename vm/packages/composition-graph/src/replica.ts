@@ -64,8 +64,7 @@ const same = (a: Record<string, unknown>, b: Record<string, unknown>) => Object.
 export function applyReplica(store: Store, batch: Omit<ReplicaBatch, 'next'>): { added: number } {
   const db = store.db
   let added = 0
-  db.exec('SAVEPOINT cg_replica')
-  try {
+  db.atomic(() => {
     for (const [hash, body] of Object.entries(batch.contents)) db.prepare('INSERT OR IGNORE INTO content (hash, body, at) VALUES (?, ?, ?)').run(hash, body, Date.now())
     const touched = new Set<string>()
     for (const c of batch.changes) {
@@ -101,7 +100,6 @@ export function applyReplica(store: Store, batch: Omit<ReplicaBatch, 'next'>): {
       else db.prepare('INSERT INTO name (name, kind, hash, scope, owner) VALUES (?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET kind = excluded.kind, hash = excluded.hash, scope = excluded.scope, owner = excluded.owner')
         .run(name, last.kind, last.to_hash, last.scope ?? 'global', last.owner)
     }
-    db.exec('RELEASE cg_replica')
-  } catch (e) { db.exec('ROLLBACK TO cg_replica'); db.exec('RELEASE cg_replica'); throw e }
+  })
   return { added }
 }

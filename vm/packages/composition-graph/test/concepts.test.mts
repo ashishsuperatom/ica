@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join as pathJoin } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { Store, compose, join, leave, domains, conceptsOf } from '../src/index.ts'
+import { openStore, Store, compose, join, leave, domains, conceptsOf } from '../src/node.ts'
 
 const by = { by: 'test' }
 const c = (title: string) => ({ title, form: 'text' as const, text: `${title} text` })
@@ -28,7 +28,7 @@ test('a graph from before concepts were named so: its parts become concepts, and
   put('d/rules', 'part', 'h1', c('Rules'))
   put('d', 'domain', 'h2', { capabilities: [], parts: ['d/rules'], files: [] })
   old.close()
-  const s = new Store(file)
+  const s = openStore(file)
   assert.equal(s.get('d/rules')!.kind, 'concept')
   assert.equal(s.get('d/rules')!.scope, 'global')
   assert.match(compose(s, 'd').text, /# Rules\nRules text/)
@@ -38,7 +38,7 @@ test('a graph from before concepts were named so: its parts become concepts, and
 })
 
 test('join and leave change a domain\'s composition; the graph can be read as it was before each', () => {
-  const s = new Store(':memory:')
+  const s = openStore(':memory:')
   s.put('rules', 'concept', c('Rules'), by)
   s.put('tone', 'concept', c('Tone'), by)
   s.put('d', 'domain', { capabilities: [], concepts: ['rules'], files: [] }, by)
@@ -59,7 +59,7 @@ test('join and leave change a domain\'s composition; the graph can be read as it
 })
 
 test('scopes: a viewer sees global and their own; a scope change is a recorded change; scopes as they were', () => {
-  const s = new Store(':memory:')
+  const s = openStore(':memory:')
   s.put('rules', 'concept', c('Rules'), by)
   s.put('finance-rules', 'concept', c('Finance rules'), by, { scope: 'group:finance', owner: 'user:ana' })
   s.put('my-notes', 'concept', c('My notes'), by, { scope: 'user:u1', owner: 'user:u1' })

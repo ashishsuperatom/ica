@@ -11,14 +11,13 @@
 //     hashes each session was made from
 // …plus the agents' directories, browsable file by file.
 
-import { peopleIn } from './people.js'
 import { readFile, readdir } from 'node:fs/promises'
 import { existsSync, statSync } from 'node:fs'
 import { join, resolve, sep, relative } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { dataSourceStats, type DataSourceIndex } from '@superatom/datasource-index'
 import { GroundingStore } from '@superatom/grounding'   // the ONE loader/reader for the grounding store
-import { Store as CompositionStore, compose as composeDomain, conceptsOf, domains as compositionDomains, drift as compositionDrift, type DomainBody, type ConceptBody, type FileBody } from '@superatom/composition-graph'
+import { openStore, drift as compositionDrift, type Store as CompositionStore } from '@superatom/composition-graph/node'
 import type { AgentSessions } from './agent-sessions.js'
 import { log } from './log.js'   // the central log/error channel — surfaced read-only here
 
@@ -172,66 +171,28 @@ export function createInspector(deps: InspectorDeps) {
   const compositionFile = () => join(roots.db, 'composition.sqlite')
   const withComposition = <T,>(fn: (store: CompositionStore) => T): T | { exists: false } => {
     if (!existsSync(compositionFile())) return { exists: false }
-    const store = new CompositionStore(compositionFile())
+    const store = openStore(compositionFile())
     try { return fn(store) } finally { store.close() }
   }
-  /** Every domain with its parts and files, the latest changes, and every session that is a domain with what moved since. */
-  async function composition() {
+  /** Every session that is a domain, with what has moved in the graph (this engine's replica of it) since it was made.
+   *  The graph itself — its domains, concepts, changes and questions — is read from the platform, which holds it. */
+  async function graphSessions() {
     const sessions: { id: string; domain: string; at: string | null; used: number; moved: string[] }[] = []
     const notes: { id: string; note: any }[] = []
     for (const id of await readdir(roots.sessions).catch(() => [] as string[])) {
       try { notes.push({ id, note: JSON.parse(await readFile(join(roots.sessions, id, 'work', '.domain.json'), 'utf8')) }) } catch { /* not a domain session */ }
     }
     return withComposition((store) => {
-      const domains = compositionDomains(store).map((d) => {
-        const node = store.get<DomainBody>(d.name)!
-        const concepts = conceptsOf(node.body).map((name) => { const n = store.get<ConceptBody>(name); return { name, hash: n?.hash ?? null, title: n?.body.title ?? null, form: n?.body.form ?? null,
-          lines: n ? (n.body.form === 'text' ? 1 : n.body.form === 'composed' ? n.body.concepts.length : n.body.items.length) : 0 } })
-        const files = node.body.files.map((name) => { const n = store.get<FileBody>(name); return { name, hash: n?.hash ?? null, file: n?.body.name ?? null, bytes: n ? n.body.text.length : 0 } })
-        const asked = store.questions(40, d.name).map((q) => ({ at: q.at, session: q.session, question: q.question, how: q.how, domainHash: q.domainHash,
-          decided: Array.isArray(q.ranked) ? ((q.ranked as any[])[0]?.terms ?? []).slice(0, 6) : [] }))
-        return { name: d.name, hash: node.hash, description: node.body.description ?? null, intents: node.body.intents ?? [], capabilities: node.body.capabilities, tools: node.body.tools ?? null, concepts, files, asked }
-      })
       for (const { id, note } of notes) sessions.push({ id, domain: String(note.domain ?? ''), at: note.at ?? null, used: Object.keys(note.used ?? {}).length,
         moved: note.used && Object.keys(note.used).length ? compositionDrift(store, note.used).map((x) => x.name) : [] })
       sessions.sort((a, b) => String(b.at ?? '').localeCompare(String(a.at ?? '')))
-      return { exists: true, domains, people: peopleIn(roots.db), changes: store.changes(60), counts: { domain: store.names('domain').length, concept: store.names('concept').length, file: store.names('file').length }, sessions: sessions.slice(0, MAX_ROWS) }
+      return { exists: true, sessions: sessions.slice(0, MAX_ROWS) }
     })
-  }
-  /** The whole graph for the console's graph page: every domain (with the agents that are it), every intermediate
-   *  concept, every atomic concept — each with its full content, owner, scope and version, and what it composes. */
-  async function compositionColumns(a: { version?: string; upto?: number } = {}) {
-    return withComposition((store) => {
-      // As a named version reads it, or as the graph stood after a change (a step of its history), or as it is now.
-      const v = a.version ? store.version(String(a.version)) : null
-      if (a.version && !v) return { exists: true, error: `there is no version "${a.version}"` }
-      const upto = v?.upto ?? (a.upto !== undefined && Number.isInteger(Number(a.upto)) ? Number(a.upto) : undefined)   // read by change number: exact even when changes share a millisecond
-      const line = (b: any) => String(b?.text ?? (Array.isArray(b?.items) ? b.items.map((x: any) => (typeof x === 'string' ? x : x?.question ?? '')).join(' · ') : '')).replace(/\s+/g, ' ').slice(0, 200)
-      const agents = store.names('agent', { upto }).map((n) => { const b = store.content<any>(n.hash); return { name: n.name, title: String(b.title ?? n.name), domain: String(b.domain ?? '') } })
-      const domains = store.names('domain', { upto }).map((n) => { const b = store.content<DomainBody>(n.hash); return { name: n.name, title: String((b as any).title ?? n.name), line: String(b.description ?? '').slice(0, 200), scope: n.scope, owner: n.owner, hash: n.hash, concepts: conceptsOf(b), body: b, agents: agents.filter((a) => a.domain === n.name) } })
-      const concepts = store.names('concept', { upto }).map((n) => { const b = store.content<any>(n.hash); return { name: n.name, title: String(b.title ?? n.name), form: String(b.form), composed: b.form === 'composed', line: line(b), scope: n.scope, owner: n.owner, hash: n.hash, concepts: b.form === 'composed' ? (b.concepts as string[]) : [], body: b } })
-      return { exists: true, ...(v ? { version: v } : {}), domains, intermediate: concepts.filter((c) => c.composed), atomic: concepts.filter((c) => !c.composed) }
-    })
-  }
-  /** One node: its content as it is now or was at a moment, every change to it, and the domains that name it. */
-  async function compositionNode(a: { name?: string; asOf?: string }) {
-    const name = String(a.name ?? '')
-    const asOf = a.asOf ? Date.parse(a.asOf) : undefined
-    return withComposition((store) => {
-      const node = store.get(name, asOf)
-      const usedBy = store.names('domain').filter((d) => { const b = store.content<DomainBody>(d.hash); return conceptsOf(b).includes(name) || b.files.includes(name) }).map((d) => d.name)
-      return { exists: true, node, history: store.history(name), usedBy }
-    })
-  }
-  /** A domain composed — the whole system prompt its agent gets — as it is now or was at a moment, with the hashes it read. */
-  async function compositionCompose(a: { domain?: string; asOf?: string }) {
-    const asOf = a.asOf ? Date.parse(a.asOf) : undefined
-    return withComposition((store) => { const c = composeDomain(store, String(a.domain ?? ''), asOf); return { exists: true, domain: c.domain, text: c.text, used: c.used, bytes: c.text.length, tools: c.tools ?? null } })
   }
 
   const VIEWS: Record<string, (a: any) => any> = {
     overview, file, dir, logs, index, grounding, db,
-    composition, compositionNode, compositionCompose, compositionColumns,
+    graphSessions,
   }
 
   return {
