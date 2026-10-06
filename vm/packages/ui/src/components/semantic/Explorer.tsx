@@ -105,6 +105,20 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
   const [closed, setClosed] = useState<Set<string>>(() => new Set(recall<string[]>(`${keep}:closed`, [])))
   const toggle = (id: string) => setClosed((c) => { const n = new Set(c); if (n.has(id)) n.delete(id); else n.add(id); remember(`${keep}:closed`, [...n]); return n })
   const shut = (id: string) => closed.has(id) && !search.trim()
+  // The widths of the tables' column and the columns' panel: dragged at their edge, kept in this browser.
+  const [widths, setWidths] = useState<{ left: number; right: number }>(() => ({ left: 260, right: 320, ...recall<Partial<{ left: number; right: number }>>(`${keep}:widths`, {}) }))
+  const drag = useRef<{ side: 'left' | 'right'; x: number; w: number } | null>(null)
+  useEffect(() => {
+    const move = (e: PointerEvent) => { const d = drag.current; if (!d) return; const dx = e.clientX - d.x; setWidths((w) => ({ ...w, [d.side]: Math.round(Math.min(720, Math.max(200, d.w + (d.side === 'left' ? dx : -dx)))) })) }
+    const up = () => { if (!drag.current) return; drag.current = null; document.body.classList.remove('sa-resizing'); setWidths((w) => { remember(`${keep}:widths`, w); return w }) }
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
+    return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
+  }, [keep])
+  const resizer = (side: 'left' | 'right') => (
+    <span className={`sa-explorer__resize sa-explorer__resize--${side}`} role="separator" aria-orientation="vertical" aria-label="Resize" title="Drag to resize · double-click for its usual width"
+      onPointerDown={(e) => { e.preventDefault(); drag.current = { side, x: e.clientX, w: widths[side] }; document.body.classList.add('sa-resizing') }}
+      onDoubleClick={() => setWidths((w) => { const n = { ...w, [side]: side === 'left' ? 260 : 320 }; remember(`${keep}:widths`, n); return n })} />
+  )
   const pick = (k: string) => { setPicked(k); remember(`${keep}:open`, k); setWhere([]) }
   const term = search.trim().toLowerCase()
   const matches = (t: ExplorerTable) => !term || t.name.toLowerCase().includes(term) || t.columns.some((c) => c.name.toLowerCase().includes(term)) || (t.description ?? '').toLowerCase().includes(term) || (t.owner ?? '').toLowerCase().includes(term)
@@ -150,7 +164,8 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
 
   return (
     <div className="sa-explorer">
-      <div className="sa-explorer__panes" data-profile={ready && profileOpen && !place}>
+      <div className="sa-explorer__panes" data-profile={ready && profileOpen && !place}
+        style={{ gridTemplateColumns: `${widths.left}px minmax(0, 1fr)${ready && profileOpen && !place ? ` ${widths.right}px` : ''}` }}>
         <aside className="sa-explorer__tables" aria-label="Tables and queries">
           {/* One search: it finds tables and queries here, and searches the open table's rows in the warehouse. */}
           <div className="sa-explorer__search" title={opened ? `Finds tables and columns, and searches the rows of ${opened.name}` : 'Finds tables and columns'}>
@@ -203,6 +218,7 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
           )}
         </aside>
         <section className="sa-explorer__rows">
+          {resizer('left')}{ready && profileOpen && !place && resizer('right')}
           {place ? <div className="sa-explorer__place">{place.render()}</div>
             : opened ? <>
               {opened.query ? <QueryHead key={opened.key} opened={opened} draft={draft} setDraft={setDraft} onRun={runSql} onSave={onSaveQuery} onDelete={onDeleteQuery} onSaved={async (x) => { setLearnt((l) => ({ ...l, [`q:${x.id}`]: opened.columns })); await onQueriesChanged?.(); pick(`q:${x.id}`) }} onGone={async () => { setPicked(null); await onQueriesChanged?.() }} profileOpen={profileOpen} togglePanel={togglePanel} ready={ready} />

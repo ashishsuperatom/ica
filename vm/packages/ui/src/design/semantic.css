@@ -373,3 +373,12 @@
 .sa-explorer__tablehead .sa-icon-btn { width: 28px; height: 28px; }
 .sa-explorer__what strong { font-size: var(--t-sm); }
 .sa-explorer__qname { height: 28px; font-size: var(--t-sm); }
+
+/* The explorer's dividers: the tables' column and the columns' panel, dragged at their inner edge. */
+.sa-explorer__rows { position: relative; }
+.sa-explorer__resize { position: absolute; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 3; touch-action: none; }
+.sa-explorer__resize--left { left: -4px; }
+.sa-explorer__resize--right { right: -4px; }
+.sa-explorer__resize::after { content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: transparent; transition: background var(--dur-1) var(--ease); }
+.sa-explorer__resize:hover::after, .sa-resizing .sa-explorer__resize::after { background: var(--primary); }
+@media (max-width: 900px) { .sa-explorer__resize { display: none; } .sa-explorer__panes { grid-template-columns: minmax(0, 1fr) !important; } }
