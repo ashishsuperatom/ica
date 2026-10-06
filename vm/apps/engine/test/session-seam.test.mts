@@ -234,3 +234,14 @@ test('views: an agent browsed without a session — nothing written; a step comp
   const bad = await ask({ t: 'view:intent', agent: 'trips', state: { ...root, trips: { ...root.trips, branch: 42 } }, ops: [{ op: 'set', path: 'trips.branch', value: 'PUNE' }] })
   assert.match(bad.reason, /does not fit trips/)
 })
+
+test('a change the agent asks for that is not a valid op is left out — the answer still stands, and says so', async () => {
+  const { intentOf } = await import('../session-seam.ts')
+  const r = intentOf('Lanes by bookings.\n:::intent {"ops":[{"op":"by","value":"lane"}]}')
+  assert.equal(r.markdown, 'Lanes by bookings.')
+  assert.equal(r.intent, null)
+  assert.match(r.problem ?? '', /was not made/)
+  const ok = intentOf('Filtered.\n:::intent {"ops":[{"op":"set","path":"pmo.pillar","value":"Retail"}]}')
+  assert.deepEqual(ok.intent?.ops, [{ op: 'set', path: 'pmo.pillar', value: 'Retail' }])
+  assert.equal(ok.problem, undefined)
+})

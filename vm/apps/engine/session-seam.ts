@@ -25,7 +25,7 @@ import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { placeForRunning, pick } from './knowledge.js'
-import { checkAgent, checkObject, type AgentSpec, type Intent } from '@superatom/platform-types'
+import { checkAgent, checkObject, checkOp, type AgentSpec, type Intent } from '@superatom/platform-types'
 import { ProgramStore, ProgramError, loadPackage } from '@superatom/programs'
 import { createStateEngine, StateRefusal, type StateEngine } from '@superatom/state'
 import { createSessions, memoryLog, fileLog, history, replay, SessionRefusal, type SessionLog, type SessionView } from '@superatom/session'
@@ -74,6 +74,11 @@ export function intentOf(markdown: string): { markdown: string; intent: { ops?: 
     catch (e: any) { problem = `the answer asked for a change that could not be read: ${e.message}` }
     return false
   })
+  // A change the agent asked for that is not a valid op is left out — the answer still stands, and says so.
+  if (intent?.ops) {
+    const bad = intent.ops.flatMap((op: unknown, i: number) => checkOp(op, `change ${i + 1}`))
+    if (bad.length) { problem = `_A change this answer asked for was not made: ${bad[0]}._`; delete intent.ops }
+  }
   return { markdown: kept.join('\n').trim(), intent: intent && (intent.ops || intent.call || intent.action) ? intent : null, ...(problem ? { problem } : {}) }
 }
 
@@ -302,7 +307,14 @@ export function createSessionSeam(d: SessionSeamDeps) {
       ...(asked?.call ? { call: asked.call } : {}), ...(asked?.action ? { action: asked.action } : {}),
       to: asked?.to ?? (asked && !asked.call && !asked.action ? 'current' : 'new'), block: at, by: user, at: new Date().toISOString(), qid,
     }
-    return asReader(who, () => rtSessions.intent(li))
+    // A change that is well formed but cannot be applied (a slice the programs do not have, …) does not cost the answer:
+    // it is applied without the change, and says so.
+    try { return await asReader(who, () => rtSessions.intent(li)) }
+    catch (e: any) {
+      if (!li.result?.ops?.length || !(e instanceof StateRefusal || e instanceof SessionRefusal)) throw e
+      const without: Intent = { ...li, result: { ...li.result, ops: undefined, markdown: [li.result.markdown, `_A change this answer asked for was not made: ${e.message}._`].filter(Boolean).join('\n\n') } }
+      return asReader(who, () => rtSessions.intent(without))
+    }
   }
 
   /** The agent a question goes to when none was picked: the one whose domain its words reach, else the default agent. */
