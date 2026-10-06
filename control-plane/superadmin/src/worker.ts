@@ -490,7 +490,9 @@ export default {
         }))
       }))
       const rows = perOrg.flatMap(r => r.status === 'fulfilled' ? r.value : [])
-      return Response.json({ projects: rows })
+      // An organisation that could not be read is said, not silently left out (it read as "no engines known").
+      const errors = perOrg.flatMap((r, i) => r.status === 'rejected' ? [{ org: orgs[i]?.name ?? null, error: String((r.reason as any)?.message ?? r.reason).slice(0, 200) }] : [])
+      return Response.json({ projects: rows, ...(errors.length ? { errors } : {}) })
     }
 
     // ── The MODEL CATALOGUE: which models each provider may be asked for ────
