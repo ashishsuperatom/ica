@@ -319,15 +319,18 @@ function ChangesGraph({ hub, go }: { hub: Hub; go: (p: CompPick) => void }) {
   if (err) return <Notice state="critical">{err}</Notice>
   if (!data) return <Loading on />
   const names = picked === 'draft' ? data.draft.map((d) => d.name) : picked ? picked.names : []
+  const who = (by: string) => by.replace(/^user:/, '').replace(/^agent:/, 'agent ')
   return (
-    <div className="sa-stack sa-stack--3">
+    <div className="sa-section__body sa-stack sa-stack--4">
       <VersionGraph versions={data.versions} published={data.published} draft={data.draft} current={picked === 'draft' ? null : picked?.name ?? '\u0000none'}
         onPick={(v) => setPicked(v === null ? (picked === 'draft' ? null : 'draft') : picked !== 'draft' && picked?.name === v.name ? null : v)} />
       {picked && (
-        <div className="sa-stack sa-stack--2">
-          <h3 className="sa-label">{picked === 'draft' ? 'The draft' : `${picked.name} · published ${publishedWhen(picked.at)}`}</h3>
-          {picked !== 'draft' && <p>{picked.message}</p>}
-          <div className="sa-words">{names.map((n) => <button key={n} className="sa-word" onClick={() => go({ kind: 'node', name: n })}>{n}</button>)}{picked !== 'draft' && picked.count > picked.names.length && <span className="sa-note">and more — {picked.count} changes in all</span>}</div>
+        <div className="sa-verdetail">
+          <Receipt items={picked === 'draft'
+            ? [['Version', 'The draft — not yet published'], ['Nodes that differ', String(data.draft.length)]]
+            : [['Version', picked.name], ['What it is', picked.message], ['Published', `${publishedWhen(picked.at)} · ${who(picked.by)}`], ['Changes', String(picked.count)]]} />
+          <h4 className="sa-label">Nodes it changed{picked !== 'draft' && picked.count > picked.names.length ? ` — the first ${picked.names.length}` : ''}</h4>
+          <ul className="sa-verdetail__nodes">{names.map((n) => <li key={n}><button onClick={() => go({ kind: 'node', name: n })} title={n}>{n}</button></li>)}</ul>
         </div>
       )}
     </div>
