@@ -14,7 +14,8 @@ A data source is reached through a **bridge** — one `.mjs` module the datasour
 queries to. Given what the admin tells you, you WRITE a bridge, TEST it live, and REGISTER it.
 
 ### The bridge contract
-A bridge file exports `createBridge()` returning an object:
+A bridge file exports `createBridge({ settings, secrets })` — the connection's settings and secrets, as the admin
+entered them in the console — returning an object:
 ```
 { id, kind, dialect?, description?, ready(), query(sql, params?), introspect(), close?() }
 ```
@@ -26,17 +27,23 @@ A bridge file exports `createBridge()` returning an object:
 - `query(sql, params)` — run a query, return an array of row objects. Bind `@name` params in the source's dialect.
 - `introspect()` — return `{ tables: [...], kind, dialect }`: the catalog (table/column names).
 - `close?()` — optional teardown.
-Prefer node built-ins (no new deps). NEVER hardcode secrets in the bridge — read them from `process.env`.
+Prefer node built-ins (no new deps). Read every setting and secret from the `settings` and `secrets` it is given —
+never from a file, the environment, or the code.
 
 ### Where things go
-- Bridge:  `<DATASOURCES_DIR>/<id>/bridge.mjs`
-- Secrets: `<DATASOURCES_DIR>/<id>/.env`  (the bridge loads it with `process.loadEnvFile(...)`)
+- A connection lives in the platform: the admin makes it in the console (Connections → a connector, or "Custom source
+  (code)"), entering its settings and secrets there. Its **name** is the source's id.
+- Its bridge: `<DATASOURCES_DIR>/<name>/bridge.mjs`. When you finish, the engine sends the bridge up to the platform,
+  which keeps it with the connection; every engine then downloads it from there.
+- Credentials are never written to a file and never asked for in this terminal: if the connection is not made yet,
+  ask the admin to make it in the console, then go on.
 The exact `<DATASOURCES_DIR>` and the manager URL are given to you in each message's preamble.
 
 ### Test + register — LIVE, no restart
-1. Write the bridge (+ its `.env`).
-2. **Register it live:** `POST <MANAGER>/sources` with `{ "id": "<id>", "path": "<absolute path to bridge.mjs>" }`.
-   The manager imports it into the running process — nothing else reloads (not the engine, not the manager).
+1. Write the bridge.
+2. **Load it live:** `POST <MANAGER>/sources` with `{ "id": "<name>", "path": "<absolute path to bridge.mjs>" }`.
+   The manager imports it with that connection's settings and secrets (the engine downloaded them from the
+   platform) — nothing else reloads.
 3. **Verify against real data:**
    - `GET  <MANAGER>/sources` → your source appears with `ready: true`.
    - `POST <MANAGER>/introspect { "id":"<id>" }` → real tables come back.

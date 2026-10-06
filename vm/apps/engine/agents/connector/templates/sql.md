@@ -5,7 +5,7 @@ A relational DB reachable by a driver or a bridge/proxy. The analyst writes SQL 
 ## Connect
 - Set `dialect` to the real one (`postgres` | `mssql` | `duckdb` | `sqlite` | `mysql` | …) so the analyst writes the right SQL.
 - Use a **node built-in / already-present driver** if you can; otherwise a small HTTP bridge/proxy to the DB (the "recorded" connector). No new heavy deps.
-- Creds in the source's `.env`, read via `process.env` — never hardcode. `ready()` = true only once a real connection succeeds.
+- Creds are the connection's (made in the console), given to `createBridge({ settings, secrets })` — never a file, the environment or the code. `ready()` = true only once a real connection succeeds.
 - `query(sql, params)` binds `@name` params in the dialect and returns an **array of clean row objects**.
 - `introspect()` returns `{ tables:[{name, ...}], kind:'sql', dialect }` from the DB's catalog (`information_schema`, `sqlite_master`, `oa_tables`, …).
 

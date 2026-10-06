@@ -9,6 +9,10 @@ export interface Platform {
   listPrograms(q?: { name?: string; published?: boolean }): Promise<{ hash: string; name: string; uploaded_at: string; published_at: string | null }[]>
   /** A session's file, as its person put it in (kept on the platform under the session, by its hash). */
   fetchAttachment(session: string, hash: string): Promise<Uint8Array>
+  /** A connection's bridge code, by its hash. */
+  fetchBridge(hash: string): Promise<string>
+  /** A bridge written here (by the connector agent), up to the platform for the connection of that name. */
+  uploadBridge(name: string, code: string): Promise<{ name: string; bridge: string; changed: boolean }>
 }
 
 /** The largest session file the platform keeps (its LIMITS.attachment). */
@@ -36,6 +40,12 @@ export function platformOf(o: { hub: string; project: string; key: string; fetch
       if (bytes.length > ATTACHMENT_MAX) throw new Error(`the file is larger than ${ATTACHMENT_MAX / 1024 / 1024} MB`)
       return bytes
     },
+    fetchBridge: async (hash) => {
+      const r = await f(`${base}/bridges/${hash}`, { headers: { authorization: `Bearer ${o.key}` } })
+      if (!r.ok) throw new Error(((await r.json().catch(() => null)) as any)?.error ?? `the platform answered ${r.status}`)
+      return r.text()
+    },
+    uploadBridge: (name, code) => call(`/connections/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify({ bridge: code }) }),
     listPrograms: async (q = {}) => (await call(`/programs?${new URLSearchParams({ ...(q.name ? { name: q.name } : {}), ...(q.published !== undefined ? { published: String(q.published) } : {}) })}`)).programs,
   }
 }

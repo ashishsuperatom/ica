@@ -54,7 +54,7 @@ export async function createConnector(opts: ConnectorOpts): Promise<Connector> {
     `You are the infrastructure connector agent. Read ./connector/CONNECTOR.md for your role + the bridge protocol, then help ` +
     `the admin. BEFORE writing a bridge, read the matching connection template in ./templates/ (e.g. suiteql.md, sql.md, ` +
     `rest.md) and reuse its connect steps + common-issue checks. The datasource-manager is at ${manager}. Write bridges under ` +
-    `${opts.datasourcesDir} (one folder per source: <id>/bridge.mjs + <id>/.env for secrets). Register a bridge LIVE via POST ` +
+    `${opts.datasourcesDir} (one folder per connection: <name>/bridge.mjs; its settings and secrets come from the platform). Load a bridge LIVE via POST ` +
     `${manager}/sources {"id","path"} (absolute path), then verify via GET ${manager}/sources, POST ${manager}/introspect, POST ${manager}/query.`
 
   return {

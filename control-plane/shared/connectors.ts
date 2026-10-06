@@ -30,6 +30,10 @@ export const CONNECTORS: Connector[] = [
       { name: 'certId', label: 'Certificate ID', type: 'text', required: true },
       { name: 'privateKey', label: 'Private key (PEM)', type: 'secret', required: true, help: 'The private key of the certificate uploaded to NetSuite.' },
     ] },
+  // A source reached by a bridge written for it (by the connector agent, or a person): its settings and secrets are
+  // whatever its bridge reads (createBridge({ settings, secrets })), given as two maps.
+  { id: 'code', runs: 'code', title: 'Custom source (code)', kind: 'sql', description: 'A source reached by a bridge written for it; its settings and secrets are what the bridge reads.', levels: ['project'], bridge: 'its own',
+    fields: [] },
   { id: 'sqlserver', runs: 'code', title: 'Microsoft SQL Server', kind: 'sql', description: 'A SQL Server database, read-only.', levels: ['project', 'user'], bridge: null,
     fields: [
       { name: 'host', label: 'Host', type: 'text', required: true }, { name: 'port', label: 'Port', type: 'number', placeholder: '1433' },
@@ -56,6 +60,12 @@ export const connectorById = (id: string) => CONNECTORS.find((c) => c.id === id)
  *  kept in the clear (settings) and what is sealed (secrets). */
 export function checkConnection(c: Connector, values: Record<string, unknown>): { problems: string[]; settings: Record<string, unknown>; secrets: Record<string, string> } {
   const problems: string[] = [], settings: Record<string, unknown> = {}, secrets: Record<string, string> = {}
+  if (c.id === 'code') {   // free-form: { settings: {…}, secrets: {…} }
+    const s = values?.settings, x = values?.secrets
+    if (s !== undefined && (typeof s !== 'object' || Array.isArray(s))) problems.push('settings is a map of names to values')
+    if (x !== undefined && (typeof x !== 'object' || Array.isArray(x) || Object.values(x as object).some((v) => typeof v !== 'string'))) problems.push('secrets is a map of names to text')
+    return { problems, settings: (s ?? {}) as Record<string, unknown>, secrets: (x ?? {}) as Record<string, string> }
+  }
   for (const f of c.fields) {
     const v = values?.[f.name]
     const empty = v === undefined || v === null || String(v).trim() === ''

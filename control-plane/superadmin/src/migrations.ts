@@ -287,6 +287,11 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     DROP TABLE IF EXISTS graph_records;
     DROP TABLE IF EXISTS graph_content;
   ` },
+  { id: 36, name: 'a connection carries its bridge', up: `
+    -- A code connection's bridge (the module the engine's data source manager loads): kept here by its hash (the code in
+    -- the bucket, bridge/<project>/<hash>), downloaded by the engine with the connection's settings and secrets.
+    ALTER TABLE connections ADD COLUMN bridge TEXT;
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

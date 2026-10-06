@@ -45,6 +45,7 @@ import { createSessionSync } from './session-sync.js'
 import { createProgramSeam, PROGRAM_MESSAGES } from './program-seam.js'
 import { platformOf } from './platform.js'
 import { createGraphReplica, graphFileOf } from './graph-replica.js'
+import { createConnections } from './connections.js'
 import { createAccess, readerFor } from './access.js'
 import { whoIs, personOf } from './identity.js'
 import { createActivities } from './activity.js'
@@ -412,7 +413,10 @@ async function handleConnector(text: string, from: any) {
     console.log(`[ica] connector · ${(r.ms / 1000).toFixed(1)}s`)
   } catch (e: any) {
     emit(from, { t: 'connector:status', text: `Connector failed: ${e?.message ?? e}` })
-  } finally { connectorSlot.persist(); connectorBusy = false; emit(from, { t: 'connector:done' }) }
+  } finally {
+    connectorSlot.persist(); connectorBusy = false; emit(from, { t: 'connector:done' })
+    void connections.uploadWritten()   // a bridge it wrote goes up to the platform, and comes back down as a connection
+  }
 }
 
 // ── Interactive terminal passthrough (raw PTY <-> UI xterm) ───────────────────
@@ -524,6 +528,8 @@ setUsageSink({
   report: (u) => { usageQueue.push({ type: 'usage:report', ...u }); if (usageQueue.length > 50_000) usageQueue.shift(); flushUsage() },
 })
 const enginePlatform = KEY && PROJECT ? platformOf({ hub: HUB, project: PROJECT, key: KEY }) : null
+// The project's connections live in the platform; this engine downloads them and runs them (connections.ts).
+const connections = createConnections({ dir: DATASOURCES_DIR, manager: DATASOURCE, platform: enginePlatform, send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true }, log: (s) => console.warn(s) })
 // The composition graph lives in the platform; this engine keeps a replica it pulls into (graph-replica.ts).
 const graphReplica = createGraphReplica({ file: graphFileOf(PROJECT_DIR), send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true }, log: (s) => console.warn(s) })
 const sessionSeam = createSessionSeam({ graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, graphFile: graphFileOf(PROJECT_DIR),
@@ -665,7 +671,7 @@ function connect() {
       flushUsage()   // usage reported while the platform was out of reach
       void programSeam.syncUp((x) => console.warn(x)).catch((e) => console.warn(`[programs] sync failed: ${e?.message ?? e}`))   // and every program built here
       // and the code connectors this engine runs (its datasource manager's sources), for the platform to list beside the rest
-      void fetch(`${DATASOURCE}/sources`, { signal: AbortSignal.timeout(4000) }).then((r) => r.json()).then((j: any) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'sources:report', sources: (j?.sources ?? []).map((x: any) => ({ id: x.id, kind: x.kind, dialect: x.dialect, description: x.description, ready: !!x.ready })) })) }).catch(() => {})
+      connections.pull()      // and the project's connections: each bridge, settings and secrets, from the platform
       // THE PROJECT'S PROFILE, delivered with the welcome. Adopted before warm-up builds any agent, so a box
       // starts on its own configuration rather than adopting it a few seconds late and rebuilding.
       if (m.payload.profile) receive(m.payload.profile, 'project profile')
@@ -696,6 +702,7 @@ function connect() {
     }
     if (t === 'session:synced') { sessionSync.onSynced(m.payload); return }
     if (t === 'graph:batch' || t === 'graph:changed' || t === 'graph:written') { graphReplica.onMessage(m.payload); return }
+    if (t === 'connections:list' || t === 'connections:changed') { connections.onMessage(m.payload); return }
     if (t === 'access:resolved' || t === 'access:changed') { access.onMessage(m.payload); return }
     if (t === 'fenced')     { console.log('[ica] fenced — a newer engine holds this role (obsolete instance)'); return }
     if (t === 'superseded') { console.log('[ica] superseded by our own reconnection'); return }

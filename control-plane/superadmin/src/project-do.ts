@@ -324,6 +324,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (request.method === 'POST' && path === '/agent-call') return this.agentCall(request)
     if (path === '/engine/programs' || path.startsWith('/engine/programs/')) return this.enginePrograms(request, path)
     if (path.startsWith('/engine/attachments/')) return this.engineAttachments(request, path)
+    if (path.startsWith('/engine/connections/') || path.startsWith('/engine/bridges/')) return this.engineConnections(request, path)
     // A program's React side, file by file, for screens (the worker has checked the caller is in the project).
     { const m = request.method === 'GET' ? path.match(/^\/programs\/([0-9a-f]{64})\/(web\/[\w./-]+\.js)$/) : null
       if (m && !m[2].includes('..')) {
@@ -554,6 +555,13 @@ export class ProjectDO extends DurableObject<Env> {
         this.ctx.storage.sql.exec('DELETE FROM engine_sources')
         for (const x of list) this.ctx.storage.sql.exec('INSERT INTO engine_sources (id, kind, dialect, description, ready, reported_at) VALUES (?, ?, ?, ?, ?, ?)', x.id, x.kind ?? null, x.dialect ?? null, String(x.description ?? '').slice(0, 500), x.ready ? 1 : 0, at)
       })
+      return
+    }
+    // The code connections the engine runs: pulled on every welcome and whenever they change (connections:changed).
+    if (msg.type === 'connections:pull' && sender.type === 'code-engine') {
+      const reply = (payload: Record<string, unknown>) => { try { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'connections:list', reqId: msg.reqId, ...payload } })) } catch { /* gone */ } }
+      try { reply({ connections: await this.codeConnectionsForEngine() }); this.audit.record({ actor: { kind: 'engine', id: 'engine' }, via: 'engine', action: 'connection.open', target: 'code connections', outcome: 'ok' }) }
+      catch (e: any) { reply({ error: e?.message ?? String(e) }) }
       return
     }
     if (msg.type === 'connection:get' && sender.type === 'code-engine') {
@@ -950,6 +958,61 @@ export class ProjectDO extends DurableObject<Env> {
     }
   }
 
+  // ── Connections, for the engine: the bridges it runs come from here (one path) ──────────────────────────────────
+  /** The project's code connections, as the engine runs them: each one's name (the source id queries use), connector,
+   *  settings, secrets (unsealed — over the engine's authenticated socket, never kept on its disk) and bridge (hash). */
+  private async codeConnectionsForEngine() {
+    const master = (this.env as any).CREDENTIALS_MASTER_KEY
+    const rows = [...this.ctx.storage.sql.exec("SELECT * FROM connections WHERE removed_at IS NULL AND level = 'project' ORDER BY created_at")] as any[]
+    const out = []
+    for (const r of rows.filter((x) => connectorById(x.connector)?.runs === 'code')) {
+      out.push({ id: r.id, name: r.name, connector: r.connector, settings: JSON.parse(r.settings), secrets: r.secrets_sealed && master ? JSON.parse(await unseal(r.secrets_sealed, master)) : {}, bridge: r.bridge ?? null })
+    }
+    return out
+  }
+  /** The engine's own calls about connections: download a bridge by its hash; upload a bridge written on the engine (by
+   *  the connector agent) — the engine generates it, so it comes up here first and goes back down like any other. */
+  private async engineConnections(request: Request, path: string): Promise<Response> {
+    const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
+    const key = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
+    if (!key || !this.keyMatches(key)) return json({ error: 'only this project\'s engine' }, 401)
+    const bucket = (this.env as any).PACKAGES as R2Bucket | undefined
+    if (!bucket) return json({ error: 'no bucket' }, 503)
+    const b = path.match(/^\/engine\/bridges\/([0-9a-f]{64})$/)
+    if (b && request.method === 'GET') {
+      const o = await bucket.get(`bridge/${this._pid}/${b[1]}`)
+      return o ? new Response(await o.text(), { headers: { 'content-type': 'text/javascript' } }) : json({ error: 'there is no such bridge' }, 404)
+    }
+    const c = path.match(/^\/engine\/connections\/([\w.-]{1,80})$/)
+    if (c && request.method === 'PUT') {
+      const body: any = await request.json().catch(() => null)
+      const name = c[1]
+      const code = typeof body?.bridge === 'string' ? body.bridge : null
+      if (!code || code.length > 2_000_000) return json({ error: 'an upload carries the bridge\'s code' }, 400)
+      const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code)))].map((x) => x.toString(16).padStart(2, '0')).join('')
+      await bucket.put(`bridge/${this._pid}/${hash}`, code)
+      const [have] = [...this.ctx.storage.sql.exec("SELECT id, bridge FROM connections WHERE name = ? AND level = 'project' AND removed_at IS NULL", name)] as any[]
+      // ONE-TIME (removed in the next commit): the connections that lived on the engines' disks, moved here with their
+      // settings and secrets.
+      if (body.connector && connectorById(String(body.connector))) {
+        const master = (this.env as any).CREDENTIALS_MASTER_KEY
+        const sealed = body.secrets && Object.keys(body.secrets).length ? await seal(JSON.stringify(body.secrets), master) : null
+        const id = have?.id ?? `con_${crypto.randomUUID().slice(0, 12)}`
+        if (!have) this.ctx.storage.sql.exec("INSERT INTO connections (id, connector, name, level, owner, settings, secrets_sealed, created_by, created_at, bridge) VALUES (?, ?, ?, 'project', 'project', ?, ?, 'engine', ?, ?)", id, String(body.connector), name, JSON.stringify(body.settings ?? {}), sealed, new Date().toISOString(), hash)
+        else this.ctx.storage.sql.exec('UPDATE connections SET connector = ?, settings = ?, secrets_sealed = ?, bridge = ? WHERE id = ?', String(body.connector), JSON.stringify(body.settings ?? {}), sealed, hash, id)
+        this.sendToRole('code-engine', { t: 'connections:changed' })
+        return json({ name, bridge: hash, moved: true })
+      }
+      if (have) this.ctx.storage.sql.exec('UPDATE connections SET bridge = ? WHERE id = ?', hash, have.id)
+      else this.ctx.storage.sql.exec("INSERT INTO connections (id, connector, name, level, owner, settings, secrets_sealed, created_by, created_at, bridge) VALUES (?, 'code', ?, 'project', 'project', '{}', NULL, 'engine', ?, ?)",
+        `con_${crypto.randomUUID().slice(0, 12)}`, name, new Date().toISOString(), hash)
+      this.audit.record({ actor: { kind: 'engine', id: 'engine' }, via: 'engine', action: 'connection.bridge', target: name, outcome: 'ok', detail: { bridge: hash, made: !have } })
+      if (!have || have.bridge !== hash) this.sendToRole('code-engine', { t: 'connections:changed' })
+      return json({ name, bridge: hash, changed: !have || have.bridge !== hash })
+    }
+    return json({ error: 'not found' }, 404)
+  }
+
   // ── Usage and credits (metering.ts) ───────────────────────────────────────
   private prices: { at: number; list: Price[] } | null = null
   private async priceList(): Promise<Price[]> {
@@ -1120,11 +1183,14 @@ export class ProjectDO extends DurableObject<Env> {
   // ── Connections to other systems (shared/connectors.ts) ────────────────────
   /** Connections a person may see: the project's shared ones and their own; never a secret. An admin sees all. */
   private connectionRows(who: string | null, admin: boolean) {
+    const ready = new Map(([...this.ctx.storage.sql.exec('SELECT * FROM engine_sources')] as any[]).map((e) => [String(e.id), e]))
     return ([...this.ctx.storage.sql.exec('SELECT id, connector, name, level, owner, settings, created_by, created_at FROM connections WHERE removed_at IS NULL ORDER BY created_at')] as any[])
-      .filter((r) => admin || r.level === 'project' || r.owner === who).map((r) => ({ ...r, settings: JSON.parse(r.settings), runs: connectorById(r.connector)?.runs ?? 'api', runnable: !!connectorById(r.connector)?.bridge || ['api', 'cloud'].includes(connectorById(r.connector)?.runs ?? ''), origin: 'platform' }))
-      // and the code connectors the engine runs — the same thing, configured on the engine
-      .concat(([...this.ctx.storage.sql.exec('SELECT * FROM engine_sources ORDER BY id')] as any[]).map((e) => ({ id: `engine:${e.id}`, connector: e.dialect ?? e.kind ?? 'source', name: e.id, level: 'project', owner: 'project',
-        settings: { kind: e.kind, dialect: e.dialect, description: e.description }, created_by: 'engine', created_at: e.reported_at, runs: 'code', runnable: !!e.ready, origin: 'engine' })))
+      .filter((r) => admin || r.level === 'project' || r.owner === who).map((r) => {
+        const runs = connectorById(r.connector)?.runs ?? 'api'
+        // a code connection runs on the engine: runnable when the engine says its source is ready
+        const ran = runs === 'code' ? ready.get(r.name) : undefined
+        return { ...r, settings: JSON.parse(r.settings), runs, runnable: runs === 'code' ? !!ran?.ready : ['api', 'cloud'].includes(runs), ...(ran ? { source: { kind: ran.kind, dialect: ran.dialect, description: ran.description } } : {}), origin: 'platform' }
+      })
   }
   private async connectionsApi(request: Request, path: string): Promise<Response> {
     const url = new URL(request.url)
@@ -1154,6 +1220,7 @@ export class ProjectDO extends DurableObject<Env> {
       this.ctx.storage.sql.exec('INSERT INTO connections (id, connector, name, level, owner, settings, secrets_sealed, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
         id, c.id, name, level, level === 'user' ? who : 'project', JSON.stringify(settings), Object.keys(secrets).length ? await seal(JSON.stringify(secrets), master) : null, email, new Date().toISOString())
       this.audit.record({ actor, via: 'ui', action: 'connection.create', target: id, outcome: 'ok', detail: { connector: c.id, name, level, settings } })   // never the secrets
+      if (c.runs === 'code') this.sendToRole('code-engine', { t: 'connections:changed' })
       return this.j({ connection: { id, connector: c.id, name, level, settings, runnable: !!c.bridge || c.runs === 'cloud' } }, 201)
     }
     const m = path.match(/^\/connections\/(con_[\w-]+)$/)
@@ -1163,6 +1230,7 @@ export class ProjectDO extends DurableObject<Env> {
       if (!admin && r.owner !== who) return this.j({ error: 'only its owner, or someone with project.data, removes a connection' }, 403)
       this.ctx.storage.sql.exec('UPDATE connections SET removed_at = ?, removed_by = ? WHERE id = ?', new Date().toISOString(), email, m[1])
       this.audit.record({ actor, via: 'ui', action: 'connection.remove', target: m[1], outcome: 'ok' })
+      this.sendToRole('code-engine', { t: 'connections:changed' })
       return this.j({ removed: m[1] })
     }
     return this.j({ error: 'not found' }, 404)

@@ -11,7 +11,7 @@ writes SuiteQL (not HTTP). You write a bridge that authenticates, runs SuiteQL, 
 - **Query:** `POST https://<ACCOUNT>.suitetalk.api.netsuite.com/services/rest/query/v1/suiteql?limit=1000&offset=N`
   with header **`prefer: transient`** and body `{ "q": <sql> }`; **page while `hasMore`** (accumulate all rows).
 - **Introspect:** `SELECT * FROM oa_tables` (SuiteQL's own catalog).
-- Creds in the source's `.env` (`NETSUITE_ACCOUNT`, `NETSUITE_CLIENT_ID`, `NETSUITE_CERT_ID`, `NETSUITE_PRIVATE_KEY_PATH`); read via `process.env`, never hardcode.
+- Creds are the connection's (the NetSuite connector in the console: `settings.account`, `settings.clientId`, `settings.certId`, `secrets.privateKey` — the PEM itself), given to `createBridge({ settings, secrets })`; never hardcode.
 
 ## Common issues (do these every time)
 - **Strip per-row metadata.** SuiteQL returns a `links` field on every row — `delete row.links` before returning, so rows are clean data.

@@ -6,12 +6,12 @@
 //
 // The manager routes by `id` to a BRIDGE loaded in-process. A bridge owns the connection to its
 // remote source (e.g. a bridge that holds the WebSocket to a remote database). Adding a source
-// = add a bridge to the registry below; nothing else in the system changes. Local port only —
+// = the engine registers its bridge (POST /sources, from the platform's connections). Local port only —
 // callers (ICA units, the semantic-model agent) never see a database, port, or credential.
 
 import http from 'node:http'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
+
 import { dirname, join, isAbsolute } from 'node:path'
 import { sqlSignature, rewriteSqlDetailed, analyzeSql } from './sqlglot-pool.js'
 import { QueryCache, cacheKey } from './query-cache.js'
@@ -79,7 +79,6 @@ const PORT = Number(process.env.DATASOURCE_PORT ?? process.env.MANAGER_PORT ?? 4
 // Dynamically-registered sources (from the connector agent) persist here (id → absolute bridge path) so they
 // survive a restart. On Fly, point DATASOURCE_DATA_DIR at the mounted volume.
 const DATA_DIR = process.env.DATASOURCE_DATA_DIR ?? join(dirname(fileURLToPath(import.meta.url)), '..', '.data')
-const REGISTRY_FILE = join(DATA_DIR, 'registry.json')
 const cache = new QueryCache(process.env.QUERY_CACHE_FILE ?? join(DATA_DIR, 'query-results.sqlite'))
 
 // A Bridge knows WHAT it is (kind/dialect) so the agent can write the right query, and HOW to run
@@ -101,57 +100,38 @@ interface Bridge {
   close?(): void
 }
 
-// Registry: dataSourceId → the bridge module to load. The source of truth is registry.json (in
-// DATASOURCE_DATA_DIR) — what the connector agent registers, per project, persisted on the volume. An
-// optional SOURCES env can still seed static sources (JSON: {"id":"/abs/path/bridge.mjs"}); it's MERGED with
-// registry.json (dynamic overrides). A fresh box with neither = no sources (add them via the connector agent).
-const ENV_REGISTRY: Record<string, string> = process.env.SOURCES ? JSON.parse(process.env.SOURCES) : {}
-
+// The sources: registered by the engine, which downloads them from the platform (the project's connections: each one's
+// bridge, settings and secrets). Nothing is read from disk here and nothing is kept: the bridge's settings and secrets
+// are handed to it in memory (createBridge({ settings, secrets })), and a restarted manager is given its sources again.
 const bridges = new Map<string, Bridge>()
-
-const readDynamicRegistry = async (): Promise<Record<string, string>> => {
-  try { return JSON.parse(await readFile(REGISTRY_FILE, 'utf8')) } catch { return {} }
-}
-const writeDynamicRegistry = async (reg: Record<string, string>) => {
-  await mkdir(DATA_DIR, { recursive: true }); await writeFile(REGISTRY_FILE, JSON.stringify(reg, null, 2))
-}
+/** Each source's settings and secrets, as the engine gave them (POST /sources). */
+const configs = new Map<string, { settings: Record<string, unknown>; secrets: Record<string, string> }>()
 
 // Import a bridge module by path (absolute → file URL; else relative to this file). Cache-busted so a
 // re-registered (rewritten) bridge reloads fresh instead of returning the cached module.
-async function importBridge(rel: string): Promise<Bridge> {
+async function importBridge(rel: string, config: { settings: Record<string, unknown>; secrets: Record<string, string> }): Promise<Bridge> {
   const base = isAbsolute(rel) ? pathToFileURL(rel).href : new URL(rel, import.meta.url).href
   const mod: any = await import(`${base}?t=${Date.now()}`)
-  return mod.createBridge()
+  return mod.createBridge(config)
 }
 
-async function loadBridge(id: string, rel: string) {
-  const bridge = await importBridge(rel)
-  bridges.set(id, bridge)
-  console.log(`[datasource] loaded bridge "${id}" (${bridge.dialect ?? bridge.kind})`)
-}
-
-async function loadBridges() {
-  const merged = { ...ENV_REGISTRY, ...(await readDynamicRegistry()) }   // dynamic overrides env on conflict
-  for (const [id, rel] of Object.entries(merged)) {
-    try { await loadBridge(id, rel) } catch (e: any) { console.error(`[datasource] failed to load bridge "${id}": ${e?.message ?? e}`) }
-  }
-}
-
-// Register a bridge LIVE (called by the connector agent after it writes + wants to test one). Imports it into
-// the running process, persists it to registry.json, and returns its surfaced kind/dialect/ready. No restart.
-async function registerSource(id: string, path: string): Promise<{ ok: boolean; source?: any; error?: string }> {
+// Register a source LIVE: import its bridge into the running process with its settings and secrets. A source given
+// again (same id) replaces the old one; without a config, the one it was last given is kept (the connector agent
+// re-testing a bridge it rewrote).
+async function registerSource(id: string, path: string, config?: { settings?: Record<string, unknown>; secrets?: Record<string, string> }): Promise<{ ok: boolean; source?: any; error?: string }> {
   try {
-    await loadBridge(id, path)
-    const reg = await readDynamicRegistry(); reg[id] = path; await writeDynamicRegistry(reg)
-    const b = bridges.get(id)!
-    return { ok: true, source: { id, kind: b.kind, dialect: b.dialect, description: b.description, ready: b.ready() } }
+    const c = config ? { settings: config.settings ?? {}, secrets: config.secrets ?? {} } : configs.get(id) ?? { settings: {}, secrets: {} }
+    const bridge = await importBridge(path, c)
+    try { bridges.get(id)?.close?.() } catch { /* ignore */ }
+    bridges.set(id, bridge); configs.set(id, c)
+    console.log(`[datasource] loaded bridge "${id}" (${bridge.dialect ?? bridge.kind})`)
+    return { ok: true, source: { id, kind: bridge.kind, dialect: bridge.dialect, description: bridge.description, ready: bridge.ready() } }
   } catch (e: any) { return { ok: false, error: e?.message ?? String(e) } }
 }
 
 async function unregisterSource(id: string): Promise<{ ok: boolean }> {
   try { bridges.get(id)?.close?.() } catch { /* ignore */ }
-  bridges.delete(id)
-  const reg = await readDynamicRegistry(); delete reg[id]; await writeDynamicRegistry(reg)
+  bridges.delete(id); configs.delete(id)
   return { ok: true }
 }
 
@@ -181,8 +161,8 @@ const server = http.createServer(async (req, res) => {
   // Dynamic registration (the connector agent): add or remove a bridge live, no restart.
   if (req.method === 'POST' && url.pathname === '/sources') {
     let b: any; try { b = await readBody(req) } catch (e: any) { return send(res, 400, { error: e.message }) }
-    if (!b.id || !b.path) return send(res, 400, { error: 'body must have { id, path }' })
-    const r = await registerSource(String(b.id), String(b.path))
+    if (!b.id || !b.path) return send(res, 400, { error: 'body must have { id, path, config? }' })
+    const r = await registerSource(String(b.id), String(b.path), b.config)
     return send(res, r.ok ? 200 : 400, r)
   }
   if (req.method === 'DELETE' && url.pathname === '/sources') {
@@ -286,7 +266,7 @@ const server = http.createServer(async (req, res) => {
   }
 })
 
-await loadBridges()
+// No sources until the engine registers them (from the platform's connections).
 server.listen(PORT, '127.0.0.1', () => console.log(`[datasource-manager] http://127.0.0.1:${PORT} · sources: ${[...bridges.keys()].join(', ')}`))
 
 // Keep the URL helper import honest under noUnusedLocals-style linters.
