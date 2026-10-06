@@ -469,20 +469,6 @@ export default {
     // This fans out: every org's projects, then each project's own DO for the profile it has stored and the
     // one its engine last said it was running. Settled, not raced — a project whose DO is slow or whose engine
     // is asleep must appear in the list as exactly that, rather than removing the whole answer.
-    if (path === '/api/once-org-ids' && request.method === 'POST') {   // ONE-TIME, removed after
-      if (!(await requireSuperadmin(request, env))) return new Response('unauthorized', { status: 401 })
-      const g = env.GLOBAL.get(env.GLOBAL.idFromName('global'))
-      const orgs = await (await g.fetch(new Request('http://do/organizations'))).json() as any[]
-      const out: any[] = []
-      for (const o of orgs) {
-        const projects = await (await env.ORG.get(env.ORG.idFromName(o.id)).fetch(new Request('http://do/projects'))).json() as any[]
-        for (const pr of projects) {
-          const r = await env.PROJECT.get(env.PROJECT.idFromName(`proj:${pr.id}`)).fetch(new Request('http://do/once-org-id', { method: 'POST', body: JSON.stringify({ orgId: o.id }) }))
-          out.push({ org: o.name, project: pr.name, ...(await r.json() as any) })
-        }
-      }
-      return Response.json(out)
-    }
     if (path === '/api/profiles') {
       if (!(await requireSuperadmin(request, env))) return new Response('unauthorized', { status: 401 })
       const g = env.GLOBAL.get(env.GLOBAL.idFromName('global'))

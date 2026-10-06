@@ -67,8 +67,8 @@ function mayWrite(store: Store, actor: Actor, name: string): { ok: true } | { ok
 
 /** Make or change a node as this actor: a new node becomes theirs; an existing one only if they own it (or admin). */
 export function write(store: Store, actor: Actor, name: string, kind: Kind, body: unknown, ctx: { reason?: string; from?: string } = {}, place: { scope?: Scope } = {}) {
-  // A NEW node is named plainly; one that exists is changed under the name it has (domains made before the rule keep theirs).
-  if (!ownerOf(store, name) && !/^[\w][\w.-]{0,119}$/.test(name)) throw new GovernanceRefusal(`"${name}" is not a name: letters, digits, dots, dashes and underscores`)
+  // A name: letters, digits, spaces, dots, dashes, underscores and "/" — a domain's parts are named under it ("<domain>/<part>").
+  if (!/^[\w](?:[\w .\/-]{0,118}[\w.-])?$/.test(name) || name.includes('//')) throw new GovernanceRefusal(`"${name}" is not a name: letters, digits, spaces, dots, dashes, underscores and "/"`)
   const bad = checkBody(kind, body)
   if (bad.length) throw new GovernanceRefusal(bad.join('; '))
   const may = mayWrite(store, actor, name)

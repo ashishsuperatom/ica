@@ -436,12 +436,11 @@ function ProjectMoved() {
   const [lost, setLost] = useState(false)
   useEffect(() => {
     if (!token) return
-    // The project says which organisation owns it; one that does not know is found in the person's projects.
+    // The project says which organisation owns it.
     void (async () => {
       const rest = loc.pathname.replace(/^\/pro\/[^/]+/, '').replace(/^\/inspector\/composition$/, '/graph')
       const s: any = await api(`/projects/${projectId}/status`).then((r) => r.json()).catch(() => null)
-      let org: string | null = s?.orgId ?? null
-      if (!org) { const mine: any = await api('/me/projects').then((r) => r.json()).catch(() => null); org = (Array.isArray(mine) ? mine : []).find((o: any) => (o.projects ?? []).some((p: any) => p.id === projectId))?.org?.id ?? null }
+      const org: string | null = s?.orgId ?? null
       if (org) nav(`/o/${org}/p/${projectId}${rest}`, { replace: true }); else setLost(true)
     })()
   }, [token])   // eslint-disable-line react-hooks/exhaustive-deps
