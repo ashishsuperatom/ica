@@ -1627,6 +1627,9 @@ export class ProjectDO extends DurableObject<Env> {
         const t = String(inner?.t ?? '')
         const ok = sender.type === 'agent' ? keyAllows(sender.scopes ?? [], caps, t) : can(caps, messageNeeds(t))
         if (!ok) { this.auditMessage(sender, inner ?? {}, 'refused', `${t || 'this message'} is not allowed for you here`); hubReply({ t: 'error', source: 'hub', reason: `${t || 'this message'} is not allowed for you here`, reqId: inner?.reqId }); return }
+        // A message the platform answers itself (the graph, an app's publish, …) is handled here, whole; one for the engine
+        // goes on in its parts, in order.
+        if ((HUB_MESSAGES as readonly string[]).includes(t) || (t === 'inspect:req' && GRAPH_VIEWS.has(String(inner?.view)))) { await this.relay(senderWs, sender, { ...msg, payload: inner }); return }
         for (const f of held.frames.sort((a: any, b: any) => a.payload.part - b.payload.part)) { this.partsChecked.add(f); await this.relay(senderWs, sender, f) }
         return
       }

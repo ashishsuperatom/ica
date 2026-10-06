@@ -150,4 +150,13 @@ describe('the composition graph, held by the platform', () => {
     // governance holds for an engine's writes too: ana cannot change the agent's concept through one
     await expect(a.replica.write({ id: 'user:ana', admin: false, scopes: ['user:ana'] }, [{ name: 'settlement', kind: 'concept', body: concept('x'), reason: 'y' }])).rejects.toThrow(/suggest the change instead/)
   })
+  it('a large graph message, sent in parts, is joined and answered by the platform', async () => {
+    const whole = JSON.stringify({ t: 'graph:concept', name: 'long-note', body: concept('x'.repeat(5000)), reqId: 'parts1' })
+    const half = Math.ceil(whole.length / 2)
+    for (const [i, data] of [whole.slice(0, half), whole.slice(half)].entries()) admin.ws.send(JSON.stringify({ to: { type: 'code-engine' }, payload: { t: 'part', id: 'p1', part: i, of: 2, data } }))
+    const r = (await admin.until((m) => m.payload?.reqId === 'parts1')).payload
+    expect(r.t).toBe('graph:reply')
+    expect(r.node.name).toBe('long-note')
+  })
+
 })
