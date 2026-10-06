@@ -1030,6 +1030,8 @@ export class ProjectDO extends DurableObject<Env> {
     const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
     const key = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
     if (!key || !this.keyMatches(key)) return json({ error: 'only this project\'s engine' }, 401)
+    // ONE-TIME (removed in the next commit): the two apps that lived on the engines' disks, published here once.
+    if (path === '/engine/app' && request.method === 'PUT') { try { return json(await this.publishApp(((await request.json()) as any).files, 'one-off move')) } catch (e: any) { return json({ error: e?.message ?? String(e) }, 400) } }
     if (path === '/engine/app') { const [cur] = [...this.ctx.storage.sql.exec('SELECT hash, at, by FROM app_versions ORDER BY rowid DESC LIMIT 1')] as any[]; return json({ app: cur ?? null }) }
     const hash = path.slice('/engine/app/'.length)
     const o = await ((this.env as any).PACKAGES as R2Bucket).get(`app/${this._pid}/${hash}`)
