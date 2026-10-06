@@ -20,4 +20,7 @@ export default defineConfig({
     dedupe: ['react', 'react-dom', '@iconify/react', 'echarts', 'echarts-for-react', 'marked'],
   },
   build: { outDir: 'dist/client/admin', emptyOutDir: true },
+  // Dev (`vite`, scripts/ui-dev.sh): the console on :5175 with hot reload against the live platform — its socket goes
+  // to wss://superatom.site already; /api is forwarded there.
+  server: { port: 5175, proxy: { '/api': { target: process.env.VITE_API_PROXY || 'https://superatom.site', changeOrigin: true, secure: true } } },
 })
