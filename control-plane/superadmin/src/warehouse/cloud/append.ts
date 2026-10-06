@@ -134,7 +134,8 @@ export async function appendRows(catalog: IcebergCatalog, store: ObjectStore, na
       { 'snapshot-id': snap, 'parent-snapshot-id': parent ?? 'null', 'sequence-number': String(seq), 'format-version': '2' })
     const listPath = `${loc}/metadata/snap-${snap}-${attempt}-${uuid}.avro`
     await store.put(keyOf(listPath, store), list)
-    const total = (meta.snapshots ?? []).find((s) => String(s['snapshot-id']) === parent)?.summary?.['total-records']
+    // The table's rows so far: none before its first append; otherwise what the parent snapshot counted (if it did).
+    const total = parent ? (meta.snapshots ?? []).find((s) => String(s['snapshot-id']) === parent)?.summary?.['total-records'] : '0'
     const snapshot = { 'snapshot-id': snap, ...(parent ? { 'parent-snapshot-id': parent } : {}), 'sequence-number': seq, 'timestamp-ms': Date.now(), 'manifest-list': listPath, 'schema-id': schema['schema-id'],
       summary: { operation: 'append', 'added-data-files': '1', 'added-records': String(rows.length), 'added-files-size': String(data.length), ...(total !== undefined ? { 'total-records': String(Number(total) + rows.length) } : {}) } }
     try {

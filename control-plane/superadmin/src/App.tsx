@@ -10,6 +10,7 @@ import { GroupsPanel } from './Groups'
 import { WarehousePanel } from './Warehouse'
 import { OrgPeoplePanel, OrgKeysPanel, ProjectAccessPanel } from './People'
 import { CompositionGraph } from './CompositionGraph'
+import { ProjectWarehouse } from './ProjectWarehouse'
 import { BillingPanel } from './Billing'
 import { UsagePanel } from './Usage'
 import { useProjectHub } from './hub'
@@ -265,6 +266,7 @@ function purposesOf(): { key: string; title: string; places: Place[] }[] {
       { slug: 'inspector/questions', label: 'Questions', icon: 'lucide:message-circle-question', says: 'Every question and the agent it went to.', needs: 'project.manage' },
       { slug: 'inspector/sessions', label: 'Sessions', icon: 'lucide:messages-square', says: 'Each chat made from the graph, and what changed since.', needs: 'project.manage' }] },
     { key: 'data', title: 'Data', places: [
+      { slug: 'warehouse', label: 'Warehouse', icon: 'lucide:warehouse', says: 'The organisation\'s tables granted to this project: rows, columns, values.', needs: 'warehouse.use' },
       { slug: 'index', label: 'Data index', icon: 'lucide:table-properties', says: 'Every source, its tables and fields.', needs: 'project.manage' },
       { slug: 'inspector/grounding', label: 'Grounding', icon: 'lucide:anchor', says: 'Names people use, matched to the records they mean.', needs: 'project.manage' },
       { slug: 'inspector/index', label: 'Datasource index', icon: 'lucide:list-tree', says: 'What the engine indexed of each source.', needs: 'project.manage' },
@@ -361,7 +363,7 @@ function Console() {
     ...(project ? [{ key: 'project', label: projectName, icon: 'lucide:folder-kanban', onClick: () => nav(P('')), choices: projects.map((p) => ({ key: p.id, label: p.name, icon: 'lucide:folder', active: p.id === project, onClick: () => nav(`/o/${org}/p/${p.id}`) })) }] : []),
     { key: 'place', label: placeLabel },
   ]
-  const full = layer === 'project' && place === 'graph'
+  const full = (layer === 'project' && (place === 'graph' || place === 'warehouse')) || (layer === 'org' && place === 'warehouse')
   return (
     <>
       <Style />
@@ -379,6 +381,7 @@ function Console() {
               <Route path="/models" element={<ModelsPage />} />
               <Route path="/credentials" element={<CredentialsPage />} />
               <Route path="/o/:orgId/p/:projectId/graph" element={<CompositionGraph projectId={project ?? ''} token={token} />} />
+              <Route path="/o/:orgId/p/:projectId/warehouse" element={<ProjectWarehouse key={project ?? ''} projectId={project ?? ''} token={token} />} />
               <Route path="/o/:orgId/p/:projectId/attention" element={<AttentionPage key={project ?? ''} projectId={project ?? undefined} />} />
               <Route path="/o/:orgId/p/:projectId/*" element={<ProjectDetailPage />} />
               <Route path="/o/:orgId/:tab?" element={<OrgDetailPage />} />
@@ -757,6 +760,9 @@ function OrgDetailPage() {
     setRot({ ...rot, done: true })
   }
 
+  // The warehouse is the whole page: the explorer, with everything else beside its tables.
+  if (tab === 'warehouse') return <WarehousePanel api={api} projects={projects.filter((p: any) => !p.deleted).map((p: any) => ({ id: p.id, name: p.name }))} keys={<OrgKeysPanel api={api} />} />
+
   return (
     <Shell>
       {conn && (() => {
@@ -841,7 +847,6 @@ function OrgDetailPage() {
 
       {tab === 'usage' && <UsagePanel api={api} />}
       {tab === 'billing' && <BillingPanel api={api} />}
-      {tab === 'warehouse' && <><WarehousePanel api={api} projects={projects.filter((p: any) => !p.deleted).map((p: any) => ({ id: p.id, name: p.name }))} /><OrgKeysPanel api={api} /></>}
       {tab === 'users' && <OrgPeoplePanel api={api} />}
 
       {/* Deleting an ORGANISATION is a platform act — the customer console never offers it, and the API refuses

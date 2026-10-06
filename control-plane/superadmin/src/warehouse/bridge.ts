@@ -11,7 +11,11 @@
 export type ColumnType = 'string' | 'long' | 'int' | 'double' | 'float' | 'boolean' | 'date' | 'timestamptz' | 'timestamp'
 export const COLUMN_TYPES: ColumnType[] = ['string', 'long', 'int', 'double', 'float', 'boolean', 'date', 'timestamptz', 'timestamp']
 export interface Column { name: string; type: ColumnType; required?: boolean }
-export interface TableInfo { name: string; columns: Column[] }
+export interface TableInfo {
+  name: string; columns: Column[]
+  /** Rows as the current snapshot counts them (absent when it did not count), and when it was written. */
+  rows?: number; appended?: number
+}
 export interface QueryResult { columns: string[]; rows: Record<string, unknown>[]; truncated: boolean }
 
 export interface DataSourceBridge {

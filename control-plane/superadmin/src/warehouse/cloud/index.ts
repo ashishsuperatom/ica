@@ -11,7 +11,10 @@ export interface CloudConfig { accountId: string; bucket: string; catalogToken: 
 
 const tableInfo = (name: string, m: TableMetadata): TableInfo => {
   const s = m.schemas.find((x) => x['schema-id'] === m['current-schema-id']) ?? m.schemas[0]
-  return { name, columns: (s?.fields ?? []).map((f) => ({ name: f.name, type: f.type as Column['type'], required: f.required })) }
+  const snap = (m.snapshots ?? []).find((x) => String(x['snapshot-id']) === String(m['current-snapshot-id']))
+  const total = snap?.summary?.['total-records']
+  return { name, columns: (s?.fields ?? []).map((f) => ({ name: f.name, type: f.type as Column['type'], required: f.required })),
+    ...(snap ? { appended: snap['timestamp-ms'] } : {}), ...(total !== undefined && Number.isFinite(Number(total)) ? { rows: Number(total) } : {}) }
 }
 
 export function cloudWarehouse(cfg: CloudConfig | null, store: ObjectStore | null, fetcher: typeof fetch = fetch): { bridge: DataSourceBridge & { queryAs: QueryAs }; ingest: Ingest } {

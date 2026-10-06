@@ -1501,7 +1501,7 @@ export class ProjectDO extends DurableObject<Env> {
       return
     }
     // ── The organisation's warehouse, as far as this project was granted (no engine needed) ──
-    if ((pl.t === 'warehouse:tables' || pl.t === 'warehouse:query' || pl.t === 'warehouse:append') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
+    if ((pl.t === 'warehouse:tables' || pl.t === 'warehouse:query' || pl.t === 'warehouse:explore' || pl.t === 'warehouse:append') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
       const who = this.principalOf(sender)
       try {
         if (!who) throw new Error('who is asking is not known')
@@ -1523,6 +1523,13 @@ export class ProjectDO extends DurableObject<Env> {
           if (!res.ok) throw new Error(out.error ?? `the warehouse answered ${res.status}`)
           this.audit.record({ actor: { kind: sender.type === 'agent' ? 'agent' : 'user', id: who, ...(sender.email ? { email: sender.email } : {}) }, via: sender.type === 'agent' ? 'agent' : 'ui', action: 'warehouse.append', target: table, outcome: 'ok', detail: { rows: out.rows ?? 0 } })
           hubReply({ t: 'warehouse:appended', ...out, reqId: pl.reqId })
+        } else if (pl.t === 'warehouse:explore') {
+          // The explorer over what this project was granted: the organisation makes the SQL and checks it against the grant.
+          const { t: _t, reqId: _r, ...req } = pl
+          const res = await orgDo.fetch(new Request('http://do/warehouse/explore', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-org': org }, body: JSON.stringify({ ...req, grant, project: this._pid, by: who }) }))
+          const out: any = await res.json()
+          if (!res.ok) throw new Error(out.error ?? `the warehouse answered ${res.status}`)
+          hubReply({ t: 'warehouse:explored', ...out, reqId: pl.reqId })
         } else {
           const res = await orgDo.fetch(new Request('http://do/warehouse/query', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-org': org }, body: JSON.stringify({ sql: pl.sql, limit: pl.limit, grant, project: this._pid, by: who }) }))
           const out: any = await res.json()

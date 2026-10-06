@@ -11,7 +11,7 @@ import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/
 import { ORG_MIGRATIONS } from './migrations.js'
 import { DurableObject } from 'cloudflare:workers'
 import { createRecorder } from './records.js'
-import { warehouse, WarehouseRefusal, type Grant } from './warehouse/index.js'
+import { warehouse, WarehouseRefusal, explore, ExploreRefusal, type Grant } from './warehouse/index.js'
 import { AgentKeys, KeyRefusal, ORG_KEYS } from './agent-keys.js'
 import { beyond, builtinRole, checkRole, isCapability, orgMessageAllowed, ORG_ADMINISTERS_PROJECTS, ORG_ROLES, type Capability } from '../../shared/permissions.js'
 import { SUPERADMIN_EMAILS } from './auth/tokens.js'
@@ -87,15 +87,43 @@ export class OrgDO extends DurableObject<Env> {
         new Date().toISOString(), op, o.tbl ?? null, o.project ?? null, o.rows ?? null, o.snapshot ?? null, o.ok ? 1 : 0, o.detail === undefined ? null : JSON.stringify(o.detail), o.by)
     const body: any = request.method === 'POST' ? await request.json().catch(() => ({})) : {}
     const by = String(body.by ?? 'platform')
+    // Who owns each table and what it is (warehouse_tables, the latest per table); a table made before owners were kept
+    // has none until one is set.
+    const owners = () => new Map(([...this.ctx.storage.sql.exec('SELECT w.tbl, w.owner, w.description, w.by, w.at FROM warehouse_tables w JOIN (SELECT tbl, MAX(seq) AS m FROM warehouse_tables GROUP BY tbl) x ON x.m = w.seq')] as any[]).map((r) => [String(r.tbl), r]))
+    const own = (tbl: string, owner: string, description: string) => this.ctx.storage.sql.exec('INSERT INTO warehouse_tables (tbl, owner, description, by, at) VALUES (?, ?, ?, ?, ?)', tbl, owner, description, by, new Date().toISOString())
     try {
       if (request.method === 'GET' && path === '/warehouse') {
-        const ops = [...this.ctx.storage.sql.exec('SELECT * FROM warehouse_ops ORDER BY seq DESC LIMIT 50')]
-        return json({ configured: bridge.configured, org, tables: bridge.configured ? await bridge.tables(org) : [], ops })
+        // The record of what was done; the explorer's reads are kept too, but not listed among the doings.
+        const ops = [...this.ctx.storage.sql.exec("SELECT * FROM warehouse_ops WHERE op != 'explore' ORDER BY seq DESC LIMIT 50")]
+        const o = owners()
+        const tables = bridge.configured ? (await bridge.tables(org)).map((t) => { const w = o.get(t.name); return { ...t, owner: w?.owner ?? null, description: w?.description ?? '' } }) : []
+        return json({ configured: bridge.configured, org, tables, ops })
       }
       if (request.method === 'POST' && path === '/warehouse/tables') {
         await ingest.createTable(org, { name: String(body.name ?? ''), columns: Array.isArray(body.columns) ? body.columns : [] })
+        own(String(body.name), String(body.owner || by), String(body.description ?? '').slice(0, 2000))
         log('create', { tbl: body.name, ok: true, detail: { columns: body.columns }, by })
         return json({ ok: true, table: body.name }, 201)
+      }
+      if (request.method === 'POST' && path === '/warehouse/owner') {
+        const tbl = String(body.table ?? ''), owner = String(body.owner ?? '').trim()
+        if (!(await bridge.describe(org, tbl))) throw new WarehouseRefusal(`there is no table "${tbl}"`)
+        if (!owner) throw new WarehouseRefusal('a table has an owner: a person (their email) or a project')
+        own(tbl, owner.slice(0, 200), String(body.description ?? '').slice(0, 2000))
+        log('owner', { tbl, ok: true, detail: { owner }, by })
+        return json({ ok: true, table: tbl, owner, description: String(body.description ?? '') })
+      }
+      if (request.method === 'POST' && path === '/warehouse/explore') {
+        // What may be read: 'all', or a project's grant — the explorer is given only those columns, and every query it
+        // makes is checked against the same grant again.
+        const grant: Grant | 'all' = body.grant === 'all' ? 'all' : (body.grant && typeof body.grant === 'object' ? body.grant : {})
+        const tbl = String(body.table ?? '')
+        const info = await bridge.describe(org, tbl)
+        if (!info || (grant !== 'all' && !(tbl in grant))) throw new WarehouseRefusal(`there is no table "${tbl}" you may read`)
+        const allowed = grant === 'all' || grant[tbl] === null ? info.columns : info.columns.filter((c) => (grant[tbl] as string[]).includes(c.name))
+        const out = await explore((sql, limit) => bridge.queryAs(org, sql, grant, { limit }), { ...info, columns: allowed }, body)
+        log('explore', { tbl, project: body.project ?? null, ok: true, detail: { op: body.op }, by })
+        return json(out)
       }
       if (request.method === 'POST' && path === '/warehouse/append') {
         const rows = Array.isArray(body.rows) ? body.rows : []
@@ -112,7 +140,7 @@ export class OrgDO extends DurableObject<Env> {
       }
       return json({ error: 'not found' }, 404)
     } catch (e: any) {
-      const refused = e instanceof WarehouseRefusal
+      const refused = e instanceof WarehouseRefusal || e instanceof ExploreRefusal
       log(path.split('/').pop() ?? 'op', { tbl: body.table ?? body.name ?? null, project: body.project ?? null, ok: false, detail: { error: String(e?.message ?? e).slice(0, 500), ...(body.sql ? { sql: String(body.sql).slice(0, 2000) } : {}) }, by })
       return json({ error: e?.message ?? String(e) }, refused ? 400 : 502)
     }
@@ -410,6 +438,7 @@ export class OrgDO extends DurableObject<Env> {
     const call = (path: string, body?: unknown) => this.warehouse(new Request(`http://do${path}`, body === undefined ? { headers } : { method: 'POST', headers, body: JSON.stringify({ ...(body as object), by }) }), path)
     if (t === 'warehouse:tables') return call('/warehouse')
     if (t === 'warehouse:query') return call('/warehouse/query', { sql: b.sql, limit: b.limit, grant: 'all' })
+    if (t === 'warehouse:explore') { const { t: _t, reqId: _r, ...req } = b; return call('/warehouse/explore', { ...req, grant: 'all' }) }
     if (t === 'warehouse:append') return call('/warehouse/append', { table: b.table, rows: b.rows })
     if (t === 'warehouse:create') return call('/warehouse/tables', { name: b.name, columns: b.columns })
     // A project's grant: the project must be this organisation's.

@@ -1136,8 +1136,39 @@ viewer, two places:** the organisation's Warehouse page (everything, for warehou
 (only its grant — tables and columns — through the same access check as every project query). The explorer's reads are
 structured (rows, values, profile, spread), turned into SQL by the platform from checked names only, then checked again
 by the warehouse's access check before Basin SQL runs them — never raw SQL from the page.
-*To verify first:* what Basin SQL accepts (subqueries, OFFSET, COUNT DISTINCT, quantiles, ILIKE, GROUP BY) — the
-explorer's reads are shaped by it — with a real table and sample rows.
+*Verified (2026-10-06, a 3,000-row probe table in the TotalGroup organisation):* Basin SQL takes GROUP BY with ORDER BY,
+COUNT(DISTINCT), ILIKE, CAST(… AS VARCHAR) LIKE (search over every column), MIN/MAX/AVG, `approx_percentile_cont` /
+`median` (quartiles), `date_trunc`, `floor` arithmetic (histogram buckets — `width_bucket` is missing), subqueries and
+window functions. **No OFFSET** — pages are `ROW_NUMBER() OVER (ORDER BY …)` in a subquery, or keyset (`WHERE id > last`).
+The probe found three faults of ours, fixed: a subquery's alias was refused; every query was wrapped in an outer SELECT
+for its row cap, which lost its ORDER BY (the cap is now the query's own LIMIT); headers carried the namespace.
+
+### Appending and partitioning in the warehouse (question, 2026-10-06)
+
+**In the user's words:** Parquet files are a one-time thing, a compression system — appending is not like a scale
+system, you cannot just append another row. So how exactly are we adding data incrementally — will that be a problem?
+How does it normally work in a Parquet file system? And have we thought properly about partitioning — there are many
+ways; in one system I partitioned by year and then month and inside that each table, or table and inside it year and
+month — everything partitioned by time. Is it done like that, or is there no partitioning and Apache Iceberg does it?
+
+*How it is today:* a Parquet file is never changed. Each append writes one new Parquet file with only those rows, a
+manifest naming it, a manifest list carrying every earlier manifest forward, and a commit to the catalog that makes the
+new snapshot current only if nobody committed in between. A table is a growing set of immutable files; a snapshot says
+which make it up (hence time travel). The tables are **unpartitioned**, and append refuses a partitioned table.
+*The risk:* many small appends → many small files, and a manifest list one entry longer per append. The cure is
+**compaction** (rewriting small files into few, as a new snapshot — readers never notice) and batching on the sending
+side. Whether R2 Data Catalog's compaction is switched on for our catalog is **not verified yet**.
+*Iceberg's partitioning:* a partition spec in the metadata (e.g. `month(shipped)`), not folders; each data file carries
+its partition value and per-column min/max in the manifest, so a query's WHERE skips files (hidden partitioning — no
+`year` column to filter on); the table is always the top level; the spec can change later without rewriting old files.
+*Proposal (not built):* unpartitioned until a table is large (min/max + compaction serve millions of rows; partitioning
+small tables multiplies small files); the maker of a big time-series table names its time column, the default spec
+`month(column)` (`day` for very high volume); append splits a batch by partition, one file each. Turn on and verify
+compaction first.
+
+**Decision (the user, 2026-10-06):** appending an immutable file n+1 is the standard way — beautiful. If Cloudflare's
+Iceberg catalog does the compaction for us, even better. No Hive-style layout: we go with today's industry standard,
+Iceberg, the way Cloudflare's catalog is made for — not our own scheme, nor something random found on the internet.
 
 ### The composition graph in columns (built 2026-10-06)
 

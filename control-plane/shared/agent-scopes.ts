@@ -6,7 +6,7 @@
 import { can, messageNeeds, type ProjectCapability } from './permissions.js'
 
 /** Messages the hub answers itself, from the platform's own records (no engine needed). */
-export const HUB_MESSAGES = ['session:list', 'session:read', 'program:list', 'program:publish', 'activity:list', 'decision:paths', 'decision:outcome', 'decision:states', 'decision:state', 'decision:change', 'decision:learn', 'artifact:record', 'artifact:decide', 'artifact:list', 'artifact:get', 'decision:register', 'warehouse:tables', 'warehouse:query', 'warehouse:append', 'connector:catalog', 'connector:test', 'connector:introspect', 'connector:read', 'connector:act', 'connector:run', 'connector:calls'] as const
+export const HUB_MESSAGES = ['session:list', 'session:read', 'program:list', 'program:publish', 'activity:list', 'decision:paths', 'decision:outcome', 'decision:states', 'decision:state', 'decision:change', 'decision:learn', 'artifact:record', 'artifact:decide', 'artifact:list', 'artifact:get', 'decision:register', 'warehouse:tables', 'warehouse:query', 'warehouse:explore', 'warehouse:append', 'connector:catalog', 'connector:test', 'connector:introspect', 'connector:read', 'connector:act', 'connector:run', 'connector:calls'] as const
 /** Messages every agent key may send, whatever its scopes: its own activities. */
 export const ALWAYS_ALLOWED = ['activity:list'] as const
 
@@ -23,7 +23,7 @@ export const AGENT_SCOPES = {
   /** The learning path: change decision states through their named operations. */
   learn: ['decision:states', 'decision:state', 'decision:change', 'decision:learn'],
   /** The organisation's warehouse, as far as this project was granted: its tables and columns, and SQL over them. */
-  warehouse: ['warehouse:tables', 'warehouse:query'],
+  warehouse: ['warehouse:tables', 'warehouse:query', 'warehouse:explore'],
   /** Append rows to the warehouse tables this project's grant makes writable. */
   'warehouse-write': ['warehouse:tables', 'warehouse:append'],
   /** The project's connections to other systems (connectors/): read what they offer, run actions (a change waits for a

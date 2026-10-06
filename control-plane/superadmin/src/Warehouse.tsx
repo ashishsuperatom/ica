@@ -1,13 +1,15 @@
-// THE ORGANISATION'S WAREHOUSE in the console: whether it is set up, its tables and their columns, making a table,
-// asking it in SQL, what each project may read of it, and what has been done to it. Drawn only with the semantic
-// components (@superatom/ui); every call goes to /api/warehouse (the organisation's administrator).
+// THE ORGANISATION'S WAREHOUSE in the console: the explorer over its tables (the whole page — tables, rows, columns
+// profiled), and around it what the reader's warehouse capabilities let them do: make a table, add rows, set a table's
+// owner, grant tables to projects, ask in SQL, read the record, and the organisation's keys. Drawn only with the
+// semantic components (@superatom/ui); every call goes to /api/warehouse, checked by the organisation.
 
-import { useCallback, useEffect, useState } from 'react'
-import { Section, RecordList, Form, Field, Choices, Notice, Status, Code, Empty, Toolbar, Receipt, ActionBar } from '@superatom/ui'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { Icon } from '@iconify/react'
+import { Section, RecordList, Form, Field, Choices, Notice, Status, Code, Toolbar, Receipt, ActionBar, Dialog, Explorer, notify, type ExplorerTable, type ExplorerRequest } from '@superatom/ui'
 
 type Api = (path: string, init?: RequestInit) => Promise<Response>
 type Column = { name: string; type: string; required?: boolean }
-type Table = { name: string; columns: Column[] }
+type Table = { name: string; columns: Column[]; rows?: number; appended?: number; owner?: string | null; description?: string }
 type Op = { seq: number; at: string; op: string; tbl: string | null; project: string | null; rows: number | null; ok: number; detail: string | null; by: string }
 const TYPES = ['string', 'long', 'int', 'double', 'float', 'boolean', 'date', 'timestamptz', 'timestamp']
 const when = (iso: string) => new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })
@@ -23,70 +25,93 @@ function columnsFrom(text: string): { columns: Column[]; problem?: string } {
   return { columns }
 }
 
-export function WarehousePanel({ api, projects }: { api: Api; projects: { id: string; name: string }[] }) {
-  const [state, setState] = useState<{ configured: boolean; tables: Table[]; ops: Op[] } | null>(null)
+export function WarehousePanel({ api, projects, keys }: { api: Api; projects: { id: string; name: string }[]; keys?: ReactNode }) {
+  const [state, setState] = useState<{ configured: boolean; tables: Table[]; ops: Op[]; caps: string[] } | null>(null)
   const [error, setError] = useState('')
+  const [dialog, setDialog] = useState<{ kind: 'new' } | { kind: 'rows' | 'owner'; table: Table } | null>(null)
   const load = useCallback(async () => {
     const r = await api('/warehouse'); const j: any = await r.json().catch(() => ({}))
-    if (!r.ok) { setError(j.error ?? `The warehouse answered ${r.status}`); setState({ configured: false, tables: [], ops: [] }); return }
-    setError(''); setState({ configured: !!j.configured, tables: j.tables ?? [], ops: j.ops ?? [] })
+    if (!r.ok) { setError(j.error ?? `The warehouse answered ${r.status}`); setState({ configured: false, tables: [], ops: [], caps: [] }); return }
+    setError(''); setState({ configured: !!j.configured, tables: j.tables ?? [], ops: j.ops ?? [], caps: j.capabilities ?? [] })
   }, [api])
   useEffect(() => { void load() }, [load])
-  // While it is read, the tables and the record are already in their places, as loading rows.
-  if (!state) return <div className="sa-stack sa-stack--4"><Tables tables={null} /><Operations ops={null} /></div>
+  const read = useCallback(async (req: ExplorerRequest) => {
+    const r = await api('/warehouse/explore', { method: 'POST', body: JSON.stringify(req) }); const j: any = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(j.error ?? `The warehouse answered ${r.status}`)
+    return j
+  }, [api])
+  const may = (c: string) => !!state?.caps.includes(c)
+  const tables: ExplorerTable[] | null = state ? state.tables.map((t) => ({ ...t, group: t.owner ? `Owned by ${t.owner}` : 'No owner set' })) : null
+  const places = [
+    ...(state?.configured && may('warehouse.query') ? [{ key: 'sql', label: 'Ask in SQL', icon: 'lucide:terminal-square', render: () => <Ask api={api} tables={state.tables} /> }] : []),
+    ...(state && state.tables.length > 0 && projects.length > 0 && may('warehouse.manage') ? [{ key: 'grants', label: 'What projects may read', icon: 'lucide:shield-check', render: () => <Grants api={api} tables={state.tables} projects={projects} /> }] : []),
+    ...(may('warehouse.query') || may('warehouse.manage') ? [{ key: 'record', label: 'What was done', icon: 'lucide:history', render: () => <Operations ops={state?.ops ?? null} /> }] : []),
+    ...(keys ? [{ key: 'keys', label: 'Organisation keys', icon: 'lucide:key-round', render: () => keys }] : []),
+  ]
   return (
-    <div className="sa-stack sa-stack--4">
+    <div className="sa-graphpage">
       {error && <Notice state="critical">{error}</Notice>}
-      {!state.configured && !error && (
+      {state && !state.configured && !error && (
         <Notice state="attention">The warehouse is not set up on this platform yet: it needs the catalog's account and bucket, its token, and the bucket bound for writing. Until then nothing can be made or asked here.</Notice>
       )}
-      <Tables tables={state.tables} />
-      {state.configured && <NewTable api={api} onMade={load} />}
-      {state.configured && state.tables.length > 0 && <AddRows api={api} tables={state.tables} onAdded={load} />}
-      {state.configured && state.tables.length > 0 && <Ask api={api} tables={state.tables} />}
-      {state.tables.length > 0 && projects.length > 0 && <Grants api={api} tables={state.tables} projects={projects} />}
-      <Operations ops={state.ops} />
+      <Explorer keep="org-warehouse" tables={tables} read={read} places={places}
+        empty={state?.configured ? 'No tables yet — make the first one.' : 'No tables.'}
+        tablesHead={state?.configured && may('warehouse.manage') ? <button className="sa-btn sa-btn--link" onClick={() => setDialog({ kind: 'new' })}><Icon icon="lucide:plus" className="sa-btn__icon" />New</button> : null}
+        actions={(t) => {
+          const table = state?.tables.find((x) => x.name === t.name)
+          if (!table) return null
+          return (<>
+            {may('warehouse.write') && <button className="sa-btn" onClick={() => setDialog({ kind: 'rows', table })}><Icon icon="lucide:list-plus" className="sa-btn__icon" />Add rows</button>}
+            {may('warehouse.manage') && <button className="sa-btn" onClick={() => setDialog({ kind: 'owner', table })}><Icon icon="lucide:user-round-pen" className="sa-btn__icon" />Owner</button>}
+          </>)
+        }} />
+      {dialog?.kind === 'new' && <NewTable api={api} onClose={() => setDialog(null)} onMade={() => { setDialog(null); void load() }} />}
+      {dialog?.kind === 'rows' && <AddRows api={api} table={dialog.table} onClose={() => setDialog(null)} onAdded={() => { setDialog(null); void load() }} />}
+      {dialog?.kind === 'owner' && <Owner api={api} table={dialog.table} projects={projects} onClose={() => setDialog(null)} onSaved={() => { setDialog(null); void load() }} />}
     </div>
   )
 }
 
-function Tables({ tables }: { tables: Table[] | null }) {
-  const [open, setOpen] = useState<string | null>(null)
-  const t = tables?.find((x) => x.name === open)
-  return (<>
-    <Section icon="lucide:database" title="Tables" subtitle="One warehouse for the organisation; each project reads only what it is granted.">
-      <RecordList rows={tables} keyOf={(x) => x.name} onRow={(x) => setOpen(x.name === open ? null : x.name)} empty="No tables yet."
-        columns={[{ key: 'name', label: 'Table', render: (x) => <Code>{x.name}</Code> }, { key: 'columns', label: 'Columns', align: 'end', render: (x) => x.columns.length }]} />
-    </Section>
-    {t && (
-      <Section icon="lucide:columns-3" title={t.name} subtitle="Its columns, as the catalog keeps them.">
-        <RecordList rows={t.columns} keyOf={(c) => c.name} columns={[
-          { key: 'name', label: 'Column', render: (c) => <Code>{c.name}</Code> }, { key: 'type', label: 'Type' },
-          { key: 'required', label: '', align: 'end', render: (c) => (c.required ? <Status state="neutral">required</Status> : null) },
-        ]} />
-      </Section>
-    )}
-  </>)
+/** Who owns a table — a person (their email) or a project — and what it is. */
+function Owner({ api, table, projects, onClose, onSaved }: { api: Api; table: Table; projects: { id: string; name: string }[]; onClose: () => void; onSaved: () => void }) {
+  const [owner, setOwner] = useState(table.owner ?? ''), [description, setDescription] = useState(table.description ?? ''), [error, setError] = useState('')
+  const save = async () => {
+    const r = await api('/warehouse/owner', { method: 'POST', body: JSON.stringify({ table: table.name, owner, description }) }); const j: any = await r.json().catch(() => ({}))
+    if (!r.ok) { setError(j.error ?? 'Not saved'); return }
+    notify(`${table.name}: owner saved`, 'note'); onSaved()
+  }
+  return (
+    <Dialog title={`Who owns ${table.name}`} onClose={onClose}>
+      <Form onSubmit={() => void save()} error={error} actions={<><button type="button" className="sa-btn" onClick={onClose}>Cancel</button><button className="sa-btn sa-btn--primary" disabled={!owner.trim()}>Save</button></>}>
+        <Field label="Owner" help="A person's email, or a project of the organisation.">
+          <input id="wh-owner" className="sa-input" list="wh-owner-projects" autoFocus value={owner} onChange={(e) => setOwner(e.target.value)} placeholder="name@company.com, or a project" />
+          <datalist id="wh-owner-projects">{projects.map((p) => <option key={p.id} value={`project:${p.name}`} />)}</datalist>
+        </Field>
+        <Field label="What it holds"><textarea id="wh-owner-desc" className="sa-input sa-input--area" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What one row is, where the rows come from, how often" /></Field>
+      </Form>
+    </Dialog>
+  )
 }
 
-function NewTable({ api, onMade }: { api: Api; onMade: () => void }) {
+function NewTable({ api, onClose, onMade }: { api: Api; onClose: () => void; onMade: () => void }) {
   const [name, setName] = useState(''); const [cols, setCols] = useState('id long required\nname string\nat timestamptz')
-  const [error, setError] = useState(''); const [made, setMade] = useState('')
+  const [description, setDescription] = useState('')
+  const [error, setError] = useState('')
   const make = async () => {
     const { columns, problem } = columnsFrom(cols)
     if (problem) { setError(problem); return }
-    const r = await api('/warehouse/tables', { method: 'POST', body: JSON.stringify({ name, columns }) }); const j: any = await r.json().catch(() => ({}))
+    const r = await api('/warehouse/tables', { method: 'POST', body: JSON.stringify({ name, columns, description }) }); const j: any = await r.json().catch(() => ({}))
     if (!r.ok) { setError(j.error ?? 'The table was not made'); return }
-    setError(''); setMade(name); setName(''); onMade()
+    notify(`${name} was made — you own it`, 'note'); onMade()
   }
   return (
-    <Section icon="lucide:table-2" title="Make a table" subtitle="Its columns, one per line: a name, a type, and “required” when every row must have it.">
-      {made && <div className="sa-section__body"><Notice state="ok">{made} was made. Rows are added by what sends them to it.</Notice></div>}
-      <Form onSubmit={() => void make()} error={error} actions={<button className="sa-btn sa-btn--primary">Make the table</button>}>
-        <Field label="Name" help="Lowercase letters, digits and _, starting with a letter."><input id="wh-name" className="sa-input" value={name} onChange={(e) => setName(e.target.value)} required pattern="[a-z][a-z0-9_]*" /></Field>
-        <Field label="Columns" help={`Types: ${TYPES.join(', ')}`}><textarea id="wh-cols" className="sa-input sa-input--area" rows={5} value={cols} onChange={(e) => setCols(e.target.value)} /></Field>
+    <Dialog title="Make a table" onClose={onClose}>
+      <Form onSubmit={() => void make()} error={error} actions={<><button type="button" className="sa-btn" onClick={onClose}>Cancel</button><button className="sa-btn sa-btn--primary">Make the table</button></>}>
+        <Field label="Name" help="Lowercase letters, digits and _, starting with a letter."><input id="wh-name" className="sa-input" autoFocus value={name} onChange={(e) => setName(e.target.value)} required pattern="[a-z][a-z0-9_]*" /></Field>
+        <Field label="Columns" help={`One per line: a name, a type, and “required” when every row must have it. Types: ${TYPES.join(', ')}`}><textarea id="wh-cols" className="sa-input sa-input--area sa-input--mono" rows={6} value={cols} onChange={(e) => setCols(e.target.value)} /></Field>
+        <Field label="What it holds"><textarea id="wh-desc" className="sa-input sa-input--area" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What one row is, where the rows come from" /></Field>
       </Form>
-    </Section>
+    </Dialog>
   )
 }
 
@@ -97,34 +122,26 @@ function sampleRows(t: Table): string {
 }
 
 /** Rows added by hand (a list of objects, one per row) — what a sender does, for trying a table out. */
-function AddRows({ api, tables, onAdded }: { api: Api; tables: Table[]; onAdded: () => void }) {
-  const [table, setTable] = useState(tables[0].name)
-  const t = tables.find((x) => x.name === table) ?? tables[0]
-  const [text, setText] = useState(() => sampleRows(t))
-  const [error, setError] = useState(''); const [done, setDone] = useState(''); const [busy, setBusy] = useState(false)
+function AddRows({ api, table, onClose, onAdded }: { api: Api; table: Table; onClose: () => void; onAdded: () => void }) {
+  const [text, setText] = useState(() => sampleRows(table))
+  const [error, setError] = useState(''); const [busy, setBusy] = useState(false)
   const add = async () => {
-    setError(''); setDone('')
+    setError('')
     let rows: unknown
     try { rows = JSON.parse(text) } catch { setError('The rows are not JSON: write a list of objects, one per row.'); return }
     if (!Array.isArray(rows) || !rows.length) { setError('Write a list of rows, one object each.'); return }
     setBusy(true)
-    const r = await api('/warehouse/append', { method: 'POST', body: JSON.stringify({ table, rows }) }); const j: any = await r.json().catch(() => ({}))
+    const r = await api('/warehouse/append', { method: 'POST', body: JSON.stringify({ table: table.name, rows }) }); const j: any = await r.json().catch(() => ({}))
     setBusy(false)
     if (!r.ok) { setError(j.error ?? 'The rows were not added'); return }
-    setDone(`${j.rows} row${j.rows === 1 ? '' : 's'} added to ${table}.`); onAdded()
+    notify(`${j.rows} row${j.rows === 1 ? '' : 's'} added to ${table.name}`, 'note'); onAdded()
   }
   return (
-    <Section icon="lucide:list-plus" title="Add rows" subtitle="Rows usually arrive from what sends them; here they can be added by hand to try a table out.">
-      {done && <div className="sa-section__body"><Notice state="ok">{done}</Notice></div>}
-      <Form onSubmit={() => void add()} error={error} actions={<button className="sa-btn sa-btn--primary" disabled={busy}>{busy ? 'Adding…' : 'Add the rows'}</button>}>
-        <Field label="Table">
-          <select id="wh-rows-table" className="sa-input" value={table} onChange={(e) => { setTable(e.target.value); const nt = tables.find((x) => x.name === e.target.value); if (nt) setText(sampleRows(nt)) }}>
-            {tables.map((x) => <option key={x.name} value={x.name}>{x.name}</option>)}
-          </select>
-        </Field>
-        <Field label="Rows" help="A JSON list, one object per row, its keys the table's columns."><textarea id="wh-rows" className="sa-input sa-input--area sa-input--mono" rows={7} value={text} onChange={(e) => setText(e.target.value)} /></Field>
+    <Dialog title={`Add rows to ${table.name}`} onClose={onClose}>
+      <Form onSubmit={() => void add()} error={error} actions={<><button type="button" className="sa-btn" onClick={onClose}>Cancel</button><button className="sa-btn sa-btn--primary" disabled={busy}>{busy ? 'Adding…' : 'Add the rows'}</button></>}>
+        <Field label="Rows" help="A JSON list, one object per row, its keys the table's columns. Rows usually arrive from what sends them, in batches; this is for trying a table out."><textarea id="wh-rows" className="sa-input sa-input--area sa-input--mono" rows={10} value={text} onChange={(e) => setText(e.target.value)} /></Field>
       </Form>
-    </Section>
+    </Dialog>
   )
 }
 

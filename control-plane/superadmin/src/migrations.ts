@@ -340,6 +340,14 @@ export const ORG_MIGRATIONS: Migration[] = [
     CREATE TRIGGER IF NOT EXISTS billing_no_update BEFORE UPDATE ON billing_details BEGIN SELECT RAISE(ABORT, 'billing details are append-only'); END;
     CREATE TRIGGER IF NOT EXISTS billing_no_delete BEFORE DELETE ON billing_details BEGIN SELECT RAISE(ABORT, 'billing details are append-only'); END;
   ` },
+  { id: 7, name: 'warehouse table owners', up: `
+    -- Who owns each warehouse table (a person, or a project) and what it is: kept by the organisation beside the catalog,
+    -- which knows only names and columns. Every change kept; the latest per table is in force.
+    CREATE TABLE IF NOT EXISTS warehouse_tables (seq INTEGER PRIMARY KEY AUTOINCREMENT, tbl TEXT NOT NULL, owner TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', by TEXT NOT NULL, at TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS warehouse_tables_tbl ON warehouse_tables (tbl, seq);
+    CREATE TRIGGER IF NOT EXISTS warehouse_tables_no_update BEFORE UPDATE ON warehouse_tables BEGIN SELECT RAISE(ABORT, 'warehouse table owners are append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS warehouse_tables_no_delete BEFORE DELETE ON warehouse_tables BEGIN SELECT RAISE(ABORT, 'warehouse table owners are append-only'); END;
+  ` },
 ]
 
 // ── GlobalDO ─────────────────────────────────────────────────────────────────────────────────────────────────────

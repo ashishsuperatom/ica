@@ -90,6 +90,7 @@ earlier block (--block) branches the session into a new thread. Values are JSON;
   sacli warehouse query "<sql>" [--limit <n>]          SQL over them (read-only; a project key reads its grant only)
   sacli warehouse append <table> [--rows '<json>' | --file <rows.json>]   rows (a JSON list; stdin when neither)
 With an organisation key (sak_org_…) made by someone who may manage the warehouse:
+  sacli warehouse explore <rows|values|profile|spread> <table> [--column c] [--q text] [--sort c --desc] [--page n --size n]
   sacli warehouse create <table> --column <name>:<type>[!] …   types: string long int double float boolean date
                                                               timestamp timestamptz; a ! makes the column required
   sacli warehouse grants --project <id>                what a project may read and write
@@ -131,7 +132,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
     const specific: ParseArgsConfig['options'] = cmd === 'session'
       ? { id: { type: 'string' }, 'as-of': { type: 'string' }, set: { type: 'string', multiple: true }, add: { type: 'string', multiple: true }, remove: { type: 'string', multiple: true },
           call: { type: 'string' }, param: { type: 'string', multiple: true }, act: { type: 'string' }, to: { type: 'string' }, block: { type: 'string' } }
-      : cmd === 'warehouse' ? { rows: { type: 'string' }, file: { type: 'string' }, limit: { type: 'string' }, column: { type: 'string', multiple: true }, project: { type: 'string' }, columns: { type: 'string' }, write: { type: 'boolean' } }
+      : cmd === 'warehouse' ? { rows: { type: 'string' }, file: { type: 'string' }, limit: { type: 'string' }, column: { type: 'string', multiple: true }, project: { type: 'string' }, columns: { type: 'string' }, write: { type: 'boolean' }, q: { type: 'string' }, sort: { type: 'string' }, desc: { type: 'boolean' }, page: { type: 'string' }, size: { type: 'string' } }
       : cmd === 'ask' ? { session: { type: 'string' } } : cmd === 'use' ? { here: { type: 'boolean' } } : cmd === 'call' ? { data: { type: 'string' } } : {}
     let parsed
     try { parsed = parseArgs({ args: argv, options: { ...GLOBAL, ...specific }, allowPositionals: true, strict: true }) }
@@ -189,6 +190,12 @@ export async function run(argv: string[], io: Io): Promise<number> {
     if (!key) throw new CliError(`no agent key — run 'sacli login' (profile "${profileName}"), or pass --key or $SACLI_KEY`, 3)
     const org = orgOfKey(key)
     if (!projectOfKey(key) && !org) throw new CliError('that is not an agent key (sak_<project>_<secret>, or sak_org_<org>_<secret>) — make one in the admin console', 3)
+    // The explorer's structured reads: sacli warehouse explore <rows|values|profile|spread> <table> [--column c] [--q text] [--sort c] [--desc] [--page n] [--size n]
+    const exploreReq = (args: string[]) => {
+      const [op, table] = args
+      if (!['rows', 'values', 'profile', 'spread'].includes(String(op)) || !table) throw new CliError('sacli warehouse explore <rows|values|profile|spread> <table> [--column c] [--q text] [--sort c] [--desc] [--page n] [--size n]', 2)
+      return { t: 'warehouse:explore', op, table, ...(o.column ? { column: String(Array.isArray(o.column) ? o.column[0] : o.column) } : {}), q: o.q ? String(o.q) : '', where: [], ...(o.sort ? { sort: String(o.sort), dir: o.desc ? 'desc' : 'asc' } : {}), page: o.page ? Number(o.page) : 1, size: o.size ? Number(o.size) : 50 }
+    }
     const rowsGiven = async (): Promise<unknown[]> => {
       let text = o.rows as string | undefined
       if (!text && o.file) { try { text = readFileSync(String(o.file), 'utf8') } catch (e: any) { throw new CliError(`cannot read ${o.file}: ${e.message}`, 2) } }
@@ -226,6 +233,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       const project = () => { if (!o.project) throw new CliError(`which project? --project <id>`, 2); return String(o.project) }
       if (sub === 'tables') { const r = await call({ t: 'warehouse:tables' }); out(r.configured === false ? 'the warehouse is not set up' : showTables(r.tables ?? []), r); return 0 }
       if (sub === 'query') { const sql = pos.slice(2).join(' ').trim(); if (!sql) throw new CliError('which SQL? sacli warehouse query "<sql>"', 2); const r = await call({ t: 'warehouse:query', sql, limit: o.limit ? Number(o.limit) : undefined }); out(showResult(r), r); return 0 }
+      if (sub === 'explore') { const r = await call(exploreReq(pos.slice(2))); out(JSON.stringify(r, null, 2), r); return 0 }
       if (sub === 'append') { const t = need(' --rows …'); const r = await call({ t: 'warehouse:append', table: t, rows: await rowsGiven() }); out(`appended ${r.rows} rows to ${t} (snapshot ${r.snapshot})`, r); return 0 }
       if (sub === 'create') {
         const t = need(' --column <name>:<type> …')
@@ -236,7 +244,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       if (sub === 'grants') { const r = await call({ t: 'warehouse:grants', project: project() }); out(Object.keys(r.grant ?? {}).length ? table(['table', 'columns', 'write'], Object.entries(r.grant).map(([t, c]: [string, any]) => [t, c === null ? 'all' : c.join(', '), (r.writable ?? []).includes(t) ? 'yes' : ''])) : 'this project was granted nothing', r); return 0 }
       if (sub === 'grant') { const t = need(' --project <id>'); const columns = o.columns ? String(o.columns).split(',').map((c) => c.trim()).filter(Boolean) : null; const r = await call({ t: 'warehouse:grant', project: project(), table: t, columns, write: !!o.write }); if (r.error) throw new CliError(r.error); out(`project ${o.project} may read ${columns ? columns.join(', ') + ' of ' : ''}${t}${o.write ? ' and append to it' : ''}`, r); return 0 }
       if (sub === 'revoke') { const t = need(' --project <id>'); const r = await call({ t: 'warehouse:revoke', project: project(), table: t }); out(`project ${o.project} may no longer read ${t}`, r); return 0 }
-      throw new CliError(`there is no 'warehouse ${sub ?? ''}' — tables, query, append, create, grants, grant or revoke`, 2)
+      throw new CliError(`there is no 'warehouse ${sub ?? ''}' — tables, query, explore, append, create, grants, grant or revoke`, 2)
     }
 
     if (cmd === 'status') {
@@ -329,6 +337,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       const wh = async (payload: Record<string, unknown>) => { const r = await hub!.request(payload, { timeoutMs }); if (r.t === 'warehouse:refused' || r.t === 'error') throw new CliError(r.reason ?? 'refused'); return r }
       if (sub === 'tables') { const r = await wh({ t: 'warehouse:tables' }); out(r.configured === false ? 'the warehouse is not set up' : showTables(r.tables ?? []), r); return 0 }
       if (sub === 'query') { const sql = pos.slice(2).join(' ').trim(); if (!sql) throw new CliError('which SQL? sacli warehouse query "<sql>"', 2); const r = await wh({ t: 'warehouse:query', sql, limit: o.limit ? Number(o.limit) : undefined }); out(showResult(r), r); return 0 }
+      if (sub === 'explore') { const r = await wh(exploreReq(pos.slice(2))); out(JSON.stringify(r, null, 2), r); return 0 }
       if (sub === 'append') { const t = pos[2]; if (!t) throw new CliError('which table? sacli warehouse append <table> --rows …', 2); const r = await wh({ t: 'warehouse:append', table: t, rows: await rowsGiven() }); out(`appended ${r.rows} rows to ${t} (snapshot ${r.snapshot})`, r); return 0 }
       if (['create', 'grants', 'grant', 'revoke'].includes(String(sub))) throw new CliError(`warehouse ${sub} is the organisation's: use an organisation key (sak_org_…), made in the admin console's Warehouse`, 2)
       throw new CliError(`there is no 'warehouse ${sub ?? ''}' — tables, query or append (create and grant with an organisation key)`, 2)

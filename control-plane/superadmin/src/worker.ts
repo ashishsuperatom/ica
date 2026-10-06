@@ -759,7 +759,7 @@ export default {
           return Response.json({ configured: r.configured, org: r.org, tables: sees ? r.tables : [], ops: can(oa.caps, 'warehouse.query') || can(oa.caps, 'warehouse.manage') ? r.ops : [], capabilities: oa.caps.filter((c) => c.startsWith('warehouse.')) })
         }
         if (request.method === 'GET') return org.fetch(new Request(`http://do${sub}`, { headers }))
-        const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by, ...(sub === '/warehouse/query' ? { grant: 'all' } : {}) })
+        const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by, ...(sub === '/warehouse/query' || sub === '/warehouse/explore' ? { grant: 'all' } : {}) })
         return org.fetch(new Request(`http://do${sub}`, { method: request.method, headers, body }))
       }
       // USAGE PER PERSON across the organisation's projects: what each of its people used (tokens, cache, credits), and
