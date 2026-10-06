@@ -283,7 +283,7 @@
 .sa-explorer__table [data-kind="number"] { text-align: right; font-variant-numeric: tabular-nums; }
 .sa-explorer__table .sa-explorer__no { position: sticky; left: 0; z-index: 1; min-width: 52px; text-align: right; font-size: var(--t-xs); color: var(--faint); background: var(--surface); font-variant-numeric: tabular-nums; cursor: default; }
 .sa-explorer__table th.sa-explorer__no { z-index: 2; background: var(--panel); }
-.sa-explorer__glyph { display: inline-block; width: 16px; font-size: var(--t-xs); font-weight: var(--w-regular, 400); color: var(--faint); }
+.sa-explorer__glyph { display: inline-block; width: 16px; margin-right: 2px; font-size: var(--t-xs); font-weight: var(--w-regular, 400); color: var(--faint); }
 .sa-explorer__null { color: var(--faint); font-style: italic; }
 .sa-explorer__error { color: var(--loss-ink); }
 .sa-explorer__pager { display: flex; align-items: center; gap: var(--sp-2); min-height: 40px; padding: 0 var(--sp-3) 0 var(--sp-4); border-top: 1px solid var(--line); flex-shrink: 0; flex-wrap: wrap; }
@@ -329,3 +329,4 @@
   .sa-explorer, .sa-explorer[data-profile="true"] { grid-template-columns: minmax(0, 1fr); grid-auto-rows: minmax(12rem, auto); overflow: auto; }
   .sa-explorer__tables, .sa-explorer__profile { border: 0; border-bottom: 1px solid var(--line); }
 }
+.sa-explorer__table th[data-kind="number"] .sa-explorer__glyph { width: auto; margin-right: var(--sp-1h); }

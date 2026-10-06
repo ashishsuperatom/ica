@@ -1113,7 +1113,7 @@ one savepoint. CLI: `composition-graph versions | version <name> --message … |
 `version`) to the GraphDO and back. The graph page shows the strip beside the search, a banner while viewing a version
 (read-only: nothing attached, detached, made or edited), **Make this the current graph** and **Back to now**.
 
-### The warehouse explorer (proposed, 2026-10-06)
+### The warehouse explorer (built, 2026-10-06)
 
 **In the user's words:** the warehouse view in the organisation is going to be a big one. Today there is a table list,
 make a table, what was done, and organisation keys. Look at slob's data section — a proper data warehousing UI: all the
@@ -1142,6 +1142,21 @@ COUNT(DISTINCT), ILIKE, CAST(… AS VARCHAR) LIKE (search over every column), MI
 window functions. **No OFFSET** — pages are `ROW_NUMBER() OVER (ORDER BY …)` in a subquery, or keyset (`WHERE id > last`).
 The probe found three faults of ours, fixed: a subquery's alias was refused; every query was wrapped in an outer SELECT
 for its row cap, which lost its ORDER BY (the cap is now the query's own LIMIT); headers carried the namespace.
+
+*Built:* the explorer is one framework component (`Explorer` in `@superatom/ui`) reading through one function with
+structured requests — `rows` (search across every column, value filters, sort, pages of 50–500 numbered by
+`ROW_NUMBER()` over the sort then every column, so a page is the same page each time), `values` (the 50 commonest),
+`profile` (every column in one read: distinct, empty, min/max, mean and quartiles for numbers, trues for booleans) and
+`spread` (twenty bins for numbers; days or months for dates). The organisation makes the SQL (`warehouse/explore.ts`)
+from names checked against the columns the reader may read, and the access check reads it again before Basin SQL runs
+it. **Through the Durable Objects, where the authorization is:** the organisation's page asks the OrgDO
+(`/warehouse/explore`, warehouse.query, grant 'all'); a project's Data → Warehouse asks its ProjectDO
+(`warehouse:explore`, warehouse.use), which adds the project's grant and asks the OrgDO. The Worker only routes.
+**Owners:** `warehouse_tables` in the OrgDO (append-only; the maker owns a new table; warehouse.manage changes it),
+tables grouped by owner on the left. The organisation's page is the explorer, the whole page; beside its tables:
+Ask in SQL, What projects may read, What was done (explorer reads are recorded but not listed there), Organisation
+keys; above a table's rows: Add rows, Owner. `sacli warehouse explore <op> <table>` gives agents the same reads.
+Later: views, versions and transformations (the semantic warehouse); a table's grant from its own head.
 
 ### Appending and partitioning in the warehouse (question, 2026-10-06)
 
