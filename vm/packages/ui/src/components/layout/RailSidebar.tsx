@@ -41,8 +41,10 @@ export default function RailSidebar({ name, places, current, foot, pinned, onPin
 }) {
   const phone = () => typeof window !== 'undefined' && window.innerWidth < 768
   // Whose panel is shown: where the person is, or the place last picked; on a page of no place (profile), the last one.
-  const [shown, setShown] = useState(current || places.find((p) => p.panel)?.key || '')
-  useEffect(() => { if (current) setShown(current) }, [current])
+  // Only a place with a panel can be shown: on a page of a place without one (about, connections), the last one stays.
+  const hasPanel = (k: string) => places.some((p) => p.key === k && p.panel)
+  const [shown, setShown] = useState(hasPanel(current) ? current : places.find((p) => p.panel)?.key ?? '')
+  useEffect(() => { if (hasPanel(current)) setShown(current) }, [current])   // eslint-disable-line react-hooks/exhaustive-deps
   const [peek, setPeek] = useState<string | null>(null)   // unpinned: the place whose panel is open over the page
   const leave = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const hold = () => clearTimeout(leave.current)
