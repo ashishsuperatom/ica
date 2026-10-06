@@ -86,13 +86,13 @@ export function render(domain: string, concepts: (ComposedConcept | ConceptBody)
 
 /** A domain composed from the store, as it is now or as it was at a moment. With a viewer's scopes, it holds only what
  *  they see: a concept in a group or user scope they are not in is left out; a domain they do not see is refused. */
-export function compose(store: Store, domain: string, asOf?: number, opts: { viewer?: Scope[] } = {}): Composition {
-  const d = store.get<DomainBody>(domain, asOf)
+export function compose(store: Store, domain: string, asOf?: number, opts: { viewer?: Scope[]; upto?: number } = {}): Composition {
+  const d = store.get<DomainBody>(domain, asOf, opts.upto)
   if (!d || d.kind !== 'domain') throw new Error(`there is no domain "${domain}"${asOf ? ` as of ${new Date(asOf).toISOString()}` : ''}`)
   if (opts.viewer && !visibleTo(d.scope, opts.viewer)) throw new Error(`there is no domain "${domain}" for this viewer`)
   const used: Record<string, string> = { [domain]: d.hash }
   const read = <B,>(name: string, kind: 'concept' | 'file' | 'setting', by = `domain "${domain}"`): B | null => {
-    const n = store.get<B>(name, asOf)
+    const n = store.get<B>(name, asOf, opts.upto)
     if (!n || n.kind !== kind) throw new Error(`${by} names ${kind} "${name}", which there is not`)
     if (opts.viewer && !visibleTo(n.scope, opts.viewer)) return null
     used[name] = n.hash
@@ -112,7 +112,7 @@ export function compose(store: Store, domain: string, asOf?: number, opts: { vie
 }
 
 /** The domains there are (or were at a moment), with what each covers — those a viewer's scopes see. */
-export function domains(store: Store, opts: { asOf?: number; viewer?: Scope[] } = {}): { name: string; capabilities: string[] }[] {
+export function domains(store: Store, opts: { asOf?: number; viewer?: Scope[]; upto?: number } = {}): { name: string; capabilities: string[] }[] {
   return store.names('domain', opts).map((n) => ({ name: n.name, capabilities: store.content<DomainBody>(n.hash).capabilities }))
 }
 

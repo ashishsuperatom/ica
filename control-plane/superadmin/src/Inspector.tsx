@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { Section as Panel, RecordList, Receipt, Status, Empty, Notice, Code, Figures, Kpi, Tabs, Toolbar, Icon, ViewToggle, useView, type StatusState } from '@superatom/ui'
 import type { Hub } from './hub'
-import { HistoryGraph, stepSays, stepWhen, type Step } from './GraphHistory'
+import { VersionGraph, when as publishedWhen, type Line, type DraftNode } from './GraphHistory'
 
 export type Section =
   | 'summary' | 'composition' | 'changes' | 'questions' | 'sessions' | 'grounding' | 'index' | 'files' | 'db' | 'logs'
@@ -310,22 +310,24 @@ function CompChanges({ hub, changes, go }: { hub: Hub; changes: any[]; go: (p: C
   )
 }
 
-/** The changes as the graph's history: each run of changes a version on its line; one picked shows what it touched. */
+/** The changes as the graph's versions: each published version on its line, the draft above; one picked shows what it touched. */
 function ChangesGraph({ hub, go }: { hub: Hub; go: (p: CompPick) => void }) {
-  const [steps, setSteps] = useState<Step[] | null>(null)
+  const [data, setData] = useState<{ versions: Line[]; published: string | null; draft: DraftNode[] } | null>(null)
   const [err, setErr] = useState('')
-  const [picked, setPicked] = useState<Step | null>(null)
-  useEffect(() => { void hub.call({ t: 'graph:versions' }).then((r) => { if (r?.t === 'graph:reply') setSteps(r.steps ?? []); else setErr(r?.reason ?? 'The history did not come') }).catch((e) => setErr(String(e?.message ?? e))) }, [hub])   // eslint-disable-line react-hooks/exhaustive-deps
+  const [picked, setPicked] = useState<Line | 'draft' | null>(null)
+  useEffect(() => { void hub.call({ t: 'graph:versions' }).then((r) => { if (r?.t === 'graph:reply') setData({ versions: r.versions ?? [], published: r.published ?? null, draft: r.draft ?? [] }); else setErr(r?.reason ?? 'The versions did not come') }).catch((e) => setErr(String(e?.message ?? e))) }, [hub])   // eslint-disable-line react-hooks/exhaustive-deps
   if (err) return <Notice state="critical">{err}</Notice>
-  if (!steps) return <Loading on />
+  if (!data) return <Loading on />
+  const names = picked === 'draft' ? data.draft.map((d) => d.name) : picked ? picked.names : []
   return (
     <div className="sa-stack sa-stack--3">
-      <HistoryGraph steps={steps} current={picked?.upto ?? null} onPick={(s) => setPicked(picked?.n === s.n ? null : s)} />
+      <VersionGraph versions={data.versions} published={data.published} draft={data.draft} current={picked === 'draft' ? null : picked?.name ?? '\u0000none'}
+        onPick={(v) => setPicked(v === null ? (picked === 'draft' ? null : 'draft') : picked !== 'draft' && picked?.name === v.name ? null : v)} />
       {picked && (
         <div className="sa-stack sa-stack--2">
-          <h3 className="sa-label">v{picked.n} · {stepWhen(picked.at)}</h3>
-          <p>{stepSays(picked)}</p>
-          <div className="sa-words">{picked.names.map((n) => <button key={n} className="sa-word" onClick={() => go({ kind: 'node', name: n })}>{n}</button>)}{picked.count > picked.names.length && <span className="sa-note">and {picked.count - picked.names.length} more changes</span>}</div>
+          <h3 className="sa-label">{picked === 'draft' ? 'The draft' : `${picked.name} · published ${publishedWhen(picked.at)}`}</h3>
+          {picked !== 'draft' && <p>{picked.message}</p>}
+          <div className="sa-words">{names.map((n) => <button key={n} className="sa-word" onClick={() => go({ kind: 'node', name: n })}>{n}</button>)}{picked !== 'draft' && picked.count > picked.names.length && <span className="sa-note">and more — {picked.count} changes in all</span>}</div>
         </div>
       )}
     </div>

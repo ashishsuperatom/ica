@@ -4,7 +4,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Store } from '../src/store.ts'
-import { governance as g, GovernanceRefusal, compose as composeDomain, nameVersion, restoreVersion, restoreStep, sinceLastVersion, steps } from '../src/index.ts'
+import { governance as g, GovernanceRefusal, compose as composeDomain, publishDraft, publishedUpto, draft, restoreVersion, versionLine, route } from '../src/index.ts'
 
 const fresh = () => new Store(join(mkdtempSync(join(tmpdir(), 'gov-')), 'composition.sqlite'))
 const ana = { id: 'user:ana' }, bo = { id: 'user:bo' }, bot = { id: 'agent:key_1' }, admin = { id: 'user:root', admin: true }
@@ -145,32 +145,40 @@ test('two levels: a domain composes intermediate concepts, an intermediate compo
   assert.doesNotMatch(composeDomain(s, 'pmo').text, /RAG is the worst/)
 })
 
-test('named versions: a name for a moment of the log; the graph read as of it; going back writes new changes', () => {
+test('edits are a draft; publishing makes the next version, which the agents read; discarding sets the draft back', () => {
   const s = fresh()
   g.write(s, admin, 'a', 'concept', text('first'))
   g.write(s, admin, 'd', 'domain', { capabilities: [], concepts: ['a'], files: [] })
-  assert.throws(() => nameVersion(s, ana, 'v1', 'x'), /may publish/)
-  assert.throws(() => nameVersion(s, admin, 'v1', ''), /says what it is/)
-  const v1 = nameVersion(s, admin, 'v1', 'the first shape')
-  assert.equal(v1.changes, 2)
-  assert.throws(() => nameVersion(s, admin, 'v1', 'again'), /already a version "v1"/)
+  assert.equal(publishedUpto(s), undefined)                                   // nothing published: the agents read the graph as it is
+  assert.throws(() => publishDraft(s, ana, 'x'), /may publish/)
+  assert.throws(() => publishDraft(s, admin, ''), /what changed/)
+  const v1 = publishDraft(s, admin, 'the first shape')
+  assert.equal(v1.name, 'v1')
+  assert.deepEqual(draft(s), [])
+  assert.throws(() => publishDraft(s, admin, 'again'), /nothing in the draft/)
   g.write(s, admin, 'a', 'concept', text('second'))
   g.write(s, admin, 'b', 'concept', text('new one'))
-  assert.equal(sinceLastVersion(s).length, 2)
-  const v2 = nameVersion(s, admin, 'v2', 'a and b')
-  assert.deepEqual(s.versions().map((v) => [v.name, v.changes]), [['v2', 2], ['v1', 2]])
-  // read as of v1
-  assert.equal((s.get('a', undefined, v1.upto)!.body as any).text, 'first')
-  assert.equal(s.get('b', undefined, v1.upto), null)
-  // back to v1: a set back, b taken away — as new changes, history kept
-  const before = s.lastChange()
+  assert.deepEqual(draft(s).map((x) => [x.name, x.was !== null, x.now !== null]), [['a', true, true], ['b', false, true]])
+  // the agents still read v1
+  assert.match(composeDomain(s, 'd', undefined, { upto: publishedUpto(s) }).text, /first/)
+  // discard: the draft is v1 again — nothing to publish, though the log grew
   assert.deepEqual(restoreVersion(s, admin, 'v1').sort(), ['a', 'b'])
-  assert.equal((s.get('a')!.body as any).text, 'first')
-  assert.equal(s.get('b'), null)
-  assert.ok(s.lastChange() > before)
-  assert.equal((s.get('a', undefined, v2.upto)!.body as any).text, 'second')   // v2 still reads as it was
-  assert.deepEqual(restoreVersion(s, admin, 'v1'), [])                // already there
+  assert.deepEqual(draft(s), [])
+  g.write(s, admin, 'a', 'concept', text('second'))
+  const v2 = publishDraft(s, admin, 'a rewritten')
+  assert.equal(v2.name, 'v2')
+  assert.match(composeDomain(s, 'd', undefined, { upto: publishedUpto(s) }).text, /second/)
+  assert.equal(route(s, 'second', publishedUpto(s)).ranked[0].domain, 'd')
   assert.throws(() => s.db.exec('DELETE FROM version'), /append-only/)
+})
+
+test('published versions form a tree: bringing an older one back and publishing starts a new line from it', () => {
+  const s = fresh()
+  g.write(s, admin, 'a', 'concept', text('A1')); publishDraft(s, admin, 'one')
+  g.write(s, admin, 'a', 'concept', text('A2')); publishDraft(s, admin, 'two')
+  restoreVersion(s, admin, 'v1'); g.write(s, admin, 'b', 'concept', text('B')); publishDraft(s, admin, 'from one again')
+  g.write(s, admin, 'c', 'concept', text('C')); publishDraft(s, admin, 'four')
+  assert.deepEqual(versionLine(s).map((v) => [v.name, v.parent, v.restoredFrom]), [['v1', null, null], ['v2', 'v1', null], ['v3', 'v1', 'v1'], ['v4', 'v3', null]])
 })
 
 test('a node made before names were plain keeps its name and can still be changed; a new one is named plainly', () => {
@@ -180,20 +188,4 @@ test('a node made before names were plain keeps its name and can still be change
   g.compose(s, ana, 'trips and money', 'a', {})
   assert.deepEqual((s.get('trips and money')!.body as any).concepts, ['a'])
   assert.throws(() => g.write(s, ana, 'another one', 'domain', { capabilities: [], concepts: [], files: [] }), /is not a name/)
-})
-
-test('every run of changes is a step; a going back branches from the step it went back to', () => {
-  const s = fresh()
-  g.write(s, admin, 'a', 'concept', text('A1')); g.write(s, admin, 'b', 'concept', text('B1'))   // step 1: one run
-  nameVersion(s, admin, 'v1', 'first')
-  g.write(s, admin, 'a', 'concept', text('A2'))                                                  // step 2
-  g.write(s, ana, 'c', 'concept', text('C1'))                                                    // step 3: someone else
-  restoreStep(s, admin, steps(s)[0].upto)                                                         // step 4: back to step 1
-  g.write(s, admin, 'b', 'concept', text('B2'))                                                  // step 5
-  const st = steps(s)
-  assert.deepEqual(st.map((x) => [x.n, x.parent, x.restoredTo, x.tags]), [[1, null, null, ['v1']], [2, 1, null, []], [3, 2, null, []], [4, 1, 1, []], [5, 4, null, []]])
-  assert.equal(st[0].count, 2)
-  assert.equal(s.get('c'), null)                                                                  // going back took c away
-  nameVersion(s, admin, 'old', 'the second step', st[1].upto)
-  assert.deepEqual(steps(s)[1].tags, ['old'])
 })

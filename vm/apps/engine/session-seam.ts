@@ -29,7 +29,7 @@ import { checkAgent, checkObject, checkOp, type AgentSpec, type Intent } from '@
 import { ProgramStore, ProgramError, loadPackage } from '@superatom/programs'
 import { createStateEngine, StateRefusal, type StateEngine } from '@superatom/state'
 import { createSessions, memoryLog, fileLog, history, replay, SessionRefusal, type SessionLog, type SessionView } from '@superatom/session'
-import { Store, governance as g, GovernanceRefusal } from '@superatom/composition-graph'
+import { Store, governance as g, GovernanceRefusal, publishedUpto } from '@superatom/composition-graph'
 import { cardOf } from './answer-card.js'
 import { whoIs, type Who } from './identity.js'
 import { asReader, currentReader, AccessRefusal } from './access.js'
@@ -182,14 +182,25 @@ export function createSessionSeam(d: SessionSeamDeps) {
     programs: n.body.programs ?? [], tools: n.body.tools ?? [], ...(n.body.start ? { start: n.body.start } : {}), ui: { start: n.body.ui?.start ?? '' }, ica: n.body.ica ?? 'composer', ...(n.body.isDefault ? { isDefault: true } : {}),
     look: { ...(n.body.icon ? { icon: n.body.icon } : {}), ...(n.body.accent ? { accent: n.body.accent } : {}), ...(n.body.says ? { says: n.body.says } : {}), ...(n.body.main?.label ? { main: { label: String(n.body.main.label), ...(n.body.main.says ? { says: String(n.body.main.says) } : {}) } } : {}) }, starts: Array.isArray(n.body.starts) ? n.body.starts : [],
   })
+  // What everyone sees is the graph's published version; an agent in a person's own scope (made from their session) is
+  // theirs at once, as it is now.
+  const agentNode = (s: Store, name: string) => {
+    const now = s.get(name)
+    const upto = publishedUpto(s)
+    if (upto === undefined || (now?.kind === 'agent' && now.scope.startsWith('user:'))) return now
+    return s.get(name, undefined, upto)
+  }
   function graphAgents(): AgentSpec[] {
     const s = graphStore(); if (!s) return []
-    return s.names('agent').map((x) => fromNode(s.get(x.name)!))
+    const upto = publishedUpto(s)
+    const names = new Set([...s.names('agent', upto === undefined ? {} : { upto }), ...s.names('agent').filter((x) => x.scope.startsWith('user:'))].map((x) => x.name))
+    return [...names].map((n) => agentNode(s, n)).filter((n): n is NonNullable<typeof n> => !!n && n.kind === 'agent').map(fromNode)
   }
 
   function readAgent(id: string): AgentSpec {
     if (!/^[\w-]+$/.test(id)) throw new SessionSeamRefusal(`"${id}" is not an agent id`)
-    const node = graphStore()?.get(id)
+    const gs = graphStore()
+    const node = gs ? agentNode(gs, id) : null
     if (node?.kind === 'agent') return fromNode(node)
     const file = join(agentsDir, `${id}.json`)
     if (!existsSync(file)) throw new SessionSeamRefusal(`there is no agent "${id}"`)

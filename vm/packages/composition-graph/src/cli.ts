@@ -11,9 +11,9 @@
 //   composition-graph concept <name> --title <t> --form composed [--text <line>] [--parts a,b]       an intermediate concept
 //   composition-graph join <domain|intermediate> <concept> [--at <position>]   attach a concept (an intermediate takes atomic ones)
 //   composition-graph leave <domain|intermediate> <concept>                    detach it (the concept stays in the graph)
-//   composition-graph versions                                       the named versions, and what changed since the last
-//   composition-graph version <name> --message <m>                   name the graph as it is now
-//   composition-graph restore <version>                              make the graph what it was at that version (new changes)
+//   composition-graph versions                                       the published versions, and what is in the draft
+//   composition-graph publish --message <m>                          publish the draft as the next version (the agents read it)
+//   composition-graph restore <version>                              set the draft to that version (new changes); publish to make it current
 //   composition-graph put <name> --kind concept|file|domain|setting --body <json|@file>   (a file: --kind file --text @<path>)
 //   composition-graph remove <name>
 //
@@ -30,7 +30,7 @@ import { pathToFileURL } from 'node:url'
 import { Store, type Kind } from './store.js'
 import { compose, domains } from './compose.js'
 import { compose as attach, write as governedWrite, GovernanceRefusal } from './governance.js'
-import { nameVersion, restoreVersion, sinceLastVersion } from './versions.js'
+import { publishDraft, restoreVersion, draft, published } from './versions.js'
 import { importDomains, type WrittenDomain, type WrittenSetting } from './import.js'
 import { verifyGraph, verifyAgainst, type Finding } from './verify.js'
 
@@ -86,16 +86,15 @@ if (command === 'domains') {
   said(from, operator(() => attach(store, { id: ctx.by, admin: true }, from, concept, { leave: true }, ctx.reason)))
 } else if (command === 'versions') {
   for (const v of store.versions()) console.log(`${v.name}\t${new Date(v.at).toISOString()}\t${v.by}\t${v.changes} changes\t${v.message}`)
-  const since = sinceLastVersion(store)
-  console.log(since.length ? `${since.length} change${since.length === 1 ? '' : 's'} since the last version` : 'nothing changed since the last version')
-} else if (command === 'version') {
-  const name = rest[0] ?? fail('version <name> --message <m>')
-  const v = operator(() => nameVersion(store, { id: ctx.by, admin: true }, name, text(flags.message) ?? ''))
-  console.log(`${v.name} → change ${v.upto} (${v.changes} changes)`)
+  const d = draft(store), p = published(store)
+  console.log(d.length ? `draft: ${d.length} node${d.length === 1 ? '' : 's'} differ from ${p?.name ?? 'nothing published yet'} — ${d.map((x) => x.name).join(', ')}` : `the draft is ${p?.name ?? 'empty'}`)
+} else if (command === 'publish') {
+  const v = operator(() => publishDraft(store, { id: ctx.by, admin: true }, text(flags.message) ?? ''))
+  console.log(`published ${v.name} → change ${v.upto} (${v.changes} changes)`)
 } else if (command === 'restore') {
   const name = rest[0] ?? fail('restore <version>')
   const changed = operator(() => restoreVersion(store, { id: ctx.by, admin: true }, name))
-  console.log(changed.length ? `back to ${name}: ${changed.join(', ')}` : `the graph is already ${name}`)
+  console.log(changed.length ? `the draft is ${name} again: ${changed.join(', ')} — publish to make it current` : `the draft already is ${name}`)
 } else if (command === 'show') {
   const n = store.get(rest[0] ?? fail('show <name>'), asOf) ?? fail(`there is no "${rest[0]}"${asOf ? ' at that moment' : ''}`)
   console.log(JSON.stringify({ name: n.name, kind: n.kind, hash: n.hash, body: n.body }, null, 2))
@@ -136,6 +135,6 @@ if (command === 'domains') {
   console.log(failed ? `${failed} failed, ${findings.length - failed} warnings` : `the graph holds together${typeof flags.against === 'string' ? ' and holds what the knowledge writes' : ''}${findings.length ? ` (${findings.length} warnings)` : ''}`)
   if (failed) process.exitCode = 1
 } else {
-  fail('commands: domains · names · show · history · changes · compose · concept · join · leave · put · remove · import · verify · versions · version · restore   (every change: --by --reason --from; writes: --scope --owner)')
+  fail('commands: domains · names · show · history · changes · compose · concept · join · leave · put · remove · import · verify · versions · publish · restore   (every change: --by --reason --from; writes: --scope --owner)')
 }
 store.close()

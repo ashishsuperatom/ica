@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
 import { Columns, ColumnsSearch, Dialog, markdownToHtml, Form, Field, Notice, Receipt, Code, Empty, Icon, notify, type ColumnItem, type ColumnSpec } from '@superatom/ui'
 import { useProjectHub } from './hub'
-import { HistoryGraph, stepSays, stepWhen, type Step } from './GraphHistory'
+import { VersionGraph, when, type Line, type DraftNode } from './GraphHistory'
 import { cached, keep } from './cache'
 
 type Body = Record<string, any>
@@ -32,11 +32,11 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   // Shown at once from this browser's copy (cache.ts) when it was read before; the engine's answer replaces it.
   const who = (() => { try { return String(JSON.parse(atob(String(token).split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).email ?? '') } catch { return '' } })()
   // A named version being looked at (read-only), or null: the graph as it is now.
-  // A step of the graph's history being looked at (read-only), or null: the graph as it is now.
-  const [viewing, setViewing] = useState<Step | null>(null)
-  const [versions, setVersions] = useState<{ versions: Version[]; steps: Step[]; since: Change[] } | null>(null)
+  // A published version being looked at (read-only), or null: the draft — the graph as it is, edited here.
+  const [viewing, setViewing] = useState<Line | null>(null)
+  const [versions, setVersions] = useState<{ versions: Line[]; published: string | null; draft: DraftNode[]; since: Change[] } | null>(null)
   const [versionsOpen, setVersionsOpen] = useState(false)
-  const cacheKey = `${who}|graph|${projectId}${viewing ? `|at:${viewing.upto}` : ''}`
+  const cacheKey = `${who}|graph|${projectId}${viewing ? `|v:${viewing.name}` : ''}`
   const [graph, setGraph] = useState<Graph | null>(() => { try { const c = cached(cacheKey); return c ? JSON.parse(c) as Graph : null } catch { return null } })
   const [err, setErr] = useState('')
   const [dom, setDom] = useState<string | null>(null)
@@ -47,18 +47,19 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   const [makingDomain, setMakingDomain] = useState(false)
   const [q, setQ] = useState('')
   const load = useCallback(async () => {
-    try { const r = await hub.request('compositionColumns', viewing ? { upto: viewing.upto } : {}); if (r.error) setErr(r.error); else if (r.exists === false) setErr('This project has no composition graph yet.'); else { setErr(''); setGraph(r); keep(cacheKey, JSON.stringify(r)) } }
+    try { const r = await hub.request('compositionColumns', viewing ? { version: viewing.name } : {}); if (r.error) setErr(r.error); else if (r.exists === false) setErr('This project has no composition graph yet.'); else { setErr(''); setGraph(r); keep(cacheKey, JSON.stringify(r)) } }
     catch (e: any) { setErr(e?.message ?? String(e)) }
   }, [hub.request, cacheKey, viewing])   // eslint-disable-line react-hooks/exhaustive-deps -- hub is a new object each render; its request is stable
   const loadVersions = useCallback(async () => {
     const r = await hub.call({ t: 'graph:versions' }).catch(() => null)
-    if (r?.t === 'graph:reply') setVersions({ versions: r.versions ?? [], steps: r.steps ?? [], since: r.since ?? [] })
+    if (r?.t === 'graph:reply') setVersions({ versions: r.versions ?? [], published: r.published ?? null, draft: r.draft ?? [], since: r.since ?? [] })
   }, [hub.call])   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (hub.status === 'live') { void load(); void loadVersions() } }, [hub.status, load, loadVersions])
-  const [naming, setNaming] = useState<Step | null>(null)
-  const [restoring, setRestoring] = useState<Step | null>(null)
+  const [publishing, setPublishing] = useState(false)
+  const [discarding, setDiscarding] = useState(false)
+  const [restoring, setRestoring] = useState<Line | null>(null)
   /** Look at a version (null: now): the graph as it read then, read-only. */
-  const view = (name: Step | null) => { setViewing(name); setDom(null); setMid(null); setAtom(null); setFocus(null); setGraph(null) }
+  const view = (name: Line | null) => { setViewing(name); setDom(null); setMid(null); setAtom(null); setFocus(null); setGraph(null) }
 
   const by = useMemo(() => new Map([...(graph?.domains ?? []), ...(graph?.intermediate ?? []), ...(graph?.atomic ?? [])].map((n) => [n.name, n])), [graph])
   if (err) return <Notice state="critical">{err}</Notice>
@@ -138,14 +139,17 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
       <div className="sa-graphpage__top">
         <ColumnsSearch value={q} onChange={setQ} placeholder="Search domains and concepts — titles and what they say" />
         <VersionsButton versions={versions} viewing={viewing} onOpen={() => setVersionsOpen(true)} />
+        {!viewing && versions && versions.draft.length > 0 && <span className="sa-draftbar">
+          <button className="sa-btn" onClick={() => setDiscarding(true)} disabled={!versions.published} title={versions.published ? `Set the draft back to ${versions.published}` : 'Nothing published to go back to'}>Discard</button>
+          <button className="sa-btn sa-btn--primary" onClick={() => setPublishing(true)}><Icon icon="lucide:upload" className="sa-btn__icon" />Publish v{versions.versions.length + 1}</button>
+        </span>}
       </div>
       {viewing && (
         <div className="sa-graphpage__viewing" role="status">
-          <Icon icon="lucide:history" /><span><strong>v{viewing.n}{viewing.tags.length ? ` · ${viewing.tags.join(', ')}` : ''}</strong> — {stepSays(viewing)} <span className="sa-muted">· {stepWhen(viewing.at)} · read-only</span></span>
+          <Icon icon="lucide:history" /><span><strong>{viewing.name}</strong> — {viewing.message} <span className="sa-muted">· published {when(viewing.at)} · read-only</span></span>
           <span className="sa-graphpage__viewacts">
-            <button className="sa-btn" onClick={() => setNaming(viewing)}><Icon icon="lucide:tag" className="sa-btn__icon" />Name it</button>
-            <button className="sa-btn" onClick={() => setRestoring(viewing)}><Icon icon="lucide:rotate-ccw" className="sa-btn__icon" />Make this the current graph</button>
-            <button className="sa-btn sa-btn--primary" onClick={() => view(null)}>Back to now</button>
+            {viewing.name !== versions?.published && <button className="sa-btn" onClick={() => setRestoring(viewing)}><Icon icon="lucide:rotate-ccw" className="sa-btn__icon" />Bring into the draft</button>}
+            <button className="sa-btn sa-btn--primary" onClick={() => view(null)}>Back to the draft</button>
           </span>
         </div>
       )}
@@ -159,67 +163,77 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
       {making?.kind === 'intermediate' && <NewIntermediate hub={hub} atomic={graph.atomic} preset={atom ? [atom] : []} into={making.into ? by.get(making.into)?.title ?? making.into : null}
         onClose={() => setMaking(null)} onMade={async (name) => { if (making.into) await change('graph:join', making.into, name); else await load(); setMaking(null); goTo(name) }} />}
       {versionsOpen && versions && (
-        <Dialog title="History" onClose={() => setVersionsOpen(false)} actions={<button className="sa-btn" onClick={() => setVersionsOpen(false)}>Close</button>}>
-          <p className="sa-note">Every run of changes is a version, newest at the top. Going back to an older one starts a new line from it; the line left behind stays.</p>
+        <Dialog title="Versions" onClose={() => setVersionsOpen(false)} actions={<button className="sa-btn" onClick={() => setVersionsOpen(false)}>Close</button>}>
+          <p className="sa-note">Edits are a draft; publishing makes the next version, and the agents read the latest one. Bringing an older version into the draft and publishing it starts a new line from it.</p>
           <div className="sa-history__scroll">
-            <HistoryGraph steps={versions.steps} current={viewing?.upto ?? null}
-              onPick={(st) => { setVersionsOpen(false); view(st === versions.steps[versions.steps.length - 1] ? null : st) }}
-              actions={(st, isHead) => <>
-                <button className="sa-btn sa-btn--link" onClick={() => { setVersionsOpen(false); setNaming(st) }}><Icon icon="lucide:tag" className="sa-btn__icon" />Name</button>
-                {!isHead && <button className="sa-btn sa-btn--link" onClick={() => { setVersionsOpen(false); setRestoring(st) }}><Icon icon="lucide:rotate-ccw" className="sa-btn__icon" />Make current</button>}
-              </>} />
+            <VersionGraph versions={versions.versions} published={versions.published} draft={versions.draft} current={viewing?.name ?? null}
+              onPick={(v) => { setVersionsOpen(false); view(v) }}
+              actions={(v) => v.name !== versions.published ? <button className="sa-btn sa-btn--link" onClick={() => { setVersionsOpen(false); setRestoring(v) }}><Icon icon="lucide:rotate-ccw" className="sa-btn__icon" />Bring into the draft</button> : null}
+              draftActions={versions.draft.length > 0 ? <button className="sa-btn sa-btn--primary" onClick={() => { setVersionsOpen(false); setPublishing(true) }}><Icon icon="lucide:upload" className="sa-btn__icon" />Publish v{versions.versions.length + 1}</button> : undefined} />
           </div>
         </Dialog>
       )}
-      {naming && <NameVersion hub={hub} step={naming} since={naming === versions?.steps[versions.steps.length - 1] ? versions?.since ?? [] : null} onClose={() => setNaming(null)} onNamed={() => { setNaming(null); void loadVersions() }} />}
+      {publishing && versions && <PublishDraft hub={hub} next={`v${versions.versions.length + 1}`} draft={versions.draft} by={by} onClose={() => setPublishing(false)} onDone={() => { setPublishing(false); void loadVersions() }} />}
       {makingDomain && <NewDomain hub={hub} onClose={() => setMakingDomain(false)} onMade={async (name) => { setMakingDomain(false); await load(); void loadVersions(); goTo(name) }} />}
+      {discarding && versions?.published && (
+        <Dialog title="Discard the draft?" onClose={() => setDiscarding(false)}
+          actions={<><button className="sa-btn" onClick={() => setDiscarding(false)}>Keep editing</button><button className="sa-btn sa-btn--primary" onClick={async () => {
+            const r = await hub.call({ t: 'graph:restore', name: versions.published }).catch((e) => ({ reason: String(e?.message ?? e) }))
+            setDiscarding(false)
+            if (r?.t !== 'graph:reply') { notify(r?.reason ?? 'It was not discarded', 'refused'); return }
+            notify(`The draft is ${versions.published} again`, 'note'); await load(); void loadVersions()
+          }}>Discard {versions.draft.length} change{versions.draft.length === 1 ? '' : 's'}</button></>}>
+          <p>Every node that differs from {versions.published} is set back to how it is there. The edits stay in the change log, so nothing is lost.</p>
+        </Dialog>
+      )}
       {restoring && (
-        <Dialog title={`Make v${restoring.n} the current graph?`} onClose={() => setRestoring(null)}
+        <Dialog title={`Bring ${restoring.name} into the draft?`} onClose={() => setRestoring(null)}
           actions={<><button className="sa-btn" onClick={() => setRestoring(null)}>Cancel</button><button className="sa-btn sa-btn--primary" onClick={async () => {
-            const st = restoring
-            const r = await hub.call({ t: 'graph:restore', upto: st.upto }).catch((e) => ({ reason: String(e?.message ?? e) }))
+            const v = restoring
+            const r = await hub.call({ t: 'graph:restore', name: v.name }).catch((e) => ({ reason: String(e?.message ?? e) }))
             setRestoring(null)
-            if (r?.t !== 'graph:reply') { notify(r?.reason ?? 'It was not restored', 'refused'); return }
-            notify(r.restored?.length ? `Back to v${st.n}: ${r.restored.length} node${r.restored.length === 1 ? '' : 's'} changed` : `The graph already is v${st.n}`, 'note')
-            view(null); void loadVersions()
-          }}>Make it current</button></>}>
-          <p>Every node that differs from v{restoring.n} is set back to how it was — as new changes, so nothing is lost: the graph as it is now stays in the history as its own line.</p>
+            if (r?.t !== 'graph:reply') { notify(r?.reason ?? 'It was not brought back', 'refused'); return }
+            notify(`The draft is ${v.name} now — publish it to make it live`, 'note'); view(null); void loadVersions()
+          }}>Bring it into the draft</button></>}>
+          <p>The draft becomes the graph as it was in {restoring.name}. The agents keep reading {versions?.published ?? 'the published version'} until you publish; publishing starts a new line from {restoring.name}.</p>
         </Dialog>
       )}
     </div>
   )
 }
 
-/** Where the graph is, in one button: its latest version (and when), or the one being looked at. Opens the history. */
-function VersionsButton({ versions, viewing, onOpen }: { versions: { steps: Step[] } | null; viewing: Step | null; onOpen: () => void }) {
-  const head = versions?.steps[versions.steps.length - 1]
-  const said = viewing ? `Looking at v${viewing.n}` : !versions ? 'History' : head ? `v${head.n} · ${stepWhen(head.at)}` : 'No changes yet'
+/** Where the graph is, in one button: the version the agents read, and what is in the draft — or the version looked at. */
+function VersionsButton({ versions, viewing, onOpen }: { versions: { published: string | null; draft: DraftNode[] } | null; viewing: Line | null; onOpen: () => void }) {
+  const n = versions?.draft.length ?? 0
+  const said = viewing ? `Looking at ${viewing.name}` : !versions ? 'Versions' : !versions.published ? 'Nothing published yet' : `${versions.published} live${n ? ` · ${n} change${n === 1 ? '' : 's'} in draft` : ''}`
   return (
-    <button className="sa-versions" onClick={onOpen} disabled={!versions} data-viewing={!!viewing} title="The graph's history: every version, as a graph">
+    <button className="sa-versions" onClick={onOpen} disabled={!versions} data-viewing={!!viewing} data-draft={n > 0} title="The graph's versions: what the agents read, and the draft">
       <Icon icon="lucide:git-branch" className="sa-versions__icon" /><span className="sa-versions__said">{said}</span><Icon icon="lucide:chevron-down" className="sa-versions__icon" />
     </button>
   )
 }
 
-/** Name the graph as it is now — with what changed since the last version, as a commit lists its changes. */
-function NameVersion({ hub, step, since, onClose, onNamed }: { hub: ReturnType<typeof useProjectHub>; step: Step; since: Change[] | null; onClose: () => void; onNamed: () => void }) {
-  const [name, setName] = useState(''), [message, setMessage] = useState(''), [err, setErr] = useState('')
-  const make = async () => {
-    const r = await hub.call({ t: 'graph:version', name: name.trim(), message: message.trim(), upto: step.upto }).catch((e) => ({ reason: String(e?.message ?? e) }))
-    if (r?.t !== 'graph:reply') { setErr(r?.reason ?? 'It was not named'); return }
-    notify(`Named ${name.trim()}`, 'note'); onNamed()
+/** Publish the draft: what changed, node by node, and a line saying what this version is. */
+function PublishDraft({ hub, next, draft, by, onClose, onDone }: { hub: ReturnType<typeof useProjectHub>; next: string; draft: DraftNode[]; by: Map<string, Node>; onClose: () => void; onDone: () => void }) {
+  const [message, setMessage] = useState(''), [err, setErr] = useState(''), [busy, setBusy] = useState(false)
+  const go = async () => {
+    setBusy(true)
+    const r = await hub.call({ t: 'graph:version', message: message.trim() }).catch((e) => ({ reason: String(e?.message ?? e) }))
+    setBusy(false)
+    if (r?.t !== 'graph:reply') { setErr(r?.reason ?? 'It was not published'); return }
+    notify(`Published ${r.version?.name ?? next} — new chats use it`, 'note'); onDone()
   }
+  const what = (d: DraftNode) => (d.was === null ? 'added' : d.now === null ? 'removed' : 'changed')
   return (
-    <Dialog title={`Name v${step.n}`} onClose={onClose}>
-      <Form onSubmit={() => void make()} error={err} actions={<><button type="button" className="sa-btn" onClick={onClose}>Cancel</button><button className="sa-btn sa-btn--primary" disabled={!name.trim() || !message.trim()}>Name it</button></>}>
-        <Field label="Name"><input id="nv-name" className="sa-input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="A short name, like a release" /></Field>
-        <Field label="What it is"><textarea id="nv-message" className="sa-input" rows={3} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="What this version of the graph is, and what changed in it" /></Field>
-        <p className="sa-note">v{step.n} · {stepWhen(step.at)} · {stepSays(step)}</p>
-        {since && since.length > 0 && <div className="sa-graphpage__block">
-          <h3 className="sa-label">{since.length} change{since.length === 1 ? '' : 's'} since the last name</h3>
-          <ul className="sa-versions__changes">{since.slice(-200).reverse().map((c) => (
-            <li key={c.id}><Code>{c.name}</Code> <span className="sa-muted">{c.removed ? 'removed' : c.kind} · {c.by.replace(/^user:/, '')}{c.reason ? ` · ${c.reason}` : ''}</span></li>))}</ul>
-        </div>}
+    <Dialog title={`Publish ${next}`} onClose={onClose}>
+      <Form onSubmit={() => void go()} error={err} actions={<><button type="button" className="sa-btn" onClick={onClose}>Cancel</button><button className="sa-btn sa-btn--primary" disabled={!message.trim() || busy}>Publish {next}</button></>}>
+        <div className="sa-graphpage__block">
+          <h3 className="sa-label">{draft.length} change{draft.length === 1 ? '' : 's'}</h3>
+          <ul className="sa-versions__changes">{draft.map((d) => (
+            <li key={d.name}><span className="sa-pill" data-state={what(d) === 'removed' ? 'critical' : what(d) === 'added' ? 'ok' : 'neutral'}>{what(d)}</span> {by.get(d.name)?.title ?? d.name} <span className="sa-muted">{d.kind}</span></li>))}</ul>
+        </div>
+        <Field label="What this version is"><textarea id="pv-message" className="sa-input" rows={3} autoFocus value={message} onChange={(e) => setMessage(e.target.value)} placeholder="What changed, for whoever reads the history" /></Field>
+        <p className="sa-note">The agents read {next} from their next chat; chats already open keep what they started with.</p>
       </Form>
     </Dialog>
   )

@@ -5,6 +5,9 @@
 // are, which one a session is, and the composition to give its agent — whose whole system prompt it is, never a file
 // to read — with the files placed in its folder and the hashes it was made from noted there.
 //
+// What the agents read is the graph's latest PUBLISHED version: edits are a draft until they are published (before the
+// first version is published, the graph as it is).
+//
 // A project with no store yet may state its domains in knowledge/index.mts, in the same shape the graph imports
 // (`composition-graph import knowledge/index.mts`); it is rendered by the same package, so the text is the same.
 import { readFile, mkdir, writeFile } from 'node:fs/promises'
@@ -12,7 +15,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { dataSeam } from './ica/workspace.js'
-import { Store, compose as composeFromGraph, domains as domainsInGraph, render, route, rank, indexOf, type ConceptBody, type FileBody, type Route } from '@superatom/composition-graph'
+import { Store, compose as composeFromGraph, domains as domainsInGraph, render, route, rank, indexOf, publishedUpto, type ConceptBody, type FileBody, type Route } from '@superatom/composition-graph'
 import { createHash } from 'node:crypto'
 
 export interface Domain { name: string; capabilities: string[]; tools?: string[] }
@@ -41,7 +44,8 @@ export async function domainsOf(projectDir: string): Promise<Domain[]> {
   const store = storeOf(projectDir)
   if (store) {
     try {
-      return domainsInGraph(store).map((d) => { const tools = composeFromGraph(store, d.name).tools; return { name: d.name, capabilities: d.capabilities, ...(tools ? { tools } : {}) } })
+      const upto = publishedUpto(store)
+      return domainsInGraph(store, { upto }).map((d) => { const tools = composeFromGraph(store, d.name, undefined, { upto }).tools; return { name: d.name, capabilities: d.capabilities, ...(tools ? { tools } : {}) } })
     } finally { store.close() }
   }
   return (await stated(projectDir)).map((d) => ({ name: d.name, capabilities: d.capabilities, ...(d.tools ? { tools: d.tools } : {}) }))
@@ -51,7 +55,7 @@ export async function domainsOf(projectDir: string): Promise<Domain[]> {
 export async function agentsOf(projectDir: string): Promise<{ name: string; description: string | null }[]> {
   const store = storeOf(projectDir)
   if (!store) return (await domainsOf(projectDir)).map((d) => ({ name: d.name, description: null }))
-  try { return domainsInGraph(store).map((d) => ({ name: d.name, description: (store.get<any>(d.name)?.body?.description as string | undefined) ?? null })) }
+  try { const upto = publishedUpto(store); return domainsInGraph(store, { upto }).map((d) => ({ name: d.name, description: (store.get<any>(d.name, undefined, upto)?.body?.description as string | undefined) ?? null })) }
   finally { store.close() }
 }
 
@@ -65,7 +69,7 @@ export async function domainFor(projectDir: string, focus: string | null | undef
 export async function compose(projectDir: string, domain: Domain): Promise<Knowledge> {
   const store = storeOf(projectDir)
   if (store) {
-    try { const c = composeFromGraph(store, domain.name); return { domain: c.domain, text: c.text, files: c.files, used: c.used, settings: c.settings } }
+    try { const c = composeFromGraph(store, domain.name, undefined, { upto: publishedUpto(store) }); return { domain: c.domain, text: c.text, files: c.files, used: c.used, settings: c.settings } }
     finally { store.close() }
   }
   const d = (await stated(projectDir)).find((x) => x.name === domain.name)
@@ -97,7 +101,7 @@ export async function pick(projectDir: string, question: string): Promise<{ doma
   if (!all.length) return { domain: null, route: null }
   const store = storeOf(projectDir)
   let r: Route
-  if (store) { try { r = route(store, question) } finally { store.close() } }
+  if (store) { try { r = route(store, question, publishedUpto(store)) } finally { store.close() } }
   else {
     const docs = await Promise.all((await stated(projectDir)).map(async (d) => ({ name: d.name, text: `${d.name} ${(await compose(projectDir, d)).text}`, intents: d.intents ?? [] })))
     r = rank(indexOf(docs), question)

@@ -74,10 +74,10 @@ export function rank(index: Indexed[], question: string): Route {
 }
 
 /** Route a first question over the graph's domains, as composed now. */
-export function route(store: Store, question: string): Route {
-  const docs = listDomains(store).map((d) => {
-    const body = store.get<DomainBody>(d.name)!.body
-    return { name: d.name, text: `${d.name} ${compose(store, d.name).text}`, intents: body.intents ?? [] }
+export function route(store: Store, question: string, upto?: number): Route {
+  const docs = listDomains(store, { upto }).map((d) => {
+    const body = store.get<DomainBody>(d.name, undefined, upto)!.body
+    return { name: d.name, text: `${d.name} ${compose(store, d.name, undefined, { upto }).text}`, intents: body.intents ?? [] }
   })
   return rank(indexOf(docs), question)
 }

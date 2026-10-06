@@ -4,7 +4,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Store } from '../src/store.ts'
-import { compose, governance as g, replicaSince, applyReplica, hasAfter, START, ReplicaConflict, nameVersion, type Cursor } from '../src/index.ts'
+import { compose, governance as g, replicaSince, applyReplica, hasAfter, START, ReplicaConflict, publishDraft, type Cursor } from '../src/index.ts'
 
 const fresh = () => new Store(join(mkdtempSync(join(tmpdir(), 'rep-')), 'composition.sqlite'))
 const text = (t: string) => ({ title: 'T', form: 'text', text: t })
@@ -68,10 +68,10 @@ test('named versions travel with the log, each after the change it stands at, in
   const a = fresh(), b = fresh()
   const admin = { id: 'user:root', admin: true }
   g.write(a, admin, 'c1', 'concept', text('one'))
-  nameVersion(a, admin, 'v1', 'one concept')
+  publishDraft(a, admin, 'one concept')
   g.write(a, admin, 'c2', 'concept', text('two'))
   g.write(a, admin, 'c3', 'concept', text('three'))
-  nameVersion(a, admin, 'v2', 'three concepts')
+  publishDraft(a, admin, 'three concepts')
   let c: Cursor = START, rounds = 0
   while (hasAfter(a, c) && rounds++ < 100) { const batch = replicaSince(a, c, 1); applyReplica(b, batch); c = batch.next }
   assert.deepEqual(b.versions().map((v) => [v.name, v.upto, v.changes]), a.versions().map((v) => [v.name, v.upto, v.changes]))

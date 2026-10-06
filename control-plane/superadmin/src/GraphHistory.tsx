@@ -1,79 +1,93 @@
-// THE GRAPH'S HISTORY, drawn like a git graph: every run of changes is a step (v1, v2, …, with when and by whom), newest
-// at the top; a name is a tag on a step. Going back to an older step starts a new line from it — the line left behind
-// stays, ending where it was left. Used by the graph page (its versions) and by the changes page (its graph view).
+// THE GRAPH'S VERSIONS, drawn like a git graph: each PUBLISHED version (v1, v2, …) a dot on its line, newest at the top,
+// the draft — what is edited and not yet published — a hollow dot above the published one. Bringing an older version
+// back and publishing it starts a new line from it; the line left behind stays, ending where it was left. Used by the
+// graph page (its history) and by the changes page (its graph view).
 
 import { useMemo, type CSSProperties, type ReactNode } from 'react'
 import { Icon } from '@superatom/ui'
 
-export interface Step {
-  n: number; from: number; upto: number; startAt: number; at: number; by: string; count: number
-  names: string[]; reasons: string[]; tags: string[]; parent: number | null; restoredTo: number | null
+/** A published version on its line (composition-graph versionLine). */
+export interface Line {
+  id: number; name: string; message: string; upto: number; at: number; by: string; changes: number
+  n: number; from: number; count: number; names: string[]; parent: string | null; restoredFrom: string | null
 }
+/** A node of the draft: how it differs from the published graph (null: not there). */
+export interface DraftNode { name: string; kind: string; was: string | null; now: string | null }
 
 const ROW = 64, LANE = 18, PAD = 12
+const DRAFT = '\u0000draft' as const
 
-/** Lanes: the line that leads to now is lane 0; each line left behind by a going back gets a lane of its own. */
-function lanesOf(steps: Step[]): Map<number, number> {
-  const by = new Map(steps.map((s) => [s.n, s]))
-  const lane = new Map<number, number>()
-  const head = steps[steps.length - 1]
-  for (let s: Step | undefined = head; s && !lane.has(s.n); s = s.parent ? by.get(s.parent) : undefined) lane.set(s.n, 0)
+/** Lanes: the line that leads to the published version is lane 0; each line left behind gets a lane of its own. */
+function lanesOf(versions: Line[], head: Line | undefined): Map<string, number> {
+  const by = new Map(versions.map((v) => [v.name, v]))
+  const lane = new Map<string, number>()
+  for (let v: Line | undefined = head; v && !lane.has(v.name); v = v.parent ? by.get(v.parent) : undefined) lane.set(v.name, 0)
   let next = 1
-  for (const s of [...steps].reverse()) {
-    if (lane.has(s.n)) continue
+  for (const v of [...versions].reverse()) {
+    if (lane.has(v.name)) continue
     const l = next++
-    for (let x: Step | undefined = s; x && !lane.has(x.n); x = x.parent ? by.get(x.parent) : undefined) lane.set(x.n, l)
+    for (let x: Line | undefined = v; x && !lane.has(x.name); x = x.parent ? by.get(x.parent) : undefined) lane.set(x.name, l)
   }
   return lane
 }
 
-export const stepWhen = (ms: number) => new Date(ms).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+export const when = (ms: number) => new Date(ms).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 const who = (by: string) => by.replace(/^user:/, '').replace(/^agent:/, 'agent ')
-/** What a step did, in a line: its reason, else the nodes it changed. */
-export const stepSays = (s: Step) => s.reasons.find((r) => !/^back to /.test(r)) ?? `${s.count} change${s.count === 1 ? '' : 's'} to ${s.names.slice(0, 3).join(', ')}${s.names.length > 3 ? ', …' : ''}`
 
-export function HistoryGraph({ steps, current, onPick, actions, empty = 'No changes yet.' }: {
-  steps: Step[]
-  /** The step being looked at (its last change), or null: now. */
-  current: number | null
-  onPick?: (s: Step) => void
-  /** Buttons for a step, shown when it is pointed at. */
-  actions?: (s: Step, isHead: boolean) => ReactNode
-  empty?: string
+export function VersionGraph({ versions, published, draft, current, onPick, actions, draftActions }: {
+  versions: Line[]
+  /** The version the agents read. */
+  published: string | null
+  /** What is edited and not yet published (empty: the draft is the published graph). */
+  draft: DraftNode[]
+  /** The version being looked at, or null: the draft (the graph as it is). */
+  current: string | null
+  onPick?: (v: Line | null) => void
+  actions?: (v: Line) => ReactNode
+  draftActions?: ReactNode
 }) {
-  const lane = useMemo(() => lanesOf(steps), [steps])
-  if (!steps.length) return <p className="sa-note">{empty}</p>
-  const rows = [...steps].reverse()                     // newest at the top
-  const row = new Map(rows.map((s, i) => [s.n, i]))
-  const lanes = Math.max(...lane.values()) + 1
-  const x = (n: number) => PAD + (lane.get(n) ?? 0) * LANE
-  const y = (n: number) => (row.get(n) ?? 0) * ROW + ROW / 2
-  const head = steps[steps.length - 1]
-  const shown = current ?? head.upto
+  const head = versions.find((v) => v.name === published) ?? versions[versions.length - 1]
+  const lane = useMemo(() => lanesOf(versions, head), [versions, head])
+  const rows: (Line | typeof DRAFT)[] = [...(draft.length || !versions.length ? [DRAFT] : []), ...[...versions].reverse()]
+  const row = new Map(rows.map((r, i) => [typeof r === 'string' ? r : r.name, i]))
+  const lanes = Math.max(1, ...lane.values()) + (lane.size ? 1 : 0)
+  const x = (name: string) => PAD + (name === DRAFT ? 0 : lane.get(name) ?? 0) * LANE
+  const y = (name: string) => (row.get(name) ?? 0) * ROW + ROW / 2
+  const width = PAD * 2 + Math.max(0, lanes - 1) * LANE
   return (
-    <div className="sa-history" style={{ '--gutter': `${PAD * 2 + (lanes - 1) * LANE}px`, '--row': `${ROW}px` } as CSSProperties}>
-      <svg className="sa-history__lines" width={PAD * 2 + (lanes - 1) * LANE} height={rows.length * ROW} aria-hidden>
-        {steps.filter((s) => s.parent).map((s) => {
-          const p = s.parent!, x1 = x(s.n), y1 = y(s.n), x2 = x(p), y2 = y(p)
+    <div className="sa-history" style={{ '--gutter': `${width}px`, '--row': `${ROW}px` } as CSSProperties}>
+      <svg className="sa-history__lines" width={width} height={rows.length * ROW} aria-hidden>
+        {row.has(DRAFT) && head && <path d={`M${x(DRAFT)},${y(DRAFT)} V${y(head.name)}`} data-lane="0" data-draft />}
+        {versions.filter((v) => v.parent && row.has(v.parent)).map((v) => {
+          const p = v.parent!, x1 = x(v.name), y1 = y(v.name), x2 = x(p), y2 = y(p)
           const d = x1 === x2 ? `M${x1},${y1} V${y2}` : `M${x1},${y1} V${y2 - ROW / 2} C${x1},${y2 - ROW / 4} ${x2},${y2 - ROW / 4} ${x2},${y2}`
-          return <path key={s.n} d={d} data-lane={Math.min(lane.get(s.n) ?? 0, 3)} />
+          return <path key={v.name} d={d} data-lane={Math.min(lane.get(v.name) ?? 0, 3)} />
         })}
-        {rows.map((s) => <circle key={s.n} cx={x(s.n)} cy={y(s.n)} r={s.tags.length ? 6 : 4.5} data-lane={Math.min(lane.get(s.n) ?? 0, 3)} data-on={s.upto === shown} data-head={s === head} />)}
+        {row.has(DRAFT) && <circle cx={x(DRAFT)} cy={y(DRAFT)} r={5} data-lane="0" data-draft data-on={current === null} />}
+        {versions.map((v) => <circle key={v.name} cx={x(v.name)} cy={y(v.name)} r={v === head ? 6 : 4.5} data-lane={Math.min(lane.get(v.name) ?? 0, 3)} data-on={current === v.name} data-head={v === head} />)}
       </svg>
       <ol className="sa-history__rows">
-        {rows.map((s) => (
-          <li key={s.n} className="sa-history__row" data-on={s.upto === shown}>
-            <button className="sa-history__main" onClick={() => onPick?.(s)} disabled={!onPick} title={`v${s.n} — ${stepWhen(s.startAt)}${s.at - s.startAt > 60_000 ? ` to ${stepWhen(s.at)}` : ''}`}>
-              <span className="sa-history__top">
-                <span className="sa-history__n">v{s.n}</span>
-                {s === head && <span className="sa-history__tag sa-history__tag--now">now</span>}
-                {s.tags.map((t) => <span key={t} className="sa-history__tag"><Icon icon="lucide:tag" />{t}</span>)}
-                {s.restoredTo && <span className="sa-history__back"><Icon icon="lucide:undo-2" />back to v{s.restoredTo}</span>}
-                <span className="sa-history__says">{stepSays(s)}</span>
-              </span>
-              <span className="sa-history__meta">{who(s.by)} · {stepWhen(s.at)} · {s.count} change{s.count === 1 ? '' : 's'}</span>
+        {rows.map((r) => r === DRAFT ? (
+          <li key="draft" className="sa-history__row" data-on={current === null}>
+            <button className="sa-history__main" onClick={() => onPick?.(null)} disabled={!onPick}>
+              <span className="sa-history__top"><span className="sa-history__n">Draft</span>
+                <span className="sa-history__says">{draft.length ? `${draft.length} change${draft.length === 1 ? '' : 's'} not yet published` : 'Nothing published yet — the agents read the graph as it is'}</span></span>
+              <span className="sa-history__meta">{draft.length ? draft.slice(0, 6).map((d) => d.name).join(', ') + (draft.length > 6 ? ', …' : '') : 'Publish it to make v1'}</span>
             </button>
-            {actions && <span className="sa-history__acts">{actions(s, s === head)}</span>}
+            {draftActions && <span className="sa-history__acts sa-history__acts--shown">{draftActions}</span>}
+          </li>
+        ) : (
+          <li key={r.name} className="sa-history__row" data-on={current === r.name}>
+            <button className="sa-history__main" onClick={() => onPick?.(r)} disabled={!onPick} title={`${r.name} — published ${when(r.at)}`}>
+              <span className="sa-history__top">
+                <span className="sa-history__n">{r.name}</span>
+                {r === head && <span className="sa-history__tag sa-history__tag--now">live</span>}
+                {r.restoredFrom && <span className="sa-history__back"><Icon icon="lucide:undo-2" />from {r.restoredFrom}</span>}
+                <span className="sa-history__says">{r.message}</span>
+              </span>
+              <span className="sa-history__meta">{who(r.by)} · {when(r.at)} · {r.count} change{r.count === 1 ? '' : 's'}</span>
+            </button>
+            {actions && <span className="sa-history__acts">{actions(r)}</span>}
           </li>
         ))}
       </ol>

@@ -239,6 +239,12 @@
 .sa-history__lines [data-lane='3'] { --lane: var(--warn); }
 .sa-history__lines circle[data-head='true'], .sa-history__lines circle[data-on='true'] { fill: var(--lane); }
 .sa-history__lines circle[data-on='true'] { stroke-width: 4; stroke-opacity: 0.35; }
+.sa-history__lines path[data-draft] { stroke-dasharray: 3 4; }
+.sa-history__lines circle[data-draft] { fill: var(--surface); stroke-dasharray: 2 2; }
+.sa-history__acts--shown { opacity: 1; }
+/* The draft beside the versions button: what is edited and not yet published, and what to do with it */
+.sa-draftbar { display: inline-flex; align-items: center; gap: var(--sp-1h); }
+.sa-versions[data-draft='true'] .sa-versions__said::after { content: ''; display: inline-block; width: 6px; height: 6px; margin-left: var(--sp-1h); border-radius: 50%; background: var(--warn); vertical-align: middle; }
 .sa-history__rows { list-style: none; margin: 0; padding: 0 0 0 var(--gutter); }
 .sa-history__row { height: var(--row); display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
 .sa-history__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: var(--sp-1h) var(--sp-2h); border-radius: var(--r-sm); text-align: left; }

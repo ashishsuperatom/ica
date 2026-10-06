@@ -1113,6 +1113,25 @@ one savepoint. CLI: `composition-graph versions | version <name> --message … |
 `version`) to the platform (the ProjectDO) and back. The graph page shows the strip beside the search, a banner while viewing a version
 (read-only: nothing attached, detached, made or edited), **Make this the current graph** and **Back to now**.
 
+### Draft and published versions (built, 2026-10-06 — replaces naming)
+
+**In the user's words:** every edit is not a version v1, v2 — they are just changes. We need a draft/publish system: while
+they are editing it is a draft; when they commit/publish, a new v2 → v3 happens. That is what is pushed to the engine.
+And the versions as a diagram, like git's, of how things moved.
+
+*Built:* every change is still saved at once, but a change is only a change. **What the agents read is the latest
+published version** — picking an agent for a question, composing its prompt, listing domains and agents
+(`publishedUpto`; before the first version, the graph as it is). Edits after it are **the draft**, shown as the nodes
+that differ from the published graph (so a discard empties it although the log grew). **Publish** makes the next
+version, numbered v1, v2, … with a message (`graph:version {message}`, CLI `composition-graph publish --message …`);
+**Discard** sets the draft back to the published version; **Bring into the draft** sets it to an older version, and
+publishing that starts a new line from it — the versions form a tree (`versionLine`: each version's parent is the one it
+was published from). An agent in a person's own scope (made from their session) is theirs at once; everything shared
+waits for a publish. The graph page: one button saying `vN live · k changes in draft`, Publish and Discard beside it, and
+the versions drawn as a git graph (the draft a dashed dot above the live version, lines left behind in their own colour);
+the changes page has a List / Graph toggle showing the same graph. Open chats keep what they started with; new chats read
+the new version.
+
 ### The warehouse explorer (built, 2026-10-06)
 
 **In the user's words:** the warehouse view in the organisation is going to be a big one. Today there is a table list,
