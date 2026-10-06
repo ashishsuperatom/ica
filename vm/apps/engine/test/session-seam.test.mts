@@ -245,3 +245,21 @@ test('a change the agent asks for that is not a valid op is left out — the ans
   assert.deepEqual(ok.intent?.ops, [{ op: 'set', path: 'pmo.pillar', value: 'Retail' }])
   assert.equal(ok.problem, undefined)
 })
+
+test('a question from an application screen is a composer turn in a session: on the agent of the screen\'s domain, with what the person is looking at', async () => {
+  const { Store, governance } = await import('@superatom/composition-graph')
+  const graphFile = join(home, 'db-screen.sqlite')
+  const g = new Store(graphFile)
+  const admin = { id: 'user:admin', admin: true }
+  governance.write(g, admin, 'c1', 'concept', { title: 'Settled', form: 'text', text: 'A trip is settled when its settlement document exists.' })
+  governance.write(g, admin, 'trips-domain', 'domain', { capabilities: [], concepts: ['c1'], files: [] })
+  governance.write(g, admin, 'screen-trips', 'agent', { title: 'Trips', domain: 'trips-domain', programs: ['unsettled-trips'], start: { trips: { branch: 'PUNE' } } })
+  g.close()
+  const told: any[] = []
+  const s = createSessionSeam({ projectDir: home, datasource: url, graphFile, send: () => {}, ask: async (o) => { told.push(o); return { markdown: 'Two are open.', blocks: [] } } })
+  const r = await s.ask({ session: 'scr1', text: 'how many are open?', from: { id: 'ws1', type: 'runtime', userId: 'u9' }, qid: 'q1', screen: 'Unsettled trips, PUNE: 2 rows', domain: 'trips-domain', reqId: 'r1' })
+  assert.equal(r.agent.agent, 'screen-trips')
+  assert.equal(r.answer.markdown, 'Two are open.')
+  assert.match(told[0].context, /^What the person is looking at:\nUnsettled trips, PUNE: 2 rows/)
+  assert.equal(told[0].reqId, 'r1')                       // the turn's narration finds the asking page
+})

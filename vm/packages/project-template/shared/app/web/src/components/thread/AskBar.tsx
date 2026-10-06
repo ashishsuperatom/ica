@@ -33,7 +33,7 @@ export default function AskBar() {
             <Icon icon={saying ? 'lucide:loader' : 'lucide:arrow-up'} />
           </button>
         </div>
-        {from && <div className="sa-askbar__hint truncate" title={fromTitle}>{saying ? 'reading…' : 'asked from'} <b>{fromTitle}</b></div>}
+        {from && <div className="sa-askbar__hint truncate" title={fromTitle}>{saying ? 'answering…' : 'asked from'} <b>{fromTitle}</b></div>}
       </form>
     </div>
   )

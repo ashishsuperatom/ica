@@ -36,9 +36,9 @@ The agents that produce/maintain computation are named by thinking speed:
 `scripts/check-all.sh` runs every typecheck and test suite and stops at the first failure. Run it before every
 push. The control plane is deployed only by `scripts/deploy-control-plane.sh` (`pnpm -C control-plane/superadmin run
 deploy`): committed code only, every check, then a production smoke test that every live project's DO starts, rolling
-back automatically if not. Before deploying any UI change, `node scripts/ui-review/run.mjs run` captures every console and
-Workspace page at three widths from production and checks each for cut-off controls, sideways scroll, content touching a
-card's edge and overlaps; read its gallery, fix what it finds, and `accept` the run once it is right. A shipped migration is never edited (`vm/packages/migrate/shipped.lock.json` enforces it;
+back automatically if not. Changes are verified with fast server-side tests (tests, direct calls, `sacli`), never by driving a
+browser: the user looks at the UI. `scripts/ui-review` (every page at three widths, checked for cut-off controls, sideways
+scroll, content touching a card's edge, overlaps) runs only when the user asks for it. A shipped migration is never edited (`vm/packages/migrate/shipped.lock.json` enforces it;
 `pnpm -C vm/packages/migrate lock` adds new ones).
 
 ## Where the design lives
