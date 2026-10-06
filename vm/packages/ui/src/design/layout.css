@@ -51,7 +51,7 @@
 .sa-nav-item[data-active='true'] svg { color: var(--primary); }
 .sa-nav-item > svg { width: 17px; height: 17px; flex-shrink: 0; }
 /* A long name fades out at the edge, no dots; the text spans the row so a short one never reaches the fade. */
-.sa-nav-item__text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+.sa-nav-item__text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 14px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 14px), transparent); }
 .sa-nav-item--rail { width: 36px; height: 36px; padding: 0; justify-content: center; }
 .sa-profile { position: relative; }
 .sa-profile__btn { display: flex; align-items: center; gap: var(--sp-2h); border-radius: var(--r-md); padding: var(--sp-1); transition: background var(--dur-1) var(--ease); }

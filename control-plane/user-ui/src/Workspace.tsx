@@ -145,7 +145,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const itemOf = (s: Conversation) => ({ key: `s:${s.session}`, label: titleOf(s), active: s.session === sessionId, onClick: () => go(s.session), menu: menuOf(s) })
   const loose = live.filter((s) => !s.pinned && !s.collection)
   const nav = [
-    { items: [{ key: 'new', label: 'New chat', icon: 'solar:pen-new-square-linear', active: onPages && root === 'home' && !pending, onClick: newChat }] },
+    { items: [{ key: 'new', label: 'New chat', icon: 'solar:pen-new-square-linear', onClick: newChat }] },
     ...(live.some((s) => s.pinned) ? [{ label: 'Pinned', items: live.filter((s) => s.pinned).map(itemOf) }] : []),
     ...collections.map((c) => ({ label: c, items: live.filter((s) => !s.pinned && s.collection === c).map(itemOf) })).filter((g) => g.items.length),
     { label: 'Conversations', items: loose.slice(0, shownConversations).map(itemOf) },
