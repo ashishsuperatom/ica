@@ -17,6 +17,7 @@ import { Icon } from '@iconify/react'
 import { recall, remember } from '../../lib/remember'
 import { notify } from '../../lib/toast'
 import { lru } from '../../lib/lru'
+import Histogram from '../ui/Histogram'
 
 export interface ExplorerColumn { name: string; type: string; required?: boolean }
 export interface ExplorerTable { name: string; columns: ExplorerColumn[]; rows?: number; appended?: number; owner?: string | null; description?: string; group?: string }
@@ -100,6 +101,10 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
   const [learnt, setLearnt] = useState<Record<string, ExplorerColumn[]>>({})
   const [draft, setDraft] = useState<{ name: string; sql: string; ran: string | null }>({ name: '', sql: '', ran: null })
   const [runNo, setRunNo] = useState(0)
+  // Folded groups (tables, queries, each owner's, saved, recent), kept in this browser; a search opens them all.
+  const [closed, setClosed] = useState<Set<string>>(() => new Set(recall<string[]>(`${keep}:closed`, [])))
+  const toggle = (id: string) => setClosed((c) => { const n = new Set(c); if (n.has(id)) n.delete(id); else n.add(id); remember(`${keep}:closed`, [...n]); return n })
+  const shut = (id: string) => closed.has(id) && !search.trim()
   const pick = (k: string) => { setPicked(k); remember(`${keep}:open`, k); setWhere([]) }
   const term = search.trim().toLowerCase()
   const matches = (t: ExplorerTable) => !term || t.name.toLowerCase().includes(term) || t.columns.some((c) => c.name.toLowerCase().includes(term)) || (t.description ?? '').toLowerCase().includes(term) || (t.owner ?? '').toLowerCase().includes(term)
@@ -154,14 +159,16 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
       <div className="sa-explorer__panes" data-profile={ready && profileOpen && !place}>
         <aside className="sa-explorer__tables" aria-label="Tables and queries">
           <div className="sa-explorer__list">
-            <header className="sa-explorer__head"><span className="sa-explorer__title">Tables{tables && <span className="sa-col__count">{tables.length}</span>}</span>{tablesHead}</header>
+            <header className="sa-explorer__head">
+              <button className="sa-explorer__fold" onClick={() => toggle('tables')} aria-expanded={!shut('tables')}><Icon icon={shut('tables') ? 'lucide:chevron-right' : 'lucide:chevron-down'} /><span className="sa-explorer__title">Tables</span>{tables && <span className="sa-col__count">{tables.length}</span>}</button>{tablesHead}</header>
+            {!shut('tables') && <>
             {tables === null && Array.from({ length: 5 }, (_, i) => <div key={i} className="sa-explorer__item" aria-hidden><span /><span className="sa-skeleton" style={{ width: `${45 + ((i * 19) % 40)}%`, height: 11 }} /></div>)}
             {tables !== null && !tables.length && <p className="sa-col__empty">{empty ?? 'No tables yet.'}</p>}
             {tables !== null && tables.length > 0 && !groups.length && <p className="sa-col__empty">No table matches.</p>}
             {groups.map(([g, list]) => (
               <div key={g}>
-                {g && <div className="sa-col__group">{g} <span className="sa-col__count">{list.length}</span></div>}
-                {list.map((t) => {
+                {g && <button className="sa-explorer__grouphead" onClick={() => toggle(`g:${g}`)} aria-expanded={!shut(`g:${g}`)}><Icon icon={shut(`g:${g}`) ? 'lucide:chevron-right' : 'lucide:chevron-down'} /><span className="sa-explorer__name">{g}</span><span className="sa-explorer__n">{list.length}</span></button>}
+                {!(g && shut(`g:${g}`)) && list.map((t) => {
                   const col = term && !t.name.toLowerCase().includes(term) ? t.columns.find((c) => c.name.toLowerCase().includes(term)) : undefined
                   return (
                     <button key={t.name} className="sa-explorer__item" data-selected={picked === `t:${t.name}`} onClick={() => pick(`t:${t.name}`)} title={t.description || t.name}>
@@ -173,16 +180,20 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
                 })}
               </div>
             ))}
+            </>}
             {(queries !== undefined || onSaveQuery) && <>
-              <header className="sa-explorer__head sa-explorer__head--queries"><span className="sa-explorer__title">Queries{queries && <span className="sa-col__count">{queries.length}</span>}</span>
+              <header className="sa-explorer__head sa-explorer__head--queries">
+                <button className="sa-explorer__fold" onClick={() => toggle('queries')} aria-expanded={!shut('queries')}><Icon icon={shut('queries') ? 'lucide:chevron-right' : 'lucide:chevron-down'} /><span className="sa-explorer__title">Queries</span>{queries && <span className="sa-col__count">{queries.length}</span>}</button>
                 {onSaveQuery && <button className="sa-btn sa-btn--link" onClick={() => { setDraft({ name: '', sql: '', ran: null }); setLearnt((l) => ({ ...l, 'q:new': [] })); pick('q:new') }}><Icon icon="lucide:plus" className="sa-btn__icon" />New</button>}</header>
+              {!shut('queries') && <>
               {queries === null && <div className="sa-explorer__item" aria-hidden><span /><span className="sa-skeleton" style={{ width: '60%', height: 11 }} /></div>}
               {picked === 'q:new' && <button className="sa-explorer__item" data-selected><Icon icon="lucide:file-code-2" /><span className="sa-explorer__name">{draft.name || 'New query'}</span><span /></button>}
-              {saved.length > 0 && <div className="sa-col__group">Saved <span className="sa-col__count">{saved.length}</span></div>}
-              {saved.map(queryItem)}
-              {recent.length > 0 && <div className="sa-col__group">Recent <span className="sa-col__count">{recent.length}</span></div>}
-              {recent.map(queryItem)}
+              {saved.length > 0 && <button className="sa-explorer__grouphead" onClick={() => toggle('saved')} aria-expanded={!shut('saved')}><Icon icon={shut('saved') ? 'lucide:chevron-right' : 'lucide:chevron-down'} /><span className="sa-explorer__name">Saved</span><span className="sa-explorer__n">{saved.length}</span></button>}
+              {!shut('saved') && saved.map(queryItem)}
+              {recent.length > 0 && <button className="sa-explorer__grouphead" onClick={() => toggle('recent')} aria-expanded={!shut('recent')}><Icon icon={shut('recent') ? 'lucide:chevron-right' : 'lucide:chevron-down'} /><span className="sa-explorer__name">Recent</span><span className="sa-explorer__n">{recent.length}</span></button>}
+              {!shut('recent') && recent.map(queryItem)}
               {queries && !queries.length && picked !== 'q:new' && <p className="sa-col__empty">Your queries appear here once you run one.</p>}
+              </>}
             </>}
           </div>
           {places.length > 0 && (
@@ -393,6 +404,11 @@ function Columns({ opened, read, cache, space, narrow, setWhere, keep }: { opene
         <div><strong>{opened.columns.length}</strong><span>columns</span></div>
         <div><strong>{emptyPct == null ? '—' : `${pct(emptyPct)}%`}</strong><span>empty</span></div>
       </div>
+      {opened.query && opened.query !== 'new' && <dl className="sa-explorer__meta">
+        <dt>{opened.query.name ? 'Saved query' : 'Recent query'}</dt><dd>{opened.query.runs ? `ran ${opened.query.runs} time${opened.query.runs === 1 ? '' : 's'}` : ''}</dd>
+        {opened.query.lastRun && <><dt>Last ran</dt><dd>{new Date(opened.query.lastRun).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</dd></>}
+        {opened.query.lastRows != null && <><dt>Rows then</dt><dd>{count(opened.query.lastRows)}</dd></>}
+      </dl>}
       {opened.table && (opened.table.owner || opened.table.appended) && <dl className="sa-explorer__meta">
         {opened.table.owner && <><dt>Owner</dt><dd>{opened.table.owner}</dd></>}
         {opened.table.appended && <><dt>Last added to</dt><dd>{new Date(opened.table.appended).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</dd></>}
@@ -456,9 +472,11 @@ function ColumnDetail({ opened, c, p, rows, read, cache, space, narrow, setWhere
       {error && <p className="sa-explorer__error">{error}</p>}
       <div className="sa-explorer__detailhead"><span className="sa-label">{k === 'text' || k === 'bool' ? 'Commonest values' : 'Distribution'}{narrow.q || others.length ? ', within the search and filters' : ''}</span>
         <button className="sa-btn sa-btn--link" onClick={() => navigator.clipboard?.writeText(c.name).then(() => notify(`Copied ${c.name}`, 'note'))}><Icon icon="lucide:copy" className="sa-btn__icon" />Name</button></div>
-      {(k === 'number' || k === 'time') && !spread && <span className="sa-skeleton" style={{ width: '100%', height: 64 }} />}
-      {spread?.kind === 'numbers' && <Bars counts={spread.bins} left={stat(spread.lo)} right={stat(spread.hi)} />}
-      {spread?.kind === 'time' && <Bars counts={spread.bins.map((b) => b.rows)} left={spread.bins[0]?.at ?? ''} right={spread.bins[spread.bins.length - 1]?.at ?? ''} note={`rows a ${spread.unit}`} labels={spread.bins.map((b) => `${b.at}: ${count(b.rows)} rows`)} />}
+      {(k === 'number' || k === 'time') && !spread && <span className="sa-skeleton" style={{ width: '100%', height: 120 }} />}
+      {spread?.kind === 'numbers' && <><Histogram bins={spread.bins} labels={spread.bins.map((_, i) => { const w = (spread.hi - spread.lo) / spread.bins.length; return `${stat(spread.lo + i * w)} – ${stat(spread.lo + (i + 1) * w)}` })} />
+        <div className="sa-explorer__axis"><span>{stat(spread.lo)}</span><span>{stat(spread.hi)}</span></div></>}
+      {spread?.kind === 'time' && <><Histogram bins={spread.bins.map((b) => b.rows)} labels={spread.bins.map((b) => b.at)} />
+        <div className="sa-explorer__axis"><span>{spread.bins[0]?.at ?? ''}</span><span>rows a {spread.unit}</span><span>{spread.bins[spread.bins.length - 1]?.at ?? ''}</span></div></>}
       {p && k === 'number' && <dl className="sa-explorer__stats">{([['min', p.min], ['first quarter', p.q1], ['median', p.median], ['third quarter', p.q3], ['max', p.max], ['mean', p.mean], ['distinct', p.distinct], ['empty', p.nulls]] as const).map(([l, v]) => <div key={l}><dt>{l}</dt><dd>{stat(v)}</dd></div>)}</dl>}
       {p && k === 'time' && <dl className="sa-explorer__stats"><div><dt>first</dt><dd>{p.min ?? '—'}</dd></div><div><dt>last</dt><dd>{p.max ?? '—'}</dd></div><div><dt>distinct</dt><dd>{count(p.distinct)}</dd></div><div><dt>empty</dt><dd>{count(p.nulls)}</dd></div></dl>}
       {p && k === 'bool' && <dl className="sa-explorer__stats"><div><dt>true</dt><dd>{count(p.trues)}</dd></div><div><dt>false</dt><dd>{count(total - (p.trues ?? 0) - p.nulls)}</dd></div><div><dt>empty</dt><dd>{count(p.nulls)}</dd></div></dl>}
@@ -475,17 +493,6 @@ function ColumnDetail({ opened, c, p, rows, read, cache, space, narrow, setWhere
           {!values.values.length && <li className="sa-note">No values.</li>}
         </ul>
       )}
-    </div>
-  )
-}
-
-/** A histogram: one bar a bin, scaled to the tallest. */
-function Bars({ counts, left, right, note, labels }: { counts: number[]; left: string; right: string; note?: string; labels?: string[] }) {
-  const max = Math.max(1, ...counts)
-  return (
-    <div className="sa-explorer__hist">
-      <div className="sa-explorer__bars">{counts.map((n, i) => <span key={i} style={{ height: `${n ? Math.max(3, (n / max) * 100) : 0}%` }} title={labels?.[i] ?? `${count(n)} rows`} />)}</div>
-      <div className="sa-explorer__axis"><span>{left}</span>{note && <span>{note}</span>}<span>{right}</span></div>
     </div>
   )
 }

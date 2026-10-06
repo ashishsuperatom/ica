@@ -355,3 +355,12 @@
   .sa-explorer__tables, .sa-explorer__profile { border: 0; border-bottom: 1px solid var(--line); }
 }
 .sa-explorer__table th[data-kind="number"] .sa-explorer__glyph { width: auto; margin-right: var(--sp-1h); }
+
+/* The explorer's folds: its sections (tables, queries) and their groups (an owner's, saved, recent), as slob draws them. */
+.sa-explorer__fold { display: inline-flex; align-items: center; gap: var(--sp-1h); min-width: 0; color: var(--ink); }
+.sa-explorer__fold > svg { color: var(--faint); flex-shrink: 0; }
+.sa-explorer__grouphead { width: 100%; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; gap: var(--sp-1h); height: 28px; padding: 0 var(--sp-3) 0 var(--sp-2); text-align: left; font-size: var(--t-xs); font-weight: var(--w-semibold); color: var(--muted); }
+.sa-explorer__grouphead:hover { color: var(--ink); background: var(--panel); }
+.sa-explorer__grouphead > svg { color: var(--faint); }
+.sa-explorer__grouphead + .sa-explorer__item, .sa-explorer__grouphead ~ .sa-explorer__item { padding-left: calc(var(--sp-3) + var(--sp-2)); }
+.sa-explorer__spark span { min-height: 1px; }
