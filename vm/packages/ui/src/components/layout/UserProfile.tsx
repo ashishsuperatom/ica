@@ -37,9 +37,9 @@ export default function UserProfile({ name, email, context, showName = false, me
         <div className="sa-menu sa-menu--person" role="menu" onClick={(e) => { if ((e.target as HTMLElement).closest('[data-menu-close]')) setOpen(false) }}>
           <div className="sa-menu__person">
             <span className="sa-avatar">{initialsOf(name)}</span>
-            <span className="sa-profile__who">
-              <span className="sa-menu__title">{name}</span>
-              {(context ?? email) && <span className="sa-menu__line">{context ?? email}</span>}
+            <span className="sa-menu__who">
+              <span className="sa-menu__title" title={name}>{name}</span>
+              {(context ?? email) && (context ?? email) !== name && <span className="sa-menu__line" title={context ?? email}>{context ?? email}</span>}
             </span>
           </div>
           {menu}

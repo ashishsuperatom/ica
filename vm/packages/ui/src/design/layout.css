@@ -339,7 +339,7 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 .sa-menu__chev { width: 15px !important; height: 15px !important; }
 .sa-menu__rule { height: 1px; background: var(--line); margin: var(--sp-1) var(--sp-2); }
 .sa-menu__subwrap { position: relative; }
-.sa-menu--side { left: 100%; bottom: auto; top: auto; margin: 0; transform: translateY(calc(-100% + 36px)); width: 240px; padding: var(--sp-1h); border-radius: var(--r-lg); }
+.sa-menu--side { left: 100%; bottom: 0; top: auto; margin: 0; width: 240px; padding: var(--sp-1h); border-radius: var(--r-lg); }
 @media (max-width: 767px) { .sa-menu--side { position: static; transform: none; margin: 0; box-shadow: none; border-width: 0; width: auto; padding: 0 0 0 var(--sp-4); } }
 .sa-dialog__keys { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-2) var(--sp-4); align-items: center; font-size: var(--t-sm); }
 .sa-dialog__keys kbd { font-family: inherit; font-size: var(--t-xs); padding: 2px var(--sp-1h); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--panel); color: var(--ink); white-space: nowrap; }
@@ -367,3 +367,5 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 .sa-railbar__panel .sa-nav-row__more:hover { background: var(--rail-active); }
 .sa-railbar__panel .sa-sidebar__brand { padding: 0; }
 .sa-railbar__panel .sa-sidebar__head .sa-icon-btn { width: 32px; height: 32px; }
+.sa-menu__who { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.sa-menu__who .sa-menu__title, .sa-menu__who .sa-menu__line { display: block; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }

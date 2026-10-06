@@ -21,8 +21,8 @@ export interface RailPlace {
   actions?: ReactNode
 }
 
-export default function RailSidebar({ name, connected, statusWord, places, current, foot, pinned, onPin }: {
-  name: string; connected: boolean; statusWord?: string
+export default function RailSidebar({ name, places, current, foot, pinned, onPin }: {
+  name: string
   places: RailPlace[]
   /** The rail place where the person is. */
   current: string
@@ -53,7 +53,6 @@ export default function RailSidebar({ name, connected, statusWord, places, curre
   }
   const open = peek ?? (pinned ? shown : null)
   const place = places.find((p) => p.key === open && p.panel) ?? null
-  const word = statusWord ?? (connected ? 'Connected' : 'Reconnecting…')
   const pick = (p: RailPlace) => {
     if (p.panel) { setShown(p.key); setPeek(pinned ? null : p.key) }
     p.onClick?.()
@@ -71,7 +70,6 @@ export default function RailSidebar({ name, connected, statusWord, places, curre
             </button>
           ))}
           <span className="sa-railbar__gap" />
-          <span className="sa-dot" style={{ background: connected ? 'var(--win)' : 'var(--warn)' }} title={word} />
           {foot}
         </nav>
         {place && (

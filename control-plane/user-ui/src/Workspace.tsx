@@ -152,7 +152,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   ]
   const searchItems: SearchItem[] = [
     { key: 'a:new', label: 'New chat', icon: 'solar:pen-new-square-linear', group: 'Go to', onSelect: newChat },
-    { key: 'a:agents', label: 'Agents', icon: 'solar:user-speak-rounded-linear', group: 'Go to', onSelect: () => page('agents') },
+    { key: 'a:agents', label: 'Agents', icon: 'solar:stars-linear', group: 'Go to', onSelect: () => page('agents') },
     { key: 'a:activity', label: 'Activity', icon: 'solar:pulse-linear', group: 'Go to', onSelect: () => page('activity') },
     { key: 'a:connections', label: 'Connections', icon: 'solar:plug-circle-linear', group: 'Go to', onSelect: () => page('connections') },
     ...sessions.map((s) => ({ key: `s:${s.session}`, label: titleOf(s), sub: [agentOf(s.agent).name, s.collection].filter(Boolean).join(' · '), group: s.archived ? 'Archived' : 'Conversations', onSelect: () => go(s.session) })),
@@ -167,10 +167,10 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const places: RailPlace[] = [
     { key: 'home', label: 'Home', icon: 'solar:home-2-linear', onClick: () => page('home'), actions: sideActions,
       panel: activityView ? <><NavList groups={[nav[0]!]} /><SideActivity request={request} subscribeLive={subscribeLive} /></> : <><NavList groups={nav} />{moreConversations}</> },
-    { key: 'agents', label: 'Agents', icon: 'solar:user-speak-rounded-linear', onClick: () => page('agents'), actions: sideActions,
+    { key: 'agents', label: 'Agents', icon: 'solar:stars-linear', onClick: () => page('agents'), actions: sideActions,
       panel: <NavList groups={[
         { items: [{ key: 'agents', label: 'All agents', icon: 'solar:widget-linear', active: onPages && root === 'agents', onClick: () => page('agents') }] },
-        { label: 'Agents', items: named.map((a) => ({ key: `a:${a.id}`, label: a.name, icon: a.look.icon ?? 'solar:user-speak-rounded-linear', active: startAgent === a.id || (!!sessionId && current === a.id), onClick: () => go(`s/${a.id}`) })) },
+        { label: 'Agents', items: named.map((a) => ({ key: `a:${a.id}`, label: a.name, icon: a.look.icon ?? 'solar:stars-linear', active: startAgent === a.id || (!!sessionId && current === a.id), onClick: () => go(`s/${a.id}`) })) },
       ]} /> },
     { key: 'connections', label: 'Connections', icon: 'solar:plug-circle-linear', onClick: () => page('connections') },
   ]
@@ -197,13 +197,13 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
     <>
       <AppShell
         sidebar={(collapsed, toggle) => (
-          <RailSidebar name={projectName} connected={connected} places={places} current={railAt} pinned={!collapsed} onPin={(p) => toggle(!p)}
-            foot={<UserProfile name={me.name} email={me.email} context={me.email}
+          <RailSidebar name={projectName} places={places} current={railAt} pinned={!collapsed} onPin={(p) => toggle(!p)}
+            foot={<UserProfile name={me.name} email={me.email}
               menu={<>
                 <MenuItem icon="solar:user-circle-linear" label="Profile" onClick={() => page('profile')} />
                 <MenuItem icon="solar:settings-linear" label="Settings" onClick={() => page('settings')} />
                 <MenuRule />
-                <MenuItem icon="solar:user-speak-rounded-linear" label="Agents" onClick={() => page('agents')} />
+                <MenuItem icon="solar:stars-linear" label="Agents" onClick={() => page('agents')} />
                 <MenuItem icon="solar:plug-circle-linear" label="Connections" onClick={() => page('connections')} />
                 <MenuItem icon="solar:pulse-linear" label="Activity" onClick={() => page('activity')} />
                 <MenuRule />
