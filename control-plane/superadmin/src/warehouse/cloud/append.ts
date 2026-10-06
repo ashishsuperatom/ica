@@ -135,7 +135,11 @@ export async function appendRows(catalog: IcebergCatalog, store: ObjectStore, na
     const listPath = `${loc}/metadata/snap-${snap}-${attempt}-${uuid}.avro`
     await store.put(keyOf(listPath, store), list)
     // The table's rows so far: none before its first append; otherwise what the parent snapshot counted (if it did).
-    const total = parent ? (meta.snapshots ?? []).find((s) => String(s['snapshot-id']) === parent)?.summary?.['total-records'] : '0'
+    // Where the parent did not count (an older writer), its manifests do: the rows each data manifest added or kept. Any
+    // delete manifest and the count is left out rather than guessed.
+    const counted = parent ? (meta.snapshots ?? []).find((s) => String(s['snapshot-id']) === parent)?.summary?.['total-records'] : '0'
+    const fromManifests = previous.every((m) => Number(m.content) === 0) ? String(previous.reduce((n, m) => n + Number(m.added_rows_count) + Number(m.existing_rows_count), 0)) : undefined
+    const total = counted ?? fromManifests
     const snapshot = { 'snapshot-id': snap, ...(parent ? { 'parent-snapshot-id': parent } : {}), 'sequence-number': seq, 'timestamp-ms': Date.now(), 'manifest-list': listPath, 'schema-id': schema['schema-id'],
       summary: { operation: 'append', 'added-data-files': '1', 'added-records': String(rows.length), 'added-files-size': String(data.length), ...(total !== undefined ? { 'total-records': String(Number(total) + rows.length) } : {}) } }
     try {

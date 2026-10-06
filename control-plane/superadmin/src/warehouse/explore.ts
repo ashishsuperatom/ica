@@ -73,8 +73,10 @@ export async function explore(run: Run, t: TableInfo, r: ExploreRequest): Promis
     // the chosen column, then every column — so a page is the same page each time it is asked.
     const order = [...(r.sort ? [`${s.id(r.sort)} ${r.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST`] : []), ...all.filter((c) => !r.sort || c !== s.id(r.sort))].join(', ')
     const from = (page - 1) * size
+    // Unnarrowed, the table's own snapshot counts its rows (when it does): one query fewer.
+    const counted = !w && t.rows !== undefined ? { columns: [], rows: [{ sa_total: t.rows }], truncated: false } : null
     const [total, rows] = await Promise.all([
-      run(`SELECT COUNT(*) AS sa_total FROM ${s.table}${w}`, 1),
+      counted ?? run(`SELECT COUNT(*) AS sa_total FROM ${s.table}${w}`, 1),
       run(`SELECT ${all.join(', ')} FROM (SELECT ${all.join(', ')}, ROW_NUMBER() OVER (ORDER BY ${order}) AS sa_rn FROM ${s.table}${w}) sa_page WHERE sa_rn > ${from} AND sa_rn <= ${from + size} ORDER BY sa_rn`, size),
     ])
     return { total: num(total.rows[0]?.sa_total) ?? 0, page, size, rows: rows.rows }

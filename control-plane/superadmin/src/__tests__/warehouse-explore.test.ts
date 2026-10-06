@@ -34,6 +34,11 @@ describe('the explorer\'s reads', () => {
     await explore(g.run, limited, { op: 'rows', table: 'ships', q: 'x' })
     expect(g.seen.join(' ')).not.toMatch(/"at"|"late"/)
   })
+  it('takes an unnarrowed total from the snapshot, counting only when narrowed', async () => {
+    const { run, seen } = runner(() => [{ id: 1 }])
+    const r: any = await explore(run, { ...ships, rows: 42 }, { op: 'rows', table: 'ships' })
+    expect(r.total).toBe(42); expect(seen.some((q) => q.includes('sa_total'))).toBe(false)
+  })
   it('profiles every column in one read, by kind', async () => {
     const { run, seen } = runner(() => [{ sa_rows: 10, sa_d0: 10, sa_c0: 10, sa_lo0: 1, sa_hi0: 10, sa_mean0: 5.5, sa_qa0: 3, sa_qb0: 5, sa_qc0: 8, sa_d1: 3, sa_c1: 8, sa_lo1: 'a', sa_hi1: 'z', sa_d2: 2, sa_c2: 10, sa_d3: 2, sa_c3: 9, sa_t3: 4 }])
     const p: any = await explore(run, ships, { op: 'profile', table: 'ships' })
