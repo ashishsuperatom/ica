@@ -4,7 +4,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Store } from '../src/store.ts'
-import { governance as g, GovernanceRefusal, compose as composeDomain } from '../src/index.ts'
+import { governance as g, GovernanceRefusal, compose as composeDomain, nameVersion, restoreVersion, sinceLastVersion } from '../src/index.ts'
 
 const fresh = () => new Store(join(mkdtempSync(join(tmpdir(), 'gov-')), 'composition.sqlite'))
 const ana = { id: 'user:ana' }, bo = { id: 'user:bo' }, bot = { id: 'agent:key_1' }, admin = { id: 'user:root', admin: true }
@@ -143,4 +143,32 @@ test('two levels: a domain composes intermediate concepts, an intermediate compo
   assert.deepEqual((s.get('health')!.body as any).concepts, ['pillar'])
   assert.throws(() => g.compose(s, admin, 'health', 'rag', { leave: true }), /"rag" is not in "health"/)
   assert.doesNotMatch(composeDomain(s, 'pmo').text, /RAG is the worst/)
+})
+
+test('named versions: a name for a moment of the log; the graph read as of it; going back writes new changes', () => {
+  const s = fresh()
+  g.write(s, admin, 'a', 'concept', text('first'))
+  g.write(s, admin, 'd', 'domain', { capabilities: [], concepts: ['a'], files: [] })
+  assert.throws(() => nameVersion(s, ana, 'v1', 'x'), /may publish/)
+  assert.throws(() => nameVersion(s, admin, 'v1', ''), /says what it is/)
+  const v1 = nameVersion(s, admin, 'v1', 'the first shape')
+  assert.equal(v1.changes, 2)
+  assert.throws(() => nameVersion(s, admin, 'v1', 'again'), /already a version "v1"/)
+  g.write(s, admin, 'a', 'concept', text('second'))
+  g.write(s, admin, 'b', 'concept', text('new one'))
+  assert.equal(sinceLastVersion(s).length, 2)
+  const v2 = nameVersion(s, admin, 'v2', 'a and b')
+  assert.deepEqual(s.versions().map((v) => [v.name, v.changes]), [['v2', 2], ['v1', 2]])
+  // read as of v1
+  assert.equal((s.get('a', undefined, v1.upto)!.body as any).text, 'first')
+  assert.equal(s.get('b', undefined, v1.upto), null)
+  // back to v1: a set back, b taken away — as new changes, history kept
+  const before = s.lastChange()
+  assert.deepEqual(restoreVersion(s, admin, 'v1').sort(), ['a', 'b'])
+  assert.equal((s.get('a')!.body as any).text, 'first')
+  assert.equal(s.get('b'), null)
+  assert.ok(s.lastChange() > before)
+  assert.equal((s.get('a', undefined, v2.upto)!.body as any).text, 'second')   // v2 still reads as it was
+  assert.deepEqual(restoreVersion(s, admin, 'v1'), [])                // already there
+  assert.throws(() => s.db.exec('DELETE FROM version'), /append-only/)
 })

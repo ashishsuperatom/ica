@@ -33,7 +33,7 @@ export const AGENT_SCOPES = {
   /** Publishing: make concepts, domains, agents and programs seen by everyone (or a group), and decide others'
    *  suggestions — as someone who may publish. */
   publish: ['graph:publish', 'graph:decide', 'program:publish'],
-  graph: ['graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish'],
+  graph: ['graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:versions', 'graph:version', 'graph:restore'],
 } as const
 
 export type AgentScope = keyof typeof AGENT_SCOPES

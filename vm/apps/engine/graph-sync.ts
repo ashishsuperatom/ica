@@ -22,9 +22,9 @@ export function createGraphSync(o: { file: string; send: (msg: Record<string, un
   let platform: Cursor = START
 
   const one = (q: string) => Number((open().db.prepare(q).get() as { v: number | null } | undefined)?.v ?? 0)
-  const local = (): Cursor => ({ change: one('SELECT MAX(id) AS v FROM change'), suggestion: one('SELECT MAX(id) AS v FROM suggestion'), decisionAt: one('SELECT MAX(at) AS v FROM decision') })
+  const local = (): Cursor => ({ change: one('SELECT MAX(id) AS v FROM change'), suggestion: one('SELECT MAX(id) AS v FROM suggestion'), decisionAt: one('SELECT MAX(at) AS v FROM decision'), version: one('SELECT MAX(id) AS v FROM version') })
   const isEmpty = (c: Cursor) => !c.change && !c.suggestion && !c.decisionAt
-  const ahead = (l: Cursor, p: Cursor) => l.change > p.change || l.suggestion > p.suggestion || l.decisionAt > p.decisionAt
+  const ahead = (l: Cursor, p: Cursor) => l.change > p.change || l.suggestion > p.suggestion || l.decisionAt > p.decisionAt || (l.version ?? 0) > (p.version ?? 0)
 
   function stop(why: string) { state = 'stopped'; o.log?.(`[graph-sync] ${why} — nothing more is pushed or pulled until someone looks`) }
 
@@ -32,7 +32,7 @@ export function createGraphSync(o: { file: string; send: (msg: Record<string, un
     if (state !== 'idle' && state !== 'pushing') return
     const batch = replicaSince(open(), platform, BATCH)
     const { next: _n, ...records } = batch
-    if (!records.changes.length && !records.suggestions.length && !records.decisions.some((d) => Number(d.at) > platform.decisionAt)) {
+    if (!records.changes.length && !records.suggestions.length && !(records.versions?.length) && !records.decisions.some((d) => Number(d.at) > platform.decisionAt)) {
       if (state === 'pushing') o.log?.(`[graph-sync] the platform has the graph (up to change ${platform.change})`)
       state = 'idle'; return
     }
@@ -56,7 +56,7 @@ export function createGraphSync(o: { file: string; send: (msg: Record<string, un
       if (p.conflict) { stop(`the platform has a different record (${p.error})`); return }
       if (state === 'anchoring') {
         const l = local()
-        if (!ahead(l, platform) && (l.change < platform.change || l.suggestion < platform.suggestion || l.decisionAt < platform.decisionAt)) { o.log?.('[graph-sync] this engine is behind the platform — catching up'); pull(l); return }
+        if (!ahead(l, platform) && (l.change < platform.change || l.suggestion < platform.suggestion || l.decisionAt < platform.decisionAt || (l.version ?? 0) < (platform.version ?? 0))) { o.log?.('[graph-sync] this engine is behind the platform — catching up'); pull(l); return }
         o.log?.(`[graph-sync] in step with the platform (its copy up to change ${platform.change}, here ${l.change})`)
         state = 'pushing'; push(); return
       }
@@ -64,7 +64,7 @@ export function createGraphSync(o: { file: string; send: (msg: Record<string, un
     } else if (p.t === 'graph:batch') {
       const b = p.batch
       const known = (d: any) => !!open().db.prepare('SELECT 1 FROM decision WHERE suggestion = ?').get(d.suggestion)
-      const done = !b.changes.length && !b.suggestions.length && b.decisions.every(known)
+      const done = !b.changes.length && !b.suggestions.length && !(b.versions?.length) && b.decisions.every(known)
       try { applyReplica(open(), b) } catch (e: any) { stop(`taking the platform's records failed: ${e?.message ?? e}`); return }
       if (done) { o.log?.('[graph-sync] rebuilt from the platform'); state = 'idle'; push(); return }
       pull(b.next)

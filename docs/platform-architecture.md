@@ -1089,7 +1089,7 @@ and every reader reads again. Keys are who · organisation · path; least recent
 organisation; reads that change by the second (status, logs, attention) are never cached; a read that changes on every
 ask stops causing re-reads.
 
-### Named versions of the composition graph (proposed, 2026-10-06)
+### Named versions of the composition graph (built, 2026-10-06)
 
 **In the user's words:** is versioning possible in the composition graph? Every change to a node is saved at once — that is
 time travel — but there is no commit-like system: in git we make several changes and commit them. We need a version we
@@ -1104,6 +1104,14 @@ changes between them counted; clicking one shows the whole graph as of that vers
 store already has); **Make this the current graph** writes the changes that bring today's graph back to it (new
 changes in the log; history never rewritten). Engine-side in the composition-graph package and its CLI; replicated to
 the platform like every change.
+
+*Built:* the `version` table (engine migration 6: name, message, `upto` — the id of the last change it covers — when,
+who; append-only). A version is read **by change id**, not by time, so changes made in the same millisecond never leak
+into it. Naming needs an admin; restoring is governed like any change and writes `back to version <name>` changes in
+one savepoint. CLI: `composition-graph versions | version <name> --message … | restore <name>`; hub: `graph:versions`,
+`graph:version`, `graph:restore`, and `compositionColumns({version})`; versions travel with the replica (cursor
+`version`) to the GraphDO and back. The graph page shows the strip beside the search, a banner while viewing a version
+(read-only: nothing attached, detached, made or edited), **Make this the current graph** and **Back to now**.
 
 ### The warehouse explorer (proposed, 2026-10-06)
 

@@ -12,7 +12,8 @@ import { cached, keep } from './cache'
 
 type Body = Record<string, any>
 interface Node { name: string; title: string; line: string; scope: string; owner: string | null; hash: string; concepts: string[]; body: Body; composed?: boolean; form?: string; agents?: { name: string; title: string }[] }
-interface Graph { domains: Node[]; intermediate: Node[]; atomic: Node[] }
+interface Version { id: number; name: string; message: string; upto: number; at: number; by: string; asOf: number; changes: number }
+interface Graph { domains: Node[]; intermediate: Node[]; atomic: Node[]; version?: Version }
 type Focus = { kind: 'domain' | 'intermediate' | 'atomic'; name: string } | null
 
 /** A concept's content as Markdown — a list or worked examples written before concepts were Markdown read as their Markdown. */
@@ -28,7 +29,10 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   const hub = useProjectHub(projectId, token)
   // Shown at once from this browser's copy (cache.ts) when it was read before; the engine's answer replaces it.
   const who = (() => { try { return String(JSON.parse(atob(String(token).split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).email ?? '') } catch { return '' } })()
-  const cacheKey = `${who}|graph|${projectId}`
+  // A named version being looked at (read-only), or null: the graph as it is now.
+  const [viewing, setViewing] = useState<string | null>(null)
+  const [versions, setVersions] = useState<{ versions: Version[]; since: { id: number; name: string; kind: string; by: string; reason: string | null; removed: boolean }[] } | null>(null)
+  const cacheKey = `${who}|graph|${projectId}${viewing ? `|v:${viewing}` : ''}`
   const [graph, setGraph] = useState<Graph | null>(() => { try { const c = cached(cacheKey); return c ? JSON.parse(c) as Graph : null } catch { return null } })
   const [err, setErr] = useState('')
   const [dom, setDom] = useState<string | null>(null)
@@ -38,10 +42,18 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   const [making, setMaking] = useState<null | { kind: 'intermediate' | 'atomic'; into: string | null }>(null)
   const [q, setQ] = useState('')
   const load = useCallback(async () => {
-    try { const r = await hub.request('compositionColumns'); if (r.error) setErr(r.error); else if (r.exists === false) setErr('This project has no composition graph yet.'); else { setErr(''); setGraph(r); keep(cacheKey, JSON.stringify(r)) } }
+    try { const r = await hub.request('compositionColumns', viewing ? { version: viewing } : {}); if (r.error) setErr(r.error); else if (r.exists === false) setErr('This project has no composition graph yet.'); else { setErr(''); setGraph(r); keep(cacheKey, JSON.stringify(r)) } }
     catch (e: any) { setErr(e?.message ?? String(e)) }
-  }, [hub.request, cacheKey])   // eslint-disable-line react-hooks/exhaustive-deps -- hub is a new object each render; its request is stable
-  useEffect(() => { if (hub.status === 'live') void load() }, [hub.status, load])
+  }, [hub.request, cacheKey, viewing])   // eslint-disable-line react-hooks/exhaustive-deps -- hub is a new object each render; its request is stable
+  const loadVersions = useCallback(async () => {
+    const r = await hub.call({ t: 'graph:versions' }).catch(() => null)
+    if (r?.t === 'graph:reply') setVersions({ versions: r.versions ?? [], since: r.since ?? [] })
+  }, [hub.call])   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (hub.status === 'live') { void load(); void loadVersions() } }, [hub.status, load, loadVersions])
+  const [naming, setNaming] = useState(false)
+  const [restoring, setRestoring] = useState(false)
+  /** Look at a version (null: now): the graph as it read then, read-only. */
+  const view = (name: string | null) => { setViewing(name); setDom(null); setMid(null); setAtom(null); setFocus(null); setGraph(null) }
 
   const by = useMemo(() => new Map([...(graph?.domains ?? []), ...(graph?.intermediate ?? []), ...(graph?.atomic ?? [])].map((n) => [n.name, n])), [graph])
   if (err) return <Notice state="critical">{err}</Notice>
@@ -69,7 +81,7 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   const change = async (t: 'graph:join' | 'graph:leave', into: string, concept: string, at?: number) => {
     const r = await hub.call({ t, into, concept, ...(at !== undefined ? { at } : {}), reason: 'in the console' }).catch((e) => ({ reason: String(e?.message ?? e) }))
     if (r?.t !== 'graph:reply') { notify(r?.reason ?? 'The graph did not change', 'refused'); return false }
-    await load(); return true
+    await load(); void loadVersions(); return true
   }
   /** Detach an atomic concept from the selection: directly from it, or say which intermediate concept holds it. */
   const detachAtom = (k: string) => {
@@ -109,26 +121,105 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
     },
   ]
 
+  // Looking at a version: nothing is attached, detached or made — it is how the graph was.
+  const shown = viewing ? columns.map((c) => ({ ...c, onAttach: undefined, onDetach: undefined, onNew: undefined })) : columns
   const focused = focus ? by.get(focus.name) ?? null : null
   const partOf = (name: string) => [...graph.intermediate, ...graph.domains].filter((x) => x.concepts.includes(name))
   return (
     <div className="sa-graphpage">
-      <ColumnsSearch value={q} onChange={setQ} placeholder="Search domains and concepts — titles and what they say" />
-      <Columns keep="composition-graph" columns={columns} detail={focused
-        ? <Detail key={focused.name + focused.hash} hub={hub} node={focused} kind={focus!.kind} by={by} partOf={partOf(focused.name)} goTo={goTo} change={change} reload={load} intermediates={graph.intermediate} />
+      <div className="sa-graphpage__top">
+        <ColumnsSearch value={q} onChange={setQ} placeholder="Search domains and concepts — titles and what they say" />
+        <VersionsStrip versions={versions?.versions ?? null} since={versions?.since.length ?? 0} viewing={viewing} onView={view} onName={() => setNaming(true)} />
+      </div>
+      {viewing && graph.version && (
+        <div className="sa-graphpage__viewing" role="status">
+          <Icon icon="lucide:history" /><span><strong>Version {graph.version.name}</strong> — {graph.version.message} <span className="sa-muted">· named by {graph.version.by.replace(/^user:/, '')} on {new Date(graph.version.at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })} · read-only</span></span>
+          <span className="sa-graphpage__viewacts">
+            <button className="sa-btn" onClick={() => setRestoring(true)}><Icon icon="lucide:rotate-ccw" className="sa-btn__icon" />Make this the current graph</button>
+            <button className="sa-btn sa-btn--primary" onClick={() => view(null)}>Back to now</button>
+          </span>
+        </div>
+      )}
+      <Columns keep="composition-graph" columns={shown} detail={focused
+        ? <Detail key={focused.name + focused.hash} hub={hub} node={focused} kind={focus!.kind} by={by} partOf={partOf(focused.name)} goTo={goTo} change={change} reload={load} intermediates={graph.intermediate} readOnly={!!viewing} />
         : <div className="sa-graphpage__hint"><Icon icon="lucide:mouse-pointer-click" /><p>Select a domain or a concept to see all of it here, change it, and walk what it composes.</p>
             <Receipt items={[['Domains', String(graph.domains.length)], ['Intermediate concepts', String(graph.intermediate.length)], ['Atomic concepts', String(graph.atomic.length)]]} /></div>} />
       {making?.kind === 'atomic' && <NewConcept hub={hub} kind="atomic" into={making.into ? by.get(making.into)?.title ?? making.into : null}
         onClose={() => setMaking(null)} onMade={async (name) => { if (making.into) await change('graph:join', making.into, name); else await load(); setMaking(null); goTo(name) }} />}
       {making?.kind === 'intermediate' && <NewIntermediate hub={hub} atomic={graph.atomic} preset={atom ? [atom] : []} into={making.into ? by.get(making.into)?.title ?? making.into : null}
         onClose={() => setMaking(null)} onMade={async (name) => { if (making.into) await change('graph:join', making.into, name); else await load(); setMaking(null); goTo(name) }} />}
+      {naming && <NameVersion hub={hub} since={versions?.since ?? []} last={versions?.versions[0]?.name ?? null} onClose={() => setNaming(false)} onNamed={() => { setNaming(false); void loadVersions() }} />}
+      {restoring && viewing && (
+        <Dialog title={`Make ${viewing} the current graph?`} onClose={() => setRestoring(false)}
+          actions={<><button className="sa-btn" onClick={() => setRestoring(false)}>Cancel</button><button className="sa-btn sa-btn--primary" onClick={async () => {
+            const r = await hub.call({ t: 'graph:restore', name: viewing }).catch((e) => ({ reason: String(e?.message ?? e) }))
+            setRestoring(false)
+            if (r?.t !== 'graph:reply') { notify(r?.reason ?? 'It was not restored', 'refused'); return }
+            notify(r.restored?.length ? `Back to ${viewing}: ${r.restored.length} node${r.restored.length === 1 ? '' : 's'} changed` : `The graph already is ${viewing}`, 'note')
+            view(null); void loadVersions()
+          }}>Make it current</button></>}>
+          <p>Every node that differs from {viewing} is set back to how it was — as new changes, so nothing is lost: today's graph stays in the history, and can be named first if you may want it back.</p>
+        </Dialog>
+      )}
     </div>
   )
 }
 
+/** The named versions as a line of points, the changes between them counted, ending at now — click one to look at it. */
+function VersionsStrip({ versions, since, viewing, onView, onName }: { versions: Version[] | null; since: number; viewing: string | null; onView: (name: string | null) => void; onName: () => void }) {
+  const list = [...(versions ?? [])].reverse()   // oldest first, along the line
+  return (
+    <div className="sa-versions" aria-label="Named versions">
+      <Icon icon="lucide:git-commit-horizontal" className="sa-versions__icon" />
+      <div className="sa-versions__line">
+        {versions === null && <span className="sa-skeleton" style={{ width: 160, height: 10 }} />}
+        {versions !== null && !list.length && <span className="sa-note">No named versions yet</span>}
+        {list.map((v, i) => (
+          <span key={v.id} className="sa-versions__step">
+            {i > 0 && <span className="sa-versions__gap" title={`${v.changes} change${v.changes === 1 ? '' : 's'} since ${list[i - 1].name}`}>{v.changes}</span>}
+            <button className="sa-versions__point" data-on={viewing === v.name} onClick={() => onView(viewing === v.name ? null : v.name)}
+              title={`${v.name} — ${v.message}\n${v.by.replace(/^user:/, '')} · ${new Date(v.at).toLocaleString()}`}>{v.name}</button>
+          </span>
+        ))}
+        {versions !== null && (
+          <span className="sa-versions__step">
+            {list.length > 0 && <span className="sa-versions__gap" title={`${since} change${since === 1 ? '' : 's'} since ${list[list.length - 1].name}`}>{since}</span>}
+            <button className="sa-versions__point sa-versions__point--now" data-on={!viewing} onClick={() => onView(null)}>Now</button>
+          </span>
+        )}
+      </div>
+      <button className="sa-btn sa-btn--link" onClick={onName} disabled={viewing !== null} title={viewing ? 'Go back to now to name a version' : 'Name the graph as it is now'}><Icon icon="lucide:tag" className="sa-btn__icon" />Name this version</button>
+    </div>
+  )
+}
+
+/** Name the graph as it is now — with what changed since the last version, as a commit lists its changes. */
+function NameVersion({ hub, since, last, onClose, onNamed }: { hub: ReturnType<typeof useProjectHub>; since: { id: number; name: string; kind: string; by: string; reason: string | null; removed: boolean }[]; last: string | null; onClose: () => void; onNamed: () => void }) {
+  const [name, setName] = useState(''), [message, setMessage] = useState(''), [err, setErr] = useState('')
+  const make = async () => {
+    const r = await hub.call({ t: 'graph:version', name: name.trim(), message: message.trim() }).catch((e) => ({ reason: String(e?.message ?? e) }))
+    if (r?.t !== 'graph:reply') { setErr(r?.reason ?? 'It was not named'); return }
+    notify(`Named ${name.trim()}`, 'note'); onNamed()
+  }
+  return (
+    <Dialog title="Name this version" onClose={onClose}>
+      <Form onSubmit={() => void make()} error={err} actions={<><button type="button" className="sa-btn" onClick={onClose}>Cancel</button><button className="sa-btn sa-btn--primary" disabled={!name.trim() || !message.trim()}>Name it</button></>}>
+        <Field label="Name"><input id="nv-name" className="sa-input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="A short name, like a release" /></Field>
+        <Field label="What it is"><textarea id="nv-message" className="sa-input" rows={3} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="What this version of the graph is, and what changed in it" /></Field>
+        <div className="sa-graphpage__block">
+          <h3 className="sa-label">{since.length} change{since.length === 1 ? '' : 's'} since {last ?? 'the start'}</h3>
+          {since.length ? <ul className="sa-versions__changes">{since.slice(-200).reverse().map((c) => (
+            <li key={c.id}><Code>{c.name}</Code> <span className="sa-muted">{c.removed ? 'removed' : c.kind} · {c.by.replace(/^user:/, '')}{c.reason ? ` · ${c.reason}` : ''}</span></li>))}</ul>
+            : <p className="sa-note">Nothing changed since {last} — naming it again would name the same graph.</p>}
+        </div>
+      </Form>
+    </Dialog>
+  )
+}
+
 /** What is selected: all of it, and its editor. */
-function Detail({ hub, node, kind, by, partOf, goTo, change, reload, intermediates }: {
-  hub: ReturnType<typeof useProjectHub>; node: Node; kind: NonNullable<Focus>['kind']; by: Map<string, Node>; partOf: Node[]; intermediates: Node[]
+function Detail({ hub, node, kind, by, partOf, goTo, change, reload, intermediates, readOnly = false }: {
+  hub: ReturnType<typeof useProjectHub>; node: Node; kind: NonNullable<Focus>['kind']; by: Map<string, Node>; partOf: Node[]; intermediates: Node[]; readOnly?: boolean
   goTo: (name: string) => void; change: (t: 'graph:join' | 'graph:leave', into: string, concept: string, at?: number) => Promise<boolean>; reload: () => Promise<void>
 }) {
   const b = node.body
@@ -146,11 +237,11 @@ function Detail({ hub, node, kind, by, partOf, goTo, change, reload, intermediat
         return (
           <li key={c}>
             <button className="sa-graphpage__link" onClick={() => goTo(c)}>{n?.title ?? c}{n?.composed && <span className="sa-col__tag">intermediate</span>}</button>
-            <span className="sa-graphpage__acts">
+            {!readOnly && <span className="sa-graphpage__acts">
               <button className="sa-icon-btn" disabled={i === 0} title="Move up" aria-label="Move up" onClick={() => void change('graph:join', owner.name, c, i - 1)}><Icon icon="lucide:arrow-up" /></button>
               <button className="sa-icon-btn" disabled={i === owner.concepts.length - 1} title="Move down" aria-label="Move down" onClick={() => void change('graph:join', owner.name, c, i + 1)}><Icon icon="lucide:arrow-down" /></button>
               <button className="sa-icon-btn" title="Detach" aria-label="Detach" onClick={() => void change('graph:leave', owner.name, c)}><Icon icon="lucide:unlink" /></button>
-            </span>
+            </span>}
           </li>
         )
       })}</ol> : <p className="sa-note">Nothing yet — attach from the column.</p>}
@@ -169,14 +260,14 @@ function Detail({ hub, node, kind, by, partOf, goTo, change, reload, intermediat
       ]} />
       {(b.intents ?? []).length > 0 && <div className="sa-graphpage__block"><h3 className="sa-label">Phrases it serves</h3><div className="sa-words">{b.intents.map((t: string) => <span key={t} className="sa-word">{t}</span>)}</div></div>}
       {order(node, 'What it composes')}
-      <AttachPick label="Attach an intermediate concept" options={intermediates.filter((x) => !node.concepts.includes(x.name))} onAttach={(k) => void change('graph:join', node.name, k)} />
+ {!readOnly && <AttachPick label="Attach an intermediate concept" options={intermediates.filter((x) => !node.concepts.includes(x.name))} onAttach={(k) => void change('graph:join', node.name, k)} />}
       <SystemPrompt hub={hub} domain={node.name} />
       {meta}
     </div>
   )
-  if (kind === 'intermediate') return <IntermediateDetail hub={hub} node={node} reload={reload} meta={meta} order={order(node, 'Its atomic concepts')} links={links('Part of', partOf, 'No domain composes it yet.')}
+  if (kind === 'intermediate') return <IntermediateDetail readOnly={readOnly} hub={hub} node={node} reload={reload} meta={meta} order={order(node, 'Its atomic concepts')} links={links('Part of', partOf, 'No domain composes it yet.')}
     composed={composedText(String(b.title ?? node.title), String(b.text ?? ''), node.concepts.map((c) => by.get(c)).filter((x): x is Node => !!x))} />
-  return <AtomicDetail hub={hub} node={node} reload={reload} meta={meta} links={links('Part of', partOf, 'Nothing composes it yet — attach it to an intermediate concept.')} />
+  return <AtomicDetail readOnly={readOnly} hub={hub} node={node} reload={reload} meta={meta} links={links('Part of', partOf, 'Nothing composes it yet — attach it to an intermediate concept.')} />
 }
 
 /** Attach one from a list (a domain's first intermediate concept, when its column is not shown). */
@@ -211,7 +302,7 @@ function useSave(hub: ReturnType<typeof useProjectHub>, name: string, reload: ()
   return { err, suggestable, saving, save, suggest }
 }
 
-function AtomicDetail({ hub, node, reload, meta, links }: { hub: ReturnType<typeof useProjectHub>; node: Node; reload: () => Promise<void>; meta: ReactNode; links: ReactNode }) {
+function AtomicDetail({ hub, node, reload, meta, links, readOnly = false }: { readOnly?: boolean; hub: ReturnType<typeof useProjectHub>; node: Node; reload: () => Promise<void>; meta: ReactNode; links: ReactNode }) {
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(String(node.body.title ?? ''))
   // One Markdown text: a concept written in another form (a list, worked examples) opens as its Markdown and is kept so.
@@ -222,7 +313,7 @@ function AtomicDetail({ hub, node, reload, meta, links }: { hub: ReturnType<type
   return (
     <div className="sa-graphpage__detail">
       <header className="sa-graphpage__head"><Icon icon="lucide:atom" /><div><h2>{node.title}</h2><p className="sa-note">An atomic concept</p></div>
-        {!editing && <button className="sa-btn" onClick={() => setEditing(true)}><Icon icon="lucide:pencil" className="sa-btn__icon" />Edit</button>}</header>
+        {!editing && !readOnly && <button className="sa-btn" onClick={() => setEditing(true)}><Icon icon="lucide:pencil" className="sa-btn__icon" />Edit</button>}</header>
       {!editing ? (toText(node.body).trim() ? <div className="sa-graphpage__md sa-prose" dangerouslySetInnerHTML={{ __html: markdownToHtml(toText(node.body)) }} /> : <p className="sa-note">Empty.</p>) : (
         <Form onSubmit={() => void s.save(body, reason).then((ok) => ok && setEditing(false))} error={s.err}
           actions={<>{s.suggestable && <button type="button" className="sa-btn" onClick={() => void s.suggest(body, reason).then((ok) => ok && setEditing(false))}>Suggest this change</button>}
@@ -240,7 +331,7 @@ function AtomicDetail({ hub, node, reload, meta, links }: { hub: ReturnType<type
   )
 }
 
-function IntermediateDetail({ hub, node, reload, meta, order, links, composed }: { hub: ReturnType<typeof useProjectHub>; node: Node; reload: () => Promise<void>; meta: ReactNode; order: ReactNode; links: ReactNode; composed: string }) {
+function IntermediateDetail({ hub, node, reload, meta, order, links, composed, readOnly = false }: { readOnly?: boolean; hub: ReturnType<typeof useProjectHub>; node: Node; reload: () => Promise<void>; meta: ReactNode; order: ReactNode; links: ReactNode; composed: string }) {
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(String(node.body.title ?? '')), [line, setLine] = useState(String(node.body.text ?? '')), [reason, setReason] = useState('')
   const s = useSave(hub, node.name, reload)
@@ -248,7 +339,7 @@ function IntermediateDetail({ hub, node, reload, meta, order, links, composed }:
   return (
     <div className="sa-graphpage__detail">
       <header className="sa-graphpage__head"><Icon icon="lucide:layers" /><div><h2>{node.title}</h2><p className="sa-note">An intermediate concept — a combination of atomic concepts, in this order</p></div>
-        {!editing && <button className="sa-btn" onClick={() => setEditing(true)}><Icon icon="lucide:pencil" className="sa-btn__icon" />Edit</button>}</header>
+        {!editing && !readOnly && <button className="sa-btn" onClick={() => setEditing(true)}><Icon icon="lucide:pencil" className="sa-btn__icon" />Edit</button>}</header>
       {!editing ? (node.body.text ? <p className="sa-graphpage__text">{node.body.text}</p> : null) : (
         <Form onSubmit={() => void s.save(body, reason).then((ok) => ok && setEditing(false))} error={s.err}
           actions={<>{s.suggestable && <button type="button" className="sa-btn" onClick={() => void s.suggest(body, reason).then((ok) => ok && setEditing(false))}>Suggest this change</button>}

@@ -25,6 +25,8 @@ export const visibleTo = (scope: Scope, viewer: Scope[]) => scope === 'global' |
 /** A question and the agent it went to: routed by its own words (a session's first question) or asked in a session that
  *  already was a domain. `ranked` is the router's scoring when it routed: every domain, its score, the terms that decided. */
 export interface Asked { id: number; at: number; session: string; qid: string | null; question: string; domain: string | null; domainHash: string | null; how: 'routed' | 'chosen' | 'session'; ranked: unknown }
+/** A named version: a name and a message given to one moment of the change log (like a git tag over it). */
+export interface Version { id: number; name: string; message: string; upto: number; at: number; by: string; asOf: number; changes: number }
 export interface Change { id: number; at: number; name: string; kind: Kind; fromHash: string | null; toHash: string | null; by: string; reason: string | null; from: string | null; scope: Scope | null }
 
 /** The composition graph's migrations (@superatom/migrate): numbered, never edited once shipped — a change is a new one. */
@@ -71,6 +73,14 @@ CREATE TRIGGER IF NOT EXISTS decision_no_delete BEFORE DELETE ON decision BEGIN 
 ` },
   // Each change records the owner it left the node with, so the graph can be rebuilt from its log alone (replica.ts).
   { id: 5, name: 'owner on each change', up: (db) => { addColumnIfMissing(db, 'change', 'owner', 'TEXT') } },
+  // Named versions (versions.ts): a name and a message for one moment of the change log — the change it stands at.
+  // Every change is still saved at once; a version only names a point of that history. Append-only.
+  { id: 6, name: 'named versions', up: `
+CREATE TABLE IF NOT EXISTS version (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, message TEXT NOT NULL, upto INTEGER NOT NULL, at INTEGER NOT NULL, by TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS version_no_update BEFORE UPDATE ON version BEGIN SELECT RAISE(ABORT, 'versions are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS version_no_delete BEFORE DELETE ON version BEGIN SELECT RAISE(ABORT, 'versions are append-only'); END;
+` },
 ]
 
 /** JSON with keys in a fixed order, so the same content always has the same hash. */
@@ -128,10 +138,12 @@ export class Store {
     return true
   }
 
-  /** A node as it is now, or as it was at a moment (ms since the epoch). */
-  get<B = unknown>(name: string, asOf?: number): Node<B> | null {
+  /** A node as it is now, as it was at a moment (ms since the epoch), or as it was after one change (`upto`: a change's id —
+   *  exact even when several changes share a millisecond; what a named version reads by). */
+  get<B = unknown>(name: string, asOf?: number, upto?: number): Node<B> | null {
     let row: { kind: string; hash: string | null; scope: string | null; owner: string | null } | undefined
-    if (asOf === undefined) row = this.db.prepare('SELECT kind, hash, scope, owner FROM name WHERE name = ?').get(name) as any
+    if (upto !== undefined) row = this.db.prepare('SELECT kind, to_hash AS hash, scope, NULL AS owner FROM change WHERE name = ? AND id <= ? ORDER BY id DESC LIMIT 1').get(name, upto) as any
+    else if (asOf === undefined) row = this.db.prepare('SELECT kind, hash, scope, owner FROM name WHERE name = ?').get(name) as any
     else row = this.db.prepare('SELECT kind, to_hash AS hash, scope, NULL AS owner FROM change WHERE name = ? AND at <= ? ORDER BY at DESC, id DESC LIMIT 1').get(name, asOf) as any
     if (!row?.hash) return null
     return { name, kind: row.kind as Kind, hash: row.hash, body: this.content<B>(row.hash), scope: row.scope ?? 'global', owner: row.owner ?? null }
@@ -145,8 +157,12 @@ export class Store {
   }
 
   /** The names there are now (or were at a moment), of one kind or all, and only those a viewer's scopes see. */
-  names(kind?: Kind, opts: { asOf?: number; viewer?: Scope[] } = {}): { name: string; kind: Kind; hash: string; scope: Scope; owner: string | null }[] {
-    const rows = (opts.asOf === undefined
+  names(kind?: Kind, opts: { asOf?: number; upto?: number; viewer?: Scope[] } = {}): { name: string; kind: Kind; hash: string; scope: Scope; owner: string | null }[] {
+    const rows = (opts.upto !== undefined
+      // After one change: each name's last change up to it, if that change did not remove it.
+      ? this.db.prepare(`SELECT c.name, c.kind, c.to_hash AS hash, COALESCE(c.scope, 'global') AS scope, NULL AS owner FROM change c
+          WHERE c.id = (SELECT MAX(c2.id) FROM change c2 WHERE c2.name = c.name AND c2.id <= ?) AND c.to_hash IS NOT NULL ORDER BY c.name`).all(opts.upto)
+      : opts.asOf === undefined
       ? this.db.prepare('SELECT name, kind, hash, scope, owner FROM name ORDER BY name').all()
       // As it was: each name's last change at or before the moment, if that change did not remove it.
       : this.db.prepare(`SELECT c.name, c.kind, c.to_hash AS hash, COALESCE(c.scope, 'global') AS scope, NULL AS owner FROM change c
@@ -172,6 +188,24 @@ export class Store {
     const rows = (domain ? this.db.prepare('SELECT * FROM question WHERE domain = ? ORDER BY at DESC, id DESC LIMIT ?').all(domain, limit)
       : this.db.prepare('SELECT * FROM question ORDER BY at DESC, id DESC LIMIT ?').all(limit)) as any[]
     return rows.map((r) => ({ id: r.id, at: r.at, session: r.session, qid: r.qid, question: r.question, domain: r.domain, domainHash: r.domain_hash, how: r.how, ranked: r.ranked ? JSON.parse(r.ranked) : null }))
+  }
+
+  /** The named versions, newest first — each with the moment it reads the graph at and how many changes it covers
+   *  since the version before it. */
+  versions(): Version[] {
+    const rows = this.db.prepare('SELECT v.id, v.name, v.message, v.upto, v.at, v.by, COALESCE((SELECT at FROM change WHERE id = v.upto), v.at) AS as_of FROM version v ORDER BY v.id').all() as any[]
+    let prev = 0
+    const out = rows.map((r) => { const n = Number((this.db.prepare('SELECT COUNT(*) AS n FROM change WHERE id > ? AND id <= ?').get(prev, r.upto) as any).n); prev = r.upto
+      return { id: r.id, name: r.name, message: r.message, upto: r.upto, at: r.at, by: r.by, asOf: r.as_of, changes: n } })
+    return out.reverse()
+  }
+  version(name: string): Version | null { return this.versions().find((v) => v.name === name) ?? null }
+  /** The last change there is (0: none). */
+  lastChange(): number { return Number((this.db.prepare('SELECT MAX(id) AS v FROM change').get() as any)?.v ?? 0) }
+  /** Changes after one change, up to another (or now), oldest first. */
+  changesBetween(after: number, upto?: number): Change[] {
+    return (this.db.prepare(`SELECT id, at, name, kind, from_hash, to_hash, by, reason, evidence, scope FROM change WHERE id > ?${upto === undefined ? '' : ' AND id <= ?'} ORDER BY id`).all(...(upto === undefined ? [after] : [after, upto])) as any[])
+      .map((r) => ({ id: r.id, at: r.at, name: r.name, kind: r.kind, fromHash: r.from_hash, toHash: r.to_hash, by: r.by, reason: r.reason, from: r.evidence, scope: r.scope ?? null }))
   }
 
   /** The latest changes across the graph, newest first. */

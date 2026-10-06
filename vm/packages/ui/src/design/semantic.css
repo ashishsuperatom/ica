@@ -199,6 +199,26 @@
 .sa-graphpage__order li:hover .sa-graphpage__acts { opacity: 1; }
 .sa-graphpage__editor { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--t-sm); line-height: 1.55; min-height: 18rem; resize: vertical; }
 .sa-graphpage__prompt { margin: 0; max-height: 28rem; overflow: auto; padding: var(--sp-3); border-radius: var(--r-md); background: var(--panel); font-size: var(--t-xs); line-height: 1.5; white-space: pre-wrap; color: var(--ink); }
+/* The graph's named versions: a line of points, the changes between them counted, ending at now. */
+.sa-graphpage__top { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.sa-graphpage__top .sa-cols__search { flex: 1 1 18rem; }
+.sa-versions { flex: 1 1 24rem; min-width: 0; display: flex; align-items: center; gap: var(--sp-2); }
+.sa-versions__icon { flex-shrink: 0; color: var(--faint); }
+.sa-versions__line { flex: 1; min-width: 0; display: flex; align-items: center; overflow-x: auto; scrollbar-width: thin; padding: 2px 0; }
+.sa-versions__step { display: inline-flex; align-items: center; flex-shrink: 0; }
+.sa-versions__gap { display: inline-flex; align-items: center; justify-content: center; min-width: 2.5rem; padding: 0 var(--sp-1); font-size: var(--t-xs); color: var(--faint); font-variant-numeric: tabular-nums; background: linear-gradient(var(--line), var(--line)) center / 100% 1px no-repeat; }
+.sa-versions__gap:not(:empty) { text-shadow: 0 0 3px var(--page), 0 0 3px var(--page); }
+.sa-versions__point { height: 24px; padding: 0 var(--sp-2); border: 1px solid var(--line); border-radius: 999px; background: var(--surface); font-size: var(--t-xs); font-weight: var(--w-medium); color: var(--ink); white-space: nowrap; }
+.sa-versions__point:hover { border-color: var(--primary); }
+.sa-versions__point[data-on="true"] { background: var(--primary); border-color: var(--primary); color: var(--on-accent); }
+.sa-versions__point--now { font-style: normal; color: var(--muted); }
+.sa-versions__changes { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; max-height: 14rem; overflow-y: auto; font-size: var(--t-sm); }
+.sa-versions__changes li { display: flex; gap: var(--sp-2); align-items: baseline; min-width: 0; }
+.sa-versions__changes li .sa-muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-graphpage__viewing { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); background: var(--warn-wash); color: var(--ink); font-size: var(--t-sm); }
+.sa-graphpage__viewing > svg { color: var(--warn-ink); flex-shrink: 0; }
+.sa-graphpage__viewing > span:nth-child(2) { flex: 1; min-width: 0; }
+.sa-graphpage__viewacts { display: inline-flex; gap: var(--sp-2); }
 
 /* Making an intermediate concept: pick on the left, order and see the result on the right. */
 .sa-dialog__box:has(.sa-newmid) { width: min(64rem, 100%); }

@@ -12,7 +12,7 @@ import { GRAPH_MIGRATIONS } from './migrations.js'
 import { createRecorder } from './records.js'
 
 type Row = Record<string, unknown>
-const KEY: Record<string, (r: Row) => string> = { change: (r) => String(r.id), suggestion: (r) => String(r.id), decision: (r) => String(r.suggestion) }
+const KEY: Record<string, (r: Row) => string> = { change: (r) => String(r.id), suggestion: (r) => String(r.id), decision: (r) => String(r.suggestion), version: (r) => String(r.id) }
 const same = (a: Row, b: Row) => { const k = new Set([...Object.keys(a), ...Object.keys(b)]); return [...k].every((x) => (a[x] ?? null) === (b[x] ?? null)) }
 
 export class GraphDO extends DurableObject<Env> {
@@ -27,6 +27,7 @@ export class GraphDO extends DurableObject<Env> {
       change: one("SELECT MAX(CAST(key AS INTEGER)) AS v FROM records WHERE kind = 'change'"),
       suggestion: one("SELECT MAX(CAST(key AS INTEGER)) AS v FROM records WHERE kind = 'suggestion'"),
       decisionAt: one("SELECT MAX(at) AS v FROM records WHERE kind = 'decision'"),
+      version: one("SELECT MAX(CAST(key AS INTEGER)) AS v FROM records WHERE kind = 'version'"),
     }
   }
 
@@ -36,7 +37,7 @@ export class GraphDO extends DurableObject<Env> {
     const sql = this.ctx.storage.sql
     if (request.method === 'GET' && url.pathname === '/cursor') return json({ cursor: this.cursor() })
     if (request.method === 'POST' && url.pathname === '/append') {
-      const b = await request.json() as { project?: string; changes?: Row[]; suggestions?: Row[]; decisions?: Row[]; contents?: Record<string, string> }
+      const b = await request.json() as { project?: string; changes?: Row[]; suggestions?: Row[]; decisions?: Row[]; versions?: Row[]; contents?: Record<string, string> }
       const record = createRecorder((this.env as any).RECORDS, () => String(b.project ?? ''))
       let added = 0
       try {
@@ -45,7 +46,7 @@ export class GraphDO extends DurableObject<Env> {
             if (!/^[0-9a-f]{64}$/.test(hash) || typeof body !== 'string') throw new Refused('a content is named by its hash')
             sql.exec('INSERT OR IGNORE INTO content (hash, body) VALUES (?, ?)', hash, body)
           }
-          for (const [kind, rows] of [['change', b.changes ?? []], ['suggestion', b.suggestions ?? []], ['decision', b.decisions ?? []]] as const) {
+          for (const [kind, rows] of [['change', b.changes ?? []], ['suggestion', b.suggestions ?? []], ['decision', b.decisions ?? []], ['version', b.versions ?? []]] as const) {
             for (const r of rows) {
               const key = KEY[kind](r)
               if (!/^\d+$/.test(key)) throw new Refused(`a ${kind} has a number`)
@@ -78,12 +79,14 @@ export class GraphDO extends DurableObject<Env> {
       const changes = rows('change', Number(q.get('change') ?? 0), 'key')
       const suggestions = rows('suggestion', Number(q.get('suggestion') ?? 0), 'key')
       const decisions = rows('decision', Number(q.get('decisionAt') ?? 0), 'at')
+      const versions = rows('version', Number(q.get('version') ?? 0), 'key')
       const hashes = new Set<string>()
       for (const c of changes) { if (c.to_hash) hashes.add(String(c.to_hash)); if (c.from_hash) hashes.add(String(c.from_hash)) }
       for (const s of suggestions) { hashes.add(String(s.body_hash)); if (s.base_hash) hashes.add(String(s.base_hash)) }
       const contents: Record<string, string> = {}
       for (const h of hashes) { const [r] = [...sql.exec('SELECT body FROM content WHERE hash = ?', h)]; if (r) contents[h] = String(r.body) }
-      return json({ changes, suggestions, decisions, contents, next: {
+      return json({ changes, suggestions, decisions, versions, contents, next: {
+        version: versions.length ? Number(versions[versions.length - 1].id) : Number(q.get('version') ?? 0),
         change: changes.length ? Number(changes[changes.length - 1].id) : Number(q.get('change') ?? 0),
         suggestion: suggestions.length ? Number(suggestions[suggestions.length - 1].id) : Number(q.get('suggestion') ?? 0),
         decisionAt: decisions.length ? Number(decisions[decisions.length - 1].at) : Number(q.get('decisionAt') ?? 0),

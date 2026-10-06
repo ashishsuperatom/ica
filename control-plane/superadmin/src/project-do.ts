@@ -560,7 +560,7 @@ export class ProjectDO extends DurableObject<Env> {
       try {
         if (msg.type === 'graph:cursor') reply({ t: 'graph:cursor', ...(await (await stub.fetch('http://do/cursor')).json() as object) })
         else if (msg.type === 'graph:sync') reply({ t: 'graph:synced', ...(await (await stub.fetch('http://do/append', { method: 'POST', body: JSON.stringify({ ...(msg.batch ?? {}), project: this._pid }) })).json() as object) })
-        else { const c = msg.cursor ?? {}; reply({ t: 'graph:batch', batch: await (await stub.fetch(`http://do/pull?change=${Number(c.change) || 0}&suggestion=${Number(c.suggestion) || 0}&decisionAt=${Number(c.decisionAt) || 0}`)).json() }) }
+        else { const c = msg.cursor ?? {}; reply({ t: 'graph:batch', batch: await (await stub.fetch(`http://do/pull?change=${Number(c.change) || 0}&suggestion=${Number(c.suggestion) || 0}&decisionAt=${Number(c.decisionAt) || 0}&version=${Number(c.version) || 0}`)).json() }) }
       } catch (e: any) { reply({ t: msg.type === 'graph:cursor' ? 'graph:cursor' : msg.type === 'graph:sync' ? 'graph:synced' : 'graph:batch', error: e?.message ?? String(e) }) }
       return
     }

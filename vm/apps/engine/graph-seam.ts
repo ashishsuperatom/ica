@@ -16,10 +16,10 @@
 // own and their groups'; an admin sees everything; an agent sees global nodes and its groups'.
 
 import { join } from 'node:path'
-import { Store, compose, domains, governance as g, GovernanceRefusal, type Kind } from '@superatom/composition-graph'
+import { Store, compose, domains, governance as g, GovernanceRefusal, nameVersion, restoreVersion, sinceLastVersion, type Kind } from '@superatom/composition-graph'
 import { whoIs, IdentityRefusal } from './identity.js'
 
-export const GRAPH_MESSAGES = new Set(['graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish'])
+export const GRAPH_MESSAGES = new Set(['graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:versions', 'graph:version', 'graph:restore'])
 
 export function createGraphSeam(d: { projectDir: string; send: (to: any, msg: Record<string, unknown>) => void; file?: string }) {
   let store: Store | null = null
@@ -62,6 +62,10 @@ export function createGraphSeam(d: { projectDir: string; send: (to: any, msg: Re
         }
         case 'graph:suggest': return ok({ suggestion: g.suggest(s, who, str(payload.name, 'name'), str(payload.kind, 'kind') as Kind, payload.body, String(payload.reason ?? '')) })
         case 'graph:publish': return ok({ suggestion: g.publish(s, who, str(payload.name, 'name'), str(payload.scope, 'scope') as any, String(payload.reason ?? '')) })
+        // Named versions: the list (with what changed since the last one), naming the graph as it is, and going back to one.
+        case 'graph:versions': return ok({ versions: s.versions(), since: sinceLastVersion(s).map((c) => ({ id: c.id, at: c.at, name: c.name, kind: c.kind, by: c.by, reason: c.reason, removed: !c.toHash })) })
+        case 'graph:version': return ok({ version: nameVersion(s, who, str(payload.name, 'name'), String(payload.message ?? '')) })
+        case 'graph:restore': return ok({ restored: restoreVersion(s, who, str(payload.name, 'name')), version: s.version(String(payload.name)) })
         case 'graph:decide': {
           const verdict = String(payload.verdict ?? '')
           if (!['approved', 'rejected', 'withdrawn'].includes(verdict)) throw new GovernanceRefusal('a verdict is approved, rejected or withdrawn')
