@@ -150,14 +150,14 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
 
   return (
     <div className="sa-explorer">
-      <div className="sa-explorer__search">
-        <Icon icon="lucide:search" />
-        <input id={`${keep}-search`} className="sa-col__input" value={search} onChange={(e) => setSearch(e.target.value)}
-          placeholder={opened ? `Find tables and columns · search the rows of ${opened.name}` : 'Find tables and columns'} />
-        {search && <button className="sa-icon-btn" aria-label="Clear the search" onClick={() => setSearch('')}><Icon icon="lucide:x" /></button>}
-      </div>
       <div className="sa-explorer__panes" data-profile={ready && profileOpen && !place}>
         <aside className="sa-explorer__tables" aria-label="Tables and queries">
+          {/* One search: it finds tables and queries here, and searches the open table's rows in the warehouse. */}
+          <div className="sa-explorer__search" title={opened ? `Finds tables and columns, and searches the rows of ${opened.name}` : 'Finds tables and columns'}>
+            <Icon icon="lucide:search" />
+            <input id={`${keep}-search`} className="sa-col__input" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={opened ? 'Search tables and rows' : 'Search tables and columns'} />
+            {search && <button className="sa-icon-btn" aria-label="Clear the search" onClick={() => setSearch('')}><Icon icon="lucide:x" /></button>}
+          </div>
           <div className="sa-explorer__list">
             <header className="sa-explorer__head">
               <button className="sa-explorer__fold" onClick={() => toggle('tables')} aria-expanded={!shut('tables')}><Icon icon={shut('tables') ? 'lucide:chevron-right' : 'lucide:chevron-down'} /><span className="sa-explorer__title">Tables</span>{tables && <span className="sa-col__count">{tables.length}</span>}</button>{tablesHead}</header>

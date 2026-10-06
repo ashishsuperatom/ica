@@ -364,3 +364,12 @@
 .sa-explorer__grouphead > svg { color: var(--faint); }
 .sa-explorer__grouphead + .sa-explorer__item, .sa-explorer__grouphead ~ .sa-explorer__item { padding-left: calc(var(--sp-3) + var(--sp-2)); }
 .sa-explorer__spark span { min-height: 1px; }
+
+/* The explorer in two columns, their first rows level: the search over the tables, the open table's one-line head — then
+   straight into the data. */
+.sa-explorer__tables .sa-explorer__search { height: 40px; padding: 0 var(--sp-2) 0 var(--sp-3); border-bottom: 1px solid var(--line); background: var(--surface); }
+.sa-explorer__tablehead { min-height: 40px; height: 40px; padding: 0 var(--sp-2) 0 var(--sp-3); gap: var(--sp-2); }
+.sa-explorer__tablehead .sa-btn { height: 28px; padding: 0 var(--sp-2); font-size: var(--t-xs); }
+.sa-explorer__tablehead .sa-icon-btn { width: 28px; height: 28px; }
+.sa-explorer__what strong { font-size: var(--t-sm); }
+.sa-explorer__qname { height: 28px; font-size: var(--t-sm); }
