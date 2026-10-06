@@ -354,6 +354,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (request.method === 'GET'  && path === '/logs')         return this.getLogs(url)
     if (request.method === 'POST' && path === '/log')          return this.addLog(request)
     if (request.method === 'PUT'  && path === '/machine')      return this.updateMachine(request)
+    if (request.method === 'POST' && path === '/once-org-id')  { const { orgId } = await request.json() as any; if (typeof orgId === 'string' && orgId && !(await this.ctx.storage.get('orgId'))) { await this.ctx.storage.put('orgId', orgId); return Response.json({ set: true }) } return Response.json({ set: false }) }   // ONE-TIME, removed after
     if (request.method === 'GET'  && path === '/profile')      return this.getProfile()
     if (request.method === 'PUT'  && path === '/profile')      return this.putProfile(request)
     if (request.method === 'POST' && path === '/verify-conn')  return this.verifyConn(request)
