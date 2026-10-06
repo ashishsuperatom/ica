@@ -199,7 +199,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
     <>
       <AppShell
         sidebar={(collapsed, toggle) => (
-          <RailSidebar name={projectName} onAbout={() => page('about')} places={places} current={railAt} pinned={!collapsed} onPin={(p) => toggle(!p)}
+          <RailSidebar name={projectName} onAbout={() => page('about')} onHome={() => page('home')} places={places} current={railAt} pinned={!collapsed} onPin={(p) => toggle(!p)}
             foot={<UserProfile name={me.name} email={me.email}
               menu={<>
                 <MenuItem icon="solar:user-circle-linear" label="Profile" onClick={() => page('profile')} />

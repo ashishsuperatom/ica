@@ -24,8 +24,10 @@ export interface RailPlace {
   actions?: ReactNode
 }
 
-export default function RailSidebar({ name, places, current, foot, pinned, onPin, onAbout }: {
+export default function RailSidebar({ name, places, current, foot, pinned, onPin, onAbout, onHome }: {
   name: string
+  /** The project's name at the panel's head opens its home. */
+  onHome: () => void
   /** The Superatom mark at the top of the rail, always there: it opens the about page. */
   onAbout: () => void
   places: RailPlace[]
@@ -82,7 +84,7 @@ export default function RailSidebar({ name, places, current, foot, pinned, onPin
         {place && (
           <div className="sa-railbar__panel" data-floating={!pinned} style={{ ...(width ? { width } : {}), ...(place.accent ? { '--accent': place.accent } : {}) } as React.CSSProperties}>
             <div className="sa-sidebar__head">
-              <span className="sa-sidebar__brand" title={name}><span className="sa-sidebar__name truncate">{name}</span></span>
+              <button type="button" className="sa-sidebar__brand" title={`${name} — home`} onClick={() => { onHome(); if (phone()) onPin(false) }}><span className="sa-sidebar__name truncate">{name}</span></button>
               {place.actions}
               <button type="button" onClick={() => { onPin(!pinned); setPeek(null) }} className="sa-icon-btn sa-icon-btn--lg"
                 title={pinned ? 'Close the side panel' : 'Keep the side panel open'} aria-label={pinned ? 'Close the side panel' : 'Keep the side panel open'}><Icon icon="solar:sidebar-minimalistic-linear" /></button>
