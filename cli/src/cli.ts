@@ -270,7 +270,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       if (!sub || sub === 'list') {
         const r = await rest('GET', `/api/projects${o.deleted ? '?deleted=1' : ''}`)
         const list = Array.isArray(r) ? r : (r.projects ?? [])
-        out(list.length ? table(['id', 'name', 'created'], list.map((p: any) => [p.id, p.name ?? '', p.created_at ? new Date(p.created_at).toISOString().slice(0, 10) : ''])) : 'no projects', list)
+        out(list.length ? table(['id', 'name', 'created'], list.map((p: any) => [p.id, p.name ?? '', p.created_at ? new Date(Number(p.created_at) < 1e12 ? Number(p.created_at) * 1000 : p.created_at).toISOString().slice(0, 10) : ''])) : 'no projects', list)
         return 0
       }
       const arg = pos[2]
