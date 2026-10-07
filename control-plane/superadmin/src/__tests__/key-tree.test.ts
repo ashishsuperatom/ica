@@ -72,6 +72,13 @@ describe('one key tree, through the Worker', () => {
     expect(r.projects).toEqual([expect.objectContaining({ project, objects: 1, bytes: body.length })])
     expect(r.people).toEqual([{ by: 'olga@x.io', objects: 1, bytes: body.length, projects: [expect.objectContaining({ project, objects: 1, bytes: body.length })] }])   // a key's upload is its person's
     expect((await at('/api/storage', { headers: bearer(orgKey) })).status).toBe(403)   // the organisation key without org.billing
+    // any site may fetch it (the SDKs run embedded anywhere; the ticket or key is the credential): the preflight, and the answer
+    const pre = await mf.dispatchFetch(`http://x/api/projects/${project}/objects/parcel/${hash}`, { method: 'OPTIONS', headers: { origin: 'https://elsewhere.example', 'access-control-request-method': 'PUT', 'access-control-request-headers': 'authorization' } })
+    expect(pre.status).toBe(204)
+    expect(pre.headers.get('access-control-allow-origin')).toBe('*')
+    expect(pre.headers.get('access-control-allow-headers')).toMatch(/authorization/)
+    const got = await mf.dispatchFetch(`http://x/api/projects/${project}/objects/parcel/${hash}`, { headers: { ...bearer(projKey), origin: 'https://elsewhere.example' } })
+    expect(got.headers.get('access-control-allow-origin')).toBe('*'); await got.text()
   })
 
   it('a project key makes keys below it, never more than it holds, and reaches only those', async () => {

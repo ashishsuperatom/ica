@@ -295,9 +295,13 @@ export default {
     //    (parcels only) is the engine with the project's key, or a member with their token or key. ──
     const objectMatch = path.match(/^\/api\/projects\/([^/]+)\/objects\/([a-z]+)\/(.+)$/)
     if (objectMatch) {
+      // Any site may read and write here: the SDKs run embedded anywhere, and the credential is the ticket or the key in
+      // the request — never a cookie — so every origin is allowed, and a browser's preflight is answered.
+      const cors = { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, PUT, OPTIONS', 'access-control-allow-headers': 'authorization, content-type', 'access-control-max-age': '86400' }
+      if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors })
       const projectId = objectMatch[1], kind = objectMatch[2]
       const bearer = (request.headers.get('authorization') || '').replace(/^bearer\s+/i, '')
-      return handleObjectRoute({
+      const res = await handleObjectRoute({
         request, bucket: env.PACKAGES, secret: env.JWT_SECRET, projectId, kind, id: decodeURIComponent(objectMatch[3]), after: (p) => ctx.waitUntil(p),
         isEngine: async () => {
           if (!bearer || bearer.startsWith('sak_') || bearer.split('.').length === 3) return false   // a key of a person's or an agent's, or a token
@@ -307,6 +311,9 @@ export default {
         isMember: async () => { if (!bearer) return null; const a = await projectAccessOf(request, env, projectId); return a.ok ? (a.email || (a.key ? `agent:${a.key}` : a.level)) : null },
         ledger: remoteLedger(env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`)), projectId),
       })
+      const out = new Response(res.body, res)
+      for (const [k, v] of Object.entries(cors)) out.headers.set(k, v)
+      return out
     }
 
     // ── An agent over HTTP: POST /api/agent/<projectId> with its key as the bearer, the message as the body. The
