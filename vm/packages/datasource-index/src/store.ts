@@ -13,6 +13,16 @@ import { DATASOURCE_INDEX_SCHEMA } from './datasource-index.js'
  *  baseline adopts an index made before migrations (which may lack the rows column). */
 export const MIGRATIONS: Migration[] = [
   { id: 1, name: 'baseline', up: (db) => { db.exec(DATASOURCE_INDEX_SCHEMA); addColumnIfMissing(db, 'datasource_index', 'rows', 'INTEGER') } },
+  // The index became a replica of the platform's: tables of their own (rows, enabled, gone, descriptions), a field can be
+  // gone, and how far the replica has the platform's index. What an engine indexed before is not the platform's: emptied,
+  // pulled again.
+  { id: 2, name: 'a replica of the platform', up: `
+    DELETE FROM datasource_index;
+    ALTER TABLE datasource_index ADD COLUMN gone INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE IF NOT EXISTS dsi_tables (source TEXT NOT NULL, container TEXT NOT NULL, rows INTEGER, enabled INTEGER NOT NULL DEFAULT 1,
+      gone INTEGER NOT NULL DEFAULT 0, desc_source TEXT, desc_human TEXT, desc_ai TEXT, PRIMARY KEY (source, container));
+    CREATE TABLE IF NOT EXISTS dsi_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  ` },
 ]
 
 export class DataSourceIndex {

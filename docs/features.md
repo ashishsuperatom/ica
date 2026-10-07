@@ -19,7 +19,12 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 **Data**
 - Datasource manager: one endpoint that routes every query to its source's bridge, with retries, a protective row cap and a query cache.
 - SQL rewriting through a SQLGlot worker pool, with per-dialect hooks.
-- Datasource index built by the system and searched (`find-schema`) or read whole (`get-schema`).
+- Each source's index held by the platform (ProjectDO): tables and fields, three descriptions (a person's > the source's > an AI's), table- and field-level disable (hidden from find-schema/get-schema, queries not blocked), nothing deleted (gone), every change logged — the index as of any time; one snapshot file for screens.
+- Index builds run where the connector runs (the engine today): phase 1 names/types/descriptions, phase 2 cheap row counts; checkpoints on the platform (resume after any failure or restart, nothing read twice); an unreadable table never counts as empty; targeted rebuild of named tables; one build at a time (lease + heartbeat); resumes by itself when the engine is back.
+- The engine's index replica follows the platform by cursor (pulled whole if lost); find-schema and get-schema read it.
+- One job protocol for long work (job:start/beat/end, kind, lease, stage, doing, counts, stale after a minute), seen live by the project's admins.
+- Data sources carry kind, dialect, description, and shared or per-user keys (a person's own key kept sealed); updated in place (a secret left out is kept).
+- sacli datasources (list/show/create/update/remove/my-key; values from flags, a prefixed KEY=VALUE file, secrets read from files) and sacli dsi (stats/show --as-of/describe --by/enable/disable/build --tables/status --watch/snapshot).
 - Two live projects: Fusion5 (NetSuite through a SuiteQL bridge) and Total Group (Microsoft SQL Server).
 
 **Knowledge and computation**
@@ -115,6 +120,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Views and sessions: an agent is browsed as a view kept by the browser (steps in the history, the current STATE in the address, nothing written on the server but a usage row); it becomes a session only at a question to the agent or a recorded decision, by replaying the path in the engine.
 
 ## Planned
+- Data sources: queries through each person's own key for per-user sources; connectors running in a Cloudflare worker building their index; the index's console page in its own design; profiling/linking/AI descriptions of the index.
 
 - Rate limits on creating organisations and on creating projects per organisation — tight: e.g. at most ~10 new projects a day and ~100 in all per organisation (the user, 2026-10-07: "we want to do rate limit on project creation and organization creation"; not now).
 

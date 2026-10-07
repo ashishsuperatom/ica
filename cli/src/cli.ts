@@ -31,6 +31,8 @@ Commands:
   projects         the organisation's projects: list, create, delete, restore (an organisation key)
   keys             keys below this one: list, create, revoke (--project <id> for a project's, with an organisation key)
   api              call the platform's REST API with this key: sacli api <METHOD> <path> [--data '<json>']
+  datasources      the project's data sources: list, show, create, update, remove, my-key (a person's own key)
+  dsi              each source's index: stats, show [--as-of], describe, enable, disable, build, status, snapshot
   use              make a profile the one in use (--here: for this folder only)
   logout           forget a saved key
   whoami           the key in use, its project, and whether the hub accepts it
@@ -103,6 +105,31 @@ project's. A new key holds at most what this one holds, and goes when this one g
 The new key is shown once; with --save-as it is saved as that profile instead and never printed.
 Capabilities are the names roles use (sacli api GET /api/me shows what this key holds).`,
   api: `sacli api <GET|POST|PUT|DELETE> <path> [--data '<json>']     e.g. sacli api GET /api/projects/<id>/agent-keys`,
+  datasources: `sacli datasources <list|show|create|update|remove|my-key> … [--project <id>]
+
+  sacli datasources list
+  sacli datasources show <name>
+  sacli datasources create <name> --connector <id> [values] [--kind sql] [--dialect mssql] [--description "…"] [--auth shared|per-user]
+  sacli datasources update <name> [values] [--kind …] [--dialect …] [--description …] [--auth …]
+  sacli datasources remove <name>
+  sacli datasources my-key <name> [values]        your own key, for a source that reaches each person with theirs
+
+Values — what the connector asks for (sacli api GET /api/projects/<id>/connectors lists each connector's fields):
+  --set <field>=<value>             a setting
+  --secret <field>=<value>          a secret; <field>=@<file> reads it from a file (a PEM key, a certificate, …)
+  --values-file <file> [--prefix P] KEY=VALUE lines: each key matched to a field by name, ignoring case, _ and -, after
+                                    taking away the prefix (FABRIC_TENANT_ID with --prefix FABRIC_ → tenantId); a value
+                                    @<file> is read from that file
+Secrets go to the platform, sealed; they are never printed, and never written on any engine's disk.`,
+  dsi: `sacli dsi <stats|show|describe|enable|disable|build|status|snapshot> …
+
+  sacli dsi stats                                   each source: tables, fields, disabled, gone, its last build
+  sacli dsi show <source>[.<table>] [--as-of <iso time>]   the index now, or as it was then
+  sacli dsi describe <source>.<table>[.<field>] "<text>" --by human|ai     who wrote it decides where it is kept
+  sacli dsi enable|disable <source>.<table>[.<field>]     a disabled table hides all its fields from find-schema/get-schema
+  sacli dsi build [<source>…] [--tables a,b] [--fresh]    one build at a time; --tables reads only those tables
+  sacli dsi status [--watch]                        the build running (stage, table, counts) or the last one
+  sacli dsi snapshot                                the whole current index, as one JSON document`,
   use: `sacli use <profile> [--here]   make <profile> the default, or (--here) write .sacli.json so this folder uses it`,
   app: `sacli app publish <app folder>
 
@@ -165,14 +192,16 @@ export async function run(argv: string[], io: Io): Promise<number> {
   let hub: Hub | Conn | null = null
   try {
     // The command words come first; options may be anywhere.
-    const words = argv.filter((a, i) => !a.startsWith('-') && !(i > 0 && /^--(profile|key|hub|timeout|id|as-of|set|add|remove|call|param|act|to|block|session|rows|file|limit|column|project|columns|data|can|days|save-as)$/.test(argv[i - 1])))
+    const words = argv.filter((a, i) => !a.startsWith('-') && !(i > 0 && /^--(profile|key|hub|timeout|id|as-of|set|add|remove|call|param|act|to|block|session|rows|file|limit|column|project|columns|data|can|days|save-as|connector|secret|values-file|prefix|kind|dialect|description|auth|by|tables)$/.test(argv[i - 1])))
     const [cmd, sub] = words
     const specific: ParseArgsConfig['options'] = cmd === 'session'
       ? { id: { type: 'string' }, 'as-of': { type: 'string' }, set: { type: 'string', multiple: true }, add: { type: 'string', multiple: true }, remove: { type: 'string', multiple: true },
           call: { type: 'string' }, param: { type: 'string', multiple: true }, act: { type: 'string' }, to: { type: 'string' }, block: { type: 'string' } }
       : cmd === 'warehouse' ? { rows: { type: 'string' }, file: { type: 'string' }, limit: { type: 'string' }, column: { type: 'string', multiple: true }, project: { type: 'string' }, columns: { type: 'string' }, write: { type: 'boolean' }, q: { type: 'string' }, sort: { type: 'string' }, desc: { type: 'boolean' }, page: { type: 'string' }, size: { type: 'string' }, sql: { type: 'string' } }
       : cmd === 'ask' ? { session: { type: 'string' }, channel: { type: 'string' } } : cmd === 'use' ? { here: { type: 'boolean' } } : cmd === 'call' || cmd === 'api' ? { data: { type: 'string' } } : cmd === 'projects' ? { deleted: { type: 'boolean' } }
-      : cmd === 'keys' ? { project: { type: 'string' }, can: { type: 'string' }, days: { type: 'string' }, never: { type: 'boolean' }, 'save-as': { type: 'string' } } : cmd === 'graph' ? { reason: { type: 'string' } } : {}
+      : cmd === 'keys' ? { project: { type: 'string' }, can: { type: 'string' }, days: { type: 'string' }, never: { type: 'boolean' }, 'save-as': { type: 'string' } }
+      : cmd === 'datasources' ? { project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' } }
+      : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' } } : {}
     let parsed
     try { parsed = parseArgs({ args: argv, options: { ...GLOBAL, ...specific }, allowPositionals: true, strict: true }) }
     catch (e: any) { throw new CliError(`${e.message.replace(/^Unknown option/, 'unknown option')} — see sacli ${cmd ?? ''} --help`.replace(/\s+—/, ' —'), 2) }
@@ -260,7 +289,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
     }
     if (cmd === 'api') {
       const method = String(pos[1] ?? '').toUpperCase(), path = pos[2]
-      if (!['GET', 'POST', 'PUT', 'DELETE'].includes(method) || !path?.startsWith('/')) throw new CliError(HELP.api, 2)
+      if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method) || !path?.startsWith('/')) throw new CliError(HELP.api, 2)
       let data: unknown
       if (o.data !== undefined) { try { data = JSON.parse(String(o.data)) } catch { throw new CliError('--data is JSON', 2) } }
       const r = await rest(method, path, data); say(JSON.stringify(r, null, 2)); return 0
@@ -279,6 +308,50 @@ export async function run(argv: string[], io: Io): Promise<number> {
       if (sub === 'delete') { const r = await rest('DELETE', '/api/projects', { id: arg }); out(`removed project ${arg} (restorable: sacli projects restore ${arg})`, r); return 0 }
       if (sub === 'restore') { const r = await rest('PUT', '/api/projects', { id: arg }); out(`restored project ${arg}`, r); return 0 }
       throw new CliError(HELP.projects, 2)
+    }
+    if (cmd === 'datasources') {
+      const pid = String(o.project ?? projectOfKey(key) ?? '')
+      if (!pid) throw new CliError('which project? --project <id> (an organisation key works on any of its projects)', 2)
+      const base = `/api/projects/${pid}/connections`
+      const all = async () => ((await rest('GET', base)).connections ?? []) as any[]
+      const named = async (name: string) => { const c = (await all()).find((x) => x.name === name || x.id === name); if (!c) throw new CliError(`there is no data source ${name} — sacli datasources list`, 1); return c }
+      // The values a connector asks for, from --set / --secret / --values-file; a free-form source ("code") takes them as
+      // its settings and secrets maps, any other is matched to its declared fields.
+      const values = async (connectorId: string): Promise<Record<string, unknown>> => {
+        const fileOr = (v: string) => (v.startsWith('@') ? readFileSync(resolve(io.cwd ?? process.cwd(), v.slice(1)), 'utf8') : v)
+        const pairs = (list: string[] | undefined, flag: string) => (list ?? []).map((x) => { const i = x.indexOf('='); if (i < 1) throw new CliError(`--${flag} ${x.split('=')[0]}: write <field>=<value>`, 2); return [x.slice(0, i), fileOr(x.slice(i + 1))] as [string, string] })
+        const sets = pairs(o.set, 'set'), secrets = pairs(o.secret, 'secret')
+        const fromFile: [string, string][] = o['values-file'] ? readFileSync(resolve(io.cwd ?? process.cwd(), String(o['values-file'])), 'utf8').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#') && l.includes('='))
+          .map((l) => { const i = l.indexOf('='); let k = l.slice(0, i).trim(); if (o.prefix && k.startsWith(String(o.prefix))) k = k.slice(String(o.prefix).length); return [k, fileOr(l.slice(i + 1).trim().replace(/^["']|["']$/g, ''))] as [string, string] }) : []
+        if (connectorId === 'code') return { settings: Object.fromEntries(sets), secrets: Object.fromEntries([...fromFile, ...secrets]) }
+        const connectors = ((await rest('GET', `/api/projects/${pid}/connectors`)).connectors ?? []) as any[]
+        const c = connectors.find((x) => x.id === connectorId)
+        if (!c) throw new CliError(`there is no connector ${connectorId}`, 2)
+        const norm = (k: string) => k.toLowerCase().replace(/[^a-z0-9]/g, '')
+        const out: Record<string, unknown> = {}
+        for (const [k, v] of [...fromFile, ...sets, ...secrets]) {
+          const f = (c.fields ?? []).find((x: any) => norm(x.name) === norm(k))
+          if (!f) throw new CliError(`${c.title} has no field ${k} (its fields: ${(c.fields ?? []).map((x: any) => x.name).join(', ')})`, 2)
+          out[f.name] = v
+        }
+        return out
+      }
+      const about = { ...(o.kind ? { kind: o.kind } : {}), ...(o.dialect ? { dialect: o.dialect } : {}), ...(o.description ? { description: o.description } : {}), ...(o.auth ? { auth: o.auth } : {}) }
+      const show = (c: any) => [`${c.name}  (${c.id})`, `connector    ${c.connector}${c.kind ? ` · ${c.kind}` : ''}${c.dialect ? ` · ${c.dialect}` : ''}`, `reached by   ${c.auth === 'per-user' ? "each person's own key" : 'one shared key'}`,
+        `runnable     ${c.runnable ? 'yes' : 'no'}`, ...(c.description ? [`description  ${c.description}`] : []), `settings     ${JSON.stringify(c.settings)}`].join('\n')
+      if (!sub || sub === 'list') { const list = await all(); out(list.length ? table(['name', 'connector', 'kind', 'dialect', 'auth', 'runnable'], list.map((c) => [c.name, c.connector, c.kind ?? '', c.dialect ?? '', c.auth ?? 'shared', c.runnable ? 'yes' : 'no'])) : 'no data sources', list); return 0 }
+      const name = pos[2]
+      if (!name) throw new CliError(HELP.datasources, 2)
+      if (sub === 'show') { const c = await named(name); out(show(c), c); return 0 }
+      if (sub === 'create') {
+        if (!o.connector) throw new CliError('which connector? --connector <id> (sacli api GET /api/projects/<id>/connectors)', 2)
+        const r = await rest('POST', base, { connector: o.connector, name, values: await values(String(o.connector)), ...about })
+        out(`made data source ${name} (${r.connection.id})`, r.connection); return 0
+      }
+      if (sub === 'update') { const c = await named(name); const r = await rest('PATCH', `${base}/${c.id}`, { values: await values(c.connector), ...about }); out(`updated ${name}`, r.connection); return 0 }
+      if (sub === 'remove') { const c = await named(name); await rest('DELETE', `${base}/${c.id}`); out(`removed ${name}`, { removed: c.id }); return 0 }
+      if (sub === 'my-key') { const c = await named(name); await rest('PUT', `${base}/${c.id}/my-key`, { values: await values(c.connector) }); out(`your key for ${name} is kept, sealed`, { saved: true }); return 0 }
+      throw new CliError(HELP.datasources, 2)
     }
     if (cmd === 'keys') {
       const base = o.project ? `/api/projects/${o.project}/agent-keys` : org ? '/api/keys' : `/api/projects/${projectOfKey(key)}/agent-keys`
@@ -442,6 +515,51 @@ ${r.key}`, r)
       const rows = (r.imported ?? []) as { name: string; kind: string; hash: string; changed: boolean }[]
       out(rows.map((x) => `${x.changed ? 'changed  ' : 'unchanged'} ${x.kind.padEnd(7)} ${x.name}`).join('\n') + `\n${rows.filter((x) => x.changed).length} of ${rows.length} changed`, r)
       return 0
+    }
+    if (cmd === 'dsi') {
+      const req = async (payload: Record<string, unknown>) => { const r = await hub!.request(payload, { timeoutMs }); if (/refused/.test(String(r.t))) throw new CliError(r.reason ?? 'refused'); return r }
+      const path = (p: string | undefined, need: 2 | 3) => { const parts = String(p ?? '').split('.'); if (parts.length < need - 1 || !parts[0] || (need === 3 && !parts[1])) throw new CliError(HELP.dsi, 2); return { source: parts[0], table: parts.slice(1, 2)[0], field: parts.slice(2).join('.') || undefined } }
+      const jobLine = (j: any) => !j ? 'no build has run' : `${j.state === 'running' ? `running: ${j.stage ?? ''}${j.doing ? ` — ${j.doing}` : ''}` : `last build ${j.state}${j.detail ? ` — ${j.detail}` : ''}`}${j.counts?.tables ? ` · ${j.counts.tables.done ?? 0}/${j.counts.tables.total ?? 0} tables${j.counts.tables.failed ? `, ${j.counts.tables.failed} not read` : ''} · ${j.counts.fields ?? 0} fields` : ''}`
+      if (!sub || sub === 'stats') {
+        const r = await req({ t: 'dsi:stats' })
+        out(table(['source', 'tables', 'fields', 'disabled', 'gone', 'last build'], (r.sources ?? []).map((s: any) => { const p = (s.phases ?? []).find((x: any) => x.phase === 1)
+          return [s.source, String(s.tables), String(s.fields), `${s.tablesDisabled} t · ${s.fieldsDisabled} f`, String(s.tablesGone), p ? `${p.finishedAt ? 'finished' : 'unfinished'} ${p.done}/${p.planned}${p.failed ? `, ${p.failed} not read` : ''}` : 'never'] })) + (r.running ? `\n${jobLine(r.running)}` : ''), r)
+        return 0
+      }
+      if (sub === 'show') {
+        const { source, table: t } = path(pos[2], 2)
+        const r = await req({ t: 'dsi:show', source, ...(t ? { table: t } : {}), ...(o['as-of'] ? { asOf: o['as-of'] } : {}) })
+        const items = r.items ?? []
+        const state = (i: any) => (i.gone ? 'gone' : i.enabled ? '' : 'disabled')
+        const desc = (i: any) => i.descHuman || i.descSource || i.descAi || ''
+        out(t ? table(['field', 'type', 'key', 'state', 'description'], items.filter((i: any) => i.field).map((i: any) => [i.field, i.type ?? '', i.key ? 'key' : '', state(i), desc(i)]))
+          : table(['table', 'fields', 'rows', 'state'], items.filter((i: any) => !i.field).map((i: any) => [i.table, String(items.filter((x: any) => x.table === i.table && x.field && !x.gone).length), i.rows == null ? '' : String(i.rows), state(i)])), items)
+        return 0
+      }
+      if (sub === 'describe') {
+        const p = path(pos[2], 3), text = pos.slice(3).join(' ')
+        if (o.by !== 'human' && o.by !== 'ai') throw new CliError('say who wrote it: --by human or --by ai', 2)
+        const r = await req({ t: 'dsi:describe', ...p, text, by: o.by }); out(`described ${pos[2]} (as ${o.by === 'human' ? "a person's" : "an AI's"})`, r.item); return 0
+      }
+      if (sub === 'enable' || sub === 'disable') { const r = await req({ t: 'dsi:enable', ...path(pos[2], 3), enabled: sub === 'enable' }); out(`${sub}d ${pos[2]}`, r.item); return 0 }
+      if (sub === 'build') {
+        const sources = pos.slice(2)
+        const tables = o.tables ? { [sources[0] ?? '']: String(o.tables).split(',').map((x) => x.trim()).filter(Boolean) } : undefined
+        if (tables && sources.length !== 1) throw new CliError('--tables reads tables of one source: sacli dsi build <source> --tables a,b', 2)
+        const r = await req({ t: 'dsi:build', ...(sources.length && !tables ? { sources } : {}), ...(tables ? { tables } : {}), ...(o.fresh ? { fresh: true } : {}) })
+        out(r.asked ? 'asked the engine to build — sacli dsi status --watch' : `a build is already running — ${jobLine(r.running)}`, r); return 0
+      }
+      if (sub === 'status') {
+        for (;;) {
+          const r = await req({ t: 'job:list', kind: 'dsi.build' })
+          const j = (r.jobs ?? [])[0]
+          out(jobLine(j), j ?? null)
+          if (!o.watch || !j || j.state !== 'running') return 0
+          await new Promise((res) => setTimeout(res, 3000))
+        }
+      }
+      if (sub === 'snapshot') { say(JSON.stringify(await rest('GET', `/api/projects/${hub.project.id}/dsi/snapshot`), null, 2)); return 0 }
+      throw new CliError(HELP.dsi, 2)
     }
     if (cmd === 'call') {
       const t = pos[1]

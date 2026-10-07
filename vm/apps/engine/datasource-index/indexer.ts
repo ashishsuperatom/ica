@@ -73,6 +73,8 @@ async function pagedRaw(source: string, query: RawQuery, selectSql: string, orde
   return all
 }
 let _mssqlCache: { source: string; cols: Map<string, any[]>; pks: Set<string>; fks: Map<string, string> } | null = null
+/** Forget what an earlier build read (a new build reads the source as it is now). */
+export function resetIndexerCaches() { _mssqlCache = null }
 async function mssqlLoad(source: string, query: RawQuery) {
   if (_mssqlCache?.source === source) return _mssqlCache
   const cols = new Map<string, any[]>()
@@ -146,14 +148,12 @@ const suiteql: TypeIndexer = {
     } catch (e: any) { console.warn(`  [${source}] customrecordtype enumeration failed (${String(e?.message ?? e).slice(0, 80)}) — using catalog/standard; resume will retry`) }
     return [...set].sort()
   },
-  // One container = one sample call. EVERY failure mode (table absent, no permission, 429 rate-limit, timeout,
-  // malformed response, empty table) → return [] so the runner moves to the next; the container just isn't in the
-  // index, so a resume retries it. Never throws.
+  // One container = one sample call. A failure (table absent, no permission, 429 rate-limit, timeout) THROWS, so the
+  // build records it as not read — never as empty; an empty table returns [] (its columns cannot be inferred from no
+  // rows, which the build also records as not read). A resume retries both.
   async indexContainer(source, container, query) {
-    let rows: any[]
-    try { rows = await query(source, `SELECT * FROM ${container} WHERE ROWNUM <= 25`) }
-    catch { return [] }                                            // absent / permission / rate-limit / timeout → skip
-    if (!Array.isArray(rows) || !rows.length) return []            // empty table → can't infer columns; skip
+    const rows: any[] = await query(source, `SELECT * FROM ${container} WHERE ROWNUM <= 25`)
+    if (!Array.isArray(rows) || !rows.length) return []            // empty table → can't infer columns
     const cols = new Map<string, string | undefined>()
     for (const r of rows) {
       if (!r || typeof r !== 'object') continue                    // guard a malformed row

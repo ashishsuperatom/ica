@@ -52,7 +52,7 @@ import { whoIs, personOf } from './identity.js'
 import { createActivities } from './activity.js'
 import { readingAnswer } from './answer-card.js'
 import { randomUUID } from 'node:crypto'
-import { buildDatasourceIndex } from './datasource-index/build.js'
+import { createDsi } from './dsi.js'
 import type { AgentEvent } from './ica/session.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -132,7 +132,6 @@ export function stopTurn(sid: string, why = 'the user stopped it'): boolean { re
 const turnsRunning = () => appSeam.busy()
 let connectorBusy = false
 let groundingBusy = false
-let indexBusy = false   // the datasource-index build — one at a time per project
 
 // ── BOOTSTRAP: guarantee the engine's environment BEFORE opening any store or connecting. On a fresh
 // machine the per-project dirs don't exist yet; opening a sqlite in a missing dir throws. We create them
@@ -343,29 +342,6 @@ async function listSources(): Promise<string[]> {
 // this project's value→id resolution indexes. Streamed RAW (PTY) to the admin's xterm, same machinery as the
 // connector. It reads data via the seam and persists via build(config) on grounding.mjs; it never answers user
 // questions and never touches the graph.
-// ── DATASOURCE INDEX — admin-triggered ──────────────────────────────────────
-// The index (what tables and fields each source has) used to be a manual CLI run on the box, which meant a new
-// project could not be made useful without someone with shell access. Same builder, driven from the console,
-// streaming its progress back so the admin can watch rather than guess. Resumable: re-running continues.
-async function handleIndexBuild(from: any, opts: { rebuild?: boolean; only?: string }) {
-  if (indexBusy) { emit(from, { t: 'index:status', text: 'An index build is already running.' }); return }
-  indexBusy = true
-  const t0 = Date.now()
-  try {
-    emit(from, { t: 'index:status', text: `Building the datasource index${opts.only ? ` for ${opts.only}` : ''}${opts.rebuild ? ' (from empty)' : ' (resuming)'}…` })
-    const r = await buildDatasourceIndex({
-      store: indexStore, managerUrl: DATASOURCE, only: opts.only, wipe: !!opts.rebuild,
-      log: (line) => emit(from, { t: 'index:line', text: line }),
-    })
-    const total = r.sources.reduce((n, x) => n + x.fields, 0)
-    emit(from, { t: 'index:done', ok: true, sources: r.sources, totals: r.totals, ms: Date.now() - t0 })
-    console.log(`[ica] datasource index built in ${((Date.now() - t0) / 1000).toFixed(1)}s · ${total} fields across ${r.sources.length} source(s)`)
-  } catch (e: any) {
-    emit(from, { t: 'index:done', ok: false, error: e?.message ?? String(e), ms: Date.now() - t0 })
-    console.warn(`[ica] datasource index build failed: ${e?.message ?? e}`)
-  } finally { indexBusy = false }
-}
-
 async function handleGrounding(from: any, rebuild = false) {
   if (groundingBusy) { emit(from, { t: 'grounding:status', text: 'Grounding build already running.' }); return }
   groundingBusy = true
@@ -526,7 +502,9 @@ setUsageSink({
 })
 const enginePlatform = KEY && PROJECT ? platformOf({ hub: HUB, project: PROJECT, key: KEY }) : null
 // The project's connections live in the platform; this engine downloads them and runs them (connections.ts).
-const connections = createConnections({ dir: DATASOURCES_DIR, manager: DATASOURCE, platform: enginePlatform, send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true }, log: (s) => console.warn(s) })
+// Each source's index lives in the platform; this engine keeps the replica find-schema reads, and builds (dsi.ts).
+const dsi = createDsi({ store: indexStore, manager: DATASOURCE, send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true }, log: (s) => console.log(s) })
+const connections = createConnections({ applied: () => dsi.sourcesReady(), dir: DATASOURCES_DIR, manager: DATASOURCE, platform: enginePlatform, send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true }, log: (s) => console.warn(s) })
 // The composition graph lives in the platform; this engine keeps a replica it pulls into (graph-replica.ts).
 const graphReplica = createGraphReplica({ file: graphFileOf(PROJECT_DIR), send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true }, log: (s) => console.warn(s) })
 const sessionSeam = createSessionSeam({ graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, graphFile: graphFileOf(PROJECT_DIR),
@@ -544,7 +522,6 @@ async function handle(payload: any, from: any) {
   if (PROGRAM_MESSAGES.has(payload?.t)) { void programSeam.handle(payload, from); return }
   if (payload.t === 'analyse') { analyse(String(payload.question || ''), from, String(payload.sessionId || ''), String(payload.questionId || ''), String(payload.channel || ''), String(payload.agent || '')) }
   else if (payload.t === 'agents:list') { agentsOf(PROJECT_DIR).then((agents) => emit(from, { t: 'agents:list:res', agents } as any)).catch(() => emit(from, { t: 'agents:list:res', agents: [] } as any)) }   // UI supplies both ids; channel set for chat-channel turns
-  else if (payload.t === 'index:build') { handleIndexBuild(from, { rebuild: !!payload.rebuild, only: payload.only ? String(payload.only) : undefined }) }   // admin console → build/refresh the datasource index
   else if (payload.t === 'grounding:build') { handleGrounding(from, !!payload.rebuild) }        // admin console → grounding agent builds (rebuild:true = wipe first, else additive)
   else if (payload.t === 'connector:ask') { handleConnector(String(payload.text || ''), from) }   // admin console → connector agent (raw PTY back)
   else if (payload.t === 'term:attach') { attachTerminal(normWhich(payload.which), from) }         // open a live typeable terminal into an agent's PTY (e.g. /login)
@@ -667,6 +644,7 @@ function connect() {
       flushOutbox()   // re-registered → deliver anything queued while the socket was flapping (answers, logs)
       sessionSync.pushAll()   // and every session the platform does not have whole
       graphReplica.welcome()  // and the graph's replica: what changed in the platform's graph since
+      dsi.welcome()           // and the index's replica: what changed in each source's index since
       flushUsage()   // usage reported while the platform was out of reach
       void programSeam.syncUp((x) => console.warn(x)).catch((e) => console.warn(`[programs] sync failed: ${e?.message ?? e}`))   // and every program built here
       // and the code connectors this engine runs (its datasource manager's sources), for the platform to list beside the rest
@@ -704,6 +682,7 @@ function connect() {
     if (t === 'graph:batch' || t === 'graph:changed' || t === 'graph:written') { graphReplica.onMessage(m.payload); return }
     if (t === 'connections:list' || t === 'connections:changed') { connections.onMessage(m.payload); return }
     if (t === 'app:changed') { appDownload.onMessage(m.payload); return }
+    if (typeof t === 'string' && /^(dsi|job):/.test(t) && dsi.onMessage(m.payload)) return
     if (t === 'access:resolved' || t === 'access:changed') { access.onMessage(m.payload); return }
     if (t === 'fenced')     { console.log('[ica] fenced — a newer engine holds this role (obsolete instance)'); return }
     if (t === 'superseded') { console.log('[ica] superseded by our own reconnection'); return }

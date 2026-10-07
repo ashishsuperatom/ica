@@ -37,6 +37,8 @@ import { connectorById, checkConnection, CONNECTORS } from '../../shared/connect
 import { seal, unseal } from './proxy/seal.js'
 import { runConnector, runCode, manifestOf } from './connectors/runtime.js'
 import { projectGraph, migrateGraph, GRAPH_MESSAGES, GRAPH_VIEWS, type Who } from './graph.js'
+import { projectDsi, dsiSnapshot, DsiRefusal } from './dsi.js'
+import { projectJobs, JobRefusal, type Job } from './jobs.js'
 import { keyOf as fileKeys } from './files.js'
 
 
@@ -373,6 +375,14 @@ export class ProjectDO extends DurableObject<Env> {
     if (path === '/access-domains' || path.startsWith('/access-domains/')) return this.accessDomains(request, path)
     if (path === '/groups' || path.startsWith('/groups/')) return this.groupsAdmin(request, path)
     if (path === '/connections' || path.startsWith('/connections/') || path === '/connectors') return this.connectionsApi(request, path)
+    // Each source's index: where its builds stand, and the current index as one file (remade only when it changed).
+    if (path === '/dsi' && request.method === 'GET') return this.j({ ...this.dsi().stats(), running: this.jobs().running('dsi') })
+    if (path === '/dsi/snapshot' && request.method === 'GET') {
+      const bucket = (this.env as any).PACKAGES as R2Bucket | undefined
+      if (!bucket) return this.j({ error: 'no bucket to keep the snapshot in' }, 503)
+      const { body, cursor } = await dsiSnapshot(bucket, this._pid, this.dsi())
+      return new Response(body, { headers: { 'content-type': 'application/json', 'x-dsi-cursor': String(cursor) } })
+    }
     if (request.method === 'POST' && path === '/access/arrive') return this.arrive(request)
     if (path === '/usage' && request.method === 'GET') return this.usageSummary(new URL(request.url))
 
@@ -587,6 +597,9 @@ export class ProjectDO extends DurableObject<Env> {
       const at = new Date().toISOString()
       this.ctx.storage.transactionSync(() => {
         this.ctx.storage.sql.exec('DELETE FROM engine_sources')
+        // What the source is, as its connector says (engine-made information goes up): kept on the connection where nobody said otherwise.
+        for (const x of list) this.ctx.storage.sql.exec("UPDATE connections SET kind = COALESCE(kind, ?), dialect = COALESCE(dialect, ?), description = COALESCE(description, ?) WHERE name = ? AND removed_at IS NULL AND level = 'project'",
+          x.kind ?? null, x.dialect ?? null, x.description ? String(x.description).slice(0, 4000) : null, x.id)
         for (const x of list) this.ctx.storage.sql.exec('INSERT INTO engine_sources (id, kind, dialect, description, ready, reported_at) VALUES (?, ?, ?, ?, ?, ?)', x.id, x.kind ?? null, x.dialect ?? null, String(x.description ?? '').slice(0, 500), x.ready ? 1 : 0, at)
       })
       return
@@ -626,6 +639,36 @@ export class ProjectDO extends DurableObject<Env> {
         if (msg.type === 'graph:pull') reply({ t: 'graph:batch', batch: this.graph().pull(msg.cursor ?? {}), cursor: this.graph().cursor() })
         else this.graph().asked(msg.question)
       } catch (e: any) { if (msg.type === 'graph:pull') reply({ t: 'graph:batch', error: e?.message ?? String(e) }); else console.warn(`[graph] a question was not recorded: ${e?.message ?? e}`) }
+      return
+    }
+    // ── Each source's index (dsi.ts): built by the engine, kept here; and long work (jobs.ts), any kind ──
+    if (typeof msg.type === 'string' && /^(dsi|job):/.test(msg.type) && sender.type === 'code-engine') {
+      const reply = (payload: Record<string, unknown>) => { try { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { reqId: msg.reqId, ...payload } })) } catch { /* gone */ } }
+      const by = 'engine'
+      try {
+        switch (msg.type) {
+          case 'dsi:pull': reply({ t: 'dsi:batch', ...this.dsi().pull(msg.cursor) }); break
+          case 'dsi:plan': { const r = this.dsi().plan(msg, by); reply({ t: 'dsi:planned', source: msg.source, phase: msg.phase, ...r }); if (r.gone) this.dsiChanged(); break }
+          case 'dsi:put': if (this.dsi().put(msg, by).changed) this.dsiChanged(); break
+          case 'dsi:failed': this.dsi().failed(msg); break
+          case 'dsi:rows': if (this.dsi().rows(msg, by).changed) this.dsiChanged(); break
+          case 'dsi:finish': this.dsi().finish(msg); break
+          case 'dsi:resume': {
+            // The engine is back (or its sources changed): a build left unfinished, or never run, carries on by itself.
+            const todo = this.dsi().unfinished(this.codeSourceNames())
+            if (todo.length) this.askIndexBuild({ sources: todo }, 'platform')
+            break
+          }
+          case 'job:start': { const r = this.jobs().start({ kind: String(msg.kind ?? ''), lease: String(msg.lease ?? ''), holder: sender.instanceId ?? null, by: msg.by ? String(msg.by) : null })
+            if ('job' in r) { reply({ t: 'job:started', job: r.job }); this.jobUpdate(r.job) } else reply({ t: 'job:busy', job: r.busy }); break }
+          case 'job:beat': this.jobUpdate(this.jobs().beat(String(msg.id ?? ''), msg)); break
+          case 'job:end': this.jobUpdate(this.jobs().end(String(msg.id ?? ''), msg.state, msg.detail)); break
+          default: reply({ t: 'dsi:refused', reason: `there is no ${msg.type}` })
+        }
+      } catch (e: any) {
+        if (e instanceof DsiRefusal || e instanceof JobRefusal) reply({ t: msg.type.startsWith('job:') ? 'job:refused' : 'dsi:refused', reason: e.message })
+        else throw e
+      }
       return
     }
     if (msg.type === 'session:sync' && sender.type === 'code-engine') {
@@ -1242,13 +1285,21 @@ export class ProjectDO extends DurableObject<Env> {
   /** Connections a person may see: the project's shared ones and their own; never a secret. An admin sees all. */
   private connectionRows(who: string | null, admin: boolean) {
     const ready = new Map(([...this.ctx.storage.sql.exec('SELECT * FROM engine_sources')] as any[]).map((e) => [String(e.id), e]))
-    return ([...this.ctx.storage.sql.exec('SELECT id, connector, name, level, owner, settings, created_by, created_at FROM connections WHERE removed_at IS NULL ORDER BY created_at')] as any[])
+    return ([...this.ctx.storage.sql.exec('SELECT id, connector, name, level, owner, settings, kind, dialect, description, auth, created_by, created_at FROM connections WHERE removed_at IS NULL ORDER BY created_at')] as any[])
       .filter((r) => admin || r.level === 'project' || r.owner === who).map((r) => {
         const runs = connectorById(r.connector)?.runs ?? 'api'
         // a code connection runs on the engine: runnable when the engine says its source is ready
         const ran = runs === 'code' ? ready.get(r.name) : undefined
         return { ...r, settings: JSON.parse(r.settings), runs, runnable: runs === 'code' ? !!ran?.ready : ['api', 'cloud'].includes(runs), ...(ran ? { source: { kind: ran.kind, dialect: ran.dialect, description: ran.description } } : {}), origin: 'platform' }
       })
+  }
+  /** What a source is and how people reach it, as given — or why not. */
+  private aboutSource(body: any): { kind?: string; dialect?: string; description?: string; auth?: 'shared' | 'per-user' } | string {
+    const out: { kind?: string; dialect?: string; description?: string; auth?: 'shared' | 'per-user' } = {}
+    for (const k of ['kind', 'dialect'] as const) if (body[k] !== undefined) { if (typeof body[k] !== 'string' || !/^[a-z][\w-]{0,40}$/.test(body[k])) return `${k} is a short lower-case word`; out[k] = body[k] }
+    if (body.description !== undefined) { if (typeof body.description !== 'string' || body.description.length > 4000) return 'a description is text of at most 4000 characters'; out.description = body.description }
+    if (body.auth !== undefined) { if (body.auth !== 'shared' && body.auth !== 'per-user') return 'auth is "shared" (one key) or "per-user" (each person\'s own key)'; out.auth = body.auth }
+    return out
   }
   private async connectionsApi(request: Request, path: string): Promise<Response> {
     const url = new URL(request.url)
@@ -1275,13 +1326,57 @@ export class ProjectDO extends DurableObject<Env> {
       const master = (this.env as any).CREDENTIALS_MASTER_KEY
       if (Object.keys(secrets).length && !master) return this.j({ error: 'secrets cannot be kept: the platform has no master key' }, 503)
       const id = `con_${crypto.randomUUID().slice(0, 12)}`
-      this.ctx.storage.sql.exec('INSERT INTO connections (id, connector, name, level, owner, settings, secrets_sealed, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        id, c.id, name, level, level === 'user' ? who : 'project', JSON.stringify(settings), Object.keys(secrets).length ? await seal(JSON.stringify(secrets), master) : null, email, new Date().toISOString())
+      const about = this.aboutSource(body)
+      if (typeof about === 'string') return this.j({ error: about }, 400)
+      if (this.ctx.storage.sql.exec("SELECT 1 FROM connections WHERE name = ? AND removed_at IS NULL", name).toArray().length) return this.j({ error: `there is a connection named ${name} already` }, 409)
+      this.ctx.storage.sql.exec('INSERT INTO connections (id, connector, name, level, owner, settings, secrets_sealed, kind, dialect, description, auth, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        id, c.id, name, level, level === 'user' ? who : 'project', JSON.stringify(settings), Object.keys(secrets).length ? await seal(JSON.stringify(secrets), master) : null,
+        about.kind ?? c.kind ?? null, about.dialect ?? null, about.description ?? null, about.auth ?? 'shared', email, new Date().toISOString())
       this.audit.record({ actor, via: 'ui', action: 'connection.create', target: id, outcome: 'ok', detail: { connector: c.id, name, level, settings } })   // never the secrets
       if (c.runs === 'code') this.sendToRole('code-engine', { t: 'connections:changed' })
       return this.j({ connection: { id, connector: c.id, name, level, settings, runnable: !!c.bridge || c.runs === 'cloud' } }, 201)
     }
     const m = path.match(/^\/connections\/(con_[\w-]+)$/)
+    // A source's settings, secrets (a secret left out is kept), what it is, and how people reach it — its admins change them.
+    if (m && request.method === 'PATCH') {
+      const [r] = [...this.ctx.storage.sql.exec('SELECT * FROM connections WHERE id = ? AND removed_at IS NULL', m[1])] as any[]
+      if (!r) return this.j({ error: `there is no connection ${m[1]}` }, 404)
+      if (!admin && r.owner !== who) return this.j({ error: 'only its owner, or someone with project.data, changes a connection' }, 403)
+      const c = connectorById(r.connector)!
+      const about = this.aboutSource(body)
+      if (typeof about === 'string') return this.j({ error: about }, 400)
+      const master = (this.env as any).CREDENTIALS_MASTER_KEY
+      const before = r.secrets_sealed && master ? JSON.parse(await unseal(r.secrets_sealed, master)) : {}
+      const given = body.values && typeof body.values === 'object' ? body.values : {}
+      const merged = c.id === 'code'   // free-form: its settings and its secrets, each map kept and added to
+        ? { settings: { ...JSON.parse(r.settings), ...(given.settings ?? {}) }, secrets: { ...before, ...(given.secrets ?? {}) } }
+        : { ...JSON.parse(r.settings), ...before, ...given }
+      const { problems, settings, secrets } = checkConnection(c, merged)
+      if (problems.length) return this.j({ error: problems.join('; ') }, 400)
+      if (Object.keys(secrets).length && !master) return this.j({ error: 'secrets cannot be kept: the platform has no master key' }, 503)
+      this.ctx.storage.sql.exec('UPDATE connections SET settings = ?, secrets_sealed = ?, kind = COALESCE(?, kind), dialect = COALESCE(?, dialect), description = COALESCE(?, description), auth = COALESCE(?, auth) WHERE id = ?',
+        JSON.stringify(settings), Object.keys(secrets).length ? await seal(JSON.stringify(secrets), master) : null, about.kind ?? null, about.dialect ?? null, about.description ?? null, about.auth ?? null, m[1])
+      this.audit.record({ actor, via: 'ui', action: 'connection.change', target: m[1], outcome: 'ok', detail: { settings, secretsChanged: Object.keys(c.id === 'code' ? given.secrets ?? {} : given).filter((k) => k in secrets), ...about } })   // never the secrets
+      if (c.runs === 'code') this.sendToRole('code-engine', { t: 'connections:changed' })
+      return this.j({ connection: this.connectionRows(who, admin).find((x: any) => x.id === m[1]) })
+    }
+    // A person's own key for a source that reaches each person with their own (auth "per-user"): kept sealed, theirs only.
+    const mine = path.match(/^\/connections\/(con_[\w-]+)\/my-key$/)
+    if (mine) {
+      const [r] = [...this.ctx.storage.sql.exec('SELECT * FROM connections WHERE id = ? AND removed_at IS NULL', mine[1])] as any[]
+      if (!r) return this.j({ error: `there is no connection ${mine[1]}` }, 404)
+      if (request.method === 'DELETE') { this.ctx.storage.sql.exec('DELETE FROM connection_user_keys WHERE connection = ? AND principal = ?', mine[1], who); this.audit.record({ actor, via: 'ui', action: 'connection.my-key.remove', target: mine[1], outcome: 'ok' }); return this.j({ removed: true }) }
+      if (request.method !== 'PUT') return this.j({ error: 'PUT your key, or DELETE it' }, 405)
+      if (r.auth !== 'per-user') return this.j({ error: `${r.name} is reached with one shared key, not each person's own` }, 400)
+      const master = (this.env as any).CREDENTIALS_MASTER_KEY
+      if (!master) return this.j({ error: 'secrets cannot be kept: the platform has no master key' }, 503)
+      const values = body.values && typeof body.values === 'object' ? body.values : {}
+      if (!Object.keys(values).length) return this.j({ error: 'your key is the values the source asks of each person' }, 400)
+      this.ctx.storage.sql.exec('INSERT INTO connection_user_keys (connection, principal, secrets_sealed, added_at) VALUES (?, ?, ?, ?) ON CONFLICT (connection, principal) DO UPDATE SET secrets_sealed = excluded.secrets_sealed, added_at = excluded.added_at',
+        mine[1], who, await seal(JSON.stringify(values), master), new Date().toISOString())
+      this.audit.record({ actor, via: 'ui', action: 'connection.my-key.set', target: mine[1], outcome: 'ok' })
+      return this.j({ saved: true })
+    }
     if (m && request.method === 'DELETE') {
       const [r] = [...this.ctx.storage.sql.exec('SELECT level, owner, removed_at FROM connections WHERE id = ?', m[1])] as any[]
       if (!r || r.removed_at) return this.j({ error: `there is no connection ${m[1]}` }, 404)
@@ -1447,6 +1542,36 @@ export class ProjectDO extends DurableObject<Env> {
   /** The project's composition graph, held here (graph.ts). */
   private _graph?: ReturnType<typeof projectGraph>
   private graph() { return (this._graph ??= projectGraph(this.ctx.storage, this.env, () => this._pid)) }
+  private _dsi?: ReturnType<typeof projectDsi>
+  private dsi() { return (this._dsi ??= projectDsi(this.ctx.storage)) }
+  private _jobs?: ReturnType<typeof projectJobs>
+  private jobs() { return (this._jobs ??= projectJobs(this.ctx.storage)) }
+  /** A job's state, to everyone in the project who may run the project (and the engine's own listeners do not need it). */
+  private jobUpdate(job: Job) {
+    const envelope = { from: { id: 'hub', type: 'hub' }, payload: { t: 'job:update', job } }
+    for (const [cws, conn] of this.connByWs) {
+      if (conn.type === 'code-engine' || conn.wsId.startsWith('http-')) continue
+      if (can(this.capsOf(conn), 'project.manage') || can(this.capsOf(conn), 'project.data')) this.deliverToConn(cws, conn, envelope as any)
+    }
+  }
+  /** The engine's replica pulls what changed — told once per burst of changes, not once per table. */
+  private dsiNotify?: ReturnType<typeof setTimeout>
+  private dsiChanged() {
+    if (this.dsiNotify) return
+    this.dsiNotify = setTimeout(() => { this.dsiNotify = undefined; this.sendToRole('code-engine', { t: 'dsi:changed', cursor: this.dsi().cursor() }) }, 300)
+  }
+  /** The project's code sources by name (the connections the engine runs). */
+  private codeSourceNames(): string[] {
+    return ([...this.ctx.storage.sql.exec("SELECT name, connector FROM connections WHERE removed_at IS NULL AND level = 'project'")] as any[]).filter((r) => connectorById(r.connector)?.runs === 'code').map((r) => String(r.name))
+  }
+  /** A build asked for (by a person, an agent, or the platform itself on the engine's return): one at a time — if one is
+   *  running it is the answer; otherwise the engine is asked to build. */
+  private askIndexBuild(p: { sources?: string[]; tables?: Record<string, string[]>; fresh?: boolean }, by: string): { asked: boolean; running?: Job } {
+    const running = this.jobs().running('dsi')
+    if (running) return { asked: false, running }
+    this.sendToRole('code-engine', { t: 'dsi:build', ...(p.sources?.length ? { sources: p.sources } : {}), ...(p.tables ? { tables: p.tables } : {}), ...(p.fresh ? { fresh: true } : {}), by })
+    return { asked: true }
+  }
   private decisionStub() { return (this.env as any).DECISION.get((this.env as any).DECISION.idFromName(`dec:${this._pid}`)) }
   /** Where a session lives: its owner's UserDO, asked with this project and the session's id (session-store.ts). */
   private sessionAt(session: string) {
@@ -1734,6 +1859,36 @@ export class ProjectDO extends DurableObject<Env> {
       const control = pl.t === 'view:open' ? (pl.startAt ? `start ${String(pl.startAt)}` : pl.state ? 'reopened' : 'opened')
         : pl.call ? `${pl.call.package}.${pl.call.fn}${Array.isArray(pl.call.params?.ops) ? ` ${pl.call.params.ops.map((o: any) => o?.op).join(',')}` : ''}` : pl.action ? `${pl.action.package}·${pl.action.id}` : Array.isArray(pl.ops) ? pl.ops.map((o: any) => `${o?.op} ${o?.path ?? ''}`).join(',') : 'a change'
       this.ctx.storage.sql.exec('INSERT INTO view_events (at, who, agent, kind, detail) VALUES (?, ?, ?, ?, ?)', new Date().toISOString(), this.principalOf(sender), String(pl.agent ?? ''), pl.t === 'view:open' ? 'open' : 'step', control.slice(0, 200))
+    }
+    // ── Each source's index, and long work: read and changed here (the hub checked what each message needs) ──
+    if (typeof pl.t === 'string' && /^(dsi:(show|stats|describe|enable|build)|job:(list|get))$/.test(pl.t) && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
+      const who = this.principalOf(sender)
+      if (!who) { hubReply({ t: 'dsi:refused', reason: 'who is asking is not known', reqId: pl.reqId }); return }
+      const actor = sender.type === 'agent' ? { kind: 'agent' as const, id: who } : { kind: 'user' as const, id: who, ...(sender.email ? { email: sender.email } : {}) }
+      const via = sender.type === 'agent' ? 'agent' : sender.type === 'admin' ? 'admin' : 'ui'
+      try {
+        switch (pl.t) {
+          case 'dsi:show': hubReply({ t: 'dsi:items', items: this.dsi().show(pl), reqId: pl.reqId }); break
+          case 'dsi:stats': hubReply({ t: 'dsi:stats', ...this.dsi().stats(), running: this.jobs().running('dsi'), reqId: pl.reqId }); break
+          case 'dsi:describe': case 'dsi:enable': {
+            const item = pl.t === 'dsi:describe' ? this.dsi().describe(pl, sender.email ?? who) : this.dsi().enable(pl, sender.email ?? who)
+            this.audit.record({ actor, via, action: pl.t === 'dsi:describe' ? 'dsi.describe' : item.enabled ? 'dsi.enable' : 'dsi.disable', target: [item.source, item.table, item.field].filter(Boolean).join('.'), outcome: 'ok', detail: pl.t === 'dsi:describe' ? { by: pl.by, text: String(pl.text ?? '').slice(0, 300) } : { enabled: item.enabled } })
+            this.dsiChanged()
+            hubReply({ t: 'dsi:item', item, reqId: pl.reqId }); break
+          }
+          case 'dsi:build': {
+            const tables = pl.tables && typeof pl.tables === 'object' ? Object.fromEntries(Object.entries(pl.tables).map(([k, v]) => [k, Array.isArray(v) ? v.map(String) : []])) : undefined
+            const r = this.askIndexBuild({ sources: Array.isArray(pl.sources) ? pl.sources.map(String) : undefined, tables, fresh: !!pl.fresh }, sender.email ?? who)
+            this.audit.record({ actor, via, action: 'dsi.build', target: (pl.sources ?? []).join(',') || 'every source', outcome: 'ok', detail: { asked: r.asked, running: r.running?.id ?? null } })
+            hubReply({ t: 'dsi:building', ...r, reqId: pl.reqId }); break
+          }
+          case 'job:list': hubReply({ t: 'job:list', jobs: this.jobs().list({ kind: pl.kind ? String(pl.kind) : undefined, active: !!pl.active }), reqId: pl.reqId }); break
+          case 'job:get': hubReply({ t: 'job:got', job: this.jobs().get(String(pl.id ?? '')), reqId: pl.reqId }); break
+        }
+      } catch (e: any) {
+        if (e instanceof DsiRefusal || e instanceof JobRefusal) hubReply({ t: 'dsi:refused', reason: e.message, reqId: pl.reqId }); else throw e
+      }
+      return
     }
     // ── Activities: what is running, or ran lately — one's own (an admin sees everyone's) ──
     if (pl.t === 'activity:list' && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {

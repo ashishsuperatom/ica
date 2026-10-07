@@ -5,8 +5,10 @@
 //
 // This is NOT introspection: introspection is live, per-source, and does stats/joins. This index is the
 // always-available, CROSS-source structure map an agent searches FIRST — in the index ⇒ it exists; not in it ⇒
-// it doesn't. A separate process (the connector agent) keeps it fresh; readers only search. Enable/disable and
-// (later) authorization live here too. No statistics — pure structure.
+// it doesn't. It is a REPLICA: the platform holds each source's index (built wherever the source's connector runs) and
+// this engine applies what changed after its cursor (applyItems); nothing else writes it. A table is a row of
+// dsi_tables, its fields rows of datasource_index; a disabled or gone table hides all its fields, a disabled or gone
+// field itself — from find-schema and get-schema (queries are not blocked).
 
 import type { DataSourceIndex } from './store.js'
 
@@ -17,8 +19,8 @@ export interface DataSourceEntry {
   field: string               // column / attribute / field name
   type?: string               // the field's type — native for SQL ('nvarchar','int','NUMBER'); a shape for API/JSON ('string[]','object')
   descDefault?: string        // description defined in the source (a column comment, if any)
-  descAi?: string             // AI-filled description (later; empty for now)
-  descHuman?: string          // human-written description (later; wins the preference order)
+  descAi?: string             // AI-written description
+  descHuman?: string          // a person's description (wins the preference order)
   isOptional?: boolean        // nullable
   isKey?: boolean             // part of the primary key
   references?: string         // the FK target this field joins to, as 'CONTAINER.FIELD' (cheap-if-available only)
@@ -26,9 +28,41 @@ export interface DataSourceEntry {
   enabled?: boolean           // false disables this field (or whole table) from being used; default true
 }
 
-/** Preference order for a field's description: human > ai > source-default. */
+/** Preference order for a description: a person's, then the source's own, then an AI's. */
 export function describeEntry(e: Pick<DataSourceEntry, 'descHuman' | 'descAi' | 'descDefault'>): string {
-  return (e.descHuman?.trim() || e.descAi?.trim() || e.descDefault?.trim() || '')
+  return (e.descHuman?.trim() || e.descDefault?.trim() || e.descAi?.trim() || '')
+}
+
+/** A field shows only when it, and its table, are enabled and still in the source (d: the field's row). */
+const VISIBLE = `d.enabled = 1 AND d.gone = 0 AND NOT EXISTS (SELECT 1 FROM dsi_tables t WHERE t.source = d.source AND t.container = d.container AND (t.enabled = 0 OR t.gone = 1))`
+
+/** One item of the platform's index, as it pulls (a table when field is ''). */
+export interface ReplicaItem { source: string; table: string; field: string; type: string | null; descSource: string | null; descHuman: string | null; descAi: string | null
+  optional: boolean | null; key: boolean | null; references: string | null; rows: number | null; enabled: boolean; gone: boolean; seq: number }
+
+/** Apply what the platform's index changed — the replica's only writer — and move its cursor to the last applied. */
+export function applyItems(store: DataSourceIndex, items: ReplicaItem[], cursor: number): void {
+  const table = store.db.prepare(`INSERT INTO dsi_tables (source, container, rows, enabled, gone, desc_source, desc_human, desc_ai) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (source, container) DO UPDATE SET rows = excluded.rows, enabled = excluded.enabled, gone = excluded.gone, desc_source = excluded.desc_source, desc_human = excluded.desc_human, desc_ai = excluded.desc_ai`)
+  const field = store.db.prepare(`INSERT INTO datasource_index (key, source, container, field, type, desc_default, desc_ai, desc_human, is_optional, is_key, references_, rows, enabled, gone)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?) ON CONFLICT (key) DO UPDATE SET type = excluded.type, desc_default = excluded.desc_default, desc_ai = excluded.desc_ai,
+    desc_human = excluded.desc_human, is_optional = excluded.is_optional, is_key = excluded.is_key, references_ = excluded.references_, enabled = excluded.enabled, gone = excluded.gone`)
+  const b = (v: boolean | null) => (v == null ? null : v ? 1 : 0)
+  store.db.transaction(() => {
+    for (const i of items) {
+      if (i.field === '') table.run(i.source, i.table, i.rows, i.enabled ? 1 : 0, i.gone ? 1 : 0, i.descSource, i.descHuman, i.descAi)
+      else field.run(dsiKey(i.source, i.table, i.field), i.source, i.table, i.field, i.type, i.descSource, i.descAi, i.descHuman, b(i.optional), b(i.key), i.references, i.enabled ? 1 : 0, i.gone ? 1 : 0)
+    }
+    store.db.prepare("INSERT INTO dsi_meta (key, value) VALUES ('cursor', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(String(cursor))
+  })()
+}
+/** How far the replica has the platform's index (0: nothing yet). */
+export function replicaCursor(store: DataSourceIndex): number {
+  return Number((store.db.prepare("SELECT value FROM dsi_meta WHERE key = 'cursor'").get() as any)?.value ?? 0)
+}
+/** Empty the replica (it is rebuilt from the platform). */
+export function wipeReplica(store: DataSourceIndex): void {
+  store.db.transaction(() => { store.db.exec('DELETE FROM datasource_index; DELETE FROM dsi_tables; DELETE FROM dsi_meta') })()
 }
 
 /** The index's SCHEMA. Exported so the store creates it when its database is opened.
@@ -77,52 +111,8 @@ export const DATASOURCE_INDEX_SCHEMA = `
     END;
   `
 
-/**
- * Record known row counts for a source's containers and AUTO-DISABLE the empty ones (so they never surface in
- * search — an empty table/column is pure distraction). CRITICAL: only pass counts you DEFINITIVELY got (a real
- * 0 = empty). A timeout/error means "unknown, possibly huge" — do NOT include it here, so it stays enabled.
- * Never re-enables a manually-disabled non-empty table (only flips enabled for the containers passed in).
- */
-export function applyRowCounts(store: DataSourceIndex, source: string, counts: Record<string, number>): { disabled: number; enabled: number } {
-  let disabled = 0, enabled = 0
-  const upd = store.db.prepare('UPDATE datasource_index SET rows=?, enabled=? WHERE source=? AND container=?')
-  const tx = store.db.transaction((entries: [string, number][]) => {
-    for (const [container, n] of entries) {
-      const en = n > 0 ? 1 : 0
-      upd.run(n, en, source, container)
-      if (en) enabled++; else disabled++
-    }
-  })
-  tx(Object.entries(counts))
-  return { disabled, enabled }
-}
-
 export function dsiKey(source: string, container: string, field: string): string {
   return `${source}.${container}.${field}`
-}
-
-/** Upsert one entry (idempotent on key). The updater process calls this; readers never write. */
-export function putEntry(store: DataSourceIndex, e: DataSourceEntry): void {
-  store.db.prepare(`
-    INSERT INTO datasource_index (key, source, container, field, type, desc_default, desc_ai, desc_human, is_optional, is_key, references_, rows, enabled)
-    VALUES (@key, @source, @container, @field, @type, @descDefault, @descAi, @descHuman, @isOptional, @isKey, @references, @rows, @enabled)
-    ON CONFLICT(key) DO UPDATE SET
-      type=excluded.type, desc_default=excluded.desc_default, is_optional=excluded.is_optional,
-      is_key=excluded.is_key, references_=excluded.references_
-      -- NOTE: desc_ai/desc_human/rows/enabled are curated (rows/enabled owned by applyRowCounts), so a refresh never clobbers them.
-  `).run({
-    key: e.key, source: e.source, container: e.container, field: e.field, type: e.type ?? null,
-    descDefault: e.descDefault ?? null, descAi: e.descAi ?? null, descHuman: e.descHuman ?? null,
-    isOptional: e.isOptional == null ? null : (e.isOptional ? 1 : 0),
-    isKey: e.isKey == null ? null : (e.isKey ? 1 : 0), references: e.references ?? null,
-    rows: e.rows == null ? null : e.rows, enabled: e.enabled === false ? 0 : 1,
-  })
-}
-
-export function putEntries(store: DataSourceIndex, entries: DataSourceEntry[]): number {
-  const tx = store.db.transaction((es: DataSourceEntry[]) => { for (const e of es) putEntry(store, e) })
-  tx(entries)
-  return entries.length
 }
 
 function rowToEntry(r: any): DataSourceEntry {
@@ -168,7 +158,7 @@ export function searchDataSource(store: DataSourceIndex, query: string, opts: { 
   const where: string[] = []
   const bind: any[] = []
   if (opts.source) { where.push('d.source = ?'); bind.push(opts.source) }
-  if (!opts.includeDisabled) where.push('d.enabled = 1')
+  if (!opts.includeDisabled) where.push(VISIBLE)
   const filter = where.length ? 'AND ' + where.join(' AND ') : ''
   const q = String(query || '').trim()
   const empty = (): DataSourceSearchResult => ({ entries: [], shown: 0, matched: 0, bySource: {} })
@@ -232,17 +222,11 @@ export function searchDataSource(store: DataSourceIndex, query: string, opts: { 
   return { entries: rows, shown: rows.length, matched: total, bySource }
 }
 
-/** Enable/disable by exact key, or a whole container/source via a LIKE pattern on the key (e.g. 'erp.employee.%'). */
-export function setEnabled(store: DataSourceIndex, keyOrPattern: string, enabled: boolean): number {
-  const op = keyOrPattern.includes('%') ? 'LIKE' : '='
-  return store.db.prepare(`UPDATE datasource_index SET enabled=? WHERE key ${op} ?`).run(enabled ? 1 : 0, keyOrPattern).changes
-}
-
 export function dataSourceStats(store: DataSourceIndex): { source: string; containers: number; fields: number; disabled: number }[] {
   return store.db.prepare(
-    `SELECT source, COUNT(DISTINCT container) AS containers, COUNT(*) AS fields,
-            SUM(CASE WHEN enabled=0 THEN 1 ELSE 0 END) AS disabled
-     FROM datasource_index GROUP BY source ORDER BY source`
+    `SELECT d.source AS source, COUNT(DISTINCT d.container) AS containers, COUNT(*) AS fields,
+            SUM(CASE WHEN ${VISIBLE} THEN 0 ELSE 1 END) AS disabled
+     FROM datasource_index d WHERE d.gone = 0 GROUP BY d.source ORDER BY d.source`
   ).all() as any[]
 }
 
@@ -253,19 +237,20 @@ export function getSchema(store: DataSourceIndex, source?: string, container?: s
   | { sources: { source: string; tables: number; fields: number }[] }
   | { source: string; tables: { table: string; rows: number | null; fields: number }[] }
   | { source: string; table: string; rows: number | null; fields: { field: string; type: string | null; key: boolean; optional: boolean; references: string | null; description: string }[] } {
-  const enabled = opts.includeDisabled ? '' : ' AND enabled = 1'
+  const enabled = opts.includeDisabled ? ' AND d.gone = 0' : ` AND ${VISIBLE}`
   if (!source) {
-    const rows = store.db.prepare(`SELECT source, COUNT(DISTINCT container) AS tables, COUNT(*) AS fields FROM datasource_index WHERE 1=1${enabled} GROUP BY source ORDER BY source`).all() as any[]
+    const rows = store.db.prepare(`SELECT d.source AS source, COUNT(DISTINCT d.container) AS tables, COUNT(*) AS fields FROM datasource_index d WHERE 1=1${enabled} GROUP BY d.source ORDER BY d.source`).all() as any[]
     return { sources: rows.map((r) => ({ source: r.source, tables: Number(r.tables), fields: Number(r.fields) })) }
   }
   if (!container) {
-    const rows = store.db.prepare(`SELECT container, MAX(rows) AS rows, COUNT(*) AS fields FROM datasource_index WHERE source = ?${enabled} GROUP BY container ORDER BY container`).all(source) as any[]
+    const rows = store.db.prepare(`SELECT d.container AS container, (SELECT t.rows FROM dsi_tables t WHERE t.source = d.source AND t.container = d.container) AS rows, COUNT(*) AS fields FROM datasource_index d WHERE d.source = ?${enabled} GROUP BY d.container ORDER BY d.container`).all(source) as any[]
     if (!rows.length) throw new Error(`the index holds no tables for "${source}" — the sources it holds: ${(getSchema(store) as any).sources.map((s: any) => s.source).join(', ') || 'none'}`)
     return { source, tables: rows.map((r) => ({ table: r.container, rows: r.rows == null ? null : Number(r.rows), fields: Number(r.fields) })) }
   }
-  const rows = store.db.prepare(`SELECT * FROM datasource_index WHERE source = ? AND container = ?${enabled} ORDER BY rowid`).all(source, container) as any[]
+  const rows = store.db.prepare(`SELECT d.* FROM datasource_index d WHERE d.source = ? AND d.container = ?${enabled} ORDER BY d.rowid`).all(source, container) as any[]
   if (!rows.length) throw new Error(`the index holds no table "${container}" in "${source}" — find it with find-schema`)
-  return { source, table: container, rows: rows[0].rows == null ? null : Number(rows[0].rows), fields: rows.map((r) => ({
+  const t = store.db.prepare('SELECT rows FROM dsi_tables WHERE source = ? AND container = ?').get(source, container) as any
+  return { source, table: container, rows: t?.rows == null ? null : Number(t.rows), fields: rows.map((r) => ({
     field: r.field, type: r.type ?? null, key: !!r.is_key, optional: !!r.is_optional, references: r.references_ ?? null,
     description: describeEntry({ descHuman: r.desc_human, descAi: r.desc_ai, descDefault: r.desc_default }),
   })) }

@@ -72,6 +72,13 @@ to the warehouse, with ms), `warehouse_tables` (owners); legacy `datasources`, `
 - the engine: `api_key` (the project key `sk-proj-…`), `fly_machine`, `engine_running`, `profile`, `message_queue`
   (for a sleeping engine, 60 min), `engine_sources`;
 - the hub: `person_links` (each person linked through their UserDO), `logs` (event log);
+- each source's index (`dsi.ts`): `dsi_items` (each table — field '' — and field as it is now: type, three descriptions
+  kept apart, enabled and who set it, gone, the log entry that made it), `dsi_log` (every change appended: the item as
+  it became, when, by whom — the index as of any time), `dsi_plan` and `dsi_progress` (each build's work list and its
+  checkpoints per source and phase); the current index as one file in R2 `dsi/<project>/snapshot.json`, remade only
+  when the index changed; `connection_user_keys` (a person's own key for a per-user source, sealed);
+- long work (`jobs.ts`): `jobs` (kind, lease — one running per lease —, holder, stage, what it is doing, counts,
+  heartbeat; stale after a minute without one);
 - knowledge and work: the composition graph itself — its own tables (`content`, `name`, `change`, `question`, `suggestion`, `decision`, `version`, by its own migrations in `_graph_migrations`; `graph.ts`) and `graph_people` (who changed it, by email), `programs` (catalogue; bundles in R2),
   `dashboards`, `dashboard_builds`, `decision_register`, `activities`, `connections` (settings; `secrets_sealed` with the
   master key; `bridge` — a code connection's bridge, its code in R2 `bridge/<project>/<sha256>`, downloaded by the engine), `connector_calls`, `connector_schemas`;
@@ -112,7 +119,8 @@ Roots (`engine.ts`): `SUPERATOM_ROOT` = `$SUPERATOM_HOME` or `~/.superatom`; a p
 |---|---|---|
 | `.env`, `profile.json` | the engine's identity and start-up settings (project, key, hub, ports), the last agent profile adopted | no (the profile mirrors ProjectDO); no credential of a connection or a model is ever here |
 | `db/composition.sqlite` | the composition graph's REPLICA: pulled from the ProjectDO (`graph:pull` on welcome and on `graph:changed`), never written here; set aside (`.differs-<ms>`) and rebuilt when it disagrees | ← ProjectDO (the graph lives there) |
-| `db/datasource-index.sqlite`, `db/grounding.sqlite`, `db/agent-sessions.sqlite`, `db/backups/` | rebuildable indexes, harness session ids, migration backups (engine-only: they make sense only where the engine runs) | no |
+| `db/datasource-index.sqlite` | the replica of each source's index (`dsi_tables`, `datasource_index` fields, `dsi_meta` cursor) — pulled from the platform, never written otherwise; find-schema and get-schema read it | ← ProjectDO `dsi_items` |
+| `db/grounding.sqlite`, `db/agent-sessions.sqlite`, `db/backups/` | rebuildable indexes, harness session ids, migration backups (engine-only: they make sense only where the engine runs) | no |
 | `sessions/<sid>/session.jsonl` | a session's log — the engine writes it first | yes → the owner's UserDO `session_entries` (`session:sync`, per session; after a reconnect one session at a time); `synced.json` says how far |
 | `sessions/<sid>/STATE.json`, `ANSWER_HISTORY.jsonl`, `context.md`, `<qid>/answer.md` (+ `blocks.json`, `queries.jsonl`), `attachments/` | the session as files: current STATE, answer history, start context, each answer committed, its files | the log is; these are written from it (attachments come from R2) |
 | `sessions/<sid>/work/` | the session's agent's own folder (its tools, data, out/, harness notes) | no |

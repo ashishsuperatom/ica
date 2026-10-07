@@ -1435,6 +1435,63 @@ workspace. Only in some cases are we working directly on /state/<project>/…, a
 Only the engine's agents work in the project workspace; when we write code ourselves (by hand or through our own agent)
 we always use sacli, which always goes through the platform — and the problem is solved.
 
+## Data sources and their index (the user, 2026-10-07)
+
+**In the user's words:** the datasource index, as everything else we are doing, will really be in the platform — inside
+the project's Durable Object as the primary source of truth. It actually gets created in the engine, because that is
+where the connector code is; but we will add connectors that run in a Cloudflare worker, so it can come from anywhere.
+No matter where the connection happens, we sync both sides; if it is deleted fully or partly from the engine it is
+efficiently synced back from the platform. Almost every piece of data has to be on the platform; we sync it to the
+engine only because the engine is the one doing the work. find-schema and get-schema are answered on the engine, beside
+the agents, fast. There is one idea, the DATASOURCE, and the DATASOURCE INDEX is part of it: information about the
+source and its keys to connect. Sometimes there are per-user keys: if the source has its own authorisation, instead of
+one machine-to-machine key we reuse the user's key, with their roles and authorisation in it. When the engine starts it
+checks it has the latest data sources (else the platform gives it a snapshot), then asks for each source's latest index.
+When an admin adds or changes a table or column, or disables one, it comes as a standard change-sync message; the
+platform is the truth and the engine holds a replica. The connector agent fills in the kind of database and the basic
+information essential to connect. sacli works with data sources and their index too (create, read, update, delete,
+publish to the platform). Each connector has its introspect(); beside it the build-dsi system, in phases — the first as
+fast as possible: table names, column names, type, description if any (else empty). Every item has programmatic, human
+and AI descriptions, kept apart; the order of value is human > the database's own > AI; when a human has written one,
+the others are only shown. Through sacli we cannot know whether a person or an AI wrote it — the sacli user picks.
+
+Building must survive anything: a failure, a restart, a source disconnected and reconnected — it continues from its
+checkpoint, never redoing work. A second layer (which tables have no rows, how many fields are empty…) comes after,
+never in the first stage, because COUNT(*) is slow on some databases. While it runs, progress is sent like a heartbeat —
+a message type of its own: how many sources, which one now, how many tables in it, how many columns seen. It is a
+singleton: there can never be two at once; a second trigger joins the one running. A protocol for this kind of work in
+general — not only this — that says the stage and exactly what it is doing, so whoever listens sees it, and can trigger
+it again if it broke; after a restart it carries on by itself, since the index matters: as long as it is not done, keep
+doing it. Schemas change, sources are removed; we show the last snapshot. A project may see only a slice of a source
+(the warehouse) and the slice changes with permissions; we do not poll every source daily — a targeted message (this
+table changed, look again) is sent to the indexer, at table level (column level allowed). For the console, one current
+snapshot of the index to download directly, updated whenever the index changes — while the index itself time-travels:
+at any point in time, which tables and columns were there, their descriptions, which were disabled. Disabled is never
+deleted — shown as available but disabled. Disable at table level or field level; a disabled table hides all its
+fields. Disabled means find-schema and get-schema leave it out; queries are not blocked (a fixed dashboard may still
+read a column disabled later). Every connector is its own module, because some (NetSuite) have no introspection query
+and need what is known about them written in.
+
+*The rules this is built and tested against:*
+1. The platform (ProjectDO) holds every data source and its index; engines hold a replica; nothing on an engine is the
+   only copy.
+2. An index item is a table or a field of a source. It keeps three descriptions (source, human, AI); the one used is
+   human, else the source's, else AI. A description written through sacli says which it is.
+3. Every change to an item is appended to the index's log with when and by whom; the index as of any time is read from
+   it. Nothing is ever deleted: a removed table is marked gone, a disabled one disabled.
+4. Disabled: a table or a field; a disabled table hides all its fields from find-schema and get-schema; queries are not
+   blocked.
+5. Building is in phases per source (1: names and types and descriptions; 2: row counts, only where cheap). Each table
+   done is a checkpoint kept by the platform; a build resumes from it after any failure or restart, and skips nothing.
+6. A failure to read is never recorded as emptiness, and never removes or disables anything.
+7. One build at a time per project, held by a lease on the platform with a heartbeat; a second trigger is told the one
+   running; a lease whose heartbeat stops expires and the work resumes.
+8. A build left unfinished resumes by itself when the engine is back; a targeted rebuild names tables.
+9. Every long piece of work reports through one job protocol: kind, stage, what it is on, counts, heartbeat, state.
+10. The engine's replica follows the platform by a numbered cursor: told when something changed, it pulls what changed
+    after its cursor; empty or lost, it pulls everything.
+11. A snapshot of the current index is kept as one file, rebuilt only when the index changed since it was made.
+
 ## Who writes source, and where (the user, 2026-10-07)
 
 **In the user's words:** a dashboard or another program is built either through the CLI, or by the engine altogether —

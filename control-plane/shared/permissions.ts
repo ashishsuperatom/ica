@@ -102,6 +102,7 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   if (first === 'audit' || first === 'usage' || first === 'logs' || first === 'conversations') return 'project.audit'
   if (first === 'access-policies' || first === 'access-attributes' || first === 'datasources') return 'project.data'
   if (first === 'connections') return read ? 'project.view' : 'project.connect'   // shared ones: project.data, checked by the DO
+  if (first === 'dsi') return read ? 'project.view' : 'project.manage'
   if (first === 'connectors' || first === 'programs' || first === 'status') return read ? 'project.view' : 'project.manage'
   if (first === 'dashboards') return read ? 'project.view' : 'project.manage'
   return 'project.manage'
@@ -145,6 +146,10 @@ export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   ...Object.fromEntries(ASK.map((t) => [t, 'project.ask'])),
   'artifact:decide': 'project.approve',
   'graph:import': 'project.publish',
+  // Each source's index: read by anyone who sees the project; described, enabled and disabled by who manages its data;
+  // built by who runs the project. Long work (jobs) is seen by anyone who sees the project.
+  'dsi:show': 'project.view', 'dsi:stats': 'project.view', 'job:list': 'project.view', 'job:get': 'project.view',
+  'dsi:describe': 'project.data', 'dsi:enable': 'project.data', 'dsi:build': 'project.manage',
   'decision:change': 'project.publish', 'decision:learn': 'project.publish',
   // Publishing a program: its owner, or someone with project.publish (the catalogue decides which).
   'program:publish': 'project.ask',

@@ -278,9 +278,8 @@ function purposesOf(): { key: string; title: string; places: Place[] }[] {
       { slug: 'inspector/sessions', label: 'Sessions', icon: 'solar:chat-round-line-linear', says: 'Each chat made from the graph, and what changed since.', needs: 'project.manage' }] },
     { key: 'data', title: 'Data', places: [
       { slug: 'warehouse', label: 'Warehouse', icon: 'solar:box-linear', says: 'The organisation\'s tables granted to this project: rows, columns, values.', needs: 'warehouse.use' },
-      { slug: 'index', label: 'Data index', icon: 'solar:layers-linear', says: 'Every source, its tables and fields.', needs: 'project.manage' },
+      { slug: 'index', label: 'Data source index', icon: 'solar:layers-linear', says: 'Every source, its tables and fields, and its builds.', needs: 'project.manage' },
       { slug: 'inspector/grounding', label: 'Grounding', icon: 'solar:map-point-linear', says: 'Names people use, matched to the records they mean.', needs: 'project.manage' },
-      { slug: 'inspector/index', label: 'Datasource index', icon: 'solar:checklist-linear', says: 'What the engine indexed of each source.', needs: 'project.manage' },
       { slug: 'data-access', label: 'Data access', icon: 'solar:shield-check-linear', says: 'Rows, columns and denials per person, role, group or key.', needs: 'project.data' }] },
     { key: 'agents', title: 'Agents', places: [
       { slug: 'agents', label: 'Agents and models', icon: 'solar:cpu-linear', says: 'The harness, account and model each agent runs.', needs: 'project.manage' },
@@ -1043,63 +1042,60 @@ function AccessPanel({ projectId, orgId, api, token }: { projectId: string; orgI
   return <ProjectAccessPanel projectId={projectId} api={api} orgApi={orgId ? orgApi : null} />
 }
 
-// ── Datasource index (per project) ──────────────────────────────────────────
-// What tables and fields each source has — the map the agents search before writing a query. Building it used to
-// mean shell access to the box, so a new project could not be made useful without one. Same builder, run from
-// here, streaming progress. It RESUMES: re-running continues where it stopped, so a failed run is not wasted.
+// ── Each source's index (per project) ───────────────────────────────────────
+// Held by the platform (dsi.ts), built where each source's connector runs: each source's tables and fields, how far its
+// builds got, and the build running now (one at a time) with its stage and counts, as its heartbeat reports them.
+type DsiPhase = { phase: number; planned: number; done: number; failed: number; complete: boolean; plannedAt: string; finishedAt: string | null }
+type DsiSource = { source: string; tables: number; fields: number; tablesDisabled: number; fieldsDisabled: number; tablesGone: number; phases: DsiPhase[] }
+type DsiJob = { id: string; state: string; stage: string | null; doing: string | null; counts: any; detail: string | null; startedAt: string; beatAt: string }
 function IndexPanel({ hub }: { hub: ReturnType<typeof useProjectHub> }) {
-  const [lines, setLines] = useState<string[]>([])
-  const [busy, setBusy] = useState(false)
-  const [summary, setSummary] = useState<any>(null)
-  const endRef = useRef<HTMLDivElement | null>(null)
-
+  const [sources, setSources] = useState<DsiSource[] | null>(null)
+  const [job, setJob] = useState<DsiJob | null>(null)
+  const [err, setErr] = useState('')
+  const load = useCallback(() => {
+    if (hub.status !== 'live') return
+    hub.call({ t: 'dsi:stats' }).then((r: any) => { if (r.reason) setErr(r.reason); else { setErr(''); setSources(r.sources ?? []); setJob(r.running ?? null) } }).catch((e: any) => setErr(e.message))
+  }, [hub])
+  useEffect(load, [load, hub.status])
   useEffect(() => hub.subscribe((m: any) => {
-    if (m?.t === 'index:status' || m?.t === 'index:line') setLines(l => [...l, m.text])
-    if (m?.t === 'index:done') {
-      setBusy(false); setSummary(m)
-      setLines(l => [...l, m.ok ? `finished in ${(m.ms / 1000).toFixed(1)}s` : `failed: ${m.error}`])
-    }
-  }), [hub])
-  useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }) }, [lines])
-
-  const start = (rebuild: boolean) => {
-    setLines([]); setSummary(null); setBusy(true)
-    hub.send({ to: { type: 'code-engine' }, payload: { t: 'index:build', rebuild } })
+    if (m?.t !== 'job:update' || !String(m.job?.kind ?? '').startsWith('dsi')) return
+    setJob(m.job)
+    if (m.job.state !== 'running') load()
+  }), [hub, load])
+  const build = (fresh: boolean) => {
+    hub.call({ t: 'dsi:build', ...(fresh ? { fresh: true } : {}) }).then((r: any) => { if (r.reason) setErr(r.reason); else if (r.running) setJob(r.running) }).catch((e: any) => setErr(e.message))
   }
-
+  const running = job?.state === 'running'
+  const c = job?.counts ?? {}
   return (
     <>
-      <SectionCard icon="lucide:database-zap" title="Build the index" subtitle="Records the tables and fields of each connected source, so an agent finds where something lives instead of guessing"
+      <SectionCard icon="lucide:database-zap" title="Build" subtitle="Reads each connected source's tables and fields; resumes where it stopped"
         actions={<>
-          <button className="sa-btn" disabled={busy || hub.status !== 'live'} onClick={() => start(true)}>Rebuild from empty</button>
-          <button className="sa-btn sa-btn--primary" disabled={busy || hub.status !== 'live'} onClick={() => start(false)}>{busy ? 'Building…' : 'Build / resume'}</button>
+          <button className="sa-btn" disabled={running || hub.status !== 'live'} onClick={() => build(true)}>Start over</button>
+          <button className="sa-btn sa-btn--primary" disabled={running || hub.status !== 'live'} onClick={() => build(false)}>{running ? 'Building…' : 'Build / resume'}</button>
         </>}>
         <div className="sa-section__body sa-stack">
-          <Notice>Building resumes: running it again picks up where it left off and skips what is already indexed.</Notice>
-          {hub.status !== 'live' && <Notice state="attention">The engine is not connected.</Notice>}
+          {err && <Notice state="critical">{err}</Notice>}
+          {hub.status !== 'live' && <Notice state="attention">Not connected.</Notice>}
+          {job && <Notice state={job.state === 'failed' || job.state === 'stale' ? 'critical' : running ? 'attention' : 'ok'}>
+            <span><strong>{running ? job.stage ?? 'Building' : `Last build ${job.state}`}</strong>{running && job.doing ? ` — ${job.doing}` : ''}
+              {c.tables ? ` · ${c.tables.done ?? 0} of ${c.tables.total ?? 0} tables${c.tables.failed ? ` (${c.tables.failed} not read)` : ''} · ${c.fields ?? 0} fields` : ''}
+              {c.sources ? ` · source ${Math.min((c.sources.done ?? 0) + (running ? 1 : 0), c.sources.total ?? 0)} of ${c.sources.total ?? 0}` : ''}
+              {!running && job.detail ? ` — ${job.detail}` : ''}</span>
+          </Notice>}
         </div>
       </SectionCard>
-
-      {summary?.sources && (
-        <SectionCard icon="lucide:database" title="Sources" note={`${summary.sources.length}`}>
-          <RecordList rows={summary.sources as any[]} keyOf={(s) => String(s.id)} columns={[
-            { key: 'id', label: 'Source' },
-            { key: 'dialect', label: 'Dialect' },
-            { key: 'containers', label: 'Tables', align: 'end', render: (s) => s.error ? '—' : String(s.containers) },
-            { key: 'indexed', label: 'Indexed now', align: 'end', render: (s) => s.error ? '—' : `+${s.indexed}` },
-            { key: 'fields', label: 'Fields', align: 'end', render: (s) => s.error ? '—' : String(s.fields) },
-            { key: 'state', label: 'State', wrap: true, render: (s) => s.error ? <span className="sa-row sa-row--tight"><Status state="critical">failed</Status>{s.error}</span> : <Status state="ok">indexed</Status> },
-          ]} />
-        </SectionCard>
-      )}
-
-      {lines.length > 0 && (
-        <SectionCard icon="lucide:scroll-text" title="Progress" note={busy ? 'building' : undefined}>
-          <div className="sa-section__scroll sa-section__scroll--tall sa-scroll">
-            <pre className="sa-section__text">{lines.join('\n')}<div ref={endRef} /></pre>
-          </div>
-        </SectionCard>
-      )}
+      <SectionCard icon="lucide:database" title="Sources" note={sources ? `${sources.length}` : undefined}>
+        <RecordList rows={sources} keyOf={(s) => s.source} empty="No source has been indexed yet." columns={[
+          { key: 'source', label: 'Source' },
+          { key: 'tables', label: 'Tables', align: 'end', render: (s) => s.tables.toLocaleString() },
+          { key: 'fields', label: 'Fields', align: 'end', render: (s) => s.fields.toLocaleString() },
+          { key: 'disabled', label: 'Disabled', align: 'end', render: (s) => s.tablesDisabled || s.fieldsDisabled ? `${s.tablesDisabled} tables · ${s.fieldsDisabled} fields` : <span className="sa-faint">0</span> },
+          { key: 'gone', label: 'Gone', align: 'end', render: (s) => s.tablesGone ? String(s.tablesGone) : <span className="sa-faint">0</span> },
+          { key: 'build', label: 'Last build', wrap: true, render: (s) => { const p = s.phases.find((x) => x.phase === 1); return !p ? <span className="sa-faint">never</span>
+            : <span className="sa-row sa-row--tight"><Status state={p.finishedAt ? (p.failed ? 'attention' : 'ok') : 'critical'}>{p.finishedAt ? 'finished' : 'unfinished'}</Status>{`${p.done} of ${p.planned}${p.failed ? `, ${p.failed} not read` : ''}`}</span> } },
+        ]} />
+      </SectionCard>
     </>
   )
 }

@@ -308,6 +308,40 @@ export const PROJECT_MIGRATIONS: Migration[] = [
       db.all('UPDATE agent_keys SET capabilities = ? WHERE id = ? RETURNING id', JSON.stringify([...new Set(scopes.flatMap((x) => GAVE[x] ?? []))].sort()), r.id)
     }
   } },
+  { id: 39, name: 'data sources and their index', up: `
+    -- A data source (a connection) says what it is — its kind, dialect and description, filled in by whoever connects it
+    -- (the connector agent, a person, sacli) — and how people reach it: one shared key, or each person's own key (their
+    -- roles inside the source apply). A person's own key for a per-user source, sealed like any secret.
+    ALTER TABLE connections ADD COLUMN kind TEXT;
+    ALTER TABLE connections ADD COLUMN dialect TEXT;
+    ALTER TABLE connections ADD COLUMN description TEXT;
+    ALTER TABLE connections ADD COLUMN auth TEXT NOT NULL DEFAULT 'shared';
+    CREATE TABLE IF NOT EXISTS connection_user_keys (connection TEXT NOT NULL, principal TEXT NOT NULL, secrets_sealed TEXT NOT NULL,
+      added_at TEXT NOT NULL, PRIMARY KEY (connection, principal));
+    -- The index of each source, as it is now: a table (field '') or one of its fields. Three descriptions kept apart
+    -- (the source's, a person's, an AI's); enabled (and who set it: 'auto' by the build, 'person' by someone); gone (no
+    -- longer in the source — never deleted); seq: the log entry that made the item as it is.
+    CREATE TABLE IF NOT EXISTS dsi_items (source TEXT NOT NULL, tbl TEXT NOT NULL, field TEXT NOT NULL DEFAULT '',
+      type TEXT, desc_source TEXT, desc_human TEXT, desc_ai TEXT, optional INTEGER, is_key INTEGER, refs TEXT, rows INTEGER,
+      enabled INTEGER NOT NULL DEFAULT 1, enabled_by TEXT NOT NULL DEFAULT 'auto', gone INTEGER NOT NULL DEFAULT 0, seq INTEGER NOT NULL,
+      PRIMARY KEY (source, tbl, field));
+    CREATE INDEX IF NOT EXISTS dsi_items_seq ON dsi_items(seq);
+    -- Every change to an item, appended (never changed): the item as it became, when, by whom — the index at any time.
+    CREATE TABLE IF NOT EXISTS dsi_log (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, by TEXT NOT NULL,
+      source TEXT NOT NULL, tbl TEXT NOT NULL, field TEXT NOT NULL, op TEXT NOT NULL, item TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS dsi_log_item ON dsi_log(source, tbl, field, seq);
+    CREATE INDEX IF NOT EXISTS dsi_log_at ON dsi_log(at);
+    -- A build's work list per source and phase (what it set out to do) and its checkpoints (each table done or failed):
+    -- kept here, so a build resumes from them whatever happened to the engine.
+    CREATE TABLE IF NOT EXISTS dsi_plan (source TEXT NOT NULL, phase INTEGER NOT NULL, tables INTEGER NOT NULL, complete INTEGER NOT NULL,
+      planned_at TEXT NOT NULL, finished_at TEXT, PRIMARY KEY (source, phase));
+    CREATE TABLE IF NOT EXISTS dsi_progress (source TEXT NOT NULL, phase INTEGER NOT NULL, tbl TEXT NOT NULL, state TEXT NOT NULL,
+      error TEXT, at TEXT NOT NULL, PRIMARY KEY (source, phase, tbl));
+    -- Long work, any kind (an index build first): one running per lease, its heartbeat, what it is doing.
+    CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, kind TEXT NOT NULL, lease TEXT NOT NULL, holder TEXT, by TEXT, state TEXT NOT NULL,
+      stage TEXT, doing TEXT, counts TEXT, detail TEXT, started_at TEXT NOT NULL, beat_at TEXT NOT NULL, ended_at TEXT);
+    CREATE INDEX IF NOT EXISTS jobs_lease ON jobs(lease, state);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

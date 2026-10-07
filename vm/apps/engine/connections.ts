@@ -14,7 +14,7 @@ export interface Connection { id: string; name: string; connector: string; setti
 
 const sha = (s: string) => createHash('sha256').update(s).digest('hex')
 
-export function createConnections(o: { dir: string; manager: string; platform: Platform | null; send: (msg: Record<string, unknown>) => boolean; log?: (s: string) => void }) {
+export function createConnections(o: { dir: string; manager: string; platform: Platform | null; send: (msg: Record<string, unknown>) => boolean; log?: (s: string) => void; applied?: () => void }) {
   let held: Connection[] = []
   const fileOf = (name: string) => join(o.dir, name, 'bridge.mjs')
 
@@ -40,6 +40,7 @@ export function createConnections(o: { dir: string; manager: string; platform: P
     const have = await sources()
     for (const id of have) if (!list.some((c) => c.name === id)) await fetch(`${o.manager}/sources`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id }) }).catch(() => {})
     report()
+    o.applied?.()   // the sources are loaded: whatever depends on them (the index's build) may go on
   }
 
   const sources = async (): Promise<string[]> => {

@@ -16,6 +16,7 @@ import { Miniflare } from 'miniflare'
 import { buildProgram, ProgramStore } from '../../vm/packages/programs/src/index.ts'
 import { createSessionSeam } from '../../vm/apps/engine/session-seam.ts'
 import { agentsInGraph } from '../../vm/apps/engine/test/graph-agents.ts'
+import { sealKeygen } from '../../control-plane/superadmin/src/proxy/seal.ts'
 
 const PID = '11111111-2222-3333-4444-555555555555', ORG = 'org-e2e'
 const root = fileURLToPath(new URL('../../', import.meta.url))
@@ -51,7 +52,7 @@ export default { async fetch(req, env, ctx) { const u = new URL(req.url); const 
   const fwd = new Request('http://do' + u.pathname.slice(3) + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return stub.fetch(fwd) } }`
   const out = await build({ stdin: { contents: harness, resolveDir: join(root, 'control-plane/superadmin/src/__tests__'), loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'] })
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'], host: '127.0.0.1', port: 0,
-    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, ORG: { className: 'OrgDO', useSQLite: true }, GLOBAL: { className: 'GlobalDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], kvNamespaces: ['DOMAINS', 'CREDENTIALS'], bindings: { JWT_SECRET: 'x' } })
+    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, ORG: { className: 'OrgDO', useSQLite: true }, GLOBAL: { className: 'GlobalDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], kvNamespaces: ['DOMAINS', 'CREDENTIALS'], bindings: { JWT_SECRET: 'x', CREDENTIALS_MASTER_KEY: sealKeygen() } })
   hubUrl = (await mf.ready).href.replace(/^http/, 'ws').replace(/\/$/, '')
   await doCall('/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'engine-key', provider: 'external', name: 'E2E project', orgId: ORG }) })
   // the engine: the real session seam behind a hub connection
@@ -201,6 +202,49 @@ test('an organisation key: its projects, and keys made below it — saved as a p
   assert.equal((await sacli(['keys', 'revoke', keys[0].id, '--project', otherProject, '--profile', 'builder'])).code, 0)
   assert.equal((await sacli(['api', 'GET', `/api/projects/${otherProject}/me`, '--profile', 'loads'])).code, 3)
   assert.match((await sacli(['projects', 'list', '--profile', 'loads'])).err, /organisation key/)
+})
+
+test('data sources: made with values from flags, a file of keys (by prefix) and a secret read from a file — never printed', async () => {
+  const full = (await doCall('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'data admin', capabilities: ['project.view', 'project.ask', 'project.data', 'project.connect', 'project.manage'], by: 'admin@test.io' }) })).key
+  const dir = mkdtempSync(join(tmpdir(), 'sacli-ds-'))
+  writeFileSync(join(dir, 'password.txt'), 'pa55-from-file\n')
+  writeFileSync(join(dir, 'db.env'), 'DB_HOST=db.example.com\nDB_DATABASE=sales\n# a comment\nDB_USER="reader"\n')
+  const made = await sacli(['datasources', 'create', 'SALES', '--connector', 'sqlserver', '--values-file', join(dir, 'db.env'), '--prefix', 'DB_', '--secret', `password=@${join(dir, 'password.txt')}`, '--dialect', 'mssql', '--description', 'the sales database', '--key', full, '--no-daemon'])
+  assert.equal(made.code, 0, made.err)
+  const shown = await sacli(['datasources', 'show', 'SALES', '--key', full, '--no-daemon', '--json'])
+  const c = JSON.parse(shown.out)
+  assert.deepEqual(c.settings, { host: 'db.example.com', database: 'sales', user: 'reader' })
+  assert.equal(c.dialect, 'mssql'); assert.equal(c.description, 'the sales database'); assert.equal(c.auth, 'shared')
+  assert.doesNotMatch(shown.out + made.out, /pa55/)                                         // secrets never come back
+  assert.match((await sacli(['datasources', 'create', 'X', '--connector', 'sqlserver', '--set', 'colour=red', '--key', full, '--no-daemon'])).err, /has no field colour \(its fields: host, port, database, user, password\)/)
+  const upd = await sacli(['datasources', 'update', 'SALES', '--set', 'port=1444', '--auth', 'per-user', '--key', full, '--no-daemon', '--json'])
+  assert.equal(upd.code, 0, upd.err)
+  assert.deepEqual(JSON.parse(upd.out), { ...JSON.parse(upd.out), auth: 'per-user', settings: { host: 'db.example.com', database: 'sales', user: 'reader', port: 1444 } })   // the password kept
+  assert.equal((await sacli(['datasources', 'my-key', 'SALES', '--set', 'user=ana', '--secret', 'password=hers', '--key', full, '--no-daemon'])).code, 0)
+  assert.equal((await sacli(['datasources', 'remove', 'SALES', '--key', full, '--no-daemon'])).code, 0)
+  assert.match((await sacli(['datasources', 'list', '--key', full, '--no-daemon'])).out, /no data sources/)
+})
+
+test('the index: stats, show (now and as of a time), describe with who wrote it, disable, build and status', async () => {
+  const full = (await doCall('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'index admin', capabilities: ['project.view', 'project.ask', 'project.data', 'project.manage'], by: 'admin@test.io' }) })).key
+  engineWs.send(JSON.stringify({ type: 'dsi:plan', source: 'SHOP', phase: 1, tables: ['orders'], complete: true, reqId: 'p1' }))
+  engineWs.send(JSON.stringify({ type: 'dsi:put', source: 'SHOP', phase: 1, table: 'orders', fields: [{ name: 'id', type: 'int', key: true }, { name: 'total', type: 'money', description: 'order total' }] }))
+  await new Promise((r) => setTimeout(r, 300))
+  const before = new Date().toISOString()
+  await new Promise((r) => setTimeout(r, 50))
+  const run = (...a: string[]) => sacli(['dsi', ...a, '--key', full, '--no-daemon'])
+  assert.match((await run('stats')).out, /SHOP\s+1\s+2/)
+  assert.match((await run('describe', 'SHOP.orders.total', 'Order value incl. GST')).err, /--by human or --by ai/)
+  assert.equal((await run('describe', 'SHOP.orders.total', 'Order value incl. GST', '--by', 'human')).code, 0)
+  assert.equal((await run('disable', 'SHOP.orders.id')).code, 0)
+  const now = (await run('show', 'SHOP.orders')).out
+  assert.match(now, /total\s+money\s+Order value incl. GST/); assert.match(now, /id\s+int\s+key\s+disabled/)
+  const then = (await run('show', 'SHOP.orders', '--as-of', before)).out
+  assert.match(then, /total\s+money\s+order total/); assert.doesNotMatch(then, /disabled/)
+  assert.match((await run('build', 'SHOP', '--tables', 'orders')).out, /asked the engine to build/)
+  assert.match((await run('status')).out, /no build has run/)
+  const doc = JSON.parse((await run('snapshot')).out)
+  assert.equal(doc.sources[0].tables[0].fields.find((f: any) => f.field === 'total').description, 'Order value incl. GST')
 })
 
 test('an idle background connection cleans up after itself: the process ends and its socket file is gone', async () => {

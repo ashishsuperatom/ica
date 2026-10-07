@@ -15,7 +15,7 @@ import type { Hub } from './hub'
 import { VersionGraph, whoOf, when as publishedWhen, type Line, type DraftNode } from './GraphHistory'
 
 export type Section =
-  | 'summary' | 'composition' | 'changes' | 'questions' | 'sessions' | 'grounding' | 'index' | 'files' | 'db' | 'logs'
+  | 'summary' | 'composition' | 'changes' | 'questions' | 'sessions' | 'grounding' | 'files' | 'db' | 'logs'
 
 // Grouped so the views read as a few coherent buckets, not one flat list.
 export const SECTIONS: { id: Section; label: string; group?: string }[] = [
@@ -25,7 +25,6 @@ export const SECTIONS: { id: Section; label: string; group?: string }[] = [
   { id: 'questions', label: 'Questions',        group: 'Knowledge' },
   { id: 'sessions',  label: 'Sessions',         group: 'Knowledge' },
   { id: 'grounding', label: 'Grounding',        group: 'Knowledge' },
-  { id: 'index',     label: 'Datasource index', group: 'Knowledge' },
   { id: 'files',     label: 'Files',            group: 'Storage' },
   { id: 'db',        label: 'Database',         group: 'Storage' },
   { id: 'logs',      label: 'Logs',             group: 'Storage' },
@@ -106,7 +105,7 @@ export function Inspector({ hub, section }: { hub: Hub; section: Section }) {
   // A link to a section that no longer exists lands on the summary rather than a blank page.
   const Body = ({
     summary: SummaryView,
-    grounding: GroundingView, index: IndexView, files: FilesView, db: DbView, logs: LogsView,
+    grounding: GroundingView, files: FilesView, db: DbView, logs: LogsView,
     changes: ChangesView, questions: QuestionsView, sessions: SessionsView,
   } as Record<string, (p: ViewProps) => ReactElement>)[section] ?? SummaryView
 
@@ -179,24 +178,6 @@ function SummaryView({ hub }: ViewProps) {
         </Panel>
       </div>
     </div>
-  )
-}
-
-// ── Datasource index ─────────────────────────────────────────────────────────
-function IndexView({ hub }: ViewProps) {
-  const { data, err, loading, reload } = useInspect(hub, 'index', {}, 'index')
-  if (err) return <Err msg={err} retry={reload} />
-  if (!data) return <Loading on={loading} />
-  const list: any[] = data.sources ?? []
-  return (
-    <Panel icon="lucide:list-tree" title="Datasource index" subtitle="What ./find-schema can find, per source" actions={<Refresh onClick={reload} />}>
-      <RecordList rows={list} keyOf={s => s.source} empty="Nothing indexed yet." columns={[
-        { key: 'source', label: 'Source' },
-        { key: 'containers', label: 'Tables', align: 'end', render: s => Number(s.containers).toLocaleString() },
-        { key: 'fields', label: 'Fields', align: 'end', render: s => Number(s.fields).toLocaleString() },
-        { key: 'disabled', label: 'Disabled', align: 'end', render: s => s.disabled ? <Status state="critical">{s.disabled}</Status> : <span className="sa-faint">0</span> },
-      ]} />
-    </Panel>
   )
 }
 
