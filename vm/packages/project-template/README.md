@@ -1,6 +1,6 @@
 # Project template
 
-A project's author folder (`~/.superatom/state/<projectId>/author/`) is where its knowledge and its dashboard are
+A project's author folder (`~/.superatom/<projectId>/author/`) is where its knowledge and its dashboard are
 written — then imported and published to the platform; the engine never reads it. Most of the
 dashboard and the program helpers are the same in every project; this is that part, kept in one place.
 

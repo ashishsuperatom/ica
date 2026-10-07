@@ -42,11 +42,11 @@ if (command === 'check') {
 }
 
 if (command === 'new') {
-  // The author's folder (~/.superatom/state/<project id>/author/): where the project's knowledge and app are written,
+  // The author's folder (~/.superatom/<project id>/author/): where the project's knowledge and app are written,
   // then imported and published to the platform — never read by the engine. Bound to its project, so its material can go
   // to no other project.
   const PROJECT_ID = HOME.split(sep).reverse().find((s) => /^[0-9a-f-]{36}$/.test(s))
-  if (!PROJECT_ID) { console.error(`${HOME}: an author's folder sits in its project's folder (~/.superatom/state/<project id>/author)`); process.exit(1) }
+  if (!PROJECT_ID) { console.error(`${HOME}: an author's folder sits in its project's folder (~/.superatom/<project id>/author)`); process.exit(1) }
   mkdirSync(HOME, { recursive: true })
   if (!existsSync(join(HOME, '.sacli.json'))) writeFileSync(join(HOME, '.sacli.json'), JSON.stringify({ project: PROJECT_ID }, null, 2) + '\n')
   const missing = ['name', 'currency', 'locale'].filter((k) => !flags[k])

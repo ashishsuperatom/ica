@@ -43,7 +43,7 @@ claude --version >/dev/null && tsx --version >/dev/null
 echo "[setup] installing workspace dependencies (compiles native addons — better-sqlite3, node-pty)…"
 pnpm install --frozen-lockfile
 
-mkdir -p "$HERE/state" "$HERE/datasources"
+mkdir -p "$HOME/.superatom" "$HERE/datasources"
 [ -f "$HERE/.env" ] || cp "$HERE/.env.example" "$HERE/.env"
 
 cat <<EOF
@@ -58,5 +58,5 @@ Next:
   3. Start everything:                     ./run.sh
        Then watch it connect:  pm2 logs sa-engine   (look for "ENGINE FULLY READY").
 
-State lives in ./state — nothing here is destroyed on a re-run.
+Each project's home is ~/.superatom/<project>/ — nothing there is destroyed on a re-run.
 EOF

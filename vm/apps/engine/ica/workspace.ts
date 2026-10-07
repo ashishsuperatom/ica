@@ -88,11 +88,11 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
   const dbDir = join(projectHome, 'db')
   const managerUrl = s.managerUrl ?? 'http://localhost:4000'
 
-  // @superatom/* must resolve from the project home for the data seams below. State lives outside the repository
-  // (~/.superatom/state), where Node finds no node_modules by walking up, so the project home links to the engine's
+  // @superatom/* must resolve from the project home for the data seams below. Project homes live outside the repository
+  // (~/.superatom/<project>), where Node finds no node_modules by walking up, so the project home links to the engine's
   // by absolute path — always checked, never assumed: a resolution test from inside the engine's process answers for
   // the engine's environment (NODE_PATH under pm2), not for the tool's own process, which found nothing. A relative
-  // link breaks when the state directory moves, so it is replaced.
+  // link breaks when the home moves, so it is replaced.
   try {
     const link = join(projectHome, 'node_modules')
     const target = fileURLToPath(new URL('../node_modules', import.meta.url))   // apps/engine/node_modules

@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 
-const STATE = process.env.SUPERATOM_STATE ?? join(homedir(), '.superatom', 'state')
+const STATE = process.env.SUPERATOM_HOME ?? join(homedir(), '.superatom')
 // Where the platform is, from where THIS file is — so the check means the same thing from any directory. Asked
 // from the wrong one it read nothing at all and said everything was fine, which is the failure it exists to stop.
 const VM = dirname(dirname(fileURLToPath(import.meta.url)))

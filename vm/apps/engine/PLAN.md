@@ -54,7 +54,7 @@ Generated into each working directory by `ica/workspace.ts`; each explains itsel
 
 ## State
 
-Everything that belongs to one project lives in its **home**, `~/.superatom/state/<projectId>/` (`ENGINE_STATE_DIR`);
+Everything that belongs to one project lives in its **home**, `~/.superatom/<projectId>/` (`SUPERATOM_HOME`);
 the repository holds only the platform.
 
 - `.env` (hub, key, source credentials), `settings.json`, `secrets/`, `datasources/` (bridges, registry, index seeds),

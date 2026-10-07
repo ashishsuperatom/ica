@@ -40,7 +40,7 @@ async function main() {
   const zip = join(OUT, `sa-engine-docker-${VERSION}.zip`)
   // ── NOTHING OF ONE PROJECT'S MAY SHIP ────────────────────────────────────
   // This image is the PRODUCT, and the laptop that builds it is a test bench: it has a project connected, a
-  // datasource pointed at someone's live data, credentials, and a state directory full of what that project
+  // datasource pointed at someone's live data, credentials, and a project home full of what that project
   // has learned. None of it belongs in an artifact that goes to a customer's machine.
   //
   // Staging is already explicit — apps, packages, docker, and nothing else — so this is not fixing a leak. It

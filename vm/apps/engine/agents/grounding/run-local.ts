@@ -10,7 +10,7 @@ import { homedir } from 'node:os'
 const projectId = process.argv[2]
 if (!projectId) { console.error('usage: run-local.ts <projectId>'); process.exit(1) }
 const managerUrl = process.env.DATASOURCE_URL || 'http://localhost:4000'
-const root = process.env.ENGINE_STATE_DIR ?? join(homedir(), '.superatom', 'state')
+const root = process.env.SUPERATOM_HOME ?? join(homedir(), '.superatom')
 
 console.log(`[grounding-local] project=${projectId} · manager=${managerUrl} · root=${root}\n`)
 const agent = await createGroundingAgent({

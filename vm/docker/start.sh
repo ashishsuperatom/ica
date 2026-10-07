@@ -48,7 +48,7 @@ export ICA_OC_URL=http://127.0.0.1:4096
 echo "[vm] opencode serve warming on :4096"
 
 # The machine env (from fly.ts) carries everything: ICA_PROJECT/ICA_KEY/ICA_HUB, DATASOURCE_URL,
-# ENGINE_STATE_DIR / DATASOURCE_DATA_DIR / DATASOURCES_DIR (all under the mounted volume /app/data), and
+# SUPERATOM_HOME / DATASOURCE_DATA_DIR / DATASOURCES_DIR (all under the mounted volume /app/data), and
 # CLAUDE_CODE_OAUTH_TOKEN. Both processes below inherit it. One project per machine.
 
 # ── Datasource manager (background, localhost only) ──────────────────────────
@@ -62,7 +62,7 @@ sleep 2   # let it bind before the engine calls it
 
 # ── ICA engine (main process) ────────────────────────────────────────────────
 # Connects OUT to the hub as role code-engine (no inbound ports). Persists model/programs/answers to the
-# volume via ENGINE_STATE_DIR (state/<project>/).
+# volume via SUPERATOM_HOME (/app/data/<project>/).
 cd /app/apps/engine
 echo "[vm] ica-engine → ${ICA_HUB:-wss://superatom.site}"
 exec pnpm exec tsx engine.ts

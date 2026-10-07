@@ -1420,6 +1420,21 @@ place, the same for every organisation and project); the project template's thre
   owner decides; the decided version is published; everything keeps its history (time travel) and its scope
   (global / group / user).
 
+## Everything is an agent, an agent is a composition (the user, 2026-10-07)
+
+**In the user's words:** we want everything to be an agent, which itself is just a composition of concept nodes. Concept
+is the base node — there could be other types inside, like settings, UI, units… Most nodes come stored (inside the
+database). But some nodes are created dynamically, like the available programs and the available tools that we can run.
+Simplify everything that can be done with this composition graph — and only whatever is not possible as a composition
+we will think of separately.
+
+Whenever we work with our own coding agent, we can create any files or folders and programs, and then we always upload
+them through sacli. Most of the time the engine is hosted somewhere we do not directly have access to: what we create
+through, say, Codex and upload with sacli is stored in the platform database and replicated into the engine's project
+workspace. Only in some cases are we working directly on /state/<project>/…, and that is where the confusion comes from.
+Only the engine's agents work in the project workspace; when we write code ourselves (by hand or through our own agent)
+we always use sacli, which always goes through the platform — and the problem is solved.
+
 ## Who writes source, and where (the user, 2026-10-07)
 
 **In the user's words:** a dashboard or another program is built either through the CLI, or by the engine altogether —
@@ -1431,7 +1446,7 @@ same thing in state? What is special about it that cannot, and should not, be do
 from; knowledge is the graph's nodes. Every author — a person with the CLI, or the engine's builder agent from a chat —
 works the same way: take a copy from the platform (or the template), edit it in a scratch folder of its own, send it back
 (`program:build`, `graph import`); the platform keeps the new version, the engine downloads it. The scratch folder sits
-in the project's folder on the engine (`~/.superatom/state/<project>/author/` for a person; a builder session's own
+in the project's folder on the engine (`~/.superatom/<project>/author/` for a person; a builder session's own
 folder for the agent). Two rules keep one path: the engine's downloaded copies are never edited by hand, and an author's
 folder is never read by the engine as truth. It is not the agents' shared `workspace/`, which holds only what the engine
 puts there. Still to build: taking a program's source (and knowledge, as files) back from the platform — `program pull`.
@@ -1644,7 +1659,7 @@ In scope, beyond what is above:
 | user UI chat | the user UI with the block · card · thread system |
 | `vm/packages/project-template` | replaced by the template above |
 | engine as the store | platform is the truth, the engine a replica; sessions and programs synced up, domains and concepts synced down |
-| project homes only under `~/.superatom/state/<projectId>` (the old in-repository `vm/projects` is gone) | — |
+| project homes only under `~/.superatom/<projectId>` (the old in-repository `vm/projects` is gone) | — |
 | a port per project (data source manager, engine) | one set of ports, every request scoped by project |
 
 ## Order of work (proposed)

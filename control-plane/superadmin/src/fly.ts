@@ -127,10 +127,10 @@ export async function createMachine(token: string, config: MachineConfig): Promi
           // Machine (Firecracker microVM) is one, so the analyst/connector/modeller can run as root.
           IS_SANDBOX: '1',
           // Persistence + the datasource registry live on the mounted VOLUME so they survive machine restarts.
-          // ONE state root: the workspace (seams, programs, out) and the project's DBs (project/grounding/
-          // answers) co-locate under /app/data/state/<project>. (The engine derives WORKSPACE_ROOT/DATA_ROOT
-          // from ENGINE_STATE_DIR when those per-root vars are unset — see vm/apps/engine/engine.ts.)
-          ENGINE_STATE_DIR: '/app/data/state',
+          // The project's home on the volume: the workspace (seams, programs, out) and the project's DBs (project/grounding/
+          // answers) co-locate under /app/data/<project>. (The engine derives WORKSPACE_ROOT/DATA_ROOT
+          // from SUPERATOM_HOME when those per-root vars are unset — see vm/apps/engine/engine.ts.)
+          SUPERATOM_HOME: '/app/data',
           DATASOURCE_DATA_DIR: '/app/data/datasources',
           DATASOURCES_DIR: '/app/data/datasources',
           // THE PLATFORM THIS BOX BELONGS TO. Without it the engine does not consider itself part of a fleet:

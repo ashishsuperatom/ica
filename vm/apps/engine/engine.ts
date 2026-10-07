@@ -60,7 +60,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 // with ICA_PROJECT or ENGINE_PROJECT_DIR). A value already set is never overridden.
 {
   const home = process.env.ENGINE_PROJECT_DIR
-    ?? (process.env.ICA_PROJECT ? join(process.env.ENGINE_STATE_DIR ?? join(homedir(), '.superatom', 'state'), process.env.ICA_PROJECT) : undefined)
+    ?? (process.env.ICA_PROJECT ? join(process.env.SUPERATOM_HOME ?? join(homedir(), '.superatom'), process.env.ICA_PROJECT) : undefined)
   if (home) try { process.loadEnvFile(join(home, '.env')) } catch { /* no .env — rely on the ambient environment */ }
 }
 // Resilience: a stray async error from a flaky agent CLI/harness (a PTY that vanished, an opencode server
@@ -75,26 +75,26 @@ const HUB = (() => { const raw = process.env.ICA_HUB || 'ws://localhost:5174'; t
 const PROJECT = process.env.ICA_PROJECT || ''
 // THE PROJECT'S HOME. Everything that belongs to one project — and nothing of the platform — lives under ONE root,
 // outside the repository, keyed by the project id:
-//   <STATE_ROOT>/<projectId>/  .env (its hub, key, source credentials) · settings.json · secrets/ · datasources/ (its
+//   <SUPERATOM_ROOT>/<projectId>/  .env (its hub, key, source credentials) · settings.json · secrets/ · datasources/ (its
 //   bridges, registry, index seeds) · knowledge/ (what the composition graph imports) · app/ · db/ (composition.sqlite ·
 //   datasource-index.sqlite · grounding.sqlite · agent-sessions.sqlite) · workspace/ · sessions/<id>/
 // The repository holds only the platform. Env-overridable so Fly points the root at the mounted volume.
 // Outside the repository, so an agent working in its workspace is not one directory away from the engine's source.
-const STATE_ROOT = process.env.ENGINE_STATE_DIR ?? join(homedir(), '.superatom', 'state')
-const WORKSPACE_ROOT = process.env.ENGINE_WORKSPACE_DIR ?? STATE_ROOT
+const SUPERATOM_ROOT = process.env.SUPERATOM_HOME ?? join(homedir(), '.superatom')
+const WORKSPACE_ROOT = process.env.ENGINE_WORKSPACE_DIR ?? SUPERATOM_ROOT
 
 // THE PROFILE THIS MACHINE LAST ADOPTED, read before any agent config is resolved. Without it a box whose
 // control plane is briefly unreachable would boot on the git default — quietly running different agents than
 // it was configured with, and working well enough that nobody looks.
-useCache(join(STATE_ROOT, PROJECT))
+useCache(join(SUPERATOM_ROOT, PROJECT))
 // SEGREGATION (see ica/workspace.ts): the agent's write-root and the engine's DBs are SIBLING folders under the
 // project home, so the agent's cwd never contains our SQLite files.
 const WORKSPACE = join(WORKSPACE_ROOT, PROJECT, 'workspace')   // the shared agents' cwd: the analyst, connector and grounding agents
 // A conversation's composer works in sessions/<id>/ (ica/workspace.ts).
 const SESSIONS = join(WORKSPACE_ROOT, PROJECT, 'sessions')
 const DB_DIR    = join(WORKSPACE_ROOT, PROJECT, 'db')          // ENGINE-private DBs — a sibling, NOT under WORKSPACE
-// The project's home: always under the state root (~/.superatom/state/<projectId>), never in the repository.
-const PROJECT_DIR = process.env.ENGINE_PROJECT_DIR ?? join(STATE_ROOT, PROJECT)
+// The project's home: always ~/.superatom/<projectId> (or under SUPERATOM_HOME), never in the repository.
+const PROJECT_DIR = process.env.ENGINE_PROJECT_DIR ?? join(SUPERATOM_ROOT, PROJECT)
 const KEY = process.env.ICA_KEY || ''
 // ONE fleet switch for the WORK agents (analyst/connector/grounding): ICA_AGENT_HARNESS =
 // claude-code | codex | opencode picks the brain for ALL of them, and each agent's MODEL is INHERITED from

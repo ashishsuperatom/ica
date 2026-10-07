@@ -105,8 +105,8 @@ lanes.
 
 ## 6. The engine's disk
 
-Roots (`engine.ts`): `STATE_ROOT` = `$ENGINE_STATE_DIR` or `~/.superatom/state`; a project's home `<home>` =
-`STATE_ROOT/<project>`. On Fly the state is on the machine's volume (`/app/data/state`, datasources `/app/data/datasources`).
+Roots (`engine.ts`): `SUPERATOM_ROOT` = `$SUPERATOM_HOME` or `~/.superatom`; a project's home `<home>` =
+`SUPERATOM_ROOT/<project>`. On Fly the homes are on the machine's volume (`/app/data/<project>`, datasources `/app/data/datasources`).
 
 | Path under `<home>` | Holds | To the platform |
 |---|---|---|

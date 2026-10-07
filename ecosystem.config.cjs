@@ -4,8 +4,8 @@
 // Each engine connects OUT to the deployed hub as role code-engine; it never serves the UI. Beside it runs that
 // project's datasource manager, the one data seam its engine and agents query.
 //
-// A project on this machine is a home with a .env under the state root (~/.superatom/state/<projectId>/, or
-// ENGINE_STATE_DIR). Everything project-specific — its hub, key and source credentials, its name and datasource port,
+// A project on this machine is a home with a .env: ~/.superatom/<projectId>/ (or under
+// SUPERATOM_HOME). Everything project-specific — its hub, key and source credentials, its name and datasource port,
 // the agents it runs with — is in that .env; this file holds none of it:
 //
 //   ICA_PROJECT / ICA_HUB / ICA_KEY / DATASOURCE_URL     where the engine connects, and its data seam
@@ -22,7 +22,7 @@ const os = require('node:os')
 const path = require('node:path')
 
 const root = __dirname
-const STATE = process.env.ENGINE_STATE_DIR || path.join(os.homedir(), '.superatom', 'state')
+const STATE = process.env.SUPERATOM_HOME || path.join(os.homedir(), '.superatom')
 
 // A project's .env as an object: its secrets stay out of this committed file and reach the processes at start.
 function readEnv(file) {
@@ -63,7 +63,7 @@ module.exports = {
         watch:       false,
         // Stamp every line: where the time in a slow turn went is read from the log, not re-measured live.
         log_date_format: 'YYYY-MM-DD HH:mm:ss.SSS',
-        env:         { PATH: process.env.PATH, ...env, ENGINE_STATE_DIR: STATE, ENGINE_PROJECT_DIR: home, DATASOURCES_DIR: path.join(home, 'datasources') },
+        env:         { PATH: process.env.PATH, ...env, SUPERATOM_HOME: STATE, ENGINE_PROJECT_DIR: home, DATASOURCES_DIR: path.join(home, 'datasources') },
       },
     ]
   }),

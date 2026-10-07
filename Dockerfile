@@ -73,13 +73,13 @@ RUN printf 'export PATH="/usr/local/share/pnpm:/app/apps/engine/node_modules/.bi
     && mkdir -p /app/data/agent-home && cat /tmp/sa-path.sh >> /app/data/agent-home/.bashrc && rm /tmp/sa-path.sh
 
 # ── Volume mount point (persisted across stop/start) ────────────────────────
-# Everything stateful lives here so it survives machine restarts: per project, ONE state home under
-# state/<project>/ — db/ (graph.sqlite: programs, memory, data sessions; datasource-index.sqlite: the datasource
+# Everything stateful lives here so it survives machine restarts: per project, ONE home under
+# /app/data/<project>/ — db/ (graph.sqlite: programs, memory, data sessions; datasource-index.sqlite: the datasource
 # schema index; grounding.sqlite; agent-sessions.sqlite: which harness session each agent resumes), workspace/ and
 # sessions/<id>/ (the agents' working directories) — plus the datasource registry + connector-written bridges
 # (datasources/). A fresh machine starts with these empty — sources are added at runtime via the connector agent.
-# Paths are set by fly.ts (ENGINE_STATE_DIR / DATASOURCE_DATA_DIR / DATASOURCES_DIR).
-RUN mkdir -p /app/data/state /app/data/datasources
+# Paths are set by fly.ts (SUPERATOM_HOME / DATASOURCE_DATA_DIR / DATASOURCES_DIR).
+RUN mkdir -p /app/data/datasources
 VOLUME ["/app/data"]
 
 # ── Build stamp ───────────────────────────────────────────────────────────────

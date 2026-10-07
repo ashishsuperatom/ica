@@ -45,7 +45,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Sessions: one user's blocks as a tree (each path through it a thread), current-view vs new-block intents, branching from earlier blocks, the answer history, stale runs dropped, an append-only log readable as of any moment.
 - Agent sessions on the engine: an agent defined in the project home runs its programs as sessions of blocks over the hub (`session:*`), each answer drawn as the answer card and each program's own view in its block.
 - UI library: `<Intent>` with one delegated listener and a list of every intent on screen, the thread view with branches, and loading a program's React side with the platform's own React.
-- Project homes under `~/.superatom/state/<projectId>`, and a project template (new, check, sync).
+- Project homes under `~/.superatom/<projectId>`, and a project template (new, check, sync).
 - A per-project deterministic application behind the engine's `app:` seam (the Fusion5 and Total Group dashboards).
 - A guard that keeps platform code free of any one dataset's vocabulary.
 

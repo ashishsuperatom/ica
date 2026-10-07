@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Start the Superatom engine + its sidecars under pm2. Reads .env for the project connection/keys;
-# sets the infra paths (state dir, ports) itself. Re-run to restart. Survives reboot via `pm2 save`.
+# sets the infra paths (project homes, ports) itself. Re-run to restart. Survives reboot via `pm2 save`.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 cd "$HERE"
@@ -10,13 +10,13 @@ set -a; [ -f .env ] && . ./.env; set +a
 : "${ICA_PROJECT:?set ICA_PROJECT in .env}"
 : "${ICA_KEY:?set ICA_KEY in .env}"
 
-# 2. infra paths — authoritative + absolute, so nothing depends on cwd. ONE unified state dir.
-export ENGINE_STATE_DIR="$HERE/state"
+# 2. infra paths — authoritative + absolute, so nothing depends on cwd. Project homes: ~/.superatom/<project>/.
+export SUPERATOM_HOME="$HOME/.superatom"
 export DATASOURCES_DIR="$HERE/datasources"
 export DATASOURCE_DATA_DIR="$HERE/datasources"
 export DATASOURCE_URL="${DATASOURCE_URL:-http://localhost:4000}"
 export ICA_OC_URL="${ICA_OC_URL:-http://127.0.0.1:4096}"
-mkdir -p "$ENGINE_STATE_DIR" "$DATASOURCES_DIR"
+mkdir -p "$SUPERATOM_HOME" "$DATASOURCES_DIR"
 
 # 3. put nvm's node + pnpm's global bin on PATH (so pm2/pnpm/claude/tsx resolve)
 export NVM_DIR="$HOME/.nvm"
