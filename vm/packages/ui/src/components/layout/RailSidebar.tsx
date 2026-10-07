@@ -1,8 +1,9 @@
 // The two-level sidebar: a thin rail that is always there (the Superatom mark, the big places, the person at its foot)
 // and beside it the panel of one place.
 //
-// What shows is decided by three plain values: the place chosen (clicked; where a pinned panel rests), the place
-// pointed at (only while the pointer is over the sidebar), and pinned. The panel is the pointed place's, else the
+// What shows is decided by three plain values: the place chosen (where a pinned panel rests: the place of the page the
+// person is on, or one they clicked in the rail since they came to this page), the place pointed at (only while the
+// pointer is over the sidebar), and pinned. The panel is the pointed place's, else the
 // chosen one's; it shows when pinned or while pointing. Clicking a place chooses it and pins; the toggle in the
 // panel's head pins and unpins. Every place has a panel — one with nothing under it shows an empty one. On a phone
 // the whole sidebar is a drawer.
@@ -42,7 +43,11 @@ export default function RailSidebar({ name, places, current, foot, pinned, onPin
   /** The name at the panel's head opens its home. */
   onHome: () => void
 }) {
-  const [chosen, setChosen] = useState(() => places.some((p) => p.key === current) ? current : places[0]?.key ?? '')
+  // A rail click counts only on the page it was made on: going to another page (from the panel, a link, anywhere) makes
+  // that page's place the chosen one.
+  const [clicked, setClicked] = useState<{ key: string; on: string } | null>(null)
+  const chosen = clicked && clicked.on === current ? clicked.key : places.some((p) => p.key === current) ? current : clicked?.key ?? places[0]?.key ?? ''
+  const setChosen = (key: string) => setClicked({ key, on: current })
   const [pointed, setPointed] = useState<string | null>(null)
   const phone = () => typeof window !== 'undefined' && window.innerWidth < 768
   const place = places.find((p) => p.key === (pointed ?? chosen)) ?? places[0]
