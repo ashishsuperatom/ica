@@ -21,6 +21,12 @@ import { getIndexer, resetIndexerCaches } from './datasource-index/indexer.js'
 
 type Send = (msg: Record<string, unknown>) => boolean
 const BEAT_MS = 10_000
+/** How long a build waits for a source to say it is ready before listing its tables. */
+const READY_WAIT_MS = 90_000
+/** How often the engine asks whether a build was left unfinished (a source that was down, a build that failed). */
+const RESUME_EVERY_MS = 5 * 60_000
+/** How many tables of one source are read at once. */
+const READ_AT_ONCE = 4
 
 export function createDsi(o: { store: DataSourceIndex; manager: string; send: Send; log?: (s: string) => void }) {
   const log = o.log ?? (() => {})
@@ -96,6 +102,14 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
         let indexer
         try { indexer = getIndexer(s.dialect) } catch (e: any) { log(`[dsi] ${s.id}: ${e.message}`); failedSources++; state.counts.sources.done++; continue }
 
+        // A source that has just been loaded may not be connected yet: wait for it to say it is ready.
+        progress({ stage: `phase 1 · ${s.id}`, doing: 'waiting for it to be ready' })
+        for (const t0 = Date.now(); Date.now() - t0 < READY_WAIT_MS;) {
+          const now = (((await (await fetch(`${o.manager}/sources`)).json().catch(() => ({}))) as any).sources ?? []).find((x: any) => x.id === s.id)
+          if (!now || now.ready !== false) break
+          await new Promise((r) => setTimeout(r, 2000))
+        }
+
         // PHASE 1 — the tables, then each table's fields.
         progress({ stage: `phase 1 · ${s.id}`, doing: 'listing its tables' })
         let tables: string[], complete = false
@@ -116,7 +130,9 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
         state.counts.tables.total += tables.length; state.counts.tables.done += done.size
         log(`[dsi] ${s.id}: ${tables.length} tables (${done.size} already done, ${todo.length} to read)`)
         let ok = 0, failed = 0, firstError = ''
-        for (const t of todo) {
+        // A few tables at a time (a source's own limit on concurrent requests is the bound: NetSuite's default is 5).
+        const queue = [...todo]
+        const readOne = async (t: string) => {
           progress({ doing: `${s.id} · ${t}` })
           try {
             const entries = await indexer.indexContainer(s.id, t, raw)
@@ -130,6 +146,7 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
           }
           state.counts.tables.done++
         }
+        await Promise.all(Array.from({ length: Math.min(READ_AT_ONCE, queue.length) }, async () => { for (let t = queue.shift(); t !== undefined; t = queue.shift()) await readOne(t) }))
         if (!targeted) o.send({ type: 'dsi:finish', source: s.id, phase: 1 })
         log(`[dsi] ${s.id}: phase 1 read ${ok}${failed ? `, ${failed} could not be read (first: ${firstError})` : ''}`)
 
@@ -151,6 +168,10 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
       throw e
     }
   }
+
+  // As long as a build is not finished, keep at it: a source that was down is tried again (the platform says what is left).
+  const again_ = setInterval(() => { if (!building) o.send({ type: 'dsi:resume' }) }, RESUME_EVERY_MS)
+  again_.unref?.()
 
   return {
     /** On welcome: bring the replica up to the platform. */
