@@ -21,7 +21,7 @@ import { AnalystConsole } from './AnalystConsole'
 import { useSession, useUser, useClerk, SignIn } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
-import { AppShell, RailSidebar, NavList, type RailPlace, UserProfile, MenuItem, MenuRule, Search, useSearchKey, type SearchItem, ConnectionStatus, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, SourceHub, SourceTree, type HubSource, type TreeTable, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Toolbar, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
+import { AppShell, RailSidebar, NavList, type RailPlace, UserProfile, MenuItem, MenuRule, Search, useSearchKey, type SearchItem, ConnectionStatus, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, SourceHub, SourceTree, SourceExplorer, type HubSource, type TreeTable, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Toolbar, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
 import '@superatom/ui/design.css'
 import { AdminContext, ADMIN_OWN_BLOCKS } from './AdminBlocks'
 
@@ -1056,15 +1056,37 @@ type SnapItem = { description?: string; descSource?: string | null; descHuman?: 
 type SnapTable = SnapItem & { table: string; rows?: number | null; fields: (SnapItem & { field: string; type?: string | null; key?: boolean | null; optional?: boolean | null; references?: string | null })[] }
 type Snapshot = { cursor: number; sources: { source: string; tables: SnapTable[] }[] }
 type Failure = { table: string; phase: number; error: string | null; at: string }
+/** A failure's reason as a sentence: a JSON problem document (RFC 9457) inside it says its detail (or title); else the text,
+ *  cut short. The whole text stays on hover. */
+function reasonOf(error: string | null): string {
+  if (!error) return '—'
+  const at = error.indexOf('{')
+  if (at >= 0) {
+    try {
+      const doc = JSON.parse(error.slice(at))
+      const detail = doc?.['o:errorDetails']?.[0]?.detail ?? doc?.detail ?? doc?.errors?.[0]?.detail ?? doc?.title
+      if (typeof detail === 'string') { const last = detail.split(/(?<=[.:])\s+/).filter(Boolean).pop() ?? detail; return last.length < 12 ? detail : last }
+    } catch { /* not JSON after all */ }
+  }
+  return error.length > 160 ? `${error.slice(0, 160)}…` : error
+}
+/** One source of the snapshot, as the tree components take it. */
+function treeTablesOf(snap: Snapshot | null, name: string): TreeTable[] {
+  return (snap?.sources.find((s) => s.source === name)?.tables ?? []).map((t) => ({ name: t.table, rows: t.rows ?? null, description: t.description, descSource: t.descSource, descHuman: t.descHuman, descAi: t.descAi, enabled: t.enabled, gone: t.gone,
+    fields: t.fields.map((f) => ({ name: f.field, type: f.type, key: f.key, optional: f.optional, references: f.references, description: f.description, descSource: f.descSource, descHuman: f.descHuman, descAi: f.descAi, enabled: f.enabled, gone: f.gone })) }))
+}
 const fmtWhen = (iso?: string | null) => (iso ? new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '')
 
-function DataSourcesPanel({ hub, api, projectId }: { hub: ReturnType<typeof useProjectHub>; api: (p: string, i?: RequestInit) => Promise<Response>; projectId: string }) {
+function DataSourcesPanel({ hub, api, projectId, projectName }: { hub: ReturnType<typeof useProjectHub>; api: (p: string, i?: RequestInit) => Promise<Response>; projectId: string; projectName: string }) {
   const [snap, setSnap] = useState<Snapshot | null>(null)
   const [stats, setStats] = useState<DsiSource[]>([])
   const [conns, setConns] = useState<any[]>([])
   const [job, setJob] = useState<DsiJob | null>(null)
   const [err, setErr] = useState('')
   const [chosen, setChosen] = useState<string | null>(null)
+  // What is picked in the explorer beside the chosen card — the tree below opens on it.
+  const [focus, setFocus] = useState<{ table: string; field: string | null } | null>(null)
+  const explored = useMemo(() => (chosen ? treeTablesOf(snap, chosen) : []), [snap, chosen])
   const live = hub.status === 'live'
   const loadStats = useCallback(() => {
     if (!live) return
@@ -1109,14 +1131,12 @@ function DataSourcesPanel({ hub, api, projectId }: { hub: ReturnType<typeof useP
         action={running ? undefined : <button className="sa-btn" disabled={!live} onClick={() => build({})}>Build / resume</button>}>
         <JobLine job={job} />
       </Notice>}
-      <SectionCard icon="lucide:git-fork" title="Where the data comes from" note={names.length ? `${names.length}` : undefined}
-        subtitle={totals.t ? `${totals.t.toLocaleString()} tables · ${totals.f.toLocaleString()} fields in the index` : 'Each source the project reads, and what its index holds'}>
-        <div className="sa-section__body">
-          <SourceHub centre={{ title: 'This project', subtitle: snap ? `index at ${snap.cursor.toLocaleString()} changes` : undefined }} sources={sources} selected={chosen}
-            onSelect={(k) => setChosen((c) => (c === k ? null : k))} empty="No data source yet — connect one, and its index is built here." />
-        </div>
-      </SectionCard>
-      {chosen && <SourceWorkspace key={chosen} name={chosen} hub={hub} snap={snap} setSnap={setSnap} stats={stats.find((s) => s.source === chosen)} conn={conns.find((c) => c.name === chosen)}
+      {/* The canvas, straight on the page: the project at the centre, its sources around it, the chosen one opened beside its card. */}
+      <SourceHub centre={{ title: projectName || 'Project', subtitle: totals.t ? `${totals.t.toLocaleString()} tables · ${totals.f.toLocaleString()} fields` : undefined }} sources={sources} selected={chosen}
+        onSelect={(k) => { setChosen((c) => (c === k ? null : k)); setFocus(null) }} empty="No data source yet — connect one, and its index is built here.">
+        {chosen && <SourceExplorer key={chosen} tables={explored} loading={!snap} picked={focus} onPick={setFocus} />}
+      </SourceHub>
+      {chosen && <SourceWorkspace key={chosen} name={chosen} focus={focus} hub={hub} snap={snap} setSnap={setSnap} stats={stats.find((s) => s.source === chosen)} conn={conns.find((c) => c.name === chosen)}
         state={stateOf(chosen)} running={running} build={build} onClose={() => setChosen(null)} />}
     </div>
   )
@@ -1130,7 +1150,8 @@ function JobLine({ job }: { job: DsiJob }) {
     {!running && job.detail ? ` — ${job.detail}` : ''}{!running ? <span className="sa-muted"> · {fmtWhen(job.beatAt)}</span> : null}</span>
 }
 
-function SourceWorkspace({ name, hub, snap, setSnap, stats, conn, state, running, build, onClose }: {
+function SourceWorkspace({ name, focus, hub, snap, setSnap, stats, conn, state, running, build, onClose }: {
+  focus: { table: string; field: string | null } | null
   name: string; hub: ReturnType<typeof useProjectHub>; snap: Snapshot | null; setSnap: (f: (s: Snapshot | null) => Snapshot | null) => void
   stats?: DsiSource; conn?: any; state: { state: StatusState; label: string }; running: boolean; build: (p: Record<string, unknown>) => void; onClose: () => void
 }) {
@@ -1139,9 +1160,8 @@ function SourceWorkspace({ name, hub, snap, setSnap, stats, conn, state, running
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   useEffect(() => { hub.call({ t: 'dsi:failures', source: name }).then((r: any) => setFailures(r.failures ?? [])).catch(() => setFailures([])) }, [hub, name, stats?.phases.find((p) => p.phase === 1)?.finishedAt])
-  const src = snap?.sources.find((s) => s.source === name)
-  const tables: TreeTable[] = (src?.tables ?? []).map((t) => ({ name: t.table, rows: t.rows ?? null, description: t.description, descSource: t.descSource, descHuman: t.descHuman, descAi: t.descAi, enabled: t.enabled, gone: t.gone,
-    fields: t.fields.map((f) => ({ name: f.field, type: f.type, key: f.key, optional: f.optional, references: f.references, description: f.description, descSource: f.descSource, descHuman: f.descHuman, descAi: f.descAi, enabled: f.enabled, gone: f.gone })) }))
+  const tables = useMemo(() => treeTablesOf(snap, name), [snap, name])
+  useEffect(() => { if (focus) setTab('tables') }, [focus])
   // What the platform confirmed, put into the index as shown — no reload.
   const apply = (item: any) => setSnap((s) => s && ({ ...s, sources: s.sources.map((x) => x.source !== item.source ? x : { ...x, tables: x.tables.map((t) => {
     if (t.table !== item.table) return t
@@ -1150,6 +1170,7 @@ function SourceWorkspace({ name, hub, snap, setSnap, stats, conn, state, running
   }) }) }))
   const act = (payload: Record<string, unknown>) => { setBusy(true); setErr(''); hub.call(payload).then((r: any) => { if (r.reason) setErr(r.reason); else if (r.item) apply(r.item) }).catch((e: any) => setErr(e.message)).finally(() => setBusy(false)) }
   const p1 = stats?.phases.find((p) => p.phase === 1)
+  const readAgain = (list: string[]) => build({ tables: { [name]: list } })
   return (
     <SectionCard icon="lucide:database" title={name} subtitle={[conn?.description, conn?.dialect ?? conn?.kind].filter(Boolean)[0] ? String(conn?.description ?? conn?.dialect ?? conn?.kind).slice(0, 160) : undefined}
       note={state.label}
@@ -1168,18 +1189,19 @@ function SourceWorkspace({ name, hub, snap, setSnap, stats, conn, state, running
           ['Reached', conn ? (conn.runnable ? 'ready' : 'not reachable now') : 'not a connection of this project'],
         ]} />
         <Tabs value={tab} onChange={setTab} items={[{ key: 'tables', label: 'Tables', count: tables.length }, { key: 'failed', label: 'Not read', count: failures?.length ?? 0 }]} />
-        {tab === 'tables' && (snap ? <SourceTree title={name} subtitle={conn?.dialect ?? conn?.kind} tables={tables} busy={busy}
+        {tab === 'tables' && (snap ? <SourceTree title={name} subtitle={conn?.dialect ?? conn?.kind} tables={tables} busy={busy} focus={focus}
           onEnable={(table, field, enabled) => act({ t: 'dsi:enable', source: name, table, ...(field ? { field } : {}), enabled })}
           onDescribe={(table, field, text) => act({ t: 'dsi:describe', source: name, table, ...(field ? { field } : {}), text, by: 'human' })}
-          onReread={running ? undefined : (table) => build({ tables: { [name]: [table] } })} /> : <Notice>Loading the index…</Notice>)}
+          onReread={running ? undefined : (table) => readAgain([table])} /> : <Notice>Loading the index…</Notice>)}
         {tab === 'failed' && (
           <div className="sa-stack">
-            {!!failures?.length && <Toolbar end={<button className="sa-btn sa-btn--primary" disabled={running} onClick={() => build({ tables: { [name]: failures.map((f) => f.table) } })}>Read these {failures.length} again</button>}>
+            {!!failures?.length && <Toolbar end={<button className="sa-btn sa-btn--primary" disabled={running} onClick={() => readAgain(failures.map((f) => f.table))}>Read these {failures.length} again</button>}>
               <span className="sa-muted">Tables the builds could not read — never counted as empty; the next build tries them again.</span></Toolbar>}
             <RecordList rows={failures} keyOf={(f) => f.table} empty="Every table of this source was read." pageSize={100} search={(f) => `${f.table} ${f.error ?? ''}`} searchLabel="Find a table or a reason…" columns={[
               { key: 'table', label: 'Table', render: (f) => <Code>{f.table}</Code> },
-              { key: 'error', label: 'Why', wrap: true, render: (f) => f.error ?? '—' },
+              { key: 'error', label: 'Why', wrap: true, render: (f) => <span title={f.error ?? ''}>{reasonOf(f.error)}</span> },
               { key: 'at', label: 'When', render: (f) => <span className="sa-muted">{fmtWhen(f.at)}</span> },
+              { key: 'do', label: '', align: 'end', render: (f) => <button className="sa-btn sa-btn--link" disabled={running} onClick={() => readAgain([f.table])}>Read again</button> },
             ]} />
           </div>
         )}
@@ -1639,7 +1661,7 @@ function ProjectDetailPage() {
 
       {view === 'grounding' && <GroundingConsole hub={hub} />}
 
-      {view === 'index' && <DataSourcesPanel hub={hub} api={api} projectId={projectId ?? ''} />}
+      {view === 'index' && <DataSourcesPanel hub={hub} api={api} projectId={projectId ?? ''} projectName={String(status?.name ?? '')} />}
       {view === 'access' && <AccessPanel projectId={projectId!} orgId={orgId ?? status?.orgId ?? null} api={api} token={token} />}
       {view === 'channels' && <ChannelsPanel projectId={projectId!} api={api} />}
     </Shell>
