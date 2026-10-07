@@ -39,7 +39,13 @@ import { runConnector, runCode, manifestOf } from './connectors/runtime.js'
 import { projectGraph, migrateGraph, GRAPH_MESSAGES, GRAPH_VIEWS, type Who } from './graph.js'
 import { changesFingerprint } from '../../../vm/packages/composition-graph/src/fingerprint.js'
 import { projectDsi, DsiRefusal } from './dsi.js'
+/** THE ONLY PAYLOADS THAT CARRY SECRETS: a project's connections, unsealed for its engine (and one connection, for one
+ *  person). They are sent inline on the engine's authenticated socket — never as a parcel, never into the bucket, the
+ *  audit, the record stream or a log. A secret enters the platform only through the connections routes (sealed at once,
+ *  proxy/seal.ts) and leaves only in these. */
+export const SECRET_PAYLOADS = new Set(['connections:list', 'connection:got'])
 import { projectJobs, JobRefusal, type Job } from './jobs.js'
+import { putObject, removeObjects, kindOfKey, projectOfKey as projectOfObject, prefixesOf, KINDS, type Ledger, type LedgerRow } from './storage.js'
 import { keyOf as fileKeys } from './files.js'
 
 
@@ -234,7 +240,7 @@ export class ProjectDO extends DurableObject<Env> {
     this.buffer = new AnswerBuffer(this.ctx.storage.sql, (e, d) => this.log(e, d))
     this.audit = new AuditLog(this.ctx.storage.sql as any, () => this._pid ?? '', { stream: (env as any).AUDIT, records: createRecorder((env as any).RECORDS, () => this._pid ?? ''), warn: (m) => { this.log('audit:send_failed', { message: m }); console.warn(`[audit] ${m}`) } })
     this.agentKeys = new AgentKeys(this.ctx.storage.sql as any, () => this._pid ?? '')
-    this.catalogue = new ProgramCatalogue(this.ctx.storage.sql as any, env.PACKAGES, () => this._pid ?? '')
+    this.catalogue = new ProgramCatalogue(this.ctx.storage.sql as any, env.PACKAGES, () => this._pid ?? '', () => this.ledger())
     this.record = createRecorder((env as any).RECORDS, () => this._pid ?? '')
     // KEEPALIVE, ANSWERED AT THE EDGE. A client that sits idle — the engine between questions — has its socket
     // closed by the edge, seen as a clean register followed by a 1006 every half-minute or so. The cure is a
@@ -375,6 +381,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (path === '/access-domains' || path.startsWith('/access-domains/')) return this.accessDomains(request, path)
     if (path === '/groups' || path.startsWith('/groups/')) return this.groupsAdmin(request, path)
     if (path === '/connections' || path.startsWith('/connections/') || path === '/connectors') return this.connectionsApi(request, path)
+    if (path === '/storage' || path.startsWith('/storage/')) return this.storageApi(request, path)
     if (request.method === 'POST' && path === '/access/arrive') return this.arrive(request)
     if (path === '/usage' && request.method === 'GET') return this.usageSummary(new URL(request.url))
 
@@ -604,13 +611,13 @@ export class ProjectDO extends DurableObject<Env> {
     }
     // The code connections the engine runs: pulled on every welcome and whenever they change (connections:changed).
     if (msg.type === 'connections:pull' && sender.type === 'code-engine') {
-      const reply = (payload: Record<string, unknown>) => { this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { t: 'connections:list', reqId: msg.reqId, ...payload }, { inline: true }) }
+      const reply = (payload: Record<string, unknown>) => { this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { t: 'connections:list', reqId: msg.reqId, ...payload }) }
       try { reply({ connections: await this.codeConnectionsForEngine() }); this.audit.record({ actor: { kind: 'engine', id: 'engine' }, via: 'engine', action: 'connection.open', target: 'code connections', outcome: 'ok' }) }
       catch (e: any) { reply({ error: e?.message ?? String(e) }) }
       return
     }
     if (msg.type === 'connection:get' && sender.type === 'code-engine') {
-      const reply = (payload: Record<string, unknown>) => { this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { t: 'connection:got', reqId: msg.reqId, ...payload }, { inline: true }) }
+      const reply = (payload: Record<string, unknown>) => { this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { t: 'connection:got', reqId: msg.reqId, ...payload }) }
       try { reply({ connection: await this.connectionForEngine(String(msg.id ?? ''), msg.principal ? String(msg.principal) : null, msg.email ? String(msg.email) : null) }) }
       catch (e: any) { reply({ error: e?.message ?? String(e) }) }
       return
@@ -1054,7 +1061,7 @@ export class ProjectDO extends DurableObject<Env> {
       const code = typeof body?.bridge === 'string' ? body.bridge : null
       if (!code || code.length > 2_000_000) return json({ error: 'an upload carries the bridge\'s code' }, 400)
       const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code)))].map((x) => x.toString(16).padStart(2, '0')).join('')
-      await bucket.put(`bridge/${this._pid}/${hash}`, code)
+      await putObject(bucket, this.ledger(), { key: `bridge/${this._pid}/${hash}`, kind: 'bridge', bytes: new TextEncoder().encode(code).byteLength, by: 'engine', body: code, contentType: 'text/javascript', once: true })
       const [have] = [...this.ctx.storage.sql.exec("SELECT id, bridge FROM connections WHERE name = ? AND level = 'project' AND removed_at IS NULL", name)] as any[]
       if (have) this.ctx.storage.sql.exec('UPDATE connections SET bridge = ? WHERE id = ?', hash, have.id)
       else this.ctx.storage.sql.exec("INSERT INTO connections (id, connector, name, level, owner, settings, secrets_sealed, created_by, created_at, bridge) VALUES (?, 'code', ?, 'project', 'project', '{}', NULL, 'engine', ?, ?)",
@@ -1083,7 +1090,7 @@ export class ProjectDO extends DurableObject<Env> {
     const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body)))].map((x) => x.toString(16).padStart(2, '0')).join('')
     const [cur] = [...this.ctx.storage.sql.exec('SELECT hash FROM app_versions ORDER BY rowid DESC LIMIT 1')] as any[]
     if (cur?.hash === hash) return { hash, changed: false }
-    await ((this.env as any).PACKAGES as R2Bucket).put(`app/${this._pid}/${hash}`, body)
+    await putObject((this.env as any).PACKAGES as R2Bucket, this.ledger(), { key: `app/${this._pid}/${hash}`, kind: 'app', bytes: new TextEncoder().encode(body).byteLength, by, body, contentType: 'application/json', once: true })
     this.ctx.storage.sql.exec('INSERT INTO app_versions (hash, at, by, files, bytes) VALUES (?, ?, ?, ?, ?)', hash, new Date().toISOString(), by, paths.length, bytes)
     this.sendToRole('code-engine', { t: 'app:changed', hash })
     return { hash, changed: true }
@@ -1278,6 +1285,97 @@ export class ProjectDO extends DurableObject<Env> {
         return { ...r, settings: JSON.parse(r.settings), runs, runnable: runs === 'code' ? !!ran?.ready : ['api', 'cloud'].includes(runs), ...(ran ? { source: { kind: ran.kind, dialect: ran.dialect, description: ran.description } } : {}), origin: 'platform' }
       })
   }
+  // ── What this project keeps in the bucket (storage.ts): its ledger ──
+  /** This project's ledger, for writers inside this object. */
+  ledger(): Ledger {
+    const sql = this.ctx.storage.sql
+    return {
+      add: async (rows: LedgerRow[]) => { for (const r of rows) this.ledgerAdd(r) },
+      forget: async (keys: string[]) => { for (const k of keys) sql.exec('DELETE FROM stored_objects WHERE key = ?', k) },
+    }
+  }
+  private ledgerAdd(r: LedgerRow) {
+    if (projectOfObject(r.key) !== this._pid || kindOfKey(r.key) !== r.kind || !(Number(r.bytes) >= 0)) throw new Error(`${r.key} is not one of this project's ${r.kind} objects`)
+    this.ctx.storage.sql.exec('INSERT INTO stored_objects (key, kind, bytes, by, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (key) DO NOTHING', r.key, r.kind, Number(r.bytes), r.by ?? null, new Date().toISOString())
+  }
+  /** Objects still in use are not deleted: a source's bridge, a program in the catalogue, the app version engines run. */
+  private inUse(key: string): string | null {
+    const kind = kindOfKey(key), hash = key.split('/').pop()?.replace(/\.json$/, '') ?? ''
+    if (kind === 'bridge' && this.ctx.storage.sql.exec('SELECT name FROM connections WHERE bridge = ? AND removed_at IS NULL', hash).toArray().length) return 'a data source runs this bridge'
+    if (kind === 'program' && this.ctx.storage.sql.exec('SELECT 1 FROM programs WHERE hash = ?', hash).toArray().length) return 'it is a program in the catalogue'
+    if (kind === 'app') { const [v] = this.ctx.storage.sql.exec('SELECT hash FROM app_versions ORDER BY at DESC LIMIT 1').toArray() as any[]; if (v?.hash === hash) return 'it is the app version engines run' }
+    return null
+  }
+  /** GET /storage — totals by kind and by person (anyone in the project), and the objects themselves (a person's own;
+   *  every one's for someone who runs the project): ?list=1&by=<who>&kind=<kind>&page=<n>.
+   *  DELETE /storage { keys } | { everything: true, by? } — a person removes their own, someone who runs the project
+   *  anyone's (never what is in use).
+   *  POST /storage/add { rows } · /storage/forget { keys } — the platform's own writers outside this object. */
+  private async storageApi(request: Request, path: string): Promise<Response> {
+    const sql = this.ctx.storage.sql
+    const body: any = request.method === 'GET' ? {} : await request.json().catch(() => ({}))
+    if (path === '/storage/add' && request.method === 'POST') { try { for (const r of body.rows ?? []) this.ledgerAdd(r) } catch (e: any) { return this.j({ error: e.message }, 400) } return this.j({ ok: true }) }
+    // ONE-OFF (removed once run): objects stored before this ledger existed, recorded from the bucket's own listing.
+    if (path === '/storage/backfill' && request.method === 'POST') {
+      if (!can(this.capsOfRequest(request), 'project.manage')) return this.j({ error: 'needs project.manage' }, 403)
+      const bucket = (this.env as any).PACKAGES as R2Bucket
+      let seen = 0
+      for (const prefix of prefixesOf(this._pid)) {
+        let cursor: string | undefined
+        do {
+          const page = await bucket.list({ prefix, cursor })
+          for (const o of page.objects) { const kind = kindOfKey(o.key); if (kind) { this.ledgerAdd({ key: o.key, kind, bytes: o.size, by: null }); seen++ } }
+          cursor = page.truncated ? page.cursor : undefined
+        } while (cursor)
+      }
+      return this.j({ seen, recorded: Number((sql.exec('SELECT COUNT(*) AS n FROM stored_objects').toArray()[0] as any).n) })
+    }
+    if (path === '/storage/forget' && request.method === 'POST') { for (const k of body.keys ?? []) sql.exec('DELETE FROM stored_objects WHERE key = ?', String(k)); return this.j({ ok: true }) }
+    let actorH: any = null
+    try { actorH = JSON.parse(request.headers.get('x-sa-actor') ?? 'null') } catch { /* none */ }
+    const me = String(actorH?.email ?? actorH?.id ?? '')
+    const all = can(this.capsOfRequest(request), 'project.manage')
+    if (path === '/storage' && request.method === 'GET') {
+      const q = new URL(request.url).searchParams
+      const totals = sql.exec('SELECT COUNT(*) AS objects, COALESCE(SUM(bytes), 0) AS bytes FROM stored_objects').toArray()[0] as any
+      const byKind = sql.exec('SELECT kind, COUNT(*) AS objects, SUM(bytes) AS bytes FROM stored_objects GROUP BY kind ORDER BY bytes DESC').toArray()
+      const byPerson = sql.exec("SELECT COALESCE(by, 'before the ledger') AS by, COUNT(*) AS objects, SUM(bytes) AS bytes FROM stored_objects GROUP BY by ORDER BY bytes DESC").toArray()
+      const out: Record<string, unknown> = { project: this._pid, objects: Number(totals.objects), bytes: Number(totals.bytes), byKind, byPerson: all ? byPerson : byPerson.filter((r: any) => r.by === me) }
+      if (q.get('list')) {
+        const who = all ? q.get('by') : me, kind = q.get('kind'), page = Math.max(1, Number(q.get('page')) || 1)
+        if (kind && !(kind in KINDS)) return this.j({ error: `a kind is one of ${Object.keys(KINDS).join(', ')}` }, 400)
+        const where = [who ? 'by = ?' : '', kind ? 'kind = ?' : ''].filter(Boolean)
+        const bind = [...(who ? [who] : []), ...(kind ? [kind] : [])]
+        out.list = sql.exec(`SELECT key, kind, bytes, by, at FROM stored_objects ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY at DESC LIMIT 100 OFFSET ?`, ...bind, (page - 1) * 100).toArray()
+          .map((r: any) => ({ ...r, inUse: this.inUse(r.key) }))
+        out.listed = Number((sql.exec(`SELECT COUNT(*) AS n FROM stored_objects ${where.length ? 'WHERE ' + where.join(' AND ') : ''}`, ...bind).toArray()[0] as any).n)
+      }
+      return this.j(out)
+    }
+    if (path === '/storage' && request.method === 'DELETE') {
+      // Everything of one person's ({ everything: true } — one's own; someone who runs the project names whose with by), or
+      // the objects named.
+      const whose = body.everything === true ? (all && typeof body.by === 'string' ? body.by : me) : null
+      if (whose !== null && !whose) return this.j({ error: 'whose objects?' }, 400)
+      const keys: string[] = whose !== null ? (sql.exec('SELECT key FROM stored_objects WHERE by = ?', whose).toArray() as any[]).map((r) => String(r.key)) : Array.isArray(body.keys) ? body.keys.map(String) : []
+      if (!keys.length) return this.j(whose !== null ? { removed: 0, refused: [] } : { error: 'which objects? { keys: [...] } or { everything: true }' }, whose !== null ? 200 : 400)
+      const refused: { key: string; why: string }[] = [], doomed: string[] = []
+      for (const k of keys) {
+        const [r] = sql.exec('SELECT key, by FROM stored_objects WHERE key = ?', k).toArray() as any[]
+        if (!r) { refused.push({ key: k, why: 'not one of this project\'s objects' }); continue }
+        if (!all && r.by !== me) { refused.push({ key: k, why: 'not yours' }); continue }
+        const why = this.inUse(k)
+        if (why) { refused.push({ key: k, why: `in use: ${why}` }); continue }
+        doomed.push(k)
+      }
+      const bucket = (this.env as any).PACKAGES as R2Bucket
+      const removed = doomed.length ? await removeObjects(bucket, this.ledger(), doomed) : 0
+      this.audit.record({ actor: { kind: actorH?.kind === 'agent' ? 'agent' : 'user', id: me || 'unknown', ...(actorH?.email ? { email: actorH.email } : {}) }, via: 'api', action: 'storage.delete', target: `${removed} objects`, outcome: 'ok', detail: { removed: doomed, refused } })
+      return this.j({ removed, refused })
+    }
+    return this.j({ error: 'not found' }, 404)
+  }
+
   /** What a source is and how people reach it, as given — or why not. */
   private aboutSource(body: any): { kind?: string; dialect?: string; description?: string; auth?: 'shared' | 'per-user' } | string {
     const out: { kind?: string; dialect?: string; description?: string; auth?: 'shared' | 'per-user' } = {}
@@ -1359,7 +1457,7 @@ export class ProjectDO extends DurableObject<Env> {
       const bucket = (this.env as any).PACKAGES as R2Bucket | undefined
       if (!bucket) return this.j({ error: 'no bucket to keep it in' }, 503)
       const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code)))].map((x) => x.toString(16).padStart(2, '0')).join('')
-      await bucket.put(`bridge/${this._pid}/${hash}`, code)
+      await putObject(bucket, this.ledger(), { key: `bridge/${this._pid}/${hash}`, kind: 'bridge', bytes: new TextEncoder().encode(code).byteLength, by: email || 'unknown', body: code, contentType: 'text/javascript', once: true })
       this.ctx.storage.sql.exec('UPDATE connections SET bridge = ? WHERE id = ?', hash, br[1])
       this.audit.record({ actor, via: 'ui', action: 'connection.bridge', target: br[1], outcome: 'ok', detail: { bridge: hash, bytes: code.length } })
       if (r.bridge !== hash) this.sendToRole('code-engine', { t: 'connections:changed' })
@@ -2275,9 +2373,8 @@ export class ProjectDO extends DurableObject<Env> {
 
   // ── EVERY PAYLOAD THE HUB SENDS GOES THROUGH emit ──
   // In order, per socket. A payload too big for one frame goes beside the wire as a parcel (the bucket, by its hash, read
-  // with a ticket) and its pointer travels instead — the same transport every end uses, in every direction. `inline`
-  // keeps a payload on the socket whatever its size: what carries secrets (a connection's, unsealed for the engine) never
-  // rests in the bucket.
+  // with a ticket) and its pointer travels instead — the same transport every end uses, in every direction. A payload
+  // that carries secrets (SECRET_PAYLOADS) is never a parcel, whatever its size: secrets never rest in the bucket.
   private outChain = new WeakMap<WebSocket, Promise<void>>()
   /** The one place the platform opens a parcel it was sent: the body, if it is the message its pointer names (by `t` or
    *  `type`) — else null. The pointer's reqId stays the message's. */
@@ -2287,15 +2384,15 @@ export class ProjectDO extends DurableObject<Env> {
     if (!body || typeof body !== 'object' || String(body[by] ?? '') !== String(pointer[by] ?? '')) return null
     return pointer.reqId !== undefined ? { ...body, reqId: pointer.reqId } : body
   }
-  private emit(ws: WebSocket, head: Record<string, unknown>, payload: unknown, o: { inline?: boolean } = {}) {
+  private emit(ws: WebSocket, head: Record<string, unknown>, payload: unknown) {
     const frame = (p: unknown) => JSON.stringify({ ...head, payload: p })
     const text = frame(payload)
-    const small = o.inline || text.length * 3 <= FRAME_LIMIT   // under the limit even if every character took three bytes
+    const small = SECRET_PAYLOADS.has(String((payload as any)?.t)) || text.length * 3 <= FRAME_LIMIT   // under the limit even if every character took three bytes
     const prev = this.outChain.get(ws)
     if (small && !prev) { try { ws.send(text) } catch { /* gone */ } return }
     const next = (prev ?? Promise.resolve()).then(async () => {
       if (small) { try { ws.send(text) } catch { /* gone */ } return }
-      await wireSender({ send: (f) => { try { ws.send(frame(f)) } catch { /* gone */ } }, parcels: bucketStore(this.env.PACKAGES, this._pid, (this.env as any).JWT_SECRET),
+      await wireSender({ send: (f) => { try { ws.send(frame(f)) } catch { /* gone */ } }, parcels: bucketStore(this.env.PACKAGES, this._pid, (this.env as any).JWT_SECRET, this.ledger()),
         onFallback: (why) => console.warn(`[hub] a payload went as parts: ${why}`) }).send(payload as Record<string, unknown>)
     }).catch((e) => console.warn(`[hub] a payload was not sent: ${e?.message ?? e}`))
     this.outChain.set(ws, next)

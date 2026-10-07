@@ -40,7 +40,6 @@ export const keyOf = {
 /** Everything of one kind for a project, or for one session — what a removal lists. */
 export const prefixOf = {
   parcels: (project: string) => { must(ID.test(project), 'a project id'); return `parcel/${project}/` },
-  project: (project: string) => { must(ID.test(project), 'a project id'); return ['parcel', 'programs', 'dashboard', 'attachments'].map((k) => `${k}/${project}/`) },
   session: (project: string, session: string) => { must(ID.test(project) && ID.test(session), 'a project and session id'); return [`attachments/${project}/${session}/`] },
 }
 
@@ -54,23 +53,4 @@ export async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string
   return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (b) => b.toString(16).padStart(2, '0')).join('')
 }
 
-/** Put a content-addressed file: within its limit, hashing to its name, stored once. */
-export async function putByHash(bucket: R2Bucket, kind: 'parcel' | 'attachment' | 'program', key: string, hash: string, bytes: ArrayBuffer | Uint8Array, contentType: string, meta?: Record<string, string>): Promise<void> {
-  checkSize(kind, bytes.byteLength)
-  if ((await sha256Hex(bytes)) !== hash) throw new FileRefusal(400, 'the bytes do not hash to the name they were given')
-  if (!(await bucket.head(key))) await bucket.put(key, bytes, { httpMetadata: { contentType }, ...(meta ? { customMetadata: meta } : {}) })
-}
 
-/** Remove every file under some prefixes (a session's, a project's); how many went. */
-export async function removeUnder(bucket: R2Bucket, prefixes: string[]): Promise<number> {
-  let gone = 0
-  for (const prefix of prefixes) {
-    let cursor: string | undefined
-    do {
-      const page = await bucket.list({ prefix, cursor })
-      if (page.objects.length) { await bucket.delete(page.objects.map((o) => o.key)); gone += page.objects.length }
-      cursor = page.truncated ? page.cursor : undefined
-    } while (cursor)
-  }
-  return gone
-}

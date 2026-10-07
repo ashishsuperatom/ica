@@ -5,6 +5,7 @@
 // records it in the project's catalogue: a draft of whoever built it, until its owner (or an admin) publishes it.
 // Engines fetch a program by hash. A hash is immutable: uploading the same one again changes nothing.
 
+import { putObject, type Ledger } from './storage.js'
 import { keyOf, checkSize } from './files.js'
 import { verifyBundle, type ProgramBundle } from '../../../vm/packages/programs/src/bundle.js'
 
@@ -14,7 +15,7 @@ export interface CatalogueEntry { hash: string; name: string; version: number; s
 export class CatalogueRefusal extends Error {}
 
 export class ProgramCatalogue {
-  constructor(private sql: Sql, private bucket: R2Bucket, private project: () => string) {}
+  constructor(private sql: Sql, private bucket: R2Bucket, private project: () => string, private ledger: () => Ledger) {}
   private key = (hash: string) => keyOf.program(this.project(), hash)   // where a bundle lives: files.ts
   private row = (r: Record<string, unknown>): CatalogueEntry => ({ hash: String(r.hash), name: String(r.name), version: Number(r.version), scope: String(r.scope), owner: String(r.owner), attaches_to: (r.attaches_to as string) ?? null,
     bytes: Number(r.bytes), built_by: String(r.built_by), uploaded_at: String(r.uploaded_at), published_at: (r.published_at as string) ?? null, published_by: (r.published_by as string) ?? null })
@@ -37,7 +38,7 @@ export class ProgramCatalogue {
     if (typeof m?.name !== 'string' || !Number.isInteger(m.version)) throw new CatalogueRefusal('the manifest names the program and its version')
     const text = JSON.stringify(b)
     try { checkSize('program', new TextEncoder().encode(text).byteLength) } catch (e: any) { throw new CatalogueRefusal(e.message) }
-    await this.bucket.put(this.key(b.hash), text, { httpMetadata: { contentType: 'application/json' }, customMetadata: { name: m.name, builtBy: by } })
+    await putObject(this.bucket, this.ledger(), { key: this.key(b.hash), kind: 'program', bytes: new TextEncoder().encode(text).byteLength, by, body: text, contentType: 'application/json', meta: { name: m.name, builtBy: by } })
     this.sql.exec('INSERT OR IGNORE INTO programs (hash, name, version, scope, owner, attaches_to, manifest, bytes, built_by, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       b.hash, m.name, m.version, String(m.scope ?? 'global'), by, m.attachesTo ?? null, b.files['manifest.json'], text.length, by, new Date().toISOString())
     return { entry: this.get(b.hash)!, added: true }

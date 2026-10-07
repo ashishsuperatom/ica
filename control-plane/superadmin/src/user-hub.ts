@@ -25,7 +25,8 @@
 import { receiver } from '../../../clients/transport.js'
 import { bucketStore } from './parcels.js'
 import { AnswerBuffer } from './answer-buffer.js'
-import { LIMITS, keyOf, checkSize, sha256Hex, putByHash } from './files.js'
+import { LIMITS, keyOf, checkSize, sha256Hex } from './files.js'
+import { putObject, remoteLedger } from './storage.js'
 
 type Claims = { userId: string; email?: string; role?: string }
 export interface Tab { tab: string; project: string; surface: 'runtime' | 'admin'; claims: Claims; wsId?: string; lanes: string[] }
@@ -251,7 +252,9 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
       const hash = await sha256Hex(bytes)
       const bucket = (env_ as any).PACKAGES as R2Bucket | undefined
       if (!bucket) return json({ error: 'no bucket bound' }, 503)
-      try { await putByHash(bucket, 'attachment', keyOf.attachment(project, session, hash), hash, bytes, type) } catch (e: any) { return json({ error: e.message }, e.status ?? 400) }
+      // Stored through the one storage door, recorded in the project's ledger as this person's (storage.ts).
+      const ledger = remoteLedger((env as any).PROJECT.get((env as any).PROJECT.idFromName(`proj:${project}`)), project)
+      try { await putObject(bucket, ledger, { key: keyOf.attachment(project, session, hash), kind: 'attachment', bytes: bytes.length, by: claims.email ?? `user:${claims.userId}`, body: bytes, contentType: type, once: true }) } catch (e: any) { return json({ error: e.message }, e.status ?? 400) }
       await projectStub(project).personMessage(project, linked.wsId, { to: { type: 'code-engine' }, payload: { t: 'session:attach', session, name, type, hash, size: bytes.length, reqId: `attach-${hash.slice(0, 12)}` } })
       return json({ ok: true, session, name, hash, size: bytes.length, type }, 201)
     },

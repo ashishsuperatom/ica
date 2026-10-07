@@ -33,6 +33,7 @@ Commands:
   api              call the platform's REST API with this key: sacli api <METHOD> <path> [--data '<json>']
   datasources      the project's data sources: list, show, create, update, remove, my-key (a person's own key)
   dsi              each source's index: stats, show [--as-of], describe, enable, disable, build, status, snapshot
+  storage          what a project (or, with an organisation key, every project) keeps: totals, list, delete
   use              make a profile the one in use (--here: for this folder only)
   logout           forget a saved key
   whoami           the key in use, its project, and whether the hub accepts it
@@ -123,6 +124,14 @@ Values — what the connector asks for (sacli api GET /api/projects/<id>/connect
                                     taking away the prefix (FABRIC_TENANT_ID with --prefix FABRIC_ → tenantId); a value
                                     @<file> is read from that file
 Secrets go to the platform, sealed; they are never printed, and never written on any engine's disk.`,
+  storage: `sacli storage [list|delete] … [--project <id>]
+
+  sacli storage                                     how much the project keeps, by kind and by person (your own);
+                                                    with an organisation key and no --project: every project, summed
+  sacli storage list [--by <who>] [--kind <kind>] [--page n]   the objects themselves: where, how big, who, when,
+                                                    and whether in use (yours; anyone's for who runs the project)
+  sacli storage delete <key>… | --everything [--by <who>]      remove them (never what is in use)
+Kinds: parcel, program, bridge, app, attachment, dashboard.`,
   dsi: `sacli dsi <stats|show|describe|enable|disable|build|status|snapshot> …
 
   sacli dsi stats                                   each source: tables, fields, disabled, gone, its last build
@@ -194,7 +203,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   let hub: Hub | Conn | null = null
   try {
     // The command words come first; options may be anywhere.
-    const words = argv.filter((a, i) => !a.startsWith('-') && !(i > 0 && /^--(profile|key|hub|timeout|id|as-of|set|add|remove|call|param|act|to|block|session|rows|file|limit|column|project|columns|data|can|days|save-as|connector|secret|values-file|prefix|kind|dialect|description|auth|by|tables|bridge)$/.test(argv[i - 1])))
+    const words = argv.filter((a, i) => !a.startsWith('-') && !(i > 0 && /^--(profile|key|hub|timeout|id|as-of|set|add|remove|call|param|act|to|block|session|rows|file|limit|column|project|columns|data|can|days|save-as|connector|secret|values-file|prefix|kind|dialect|description|auth|by|tables|bridge|page)$/.test(argv[i - 1])))
     const [cmd, sub] = words
     const specific: ParseArgsConfig['options'] = cmd === 'session'
       ? { id: { type: 'string' }, 'as-of': { type: 'string' }, set: { type: 'string', multiple: true }, add: { type: 'string', multiple: true }, remove: { type: 'string', multiple: true },
@@ -203,6 +212,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'ask' ? { session: { type: 'string' }, channel: { type: 'string' } } : cmd === 'use' ? { here: { type: 'boolean' } } : cmd === 'call' || cmd === 'api' ? { data: { type: 'string' } } : cmd === 'projects' ? { deleted: { type: 'boolean' } }
       : cmd === 'keys' ? { project: { type: 'string' }, can: { type: 'string' }, days: { type: 'string' }, never: { type: 'boolean' }, 'save-as': { type: 'string' } }
       : cmd === 'datasources' ? { project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' }, bridge: { type: 'string' } }
+      : cmd === 'storage' ? { project: { type: 'string' }, by: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' }, everything: { type: 'boolean' } }
       : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' } } : {}
     let parsed
     try { parsed = parseArgs({ args: argv, options: { ...GLOBAL, ...specific }, allowPositionals: true, strict: true }) }
@@ -310,6 +320,37 @@ export async function run(argv: string[], io: Io): Promise<number> {
       if (sub === 'delete') { const r = await rest('DELETE', '/api/projects', { id: arg }); out(`removed project ${arg} (restorable: sacli projects restore ${arg})`, r); return 0 }
       if (sub === 'restore') { const r = await rest('PUT', '/api/projects', { id: arg }); out(`restored project ${arg}`, r); return 0 }
       throw new CliError(HELP.projects, 2)
+    }
+    if (cmd === 'storage') {
+      const mb = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : n >= 1024 ? `${(n / 1024).toFixed(1)} KB` : `${n} B`)
+      const pid = String(o.project ?? projectOfKey(key) ?? '')
+      if (!pid) {
+        if (sub && sub !== 'usage') throw new CliError('which project? --project <id>', 2)
+        const r = await rest('GET', '/api/storage')
+        out(`${mb(r.bytes)} in ${r.objects} objects\n` + table(['project', 'name', 'objects', 'size'], r.projects.map((p: any) => [p.project, p.name ?? '', String(p.objects), mb(p.bytes)])), r)
+        return 0
+      }
+      const base = `/api/projects/${pid}/storage`
+      if (!sub || sub === 'usage') {
+        const r = await rest('GET', base)
+        out([`${mb(r.bytes)} in ${r.objects} objects`, table(['kind', 'objects', 'size'], r.byKind.map((k: any) => [k.kind, String(k.objects), mb(Number(k.bytes))])),
+          r.byPerson.length ? table(['by', 'objects', 'size'], r.byPerson.map((k: any) => [k.by, String(k.objects), mb(Number(k.bytes))])) : ''].filter(Boolean).join('\n\n'), r)
+        return 0
+      }
+      if (sub === 'list') {
+        const q = new URLSearchParams({ list: '1', ...(o.by ? { by: String(o.by) } : {}), ...(o.kind ? { kind: String(o.kind) } : {}), ...(o.page ? { page: String(o.page) } : {}) })
+        const r = await rest('GET', `${base}?${q}`)
+        out(r.list.length ? table(['key', 'kind', 'size', 'by', 'at', 'in use'], r.list.map((x: any) => [x.key, x.kind, mb(Number(x.bytes)), x.by ?? '', String(x.at).slice(0, 19), x.inUse ?? ''])) + (r.listed > r.list.length ? `\n(${r.list.length} of ${r.listed} — --page)` : '') : 'nothing', r)
+        return 0
+      }
+      if (sub === 'delete') {
+        const keys = pos.slice(2)
+        if (!keys.length && !o.everything) throw new CliError(HELP.storage, 2)
+        const r = await rest('DELETE', base, o.everything ? { everything: true, ...(o.by ? { by: String(o.by) } : {}) } : { keys })
+        out(`removed ${r.removed}${r.refused.length ? `; kept ${r.refused.length}:\n` + r.refused.map((x: any) => `  ${x.key} — ${x.why}`).join('\n') : ''}`, r)
+        return 0
+      }
+      throw new CliError(HELP.storage, 2)
     }
     if (cmd === 'datasources') {
       const pid = String(o.project ?? projectOfKey(key) ?? '')

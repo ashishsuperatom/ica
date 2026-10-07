@@ -76,6 +76,9 @@ to the warehouse, with ms), `warehouse_tables` (owners); legacy `datasources`, `
   kept apart, enabled and who set it, gone, the log entry that made it), `dsi_log` (every change appended: the item as
   it became, when, by whom — the index as of any time), `dsi_plan` and `dsi_progress` (each build's work list and its
   checkpoints per source and phase); the whole current index is the reply to `dsi:snapshot` (a parcel when big — no file of its own); `connection_user_keys` (a person's own key for a per-user source, sealed);
+- what the project keeps in the bucket (`storage.ts`): `stored_objects` — every object (key, kind, bytes, who put it,
+  when), written by the one storage module whatever writes the object (parcels, program builds, bridges, app versions,
+  session files, dashboard builds); usage by kind and person, listing and deletion read it;
 - long work (`jobs.ts`): `jobs` (kind, lease — one running per lease —, holder, stage, what it is doing, counts,
   heartbeat; stale after a minute without one);
 - knowledge and work: the composition graph itself — its own tables (`content`, `name`, `change`, `question`, `suggestion`, `decision`, `version`, by its own migrations in `_graph_migrations`; `graph.ts`) and `graph_people` (who changed it, by email), `programs` (catalogue; bundles in R2),

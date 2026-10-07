@@ -23,6 +23,9 @@ const SECRET = 'test-secret'
 const enc = (s: string) => new TextEncoder().encode(s).buffer as ArrayBuffer
 const sha = async (s: string) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', enc(s))), (b) => b.toString(16).padStart(2, '0')).join('')
 
+/** The project's ledger, as the storage module sees it (recorded here, not checked). */
+const LEDGER = { add: async () => {}, forget: async () => {} }
+
 describe('tickets', () => {
   it('a ticket opens its own parcel for its own project until it expires, and nothing else', async () => {
     const exp = Date.now() + 1000
@@ -42,7 +45,7 @@ describe('tickets', () => {
 describe('the route', () => {
   const body = JSON.stringify({ t: 'app:answer', rows: Array.from({ length: 50 }, (_, i) => i) })
   const route = (bucket: R2Bucket, req: Request, hash: string, ok = true) =>
-    handleParcelRoute({ request: req, bucket, secret: SECRET, projectId: 'p1', hash, authorize: async () => ok })
+    handleParcelRoute({ request: req, bucket, secret: SECRET, projectId: 'p1', hash, ledger: LEDGER, authorize: async () => (ok ? 'someone' : null) })
 
   it('PUT stores by hash and answers a ticket; GET with the ticket reads the body back', async () => {
     const bucket = fakeBucket()
@@ -69,16 +72,16 @@ describe('the route', () => {
   it('the same body put twice is stored once', async () => {
     const bucket = fakeBucket()
     const hash = await sha(body)
-    await putParcel(bucket, SECRET, 'p1', hash, enc(body)); await putParcel(bucket, SECRET, 'p1', hash, enc(body))
+    await putParcel(bucket, LEDGER, 'someone', SECRET, 'p1', hash, enc(body)); await putParcel(bucket, LEDGER, 'someone', SECRET, 'p1', hash, enc(body))
     expect(bucket.objects.size).toBe(1)
   })
   it('pruning drops what is older than the retention and keeps the rest', async () => {
     let now = Date.now()
     const bucket = fakeBucket(() => now)
-    await putParcel(bucket, SECRET, 'p1', await sha('old'), enc('old'))
+    await putParcel(bucket, LEDGER, 'someone', SECRET, 'p1', await sha('old'), enc('old'))
     now += (PARCEL_DAYS + 1) * 86_400_000
-    await putParcel(bucket, SECRET, 'p1', await sha('new'), enc('new'))
-    expect(await pruneParcels(bucket, 'p1', now)).toBe(1)
+    await putParcel(bucket, LEDGER, 'someone', SECRET, 'p1', await sha('new'), enc('new'))
+    expect(await pruneParcels(bucket, LEDGER, 'p1', now)).toBe(1)
     expect([...bucket.objects.keys()]).toEqual([`parcel/p1/${await sha('new')}`])
   })
 })
@@ -90,7 +93,7 @@ describe('end to end through the transport', () => {
     const f: typeof fetch = async (input, init) => {
       const req = new Request(input as string, init)
       const m = new URL(req.url).pathname.match(/\/api\/projects\/([^/]+)\/objects\/parcel\/([^/]+)$/)!
-      return handleParcelRoute({ request: req, bucket, secret: SECRET, projectId: m[1], hash: m[2], authorize: async () => req.headers.get('authorization') === 'Bearer sk-proj-k' })
+      return handleParcelRoute({ request: req, bucket, secret: SECRET, projectId: m[1], hash: m[2], ledger: LEDGER, authorize: async () => (req.headers.get('authorization') === 'Bearer sk-proj-k' ? 'engine' : null) })
     }
     const frames: unknown[] = []
     const engine = sender({ send: (fr) => frames.push(fr), limit: 2_000, parcels: parcelStore({ api: 'https://x', projectId: 'p1', credential: 'sk-proj-k', fetch: f }) })

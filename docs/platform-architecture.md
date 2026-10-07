@@ -1435,6 +1435,25 @@ workspace. Only in some cases are we working directly on /state/<project>/…, a
 Only the engine's agents work in the project workspace; when we write code ourselves (by hand or through our own agent)
 we always use sacli, which always goes through the platform — and the problem is solved.
 
+## What each project keeps, and secrets on their own path (the user, 2026-10-08)
+
+**In the user's words:** we use the same R2 bucket for every organisation, every project, every user — imagine someone
+uploads a lot of things for a project: is there a way we track, for each upload of files and things, how much storage
+they are using? For the project's Durable Object that is easy, but in the bucket — the parcels, the messages, the source
+code, the programs, the React applications, the source index — can we calculate how much is there? When we store where
+an upload went, also a little metadata about its size, so we can say "you are using this much storage from us". And if
+they ask us to delete their data, we know exactly where their things are: we can list them (it may take time), show them
+where things are, how big, what is inside, and delete them. And secrets — data passwords and the like — are never put
+into R2 or anywhere readable: there must be a specific, special way, so that secrets never go through the same path; they
+always go through a different one.
+
+*So:* every object in the bucket is written and removed through one module (storage.ts), which records it in its
+project's ledger (the project's Durable Object, stored_objects: key, kind, size, who put it, when). From the ledger: what
+a project keeps by kind and by person, an organisation's as the sum of its projects', and the list of a person's or a
+project's objects — to show and to delete (never what is in use). Secrets enter only through the connections routes,
+sealed at once (proxy/seal.ts), kept sealed in the project's Durable Object, and leave only in the two payloads that carry
+them to the engine (SECRET_PAYLOADS) — inline on its authenticated socket, never as a parcel, never into the bucket.
+
 ## Big bodies and stored things travel one way (the user, 2026-10-08)
 
 **In the user's words:** downloading a file, downloading a snapshot of something — this will be very common, so it should

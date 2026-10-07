@@ -23,6 +23,7 @@ import { b64url } from './auth/tokens.js'
 import { LIMITS, keyOf as files, prefixOf, sha256Hex } from './files.js'
 export { sha256Hex }
 import { isParcelled, type Parcel, type ParcelStore } from '../../../clients/transport.js'
+import { putObject, removeObjects, type Ledger } from './storage.js'
 
 /** How long a parcel lives, and so how long its ticket works. */
 export const PARCEL_DAYS = 30
@@ -58,12 +59,11 @@ export async function verifyTicket(secret: string, projectId: string, hash: stri
 
 
 /** Put a body for a project: stored once by hash, ticketed for PARCEL_DAYS. The caller has already authenticated. */
-export async function putParcel(bucket: R2Bucket, secret: string, projectId: string, hash: string, bytes: ArrayBuffer): Promise<Parcel> {
+export async function putParcel(bucket: R2Bucket, ledger: Ledger, by: string | null, secret: string, projectId: string, hash: string, bytes: ArrayBuffer): Promise<Parcel> {
   if (bytes.byteLength > PARCEL_MAX_BYTES) throw new ParcelError(413, `a parcel is at most ${PARCEL_MAX_BYTES} bytes`)
   const actual = await sha256Hex(bytes)
   if (actual !== hash) throw new ParcelError(400, 'the body does not hash to the name in the path')
-  const key = keyOf(projectId, hash)
-  if (!(await bucket.head(key))) await bucket.put(key, bytes, { httpMetadata: { contentType: 'application/json' } })
+  await putObject(bucket, ledger, { key: keyOf(projectId, hash), kind: 'parcel', bytes: bytes.byteLength, by, body: bytes, contentType: 'application/json', once: true })
   const expires = Date.now() + PARCEL_DAYS * 86_400_000
   return { hash, bytes: bytes.byteLength, ticket: await mintTicket(secret, projectId, hash, expires), expires }
 }
@@ -74,13 +74,13 @@ export async function getParcel(bucket: R2Bucket, projectId: string, hash: strin
 }
 
 /** Drop a project's parcels older than their retention. Run beside a put, never in a request's critical path. */
-export async function pruneParcels(bucket: R2Bucket, projectId: string, now = Date.now()): Promise<number> {
+export async function pruneParcels(bucket: R2Bucket, ledger: Ledger, projectId: string, now = Date.now()): Promise<number> {
   const before = now - PARCEL_DAYS * 86_400_000
   let cursor: string | undefined, dropped = 0
   do {
     const page = await bucket.list({ prefix: prefixOf.parcels(projectId), cursor })
     const old = page.objects.filter((o) => o.uploaded.getTime() < before).map((o) => o.key)
-    if (old.length) { await bucket.delete(old); dropped += old.length }
+    if (old.length) dropped += await removeObjects(bucket, ledger, old)
     cursor = page.truncated ? page.cursor : undefined
   } while (cursor)
   return dropped
@@ -94,7 +94,7 @@ export class ParcelError extends Error { constructor(public status: number, mess
  */
 export async function handleParcelRoute(o: {
   request: Request; bucket: R2Bucket | undefined; secret: string | undefined; projectId: string; hash: string
-  authorize: () => Promise<boolean>; after?: (p: Promise<unknown>) => void
+  authorize: () => Promise<string | null>; after?: (p: Promise<unknown>) => void; ledger: Ledger
 }): Promise<Response> {
   const { request } = o
   if (!o.bucket) return new Response('no bucket bound', { status: 500 })
@@ -108,12 +108,13 @@ export async function handleParcelRoute(o: {
     return new Response(obj.body, { headers: { 'content-type': 'application/json', 'cache-control': 'private, no-store', 'content-length': String(obj.size) } })
   }
   if (request.method === 'PUT') {
-    if (!(await o.authorize())) return new Response('unauthorized', { status: 401 })
+    const by = await o.authorize()
+    if (!by) return new Response('unauthorized', { status: 401 })
     const len = Number(request.headers.get('content-length') ?? 0)
     if (len > PARCEL_MAX_BYTES) return new Response(`a parcel is at most ${PARCEL_MAX_BYTES} bytes`, { status: 413 })
     try {
-      const parcel = await putParcel(o.bucket, o.secret, o.projectId, o.hash, await request.arrayBuffer())
-      o.after?.(pruneParcels(o.bucket, o.projectId).catch(() => 0))
+      const parcel = await putParcel(o.bucket, o.ledger, by, o.secret, o.projectId, o.hash, await request.arrayBuffer())
+      o.after?.(pruneParcels(o.bucket, o.ledger, o.projectId).catch(() => 0))
       return Response.json(parcel)
     } catch (e: any) {
       if (e instanceof ParcelError) return new Response(e.message, { status: e.status })
@@ -125,7 +126,7 @@ export async function handleParcelRoute(o: {
 
 /** The store a Durable Object hands the transport: it reads the bucket directly, no ticket, no HTTP — the DO is the
  *  platform. Given the platform's secret it also puts: a big body the platform sends goes beside the wire, ticketed. */
-export function bucketStore(bucket: R2Bucket | undefined, projectId: string, secret?: string): ParcelStore {
+export function bucketStore(bucket: R2Bucket | undefined, projectId: string, secret?: string, ledger?: Ledger): ParcelStore {
   const store: ParcelStore = {
     get: async (parcel: Parcel) => {
       if (!bucket) throw new Error('no bucket bound')
@@ -134,9 +135,9 @@ export function bucketStore(bucket: R2Bucket | undefined, projectId: string, sec
       return obj.text()
     },
   }
-  if (bucket && secret) store.put = async (body: string) => {
+  if (bucket && secret && ledger) store.put = async (body: string) => {
     const bytes = enc.encode(body)
-    return putParcel(bucket, secret, projectId, await sha256Hex(bytes.buffer as ArrayBuffer), bytes.buffer as ArrayBuffer)
+    return putParcel(bucket, ledger, 'platform', secret, projectId, await sha256Hex(bytes.buffer as ArrayBuffer), bytes.buffer as ArrayBuffer)
   }
   return store
 }
@@ -156,7 +157,7 @@ export function objectKey(kind: string, projectId: string, id: string): string |
  *  member's token or a key of the project (the worker's own checks). */
 export async function handleObjectRoute(o: {
   request: Request; bucket: R2Bucket | undefined; secret: string | undefined; projectId: string; kind: string; id: string
-  isEngine: () => Promise<boolean>; isMember: () => Promise<boolean>; after?: (p: Promise<unknown>) => void
+  isEngine: () => Promise<boolean>; isMember: () => Promise<string | null>; after?: (p: Promise<unknown>) => void; ledger: Ledger
 }): Promise<Response> {
   const { request, kind } = o
   if (!o.bucket) return new Response('no bucket bound', { status: 500 })
@@ -165,8 +166,8 @@ export async function handleObjectRoute(o: {
       const obj = await getParcel(o.bucket, o.projectId, o.id)
       return obj ? new Response(obj.body, { headers: { 'content-type': 'application/json', 'cache-control': 'private, no-store' } }) : new Response('no such parcel', { status: 404 })
     }
-    return handleParcelRoute({ request, bucket: o.bucket, secret: o.secret, projectId: o.projectId, hash: o.id, after: o.after,
-      authorize: async () => (await o.isEngine()) || (await o.isMember()) })
+    return handleParcelRoute({ request, bucket: o.bucket, secret: o.secret, projectId: o.projectId, hash: o.id, after: o.after, ledger: o.ledger,
+      authorize: async () => ((await o.isEngine()) ? 'engine' : await o.isMember()) })
   }
   if (request.method !== 'GET') return new Response('this kind is written through its own door', { status: 405 })
   const key = objectKey(kind, o.projectId, o.id)

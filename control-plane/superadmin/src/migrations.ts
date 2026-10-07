@@ -342,6 +342,13 @@ export const PROJECT_MIGRATIONS: Migration[] = [
       stage TEXT, doing TEXT, counts TEXT, detail TEXT, started_at TEXT NOT NULL, beat_at TEXT NOT NULL, ended_at TEXT);
     CREATE INDEX IF NOT EXISTS jobs_lease ON jobs(lease, state);
   ` },
+  { id: 40, name: 'the ledger of stored objects', up: `
+    -- Every object this project keeps in the shared bucket (storage.ts): where, what kind, how big, who put it, when —
+    -- what the project stores (by kind, by person), and what to list or delete when asked.
+    CREATE TABLE IF NOT EXISTS stored_objects (key TEXT PRIMARY KEY, kind TEXT NOT NULL, bytes INTEGER NOT NULL, by TEXT, at TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS stored_objects_by ON stored_objects(by);
+    CREATE INDEX IF NOT EXISTS stored_objects_kind ON stored_objects(kind);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

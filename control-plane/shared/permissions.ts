@@ -102,6 +102,9 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   if (first === 'audit' || first === 'usage' || first === 'logs' || first === 'conversations') return 'project.audit'
   if (first === 'access-policies' || first === 'access-attributes' || first === 'datasources') return 'project.data'
   if (first === 'connections') return read ? 'project.view' : 'project.connect'   // shared ones: project.data, checked by the DO
+  // What the project stores: anyone in it sees the totals and their own; the DO decides who lists or deletes whose.
+  // Recording an object is the platform's own (its ledger's internal routes), never a caller's.
+  if (first === 'storage') return ['storage/add', 'storage/forget'].includes(sub) ? 'internal' : 'project.view'
   if (first === 'connectors' || first === 'programs' || first === 'status') return read ? 'project.view' : 'project.manage'
   if (first === 'dashboards') return read ? 'project.view' : 'project.manage'
   return 'project.manage'
@@ -120,7 +123,7 @@ export function orgRouteNeeds(method: string, path: string): RouteNeed {
   if (path === '/projects') return read ? 'any' : 'org.projects'   // a member sees the projects they are in
   if (path === '/assignments') return 'org.people'                 // or project.people in that project (the Worker checks)
   if (path === '/conversations' || path.startsWith('/conversations')) return 'org.audit'
-  if (path === '/credits' || path === '/credits/budgets' || path === '/billing') return 'org.billing'
+  if (path === '/credits' || path === '/credits/budgets' || path === '/billing' || path === '/storage') return 'org.billing'   // storage: what its projects keep, summed
   if (path === '/usage/people') return 'any'                        // a person sees themselves; org.billing sees everyone
   if (path === '/keys' || path.startsWith('/keys/')) return 'org.keys'
   if (path === '/warehouse') return 'any'                           // filtered: what the caller's warehouse capabilities show

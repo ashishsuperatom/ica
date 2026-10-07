@@ -32,6 +32,7 @@ import { verifyJwt, signJwt, mintPlatformTokenFromClerk, type JwtClaims } from '
 import { routeSocket } from './ws-route.js'
 import { LIMITS, keyOf as fileKeys } from './files.js'
 import { handleObjectRoute } from './parcels.js'
+import { putObject, removeUnder, remoteLedger } from './storage.js'
 import { mobileAuthPage, handleMobileCode, handleMobileExchange, handleMeProjects } from './auth/mobile.js'
 import { can, capabilitiesOf, orgRouteNeeds, projectRouteNeeds, beyond, builtinRole, type Capability, type RouteNeed } from '../../shared/permissions.js'
 import { orgOfKey, projectOfKey } from './agent-keys.js'
@@ -303,7 +304,8 @@ export default {
           const r = await env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`)).fetch('https://do/verify-conn', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: bearer }) })
           return r.ok
         },
-        isMember: async () => !!bearer && (await projectAccessOf(request, env, projectId)).ok,
+        isMember: async () => { if (!bearer) return null; const a = await projectAccessOf(request, env, projectId); return a.ok ? (a.email || (a.key ? `agent:${a.key}` : a.level)) : null },
+        ledger: remoteLedger(env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`)), projectId),
       })
     }
 
@@ -744,6 +746,14 @@ export default {
       const orgHeaders: Record<string, string> = { 'content-type': 'application/json', 'x-sa-org': orgId, 'x-sa-actor': JSON.stringify(oa.key ? { kind: 'agent', id: `agent:${oa.key}`, email: oa.email } : { kind: 'user', id: by, email: oa.email }), 'x-sa-caps': JSON.stringify(oa.caps), ...(oa.key ? { 'x-sa-key': oa.key } : {}) }
       const projectsOfOrg = async (): Promise<any[]> => { const r = await (await org.fetch(new Request('http://do/projects'))).json().catch(() => []); return Array.isArray(r) ? r : [] }
       if (sub === '/me') return Response.json({ org: orgId, level: oa.level, role: oa.role, capabilities: oa.caps })
+      // What the organisation keeps in the bucket: each project's ledger (storage.ts), summed.
+      if (sub === '/storage' && request.method === 'GET') {
+        const per = await Promise.all((await projectsOfOrg()).filter((p: any) => !p.deleted).map(async (p: any) => {
+          const r: any = await env.PROJECT.get(env.PROJECT.idFromName(`proj:${p.id}`)).fetch(new Request('http://do/storage', { headers: { 'x-sa-project': p.id, 'x-sa-caps': JSON.stringify(['project.manage']) } })).then((x) => x.json()).catch(() => null)
+          return { project: p.id, name: p.name, objects: Number(r?.objects ?? 0), bytes: Number(r?.bytes ?? 0), byKind: r?.byKind ?? [] }
+        }))
+        return Response.json({ org: orgId, objects: per.reduce((n, p) => n + p.objects, 0), bytes: per.reduce((n, p) => n + p.bytes, 0), projects: per })
+      }
       // Budgets are set by whoever holds org.billing (assigning credits the organisation was given).
       if (sub === '/credits/budgets' && request.method === 'POST') {
         const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by })
@@ -1097,8 +1107,9 @@ async function uploadDashboardBuild(dashId: string, projectId: string, by: strin
   let base: string
   try { base = fileKeys.dashboardBuild(projectId, dashId, buildId) } catch (e: any) { return new Response(e.message, { status: 400 }) }
   let files = 0, bytes = 0
+  const stored = remoteLedger(env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`)), projectId)
   for (const f of read) {
-    await env.PACKAGES.put(`${base}/${f.rel}`, f.body, { httpMetadata: { contentType: mimeOf(f.rel) } })
+    await putObject(env.PACKAGES, stored, { key: `${base}/${f.rel}`, kind: 'dashboard', bytes: f.body.byteLength, by, body: f.body, contentType: mimeOf(f.rel) })
     files++; bytes += f.body.byteLength
   }
 
@@ -1161,27 +1172,15 @@ async function pruneOldBuilds(dashId: string, projectId: string, keepBuilds: Set
   } while (cursor)
 
   const doomed = [...builds].filter((b) => b && !keepBuilds.has(b))
-  for (const b of doomed) {
-    let c: string | undefined
-    do {
-      const page = await env.PACKAGES.list({ prefix: `${prefix}${b}/`, cursor: c })
-      if (page.objects.length) await env.PACKAGES.delete(page.objects.map((o) => o.key))
-      c = page.truncated ? page.cursor : undefined
-    } while (c)
-  }
+  const ledger = remoteLedger(env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`)), projectId)
+  await removeUnder(env.PACKAGES, ledger, doomed.map((b) => `${prefix}${b}/`))
   return doomed
 }
 
 /** Remove every object of every build of one dashboard. R2 lists 1000 at a time, so it pages. */
 async function deleteDashboardObjects(dashId: string, projectId: string, env: Env): Promise<void> {
   if (!env.PACKAGES) return
-  const prefix = `dashboard/${projectId}/${dashId}/`
-  let cursor: string | undefined
-  do {
-    const page = await env.PACKAGES.list({ prefix, cursor })
-    if (page.objects.length) await env.PACKAGES.delete(page.objects.map((o) => o.key))
-    cursor = page.truncated ? page.cursor : undefined
-  } while (cursor)
+  await removeUnder(env.PACKAGES, remoteLedger(env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`)), projectId), [`dashboard/${projectId}/${dashId}/`])
   buildCache.delete(`${projectId}/${dashId}`)
 }
 
