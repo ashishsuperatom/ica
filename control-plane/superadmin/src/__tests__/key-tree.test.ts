@@ -62,6 +62,18 @@ describe('one key tree, through the Worker', () => {
     expect((await at(`/api/projects/${project}/me`, { headers: bearer(projKey) })).body).toMatchObject({ level: 'key', capabilities: ['project.ask', 'project.keys', 'project.view'] })
   })
 
+  it('storage at every level: the organisation, each project, each person — and each person in each project', async () => {
+    const body = JSON.stringify({ t: 'x', n: [1, 2, 3] })
+    const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body))), (b) => b.toString(16).padStart(2, '0')).join('')
+    expect((await mf.dispatchFetch(`http://x/api/projects/${project}/objects/parcel/${hash}`, { method: 'PUT', headers: bearer(projKey), body })).status).toBe(200)
+    const billing = (await at('/org/keys', { method: 'POST', headers: as('olga@x.io', ORG_ROLES.owner.capabilities), body: JSON.stringify({ name: 'billing', capabilities: ['org.billing'] }) })).body.key
+    const r = (await at('/api/storage', { headers: bearer(billing) })).body
+    expect(r.bytes).toBe(body.length)
+    expect(r.projects).toEqual([expect.objectContaining({ project, objects: 1, bytes: body.length })])
+    expect(r.people).toEqual([{ by: 'olga@x.io', objects: 1, bytes: body.length, projects: [expect.objectContaining({ project, objects: 1, bytes: body.length })] }])   // a key's upload is its person's
+    expect((await at('/api/storage', { headers: bearer(orgKey) })).status).toBe(403)   // the organisation key without org.billing
+  })
+
   it('a project key makes keys below it, never more than it holds, and reaches only those', async () => {
     expect((await at(`/api/projects/${project}/agent-keys`, { method: 'POST', headers: bearer(projKey), body: JSON.stringify({ name: 'x', capabilities: ['project.manage'] }) })).status).toBe(403)
     const c = await at(`/api/projects/${project}/agent-keys`, { method: 'POST', headers: bearer(projKey), body: JSON.stringify({ name: 'reader', capabilities: ['project.view'] }) })

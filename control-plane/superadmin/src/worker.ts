@@ -750,9 +750,16 @@ export default {
       if (sub === '/storage' && request.method === 'GET') {
         const per = await Promise.all((await projectsOfOrg()).filter((p: any) => !p.deleted).map(async (p: any) => {
           const r: any = await env.PROJECT.get(env.PROJECT.idFromName(`proj:${p.id}`)).fetch(new Request('http://do/storage', { headers: { 'x-sa-project': p.id, 'x-sa-caps': JSON.stringify(['project.manage']) } })).then((x) => x.json()).catch(() => null)
-          return { project: p.id, name: p.name, objects: Number(r?.objects ?? 0), bytes: Number(r?.bytes ?? 0), byKind: r?.byKind ?? [] }
+          return { project: p.id, name: p.name, objects: Number(r?.objects ?? 0), bytes: Number(r?.bytes ?? 0), byKind: r?.byKind ?? [], byPerson: (r?.byPerson ?? []) as any[] }
         }))
-        return Response.json({ org: orgId, objects: per.reduce((n, p) => n + p.objects, 0), bytes: per.reduce((n, p) => n + p.bytes, 0), projects: per })
+        // Each person across the organisation, and each person in each project (the intersection), from the same ledgers.
+        const people = new Map<string, { by: string; objects: number; bytes: number; projects: { project: string; name: string; objects: number; bytes: number }[] }>()
+        for (const p of per) for (const x of p.byPerson) {
+          const e = people.get(x.by) ?? people.set(x.by, { by: x.by, objects: 0, bytes: 0, projects: [] }).get(x.by)!
+          e.objects += Number(x.objects); e.bytes += Number(x.bytes); e.projects.push({ project: p.project, name: p.name, objects: Number(x.objects), bytes: Number(x.bytes) })
+        }
+        return Response.json({ org: orgId, objects: per.reduce((n, p) => n + p.objects, 0), bytes: per.reduce((n, p) => n + p.bytes, 0),
+          projects: per.map(({ byPerson, ...rest }) => rest), people: [...people.values()].sort((a, b) => b.bytes - a.bytes) })
       }
       // Budgets are set by whoever holds org.billing (assigning credits the organisation was given).
       if (sub === '/credits/budgets' && request.method === 'POST') {

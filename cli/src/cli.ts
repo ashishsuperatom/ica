@@ -327,7 +327,8 @@ export async function run(argv: string[], io: Io): Promise<number> {
       if (!pid) {
         if (sub && sub !== 'usage') throw new CliError('which project? --project <id>', 2)
         const r = await rest('GET', '/api/storage')
-        out(`${mb(r.bytes)} in ${r.objects} objects\n` + table(['project', 'name', 'objects', 'size'], r.projects.map((p: any) => [p.project, p.name ?? '', String(p.objects), mb(p.bytes)])), r)
+        out(`${mb(r.bytes)} in ${r.objects} objects\n` + table(['project', 'name', 'objects', 'size'], r.projects.map((p: any) => [p.project, p.name ?? '', String(p.objects), mb(p.bytes)]))
+          + (r.people?.length ? '\n\n' + table(['by', 'objects', 'size', 'in'], r.people.map((x: any) => [x.by, String(x.objects), mb(x.bytes), x.projects.map((p: any) => `${p.name ?? p.project.slice(0, 8)} ${mb(p.bytes)}`).join(', ')])) : ''), r)
         return 0
       }
       const base = `/api/projects/${pid}/storage`
