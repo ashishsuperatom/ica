@@ -60,6 +60,21 @@ export function applyItems(store: DataSourceIndex, items: ReplicaItem[], cursor:
 export function replicaCursor(store: DataSourceIndex): number {
   return Number((store.db.prepare("SELECT value FROM dsi_meta WHERE key = 'cursor'").get() as any)?.value ?? 0)
 }
+/** Empty one source of the replica (it is pulled again from the platform). */
+export function wipeSource(store: DataSourceIndex, source: string): void {
+  store.db.transaction(() => { store.db.prepare('DELETE FROM datasource_index WHERE source = ?').run(source); store.db.prepare('DELETE FROM dsi_tables WHERE source = ?').run(source) })()
+}
+/** The replica's items, by source, as the platform holds them (for the fingerprint). */
+export function replicaItems(store: DataSourceIndex): Map<string, import('./fingerprint.js').FingerprintItem[]> {
+  const out = new Map<string, import('./fingerprint.js').FingerprintItem[]>()
+  const add = (source: string, i: import('./fingerprint.js').FingerprintItem) => (out.get(source) ?? out.set(source, []).get(source)!).push(i)
+  const b = (v: unknown) => (v == null ? null : !!v)
+  for (const r of store.db.prepare('SELECT * FROM dsi_tables').all() as any[])
+    add(r.source, { table: r.container, field: '', type: null, descSource: r.desc_source ?? null, descHuman: r.desc_human ?? null, descAi: r.desc_ai ?? null, optional: null, key: null, references: null, rows: r.rows == null ? null : Number(r.rows), enabled: !!r.enabled, gone: !!r.gone })
+  for (const r of store.db.prepare('SELECT * FROM datasource_index').all() as any[])
+    add(r.source, { table: r.container, field: r.field, type: r.type ?? null, descSource: r.desc_default ?? null, descHuman: r.desc_human ?? null, descAi: r.desc_ai ?? null, optional: b(r.is_optional), key: b(r.is_key), references: r.references_ ?? null, rows: null, enabled: !!r.enabled, gone: !!r.gone })
+  return out
+}
 /** Empty the replica (it is rebuilt from the platform). */
 export function wipeReplica(store: DataSourceIndex): void {
   store.db.transaction(() => { store.db.exec('DELETE FROM datasource_index; DELETE FROM dsi_tables; DELETE FROM dsi_meta') })()

@@ -53,7 +53,7 @@ const defaultId = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto
 
 /** Which fields of a large message still travel when its body goes as a parcel: the routing and the summary. */
 export function summaryOf(msg: Record<string, unknown>): Record<string, unknown> {
-  const keep = ['t', 'reqId', 'id', 'to', 'from', 'focus', 'label', 'title', 'words', 'said', 'today', 'ms', 'used', 'notes']
+  const keep = ['t', 'type', 'reqId', 'id', 'to', 'from', 'focus', 'label', 'title', 'words', 'said', 'today', 'ms', 'used', 'notes']
   const out: Record<string, unknown> = {}
   for (const k of keep) if (k in msg) out[k] = msg[k]
   return out

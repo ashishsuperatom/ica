@@ -13,6 +13,7 @@ import { join, relative } from 'node:path'
 import { createProgramSeam } from '../../../../vm/apps/engine/program-seam.ts'
 import { createSessionSeam } from '../../../../vm/apps/engine/session-seam.ts'
 import { platformOf } from '../../../../vm/apps/engine/platform.ts'
+import { fromBundle, ProgramStore } from '../../../../vm/packages/programs/src/index.ts'
 import { createActivities } from '../../../../vm/apps/engine/activity.ts'
 
 import { agentsInGraph } from '../../../../vm/apps/engine/test/graph-agents.ts'
@@ -20,11 +21,16 @@ const here = fileURLToPath(new URL('.', import.meta.url))
 const PID = '11111111-2222-3333-4444-555555555555'
 const harness = `
 import { routeSocket } from '../ws-route.ts'
+import { handleObjectRoute } from '../parcels.ts'
 export { ProjectDO } from '../project-do.ts'
 export { UserDO } from '../user-do.ts'
 export default { async fetch(req, env) {
   const u = new URL(req.url); const stub = env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}'))
   if (u.pathname.startsWith('/_ws/')) return routeSocket(req, env, '${PID}')
+  const obj = u.pathname.match(/^\\/api\\/projects\\/([^/]+)\\/objects\\/([a-z]+)\\/(.+)$/)
+  if (obj) return handleObjectRoute({ request: req, bucket: env.PACKAGES, secret: env.JWT_SECRET, projectId: obj[1], kind: obj[2], id: decodeURIComponent(obj[3]),
+    isEngine: async () => (await stub.fetch('https://do/verify-conn', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: (req.headers.get('authorization') || '').replace(/^bearer\\s+/i, '') }) })).ok,
+    isMember: async () => false })
   const eng = u.pathname.match(/^\\/api\\/engine\\/[0-9a-f-]{36}\\/(.+)$/)
   const path = eng ? '/engine/' + eng[1] : u.pathname.slice(3)
   const fwd = new Request('http://do' + path + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return stub.fetch(fwd)
@@ -158,10 +164,10 @@ describe('programs: source → built → kept → published → running elsewher
     const b = JSON.parse(await (await bucket.get(key))!.text())
     b.files['node/index.js'] += '\n// changed in storage'
     await bucket.put(key, JSON.stringify(b))
-    const r = await mf.dispatchFetch(`http://x/api/engine/${PID}/programs/${hash}`, { headers: { authorization: 'Bearer engine-key' } })
-    expect(r.status).toBe(400)
-    expect(((await r.json()) as any).error).toMatch(/changed or damaged/)
-    const nokey = await mf.dispatchFetch(`http://x/api/engine/${PID}/programs/${hash}`, { headers: { authorization: 'Bearer wrong' } })
+    // the engine receives the bundle as stored, and checks it before keeping it: a damaged one is never run
+    const fetched = await platformOf({ hub: `ws://x/_ws/${PID}`, project: PID, key: 'engine-key', fetch: (u: any, i: any) => mf.dispatchFetch(String(u), i) as any }).fetchProgram(hash)
+    await expect(fromBundle(new ProgramStore(join(root, 'damaged')), fetched)).rejects.toThrow(/changed or damaged/)
+    const nokey = await mf.dispatchFetch(`http://x/api/projects/${PID}/objects/program/${hash}`, { headers: { authorization: 'Bearer wrong' } })
     expect(nokey.status).toBe(401)
   })
 })

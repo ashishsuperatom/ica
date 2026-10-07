@@ -38,7 +38,7 @@ Every key is made by `files.ts`, under its kind and its project; a project's fil
 
 | Key | Holds | Writer → reader | Limit · check · lifetime |
 |---|---|---|---|
-| `parcel/<project>/<sha256>` | a message body too large for one hub frame (JSON) | `putParcel` (via `PUT /api/projects/<p>/parcels/<hash>`, project key or member) → ticketed GET, `bucketStore` in ProjectDO, ChannelDO, UserDO | 64 MB · hashes to its name · ticket and file 30 days, pruned after a later put |
+| `parcel/<project>/<sha256>` | a message body too large for one hub frame (JSON) | `putParcel` (via `PUT /api/projects/<p>/objects/parcel/<hash>`, project key or member) → ticketed GET, `bucketStore` in ProjectDO, ChannelDO, UserDO | 64 MB · hashes to its name · ticket and file 30 days, pruned after a later put |
 | `programs/<project>/<sha256>.json` | a program bundle (all files as JSON) | engine `PUT /api/engine/<p>/programs/<hash>` → `ProgramCatalogue` | 16 MB · bundle verified in and out · kept (immutable by hash) |
 | `dashboard/<project>/<dashboard>/<build>/<path>` | a dashboard build's files | `uploadDashboardBuild` (worker.ts) → `serveDashboard` | 25 MB a file, 200 MB a build · content hash dedupes · current + 5 newest builds kept; all go with the dashboard |
 | `attachments/<project>/<session>/<sha256>` | a file a person added to a session | the person's UserDO (`POST /api/sessions/<p>/<s>/attachments`) → the engine `GET /api/engine/<p>/attachments/<s>/<hash>` | 20 MB (checked before reading, both ways) · hashes to its name · goes with its session (`prefixOf.session`) |
@@ -75,8 +75,7 @@ to the warehouse, with ms), `warehouse_tables` (owners); legacy `datasources`, `
 - each source's index (`dsi.ts`): `dsi_items` (each table — field '' — and field as it is now: type, three descriptions
   kept apart, enabled and who set it, gone, the log entry that made it), `dsi_log` (every change appended: the item as
   it became, when, by whom — the index as of any time), `dsi_plan` and `dsi_progress` (each build's work list and its
-  checkpoints per source and phase); the current index as one file in R2 `dsi/<project>/snapshot.json`, remade only
-  when the index changed; `connection_user_keys` (a person's own key for a per-user source, sealed);
+  checkpoints per source and phase); the whole current index is the reply to `dsi:snapshot` (a parcel when big — no file of its own); `connection_user_keys` (a person's own key for a per-user source, sealed);
 - long work (`jobs.ts`): `jobs` (kind, lease — one running per lease —, holder, stage, what it is doing, counts,
   heartbeat; stale after a minute without one);
 - knowledge and work: the composition graph itself — its own tables (`content`, `name`, `change`, `question`, `suggestion`, `decision`, `version`, by its own migrations in `_graph_migrations`; `graph.ts`) and `graph_people` (who changed it, by email), `programs` (catalogue; bundles in R2),

@@ -4,8 +4,11 @@
 //
 //  • REPLICA. find-schema and get-schema read a local copy, beside the agents. It follows the platform by a cursor: on
 //    welcome and whenever told something changed (dsi:changed), it pulls what changed after its cursor (dsi:pull →
-//    dsi:batch, in pages). A replica that is empty, or ahead of the platform (a platform restored from elsewhere), is
-//    emptied and pulled whole. Nothing else writes it — not even this engine's own builds: they go up, and come back.
+//    dsi:batch, in pages that travel as parcels when big) — the current state of what changed, never the history, so
+//    catching up costs at most one row per item changed. Once caught up after a welcome it compares each source's
+//    fingerprint with the platform's (dsi:fingerprints) and pulls again only a source that differs; a replica ahead of
+//    the platform (a platform restored from elsewhere) does the same, source by source — never everything. Nothing else
+//    writes it — not even this engine's own builds: they go up, and come back.
 //
 //  • BUILDER. The engine is where the connectors run, so it reads each source and sends what it read up, table by table:
 //    phase 1 (names, types, descriptions — as fast as possible), then phase 2 (row counts, only where the connector can
@@ -16,7 +19,7 @@
 //    tables it names. After the engine's sources are loaded (and whenever they change) it asks the platform whether a
 //    build was left unfinished (dsi:resume) — the platform answers with dsi:build.
 
-import { applyItems, replicaCursor, wipeReplica, type DataSourceIndex, type ReplicaItem } from '@superatom/datasource-index'
+import { applyItems, replicaCursor, wipeReplica, wipeSource, replicaItems, fingerprintOf, type DataSourceIndex, type ReplicaItem } from '@superatom/datasource-index'
 import { getIndexer, resetIndexerCaches } from './datasource-index/indexer.js'
 
 type Send = (msg: Record<string, unknown>) => boolean
@@ -43,7 +46,29 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
   }
 
   // ── The replica ──
-  let pulling = false, again = false
+  let pulling = false, again = false, checked = false
+  /** Bring every source the platform holds, or this replica holds, to the platform's fingerprint: a source that differs
+   *  is emptied here and pulled whole (its own items only); a source the platform no longer has is emptied. */
+  async function reconcile(latest: number) {
+    const there = await ask({ type: 'dsi:fingerprints' })
+    if (there.t !== 'dsi:fingerprints') throw new Error(there.reason ?? 'the platform did not give its fingerprints')
+    const here = replicaItems(o.store)
+    for (const s of new Set([...Object.keys(there.sources ?? {}), ...here.keys()])) {
+      const want = there.sources?.[s], have = here.has(s) ? await fingerprintOf(here.get(s)!) : null
+      if (want && have && want.hash === have.hash) continue
+      wipeSource(o.store, s)
+      if (!want) { log(`[dsi] ${s} is not on the platform — emptied here`); continue }
+      log(`[dsi] ${s} differs from the platform (${have ? `${have.count} items here, ${want.count} there` : 'missing here'}) — pulling it again`)
+      for (let c = 0; ;) {
+        const b = await ask({ type: 'dsi:pull', cursor: c, source: s })
+        if (b.t === 'dsi:refused') throw new Error(b.reason)
+        applyItems(o.store, b.items as ReplicaItem[], Math.max(replicaCursor(o.store), latest))
+        c = Number(b.cursor)
+        if (!b.more) break
+      }
+    }
+    applyItems(o.store, [], Number(there.latest ?? latest))
+  }
   async function pull() {
     if (pulling) { again = true; return }
     pulling = true
@@ -55,11 +80,13 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
         for (;;) {
           const b = await ask({ type: 'dsi:pull', cursor })
           if (b.t === 'dsi:refused') throw new Error(b.reason)
-          if (cursor > 0 && (Number(b.latest ?? b.cursor) < cursor)) { log(`[dsi] the replica is ahead of the platform (${cursor} > ${b.latest}) — rebuilding it from the platform`); wipeReplica(o.store); cursor = 0; continue }
+          if (cursor > 0 && Number(b.latest) < cursor) { log(`[dsi] the replica is ahead of the platform (${cursor} > ${b.latest}) — checking each source`); await reconcile(Number(b.latest)); checked = true; break }
           if (b.items.length) applyItems(o.store, b.items as ReplicaItem[], Number(b.cursor))
           cursor = Number(b.cursor)
           if (!b.more) break
         }
+        // Caught up after a welcome: is each source what the platform holds?
+        if (!checked) { checked = true; await reconcile(Number(replicaCursor(o.store))) }
       } while (again)
     } catch (e: any) { log(`[dsi] the replica could not pull: ${e?.message ?? e}`) }
     finally { pulling = false }
@@ -175,8 +202,8 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
   again_.unref?.()
 
   return {
-    /** On welcome: bring the replica up to the platform. */
-    welcome: () => { void pull() },
+    /** On welcome: bring the replica up to the platform, and check it. */
+    welcome: () => { checked = false; void pull() },
     /** The engine's sources are loaded (or changed): ask whether a build was left unfinished. */
     sourcesReady: () => { o.send({ type: 'dsi:resume' }) },
     building: () => !!building,

@@ -118,7 +118,7 @@ export function useProjectHub(projectId: string | undefined, token: string | nul
       const reqId = Math.random().toString(36).slice(2)
       const timer = window.setTimeout(() => { conn.pending.delete(reqId); reject(new Error(timeoutWords)) }, REQUEST_TIMEOUT_MS)
       conn.pending.set(reqId, { resolve, reject, timer })
-      void sender({ send: (frame) => ws.send(JSON.stringify({ to: { type: 'code-engine' }, payload: frame })) }).send({ ...payload, reqId })
+      void sender({ send: (frame) => ws.send(JSON.stringify({ to: { type: 'code-engine' }, payload: frame })), parcels: parcelStore({ api: apiOfHub(HUB), projectId: conn.projectId, credential: conn.token }) }).send({ ...payload, reqId })
     })
     return {
       ...view,

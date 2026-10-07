@@ -572,7 +572,7 @@ ${r.key}`, r)
           await new Promise((res) => setTimeout(res, 3000))
         }
       }
-      if (sub === 'snapshot') { say(JSON.stringify(await rest('GET', `/api/projects/${hub.project.id}/dsi/snapshot`), null, 2)); return 0 }
+      if (sub === 'snapshot') { const { reqId: _r, ...doc } = await req({ t: 'dsi:snapshot' }); say(JSON.stringify(doc, null, 2)); return 0 }
       throw new CliError(HELP.dsi, 2)
     }
     if (cmd === 'call') {

@@ -18,7 +18,7 @@
 import { DurableObject } from 'cloudflare:workers'
 import { suspendMachine, stopMachine as flyStopMachine, startMachine as flyStartMachine, getMachineStatus, safeName, FLY_APP } from './fly.js'
 import { AnswerBuffer } from './answer-buffer.js'
-import { receiver } from '../../../clients/transport.js'
+import { receiver, sender as wireSender, FRAME_LIMIT, isParcelled } from '../../../clients/transport.js'
 import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
 import { PROJECT_MIGRATIONS, adoptProjectSchemaVersion } from './migrations.js'
 import { bucketStore } from './parcels.js'
@@ -37,7 +37,8 @@ import { connectorById, checkConnection, CONNECTORS } from '../../shared/connect
 import { seal, unseal } from './proxy/seal.js'
 import { runConnector, runCode, manifestOf } from './connectors/runtime.js'
 import { projectGraph, migrateGraph, GRAPH_MESSAGES, GRAPH_VIEWS, type Who } from './graph.js'
-import { projectDsi, dsiSnapshot, DsiRefusal } from './dsi.js'
+import { changesFingerprint } from '../../../vm/packages/composition-graph/src/fingerprint.js'
+import { projectDsi, DsiRefusal } from './dsi.js'
 import { projectJobs, JobRefusal, type Job } from './jobs.js'
 import { keyOf as fileKeys } from './files.js'
 
@@ -358,8 +359,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (request.method === 'POST' && path === '/agent-call') return this.agentCall(request)
     if (request.method === 'POST' && path === '/key-access') return this.keyAccess(request)
     if (path === '/engine/programs' || path.startsWith('/engine/programs/')) return this.enginePrograms(request, path)
-    if (path.startsWith('/engine/attachments/')) return this.engineAttachments(request, path)
-    if (path.startsWith('/engine/connections/') || path.startsWith('/engine/bridges/')) return this.engineConnections(request, path)
+    if (path.startsWith('/engine/connections/')) return this.engineConnections(request, path)
     if (path === '/engine/app' || path.startsWith('/engine/app/')) return this.engineApp(request, path)
     // A program's React side, file by file, for screens (the worker has checked the caller is in the project).
     { const m = request.method === 'GET' ? path.match(/^\/programs\/([0-9a-f]{64})\/(web\/[\w./-]+\.js)$/) : null
@@ -375,14 +375,6 @@ export class ProjectDO extends DurableObject<Env> {
     if (path === '/access-domains' || path.startsWith('/access-domains/')) return this.accessDomains(request, path)
     if (path === '/groups' || path.startsWith('/groups/')) return this.groupsAdmin(request, path)
     if (path === '/connections' || path.startsWith('/connections/') || path === '/connectors') return this.connectionsApi(request, path)
-    // Each source's index: where its builds stand, and the current index as one file (remade only when it changed).
-    if (path === '/dsi' && request.method === 'GET') return this.j({ ...this.dsi().stats(), running: this.jobs().running('dsi') })
-    if (path === '/dsi/snapshot' && request.method === 'GET') {
-      const bucket = (this.env as any).PACKAGES as R2Bucket | undefined
-      if (!bucket) return this.j({ error: 'no bucket to keep the snapshot in' }, 503)
-      const { body, cursor } = await dsiSnapshot(bucket, this._pid, this.dsi())
-      return new Response(body, { headers: { 'content-type': 'application/json', 'x-dsi-cursor': String(cursor) } })
-    }
     if (request.method === 'POST' && path === '/access/arrive') return this.arrive(request)
     if (path === '/usage' && request.method === 'GET') return this.usageSummary(new URL(request.url))
 
@@ -519,6 +511,12 @@ export class ProjectDO extends DurableObject<Env> {
       ws.close(4001, 'Not authenticated — send { type: "hello", ... } first')
       return
     }
+    // The engine's own message, too big for a frame, came beside the wire: opened here (the one place), then handled.
+    if (sender.type === 'code-engine' && typeof msg.type === 'string' && isParcelled(msg)) {
+      const body = await this.openParcel(msg as any, 'type')
+      if (!body) { console.warn(`[hub] the engine's ${msg.type} came as a parcel that could not be opened`); return }
+      msg = body
+    }
 
     // ── Heartbeat: code-engine reports liveness + activity ──────────────────
     // busy=true  → REAL activity → bump last_active, reset the idle countdown
@@ -606,19 +604,19 @@ export class ProjectDO extends DurableObject<Env> {
     }
     // The code connections the engine runs: pulled on every welcome and whenever they change (connections:changed).
     if (msg.type === 'connections:pull' && sender.type === 'code-engine') {
-      const reply = (payload: Record<string, unknown>) => { try { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'connections:list', reqId: msg.reqId, ...payload } })) } catch { /* gone */ } }
+      const reply = (payload: Record<string, unknown>) => { this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { t: 'connections:list', reqId: msg.reqId, ...payload }, { inline: true }) }
       try { reply({ connections: await this.codeConnectionsForEngine() }); this.audit.record({ actor: { kind: 'engine', id: 'engine' }, via: 'engine', action: 'connection.open', target: 'code connections', outcome: 'ok' }) }
       catch (e: any) { reply({ error: e?.message ?? String(e) }) }
       return
     }
     if (msg.type === 'connection:get' && sender.type === 'code-engine') {
-      const reply = (payload: Record<string, unknown>) => { try { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'connection:got', reqId: msg.reqId, ...payload } })) } catch { /* gone */ } }
+      const reply = (payload: Record<string, unknown>) => { this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { t: 'connection:got', reqId: msg.reqId, ...payload }, { inline: true }) }
       try { reply({ connection: await this.connectionForEngine(String(msg.id ?? ''), msg.principal ? String(msg.principal) : null, msg.email ? String(msg.email) : null) }) }
       catch (e: any) { reply({ error: e?.message ?? String(e) }) }
       return
     }
     if (msg.type === 'access:resolve' && sender.type === 'code-engine') {
-      const reply = (payload: Record<string, unknown>) => { try { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'access:resolved', principal: msg.principal, source: msg.source, reqId: msg.reqId, ...payload } })) } catch { /* gone */ } }
+      const reply = (payload: Record<string, unknown>) => { this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { t: 'access:resolved', principal: msg.principal, source: msg.source, reqId: msg.reqId, ...payload }) }
       try { reply({ policies: this.policiesFor(String(msg.principal ?? ''), msg.email ? String(msg.email) : null, String(msg.source ?? '')), version: this.accessVersion() }) }
       catch (e: any) { reply({ error: e?.message ?? String(e) }) }
       return
@@ -629,12 +627,18 @@ export class ProjectDO extends DurableObject<Env> {
       const w = msg.who ?? {}
       const who: Who = { id: String(w.id ?? ''), admin: w.admin === true, ...(typeof w.email === 'string' ? { email: w.email } : {}), scopes: Array.isArray(w.scopes) ? w.scopes.map(String) : [] }
       const r = /^(user|agent):\S+$/.test(who.id) ? this.graph().writeFor(who, msg.writes) : { error: 'who the write is for is not known', changed: false }
-      try { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'graph:written', reqId: msg.reqId, ...(r.error ? { error: r.error } : { results: r.results }) } })) } catch { /* gone */ }
+      this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { t: 'graph:written', reqId: msg.reqId, ...(r.error ? { error: r.error } : { results: r.results }) })
       if (r.changed) this.sendToRole('code-engine', { t: 'graph:changed', cursor: this.graph().cursor() })
       return
     }
+    // The graph replica's check: the platform's change log, summed up (fingerprint.ts) — a replica that differs is rebuilt.
+    if (msg.type === 'graph:fingerprint' && sender.type === 'code-engine') {
+      const rows = [...this.ctx.storage.sql.exec('SELECT id, name, to_hash FROM change')] as any[]
+      this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { t: 'graph:fingerprint', reqId: msg.reqId, ...(await changesFingerprint(rows)) })
+      return
+    }
     if ((msg.type === 'graph:pull' || msg.type === 'graph:asked') && sender.type === 'code-engine') {
-      const reply = (payload: Record<string, unknown>) => { try { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload })) } catch { /* gone */ } }
+      const reply = (payload: Record<string, unknown>) => { this.emit(ws, { from: { id: 'hub', type: 'hub' } }, payload) }
       try {
         if (msg.type === 'graph:pull') reply({ t: 'graph:batch', batch: this.graph().pull(msg.cursor ?? {}), cursor: this.graph().cursor() })
         else this.graph().asked(msg.question)
@@ -643,11 +647,12 @@ export class ProjectDO extends DurableObject<Env> {
     }
     // ── Each source's index (dsi.ts): built by the engine, kept here; and long work (jobs.ts), any kind ──
     if (typeof msg.type === 'string' && /^(dsi|job):/.test(msg.type) && sender.type === 'code-engine') {
-      const reply = (payload: Record<string, unknown>) => { try { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { reqId: msg.reqId, ...payload } })) } catch { /* gone */ } }
+      const reply = (payload: Record<string, unknown>) => { this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { reqId: msg.reqId, ...payload }) }
       const by = 'engine'
       try {
         switch (msg.type) {
-          case 'dsi:pull': reply({ t: 'dsi:batch', ...this.dsi().pull(msg.cursor) }); break
+          case 'dsi:pull': reply({ t: 'dsi:batch', source: msg.source ?? null, ...this.dsi().pull(msg.cursor, msg.source || undefined) }); break
+          case 'dsi:fingerprints': reply({ t: 'dsi:fingerprints', sources: await this.dsi().fingerprints(), latest: this.dsi().cursor() }); break
           case 'dsi:plan': { const r = this.dsi().plan(msg, by); reply({ t: 'dsi:planned', source: msg.source, phase: msg.phase, ...r }); if (r.gone) this.dsiChanged(); break }
           case 'dsi:put': if (this.dsi().put(msg, by).changed) this.dsiChanged(); break
           case 'dsi:failed': this.dsi().failed(msg); break
@@ -672,7 +677,7 @@ export class ProjectDO extends DurableObject<Env> {
       return
     }
     if (msg.type === 'session:sync' && sender.type === 'code-engine') {
-      const reply = (payload: Record<string, unknown>) => { try { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'session:synced', session: msg.session, ...payload } })) } catch { /* gone */ } }
+      const reply = (payload: Record<string, unknown>) => { this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { t: 'session:synced', session: msg.session, ...payload }) }
       try { reply(await this.syncSession(String(msg.session ?? ''), Number(msg.from), Array.isArray(msg.entries) ? msg.entries : [])) }
       catch (e: any) { reply({ error: e?.message ?? String(e) }) }
       return
@@ -993,21 +998,7 @@ export class ProjectDO extends DurableObject<Env> {
     })
   }
 
-  // ── Programs the engine builds and fetches (authenticated with the project's key) ──
-  /** A session's file, for the engine: its person put it in through their UserDO (in the bucket, by hash); the
-   *  engine reads it into the session's attachments folder. Only this project's engine reads here. */
-  private async engineAttachments(request: Request, path: string): Promise<Response> {
-    const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
-    const key = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
-    if (!key || !this.keyMatches(key)) return json({ error: 'only this project\'s engine' }, 401)
-    const [session, hash] = path.slice('/engine/attachments/'.length).split('/')
-    if (request.method !== 'GET') return json({ error: 'GET a session\'s file by its hash' }, 400)
-    let at: string
-    try { at = fileKeys.attachment(this._pid, session ?? '', hash ?? '') } catch (e: any) { return json({ error: e.message }, 400) }
-    const o = await ((this.env as any).PACKAGES as R2Bucket | undefined)?.get(at)
-    return o ? new Response(o.body, { headers: { 'content-type': o.httpMetadata?.contentType ?? 'application/octet-stream', 'content-length': String(o.size) } }) : json({ error: 'no such file' }, 404)
-  }
-
+  // ── Programs the engine builds (authenticated with the project's key); it downloads them, its bridges and session files by the object route (parcels.ts) ──
   private async enginePrograms(request: Request, path: string): Promise<Response> {
     const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
     const key = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
@@ -1019,7 +1010,6 @@ export class ProjectDO extends DurableObject<Env> {
       }
       const hash = path.slice('/engine/programs/'.length)
       if (!/^[0-9a-f]{64}$/.test(hash)) return json({ error: 'not a program hash' }, 400)
-      if (request.method === 'GET') return json(await this.catalogue.bundle(hash))
       if (request.method === 'PUT') {
         const by = request.headers.get('x-sa-by') ?? ''
         if (!/^(user|agent):[^\s]+$/.test(by)) return json({ error: 'an upload says who asked for the build (x-sa-by)' }, 400)
@@ -1057,11 +1047,6 @@ export class ProjectDO extends DurableObject<Env> {
     if (!key || !this.keyMatches(key)) return json({ error: 'only this project\'s engine' }, 401)
     const bucket = (this.env as any).PACKAGES as R2Bucket | undefined
     if (!bucket) return json({ error: 'no bucket' }, 503)
-    const b = path.match(/^\/engine\/bridges\/([0-9a-f]{64})$/)
-    if (b && request.method === 'GET') {
-      const o = await bucket.get(`bridge/${this._pid}/${b[1]}`)
-      return o ? new Response(await o.text(), { headers: { 'content-type': 'text/javascript' } }) : json({ error: 'there is no such bridge' }, 404)
-    }
     const c = path.match(/^\/engine\/connections\/([\w.-]{1,80})$/)
     if (c && request.method === 'PUT') {
       const body: any = await request.json().catch(() => null)
@@ -1657,6 +1642,7 @@ export class ProjectDO extends DurableObject<Env> {
   /** Large messages arrive in parts; the hub holds them until whole, so what is inside is checked like any message. */
   private partsHeld = new Map<string, { frames: any[]; at: number }>()
   private partsChecked = new WeakSet<object>()
+  private parcelsChecked = new WeakSet<object>()
 
   /** The scopes a connection sees with: its own (user:<id>, or the agent key's id) and its groups' — read each time, so
    *  a change to a group applies at once. Stamped by the hub on every message; never taken from a payload. */
@@ -1792,7 +1778,7 @@ export class ProjectDO extends DurableObject<Env> {
     // Serve history/answers straight from the always-on DO (no engine wake), and capture questions/answers as
     // they pass through so an offline client can recover them. All user-scoped by the runtime's JWT userId.
     const pl = msg.payload || {}
-    const hubReply = (payload: any) => senderWs.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload }))
+    const hubReply = (payload: any) => this.emit(senderWs, { from: { id: 'hub', type: 'hub' } }, payload)
     const scopes = sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent' ? this.scopesOf(sender) : undefined
     const envelope: Envelope = { from: { id: sender.wsId, type: sender.type, ...(sender.userId ? { userId: sender.userId } : {}), ...(sender.email ? { email: sender.email } : {}), ...(sender.admin ? { admin: true } : {}), ...(scopes ? { scopes } : {}) }, payload: msg.payload }   // built once — reused by the base routing below AND the fan-out
     // ── Who may send this: everything a person or an agent sends is checked against what they hold now ──
@@ -1818,6 +1804,20 @@ export class ProjectDO extends DurableObject<Env> {
         if ((HUB_MESSAGES as readonly string[]).includes(t) || (t === 'inspect:req' && GRAPH_VIEWS.has(String(inner?.view)))) { await this.relay(senderWs, sender, { ...msg, payload: inner }); return }
         for (const f of held.frames.sort((a: any, b: any) => a.payload.part - b.payload.part)) { this.partsChecked.add(f); await this.relay(senderWs, sender, f) }
         return
+      }
+      // A message whose body came beside the wire (a parcel): its body must be the message its pointer names — what is
+      // checked below is the pointer's type, and the engine acts on the body. One the platform answers itself is handled
+      // here, whole; one for the engine goes on as its pointer.
+      if (isParcelled(pl) && !this.parcelsChecked.has(msg)) {
+        const body = await this.openParcel(pl, 't')
+        if (!body) {
+          const reason = 'the body beside the wire is not the message its pointer names'
+          this.auditMessage(sender, pl, 'refused', reason); hubReply({ t: 'error', source: 'hub', reason, reqId: pl.reqId }); return
+        }
+        if ((HUB_MESSAGES as readonly string[]).includes(String(body.t)) || (body.t === 'inspect:req' && GRAPH_VIEWS.has(String(body.view)))) {
+          await this.relay(senderWs, sender, { ...msg, payload: body }); return
+        }
+        this.parcelsChecked.add(msg)
       }
       if (sender.userId && !(pl.t === 'part' && this.partsChecked.has(msg))) {
         const t = String(pl.t ?? '')
@@ -1881,7 +1881,7 @@ export class ProjectDO extends DurableObject<Env> {
       this.ctx.storage.sql.exec('INSERT INTO view_events (at, who, agent, kind, detail) VALUES (?, ?, ?, ?, ?)', new Date().toISOString(), this.principalOf(sender), String(pl.agent ?? ''), pl.t === 'view:open' ? 'open' : 'step', control.slice(0, 200))
     }
     // ── Each source's index, and long work: read and changed here (the hub checked what each message needs) ──
-    if (typeof pl.t === 'string' && /^(dsi:(show|stats|describe|enable|build)|job:(list|get))$/.test(pl.t) && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
+    if (typeof pl.t === 'string' && /^(dsi:(show|stats|describe|enable|build|snapshot)|job:(list|get))$/.test(pl.t) && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
       const who = this.principalOf(sender)
       if (!who) { hubReply({ t: 'dsi:refused', reason: 'who is asking is not known', reqId: pl.reqId }); return }
       const actor = sender.type === 'agent' ? { kind: 'agent' as const, id: who } : { kind: 'user' as const, id: who, ...(sender.email ? { email: sender.email } : {}) }
@@ -1890,6 +1890,7 @@ export class ProjectDO extends DurableObject<Env> {
         switch (pl.t) {
           case 'dsi:show': hubReply({ t: 'dsi:items', items: this.dsi().show(pl), reqId: pl.reqId }); break
           case 'dsi:stats': hubReply({ t: 'dsi:stats', ...this.dsi().stats(), running: this.jobs().running('dsi'), reqId: pl.reqId }); break
+          case 'dsi:snapshot': hubReply({ t: 'dsi:snapshot', cursor: this.dsi().cursor(), at: new Date().toISOString(), sources: this.dsi().document(), reqId: pl.reqId }); break
           case 'dsi:describe': case 'dsi:enable': {
             const item = pl.t === 'dsi:describe' ? this.dsi().describe(pl, sender.email ?? who) : this.dsi().enable(pl, sender.email ?? who)
             this.audit.record({ actor, via, action: pl.t === 'dsi:describe' ? 'dsi.describe' : item.enabled ? 'dsi.enable' : 'dsi.disable', target: [item.source, item.table, item.field].filter(Boolean).join('.'), outcome: 'ok', detail: pl.t === 'dsi:describe' ? { by: pl.by, text: String(pl.text ?? '').slice(0, 300) } : { enabled: item.enabled } })
@@ -2268,7 +2269,37 @@ export class ProjectDO extends DurableObject<Env> {
   //                        boundary — a message can never reach another user.
   //   3. broadcastToAll — EVERY connection (project-wide). Rare / unused.
   private deliverToConn(ws: WebSocket, conn: ConnInfo, envelope: Envelope) {
-    try { ws.send(JSON.stringify({ ...envelope, to: { id: conn.wsId, type: conn.type } })) } catch {}   // stamp per-recipient `to`
+    const { payload, ...head } = envelope as any
+    this.emit(ws, { ...head, to: { id: conn.wsId, type: conn.type } }, payload)   // stamp per-recipient `to`
+  }
+
+  // ── EVERY PAYLOAD THE HUB SENDS GOES THROUGH emit ──
+  // In order, per socket. A payload too big for one frame goes beside the wire as a parcel (the bucket, by its hash, read
+  // with a ticket) and its pointer travels instead — the same transport every end uses, in every direction. `inline`
+  // keeps a payload on the socket whatever its size: what carries secrets (a connection's, unsealed for the engine) never
+  // rests in the bucket.
+  private outChain = new WeakMap<WebSocket, Promise<void>>()
+  /** The one place the platform opens a parcel it was sent: the body, if it is the message its pointer names (by `t` or
+   *  `type`) — else null. The pointer's reqId stays the message's. */
+  private async openParcel(pointer: { parcel: any; reqId?: unknown; [k: string]: unknown }, by: 't' | 'type'): Promise<any | null> {
+    let body: any = null
+    try { body = JSON.parse(await bucketStore(this.env.PACKAGES, this._pid).get!(pointer.parcel)) } catch { return null }
+    if (!body || typeof body !== 'object' || String(body[by] ?? '') !== String(pointer[by] ?? '')) return null
+    return pointer.reqId !== undefined ? { ...body, reqId: pointer.reqId } : body
+  }
+  private emit(ws: WebSocket, head: Record<string, unknown>, payload: unknown, o: { inline?: boolean } = {}) {
+    const frame = (p: unknown) => JSON.stringify({ ...head, payload: p })
+    const text = frame(payload)
+    const small = o.inline || text.length * 3 <= FRAME_LIMIT   // under the limit even if every character took three bytes
+    const prev = this.outChain.get(ws)
+    if (small && !prev) { try { ws.send(text) } catch { /* gone */ } return }
+    const next = (prev ?? Promise.resolve()).then(async () => {
+      if (small) { try { ws.send(text) } catch { /* gone */ } return }
+      await wireSender({ send: (f) => { try { ws.send(frame(f)) } catch { /* gone */ } }, parcels: bucketStore(this.env.PACKAGES, this._pid, (this.env as any).JWT_SECRET),
+        onFallback: (why) => console.warn(`[hub] a payload went as parts: ${why}`) }).send(payload as Record<string, unknown>)
+    }).catch((e) => console.warn(`[hub] a payload was not sent: ${e?.message ?? e}`))
+    this.outChain.set(ws, next)
+    void next.then(() => { if (this.outChain.get(ws) === next) this.outChain.delete(ws) })
   }
   private deliverToUser(userId: string, envelope: Envelope, exceptWsId?: string) {
     if (!userId) return   // never fan out to '' (that would be every unauthenticated connection)
@@ -2623,7 +2654,7 @@ export class ProjectDO extends DurableObject<Env> {
     const ws = wsId ? this.wsById.get(wsId) : undefined
     if (!ws || !wsId) return false
     try {
-      ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, to: { id: wsId, type: role }, payload }))
+      this.emit(ws, { from: { id: 'hub', type: 'hub' }, to: { id: wsId, type: role } }, payload)
       return true
     } catch { return false }
   }

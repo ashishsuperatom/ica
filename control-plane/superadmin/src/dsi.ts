@@ -11,12 +11,16 @@
 //   dsi:plan { source, phase, tables[], complete, fresh? } → dsi:planned { done[] }     the work list; what is done already
 //   dsi:put { source, phase, table, fields[] }   one table read (a checkpoint)          dsi:failed { source, phase, table, error }
 //   dsi:rows { source, counts }   row counts (phase 2, only where cheap)                dsi:finish { source, phase }
-//   dsi:pull { cursor } → dsi:batch { items, cursor, more }                              (and dsi:changed tells it to pull)
+//   dsi:pull { cursor, source? } → dsi:batch { items, cursor, more, latest }   (dsi:changed tells it to pull; a big page
+//                                    travels as a parcel, like every big body)
+//   dsi:fingerprints → { sources: { <source>: { count, hash } } }   a replica that differs re-pulls only that source
 // From people and agents (the hub checks what each needs):
 //   dsi:show { source?, table?, asOf? } · dsi:stats · dsi:describe { source, table, field?, text, by: human|ai }
 //   dsi:enable { source, table, field?, enabled } · dsi:build { sources?, tables?, fresh? } (asked of the engine)
+//   dsi:snapshot → the whole current index as one document (a screen downloads it; it travels as a parcel)
 
 type Storage = DurableObjectStorage
+import { fingerprintOf } from '../../../vm/packages/datasource-index/src/fingerprint.js'
 
 export interface FieldIn { name: string; type?: string | null; description?: string | null; optional?: boolean | null; key?: boolean | null; references?: string | null }
 export interface Item {
@@ -172,13 +176,22 @@ export function projectDsi(storage: Storage) {
     },
 
     /** What changed after a cursor (the current state of each item changed, in order) — an engine's replica pulls it. */
-    pull(after: unknown, limit = 2000): { items: Item[]; cursor: number; more: boolean; latest: number } {
+    pull(after: unknown, source?: unknown, limit = 10_000): { items: Item[]; cursor: number; more: boolean; latest: number } {
       const from = Math.max(0, Number(after) || 0)
-      const rows = ([...sql.exec('SELECT * FROM dsi_items WHERE seq > ? ORDER BY seq LIMIT ?', from, limit + 1)] as any[]).map(toItem)
-      const more = rows.length > limit
+      const rows = ((source ? [...sql.exec('SELECT * FROM dsi_items WHERE source = ? AND seq > ? ORDER BY seq LIMIT ?', nameOk(source, 'a source'), from, limit + 1)]
+        : [...sql.exec('SELECT * FROM dsi_items WHERE seq > ? ORDER BY seq LIMIT ?', from, limit + 1)]) as any[]).map(toItem)
       const items = rows.slice(0, limit)
       const latest = Number([...sql.exec('SELECT MAX(seq) AS v FROM dsi_log')][0]?.v ?? 0)
-      return { items, cursor: items.length ? items[items.length - 1].seq : Math.min(from, latest), more, latest }
+      return { items, cursor: items.length ? items[items.length - 1].seq : Math.min(from, latest), more: rows.length > limit, latest }
+    },
+
+    /** Each source's fingerprint (fingerprint.ts): what a replica compares with its own. */
+    async fingerprints(): Promise<Record<string, { count: number; hash: string }>> {
+      const by = new Map<string, Item[]>()
+      for (const i of ([...sql.exec('SELECT * FROM dsi_items')] as any[]).map(toItem)) (by.get(i.source) ?? by.set(i.source, []).get(i.source)!).push(i)
+      const out: Record<string, { count: number; hash: string }> = {}
+      for (const [s, items] of by) out[s] = await fingerprintOf(items)
+      return out
     },
 
     /** The index of a source (or one table, or every source's tables) — now, or as it was at a time. */
@@ -230,14 +243,3 @@ export function projectDsi(storage: Storage) {
   }
 }
 
-/** The current index as one file in the bucket (dsi/<project>/snapshot.json), remade only when the index changed since
- *  it was made — what a screen downloads to show it. */
-export async function dsiSnapshot(bucket: R2Bucket, project: string, dsi: ReturnType<typeof projectDsi>): Promise<{ body: string; cursor: number }> {
-  const key = `dsi/${project}/snapshot.json`
-  const cursor = dsi.cursor()
-  const have = await bucket.get(key)
-  if (have && Number(have.customMetadata?.cursor) === cursor) return { body: await have.text(), cursor }
-  const body = JSON.stringify({ project, cursor, at: new Date().toISOString(), sources: dsi.document() })
-  await bucket.put(key, body, { httpMetadata: { contentType: 'application/json' }, customMetadata: { cursor: String(cursor) } })
-  return { body, cursor }
-}

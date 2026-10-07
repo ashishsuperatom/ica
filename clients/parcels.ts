@@ -5,8 +5,8 @@
 // HTTP client for it, shared by every TypeScript end — the engine (Node), the web clients (browser) and the
 // Durable Objects (workers) — so the route is spelled in exactly one place:
 //
-//   PUT  <api>/api/projects/<project>/parcels/<hash>            body · Authorization: Bearer <project key | jwt>
-//   GET  <api>/api/projects/<project>/parcels/<hash>?ticket=…   → the body
+//   PUT  <api>/api/projects/<project>/objects/parcel/<hash>            body · Authorization: Bearer <project key | jwt | agent key>
+//   GET  <api>/api/projects/<project>/objects/parcel/<hash>?ticket=…   → the body
 //
 // `put` needs a credential: the engine's project key or a user's token. `get` needs only the ticket, which is
 // the credential — it names the project, the hash and when it stops working, and cannot be forged or moved to
@@ -32,7 +32,7 @@ export interface ParcelClientOptions {
 /** A parcel store over the platform's parcel route. Without a credential it can only `get`. */
 export function parcelStore(o: ParcelClientOptions): ParcelStore {
   const f = o.fetch ?? fetch
-  const url = (hash: string) => `${o.api.replace(/\/$/, '')}/api/projects/${encodeURIComponent(o.projectId)}/parcels/${hash}`
+  const url = (hash: string) => `${o.api.replace(/\/$/, '')}/api/projects/${encodeURIComponent(o.projectId)}/objects/parcel/${hash}`
   const store: ParcelStore = {
     get: async (parcel: Parcel) => {
       const r = await f(`${url(parcel.hash)}?ticket=${encodeURIComponent(parcel.ticket)}`)

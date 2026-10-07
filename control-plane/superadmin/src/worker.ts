@@ -31,7 +31,7 @@ import { createMachine, stopMachine, FLY_APP } from './fly.js'
 import { verifyJwt, signJwt, mintPlatformTokenFromClerk, type JwtClaims } from './auth/tokens.js'
 import { routeSocket } from './ws-route.js'
 import { LIMITS, keyOf as fileKeys } from './files.js'
-import { handleParcelRoute } from './parcels.js'
+import { handleObjectRoute } from './parcels.js'
 import { mobileAuthPage, handleMobileCode, handleMobileExchange, handleMeProjects } from './auth/mobile.js'
 import { can, capabilitiesOf, orgRouteNeeds, projectRouteNeeds, beyond, builtinRole, type Capability, type RouteNeed } from '../../shared/permissions.js'
 import { orgOfKey, projectOfKey } from './agent-keys.js'
@@ -289,24 +289,21 @@ export default {
       return new Response('', { status: 200 })   // ack the channel immediately; reply comes proactively
     }
 
-    // ── Parcels: message bodies beside the wire (parcels.ts) ─────────────────────────────────────────────────
-    // A GET needs only the ticket in the pointer. A PUT is the engine with the project's key, or a member with
-    // their token — the two credentials the hub itself accepts, checked the same way.
-    const parcelMatch = path.match(/^\/api\/projects\/([^/]+)\/parcels\/([^/?]+)$/)
-    if (parcelMatch) {
-      const projectId = parcelMatch[1]
-      return handleParcelRoute({
-        request, bucket: env.PACKAGES, secret: env.JWT_SECRET, projectId, hash: parcelMatch[2], after: (p) => ctx.waitUntil(p),
-        authorize: async () => {
-          const bearer = (request.headers.get('authorization') || '').replace(/^bearer\s+/i, '')
-          if (!bearer) return false
-          if (bearer.startsWith('sk-proj-')) {
-            const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
-            const r = await stub.fetch('https://do/verify-conn', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: bearer }) })
-            return r.ok
-          }
-          return (await projectAccessOf(request, env, projectId)).ok
+    // ── Every stored thing a project keeps, by kind (parcels.ts): parcels — message bodies beside the wire, read with
+    //    their ticket — and what the engine downloads (program builds, bridges, session files), read with its key. A PUT
+    //    (parcels only) is the engine with the project's key, or a member with their token or key. ──
+    const objectMatch = path.match(/^\/api\/projects\/([^/]+)\/objects\/([a-z]+)\/(.+)$/)
+    if (objectMatch) {
+      const projectId = objectMatch[1], kind = objectMatch[2]
+      const bearer = (request.headers.get('authorization') || '').replace(/^bearer\s+/i, '')
+      return handleObjectRoute({
+        request, bucket: env.PACKAGES, secret: env.JWT_SECRET, projectId, kind, id: decodeURIComponent(objectMatch[3]), after: (p) => ctx.waitUntil(p),
+        isEngine: async () => {
+          if (!bearer || bearer.startsWith('sak_') || bearer.split('.').length === 3) return false   // a key of a person's or an agent's, or a token
+          const r = await env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`)).fetch('https://do/verify-conn', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: bearer }) })
+          return r.ok
         },
+        isMember: async () => !!bearer && (await projectAccessOf(request, env, projectId)).ok,
       })
     }
 
@@ -322,7 +319,7 @@ export default {
       return env.USER.get(env.USER.idFromName(`user:${claims.userId}`)).fetch(fwd)
     }
     // ── The engine's own calls with its project key: programs it uploads and fetches; the files people put in sessions. ──
-    const engineCall = path.match(/^\/api\/engine\/([0-9a-f-]{36})\/(programs(?:\/[0-9a-f]{64})?|attachments\/[\w-]{1,80}\/[0-9a-f]{64}|connections\/[\w.-]{1,80}|bridges\/[0-9a-f]{64}|app(?:\/[0-9a-f]{64})?)$/)
+    const engineCall = path.match(/^\/api\/engine\/([0-9a-f-]{36})\/(programs(?:\/[0-9a-f]{64})?|connections\/[\w.-]{1,80}|app(?:\/[0-9a-f]{64})?)$/)
     if (engineCall) {
       const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${engineCall[1]}`))
       const fwd = new Request(`http://do/engine/${engineCall[2]}${url.search}`, request)

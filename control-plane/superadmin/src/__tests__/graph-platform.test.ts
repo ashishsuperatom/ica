@@ -138,6 +138,19 @@ describe('the composition graph, held by the platform', () => {
     expect(readdirSync(join(root, 'a')).some((f) => f.includes('.differs-'))).toBe(true)
   })
 
+  it('a replica whose change log drifted without a conflict is found by its fingerprint and rebuilt', async () => {
+    a.logs.length = 0
+    const s = openStore(a.file)
+    s.db.prepare("UPDATE change SET to_hash = 'edited-by-hand' WHERE id = (SELECT MAX(id) FROM change)").run()   // same count, same cursor
+    s.close()
+    a.replica.welcome()
+    await settle(1200)
+    expect(a.logs.join('\n')).toMatch(/its change log differs from the platform's/)
+    const r = openStore(a.file)
+    expect((r.db.prepare("SELECT COUNT(*) AS n FROM change WHERE to_hash = 'edited-by-hand'").get() as any).n).toBe(0)
+    r.close()
+  })
+
   it('a node an engine generates for a person is written by the platform, as them, and comes back to the replica', async () => {
     const results = await a.replica.write({ id: 'user:ana', admin: false, email: 'ana@test.io', scopes: ['user:ana'] }, [
       { name: 'ana-notes', kind: 'concept', body: concept('what ana learned'), reason: 'made from session s1', scope: 'user:ana' },

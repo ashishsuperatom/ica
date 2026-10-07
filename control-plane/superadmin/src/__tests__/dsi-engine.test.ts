@@ -15,17 +15,24 @@ import { join } from 'node:path'
 import { createDsi } from '../../../../vm/apps/engine/dsi.ts'
 import { INDEXERS } from '../../../../vm/apps/engine/datasource-index/indexer.ts'
 import { DataSourceIndex, searchDataSource, getSchema, replicaCursor } from '../../../../vm/packages/datasource-index/src/index.ts'
+import { receiver } from '../../../../clients/transport.ts'
+import { parcelStore } from '../../../../clients/parcels.ts'
 
 const here = fileURLToPath(new URL('.', import.meta.url))
 const PID = '11111111-2222-3333-4444-555555555555'
 const SECRET = 's3cret'
 const harness = `
 import { routeSocket } from '../ws-route.ts'
+import { handleObjectRoute } from '../parcels.ts'
 export { ProjectDO } from '../project-do.ts'
 export { UserDO } from '../user-do.ts'
 export default { async fetch(req, env) {
   const u = new URL(req.url); const stub = env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}'))
   if (u.pathname.startsWith('/_ws/')) return routeSocket(req, env, '${PID}')
+  const obj = u.pathname.match(/^\\/api\\/projects\\/([^/]+)\\/objects\\/([a-z]+)\\/(.+)$/)
+  if (obj) return handleObjectRoute({ request: req, bucket: env.PACKAGES, secret: env.JWT_SECRET, projectId: obj[1], kind: obj[2], id: decodeURIComponent(obj[3]),
+    isEngine: async () => (await stub.fetch('https://do/verify-conn', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: (req.headers.get('authorization') || '').replace(/^bearer\\s+/i, '') }) })).ok,
+    isMember: async () => false })
   const fwd = new Request('http://do' + u.pathname.slice(3) + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return stub.fetch(fwd)
 } }`
 const root = mkdtempSync(join(here, '.dsi-'))
@@ -73,7 +80,9 @@ async function engine(name: string, epoch: number) {
   const ws = await socket({ role: 'code-engine', key: 'ek', instanceId: name, epoch })
   const logs: string[] = []
   const dsi = createDsi({ store, manager: managerUrl, send: (m) => { try { ws.ws.send(JSON.stringify(m)); return true } catch { return false } }, log: (s) => logs.push(s) })
-  ws.ws.addEventListener('message', (e: any) => { const m = JSON.parse(String(e.data)); if (/^(dsi|job):/.test(String(m.payload?.t ?? ''))) dsi.onMessage(m.payload) })
+  // As the engine does (wire.ts): every payload through the receiver first — a parcel is fetched by the object route.
+  const inbound = receiver({ deliver: (p: any) => { if (/^(dsi|job):/.test(String(p?.t ?? ''))) dsi.onMessage(p) }, parcels: parcelStore({ api: 'http://x', projectId: PID, fetch: ((u: any, i: any) => mf.dispatchFetch(String(u), i)) as any }) })
+  ws.ws.addEventListener('message', (e: any) => { const m = JSON.parse(String(e.data)); if (m.payload) void inbound.receive(m.payload) })
   dsi.welcome()
   return { ws, dsi, store, logs }
 }
@@ -173,9 +182,34 @@ describe('each source\'s index, end to end', () => {
     cheapCounts = true
   })
 
+  it('a replica that drifted is found by its fingerprint, and only the source that differs is pulled again', async () => {
+    // a second source, so there is one that must be left alone
+    const w = await socket({ role: 'code-engine', key: 'ek', instanceId: 'w', epoch: 10 })
+    w.ws.send(JSON.stringify({ type: 'dsi:plan', source: 'OTHER', phase: 1, tables: ['t'], complete: true, reqId: 'p' }))
+    w.ws.send(JSON.stringify({ type: 'dsi:put', source: 'OTHER', phase: 1, table: 't', fields: [{ name: 'a', type: 'int' }] }))
+    await settle()
+    const c = await engine('c', 11)
+    await until(() => (getSchema(c.store) as any).sources.length === 2)
+    // the file is damaged: rows of SHOP lost, one OTHER row edited by hand
+    c.store.db.prepare("DELETE FROM datasource_index WHERE source = 'SHOP' AND container = 'lines'").run()
+    c.logs.length = 0
+    const d = await engine('c', 12)   // the same replica file, a new connection: welcome → caught up → fingerprints
+    await until(() => d.logs.some((l) => /SHOP differs from the platform/.test(l)))
+    await until(() => (getSchema(d.store, 'SHOP') as any).tables.some((t: any) => t.table === 'lines'))
+    expect(d.logs.some((l) => /OTHER differs/.test(l))).toBe(false)
+  })
+
+  it('a page too big for a frame reaches the engine as a parcel, whole', async () => {
+    const w = await socket({ role: 'code-engine', key: 'ek', instanceId: 'w2', epoch: 13 })
+    w.ws.send(JSON.stringify({ type: 'dsi:put', source: 'WIDE', phase: 1, table: 'wide', fields: Array.from({ length: 2500 }, (_, i) => ({ name: `column_${i}`, type: 'nvarchar', description: 'y'.repeat(30) })) }))
+    await settle()
+    const e = await engine('e', 14)   // empty replica: its first page holds every item, far over a frame
+    await until(() => ((getSchema(e.store) as any).sources.find((s: any) => s.source === 'WIDE')?.fields ?? 0) === 2500)
+  })
+
   it('a lost replica is pulled again whole; a second engine is told the build running and starts none', async () => {
-    const b = await engine('b', 3)   // a new engine, empty replica: takes the role, pulls everything
-    await until(() => (getSchema(b.store) as any).sources.length === 1)
+    const b = await engine('b', 15)   // a new engine, empty replica: takes the role, pulls everything
+    await until(() => (getSchema(b.store) as any).sources.some((x: any) => x.source === 'SHOP'))
     expect((getSchema(b.store, 'SHOP', 'lines') as any).fields.map((f: any) => f.field).sort()).toEqual(['order_id', 'qty'])
     // one build at a time: a build already running on the platform's lease — this engine starts none
     const started = await new Promise<any>((resolve) => { b.ws.ws.addEventListener('message', (e: any) => { const m = JSON.parse(String(e.data)); if (m.payload?.reqId === 'lease') resolve(m.payload) }); b.ws.ws.send(JSON.stringify({ type: 'job:start', kind: 'dsi.build', lease: 'dsi', reqId: 'lease' })) })

@@ -68,7 +68,8 @@ export async function connect(o: { key: string; hub: string; timeoutMs?: number;
     tick()
   })
 
-  const out = sender({ send: (frame: unknown) => ws.send(JSON.stringify({ to: { type: 'code-engine' }, payload: frame })) })
+  // A big message goes beside the wire as a parcel, stored with this key — the same transport every end uses.
+  const out = sender({ send: (frame: unknown) => ws.send(JSON.stringify({ to: { type: 'code-engine' }, payload: frame })), parcels: parcelStore({ api: apiOfHub(url.replace(/\?.*$/, '')), projectId: project, credential: o.key }) })
   let n = 0
   return {
     project: { id: project, name: welcome.project?.name },

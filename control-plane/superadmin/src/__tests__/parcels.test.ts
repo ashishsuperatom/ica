@@ -47,12 +47,12 @@ describe('the route', () => {
   it('PUT stores by hash and answers a ticket; GET with the ticket reads the body back', async () => {
     const bucket = fakeBucket()
     const hash = await sha(body)
-    const put = await route(bucket, new Request(`https://x/api/projects/p1/parcels/${hash}`, { method: 'PUT', body }), hash)
+    const put = await route(bucket, new Request(`https://x/api/projects/p1/objects/parcel/${hash}`, { method: 'PUT', body }), hash)
     expect(put.status).toBe(200)
     const p = await put.json() as any
     expect(p.hash).toBe(hash); expect(p.bytes).toBe(body.length); expect(p.expires).toBeGreaterThan(Date.now() + (PARCEL_DAYS - 1) * 86_400_000)
     expect(bucket.objects.has(`parcel/p1/${hash}`)).toBe(true)
-    const get = await route(bucket, new Request(`https://x/api/projects/p1/parcels/${hash}?ticket=${encodeURIComponent(p.ticket)}`), hash)
+    const get = await route(bucket, new Request(`https://x/api/projects/p1/objects/parcel/${hash}?ticket=${encodeURIComponent(p.ticket)}`), hash)
     expect(get.status).toBe(200)
     expect(get.headers.get('cache-control')).toBe('private, no-store')
     expect(await get.text()).toBe(body)
@@ -89,7 +89,7 @@ describe('end to end through the transport', () => {
     // The platform, as fetch sees it.
     const f: typeof fetch = async (input, init) => {
       const req = new Request(input as string, init)
-      const m = new URL(req.url).pathname.match(/\/api\/projects\/([^/]+)\/parcels\/([^/]+)$/)!
+      const m = new URL(req.url).pathname.match(/\/api\/projects\/([^/]+)\/objects\/parcel\/([^/]+)$/)!
       return handleParcelRoute({ request: req, bucket, secret: SECRET, projectId: m[1], hash: m[2], authorize: async () => req.headers.get('authorization') === 'Bearer sk-proj-k' })
     }
     const frames: unknown[] = []

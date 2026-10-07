@@ -115,8 +115,9 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
   const send = useCallback((payload: any) => {
     const ws = wsRef.current
     if (ws?.readyState !== 1 || !ready.current) { queued.current.push(payload); return }
-    void sender({ send: (frame) => ws.send(JSON.stringify(CLOUD ? { to: { type: 'code-engine' }, payload: frame } : frame)) }).send(payload)
-  }, [])
+    // A big message goes beside the wire as a parcel, stored with this person's token — the same transport every end uses.
+    void sender({ send: (frame) => ws.send(JSON.stringify(CLOUD ? { to: { type: 'code-engine' }, payload: frame } : frame)), parcels: CLOUD && token ? parcelStore({ api: apiOfHub(HUB!), projectId, credential: token }) : undefined }).send(payload)
+  }, [token])
   const flush = () => { ready.current = true; for (const p of queued.current.splice(0)) send(p) }
   const request = useCallback((payload: Record<string, unknown>, onProgress?: (m: any) => void) => new Promise<any>((resolve) => {
     const reqId = `ui-${Math.random().toString(36).slice(2, 10)}`

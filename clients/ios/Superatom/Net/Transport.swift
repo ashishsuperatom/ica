@@ -176,11 +176,11 @@ enum Transport {
 
     // ── The store behind the worker's parcel route ───────────────────────────
 
-    /// Parcels fetched from the platform: `GET <api>/api/projects/<project>/parcels/<hash>?ticket=…`. The route is
+    /// Parcels fetched from the platform: `GET <api>/api/projects/<project>/objects/parcel/<hash>?ticket=…`. The route is
     /// the worker's; the ticket in the message is the whole credential. Upload is the engine's job, not a client's.
     static func store(api: URL, projectId: String) -> ParcelStore {
         ParcelStore(put: nil, get: { parcel in
-            var c = URLComponents(url: api.appendingPathComponent("api/projects/\(projectId)/parcels/\(parcel.hash)"), resolvingAgainstBaseURL: false)!
+            var c = URLComponents(url: api.appendingPathComponent("api/projects/\(projectId)/objects/parcel/\(parcel.hash)"), resolvingAgainstBaseURL: false)!
             c.queryItems = [URLQueryItem(name: "ticket", value: parcel.ticket)]
             let (data, response) = try await URLSession.shared.data(from: c.url!)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {

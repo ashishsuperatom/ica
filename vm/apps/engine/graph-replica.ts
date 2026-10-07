@@ -6,18 +6,21 @@
 //   replica's cursor (graph:pull) and apply each batch in order until nothing is left.
 //
 // A record here that differs from the platform's (written here by hand, or kept from before the platform held the graph)
-// means this replica is wrong: it is set aside and rebuilt from the platform, which is always right.
+// means this replica is wrong: it is set aside and rebuilt from the platform, which is always right. Once caught up after
+// a welcome it compares its change log's fingerprint with the platform's (graph:fingerprint), so a replica that drifted
+// without a conflict is found too. The replica keeps the log, not only the current state: this engine reads the graph's
+// published version (as of a version), which needs the history. The graph is small; replaying it is cheap.
 
 import { join } from 'node:path'
 import { renameSync, existsSync } from 'node:fs'
-import { openStore, applyReplica, ReplicaConflict, START, type Store, type Cursor } from '@superatom/composition-graph/node'
+import { openStore, applyReplica, ReplicaConflict, START, changesFingerprint, type Store, type Cursor } from '@superatom/composition-graph/node'
 
 export const graphFileOf = (projectDir: string) => join(projectDir, 'db', 'composition.sqlite')
 
 export function createGraphReplica(o: { file: string; send: (msg: Record<string, unknown>) => boolean; log?: (s: string) => void }) {
   let store: Store | null = null
   const open = () => (store ??= openStore(o.file))
-  let pulling = false, again = false
+  let pulling = false, again = false, checked = false
   const waiting = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>()
 
   const one = (q: string) => Number((open().db.prepare(q).get() as { v: number | null } | undefined)?.v ?? 0)
@@ -45,7 +48,12 @@ export function createGraphReplica(o: { file: string; send: (msg: Record<string,
     const here = cursor(), there = p.cursor as Cursor | undefined
     if (there && (here.change > there.change || here.suggestion > there.suggestion || (here.version ?? 0) > (there.version ?? 0)))
       return rebuild(`it holds records the platform does not (change ${here.change}, the platform's ${there.change})`)
-    if (again) { again = false; pull() }
+    if (again) { again = false; pull(); return }
+    if (!checked) { checked = true; o.send({ type: 'graph:fingerprint', reqId: `gfp_${Date.now().toString(36)}` }) }
+  }
+  async function onFingerprint(p: any) {
+    const here = await changesFingerprint(open().db.prepare('SELECT id, name, to_hash FROM change').all() as any[])
+    if (here.hash !== p.hash) rebuild(`its change log differs from the platform's (${here.count} changes here, ${p.count} there)`)
   }
 
   /** This replica disagrees with the platform: set it aside, and take the platform's whole. */
@@ -59,11 +67,12 @@ export function createGraphReplica(o: { file: string; send: (msg: Record<string,
 
   return {
     /** On every (re)connection to the platform. */
-    welcome: () => { pulling = false; pull() },
+    welcome: () => { pulling = false; checked = false; pull() },
     /** A message from the platform about the graph. */
     onMessage: (p: any) => {
       if (p?.t === 'graph:batch') onBatch(p)
       else if (p?.t === 'graph:changed') pull()
+      else if (p?.t === 'graph:fingerprint') void onFingerprint(p)
       else if (p?.t === 'graph:written') { const w = waiting.get(String(p.reqId)); if (!w) return; waiting.delete(String(p.reqId)); clearTimeout(w.timer); p.error ? w.reject(new Error(p.error)) : w.resolve(p.results) }
     },
     /** Nodes written in the platform's graph for a person (who, as the hub stamped them) — e.g. an agent made from a

@@ -1435,6 +1435,26 @@ workspace. Only in some cases are we working directly on /state/<project>/…, a
 Only the engine's agents work in the project workspace; when we write code ourselves (by hand or through our own agent)
 we always use sacli, which always goes through the platform — and the problem is solved.
 
+## Big bodies and stored things travel one way (the user, 2026-10-08)
+
+**In the user's words:** downloading a file, downloading a snapshot of something — this will be very common, so it should
+be done in a generic way, or at least organised properly. Do not give a direct R2 URL: everything comes from
+*.superatom.site or *.superatom.ai. The engine always pulls through its WebSocket, but it can push something as a parcel
+and the front end can read that parcel; when something big goes from the front end, or the CLI, it should be the same
+parcel idea in the reverse direction too — where authorisation allows it. Packaging something as a parcel happens in one
+place, and opening a parcel also happens in one place: once in the browser, once in the engine, and once in the platform
+code. No backward compatibility while there are no users — change it for the best and only method (the iOS app too).
+
+*So:* one transport (clients/transport.ts) at every end, in every direction: a body over the frame limit goes beside the
+wire as a parcel (the bucket, by its hash, read with a ticket the platform signs) and its pointer travels. The browser,
+the admin console, the CLI and the engine each pack in one sender and open in one receiver; the engine's own messages to
+the platform go through the same wire (toHub). The platform packs in one place (the project's Durable Object's emit) and
+opens in one (openParcel) — and, where the platform itself must read a body, through the same receiver: a person's hub
+(to keep their answers) and the Teams channel (to post). One route serves every stored thing a project keeps:
+/api/projects/<project>/objects/<kind>/<id> — parcels (with their ticket), and what the engine downloads (program builds,
+bridges, session files, with its key). Secrets never take this path: what carries them (a connection unsealed for the
+engine) is sent inline on the authenticated socket, never as a parcel.
+
 ## Data sources and their index (the user, 2026-10-07)
 
 **In the user's words:** the datasource index, as everything else we are doing, will really be in the platform — inside

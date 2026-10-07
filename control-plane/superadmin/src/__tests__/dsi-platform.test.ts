@@ -115,16 +115,16 @@ describe('each source\'s index, held by the platform', () => {
   it('rule 2: three descriptions kept apart; a person\'s wins, then the source\'s, then an AI\'s; whoever writes says which', async () => {
     expect((await admin.ask({ t: 'dsi:describe', source: 'ERP', table: 'orders', field: 'total', text: 'x' })).reason).toMatch(/by "human" or "ai"/)
     await admin.ask({ t: 'dsi:describe', source: 'ERP', table: 'orders', field: 'total', text: 'total in AUD, tax included', by: 'ai' })
-    let doc = JSON.parse(await (await mf.dispatchFetch('http://x/do/dsi/snapshot')).text())
+    let doc = await admin.ask({ t: 'dsi:snapshot' })
     const total = () => doc.sources[0].tables.find((t: any) => t.table === 'orders').fields.find((f: any) => f.field === 'total')
     expect(total()).toMatchObject({ description: 'the order total', descSource: 'the order total', descAi: 'total in AUD, tax included' })   // the source's beats an AI's
     await admin.ask({ t: 'dsi:describe', source: 'ERP', table: 'orders', field: 'total', text: 'Order value incl. GST', by: 'human' })
-    doc = JSON.parse(await (await mf.dispatchFetch('http://x/do/dsi/snapshot')).text())
+    doc = await admin.ask({ t: 'dsi:snapshot' })
     expect(total().description).toBe('Order value incl. GST')
     // a rebuild never overwrites a person's or an AI's description
     eng.tell({ type: 'dsi:put', source: 'ERP', phase: 1, table: 'orders', fields: [{ name: 'id', type: 'bigint', key: true }, { name: 'total', type: 'money', description: 'the order total' }] })
     await settle(200)
-    doc = JSON.parse(await (await mf.dispatchFetch('http://x/do/dsi/snapshot')).text())
+    doc = await admin.ask({ t: 'dsi:snapshot' })
     expect(total()).toMatchObject({ descHuman: 'Order value incl. GST', descAi: 'total in AUD, tax included' })
     expect((await mem.ask({ t: 'dsi:describe', source: 'ERP', table: 'orders', field: 'total', text: 'y', by: 'human' })).reason).toMatch(/needs project.data/)
   })
@@ -156,11 +156,27 @@ describe('each source\'s index, held by the platform', () => {
     expect(next.items.map((i: any) => `${i.table}.${i.field}:${i.enabled}`)).toEqual(['orders.total:false'])
   })
 
-  it('rule 11: the snapshot is one file, remade only when the index changed', async () => {
-    const a = await mf.dispatchFetch('http://x/do/dsi/snapshot'); const ca = a.headers.get('x-dsi-cursor'); await a.text()
-    const b = await mf.dispatchFetch('http://x/do/dsi/snapshot'); expect(b.headers.get('x-dsi-cursor')).toBe(ca); await b.text()
+  it('rule 11: the snapshot is the whole current index as one reply; a big one travels as a parcel', async () => {
+    const a = await admin.ask({ t: 'dsi:snapshot' })
     await admin.ask({ t: 'dsi:enable', source: 'ERP', table: 'orders', field: 'total', enabled: true })
-    const c = await mf.dispatchFetch('http://x/do/dsi/snapshot'); expect(Number(c.headers.get('x-dsi-cursor'))).toBeGreaterThan(Number(ca)); await c.text()
+    const b = await admin.ask({ t: 'dsi:snapshot' })
+    expect(b.cursor).toBeGreaterThan(a.cursor)
+    // a big index: its snapshot does not fit a frame, so its body goes beside the wire and the pointer travels
+    eng.tell({ type: 'dsi:put', source: 'BIG', phase: 1, table: 'wide', fields: Array.from({ length: 3000 }, (_, i) => ({ name: `column_${i}`, type: 'nvarchar', description: 'x'.repeat(40) })) })
+    await settle(400)
+    const reqId = `big-${Math.random()}`
+    admin.ws.send(JSON.stringify({ to: { type: 'code-engine' }, payload: { t: 'dsi:snapshot', reqId } }))
+    const pointer = (await admin.until((m) => m.payload?.reqId === reqId)).payload
+    expect(pointer.parcel).toMatchObject({ hash: expect.stringMatching(/^[0-9a-f]{64}$/), ticket: expect.any(String) })
+  })
+
+  it('rule 10: fingerprints per source; a source pulled on its own', async () => {
+    const f = await eng.call({ type: 'dsi:fingerprints' })
+    expect(Object.keys(f.sources).sort()).toEqual(['BIG', 'ERP', 'WAREHOUSE'].filter((x) => x !== 'WAREHOUSE'))
+    expect(f.sources.ERP).toMatchObject({ count: expect.any(Number), hash: expect.stringMatching(/^[0-9a-f]{64}$/) })
+    const erp = await eng.call({ type: 'dsi:pull', cursor: 0, source: 'ERP' })
+    expect(erp.items.every((i: any) => i.source === 'ERP')).toBe(true)
+    expect(erp.items.length).toBe(f.sources.ERP.count)
   })
 
   it('rule 7 & 9: one build at a time — a second is told the one running; its heartbeat and stages reach the admins', async () => {

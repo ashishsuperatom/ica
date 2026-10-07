@@ -477,36 +477,37 @@ function resyncAnalyst(from: any, full = false) {
 // route is not served (a hub with no platform behind it) a put fails and the wire sends parts instead.
 const wire = createWire({
   emit: (to, frame) => emitFrame(to, frame as { t: EngineMsgType }),
-  handle: (whole, from) => { void handle(whole, from) },
+  handle: (whole, from) => { if (hub) void route(whole, from, hub) },
   parcels: parcelStore({ api: apiOfHub(HUB), projectId: PROJECT, credential: KEY }),
+  raw: () => (hub?.readyState === WebSocket.OPEN ? hub : null),
 })
 // Sessions are kept by the platform: every append goes up to it (session-sync.ts), and everything missing on reconnect.
-const sessionSync = createSessionSync({ dir: join(PROJECT_DIR, 'sessions'), send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true }, log: (s) => console.warn(s) })
+const sessionSync = createSessionSync({ dir: join(PROJECT_DIR, 'sessions'), send: (msg) => wire.toHub(msg), log: (s) => console.warn(s) })
 // Long work made visible: the hub keeps each activity's latest state and tells its owner.
-const activities = createActivities({ send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true } })
+const activities = createActivities({ send: (msg) => wire.toHub(msg) })
 // Programs: built here, kept by the platform, fetched from it when a session needs one this engine lacks.
 const programSeam = createProgramSeam({ projectDir: PROJECT_DIR, platform: KEY && PROJECT ? platformOf({ hub: HUB, project: PROJECT, key: KEY }) : null, send: (to, msg) => wire.send(to, msg), activities })
 // Data access per reader: policies resolved by the platform, carried with each intent, applied by the manager.
-const access = createAccess({ send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true } })
+const access = createAccess({ send: (msg) => wire.toHub(msg) })
 /** The asker of a chat turn's data access, for the agent's own tools. */
 const sourceIds = async () => ((await (await fetch(`${DATASOURCE}/sources`, { signal: AbortSignal.timeout(4000) })).json()) as { sources?: { id: string }[] }).sources?.map((x) => x.id) ?? []
 const turnReader = (from: any) => readerFor(access, from, sourceIds)
 /** Something the engine did, for the platform's warehouse: sent to the project's DO, which records it (one path). */
-const recordToPlatform = (kind: string, key: string, data: unknown) => { try { if (hub?.readyState === WebSocket.OPEN) hub.send(JSON.stringify({ type: 'record', kind, key, data })) } catch { /* the warehouse never breaks the work */ } }
+const recordToPlatform = (kind: string, key: string, data: unknown) => { try { wire.toHub({ type: 'record', kind, key, data }) } catch { /* the warehouse never breaks the work */ } }
 // USAGE PER PERSON (ica/index.ts): what each harness reports for each model call, stamped with the turn's session and
 // person, sent to the platform — and kept until sent: a report lost to a dropped socket is usage nobody pays for.
 const usageQueue: unknown[] = []
-const flushUsage = () => { while (usageQueue.length && hub?.readyState === WebSocket.OPEN) { try { hub.send(JSON.stringify(usageQueue[0])); usageQueue.shift() } catch { return } } }
+const flushUsage = () => { while (usageQueue.length && hub?.readyState === WebSocket.OPEN) { try { wire.toHub(usageQueue[0] as Record<string, unknown>); usageQueue.shift() } catch { return } } }
 setUsageSink({
   report: (u) => { usageQueue.push({ type: 'usage:report', ...u }); if (usageQueue.length > 50_000) usageQueue.shift(); flushUsage() },
 })
 const enginePlatform = KEY && PROJECT ? platformOf({ hub: HUB, project: PROJECT, key: KEY }) : null
 // The project's connections live in the platform; this engine downloads them and runs them (connections.ts).
 // Each source's index lives in the platform; this engine keeps the replica find-schema reads, and builds (dsi.ts).
-const dsi = createDsi({ store: indexStore, manager: DATASOURCE, send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true }, log: (s) => console.log(s) })
-const connections = createConnections({ applied: () => dsi.sourcesReady(), dir: DATASOURCES_DIR, manager: DATASOURCE, platform: enginePlatform, send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true }, log: (s) => console.warn(s) })
+const dsi = createDsi({ store: indexStore, manager: DATASOURCE, send: (msg) => wire.toHub(msg), log: (s) => console.log(s) })
+const connections = createConnections({ applied: () => dsi.sourcesReady(), dir: DATASOURCES_DIR, manager: DATASOURCE, platform: enginePlatform, send: (msg) => wire.toHub(msg), log: (s) => console.warn(s) })
 // The composition graph lives in the platform; this engine keeps a replica it pulls into (graph-replica.ts).
-const graphReplica = createGraphReplica({ file: graphFileOf(PROJECT_DIR), send: (msg) => { if (hub?.readyState !== WebSocket.OPEN) return false; hub.send(JSON.stringify(msg)); return true }, log: (s) => console.warn(s) })
+const graphReplica = createGraphReplica({ file: graphFileOf(PROJECT_DIR), send: (msg) => wire.toHub(msg), log: (s) => console.warn(s) })
 const sessionSeam = createSessionSeam({ graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, graphFile: graphFileOf(PROJECT_DIR),
   // Words in a session: the composer on the agent's domain, told the step's STATE, what it shows and the programs' docs.
   app: (payload, from) => appSeam.call(payload, from),
@@ -515,8 +516,63 @@ const appSeam = createAppSeam({ asked: (q) => graphReplica.asked(q), askInSessio
 // The project's app lives in the platform; this engine downloads what it runs and reloads it (app-download.ts).
 const appDownload = createAppDownload({ projectDir: PROJECT_DIR, platform: enginePlatform, reload: () => appSeam.handle({ t: 'app:reload' }, null, () => {}), log: (s) => console.warn(s) })
 
+
+// EVERY WHOLE MESSAGE FROM THE HUB — after the wire joined its parts or fetched its parcel — is routed here.
+async function route(payload: any, from: any, ws: WebSocket) {
+  const t = payload?.t
+  const m = { payload, from }
+  if (t === 'welcome') {
+    console.log(`[ica] registered (${m.payload.wsId}) — running self-check…`)
+    flushOutbox()   // re-registered → deliver anything queued while the socket was flapping (answers, logs)
+    sessionSync.pushAll()   // and every session the platform does not have whole
+    graphReplica.welcome()  // and the graph's replica: what changed in the platform's graph since
+    dsi.welcome()           // and the index's replica: what changed in each source's index since
+    flushUsage()   // usage reported while the platform was out of reach
+    void programSeam.syncUp((x) => console.warn(x)).catch((e) => console.warn(`[programs] sync failed: ${e?.message ?? e}`))   // and every program built here
+    // and the code connectors this engine runs (its datasource manager's sources), for the platform to list beside the rest
+    connections.pull()      // and the project's connections: each bridge, settings and secrets, from the platform
+    void appDownload.sync() // and the project's app, as last published
+    // THE PROJECT'S PROFILE, delivered with the welcome. Adopted before warm-up builds any agent, so a box
+    // starts on its own configuration rather than adopting it a few seconds late and rebuilding.
+    if (m.payload.profile) receive(m.payload.profile, 'project profile')
+    reportConfig(ws)
+    settleProfile()
+    // Only claim READY after the self-check passes. The hub/DO can trust this signal to mean the engine
+    // can actually answer, not merely that a socket is open.
+    selfCheck().then((res) => {
+      if (ws !== hub || ws.readyState !== WebSocket.OPEN) return
+      if (res.ok) { console.log(`[ica] READY — ${res.detail}`); ws.send(JSON.stringify({ type: 'ready', instanceId: INSTANCE_ID, epoch: EPOCH, detail: res.detail })) }
+      else { console.error(`[ica] NOT READY — self-check failed: ${res.detail}`); ws.send(JSON.stringify({ type: 'not_ready', instanceId: INSTANCE_ID, detail: res.detail })) }
+    })
+    return
+  }
+  // A CHANGE PUSHED WHILE WE RUN. Adopted for the next session each agent builds — a turn already in flight
+  // keeps the session it started on, because interrupting a running question to change a model is a worse
+  // failure than applying the change a minute later.
+  if (t === 'config:update') {
+    const r = receive(m.payload.profile, `project profile v${m.payload.version}`)
+    if (r.ok) {
+      // The TABLE, not just a version number. A change arriving while the box runs is exactly when someone
+      // needs to see what it changed to, and the version alone sends them to a database to find out.
+      console.log(`[config] adopted v${m.payload.version} — agents rebuild on their next session`)
+      for (const line of describeConfig()) console.log(`[config] ${line}`)
+    }
+    reportConfig(ws)
+    return
+  }
+  if (t === 'session:synced') { sessionSync.onSynced(m.payload); return }
+  if (t === 'graph:batch' || t === 'graph:changed' || t === 'graph:written' || t === 'graph:fingerprint') { graphReplica.onMessage(m.payload); return }
+  if (t === 'connections:list' || t === 'connections:changed') { connections.onMessage(m.payload); return }
+  if (t === 'app:changed') { appDownload.onMessage(m.payload); return }
+  if (typeof t === 'string' && /^(dsi|job):/.test(t) && dsi.onMessage(m.payload)) return
+  if (t === 'access:resolved' || t === 'access:changed') { access.onMessage(m.payload); return }
+  if (t === 'fenced')     { console.log('[ica] fenced — a newer engine holds this role (obsolete instance)'); return }
+  if (t === 'superseded') { console.log('[ica] superseded by our own reconnection'); return }
+  if (t === 'evicted')    { console.log('[ica] evicted — a newer connection took the role'); return }
+  if (payload) await handle(payload, from)
+}
+
 async function handle(payload: any, from: any) {
-  if (wire.receive(payload, from)) return
   if (typeof payload?.t === 'string' && payload.t.startsWith('app:')) { void appSeam.handle(payload, from); return }
   if (SESSION_MESSAGES.has(payload?.t)) { void sessionSeam.handle(payload, from); return }
   if (PROGRAM_MESSAGES.has(payload?.t)) { void programSeam.handle(payload, from); return }
@@ -637,57 +693,10 @@ function connect() {
     // is not JSON and is dropped below.
     lastInbound = Date.now()
     let m: any; try { m = JSON.parse(raw.toString()) } catch { return }
-    const t = m.payload?.t
-    if (process.env.ICA_TRACE_HUB) console.log(`[ica:trace] ← ${t ?? '(no t)'} from ${m.from?.type ?? '?'}/${m.from?.id ?? '?'}${t === 'error' ? ` — ${m.payload?.reason ?? m.payload?.message ?? ''}` : ''}`)
-    if (t === 'welcome') {
-      console.log(`[ica] registered (${m.payload.wsId}) — running self-check…`)
-      flushOutbox()   // re-registered → deliver anything queued while the socket was flapping (answers, logs)
-      sessionSync.pushAll()   // and every session the platform does not have whole
-      graphReplica.welcome()  // and the graph's replica: what changed in the platform's graph since
-      dsi.welcome()           // and the index's replica: what changed in each source's index since
-      flushUsage()   // usage reported while the platform was out of reach
-      void programSeam.syncUp((x) => console.warn(x)).catch((e) => console.warn(`[programs] sync failed: ${e?.message ?? e}`))   // and every program built here
-      // and the code connectors this engine runs (its datasource manager's sources), for the platform to list beside the rest
-      connections.pull()      // and the project's connections: each bridge, settings and secrets, from the platform
-      void appDownload.sync() // and the project's app, as last published
-      // THE PROJECT'S PROFILE, delivered with the welcome. Adopted before warm-up builds any agent, so a box
-      // starts on its own configuration rather than adopting it a few seconds late and rebuilding.
-      if (m.payload.profile) receive(m.payload.profile, 'project profile')
-      reportConfig(ws)
-      settleProfile()
-      // Only claim READY after the self-check passes. The hub/DO can trust this signal to mean the engine
-      // can actually answer, not merely that a socket is open.
-      selfCheck().then((res) => {
-        if (ws !== hub || ws.readyState !== WebSocket.OPEN) return
-        if (res.ok) { console.log(`[ica] READY — ${res.detail}`); ws.send(JSON.stringify({ type: 'ready', instanceId: INSTANCE_ID, epoch: EPOCH, detail: res.detail })) }
-        else { console.error(`[ica] NOT READY — self-check failed: ${res.detail}`); ws.send(JSON.stringify({ type: 'not_ready', instanceId: INSTANCE_ID, detail: res.detail })) }
-      })
-      return
-    }
-    // A CHANGE PUSHED WHILE WE RUN. Adopted for the next session each agent builds — a turn already in flight
-    // keeps the session it started on, because interrupting a running question to change a model is a worse
-    // failure than applying the change a minute later.
-    if (t === 'config:update') {
-      const r = receive(m.payload.profile, `project profile v${m.payload.version}`)
-      if (r.ok) {
-        // The TABLE, not just a version number. A change arriving while the box runs is exactly when someone
-        // needs to see what it changed to, and the version alone sends them to a database to find out.
-        console.log(`[config] adopted v${m.payload.version} — agents rebuild on their next session`)
-        for (const line of describeConfig()) console.log(`[config] ${line}`)
-      }
-      reportConfig(ws)
-      return
-    }
-    if (t === 'session:synced') { sessionSync.onSynced(m.payload); return }
-    if (t === 'graph:batch' || t === 'graph:changed' || t === 'graph:written') { graphReplica.onMessage(m.payload); return }
-    if (t === 'connections:list' || t === 'connections:changed') { connections.onMessage(m.payload); return }
-    if (t === 'app:changed') { appDownload.onMessage(m.payload); return }
-    if (typeof t === 'string' && /^(dsi|job):/.test(t) && dsi.onMessage(m.payload)) return
-    if (t === 'access:resolved' || t === 'access:changed') { access.onMessage(m.payload); return }
-    if (t === 'fenced')     { console.log('[ica] fenced — a newer engine holds this role (obsolete instance)'); return }
-    if (t === 'superseded') { console.log('[ica] superseded by our own reconnection'); return }
-    if (t === 'evicted')    { console.log('[ica] evicted — a newer connection took the role'); return }
-    if (m.payload) await handle(m.payload, m.from)
+    if (process.env.ICA_TRACE_HUB) console.log(`[ica:trace] ← ${m.payload?.t ?? '(no t)'} from ${m.from?.type ?? '?'}/${m.from?.id ?? '?'}`)
+    // A part or a parcel pointer is the wire's: it is delivered whole to route() once complete (fetched beside the wire).
+    if (m.payload && wire.receive(m.payload, m.from)) return
+    await route(m.payload, m.from, ws)
   })
   ws.on('close', (code: number) => {
     stopBeat()

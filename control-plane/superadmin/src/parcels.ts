@@ -13,6 +13,12 @@
 //
 // The body is content-addressed, so the same answer sent twice is stored once, and a put whose bytes do not
 // hash to the name in the path is refused: the name is the proof of what is stored.
+//
+// ONE ROUTE FOR EVERY STORED THING A PROJECT KEEPS: GET /api/projects/<project>/objects/<kind>/<id>. A parcel (kind
+// parcel, id its hash) is read with its ticket, or by the project's engine, and written (PUT) by the engine or a member;
+// the other kinds — a program build, a source's bridge, a session's file — are read by the project's engine with its
+// key (they are written through their own doors, which decide what they mean). Every big body any end sends, in any
+// direction, is a parcel; nothing else on the wire is big.
 import { b64url } from './auth/tokens.js'
 import { LIMITS, keyOf as files, prefixOf, sha256Hex } from './files.js'
 export { sha256Hex }
@@ -117,9 +123,10 @@ export async function handleParcelRoute(o: {
   return new Response('method not allowed', { status: 405 })
 }
 
-/** The store a Durable Object hands the transport: it reads the bucket directly, no ticket, no HTTP — the DO is the platform. */
-export function bucketStore(bucket: R2Bucket | undefined, projectId: string): ParcelStore {
-  return {
+/** The store a Durable Object hands the transport: it reads the bucket directly, no ticket, no HTTP — the DO is the
+ *  platform. Given the platform's secret it also puts: a big body the platform sends goes beside the wire, ticketed. */
+export function bucketStore(bucket: R2Bucket | undefined, projectId: string, secret?: string): ParcelStore {
+  const store: ParcelStore = {
     get: async (parcel: Parcel) => {
       if (!bucket) throw new Error('no bucket bound')
       const obj = await getParcel(bucket, projectId, parcel.hash)
@@ -127,6 +134,47 @@ export function bucketStore(bucket: R2Bucket | undefined, projectId: string): Pa
       return obj.text()
     },
   }
+  if (bucket && secret) store.put = async (body: string) => {
+    const bytes = enc.encode(body)
+    return putParcel(bucket, secret, projectId, await sha256Hex(bytes.buffer as ArrayBuffer), bytes.buffer as ArrayBuffer)
+  }
+  return store
+}
+
+/** Where an object of a kind lives in the bucket, from its id — or null when the kind or id is not one. */
+export function objectKey(kind: string, projectId: string, id: string): string | null {
+  try {
+    if (kind === 'parcel') return keyOf(projectId, id)
+    if (kind === 'program') return files.program(projectId, id)
+    if (kind === 'bridge') return isHash(id) && /^[0-9a-f-]{36}$/.test(projectId) ? `bridge/${projectId}/${id}` : null
+    if (kind === 'attachment') { const [session, hash] = id.split('/'); return files.attachment(projectId, session ?? '', hash ?? '') }
+  } catch { /* not a well-formed id */ }
+  return null
+}
+
+/** The route for every stored thing (above). `isEngine` checks the bearer is the project's key; `isMember` that it is a
+ *  member's token or a key of the project (the worker's own checks). */
+export async function handleObjectRoute(o: {
+  request: Request; bucket: R2Bucket | undefined; secret: string | undefined; projectId: string; kind: string; id: string
+  isEngine: () => Promise<boolean>; isMember: () => Promise<boolean>; after?: (p: Promise<unknown>) => void
+}): Promise<Response> {
+  const { request, kind } = o
+  if (!o.bucket) return new Response('no bucket bound', { status: 500 })
+  if (kind === 'parcel') {
+    if (request.method === 'GET' && !new URL(request.url).searchParams.get('ticket') && await o.isEngine()) {
+      const obj = await getParcel(o.bucket, o.projectId, o.id)
+      return obj ? new Response(obj.body, { headers: { 'content-type': 'application/json', 'cache-control': 'private, no-store' } }) : new Response('no such parcel', { status: 404 })
+    }
+    return handleParcelRoute({ request, bucket: o.bucket, secret: o.secret, projectId: o.projectId, hash: o.id, after: o.after,
+      authorize: async () => (await o.isEngine()) || (await o.isMember()) })
+  }
+  if (request.method !== 'GET') return new Response('this kind is written through its own door', { status: 405 })
+  const key = objectKey(kind, o.projectId, o.id)
+  if (!key) return new Response(`there is no object kind "${kind}", or "${o.id}" is not one of its ids`, { status: 400 })
+  if (!(await o.isEngine())) return new Response("only the project's engine reads this", { status: 401 })
+  const obj = await o.bucket.get(key)
+  if (!obj) return new Response('no such object', { status: 404 })
+  return new Response(obj.body, { headers: { 'content-type': obj.httpMetadata?.contentType ?? 'application/octet-stream', 'content-length': String(obj.size), 'cache-control': 'private, no-store' } })
 }
 
 export { isParcelled }

@@ -13,11 +13,16 @@ const here = fileURLToPath(new URL('.', import.meta.url))
 const PID = '11111111-2222-3333-4444-555555555555'
 const harness = `
 import { routeSocket } from '../ws-route.ts'
+import { handleObjectRoute } from '../parcels.ts'
 export { ProjectDO } from '../project-do.ts'
 export { UserDO } from '../user-do.ts'
 export default { async fetch(req, env) {
   const u = new URL(req.url); const stub = env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}'))
   if (u.pathname.startsWith('/_ws/')) return routeSocket(req, env, '${PID}')
+  const obj = u.pathname.match(/^\\/api\\/projects\\/([^/]+)\\/objects\\/([a-z]+)\\/(.+)$/)
+  if (obj) return handleObjectRoute({ request: req, bucket: env.PACKAGES, secret: env.JWT_SECRET, projectId: obj[1], kind: obj[2], id: decodeURIComponent(obj[3]),
+    isEngine: async () => (await stub.fetch('https://do/verify-conn', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: (req.headers.get('authorization') || '').replace(/^bearer\\s+/i, '') }) })).ok,
+    isMember: async () => false })
   const fwd = new Request('http://do' + u.pathname.slice(3) + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return stub.fetch(fwd)
 } }`
 let mf: Miniflare
@@ -94,8 +99,8 @@ describe('connections', () => {
     const ub = await up.json() as any
     expect(ub).toMatchObject({ name: 'TOTALGROUP', changed: true })
     expect(await until('connections:changed')).toBeTruthy()
-    expect(await (await mf.dispatchFetch(`http://x/do/engine/bridges/${ub.bridge}`, { headers: { authorization: 'Bearer ek' } })).text()).toBe(code)
-    expect((await mf.dispatchFetch(`http://x/do/engine/bridges/${ub.bridge}`, { headers: { authorization: 'Bearer nope' } })).status).toBe(401)
+    expect(await (await mf.dispatchFetch(`http://x/api/projects/${PID}/objects/bridge/${ub.bridge}`, { headers: { authorization: 'Bearer ek' } })).text()).toBe(code)
+    expect((await mf.dispatchFetch(`http://x/api/projects/${PID}/objects/bridge/${ub.bridge}`, { headers: { authorization: 'Bearer nope' } })).status).toBe(401)
     ws.send(JSON.stringify({ type: 'connections:pull' }))
     expect((await until('connections:list', 2)).connections.find((c: any) => c.name === 'TOTALGROUP').bridge).toBe(ub.bridge)
     // the engine says how it runs: the platform's connection shows it ready
