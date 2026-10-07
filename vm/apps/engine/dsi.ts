@@ -51,7 +51,7 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
    *  is emptied here and pulled whole (its own items only); a source the platform no longer has is emptied. */
   async function reconcile(latest: number) {
     const there = await ask({ type: 'dsi:fingerprints' })
-    if (there.t !== 'dsi:fingerprints') throw new Error(there.reason ?? 'the platform did not give its fingerprints')
+    if (there.t !== 'dsi:fingerprints') throw new Error(`${there.reason ?? 'the platform did not give its fingerprints'} [reply ${JSON.stringify(there).slice(0, 300)}]`)
     const here = replicaItems(o.store)
     for (const s of new Set([...Object.keys(there.sources ?? {}), ...here.keys()])) {
       const want = there.sources?.[s], have = here.has(s) ? await fingerprintOf(here.get(s)!) : null
