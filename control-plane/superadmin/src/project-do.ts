@@ -45,7 +45,7 @@ import { projectDsi, DsiRefusal } from './dsi.js'
  *  proxy/seal.ts) and leaves only in these. */
 export const SECRET_PAYLOADS = new Set(['connections:list', 'connection:got'])
 import { projectJobs, JobRefusal, type Job } from './jobs.js'
-import { putObject, removeObjects, kindOfKey, projectOfKey as projectOfObject, prefixesOf, KINDS, type Ledger, type LedgerRow } from './storage.js'
+import { putObject, removeObjects, kindOfKey, projectOfKey as projectOfObject, KINDS, type Ledger, type LedgerRow } from './storage.js'
 import { keyOf as fileKeys } from './files.js'
 
 
@@ -1315,21 +1315,6 @@ export class ProjectDO extends DurableObject<Env> {
     const sql = this.ctx.storage.sql
     const body: any = request.method === 'GET' ? {} : await request.json().catch(() => ({}))
     if (path === '/storage/add' && request.method === 'POST') { try { for (const r of body.rows ?? []) this.ledgerAdd(r) } catch (e: any) { return this.j({ error: e.message }, 400) } return this.j({ ok: true }) }
-    // ONE-OFF (removed once run): objects stored before this ledger existed, recorded from the bucket's own listing.
-    if (path === '/storage/backfill' && request.method === 'POST') {
-      if (!can(this.capsOfRequest(request), 'project.manage')) return this.j({ error: 'needs project.manage' }, 403)
-      const bucket = (this.env as any).PACKAGES as R2Bucket
-      let seen = 0
-      for (const prefix of prefixesOf(this._pid)) {
-        let cursor: string | undefined
-        do {
-          const page = await bucket.list({ prefix, cursor })
-          for (const o of page.objects) { const kind = kindOfKey(o.key); if (kind) { this.ledgerAdd({ key: o.key, kind, bytes: o.size, by: null }); seen++ } }
-          cursor = page.truncated ? page.cursor : undefined
-        } while (cursor)
-      }
-      return this.j({ seen, recorded: Number((sql.exec('SELECT COUNT(*) AS n FROM stored_objects').toArray()[0] as any).n) })
-    }
     if (path === '/storage/forget' && request.method === 'POST') { for (const k of body.keys ?? []) sql.exec('DELETE FROM stored_objects WHERE key = ?', String(k)); return this.j({ ok: true }) }
     let actorH: any = null
     try { actorH = JSON.parse(request.headers.get('x-sa-actor') ?? 'null') } catch { /* none */ }
