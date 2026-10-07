@@ -50,7 +50,7 @@ async function engineAsk(msg: Record<string, unknown>) {
 describe('connections', () => {
   let shared = '', mine = ''
   it('forms are checked against their connector; a shared connection is an admin\'s to make', async () => {
-    expect((await admin('/connectors')).body.connectors.map((c: any) => c.id)).toEqual(['netsuite', 'code', 'sqlserver', 'postgres', 'github', 'mcp-server', 'rest-json'])
+    expect((await admin('/connectors')).body.connectors.map((c: any) => c.id)).toEqual(['netsuite', 'code', 'azure-sql', 'sqlserver', 'postgres', 'github', 'mcp-server', 'rest-json'])
     expect((await admin('/connections', 'POST', { connector: 'postgres', name: 'warehouse', values: { host: 'db', database: 'x' } })).body.error).toBe('User is required; Password is required')
     expect((await admin('/connections', 'POST', { connector: 'mcp-server', name: 'tools', values: { url: 'not a url' } })).body.error).toBe('Server URL is a URL (http or https)')
     expect((await ana('/connections', 'POST', { connector: 'postgres', name: 'warehouse', level: 'project', values: { host: 'db', database: 'x', user: 'u', password: 'p' } })).status).toBe(403)
