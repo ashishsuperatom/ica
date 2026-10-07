@@ -184,6 +184,7 @@ export class ProjectDO extends DurableObject<Env> {
   /** A key is in force when it is, and so is the key that made it — one of this project's, or an organisation's (asked
    *  of the OrgDO). A key whose maker key went holds nothing: it goes with it. */
   private async keyInForce(k: AgentKey, seen = new Set<string>()): Promise<boolean> {
+    if (!seen.size && !(await this.inItsOrganisation())) return false   // a removed project's keys hold nothing
     if (!this.agentKeys.live(k) || seen.has(k.id)) return false
     seen.add(k.id)
     if (!k.made_by_key) return true
@@ -195,6 +196,14 @@ export class ProjectDO extends DurableObject<Env> {
     }
     const parent = this.agentKeys.get(k.made_by_key)
     return !!parent && this.keyInForce(parent, seen)
+  }
+  /** Is this project still in force — not removed by its organisation? A project with no organisation has nothing to ask. */
+  private async inItsOrganisation(): Promise<boolean> {
+    const org = await this.orgId()
+    if (!org) return true
+    const removed: any = await this.env.ORG.get(this.env.ORG.idFromName(org)).fetch(new Request('http://do/projects?deleted=1')).then((x) => x.json()).catch(() => null)
+    if (!Array.isArray(removed)) return false   // cannot tell: refuse, never assume
+    return !removed.some((p: any) => p.id === this._pid)
   }
   /** For the worker: a project key's standing — in force, what it holds now, and the person it acts for. */
   private async keyAccess(request: Request): Promise<Response> {

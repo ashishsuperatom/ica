@@ -76,6 +76,14 @@ describe('one key tree, through the Worker', () => {
     expect((await at('/api/me', { headers: bearer(projKey) })).status).toBe(401)
   })
 
+  it('a removed project\'s keys hold nothing; restored, they hold again', async () => {
+    const del = await at('/api/projects', { method: 'DELETE', headers: bearer(orgKey), body: JSON.stringify({ id: project }) })
+    expect(del.status).toBe(200)
+    expect((await at(`/api/projects/${project}/me`, { headers: bearer(childKey) })).status).toBe(401)
+    expect((await at('/api/projects', { method: 'PUT', headers: bearer(orgKey), body: JSON.stringify({ id: project }) })).status).toBe(200)
+    expect((await at(`/api/projects/${project}/me`, { headers: bearer(childKey) })).status).toBe(200)
+  })
+
   it('when the organisation key goes, every key below it goes too', async () => {
     expect((await at(`/api/projects/${project}/me`, { headers: bearer(childKey) })).status).toBe(200)
     expect((await at(`/org/keys/${orgKeyId}`, { method: 'DELETE', headers: as('olga@x.io', ORG_ROLES.owner.capabilities) })).status).toBe(200)
