@@ -24,6 +24,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - The engine's index replica follows the platform by cursor (pulled whole if lost); find-schema and get-schema read it.
 - One job protocol for long work (job:start/beat/end, kind, lease, stage, doing, counts, stale after a minute), seen live by the project's admins.
 - Data sources carry kind, dialect, description, and shared or per-user keys (a person's own key kept sealed); updated in place (a secret left out is kept).
+- A data source's bridge goes in through the platform (sacli datasources bridge / --bridge): the SQL Server-protocol bridge template (SQL Server, Azure SQL, Microsoft Fabric — Entra service principal or SQL login); a source can say its metadata cannot count rows (cheapCounts: false), and the build then skips phase 2.
 - sacli datasources (list/show/create/update/remove/my-key; values from flags, a prefixed KEY=VALUE file, secrets read from files) and sacli dsi (stats/show --as-of/describe --by/enable/disable/build --tables/status --watch/snapshot).
 - Two live projects: Fusion5 (NetSuite through a SuiteQL bridge) and Total Group (Microsoft SQL Server).
 
