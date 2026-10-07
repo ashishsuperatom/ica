@@ -1360,6 +1360,26 @@ export class ProjectDO extends DurableObject<Env> {
       if (c.runs === 'code') this.sendToRole('code-engine', { t: 'connections:changed' })
       return this.j({ connection: this.connectionRows(who, admin).find((x: any) => x.id === m[1]) })
     }
+    // A source's bridge — the code its connector runs (a template's copy, written by a person or an agent, sent with sacli):
+    // kept by its hash in the bucket, the connection pointing at it; the engine downloads it and loads it.
+    const br = path.match(/^\/connections\/(con_[\w-]+)\/bridge$/)
+    if (br && request.method === 'PUT') {
+      const [r] = [...this.ctx.storage.sql.exec('SELECT * FROM connections WHERE id = ? AND removed_at IS NULL', br[1])] as any[]
+      if (!r) return this.j({ error: `there is no connection ${br[1]}` }, 404)
+      if (!admin) return this.j({ error: "a source's code is set by someone with project.data" }, 403)
+      if (connectorById(r.connector)?.runs !== 'code') return this.j({ error: `${r.name} runs no code of its own` }, 400)
+      const code = typeof body.code === 'string' ? body.code : ''
+      if (!code.trim() || code.length > 2_000_000) return this.j({ error: 'a bridge is the code of a module (at most 2 MB) exporting createBridge' }, 400)
+      if (!/export\s+(async\s+)?function\s+createBridge|export\s+(const|let)\s+createBridge/.test(code)) return this.j({ error: 'a bridge exports createBridge({ settings, secrets })' }, 400)
+      const bucket = (this.env as any).PACKAGES as R2Bucket | undefined
+      if (!bucket) return this.j({ error: 'no bucket to keep it in' }, 503)
+      const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code)))].map((x) => x.toString(16).padStart(2, '0')).join('')
+      await bucket.put(`bridge/${this._pid}/${hash}`, code)
+      this.ctx.storage.sql.exec('UPDATE connections SET bridge = ? WHERE id = ?', hash, br[1])
+      this.audit.record({ actor, via: 'ui', action: 'connection.bridge', target: br[1], outcome: 'ok', detail: { bridge: hash, bytes: code.length } })
+      if (r.bridge !== hash) this.sendToRole('code-engine', { t: 'connections:changed' })
+      return this.j({ bridge: hash, changed: r.bridge !== hash })
+    }
     // A person's own key for a source that reaches each person with their own (auth "per-user"): kept sealed, theirs only.
     const mine = path.match(/^\/connections\/(con_[\w-]+)\/my-key$/)
     if (mine) {

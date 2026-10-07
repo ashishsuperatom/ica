@@ -112,6 +112,8 @@ Capabilities are the names roles use (sacli api GET /api/me shows what this key 
   sacli datasources create <name> --connector <id> [values] [--kind sql] [--dialect mssql] [--description "…"] [--auth shared|per-user]
   sacli datasources update <name> [values] [--kind …] [--dialect …] [--description …] [--auth …]
   sacli datasources remove <name>
+  sacli datasources bridge <name> <file.mjs>      the code its connector runs (a template's copy, e.g. mssql.bridge.mjs);
+                                                  --bridge <file> on create or update does the same
   sacli datasources my-key <name> [values]        your own key, for a source that reaches each person with theirs
 
 Values — what the connector asks for (sacli api GET /api/projects/<id>/connectors lists each connector's fields):
@@ -192,7 +194,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   let hub: Hub | Conn | null = null
   try {
     // The command words come first; options may be anywhere.
-    const words = argv.filter((a, i) => !a.startsWith('-') && !(i > 0 && /^--(profile|key|hub|timeout|id|as-of|set|add|remove|call|param|act|to|block|session|rows|file|limit|column|project|columns|data|can|days|save-as|connector|secret|values-file|prefix|kind|dialect|description|auth|by|tables)$/.test(argv[i - 1])))
+    const words = argv.filter((a, i) => !a.startsWith('-') && !(i > 0 && /^--(profile|key|hub|timeout|id|as-of|set|add|remove|call|param|act|to|block|session|rows|file|limit|column|project|columns|data|can|days|save-as|connector|secret|values-file|prefix|kind|dialect|description|auth|by|tables|bridge)$/.test(argv[i - 1])))
     const [cmd, sub] = words
     const specific: ParseArgsConfig['options'] = cmd === 'session'
       ? { id: { type: 'string' }, 'as-of': { type: 'string' }, set: { type: 'string', multiple: true }, add: { type: 'string', multiple: true }, remove: { type: 'string', multiple: true },
@@ -200,7 +202,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'warehouse' ? { rows: { type: 'string' }, file: { type: 'string' }, limit: { type: 'string' }, column: { type: 'string', multiple: true }, project: { type: 'string' }, columns: { type: 'string' }, write: { type: 'boolean' }, q: { type: 'string' }, sort: { type: 'string' }, desc: { type: 'boolean' }, page: { type: 'string' }, size: { type: 'string' }, sql: { type: 'string' } }
       : cmd === 'ask' ? { session: { type: 'string' }, channel: { type: 'string' } } : cmd === 'use' ? { here: { type: 'boolean' } } : cmd === 'call' || cmd === 'api' ? { data: { type: 'string' } } : cmd === 'projects' ? { deleted: { type: 'boolean' } }
       : cmd === 'keys' ? { project: { type: 'string' }, can: { type: 'string' }, days: { type: 'string' }, never: { type: 'boolean' }, 'save-as': { type: 'string' } }
-      : cmd === 'datasources' ? { project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' } }
+      : cmd === 'datasources' ? { project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' }, bridge: { type: 'string' } }
       : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' } } : {}
     let parsed
     try { parsed = parseArgs({ args: argv, options: { ...GLOBAL, ...specific }, allowPositionals: true, strict: true }) }
@@ -336,6 +338,11 @@ export async function run(argv: string[], io: Io): Promise<number> {
         }
         return out
       }
+      const sendBridge = async (id: string, file: string) => {
+        let code: string
+        try { code = readFileSync(resolve(io.cwd ?? process.cwd(), file), 'utf8') } catch (e: any) { throw new CliError(`cannot read ${file}: ${e.message}`, 2) }
+        return await rest('PUT', `${base}/${id}/bridge`, { code }) as { bridge: string; changed: boolean }
+      }
       const about = { ...(o.kind ? { kind: o.kind } : {}), ...(o.dialect ? { dialect: o.dialect } : {}), ...(o.description ? { description: o.description } : {}), ...(o.auth ? { auth: o.auth } : {}) }
       const show = (c: any) => [`${c.name}  (${c.id})`, `connector    ${c.connector}${c.kind ? ` · ${c.kind}` : ''}${c.dialect ? ` · ${c.dialect}` : ''}`, `reached by   ${c.auth === 'per-user' ? "each person's own key" : 'one shared key'}`,
         `runnable     ${c.runnable ? 'yes' : 'no'}`, ...(c.description ? [`description  ${c.description}`] : []), `settings     ${JSON.stringify(c.settings)}`].join('\n')
@@ -346,9 +353,16 @@ export async function run(argv: string[], io: Io): Promise<number> {
       if (sub === 'create') {
         if (!o.connector) throw new CliError('which connector? --connector <id> (sacli api GET /api/projects/<id>/connectors)', 2)
         const r = await rest('POST', base, { connector: o.connector, name, values: await values(String(o.connector)), ...about })
-        out(`made data source ${name} (${r.connection.id})`, r.connection); return 0
+        const b = o.bridge ? await sendBridge(r.connection.id, String(o.bridge)) : null
+        out(`made data source ${name} (${r.connection.id})${b ? ` with its bridge ${b.bridge.slice(0, 12)}` : ''}`, { ...r.connection, ...(b ? { bridge: b.bridge } : {}) }); return 0
       }
-      if (sub === 'update') { const c = await named(name); const r = await rest('PATCH', `${base}/${c.id}`, { values: await values(c.connector), ...about }); out(`updated ${name}`, r.connection); return 0 }
+      if (sub === 'update') {
+        const c = await named(name)
+        const r = await rest('PATCH', `${base}/${c.id}`, { values: await values(c.connector), ...about })
+        const b = o.bridge ? await sendBridge(c.id, String(o.bridge)) : null
+        out(`updated ${name}${b ? (b.changed ? ` and its bridge (${b.bridge.slice(0, 12)})` : ' (its bridge unchanged)') : ''}`, r.connection); return 0
+      }
+      if (sub === 'bridge') { const c = await named(name); if (!pos[3]) throw new CliError(HELP.datasources, 2); const b = await sendBridge(c.id, pos[3]); out(b.changed ? `${name} runs bridge ${b.bridge.slice(0, 12)} now` : `${name} already runs that bridge`, b); return 0 }
       if (sub === 'remove') { const c = await named(name); await rest('DELETE', `${base}/${c.id}`); out(`removed ${name}`, { removed: c.id }); return 0 }
       if (sub === 'my-key') { const c = await named(name); await rest('PUT', `${base}/${c.id}/my-key`, { values: await values(c.connector) }); out(`your key for ${name} is kept, sealed`, { saved: true }); return 0 }
       throw new CliError(HELP.datasources, 2)

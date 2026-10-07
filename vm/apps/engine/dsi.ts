@@ -112,7 +112,7 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
 
         // PHASE 1 — the tables, then each table's fields.
         progress({ stage: `phase 1 · ${s.id}`, doing: 'listing its tables' })
-        let tables: string[], complete = false
+        let tables: string[], complete = false, cheapCounts = true
         if (targeted) tables = targeted[s.id] ?? []
         else {
           let catalog: string[] | undefined
@@ -120,6 +120,7 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
             const j: any = await (await fetch(`${o.manager}/introspect`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: s.id }) })).json()
             const t = (j.tables || []).map((x: any) => String(x?.name ?? x ?? '')).filter(Boolean)
             if (t.length) catalog = t
+            if (j.cheapCounts === false) cheapCounts = false   // the source says its metadata's row counts cannot be trusted
           } catch { /* no catalog: the kind's own knowledge */ }
           try { tables = await indexer.listContainers(s.id, raw, { catalogTables: catalog }); complete = !!catalog || s.dialect === 'mssql' }
           catch (e: any) { log(`[dsi] ${s.id}: its tables could not be listed — ${e?.message ?? e}`); failedSources++; state.counts.sources.done++; continue }
@@ -151,7 +152,7 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
         log(`[dsi] ${s.id}: phase 1 read ${ok}${failed ? `, ${failed} could not be read (first: ${firstError})` : ''}`)
 
         // PHASE 2 — row counts, only where the connector counts cheaply; what it could not count stays as it was.
-        if (indexer.rowCounts && !targeted && ok + done.size > 0) {
+        if (indexer.rowCounts && cheapCounts && !targeted && ok + done.size > 0) {
           progress({ stage: `phase 2 · ${s.id}`, doing: 'counting rows' })
           try { o.send({ type: 'dsi:rows', source: s.id, counts: await indexer.rowCounts(s.id, raw) }); o.send({ type: 'dsi:finish', source: s.id, phase: 2 }) }
           catch (e: any) { log(`[dsi] ${s.id}: rows not counted — ${e?.message ?? e}`) }

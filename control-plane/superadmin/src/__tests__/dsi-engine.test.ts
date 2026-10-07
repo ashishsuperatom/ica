@@ -40,6 +40,8 @@ const jwt = (claims: Record<string, unknown>) => {
 const schema: Record<string, string[]> = { orders: ['id', 'total'], customer: ['id', 'name'], lines: ['order_id', 'qty'], broken: ['x'] }
 const unreadable = new Set(['broken'])
 let reads: string[] = []
+let cheapCounts = true      // what the source says of its metadata's row counts
+let counted = 0             // how often the source was asked to count rows
 let stopAfter = Infinity   // after reading this many tables the source hangs: the engine is stuck, and is replaced
 INDEXERS.fake = {
   async listContainers() { return Object.keys(schema) },
@@ -49,7 +51,7 @@ INDEXERS.fake = {
     if (unreadable.has(t)) throw new Error('permission denied')
     return (schema[t] ?? []).map((f) => ({ key: `${source}.${t}.${f}`, source, container: t, field: f, type: 'int' }))
   },
-  async rowCounts() { return { orders: 10, customer: 0, lines: 5 } },
+  async rowCounts() { counted++; return { orders: 10, customer: 0, lines: 5 } },
 }
 
 async function socket(hello: Record<string, unknown>) {
@@ -84,7 +86,7 @@ beforeAll(async () => {
     req.on('data', (c) => (body += c)).on('end', () => {
       res.setHeader('content-type', 'application/json')
       if (req.url === '/sources') return res.end(JSON.stringify({ sources: [{ id: 'SHOP', kind: 'sql', dialect: 'fake', ready: true }] }))
-      if (req.url === '/introspect') return res.end(JSON.stringify({ tables: Object.keys(schema).map((name) => ({ name })) }))
+      if (req.url === '/introspect') return res.end(JSON.stringify({ tables: Object.keys(schema).map((name) => ({ name })), ...(cheapCounts ? {} : { cheapCounts: false }) }))
       res.end(JSON.stringify({ rows: [] }))
     })
   }).listen(0)
@@ -155,6 +157,20 @@ describe('each source\'s index, end to end', () => {
     expect(reads).toEqual(['orders'])
     const orders = (await admin.ask({ t: 'dsi:show', source: 'SHOP', table: 'orders' })).items
     expect(orders.map((i: any) => `${i.field}:${i.gone ? 'gone' : 'here'}`)).toEqual([':here', 'amount:here', 'id:here', 'total:gone'])
+  })
+
+  it('a source whose metadata cannot count rows (cheapCounts: false) is never given phase 2: nothing is disabled on its word', async () => {
+    cheapCounts = false
+    const before = counted
+    expect(before).toBeGreaterThan(0)                                        // the earlier builds did count
+    await admin.ask({ t: 'dsi:enable', source: 'SHOP', table: 'customer', enabled: true })   // a person's choice, now theirs
+    a.logs.length = 0
+    await admin.until((m) => m.payload?.t === 'job:update' && m.payload.job.state !== 'running')
+    await admin.ask({ t: 'dsi:build', fresh: true })
+    await until(() => a.logs.some((l) => /build done/.test(l)))
+    expect(counted).toBe(before)                                             // never asked to count
+    expect(a.logs.some((l) => /SHOP: phase 1 read 3/.test(l))).toBe(true)   // phase 1 ran whole (fresh): broken still not read
+    cheapCounts = true
   })
 
   it('a lost replica is pulled again whole; a second engine is told the build running and starts none', async () => {

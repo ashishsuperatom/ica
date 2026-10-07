@@ -107,7 +107,8 @@ const mssql: TypeIndexer = {
   // are omitted (no cheap definitive count) so they stay enabled (unknown, never wrongly disabled).
   async rowCounts(source, query) {
     const out: Record<string, number> = {}
-    try { for (const r of await query(source, `SELECT t.name tbl, SUM(p.rows) n FROM sys.tables t JOIN sys.partitions p ON p.object_id=t.object_id AND p.index_id IN (0,1) GROUP BY t.name`)) out[trim(r.tbl)] = Number(r.n) || 0 } catch {}
+    // A count the metadata does not have (null) is unknown — never 0, which would disable a table that has rows.
+    try { for (const r of await query(source, `SELECT t.name tbl, SUM(p.rows) n FROM sys.tables t JOIN sys.partitions p ON p.object_id=t.object_id AND p.index_id IN (0,1) GROUP BY t.name`)) if (r.n !== null && r.n !== undefined && Number.isFinite(Number(r.n))) out[trim(r.tbl)] = Number(r.n) } catch {}
     return out
   },
 }

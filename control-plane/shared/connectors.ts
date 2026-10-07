@@ -34,6 +34,15 @@ export const CONNECTORS: Connector[] = [
   // whatever its bridge reads (createBridge({ settings, secrets })), given as two maps.
   { id: 'code', runs: 'code', title: 'Custom source (code)', kind: 'sql', description: 'A source reached by a bridge written for it; its settings and secrets are what the bridge reads.', levels: ['project'], bridge: 'its own',
     fields: [] },
+  // SQL Server's protocol in the cloud, signing in as an Entra service principal (the bridge template mssql.bridge.mjs).
+  { id: 'azure-sql', runs: 'code', title: 'Microsoft Fabric / Azure SQL', kind: 'sql', description: 'A Microsoft Fabric warehouse or SQL endpoint, or an Azure SQL database, read with an Entra service principal.', levels: ['project'], bridge: 'mssql',
+    fields: [
+      { name: 'server', label: 'Server', type: 'text', required: true, placeholder: 'xxxx.datawarehouse.fabric.microsoft.com' },
+      { name: 'database', label: 'Database', type: 'text', required: true },
+      { name: 'tenantId', label: 'Tenant ID', type: 'text', required: true },
+      { name: 'clientId', label: 'Client ID', type: 'text', required: true },
+      { name: 'clientSecret', label: 'Client secret', type: 'secret', required: true },
+    ] },
   { id: 'sqlserver', runs: 'code', title: 'Microsoft SQL Server', kind: 'sql', description: 'A SQL Server database, read-only.', levels: ['project', 'user'], bridge: null,
     fields: [
       { name: 'host', label: 'Host', type: 'text', required: true }, { name: 'port', label: 'Port', type: 'number', placeholder: '1433' },
