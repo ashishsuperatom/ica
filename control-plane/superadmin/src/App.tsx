@@ -21,7 +21,7 @@ import { AnalystConsole } from './AnalystConsole'
 import { useSession, useUser, useClerk, SignIn } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
-import { AppShell, RailSidebar, NavList, type RailPlace, UserProfile, MenuItem, MenuRule, Search, useSearchKey, type SearchItem, ConnectionStatus, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
+import { AppShell, RailSidebar, NavList, type RailPlace, UserProfile, MenuItem, MenuRule, Search, useSearchKey, type SearchItem, ConnectionStatus, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, SourceHub, SourceTree, type HubSource, type TreeTable, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Toolbar, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
 import '@superatom/ui/design.css'
 import { AdminContext, ADMIN_OWN_BLOCKS } from './AdminBlocks'
 
@@ -1042,61 +1042,149 @@ function AccessPanel({ projectId, orgId, api, token }: { projectId: string; orgI
   return <ProjectAccessPanel projectId={projectId} api={api} orgApi={orgId ? orgApi : null} />
 }
 
-// ── Each source's index (per project) ───────────────────────────────────────
-// Held by the platform (dsi.ts), built where each source's connector runs: each source's tables and fields, how far its
-// builds got, and the build running now (one at a time) with its stage and counts, as its heartbeat reports them.
+// ── Data sources and their index (per project) ──────────────────────────────
+// Where the project's data comes from, and what the index holds of each (held by the platform, dsi.ts; built where each
+// source's connector runs). The overview: the project at the centre and every source branching out, each with its state.
+// A source opened is a workspace: its actions (build, resume, start over, read again what could not be read), its tables
+// as a tree revealed a step at a time (a table or a field described, enabled or disabled, a table read again), and what
+// its builds could not read, with why. The whole index arrives once (dsi:snapshot, a parcel when big) and changes are
+// applied here as the platform confirms them.
 type DsiPhase = { phase: number; planned: number; done: number; failed: number; complete: boolean; plannedAt: string; finishedAt: string | null }
 type DsiSource = { source: string; tables: number; fields: number; tablesDisabled: number; fieldsDisabled: number; tablesGone: number; phases: DsiPhase[] }
 type DsiJob = { id: string; state: string; stage: string | null; doing: string | null; counts: any; detail: string | null; startedAt: string; beatAt: string }
-function IndexPanel({ hub }: { hub: ReturnType<typeof useProjectHub> }) {
-  const [sources, setSources] = useState<DsiSource[] | null>(null)
+type SnapItem = { description?: string; descSource?: string | null; descHuman?: string | null; descAi?: string | null; enabled: boolean; gone: boolean }
+type SnapTable = SnapItem & { table: string; rows?: number | null; fields: (SnapItem & { field: string; type?: string | null; key?: boolean | null; optional?: boolean | null; references?: string | null })[] }
+type Snapshot = { cursor: number; sources: { source: string; tables: SnapTable[] }[] }
+type Failure = { table: string; phase: number; error: string | null; at: string }
+const fmtWhen = (iso?: string | null) => (iso ? new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '')
+
+function DataSourcesPanel({ hub, api, projectId }: { hub: ReturnType<typeof useProjectHub>; api: (p: string, i?: RequestInit) => Promise<Response>; projectId: string }) {
+  const [snap, setSnap] = useState<Snapshot | null>(null)
+  const [stats, setStats] = useState<DsiSource[]>([])
+  const [conns, setConns] = useState<any[]>([])
   const [job, setJob] = useState<DsiJob | null>(null)
   const [err, setErr] = useState('')
-  const load = useCallback(() => {
-    if (hub.status !== 'live') return
-    hub.call({ t: 'dsi:stats' }).then((r: any) => { if (r.reason) setErr(r.reason); else { setErr(''); setSources(r.sources ?? []); setJob(r.running ?? null) } }).catch((e: any) => setErr(e.message))
-  }, [hub])
-  useEffect(load, [load, hub.status])
+  const [chosen, setChosen] = useState<string | null>(null)
+  const live = hub.status === 'live'
+  const loadStats = useCallback(() => {
+    if (!live) return
+    hub.call({ t: 'dsi:stats' }).then((r: any) => { if (r.reason) setErr(r.reason); else { setStats(r.sources ?? []); setJob(r.running ?? null) } }).catch((e: any) => setErr(e.message))
+  }, [hub, live])
+  const loadSnap = useCallback(() => {
+    if (!live) return
+    hub.call({ t: 'dsi:snapshot' }).then((r: any) => { if (r.reason || r.parcelError) setErr(r.reason ?? r.parcelError); else setSnap({ cursor: r.cursor, sources: r.sources ?? [] }) }).catch((e: any) => setErr(e.message))
+  }, [hub, live])
+  useEffect(() => { loadStats(); loadSnap() }, [loadStats, loadSnap])
+  useEffect(() => { api(`/projects/${projectId}/connections`).then((r) => (r.ok ? r.json() : { connections: [] })).then((d: any) => setConns((d.connections ?? []).filter((c: any) => c.runs === 'code' && c.level === 'project'))).catch(() => {}) }, [api, projectId])
   useEffect(() => hub.subscribe((m: any) => {
     if (m?.t !== 'job:update' || !String(m.job?.kind ?? '').startsWith('dsi')) return
     setJob(m.job)
-    if (m.job.state !== 'running') load()
-  }), [hub, load])
-  const build = (fresh: boolean) => {
-    hub.call({ t: 'dsi:build', ...(fresh ? { fresh: true } : {}) }).then((r: any) => { if (r.reason) setErr(r.reason); else if (r.running) setJob(r.running) }).catch((e: any) => setErr(e.message))
-  }
+    if (m.job.state !== 'running') { loadStats(); loadSnap() }
+  }), [hub, loadStats, loadSnap])
+
+  // Every source the project has (its connections) and every one the index holds, once.
+  const names = [...new Set([...conns.map((c) => String(c.name)), ...stats.map((s) => s.source), ...(snap?.sources ?? []).map((s) => s.source)])].sort()
   const running = job?.state === 'running'
-  const c = job?.counts ?? {}
+  const stateOf = (name: string): { state: StatusState; label: string } => {
+    const st = stats.find((s) => s.source === name), p1 = st?.phases.find((p) => p.phase === 1), c = conns.find((x) => x.name === name)
+    if (running && String(job?.stage ?? '').includes(name)) return { state: 'running', label: 'indexing' }
+    if (c && !c.runnable) return { state: 'critical', label: 'not reachable' }
+    if (!p1) return { state: 'neutral', label: 'not indexed yet' }
+    if (!p1.finishedAt) return { state: 'attention', label: 'build unfinished' }
+    if (p1.failed) return { state: 'attention', label: `${p1.failed} not read` }
+    return { state: 'ok', label: 'indexed' }
+  }
+  const sources: HubSource[] = names.map((name) => {
+    const st = stats.find((s) => s.source === name), c = conns.find((x) => x.name === name), s = stateOf(name)
+    return { key: name, title: name, meta: [c?.dialect ?? c?.kind, st ? `${st.fields.toLocaleString()} fields` : ''].filter(Boolean).join(' · '), count: st ? `${st.tables.toLocaleString()} tables` : undefined, state: s.state, stateLabel: s.label }
+  })
+  const totals = stats.reduce((a, s) => ({ t: a.t + s.tables, f: a.f + s.fields }), { t: 0, f: 0 })
+
+  const build = (p: Record<string, unknown>) => hub.call({ t: 'dsi:build', ...p }).then((r: any) => { if (r.reason) setErr(r.reason); else if (r.running) setJob(r.running); else setErr('') }).catch((e: any) => setErr(e.message))
   return (
-    <>
-      <SectionCard icon="lucide:database-zap" title="Build" subtitle="Reads each connected source's tables and fields; resumes where it stopped"
-        actions={<>
-          <button className="sa-btn" disabled={running || hub.status !== 'live'} onClick={() => build(true)}>Start over</button>
-          <button className="sa-btn sa-btn--primary" disabled={running || hub.status !== 'live'} onClick={() => build(false)}>{running ? 'Building…' : 'Build / resume'}</button>
-        </>}>
-        <div className="sa-section__body sa-stack">
-          {err && <Notice state="critical">{err}</Notice>}
-          {hub.status !== 'live' && <Notice state="attention">Not connected.</Notice>}
-          {job && <Notice state={job.state === 'failed' || job.state === 'stale' ? 'critical' : running ? 'attention' : 'ok'}>
-            <span><strong>{running ? job.stage ?? 'Building' : `Last build ${job.state}`}</strong>{running && job.doing ? ` — ${job.doing}` : ''}
-              {c.tables ? ` · ${c.tables.done ?? 0} of ${c.tables.total ?? 0} tables${c.tables.failed ? ` (${c.tables.failed} not read)` : ''} · ${c.fields ?? 0} fields` : ''}
-              {c.sources ? ` · source ${Math.min((c.sources.done ?? 0) + (running ? 1 : 0), c.sources.total ?? 0)} of ${c.sources.total ?? 0}` : ''}
-              {!running && job.detail ? ` — ${job.detail}` : ''}</span>
-          </Notice>}
+    <div className="sa-stack sa-stack--4">
+      {err && <Notice state="critical">{err}</Notice>}
+      {!live && <Notice state="attention">Not connected to the project — the index shows once it is.</Notice>}
+      {job && <Notice state={job.state === 'failed' || job.state === 'stale' ? 'critical' : running ? 'attention' : 'ok'}
+        action={running ? undefined : <button className="sa-btn" disabled={!live} onClick={() => build({})}>Build / resume</button>}>
+        <JobLine job={job} />
+      </Notice>}
+      <SectionCard icon="lucide:git-fork" title="Where the data comes from" note={names.length ? `${names.length}` : undefined}
+        subtitle={totals.t ? `${totals.t.toLocaleString()} tables · ${totals.f.toLocaleString()} fields in the index` : 'Each source the project reads, and what its index holds'}>
+        <div className="sa-section__body">
+          <SourceHub centre={{ title: 'This project', subtitle: snap ? `index at ${snap.cursor.toLocaleString()} changes` : undefined }} sources={sources} selected={chosen}
+            onSelect={(k) => setChosen((c) => (c === k ? null : k))} empty="No data source yet — connect one, and its index is built here." />
         </div>
       </SectionCard>
-      <SectionCard icon="lucide:database" title="Sources" note={sources ? `${sources.length}` : undefined}>
-        <RecordList rows={sources} keyOf={(s) => s.source} empty="No source has been indexed yet." columns={[
-          { key: 'source', label: 'Source' },
-          { key: 'tables', label: 'Tables', align: 'end', render: (s) => s.tables.toLocaleString() },
-          { key: 'fields', label: 'Fields', align: 'end', render: (s) => s.fields.toLocaleString() },
-          { key: 'disabled', label: 'Disabled', align: 'end', render: (s) => s.tablesDisabled || s.fieldsDisabled ? `${s.tablesDisabled} tables · ${s.fieldsDisabled} fields` : <span className="sa-faint">0</span> },
-          { key: 'gone', label: 'Gone', align: 'end', render: (s) => s.tablesGone ? String(s.tablesGone) : <span className="sa-faint">0</span> },
-          { key: 'build', label: 'Last build', wrap: true, render: (s) => { const p = s.phases.find((x) => x.phase === 1); return !p ? <span className="sa-faint">never</span>
-            : <span className="sa-row sa-row--tight"><Status state={p.finishedAt ? (p.failed ? 'attention' : 'ok') : 'critical'}>{p.finishedAt ? 'finished' : 'unfinished'}</Status>{`${p.done} of ${p.planned}${p.failed ? `, ${p.failed} not read` : ''}`}</span> } },
+      {chosen && <SourceWorkspace key={chosen} name={chosen} hub={hub} snap={snap} setSnap={setSnap} stats={stats.find((s) => s.source === chosen)} conn={conns.find((c) => c.name === chosen)}
+        state={stateOf(chosen)} running={running} build={build} onClose={() => setChosen(null)} />}
+    </div>
+  )
+}
+
+function JobLine({ job }: { job: DsiJob }) {
+  const c = job.counts ?? {}, running = job.state === 'running'
+  return <span><strong>{running ? job.stage ?? 'Building' : `Last build ${job.state}`}</strong>{running && job.doing ? ` — ${job.doing}` : ''}
+    {c.tables ? ` · ${c.tables.done ?? 0} of ${c.tables.total ?? 0} tables${c.tables.failed ? ` (${c.tables.failed} not read)` : ''} · ${(c.fields ?? 0).toLocaleString()} fields` : ''}
+    {c.sources ? ` · source ${Math.min((c.sources.done ?? 0) + (running ? 1 : 0), c.sources.total ?? 0)} of ${c.sources.total ?? 0}` : ''}
+    {!running && job.detail ? ` — ${job.detail}` : ''}{!running ? <span className="sa-muted"> · {fmtWhen(job.beatAt)}</span> : null}</span>
+}
+
+function SourceWorkspace({ name, hub, snap, setSnap, stats, conn, state, running, build, onClose }: {
+  name: string; hub: ReturnType<typeof useProjectHub>; snap: Snapshot | null; setSnap: (f: (s: Snapshot | null) => Snapshot | null) => void
+  stats?: DsiSource; conn?: any; state: { state: StatusState; label: string }; running: boolean; build: (p: Record<string, unknown>) => void; onClose: () => void
+}) {
+  const [tab, setTab] = useState<'tables' | 'failed'>('tables')
+  const [failures, setFailures] = useState<Failure[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  useEffect(() => { hub.call({ t: 'dsi:failures', source: name }).then((r: any) => setFailures(r.failures ?? [])).catch(() => setFailures([])) }, [hub, name, stats?.phases.find((p) => p.phase === 1)?.finishedAt])
+  const src = snap?.sources.find((s) => s.source === name)
+  const tables: TreeTable[] = (src?.tables ?? []).map((t) => ({ name: t.table, rows: t.rows ?? null, description: t.description, descSource: t.descSource, descHuman: t.descHuman, descAi: t.descAi, enabled: t.enabled, gone: t.gone,
+    fields: t.fields.map((f) => ({ name: f.field, type: f.type, key: f.key, optional: f.optional, references: f.references, description: f.description, descSource: f.descSource, descHuman: f.descHuman, descAi: f.descAi, enabled: f.enabled, gone: f.gone })) }))
+  // What the platform confirmed, put into the index as shown — no reload.
+  const apply = (item: any) => setSnap((s) => s && ({ ...s, sources: s.sources.map((x) => x.source !== item.source ? x : { ...x, tables: x.tables.map((t) => {
+    if (t.table !== item.table) return t
+    const pick = { descSource: item.descSource, descHuman: item.descHuman, descAi: item.descAi, enabled: item.enabled, gone: item.gone }
+    return item.field ? { ...t, fields: t.fields.map((f) => (f.field === item.field ? { ...f, ...pick } : f)) } : { ...t, ...pick }
+  }) }) }))
+  const act = (payload: Record<string, unknown>) => { setBusy(true); setErr(''); hub.call(payload).then((r: any) => { if (r.reason) setErr(r.reason); else if (r.item) apply(r.item) }).catch((e: any) => setErr(e.message)).finally(() => setBusy(false)) }
+  const p1 = stats?.phases.find((p) => p.phase === 1)
+  return (
+    <SectionCard icon="lucide:database" title={name} subtitle={[conn?.description, conn?.dialect ?? conn?.kind].filter(Boolean)[0] ? String(conn?.description ?? conn?.dialect ?? conn?.kind).slice(0, 160) : undefined}
+      note={state.label}
+      actions={<>
+        <button className="sa-btn" disabled={running} onClick={() => build({ sources: [name] })} title="Read what is not read yet; nothing read twice">Build / resume</button>
+        <button className="sa-btn" disabled={running} onClick={() => build({ sources: [name], fresh: true })} title="Read every table again from the start">Start over</button>
+        <button className="sa-btn sa-btn--link" onClick={onClose}>Close</button>
+      </>}>
+      <div className="sa-section__body sa-stack">
+        {err && <Notice state="critical">{err}</Notice>}
+        <Receipt items={[
+          ['Index', stats ? `${stats.tables.toLocaleString()} tables · ${stats.fields.toLocaleString()} fields` : 'not built yet'],
+          ['Disabled', stats ? `${stats.tablesDisabled} tables · ${stats.fieldsDisabled} fields` : '—'],
+          ['Gone from the source', stats ? `${stats.tablesGone} tables` : '—'],
+          ['Last build', p1 ? `${p1.finishedAt ? `finished ${fmtWhen(p1.finishedAt)}` : `unfinished (${p1.done} of ${p1.planned})`}${p1.failed ? ` · ${p1.failed} not read` : ''}` : 'never'],
+          ['Reached', conn ? (conn.runnable ? 'ready' : 'not reachable now') : 'not a connection of this project'],
         ]} />
-      </SectionCard>
-    </>
+        <Tabs value={tab} onChange={setTab} items={[{ key: 'tables', label: 'Tables', count: tables.length }, { key: 'failed', label: 'Not read', count: failures?.length ?? 0 }]} />
+        {tab === 'tables' && (snap ? <SourceTree title={name} subtitle={conn?.dialect ?? conn?.kind} tables={tables} busy={busy}
+          onEnable={(table, field, enabled) => act({ t: 'dsi:enable', source: name, table, ...(field ? { field } : {}), enabled })}
+          onDescribe={(table, field, text) => act({ t: 'dsi:describe', source: name, table, ...(field ? { field } : {}), text, by: 'human' })}
+          onReread={running ? undefined : (table) => build({ tables: { [name]: [table] } })} /> : <Notice>Loading the index…</Notice>)}
+        {tab === 'failed' && (
+          <div className="sa-stack">
+            {!!failures?.length && <Toolbar end={<button className="sa-btn sa-btn--primary" disabled={running} onClick={() => build({ tables: { [name]: failures.map((f) => f.table) } })}>Read these {failures.length} again</button>}>
+              <span className="sa-muted">Tables the builds could not read — never counted as empty; the next build tries them again.</span></Toolbar>}
+            <RecordList rows={failures} keyOf={(f) => f.table} empty="Every table of this source was read." pageSize={100} search={(f) => `${f.table} ${f.error ?? ''}`} searchLabel="Find a table or a reason…" columns={[
+              { key: 'table', label: 'Table', render: (f) => <Code>{f.table}</Code> },
+              { key: 'error', label: 'Why', wrap: true, render: (f) => f.error ?? '—' },
+              { key: 'at', label: 'When', render: (f) => <span className="sa-muted">{fmtWhen(f.at)}</span> },
+            ]} />
+          </div>
+        )}
+      </div>
+    </SectionCard>
   )
 }
 
@@ -1551,7 +1639,7 @@ function ProjectDetailPage() {
 
       {view === 'grounding' && <GroundingConsole hub={hub} />}
 
-      {view === 'index' && <IndexPanel hub={hub} />}
+      {view === 'index' && <DataSourcesPanel hub={hub} api={api} projectId={projectId ?? ''} />}
       {view === 'access' && <AccessPanel projectId={projectId!} orgId={orgId ?? status?.orgId ?? null} api={api} token={token} />}
       {view === 'channels' && <ChannelsPanel projectId={projectId!} api={api} />}
     </Shell>

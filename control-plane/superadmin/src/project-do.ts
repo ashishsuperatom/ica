@@ -1964,7 +1964,7 @@ export class ProjectDO extends DurableObject<Env> {
       this.ctx.storage.sql.exec('INSERT INTO view_events (at, who, agent, kind, detail) VALUES (?, ?, ?, ?, ?)', new Date().toISOString(), this.principalOf(sender), String(pl.agent ?? ''), pl.t === 'view:open' ? 'open' : 'step', control.slice(0, 200))
     }
     // ── Each source's index, and long work: read and changed here (the hub checked what each message needs) ──
-    if (typeof pl.t === 'string' && /^(dsi:(show|stats|describe|enable|build|snapshot)|job:(list|get))$/.test(pl.t) && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
+    if (typeof pl.t === 'string' && /^(dsi:(show|stats|describe|enable|build|snapshot|failures)|job:(list|get))$/.test(pl.t) && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
       const who = this.principalOf(sender)
       if (!who) { hubReply({ t: 'dsi:refused', reason: 'who is asking is not known', reqId: pl.reqId }); return }
       const actor = sender.type === 'agent' ? { kind: 'agent' as const, id: who } : { kind: 'user' as const, id: who, ...(sender.email ? { email: sender.email } : {}) }
@@ -1973,6 +1973,7 @@ export class ProjectDO extends DurableObject<Env> {
         switch (pl.t) {
           case 'dsi:show': hubReply({ t: 'dsi:items', items: this.dsi().show(pl), reqId: pl.reqId }); break
           case 'dsi:stats': hubReply({ t: 'dsi:stats', ...this.dsi().stats(), running: this.jobs().running('dsi'), reqId: pl.reqId }); break
+          case 'dsi:failures': hubReply({ t: 'dsi:failures', source: pl.source, failures: this.dsi().failures(pl), reqId: pl.reqId }); break
           case 'dsi:snapshot': hubReply({ t: 'dsi:snapshot', cursor: this.dsi().cursor(), at: new Date().toISOString(), sources: this.dsi().document(), reqId: pl.reqId }); break
           case 'dsi:describe': case 'dsi:enable': {
             const item = pl.t === 'dsi:describe' ? this.dsi().describe(pl, sender.email ?? who) : this.dsi().enable(pl, sender.email ?? who)

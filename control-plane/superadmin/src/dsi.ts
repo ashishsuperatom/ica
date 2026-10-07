@@ -18,6 +18,7 @@
 //   dsi:show { source?, table?, asOf? } · dsi:stats · dsi:describe { source, table, field?, text, by: human|ai }
 //   dsi:enable { source, table, field?, enabled } · dsi:build { sources?, tables?, fresh? } (asked of the engine)
 //   dsi:snapshot → the whole current index as one document (a screen downloads it; it travels as a parcel)
+//   dsi:failures { source } → the tables its builds could not read, and why
 
 type Storage = DurableObjectStorage
 import { fingerprintOf } from '../../../vm/packages/datasource-index/src/fingerprint.js'
@@ -220,6 +221,13 @@ export function projectDsi(storage: Storage) {
       for (const p of plans) (bySource.get(p.source) ?? bySource.set(p.source, { source: p.source, tables: 0, fields: 0, tablesDisabled: 0, fieldsDisabled: 0, tablesGone: 0, phases: [] }).get(p.source)).phases.push({
         phase: Number(p.phase), planned: Number(p.tables), done: Number(p.done), failed: Number(p.failed), complete: !!p.complete, plannedAt: p.planned_at, finishedAt: p.finished_at ?? null })
       return { cursor: Number([...sql.exec('SELECT MAX(seq) AS v FROM dsi_log')][0]?.v ?? 0), sources: [...bySource.values()] }
+    },
+
+    /** The tables of a source its last builds could not read, with why (retried by the next build, or a targeted one). */
+    failures(p: { source: unknown }): { table: string; phase: number; error: string | null; at: string }[] {
+      const source = nameOk(p.source, 'a source')
+      return ([...sql.exec("SELECT tbl, phase, error, at FROM dsi_progress WHERE source = ? AND state = 'failed' ORDER BY tbl LIMIT 5000", source)] as any[])
+        .map((r) => ({ table: String(r.tbl), phase: Number(r.phase), error: r.error ?? null, at: String(r.at) }))
     },
 
     /** Sources whose build is not finished (planned, not done) or never ran — what a returning engine should resume. */

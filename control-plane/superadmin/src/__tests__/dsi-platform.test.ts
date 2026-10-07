@@ -92,6 +92,7 @@ describe('each source\'s index, held by the platform', () => {
     expect((await admin.ask({ t: 'dsi:show', source: 'ERP', table: 'empty' })).items).toEqual([])
     const stats = (await admin.ask({ t: 'dsi:stats' })).sources.find((s: any) => s.source === 'ERP')
     expect(stats.phases[0]).toMatchObject({ phase: 1, planned: 3, failed: 1 })
+    expect((await admin.ask({ t: 'dsi:failures', source: 'ERP' })).failures).toEqual([expect.objectContaining({ table: 'empty', phase: 1, error: 'timeout' })])
     // a partial list (a targeted look, or a catalog that failed) removes nothing
     await eng.call({ type: 'dsi:plan', source: 'ERP', phase: 1, tables: ['orders'], complete: false })
     expect((await admin.ask({ t: 'dsi:show', source: 'ERP', table: 'customer' })).items.every((i: any) => !i.gone)).toBe(true)

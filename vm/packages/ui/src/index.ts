@@ -51,6 +51,7 @@ export { default as AboutNumbers, type AboutFacts } from './components/question/
 
 // the semantic components: what a screen composes
 export { Columns, ColumnsSearch, type ColumnSpec, type ColumnItem } from './components/semantic/Columns.tsx'
+export { SourceHub, SourceTree, type HubSource, type TreeTable, type TreeField } from './components/semantic/Sources.tsx'
 export { Explorer, type ExplorerTable, type ExplorerColumn, type ExplorerRequest, type ExplorerFilter, type ExplorerPlace, type ExplorerQuery } from './components/semantic/Explorer.tsx'
 export { Form, Field, Choices, Receipt, RecordList, ChartFrame, Status, AttentionList, ActionBar, Empty, PageHeader, Tabs, Notice, Code, Figures, Toolbar, Dialog, type Column, type Attention, type State as StatusState } from './components/semantic/index.tsx'
 

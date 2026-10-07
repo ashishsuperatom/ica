@@ -150,7 +150,7 @@ export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   'graph:import': 'project.publish',
   // Each source's index: read by anyone who sees the project; described, enabled and disabled by who manages its data;
   // built by who runs the project. Long work (jobs) is seen by anyone who sees the project.
-  'dsi:show': 'project.view', 'dsi:stats': 'project.view', 'dsi:snapshot': 'project.view', 'job:list': 'project.view', 'job:get': 'project.view',
+  'dsi:show': 'project.view', 'dsi:stats': 'project.view', 'dsi:snapshot': 'project.view', 'dsi:failures': 'project.view', 'job:list': 'project.view', 'job:get': 'project.view',
   'dsi:describe': 'project.data', 'dsi:enable': 'project.data', 'dsi:build': 'project.manage',
   'decision:change': 'project.publish', 'decision:learn': 'project.publish',
   // Publishing a program: its owner, or someone with project.publish (the catalogue decides which).
