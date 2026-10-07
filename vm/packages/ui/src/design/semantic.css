@@ -546,21 +546,25 @@ button.sa-history__main:not(:disabled):hover { background: var(--panel); }
   .sa-stree__tree { border-right: 0; border-bottom: 1px solid var(--line); max-height: 420px; }
 }
 
-/* SourceHub's canvas: flat, the overview at the canvas's width; what a card opens grows the canvas outward from that
-   card — sideways the canvas scrolls, downwards it simply grows with the page. Nothing scrolls inside it. */
-.sa-canvas { display: flex; align-items: flex-start; gap: 32px; overflow-x: auto; container-type: inline-size; padding-bottom: var(--sp-3); }
-.sa-canvas > .sa-hub { flex: none; width: 100cqw; min-width: 720px; }
-.sa-hub__beside { flex: none; position: relative; }
-.sa-hub__beside::before { content: ""; position: absolute; top: 14px; width: 32px; border-top: 2px solid var(--primary); }
-.sa-hub__beside[data-side="r"]::before { left: -32px; }
-.sa-hub__beside[data-side="l"]::before { right: -32px; }
+/* SourceHub opened: one flat canvas — the project and its sources down the left (a trunk, each source a branch), the
+   chosen source's tree growing to the right from its card. Sideways the canvas scrolls; downwards it grows with the page. */
+.sa-canvas { overflow-x: auto; padding-bottom: var(--sp-3); }
+.sa-hub-open { position: relative; display: flex; align-items: flex-start; gap: 32px; width: max-content; min-width: 100%; }
+.sa-hub__trunk { flex: none; width: 260px; display: flex; flex-direction: column; gap: var(--sp-2); }
+.sa-hub__node { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-full); background: var(--primary-wash); align-self: flex-start; max-width: 100%; }
+.sa-hub__node .sa-hub__subtitle { white-space: nowrap; }
+.sa-hub__branchlist { display: flex; flex-direction: column; gap: var(--sp-2); margin-left: 18px; padding-left: var(--sp-4); border-left: 1px dashed var(--line-strong); }
+.sa-hub__source--row { position: relative; height: auto; min-height: 64px; overflow: visible; }
+.sa-hub__source--row::before { content: ""; position: absolute; left: calc(-1 * var(--sp-4) - 1px); top: 50%; width: var(--sp-4); border-top: 1px dashed var(--line-strong); }
+.sa-hub__source--row[aria-pressed="true"]::before { border-top: 2px solid var(--primary); }
+.sa-hub__source--row[aria-pressed="true"]::after { content: ""; position: absolute; right: -33px; top: 50%; width: 32px; border-top: 2px solid var(--primary); }
+.sa-hub__beside { flex: none; }
 
-/* SourceExplorer: read only, flat — columns of rows joined by a line, a table's fields opening beside the tables. */
+/* SourceExplorer: read only, flat — a tree opening to the right; each level starts level with the row it came from
+   (rows are exactly one TREE_ROW high, Sources.tsx). */
 .sa-explore { display: flex; align-items: flex-start; gap: var(--sp-5); }
-.sa-hub__beside[data-side="l"] .sa-explore { flex-direction: row-reverse; }
-.sa-explore__col { list-style: none; margin: 0; padding: 0 0 0 var(--sp-3); width: 260px; border-left: 1px solid var(--line-strong); }
-.sa-hub__beside[data-side="l"] .sa-explore__col { padding: 0 var(--sp-3) 0 0; border-left: 0; border-right: 1px solid var(--line-strong); }
-.sa-explore__row { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: 28px; padding: 0 var(--sp-2); border: 0; border-radius: var(--r-sm); background: none; color: inherit; font: inherit; font-size: var(--t-sm); text-align: left; cursor: pointer; }
+.sa-explore__col { list-style: none; margin: 0; padding: 0 0 0 var(--sp-3); width: 260px; flex: none; border-left: 1px solid var(--line-strong); }
+.sa-explore__row { display: flex; align-items: center; gap: var(--sp-2); width: 100%; height: 28px; padding: 0 var(--sp-2); border: 0; border-radius: var(--r-sm); background: none; color: inherit; font: inherit; font-size: var(--t-sm); text-align: left; cursor: pointer; }
 .sa-explore__row:hover { background: var(--hover-wash); }
 .sa-explore__row:focus-visible { outline: 2px solid var(--primary-ring); outline-offset: -2px; }
 .sa-explore__row[aria-pressed="true"] { background: var(--primary-wash); color: var(--primary-strong); }
@@ -568,13 +572,17 @@ button.sa-history__main:not(:disabled):hover { background: var(--panel); }
 .sa-explore__aside { flex-shrink: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-size: var(--t-2xs); font-variant-numeric: tabular-nums; }
 [data-live="off"] > .sa-explore__row { color: var(--muted); }
 [data-live="gone"] > .sa-explore__row .sa-explore__name { color: var(--faint); text-decoration: line-through; }
-.sa-explore__none { padding: var(--sp-1) var(--sp-2); color: var(--muted); font-size: var(--t-sm); }
+.sa-explore__none { padding: 0 var(--sp-2); line-height: 28px; color: var(--muted); font-size: var(--t-sm); }
 .sa-explore__more { margin: var(--sp-1) var(--sp-2); }
+.sa-explore__facts { flex: none; width: 300px; display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-1) var(--sp-3) var(--sp-3); border-left: 2px solid var(--primary); }
+.sa-explore__facts-head { display: flex; align-items: center; gap: var(--sp-2); min-height: 20px; flex-wrap: wrap; }
+.sa-explore__facts-title { font-weight: var(--w-semibold); font-size: var(--t-sm); overflow-wrap: anywhere; }
+.sa-explore__desc { margin: 0; font-size: var(--t-sm); overflow-wrap: anywhere; }
 @media (max-width: 720px) {
-  .sa-canvas { flex-direction: column; overflow: visible; container-type: normal; }
-  .sa-canvas > .sa-hub { width: 100%; min-width: 0; }
-  .sa-hub__beside { order: 1; margin-top: 0 !important; width: 100%; }
-  .sa-hub__beside::before { display: none; }
-  .sa-explore { flex-direction: column !important; }
-  .sa-explore__col { width: 100%; }
+  .sa-hub-open { flex-direction: column; width: auto; }
+  .sa-hub__trunk { width: 100%; }
+  .sa-hub__source--row[aria-pressed="true"]::after { display: none; }
+  .sa-hub__beside { margin-top: 0 !important; width: 100%; }
+  .sa-explore { flex-direction: column; }
+  .sa-explore__col, .sa-explore__facts { width: 100%; margin-top: 0 !important; }
 }

@@ -2,9 +2,9 @@
 //
 //   SourceHub    the project at the centre and every source branching out to it: what each is, how big, how its index
 //                stands. Plain HTML; the branches are one SVG drawn to the same row geometry as the cards (no measuring,
-//                nothing moves once drawn). It sits on a canvas that scrolls both ways: a card chosen opens what it is
-//                given (children) right beside the card, outward, on the same canvas — the overview never changes.
-//                On a phone it stacks.
+//                nothing moves once drawn). A card chosen: the sources line up under the project on the left and what
+//                the card opens (children) grows to the right as a tree, starting level with the card — one flat canvas
+//                that scrolls sideways and grows downwards. On a phone it stacks.
 //   SourceExplorer  one source to look through, read only: its tables in a column, a table chosen opens its fields in the
 //                next. What is picked is told (onPick) — the place to work on it is elsewhere.
 //   SourceTree   one source opened as a tree, revealed a step at a time: its tables folded (searched by table or field,
@@ -20,7 +20,8 @@ import { Status, type State } from './index'
 
 export interface HubSource { key: string; title: string; kind?: string; meta?: string; count?: string; state: State; stateLabel: string }
 
-const ROW = 92   // one card's row, in px (the same number the branches are drawn to)
+const ROW = 92        // one card's row, in px (the same number the branches are drawn to)
+const TREE_ROW = 28   // one row of the explorer, in px: a level opens at its parent row's height (sa-explore__row)
 
 export function SourceHub({ centre, sources, selected, onSelect, empty, children }: {
   centre: { title: string; subtitle?: string }
@@ -31,7 +32,29 @@ export function SourceHub({ centre, sources, selected, onSelect, empty, children
   /** What the chosen card opens, placed beside it on the canvas. */
   children?: ReactNode
 }) {
-  const canvas = useRef<HTMLDivElement>(null), beside = useRef<HTMLDivElement>(null)
+  const chosenCard = useRef<HTMLButtonElement>(null)
+  const [top, setTop] = useState(0)
+  // The opened tree starts level with the chosen card (its first row's middle on the card's middle).
+  useLayoutEffect(() => { const c = chosenCard.current; if (c) setTop(Math.max(0, c.offsetTop + c.offsetHeight / 2 - TREE_ROW / 2)) }, [selected, sources.length])
+  if (selected && children) return (
+    <div className="sa-canvas">
+      <div className="sa-hub-open">
+        <div className="sa-hub__trunk">
+          <div className="sa-hub__node"><span className="sa-hub__mark"><SuperatomMark size={22} /></span><span className="sa-hub__title">{centre.title}</span>{centre.subtitle && <span className="sa-hub__subtitle">{centre.subtitle}</span>}</div>
+          <div className="sa-hub__branchlist">
+            {sources.map((s) => (
+              <button key={s.key} ref={selected === s.key ? chosenCard : undefined} type="button" className="sa-hub__source sa-hub__source--row" data-state={s.state} aria-pressed={selected === s.key} onClick={() => onSelect(s.key)}>
+                <span className="sa-hub__name">{s.title}</span>
+                {s.meta && <span className="sa-hub__meta">{s.meta}</span>}
+                <Status state={s.state}>{s.stateLabel}</Status>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="sa-hub__beside" style={{ marginTop: top }}>{children}</div>
+      </div>
+    </div>
+  )
   const left = sources.filter((_, i) => i % 2 === 0), right = sources.filter((_, i) => i % 2 === 1)
   const rows = Math.max(left.length, right.length, 2)
   const h = rows * ROW
@@ -48,20 +71,7 @@ export function SourceHub({ centre, sources, selected, onSelect, empty, children
       <Status state={s.state}>{s.stateLabel}</Status>
     </button>
   )
-  const li = left.findIndex((s) => s.key === selected), ri = right.findIndex((s) => s.key === selected)
-  const side = !selected || !children ? null : li >= 0 ? 'l' : ri >= 0 ? 'r' : null
-  const y = side === 'l' ? yOf(left.length, li) : side === 'r' ? yOf(right.length, ri) : 0
-  // Opened to the left, the canvas grows on that side: keep the overview where it was, then pan to what opened.
-  useLayoutEffect(() => {
-    const c = canvas.current, b = beside.current
-    if (!c || !b) return
-    if (side === 'l' && getComputedStyle(c).flexDirection !== 'column') c.scrollLeft += b.offsetWidth + 32
-    b.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' })
-  }, [side, selected])
-  const opened = side && <div ref={beside} className="sa-hub__beside" data-side={side} style={{ marginTop: Math.max(0, y - 24) }}>{children}</div>
   return (
-    <div ref={canvas} className="sa-canvas" data-open={!!side}>
-      {side === 'l' && opened}
     <div className="sa-hub" style={{ ['--hub-h' as string]: `${h}px` }}>
       <svg className="sa-hub__branches" viewBox={`0 0 1000 ${h}`} preserveAspectRatio="none" aria-hidden="true">
         {left.map((s, i) => <path key={s.key} d={curve('l', yOf(left.length, i))} data-on={selected === s.key} data-state={s.state} />)}
@@ -78,13 +88,12 @@ export function SourceHub({ centre, sources, selected, onSelect, empty, children
       <div className="sa-hub__col sa-hub__col--r" style={{ paddingTop: (h - right.length * ROW) / 2 + 8 }}>{right.map(card)}</div>
       {!sources.length && <div className="sa-hub__empty">{empty ?? 'No data source yet.'}</div>}
     </div>
-      {side === 'r' && opened}
-    </div>
   )
 }
 
-/** One source to look through, read only, flat on the canvas: its tables, and a chosen table's fields beside them —
- *  every row shown (a hundred tables at a time), nothing scrolls inside. */
+/** One source to look through, read only, flat on the canvas, as a tree that opens to the right: its tables; a table's
+ *  fields beside it, starting level with it; a field's facts beside the field. Every row shown (a hundred tables at a
+ *  time), nothing scrolls inside. */
 export function SourceExplorer({ tables, loading, picked, onPick }: {
   tables: TreeTable[]
   loading?: boolean
@@ -92,7 +101,10 @@ export function SourceExplorer({ tables, loading, picked, onPick }: {
   onPick: (p: { table: string; field: string | null }) => void
 }) {
   const [shown, setShown] = useState(PAGE)
-  const table = picked ? tables.find((t) => t.name === picked.table) ?? null : null
+  const ti = picked ? tables.findIndex((t) => t.name === picked.table) : -1
+  const table = ti >= 0 ? tables[ti] : null
+  const fi = table && picked?.field ? table.fields.findIndex((f) => f.name === picked.field) : -1
+  const field = table && fi >= 0 ? table.fields[fi] : null
   const live = (x: { enabled: boolean; gone: boolean }) => (x.gone ? 'gone' : x.enabled ? 'on' : 'off')
   return (
     <div className="sa-explore">
@@ -101,7 +113,7 @@ export function SourceExplorer({ tables, loading, picked, onPick }: {
           <li key={t.name} data-live={live(t)}>
             <button type="button" className="sa-explore__row" aria-pressed={picked?.table === t.name} onClick={() => onPick({ table: t.name, field: null })}>
               <span className="sa-explore__name">{t.name}</span>
-              <span className="sa-explore__aside">{t.gone ? 'gone' : !t.enabled ? 'disabled' : t.rows != null ? t.rows.toLocaleString() : ''}</span>
+              <span className="sa-explore__aside">{t.gone ? 'gone' : !t.enabled ? 'disabled' : `${t.fields.filter((f) => !f.gone).length}`}</span>
             </button>
           </li>
         ))}
@@ -109,7 +121,7 @@ export function SourceExplorer({ tables, loading, picked, onPick }: {
         {tables.length > shown && <li><button type="button" className="sa-btn sa-btn--link sa-explore__more" onClick={() => setShown((n) => n + PAGE)}>{Math.min(PAGE, tables.length - shown)} more of {tables.length - shown}</button></li>}
       </ul>
       {table && (
-        <ul className="sa-explore__col">
+        <ul className="sa-explore__col" style={{ marginTop: ti * TREE_ROW }}>
           {table.fields.map((f) => (
             <li key={f.name} data-live={live(f)}>
               <button type="button" className="sa-explore__row" aria-pressed={picked?.field === f.name} onClick={() => onPick({ table: table.name, field: f.name })}>
@@ -121,7 +133,35 @@ export function SourceExplorer({ tables, loading, picked, onPick }: {
           {!table.fields.length && <li className="sa-explore__none">No fields read for this table.</li>}
         </ul>
       )}
+      {table && <div className="sa-explore__facts" style={{ marginTop: (ti + Math.max(fi, 0)) * TREE_ROW }}><Facts table={table} field={field} /></div>}
     </div>
+  )
+}
+
+/** What the index holds about a table or a field, to read. */
+function Facts({ table, field }: { table: TreeTable; field: TreeField | null }) {
+  const it = field ?? table
+  const used = it.descHuman?.trim() ? 'a person' : it.descSource?.trim() ? 'the source' : it.descAi?.trim() ? 'an AI' : null
+  const text = it.descHuman?.trim() || it.descSource?.trim() || it.descAi?.trim()
+  return (
+    <>
+      <div className="sa-explore__facts-head">
+        <span className="sa-explore__facts-title">{field ? field.name : table.name}</span>
+        {it.gone ? <Status state="neutral">gone</Status> : it.enabled ? <Status state="ok">offered</Status> : <Status state="attention">disabled</Status>}
+      </div>
+      <dl className="sa-stree__facts">
+        {field ? <>
+          <dt>Type</dt><dd>{field.type ?? '—'}</dd>
+          {field.key && <><dt>Key</dt><dd>part of the key</dd></>}
+          {field.optional != null && <><dt>Empty</dt><dd>{field.optional ? 'may be empty' : 'always set'}</dd></>}
+          {field.references && <><dt>References</dt><dd>{field.references}</dd></>}
+        </> : <>
+          <dt>Fields</dt><dd>{table.fields.filter((f) => !f.gone).length}</dd>
+          <dt>Rows</dt><dd>{table.rows == null ? 'not counted' : table.rows.toLocaleString()}</dd>
+        </>}
+      </dl>
+      {text ? <p className="sa-explore__desc">{text}<span className="sa-faint"> — {used}</span></p> : <p className="sa-explore__desc sa-faint">No description yet.</p>}
+    </>
   )
 }
 
@@ -167,10 +207,10 @@ export function SourceTree({ title, subtitle, tables, focus, onEnable, onDescrib
     const at = tables.findIndex((t) => t.name === focus.table)
     if (at >= 0) setShown((n) => Math.max(n, Math.ceil((at + 1) / PAGE) * PAGE))
   }, [focus?.table, focus?.field])
-  useEffect(() => {   // after it is drawn: the picked row in view, and the tree on the page
+  useEffect(() => {   // after it is drawn: the picked row in view inside the tree's own list — the page never moves
     if (!focus) return
-    box.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-    box.current?.querySelector('.sa-stree__list [aria-selected="true"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    const list = box.current?.querySelector<HTMLElement>('.sa-stree__list'), row = list?.querySelector<HTMLElement>('[aria-selected="true"]')
+    if (list && row) list.scrollTop = row.offsetTop - list.offsetTop - list.clientHeight / 2
   }, [pick, open, shown])
   return (
     <div className="sa-stree" ref={box}>
