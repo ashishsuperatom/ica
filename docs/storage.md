@@ -121,9 +121,10 @@ Roots (`engine.ts`): `STATE_ROOT` = `$ENGINE_STATE_DIR` or `~/.superatom/state`;
 | `app/server/` (+ `.version`) | the project's app as last published — downloaded from the platform (`app:changed`), exactly that version, never edited here | ← ProjectDO `app_versions` + R2 `app/<project>/<hash>` |
 | `datasources/<name>/bridge.mjs`, `datasources/query-results.sqlite` | each code connection's bridge, downloaded by hash (its settings and secrets only in memory); the manager's result cache | bridges ← ProjectDO `connections` + R2 `bridge/<project>/<hash>`; the cache: no |
 
-Nothing a person writes lives in a home: a project's knowledge and its app's source are written in a workspace
-(`~/.superatom/work/<project>/`: `knowledge/`, `app/`, their git history), imported (`sacli graph import`) and published
-(`sacli app publish`) to the platform, and downloaded by the engine from there.
+What authors write sits in the home's `author/` folder (`knowledge/`, `app/`, their git history, `.sacli.json` binding it to
+the project), which the engine never reads: it reaches the platform only by import (`sacli graph import`) or build/publish,
+and the engine downloads it from there. It is not the agents' shared `workspace/`, which holds only what the engine puts
+there (it is swept of anything else). The platform keeps program source with each build; knowledge as graph nodes.
 
 Outside the home: the harnesses' own login files (`~/.claude.json`, `~/.codex/auth.json`, pi's `auth.json`).
 

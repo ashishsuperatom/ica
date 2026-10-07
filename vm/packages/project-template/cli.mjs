@@ -15,7 +15,7 @@
 // file is this repository's place on the machine the template is written on.
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync } from 'node:fs'
-import { basename, dirname, join, relative, resolve } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -42,15 +42,17 @@ if (command === 'check') {
 }
 
 if (command === 'new') {
-  // The workspace (~/.superatom/work/<project id>/): where the project's knowledge and app are written, then imported and
-  // published to the platform. Named by its project, and bound to it, so its material can go to no other project.
-  if (!/^[0-9a-f-]{36}$/.test(basename(HOME))) { console.error(`${HOME}: a workspace is named by its project's id`); process.exit(1) }
+  // The author's folder (~/.superatom/state/<project id>/author/): where the project's knowledge and app are written,
+  // then imported and published to the platform — never read by the engine. Bound to its project, so its material can go
+  // to no other project.
+  const PROJECT_ID = HOME.split(sep).reverse().find((s) => /^[0-9a-f-]{36}$/.test(s))
+  if (!PROJECT_ID) { console.error(`${HOME}: an author's folder sits in its project's folder (~/.superatom/state/<project id>/author)`); process.exit(1) }
   mkdirSync(HOME, { recursive: true })
-  if (!existsSync(join(HOME, '.sacli.json'))) writeFileSync(join(HOME, '.sacli.json'), JSON.stringify({ project: basename(HOME) }, null, 2) + '\n')
+  if (!existsSync(join(HOME, '.sacli.json'))) writeFileSync(join(HOME, '.sacli.json'), JSON.stringify({ project: PROJECT_ID }, null, 2) + '\n')
   const missing = ['name', 'currency', 'locale'].filter((k) => !flags[k])
   if (missing.length) { console.error(`${usage}\nmissing: ${missing.map((k) => `--${k}`).join(' ')}`); process.exit(1) }
   const values = { PLATFORM, NAME: flags.name, SLUG: flags.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''), CURRENCY: flags.currency.toUpperCase(), LOCALE: flags.locale,
-    PROJECT_ID: basename(HOME), HUB: flags.hub ?? 'wss://superadmin.superatom.site' }
+    PROJECT_ID, HUB: flags.hub ?? 'wss://superadmin.superatom.site' }
   for (const rel of files(join(HERE, 'start')).map((p) => relative(join(HERE, 'start'), p))) {
     if (existsSync(join(HOME, rel))) { console.log(`kept     ${rel}`); continue }
     write(rel, render(readFileSync(join(HERE, 'start', rel), 'utf8'), values))

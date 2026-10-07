@@ -1,6 +1,7 @@
 # Project template
 
-A project home (`~/.superatom/state/<projectId>/`) holds the project's knowledge and its dashboard. Most of the
+A project's author folder (`~/.superatom/state/<projectId>/author/`) is where its knowledge and its dashboard are
+written — then imported and published to the platform; the engine never reads it. Most of the
 dashboard and the program helpers are the same in every project; this is that part, kept in one place.
 
 - `shared/` — the same in every project, kept in step: the dashboard server's generic files (`app/server/`: the
@@ -14,9 +15,9 @@ dashboard and the program helpers are the same in every project; this is that pa
   `capabilities/`, an empty knowledge index with the two settings every dashboard reads.
 
 ```
-node vm/packages/project-template/cli.mjs new   <home> --name "<name>" --currency <code> --locale <tag>
-node vm/packages/project-template/cli.mjs check <home>    # the shared files a home has changed or lacks
-node vm/packages/project-template/cli.mjs sync  <home>    # write the shared files into a home
+node vm/packages/project-template/cli.mjs new   <author folder> --name "<name>" --currency <code> --locale <tag>
+node vm/packages/project-template/cli.mjs check <author folder>    # the shared files it has changed or lacks
+node vm/packages/project-template/cli.mjs sync  <author folder>    # write the shared files into it
 ```
 
 A shared file is changed here and synced to every home, never in one home alone; `check` on every home says whether

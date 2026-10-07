@@ -1420,6 +1420,22 @@ place, the same for every organisation and project); the project template's thre
   owner decides; the decided version is published; everything keeps its history (time travel) and its scope
   (global / group / user).
 
+## Who writes source, and where (the user, 2026-10-07)
+
+**In the user's words:** a dashboard or another program is built either through the CLI, or by the engine altogether —
+from the chat: "hey, build this dashboard" (on the admin side, that is also a path). In that case the engine is again
+writing into the work folder. If the work folder cannot live anywhere, what is the point of another folder? Why not the
+same thing in state? What is special about it that cannot, and should not, be done in state?
+
+*So:* nothing is special about a folder. The source lives on the platform — each program build keeps the source it came
+from; knowledge is the graph's nodes. Every author — a person with the CLI, or the engine's builder agent from a chat —
+works the same way: take a copy from the platform (or the template), edit it in a scratch folder of its own, send it back
+(`program:build`, `graph import`); the platform keeps the new version, the engine downloads it. The scratch folder sits
+in the project's folder on the engine (`~/.superatom/state/<project>/author/` for a person; a builder session's own
+folder for the agent). Two rules keep one path: the engine's downloaded copies are never edited by hand, and an author's
+folder is never read by the engine as truth. It is not the agents' shared `workspace/`, which holds only what the engine
+puts there. Still to build: taking a program's source (and knowledge, as files) back from the platform — `program pull`.
+
 ## Keys follow the same tree as people (the user, 2026-10-07)
 
 **In the user's words:** eventually the agents will do much of this work; this could be a security nightmare, so do it
