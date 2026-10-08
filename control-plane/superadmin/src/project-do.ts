@@ -33,7 +33,7 @@ import { stepOf } from '../../../vm/packages/decision/src/index.js'
 import { checkPolicy, resolve as resolvePolicies, type AccessPolicy } from './access-policies.js'
 import { costOf, priceFor, type Price } from './metering.js'
 import { createRecorder, type Recorder } from './records.js'
-import { connectorById, checkConnection, CONNECTORS } from '../../shared/connectors.js'
+import { connectorById, checkConnection, CONNECTORS, SA_WAREHOUSE } from '../../shared/connectors.js'
 import { readyBridge } from './bridges.js'
 import { seal, unseal } from './proxy/seal.js'
 import { runConnector, runCode, manifestOf } from './connectors/runtime.js'
@@ -377,6 +377,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (request.method === 'POST' && path === '/key-access') return this.keyAccess(request)
     if (path === '/engine/programs' || path.startsWith('/engine/programs/')) return this.enginePrograms(request, path)
     if (path.startsWith('/engine/connections/')) return this.engineConnections(request, path)
+    if (path.startsWith('/engine/sa-warehouse/')) return this.engineSaWarehouse(request, path)
     if (path === '/engine/app' || path.startsWith('/engine/app/')) return this.engineApp(request, path)
     // A program's React side, file by file, for screens (the worker has checked the caller is in the project).
     { const m = request.method === 'GET' ? path.match(/^\/programs\/([0-9a-f]{64})\/(web\/[\w./-]+\.js)$/) : null
@@ -1061,6 +1062,7 @@ export class ProjectDO extends DurableObject<Env> {
   /** The project's code connections, as the engine runs them: each one's name (the source id queries use), connector,
    *  settings, secrets (unsealed — over the engine's authenticated socket, never kept on its disk) and bridge (hash). */
   private async codeConnectionsForEngine() {
+    await this.ensureSaWarehouse()
     const master = (this.env as any).CREDENTIALS_MASTER_KEY
     const rows = [...this.ctx.storage.sql.exec("SELECT * FROM connections WHERE removed_at IS NULL AND level = 'project' ORDER BY created_at")] as any[]
     const out = []
@@ -1068,6 +1070,52 @@ export class ProjectDO extends DurableObject<Env> {
       out.push({ id: r.id, name: r.name, connector: r.connector, settings: JSON.parse(r.settings), secrets: r.secrets_sealed && master ? JSON.parse(await unseal(r.secrets_sealed, master)) : {}, bridge: r.bridge ?? null })
     }
     return out
+  }
+  /** SA-WAREHOUSE, in every project: the connection made the first time it is needed, its bridge kept the platform's
+   *  current one (a new platform's bridge reaches every project the next time its connections are read). */
+  private _saWarehouseBridge: string | null = null
+  private async ensureSaWarehouse(): Promise<void> {
+    const code = readyBridge('sa-warehouse')
+    if (!code) return
+    const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code)))].map((x) => x.toString(16).padStart(2, '0')).join('')
+    if (this._saWarehouseBridge === hash) return
+    const [r] = [...this.ctx.storage.sql.exec("SELECT id, bridge FROM connections WHERE connector = 'sa-warehouse' AND removed_at IS NULL")] as any[]
+    if (r?.bridge === hash) { this._saWarehouseBridge = hash; return }
+    let id = r?.id as string | undefined
+    if (!id) {
+      id = `con_${crypto.randomUUID().slice(0, 12)}`
+      this.ctx.storage.sql.exec("INSERT INTO connections (id, connector, name, level, owner, settings, secrets_sealed, kind, dialect, description, auth, created_by, created_at) VALUES (?, 'sa-warehouse', ?, 'project', 'project', '{}', NULL, 'sql', 'sa-warehouse', NULL, 'shared', 'platform', ?)",
+        id, SA_WAREHOUSE, new Date().toISOString())
+    }
+    if (await this.attachBridge(id, code, 'platform')) { this._saWarehouseBridge = hash; this.sendToRole('code-engine', { t: 'connections:changed' }) }
+  }
+  /** The tables this project may read in the organisation's warehouse, each with only its granted columns. */
+  private async grantedWarehouseTables(): Promise<{ configured: boolean; tables: any[] }> {
+    const org = await this.orgId()
+    if (!org) throw new Error('this project belongs to no organisation')
+    const grant = this.grantInForce(), writable = this.writableInForce()
+    const r: any = await (await this.env.ORG.get(this.env.ORG.idFromName(org)).fetch(new Request('http://do/warehouse', { headers: { 'x-sa-org': org } }))).json()
+    const tables = (r.tables ?? []).filter((t: any) => t.name in grant).map((t: any) => ({ ...t, columns: grant[t.name] === null ? t.columns : t.columns.filter((c: any) => grant[t.name]!.includes(c.name)), writable: writable.includes(t.name) }))
+    return { configured: !!r.configured, tables }
+  }
+  /** SA-WAREHOUSE for this project's engine (its bridge): the tables granted, and a query checked against the grant. */
+  private async engineSaWarehouse(request: Request, path: string): Promise<Response> {
+    const key = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
+    if (!key || !this.keyMatches(key)) return this.j({ error: 'only this project\'s engine' }, 401)
+    try {
+      if (path === '/engine/sa-warehouse/tables' && request.method === 'GET') return this.j(await this.grantedWarehouseTables())
+      if (path === '/engine/sa-warehouse/query' && request.method === 'POST') {
+        const b: any = await request.json().catch(() => ({}))
+        const org = await this.orgId()
+        if (!org) throw new Error('this project belongs to no organisation')
+        const res = await this.env.ORG.get(this.env.ORG.idFromName(org)).fetch(new Request('http://do/warehouse/query', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-org': org },
+          body: JSON.stringify({ sql: String(b.sql ?? ''), limit: Math.min(Number(b.limit) || 100, 5000), grant: this.grantInForce(), project: this._pid, by: 'engine' }) }))
+        const out: any = await res.json()
+        if (!res.ok) return this.j({ error: out.error ?? `the warehouse answered ${res.status}` }, 400)
+        return this.j(out)
+      }
+    } catch (e: any) { return this.j({ error: e?.message ?? String(e) }, 400) }
+    return this.j({ error: 'not found' }, 404)
   }
   /** The engine's own calls about connections: download a bridge by its hash; upload a bridge written on the engine (by
    *  the connector agent) — the engine generates it, so it comes up here first and goes back down like any other. */
@@ -1403,12 +1451,12 @@ export class ProjectDO extends DurableObject<Env> {
     const who = email ? `email:${email}` : null
     const admin = can(this.capsOfRequest(request), 'project.data')
     const actor = { kind: 'user' as const, id: email || 'unknown', ...(email ? { email } : {}) }
-    if (path === '/connectors' && request.method === 'GET') return this.j({ connectors: CONNECTORS })
-    if (path === '/connections' && request.method === 'GET') return this.j({ connections: this.connectionRows(who, admin) })
+    if (path === '/connectors' && request.method === 'GET') return this.j({ connectors: CONNECTORS.filter((c) => !c.builtin) })
+    if (path === '/connections' && request.method === 'GET') { await this.ensureSaWarehouse(); return this.j({ connections: this.connectionRows(who, admin) }) }
     if (!who) return this.j({ error: 'who is making the change?' }, 400)
     if (path === '/connections' && request.method === 'POST') {
       const c = connectorById(String(body.connector ?? ''))
-      if (!c) return this.j({ error: `there is no connector ${body.connector}` }, 400)
+      if (!c || c.builtin) return this.j({ error: c ? `${c.title} is in every project already; it is not connected again` : `there is no connector ${body.connector}` }, 400)
       const level = body.level === 'user' ? 'user' : 'project'
       if (!c.levels.includes(level)) return this.j({ error: `${c.title} is connected ${c.levels.map((l) => l === 'project' ? 'for the whole project' : 'per person').join(' or ')}` }, 400)
       if (level === 'project' && !admin) return this.j({ error: 'a connection shared by the project needs project.data; connect your own instead' }, 403)
@@ -1433,6 +1481,12 @@ export class ProjectDO extends DurableObject<Env> {
       return this.j({ connection: { id, connector: c.id, name, level, settings, bridge, runnable: c.runs !== 'code', state: c.runs !== 'code' ? 'ready' : bridge ? 'waiting for the engine' : 'no code yet' } }, 201)
     }
     const m = path.match(/^\/connections\/(con_[\w-]+)$/)
+    // The platform's own source is kept by the platform: nobody changes, re-codes or removes it.
+    const target = path.match(/^\/connections\/(con_[\w-]+)/)?.[1]
+    if (target && request.method !== 'GET' && !path.endsWith('/my-key')) {
+      const [t] = [...this.ctx.storage.sql.exec('SELECT connector, name FROM connections WHERE id = ?', target)] as any[]
+      if (t && connectorById(t.connector)?.builtin) return this.j({ error: `${t.name} is the platform's own source, in every project; it is not changed or removed` }, 400)
+    }
     // A source's settings, secrets (a secret left out is kept), what it is, and how people reach it — its admins change them.
     if (m && request.method === 'PATCH') {
       const [r] = [...this.ctx.storage.sql.exec('SELECT * FROM connections WHERE id = ? AND removed_at IS NULL', m[1])] as any[]
@@ -2111,10 +2165,7 @@ export class ProjectDO extends DurableObject<Env> {
         const grant = this.grantInForce()
         const orgDo = this.env.ORG.get(this.env.ORG.idFromName(org))
         if (pl.t === 'warehouse:tables') {
-          const r: any = await (await orgDo.fetch(new Request('http://do/warehouse', { headers: { 'x-sa-org': org } }))).json()
-          const writable = this.writableInForce()
-          const tables = (r.tables ?? []).filter((t: any) => t.name in grant).map((t: any) => ({ ...t, columns: grant[t.name] === null ? t.columns : t.columns.filter((c: any) => grant[t.name]!.includes(c.name)), writable: writable.includes(t.name) }))
-          hubReply({ t: 'warehouse:tables', configured: !!r.configured, tables, reqId: pl.reqId })
+          hubReply({ t: 'warehouse:tables', ...(await this.grantedWarehouseTables()), reqId: pl.reqId })
         } else if (pl.t === 'warehouse:append') {
           // Only a table this project's grant makes writable (the organisation's word), by someone who may append here.
           const table = String(pl.table ?? '')

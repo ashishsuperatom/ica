@@ -109,6 +109,14 @@ export class OrgDO extends DurableObject<Env> {
         log('create', { tbl: body.name, ok: true, detail: { columns: body.columns }, by })
         return json({ ok: true, table: body.name }, 201)
       }
+      // A table gone with its data — a file loaded again replaces its tables this way (drop, make, append). Its owner record
+      // and the projects' grants stay, so the table made again under the same name is theirs as before.
+      if (request.method === 'POST' && path === '/warehouse/drop') {
+        const tbl = String(body.table ?? '')
+        await ingest.dropTable(org, tbl)
+        log('drop', { tbl, ok: true, by })
+        return json({ ok: true, table: tbl })
+      }
       if (request.method === 'POST' && path === '/warehouse/owner') {
         const tbl = String(body.table ?? ''), owner = String(body.owner ?? '').trim()
         if (!(await bridge.describe(org, tbl))) throw new WarehouseRefusal(`there is no table "${tbl}"`)
@@ -474,7 +482,8 @@ export class OrgDO extends DurableObject<Env> {
     if (t === 'warehouse:query') return call('/warehouse/query', { sql: b.sql, limit: b.limit, grant: 'all' })
     if (t === 'warehouse:explore') { const { t: _t, reqId: _r, ...req } = b; return call('/warehouse/explore', { ...req, grant: 'all' }) }
     if (t === 'warehouse:append') return call('/warehouse/append', { table: b.table, rows: b.rows })
-    if (t === 'warehouse:create') return call('/warehouse/tables', { name: b.name, columns: b.columns })
+    if (t === 'warehouse:create') return call('/warehouse/tables', { name: b.name, columns: b.columns, ...(b.description ? { description: b.description } : {}) })
+    if (t === 'warehouse:drop') return call('/warehouse/drop', { table: b.table })
     // A project's grant: the project must be this organisation's.
     const project = String(b.project ?? '')
     if (![...this.ctx.storage.sql.exec('SELECT 1 FROM projects WHERE id = ? AND deleted = 0', project)].length) return Response.json({ error: 'that project is not in this organisation' }, { status: 404 })

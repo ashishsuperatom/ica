@@ -17,18 +17,18 @@ import SuperatomMark from '../layout/SuperatomMark'
 import { Status, type State } from './index'
 import { TreeColumns, type TreeColumn, type TreeColumnRow } from './TreeColumns'
 
-export interface HubSource { key: string; title: string; /** While searching: how many of its tables and fields match. */ found?: number; /** An iconify icon (the source's connector's). */ icon?: string; kind?: string; meta?: string; count?: string; state: State; stateLabel: string }
+export interface HubSource { key: string; title: string; /** While searching: how many of its tables and fields match. */ found?: number; /** An iconify icon (the source's connector's), or a mark of its own. */ icon?: string | ReactNode; kind?: string; meta?: string; count?: string; state: State; stateLabel: string }
 
 /** A source's mark: its icon, or — when it has none — its letters: the first of its name, or the first of each of its
  *  first two parts when the name is hyphenated (f5-usecases → F U). Always something to know it by. */
 const MARK_ICON = { sm: 16, md: 32 } as const   // the icon inside the tile, in px (the tile: sa-srcmark in semantic.css)
 
-export function SourceMark({ icon, name, size = 'md' }: { icon?: string; name: string; size?: 'sm' | 'md' }) {
+export function SourceMark({ icon, name, size = 'md' }: { icon?: string | ReactNode; name: string; size?: 'sm' | 'md' }) {
   const parts = name.split('-').filter(Boolean)
   const letters = (parts.length > 1 ? parts.slice(0, 2).map((p) => p[0]) : [name.trim()[0] ?? '?']).join('').toUpperCase()
   return (
     <span className="sa-srcmark" data-size={size} aria-hidden>
-      {icon ? <Icon icon={icon} className="sa-srcmark__icon" width={MARK_ICON[size]} height={MARK_ICON[size]} /> : <span className="sa-srcmark__letters">{letters}</span>}
+      {typeof icon === 'string' && icon ? <Icon icon={icon} className="sa-srcmark__icon" width={MARK_ICON[size]} height={MARK_ICON[size]} /> : icon ? icon : <span className="sa-srcmark__letters">{letters}</span>}
     </span>
   )
 }

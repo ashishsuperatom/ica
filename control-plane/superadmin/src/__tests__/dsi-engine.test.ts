@@ -50,6 +50,8 @@ let reads: string[] = []
 let cheapCounts = true      // what the source says of its metadata's row counts
 let counted = 0             // how often the source was asked to count rows
 let stopAfter = Infinity   // after reading this many tables the source hangs: the engine is stuck, and is replaced
+let described = false      // a second source that describes its own tables (columns and rows), as SA-WAREHOUSE's bridge does
+let describedReads = 0     // how often that source was queried
 INDEXERS.fake = {
   async listContainers() { return Object.keys(schema) },
   async indexContainer(source, t) {
@@ -94,7 +96,9 @@ beforeAll(async () => {
     let body = ''
     req.on('data', (c) => (body += c)).on('end', () => {
       res.setHeader('content-type', 'application/json')
-      if (req.url === '/sources') return res.end(JSON.stringify({ sources: [{ id: 'SHOP', kind: 'sql', dialect: 'fake', ready: true }] }))
+      if (req.url === '/sources') return res.end(JSON.stringify({ sources: [{ id: 'SHOP', kind: 'sql', dialect: 'fake', ready: true }, ...(described ? [{ id: 'SA-WAREHOUSE', kind: 'sql', dialect: 'sa-warehouse', ready: true }] : [])] }))
+      if (req.url === '/introspect' && JSON.parse(body || '{}').id === 'SA-WAREHOUSE') return res.end(JSON.stringify({ kind: 'sql', dialect: 'sa-warehouse', tables: [{ name: 'purchase_orders', rows: 1200, columns: [{ name: 'po_number', type: 'long' }, { name: 'amount', type: 'double' }] }] }))
+      if (req.url === '/query' && JSON.parse(body || '{}').id === 'SA-WAREHOUSE') describedReads++
       if (req.url === '/introspect') return res.end(JSON.stringify({ tables: Object.keys(schema).map((name) => ({ name })), ...(cheapCounts ? {} : { cheapCounts: false }) }))
       res.end(JSON.stringify({ rows: [] }))
     })
@@ -222,4 +226,17 @@ describe('each source\'s index, end to end', () => {
     await until(() => b.logs.some((l) => /already running/.test(l)))
     b.ws.ws.send(JSON.stringify({ type: 'job:end', id: started.job.id, state: 'done' }))
   })
+
+  it('a source that describes its own tables is indexed from that (columns, types, rows) — its data never read to learn them', async () => {
+    described = true
+    const c = await engine('c', 16)
+    await admin.ask({ t: 'dsi:build', sources: ['SA-WAREHOUSE'] })
+    await until(() => c.logs.some((l) => /build done/.test(l)))
+    await until(() => { try { return (getSchema(c.store, 'SA-WAREHOUSE', 'purchase_orders') as any).fields.length === 2 } catch { return false } })
+    expect((getSchema(c.store, 'SA-WAREHOUSE', 'purchase_orders') as any).fields.map((f: any) => [f.field, f.type])).toEqual([['po_number', 'long'], ['amount', 'double']])
+    const stats = (await admin.ask({ t: 'dsi:stats' })).sources.find((x: any) => x.source === 'SA-WAREHOUSE')
+    expect(stats).toMatchObject({ tables: 1, fields: 2 })
+    expect(describedReads).toBe(0)
+    described = false
+  }, 20_000)
 })

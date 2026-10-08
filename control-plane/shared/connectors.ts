@@ -20,9 +20,17 @@ export interface Connector {
   id: string; title: string; kind: 'sql' | 'rest' | 'mcp'; runs: Runs; description: string; levels: ('project' | 'user')[]; fields: ConnectorField[]; bridge: string | null
   /** How it is shown (an iconify icon, loaded when shown; cloud connectors also an accent), and what it offers. */
   icon?: string; accent?: string; offers?: { data: boolean; actions: boolean }; category?: string
+  /** The platform's own source: in every project from its start, made and kept current by the platform — never connected
+   *  or removed by people, so never offered to connect. */
+  builtin?: boolean
 }
 
+/** SA-WAREHOUSE: the organisation's warehouse in Superatom, a source of every project (as far as it granted the project). */
+export const SA_WAREHOUSE = 'SA-WAREHOUSE'
+
 export const CONNECTORS: Connector[] = [
+  { id: 'sa-warehouse', runs: 'code', builtin: true, title: SA_WAREHOUSE, icon: 'lucide:warehouse', kind: 'sql', description: "The organisation's warehouse in Superatom: the tables it granted this project, read through the platform.", levels: ['project'], bridge: 'sa-warehouse',
+    fields: [] },
   { id: 'netsuite', runs: 'code', title: 'NetSuite', icon: 'cib:oracle-netsuite', kind: 'sql', description: 'Oracle NetSuite through SuiteQL, with an OAuth 2.0 machine-to-machine certificate.', levels: ['project'], bridge: 'netsuite-suiteql',
     fields: [
       { name: 'account', label: 'Account ID', type: 'text', required: true, placeholder: '1234567_SB1' },

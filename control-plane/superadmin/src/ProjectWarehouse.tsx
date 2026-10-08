@@ -61,6 +61,7 @@ export function ProjectWarehouse({ projectId, token }: { projectId: string; toke
     const out: ExplorerTable[] = []
     const names = new Set<string>([...(tables ?? []).map((t) => t.name)])
     for (const s of sources) for (const t of s.tables) {
+      if (s.source === WAREHOUSE) continue   // SA-WAREHOUSE is a source of the project too; its tables are the warehouse's own group
       if (t.gone) continue
       const name = origins.has(t.table) || names.has(t.table) ? `${s.source}.${t.table}` : t.table
       origins.set(name, { from: 'source', source: s.source, table: t.table })

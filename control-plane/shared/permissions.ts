@@ -185,6 +185,7 @@ export const ORG_MESSAGE_NEEDS: Readonly<Record<string, readonly OrgCapability[]
   'warehouse:explore': ['warehouse.query'],
   'warehouse:append': ['warehouse.write'],
   'warehouse:create': ['warehouse.manage'],
+  'warehouse:drop': ['warehouse.manage'],
   'warehouse:grants': ['warehouse.manage'],
   'warehouse:grant': ['warehouse.manage'],
   'warehouse:revoke': ['warehouse.manage'],

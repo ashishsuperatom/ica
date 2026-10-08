@@ -58,7 +58,7 @@ const snapshotId = () => { const b = crypto.getRandomValues(new Uint8Array(8)); 
 function cell(type: string, v: unknown): unknown {
   if (v === null || v === undefined || v === '') return null
   switch (type) {
-    case 'long': return BigInt(Math.trunc(Number(v)))
+    case 'long': return typeof v === 'string' && /^-?\d+$/.test(v.trim()) ? BigInt(v.trim()) : BigInt(Math.trunc(Number(v)))   // an integer as text, exactly
     case 'int': return Math.trunc(Number(v))
     case 'double': case 'float': return Number(v)
     case 'boolean': return v === true || v === 'true' || v === 1

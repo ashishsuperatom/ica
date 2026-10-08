@@ -140,16 +140,19 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
         // PHASE 1 — the tables, then each table's fields.
         progress({ stage: `phase 1 · ${s.id}`, doing: 'listing its tables' })
         let tables: string[], complete = false, cheapCounts = true
+        // A source that describes its own tables (each with its columns, perhaps its rows) is read from that, not sampled.
+        const described = new Map<string, { columns: { name: string; type?: string }[]; rows?: number }>()
         if (targeted) tables = targeted[s.id] ?? []
         else {
           let catalog: string[] | undefined
           try {
             const j: any = await (await fetch(`${o.manager}/introspect`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: s.id }) })).json()
             const t = (j.tables || []).map((x: any) => String(x?.name ?? x ?? '')).filter(Boolean)
+            for (const x of j.tables || []) if (x && Array.isArray(x.columns) && x.columns.length) described.set(String(x.name), { columns: x.columns, ...(Number.isFinite(x.rows) ? { rows: Number(x.rows) } : {}) })
             if (t.length) catalog = t
             if (j.cheapCounts === false) cheapCounts = false   // the source says its metadata's row counts cannot be trusted
           } catch { /* no catalog: the kind's own knowledge */ }
-          try { tables = await indexer.listContainers(s.id, raw, { catalogTables: catalog }); complete = !!catalog || s.dialect === 'mssql' }
+          try { tables = await indexer.listContainers(s.id, raw, { catalogTables: catalog }); complete = !!catalog || s.dialect === 'mssql' || described.size > 0 }
           catch (e: any) { log(`[dsi] ${s.id}: its tables could not be listed — ${e?.message ?? e}`); failedSources++; state.counts.sources.done++; continue }
         }
         // A targeted build reads the tables it names, whatever was done; a full one resumes from the platform's checkpoints.
@@ -163,7 +166,9 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
         const readOne = async (t: string) => {
           progress({ doing: `${s.id} · ${t}` })
           try {
-            const entries = await indexer.indexContainer(s.id, t, raw)
+            const own = described.get(t)
+            const entries = own ? own.columns.map((c) => ({ field: String(c.name), type: c.type ?? undefined, descDefault: undefined, isOptional: undefined, isKey: undefined, references: undefined }))
+              : await indexer.indexContainer(s.id, t, raw)
             if (!entries.length) throw new Error('no fields could be read')
             o.send({ type: 'dsi:put', source: s.id, phase: 1, table: t, fields: entries.map((e) => ({ name: e.field, type: e.type ?? null, description: e.descDefault ?? null, optional: e.isOptional ?? null, key: e.isKey ?? null, references: e.references ?? null })) })
             ok++; state.counts.fields += entries.length
@@ -178,8 +183,11 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
         if (!targeted) o.send({ type: 'dsi:finish', source: s.id, phase: 1 })
         log(`[dsi] ${s.id}: phase 1 read ${ok}${failed ? `, ${failed} could not be read (first: ${firstError})` : ''}`)
 
-        // PHASE 2 — row counts, only where the connector counts cheaply; what it could not count stays as it was.
-        if (indexer.rowCounts && cheapCounts && !targeted && ok + done.size > 0) {
+        // PHASE 2 — row counts: the source's own, when it described its tables with them; else only where the connector
+        // counts cheaply; what it could not count stays as it was.
+        const ownCounts = Object.fromEntries([...described].filter(([, d]) => d.rows !== undefined).map(([n, d]) => [n, d.rows!]))
+        if (Object.keys(ownCounts).length && !targeted) { o.send({ type: 'dsi:rows', source: s.id, counts: ownCounts }); o.send({ type: 'dsi:finish', source: s.id, phase: 2 }) }
+        else if (indexer.rowCounts && cheapCounts && !targeted && ok + done.size > 0) {
           progress({ stage: `phase 2 · ${s.id}`, doing: 'counting rows' })
           try { o.send({ type: 'dsi:rows', source: s.id, counts: await indexer.rowCounts(s.id, raw) }); o.send({ type: 'dsi:finish', source: s.id, phase: 2 }) }
           catch (e: any) { log(`[dsi] ${s.id}: rows not counted — ${e?.message ?? e}`) }

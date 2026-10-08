@@ -31,6 +31,8 @@ export interface Ingest {
   readonly configured: boolean
   createTable(org: string, table: TableInfo): Promise<void>
   append(org: string, table: string, rows: Record<string, unknown>[]): Promise<{ snapshot: string; rows: number }>
+  /** A table and its data gone (a table loaded again is dropped and made anew). */
+  dropTable(org: string, table: string): Promise<void>
 }
 
 export class WarehouseRefusal extends Error {}

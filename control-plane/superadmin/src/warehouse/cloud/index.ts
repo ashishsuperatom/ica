@@ -87,6 +87,12 @@ export function cloudWarehouse(cfg: CloudConfig | null, store: ObjectStore | nul
         try { await catalog!.create(ns, t.name, schema) } catch (e) { if (e instanceof CatalogError && e.status === 409) throw new WarehouseRefusal(`there is already a table "${t.name}"`); throw e }
         finally { forget(org) }
       },
+      async dropTable(org, table) {
+        need()
+        try { await catalog!.drop(namespaceOf(org), table) }
+        catch (e) { if (e instanceof CatalogError && e.status === 404) throw new WarehouseRefusal(`there is no table "${table}"`); throw e }
+        finally { forget(org) }
+      },
       async append(org, table, rows) {
         need()
         try { const r = await appendRows(catalog!, store!, namespaceOf(org), table, rows); return { snapshot: r.snapshot, rows: r.rows } }

@@ -13,6 +13,7 @@ import { connect, type Hub } from './hub.ts'
 import { viaDaemon, stopDaemon, daemonStatus, serveDaemon, type Conn } from './daemon.ts'
 import { card, sessionView, table } from './render.ts'
 import { engineCommand, realDeps } from './engine.ts'
+import { loadFile } from './load.ts'
 
 export const VERSION = '0.1.0'
 
@@ -184,6 +185,13 @@ project.publish.`,
   sacli warehouse append <table> [--rows '<json>' | --file <rows.json>]   rows (a JSON list; stdin when neither)
 With an organisation key (sak_org_…) made by someone who may manage the warehouse:
   sacli warehouse explore <rows|values|profile|spread> <table | --sql "<query>"> [--column c] [--q text] [--sort c --desc] [--page n --size n]
+  sacli warehouse load <file> [--project <id>] [--replace | --append] [--table <name>] [--sheet <name>] [--tables a,b]
+                                                       a file's tables into the warehouse: a DuckDB database (each table;
+                                                       --tables picks, views too), a CSV (one table) or an Excel workbook
+                                                       (each sheet; --sheet picks). Types are DuckDB's, mapped to the
+                                                       warehouse's; names made lower_case. --project grants each table to
+                                                       that project to read. A table already there is refused unless
+                                                       --replace (dropped, made anew) or --append (same columns).
   sacli warehouse create <table> --column <name>:<type>[!] …   types: string long int double float boolean date
                                                               timestamp timestamptz; a ! makes the column required
   sacli warehouse grants --project <id>                what a project may read and write
@@ -219,12 +227,12 @@ export async function run(argv: string[], io: Io): Promise<number> {
   let hub: Hub | Conn | null = null
   try {
     // The command words come first; options may be anywhere.
-    const words = argv.filter((a, i) => !a.startsWith('-') && !(i > 0 && /^--(profile|key|hub|timeout|id|as-of|set|add|remove|call|param|act|to|block|session|rows|file|limit|column|project|columns|data|can|days|save-as|connector|secret|values-file|prefix|kind|dialect|description|auth|by|tables|bridge|page|image|wait|lines)$/.test(argv[i - 1])))
+    const words = argv.filter((a, i) => !a.startsWith('-') && !(i > 0 && /^--(profile|key|hub|timeout|id|as-of|set|add|remove|call|param|act|to|block|session|rows|file|limit|column|project|columns|data|can|days|save-as|connector|secret|values-file|prefix|kind|dialect|description|auth|by|tables|bridge|page|image|wait|lines|table|sheet|batch)$/.test(argv[i - 1])))
     const [cmd, sub] = words
     const specific: ParseArgsConfig['options'] = cmd === 'session'
       ? { id: { type: 'string' }, 'as-of': { type: 'string' }, set: { type: 'string', multiple: true }, add: { type: 'string', multiple: true }, remove: { type: 'string', multiple: true },
           call: { type: 'string' }, param: { type: 'string', multiple: true }, act: { type: 'string' }, to: { type: 'string' }, block: { type: 'string' } }
-      : cmd === 'warehouse' ? { rows: { type: 'string' }, file: { type: 'string' }, limit: { type: 'string' }, column: { type: 'string', multiple: true }, project: { type: 'string' }, columns: { type: 'string' }, write: { type: 'boolean' }, q: { type: 'string' }, sort: { type: 'string' }, desc: { type: 'boolean' }, page: { type: 'string' }, size: { type: 'string' }, sql: { type: 'string' } }
+      : cmd === 'warehouse' ? { table: { type: 'string' }, sheet: { type: 'string' }, tables: { type: 'string' }, replace: { type: 'boolean' }, append: { type: 'boolean' }, batch: { type: 'string' }, rows: { type: 'string' }, file: { type: 'string' }, limit: { type: 'string' }, column: { type: 'string', multiple: true }, project: { type: 'string' }, columns: { type: 'string' }, write: { type: 'boolean' }, q: { type: 'string' }, sort: { type: 'string' }, desc: { type: 'boolean' }, page: { type: 'string' }, size: { type: 'string' }, sql: { type: 'string' } }
       : cmd === 'ask' ? { session: { type: 'string' }, channel: { type: 'string' } } : cmd === 'use' ? { here: { type: 'boolean' } } : cmd === 'call' || cmd === 'api' ? { data: { type: 'string' } } : cmd === 'projects' ? { deleted: { type: 'boolean' } }
       : cmd === 'keys' ? { project: { type: 'string' }, can: { type: 'string' }, days: { type: 'string' }, never: { type: 'boolean' }, 'save-as': { type: 'string' } }
       : cmd === 'datasources' ? { project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' }, bridge: { type: 'string' } }
@@ -492,10 +500,21 @@ ${r.key}`, r)
         if (!columns.length) throw new CliError('a table needs columns: --column <name>:<type> …', 2)
         const r = await call({ t: 'warehouse:create', name: t, columns }); out(`made ${t} (${columns.map((c) => `${c.name} ${c.type}`).join(', ')})`, r); return 0
       }
+      if (sub === 'load') {
+        const f = pos[2]
+        if (!f) throw new CliError('which file? sacli warehouse load <file.duckdb | file.csv | file.xlsx>', 2)
+        const done = await loadFile(f, { table: o.table, sheet: o.sheet, tables: o.tables ? String(o.tables).split(',').map((x) => x.trim()).filter(Boolean) : undefined, replace: !!o.replace, append: !!o.append, project: o.project ? String(o.project) : undefined, batchRows: o.batch ? Number(o.batch) : undefined },
+          call, (s) => io.stderr(`${s}\n`))
+        const total = done.reduce((n, x) => n + x.rows, 0), secs = done.reduce((n, x) => n + x.seconds, 0)
+        out([table(['table', 'from', 'rows', 'columns', 'seconds', 'rows/s', 'granted to'], done.map((x) => [x.table, x.from, x.rows.toLocaleString(), String(x.columns.length), x.seconds.toFixed(1), Math.round(x.rows / Math.max(x.seconds, 0.001)).toLocaleString(), x.granted ?? ''])),
+          ...done.flatMap((x) => x.columns.filter((c) => c.was).length ? [`${x.table}: renamed ${x.columns.filter((c) => c.was).map((c) => `${c.was} → ${c.name}`).join(', ')}`] : []),
+          `${total.toLocaleString()} rows in ${secs.toFixed(1)} s`].join('\n'), done)
+        return 0
+      }
       if (sub === 'grants') { const r = await call({ t: 'warehouse:grants', project: project() }); out(Object.keys(r.grant ?? {}).length ? table(['table', 'columns', 'write'], Object.entries(r.grant).map(([t, c]: [string, any]) => [t, c === null ? 'all' : c.join(', '), (r.writable ?? []).includes(t) ? 'yes' : ''])) : 'this project was granted nothing', r); return 0 }
       if (sub === 'grant') { const t = need(' --project <id>'); const columns = o.columns ? String(o.columns).split(',').map((c) => c.trim()).filter(Boolean) : null; const r = await call({ t: 'warehouse:grant', project: project(), table: t, columns, write: !!o.write }); if (r.error) throw new CliError(r.error); out(`project ${o.project} may read ${columns ? columns.join(', ') + ' of ' : ''}${t}${o.write ? ' and append to it' : ''}`, r); return 0 }
       if (sub === 'revoke') { const t = need(' --project <id>'); const r = await call({ t: 'warehouse:revoke', project: project(), table: t }); out(`project ${o.project} may no longer read ${t}`, r); return 0 }
-      throw new CliError(`there is no 'warehouse ${sub ?? ''}' — tables, query, explore, append, create, grants, grant or revoke`, 2)
+      throw new CliError(`there is no 'warehouse ${sub ?? ''}' — tables, query, explore, load, append, create, grants, grant or revoke`, 2)
     }
 
     if (cmd === 'status') {
@@ -701,7 +720,7 @@ ${r.key}`, r)
       if (sub === 'query') { const sql = pos.slice(2).join(' ').trim(); if (!sql) throw new CliError('which SQL? sacli warehouse query "<sql>"', 2); const r = await wh({ t: 'warehouse:query', sql, limit: o.limit ? Number(o.limit) : undefined }); out(showResult(r), r); return 0 }
       if (sub === 'explore') { const r = await wh(exploreReq(pos.slice(2))); out(JSON.stringify(r, null, 2), r); return 0 }
       if (sub === 'append') { const t = pos[2]; if (!t) throw new CliError('which table? sacli warehouse append <table> --rows …', 2); const r = await wh({ t: 'warehouse:append', table: t, rows: await rowsGiven() }); out(`appended ${r.rows} rows to ${t} (snapshot ${r.snapshot})`, r); return 0 }
-      if (['create', 'grants', 'grant', 'revoke'].includes(String(sub))) throw new CliError(`warehouse ${sub} is the organisation's: use an organisation key (sak_org_…), made in the admin console's Warehouse`, 2)
+      if (['create', 'load', 'grants', 'grant', 'revoke'].includes(String(sub))) throw new CliError(`warehouse ${sub} is the organisation's: use an organisation key (sak_org_…), made in the admin console's Warehouse`, 2)
       throw new CliError(`there is no 'warehouse ${sub ?? ''}' — tables, query or append (create and grant with an organisation key)`, 2)
     }
     if (cmd === 'ask') {

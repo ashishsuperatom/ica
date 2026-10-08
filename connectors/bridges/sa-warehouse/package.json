@@ -1,0 +1,7 @@
+{
+  "name": "@superatom/bridge-sa-warehouse",
+  "private": true,
+  "description": "SA-WAREHOUSE, the organisation's warehouse in Superatom, read through the platform as far as it granted the project: its bridge, needing nothing beyond Node itself.",
+  "type": "module",
+  "dependencies": {}
+}

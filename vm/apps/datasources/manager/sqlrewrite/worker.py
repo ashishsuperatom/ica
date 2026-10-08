@@ -35,6 +35,7 @@ DIALECTS = {
     "mssql": "tsql", "tsql": "tsql", "sqlserver": "tsql",
     "suiteql": "oracle", "oracle": "oracle", "netsuite": "oracle",
     "postgres": "postgres", "postgresql": "postgres",
+    "sa-warehouse": "postgres",   # SA-WAREHOUSE: R2 SQL (Apache DataFusion), Postgres-like
     "sqlite": "sqlite", "duckdb": "duckdb", "mysql": "mysql",
     "snowflake": "snowflake", "bigquery": "bigquery",
     "ansi": None, "": None,

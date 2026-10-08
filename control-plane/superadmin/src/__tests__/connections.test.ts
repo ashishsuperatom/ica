@@ -67,10 +67,26 @@ describe('connections', () => {
     const r = await ana('/connections', 'POST', { connector: 'rest-json', name: 'my crm', level: 'user', values: { baseUrl: 'https://crm.example.com', endpoints: 'customers /customers', token: 'tok-ana' } })
     expect(r.status).toBe(201); mine = r.body.connection.id
     const anaSees = (await ana('/connections')).body.connections
-    expect(anaSees.map((c: any) => c.name).sort()).toEqual(['my crm', 'warehouse'])
+    expect(anaSees.map((c: any) => c.name).sort()).toEqual(['SA-WAREHOUSE', 'my crm', 'warehouse'])
     expect(JSON.stringify(anaSees)).not.toMatch(/tok-ana|s3cret/)
-    expect((await bo('/connections')).body.connections.map((c: any) => c.name)).toEqual(['warehouse'])
+    expect((await bo('/connections')).body.connections.map((c: any) => c.name).sort()).toEqual(['SA-WAREHOUSE', 'warehouse'])
     expect((await bo(`/connections/${mine}`, 'DELETE')).status).toBe(403)
+  })
+  it('SA-WAREHOUSE is in every project, the platform\'s own: its bridge the platform\'s, never connected, changed or removed by people', async () => {
+    const list = (await admin('/connections')).body.connections
+    const saw = list.find((c: any) => c.name === 'SA-WAREHOUSE')
+    expect(saw).toMatchObject({ connector: 'sa-warehouse', level: 'project' })
+    expect(saw.bridge).toMatch(/^[0-9a-f]{64}$/)
+    expect((await admin('/connections')).body.connections.filter((c: any) => c.connector === 'sa-warehouse')).toHaveLength(1)   // made once
+    expect((await admin('/connectors')).body.connectors.some((c: any) => c.id === 'sa-warehouse')).toBe(false)
+    expect((await admin('/connections', 'POST', { connector: 'sa-warehouse', name: 'another' })).body.error).toMatch(/in every project already/)
+    expect((await admin(`/connections/${saw.id}`, 'DELETE')).body.error).toMatch(/platform's own source/)
+    expect((await admin(`/connections/${saw.id}`, 'PATCH', { description: 'x' })).body.error).toMatch(/platform's own source/)
+    // The engine's bridge asks with the engine's key: the tables this project was granted (none here, no warehouse set up).
+    const tables = await mf.dispatchFetch('http://x/do/engine/sa-warehouse/tables', { headers: { authorization: 'Bearer ek' } })
+    expect(tables.status).not.toBe(401)
+    expect((await mf.dispatchFetch('http://x/do/engine/sa-warehouse/tables', { headers: { authorization: 'Bearer nope' } })).status).toBe(401)
+    expect((await mf.dispatchFetch('http://x/do/engine/sa-warehouse/query', { method: 'POST', headers: { authorization: 'Bearer nope' }, body: '{}' })).status).toBe(401)
   })
   it('the engine gets the secrets when it runs a connection — a personal one only for its owner', async () => {
     const s = await engineAsk({ id: shared })

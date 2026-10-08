@@ -167,7 +167,19 @@ const suiteql: TypeIndexer = {
   },
 }
 
-export const INDEXERS: Record<string, TypeIndexer> = { mssql, suiteql }
+// ── sa-warehouse (SA-WAREHOUSE, the organisation's warehouse in Superatom) — its bridge describes every table it may read
+// (columns and rows, from the warehouse's own catalog), so the build reads that; a table it did not describe is sampled. ──
+const saWarehouse: TypeIndexer = {
+  async listContainers(_source, _query, opts) { return [...new Set((opts.catalogTables ?? []).map(String))].sort() },
+  async indexContainer(source, container, query) {
+    const rows: any[] = await query(source, `SELECT * FROM ${container} LIMIT 25`)
+    const cols = new Map<string, string | undefined>()
+    for (const r of rows ?? []) for (const [k, v] of Object.entries(r ?? {})) if (!cols.has(k) || (cols.get(k) == null && v != null)) cols.set(k, inferType(v))
+    return [...cols].map(([field, type]) => ({ key: dsiKey(source, container, field), source, container, field, type }))
+  },
+}
+
+export const INDEXERS: Record<string, TypeIndexer> = { mssql, suiteql, 'sa-warehouse': saWarehouse }
 export function getIndexer(dialect: string): TypeIndexer {
   const t = INDEXERS[dialect]
   if (!t) throw new Error(`no indexer for dialect "${dialect}" (have: ${Object.keys(INDEXERS).join(', ')})`)

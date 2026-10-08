@@ -3,11 +3,18 @@
   "version": "0.1.0",
   "description": "sacli — the Superatom CLI: an agent (or a person) works with a Superatom project through an agent API key.",
   "type": "module",
-  "bin": { "sacli": "./dist/sacli.mjs" },
-  "files": ["dist", "README.md"],
-  "engines": { "node": ">=22" },
+  "bin": {
+    "sacli": "./dist/sacli.mjs"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/sacli.mjs --banner:js='#!/usr/bin/env node' && chmod +x dist/sacli.mjs",
+    "build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/sacli.mjs --external:@duckdb/node-api --banner:js='#!/usr/bin/env node' && chmod +x dist/sacli.mjs",
     "dev": "tsx src/main.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "tsx --test test/*.test.mts"
@@ -18,5 +25,8 @@
     "miniflare": "4.20260730.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
+  },
+  "dependencies": {
+    "@duckdb/node-api": "1.5.6-r.1"
   }
 }

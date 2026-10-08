@@ -24,7 +24,7 @@ import { AnalystConsole } from './AnalystConsole'
 import { useSession, useUser, useClerk, SignIn } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
-import { AppShell, RailSidebar, NavList, type RailPlace, UserProfile, MenuItem, MenuRule, Search, useSearchKey, type SearchItem, ConnectionStatus, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, SourceHub, sourceColumns, searchTables, type HubSource, type TreeTable, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Toolbar, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
+import { AppShell, RailSidebar, NavList, type RailPlace, UserProfile, MenuItem, MenuRule, Search, useSearchKey, type SearchItem, ConnectionStatus, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, SourceHub, sourceColumns, searchTables, type HubSource, type TreeTable, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Toolbar, Form, Field, Status, Empty, ActionBar, Icon, SuperatomMark, type StatusState, type Accent } from '@superatom/ui'
 import '@superatom/ui/design.css'
 import { AdminContext, ADMIN_OWN_BLOCKS } from './AdminBlocks'
 
@@ -1084,7 +1084,7 @@ const fmtWhen = (iso?: string | null) => (iso ? new Date(iso).toLocaleString(und
 function DataSourcesPanel({ hub, api, projectId, projectName }: { hub: ReturnType<typeof useProjectHub>; api: (p: string, i?: RequestInit) => Promise<Response>; projectId: string; projectName: string }) {
   const [snap, setSnap] = useState<Snapshot | null>(null)
   const [stats, setStats] = useState<DsiSource[]>([])
-  const [conns, setConns] = useState<any[]>([])
+  const [conns, setConns] = useState<{ id: string; name: string; connector: string; kind?: string; dialect?: string; runs?: string; level?: string; state?: string; bridge?: string | null; runnable?: boolean }[]>([])
   const [connsKnown, setConnsKnown] = useState(false)
   const [job, setJob] = useState<DsiJob | null>(null)
   const [err, setErr] = useState('')
@@ -1138,7 +1138,7 @@ function DataSourcesPanel({ hub, api, projectId, projectName }: { hub: ReturnTyp
   }
   const sources: HubSource[] = names.map((name) => {
     const st = stats.find((s) => s.source === name), c = conns.find((x) => x.name === name), s = stateOf(name)
-    return { key: name, title: name, icon: iconOfConnection(c ?? {}), found: q.trim() ? searched.get(name)?.found ?? 0 : undefined, meta: [c?.dialect ?? c?.kind, st ? `${st.fields.toLocaleString()} fields` : ''].filter(Boolean).join(' · '), count: st ? `${st.tables.toLocaleString()} tables` : undefined, state: s.state, stateLabel: s.label }
+    return { key: name, title: name, icon: c?.connector === 'sa-warehouse' ? <SuperatomMark size={18} /> : iconOfConnection(c ?? {}), found: q.trim() ? searched.get(name)?.found ?? 0 : undefined, meta: [c?.dialect ?? c?.kind, st ? `${st.fields.toLocaleString()} fields` : ''].filter(Boolean).join(' · '), count: st ? `${st.tables.toLocaleString()} tables` : undefined, state: s.state, stateLabel: s.label }
   })
   const totals = stats.reduce((a, s) => ({ t: a.t + s.tables, f: a.f + s.fields }), { t: 0, f: 0 })
 

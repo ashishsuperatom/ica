@@ -29,6 +29,8 @@ importers:
 
   bridges/netsuite-suiteql: {}
 
+  bridges/sa-warehouse: {}
+
 packages:
 
   '@azure-rest/core-client@2.9.0':

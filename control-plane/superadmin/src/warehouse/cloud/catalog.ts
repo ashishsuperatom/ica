@@ -55,6 +55,10 @@ export function icebergCatalog(cfg: CatalogConfig, fetcher: typeof fetch = fetch
       const r = await call('POST', `${await base()}/namespaces/${ns(namespace)}/tables`, { name: table, schema, properties: { 'format-version': '2', ...properties } })
       return r.metadata
     },
+    /** A table gone, with its files (the catalog purges them). */
+    async drop(namespace: string, table: string): Promise<void> {
+      await call('DELETE', `${await base()}/namespaces/${ns(namespace)}/tables/${encodeURIComponent(table)}?purgeRequested=true`)
+    },
     /** A commit: what must still be true (requirements), what changes (updates). A conflict is a CatalogError with status 409. */
     async commit(namespace: string, table: string, requirements: unknown[], updates: unknown[]): Promise<TableMetadata> {
       const r = await call('POST', `${await base()}/namespaces/${ns(namespace)}/tables/${encodeURIComponent(table)}`, { requirements, updates })
