@@ -13,7 +13,9 @@ import WindowControl from './WindowControl'
 
 export type QuestionOp = Record<string, unknown>
 export interface QuestionCatalog { financialYears?: string[]; dimensions: any[]; capabilities: any[]; today?: string }
-export interface QuestionMember { key: string; keys?: string[]; label: string; recorded?: number }
+/** A member a filter can take: its key (or every key its label is recorded under), its label, and what the views say
+ *  beside it — how much sits under it now (`note`), or how many times the label is recorded. */
+export interface QuestionMember { key: string; keys?: string[]; label: string; recorded?: number; note?: string }
 
 const dimensionOf = (c: QuestionCatalog, key: string) => c.dimensions.find((x: any) => x.key === key)
 const dimLabel = (c: QuestionCatalog, key: string): string => dimensionOf(c, key)?.label ?? key
@@ -117,7 +119,7 @@ function FilterAdd({ catalog, honours, seen, members, disabled, onPush }: { cata
   const options = (ms: QuestionMember[]) => {
     const byId = new Map<string, QuestionMember>()
     for (const m of ms) { const id = (m.keys ?? [m.key]).join('\u0000'); if (!byId.has(id)) byId.set(id, m) }
-    return [...byId.entries()].map(([id, m]) => ({ value: id, label: m.label, member: m, ...(m.recorded && m.recorded > 1 ? { note: `recorded ${m.recorded} times` } : {}) }))
+    return [...byId.entries()].map(([id, m]) => ({ value: id, label: m.label, member: m, ...(m.note ? { note: m.note } : m.recorded && m.recorded > 1 ? { note: `recorded ${m.recorded} times` } : {}) }))
   }
   const query = (typed: string) => {
     if (!d || !asks) return
