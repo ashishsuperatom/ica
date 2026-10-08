@@ -1,7 +1,7 @@
 // THE DEFAULT AGENT: every project has one from its start — the domain a question goes to when no other agent's words
 // reach it. It answers by discovery: the project's sources as they are now ({{sources}}, filled by the engine), where
 // something lives (find-schema), a table's fields (get-schema), then a query in the source's own dialect. The platform
-// puts it in a project's composition graph when the graph has no default domain (at setup, and for a project made
+// puts it in a project's composition graph once, when the graph has no default domain (at setup, and for a project made
 // before this existed, the first time its graph is opened); after that it is a domain like any other — its history
 // records the platform as who made it, and a project's own default domain means the platform adds none.
 

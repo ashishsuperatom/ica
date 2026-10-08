@@ -75,7 +75,7 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
       if (asOf !== undefined && Number.isNaN(asOf)) throw new GovernanceRefusal(`"${payload.asOf}" is not a time`)
       const visible = (name: string) => { const n = s.get(name, asOf); return n && (!viewer || n.scope === 'global' || viewer.includes(n.scope)) ? n : null }
       const before = WRITES.has(t) ? cursor() : null
-      const data = ((): Record<string, unknown> => {
+      const compute = (): Record<string, unknown> => {
         switch (t) {
           case 'graph:domains': return { domains: domainsOf(s, { asOf, viewer }) }
           case 'graph:names': {
@@ -117,7 +117,15 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
           }
         }
         throw new GovernanceRefusal(`there is no ${t}`)
-      })()
+      }
+      // A PROJECT ALWAYS HAS A DEFAULT AGENT: a change that would leave it with none (its default removed, unmarked, or a
+      // version restored that had none) is refused, whole.
+      const data = WRITES.has(t) ? s.db.atomic(() => {
+        const had = hasDefault()
+        const out = compute()
+        if (had && !hasDefault()) throw new GovernanceRefusal('this would leave the project with no default agent — mark another domain the default (fallback) first')
+        return out
+      }) : compute()
       const changed = !!before && JSON.stringify(cursor()) !== JSON.stringify(before)
       if (changed) recordSince(before!)
       return { reply: { t: 'graph:reply', ...data }, changed }
@@ -206,11 +214,14 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
     } catch (e: any) { return { error: e?.message ?? String(e), changed: false } }
   }
 
+  /** Whether the graph has a default domain: where a question no other domain reaches goes. */
+  const hasDefault = () => store.names('domain').some((d) => (store.get(d.name)?.body as DomainBody | undefined)?.fallback === true)
   /** Every project has a default agent: when its graph has no default domain, the platform's (default-agent.ts) is put in,
    *  recorded as the platform's change. Whether it changed the graph (the engine is told). */
   function ensureDefaultAgent(): boolean {
-    const hasDefault = store.names('domain').some((d) => (store.get(d.name)?.body as DomainBody | undefined)?.fallback === true)
-    if (hasDefault || store.get(DEFAULT_AGENT.name)) return false
+    // Once a graph has a default it keeps one (handle refuses a change that would leave none), so this adds it only to a
+    // project that never had one: a new project at its setup, or one made before projects had a default agent.
+    if (hasDefault() || store.get(DEFAULT_AGENT.name)) return false
     const before = cursor()
     store.db.atomic(() => importDomains(store, [DEFAULT_AGENT], () => { throw new Error('the default agent brings no files') }, { by: 'platform', reason: 'every project has a default agent, for questions no other agent covers' }))
     recordSince(before)
