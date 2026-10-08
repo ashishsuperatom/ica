@@ -608,5 +608,7 @@ button.sa-history__main:not(:disabled):hover { background: var(--panel); }
 .sa-tcols__head-icon { flex-shrink: 0; color: var(--muted); }
 /* A section's icon in the explorer's list: a source's logo, the warehouse's mark, queries' own. */
 .sa-explorer__groupicon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; color: var(--muted); }
-.sa-explorer__groupicon .sa-mark { color: var(--primary); }
+/* Superatom's mark as the rail draws it: ink, its electron on the list's own ground */
+.sa-explorer__groupicon .sa-mark { color: var(--ink); }
+.sa-explorer__tables { --mark-ground: var(--surface); }
 .sa-explorer__head--queries .sa-explorer__groupicon { color: var(--series-2); }
