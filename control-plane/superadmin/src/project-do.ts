@@ -35,7 +35,6 @@ import { costOf, priceFor, type Price } from './metering.js'
 import { createRecorder, type Recorder } from './records.js'
 import { connectorById, checkConnection, CONNECTORS, SA_WAREHOUSE } from '../../shared/connectors.js'
 import { PLATFORM_MODELS } from '../../shared/models.js'
-import { restartIfOlder } from './code-version.js'
 import { readyBridge } from './bridges.js'
 import { seal, unseal } from './proxy/seal.js'
 import { runConnector, runCode, manifestOf } from './connectors/runtime.js'
@@ -298,7 +297,6 @@ export class ProjectDO extends DurableObject<Env> {
   /** Every HTTP call, through one gate for the audit history: a call that changes something is recorded once — by its
    *  handler, with what it means (agent-key.create, …), or else here, as the call itself. Whatever way it came. */
   async fetch(request: Request): Promise<Response> {
-    restartIfOlder(this.ctx, this.env, request)   // a busy instance after a deploy: onto the new code (code-version.ts)
     if (request.method === 'GET' || request.method === 'HEAD' || request.headers.get('upgrade') === 'websocket') return this.handleFetch(request)
     const mark = { recorded: false }
     const res = await auditScope.run(mark, () => this.handleFetch(request))

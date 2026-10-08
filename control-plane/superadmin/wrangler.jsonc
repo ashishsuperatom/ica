@@ -17,8 +17,6 @@
     "traces": { "enabled": true, "head_sampling_rate": 0.1 }
   },
 
-  // When this code was deployed (code-version.ts): an object instance older than a request's code restarts onto it.
-  "version_metadata": { "binding": "CF_VERSION_METADATA" },
   "durable_objects": {
     "bindings": [
       { "class_name": "OrgDO", "name": "ORG" },

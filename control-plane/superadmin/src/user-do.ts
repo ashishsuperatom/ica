@@ -5,7 +5,6 @@
 // keys and JSON values, per project or across all). Their unpublished programs and more come here later; what exactly it
 // keeps is still being decided, so it starts with what is certainly theirs.
 
-import { restartIfOlder } from './code-version.js'
 import { DurableObject } from 'cloudflare:workers'
 import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
 import { USER_MIGRATIONS } from './migrations.js'
@@ -31,7 +30,6 @@ export class UserDO extends DurableObject<Env> {
   async closeLink(project: string, wsId: string, code: number, reason: string) { this.hub().closeLink(project, wsId, code, reason) }
 
   async fetch(request: Request): Promise<Response> {
-    restartIfOlder(this.ctx, this.env, request)   // a busy instance after a deploy: onto the new code (code-version.ts)
     if (request.headers.get('upgrade') === 'websocket') return this.hub().accept(request)
     if (request.method === 'POST' && new URL(request.url).pathname === '/attach') return this.hub().attach(request)
     const url = new URL(request.url)
