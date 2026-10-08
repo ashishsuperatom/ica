@@ -17,6 +17,55 @@ sacli ask "which trips are unsettled?"
 sacli disconnect
 ```
 
+## A new project, start to finish
+
+The order every new project goes through, with the commands. Names in `<…>` are yours.
+
+**1. Organisation and project.** Made by a person in the admin console. A project belongs to one organisation.
+
+**2. Two keys, two profiles.** They do different jobs, and both live side by side in the credentials file:
+
+| Key | Made in the console under | Holds | Used for |
+|---|---|---|---|
+| project key (`sak_<project>_…`) | the project → Keys | `project.view, project.ask, project.data, project.connect, project.publish, project.manage` | everything inside the project: its engine, sources, index, agents, questions, the warehouse tables it was granted |
+| organisation key (`sak_org_…`) | the organisation → Keys | `warehouse.manage, warehouse.query, warehouse.write` | the organisation's warehouse (SA-WAREHOUSE): loading tables and granting them to projects |
+
+```
+mkdir -p <folder> && cd <folder>
+pbpaste | sacli login --profile <project>          # the project key, from the clipboard (never typed or printed)
+sacli use <project> --here                         # this folder means this project (.sacli.json)
+pbpaste | sacli login --profile <org>              # the organisation key; used with --profile <org> only
+sacli whoami && sacli profiles
+```
+
+**3. The engine.** In Docker by default (on any OS), or `--native` under PM2. What it connects with comes from the
+platform; nothing is pasted.
+```
+sacli engine start                                 # waits until the hub has it
+sacli engine status
+sacli engine logs -f                               # look for ENGINE FULLY READY
+```
+
+**4. Data into SA-WAREHOUSE.** A DuckDB database, a CSV or an Excel workbook, from this machine straight to the
+platform (no engine involved). `--project` grants each table to the project.
+```
+sacli warehouse load <file.duckdb | file.csv | file.xlsx> --project <project id> --profile <org>
+sacli warehouse load <file> --replace --project <project id> --profile <org>   # the file regenerated: load it again
+sacli warehouse tables                              # what the project can now see
+```
+Every project has SA-WAREHOUSE as a data source already (`sacli datasources list`); other sources are connected with
+`sacli datasources create`.
+
+**5. The index**, so agents find the tables:
+```
+sacli dsi build SA-WAREHOUSE
+sacli dsi status --watch
+sacli dsi stats
+```
+
+**6. Work with it** through the project key: `sacli ask`, `sacli agents`, `sacli session …`, and the knowledge and
+programs commands.
+
 ## How it connects
 
 - **A key belongs to one project or one organisation; a profile holds one key.** The profile in use is chosen in this order: `--profile`,
@@ -42,18 +91,21 @@ sacli disconnect
 - `api <METHOD> <path> [--data]`: the platform's REST API with the key, the same routes and checks as the console
 - `agents`; `session open | get [--as-of] | intent | goto`; `ask` (with live narration on stderr)
 - `warehouse tables | query | append` with a project key (its grant; appending needs `warehouse.append` and a table the
-  organisation granted writing); with an organisation key (`sak_org_…`) also `create`, `grants`, `grant [--write]`, `revoke`
+  organisation granted writing); with an organisation key (`sak_org_…`) also `load` (DuckDB, CSV, Excel), `create`,
+  `grants`, `grant [--write]`, `revoke`
+- `engine start | status | stop | logs`: the project's engine in Docker (default) or `--native` under PM2
+- `datasources …` and `dsi …`: the project's sources and their index
 - organisation keys: a profile may hold one (the warehouse over HTTP, no background connection)
 - the background connection: idle limit, lifetime limit, `status`, `disconnect`, cleanup on every way out
 - `--json` on every command; help on every command; exit codes 0 done · 1 refused · 2 usage · 3 key refused · 4 network
 - credentials kept mode 600, with a warning if others can read them; a key passed to the background process only
   through its environment
-- zero runtime dependencies; one bundled file (`dist/sacli.mjs`, Node 22+)
+- one bundled file (`dist/sacli.mjs`, Node 22+); one runtime dependency, DuckDB's official Node package, loaded only by
+  `warehouse load`
 
 **Planned (not built)**
 - installing it: `curl -fsSL https://superatom.site/install | sh` picks the build for macOS, Linux or Windows from the
   platform's R2 releases (the latest by default, any version on request)
-- `sacli engine install | upgrade | status`: installs and configures the Superatom engine for a project (Docker first)
 - the agent HTTP API, with the key: domains and concepts (create, edit, suggest), programs (build, upload, publish), and
   what usage shows is missing
 - organisation keys for creating projects
