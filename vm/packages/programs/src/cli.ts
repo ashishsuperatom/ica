@@ -70,7 +70,7 @@ async function main() {
     // source on the platform — never in a project's home.
     const dest = resolve(name)
     if (existsSync(dest)) throw new ProgramError([`${dest} exists already`])
-    const template = new URL('../../project-template/start/programs/template/', import.meta.url)
+    const template = new URL('../../project-template/start/agent-template/programs/example/', import.meta.url)
     cpSync(template, dest, { recursive: true })
     const mf = join(dest, 'manifest.json')
     const m = JSON.parse(readFileSync(mf, 'utf8'))

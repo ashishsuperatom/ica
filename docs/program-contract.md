@@ -1,8 +1,10 @@
 # The program contract
 
 What every program is, and what a builder — an agent or a person — must do so that what is built fits the platform
-and does not drift. The template is `vm/packages/project-template/start/programs/template/`; start a program from it
-with `programs init <name>`.
+and does not drift. A program lives in an agent: the template is the agent template,
+`vm/packages/project-template/start/agent-template/` (agent.json, its domain in knowledge/index.mts, its programs) —
+`sacli agent init <folder>` makes one, `sacli agent push <folder>` imports the domain, builds each program and writes the
+agent. A single program builds with `sacli program build <folder>`.
 
 ## What a program is
 

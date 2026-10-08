@@ -1,7 +1,7 @@
 {
   "name": "@superatom/cli",
   "version": "0.1.0",
-  "description": "sacli — the Superatom CLI: an agent (or a person) works with a Superatom project through an agent API key.",
+  "description": "sacli \u2014 the Superatom CLI: an agent (or a person) works with a Superatom project through an agent API key.",
   "type": "module",
   "bin": {
     "sacli": "./dist/sacli.mjs"
@@ -14,7 +14,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/sacli.mjs --external:@duckdb/node-api --banner:js='#!/usr/bin/env node' && chmod +x dist/sacli.mjs",
+    "build": "node scripts/embed-agent-template.mjs && esbuild src/main.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/sacli.mjs --external:@duckdb/node-api --banner:js='#!/usr/bin/env node' && chmod +x dist/sacli.mjs",
     "dev": "tsx src/main.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "tsx --test test/*.test.mts"

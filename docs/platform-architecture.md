@@ -909,7 +909,8 @@ a group.
 to the platform's catalogue on each connect; screens load a program's view from the platform (R2, immutable by hash,
 cached) — the engine is not needed to draw it — falling back to the engine only for a program not yet uploaded. A
 dashboard is an agent whose programs' views are drawn together in its session. The contract every builder works to is
-`docs/program-contract.md`; the template is `project-template/start/programs/template/` (`programs init <name>`).
+`docs/program-contract.md`; the template is the agent template, `project-template/start/agent-template/` (`sacli agent
+init <folder>`, then `sacli agent push <folder>`).
 
 **Order of building:** (1) drop Analytics Engine; (2) groups, and scope (global/group/user) wherever things are listed
 or read — knowledge, agents, programs, sessions, connections; (3) agents as first-class, created from the UI and CLI;

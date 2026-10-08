@@ -14,6 +14,7 @@ import { viaDaemon, stopDaemon, daemonStatus, serveDaemon, type Conn } from './d
 import { card, sessionView, table } from './render.ts'
 import { engineCommand, realDeps } from './engine.ts'
 import { loadFile } from './load.ts'
+import { initAgent } from './agent-template.ts'
 
 export const VERSION = '0.1.0'
 
@@ -51,6 +52,7 @@ Commands:
   app publish      publish the project's app (its server/ and web/ source) — the engine downloads and runs it
   program build    build a program from its source folder: the build and its source are kept by the platform
   graph import     import the project's written knowledge (knowledge/index.mts) into its graph, on the platform
+  agent            an agent as one folder — its domain, its programs, its STATE: init a new one, push it to the platform
   map              the project's map — the sections and places people see, each place an agent: show, set
   call             send any message the platform takes, with its fields as JSON (prints the reply as JSON)
   status           the background connection: up, since when, how long until it closes
@@ -169,6 +171,14 @@ Needs project.manage.`,
 
 A program's source — manifest.json, doc.md, server/…, web/… — built by the project's engine and kept by the platform,
 the build with the source it came from. Needs project.ask.`,
+  agent: `sacli agent init <folder>            a new agent's folder from the template, named for its last part
+  sacli agent push <folder> [--reason '<why>']   its domain imported, each program built, the agent written
+
+An agent is one folder: agent.json (its title, domain, programs, the agent that answers in words, tools, look, where its
+STATE starts and its starting points), knowledge/index.mts (its domain — the concepts it answers from) and
+programs/<name>/ (each program: manifest.json, doc.md, server/, web/). A click changes STATE through an Intent; a
+question in words is answered from the domain and the programs' docs, and may change STATE the same way.
+Needs project.ask; importing the domain and writing a global agent need someone who may publish.`,
   map: `sacli map [show]                      the project's map: its sections, and each place's address and agent
   sacli map set <map.json> [--reason '<why>']   write it (someone who may publish)
 
@@ -246,7 +256,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'datasources' ? { project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' }, bridge: { type: 'string' } }
       : cmd === 'engine' ? { project: { type: 'string' }, native: { type: 'boolean' }, image: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
       : cmd === 'storage' ? { project: { type: 'string' }, by: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' }, everything: { type: 'boolean' } }
-      : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' || cmd === 'map' ? { reason: { type: 'string' } } : {}
+      : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' || cmd === 'map' || cmd === 'agent' ? { reason: { type: 'string' } } : {}
     let parsed
     try { parsed = parseArgs({ args: argv, options: { ...GLOBAL, ...specific }, allowPositionals: true, strict: true }) }
     catch (e: any) { throw new CliError(`${e.message.replace(/^Unknown option/, 'unknown option')} — see sacli ${cmd ?? ''} --help`.replace(/\s+—/, ' —'), 2) }
@@ -581,11 +591,14 @@ ${r.key}`, r)
       out(r.changed ? `published ${String(r.hash).slice(0, 12)} (${Object.keys(files).length} files) — the engine downloads it` : `unchanged (${String(r.hash).slice(0, 12)})`, r)
       return 0
     }
-    if (cmd === 'program') {
-      if (pos[1] !== 'build' || !pos[2]) throw new CliError('sacli program build <folder>', 2)
-      const root = resolve(io.cwd ?? process.cwd(), pos[2])
-      const owner = folderProject(root), keyProject = projectOfKey(key ?? '')
-      if (owner && keyProject && owner.project !== keyProject) throw new CliError(`${pos[2]} belongs to project ${owner.project} (${owner.file}); this key is project ${keyProject}'s — use that project's key`, 1)
+    // ── A program folder built, and a knowledge file imported: one way each, for `program build`, `graph import` and
+    //    `agent push` alike.
+    const checkOwner = (path: string, shown: string) => {
+      const owner = folderProject(path), keyProject = projectOfKey(key ?? '')
+      if (owner && keyProject && owner.project !== keyProject) throw new CliError(`${shown} belongs to project ${owner.project} (${owner.file}); this key is project ${keyProject}'s — use that project's key`, 1)
+    }
+    const buildFolder = async (root: string, shown: string) => {
+      checkOwner(root, shown)
       const files: Record<string, string> = {}
       const walk = (dir: string, rel: string) => {
         for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -595,12 +608,62 @@ ${r.key}`, r)
           else if (/^(manifest\.json|doc\.md|(server|web)\/.+)$/.test(r)) files[r] = readFileSync(join(dir, e.name), 'utf8')
         }
       }
-      try { walk(root, '') } catch (e: any) { throw new CliError(`${pos[2]} could not be read: ${e?.message ?? e}`, 1) }
-      if (!files['manifest.json']) throw new CliError(`${pos[2]} has no manifest.json`, 1)
-      const r = await hub.request({ t: 'program:build', files }, { timeoutMs })
-      if (r.t !== 'program:built') throw new CliError(String(r.reason ?? r.error ?? r.t), 1)
-      out(`${r.name} ${r.version ?? ''} → ${String(r.hash).slice(0, 12)}${r.added ? '' : ' (already kept)'}`, r)
+      try { walk(root, '') } catch (e: any) { throw new CliError(`${shown} could not be read: ${e?.message ?? e}`, 1) }
+      if (!files['manifest.json']) throw new CliError(`${shown} has no manifest.json`, 1)
+      const r = await hub!.request({ t: 'program:build', files }, { timeoutMs })
+      if (r.t !== 'program:built') throw new CliError(`${shown}: ${String(r.reason ?? r.error ?? r.t)}`, 1)
+      return r
+    }
+    const importKnowledge = async (file: string, shown: string) => {
+      checkOwner(file, shown)
+      let mod: any
+      try { mod = await import(pathToFileURL(file).href) } catch (e: any) { throw new CliError(`${shown} could not be read: ${e?.message ?? e}`, 1) }
+      const dir = dirname(file)
+      // Each file a domain lists, by the name import reads it with: a domain's own beside it, a shared one by its path.
+      const files: Record<string, string> = {}
+      for (const d of (mod.domains ?? []) as { name: string; files?: string[] }[]) for (const f of d.files ?? []) {
+        const at = f.includes('/') ? join(dir, f) : join(dir, d.name.replace(/\s+/g, '-').toLowerCase(), f)
+        try { files[`${d.name}|${f}`] = readFileSync(at, 'utf8') } catch { throw new CliError(`domain "${d.name}" lists ${f}, which is not at ${at}`, 1) }
+      }
+      const r = await hub!.request({ t: 'graph:import', domains: mod.domains ?? [], settings: mod.settings ?? [], files, ...(o.reason ? { reason: o.reason } : {}) }, { timeoutMs })
+      if (r.t !== 'graph:reply') throw new CliError(`${shown}: ${String(r.reason ?? r.error ?? r.t)}`, 1)
+      return (r.imported ?? []) as { name: string; kind: string; hash: string; changed: boolean }[]
+    }
+    const builtLine = (r: any) => `${r.name} ${r.version ?? ''} → ${String(r.hash).slice(0, 12)}${r.added ? '' : ' (already kept)'}`
+    if (cmd === 'program') {
+      if (pos[1] !== 'build' || !pos[2]) throw new CliError('sacli program build <folder>', 2)
+      const r = await buildFolder(resolve(io.cwd ?? process.cwd(), pos[2]), pos[2])
+      out(builtLine(r), r)
       return 0
+    }
+    if (cmd === 'agent') {
+      if (sub === 'init' && pos[2]) {
+        const made = initAgent(resolve(io.cwd ?? process.cwd(), pos[2]), pos[2].split('/').filter(Boolean).at(-1)!)
+        out(`${made.dir}\n  agent.json · knowledge/index.mts · programs/${made.name}/\nthen: sacli agent push ${pos[2]}`, made)
+        return 0
+      }
+      if (sub === 'push' && pos[2]) {
+        const dir = resolve(io.cwd ?? process.cwd(), pos[2])
+        let spec: any
+        try { spec = JSON.parse(readFileSync(join(dir, 'agent.json'), 'utf8')) } catch (e: any) { throw new CliError(`${pos[2]}/agent.json could not be read: ${e?.message ?? e}`, 1) }
+        const { name, ...body } = spec ?? {}
+        if (typeof name !== 'string' || !name) throw new CliError(`${pos[2]}/agent.json names the agent ("name")`, 1)
+        const lines: string[] = []
+        // 1. Its domain (and any concepts it names), 2. each of its programs, 3. the agent itself — in that order, since
+        //    the agent names both.
+        if (existsSync(join(dir, 'knowledge', 'index.mts'))) {
+          const rows = await importKnowledge(join(dir, 'knowledge', 'index.mts'), `${pos[2]}/knowledge/index.mts`)
+          lines.push(`knowledge: ${rows.filter((x) => x.changed).length} of ${rows.length} changed`)
+        }
+        const progDir = join(dir, 'programs')
+        for (const p of existsSync(progDir) ? readdirSync(progDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort() : []) lines.push(`program ${builtLine(await buildFolder(join(progDir, p), `${pos[2]}/programs/${p}`))}`)
+        const r = await hub!.request({ t: 'graph:agent', name, body, reason: o.reason ?? `pushed from ${pos[2]}` }, { timeoutMs })
+        if (r.t !== 'graph:reply') throw new CliError(`the agent "${name}": ${String(r.reason ?? r.t)}`, 1)
+        lines.push(`agent ${name} ${r.changed ? 'written' : 'unchanged'}`)
+        out(lines.join('\n'), { agent: name, changed: r.changed })
+        return 0
+      }
+      throw new CliError(HELP.agent, 2)
     }
     if (cmd === 'map') {
       if (!sub || sub === 'show') {
@@ -622,22 +685,8 @@ ${r.key}`, r)
     }
     if (cmd === 'graph') {
       if (pos[1] !== 'import' || !pos[2]) throw new CliError('sacli graph import <knowledge/index.mts>', 2)
-      const file = resolve(io.cwd ?? process.cwd(), pos[2])
-      const owner = folderProject(file), keyProject = projectOfKey(key ?? '')
-      if (owner && keyProject && owner.project !== keyProject) throw new CliError(`${pos[2]} belongs to project ${owner.project} (${owner.file}); this key is project ${keyProject}'s — use that project's key`, 1)
-      let mod: any
-      try { mod = await import(pathToFileURL(file).href) } catch (e: any) { throw new CliError(`${pos[2]} could not be read: ${e?.message ?? e}`, 1) }
-      const dir = dirname(file)
-      // Each file a domain lists, by the name import reads it with: a domain's own beside it, a shared one by its path.
-      const files: Record<string, string> = {}
-      for (const d of (mod.domains ?? []) as { name: string; files?: string[] }[]) for (const f of d.files ?? []) {
-        const at = f.includes('/') ? join(dir, f) : join(dir, d.name.replace(/\s+/g, '-').toLowerCase(), f)
-        try { files[`${d.name}|${f}`] = readFileSync(at, 'utf8') } catch { throw new CliError(`domain "${d.name}" lists ${f}, which is not at ${at}`, 1) }
-      }
-      const r = await hub.request({ t: 'graph:import', domains: mod.domains ?? [], settings: mod.settings ?? [], files, ...(o.reason ? { reason: o.reason } : {}) }, { timeoutMs })
-      if (r.t !== 'graph:reply') throw new CliError(String(r.reason ?? r.error ?? r.t), 1)
-      const rows = (r.imported ?? []) as { name: string; kind: string; hash: string; changed: boolean }[]
-      out(rows.map((x) => `${x.changed ? 'changed  ' : 'unchanged'} ${x.kind.padEnd(7)} ${x.name}`).join('\n') + `\n${rows.filter((x) => x.changed).length} of ${rows.length} changed`, r)
+      const rows = await importKnowledge(resolve(io.cwd ?? process.cwd(), pos[2]), pos[2])
+      out(rows.map((x) => `${x.changed ? 'changed  ' : 'unchanged'} ${x.kind.padEnd(7)} ${x.name}`).join('\n') + `\n${rows.filter((x) => x.changed).length} of ${rows.length} changed`, { imported: rows })
       return 0
     }
     if (cmd === 'dsi') {

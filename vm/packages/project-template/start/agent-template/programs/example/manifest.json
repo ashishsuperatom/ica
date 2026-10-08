@@ -10,10 +10,10 @@
   "ui": { "blocks": ["example"] },
   "package": {
     "owns": "example",
-    "schema": { "filter": { "nullable": "string" }, "rows": { "list": { "object": { "key": "string", "value": "number" } } }, "total": "number" },
-    "initial": { "filter": null, "rows": [], "total": 0 },
+    "schema": { "filter": { "nullable": "string" }, "data": { "nullable": "json" } },
+    "initial": { "filter": null, "data": null },
     "reads": [],
-    "functions": [{ "name": "run", "produces": "view" }],
+    "functions": [{ "name": "run", "produces": "view" }, { "name": "row", "produces": "view" }],
     "actions": [{ "id": "clear", "label": "Clear the filter", "ops": [{ "op": "set", "path": "example.filter", "value": null }] }],
     "commands": [],
     "doc": "doc.md"

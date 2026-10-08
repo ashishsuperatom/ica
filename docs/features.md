@@ -141,6 +141,9 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Addresses are paths (routes.ts): `/`, `/<page>`, `/c/<session>`, `/a/<agent>[/<start>]`, `/<slug>` a place on the map; reserved words never a slug; published dashboards stay at `/dashboard/<id>`.
 - A case's track (`Track` in @superatom/ui): steps done, current, ahead or skipped, each openable by its caller.
 
+- An agent as one folder: the agent template (`project-template/start/agent-template`: agent.json, its domain, its first program on today's standards — inputs and derived STATE, the answer's own table with row(), in-place filters, Form/Field/Input) embedded in sacli; `sacli agent init <folder>`, `sacli agent push <folder>` (domain imported, programs built, agent written).
+- Framework tables: sort, search and group-by (a group's count and totals, opened to its rows), paged; a row clicked goes to the program whose answer drew the table.
+
 ## Planned
 - A person's own map, kept in their UserDO (the project's map for now).
 - Recording a decision from a step in the user app: taken off the steps (2026-10-08) until how decisions happen is rethought (the user); the decision register stays on the platform.

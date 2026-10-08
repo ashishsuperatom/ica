@@ -1,0 +1,15 @@
+{
+  "name": "example",
+  "title": "Example",
+  "domain": "example",
+  "programs": ["example"],
+  "ica": "composer",
+  "tools": ["sources", "find-schema", "get-schema", "query"],
+  "icon": "lucide:layout-grid",
+  "accent": "primary",
+  "says": "What this agent is for, in one line.",
+  "start": { "example": { "filter": null } },
+  "starts": [
+    { "key": "all", "label": "Every key", "says": "The whole picture", "start": { "example": { "filter": null } } }
+  ]
+}
