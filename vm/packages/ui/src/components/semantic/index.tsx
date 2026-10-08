@@ -41,6 +41,18 @@ export function Field({ label, help, children }: { label: string; help?: ReactNo
   )
 }
 
+/** A value typed in: text or a number, inside a Field (its label) or a toolbar. Empty is null for a number, so a cleared
+ *  field says "not given" rather than 0. */
+export function Input({ id, value, onChange, kind = 'text', placeholder, label, disabled, compact }: {
+  id: string; value: string | number | null; onChange: (v: string) => void; kind?: 'text' | 'number'
+  placeholder?: string; /** Said to assistive tech when no Field labels it. */ label?: string; disabled?: boolean; compact?: boolean
+}) {
+  return (
+    <input id={id} className={`sa-input${compact ? ' sa-input--sm' : ''}${kind === 'number' ? ' sa-input--num' : ''}`} type={kind === 'number' ? 'number' : 'text'} step={kind === 'number' ? 'any' : undefined}
+      value={value ?? ''} placeholder={placeholder} aria-label={label} disabled={disabled} onChange={(e) => onChange(e.target.value)} />
+  )
+}
+
 /** Several choices, each a checkbox or radio: given as children. */
 export function Choices({ label, help, children }: { label: string; help?: ReactNode; children: ReactNode }) {
   return (

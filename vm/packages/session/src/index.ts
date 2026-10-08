@@ -107,7 +107,9 @@ export function createSessions(opts: SessionsOptions) {
     const parts = [extra?.markdown, ...ran.map((r) => r.answer?.markdown)].filter((m): m is string => !!m?.trim())
     if (!parts.length) return null
     const files = [...new Set([...(extra?.files ?? []), ...ran.flatMap((r) => r.answer?.files ?? [])])]
-    const blocks = Object.assign({}, extra?.blocks ?? {}, ...ran.map((r) => r.answer?.blocks ?? {}))
+    // A block's row move names the program whose answer drew it, so a row clicked goes back to that program (its row()).
+    const owned = (r: Ran) => Object.fromEntries(Object.entries(r.answer?.blocks ?? {}).map(([k, b]) => [k, b && typeof b === 'object' && (b as any).rowMove && typeof (b as any).rowMove === 'object' ? { ...b, rowMove: { ...(b as any).rowMove, package: r.package } } : b]))
+    const blocks = Object.assign({}, extra?.blocks ?? {}, ...ran.map(owned))
     const world = Object.assign({}, ...ran.map((r) => r.answer?.world ?? {}))
     return { markdown: parts.join('\n\n'), files, ...(Object.keys(blocks).length ? { blocks } : {}), ...(Object.keys(world).length ? { world } : {}) }
   }

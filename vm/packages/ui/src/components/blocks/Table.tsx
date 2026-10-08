@@ -1,16 +1,23 @@
 // A table on the design system's table: sort marks in the heads, a pager. A table the source pages (`page`) holds one
-// page: its pager and its sortable heads ask the source for another page or order. Any other table is sorted and paged
-// here, in the browser, and says so when it is sorted. A row with a move opens a child; a
+// page: its pager and its sortable heads ask the source for another page or order. Any other table is sorted, searched,
+// grouped and paged here, in the browser, and says so when it is sorted. Search and group-by appear once a table is long
+// enough to need them; grouped, it reads like a tree — one row per group, closed, with its count and the total of each
+// figure that adds up, opened to show its rows — and pages count groups, not rows. A row with a move opens a child; a
 // row whose period is a window narrows the block to it; `rowState` washes the row by its state.
 
 import { useMemo, useState } from 'react'
 import { Icon } from '../ui/Icon'
 import { Section, Pager } from '../ui/Section'
+import Select from '../ui/Select'
 import { fmt, numeric, asNumber, month } from '../../lib/format'
 import type { Block, Column, Row, State } from '../../answer/blocks'
 import type { BlockCallbacks } from './index'
 
 const PAGE = 50
+/** Search and group-by appear on a table with more rows than this. */
+const TOOLS_FROM = 12
+/** A figure whose rows add up to a group's total (money, counts) — not a share, a date, a day count or words. */
+const adds = (c: Column) => !!c.unit && /^([A-Z]{3}|money|h)$/.test(c.unit)
 export function rowStateOf(v: unknown): State | undefined {
   if (typeof v !== 'string') return undefined
   const s = v.toLowerCase()
@@ -24,18 +31,38 @@ export default function Table({ block, onRow, onRowWindow, onPage }: { block: Ex
   if (block.page) return <SourceTable block={block} onRow={onRow} onRowWindow={onRowWindow} onPage={onPage} />
   const [page, setPage] = useState(0)
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null)
+  const [q, setQ] = useState('')
+  const [groupBy, setGroupBy] = useState('')
+  const [opened, setOpened] = useState<Set<string>>(new Set())
   const cols: Column[] = block.columns.length ? block.columns : Object.keys(block.rows[0] ?? {}).filter((k) => typeof block.rows[0]?.[k] !== 'object').slice(0, 8).map((k) => ({ key: k, label: k }))
+  const tools = block.rows.length > TOOLS_FROM
+  // A column can group the rows when it holds words that repeat: more than one value, and fewer values than rows.
+  const groupable = useMemo(() => cols.filter((c) => !numeric(c.unit)).filter((c) => {
+    const vals = new Set(block.rows.map((r) => r[c.key]).filter((v) => typeof v === 'string' && v))
+    return vals.size > 1 && vals.size <= Math.min(50, block.rows.length / 1.5)
+  }), [block.rows, cols])
   const rows = useMemo(() => {
-    if (!sort) return block.rows
+    const t = q.trim().toLowerCase()
+    const found = t ? block.rows.filter((r) => cols.some((c) => String(r[c.key] ?? '').toLowerCase().includes(t))) : block.rows
+    if (!sort) return found
     const { key, dir } = sort
-    return [...block.rows].sort((a, b) => {
+    return [...found].sort((a, b) => {
       const x = a[key], y = b[key]
       const nx = asNumber(x), ny = asNumber(y)
       const c = nx !== null && ny !== null ? nx - ny : String(x ?? '').localeCompare(String(y ?? ''))
       return dir === 'desc' ? -c : c
     })
-  }, [block.rows, sort])
+  }, [block.rows, sort, q, cols])
+  // Grouped: the groups in the order their first row comes (so the sort orders them), each with its count and totals.
+  const groups = useMemo(() => {
+    if (!groupBy) return null
+    const by = new Map<string, Row[]>()
+    for (const r of rows) { const k = String(r[groupBy] ?? '—'); (by.get(k) ?? by.set(k, []).get(k)!).push(r) }
+    return [...by.entries()].map(([key, rs]) => ({ key, rows: rs, totals: Object.fromEntries(cols.filter(adds).map((c) => [c.key, rs.reduce((a, r) => a + (asNumber(r[c.key]) ?? 0), 0)])) }))
+  }, [rows, groupBy, cols])
   const shown = rows.slice(page * PAGE, page * PAGE + PAGE)
+  const shownGroups = groups?.slice(page * PAGE, page * PAGE + PAGE) ?? null
+  const toggle = (k: string) => setOpened((o) => { const n = new Set(o); if (n.has(k)) n.delete(k); else n.add(k); return n })
   const onHeader = (c: Column) => { setPage(0); setSort(sort?.key === c.key ? (sort.dir === 'asc' ? { key: c.key, dir: 'desc' } : null) : { key: c.key, dir: 'asc' }) }
   const cell = (r: Row, c: Column) => {
     const v = r[c.key]
@@ -51,7 +78,13 @@ export default function Table({ block, onRow, onRowWindow, onPage }: { block: Ex
   const clickable = !!block.rowMove || !!block.rowWindow
   const sortedBy = sort && (cols.find((c) => c.key === sort.key)?.label ?? sort.key)
   return (
-    <Section icon="lucide:table" accent="series-1" title={block.title} note={`${block.rows.length} row${block.rows.length === 1 ? '' : 's'}`}
+    <Section icon="lucide:table" accent="series-1" title={block.title} note={q.trim() ? `${rows.length} of ${block.rows.length} rows` : `${block.rows.length} row${block.rows.length === 1 ? '' : 's'}`}
+      actions={tools ? (
+        <span className="sa-table__tools" data-copy="skip">
+          <label className="sa-table__search"><Icon icon="lucide:search" className="sa-table__search-icon" /><input className="sa-input sa-input--sm" type="search" value={q} onChange={(e) => { setQ(e.target.value); setPage(0) }} placeholder="Search the rows" aria-label={`Search ${block.title || 'the table'}`} /></label>
+          {groupable.length > 0 && <Select variant="chip" label="Group by" value={groupBy} onChange={(v: string) => { setGroupBy(v); setOpened(new Set()); setPage(0) }} options={groupable.map((c) => ({ value: c.key, label: c.label }))} emptyLabel="No grouping" placeholder="none" />}
+        </span>
+      ) : undefined}
       footer={sort ? (
         <>
           <Icon icon="lucide:arrow-up-down" className="sa-btn__icon" />
@@ -75,16 +108,28 @@ export default function Table({ block, onRow, onRowWindow, onPage }: { block: Ex
             })}</tr>
           </thead>
           <tbody>
-            {shown.map((r, i) => (
+            {shownGroups ? shownGroups.map((g) => {
+              const open = opened.has(g.key)
+              return [
+                <tr key={`g:${g.key}`} className="sa-table__group clickable" aria-expanded={open} onClick={() => toggle(g.key)}>
+                  {cols.map((c, j) => c.key === groupBy || (j === 0 && !cols.some((x) => x.key === groupBy))
+                    ? <td key={c.key} className="l"><span className="sa-table__group-name"><Icon icon={open ? 'lucide:chevron-down' : 'lucide:chevron-right'} className="sa-table__chev" />{g.key}<span className="sa-table__count">{g.rows.length}</span></span></td>
+                    : <td key={c.key} className={numeric(c.unit) ? undefined : 'l'}>{c.key in g.totals ? <span className="sa-figure">{fmt(g.totals[c.key], c.unit)}</span> : null}</td>)}
+                </tr>,
+                ...(open ? g.rows.map((r, i) => <tr key={`g:${g.key}:${i}`} data-copy="line" className={`sa-table__child${clickable ? ' clickable' : ''}`} data-state={block.rowState ? rowStateOf(r[block.rowState]) : undefined} onClick={() => clickable && click(r)}>
+                  {cols.map((c) => <td key={c.key} className={numeric(c.unit) ? undefined : 'l'} title={typeof r[c.key] === 'string' ? String(r[c.key]) : numeric(c.unit) ? fmt(r[c.key], c.unit) : undefined}>{c.key === groupBy ? null : cell(r, c)}</td>)}
+                </tr>) : []),
+              ]
+            }) : shown.map((r, i) => (
               <tr key={i} data-copy="line" className={clickable ? 'clickable' : undefined} data-state={block.rowState ? rowStateOf(r[block.rowState]) : undefined} onClick={() => clickable && click(r)}>
                 {cols.map((c) => <td key={c.key} className={numeric(c.unit) ? undefined : 'l'} title={typeof r[c.key] === 'string' ? String(r[c.key]) : numeric(c.unit) ? fmt(r[c.key], c.unit) : undefined}>{cell(r, c)}</td>)}
               </tr>
             ))}
-            {!block.rows.length && <tr><td className="l" colSpan={cols.length}><span className="sa-note">Nothing in scope.</span></td></tr>}
+            {!rows.length && <tr><td className="l" colSpan={cols.length}><span className="sa-note">{block.rows.length ? `Nothing matches "${q.trim()}".` : 'Nothing in scope.'}</span></td></tr>}
           </tbody>
         </table>
       </div>
-      {rows.length > PAGE && <Pager page={page} pageSize={PAGE} total={rows.length} onPage={setPage} />}
+      {(groups ? groups.length : rows.length) > PAGE && <Pager page={page} pageSize={PAGE} total={groups ? groups.length : rows.length} onPage={setPage} />}
     </Section>
   )
 }

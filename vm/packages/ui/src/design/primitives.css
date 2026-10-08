@@ -443,3 +443,15 @@ table.sa-table { width: 100%; border-collapse: collapse; }
 
 /* On a narrow screen a supporting section's line wraps under its title instead of being cut to one line. */
 @media (max-width: 640px) { .sa-section__head .sa-section__subtitle { flex-basis: 100%; white-space: normal; overflow: visible; text-overflow: clip; } }
+
+/* A table's own tools, in its head: search the rows, group them. */
+.sa-table__tools { display: inline-flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.sa-table__search { position: relative; display: inline-flex; align-items: center; }
+.sa-table__search-icon { position: absolute; left: var(--sp-2); color: var(--faint); pointer-events: none; }
+.sa-table__search .sa-input { padding-left: calc(var(--sp-2) + 18px); width: 12rem; }
+/* Grouped, a table reads like a tree: the group's row carries its name, count and totals; its rows sit under a guide. */
+.sa-table__group td { background: var(--surface-subtle); font-weight: var(--w-medium); }
+.sa-table__group-name { display: inline-flex; align-items: center; gap: var(--sp-1h); }
+.sa-table__chev { color: var(--faint); flex: none; }
+.sa-table__count { font-size: var(--t-xs); color: var(--muted); font-weight: var(--w-regular, 400); background: var(--panel); border-radius: var(--r-full); padding: 0 var(--sp-1h); }
+.sa-table__child td:first-child { padding-left: calc(var(--sp-4) + 18px); border-left: 2px solid var(--line); }

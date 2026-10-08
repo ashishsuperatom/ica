@@ -25,7 +25,7 @@ const trips = {
       const count = ({ PUNE: 3, HYDERABAD: 365 } as any)[s.scope.branch] ?? 6927
       if (s.scope.branch === 'SLOW') await new Promise((r) => setTimeout(r, 60))
       ctx.set({ count })
-      return { answer: { markdown: `${count} trips${s.scope.branch ? ` at ${s.scope.branch}` : ''}, page ${s.trips.page}\n:::table trips.json`, files: ['trips.json'], blocks: { 'trips.json': { type: 'table', columns: [{ key: 'n', label: 'Trips' }], rows: [{ n: count }] } } } }
+      return { answer: { markdown: `${count} trips${s.scope.branch ? ` at ${s.scope.branch}` : ''}, page ${s.trips.page}\n:::table trips.json`, files: ['trips.json'], blocks: { 'trips.json': { type: 'table', columns: [{ key: 'n', label: 'Trips' }], rows: [{ n: count }], rowMove: { dim: 'n', key: 'n', label: 'n' } } } } }
     },
     more: (s: any, ctx: any) => { ctx.set({ page: s.trips.page + Number(ctx.params.by ?? 1) }) },
   },
@@ -61,6 +61,8 @@ test('an intent to the current view replaces its STATE and answer; one to a new 
   assert.equal(a.answer?.markdown, '3 trips at PUNE, page 1\n:::table trips.json')
   assert.deepEqual(a.answer?.files, ['trips.json'])
   assert.deepEqual(a.answer?.blocks?.['trips.json']?.rows, [{ n: 3 }])
+  // a row clicked goes back to the program that drew the table: the platform names it on the row move
+  assert.deepEqual((a.answer?.blocks?.['trips.json'] as any)?.rowMove, { dim: 'n', key: 'n', label: 'n', package: 'trips' })
   const b = await sessions.intent(setBranch('HYDERABAD'))
   assert.equal(b.answer?.replaced, a.answer?.id)
   assert.equal(b.session.blocks.length, 1)

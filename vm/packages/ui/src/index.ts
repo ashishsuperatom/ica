@@ -54,7 +54,7 @@ export { Columns, ColumnsSearch, type ColumnSpec, type ColumnItem } from './comp
 export { TreeColumns, type TreeColumn, type TreeColumnRow } from './components/semantic/TreeColumns.tsx'
 export { SourceHub, SourceMark, sourceColumns, searchTables, type HubSource, type TreeTable, type TreeField } from './components/semantic/Sources.tsx'
 export { Explorer, type ExplorerTable, type ExplorerColumn, type ExplorerRequest, type ExplorerFilter, type ExplorerPlace, type ExplorerQuery } from './components/semantic/Explorer.tsx'
-export { Form, Field, Choices, Receipt, RecordList, ChartFrame, Status, AttentionList, ActionBar, Empty, PageHeader, Tabs, Notice, Code, Figures, Toolbar, Dialog, type Column, type Attention, type State as StatusState } from './components/semantic/index.tsx'
+export { Form, Field, Input, Choices, Receipt, RecordList, ChartFrame, Status, AttentionList, ActionBar, Empty, PageHeader, Tabs, Notice, Code, Figures, Toolbar, Dialog, type Column, type Attention, type State as StatusState } from './components/semantic/index.tsx'
 export { default as Track, type TrackStep, type TrackState } from './components/semantic/Track.tsx'
 
 // primitives
