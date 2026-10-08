@@ -2,7 +2,9 @@
 // and agents, written by programs (rows appended to a table). A TEMPLATE: a project's source gets its own copy (its
 // bridge, kept by the platform by its hash); what is specific to that source is its settings.
 //
-//   settings: { path, description? }   path: the database file, on the engine's disk
+//   settings: { path, description? }   path: the database file, on the engine's disk — a relative path is in the data
+//                                      source manager's data directory (dataDir), so the same setting holds wherever
+//                                      the engine runs
 //
 // DuckDB's driver is native, so it is not bundled here: the data source manager supplies it (drivers.duckdb). The file
 // is opened once, and one connection serves the reads and the writes in turn (DuckDB writes one at a time).
@@ -20,8 +22,9 @@ const lit = (v) => {
 const bind = (sql, params = {}) => sql.replace(/@(\w+)/g, (w, n) => (Object.prototype.hasOwnProperty.call(params, n) ? lit(params[n]) : w))
 const ident = (name) => { if (!/^[A-Za-z_]\w*$/.test(name)) throw new Error(`"${name}" is not a table or column name`); return `"${name}"` }
 
-export function createBridge({ settings = {}, drivers = {} } = {}) {
-  const path = String(settings.path ?? '')
+export function createBridge({ settings = {}, drivers = {}, dataDir = '' } = {}) {
+  const given = String(settings.path ?? '')
+  const path = !given || given.startsWith('/') || !dataDir ? given : `${dataDir.replace(/\/$/, '')}/${given}`
   let opened = null
   let queue = Promise.resolve()
   /** One at a time: DuckDB's single connection serves reads and writes in turn. */

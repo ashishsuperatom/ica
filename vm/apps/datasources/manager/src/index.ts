@@ -105,6 +105,7 @@ interface Bridge {
 
 // DRIVERS THE MANAGER SUPPLIES. A bridge is bundled with its own driver, but a native driver (DuckDB) cannot travel in a
 // bundle: the manager has it installed and hands it to the bridges that ask (createBridge({ settings, secrets, drivers })).
+// Bridges are also told the manager's data directory (dataDir): where a source's own files are kept on this machine.
 const DRIVERS = { duckdb: () => import('@duckdb/node-api') }
 
 // The sources: registered by the engine, which downloads them from the platform (the project's connections: each one's
@@ -119,7 +120,7 @@ const configs = new Map<string, { settings: Record<string, unknown>; secrets: Re
 async function importBridge(rel: string, config: { settings: Record<string, unknown>; secrets: Record<string, string> }): Promise<Bridge> {
   const base = isAbsolute(rel) ? pathToFileURL(rel).href : new URL(rel, import.meta.url).href
   const mod: any = await import(`${base}?t=${Date.now()}`)
-  return mod.createBridge({ ...config, drivers: DRIVERS })
+  return mod.createBridge({ ...config, drivers: DRIVERS, dataDir: DATA_DIR })
 }
 
 // Register a source LIVE: import its bridge into the running process with its settings and secrets. A source given
