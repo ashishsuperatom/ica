@@ -164,8 +164,11 @@ describe('each source\'s index, end to end', () => {
     await admin.ask({ t: 'dsi:build', tables: { SHOP: ['orders'] } })
     await until(() => a.logs.some((l) => /build done/.test(l)))
     expect(reads).toEqual(['orders'])
-    const orders = (await admin.ask({ t: 'dsi:show', source: 'SHOP', table: 'orders' })).items
-    expect(orders.map((i: any) => `${i.field}:${i.gone ? 'gone' : 'here'}`)).toEqual([':here', 'amount:here', 'id:here', 'total:gone'])
+    // the engine's last put may still be on its way to the platform when its log says done: wait for what is checked
+    const fields = async () => ((await admin.ask({ t: 'dsi:show', source: 'SHOP', table: 'orders' })).items as any[]).map((i) => `${i.field}:${i.gone ? 'gone' : 'here'}`)
+    const want = [':here', 'amount:here', 'id:here', 'total:gone']
+    for (let t = Date.now(); JSON.stringify(await fields()) !== JSON.stringify(want) && Date.now() - t < 10_000;) await settle(50)
+    expect(await fields()).toEqual(want)
   })
 
   it('a source whose metadata cannot count rows (cheapCounts: false) is never given phase 2: nothing is disabled on its word', async () => {
