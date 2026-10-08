@@ -272,7 +272,8 @@ pop then push). A lone operator button between two controls reads as joining the
 Colour: `--ink --muted --faint --on-accent · --surface --surface-subtle --panel --page --sidebar --line
 --line-strong --scrim · --primary --primary-strong --primary-wash --primary-ring --hover-wash · --series-1/2/3 ·
 --loss(-ink,-line,-wash) --warn(-ink,-wash) --win(-ink,-wash) --neutral(-wash)`. Space: `--sp-0 … --sp-16`.
-Radius: `--r-xs/sm/md/lg/full`. Elevation: `--shadow-card/raised/float`. Type: `--font --font-features
+Radius: `--r-xs/sm/md/lg/full`. No elevation: **no shadows and nothing raised** (the user, 2026-10-09) — a thing is set apart by its border; a thing
+pointed at shows a border or an outline (focus rings stay), never a shadow or a lift. `--shadow-*` resolve to none. Type: `--font --font-features
 --t-2xs…--t-2xl --w-* --lh-* --track-*`. Motion: `--dur-1 --dur-2 --dur-settle --ease --ease-out`. Layers: `--z-*`.
 Sizes: `--sidebar-w(-collapsed) --topbar-h --column-w --popover-w --control-h(-sm,-xs) --tile(-lg) --tile-w`.
 Breakpoints (documented, not variables): 640 / 768 / 1024.

@@ -10,7 +10,7 @@
 .sa-app__topline { flex-shrink: 0; display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); min-height: 36px; padding: var(--sp-1) var(--sp-3) 0; }
 .sa-app__topbar { position: fixed; top: 0; left: 0; right: 0; height: var(--topbar-h); background: var(--surface); border-bottom-width: 1px; display: flex; align-items: center; padding: 0 var(--sp-4); z-index: var(--z-topbar); }
 .sa-app__topbar-title { margin-left: var(--sp-3); font-weight: var(--w-medium); color: var(--ink); }
-.sa-app__menu-btn { width: 36px; height: 36px; border-radius: var(--r-md); display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #14b8a6, var(--primary)); color: var(--on-accent); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1); }
+.sa-app__menu-btn { width: 36px; height: 36px; border-radius: var(--r-md); display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #14b8a6, var(--primary)); color: var(--on-accent); }
 .sa-app__menu-btn > svg { width: 18px; height: 18px; }
 @media (min-width: 768px) {
   .sa-app { padding-top: 0; }
@@ -95,8 +95,8 @@
    painted until they come near, so a long thread scrolls and opens fast. */
 /* No content-visibility here: a chart initialised inside a skipped block measures a 0×0 canvas. Threads are short. */
 .sa-block { scroll-margin-top: var(--sp-4); padding: 0 var(--sp-6); min-width: 0; }
-.sa-block__head { display: flex; align-items: center; gap: var(--sp-3); margin: 0 calc(-1 * var(--sp-4)) var(--sp-2h); padding: var(--sp-1h) var(--sp-4); border-radius: 12px; cursor: pointer; user-select: none; transition: background var(--dur-1) var(--ease), box-shadow var(--dur-1) var(--ease); }
-.sa-block__head:hover { background: var(--surface); box-shadow: var(--shadow-card); }
+.sa-block__head { display: flex; align-items: center; gap: var(--sp-3); margin: 0 calc(-1 * var(--sp-4)) var(--sp-2h); padding: var(--sp-1h) var(--sp-4); border-radius: 12px; border: 1px solid transparent; cursor: pointer; user-select: none; transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease); }
+.sa-block__head:hover { background: var(--surface); border-color: var(--line-strong); }
 .sa-block__head:focus-visible { outline: 2px solid var(--primary); }
 .sa-block__heading { min-width: 0; flex: 1; }
 .sa-block__title-row { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
@@ -149,8 +149,8 @@
 .sa-askbar { position: sticky; bottom: 0; z-index: var(--z-pill); padding: var(--sp-2) var(--sp-5) var(--sp-3); background: linear-gradient(to bottom, transparent, var(--page) 35%); }
 .sa-askbar__form { max-width: var(--askbar-w); margin: 0 auto; display: flex; flex-direction: column; gap: var(--sp-1); }
 /* The field is the platform's own input: a pill the width of a chat column, a plus on the left, a dark round send. */
-.sa-askbar__field { display: flex; align-items: flex-end; gap: var(--sp-1h); padding: var(--sp-1h) var(--sp-1h) var(--sp-1h) var(--sp-2); border-radius: 26px; border-width: 1px; border-color: var(--line); background: var(--surface); box-shadow: 0 2px 14px rgba(16, 24, 40, 0.06); }
-.sa-askbar__field:focus-within { border-color: var(--line-strong); }
+.sa-askbar__field { display: flex; align-items: flex-end; gap: var(--sp-1h); padding: var(--sp-1h) var(--sp-1h) var(--sp-1h) var(--sp-2); border-radius: 26px; border-width: 1px; border-color: var(--line); background: var(--surface); }
+.sa-askbar__field:focus-within { border-color: var(--primary); }
 .sa-askbar__plus { width: 36px; height: 36px; border-radius: var(--r-full); color: var(--muted); flex-shrink: 0; }
 .sa-askbar__plus > svg { width: 23px; height: 23px; }
 .sa-askbar__plus:disabled { opacity: 1; }
@@ -232,7 +232,7 @@
 /* The artifacts pane, closed: a small square at the bottom right, level with the ask bar's field, with a badge */
 .sa-artifacts__fab { position: fixed; bottom: calc(var(--sp-3) + 5px); right: var(--sp-4); z-index: var(--z-pill); width: 40px; height: 40px; display: grid; place-items: center; border-radius: 11px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); box-shadow: var(--shadow-card); transition: color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), transform var(--dur-1) var(--ease); }
 .sa-artifacts__fab > svg { width: 17px; height: 17px; }
-.sa-artifacts__fab:hover { color: var(--primary-strong); border-color: var(--primary); transform: translateY(-1px); }
+.sa-artifacts__fab:hover { color: var(--primary-strong); border-color: var(--primary); }
 .sa-artifacts__fab[data-has='true'] { color: var(--primary-strong); }
 .sa-artifacts__badge { position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--r-full); background: var(--primary); color: var(--on-accent); font-size: 10.5px; font-weight: var(--w-semibold); line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--page); animation: sa-arrive var(--dur-arrive) var(--ease-out-arrive) both; }
 @media (max-width: 1100px) { .sa-artifacts__fab { display: none; } }
@@ -288,7 +288,7 @@
 .sa-icon-btn[data-on='true'] { color: var(--primary-strong); background: var(--primary-wash); }
 /* Search (⌘K): a box near the top, the matches below the field */
 .sa-search { position: fixed; inset: 0; z-index: var(--z-popover); background: var(--scrim); display: flex; justify-content: center; align-items: flex-start; padding: 12vh var(--sp-4) var(--sp-4); }
-.sa-search__box { width: min(40rem, 100%); max-height: 70vh; display: flex; flex-direction: column; background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--shadow-pop, 0 12px 40px rgba(16, 24, 40, 0.18)); overflow: hidden; }
+.sa-search__box { width: min(40rem, 100%); max-height: 70vh; display: flex; flex-direction: column; background: var(--surface); border-radius: var(--r-lg); border: 1px solid var(--line-strong); overflow: hidden; }
 .sa-search__field { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--line); color: var(--faint); }
 .sa-search__field input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; font-size: var(--t-md, var(--t-base)); color: var(--ink); }
 .sa-search__kbd { font: inherit; font-size: var(--t-2xs); color: var(--faint); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 1px var(--sp-1h); }
@@ -387,7 +387,7 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 .sa-railbar__panel .sa-nav-row[data-active='true'], .sa-railbar__panel .sa-nav-item[data-active='true'] { background: color-mix(in srgb, var(--accent, var(--ink)) 7%, var(--surface)); }
 .sa-railbar__panel .sa-nav-row > .sa-nav-item[data-active='true'] { background: none; }
 /* Pinned or only resting: a pinned panel sits flat beside the rail, its toggle marked; a resting one floats over the page. */
-.sa-railbar__panel[data-floating='true'] { background: color-mix(in srgb, var(--accent, var(--ink)) 3%, var(--surface)); box-shadow: 0 16px 40px rgba(16, 24, 40, 0.16), 0 2px 6px rgba(16, 24, 40, 0.06); border-right-color: transparent; }
+.sa-railbar__panel[data-floating='true'] { background: color-mix(in srgb, var(--accent, var(--ink)) 3%, var(--surface)); border-right-color: var(--line-strong); }
 /* On (pinned, activity shown): only the icon's colour says so — no fill to draw the eye. */
 .sa-railbar__panel .sa-sidebar__head .sa-icon-btn[data-on='true'] { color: var(--primary-strong); background: none; }
 .sa-railbar__panel .sa-sidebar__head .sa-icon-btn[data-on='true']:hover { background: var(--rail); }

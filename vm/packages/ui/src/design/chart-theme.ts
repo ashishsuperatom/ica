@@ -34,7 +34,7 @@ export function chartTheme(): ChartTheme {
       borderWidth: 1,
       padding: [8, 10],
       textStyle: { ...font, color: ink },
-      extraCssText: `box-shadow: ${read('--shadow-float') || '0 12px 32px rgba(16,24,40,.14)'}; border-radius: ${read('--r-md') || '9px'};`,
+      extraCssText: `box-shadow: none; border-radius: ${read('--r-md') || '9px'};`,
       appendToBody: true,
       className: 'sa-chart-tooltip',
     },
