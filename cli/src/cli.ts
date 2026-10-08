@@ -51,6 +51,7 @@ Commands:
   app publish      publish the project's app (its server/ and web/ source) — the engine downloads and runs it
   program build    build a program from its source folder: the build and its source are kept by the platform
   graph import     import the project's written knowledge (knowledge/index.mts) into its graph, on the platform
+  map              the project's map — the sections and places people see, each place an agent: show, set
   call             send any message the platform takes, with its fields as JSON (prints the reply as JSON)
   status           the background connection: up, since when, how long until it closes
   disconnect       close the background connection now
@@ -168,6 +169,13 @@ Needs project.manage.`,
 
 A program's source — manifest.json, doc.md, server/…, web/… — built by the project's engine and kept by the platform,
 the build with the source it came from. Needs project.ask.`,
+  map: `sacli map [show]                      the project's map: its sections, and each place's address and agent
+  sacli map set <map.json> [--reason '<why>']   write it (someone who may publish)
+
+The map is what people see to find their way: { "sections": [{ "label", "items": [{ "agent", "slug"?, "label"?,
+"icon"? }] }] }. Every place is an agent of the project; its slug (else the agent's name) is its address, /<slug>, and
+is never one of the app's own (about, agents, activity, connections, profile, settings, a, c, s, w, u, dashboard,
+admin, api, ws, assets, auth). An agent not on the map is found by search and on the All agents page.`,
   graph: `sacli graph import <knowledge/index.mts> [--reason '<why>']
 
 The project's written knowledge — its domains, their concepts and files, its settings — imported into the project's
@@ -238,7 +246,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'datasources' ? { project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' }, bridge: { type: 'string' } }
       : cmd === 'engine' ? { project: { type: 'string' }, native: { type: 'boolean' }, image: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
       : cmd === 'storage' ? { project: { type: 'string' }, by: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' }, everything: { type: 'boolean' } }
-      : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' } } : {}
+      : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' || cmd === 'map' ? { reason: { type: 'string' } } : {}
     let parsed
     try { parsed = parseArgs({ args: argv, options: { ...GLOBAL, ...specific }, allowPositionals: true, strict: true }) }
     catch (e: any) { throw new CliError(`${e.message.replace(/^Unknown option/, 'unknown option')} — see sacli ${cmd ?? ''} --help`.replace(/\s+—/, ' —'), 2) }
@@ -593,6 +601,24 @@ ${r.key}`, r)
       if (r.t !== 'program:built') throw new CliError(String(r.reason ?? r.error ?? r.t), 1)
       out(`${r.name} ${r.version ?? ''} → ${String(r.hash).slice(0, 12)}${r.added ? '' : ' (already kept)'}`, r)
       return 0
+    }
+    if (cmd === 'map') {
+      if (!sub || sub === 'show') {
+        const r = await hub.request({ t: 'graph:show', name: 'map' }, { timeoutMs })
+        if (r.t !== 'graph:reply') { if (/no "map"/.test(String(r.reason))) { out('this project has no map yet — sacli map set <map.json>', { sections: [] }); return 0 } throw new CliError(String(r.reason ?? r.t), 1) }
+        const sections = (r.node?.body?.sections ?? []) as { label: string; items: { agent: string; slug?: string; label?: string }[] }[]
+        out(sections.map((x) => `${x.label}\n${x.items.map((i) => `  /${(i.slug ?? i.agent).padEnd(24)} ${i.agent}${i.label ? `  (${i.label})` : ''}`).join('\n')}`).join('\n\n'), r.node?.body)
+        return 0
+      }
+      if (sub === 'set' && pos[2]) {
+        let body: unknown
+        try { body = JSON.parse(readFileSync(resolve(io.cwd ?? process.cwd(), pos[2]), 'utf8')) } catch (e: any) { throw new CliError(`${pos[2]} could not be read: ${e?.message ?? e}`, 1) }
+        const r = await hub.request({ t: 'graph:map', body, reason: o.reason ?? 'the project\'s map' }, { timeoutMs })
+        if (r.t !== 'graph:reply') throw new CliError(String(r.reason ?? r.t), 1)
+        out(r.changed ? `the map is written (${String(r.hash).slice(0, 12)})` : 'the map is unchanged', r)
+        return 0
+      }
+      throw new CliError(HELP.map, 2)
     }
     if (cmd === 'graph') {
       if (pos[1] !== 'import' || !pos[2]) throw new CliError('sacli graph import <knowledge/index.mts>', 2)

@@ -5,6 +5,8 @@ import { useSession, useClerk, SignIn } from '@clerk/react'
 import { loadToken, mintToken, dropToken, claimReauthOnce, tokenValid } from '../../shared/session-token'
 const Workspace = lazy(() => import('./Workspace'))
 import type { WorkAgent } from './Workspace'
+import { readRoute, addressOf } from './routes'
+import { checkMap, type ProjectMap } from '@superatom/platform-types'
 
 // Cloud mode: VITE_HUB_URL set (e.g. wss://superatom.site). The page is served at
 // /u behind the worker; it logs in via Clerk, exchanges for our JWT, and connects to
@@ -77,17 +79,8 @@ const agentOf = (a: any): WorkAgent => ({
   starts: Array.isArray(a.starts) ? a.starts.filter((x: any) => x && typeof x.key === 'string' && typeof x.label === 'string').map((x: any) => ({ key: x.key, label: x.label, says: String(x.says ?? '') })) : [],
 })
 
-/** The workspace's address: /w (home), /w/<session>, /w/s/<agent>[/<start>]. Earlier addresses land in it. */
-function readPath(): string {
-  const p = location.pathname.replace(/\/+$/, '')
-  if (/^\/w(\/|$)/.test(p)) return p.replace(/^\/w\/?/, '')
-  const chat = /^\/c\/([\w-]+)/.exec(p)
-  const agent = /^\/s\/([\w-]+(?:\/[\w-]+)?)/.exec(p)
-  const page = ['/connections', '/agents', '/activity'].includes(p) ? `?page=${p.slice(1)}` : ''
-  const path = chat ? chat[1] : agent ? `s/${agent[1]}` : ''
-  history.replaceState(null, '', `/w${path ? `/${path}` : ''}${page || location.search}`)
-  return path
-}
+/** Where the address points, inside the app (routes.ts). */
+const readPath = (): string => readRoute(location.pathname).path
 
 /** The user UI: one socket (to the person's UserDO in the cloud, to the engine locally) and the workspace on it. */
 export function App({ token, projectId = 'default', onSignOut }: { token?: string | null; projectId?: string; onSignOut?: () => void } = {}) {
@@ -95,6 +88,8 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
   const [status, setStatus] = useState('')
   const [path, setPath] = useState(readPath)
   const [agents, setAgents] = useState<WorkAgent[]>([])
+  const [map, setMap] = useState<ProjectMap | null>(null)
+  const mapRef = useRef<ProjectMap | null>(null)
   const [scopes, setScopes] = useState<string[]>([])
   const [caps, setCaps] = useState<string[]>([])
   const [proj, setProj] = useState<{ id?: string; name?: string } | null>(null)
@@ -125,7 +120,7 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
     send({ ...payload, reqId })
   }), [send])
   const subscribeLive = useCallback((fn: (m: any) => void) => { live.current.add(fn); return () => { live.current.delete(fn) } }, [])
-  const go = useCallback((p: string) => { history.pushState(null, '', `/w${p ? `/${p}` : ''}`); setPath(p) }, [])
+  const go = useCallback((p: string) => { history.pushState(null, '', addressOf(p, mapRef.current)); setPath(p) }, [])
   useEffect(() => {
     const onPop = () => setPath(readPath())
     window.addEventListener('popstate', onPop)
@@ -167,7 +162,12 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
         if (!msg || msg.t === 'tick') return
         if (msg.reqId && (msg.t === 'narration' || msg.t === 'app:said:part') && progress.current.has(msg.reqId)) { progress.current.get(msg.reqId)!(msg); return }
         if (msg.reqId && waiting.current.has(msg.reqId)) { const w = waiting.current.get(msg.reqId)!; waiting.current.delete(msg.reqId); w(msg); return }
-        if (msg.t === 'session:agents') { setAgents(Array.isArray(msg.agents) ? msg.agents.filter((a: any) => a && typeof a.id === 'string').map(agentOf) : []); return }
+        if (msg.t === 'session:agents') {
+          setAgents(Array.isArray(msg.agents) ? msg.agents.filter((a: any) => a && typeof a.id === 'string').map(agentOf) : [])
+          const m = msg.map && !checkMap(msg.map).length ? (msg.map as ProjectMap) : null
+          mapRef.current = m; setMap(m)
+          return
+        }
         if (msg.t === 'welcome') {
           if (msg.project) { setProj(msg.project); if (msg.project.name) document.title = msg.project.name }
           if (Array.isArray(msg.scopes)) setScopes(msg.scopes)
@@ -186,7 +186,7 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
   return (
     <Suspense fallback={<div style={{ padding: 24, color: '#7a746c' }}>Opening…</div>}>
       <Workspace request={request} send={send} subscribeLive={subscribeLive} scopes={scopes} caps={caps} projectId={projectId} token={token} projectName={proj?.name || 'Superatom'}
-        connected={connected} status={status} agents={agents} path={path} go={go} onSignOut={onSignOut} />
+        connected={connected} status={status} agents={agents} map={map} path={path} go={go} onSignOut={onSignOut} />
     </Suspense>
   )
 }

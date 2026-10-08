@@ -122,6 +122,14 @@ test('an agent kept in the composition graph is listed (by its scope) and opens 
   await s.handle({ t: 'session:agents' }, { type: 'runtime', userId: 'u2', scopes: ['user:u2', 'group:ops'] })
   assert.deepEqual(out.at(-1).agents.find((a: any) => a.id === 'graph-trips'), { id: 'graph-trips', name: 'Trips (graph)', scope: 'group:ops', ui: { start: '' }, isDefault: false,
     look: { icon: 'lucide:truck', accent: 'series-1', says: 'Trips not yet settled.' }, starts: [{ key: 'pune', label: 'Pune', says: 'The Pune branch' }] })
+  // the project's map: each person sees only the places whose agent they may use, and no section left empty
+  const g2 = openStore(graphFile)
+  governance.write(g2, ana, 'map', 'map', { sections: [{ label: 'Operations', items: [{ agent: 'graph-trips', slug: 'trips-board', label: 'Trips board' }] }] })
+  g2.close()
+  await s.handle({ t: 'session:agents' }, { type: 'runtime', userId: 'u2', scopes: ['user:u2', 'group:ops'] })
+  assert.deepEqual(out.at(-1).map, { sections: [{ label: 'Operations', items: [{ agent: 'graph-trips', slug: 'trips-board', label: 'Trips board' }] }] })
+  await s.handle({ t: 'session:agents' }, { type: 'runtime', userId: 'u1', scopes: ['user:u1'] })
+  assert.deepEqual(out.at(-1).map, { sections: [] })
   // a starting point opens on its own STATE; one the agent does not declare is refused
   await s.handle({ t: 'session:open', session: 'ga0', agent: 'graph-trips', startAt: 'pune', run: false }, { type: 'runtime', userId: 'u2', scopes: ['user:u2', 'group:ops'] })
   assert.equal(out.at(-1).view.state.trips.branch, 'PUNE')

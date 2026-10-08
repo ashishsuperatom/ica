@@ -1436,6 +1436,44 @@ workspace. Only in some cases are we working directly on /state/<project>/…, a
 Only the engine's agents work in the project workspace; when we write code ourselves (by hand or through our own agent)
 we always use sacli, which always goes through the platform — and the problem is solved.
 
+## The project's map, and addresses (the user, 2026-10-09)
+
+**In the user's words:**
+
+- **Every menu item is an agent.** We can have each one as an agent — that's not a problem, it doesn't cost us
+  anything to make an agent. An agent can have a domain, programs, context… all of them optional except the domain,
+  and creating a domain is not a big thing. If one can ask a question of the approvals, that is not really bad.
+- **The problem is organisation, and the number of agents** — overwhelming. A menu has a hierarchy and a
+  categorisation, not just a list of agents, and there could be many more agents than we want to show.
+- **A program can't publish the menu.** The menu items are a **map**, and each is mapped to an agent.
+- **Each project has a map, written by its admin.** Each person can later have their own, kept in their own Durable
+  Object. For now the project's is enough.
+- **Addresses are paths**, not `?page=agents`: a collection of good paths. A published dashboard keeps
+  `/dashboard/<id>`.
+
+**How it is built:**
+
+- **The map is a node of the composition graph**, of kind `map`, named `map`. It is versioned, governed and changed
+  like agents.
+- **Its body** is `{ sections: [{ label, items: [{ agent, slug?, label?, icon? }] }] }`.
+  - Every item names an agent of the graph.
+  - Each item's slug (by default the agent's name) is its address, `/<slug>`. Slugs are unique and never one of the
+    reserved words below.
+- **The user app's Agents panel draws the map's sections**, under "All agents". An agent not on the map is still
+  reached by search (⌘K) and from the All agents page; it is not listed in the sidebar.
+- **The engine sends the map with `session:agents`**, from its replica of the graph. Only the items whose agent the
+  person may use are sent.
+- **Addresses:**
+  - `/` — home;
+  - `/<page>` — the app's own pages (about, agents, activity, connections, profile, settings);
+  - `/c/<session>` — a session;
+  - `/a/<agent>[/<start>]` — an agent's view;
+  - `/<slug>` — a place on the map;
+  - `/dashboard/<id>` — a published dashboard's own site, unchanged.
+- **Reserved words** (never a slug): the pages, `a c s w u dashboard admin api ws assets auth`.
+- **The view's STATE stays in the query string** (`?v=`): it says what is on screen, not where one is.
+- **Old addresses** (`/w…`, `?page=`) were migrated, not kept beside the new ones.
+
 ## What each project keeps, and secrets on their own path (the user, 2026-10-08)
 
 **In the user's words:** we use the same R2 bucket for every organisation, every project, every user — imagine someone

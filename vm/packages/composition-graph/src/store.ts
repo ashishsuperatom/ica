@@ -10,7 +10,7 @@
 import { addColumnIfMissing, type Migration } from '@superatom/migrate'
 import { createHash } from 'node:crypto'
 
-export type Kind = 'domain' | 'concept' | 'file' | 'setting' | 'agent'
+export type Kind = 'domain' | 'concept' | 'file' | 'setting' | 'agent' | 'map'
 /** Who sees a node: everyone (global), a group's members (group:<name>), or one person (user:<id>). */
 export type Scope = string
 export interface Node<B = unknown> { name: string; kind: Kind; hash: string; body: B; scope: Scope; owner: string | null }

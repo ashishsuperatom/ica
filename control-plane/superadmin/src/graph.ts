@@ -10,6 +10,7 @@
 //   graph:domains | graph:names { kind? } | graph:show { name, asOf? } | graph:history { name } | graph:compose { domain }
 //   graph:suggestions { status?, name? }
 //   graph:concept | graph:domain | graph:agent { name, body, reason?, scope? }    make or change a node one owns
+//   graph:map { body, reason? }                                                  the project's map (someone who may publish)
 //   graph:join | graph:leave { into|domain, concept, at?, reason? }              compose a concept into a domain or concept
 //   graph:suggest { name, kind, body, reason } · graph:decide { id, verdict, reason? } · graph:publish { name, scope, reason }
 //   graph:versions · graph:version { message } (publish the draft) · graph:restore { name } (the draft set to a version)
@@ -32,11 +33,11 @@ type Storage = DurableObjectStorage
 /** Who acts, as the hub knows them: user:<id> or agent:<key>, whether they may publish, their email, the scopes they see. */
 export interface Who { id: string; admin: boolean; email?: string; scopes: string[] }
 
-export const GRAPH_MESSAGES = new Set(['graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:versions', 'graph:version', 'graph:restore', 'graph:import'])
+export const GRAPH_MESSAGES = new Set(['graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:map', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:versions', 'graph:version', 'graph:restore', 'graph:import'])
 export const GRAPH_VIEWS = new Set<string>(PLATFORM_VIEWS)
 /** What changes the graph (an engine is told to pull after one). */
-const WRITES = new Set(['graph:import', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:version', 'graph:restore'])
-const KINDS: Kind[] = ['domain', 'concept', 'file', 'setting', 'agent']
+const WRITES = new Set(['graph:import', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:map', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:version', 'graph:restore'])
+const KINDS: Kind[] = ['domain', 'concept', 'file', 'setting', 'agent', 'map']
 
 /** The graph's own tables, by its own migrations (kept apart from the Durable Object's: _graph_migrations). */
 export function migrateGraph(storage: Storage) {
@@ -91,6 +92,11 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
             const kind = t === 'graph:concept' ? 'concept' : t === 'graph:domain' ? 'domain' : 'agent'
             const r = g.write(s, who, str(payload.name, 'name'), kind, payload.body, { reason: payload.reason }, payload.scope ? { scope: String(payload.scope) } : {})
             return { name: payload.name, ...r, node: s.get(payload.name) }
+          }
+          case 'graph:map': {
+            if (!who.admin) throw new GovernanceRefusal('the project\'s map is written by someone who may publish')
+            const r = g.write(s, who, 'map', 'map', payload.body, { reason: payload.reason }, { scope: 'global' })
+            return { name: 'map', ...r, node: s.get('map') }
           }
           case 'graph:join': case 'graph:leave': {
             const into = str(payload.into ?? payload.domain, 'into')

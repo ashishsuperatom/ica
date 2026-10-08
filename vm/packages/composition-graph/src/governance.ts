@@ -9,6 +9,7 @@
 
 import { canonical, hashOf, type Kind, type Scope, type Store } from './store.js'
 import { conceptsOf, isComposed, type ConceptBody, type DomainBody } from './compose.js'
+import { checkMap, type ProjectMap } from '../../platform-types/src/index.js'
 
 export class GovernanceRefusal extends Error {}
 
@@ -52,6 +53,8 @@ export function checkBody(kind: Kind, body: unknown): string[] {
       out.push('an agent\'s starts are each a key, a label, an optional line, and a start (fields by slice)')
     return out
   }
+  // The project's map: its sections and places, each place an agent (checked against the graph when written).
+  if (kind === 'map') return checkMap(b)
   return [`a ${kind} is not changed this way`]
 }
 
@@ -85,6 +88,10 @@ export function write(store: Store, actor: Actor, name: string, kind: Kind, body
   if (!cur && !place.scope && !actor.admin) place = { ...place, scope: own }
   if (kind === 'domain') for (const c of conceptsOf(body as DomainBody)) if (!store.get(c)) throw new GovernanceRefusal(`the domain names a concept that does not exist: "${c}"`)
   if (kind === 'concept') checkLevels(store, name, body as ConceptBody)
+  if (kind === 'map') {
+    if (name !== 'map') throw new GovernanceRefusal('the project\'s map is named "map"')
+    for (const s of (body as ProjectMap).sections) for (const it of s.items) { const a = store.get(it.agent); if (!a || a.kind !== 'agent') throw new GovernanceRefusal(`the map names an agent that does not exist: "${it.agent}"`) }
+  }
   if (kind === 'agent') { const d = store.get((body as any).domain); if (!d || d.kind !== 'domain') throw new GovernanceRefusal(`the agent names a domain that does not exist: "${(body as any).domain}"`) }
   try {
     return store.put(name, kind, body, { by: actor.id, reason: ctx.reason, from: ctx.from }, { ...(place.scope ? { scope: place.scope } : {}), ...(cur ? {} : { owner: actor.id }) })

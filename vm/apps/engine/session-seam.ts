@@ -1,7 +1,8 @@
 // SESSIONS — an agent's sessions of blocks, run on its programs. These payloads come here (the other session:* messages
 // belong to the chat):
 //
-//   session:agents                                  → session:agents   { agents: [{ id, name, ui, look, starts }] }
+//   session:agents                                  → session:agents   { agents: [{ id, name, ui, look, starts }], map }   the
+//                                                     project's map, only the places whose agent one may use (null: none)
 //   session:open   { session, agent, startAt? }     → session:view     { view }   startAt: one of the agent's starting points
 //   session:intent { session, ops?|action?|call?, to, block? }
 //                                                  → session:view     { view, result: { block, opened, answer, stale? } }
@@ -26,7 +27,7 @@ import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { placeForRunning, pick } from './knowledge.js'
-import { checkAgent, checkObject, checkOp, type AgentSpec, type Intent } from '@superatom/platform-types'
+import { checkAgent, checkMap, checkObject, checkOp, type AgentSpec, type Intent, type ProjectMap } from '@superatom/platform-types'
 import { ProgramStore, ProgramError, loadPackage } from '@superatom/programs'
 import { createStateEngine, StateRefusal, type StateEngine } from '@superatom/state'
 import { createSessions, memoryLog, fileLog, history, replay, SessionRefusal, type SessionLog, type SessionView } from '@superatom/session'
@@ -260,6 +261,16 @@ export function createSessionSeam(d: SessionSeamDeps) {
     return graphAgents().filter((a) => !checkAgent(a).length).map((a) => ({ id: a.id, name: a.name, scope: a.scope, ui: a.ui, isDefault: !!a.isDefault, look: a.look ?? {}, starts: (a.starts ?? []).map((x) => ({ key: x.key, label: x.label, says: x.says ?? '' })) }))
   }
 
+  /** The project's map as this person sees it: only the places whose agent they may use, and no empty section. */
+  function mapFor(shown: Set<string>): ProjectMap | null {
+    const s = graphStore(); if (!s) return null
+    const node = agentNode(s, 'map')
+    if (node?.kind !== 'map' || checkMap(node.body).length) return null
+    const body = node.body as ProjectMap
+    const sections = body.sections.map((x) => ({ label: x.label, items: x.items.filter((it) => shown.has(it.agent)) })).filter((x) => x.items.length)
+    return { sections }
+  }
+
   const viewOf = (v: SessionView, user: string) => {
     if (v.user !== user) throw new SessionSeamRefusal(`session ${v.id} is not yours`)
     return v
@@ -351,7 +362,10 @@ export function createSessionSeam(d: SessionSeamDeps) {
     try {
       // Only the agents this asker sees (global, their own, their groups'); an admin sees all.
       const visible = (scope: string) => { try { const w = whoIs(from); return w.admin || scope === 'global' || w.scopes.includes(scope) } catch { return scope === 'global' } }
-      if (t === 'session:agents') return reply({ t: 'session:agents', agents: agents().filter((a) => visible(a.scope)) })
+      if (t === 'session:agents') {
+        const list = agents().filter((a) => visible(a.scope))
+        return reply({ t: 'session:agents', agents: list, map: mapFor(new Set(list.map((a) => a.id))) })
+      }
       const user = userOf(from)
       if (t === 'session:file') { const hash = String(payload.hash ?? ''), path = String(payload.path ?? ''); return reply({ t: 'session:file', hash, path, text: programFile(hash, path) }) }
       // ── VIEWS: an agent browsed without a session ("Views and sessions — one thread, two homes"). The browser keeps the

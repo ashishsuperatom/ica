@@ -289,6 +289,41 @@ export interface AgentSpec {
 export interface AgentLook { icon?: string; accent?: string; says?: string; /** Its main view: what opening it shows, named as that view is. */ main?: { label: string; says?: string } }
 export interface AgentStart { key: string; label: string; says?: string; start: Record<string, Record<string, unknown>> }
 
+// ── The project's map ────────────────────────────────────────────────────────────────────────────────────────────
+// What the people of a project see to find their way: sections, each a list of places, each place an agent. It is a
+// node of the composition graph (kind "map", named "map"), written by the project's admins; a place's slug is its
+// address (/<slug>). Agents not on the map are found by search and on the All agents page.
+
+export interface MapItem { agent: string; slug?: string; label?: string; icon?: string }
+export interface MapSection { label: string; items: MapItem[] }
+export interface ProjectMap { sections: MapSection[] }
+
+/** The user app's own addresses — never a place's slug. */
+export const APP_PAGES = ['about', 'agents', 'activity', 'connections', 'profile', 'settings'] as const
+export const RESERVED_SLUGS: readonly string[] = [...APP_PAGES, 'a', 'c', 's', 'w', 'u', 'dashboard', 'admin', 'api', 'ws', 'assets', 'auth']
+/** A place's address: its slug, else its agent's name. */
+export const slugOf = (item: MapItem): string => item.slug ?? item.agent
+
+export function checkMap(v: unknown): Problems {
+  if (!v || typeof v !== 'object' || !Array.isArray((v as any).sections)) return ['a map lists its sections']
+  const out: Problems = []
+  const seen = new Set<string>()
+  for (const [i, s] of ((v as any).sections as any[]).entries()) {
+    if (!s || typeof s.label !== 'string' || !s.label.trim()) { out.push(`section ${i + 1} has a label`); continue }
+    if (!Array.isArray(s.items)) { out.push(`section "${s.label}" lists its items`); continue }
+    for (const it of s.items) {
+      if (!it || typeof it.agent !== 'string' || !it.agent) { out.push(`an item of "${s.label}" names its agent`); continue }
+      for (const k of ['slug', 'label', 'icon'] as const) if (it[k] !== undefined && (typeof it[k] !== 'string' || !it[k].trim())) out.push(`"${it.agent}": its ${k} is text`)
+      const slug = slugOf(it)
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) out.push(`"${slug}" is not an address: lower-case letters, digits and dashes`)
+      else if (RESERVED_SLUGS.includes(slug)) out.push(`"${slug}" is one of the app's own addresses — give the place a slug`)
+      else if (seen.has(slug)) out.push(`two places have the address "${slug}"`)
+      seen.add(slug)
+    }
+  }
+  return out
+}
+
 export function checkAgent(v: unknown): Problems {
   if (!v || typeof v !== 'object') return ['an agent must be an object']
   const o = v as Record<string, unknown>

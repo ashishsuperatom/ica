@@ -24,6 +24,8 @@ import { PAGE_BLOCKS, PagesContext, KeyboardShortcuts } from './pageBlocks'
 import { accentOf } from './agentLook'
 import ProgramBlock, { preloadProgram } from './ProgramBlock'
 import { sessionSource, viewSource, viewFromHistory, type Request, type SessionMsg, type ThreadSource, type Intent_, type View } from './threadSource'
+import { readRoute, isPage, pageAddress, agentAt } from './routes'
+import { slugOf, type ProjectMap } from '@superatom/platform-types'
 
 type FetchFile = (hash: string, path: string) => Promise<string>
 /** An agent as the workspace lists it: its look (an iconify icon, an accent, one line) and its starting points. */
@@ -67,13 +69,15 @@ async function ready(m: SessionMsg, fetchFile: FetchFile, source: ThreadSource):
   return recognised
 }
 
-export default function Workspace({ request, send, subscribeLive, scopes, caps, projectId, token, projectName, connected, status, agents, path, go, onSignOut }: {
+export default function Workspace({ request, send, subscribeLive, scopes, caps, projectId, token, projectName, connected, status, agents, map, path, go, onSignOut }: {
   request: Request; send: (payload: Record<string, unknown>) => void; subscribeLive: (fn: (m: any) => void) => () => void
   scopes: string[]; caps: string[]; projectId: string; token?: string | null; projectName: string
   /** Whether the socket is open, and what to say when it is not (an expired sign-in, no access). */
   connected: boolean; status: string
   agents: WorkAgent[]
-  /** The workspace's address: '' (home), '<session>' or 's/<agent>[/<start>]' (start a session with an agent). */
+  /** The project's map: its sections and places, each place an agent (null: none). */
+  map: ProjectMap | null
+  /** Where the workspace is (routes.ts): '' (home), '<session>', 's/<agent>[/<start>]' or 'p/<slug>' (a place on the map). */
   path: string; go: (path: string) => void
   onSignOut?: () => void
 }) {
@@ -86,7 +90,8 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const agentOf = useCallback((id: string): WorkAgent => agents.find((a) => a.id === id) ?? { id, name: id, look: {}, starts: [] }, [agents])
   const sessionId = /^[\w-]+$/.test(path) ? path : null
   const startMatch = /^s\/([\w-]+)(?:\/([\w-]+))?/.exec(path)
-  const startAgent = startMatch?.[1] ?? null
+  // A place on the map opens its agent (once the map has come).
+  const startAgent = startMatch?.[1] ?? (path.startsWith('p/') ? agentAt(map, path.slice(2)) : null)
   const startKey = startMatch?.[2] ?? null
 
   // A program's React side: from the platform (immutable, by hash), else from the engine.
@@ -105,7 +110,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
 
   // A page of the user UI is a block: from a session it opens a fresh thread starting there; on the pages, a new thread.
   const [root, setRoot] = useState<string | null>(null)
-  const [pending, setPending] = useState<{ type: string } | null>(() => { const p = new URLSearchParams(location.search).get('page'); return p && PAGES.includes(p) ? { type: p } : null })
+  const [pending, setPending] = useState<{ type: string } | null>(() => { const p = readRoute(location.pathname).page; return p ? { type: p } : null })
   const page = (type: string) => { if (sessionId || startAgent) { setPending({ type }); go('') } else startThread(type) }
   const onPages = !sessionId && !startAgent
   const current = sessionId ? sessions.find((s) => s.session === sessionId)?.agent ?? null : startAgent
@@ -172,7 +177,10 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
     { key: 'agents', label: 'Agents', icon: 'solar:widget-linear', accent: 'var(--place-2)', onClick: () => page('agents'), actions: sideActions,
       panel: <NavList groups={[
         { items: [{ key: 'agents', label: 'All agents', icon: 'solar:list-linear', active: onPages && root === 'agents', onClick: () => page('agents') }] },
-        { label: 'Agents', items: named.map((a) => ({ key: `a:${a.id}`, label: a.name, icon: a.look.icon ?? 'solar:widget-linear', active: startAgent === a.id || (!!sessionId && current === a.id), onClick: () => go(`s/${a.id}`) })) },
+        // The project's map: its sections, each place an agent; without a map, every agent in one list.
+        ...(map ? map.sections.map((sec) => ({ label: sec.label, items: sec.items.map((it) => { const a = agentOf(it.agent)
+          return { key: `p:${slugOf(it)}`, label: it.label ?? a.name, icon: it.icon ?? a.look.icon ?? 'solar:widget-linear', active: startAgent === it.agent || (!!sessionId && current === it.agent), onClick: () => go(`p/${slugOf(it)}`) } }) }))
+          : [{ label: 'Agents', items: named.map((a) => ({ key: `a:${a.id}`, label: a.name, icon: a.look.icon ?? 'solar:widget-linear', active: startAgent === a.id || (!!sessionId && current === a.id), onClick: () => go(`s/${a.id}`) })) }]),
       ]} /> },
     { key: 'connections', label: 'Connections', icon: 'solar:link-round-linear', accent: 'var(--place-3)', onClick: () => page('connections') },
   ]
@@ -227,7 +235,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
             ? <ThreadSteps key={sessionId ?? `view:${path}`} source={source} session={sessionId} request={request} fetchFile={fetchFile} agentOf={agentOf} viewAgent={startAgent} viewStart={startKey}
                 onArtifacts={setArtifacts} artifactsTick={artifactsTick} onUsed={onUsed} onKept={onKept} />
             : <PagesContext.Provider value={pagesEnv}>
-                <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} address={(b) => (b.type === 'home' ? '/w' : PAGES.includes(b.type) ? `/w?page=${b.type}` : null)} />
+                <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} address={(b) => (b.type === 'home' || isPage(b.type) ? pageAddress(b.type) : null)} />
                 <AskBar onAsk={(t) => void startWith(t)} busy={!!starting} placeholder="Ask anything"
                   working={starting ? <><span className="sa-label">Working on: {starting}</span><BeatRows beats={startBeats.slice(-3)} live /></> : undefined} />
               </PagesContext.Provider>}
@@ -248,8 +256,6 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   )
 }
 
-/** The pages of the user UI that have an address of their own (/w?page=…). */
-const PAGES = ['about', 'agents', 'activity', 'connections', 'profile', 'settings']
 
 /** One of the person's conversations, as their UserDO keeps it. */
 export type Conversation = { session: string; agent: string; title: string; updated?: string; name?: string; pinned?: number | boolean; archived?: number | boolean; collection?: string }

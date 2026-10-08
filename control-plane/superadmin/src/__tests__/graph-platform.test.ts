@@ -116,6 +116,15 @@ describe('the composition graph, held by the platform', () => {
     await admin.ask({ t: 'graph:agent', name: 'trips-desk', body: { ...plain, title: 'Trips desk', domain: 'trips' }, reason: 'back' })
   })
 
+  it("the project's map is written by someone who may publish, and every place on it is an agent", async () => {
+    const body = { sections: [{ label: 'Operations', items: [{ agent: 'trips-desk', slug: 'trips' }] }] }
+    expect((await ana.ask({ t: 'graph:map', body, reason: 'mine' })).reason).toMatch(/someone who may publish/)
+    expect((await admin.ask({ t: 'graph:map', body: { sections: [{ label: 'Operations', items: [{ agent: 'nobody' }] }] }, reason: 'try' })).reason).toMatch(/does not exist/)
+    const made = await admin.ask({ t: 'graph:map', body, reason: 'the project\'s menu' })
+    expect(made.t).toBe('graph:reply')
+    expect((await admin.ask({ t: 'graph:show', name: 'map' })).node.kind).toBe('map')
+  })
+
   it("the console's views come from the platform: the columns, a node, a domain composed", async () => {
     const cols = await admin.ask({ t: 'inspect:req', view: 'compositionColumns' })
     expect(cols.t).toBe('inspect:res')
