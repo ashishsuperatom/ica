@@ -30,7 +30,7 @@ Commands:
   login            save a key (from --key, $SACLI_KEY or stdin) as a profile
   profiles         the saved profiles — one key each — and which is in use
   projects         the organisation's projects: list, create, delete, restore (an organisation key)
-  engine           where the project's engine runs: start (in Docker; --local for PM2), status, stop, logs
+  engine           where the project's engine runs: start (in Docker; --native for PM2), status, stop, logs
   keys             keys below this one: list, create, revoke (--project <id> for a project's, with an organisation key)
   api              call the platform's REST API with this key: sacli api <METHOD> <path> [--data '<json>']
   datasources      the project's data sources: list, show, create, update, remove, my-key (a person's own key)
@@ -99,11 +99,11 @@ earlier block (--block) branches the session into a new thread. Values are JSON;
   sacli projects restore <id>`,
   engine: `sacli engine <start|status|stop|logs> [--project <id>]
 
-  sacli engine start [--local] [--image <ref>] [--wait <s>]
+  sacli engine start [--native] [--image <ref>] [--wait <s>]
                      runs the project's engine in Docker — container and volume sa-engine-<project>, restarted unless
                      stopped; the image (default superatom-engine:local) is built from the repo when there is none.
                      Again: nothing changes, or, when the image changed, the container is made again on the same volume.
-                     --local runs it here under PM2 instead, from the project's home (~/.superatom/<project>/.env).
+                     --native runs it under PM2 instead, from the project's home (~/.superatom/<project>/.env).
                      Waits until the hub has the engine (default 180 s).
   sacli engine status          where it runs on this machine, and whether the hub has it
   sacli engine stop            stops it (the data stays: the volume, or the home)
@@ -228,7 +228,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'ask' ? { session: { type: 'string' }, channel: { type: 'string' } } : cmd === 'use' ? { here: { type: 'boolean' } } : cmd === 'call' || cmd === 'api' ? { data: { type: 'string' } } : cmd === 'projects' ? { deleted: { type: 'boolean' } }
       : cmd === 'keys' ? { project: { type: 'string' }, can: { type: 'string' }, days: { type: 'string' }, never: { type: 'boolean' }, 'save-as': { type: 'string' } }
       : cmd === 'datasources' ? { project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' }, bridge: { type: 'string' } }
-      : cmd === 'engine' ? { project: { type: 'string' }, local: { type: 'boolean' }, image: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
+      : cmd === 'engine' ? { project: { type: 'string' }, native: { type: 'boolean' }, image: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
       : cmd === 'storage' ? { project: { type: 'string' }, by: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' }, everything: { type: 'boolean' } }
       : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' } } : {}
     let parsed

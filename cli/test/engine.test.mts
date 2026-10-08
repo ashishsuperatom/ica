@@ -1,6 +1,6 @@
 // sacli engine, with docker and pm2 played by a fake that keeps their state: where an engine runs is found, start is
 // idempotent, a changed image makes the container again on the same volume, one project never runs two engines, and the
-// local home's .env is written with mode 600, its own port and a process name no other home has.
+// native home's .env is written with mode 600, its own port and a process name no other home has.
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -77,9 +77,9 @@ test('no image yet: built from the repo', async () => {
   assert.ok(s.calls.includes(`docker build -t superatom-engine:local ${deps.repo}`))
 })
 
-test('Docker not running: said so, with --local offered', async () => {
+test('Docker not running: said so, with --native offered', async () => {
   const { deps } = world({ dockerUp: false })
-  await assert.rejects(engineCommand('start', PID, {}, deps), /Docker is not running.*--local/)
+  await assert.rejects(engineCommand('start', PID, {}, deps), /Docker is not running.*--native/)
 })
 
 test('an engine the hub already has from elsewhere is never doubled', async () => {
@@ -88,10 +88,10 @@ test('an engine the hub already has from elsewhere is never doubled', async () =
   assert.ok(!s.calls.some((c) => c.includes('engine-credentials')), 'the key is not even fetched')
 })
 
-test('--local: the home .env (mode 600, its own port and name), PM2 from the ecosystem; status, logs and stop find it', async () => {
+test('--native: the home .env (mode 600, its own port and name), PM2 from the ecosystem; status, logs and stop find it', async () => {
   const { s, deps, homes } = world()
   mkdirSync(join(homes, OTHER)); writeFileSync(join(homes, OTHER, '.env'), 'ICA_PROJECT=x\nPROJECT_NAME=acme-freight\nDATASOURCE_PORT=4021\n')
-  assert.equal(await engineCommand('start', PID, { local: true }, deps), 0)
+  assert.equal(await engineCommand('start', PID, { native: true }, deps), 0)
   const file = join(homes, PID, '.env')
   assert.equal(statSync(file).mode & 0o777, 0o600)
   const env = readFileSync(file, 'utf8')
@@ -102,12 +102,12 @@ test('--local: the home .env (mode 600, its own port and name), PM2 from the eco
   // Starting it in Docker now is refused: one engine per project.
   await assert.rejects(engineCommand('start', PID, {}, deps), /already runs here under PM2/)
   await engineCommand('status', PID, {}, deps)
-  assert.equal((s.said.at(-1) as any).runs.at, 'local')
+  assert.equal((s.said.at(-1) as any).runs.at, 'native')
   await engineCommand('stop', PID, {}, deps)
   assert.deepEqual(s.pm2, [])
 })
 
-test('the local .env keeps what the home had and the port it had', () => {
+test('the native .env keeps what the home had and the port it had', () => {
   const homes = [{ pid: PID, env: { DATASOURCE_PORT: '4030', PROJECT_NAME: 'mine', EXTRA: 'kept' } }]
   const e = localEnv(CREDS, homes, 4030)
   assert.equal(e.EXTRA, 'kept'); assert.equal(e.PROJECT_NAME, 'mine'); assert.equal(e.DATASOURCE_URL, 'http://localhost:4030')

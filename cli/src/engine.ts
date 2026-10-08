@@ -1,5 +1,5 @@
 // sacli engine — where a project's engine runs, started, watched and stopped from here: in Docker (the default), or with
-// --local as two PM2 processes beside the repo (the project's datasource manager and its engine). Either way the engine
+// --native as two PM2 processes beside the repo (the project's datasource manager and its engine). Either way the engine
 // connects OUT to the project's hub; nothing listens for it.
 //
 // Docker follows compose's conventions: one container per project (sa-engine-<project>), its data on a named volume of
@@ -30,7 +30,7 @@ export interface EngineDeps {
   say: (human: string, data: unknown) => void
   note: (s: string) => void
   env: NodeJS.ProcessEnv
-  /** The repo sacli came from (Docker builds the image from it; --local runs from it), when it has one. */
+  /** The repo sacli came from (Docker builds the image from it; --native runs from it), when it has one. */
   repo: string | null
   /** Where projects' homes are: $SUPERATOM_HOME or ~/.superatom. */
   homes: string
@@ -68,7 +68,7 @@ export function homesHere(homes: string): { pid: string; dir: string; env: Recor
   return names.filter((n) => /^[0-9a-f-]{36}$/.test(n)).map((pid) => ({ pid, dir: join(homes, pid), env: readEnvFile(join(homes, pid, '.env')) }))
 }
 
-/** A local home's .env for this project: what was there kept, the connection's values set now, a process name no other
+/** A native home's .env for this project: what was there kept, the connection's values set now, a process name no other
  *  home uses, and a datasource port no other home uses (the one it had, if it had one). */
 export function localEnv(c: EngineCredentials, homes: { pid: string; env: Record<string, string> }[], port: number): Record<string, string> {
   const mine = homes.find((h) => h.pid === c.project)?.env ?? {}
@@ -99,9 +99,9 @@ export function cleanEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return Object.fromEntries(Object.entries(env).filter(([k]) => !k.startsWith('CLAUDE_CODE_') && k !== 'CLAUDECODE'))
 }
 
-type Where = { at: 'docker'; state: string; startedAt: string; image: string } | { at: 'local'; name: string; state: string; startedAt: string } | { at: 'none' }
+type Where = { at: 'docker'; state: string; startedAt: string; image: string } | { at: 'native'; name: string; state: string; startedAt: string } | { at: 'none' }
 
-export async function engineCommand(sub: string | undefined, pid: string, o: { local?: boolean; image?: string; wait?: string; follow?: boolean; lines?: string }, d: EngineDeps): Promise<number> {
+export async function engineCommand(sub: string | undefined, pid: string, o: { native?: boolean; image?: string; wait?: string; follow?: boolean; lines?: string }, d: EngineDeps): Promise<number> {
   const docker = (args: string[], show = false) => d.exec('docker', args, { show })
   const dockerUp = () => docker(['info', '--format', '{{.ServerVersion}}']).code === 0
   const pm2 = (args: string[], show = false) => d.exec('pm2', args, { show, env: cleanEnv(d.env) })
@@ -115,7 +115,7 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { l
       const list = pm2(['jlist'])
       try {
         const p = (JSON.parse(list.out || '[]') as any[]).find((x) => x.name === `sa-engine-${home.env.PROJECT_NAME}`)
-        if (p) return { at: 'local', name: home.env.PROJECT_NAME, state: p.pm2_env?.status ?? 'unknown', startedAt: p.pm2_env?.pm_uptime ? new Date(p.pm2_env.pm_uptime).toISOString() : '' }
+        if (p) return { at: 'native', name: home.env.PROJECT_NAME, state: p.pm2_env?.status ?? 'unknown', startedAt: p.pm2_env?.pm_uptime ? new Date(p.pm2_env.pm_uptime).toISOString() : '' }
       } catch { /* pm2 said nothing readable */ }
     }
     return { at: 'none' }
@@ -133,7 +133,7 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { l
   if (sub === 'status' || !sub) {
     const w = where(), on = await connected()
     const runs = w.at === 'docker' ? `in Docker (container ${name}, ${w.state}${w.startedAt ? ` since ${w.startedAt.slice(0, 19)}` : ''})`
-      : w.at === 'local' ? `here under PM2 (sa-engine-${w.name}, ${w.state}${w.startedAt ? ` since ${w.startedAt.slice(0, 19)}` : ''})` : 'nowhere on this machine'
+      : w.at === 'native' ? `here under PM2 (sa-engine-${w.name}, ${w.state}${w.startedAt ? ` since ${w.startedAt.slice(0, 19)}` : ''})` : 'nowhere on this machine'
     d.say(`project ${pid}\nruns         ${runs}\nconnected    ${on ? 'yes — the hub has its engine' : 'no — the hub has no engine for this project'}`, { project: pid, runs: w, connected: on })
     return 0
   }
@@ -141,16 +141,16 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { l
   if (sub === 'logs') {
     const w = where(), lines = o.lines ?? '200'
     if (w.at === 'docker') return docker(['logs', '--tail', lines, ...(o.follow ? ['--follow'] : []), name], true).code
-    if (w.at === 'local') return pm2(['logs', `sa-engine-${w.name}`, '--lines', lines, ...(o.follow ? [] : ['--nostream'])], true).code
+    if (w.at === 'native') return pm2(['logs', `sa-engine-${w.name}`, '--lines', lines, ...(o.follow ? [] : ['--nostream'])], true).code
     throw new CliError(`the engine of ${pid} does not run on this machine — sacli engine start`, 1)
   }
 
   if (sub === 'stop') {
     const w = where()
     if (w.at === 'docker') { const r = docker(['stop', name]); if (r.code) throw new CliError(`docker could not stop ${name}: ${r.err.trim()}`, 1); d.say(`stopped ${name} (its data stays on volume ${name})`, { stopped: name, at: 'docker' }); return 0 }
-    if (w.at === 'local') {
+    if (w.at === 'native') {
       for (const p of [`sa-engine-${w.name}`, `sa-datasources-${w.name}`]) pm2(['delete', p])
-      d.say(`stopped sa-engine-${w.name} and sa-datasources-${w.name} (the home stays)`, { stopped: w.name, at: 'local' }); return 0
+      d.say(`stopped sa-engine-${w.name} and sa-datasources-${w.name} (the home stays)`, { stopped: w.name, at: 'native' }); return 0
     }
     d.say(`the engine of ${pid} does not run on this machine`, { stopped: null }); return 0
   }
@@ -158,15 +158,15 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { l
   if (sub !== 'start') throw new CliError('sacli engine <start|status|stop|logs> — see sacli engine --help', 2)
 
   const w = where()
-  const want = o.local ? 'local' : 'docker'
+  const want = o.native ? 'native' : 'docker'
   if (w.at !== 'none' && w.at !== want && w.state !== 'exited' && w.state !== 'stopped')
-    throw new CliError(`the engine of ${pid} already runs ${w.at === 'docker' ? 'in Docker' : 'here under PM2'} — sacli engine stop first, then start it ${want === 'docker' ? 'in Docker' : 'with --local'}`, 1)
+    throw new CliError(`the engine of ${pid} already runs ${w.at === 'docker' ? 'in Docker' : 'here under PM2'} — sacli engine stop first, then start it ${want === 'docker' ? 'in Docker' : 'with --native'}`, 1)
   if (w.at === 'none' && await connected())
     throw new CliError(`the hub already has an engine for ${pid}, from somewhere other than this machine — a project runs one engine; stop that one first`, 1)
   const c = await d.rest('GET', `/api/projects/${pid}/engine-credentials`) as EngineCredentials
 
   if (want === 'docker') {
-    if (!dockerUp()) throw new CliError('Docker is not running — start Docker Desktop (or the docker daemon), or run the engine here with --local', 1)
+    if (!dockerUp()) throw new CliError('Docker is not running — start Docker Desktop (or the docker daemon), or run it natively with --native (PM2)', 1)
     const image = o.image ?? IMAGE
     if (docker(['image', 'inspect', image]).code !== 0) {
       if (o.image) throw new CliError(`there is no image ${image} here — docker pull it, or leave --image out to build one`, 1)
@@ -185,7 +185,7 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { l
       d.note(`${w.at === 'docker' ? 'made again' : 'started'} ${name} on image ${imageId.slice(7, 19)}, data on volume ${name}; waiting for it to reach the hub…`)
     }
   } else {
-    if (!d.repo || !existsSync(join(d.repo, 'ecosystem.config.cjs'))) throw new CliError('--local runs from the repo (its ecosystem.config.cjs), and sacli is not running from one', 1)
+    if (!d.repo || !existsSync(join(d.repo, 'ecosystem.config.cjs'))) throw new CliError('--native runs from the repo (its ecosystem.config.cjs), and sacli is not running from one', 1)
     if (pm2(['--version']).code !== 0) throw new CliError('pm2 is not installed — pnpm add -g pm2', 1)
     const homes = homesHere(d.homes)
     const env = localEnv(c, homes, await portFor(pid, homes))
