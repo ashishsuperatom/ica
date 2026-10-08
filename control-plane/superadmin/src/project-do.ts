@@ -239,6 +239,10 @@ export class ProjectDO extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
+    // Its own project id, from its name (proj:<id>) — known from the start, also when it wakes for a socket's message
+    // after a restart, where no request has told it yet (an audit event with no project is refused).
+    const own = /^proj:([0-9a-f-]{36})$/.exec(ctx.id.name ?? '')?.[1]
+    if (own) this._pid = own
     this.buffer = new AnswerBuffer(this.ctx.storage.sql, (e, d) => this.log(e, d))
     this.audit = new AuditLog(this.ctx.storage.sql as any, () => this._pid ?? '', { stream: (env as any).AUDIT, records: createRecorder((env as any).RECORDS, () => this._pid ?? ''), warn: (m) => { this.log('audit:send_failed', { message: m }); console.warn(`[audit] ${m}`) } })
     this.agentKeys = new AgentKeys(this.ctx.storage.sql as any, () => this._pid ?? '')

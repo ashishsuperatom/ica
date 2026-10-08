@@ -13,6 +13,7 @@ const KEYWORDS = new Set(`select from where and or not in is null as on join inn
   asc desc distinct union all intersect except case when then else end with between like ilike exists true false over partition rows range
   preceding following unbounded current row filter within nulls first last interval cast try_cast using natural lateral any some
   date timestamp time year month day hour minute second extract epoch values offset fetch only recursive escape similar to at zone
+  for both leading trailing placing quarter week dow doy
   int integer bigint smallint double float real decimal numeric varchar char text string boolean bool`.split(/\s+/).filter(Boolean))
 
 export interface Checked { sql: string; tables: string[] }
@@ -75,12 +76,19 @@ export function checkQuery(sql: string, schemas: TableInfo[], grant: Grant | nul
   // Whether we are in a FROM is kept per parenthesis: a subquery has its own, and after its `)` the outer one goes on
   // (so `FROM (SELECT … WHERE …) s` knows `s` is the subquery's alias).
   let inFrom = false
-  let outer: boolean[] = []
-  const paren = (t: { text: string }) => { if (t.text === '(') { outer.push(inFrom); inFrom = false; return true } if (t.text === ')') { inFrom = outer.pop() ?? false } return false }
+  // …and whether a parenthesis is a query at all: only one that opens with SELECT or WITH has a FROM of tables. The FROM
+  // of a function's own grammar — extract(year FROM d), substring(s FROM 2), trim(x FROM s) — names no table.
+  let outer: { inFrom: boolean; query: boolean }[] = []
+  let query = true
+  const paren = (t: { text: string }, k: number) => {
+    if (t.text === '(') { outer.push({ inFrom, query }); inFrom = false; query = ['select', 'with'].includes(toks[k + 1]?.text.toLowerCase() ?? ''); return true }
+    if (t.text === ')') { const o = outer.pop(); inFrom = o?.inFrom ?? false; query = o?.query ?? true }
+    return false
+  }
   toks.forEach((t, k) => {
     const w = lower(t)
-    if (paren(t)) return
-    if (t.kind === 'word' && (w === 'from' || w === 'join')) { inFrom = true; return }
+    if (paren(t, k)) return
+    if (t.kind === 'word' && (w === 'from' || w === 'join') && query) { inFrom = true; return }
     if (t.kind === 'word' && ENDS_FROM.includes(w)) inFrom = false
     if (!isName(t)) return
     const prev = toks[k - 1]
@@ -131,11 +139,11 @@ export function checkQuery(sql: string, schemas: TableInfo[], grant: Grant | nul
 
   // Place the tables: each table slot gets the organisation's namespace.
   let out = '', last = 0
-  inFrom = false; outer = []
+  inFrom = false; outer = []; query = true
   toks.forEach((t, k) => {
     const w = t.text.toLowerCase()
-    if (paren(t)) return
-    if (t.kind === 'word' && (w === 'from' || w === 'join')) { inFrom = true; return }
+    if (paren(t, k)) return
+    if (t.kind === 'word' && (w === 'from' || w === 'join') && query) { inFrom = true; return }
     if (t.kind === 'word' && ENDS_FROM.includes(w)) inFrom = false
     const prev = toks[k - 1]
     if (inFrom && (t.kind === 'word' || t.kind === 'quoted') && used.includes(w) && !ctes.has(w) && prev && (prev.text === ',' || ['from', 'join'].includes(prev.text.toLowerCase()))) {

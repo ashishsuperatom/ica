@@ -9,6 +9,14 @@ const orders: TableInfo = { name: 'orders', columns: [{ name: 'id', type: 'long'
 const people: TableInfo = { name: 'people', columns: [{ name: 'id', type: 'long' }, { name: 'salary', type: 'double' }] }
 
 describe('the warehouse access check (fails closed)', () => {
+  it('the FROM of a function\'s own grammar names no table; a subquery\'s FROM is still a table, still checked', () => {
+    const dated: TableInfo = { name: 'orders', columns: [...orders.columns, { name: 'placed', type: 'date' }, { name: 'note', type: 'string' }] }
+    expect(checkQuery('SELECT extract(year FROM placed) AS yr, count(*) AS n FROM orders GROUP BY extract(year FROM placed)', [dated], null, 'n').sql)
+      .toBe('SELECT extract(year FROM placed) AS yr, count(*) AS n FROM n.orders GROUP BY extract(year FROM placed)')
+    expect(checkQuery('SELECT substring(note FROM 2 FOR 3) AS s, trim(both \' \' FROM note) AS t FROM orders', [dated], null, 'n').sql).toContain('FROM n.orders')
+    expect(() => checkQuery('SELECT extract(year FROM placed) AS yr FROM orders', [dated], { orders: ['customer'] }, 'n')).toThrow(/may not read the column "placed"/)
+    expect(() => checkQuery('SELECT count(*) FROM orders WHERE id IN (SELECT id FROM people)', [dated, people], { orders: null }, 'n')).toThrow(/may not read the table "people"/)
+  })
   it('knows a subquery\'s alias, and still checks what the subquery reads', () => {
     expect(checkQuery('SELECT count(*) FROM (SELECT customer FROM orders WHERE amount > 1) s', [orders], null, 'n').sql).toBe('SELECT count(*) FROM (SELECT customer FROM n.orders WHERE amount > 1) s')
     expect(checkQuery('SELECT s.customer FROM (SELECT customer FROM orders) AS s ORDER BY s.customer', [orders], null, 'n').sql).toBe('SELECT s.customer FROM (SELECT customer FROM n.orders) AS s ORDER BY s.customer')
