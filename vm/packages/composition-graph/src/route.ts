@@ -39,14 +39,17 @@ export function terms(text: string): string[] {
   return out
 }
 
-export interface Indexed { name: string; document: Map<string, number>; intents: Set<string>; /** The general domain a question no other reaches goes to. */ fallback?: boolean }
+export interface Indexed { name: string; document: Map<string, number>; intents: Set<string>
+  /** What of its intents may decide alone: a one-word intent itself, a longer one its word pairs (never a single word of it). */ decides: Set<string>
+  /** The general domain a question no other reaches goes to. */ fallback?: boolean }
 
 /** The index over a set of domains: each domain's terms with their counts, and its intents' terms. */
 export function indexOf(docs: { name: string; text: string; intents: string[]; fallback?: boolean }[]): Indexed[] {
   return docs.map((d) => {
     const document = new Map<string, number>()
     for (const t of terms(d.text)) document.set(t, (document.get(t) ?? 0) + 1)
-    return { name: d.name, document, intents: new Set(d.intents.flatMap(terms)), ...(d.fallback ? { fallback: true } : {}) }
+    const decides = new Set(d.intents.flatMap((i) => { const t = terms(i); const pairs = t.filter((x) => x.includes(' ')); return pairs.length ? pairs : t }))
+    return { name: d.name, document, intents: new Set(d.intents.flatMap(terms)), decides, ...(d.fallback ? { fallback: true } : {}) }
   })
 }
 
@@ -71,12 +74,12 @@ export function rank(index: Indexed[], question: string): Route {
   const top = ranked[0]
   const tie = ranked.length > 1 && ranked[1].score === top?.score
   // With a fallback (a general domain), a word every other domain holds says nothing about which of them a question
-  // belongs to: a specialised domain is chosen only when one of the words it matched separates it from the others (some
-  // other domain lacks it) or is one of its own intents. Else no domain is reached, and the question goes to the
+  // belongs to: a specialised domain is chosen only when one of the words it matched separates it from the others (at
+  // most half of them hold it) or is one of its own intents. Else no domain is reached, and the question goes to the
   // fallback. The fallback itself is chosen when it ranks first.
   const others = index.filter((x) => !x.fallback)
   const decisive = !top || !index.some((x) => x.fallback) || index.find((x) => x.name === top.domain)?.fallback
-    || top.terms.some((t) => index.find((x) => x.name === top.domain)?.intents.has(t) || others.some((x) => !x.document.has(t) && !x.intents.has(t)))
+    || top.terms.some((t) => index.find((x) => x.name === top.domain)?.decides.has(t) || others.filter((x) => x.document.has(t) || x.intents.has(t)).length <= Math.max(1, Math.floor(others.length / 2)))
   return { domain: top && top.score > 0 && decisive ? top.domain : null, ranked, tie }
 }
 
